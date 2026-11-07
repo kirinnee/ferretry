@@ -1,9 +1,9 @@
+import { type LedgerSendRecord } from '../../../../app/lib/transcript.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { AgendaItemHistory } from '../../../../app/features/agenda/agenda-item-history.tsx';
 import type { HistoryEvent } from '../../../../app/lib/agenda-history.ts';
 import { clockOfInstant } from '../../../../app/shell.ts';
-import type { LedgerSendRecord } from '../../../../app/shell.ts';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {

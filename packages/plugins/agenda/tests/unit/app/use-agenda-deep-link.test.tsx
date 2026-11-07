@@ -10,13 +10,13 @@ import {
   subscribeAgendaDeepLink,
 } from '../../../app/lib/agenda-deep-link.ts';
 import { daemonConnection } from '../../../app/shell.ts';
-import { mount } from '../../support/app/dom.ts';
+import { mount } from '@ferretry/app/testing';
 
 const hereAt = (hash: string) => ({ hash, pathname: '/app/', search: '?x=1' });
 
 const machine = (daemonId: string, sessions: readonly string[] | null): AgendaInboxMachine =>
   ({
-    connection: daemonConnection({ daemonId, baseUrl: `https://${daemonId}.example`, deviceId: 'phone-1' }),
+    connection: daemonConnection({ daemonId }),
     name: daemonId,
     sessions: sessions === null ? null : sessions.map(id => ({ config: { id } })),
   }) as never;
@@ -59,7 +59,7 @@ describe('opening the card', () => {
     return null;
   }
 
-  it('goes to the inbox card on the machine that runs the session, once', async () => {
+  it('goes to the ask’s own page on the machine that runs the session, once', async () => {
     const went: string[] = [];
     captureAgendaDeepLink(hereAt('#agenda/A8?session=sess-1'));
     const mounted = await mount(
@@ -67,8 +67,8 @@ describe('opening the card', () => {
     );
     try {
       expect(went).toHaveLength(1);
-      expect(went[0]).toContain('session=sess-1');
-      expect(went[0]).toContain('A8');
+      // The ask's own page (`agendaAskPath`): the ferret, then the ask.
+      expect(went[0]).toBe('/d/b/agenda/sess-1/A8');
       expect(pendingAgendaDeepLink()).toBeNull();
     } finally {
       await mounted.unmount();

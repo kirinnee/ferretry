@@ -1,24 +1,28 @@
 import { describe, it } from 'bun:test';
-import type { FerretsApi, FerretSummary } from '@ferretry/core-ferrets/contract';
+import { type FerretsApi, type FerretSummary, FerretSummarySchema } from '@ferretry/core-ferrets/contract';
 import type { FerretId } from '@ferretry/kernel/contract';
 import should from 'should';
 import { FerretTerminalOwnerDirectory } from '../../../../daemon/adapters/terminal/owner-directory.ts';
 
 const AT = '2026-01-01T00:00:00.000Z';
 
-/** A ferret as the Ferrets port summarises one; only its name and state matter to who holds terminals. */
+/**
+ * A ferret as the Ferrets port summarises one; only its name and state matter to who holds terminals. It is parsed
+ * through the real summary schema, because the directory trusts nothing the schema would refuse: a fixture the schema
+ * rejects (a role Ferrets does not have) reads as unreadable state, not as the ferret the test meant.
+ */
 function ferret(id: string, name: string, state: string): FerretSummary {
-  return {
+  return FerretSummarySchema.parse({
     id,
     name,
-    role: 'worker',
+    role: 'helper',
     harness: 'claude-code',
     runner: 'tmux',
     folder: '/home/dev/repo',
     state,
     createdAt: AT,
     stateAt: AT,
-  } as unknown as FerretSummary;
+  });
 }
 
 /** The Ferrets port, holding exactly the ferrets given; `fails` names one whose lookup throws. */
@@ -67,7 +71,7 @@ describe('FerretTerminalOwnerDirectory', () => {
     should(malformed).deepEqual({ standing: 'gone', status: 'removed', label: 'NOT AN ID' });
   });
 
-  it('should call a ferret whose lookup fails gone, labelled by its id', async () => {
+  it('should call a ferret whose lookup fails live and unknown, labelled by its id, so a failed read never loses its shells', async () => {
     // Arrange
     const sut = new FerretTerminalOwnerDirectory(ferrets([ferret('s-1', 'fitzgerald', 'working')], new Set(['s-1'])));
 
@@ -75,7 +79,7 @@ describe('FerretTerminalOwnerDirectory', () => {
     const standing = await sut.standing('s-1');
 
     // Assert
-    should(standing).deepEqual({ standing: 'gone', status: 'removed', label: 's-1' });
+    should(standing).deepEqual({ standing: 'live', status: 'unknown', label: 's-1' });
   });
 });
 

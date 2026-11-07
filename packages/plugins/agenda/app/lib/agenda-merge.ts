@@ -5,7 +5,7 @@
  * keeps the button from offering what it would refuse.
  */
 
-import { type AgendaId, type AgendaItem, agendaTitle } from '../wire/index.ts';
+import { type AgendaId, type AgendaItem, agendaTitle } from '@ferretry/core-asks/contract';
 import { isGateItem, firstOpenGate } from './gate-items.ts';
 
 /** Whether the item is closed: a closed item is never merged into or from. */

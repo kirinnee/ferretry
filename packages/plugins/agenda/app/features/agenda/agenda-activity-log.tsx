@@ -6,7 +6,7 @@
 
 import { type HistoryEvent, revisionEvents } from '../../lib/agenda-history.ts';
 import { activityLog, activityStamp, type RevisionLine } from '../../lib/agenda-item-sections.ts';
-import type { AgendaItem } from '../../wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { AgendaFold } from './agenda-fold.tsx';
 
 /** The item's edits, as the log's lines. */

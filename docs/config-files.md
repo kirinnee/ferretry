@@ -135,6 +135,13 @@ left out.
 | `PUT /v1/accounts/defaults` | `secrets.configure`, and the file's `configure` (fleet); fresh passkey remotely to set or change a line, none to remove one (!A243)¹ | the owner sets or clears one default account line      |
 | `POST /v1/agent/config`     | the agent's session credential; Ferretry settings on                                                                                 | the `config.*` tools                                   |
 
+**What `GET /v1/config/file` says differs in three values from the fixed file-kind list it replaces**: `kind` is the id of the
+plugin that declares the file (it was a file-kind name such as `machine`), `schema` is the schema file's name
+(`updates.json`; it was a schema id such as `warden`), and a file that is not there yet begins as its modeline alone
+(there are no per-kind starter texts). The members, their types and the other values are unchanged, and no consumer reads
+`kind` or `schema`. A confirmation names the held edit by its path and its FULL etag, and the daemon compares that etag
+with the disk inside its write queue, so a file that changed after the review is never confirmed.
+
 ¹ Removing one default can still change which account a card offers first: a narrower line (a project or a folder)
 that is removed lets a broader `sites` line for the same place apply. Removing never adds an account or a line, and
 owner decision !A243 accepts it as tap-free.

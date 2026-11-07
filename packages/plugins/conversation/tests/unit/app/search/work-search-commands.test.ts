@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { PluginCommandContext } from '@ferretry/app';
 import type { WorkHit, WorkSearchResponse } from '../../../../contract/index.ts';
 import {
+  MAX_WORK_ROWS_PER_KIND,
   WORK_GROUPS,
   WORK_SEARCH_LIMIT,
   workHitEntry,
@@ -113,7 +114,7 @@ describe('the work search command source', () => {
     expect(timers.map(timer => timer.delayMs)).toEqual([7]);
     expect(pending).toEqual([]);
     pause();
-    expect(pending.map(each => each.request)).toEqual([{ q: 'relay', limit: WORK_SEARCH_LIMIT }]);
+    expect(pending.map(each => each.request)).toEqual([{ q: 'relay', all: true, limit: WORK_SEARCH_LIMIT }]);
   });
 
   it('asks once per pause in typing, for the words last typed, and not again for the same words', () => {
@@ -201,6 +202,43 @@ describe('the work search command source', () => {
     await land();
     expect(changes()).toBe(1);
     expect(source('relay handshake').map(entry => entry.id)).toEqual(['work-card:F10']);
+  });
+
+  it("asks for everything, so a closed card or ask older than the daemon's 30-day window is still found", () => {
+    const { source, pending, pause } = harness();
+    source('relay');
+    pause();
+    expect(pending[0]?.request.all).toBe(true);
+  });
+
+  it('lists at most six of each kind, as the palette did while both kinds were listed', async () => {
+    const { source, pending, pause, land } = harness();
+    source('relay');
+    pause();
+    const cards = Array.from({ length: 9 }, (_, index) => card(`F${index + 1}`));
+    const asks = Array.from({ length: 8 }, (_, index) => ask(`A${index + 1}`));
+    pending[0]?.resolve(answer(...cards, ...asks));
+    await land();
+    const entries = source('relay');
+    expect(MAX_WORK_ROWS_PER_KIND).toBe(6);
+    expect(entries.filter(entry => entry.group === WORK_GROUPS.card)).toHaveLength(6);
+    expect(entries.filter(entry => entry.group === WORK_GROUPS.ask)).toHaveLength(6);
+    expect(entries.map(entry => entry.id).slice(0, 2)).toEqual(['work-card:F1', 'work-card:F2']);
+  });
+
+  it("names a card's project under it, says Unfiled for the unfiled board, and never shows an id", async () => {
+    const { source, pending, pause, land } = harness();
+    source('relay');
+    pause();
+    pending[0]?.resolve(answer(card('F11', { project: 'unfiled' }), card('F12', { title: 'Orphan relay card' })));
+    await land();
+    const [unfiled, orphan] = source('relay');
+    expect(unfiled?.description).toBe('Doing · brief: the relay handshake drops · Unfiled');
+    expect(orphan?.description).toBe('Doing · brief: the relay handshake drops');
+    for (const entry of [unfiled, orphan]) {
+      expect(entry?.description).not.toContain(RELAY_PROJECT);
+      expect(entry?.description).not.toContain('unfiled');
+    }
   });
 
   it('opens a card on the board and an ask in the Agenda, on the same daemon', async () => {

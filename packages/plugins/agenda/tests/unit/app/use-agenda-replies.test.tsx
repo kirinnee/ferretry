@@ -10,10 +10,12 @@ import { DaemonAgendaClient } from '../../../app/lib/agenda-client.ts';
 import { DaemonAgendaStore } from '../../../app/lib/agenda-store.ts';
 import { daemonConnection } from '../../../app/shell.ts';
 import { daemonSessionScope } from '../../../app/shell.ts';
-import '../../support/app/dom.ts';
-import { interact, type Mounted, mount, must } from '../../support/app/dom.ts';
+import { callFromFetch } from '../../support/app/call-from-fetch.ts';
+import { ensureDom } from '@ferretry/app/testing';
+ensureDom();
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
-const daemon = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'd-1' });
+const daemon = daemonConnection({ daemonId: 'studio' });
 const scope = daemonSessionScope(daemon, 's-1');
 const T0 = Date.parse('2026-10-28T12:00:00.000Z');
 
@@ -74,10 +76,10 @@ const setup = async (initial: ReturnType<typeof board>) => {
   let next = board();
   const client = new DaemonAgendaClient(
     new DaemonAgendaStore(),
-    async (input: string | URL | Request, init?: RequestInit) => {
-      calls.push({ url: String(input), method: init?.method ?? 'GET' });
+    callFromFetch(async (input, init) => {
+      calls.push({ url: input, method: init.method ?? 'GET' });
       return json(next);
-    },
+    }, 'https://studio.example.test'),
   );
   client.store.applySnapshot(scope, initial);
   const time = fakeClock();

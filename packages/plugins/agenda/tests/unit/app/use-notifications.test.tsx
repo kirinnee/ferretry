@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import type { PushDeviceView, SessionStatus, SessionView } from '../../../app/shell.ts';
+import type {
+  NotifiedFleet as FleetSnapshot,
+  NotifiedStatus as SessionStatus,
+  NotifiedView as SessionView,
+} from '../../../app/lib/notification-ledger.ts';
 
 import {
   type NotificationControls,
@@ -11,7 +15,6 @@ import {
 } from '../../../app/hooks/use-notifications.ts';
 import { type DaemonConnection, daemonConnection } from '../../../app/shell.ts';
 import { daemonSessionScope } from '../../../app/shell.ts';
-import type { FleetSnapshot } from '../../../app/shell.ts';
 import { DeviceNotificationFilterStore } from '../../../app/lib/notification-filter.ts';
 import type { SessionsSource } from '../../../app/lib/notification-ledger.ts';
 import { DaemonNotificationPreferences } from '../../../app/lib/notification-preferences.ts';
@@ -20,42 +23,13 @@ import type {
   NotificationPresentationData,
   NotificationSurface,
 } from '../../../app/lib/notify.ts';
-import {
-  DaemonPushDevices,
-  type DaemonPushService,
-  type MachinePushRegistrationLike,
-  PUSH_INACTIVE_MESSAGE,
-  PUSH_UNSUPPORTED_MESSAGE,
-  type PushEnrolment,
-  type PushSubscriptionHandle,
-} from '../../../app/shell.ts';
-import { render, run, runAsync } from '../../support/app/react.ts';
-import { sessionView } from '../../support/app/sessions.ts';
+import { PUSH_UNSUPPORTED_MESSAGE, type PushDeviceView } from '../../../app/lib/push-delivery.ts';
+import { render, run, runAsync } from '@ferretry/app/testing';
+import { notifiedView as sessionView } from '../../support/app/notified-views.ts';
+import { DEVICE, fakeDelivery, type ListRead, PUSH_INACTIVE_MESSAGE } from '../../support/app/push-delivery.ts';
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
-
-/** The SAME daemon after a credential rotation: a different live connection. */
-const rotatedA = daemonConnection({
-  daemonId: 'daemon-a',
-  baseUrl: 'https://a.example.test',
-  deviceId: 'token-a-rotated',
-});
-
-/** The same daemon and credential reached at a new address. */
-const movedA = daemonConnection({
-  daemonId: 'daemon-a',
-  baseUrl: 'https://a2.example.test',
-  deviceId: 'token-a',
-});
-
-const DEVICE: PushDeviceView = {
-  id: 'push-00000000-0000-4000-8000-000000000000',
-  deviceName: 'this browser',
-  createdAt: '2026-08-01T10:00:00.000Z',
-  updatedAt: '2026-08-01T10:00:00.000Z',
-  expirationTime: null,
-};
+const daemonA = daemonConnection({ daemonId: 'daemon-a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b' });
 
 /** A second device record, so a readout can be told apart by identity alone. */
 const ROTATED_DEVICE: PushDeviceView = {
@@ -67,9 +41,7 @@ const ROTATED_DEVICE: PushDeviceView = {
 const view = (id: string, status: SessionStatus): SessionView => sessionView(id, { state: { status } });
 
 const snapshot = (sessions: readonly SessionView[] | null): FleetSnapshot => ({
-  daemons: new Map([
-    [daemonA.daemonId, { sessions, byId: new Map(), status: sessions === null ? 'idle' : 'ready', error: null }],
-  ]),
+  daemons: new Map([[daemonA.daemonId, { sessions }]]),
 });
 
 /** A fleet source the test advances by hand, so no socket or clock is involved. */
@@ -90,31 +62,6 @@ const sessionsSource = (initial: FleetSnapshot | null = null) => {
       current = next;
       for (const listener of [...listeners]) listener();
     },
-  };
-};
-
-const subscriptionHandle = (): PushSubscriptionHandle => ({
-  toJSON: () => ({
-    endpoint: 'https://fcm.googleapis.com/x',
-    expirationTime: null,
-    keys: { p256dh: 'B'.repeat(87), auth: 'C'.repeat(22) },
-  }),
-  unsubscribe: async () => true,
-});
-
-const enrolment = (): PushEnrolment => {
-  const registration: MachinePushRegistrationLike = {
-    pushManager: {
-      getSubscription: async () => subscriptionHandle(),
-      subscribe: async () => subscriptionHandle(),
-    },
-    unregister: async () => true,
-  };
-  return {
-    register: async () => registration,
-    existing: async () => registration,
-    shared: async () => null,
-    deviceName: () => 'this browser',
   };
 };
 
@@ -207,26 +154,6 @@ const brittleSurface = (
   };
 };
 
-const service = (over: Partial<DaemonPushService> = {}) => {
-  const log = { registered: 0, revoked: [] as string[], listed: 0 };
-  const base: DaemonPushService = {
-    vapidKey: async () => 'key',
-    list: async () => {
-      log.listed += 1;
-      return [DEVICE];
-    },
-    register: async () => {
-      log.registered += 1;
-      return DEVICE;
-    },
-    revoke: async (_connection, deviceId) => {
-      log.revoked.push(deviceId);
-      return DEVICE;
-    },
-  };
-  return { service: { ...base, ...over }, log };
-};
-
 /** Drains the microtask queue; callable from INSIDE an `act` scope. */
 const drain = async (turns = 6) => {
   for (let index = 0; index < turns; index += 1) await Promise.resolve();
@@ -236,37 +163,6 @@ const settle = () => runAsync(() => drain());
 
 /** A deeper drain, for a chain that confirms an enrolment before it lists. */
 const settleDeep = () => runAsync(() => drain(24));
-
-/**
- * A push service whose device list resolves only when the test says so, which is
- * what makes a read's resolution ORDER something a test can choose.
- */
-const deferredService = () => {
-  const reads: {
-    readonly connection: DaemonConnection;
-    readonly settle: (devices: readonly PushDeviceView[]) => void;
-  }[] = [];
-  const push = service({
-    list: connection =>
-      new Promise<readonly PushDeviceView[]>(resolve => {
-        reads.push({ connection, settle: resolve });
-      }),
-  });
-  return {
-    ...push,
-    count: () => reads.length,
-    /** Resolves the n-th started read and lets its whole chain finish. */
-    finish: async (index: number, devices: readonly PushDeviceView[]) => {
-      const read = reads[index];
-      if (read === undefined) throw new Error(`no delivery read #${index} has been started`);
-      await runAsync(async () => {
-        read.settle(devices);
-        await drain(12);
-      });
-      return read.connection;
-    },
-  };
-};
 
 describe('useNotificationPreferences', () => {
   it('re-renders on this daemon’s change and ignores another pairing’s', () => {
@@ -465,38 +361,61 @@ describe('useNotificationWatch', () => {
   });
 });
 
+/** Answers one waiting device list read and lets its whole chain finish. */
+const finish = async (read: ListRead, devices: readonly PushDeviceView[]): Promise<void> => {
+  await runAsync(async () => {
+    read.settle(devices);
+    await drain(12);
+  });
+};
+
+/**
+ * The controls over a scripted push delivery (`tests/support/app/push-delivery.ts`): the enrolment itself is Access's,
+ * so these prove what the Agenda's controls do with what delivery answers — the stored switch, the one permission
+ * prompt, and the fence that keeps a superseded readout off the screen. A RE-PAIR, in 5.0, is the shell rebuilding the
+ * machine's client, so the controls are handed a new delivery: that is the identity the fence compares now, where
+ * today it compared a connection's device token and base URL.
+ */
 describe('useNotificationControls', () => {
   const controlsHost = (over: Partial<NotificationControlsHost> = {}): NotificationControlsHost => ({
     preferences: new DaemonNotificationPreferences(),
     surface: surface('granted').surface,
-    service: service().service,
-    devices: new DaemonPushDevices(),
-    enrolment: enrolment(),
+    delivery: fakeDelivery().port,
     ...over,
   });
 
   /**
    * Mounting is asynchronous because the mount effect is: it reads this daemon's
-   * device list, and the render is not finished until that has settled. Handing
+   * delivery, and the render is not finished until that has settled. Handing
    * back a probe before then would leave the first delivery readout landing
    * outside every `act` scope the test opens.
    */
-  const mount = async (host: NotificationControlsHost, connection: DaemonConnection = daemonA) => {
+  const mount = async (initial: NotificationControlsHost, connection: DaemonConnection = daemonA) => {
     let latest: NotificationControls | undefined;
-    function Probe({ daemon }: { readonly daemon: DaemonConnection }) {
-      latest = useNotificationControls(host, daemon);
+    let host = initial;
+    let daemon = connection;
+    function Probe(props: { readonly host: NotificationControlsHost; readonly daemon: DaemonConnection }) {
+      latest = useNotificationControls(props.host, props.daemon);
       return null;
     }
-    const renderer = render(<Probe daemon={connection} />);
+    const renderer = render(<Probe daemon={daemon} host={host} />);
     await settle();
     return {
       controls: () => {
         if (latest === undefined) throw new Error('the hook did not run');
         return latest;
       },
-      setConnection: async (daemon: DaemonConnection) => {
+      setConnection: async (next: DaemonConnection) => {
+        daemon = next;
         await runAsync(async () => {
-          renderer.update(<Probe daemon={daemon} />);
+          renderer.update(<Probe daemon={daemon} host={host} />);
+        });
+      },
+      /** A re-pair: the same machine, reached through the client the shell rebuilt. */
+      setHost: async (next: NotificationControlsHost) => {
+        host = next;
+        await runAsync(async () => {
+          renderer.update(<Probe daemon={daemon} host={host} />);
         });
       },
       unmount: async () => {
@@ -507,9 +426,9 @@ describe('useNotificationControls', () => {
     };
   };
 
-  it('reads this daemon’s device list on mount and again after a re-pair', async () => {
-    const push = service();
-    const host = controlsHost({ service: push.service });
+  it('reads this daemon’s device list on mount and again after another machine is selected', async () => {
+    const push = fakeDelivery();
+    const host = controlsHost({ delivery: push.port });
     const probe = await mount(host);
 
     expect(push.log.listed).toBe(1);
@@ -521,14 +440,15 @@ describe('useNotificationControls', () => {
     await probe.setConnection(daemonB);
     await settle();
     expect(push.log.listed).toBe(2);
+    expect(push.log.reads).toEqual(['daemon-a', 'daemon-b']);
 
     await probe.unmount();
   });
 
   it('asks the browser once, then enrols this browser with the selected daemon', async () => {
     const target = surface('default', 'granted');
-    const push = service();
-    const host = controlsHost({ surface: target.surface, service: push.service });
+    const push = fakeDelivery();
+    const host = controlsHost({ surface: target.surface, delivery: push.port });
     const probe = await mount(host);
 
     await runAsync(async () => {
@@ -548,7 +468,8 @@ describe('useNotificationControls', () => {
 
   it('leaves the switch off when the browser refuses', async () => {
     const target = surface('default', 'denied');
-    const host = controlsHost({ surface: target.surface });
+    const push = fakeDelivery();
+    const host = controlsHost({ surface: target.surface, delivery: push.port });
     const probe = await mount(host);
 
     await runAsync(async () => {
@@ -560,13 +481,14 @@ describe('useNotificationControls', () => {
     expect(probe.controls().enabled).toBe(false);
     expect(probe.controls().delivery).toBe('idle');
     expect(probe.controls().deliveryMessage).toBeNull();
+    expect(push.log.registered).toBe(0);
 
     await probe.unmount();
   });
 
   it('does not re-prompt a browser that has already answered', async () => {
     const target = surface('granted');
-    const host = controlsHost({ surface: target.surface, enrolment: null });
+    const host = controlsHost({ surface: target.surface, delivery: fakeDelivery({ supported: false }).port });
     const probe = await mount(host);
 
     await runAsync(async () => {
@@ -582,10 +504,8 @@ describe('useNotificationControls', () => {
   });
 
   it('turns delivery off and revokes this daemon’s device', async () => {
-    const push = service();
-    const devices = new DaemonPushDevices();
-    devices.remember(daemonA.daemonId, DEVICE.id);
-    const host = controlsHost({ service: push.service, devices });
+    const push = fakeDelivery({ remembered: { [daemonA.daemonId]: DEVICE.id } });
+    const host = controlsHost({ delivery: push.port });
     host.preferences.set(daemonA.daemonId, { enabled: true });
     const probe = await mount(host);
 
@@ -601,8 +521,8 @@ describe('useNotificationControls', () => {
   });
 
   it('revokes a named device and re-reads the list', async () => {
-    const push = service();
-    const host = controlsHost({ service: push.service });
+    const push = fakeDelivery();
+    const host = controlsHost({ delivery: push.port });
     const probe = await mount(host);
 
     await runAsync(async () => {
@@ -616,9 +536,72 @@ describe('useNotificationControls', () => {
     await probe.unmount();
   });
 
+  it('turns the switch off when the device revoked is this browser’s own', async () => {
+    const push = fakeDelivery({ remembered: { [daemonA.daemonId]: DEVICE.id } });
+    const host = controlsHost({ delivery: push.port });
+    host.preferences.set(daemonA.daemonId, { enabled: true });
+    const probe = await mount(host);
+    expect(probe.controls().currentDeviceId).toBe(DEVICE.id);
+
+    await runAsync(async () => {
+      probe.controls().revokeDevice(DEVICE.id);
+    });
+    await settle();
+
+    expect(probe.controls().enabled).toBe(false);
+    expect(probe.controls().currentDeviceId).toBeNull();
+
+    await probe.unmount();
+  });
+
+  it('keeps the switch on when revoking this browser’s own device fails, and says so', async () => {
+    const push = fakeDelivery({ remembered: { [daemonA.daemonId]: DEVICE.id } });
+    const refused = {
+      ...push.port,
+      revoke: async () => ({
+        status: 'unavailable' as const,
+        message: 'Could not revoke that device with this daemon.',
+        devices: [],
+        currentDeviceId: DEVICE.id,
+      }),
+    };
+    const host = controlsHost({ delivery: refused });
+    host.preferences.set(daemonA.daemonId, { enabled: true });
+    const probe = await mount(host);
+
+    await runAsync(async () => {
+      probe.controls().revokeDevice(DEVICE.id);
+    });
+    await settle();
+
+    expect(probe.controls().enabled).toBe(true);
+    expect(probe.controls().currentDeviceId).toBe(DEVICE.id);
+    expect(probe.controls().deliveryMessage).toBe('Could not revoke that device with this daemon.');
+
+    await probe.unmount();
+  });
+
+  it('keeps the switch on and says today’s sentence when the revoke itself throws', async () => {
+    const push = fakeDelivery({ remembered: { [daemonA.daemonId]: DEVICE.id } });
+    const throwing = { ...push.port, revoke: () => Promise.reject(new Error('offline')) };
+    const host = controlsHost({ delivery: throwing });
+    host.preferences.set(daemonA.daemonId, { enabled: true });
+    const probe = await mount(host);
+
+    await runAsync(async () => {
+      probe.controls().revokeDevice(DEVICE.id);
+    });
+    await settle();
+
+    expect(probe.controls().enabled).toBe(true);
+    expect(probe.controls().deliveryMessage).toBe('Could not revoke that device with this daemon.');
+
+    await probe.unmount();
+  });
+
   it('re-reads on request', async () => {
-    const push = service();
-    const probe = await mount(controlsHost({ service: push.service }));
+    const push = fakeDelivery();
+    const probe = await mount(controlsHost({ delivery: push.port }));
 
     await runAsync(async () => {
       probe.controls().refresh();
@@ -631,31 +614,30 @@ describe('useNotificationControls', () => {
   });
 
   /**
-   * THE READOUT BELONGS TO THE NEWEST CONNECTION, WHATEVER RESOLVES LAST.
+   * THE READOUT BELONGS TO THE NEWEST PAIRING, WHATEVER RESOLVES LAST.
    *
-   * A rotated device token is the hard case: the daemon id is unchanged, so a
-   * fence keyed on identity alone would let the previous pairing's device list
-   * land as though this pairing had answered. Here the NEWER read resolves first
-   * and the superseded one second, which is exactly the order a last-write-wins
-   * reader gets wrong.
+   * A re-pair is the hard case: the daemon id is unchanged, so a fence keyed on
+   * the id alone would let the previous pairing's device list land as though this
+   * pairing had answered. Here the NEWER read resolves first and the superseded one
+   * second, which is exactly the order a last-write-wins reader gets wrong.
    */
   it('never lets a superseded pairing’s delayed read publish over the newer one', async () => {
-    const push = deferredService();
-    const probe = await mount(controlsHost({ service: push.service }));
+    const first = fakeDelivery({ deferred: true });
+    const repaired = fakeDelivery({ deferred: true });
+    const host = controlsHost({ delivery: first.port });
+    const probe = await mount(host);
 
-    expect(push.count()).toBe(1);
+    expect(first.count()).toBe(1);
     expect(probe.controls().delivery).toBe('checking');
 
-    await probe.setConnection(rotatedA);
+    await probe.setHost({ ...host, delivery: repaired.port });
     await settleDeep();
-    expect(push.count()).toBe(2);
+    expect(repaired.count()).toBe(1);
 
-    const newer = await push.finish(1, [ROTATED_DEVICE]);
-    expect(newer.deviceId).toBe(rotatedA.deviceId);
+    await finish(repaired.read(0), [ROTATED_DEVICE]);
     expect(probe.controls().devices).toEqual([ROTATED_DEVICE]);
 
-    const superseded = await push.finish(0, [DEVICE]);
-    expect(superseded.deviceId).toBe(daemonA.deviceId);
+    await finish(first.read(0), [DEVICE]);
     expect(probe.controls().devices).toEqual([ROTATED_DEVICE]);
     expect(probe.controls().delivery).toBe('unavailable');
     expect(probe.controls().deliveryMessage).toBe(PUSH_INACTIVE_MESSAGE);
@@ -665,38 +647,42 @@ describe('useNotificationControls', () => {
       probe.controls().refresh();
     });
     await settle();
-    await push.finish(2, [DEVICE]);
+    await finish(repaired.read(1), [DEVICE]);
     expect(probe.controls().devices).toEqual([DEVICE]);
 
     await probe.unmount();
   });
 
-  it('fences a delayed read when only the base URL moved', async () => {
-    const push = deferredService();
-    const probe = await mount(controlsHost({ service: push.service }));
+  /** Today: "fences a delayed read when only the base URL moved". A connection has no address now; the other order. */
+  it('fences a superseded pairing’s delayed read that resolves before the newer one', async () => {
+    const first = fakeDelivery({ deferred: true });
+    const repaired = fakeDelivery({ deferred: true });
+    const host = controlsHost({ delivery: first.port });
+    const probe = await mount(host);
 
-    await probe.setConnection(movedA);
+    await probe.setHost({ ...host, delivery: repaired.port });
     await settleDeep();
 
-    const newer = await push.finish(1, [ROTATED_DEVICE]);
-    expect(newer.baseUrl).toBe(movedA.baseUrl);
-    await push.finish(0, [DEVICE]);
+    await finish(first.read(0), [DEVICE]);
+    expect(probe.controls().devices).toEqual([]);
+    expect(probe.controls().delivery).toBe('checking');
 
+    await finish(repaired.read(0), [ROTATED_DEVICE]);
     expect(probe.controls().devices).toEqual([ROTATED_DEVICE]);
 
     await probe.unmount();
   });
 
   it('keeps another daemon’s delayed read out of this daemon’s readout', async () => {
-    const push = deferredService();
-    const probe = await mount(controlsHost({ service: push.service }));
+    const push = fakeDelivery({ deferred: true });
+    const probe = await mount(controlsHost({ delivery: push.port }));
 
     await probe.setConnection(daemonB);
     await settleDeep();
 
-    const newer = await push.finish(1, [ROTATED_DEVICE]);
-    expect(newer.daemonId).toBe(daemonB.daemonId);
-    await push.finish(0, [DEVICE]);
+    expect(push.read(1).connection.daemonId).toBe(daemonB.daemonId);
+    await finish(push.read(1), [ROTATED_DEVICE]);
+    await finish(push.read(0), [DEVICE]);
 
     expect(probe.controls().devices).toEqual([ROTATED_DEVICE]);
 
@@ -704,9 +690,11 @@ describe('useNotificationControls', () => {
   });
 
   it('never lets a superseded revoke publish its result', async () => {
-    const push = deferredService();
-    const probe = await mount(controlsHost({ service: push.service }));
-    await push.finish(0, [DEVICE]);
+    const first = fakeDelivery({ deferred: true });
+    const repaired = fakeDelivery({ deferred: true });
+    const host = controlsHost({ delivery: first.port });
+    const probe = await mount(host);
+    await finish(first.read(0), [DEVICE]);
     expect(probe.controls().devices).toEqual([DEVICE]);
 
     await runAsync(async () => {
@@ -715,14 +703,14 @@ describe('useNotificationControls', () => {
     });
 
     // The revoke itself reached the daemon that issued the id; only its readout
-    // is still in flight when the pairing rotates underneath it.
-    expect(push.log.revoked).toEqual([DEVICE.id]);
-    expect(push.count()).toBe(2);
+    // is still in flight when the pairing changes underneath it.
+    expect(first.log.revoked).toEqual([DEVICE.id]);
+    expect(first.count()).toBe(2);
 
-    await probe.setConnection(rotatedA);
+    await probe.setHost({ ...host, delivery: repaired.port });
     await settleDeep();
-    await push.finish(2, [ROTATED_DEVICE]);
-    await push.finish(1, []);
+    await finish(repaired.read(0), [ROTATED_DEVICE]);
+    await finish(first.read(1), []);
 
     expect(probe.controls().devices).toEqual([ROTATED_DEVICE]);
 
@@ -735,22 +723,23 @@ describe('useNotificationControls', () => {
    * for exists even though a newer pairing now owns the screen.
    */
   it('completes a superseded enrolment without publishing its readout', async () => {
-    const push = deferredService();
-    const host = controlsHost({ service: push.service });
+    const first = fakeDelivery({ deferred: true });
+    const repaired = fakeDelivery({ deferred: true });
+    const host = controlsHost({ delivery: first.port });
     const probe = await mount(host);
-    await push.finish(0, [DEVICE]);
+    await finish(first.read(0), [DEVICE]);
 
     await runAsync(async () => {
       probe.controls().setEnabled(true);
       await drain(12);
     });
-    expect(push.log.registered).toBe(1);
-    expect(push.count()).toBe(2);
+    expect(first.log.registered).toBe(1);
+    expect(first.count()).toBe(2);
 
-    await probe.setConnection(rotatedA);
+    await probe.setHost({ ...host, delivery: repaired.port });
     await settleDeep();
-    await push.finish(2, [ROTATED_DEVICE]);
-    await push.finish(1, [DEVICE]);
+    await finish(repaired.read(0), [ROTATED_DEVICE]);
+    await finish(first.read(1), [DEVICE]);
 
     expect(probe.controls().devices).toEqual([ROTATED_DEVICE]);
     // The stored preference for that daemon still records what was asked for.

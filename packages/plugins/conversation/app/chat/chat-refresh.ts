@@ -822,7 +822,7 @@ export interface ChatRefreshControl {
   readonly loadOlder: () => Promise<void>;
   /**
    * Load older pages until the chat reaches back to `offset` of the transcript file `file` (a search
-   * hit's place); `false` when it cannot (`chat-search.ts`).
+   * hit's place); `false` when it cannot (`chat-search-model.ts`).
    */
   readonly loadUntil: (offset: number, file: string) => Promise<boolean>;
   /** The transcript file token the chat's pages came from, once one has been read. */

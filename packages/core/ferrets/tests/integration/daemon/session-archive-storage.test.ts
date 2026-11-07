@@ -9,9 +9,8 @@
 import { describe, it } from 'bun:test';
 import type { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import { ArchiveFile } from '../../../contract/index.ts';
+import { ArchiveFile, FerretConfigFile, FerretStateFile } from '../../../contract/index.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
-import { SessionConfigFiles, SessionStateFiles } from '../../../daemon/lib/state.ts';
 import { memoryStorage, sessionConfig, sessionState } from '../../support/daemon/storage.ts';
 
 async function open(existing?: MemoryStateFolder) {
@@ -49,8 +48,8 @@ describe('archiving a session in storage', () => {
     should((await storage.surveySessionDirectories()).map(session => session.id)).deepEqual([LIVE]);
     should(storage.archivedCount()).equal(1);
     should(storage.isArchived(OLD)).be.true();
-    should(folder.raw(SessionConfigFiles, OLD)).not.be.undefined();
-    should(folder.raw(SessionStateFiles, OLD)).not.be.undefined();
+    should(folder.raw(FerretConfigFile, OLD)).not.be.undefined();
+    should(folder.raw(FerretStateFile, OLD)).not.be.undefined();
   });
 
   it('should still find the session, read its documents and replay its journal', async () => {

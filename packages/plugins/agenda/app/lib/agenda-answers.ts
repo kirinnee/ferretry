@@ -23,22 +23,22 @@
  */
 
 import {
-  type AgendaGate,
   type AgendaAskOption,
   type AgendaCardAnswer,
+  agendaCardAnswers,
   type AgendaCardSource,
   type AgendaDirection,
+  type AgendaGate,
+  agendaInDiscussion,
   type AgendaItem,
+  agendaKindLabel,
   type AgendaResponse,
+  agendaShape,
   type AgendaUndeliveredReply,
   type BoardReopenAttachments,
-  agendaCardAnswers,
-  agendaKindLabel,
-  agendaInDiscussion,
-  agendaShape,
   isDefaultAnswerLabel,
   unswipedChoices,
-} from '../wire/index.ts';
+} from '@ferretry/core-asks/contract';
 
 /** What answering a card does, as the daemon is asked to do it. */
 export type InboxAction =

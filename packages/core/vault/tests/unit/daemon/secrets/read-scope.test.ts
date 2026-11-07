@@ -15,10 +15,9 @@ import {
 } from '@ferretry/kernel/contract';
 import { Dispatcher, localArrival, type MountedRoute } from '@ferretry/kernel/host';
 import should from 'should';
-import { SecretNameSchema } from '../../../../contract/index.ts';
+import { CloneableSecretNameSchema, SecretNameSchema } from '../../../../contract/index.ts';
 import {
   ChildEnvironments,
-  CloneableSecretNameSchema,
   HoldRegistry,
   maskGrid,
   maskLines,
@@ -178,6 +177,8 @@ describe('what the types refuse', () => {
       'outbound provider authorizer': /new\s+OutboundProviderAuthorizer\(\s*vault\b/u,
       'secret export': /new\s+SecretExportService\(\{[^}]*\bvault\b[^}]*\}\)/u,
       'ferret launch environment': /childEnvironment\s*=\s*async[\s\S]*?\bvault\.values\(\)/u,
+      // The kernel's own `${secret:NAME}` lookup (`kernel.secrets`): bound to the kernel alone, never a route or a half.
+      'kernel secret resolver': /secretResolver:\s*SecretResolver\s*=\s*\{[\s\S]*?\bvault\.values\(\)/u,
     };
 
     // Assert — one vault, built in one place, handed only to the allowlist. A new holder adds a use and fails here.

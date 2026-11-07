@@ -1,11 +1,15 @@
 /**
- * THE CARDS AN AGENDA ITEM'S "DONE · CLOSES" WOULD CLOSE, read from the board the app already keeps, and the way
- * to close them through the board's own Done. Nothing is offered outside the app store, for an item that did not ask,
- * or for a card that is already closed or gone.
+ * THE CARDS AN AGENDA ITEM'S "DONE · CLOSES" WOULD CLOSE, and the way to close them through the board's own Done.
+ *
+ * Today this read the board the app store kept. Cards are Board's: this half has no need on Board's routes, so it
+ * reads and moves a card only through a {@link DoneCloseBoard} a host hands it ({@link DoneCloseBoardProvider}).
+ * Nothing is offered without one, for an item that did not ask, or for a card that is already closed or gone.
+ * GAP(done-close-board): no host provides a board yet, so the ask surfaces offer no Done · closes until Board
+ * contributes one (or the lead gives Agenda a need on Board's card routes).
  */
 
-import type { AgendaItem, TaskRef } from '../wire/index.ts';
-import { useMemo } from 'react';
+import type { AgendaItem, TaskRef } from '@ferretry/core-asks/contract';
+import { createContext, createElement, type ReactNode, useContext, useMemo, useSyncExternalStore } from 'react';
 import {
   type CardForClose,
   closeCards,
@@ -15,24 +19,45 @@ import {
   type DoneCloseSource,
   offeredCards,
 } from '../lib/agenda-done-close.ts';
-import type { BoardTaskState } from '../shell.ts';
-import type { DaemonConnection, DaemonId } from '../shell.ts';
-import { useOptionalAppStore } from '../shell.ts';
-import { IDLE_STORE } from '../shell.ts';
-import { useBoardActions, useBoardTask } from '../shell.ts';
+import type { DaemonId } from '../lib/machine.ts';
 
-const NO_MACHINES: readonly DaemonConnection[] = [];
-const NO_AGENDA = { respond: () => Promise.reject(new Error('this host has no agenda')) };
+/** One card as the board last read it. */
+export interface DoneCloseCardState {
+  readonly status: 'idle' | 'loading' | 'ready' | 'failed';
+  /** The board said there is no such card. */
+  readonly missing: boolean;
+  readonly title?: string | undefined;
+  /** Present once the card was read. */
+  readonly card?: CardForClose | undefined;
+}
 
-const forClose = (state: BoardTaskState): CardForClose | undefined =>
-  state.status !== 'ready' || state.task === null
-    ? undefined
-    : { laneId: state.task.laneId, dropped: state.task.dropped !== null, laneSet: state.laneSet };
+/** What a host that holds the board hands this half: a live read of a card and Board's own move. */
+export interface DoneCloseBoard {
+  readonly subscribe: (listener: () => void) => () => void;
+  /** The card as last read (the same object until it changes); asking starts a read when none was made. */
+  readonly cardState: (daemonId: DaemonId, id: string) => DoneCloseCardState;
+  /** Moves the card into `laneId` with Board's move, recorded in its history and told to its ferret. */
+  readonly move: (daemonId: DaemonId, id: string, card: CardForClose, laneId: string) => Promise<DoneCloseResult>;
+}
+
+const DoneCloseBoardContext = createContext<DoneCloseBoard | undefined>(undefined);
+
+/** Hands the ask surfaces below it the board a Done · closes reads and moves cards through. */
+export const DoneCloseBoardProvider = (props: {
+  readonly board: DoneCloseBoard;
+  readonly children?: ReactNode;
+}): ReactNode => createElement(DoneCloseBoardContext.Provider, { value: props.board }, props.children);
+
+const IDLE: DoneCloseCardState = Object.freeze({ status: 'idle', missing: false });
+const NO_SUBSCRIPTION = (): (() => void) => () => undefined;
+
+const readCard = (state: DoneCloseCardState): CardForClose | undefined =>
+  state.status === 'ready' ? state.card : undefined;
 
 /** A card that is gone or already closed has nothing left to close, so it offers nothing. */
-const closable = (state: BoardTaskState): boolean => {
+const closable = (state: DoneCloseCardState): boolean => {
   if (state.missing) return false;
-  const card = forClose(state);
+  const card = readCard(state);
   return card === undefined || closePlan(card).kind !== 'closed';
 };
 
@@ -40,35 +65,27 @@ export const useDoneClose = (
   daemonId: DaemonId | undefined,
   item: AgendaItem | undefined,
 ): DoneCloseSource | undefined => {
-  const app = useOptionalAppStore();
+  const board = useContext(DoneCloseBoardContext);
   const refs = useMemo(
     () => (daemonId === undefined || item === undefined ? [] : offeredCards(item, daemonId)),
     [daemonId, item],
   );
   const first = refs[0];
-  const connection = app?.connections.list().find(record => record.daemonId === daemonId);
-  const machines = useMemo(() => (connection === undefined ? NO_MACHINES : [connection]), [connection]);
-  const board = app?.board ?? IDLE_STORE;
-  const state = useBoardTask(board, first === undefined ? undefined : connection, first?.id ?? '');
-  const actions = useBoardActions(board, app?.attention ?? NO_AGENDA, machines);
+  const state = useSyncExternalStore(board?.subscribe ?? NO_SUBSCRIPTION, () =>
+    board === undefined || daemonId === undefined || first === undefined ? IDLE : board.cardState(daemonId, first.id),
+  );
 
   return useMemo((): DoneCloseSource | undefined => {
-    if (first === undefined || daemonId === undefined || connection === undefined || !closable(state)) return undefined;
-    const cards: DoneCloseCard[] = [{ ref: first, title: state.task?.title }];
+    if (board === undefined || first === undefined || daemonId === undefined || !closable(state)) return undefined;
+    const cards: DoneCloseCard[] = [{ ref: first, title: state.title }];
     const closeOne = async (ref: TaskRef): Promise<DoneCloseResult> => {
-      const card = forClose(board.taskState(daemonId, ref.id));
+      const card = readCard(board.cardState(daemonId, ref.id));
       const plan = closePlan(card);
       if (plan.kind === 'closed') return { ok: true };
-      if (plan.kind === 'refused' || card === undefined) {
+      if (plan.kind === 'refused' || card === undefined)
         return { ok: false, message: plan.kind === 'refused' ? plan.message : 'the card could not be read' };
-      }
-      const moved = await actions.moveTask(
-        { daemonId, id: ref.id, laneId: card.laneId, laneSet: card.laneSet },
-        plan.laneId,
-      );
-      return moved.ok ? { ok: true } : { ok: false, message: moved.error.message };
+      return await board.move(daemonId, ref.id, card, plan.laneId);
     };
-    const close = (targets: readonly TaskRef[]) => closeCards(targets, closeOne);
-    return { cards, close };
-  }, [first, daemonId, connection, state, board, actions]);
+    return { cards, close: targets => closeCards(targets, closeOne) };
+  }, [board, first, daemonId, state]);
 };

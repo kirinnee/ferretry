@@ -1,5 +1,6 @@
 import {
   CORE_IDS,
+  type InventorySurfaces,
   PROTOCOL,
   type PluginInventory,
   type RouteDescriptor,
@@ -32,8 +33,8 @@ export type InventoryViewer =
   | { readonly kind: 'member' }
   | { readonly kind: 'none' };
 
-/** Every declared route, socket and agent tool of one plugin, as descriptors. */
-export type PluginSurfaces = ReadonlyMap<string, readonly Omit<ScopedRoute, 'method' | 'path'>[]>;
+/** Every declared route, socket and agent tool of one plugin, as descriptors: the kernel's `InventorySurfaces`. */
+export type PluginSurfaces = InventorySurfaces;
 
 export type InventoryProjection =
   | { readonly outcome: 'shown'; readonly inventory: PluginInventory }

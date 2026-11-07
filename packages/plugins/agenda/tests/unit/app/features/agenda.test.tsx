@@ -1,12 +1,12 @@
-import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, mock, test } from 'bun:test';
 import {
   type AgendaId,
   type AgendaItem,
-  type AgendaSnapshot,
   type AgendaListSnapshot,
   agendaListSnapshot,
-} from '../../../../app/wire/index.ts';
-import { LANE_PROPOSAL_ANSWERS, laneProposalReference } from '../../../../app/shell.ts';
+  type AgendaSnapshot,
+} from '@ferretry/core-asks/contract';
+import { LANE_PROPOSAL_ANSWERS } from '../../../../app/lib/lane-edit.ts';
 import { projectionSnapshot } from '../../../support/app/agenda-projection.ts';
 import type { ReactElement } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
@@ -14,6 +14,7 @@ import {
   type Agenda,
   type AgendaActionClient,
   type AgendaFocus,
+  AgendaInputCard,
   agendaLedgerIds,
   useAgenda,
 } from '../../../../app/features/agenda/agenda.tsx';
@@ -21,20 +22,34 @@ import { AgendaInboxContext, type AgendaInbox } from '../../../../app/hooks/use-
 import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view.tsx';
 import { AgendaRow } from '../../../../app/features/agenda/agenda-row.tsx';
 import { AgendaDrawer, AgendaLine } from '../../../../app/features/agenda/agenda-line.tsx';
-import { InputCardHost } from '../../../../app/shell.ts';
 import { inboxCardKey } from '../../../../app/lib/agenda-inbox.ts';
 import { daemonConnection } from '../../../../app/shell.ts';
 import { daemonSessionScope } from '../../../../app/shell.ts';
 import { registerComposerQuoteTarget } from '../../../../app/shell.ts';
-import { RouterProvider } from '../../../../app/shell.ts';
-import { type AppStore, StoreProvider } from '../../../../app/shell.ts';
-import { browserFetch } from '../../../../app/shell.ts';
-import type { TranscriptEntry } from '../../../../app/shell.ts';
-import '../../../support/app/dom.ts';
+import type { TranscriptEntry } from '../../../../app/lib/transcript.ts';
+import type { AgendaCall } from '../../../../app/lib/agenda-call.ts';
+import { AgendaClientContext } from '../../../../app/lib/agenda-client-context.tsx';
+import { ensureDom, RouterProvider, render, run, runAsync } from '@ferretry/app/testing';
 import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
-import { render, run, runAsync } from '../../../support/app/react.ts';
+import { callFromFetch, type TestFetch } from '../../../support/app/call-from-fetch.ts';
 
-const connection = daemonConnection({ daemonId: 'agenda', baseUrl: 'https://agenda.example.test', deviceId: 'device' });
+ensureDom();
+
+/** A lane-proposal card's reference, as Board spells it (`lanes:<project>:<version>`). */
+const laneProposalReference = (projectId: string, version: number): string => `lanes:${projectId}:${version}`;
+
+/** What a test's machine answers the half's reads with; none set: every read is refused, nothing is reached. */
+let itemFetch: TestFetch | undefined;
+const stubFetch = () => {
+  const read = mock<TestFetch>();
+  itemFetch = read;
+  return read;
+};
+const machine: AgendaCall = callFromFetch((url, init) =>
+  itemFetch === undefined ? Promise.reject(new Error('no machine in this test')) : itemFetch(url, init),
+);
+
+const connection = daemonConnection({ daemonId: 'agenda' });
 const scope = daemonSessionScope(connection, 'chat');
 const otherScope = daemonSessionScope(connection, 'other');
 
@@ -103,8 +118,10 @@ interface HostProps {
   readonly projectId?: string;
   /** The board's How to test for a card, as the shell's Inbox model gives it. */
   readonly boardSteps?: (daemonId: string, cardId: string) => string | null;
-  /** A store that says what the machine speaks, for the item view's lifecycle reads. */
-  readonly store?: AppStore;
+  /** The half's client, for the item view's lifecycle reads; absent: the test's machine. */
+  readonly client?: AgendaCall;
+  /** Where Edit on a lane-proposal card goes (Board's lane editor, spelt by the host). */
+  readonly laneEditor?: (projectId: string) => string | undefined;
 }
 
 let current: Agenda | undefined;
@@ -113,7 +130,16 @@ const live = (): Agenda => {
   return current;
 };
 
-function Host({ snapshot, agendaMode = true, desktop = false, focus = null, ...rest }: HostProps) {
+/** The chat host, under the half's client: a re-render with new props keeps the same tree. */
+function Host(props: HostProps) {
+  return (
+    <AgendaClientContext.Provider value={props.client ?? machine}>
+      <ChatHost {...props} />
+    </AgendaClientContext.Provider>
+  );
+}
+
+function ChatHost({ snapshot, agendaMode = true, desktop = false, focus = null, ...rest }: HostProps) {
   const agenda = useAgenda({
     agendaMode,
     client: rest.clientOverride ?? client(),
@@ -130,6 +156,7 @@ function Host({ snapshot, agendaMode = true, desktop = false, focus = null, ...r
     ...(rest.onAnswered === undefined ? {} : { onAnswered: rest.onAnswered }),
     ...(rest.onItemOpened === undefined ? {} : { onItemOpened: rest.onItemOpened }),
     ...(rest.projectId === undefined ? {} : { projectId: rest.projectId }),
+    ...(rest.laneEditor === undefined ? {} : { laneEditor: rest.laneEditor }),
   });
   current = agenda;
   return (
@@ -154,6 +181,7 @@ afterEach(() => {
   calls.length = 0;
   current = undefined;
   for (const fetcher of itemFetches.splice(0)) fetcher.mockRestore();
+  itemFetch = undefined;
   try {
     localStorage.clear();
   } catch {
@@ -165,7 +193,7 @@ describe('opening resolved list headers', () => {
   test('keeps a failed item read visible and lets the owner retry it', async () => {
     // Arrange
     const full = { ...projectionSnapshot(0, 1), sessionId: 'chat' };
-    const read = spyOn(globalThis, 'fetch')
+    const read = stubFetch()
       .mockRejectedValueOnce(new Error('Offline'))
       .mockResolvedValue(Response.json(full.resolved[0]));
     itemFetches.push(read);
@@ -188,7 +216,7 @@ describe('opening resolved list headers', () => {
     const full = { ...projectionSnapshot(0, 1), sessionId: 'chat' };
     const listed = agendaListSnapshot(full);
     const document = full.resolved[0];
-    const read = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(document));
+    const read = stubFetch().mockResolvedValue(Response.json(document));
     itemFetches.push(read);
     // Act
     let view: ReturnType<typeof mount> | undefined;
@@ -211,7 +239,7 @@ describe('opening resolved list headers', () => {
 });
 const mount = (props: HostProps) => {
   const hosted = <Host {...props} />;
-  const host = props.store === undefined ? hosted : <StoreProvider store={props.store}>{hosted}</StoreProvider>;
+  const host = hosted;
   const view = render(
     props.boardSteps === undefined ? (
       host
@@ -422,10 +450,6 @@ describe('the full card', () => {
     });
     const view = mount({
       snapshot: board([stored]),
-      store: {
-        carrier: { fetch: browserFetch },
-        connections: { list: () => [] },
-      } as unknown as AppStore,
     });
     withDrawer(view);
     open(view, 'A3');
@@ -1053,11 +1077,13 @@ describe('Edit on a lane-proposal card in the conversation', () => {
     sourceRef: laneProposalReference(PROJECT_ID, 2),
   });
   const choose = (label: string) => ({ kind: 'respond', response: { kind: 'multiple-choice', choice: label } });
+  // The host spells Board's lane editor; this half hard-codes no Board path.
+  const laneEditor = (projectId: string) => `/d/agenda/projects/${projectId}/lanes`;
 
   const mountInRouter = () => {
     const view = render(
       <RouterProvider>
-        <Host focus={{ target: 'L1' as AgendaId, seq: 1 }} snapshot={board([proposal])} />
+        <Host focus={{ target: 'L1' as AgendaId, seq: 1 }} laneEditor={laneEditor} snapshot={board([proposal])} />
       </RouterProvider>,
     );
     mounted.push(view);
@@ -1085,7 +1111,7 @@ describe('Edit on a lane-proposal card in the conversation', () => {
   });
 
   test('answers without a router in the tree, and does not go anywhere', async () => {
-    const view = mount({ snapshot: board([proposal]), focus: { target: 'L1' as AgendaId, seq: 1 } });
+    const view = mount({ snapshot: board([proposal]), focus: { target: 'L1' as AgendaId, seq: 1 }, laneEditor });
     await runAsync(async () => {
       view.root.findByType(AgendaItemView).props.onAct(choose(LANE_PROPOSAL_ANSWERS.edit));
     });
@@ -1235,7 +1261,7 @@ describe('a sign-in rule suggestion card', () => {
       focus: { target: 'A1' as AgendaId, seq: 1 },
       projectId: '5b1f2a40-6c7d-4e8f-9a0b-1c2d3e4f5a6b',
     });
-    expect(view.root.findByType(AgendaItemView).props.planForm.props.projectId).toBe(
+    expect(view.root.findByType(AgendaItemView).props.planForm.props.value.projectId).toBe(
       '5b1f2a40-6c7d-4e8f-9a0b-1c2d3e4f5a6b',
     );
     run(() => view.unmount());
@@ -1403,7 +1429,7 @@ describe('an input card that ends while it is open (#B147)', () => {
   });
   const openInput = (id = 'A7') =>
     mount({ snapshot: board([inputItem(id), item('A2')]), focus: { target: id as AgendaId, seq: 1 } });
-  const inputHost = (view: ReturnType<typeof render>) => view.root.findByType(InputCardHost);
+  const inputHost = (view: ReturnType<typeof render>) => view.root.findByType(AgendaInputCard);
   const sentLine = (view: ReturnType<typeof render>) =>
     view.root.findAll(node => node.type === 'p' && node.props['data-agenda-sent'] !== undefined);
 

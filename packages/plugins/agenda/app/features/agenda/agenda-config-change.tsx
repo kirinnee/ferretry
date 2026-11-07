@@ -11,7 +11,7 @@
  * Discard change) do, and the daemon decides whether the change is still the one shown.
  */
 
-import type { AgendaItem } from '../../wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { FileCog, TriangleAlert } from 'lucide-react';
 
 /** One loosening, split into what moves and its two values when the daemon's words name them. */

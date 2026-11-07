@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { AgendaRow, agendaAsk } from '../../../../app/features/agenda/agenda-row.tsx';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 const NOW = Date.parse('2026-10-29T10:00:00.000Z');
 

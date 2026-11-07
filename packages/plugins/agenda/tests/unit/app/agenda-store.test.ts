@@ -4,8 +4,8 @@ import { DaemonAgendaStore } from '../../../app/lib/agenda-store.ts';
 import { daemonConnection } from '../../../app/shell.ts';
 import { daemonSessionScope } from '../../../app/shell.ts';
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
+const daemonA = daemonConnection({ daemonId: 'daemon-a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b' });
 const scopeA = daemonSessionScope(daemonA, 'same-session');
 const scopeB = daemonSessionScope(daemonB, 'same-session');
 

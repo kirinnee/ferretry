@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { PushDeviceView } from '../../../../../app/shell.ts';
+import type { PushDeviceView } from '../../../../../app/lib/push-delivery.ts';
 
 import {
   NOTIFICATION_DENIED_NOTE,
@@ -9,7 +9,7 @@ import {
   NotificationSettingsView,
   type NotificationSettingsViewProps,
 } from '../../../../../app/features/settings/notification-settings.tsx';
-import { render, run } from '../../../../support/app/react.ts';
+import { render, run } from '@ferretry/app/testing';
 
 const device: PushDeviceView = {
   id: 'push-5b2b54ad-e4a3-4f96-923f-95bd960ef61b',

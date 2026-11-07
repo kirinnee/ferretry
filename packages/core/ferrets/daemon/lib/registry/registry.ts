@@ -6,7 +6,7 @@ import type {
   FerretWaiting,
   PackId,
 } from '../../../contract/index.ts';
-import type { FerretDetails } from '../state.ts';
+import { type FerretDetails } from '../../../contract/index.ts';
 
 /**
  * WHO EACH FERRET IS, in memory (§2.2): every `state/ferrets/<ferret>/ferret.json` the daemon holds, and the lineage

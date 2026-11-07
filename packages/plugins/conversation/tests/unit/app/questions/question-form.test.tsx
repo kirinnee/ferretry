@@ -7,10 +7,10 @@ import { render, run, runUntil } from '@ferretry/app/testing';
 
 /**
  * The daemon's refusal as the shell's client throws it, with the refusal's own fields riding beside it (`detail`,
- * `answered`, `answeredWith`): the form reads them when present (GAP(app): `DaemonCallError` does not carry them yet).
+ * `answered`, `answeredWith`): the form reads them from the error's `body` when present.
  */
 const httpError = (message: string, status: number, code: string, body?: Record<string, unknown>): DaemonCallError =>
-  Object.assign(new DaemonCallError(status, code, message), body === undefined ? {} : { body });
+  new DaemonCallError(status, code, message, body);
 
 const daemonA = 'daemon-a';
 const daemonB = 'daemon-b';

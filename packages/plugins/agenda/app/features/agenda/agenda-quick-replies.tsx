@@ -17,8 +17,7 @@
  * in the composer when it is empty. A notice's one button is Got it.
  */
 
-import type { AgendaCardAnswer } from '../../wire/index.ts';
-import { agendaAnswerText, GOT_IT_LABEL, plainLabel } from '../../wire/index.ts';
+import { agendaAnswerText, type AgendaCardAnswer, GOT_IT_LABEL, plainLabel } from '@ferretry/core-asks/contract';
 import { Check } from 'lucide-react';
 import { type PointerEvent, useRef } from 'react';
 import { type AnswerDirection, answerAction, CLEAR_ACTION } from '../../lib/agenda-answers.ts';

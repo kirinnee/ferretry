@@ -61,9 +61,15 @@ const PREVIEW: LinkPreview = {
   ],
 };
 
-// Ferrets’ summary says a failed ferret as `stopped`; a ferret’s mark is its label, else its name.
+// Ferrets’ summary says a failed ferret as `stopped`; a ferret’s mark is its callsign, else its label or name.
 const FERRETS: readonly FerretSummary[] = [
-  ferret('notes-ferret', { name: 'notes', label: 'Mika', folder: '/work/notes', state: 'stopped', stateAt: at(2) }),
+  ferret('notes-ferret', {
+    name: 'mika',
+    label: 'Notes clean-up',
+    folder: '/work/notes',
+    state: 'stopped',
+    stateAt: at(2),
+  }),
   ferret('api-ferret', { name: 'api', harness: 'codex', folder: '/work/api', state: 'stopped', stateAt: at(30) }),
   ferret('live-ferret', { state: 'working', stateAt: at(1) }),
 ];
@@ -399,9 +405,9 @@ describe('ContinueConversation marks and the Ferretry filter', () => {
     await open({ ferrets: FERRETS });
     expect(text('[data-continue-count]')).toBe('4 conversations');
     const bare = '[data-continue-ferret="api-ferret"]';
-    expect(text(`${bare} .fy-convo-title`)).toBe('api');
+    expect(text(`${bare} .fy-convo-title`)).toBe('Api');
     expect(text(`${bare} [data-conversation-age]`)).toBe('1d ago');
-    expect(text(`${bare} [data-conversation-ferret="api-ferret"]`)).toBe('Ferret api · stopped');
+    expect(text(`${bare} [data-conversation-ferret="api-ferret"]`)).toBe('Ferret Api · stopped');
     expect(text(`${bare} [data-conversation-harness="codex"]`)).toBe('Codex');
     expect(find(`${bare} .fy-convo-avatar__dot`).getAttribute('data-state')).toBe('stopped');
     await click('[data-segmented="source"] [data-segment="claude-code"]');

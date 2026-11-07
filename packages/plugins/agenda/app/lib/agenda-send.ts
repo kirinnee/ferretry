@@ -3,7 +3,7 @@
  * send answers; each kind of `InboxAction` is exactly one request through the ONE agenda client.
  */
 
-import type { AgendaId } from '../wire/index.ts';
+import type { AgendaId } from '@ferretry/core-asks/contract';
 import type { InboxAction } from './agenda-answers.ts';
 import type { DaemonAgendaClient } from './agenda-client.ts';
 import type { DaemonConnection } from '../shell.ts';

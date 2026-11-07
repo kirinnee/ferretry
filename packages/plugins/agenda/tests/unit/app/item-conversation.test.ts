@@ -67,7 +67,7 @@ describe('readItemConversation', () => {
     const serve = async (cursor: string | undefined) => {
       cursors.push(cursor);
       reads += 1;
-      if (reads === 2) throw new FyHttpError('old cursor', 409, 'message_cursor_stale');
+      if (reads === 2) throw new FyHttpError(409, 'old cursor', 'message_cursor_stale');
       return {
         messages: reads === 1 ? [row(999, 'user', 'obsolete !A4')] : rows,
         nextCursor: reads === 1 ? 'old-cursor' : null,
@@ -89,7 +89,7 @@ describe('readItemConversation', () => {
       ...daemonOf([]),
       messagesTail: async () => {
         reads += 1;
-        throw new FyHttpError('still stale', 409, 'message_cursor_stale');
+        throw new FyHttpError(409, 'still stale', 'message_cursor_stale');
       },
     };
     await expect(readItemConversation(client, 'sess', 'A4')).rejects.toThrow('still stale');

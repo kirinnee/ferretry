@@ -1,6 +1,7 @@
 import type { FerretSummary } from '@ferretry/core-ferrets/contract';
 import { type ApiResponse, errorResponse, jsonResponse, textResponse } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
+import type { LoginId } from '@ferretry/plugin-logins/contract';
 import { instantFromEpochMs, milliseconds } from '@ferretry/std';
 import { platform } from 'node:os';
 import manifest from '../manifest.ts';
@@ -77,9 +78,9 @@ function headroomOf(row: UsageAccountView | undefined): number | undefined {
  * Usage (§2.3): what each login spent and has left, and a pause at the owner's budget.
  *
  * NOTHING HERE SPENDS A FERRET. A pause is read by `start.decide` (a refusal that names the reset). The only ferrets Usage
- * ever stops are those on a login past its HARD limit, through Ferrets' own stop. The provider's key is never held: a
- * quota read is the Vault's `authorizeFetch`, which places one named secret on one request to an allowlisted host and
- * returns the reply.
+ * ever stops are those on a login past its HARD limit, through Ferrets' own stop. The provider's key is never held, and
+ * Usage does not need the Vault and cannot name a secret: a quota read names a LOGIN (Logins' `authorizeFetch`), and
+ * Logins resolves the key from that login's own record and has the Vault place it on one request to an allowlisted host.
  */
 export default implementDaemon(manifest, {
   build({ kernel, needs }) {
@@ -224,8 +225,8 @@ export default implementDaemon(manifest, {
     const quota = new ProviderQuotaService({
       logins: async () => providerQuotaLogins(await needs.logins.list(), await needs.logins.presets()),
       authorizer: {
-        send: async (name, hosts, request, placement) =>
-          await needs.vault.authorizeFetch(name, hosts, request, placement),
+        send: async (loginId, variable, hosts, request, placement) =>
+          await needs.logins.authorizeFetch(loginId as LoginId, variable, hosts, request, placement),
       },
       spend: new AnalyticsTranscriptSpend(ingestion),
       clock: { nowMs },

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import { type AgendaGate, type AgendaItem, gateAskOptions, gateReference } from '../../../../app/wire/index.ts';
+import { type AgendaGate, type AgendaItem, gateAskOptions, gateReference } from '@ferretry/core-asks/contract';
 import { useState } from 'react';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import type { InboxCard } from '../../../../app/lib/agenda-inbox.ts';
+import type { GateItem } from '../../../../app/lib/gate-items.ts';
 import {
   agendaItem,
   choices,
@@ -11,7 +12,7 @@ import {
   InboxHarness,
   inboxCard,
 } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { sessionView } from '../../../support/app/sessions.ts';
 import { laptop } from '../board-support.ts';
 import {
@@ -33,7 +34,8 @@ const GATE_OPTIONS: Pick<AgendaGate, 'options'> = {
   ],
 };
 
-const gateItem = (id: string, cardId: string, extra: Partial<AgendaItem> = {}): AgendaItem =>
+/** A view of a thread as its card ask: an item with the gate it stands for (`GateItem`). */
+const gateItem = (id: string, cardId: string, extra: Partial<GateItem> = {}): GateItem =>
   agendaItem(id, {
     subject: 'Try it: open the pairing page',
     why: 'Pairing QR is in Tested.',
@@ -53,7 +55,7 @@ const gateItem = (id: string, cardId: string, extra: Partial<AgendaItem> = {}): 
       options: [...GATE_OPTIONS.options],
     },
     ...extra,
-  } as Partial<AgendaItem>);
+  } as unknown as Partial<AgendaItem>) as GateItem;
 
 const owner = sessionView('sess-g', { config: { teammate: 'judson', name: 'Pairing QR' } as never });
 const gate = inboxCard(gateItem('G1', 'F1'), owner);
@@ -370,6 +372,44 @@ describe('a gate item in the Inbox', () => {
     });
   });
 
+  it('opens the why box as a dialog with the cursor in its field', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(page(fake, [gate], { initialOpen: gate.key }));
+    await press(buttonNamed(mounted, 'Not good'));
+    const why = sendBackBox(mounted.container);
+    expect(why.getAttribute('role')).toBe('dialog');
+    expect(why.getAttribute('aria-modal')).toBe('true');
+    expect(why.getAttribute('aria-labelledby')).not.toBeNull();
+    expect(document.activeElement).toBe(why.querySelector('textarea'));
+    await mounted.unmount();
+  });
+
+  it('Esc in the why box, in the field or on Cancel, closes only the box', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(page(fake, [gate], { initialOpen: gate.key }));
+    await press(buttonNamed(mounted, 'Not good'));
+    const field = must(sendBackBox(mounted.container).querySelector('textarea'), 'the field');
+    await interact(() => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(mounted.container.querySelector('[data-inbox-gate-why]')).toBeNull();
+    expect(mounted.container.querySelector('[data-inbox-gate]')).not.toBeNull();
+    expect(pending(fake)).toEqual([]);
+    await mounted.unmount();
+  });
+
+  it('refuses a reason that is too long in the box, with today’s sentence, and sends nothing', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(page(fake, [gate], { initialOpen: gate.key }));
+    await press(buttonNamed(mounted, 'Not good'));
+    const why = sendBackBox(mounted.container);
+    await writeSendBack(why, 'x'.repeat(2 * 1024 + 1));
+    await press(sendBackSubmit(why));
+    expect(pending(fake)).toEqual([]);
+    expect(why.querySelector('[role="alert"]')?.textContent).toBe('That is too long: keep it under 2048 characters.');
+    await writeSendBack(why, 'short');
+    expect(why.querySelector('[role="alert"]')).toBeNull();
+    await mounted.unmount();
+  });
+
   it('Cancel on the why composer sends nothing and keeps the card', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [gate], { initialOpen: gate.key }));
@@ -478,7 +518,7 @@ describe('Not good on a card ask drawn on a thread', () => {
       agendaItem('T1', {
         subject: 'Which colour for the badge?',
         ask: choices('Blue', 'Green'),
-        gateAttached: askOf(cardId),
+        cardAsks: [{ gate: askOf(cardId), at: '2026-08-01T10:00:00.000Z' }],
       } as Partial<AgendaItem>),
       owner,
     );

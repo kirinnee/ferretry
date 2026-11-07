@@ -184,7 +184,7 @@ function pushNumberReply(id, params) {
 function inputReply(id, method, params) {
   const page = params?.pageId;
   const facts = {
-    kind: 'browser',
+    kind: 'page',
     pageId: 'p1',
     origin: 'https://example.test',
     secure: true,
@@ -225,7 +225,7 @@ function inputReply(id, method, params) {
       page === 'missing'
         ? { observation: { ok: false, missing: 'password' } }
         : page === 'garbled'
-          ? { observation: { ok: true, facts: { kind: 'browser' } } }
+          ? { observation: { ok: true, facts: { kind: 'page' } } }
           : { observation: { ok: true, facts } },
     );
   // A re-find answers like a look, and also says when several fields could be the one (#B100).
@@ -238,7 +238,7 @@ function inputReply(id, method, params) {
         : page === 'ambiguous'
           ? { observation: { ok: false, ambiguous: 'password' } }
           : page === 'garbled'
-            ? { observation: { ok: true, facts: { kind: 'browser' } } }
+            ? { observation: { ok: true, facts: { kind: 'page' } } }
             : { observation: { ok: true, facts: { ...facts, fields: [{ ...facts.fields[0], backendNodeId: 9 }] } } },
     );
   else if (method === 'inputShot')

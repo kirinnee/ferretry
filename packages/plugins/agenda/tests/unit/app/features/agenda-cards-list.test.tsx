@@ -1,17 +1,28 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { AgendaCardRow, BoardTaskId } from '../../../../app/wire/index.ts';
+import type { AgendaCardRow } from '@ferretry/core-asks/contract';
 import {
   type AgendaCardOutcome,
   AgendaCardsList,
+  type BoardTaskId,
   CLOSE_CARD_REASON,
 } from '../../../../app/features/agenda/agenda-cards-list.tsx';
-import { agendaCardsActions } from '../../../../app/lib/agenda-cards-actions.ts';
-import { boardErr, boardOk } from '../../../../app/wire/index.ts';
+import { agendaCardsActions as cardsActions, boardErr, boardOk } from '../../../../app/lib/agenda-cards-actions.ts';
 import { daemonId } from '../../../../app/shell.ts';
-import { type Mounted, mount } from '../../../support/app/dom.ts';
+import { type Mounted, mount } from '@ferretry/app/testing';
 import { click, settle, typeInto } from '../../../support/app/dom-form.ts';
 
 const LAPTOP = daemonId('laptop');
+
+/** The shell's route table, as a host with Board and Conversation installed answers it. */
+const LINKS = {
+  card: (machine: string, id: string) => `/d/${machine}/board/${id}`,
+  chat: (machine: string, ferret: string) => `/d/${machine}/chat/${ferret}`,
+};
+const agendaCardsActions = (
+  board: Parameters<typeof cardsActions>[0],
+  machine: Parameters<typeof cardsActions>[1],
+  onNavigate: (to: string) => void,
+) => cardsActions(board, machine, onNavigate, LINKS);
 const mounted: Mounted[] = [];
 afterEach(async () => {
   for (const each of mounted.splice(0)) await each.unmount();

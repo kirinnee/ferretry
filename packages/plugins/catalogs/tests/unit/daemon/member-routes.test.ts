@@ -112,6 +112,71 @@ describe('the member routes answer a refusal with its own code and status', () =
     expect(JSON.stringify(answer.body)).not.toContain('unlock this browser');
   });
 
+  it('G4 should answer a member the contract hash of Catalogs, as the host holds it, and nothing else', async () => {
+    // Arrange
+    const fx = await catalogsFixture({ contractHash: id => `effective-of-${id}` });
+    const catalog = await makeCatalog(fx, 'Team recipes');
+    const who = await browser();
+    const joined = await joinWith(fx, who, (await mintShare(fx, { catalogIds: [catalog] })).code);
+    const end = await memberSession(fx, who, joined.keyId);
+    await unlock(end);
+
+    // Act
+    const answer = await end.ask('GET', '/v1/shared/contract');
+
+    // Assert — one field: Catalogs' hash from `kernel.contract.hash()`, no inventory and no other plugin
+    expect(answer.status).toBe(200);
+    expect(answer.body).toEqual({ contract: 'effective-of-catalogs' });
+    expect(answer.headers['cache-control']).toBe('no-store');
+  });
+
+  it('G4 should refuse a locked member key GET /v1/shared/contract 403 member_locked', async () => {
+    // Arrange
+    const fx = await catalogsFixture();
+    const catalog = await makeCatalog(fx);
+    const who = await browser();
+    const joined = await joinWith(fx, who, (await mintShare(fx, { catalogIds: [catalog] })).code);
+    const locked = await memberSession(fx, who, joined.keyId);
+
+    // Act
+    const answer = await locked.ask('GET', '/v1/shared/contract');
+
+    // Assert
+    expect(answer.status).toBe(403);
+    expect(answer.body.code).toBe('member_locked');
+  });
+
+  it('G4 should refuse a caller with no principal on GET /v1/shared/contract', async () => {
+    // Arrange
+    const { fx } = await unlockedMember();
+
+    // Act
+    const answer = await fx.dispatcher.dispatch({
+      method: 'GET',
+      path: '/v1/shared/contract',
+      headers: new Map(),
+      body: '',
+    } as never);
+
+    // Assert — the member table is reached only by a member principal: nothing is answered, no member is admitted
+    expect(answer.status).not.toBe(200);
+    expect(answer.body).not.toContain('contract');
+    expect(fx.callers.memberAdmissions.filter(admitted => admitted.path === '/v1/shared/contract')).toEqual([]);
+  });
+
+  it('G4 should refuse a member session the main inventory GET /v1/plugins 403 member_only', async () => {
+    // Arrange — the kernel's dispatcher sends a member principal to the member table only (dispatch.test.ts
+    // "a member principal is served only from the member table"); this is the same refusal over a real member session
+    const { end } = await unlockedMember();
+
+    // Act
+    const answer = await end.ask('GET', '/v1/plugins');
+
+    // Assert
+    expect(answer.status).toBe(403);
+    expect(answer.body.code).toBe('member_only');
+  });
+
   it('should let a member remove their own browser: 200 with the key id, the session concluded, the key gone', async () => {
     // Arrange
     const { fx, joined, end } = await unlockedMember();

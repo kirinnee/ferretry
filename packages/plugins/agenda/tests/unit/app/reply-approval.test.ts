@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgendaGate, AgendaItem } from '../../../app/wire/index.ts';
+import type { AgendaGate, AgendaItem } from '@ferretry/core-asks/contract';
 import { storedHistory } from '../../../app/lib/agenda-conversation.ts';
 import type { HistoryEvent } from '../../../app/lib/agenda-history.ts';
 import { replyApproval } from '../../../app/lib/reply-approval.ts';

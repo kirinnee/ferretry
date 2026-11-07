@@ -596,7 +596,7 @@ describe('the pointer and keys tools, in a real Chrome', () => {
     should(logged).equal('checked:true;checked:false;');
   }, 60_000);
 
-  it('should fill a form, and say so when a field was a password', async () => {
+  it('should fill a form, and answer a password field with the same strict Done as any other (lead decision 4)', async () => {
     let plain = '';
     let secret = '';
     const logged = await onPointerPage('form', async () => {
@@ -621,17 +621,23 @@ describe('the pointer and keys tools, in a real Chrome', () => {
     });
     should(logged).containEql('checked:true;');
     should(logged).containEql('picked:uk;');
+    // A fill answers "Done on %browser:…" and nothing about the field it hit; the password flag stays inside, for
+    // who the page signs in (unit: I154).
+    should(plain).startWith('Done on %browser:form');
+    should(secret).startWith('Done on %browser:form');
     should(plain).not.containEql('password');
-    should(secret).containEql('password field');
-    should(secret).containEql('browser_ask_owner');
+    should(secret).not.containEql('password');
+    should(secret).not.containEql('browser_ask_owner');
   }, 60_000);
 
-  it('should flag a password field typed into, and none other', async () => {
+  it('should answer a type into a password field with the same strict Done as any other (lead decision 4)', async () => {
     await tools.call(agent('s1'), { tool: 'browser.open', name: 'typed', url: `${base}/pointer` });
     const secret = await call({ tool: 'browser.type', name: 'typed', selector: '#pw', text: 'not-a-real-secret' });
     const plain = await call({ tool: 'browser.type', name: 'typed', selector: '#fn', text: 'hadi' });
     await tools.call(agent('s1'), { tool: 'browser.close', name: 'typed' });
-    should(secret.summary).containEql('password field');
+    should(secret.summary).startWith('Done on %browser:typed');
+    should(plain.summary).startWith('Done on %browser:typed');
+    should(secret.summary).not.containEql('password');
     should(plain.summary).not.containEql('password');
   }, 60_000);
 

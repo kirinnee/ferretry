@@ -13,6 +13,7 @@ import {
   neverLoosens,
   type Word,
 } from '@ferretry/kernel/contract';
+import type { AuthorizedOutcome, CredentialPlacement, OutboundHttpRequest } from '@ferretry/core-vault/contract';
 import { z } from 'zod';
 import { configDef } from './config-def.ts';
 import {
@@ -69,6 +70,20 @@ export interface LoginsApi {
   presets(): Promise<ProviderPresetCatalog>;
   /** The model catalogs in effect and the state of the published catalog. */
   models(): Promise<ModelCatalogsView>;
+  /**
+   * Puts ONE login's own key on ONE request to a host it names, and returns only what came back (Usage's quota read).
+   * The caller names the LOGIN and the variable that carries its key, never a secret: Logins resolves the secret from
+   * that login's own record, so the only secrets reachable are the ones an owner-written login names, and the Vault
+   * holds Logins to its own manifest's hosts. A login that is not an environment login, a variable that is not a single
+   * `${secret:NAME}`, or a host outside the Vault's allowance is `refused`.
+   */
+  authorizeFetch(
+    loginId: z.output<typeof LoginIdSchema>,
+    variable: string,
+    hostAllowlist: readonly string[],
+    request: OutboundHttpRequest,
+    placement?: CredentialPlacement,
+  ): Promise<AuthorizedOutcome>;
 }
 export const LoginsPort = definePort<LoginsApi>('logins');
 
@@ -202,6 +217,8 @@ export const LOGINS_CONFIG = configDef(
     schema: LoginFileSchema,
     axis: 'configure',
     loosens: loginFileLoosens,
+    // A login record names the secret its key is made from: the one def whose `${secret:NAME}` counts as Logins' own.
+    credentialRecords: true,
   }),
 );
 

@@ -1,15 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { awaitingOwner, isGateLane } from '../../../app/lib/awaiting-owner.ts';
-import { NO_BOARD_FILTERS } from '../../../app/shell.ts';
-import { boardModelOf, card } from './board-support.ts';
+import { GATE_LANES, gateCard } from '../../support/app/gate-lanes.ts';
 
-const placed = async (extra: Record<string, unknown>) => {
-  const model = await boardModelOf([card('F1', extra)], { ...NO_BOARD_FILTERS, agents: true });
-  const group = model.groups[0];
-  const found = group?.lanes.flatMap(lane => lane.cards).find(candidate => candidate.task.id === 'F1');
-  if (group === undefined || found === undefined) throw new Error('fixture card missing');
-  return { found, laneSet: group.laneSet };
-};
+// Board places the card on its lanes; the rule reads the card and the project's lanes as Board hands them over.
+const placed = async (extra: Record<string, unknown>) => ({ found: gateCard('F1', extra), laneSet: GATE_LANES });
 
 const stageIn = async (extra: Record<string, unknown>) => {
   const { found, laneSet } = await placed(extra);

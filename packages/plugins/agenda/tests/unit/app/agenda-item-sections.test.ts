@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { AgendaItem } from '../../../app/wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { readFold, writeFold } from '../../../app/lib/agenda-fold.ts';
 import {
   activityLog,
@@ -131,7 +131,7 @@ describe('card asks', () => {
   };
 
   test('carry the card’s How to test from the board, and none when the board has none', () => {
-    const attached = item({ gateAttached: gate } as Partial<AgendaItem>);
+    const attached = item({ cardAsks: [{ gate: gate, at: '2026-08-01T10:00:00.000Z' }] } as Partial<AgendaItem>);
     const asked: string[] = [];
     const steps = itemCardAsks(attached, cardId => {
       asked.push(cardId);
@@ -147,7 +147,9 @@ describe('card asks', () => {
   });
 
   test('are a list: today the one gate the thread carries, keyed by its reference', () => {
-    const asks = itemCardAsks(item({ gateAttached: gate } as Partial<AgendaItem>));
+    const asks = itemCardAsks(
+      item({ cardAsks: [{ gate: gate, at: '2026-08-01T10:00:00.000Z' }] } as Partial<AgendaItem>),
+    );
     expect(asks).toHaveLength(1);
     expect(asks[0]?.key).toBe('gate:F12:tested:3');
     expect(asks[0]?.view.ask).toEqual({

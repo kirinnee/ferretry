@@ -7,11 +7,16 @@ import {
   jsonObject,
   serializeJsonDocument,
 } from '@ferretry/std';
-import { ArchiveFile, FerretHistoryFiles, FerretIndexFile } from '../../../contract/index.ts';
+import {
+  ArchiveFile,
+  FerretHistoryFiles,
+  FerretIndexFile,
+  FerretConfigFile,
+  FerretStateFile,
+} from '../../../contract/index.ts';
 import type { ClockPort, SessionIndex, YieldingSerialExecutor } from '../../lib/ports.ts';
 import type { ArchivedSession } from '../../lib/session/archive/registry.ts';
 import { type SessionId, tryParseSessionId } from '../../lib/session-id.ts';
-import { SessionConfigFiles, SessionStateFiles } from '../../lib/state.ts';
 import { archiveRegistryValue, parseArchiveRegistryValue } from '../../lib/storage/archive-registry.ts';
 import {
   createSessionEvent,
@@ -274,13 +279,13 @@ export class DaemonStorage {
   }
 
   private async readDocumentSource(
-    file: typeof SessionConfigFiles | typeof SessionStateFiles,
+    file: typeof FerretConfigFile | typeof FerretStateFile,
     id: SessionId,
   ): Promise<DocumentSource | undefined> {
     const read =
-      file === SessionConfigFiles
-        ? await this.state.read(SessionConfigFiles, id)
-        : await this.state.read(SessionStateFiles, id);
+      file === FerretConfigFile
+        ? await this.state.read(FerretConfigFile, id)
+        : await this.state.read(FerretStateFile, id);
     if (!read.ok) return { file: fileOf(file, id), problem: read.error.sentence };
     if (read.value === undefined) return undefined;
     return { file: fileOf(file, id), value: canonicalJsonValue(read.value) };
@@ -288,8 +293,8 @@ export class DaemonStorage {
 
   private async readSession(id: SessionId): Promise<SessionRead> {
     const [config, state, journal] = await Promise.all([
-      this.readDocumentSource(SessionConfigFiles, id),
-      this.readDocumentSource(SessionStateFiles, id),
+      this.readDocumentSource(FerretConfigFile, id),
+      this.readDocumentSource(FerretStateFile, id),
       this.readJournal(id),
     ]);
     if (config === undefined && state === undefined && journal.lines.length === 0)
@@ -356,8 +361,8 @@ export class DaemonStorage {
   /** Every session the state folder holds a file for, and which files each holds. */
   private async sessionNames(): Promise<SessionNames> {
     const [configs, states, histories] = await Promise.all([
-      this.state.list(SessionConfigFiles),
-      this.state.list(SessionStateFiles),
+      this.state.list(FerretConfigFile),
+      this.state.list(FerretStateFile),
       this.state.list(FerretHistoryFiles),
     ]);
     return {
@@ -706,21 +711,21 @@ export class DaemonStorage {
    * document is checked against its declared schema first, so a refusal is this storage's own error, not the port's.
    */
   private async writeDocument(kind: 'config' | 'state', id: SessionId, value: JsonValue): Promise<void> {
-    const file = kind === 'config' ? SessionConfigFiles : SessionStateFiles;
+    const file = kind === 'config' ? FerretConfigFile : FerretStateFile;
     const checked = file.schema?.safeParse(value);
     if (checked !== undefined && !checked.success)
       throw new InvalidStateDocumentError(
         fileOf(file, id),
         checked.error.issues.map(issue => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; '),
       );
-    if (kind === 'config') await this.state.write(SessionConfigFiles, value as never, id);
-    else await this.state.write(SessionStateFiles, value as never, id);
+    if (kind === 'config') await this.state.write(FerretConfigFile, value as never, id);
+    else await this.state.write(FerretStateFile, value as never, id);
   }
 
   private async readDocument(id: SessionId, kind: 'config' | 'state'): Promise<FrozenJsonValue | undefined> {
-    const file = kind === 'config' ? SessionConfigFiles : SessionStateFiles;
+    const file = kind === 'config' ? FerretConfigFile : FerretStateFile;
     const read =
-      kind === 'config' ? await this.state.read(SessionConfigFiles, id) : await this.state.read(SessionStateFiles, id);
+      kind === 'config' ? await this.state.read(FerretConfigFile, id) : await this.state.read(FerretStateFile, id);
     if (!read.ok) throw new InvalidStateDocumentError(fileOf(file, id), read.error.sentence);
     if (read.value === undefined) return undefined;
     return deepFreezeJson(canonicalJsonValue(read.value));
@@ -756,7 +761,7 @@ export class DaemonStorage {
     this.assertOpen();
     const write = async (publishing: () => void = () => {}): Promise<JsonValue> =>
       await this.serial.run(id, async () => {
-        const file = kind === 'config' ? SessionConfigFiles : SessionStateFiles;
+        const file = kind === 'config' ? FerretConfigFile : FerretStateFile;
         const current = await this.readDocument(id, kind);
         const compute = current === undefined ? create : () => transform(current);
         if (compute === undefined) throw new InvalidStateDocumentError(fileOf(file, id), 'file is missing');

@@ -73,7 +73,7 @@ export const MAX_AGENDA_POINTS_LENGTH = 16_000;
 /** The longest "where we are now" and the longest folded from-zero detail, as Markdown. */
 export const MAX_AGENDA_WHERE_LENGTH = 200_000;
 export const MAX_AGENDA_FOLDED_DETAIL_LENGTH = 200_000;
-const MAX_AGENDA_SOURCE_REF_LENGTH = 512;
+export const MAX_AGENDA_SOURCE_REF_LENGTH = 512;
 const MAX_AGENDA_ASK_OPTIONS = 12;
 const MAX_AGENDA_ASK_OPTION_LENGTH = 120;
 /** The most fields a form carries, and the longest id one has. */
@@ -500,7 +500,7 @@ const asBullets = (value: unknown): unknown =>
       : value;
 
 /** One piece of jargon the item uses, spelled out for a reader who has not been following. */
-const AgendaTermSchema = z.strictObject({
+export const AgendaTermSchema = z.strictObject({
   term: singleLine(MAX_AGENDA_TERM_LENGTH),
   meaning: prose(MAX_AGENDA_TERM_MEANING_LENGTH),
 });
@@ -579,7 +579,7 @@ export const AgendaFormFieldSchema = z
 export type AgendaFormField = z.infer<typeof AgendaFormFieldSchema>;
 
 /** The asker's overall suggested decision, and why. */
-const AgendaRecommendationSchema = z.strictObject({
+export const AgendaRecommendationSchema = z.strictObject({
   decision: prose(MAX_AGENDA_QUESTION_LENGTH),
   why: prose(MAX_AGENDA_REASON_LENGTH).optional(),
 });
@@ -991,7 +991,7 @@ export type AgendaId = z.infer<typeof AgendaIdSchema>;
  * `{ ...reply, id }` to the board is the same action again. Each variant is the matching action request
  * without its id.
  */
-const AgendaUndeliveredReplySchema = z
+export const AgendaUndeliveredReplySchema = z
   .discriminatedUnion('action', [
     z.strictObject({
       action: z.literal('resolve'),
@@ -1778,7 +1778,7 @@ const ResolvedAgendaHeaderObjectSchema = z
 export type ResolvedAgendaHeader = z.infer<typeof ResolvedAgendaHeaderObjectSchema> &
   Partial<Omit<AgendaItem, 'raisedBy' | 'raisedByName'>>;
 export const ResolvedAgendaHeaderSchema: z.ZodType<ResolvedAgendaHeader> = ResolvedAgendaHeaderObjectSchema;
-const AgendaListRecordSchema = z.union([ResolvedAgendaHeaderSchema, ResolvedAgendaItemSchema]);
+export const AgendaListRecordSchema = z.union([ResolvedAgendaHeaderSchema, ResolvedAgendaItemSchema]);
 export type AgendaListRecord = z.infer<typeof AgendaListRecordSchema>;
 export const AgendaListSnapshotSchema = AgendaSnapshotObjectSchema.extend({
   resolved: z.array(AgendaListRecordSchema).max(MAX_AGENDA_RESOLUTIONS),
@@ -2142,3 +2142,29 @@ export type AgendaErrorCode = z.infer<typeof AgendaErrorCodeSchema>;
 export const MACHINE_AGENDA_ID = 'machine-agenda';
 
 export const isMachineAgendaId = (sessionId: string): boolean => sessionId === MACHINE_AGENDA_ID;
+
+export type AgendaTerm = z.infer<typeof AgendaTermSchema>;
+export type AgendaRecommendation = z.infer<typeof AgendaRecommendationSchema>;
+export type AgendaUndeliveredReply = z.infer<typeof AgendaUndeliveredReplySchema>;
+export type AgendaReadItem = z.infer<typeof AgendaReadItemSchema>;
+
+/** `GET …/agenda/count`: how many items a ferret's board holds open. */
+export const AgendaCountResponseSchema = z.object({
+  sessionId: z.string().min(1),
+  count: NonNegativeIntegerSchema,
+});
+export type AgendaCountResponse = z.infer<typeof AgendaCountResponseSchema>;
+
+/** The query parameter a conversation link names an ask by: `?ask=A3` (the one spelling; pushes write it too). */
+export const ASK_LINK_PARAMETER = 'ask';
+
+/**
+ * Where a push about a conversation opens, RELATIVE TO THE MACHINE'S OWN PAGES: the daemon names the ferret, and the
+ * browser's per-machine push worker puts it under that machine; the daemon never names an origin for itself. A push
+ * with no item to point at opens here.
+ */
+export const sessionNotificationPath = (sessionId: string): string => `/session/${encodeURIComponent(sessionId)}`;
+
+/** Where an Agenda notification opens: its conversation, AT the ask (`?ask=A3`). */
+export const agendaNotificationPath = (sessionId: string, id: AgendaId): string =>
+  `${sessionNotificationPath(sessionId)}?${ASK_LINK_PARAMETER}=${encodeURIComponent(id)}`;

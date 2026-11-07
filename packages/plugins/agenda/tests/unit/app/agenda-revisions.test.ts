@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgendaItem, AgendaRevision } from '../../../app/wire/index.ts';
+import type { AgendaItem, AgendaRevision } from '@ferretry/core-asks/contract';
 import {
   decidedSummary,
   describePrevious,

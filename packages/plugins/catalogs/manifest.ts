@@ -49,6 +49,10 @@ export default definePlugin({
   uses: { connections: ConnectionsPort, projects: ProjectsPort },
   provides: { catalogs: CatalogsPort },
 
+  // The install mapping offers the person the NAMES of their secrets for a `${secret:NAME}` placeholder (never a value),
+  // behind the secrets-use grant. Catalogs mints no Vault secret and writes none: its link keys are its own sealed documents.
+  permissions: { secretNamePicker: true },
+
   actions: {
     routes: [
       route('GET /v1/catalog-installs', {
@@ -446,6 +450,12 @@ export default definePlugin({
       memberRoute('GET /v1/shared/catalogs/:catalogId/manifest', {
         member: 'unlocked',
         catalog: 'path',
+        noStore: true,
+        audit: SKIP_READ,
+        guard: GUARD_NONE,
+      }),
+      memberRoute('GET /v1/shared/contract', {
+        member: 'unlocked',
         noStore: true,
         audit: SKIP_READ,
         guard: GUARD_NONE,
