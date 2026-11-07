@@ -39,6 +39,10 @@ export default definePlugin({
   kinds: ['session-mode', 'credential-provider', 'item', 'command', 'view'],
   words: CATALOGS_WORDS,
 
+  // TODO(kernel contract): `permissions: { network: [{ resolver: 'link-store' }] }` and the half's
+  // `resolvers['link-store']` (the configured `catalogs.linkStore.url` or Connections' directory origin, plus every
+  // existing link's remembered origin) need rebuild/port-kernel's ResolverEntry. Until then `kernel.fetch` refuses
+  // every link-store host, so making, refreshing or deleting a download link fails closed.
   needs: { access: AccessPort, gate: GatePort, vault: VaultPort, sealed: SealedDocumentsPort },
   uses: { connections: ConnectionsPort },
   provides: { catalogs: CatalogsPort },
