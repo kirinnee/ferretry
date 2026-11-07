@@ -133,6 +133,7 @@ import {
   UNKNOWN_HOLDER_KEY,
   type AccessLeasePolicy,
 } from './limits.ts';
+import { createIdentitySigner } from './signer.ts';
 
 /** The kernel's route table, as the one function a session's request needs from it. */
 export type SessionDispatch = (request: ApiRequest) => Promise<ApiResponse>;
@@ -199,6 +200,7 @@ export function createSessionLayer(deps: SessionLayerDeps): SessionLayerHost {
   const shared = new LayerState(deps);
   return {
     open: (carrier, peer) => shared.open(carrier, peer),
+    signer: createIdentitySigner(deps.identity),
     report: () => shared.report(),
     endMode: mode => shared.endMode(mode),
     close: () => shared.close(),
@@ -706,7 +708,7 @@ class SealedSession implements CarrierLink {
       mode: modeKey,
       proof,
       appSession,
-      principal: { kind, holder: holder.holder, session: sessionId, leaseUntil: instant(0) },
+      principal: { kind, holder: holder.holder, session: sessionId, leaseUntil: instant(0), appSession },
     };
     const watch: HolderWatch = {
       session: sessionId,
@@ -736,6 +738,13 @@ class SealedSession implements CarrierLink {
       return false;
     }
     this.#release = release;
+    // The moment this link stops being an unproven one: a direct carrier frees its unproven slot (today's
+    // `connections.track` / member `open` marking `#proved`). A carrier's throw is the carrier's problem.
+    try {
+      this.peer?.proved?.();
+    } catch {
+      // nothing: the session is proved either way
+    }
     // NOT `seen`: opening a session is something a background tab does by itself (R-presence).
     this.#armLease();
     return true;

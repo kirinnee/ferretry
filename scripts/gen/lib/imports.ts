@@ -70,6 +70,10 @@ function areaOfSubpath(pkg: WorkspacePackage, subpath: string): Area {
   if (pkg.id === 'kernel') {
     const kernelAreas: Record<string, Area> = {
       contract: 'kernel-contract',
+      // The pure wire and the browser-safe session codec: no IO, so another package may import them as it imports
+      // the contract (the files themselves sit outside contract/ because they re-export the host's session wire).
+      wire: 'kernel-contract',
+      session: 'kernel-contract',
       manifest: 'kernel-manifest',
       testing: 'kernel-testing',
       host: 'kernel-host',

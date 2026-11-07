@@ -17,12 +17,14 @@ import { CORE_IDS, type PluginId } from '../contract/ids.ts';
 import { Carriers, type DoctorCheck, DoctorChecks, PluginsChanged, SessionModes } from '../contract/kernel.ts';
 import type {
   Clock,
+  ConfigFilesWriter,
   ConfigPort,
   FetchPort,
   KernelPorts,
   SpawnPort,
   StateDamage,
   StatePort,
+  WebSocketPort,
   WorkersPort,
 } from '../contract/ports.ts';
 import { KERNEL_REFUSALS } from '../contract/refusals.ts';
@@ -38,7 +40,7 @@ import type { Manifest, ToolDecl } from '../manifest/types.ts';
 import kernelManifest, { PluginsConfig, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
-import { runInCall } from './call-scope.ts';
+import { currentActor, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
 import {
   admitCall,
@@ -57,11 +59,13 @@ import { type InventoryEntry, kernelRoutes } from './kernel-half.ts';
 import { JobRunner } from './jobs.ts';
 import { PluginLifecycle } from './lifecycle.ts';
 import { type LogSink, scopedLog } from './log.ts';
-import { openChildEnvironments, restrictFetch, restrictSpawn } from './permissions.ts';
+import { noWebSockets } from './adapters/process.ts';
+import { createIdentitySigner, signerFor } from './session/signer.ts';
+import { openChildEnvironments, restrictFetch, restrictSpawn, restrictWebSocket } from './permissions.ts';
 import { openHome } from './home.ts';
 import { rootsPortFor } from './roots.ts';
 import { buildSnapshot, type DataPluginManifest } from './snapshot.ts';
-import { type DaemonIdentity, loadIdentity } from './identity.ts';
+import { type DaemonIdentity, daemonNameFrom, loadIdentity } from './identity.ts';
 import {
   createSessionLayer,
   type SessionCrypto,
@@ -81,9 +85,19 @@ export interface PluginStateHandle {
 /** The config service the host drives (`host/config`'s `createConfigFiles`). */
 export interface HostConfig {
   port(plugin: string): ConfigPort;
+  /** The writer over every declared file; Gate alone receives it. Absent: Gate gets none. */
+  writer?(): ConfigFilesWriter;
   reload(): Promise<void>;
   startWatching?(): () => void;
 }
+
+/** Gate's judge of a plugin's own loosening config write, as the config service asks it. */
+export type ConfigJudge = (input: {
+  readonly plugin: string;
+  readonly path: string;
+  readonly removal: boolean;
+  readonly sentences: readonly string[];
+}) => boolean;
 
 export interface HostAdapters {
   readonly clock: Clock;
@@ -92,11 +106,18 @@ export interface HostAdapters {
   readonly random: () => string;
   readonly state: (manifest: Manifest) => PluginStateHandle;
   /** The config service over every started plugin's declared files (§7.2); reloaded once before build. */
-  readonly config: (declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[]) => HostConfig;
+  readonly config: (
+    declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[],
+    judge?: ConfigJudge,
+  ) => HostConfig;
   /** Unrestricted; the host narrows each to the manifest's `permissions`. */
   readonly spawn: SpawnPort;
   readonly fetch: FetchPort;
   readonly workers: WorkersPort;
+  /** Unrestricted WebSocket clients; the host narrows them per plugin. Absent: every dial is refused. */
+  readonly websocket?: WebSocketPort;
+  /** The machine's host name, for the daemon name. Absent: `Ferretry daemon`. */
+  readonly hostname?: () => string;
 }
 
 export interface Listening {
@@ -221,6 +242,12 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const identityOutcome = await loadIdentity(adapters.fs, home);
   if (identityOutcome.kind === 'damaged') return { kind: 'refused', sentence: identityOutcome.sentence, trace };
   const identity = identityOutcome.identity;
+  const identityPort = Object.freeze({
+    daemonId: identity.daemonId,
+    daemonName: daemonNameFrom(adapters.hostname?.() ?? ''),
+  });
+  const websockets = adapters.websocket ?? noWebSockets();
+  const sessionSigner = createIdentitySigner(identity);
 
   const implementations = new Map<string, DaemonImplementation>();
   for (const implementation of options.implementations)
@@ -228,12 +255,22 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const manifests: Manifest[] = [kernelManifest, ...[...implementations.values()].map(impl => impl.manifest)];
   // Config: every declared file of every known plugin, so a plugin turned on later finds its file checked.
   trace.push('config');
+  // Gate's judge is read live: Admission is bound after build, and an absent or throwing one holds the edit.
+  const judgeAdmission: { current?: Admission } = {};
   const config = adapters.config(
     manifests.flatMap(manifest => (manifest.data?.config ?? []).map(def => ({ plugin: manifest.id, def }))),
+    input => {
+      try {
+        return judgeAdmission.current?.judgeConfigWrite?.({ ...input, actor: currentActor() }) === 'apply';
+      } catch {
+        return false;
+      }
+    },
   );
   await config.reload();
   const stopWatching = config.startWatching?.();
   const pluginsYaml = readPluginsYaml(config.port('kernel'));
+  const configWriter = config.writer?.();
 
   // 1. Check the enabled graph.
   trace.push('check');
@@ -341,6 +378,10 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
     ),
     fetch: restrictFetch(manifest.id, manifest.permissions?.network ?? [], adapters.fetch),
+    websocket: restrictWebSocket(manifest.id, manifest.permissions?.network ?? [], websockets),
+    identity: identityPort,
+    signer: signerFor(manifest.id, sessionSigner),
+    ...(manifest.id === 'gate' && configWriter !== undefined ? { configFiles: configWriter } : {}),
     act,
     ids: { mint: prefix => ids.mint(prefix) },
     redaction,
@@ -452,7 +493,10 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const workFolders = boundValue(WorkFoldersPort);
   const childEnvironments = boundValue(ChildEnvironmentPort);
   if (childEnvironments !== undefined) bound.childEnvironments = childEnvironments;
-  if (admission !== undefined) bound.admission = admission;
+  if (admission !== undefined) {
+    bound.admission = admission;
+    judgeAdmission.current = admission;
+  }
   if (outputGuard !== undefined) bound.outputGuard = outputGuard;
   if (holds !== undefined) bound.holds = holds;
   if (redactor !== undefined) bound.redaction = redactor;

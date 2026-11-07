@@ -51,6 +51,45 @@ export interface Admission<Standing extends object = CallStanding, Member extend
    * warden. Anything not returned is omitted, so a limited device cannot discover it.
    */
   inventory(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[];
+  /**
+   * The Gate axis of a plugin's own config write (`kernel.config.write`/`remove`): asked only when the edit
+   * LOOSENS, with the plain sentences of what widens and the actor of the call in progress (the default actor outside
+   * a call). `apply` puts it into
+   * effect; `hold` (and an absent judge, or one that throws) holds it for the owner, the tighter version in effect.
+   */
+  judgeConfigWrite?(input: ConfigWriteJudgement): 'apply' | 'hold';
+  /**
+   * Told after every handler of a descriptor that has `audit: { record }`, once per call, with the final status —
+   * refusals included (today's audited-route decorator recorded every outcome). Never changes the answer; a throw
+   * is swallowed.
+   */
+  recorded?(call: RecordedCall): void;
+}
+
+/** What Gate's judge is asked about one loosening config edit. */
+export interface ConfigWriteJudgement {
+  readonly plugin: string;
+  /** The file, relative to `config/`. */
+  readonly path: string;
+  readonly removal: boolean;
+  readonly sentences: readonly string[];
+  /** Who the call in progress runs as. */
+  readonly actor: Actor;
+}
+
+/** One audited call, as the dispatcher reports it after the handler (or the refusal) settled. */
+export interface RecordedCall {
+  readonly table: 'route' | 'socket' | 'tool' | 'member';
+  readonly descriptor: ScopedRoute | MemberRouteDescriptor;
+  readonly request: ApiRequest;
+  readonly params: RouteParameters;
+  /** Gate's standing for the call; absent when admission refused it. */
+  readonly standing?: object;
+  readonly actor?: Actor;
+  /** The session principal the call carried, if any. */
+  readonly principal?: ApiRequest['principal'];
+  /** The final status the caller was answered (or, for a socket, the upgrade's). */
+  readonly status: number;
 }
 
 /** One `GET /v1/plugins` entry (§9.6): `contract` is the effective contract hash. */

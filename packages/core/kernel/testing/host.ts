@@ -31,8 +31,14 @@ import type {
   RootName,
   SpawnOptions,
   SpawnResult,
+  IdentityPort,
+  WebSocketClient,
 } from '../contract/ports.ts';
+import { parse as parseYaml } from 'yaml';
 import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
+import { createIdentitySigner, signerFor } from '../host/session/signer.ts';
+import { testIdentity } from './identity.ts';
+import type { IdentitySigner } from '../contract/session.ts';
 import type { CallContext, MemberRouteHandler, RouteDescriptor, RouteHandler } from '../contract/route.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
@@ -70,6 +76,10 @@ export interface TestHostOptions {
   ) => SpawnResult | Promise<SpawnResult>;
   /** Answers `kernel.fetch.request` for declared hosts. Without it a fetch fails. */
   readonly fetch?: (url: URL, init?: RequestInit) => Response | Promise<Response>;
+  /** Answers `kernel.websocket.connect` for declared hosts (`ws:`/`wss:`). Without it a dial fails. */
+  readonly websocket?: (url: URL) => WebSocketClient;
+  /** What `kernel.identity` answers. Default: the throwaway identity's id and `test-daemon`. */
+  readonly identity?: IdentityPort;
   /** Text the stand-in redaction masks (same-width `*`). */
   readonly secrets?: readonly string[];
 }
@@ -97,6 +107,8 @@ export interface OpenSocket {
 
 export interface TestHost {
   readonly clock: DrivenClock;
+  /** What `kernel.identity` answers; `kernel.signer` signs with this identity's throwaway key (gated as the real host). */
+  readonly identity: IdentityPort;
   readonly minted: TestMintedIds;
   /** Every `kernel.act` decision, in order. */
   readonly acts: readonly ActRecord[];
@@ -137,6 +149,8 @@ export interface TestHost {
 
 interface World {
   readonly options: TestHostOptions;
+  readonly identity: IdentityPort;
+  readonly identitySigner: IdentitySigner;
   readonly clock: DrivenClock;
   readonly states: Map<string, MemoryStateFolder>;
   readonly minted: TestMintedIds;
@@ -192,8 +206,14 @@ interface Built {
  * check (`finalised`), real `closeAck`.
  */
 export async function testHost(options: TestHostOptions): Promise<TestHost> {
+  const throwaway = await testIdentity();
+  const identity: IdentityPort =
+    options.identity ?? Object.freeze({ daemonId: throwaway.daemonId, daemonName: 'test-daemon' });
+  const identitySigner = createIdentitySigner(throwaway.key);
   const world: World = {
     options,
+    identity,
+    identitySigner,
     clock: options.clock ?? fixedClock(),
     states: new Map(),
     minted: new TestMintedIds(),
@@ -206,7 +226,7 @@ export async function testHost(options: TestHostOptions): Promise<TestHost> {
 }
 
 async function start(world: World): Promise<TestHost> {
-  const { options, clock } = world;
+  const { options, clock, identity, identitySigner } = world;
   const acts: ActRecord[] = [];
   const published: { event: string; payload: unknown }[] = [];
   const logs: { level: string; scope: string; message: string; fields?: LogFields }[] = [];
@@ -370,6 +390,16 @@ async function start(world: World): Promise<TestHost> {
     };
   };
 
+  const judged = (plugin: string, path: string, removal: boolean, sentences: readonly string[]): boolean => {
+    try {
+      return (
+        admission.judgeConfigWrite?.({ plugin, path, removal, sentences, actor: actorScope.getStore() ?? 'ferret' }) ===
+        'apply'
+      );
+    } catch {
+      return false;
+    }
+  };
   const configPort = (manifest: Manifest): ConfigPort => {
     const declared = manifest.data?.config ?? [];
     const keyOf = (def: ConfigFileDef<any> | ConfigCollectionDef<any>): string =>
@@ -398,6 +428,84 @@ async function start(world: World): Promise<TestHost> {
         set.add(listener);
         configListeners.set(key, set);
         return () => set.delete(listener);
+      },
+      fileState(def, name) {
+        assertDeclared(def);
+        const all = world.config.get(keyOf(def));
+        const raw =
+          def.shape === 'file'
+            ? all
+            : name === undefined
+              ? undefined
+              : (all as Record<string, unknown> | undefined)?.[name];
+        if (raw === undefined) return { state: 'absent', inEffect: false, sentences: [] };
+        const parsed = def.schema.safeParse(raw);
+        return parsed.success
+          ? { state: 'valid', inEffect: true, sentences: [] }
+          : { state: 'invalid', inEffect: false, sentences: parsed.error.issues.map(issue => issue.message) };
+      },
+      // The real writer's outcomes over the in-memory values: own defs only, schema checked, a loosening held unless
+      // the admission in use (Gate's, when given) judges this call may apply it.
+      async write(def, name, edit, writeOptions = {}) {
+        if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
+        const key = keyOf(def);
+        if (def.shape === 'collection' && (name === undefined || !def.name.test(name)))
+          return { kind: 'refused', reason: 'bad_name', issues: [] };
+        const all = world.config.get(key) as Record<string, unknown> | undefined;
+        const before = def.shape === 'file' ? all : name === undefined ? undefined : all?.[name];
+        let next: unknown;
+        if (typeof edit === 'string') {
+          try {
+            next = parseYaml(edit) ?? {};
+          } catch {
+            return { kind: 'refused', reason: 'yaml', issues: [{ path: key, message: 'this is not YAML' }] };
+          }
+        } else {
+          next = { ...((before as Record<string, unknown> | undefined) ?? {}), ...edit.patch };
+          for (const [field, value] of Object.entries(edit.patch))
+            if (value === undefined) delete (next as Record<string, unknown>)[field];
+        }
+        const checked = def.schema.safeParse(next);
+        if (!checked.success)
+          return {
+            kind: 'refused',
+            reason: 'schema',
+            issues: checked.error.issues.map(issue => ({ path: key, message: issue.message })),
+          };
+        const etag = JSON.stringify(next);
+        if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null))
+          return { kind: 'conflict' };
+        const prior = before === undefined ? undefined : def.schema.safeParse(before);
+        const sentences = def.loosens(prior?.success === true ? prior.data : undefined, checked.data);
+        const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
+        if (sentences.length > 0 && !judged(manifest.id, path, false, sentences))
+          return { kind: 'held', etag, id: `${path}@held`, sentences };
+        world.config.set(key, def.shape === 'file' ? next : { ...(all ?? {}), [name as string]: next });
+        for (const listener of configListeners.get(key) ?? []) listener();
+        return { kind: 'written', etag, loosened: sentences };
+      },
+      async remove(def, name, writeOptions = {}) {
+        if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
+        const key = keyOf(def);
+        if (def.shape === 'collection' && (name === undefined || !def.name.test(name)))
+          return { kind: 'refused', reason: 'bad_name', issues: [] };
+        const all = world.config.get(key) as Record<string, unknown> | undefined;
+        const before = def.shape === 'file' ? all : all?.[name as string];
+        if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null))
+          return { kind: 'conflict' };
+        const prior = before === undefined ? undefined : def.schema.safeParse(before);
+        const defaults = def.schema.safeParse({});
+        const sentences = prior?.success === true && defaults.success ? def.loosens(prior.data, defaults.data) : [];
+        const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
+        if (sentences.length > 0 && !judged(manifest.id, path, true, sentences))
+          return { kind: 'held', etag: 'absent', id: `${path}@held`, sentences };
+        if (def.shape === 'file') world.config.delete(key);
+        else if (all !== undefined) {
+          const { [name as string]: _gone, ...rest } = all;
+          world.config.set(key, rest);
+        }
+        for (const listener of configListeners.get(key) ?? []) listener();
+        return { kind: 'written', etag: 'absent', loosened: sentences };
       },
     };
   };
@@ -492,6 +600,20 @@ async function start(world: World): Promise<TestHost> {
           return options.fetch(parsed, init);
         },
       },
+      websocket: {
+        connect(url) {
+          const parsed = new URL(String(url));
+          if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:')
+            throw new Error(`${manifest.id}: ${parsed.protocol} is not a WebSocket address`);
+          if (!(manifest.permissions?.network ?? []).includes(parsed.host))
+            throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
+          if (options.websocket === undefined)
+            throw new Error(`${manifest.id}: dial ${parsed.host} with no websocket fake`);
+          return options.websocket(parsed);
+        },
+      },
+      identity,
+      signer: signerFor(manifest.id, identitySigner),
       act: testActRunner({
         holds: () => holds,
         actor: () => actorScope.getStore() ?? 'ferret',
@@ -661,6 +783,7 @@ async function start(world: World): Promise<TestHost> {
   };
 
   const host: TestHost = {
+    identity,
     clock,
     minted: world.minted,
     acts,

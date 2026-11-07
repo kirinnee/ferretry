@@ -16,7 +16,8 @@
     "./manifest": "./manifest/index.ts",
     "./testing": "./testing/index.ts",
     "./host": "./host/index.ts",
-    "./plugin": "./plugin.ts"
+    "./plugin": "./plugin.ts",
+    "./wire": "./wire.ts"
   },
   "dependencies": {
     "@ferretry/std": "workspace:*",

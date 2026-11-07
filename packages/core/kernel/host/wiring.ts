@@ -1,9 +1,10 @@
 import type { Manifest } from '../manifest/types.ts';
 import { systemClock } from './adapters/clock.ts';
 import { nodeFs } from './adapters/node-fs.ts';
-import { bunSpawn, bunWorkers, globalFetch } from './adapters/process.ts';
+import { hostname } from 'node:os';
+import { bunSpawn, bunWebSockets, bunWorkers, globalFetch } from './adapters/process.ts';
 import { createConfigFiles } from './config/index.ts';
-import type { HostAdapters, HostConfig, PluginStateHandle } from './host.ts';
+import type { ConfigJudge, HostAdapters, HostConfig, PluginStateHandle } from './host.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import {
   createNodeHostFs,
@@ -64,10 +65,22 @@ export function stateOpener(
 }
 
 export function configService(home: string, fs: StateFs, clock: Clock, log: Log, binary: string) {
-  return (declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[]): HostConfig => {
-    const service = createConfigFiles({ home, defs: declarations, fs, clock, log, binary });
+  return (
+    declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[],
+    judge?: ConfigJudge,
+  ): HostConfig => {
+    const service = createConfigFiles({
+      home,
+      defs: declarations,
+      fs,
+      clock,
+      log,
+      binary,
+      ...(judge === undefined ? {} : { judge }),
+    });
     return {
       port: plugin => service.port(plugin),
+      writer: () => service.writer(),
       reload: () => service.reload(),
       startWatching: () => service.startWatching(),
     };
@@ -93,6 +106,8 @@ export function realAdapters(
     spawn: bunSpawn(options.childEnv ?? {}),
     fetch: globalFetch(),
     workers: bunWorkers(),
+    websocket: bunWebSockets(),
+    hostname: () => hostname(),
   };
 }
 
