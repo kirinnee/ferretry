@@ -346,6 +346,21 @@ export interface RootEntry extends RootLstat {
   readonly name: string;
 }
 
+/** `RootHandle.readBytes` with a window: `length` bytes from `offset`; fewer at the end of the file. */
+export interface RootReadWindow {
+  readonly offset: number;
+  readonly length: number;
+}
+
+/** `RootHandle.readTail`: the bytes, and the file's size when they were read. */
+export interface RootTail {
+  readonly bytes: Uint8Array;
+  readonly size: number;
+}
+
+/** The longest window or tail one root read returns (today's rollout tail is 256 KiB). */
+export const MAX_ROOT_WINDOW_BYTES = 4 * 1024 * 1024;
+
 export interface RootWriteOptions {
   /** POSIX mode of a file this write creates. Default `0o600`. */
   readonly mode?: number;
@@ -367,7 +382,16 @@ export interface RootHandle {
   readonly name: RootName;
   resolve(relative: string): Result<FencedPath, FolderRefusal>;
   readText(path: FencedPath, limitBytes?: number): Promise<string>;
-  readBytes(path: FencedPath, limitBytes?: number): Promise<Uint8Array>;
+  /**
+   * The whole file (up to `limitBytes`), or, with a {@link RootReadWindow}, `length` bytes from `offset` (today's
+   * Codex rollout index head window). A window longer than {@link MAX_ROOT_WINDOW_BYTES} is refused.
+   */
+  readBytes(path: FencedPath, limitOrWindow?: number | RootReadWindow): Promise<Uint8Array>;
+  /**
+   * The last `maxBytes` of a file (at most {@link MAX_ROOT_WINDOW_BYTES}) and its size, from one open (today's
+   * rollout tail window): fenced exactly as `readBytes`.
+   */
+  readTail(path: FencedPath, maxBytes: number): Promise<RootTail>;
   /** Atomic replace by default; `exclusive` creates only (today's worktree registry write, `wx`). */
   writeText(path: FencedPath, text: string, options?: RootWriteOptions): Promise<void>;
   /** The same, for bytes. */

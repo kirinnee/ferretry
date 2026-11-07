@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { err, ok } from '@ferretry/std';
 import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
 import type { FerretId } from '../../../contract/ids.ts';
+import { MAX_ROOT_WINDOW_BYTES } from '../../../contract/ports.ts';
 import { nodeFs } from '../../../host/adapters/node-fs.ts';
 import { fenceFolders } from '../../../host/home.ts';
 import { resolveInRoot, RootError, rootsPortFor } from '../../../host/roots.ts';
@@ -288,5 +289,39 @@ describe('QQ replace an existing file without following a link; links and mode a
     await chmod(`${dir}/run`, 0o755);
     expect(await root.stat(at('run'))).toMatchObject({ kind: 'file', mode: 0o755, links: 1 });
     expect(await root.lstat(at('run'))).toMatchObject({ kind: 'file', mode: 0o755, links: 1 });
+  });
+});
+
+describe('WW bounded reads: a window from an offset, and a tail with the size, fenced as readBytes', () => {
+  test('readBytes with a window, readTail, and a window over the cap or a link out of the root refused', async () => {
+    const { home } = await layout();
+    const root = rootsPortFor(
+      fs,
+      { home, plugin: 'codex', worktrees: `${home}-worktrees` },
+      ['downloads'],
+      () => undefined,
+    ).root('downloads');
+    const dir = `${home}/state/codex/downloads`;
+    await mkdir(dir, { recursive: true });
+    await writeFile(`${dir}/rollout.jsonl`, '0123456789');
+    const at = (relative: string): FencedPath => {
+      const resolved = root.resolve(relative);
+      if (!resolved.ok) throw new Error(resolved.error);
+      return resolved.value;
+    };
+    const text = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
+    expect(text(await root.readBytes(at('rollout.jsonl'), { offset: 2, length: 3 }))).toBe('234');
+    expect(text(await root.readBytes(at('rollout.jsonl'), { offset: 8, length: 10 }))).toBe('89');
+    const tail = await root.readTail(at('rollout.jsonl'), 4);
+    expect({ text: text(tail.bytes), size: tail.size }).toEqual({ text: '6789', size: 10 });
+    expect(text((await root.readTail(at('rollout.jsonl'), 64)).bytes)).toBe('0123456789');
+    await expect(root.readBytes(at('rollout.jsonl'), { offset: 0, length: MAX_ROOT_WINDOW_BYTES + 1 })).rejects.toThrow(
+      RootError,
+    );
+    await expect(root.readTail(at('rollout.jsonl'), MAX_ROOT_WINDOW_BYTES + 1)).rejects.toThrow(RootError);
+    await expect(root.readBytes(at('rollout.jsonl'), { offset: -1, length: 1 })).rejects.toThrow(RootError);
+    await writeFile(`${home}/outside.txt`, 'secret');
+    await symlink(`${home}/outside.txt`, `${dir}/escape`);
+    await expect(root.readTail(at('escape'), 4)).rejects.toThrow(RootError);
   });
 });

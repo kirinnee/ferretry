@@ -2,6 +2,7 @@ import type { Result } from '@ferretry/std';
 import { err, instantFromEpochMs, ok } from '@ferretry/std';
 import type { FencedPath, FolderRefusal, WorkFolders } from '../contract/bound.ts';
 import { insideFence } from '../contract/home.ts';
+import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import type {
   RootEntry,
   RootHandle,
@@ -35,6 +36,12 @@ const leafOf = (info: NonNullable<Awaited<ReturnType<HostFs['lstat']>>>): RootLs
 /** Internal roots only one plugin may have, whatever another manifest declares. */
 const ROOT_OWNERS: Partial<Record<RootName, string>> = { credentials: 'logins' };
 const DEFAULT_COPY_ENTRIES = 10_000;
+const windowOk = (offset: number, length: number): boolean =>
+  Number.isSafeInteger(offset) &&
+  offset >= 0 &&
+  Number.isSafeInteger(length) &&
+  length >= 0 &&
+  length <= MAX_ROOT_WINDOW_BYTES;
 
 /** Every handle the kernel made, with the plugin it was made for and its fenced resolver (for `copyTree`). */
 const HANDLES = new WeakMap<
@@ -194,8 +201,16 @@ function rootHandle(
       return limit === undefined ? text : text.slice(0, limit);
     },
     readBytes: async (path, limit) => {
+      if (typeof limit === 'object') {
+        if (!windowOk(limit.offset, limit.length)) throw new RootError('outside');
+        return (await fs.readWindow(await real(path), limit.offset, limit.length)).bytes;
+      }
       const bytes = await fs.readBytes(await real(path));
       return limit === undefined ? bytes : bytes.slice(0, limit);
+    },
+    readTail: async (path, maxBytes) => {
+      if (!windowOk(0, maxBytes)) throw new RootError('outside');
+      return await fs.readWindow(await real(path), -maxBytes, maxBytes);
     },
     writeText: async (path, text, options) => await write(path, text, options),
     writeBytes: async (path, bytes, options) => await write(path, bytes, options),

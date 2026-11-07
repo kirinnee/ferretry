@@ -21,6 +21,15 @@ export interface HostFs {
   symlink(target: string, path: string): Promise<void>;
   readText(path: string): Promise<string>;
   readBytes(path: string): Promise<Uint8Array>;
+  /**
+   * `length` bytes from `offset` (`offset` < 0 counts back from the end) and the file's size, from one open. The
+   * caller has already resolved and fenced `path`.
+   */
+  readWindow(
+    path: string,
+    offset: number,
+    length: number,
+  ): Promise<{ readonly bytes: Uint8Array; readonly size: number }>;
   /** Atomic: a temp file in the same folder, fsync, rename. */
   writeAtomic(path: string, data: string | Uint8Array, mode?: number): Promise<void>;
   /** Create only (`O_CREAT|O_EXCL|O_NOFOLLOW`): refused when anything, a link included, is at the name. */
@@ -55,6 +64,19 @@ export function nodeFs(randomSuffix: () => string): HostFs {
     },
     readText: path => readFile(path, 'utf8'),
     readBytes: async path => new Uint8Array(await readFile(path)),
+    readWindow: async (path, offset, length) => {
+      const handle = await open(path, 'r');
+      try {
+        const size = (await handle.stat()).size;
+        const from = offset < 0 ? Math.max(0, size + offset) : offset;
+        const buffer = new Uint8Array(Math.max(0, Math.min(length, size - from)));
+        const { bytesRead } =
+          buffer.length === 0 ? { bytesRead: 0 } : await handle.read(buffer, 0, buffer.length, from);
+        return { bytes: buffer.subarray(0, bytesRead), size };
+      } finally {
+        await handle.close();
+      }
+    },
     writeAtomic: async (path, data, mode = 0o600) => {
       await mkdir(dirname(path), { recursive: true, mode: 0o700 });
       const temp = `${path}.${randomSuffix()}.tmp`;

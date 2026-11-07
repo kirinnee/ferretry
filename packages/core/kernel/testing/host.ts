@@ -1,3 +1,4 @@
+import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { failureResponse } from '../host/responses.ts';
 import type { HostFactsPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
@@ -581,7 +582,19 @@ async function start(world: World): Promise<TestHost> {
           if (text === undefined) throw new Error(`no such file ${path}`);
           return text;
         },
-        readBytes: async path => new TextEncoder().encode(await handle.readText(path)),
+        readBytes: async (path, limit) => {
+          const bytes = new TextEncoder().encode(await handle.readText(path));
+          if (typeof limit === 'number') return bytes.slice(0, limit);
+          if (limit === undefined) return bytes;
+          if (limit.length > MAX_ROOT_WINDOW_BYTES || limit.offset < 0 || limit.length < 0)
+            throw new Error('the window is out of range');
+          return bytes.slice(limit.offset, limit.offset + limit.length);
+        },
+        readTail: async (path, maxBytes) => {
+          if (maxBytes > MAX_ROOT_WINDOW_BYTES || maxBytes < 0) throw new Error('the tail is out of range');
+          const bytes = new TextEncoder().encode(await handle.readText(path));
+          return { bytes: bytes.slice(Math.max(0, bytes.length - maxBytes)), size: bytes.length };
+        },
         writeText: async (path, text, writeOptions) => {
           if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
           if (writeOptions?.replaceExisting === true && !world.roots.has(path)) throw new Error(`no such file ${path}`);
