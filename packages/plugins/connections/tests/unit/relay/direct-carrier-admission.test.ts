@@ -16,7 +16,7 @@ import { decodeFrame, FRAME_KINDS } from '@ferretry/kernel/wire';
 import { type RealSessionLayer, realSessionLayer, settle } from '../../support/kernel-layer.ts';
 import { openKernelSession } from '../../../daemon/index.ts';
 import {
-  DirectSession,
+  type DirectSession,
   EVICTED_REASON,
   MAX_DIRECT_UNPROVEN_SESSIONS,
 } from '../../../daemon/lib/relay/direct-carrier.ts';

@@ -16,6 +16,9 @@ it('R666 a connector receives SIGTERM then SIGKILL after the kernel clock grace'
     run: async () => {
       throw new Error('unused');
     },
+    runBytes: async () => {
+      throw new Error('unused');
+    },
     start: (program, args, options) => {
       launches.push({ program, args, env: options?.env });
       return {
