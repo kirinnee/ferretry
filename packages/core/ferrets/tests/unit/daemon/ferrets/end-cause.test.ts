@@ -55,3 +55,16 @@ test('death cause: the summary schema carries it, and a later cause replaces the
   expect(summaryOf({ ...record, cause: { kind: 'signal', signal: 9 } }).cause).toEqual({ kind: 'signal', signal: 9 });
   expect(summaryOf({ ...record, stateAt: T0 }).cause).toEqual({ kind: 'stopped' });
 });
+
+test('death cause: adopting a live process clears a stopped ferret’s end cause; the cause is present only while stopped', async () => {
+  const f = additivesFixture();
+  await f.service.resume(f.id);
+  await f.service.stop(f.id, 'now', 'done', { kind: 'completed' });
+  expect((await f.service.get(f.id))?.cause).toEqual({ kind: 'completed' });
+  const adopted = await f.service.attach(f.id, f.runner.adoptable(f.id));
+  expect(adopted.ok).toBe(true);
+  const summary = await f.service.get(f.id);
+  expect(summary?.state).toBe('working');
+  expect(summary?.cause).toBeUndefined();
+  expect('cause' in f.registry.get(f.id)!).toBe(false);
+});

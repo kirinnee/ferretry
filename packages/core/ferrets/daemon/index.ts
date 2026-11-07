@@ -80,7 +80,7 @@ import {
 import { DaemonStorage } from './adapters/storage/session-storage.ts';
 import { buildMoves, MOVE_ROUTE_KEYS } from './moves.ts';
 import { movesDeps } from './moves-deps.ts';
-import { ferretsMoveResume } from './lib/ferrets/move-resume.ts';
+import { ferretsMoveResume, movedTarget } from './lib/ferrets/move-resume.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
@@ -429,13 +429,23 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       storage: sessionStore,
       clientName: 'fy',
       // A move's relaunch is a resume of THIS service, so it goes through the ordinary launch (home, token, environment).
-      resume: ferretsMoveResume(service, ferret => registry.get(ferret)),
+      resume: ferretsMoveResume(
+        service,
+        ferret => registry.get(ferret),
+        async ferret => await movedTarget(async () => await sessionStore.readConfig(ferret as unknown as SessionId)),
+      ),
     }),
   );
+  // A move relaunches the ferret it names, so — like resume and stop — a ferret may move only itself and its helpers.
+  const MOVE_ACTING_ROUTES: readonly string[] = [
+    'POST /v1/ferrets/:ferretId/move',
+    'POST /v1/ferrets/:ferretId/move/ask-to-stop-jobs',
+  ];
   const moveRoutes = Object.fromEntries(
     MOVE_ROUTE_KEYS.map(key => [
       key,
       async (call: CallContext) => {
+        if (MOVE_ACTING_ROUTES.includes(key)) mayAct(call, await pathFerret(call));
         await storeLoaded;
         return await moves.routes[key](call);
       },

@@ -1,48 +1,78 @@
 import { expect, test } from 'bun:test';
 import { targetRef } from '@ferretry/core-vault/contract';
 import { ferretId } from '../../../../contract/testing/index.ts';
-import { additivesFixture } from './additives-fixture.ts';
+import { ActingRunner, additivesFixture } from './additives-fixture.ts';
 
-async function running() {
-  const f = additivesFixture();
+async function running(options: Parameters<typeof additivesFixture>[0] = {}) {
+  const f = additivesFixture(options);
   await f.service.resume(f.id);
   const handle = (await f.service.handle(f.id))!;
   const seam = (await f.service.harness(f.id))!;
   return { ...f, handle, seam };
 }
 
-test('decision 18: deliver goes through kernel.act on the ferret’s terminal pane, as keys', async () => {
+test('decision 18: deliver is the runner’s own delivery, which guards its writes itself; the seam adds no second act', async () => {
   const f = await running();
   const answer = await f.seam.deliver({ text: 'hello there' });
   expect(answer).toEqual({ ok: true, value: 'turn-started' });
-  expect(f.acted).toHaveLength(1);
-  expect(f.acted[0]!.op).toBe('keys');
-  expect(f.acted[0]!.target).toEqual(targetRef('terminal', f.handle));
   expect(f.runner.deliveries.map(entry => entry.delivery.text)).toEqual(['hello there']);
+  // The seam itself acted nothing: wrapping the runner's guarded writes in an act of its own would wait on itself.
+  expect(f.acted).toEqual([]);
 });
 
-test('decision 18: interrupt goes through kernel.act on the same pane and signals the runner', async () => {
+test('decision 18: deliver settles against a QUEUEING act runner and a runner that acts per write (no deadlock)', async () => {
+  const f = await running({ queueing: { held: new Set() } });
+  const settled = await Promise.race([
+    f.seam.deliver({ text: 'hello there' }),
+    new Promise<'timed out'>(resolve => setTimeout(() => resolve('timed out'), 1_000)),
+  ]);
+  expect(settled).toEqual({ ok: true, value: 'turn-started' });
+  expect((f.runner as ActingRunner).typed).toEqual(['load-buffer', 'paste-buffer', 'send-keys']);
+  // The pane's queue is not wedged: a later act on the same pane, and a second delivery, still run.
+  const later = await f.ports.act!(targetRef('terminal', f.handle), 'keys', async () => ({ status: 'done' as const }));
+  expect(later.ok).toBe(true);
+  expect(await f.seam.deliver({ text: 'again' })).toEqual({ ok: true, value: 'turn-started' });
+});
+
+test('decision 18: a held pane refuses a delivery before any keys, and a later act on the pane still works once released', async () => {
+  const held = new Set<string>();
+  const f = await running({ queueing: { held } });
+  held.add(f.handle);
+  await expect(f.seam.deliver({ text: 'secret-adjacent' })).rejects.toThrow('refused');
+  expect((f.runner as ActingRunner).typed).toEqual([]);
+  expect(f.runner.deliveries).toEqual([]);
+  held.delete(f.handle);
+  expect(await f.seam.deliver({ text: 'now allowed' })).toEqual({ ok: true, value: 'turn-started' });
+  expect(f.runner.deliveries.map(entry => entry.delivery.text)).toEqual(['now allowed']);
+});
+
+test('decision 18: interrupt goes through kernel.act on the ferret’s pane, as keys, and signals the runner', async () => {
   const f = await running();
   expect(await f.seam.interrupt()).toEqual({ ok: true, value: true });
   expect(f.acted).toEqual([{ target: targetRef('terminal', f.handle), op: 'keys' }]);
   expect(f.runner.signals).toEqual([{ handle: f.handle, signal: 'interrupt' }]);
 });
 
-test('decision 18: a hold the act runner applies stops the write; nothing reaches the pane', async () => {
+test('decision 18: interrupt settles and is refused by a hold on a queueing act runner', async () => {
+  const held = new Set<string>();
+  const f = await running({ queueing: { held } });
+  expect(await f.seam.interrupt()).toEqual({ ok: true, value: true });
+  held.add(f.handle);
+  expect(await f.seam.interrupt()).toEqual({ ok: false, error: { refused: 'held' } });
+  expect(f.runner.signals).toHaveLength(1);
+});
+
+test('decision 18: a hold the act runner applies stops an interrupt; nothing reaches the pane', async () => {
   const f = await running();
   f.control.refuse = 'held';
-  expect(await f.seam.deliver({ text: 'secret-adjacent' })).toEqual({ ok: false, error: { refused: 'held' } });
   expect(await f.seam.interrupt()).toEqual({ ok: false, error: { refused: 'held' } });
-  expect(f.runner.deliveries).toEqual([]);
   expect(f.runner.signals).toEqual([]);
 });
 
-test('decision 18: with no act runner bound the seam refuses every write (fail closed), never writes raw', async () => {
+test('decision 18: with no act runner bound an interrupt is refused (fail closed), never sent raw', async () => {
   const f = await running();
   delete f.ports.act;
-  expect(await f.seam.deliver({ text: 'x' })).toEqual({ ok: false, error: { refused: 'holds_unavailable' } });
   expect(await f.seam.interrupt()).toEqual({ ok: false, error: { refused: 'holds_unavailable' } });
-  expect(f.runner.deliveries).toEqual([]);
   expect(f.runner.signals).toEqual([]);
 });
 

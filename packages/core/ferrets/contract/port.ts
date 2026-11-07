@@ -93,9 +93,10 @@ export interface StartRequest {
   readonly login?: string;
   readonly folder: string;
   /**
-   * The folder the ferret WORKS in, when it is not `folder` (a Warden investigator's own folder): checked through the
-   * same fenced `work` rules as `folder` (a refusal is `{ code: 'folder' }`, as today), and recorded as the ferret's
-   * folder in its place. Its report is read back with `summary(ferret)`. Port-only: no route takes it.
+   * The folder the ferret WORKS in, when it is not `folder` (a Warden investigator's own folder): an absolute, canonical
+   * path (no `.`, `..` or empty segment, no trailing `/`) that the folder check accepts, or the start is refused with
+   * `{ code: 'folder' }`. It is recorded as the ferret's folder in place of `folder`. Its report is read back with
+   * `summary(ferret)`. Only trusted plugin code passes it; no route takes it.
    */
   readonly workFolder?: string;
   readonly prompt?: string;
@@ -135,8 +136,9 @@ export interface ManagedWorktreeSummary {
 }
 
 /**
- * How a resume differs from a person's plain one (today's `ResumePolicy`, copied). Both default to `false`: an explicit
- * resume by a person is not automatic and never replaces a live pane; only a move sets `replaceLiveTerminal`.
+ * How a resume differs from a person's plain one (today's `ResumePolicy.automatic`, copied). It defaults to `false`: an
+ * explicit resume by a person is not automatic. Replacing a LIVE pane is not on the port: only a move does it, through
+ * Ferrets' own service.
  */
 export interface ResumeOptions {
   /**
@@ -144,11 +146,6 @@ export interface ResumeOptions {
    * `session.resumed` event so history tells the two apart.
    */
   readonly automatic?: boolean;
-  /**
-   * Replace a LIVE pane instead of keeping the ferret running as it is: the pane is stopped and the ferret relaunched
-   * through the ordinary launch (new token, harness home, environment). Only a move sets it.
-   */
-  readonly replaceLiveTerminal?: boolean;
 }
 
 /** Why a harness-seam act did not happen: a hold the act runner applied, or nothing to act on. */
@@ -157,8 +154,10 @@ export type HarnessRefusal = { readonly refused: RefusalCode | 'no_pane' | 'plug
 /**
  * The harness seam (decision #18): what Conversation needs to type into a ferret, interrupt it and read its transcript.
  * Every write goes through `kernel.act(<the ferret's terminal pane>, 'keys')`, so Vault's input holds and the guarded
- * write apply exactly as for `terminal_send`; there is no raw pane write here. The pane is read when the act is made, so
- * a ferret that stopped since answers `no_pane`.
+ * write apply exactly as for `terminal_send`; there is no raw pane write here. `deliver` is the runner's own delivery,
+ * which acts on that pane for each write it makes (a hold it meets rejects the delivery before any keys); `interrupt` is
+ * acted on by this seam, because the runner's signal is a raw key. The pane is read when the write is made, so a ferret
+ * that stopped since answers `no_pane`.
  */
 export interface FerretHarness {
   deliver(delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessRefusal>>;
