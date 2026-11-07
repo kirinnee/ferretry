@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { BrowserActionSchema } from '../../../../daemon/pages/wire/browser.ts';
-import * as pointer from '../../../../daemon/pages/wire/pointer.ts';
+import { BrowserActionSchema } from '../../../../contract/wire/browser.ts';
+import * as pointer from '../../../../contract/wire/pointer.ts';
 import { BrowserToolCallSchema as AgentToolCallSchema } from '../../../../daemon/tools/wire.ts';
 import {
   assertCoversEverySchema,

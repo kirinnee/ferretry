@@ -5,7 +5,7 @@ import {
   MAX_HELD_FRAME_ACKNOWLEDGEMENTS,
   MIN_FRAME_INTERVAL_MS,
 } from '../../../daemon/stream/frame-governor.ts';
-import { type FrameClock, type FrameSink, type FrameTimer } from '../../../daemon/stream/contracts.ts';
+import type { FrameClock, FrameSink, FrameTimer } from '../../../daemon/stream/contracts.ts';
 
 class FakeClock implements FrameClock {
   private current = 1_000;

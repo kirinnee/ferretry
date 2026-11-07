@@ -521,9 +521,10 @@ export default definePlugin({
 
   ui: {
     screens: [
-      screen('sharing', { path: '/sharing/:tab?', nav: { label: 'Sharing', icon: 'share-2', order: 20 } }),
-      screen('join', { path: '/join' }),
-      screen('shared', { path: '/shared' }),
+      screen('sharing', { path: 'sharing/:tab?', nav: { label: 'Sharing', icon: 'share-2', order: 20 } }),
+      // Daemon-less on purpose: a share link lands here, and what is shared with this browser spans daemons.
+      screen('join', { path: '/join', daemonless: true }),
+      screen('shared', { path: '/shared', daemonless: true }),
     ],
   },
 

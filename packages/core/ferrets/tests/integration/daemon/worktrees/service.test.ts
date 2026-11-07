@@ -9,7 +9,7 @@ import {
   ManagedWorktreeAdapter,
   WorktreeOperationQueue,
 } from '../../../../daemon/adapters/worktrees/index.ts';
-import { WorktreeError } from '../../../../daemon/lib/worktrees/index.ts';
+import type { WorktreeError } from '../../../../daemon/lib/worktrees/index.ts';
 import type {
   GitExecution,
   GitInvocation,

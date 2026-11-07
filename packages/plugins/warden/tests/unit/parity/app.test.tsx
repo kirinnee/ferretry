@@ -217,7 +217,7 @@ describe('app half: the screen and the Settings tab', () => {
   });
 
   test('S-0410 the screen warden is declared at /warden with a nav entry and implemented by the app half', () => {
-    expect(screenDecl).toMatchObject({ id: 'warden', path: '/warden', nav: { label: 'Warden' } });
+    expect(screenDecl).toMatchObject({ id: 'warden', path: 'warden', nav: { label: 'Warden' } });
     expect(Object.keys(half.screens)).toEqual(['warden']);
     expect(app.half).toBe('app');
   });
@@ -263,7 +263,7 @@ describe('app half: the screen and the Settings tab', () => {
   });
 
   test('S-0383 route daemonWardenPath is the shell route /d/:daemonId/warden; the plugin declares only the relative path /warden', () => {
-    expect(screenDecl?.path).toBe('/warden');
+    expect(screenDecl?.path).toBe('warden');
   });
 
   test('S-0286 S-0578 WardenPanel and LEADING_TABS warden: the Warden Settings tab is declared, ordered and implemented', () => {

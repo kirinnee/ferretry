@@ -13,7 +13,7 @@ import type {
 import type { PasteRuleCaller } from '../../../../daemon/lib/secure-copy/rules.ts';
 import type { RuleListing, SignInRuleProofPort, SignInRuleStore } from '../../../../daemon/lib/sign-in-rules/index.ts';
 import { SignInRuleService } from '../../../../daemon/lib/sign-in-rules/index.ts';
-import { type AuditActor, type AuditDetail } from '@ferretry/core-gate/contract';
+import type { AuditActor, AuditDetail } from '@ferretry/core-gate/contract';
 
 /** A standing-rule world over fakes: the store, the listing, the registry and the clock are the test's. */
 

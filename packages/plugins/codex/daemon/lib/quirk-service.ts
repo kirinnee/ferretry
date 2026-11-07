@@ -9,7 +9,7 @@
  * how a failed drive came to leave a live pane with an open modal.
  */
 
-import { type CodexPickerCleanup, type PickerCleanupOutcome } from './cleanup.ts';
+import type { CodexPickerCleanup, PickerCleanupOutcome } from './cleanup.ts';
 import { pickerFailureReport, quarantineUnconfirmedPicker, type PickerQuarantine } from './quarantine.ts';
 import {
   planRuntimeSwitch,

@@ -1,11 +1,11 @@
-import { BROWSER_DEFAULT_DRAG_STEPS, parseBrowserKeyChord } from './wire/pointer.ts';
-import { type BrowserAction, BrowserActionSchema } from './wire/browser.ts';
+import { BROWSER_DEFAULT_DRAG_STEPS, parseBrowserKeyChord } from '../../contract/wire/pointer.ts';
+import { type BrowserAction, BrowserActionSchema } from '../../contract/wire/browser.ts';
 import {
   type BrowserElementTarget,
   type BrowserMouseButton,
   type BrowserTarget,
   browserTargetOf,
-} from './wire/target.ts';
+} from '../../contract/wire/target.ts';
 import {
   type ActableLocator,
   type ActablePage,

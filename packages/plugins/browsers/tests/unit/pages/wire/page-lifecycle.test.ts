@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as lifecycle from '../../../../daemon/pages/wire/page-lifecycle.ts';
+import * as lifecycle from '../../../../contract/wire/page-lifecycle.ts';
 import {
   assertCoversEverySchema,
   assertRejects,

@@ -41,32 +41,32 @@ import {
 } from '../account/layering.ts';
 import { componentPartialSupport, describePartialSupport } from '../account/adapt.ts';
 import { freeName, looksSecret, SECRET_TOKEN_SOURCE } from '../account/import.ts';
-import { type HarnessKind } from '../manifest.ts';
+import type { HarnessKind } from '../manifest.ts';
 import { runtimeDisable, type BudgetHolds } from '../account/disabled-runtime.ts';
-import { type SettingsObject } from '../settings.ts';
-import {
-  type AutoResumeSummary,
-  type CatalogAct,
-  type CatalogFormat,
-  type ComponentCatalog,
-  type ComponentContent,
-  type ComponentView,
-  type ComponentDetail,
-  type CredentialStatusWord,
-  type EnvEntry,
-  type FixedLayerView,
-  type LayerConflict,
-  type LayeredProfileCatalog,
-  type MachineAuthority,
-  type MachineView,
-  type ProfileDraftRequest,
-  type ProfileDraftView,
-  type ProfileScope as ProfileScopeView,
-  type RuntimeCatalog,
-  type RuntimeModelSet,
-  type RuntimeModels,
-  type SettingsEntry,
-  type StackView,
+import type { SettingsObject } from '../settings.ts';
+import type {
+  AutoResumeSummary,
+  CatalogAct,
+  CatalogFormat,
+  ComponentCatalog,
+  ComponentContent,
+  ComponentView,
+  ComponentDetail,
+  CredentialStatusWord,
+  EnvEntry,
+  FixedLayerView,
+  LayerConflict,
+  LayeredProfileCatalog,
+  MachineAuthority,
+  MachineView,
+  ProfileDraftRequest,
+  ProfileDraftView,
+  ProfileScope as ProfileScopeView,
+  RuntimeCatalog,
+  RuntimeModelSet,
+  RuntimeModels,
+  SettingsEntry,
+  StackView,
 } from '../../../contract/index.ts';
 import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
 import { claudeFastSupport, harnessKey, scopeKey } from './foreign.ts';

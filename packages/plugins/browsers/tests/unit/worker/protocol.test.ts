@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { BrowserPageSnapshotSchema, BrowserScreencastFrameSchema } from '../../../daemon/pages/wire/browser.ts';
+import { BrowserPageSnapshotSchema, BrowserScreencastFrameSchema } from '../../../contract/wire/browser.ts';
 import {
   BLANK_PAGE_URL,
   BrowserTransportError,

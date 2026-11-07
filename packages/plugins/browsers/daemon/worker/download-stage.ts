@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { BROWSER_MAX_DOWNLOAD_NOTICES, type BrowserDownloadNotice } from '../pages/wire/browser.ts';
+import { BROWSER_MAX_DOWNLOAD_NOTICES, type BrowserDownloadNotice } from '../../contract/wire/browser.ts';
 import { AGENT_FILE_LIMITS, STAGED_FILE_TTL_MS, sanitizeFileName } from '../tools/files-policy.ts';
 
 /**

@@ -1,14 +1,14 @@
 import { z } from 'zod';
 import {
-  BROWSER_PROXY_SCHEMES,
+  type BROWSER_PROXY_SCHEMES,
   BrowserActorKindSchema,
   BROWSER_MAX_PAGE_ID_LENGTH,
   BrowserPageStateSchema,
   BrowserProfileKindSchema,
-  BrowserProxySettingSchema,
+  type BrowserProxySettingSchema,
   BrowserProxyStatusSchema,
   SurfaceNameSchema,
-} from '../../../contract/index.ts';
+} from '../wire.ts';
 import {
   BROWSER_MAX_FIND_CHARS,
   BROWSER_MAX_HEIGHT,
@@ -66,7 +66,7 @@ export {
   type BrowserProxyStatus,
   BrowserProxyStatusSchema,
   browserProxyUrlProblem,
-} from '../../../contract/index.ts';
+} from '../wire.ts';
 export const BROWSER_MAX_SELECTOR_LENGTH = 4_096;
 export const BROWSER_MAX_TEXT_LENGTH = 200_000;
 export type BrowserActorKind = z.infer<typeof BrowserActorKindSchema>;

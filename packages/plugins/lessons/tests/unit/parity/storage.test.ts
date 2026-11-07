@@ -22,7 +22,7 @@ import { StateLessonsStore } from '../../../daemon/adapters/state-store.ts';
 import { LessonsMiner } from '../../../daemon/adapters/miner.ts';
 import manifest from '../../../manifest.ts';
 import { AT, LESSONS_CONFIG as CONFIG, FakeLessonsStore } from '../support.ts';
-import { lessonsHost } from './host.ts';
+import { lessonsHost, realLessonsConfig } from './host.ts';
 
 const store = (folder = new MemoryStateFolder(), now = AT) =>
   new StateLessonsStore({ state: folder.port(LESSONS_STATE), clock: { now: () => now } } as never);
@@ -85,6 +85,76 @@ describe('the lessons state folder', () => {
     const { host } = await lessonsHost({ config: { 'lessons.yaml': { passiveDefault: false, batchSize: 5 } } });
     const config = JSON.parse((await host.request('GET', '/v1/lessons/config', { as: owner() })).body as string);
     expect(config).toMatchObject({ passiveDefault: false, batchSize: 5 });
+  });
+
+  // Today's `learningLoosening` (packages/fleet/src/lib/config-files/kinds.ts): a hand edit that loosens what lesson
+  // mining may spend is HELD for the owner and the tighter version stays in effect (docs/config-files.md rule 2).
+  test('F-0165 a hand edit of lessons.yaml that switches mining on and raises its spend is HELD: the tighter version stays in effect', async () => {
+    const real = realLessonsConfig();
+    await real.handEdit('enabled: false\nmaxMinersPerRun: 2\n');
+    expect(real.port.fileState(LESSONS_CONFIG)).toMatchObject({ state: 'valid' });
+
+    // Something that can write config/ (a ferret, say) switches mining on with 50 miners a run and no spawn gap.
+    await real.handEdit(
+      'enabled: true\nmaxMinersPerRun: 50\nmaxFerretsPerRun: 400\nbatchSize: 500\nintervalMinutes: 1\nminSpawnGapMinutes: 0\n',
+    );
+
+    expect(real.port.fileState(LESSONS_CONFIG)).toEqual({
+      state: 'held',
+      inEffect: true,
+      sentences: [
+        'lesson mining may now spend on ferrets',
+        'the lesson miners one run may start goes up from 2 to 50',
+        'the ferrets one lesson run may read goes up from 40 to 400',
+        'the ferrets one lesson miner reads goes up from 20 to 500',
+        'the minutes between lesson runs goes down from 60 to 1',
+        'the minutes between two lesson miners goes down from 30 to 0',
+      ],
+    });
+    expect(real.port.file(LESSONS_CONFIG)).toEqual({ enabled: false, maxMinersPerRun: 2 });
+    const { host } = await lessonsHost({ realConfig: real });
+    const config = JSON.parse((await host.request('GET', '/v1/lessons/config', { as: owner() })).body as string);
+    expect(config).toMatchObject({ enabled: false, maxMinersPerRun: 2, minSpawnGapMinutes: 30, intervalMinutes: 60 });
+  });
+
+  for (const [edit, sentence] of [
+    ['enabled: true', 'lesson mining may now spend on ferrets'],
+    ['maxMinersPerRun: 3', 'the lesson miners one run may start goes up from 2 to 3'],
+    ['maxFerretsPerRun: 41', 'the ferrets one lesson run may read goes up from 40 to 41'],
+    ['batchSize: 21', 'the ferrets one lesson miner reads goes up from 20 to 21'],
+    ['intervalMinutes: 59', 'the minutes between lesson runs goes down from 60 to 59'],
+    ['minSpawnGapMinutes: 29', 'the minutes between two lesson miners goes down from 30 to 29'],
+  ] as const)
+    test(`F-0165 a hand edit \`${edit}\` alone is held for the owner: "${sentence}"`, async () => {
+      const real = realLessonsConfig();
+      await real.handEdit('enabled: false\n');
+      // `enabled: false` is the tighter base; every other key is at its default.
+      const text = edit === 'enabled: true' ? 'enabled: true\n' : `enabled: false\n${edit}\n`;
+      await real.handEdit(text);
+      expect(real.port.fileState(LESSONS_CONFIG)).toEqual({ state: 'held', inEffect: true, sentences: [sentence] });
+      expect(real.port.file(LESSONS_CONFIG)).toEqual({ enabled: false });
+    });
+
+  test('F-0165 a hand edit of lessons.yaml that tightens mining spend, or changes only its agent, model or passive default, applies at once', async () => {
+    const real = realLessonsConfig();
+    await real.handEdit('# the mining schedule\nmaxMinersPerRun: 2\n');
+    const tighter =
+      '# the mining schedule\nenabled: false\nmaxMinersPerRun: 1\nmaxFerretsPerRun: 10\nbatchSize: 5\nintervalMinutes: 120\nminSpawnGapMinutes: 60\nagent: codex\nmodel: gpt-5\npassiveDefault: false\n';
+
+    await real.handEdit(tighter);
+
+    expect(real.port.fileState(LESSONS_CONFIG)).toEqual({ state: 'valid', inEffect: true, sentences: [] });
+    expect(real.port.file(LESSONS_CONFIG)).toEqual({
+      enabled: false,
+      maxMinersPerRun: 1,
+      maxFerretsPerRun: 10,
+      batchSize: 5,
+      intervalMinutes: 120,
+      minSpawnGapMinutes: 60,
+      agent: 'codex',
+      model: 'gpt-5',
+      passiveDefault: false,
+    });
   });
 
   test('F-0260 F-0388 observations.jsonl: a filed lesson appends its evidence, once', async () => {

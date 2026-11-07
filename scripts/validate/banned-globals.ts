@@ -4,6 +4,10 @@
  * `new Date()` with no argument, `setTimeout`/`setInterval`/`setImmediate`, `fetch`, `process.env`,
  * `process.platform`, `Bun.spawn`/`Bun.spawnSync`/`Bun.file`/`Bun.write`, `homedir`, and imports of `fs` and
  * `child_process`. Tests are exempt (they drive the test host's ports).
+ *
+ * A browser APP half (`<plugin>/app/**`) runs in the browser, not under the kernel (DECISIONS-2 #4): it has no clock
+ * port, so `setTimeout`, `setInterval`, `Date.now` and `new Date()` are allowed there (`setImmediate` is not a browser API). It is still refused `fetch`, `process`, `Bun`,
+ * `fs` and `child_process`: it reaches its daemon only through the one client it is handed.
  */
 import { relative, sep } from 'node:path';
 import { type AstNode, type Check, type Finding, memberPath, parseFile, runMain, walk } from '../gen/lib/check.ts';
@@ -21,6 +25,8 @@ const BANNED_MEMBERS = new Map<string, string>([
   ['Bun.write', 'use kernel.state or a root handle'],
   ['os.homedir', 'use a declared root'],
 ]);
+/** What a browser app half may use: the page's own clock and timers (DECISIONS-2 #4). */
+const BROWSER_ALLOWED = new Set(['Date.now', 'new Date()', 'setTimeout', 'setInterval']);
 const BANNED_CALLS = new Map<string, string>([
   ['setTimeout', 'use kernel.clock.after'],
   ['setInterval', 'use kernel.clock.every or a job'],
@@ -39,7 +45,7 @@ function bareModule(specifier: string): string {
 }
 
 /** Findings for one file. Pure over its source; the planted-violation tests call it directly. */
-export function bannedIn(file: string, where = file): Finding[] {
+export function bannedIn(file: string, where = file, browser = false): Finding[] {
   const check = 'banned-globals';
   const findings: Finding[] = [];
   const parsed = parseFile(file);
@@ -80,18 +86,18 @@ export function bannedIn(file: string, where = file): Finding[] {
       const key = path.slice(0, 2).join('.');
       const fix = BANNED_MEMBERS.get(key);
       // Report the outermost two-segment chain once, not each prefix.
-      if (fix !== undefined && path.length === 2) add(node, key, fix);
+      if (fix !== undefined && path.length === 2 && !(browser && BROWSER_ALLOWED.has(key))) add(node, key, fix);
       return;
     }
     if (node.type === 'NewExpression') {
       const callee = node.callee as AstNode;
       if (callee.type === 'Identifier' && callee.name === 'Date' && (node.arguments as readonly unknown[]).length === 0)
-        add(node, 'new Date()', 'use kernel.clock.now()');
+        if (!browser) add(node, 'new Date()', 'use kernel.clock.now()');
       return;
     }
     if (node.type === 'Identifier') {
       const fix = BANNED_CALLS.get(node.name as string);
-      if (fix === undefined || parent === undefined) return;
+      if (fix === undefined || parent === undefined || (browser && BROWSER_ALLOWED.has(node.name as string))) return;
       const asProperty =
         (parent.type === 'MemberExpression' && parent.property === node && parent.computed !== true) ||
         ((parent.type === 'Property' || parent.type === 'MethodDefinition' || parent.type === 'PropertyDefinition') &&
@@ -144,7 +150,8 @@ export const check: Check = {
     for (const pkg of ws.packages) {
       if (ctx.packageId !== undefined && pkg.id !== ctx.packageId) continue;
       for (const file of sourceFiles(pkg))
-        if (bannedScope(pkg, file)) findings.push(...bannedIn(file, relative(ws.root, file).split(sep).join('/')));
+        if (bannedScope(pkg, file))
+          findings.push(...bannedIn(file, relative(ws.root, file).split(sep).join('/'), areaOf(pkg, file) === 'app'));
     }
     return findings;
   },

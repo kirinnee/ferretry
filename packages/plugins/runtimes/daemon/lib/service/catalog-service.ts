@@ -29,7 +29,7 @@
  * live passkey step-up. The order is: read the change, consume synchronously, check it is still current,
  * then act — restoring it only while it is certain nothing was attempted.
  */
-import { type AccountModel } from '../account/schema.ts';
+import type { AccountModel } from '../account/schema.ts';
 import { type ClaudeStatuslineCommand, skillFrontmatterKeys, skillSourceReference } from '../account/adapt.ts';
 import { EMPTY_RUNTIME_IDS, type RuntimeIds, renameRuntimeId } from '../account/ids.ts';
 import {
@@ -40,11 +40,11 @@ import {
   type FleetModelApplyPlan,
   type FleetProvisioner,
 } from '../provisioning.ts';
-import { type HarnessKind } from '../manifest.ts';
+import type { HarnessKind } from '../manifest.ts';
 import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
 import { nextDisableExpiry } from '../account/disabled.ts';
-import { type BudgetHolds } from '../account/disabled-runtime.ts';
-import { type ProviderPreset } from '../presets/schema.ts';
+import type { BudgetHolds } from '../account/disabled-runtime.ts';
+import type { ProviderPreset } from '../presets/schema.ts';
 import { parseSettings, type SettingsObject } from '../settings.ts';
 import {
   type AccountChange,
@@ -78,11 +78,11 @@ import {
   runtimeCatalog,
   runtimesUsingCredential,
 } from './catalog.ts';
-import { type RuntimeRename, type SessionStatus } from './foreign.ts';
+import type { RuntimeRename, SessionStatus } from './foreign.ts';
 import { expandAssetPath, joinPath } from '../paths.ts';
-import { type ModelCatalogSources } from '../models/catalog.ts';
+import type { ModelCatalogSources } from '../models/catalog.ts';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
-import { type RuntimeConfigWriter } from './ports.ts';
+import type { RuntimeConfigWriter } from './ports.ts';
 import {
   type AccountChangeFacts,
   type AccountComponentFile,

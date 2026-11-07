@@ -1,20 +1,20 @@
 import { LessonsService } from '../../daemon/lib/index.ts';
-import {
-  type LessonFilesPort,
-  type GlobalLessonsPort,
-  type LessonSessionFacts,
-  type LessonSessionsPort,
-  type LessonsStorePort,
-  type Observation,
-  type OwnerMessage,
-  type PassiveChannelPort,
-  type PricePort,
-  type Proposal,
-  type ScanMinerPort,
-  type SessionDigest,
-  type StoredFerretLessons,
-  type Tombstone,
-  type LessonsState,
+import type {
+  LessonFilesPort,
+  GlobalLessonsPort,
+  LessonSessionFacts,
+  LessonSessionsPort,
+  LessonsStorePort,
+  Observation,
+  OwnerMessage,
+  PassiveChannelPort,
+  PricePort,
+  Proposal,
+  ScanMinerPort,
+  SessionDigest,
+  StoredFerretLessons,
+  Tombstone,
+  LessonsState,
 } from '../../daemon/lib/index.ts';
 import type { LessonsConfig, RunManifest } from '../../contract/index.ts';
 
