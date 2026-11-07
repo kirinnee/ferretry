@@ -2,11 +2,35 @@
  * `glossary` (§1.3, §7.9): owner-facing text uses an "instead of" word. Owner-facing text read here: every manifest's
  * title, nav and settings labels, verb and tool summaries, app action labels and onboarding titles, and every
  * package's `instructions/*.md`. Matching is whole-word and case-insensitive; a word's own `means` is not read.
+ * A reviewed phrase in {@link PHRASE_EXCEPTIONS} is blanked out before matching, so its words pass only inside that
+ * exact phrase.
  */
 import { readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import type { Manifest } from '../../packages/core/kernel/manifest/index.ts';
 import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
+
+/**
+ * Reviewed phrases whose words name a real thing, not the idea an "instead of" word replaced. Exact phrases only (whole
+ * phrase, case-insensitive): no pattern, no single word. The bare banned word anywhere else still fails. phrase → reason.
+ */
+export const PHRASE_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
+  ['browser proxy', 'a real HTTP proxy the browser goes through; not a relay (docs/browser-proxy.md)'],
+  ['routing prompt', 'the one text Pack mode picks helper models with (docs/pack-mode.md); not a message to a ferret'],
+  ['firewall timer', 'a systemd .timer unit that runs the loopback-firewall verify unit; not a job'],
+]);
+
+const BOUNDARY_BEFORE = '(^|[^\\p{L}\\p{N}_-])';
+const BOUNDARY_AFTER = '(?=$|[^\\p{L}\\p{N}_-])';
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** The text with every reviewed exception phrase blanked out (its boundaries kept). */
+export function withoutExceptions(text: string): string {
+  let out = text;
+  for (const phrase of PHRASE_EXCEPTIONS.keys())
+    out = out.replace(new RegExp(`${BOUNDARY_BEFORE}${escapeRegExp(phrase)}${BOUNDARY_AFTER}`, 'giu'), '$1');
+  return out;
+}
 
 export function ownerTexts(manifest: Manifest): { readonly where: string; readonly text: string }[] {
   const out: { where: string; text: string }[] = [{ where: 'title', text: manifest.title }];
@@ -31,12 +55,10 @@ export function insteadOfIndex(manifests: readonly Manifest[]): Map<string, stri
 
 export function glossaryFindings(where: string, text: string, index: ReadonlyMap<string, string>): Finding[] {
   const findings: Finding[] = [];
+  const read = withoutExceptions(text);
   for (const [old, word] of index) {
-    const pattern = new RegExp(
-      `(^|[^\\p{L}\\p{N}_-])${old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\p{L}\\p{N}_-])`,
-      'iu',
-    );
-    if (pattern.test(text))
+    const pattern = new RegExp(`${BOUNDARY_BEFORE}${escapeRegExp(old)}${BOUNDARY_AFTER}`, 'iu');
+    if (pattern.test(read))
       findings.push({ check: 'glossary', where, message: `says "${old}"; the word is "${word}"` });
   }
   return findings;

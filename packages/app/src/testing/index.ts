@@ -1,0 +1,12 @@
+/** Shared app test harnesses, copied from today's PWA. */
+export {
+  fakeCarrier,
+  fakeDeviceClaims,
+  type FakeCarrier,
+  type FakeDeviceClaims,
+  type FakeDeviceClaimsOptions,
+} from '../connect/testing.ts';
+export { interact, type Mounted, mount, must, pressKey } from './dom.ts';
+export { render, run, runAsync, runUntil } from './react.ts';
+export { settleUntil } from './settle.ts';
+export { RouterProvider } from './router.tsx';

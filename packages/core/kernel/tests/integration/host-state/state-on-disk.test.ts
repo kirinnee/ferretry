@@ -199,3 +199,18 @@ describe('the home lock on a real disk', () => {
     await (await acquireHomeLock({ home, binary: 'fy' })).release();
   });
 });
+
+describe('readTail on disk: only the end of the file, never through a link', () => {
+  test('U tail of a large file reads the last bytes and checks each line', async () => {
+    const home = await freshHome();
+    const fs = createNodeHostFs();
+    const lines = Array.from({ length: 50_000 }, (_, i) => `{"format":1,"count":${i}}`).join('\n');
+    await writeFile(join(home, 'big.jsonl'), `${lines}\n`);
+    const tail = await fs.readTail(join(home, 'big.jsonl'), 100);
+    expect(tail?.bytes.byteLength).toBe(100);
+    expect(new TextDecoder().decode(tail?.bytes).endsWith('{"format":1,"count":49999}\n')).toBe(true);
+    expect(await fs.readTail(join(home, 'missing.jsonl'), 100)).toBeUndefined();
+    await symlink(join(home, 'big.jsonl'), join(home, 'link.jsonl'));
+    await expect(fs.readTail(join(home, 'link.jsonl'), 100)).rejects.toThrow();
+  });
+});

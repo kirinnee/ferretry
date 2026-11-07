@@ -1,18 +1,25 @@
 import type { Manifest } from '../manifest/types.ts';
 import { systemClock } from './adapters/clock.ts';
 import { nodeFs } from './adapters/node-fs.ts';
-import { bunSpawn, bunWorkers, globalFetch } from './adapters/process.ts';
+import { homedir, hostname } from 'node:os';
+import { platformRootPinner } from './adapters/pinned/index.ts';
+import { bunSpawn, bunWebSockets, bunWorkers, globalFetch } from './adapters/process.ts';
+import { scratchPort } from './scratch.ts';
+import { nodeHostFacts } from './adapters/host-facts.ts';
+import { NodeGzip } from './adapters/node-gzip.ts';
+import { updateHostFor } from './adapters/update-host.ts';
 import { createConfigFiles } from './config/index.ts';
-import type { HostAdapters, HostConfig, PluginStateHandle } from './host.ts';
+import type { ConfigJudge, HostAdapters, HostConfig, PluginStateHandle } from './host.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import {
   createNodeHostFs,
   createStatePort,
+  acquireHomeLock,
   type HostFs as StateFs,
   moveStateAside,
   openPluginState,
 } from './state/index.ts';
-import type { Clock, Log } from '../contract/ports.ts';
+import type { Clock, Log, StateDamage } from '../contract/ports.ts';
 import type { ConfigDef } from '../contract/define.ts';
 
 const random = (): string => crypto.getRandomValues(new Uint32Array(1))[0]?.toString(36) ?? '0';
@@ -34,6 +41,10 @@ export function stateOpener(
 ): (manifest: Manifest) => PluginStateHandle {
   return manifest => {
     const files = manifest.data?.state ?? [];
+    const listeners = new Set<(damage: readonly StateDamage[]) => void>();
+    const changed = (damage: readonly StateDamage[]): void => {
+      for (const listener of listeners) listener(damage);
+    };
     let port = createStatePort({ home, pluginId: manifest.id, files, fs, clock });
     return {
       get port() {
@@ -55,19 +66,61 @@ export function stateOpener(
           log.warn('a plugin folder in an older format was moved aside', { plugin: manifest.id });
           opening = await openPluginState({ home, pluginId: manifest.id, files, fs, clock, kind, liveTargets: true });
         }
-        port = createStatePort({ home, pluginId: manifest.id, files, fs, clock, initialDamage: opening.damaged });
+        for (const damage of opening.narrowed)
+          log.warn('a state file uses its narrower refusal', {
+            plugin: manifest.id,
+            file: damage.file,
+            reason: damage.reason,
+          });
+        port = createStatePort({
+          home,
+          pluginId: manifest.id,
+          files,
+          fs,
+          clock,
+          initialDamage: opening.damaged,
+          initialNarrowed: opening.narrowed,
+          changed,
+          report: ({ damage, policy }) =>
+            log.warn('a state file cannot be read', {
+              plugin: manifest.id,
+              file: damage.file,
+              reason: damage.reason,
+              policy,
+            }),
+        });
         return opening.damaged;
       },
+      onDamageChanged: listener => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+      narrowed: () => port.narrowed(),
       close: async () => undefined,
     };
   };
 }
 
 export function configService(home: string, fs: StateFs, clock: Clock, log: Log, binary: string) {
-  return (declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[]): HostConfig => {
-    const service = createConfigFiles({ home, defs: declarations, fs, clock, log, binary });
+  return (
+    declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[],
+    judge?: ConfigJudge,
+  ): HostConfig => {
+    const service = createConfigFiles({
+      home,
+      defs: declarations,
+      fs,
+      clock,
+      log,
+      binary,
+      ...(judge === undefined ? {} : { judge }),
+    });
     return {
       port: plugin => service.port(plugin),
+      secretReferences: plugin => service.secretReferences(plugin),
+      writer: () => service.writer(),
       reload: () => service.reload(),
       startWatching: () => service.startWatching(),
     };
@@ -78,7 +131,12 @@ export function configService(home: string, fs: StateFs, clock: Clock, log: Log,
 export function realAdapters(
   home: string,
   logSink: LogSink,
-  options: { readonly binary: string; readonly childEnv?: Readonly<Record<string, string>> },
+  options: {
+    readonly binary: string;
+    readonly childEnv?: Readonly<Record<string, string>>;
+    /** The release this build carries, for `kernel.updateHost`; absent, no plugin can launch an update. */
+    readonly release?: string;
+  },
 ): HostAdapters {
   const clock = systemClock();
   const log = scopedLog(logSink, 'kernel');
@@ -93,6 +151,17 @@ export function realAdapters(
     spawn: bunSpawn(options.childEnv ?? {}),
     fetch: globalFetch(),
     workers: bunWorkers(),
+    websocket: bunWebSockets(),
+    hostname: () => hostname(),
+    ownerHome: () => homedir(),
+    pinner: platformRootPinner(),
+    scratch: scratchPort(),
+    hostFacts: nodeHostFacts(),
+    compressor: new NodeGzip(),
+    ...(options.release === undefined
+      ? {}
+      : { updateHost: updateHostFor({ home, binary: options.binary, release: options.release }) }),
+    homeLock: async lockedHome => await acquireHomeLock({ home: lockedHome, binary: options.binary }),
   };
 }
 

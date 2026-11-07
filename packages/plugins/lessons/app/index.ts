@@ -1,5 +1,15 @@
-import { skeletonApp } from '@ferretry/kernel/manifest';
+import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { lessonsSurfaces } from './src/surfaces.tsx';
 
-/** Skeleton app half (§10.3): listed in ports-pending.json until the port lands. */
-export default skeletonApp(manifest);
+/** Lessons' app half (§2.3): the Lessons screen, a ferret's toolbar panel and the Settings tab. */
+export default implementApp(manifest, {
+  build: ({ client }) => {
+    const { LessonsScreen, FerretLessons, LessonsSettings } = lessonsSurfaces({ key: manifest.id, client });
+    return {
+      screens: { lessons: LessonsScreen },
+      panels: { 'ferret-lessons': FerretLessons },
+      settings: { lessons: LessonsSettings },
+    };
+  },
+});

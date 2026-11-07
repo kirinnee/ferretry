@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { type ApiResponse, jsonResponse } from '../../../contract/http.ts';
+import type { CarrierKey } from '../../../contract/ids.ts';
 import type { SocketDownstream, SocketHandler } from '../../../contract/socket.ts';
 import {
   CREDIT_WINDOW_FRAMES,
@@ -9,7 +10,6 @@ import {
   MAX_CONCURRENT_REQUESTS,
   MAX_PLAINTEXT_BYTES,
   MAX_PRE_CREDENTIAL_SESSIONS,
-  OLDER_APP_SENTENCE,
   RELAY_SESSION_CONCLUDED_CLOSE_CODE,
   RELAY_SESSION_CONCLUDED_CLOSE_REASON,
   relayDataByteBudget,
@@ -21,7 +21,7 @@ import {
   utf8Bytes,
 } from '../../../host/session/index.ts';
 import { fixture, pairedDevice, serving, settle, TestClient } from './harness.ts';
-import { relayCrypto } from './identities.ts';
+import { relayCrypto, stubbedCrypto } from './identities.ts';
 
 const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -31,6 +31,22 @@ const req = (id: number, extra: Record<string, unknown> = {}): Record<string, un
   method: 'GET',
   path: '/v1/health',
   ...extra,
+});
+
+test('a carrier signer enforces SIGNER_USERS: claims and tunnels only, never catalogs or secret offers', async () => {
+  const { layer } = await fixture();
+  const signer = layer.signer;
+  const nonce = toBase64Url(relayCrypto.randomBytes(32));
+  expect((await signer.sign({ host: 'relay.example.test', nonce })).signature).not.toBe('');
+  expect((await signer.signTunnel({ action: 'release', host: 'relay.example.test', nonce })).signature).not.toBe('');
+  await expect(signer.signCatalog({ kind: 'manifest', canonical: utf8Bytes('{}') })).rejects.toThrow(
+    'connections may not ask',
+  );
+  await expect(
+    signer.signSecretOffer({ v: 1, importId: 'offer', publicKey: 'public', expiresAt: '2026-11-07T10:00:00Z' }),
+  ).rejects.toThrow('connections may not ask');
+  expect(Object.isFrozen(signer)).toBe(true);
+  layer.close();
 });
 
 describe('the session layer: arrival and principal', () => {
@@ -174,11 +190,11 @@ describe('the session layer: frames and the handshake', () => {
     expect(client.channel).toBeUndefined();
   });
 
-  test('R2 R67 a peer speaking the previous dialect gets 4426 and a sentence naming the side to update', async () => {
+  test('R67 a hello outside the current schema gets the generic protocol refusal', async () => {
     const fx = await fixture();
     const client = TestClient.open(fx);
-    await client.handshake(fx.daemonId, hello => ({ ...hello, protocol: 'ferretry-relay/1' }));
-    expect(client.end).toEqual({ code: 4426, reason: OLDER_APP_SENTENCE });
+    await client.handshake(fx.daemonId, hello => ({ ...hello, protocol: 'unknown-wire' }));
+    expect(client.end).toEqual({ code: 4400, reason: 'unparseable client hello' });
   });
 
   test('R72 key agreement aborts on an all-zero X25519 output', async () => {
@@ -297,6 +313,71 @@ describe('the session layer: flow control', () => {
     expect(client.end?.code).toBe(4430);
   });
 
+  test('R555 two sessions on one connection share one seal queue and keep independent credit', async () => {
+    let active = 0;
+    let peak = 0;
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const started = new Promise<void>(resolve => {
+      entered = resolve;
+    });
+    const fx = await fixture({
+      crypto: stubbedCrypto({
+        seal: async (key, nonce, aad, plaintext) => {
+          if (JSON.parse(new TextDecoder().decode(plaintext)).t !== 'res')
+            return relayCrypto.seal(key, nonce, aad, plaintext);
+          active += 1;
+          peak = Math.max(peak, active);
+          entered();
+          try {
+            await held;
+            return await relayCrypto.seal(key, nonce, aad, plaintext);
+          } finally {
+            active -= 1;
+          }
+        },
+      }),
+    });
+    const connection = fx.layer.connection('relay' as CarrierKey);
+    const clients: TestClient[] = [];
+    try {
+      for (let index = 0; index < 2; index += 1) {
+        const client = TestClient.on(connection);
+        await client.handshake(fx.daemonId);
+        await client.auth(await pairedDevice(fx.device, `device-${index}`));
+        clients.push(client);
+      }
+      const [first, second] = clients as [TestClient, TestClient];
+      await first.send(req(1));
+      await started;
+      await second.send(req(1));
+      await wait(60);
+      expect(peak).toBe(1);
+      release();
+      await first.pump();
+      await second.pump();
+      expect(first.last('res')?.['id']).toBe(1);
+      expect(second.last('res')?.['id']).toBe(1);
+      // Exhaust only the first session. Its waiting payload must not block the second session's seal.
+      for (let id = 2; id <= CREDIT_WINDOW_FRAMES; id += 1) await first.send(req(id));
+      await first.pump();
+      expect(first.records.filter(record => record['t'] === 'res')).toHaveLength(CREDIT_WINDOW_FRAMES - 2);
+      await second.send(req(2));
+      await second.pump();
+      expect(second.last('res')?.['id']).toBe(2);
+      first.credit(16);
+      await first.pump();
+      expect(first.last('res')?.['id']).toBe(CREDIT_WINDOW_FRAMES);
+      expect(peak).toBe(1);
+    } finally {
+      release();
+      fx.layer.close();
+    }
+  });
+
   test('R555 the daemon seals only what the peer credited: a full window waits for credit', async () => {
     const fx = await fixture();
     const { client } = await serving(fx);
@@ -376,25 +457,38 @@ describe('the session layer: one session, one job', () => {
     fx.clock.advance(SESSION_CREDENTIAL_DEADLINE_MS);
     await idle.pump();
     expect(idle.end?.code).toBe(4400);
-    const waiting = Array.from({ length: MAX_PRE_CREDENTIAL_SESSIONS }, () => TestClient.open(fx, 'relay'));
-    const seventh = TestClient.open(fx, 'relay');
+    const rendezvous = fx.layer.connection('relay' as CarrierKey);
+    const waiting = Array.from({ length: MAX_PRE_CREDENTIAL_SESSIONS }, () => TestClient.on(rendezvous));
+    const seventh = TestClient.on(rendezvous);
     await seventh.pump();
     expect(seventh.end?.code).toBe(4429);
-    // A different carrier has its own bound.
-    const other = TestClient.open(fx, 'direct');
+    // Another connection of the same carrier has its own bound, as today's RelayLink per socket had.
+    const other = TestClient.on(fx.layer.connection('relay' as CarrierKey));
     await other.pump();
     expect(other.end).toBeUndefined();
     expect(waiting.every(client => client.end === undefined)).toBe(true);
   });
 
+  test('the pre-credential bound is per connection: 8 unproven peers on 8 direct sockets all stay', async () => {
+    const fx = await fixture();
+    const peers = Array.from({ length: 8 }, (_, index) =>
+      TestClient.open(fx, 'direct', { address: `192.0.2.${index + 1}` }),
+    );
+    for (const peer of peers) await peer.pump();
+    expect(peers.every(peer => peer.end === undefined)).toBe(true);
+    // the direct mount's own admission (16 unproven, 2 per peer, evict oldest) is the carrier's, not the layer's
+    expect(fx.layer.report().preCredential).toBe(8);
+  });
+
   test('R233 a 4429 is a busy refusal, retryable once a slot frees', async () => {
     const fx = await fixture();
-    const waiting = Array.from({ length: MAX_PRE_CREDENTIAL_SESSIONS }, () => TestClient.open(fx));
-    const refused = TestClient.open(fx);
+    const rendezvous = fx.layer.connection('relay' as CarrierKey);
+    const waiting = Array.from({ length: MAX_PRE_CREDENTIAL_SESSIONS }, () => TestClient.on(rendezvous));
+    const refused = TestClient.on(rendezvous);
     await refused.pump();
     expect(refused.end?.code).toBe(4429);
     waiting[0]?.link.closed('gone');
-    const retried = TestClient.open(fx);
+    const retried = TestClient.on(rendezvous);
     await retried.pump();
     expect(retried.end).toBeUndefined();
   });
@@ -561,6 +655,40 @@ describe('the session layer: requests', () => {
     expect(client.end).toEqual({ code: 4400, reason: 'what it was about to send changed before it left' });
   });
 
+  for (const change of ['body', 'status', 'header value', 'header order'] as const) {
+    test(`R516 R517 a same-object late answer changing its ${change} after sealing is withheld`, async () => {
+      const fx = await fixture();
+      const plain = {
+        status: 200,
+        headers: new Map([
+          ['a', '1'],
+          ['b', '2'],
+        ]),
+        body: 'private output',
+      };
+      fx.dispatch = async () => ({ ...plain, late: () => plain });
+      const { client } = await serving(fx);
+      try {
+        const before = client.records.length;
+        await client.send(req(1));
+        // Queue and seal the original answer without pulling it from the carrier yet.
+        await wait(60);
+        if (change === 'body') plain.body = 'withheld';
+        else if (change === 'status') plain.status = 403;
+        else if (change === 'header value') plain.headers.set('a', 'changed');
+        else {
+          plain.headers.delete('a');
+          plain.headers.set('a', '1');
+        }
+        await client.pump();
+        expect(client.records.length).toBe(before);
+        expect(client.end).toEqual({ code: 4400, reason: 'what it was about to send changed before it left' });
+      } finally {
+        fx.layer.close();
+      }
+    });
+  }
+
   test('R515 an unchanged late publication passes its permit and is sent', async () => {
     const fx = await fixture();
     const plain = jsonResponse({ shown: true });
@@ -570,6 +698,21 @@ describe('the session layer: requests', () => {
     await client.pump();
     expect(client.last('res')?.['status']).toBe(200);
     expect(client.end).toBeUndefined();
+  });
+
+  test('R516 R517 a shared plain headers map mutated after sealing is withheld at carrier pull', async () => {
+    const fx = await fixture();
+    const headers = new Map([['x-fixture', 'before']]);
+    const shared = { status: 200, headers, body: 'fixture-content' };
+    fx.dispatch = async () => ({ ...shared, late: () => shared });
+    const { client } = await serving(fx);
+    const before = client.records.length;
+    await client.send(req(1));
+    await wait(60);
+    headers.set('x-fixture', 'after');
+    await client.pump();
+    expect(client.records.length).toBe(before);
+    expect(client.end).toEqual({ code: 4400, reason: 'what it was about to send changed before it left' });
   });
 
   test('a handler that throws is answered 500 and the session goes on', async () => {
@@ -855,5 +998,80 @@ describe('the session layer: report', () => {
     const report = fx.layer.report();
     expect(report.lastRefusal?.includes(device.deviceId)).toBe(false);
     expect(report.sessions).toBe(0);
+  });
+});
+
+describe('the session layer: the carrier peer is told when it proved', () => {
+  test('proved() is called once after a valid device proof, never for an unknown holder or a pairing', async () => {
+    const fx = await fixture();
+    let provedCalls = 0;
+    const peer = { address: '192.0.2.20', proved: () => (provedCalls += 1) };
+    const { client } = await serving(fx, 'direct', peer);
+    expect(client.last('authenticated')).toBeDefined();
+    expect(provedCalls).toBe(1);
+    await client.send(req(1));
+    await client.pump();
+    expect(provedCalls).toBe(1);
+
+    let refused = 0;
+    const stranger = await pairedDevice(fx.device, 'S');
+    fx.device.keys.delete(stranger.deviceId);
+    const unknown = TestClient.open(fx, 'direct', { address: '192.0.2.21', proved: () => (refused += 1) });
+    await unknown.handshake(fx.daemonId);
+    await unknown.auth(stranger);
+    expect(unknown.end?.code).toBe(4403);
+    expect(refused).toBe(0);
+  });
+
+  test('a carrier whose proved() throws keeps its proved session', async () => {
+    const fx = await fixture();
+    const device = await pairedDevice(fx.device);
+    let calls = 0;
+    const client = TestClient.open(fx, 'direct', {
+      proved: () => {
+        calls += 1;
+        throw new Error('carrier bug');
+      },
+    });
+    await client.handshake(fx.daemonId);
+    await client.auth(device);
+    expect(calls).toBe(1);
+    expect(client.last('authenticated')).toBeDefined();
+    expect(client.end).toBeUndefined();
+  });
+});
+
+describe('the session layer: the identity signer it offers carriers', () => {
+  test('signs a rendezvous claim for the daemon identity and names that identity', async () => {
+    const fx = await fixture();
+    const nonce = toBase64Url(relayCrypto.randomBytes(32));
+    const signed = await fx.layer.signer.sign({ host: 'relay.example.test', nonce });
+    expect(signed.daemonId).toBe(fx.daemonId);
+    expect(Object.keys(fx.layer.signer).sort()).toEqual(['sign', 'signCatalog', 'signSecretOffer', 'signTunnel']);
+  });
+});
+
+describe('the session layer: appSession on the principal (R684)', () => {
+  test('a request whose body or header claims another appSession still carries the credential’s one', async () => {
+    const fx = await fixture();
+    const { client, device } = await serving(fx);
+    const forged = toBase64Url(relayCrypto.randomBytes(16));
+    await client.send(
+      req(1, { method: 'POST', headers: { 'x-app-session': forged }, body: JSON.stringify({ appSession: forged }) }),
+    );
+    await client.pump();
+    expect(fx.requests[0]?.principal?.appSession).toBe(device.appSession);
+    expect(fx.requests[0]?.principal?.appSession).not.toBe(forged);
+  });
+
+  test('a request on a session with no verified credential has no principal and so no appSession', async () => {
+    const fx = await fixture();
+    const device = await pairedDevice(fx.device);
+    fx.device.keys.delete(device.deviceId);
+    const client = TestClient.open(fx);
+    await client.handshake(fx.daemonId);
+    await client.auth(device);
+    expect(client.end?.code).toBe(4403);
+    expect(fx.requests).toHaveLength(0);
   });
 });

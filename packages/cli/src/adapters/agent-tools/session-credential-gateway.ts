@@ -1,4 +1,4 @@
-import type { DaemonReply, DaemonTransport } from '../../lib/client.ts';
+import type { DaemonReply, DaemonTransport, SendOptions } from '../../lib/client.ts';
 import { isLocalDaemonUrl } from '../../lib/address.ts';
 import { SESSION_BEARER_PREFIX } from '../../lib/credential.ts';
 import type { DaemonRequest } from '../../lib/request.ts';
@@ -50,7 +50,14 @@ export class SessionCredentialGateway implements DaemonTransport {
     });
   }
 
-  send(request: DaemonRequest, options: { readonly repeatable: boolean }): Promise<DaemonReply> {
+  send(request: DaemonRequest, options: SendOptions): Promise<DaemonReply> {
     return this.#inner.send(request, options);
+  }
+
+  events(
+    listener: Parameters<HttpTransport['events']>[0],
+    onClose: Parameters<HttpTransport['events']>[1],
+  ): () => void {
+    return this.#inner.events(listener, onClose);
   }
 }

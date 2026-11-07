@@ -1,14 +1,14 @@
 import { z } from 'zod';
 
-/**
- * The few shared wire primitives the fork, handover, move and transfer schemas use, copied from today's
- * `protocol/src/lib/common.ts` and `client.ts` byte for byte (that file's owner is the app shell; these stay identical so
- * a stored receipt or plan parses the same). Not `@ferretry/std`'s `InstantSchema`: that one normalises the instant,
- * and a durable receipt must read back exactly as written.
- */
-export const InstantSchema = z.iso.datetime({ offset: true });
+/** An ISO-8601 instant with an explicit timezone (the contract owns it: `IsoInstantSchema`). */
+export { IsoInstantSchema as InstantSchema } from '../../../contract/records.ts';
+
+export const NonEmptyStringSchema = z.string().trim().min(1);
 export const NonNegativeIntegerSchema = z.number().int().nonnegative();
 export const PositiveIntegerSchema = z.number().int().positive();
+export const NonNegativeFiniteSchema = z.number().finite().nonnegative();
+
+export const StringMapSchema = z.record(z.string(), z.unknown());
 
 /** Error envelope returned by every JSON API failure. */
 export const ApiErrorResponseSchema = z.looseObject({
@@ -19,5 +19,18 @@ export const ApiErrorResponseSchema = z.looseObject({
 });
 export type ApiErrorResponse = z.infer<typeof ApiErrorResponseSchema>;
 
-/** The logical request id a retried fork, handover or move carries (today's `FY_REQUEST_ID_HEADER`). */
-export const FY_REQUEST_ID_HEADER = 'x-fy-request-id';
+const SMALL_NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+
+/**
+ * A short span in words, built from the constant that owns it so the sentence cannot drift from the length: "two
+ * minutes", "one minute", "90 seconds". Whole minutes are said in minutes, ten or fewer spelled out.
+ */
+export const durationWords = (seconds: number): string => {
+  const minutes = seconds >= 60 && seconds % 60 === 0;
+  const count = minutes ? seconds / 60 : seconds;
+  return `${SMALL_NUMBER_WORDS[count] ?? String(count)} ${minutes ? 'minute' : 'second'}${count === 1 ? '' : 's'}`;
+};
+
+/** How many times, in words: "once", "twice", "3 times". */
+export const timesWords = (count: number): string =>
+  count === 1 ? 'once' : count === 2 ? 'twice' : `${String(count)} times`;

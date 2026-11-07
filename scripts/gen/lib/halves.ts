@@ -20,6 +20,10 @@ export function expectedSections(manifest: Manifest, half: HalfName): Record<str
         take.hook.mode === 'provide' && take.key !== undefined ? `${take.hook.name}:${take.key}` : take.hook.name,
       ),
       subscribers: (manifest.data?.subscribes ?? []).map(event => event.name),
+      doctor: [...(manifest.doctor ?? [])],
+      resolvers: (manifest.permissions?.network ?? []).flatMap(entry =>
+        typeof entry === 'object' && 'resolver' in entry ? [entry.resolver] : [],
+      ),
     };
   if (half === 'app')
     return {
@@ -84,6 +88,12 @@ export function isSkeleton(impl: AnyImplementation): boolean {
 }
 
 /** Compares one half with its manifest. `pending` = the id is in ports-pending.json. */
+/**
+ * Sections whose declared names may be left unimplemented: a declared doctor check with no run is reported by
+ * `fy doctor` itself as a failure naming the check, so the half still builds (an undeclared run is still refused).
+ */
+const MAY_BE_UNIMPLEMENTED: ReadonlySet<string> = new Set(['doctor']);
+
 export function halfFindings(
   where: string,
   manifest: Manifest,
@@ -110,6 +120,7 @@ export function halfFindings(
   if ('error' in inspected) return [...findings, { check, where, message: `${half} half: ${inspected.error}` }];
   const expected = expectedSections(manifest, half);
   for (const [section, names] of Object.entries(expected)) {
+    if (MAY_BE_UNIMPLEMENTED.has(section)) continue;
     const have = new Set(inspected.sections[section] ?? []);
     for (const name of names)
       if (!have.has(name)) findings.push({ check, where, message: `${half} half misses ${section} "${name}"` });

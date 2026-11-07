@@ -4,32 +4,127 @@
     "gate",
     "vault",
     "ferrets",
-    "asks",
     "access",
     "connections",
     "updates",
     "claude-code",
     "codex",
     "logins",
-    "runtimes",
     "terminals",
     "browsers",
     "accounts",
     "conversation",
     "agenda",
-    "projects",
     "board",
-    "packs",
     "warden",
     "usage",
-    "lessons",
-    "voice",
     "catalogs",
     "mcp",
     "skills",
     "shells",
     "layouts",
-    "onboarding",
-    "tidy"
+    "tidy",
+    "runtimes",
+    "onboarding"
+  ],
+  "pendingReasons": {
+    "runtimes": [
+      "GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) is not ported into Runtimes; Add runtime and a runtime that needs sign-in link to Logins' tab until Logins' app half draws it",
+      "GAP(ferrets): the launch link opens /new?agent=, and no manifest declares the new-ferret page yet (Ferrets ports it later; its runtime field mounts the slot Runtimes contributes to)",
+      "GAP(kernel): Edit as YAML on a profile is not offered, because the kernel's /v1/config/file is not declared yet (renderFileEditor is never supplied)",
+      "GAP(ferrets): removing a runtime cannot move its running ferrets, because Ferrets declares no migrate route yet (R-0355)",
+      "GAP(conversation): Import conversations is gone from the Runtimes tab; its verb is now Conversation's `fy link` (V-0285)"
+    ],
+    "ferrets": [
+      "the new-ferret and move pages mount the offered slots (ferrets.new-ferret-account, ferrets.move-account) when ported; Runtimes already contributes the account picker to both"
+    ],
+    "warden": [
+      "liveness monitor (dead_monitor, sus_thinking, sus_subprocess, agent_frozen never fire): Terminals’ port (of, holders) has no look at a ferret’s own pane; needs a Terminals additive pane liveness sample (frame, token counter, transcript size, process tree) per D2 #19",
+      "leftover browsers are never closed: neither Terminals (of, holders) nor Browsers (state, pagesOf) reads a ferret pane’s processes or closes one; needs an additive close of the browsers left under a ferret’s pane (D2 #19)",
+      "failover and auto-move refuse: needs Ferrets’ additive move(ferret, runtime), today’s migrate (D2 #19)",
+      "auto-revive is wired through FerretsApi.resume but inert: needs a death cause on FerretSummary (D2 #19)",
+      "investigators refuse, so nothing is spent: needs Ferrets’ start taking a work folder and reports read back through summary(ferret) (D2 #19, #15)",
+      "restart is stop then resume with today’s refusals checked first: needs a Ferrets additive automatic resume that replaces a live pane (today’s replaceLiveTerminal)",
+      "nudges must carry actor warden (D2 #19); needs Conversation’s additive warden caller",
+      "the Jev guard answers not_set (NO_VAULT) and nothing leaves the machine: needs the kernel’s secrets.resolve (OwnSecret) (D2 #19)",
+      "PATCH /v1/warden/config answers 503 plugin_unavailable: needs the kernel config write port (D2 #16)",
+      "input_stuck and inbox_stuck never occur: Conversation’s send-path acts (resubmit, mark stalled, tracker and delivery looks) are not on 5.0",
+      "an orphaned card is told by a notice on one ferret’s own board (an ask), not on today’s single machine item that listed every orphan: needs Asks’ machine-wide item",
+      "a sub-ferret overdue on a report is flagged but never nudged, nor its parent told: overdue-report nudges need Ferrets’ waiting/done on FerretSummary and its signal route (today skipped a ferret that declared a wait or signalled done)"
+    ]
+  },
+  "pendingHalves": {
+    "agenda": ["app"],
+    "browsers": ["app"],
+    "conversation": ["app"],
+    "terminals": ["app"],
+    "warden": ["app"]
+  },
+  "pendingAppPorts": [
+    {
+      "plugin": "conversation",
+      "path": "packages/plugins/conversation/app",
+      "reason": "skeleton app half; the queue, stuck messages and links views port with item M"
+    },
+    {
+      "plugin": "agenda",
+      "path": "packages/plugins/agenda/app",
+      "reason": "separate app port in flight"
+    },
+    {
+      "plugin": "browsers",
+      "path": "packages/plugins/browsers/app",
+      "reason": "separate app port in flight"
+    },
+    {
+      "plugin": "terminals",
+      "path": "packages/plugins/terminals/app",
+      "reason": "shell daemon-client, grants and browser-link facilities"
+    },
+    {
+      "plugin": "terminals",
+      "path": "packages/plugins/terminals/tests/unit/app",
+      "reason": "shell daemon-client, grants and browser-link facilities"
+    },
+    {
+      "plugin": "terminals",
+      "path": "packages/plugins/terminals/tests/support/app",
+      "reason": "shell daemon-client, grants and browser-link facilities"
+    },
+    {
+      "plugin": "agenda",
+      "path": "packages/plugins/agenda/tests/unit/app",
+      "reason": "app-shell-fill React runtime and app test harness"
+    },
+    {
+      "plugin": "agenda",
+      "path": "packages/plugins/agenda/tests/support/app",
+      "reason": "app-shell-fill React runtime and app test harness"
+    },
+    {
+      "plugin": "warden",
+      "path": "packages/plugins/warden/app",
+      "reason": "@ferretry/app exports none of: the current-daemon hook, the paired-daemon list, ferrets of a daemon, device controls, a plugin client for another paired daemon, Markdown, ModelSelect, AnalyticsMetricChart, the grants/speed-ups/account-picker reads, the config-change effect; app/shell.ts placeholders throw until it does (the warden screen and settings tab, the daemon.status strip and verdicts panels, the ask-warden form)"
+    },
+    {
+      "plugin": "voice",
+      "path": "packages/plugins/voice/app/features/settings/use-machine-voice-cleanup.ts",
+      "reason": "kernel config routes (D2 #3) not declared yet: GET/PUT /v1/config/file, so machine voice.yaml clean-up and the setup Voice default cannot be read or written"
+    },
+    {
+      "plugin": "voice",
+      "path": "packages/plugins/voice/app/features/fleet/setup/voice-default.ts",
+      "reason": "kernel config routes (D2 #3) not declared yet: GET/PUT /v1/config/file, so machine voice.yaml clean-up and the setup Voice default cannot be read or written"
+    },
+    {
+      "plugin": "packs",
+      "path": "packages/plugins/packs/app/components/pack-call.tsx",
+      "reason": "the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card"
+    },
+    {
+      "plugin": "packs",
+      "path": "packages/plugins/packs/tests/unit/app/pack-call.test.tsx",
+      "reason": "the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card"
+    }
   ]
 }

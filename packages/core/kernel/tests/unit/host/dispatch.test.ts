@@ -122,6 +122,31 @@ describe('the dispatcher (§7.1, §7.6 step 6)', () => {
     expect(body(damaged).error).toContain('board/cards.json');
   });
 
+  test('live damage during a handler and after seal refuses the prepared answer at publication', async () => {
+    let state: Serving = { kind: 'serving' };
+    let damageDuringHandler = false;
+    const route = mounted('/v1/board', {
+      owner: { ...owner(), serving: () => state },
+      handle: async () => {
+        await Promise.resolve();
+        if (damageDuringHandler) state = { kind: 'damaged', files: ['board/cards.json'] };
+        return jsonResponse({ text: 'fixture-content' });
+      },
+    });
+    const table = dispatcher([route]);
+    const response = await table.dispatch(request('GET', '/v1/board'));
+    const { answerRecords } = await import('../../../host/session/wire/answer.ts');
+    const records = answerRecords(1, response);
+    state = { kind: 'damaged', files: ['board/cards.json'] };
+    expect(records[0]?.permit?.()).toBe(false);
+    expect(body(finalised(response)).code).toBe('store_damaged');
+    state = { kind: 'serving' };
+    damageDuringHandler = true;
+    const damaged = finalised(await table.dispatch(request('GET', '/v1/board')));
+    expect(body(damaged).code).toBe('store_damaged');
+    expect(damaged.body).not.toContain('fixture-content');
+  });
+
   test('a thrown ApiError keeps its status and code; anything else is a bare 500', async () => {
     const named = mounted('/v1/a', {
       handle: async () => {
@@ -202,6 +227,44 @@ describe('the final check on a guard: secrets route (§7.3)', () => {
     ).dispatch(request('GET', '/v1/pane'));
     expect(finalised(throwing).body).toContain(WITHHELD_SENTENCE);
   });
+
+  test('R516 R517 a thrown ApiError uses the guarded publication path, including its extra content', async () => {
+    const state = { generation: 1 };
+    const route = mounted('/v1/pane', {
+      guard: 'secrets',
+      handle: async () => {
+        await Promise.resolve();
+        state.generation++;
+        throw new ApiError(409, 'fixture-content', 'fixture', undefined, { value: 'fixture-content' });
+      },
+    });
+    const response = await dispatcher([route], recordingAdmission(), guardWith(state)).dispatch(
+      request('GET', '/v1/pane'),
+    );
+    expect(response.late).toBeDefined();
+    expect(finalised(response).body).toContain(WITHHELD_SENTENCE);
+    expect(finalised(response).body).not.toContain('fixture-content');
+  });
+
+  test('R515 R516 an allowed guarded error keeps its status and is withheld if a hold starts before publication', async () => {
+    const state = { generation: 1 };
+    const route = mounted('/v1/pane', {
+      guard: 'secrets',
+      handle: async () => {
+        throw new ApiError(409, 'fixture-content');
+      },
+    });
+    const response = await dispatcher([route], recordingAdmission(), guardWith(state)).dispatch(
+      request('GET', '/v1/pane'),
+    );
+    expect(finalised(response).status).toBe(409);
+    expect(finalised(response).body).toContain('fixture-content');
+    const { answerRecords } = await import('../../../host/session/wire/answer.ts');
+    const records = answerRecords(1, response);
+    state.generation++;
+    expect(records[0]?.permit?.()).toBe(false);
+    expect(finalised(response).body).toContain(WITHHELD_SENTENCE);
+  });
 });
 
 describe('the actor reaches kernel.act from admission (§4.7)', () => {
@@ -216,5 +279,160 @@ describe('the actor reaches kernel.act from admission (§4.7)', () => {
     });
     await dispatcher([route]).dispatch(request('GET', '/v1/act'));
     expect(seen).toBe('owner-tools');
+  });
+});
+
+describe('the dispatcher tells Gate about audited calls (Admission.recorded)', () => {
+  test('an output guard that stops a route or member handler produces no audit record', async () => {
+    for (const table of ['route', 'member'] as const) {
+      for (const guard of [
+        undefined,
+        {
+          stamp: () => {
+            throw new Error('guard unavailable');
+          },
+          stillShowable: () => true,
+        },
+      ]) {
+        const admission = recordingAdmission();
+        let handled = 0;
+        const statuses: number[] = [];
+        admission.recorded = call => void statuses.push(call.status);
+        const route = mounted('/v1/private', {
+          guard: 'secrets',
+          audit: { record: 'private.read' as never },
+          handle: async () => {
+            handled += 1;
+            return jsonResponse({ ok: true });
+          },
+        });
+        const d = new Dispatcher(
+          { admission: () => admission, outputGuard: () => guard, version: '5.0.0' },
+          {
+            routes: table === 'route' ? [route] : [],
+            sockets: [],
+            memberRoutes:
+              table === 'member'
+                ? [
+                    {
+                      ...route,
+                      member: 'unlocked',
+                      noStore: true,
+                      handle: async () => {
+                        handled += 1;
+                        return jsonResponse({ ok: true });
+                      },
+                    },
+                  ]
+                : [],
+          },
+        );
+        const input = request('GET', '/v1/private');
+        if (table === 'member') Object.assign(input, { principal: { kind: 'member' } });
+        expect((await d.dispatch(input)).status).toBe(409);
+        expect(handled).toBe(0);
+        expect(statuses).toEqual([]);
+      }
+    }
+  });
+
+  test.each(['route', 'member'] as const)(
+    'an executed guarded %s handler is recorded once for every outcome',
+    async table => {
+      const admission = recordingAdmission();
+      const statuses: number[] = [];
+      admission.recorded = call => void statuses.push(call.status);
+      let outcome: 'ok' | 'refused' | 'failed' | 'withheld' = 'ok';
+      let handled = 0;
+      let showable = true;
+      const handle = async () => {
+        handled += 1;
+        if (outcome === 'refused') throw new ApiError(409, 'conflict', 'conflict');
+        if (outcome === 'failed') throw new Error('failed');
+        if (outcome === 'withheld') showable = false;
+        return jsonResponse({ ok: true });
+      };
+      const route = mounted('/v1/private', { guard: 'secrets', audit: { record: 'private.read' as never }, handle });
+      const d = new Dispatcher(
+        {
+          admission: () => admission,
+          outputGuard: () => ({ stamp: () => ({ generation: 1, targets: [] }), stillShowable: () => showable }),
+          version: '5.0.0',
+        },
+        {
+          routes: table === 'route' ? [route] : [],
+          sockets: [],
+          memberRoutes: table === 'member' ? [{ ...route, member: 'unlocked', noStore: true, handle }] : [],
+        },
+      );
+      const input = request('GET', '/v1/private');
+      if (table === 'member') Object.assign(input, { principal: { kind: 'member' } });
+      for (const next of ['ok', 'refused', 'failed', 'withheld'] as const) {
+        outcome = next;
+        await d.dispatch(input);
+      }
+      expect(handled).toBe(4);
+      expect(statuses).toEqual([200, 409, 500, 409]);
+    },
+  );
+
+  const audited = (handle: MountedRoute['handle']): MountedRoute =>
+    mounted('/v1/grants', { method: 'PATCH', audit: { record: 'grants.changed' as never }, handle });
+
+  test('called once per request with the final status and the full call: success and the handler’s own refusal', async () => {
+    const admission = recordingAdmission();
+    const seen: { status: number; actor?: string; path: string; standing?: object; response?: unknown }[] = [];
+    admission.recorded = call =>
+      void seen.push({
+        status: call.status,
+        actor: call.actor,
+        path: call.descriptor.path,
+        standing: call.standing,
+        response: call.response,
+      });
+    let refuse = false;
+    const route = audited(async () => {
+      if (refuse) throw new ApiError(409, 'no', 'conflict');
+      return jsonResponse({ ok: true });
+    });
+    const d = dispatcher([route], admission);
+    await d.dispatch(request('PATCH', '/v1/grants'));
+    refuse = true;
+    const refused = await d.dispatch(request('PATCH', '/v1/grants'));
+    expect(refused.status).toBe(409);
+    expect(seen.map(entry => entry.status)).toEqual([200, 409]);
+    expect(seen[0]).toMatchObject({ actor: 'owner-tools', path: '/v1/grants', standing: { actor: 'owner' } });
+    expect((seen[0]?.response as { status: number } | undefined)?.status).toBe(200);
+  });
+
+  test('a handler failure is recorded as its 500; admission refusals and skip routes are not recorded', async () => {
+    const admission = recordingAdmission(path => path !== '/v1/denied');
+    const statuses: number[] = [];
+    admission.recorded = call => void statuses.push(call.status);
+    const d = dispatcher(
+      [
+        audited(async () => {
+          throw new Error('boom');
+        }),
+        mounted('/v1/denied', { method: 'PATCH', audit: { record: 'grants.changed' as never } }),
+        mounted('/v1/plain'),
+      ],
+      admission,
+    );
+    expect((await d.dispatch(request('PATCH', '/v1/grants'))).status).toBe(500);
+    expect((await d.dispatch(request('PATCH', '/v1/denied'))).status).toBe(401);
+    await d.dispatch(request('GET', '/v1/plain'));
+    expect(statuses).toEqual([500]);
+  });
+
+  test('a recorder that throws never changes the answer', async () => {
+    const admission = recordingAdmission();
+    admission.recorded = () => {
+      throw new Error('audit down');
+    };
+    const response = await dispatcher([audited(async () => jsonResponse({ ok: true }))], admission).dispatch(
+      request('PATCH', '/v1/grants'),
+    );
+    expect(response.status).toBe(200);
   });
 });

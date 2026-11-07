@@ -29,7 +29,10 @@ cd "${root_dir}"
 # Each entry names WHY its file may reach the network without it, and an entry whose file no longer makes
 # such a call is a failure, so the list can only shrink honestly. The app shell adds its one wrapper and
 # its service worker here, with their reasons, when it lands.
-declare -A call_allowlist=()
+declare -A call_allowlist=(
+  ['packages/app/src/worker/service-worker.ts']='the service worker fetches this site'"'"'s own signed release files (FetchReleaseNetwork, pinned to its own origin and refusing a cross-origin answer) and passes an unanswered same-origin request through unchanged; it never builds a daemon request'
+  ['packages/plugins/voice/app/shell-voice.ts']='defines browserFetch, the one wrapper around the builtin; speech-model downloads and speed-up provider calls never talk to a daemon (every daemon request goes through the plugin client: useDaemonFetch refuses rather than fall back to it)'
+)
 
 scan_files=()
 while IFS= read -r -d '' path; do

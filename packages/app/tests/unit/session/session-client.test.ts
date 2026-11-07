@@ -387,6 +387,29 @@ describe('a streaming relay session', () => {
 });
 
 describe('a serving relay session', () => {
+  it('R575 a forwarded 4440 while serving keeps the rendezvous close sentence', async () => {
+    for (const reason of ['', 'concluded']) {
+      const { session } = await serving();
+      const pending = failure(session.request({ method: 'GET', path: '/v1/sessions' }));
+      await session.receiveBinary(controlFrame(sessionId, { t: 'closed', code: 4440, reason }));
+      const error = await pending;
+      should(error.code).equal(4440);
+      should(error.message).equal(`the rendezvous ended this session: 4440 ${reason}`);
+    }
+  });
+
+  it('R575 a forwarded 4440 while awaiting-credential reports the missing sealed outcome', async () => {
+    for (const reason of ['', 'concluded']) {
+      const { session, socket, daemon } = await opened();
+      await session.receiveBinary(await daemon.answer(socket.sent[0] as Uint8Array));
+      const pending = failure(session.ready());
+      await session.receiveBinary(controlFrame(sessionId, { t: 'closed', code: 4440, reason }));
+      const error = await pending;
+      should(error.code).equal(4440);
+      should(error.message).containEql('without stating an outcome inside the channel');
+    }
+  });
+
   it('should answer a request by its own identifier, headers and body absent or present', async () => {
     const { session, daemon } = await serving();
     const first = session.request({ method: 'GET', path: '/v1/sessions' });

@@ -135,7 +135,7 @@ export const PAIRING_REFUSED_REASON = 'pairing_refused' as const;
  * exactly or a split write becomes a `4400`, so this is the protocol package's own derivation called
  * with the protocol's own plaintext ceiling — one source, one number, no second opinion here.
  */
-export const RELAY_DATA_BYTE_BUDGET = relayDataByteBudget(MAX_PLAINTEXT_BYTES);
+const RELAY_DATA_BYTE_BUDGET = relayDataByteBudget(MAX_PLAINTEXT_BYTES);
 
 /**
  * How many whole requests may wait for credit on one session before the next one is refused, unsent.
@@ -409,7 +409,7 @@ export interface RelayTunnelAnswer {
  * stream modes sign this session's transcript to say which grant they hold, and the pairing mode signs
  * it to prove possession of the public key it is registering.
  */
-export type RelaySessionMode =
+type RelaySessionMode =
   /** A request session: any number of `req`, each answered by its own `id`. */
   | { readonly kind: 'auth'; readonly device: SessionDeviceClaim }
   /** A pairing session: one redemption attempt, one sealed outcome, then the session closes. */
@@ -1251,6 +1251,14 @@ export class RelayClientSession {
         await this.#onReady(frame.sessionId);
         return;
       case 'closed':
+        // R575: a forwarded close owes the same sealed outcome as a carrier close.
+        if (
+          message.code === RELAY_SESSION_CONCLUDED_CLOSE_CODE &&
+          (this.#phase === 'awaiting-credential' || this.#phase === 'streaming')
+        ) {
+          this.#quietly(message.code, this.#closedWithoutOutcome(message.code, message.reason));
+          return;
+        }
         // A daemon that speaks another session dialect says so in its own words; passed through as-is.
         if (message.code === RELAY_CLOSE_CODES.versionUnsupported) {
           this.#quietly(RELAY_CLOSE_CODES.versionUnsupported, message.reason);

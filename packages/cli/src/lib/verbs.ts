@@ -18,8 +18,37 @@ const SHELL_VERB_LINES = [
   { verb: 'doctor', summary: 'check this fy against the daemon, plugin by plugin' },
   { verb: 'daemon status', summary: 'is the daemon up, which build, which plugins agree' },
   { verb: 'daemon start', summary: 'start the daemon now (any other command starts it by itself)' },
-  { verb: 'daemon stop', summary: 'stop the daemon' },
-  { verb: 'daemon restart', summary: 'restart the daemon; ferrets keep running' },
+  { verb: 'daemon stop', summary: 'stop the daemon and wait until it has released its address' },
+  {
+    verb: 'daemon restart',
+    summary:
+      'stop the daemon, wait for it to go quiet, then start it again; ferrets keep running (--when-idle waits for every turn)',
+  },
+  { verb: 'daemon install', summary: 'install the user service definition and start the daemon under it' },
+  { verb: 'daemon uninstall', summary: 'stop the daemon and remove its user service definition' },
+  { verb: 'daemon logs', summary: 'print the daemon log (-f follows it)' },
+  { verb: 'daemon which', summary: 'show the installed and currently running daemon identities' },
+  {
+    verb: 'daemon reset',
+    summary: 'stop the daemon and remove ALL of its persistent data on this host (--yes skips the typed word)',
+  },
+  {
+    verb: 'update',
+    summary: 'update this machine, restart its daemon, and roll back if the new version does not serve',
+  },
+  { verb: 'machine', summary: 'this machine: its tools, its agent permissions, export and clone (--json)' },
+  {
+    verb: 'machine set',
+    summary:
+      'change a machine setting: agent-permissions auto|skip, default-runtime <name>|automatic, agent-control terminals|browsers|files|settings|scripts on|off, auto-resume on|off, agenda-mode on|off',
+  },
+  { verb: 'machine install', summary: 'install Claude Code or Codex on this machine (shows the command first)' },
+  { verb: 'machine export', summary: "print this machine's setup for `machine clone`: no login and no history" },
+  {
+    verb: 'machine clone',
+    summary:
+      'copy a setup exported from another machine; a repeat copy is an update that shows only what differs (--dry-run to look first)',
+  },
   { verb: 'ask', summary: 'list the asks waiting for an answer, and answer one' },
 ] as const satisfies readonly { readonly verb: string; readonly summary: string }[];
 

@@ -10,18 +10,8 @@
 /** Wire identifier carried in the rendezvous claim so a peer can refuse an unknown dialect. */
 export const RELAY_PROTOCOL_ID = 'ferretry-relay/1' as const;
 
-/**
- * The END-TO-END dialect: the handshake and every sealed tunnel record carry this, never the claim.
- *
- * It moved to `/2` when the client started proving a device key, and the rendezvous identifier above
- * deliberately did NOT: nothing a relay parses changed, so no deployed relay has to be replaced and
- * none can tell the two dialects apart. A peer speaking the other end-to-end dialect is refused at the
- * handshake with `4426` — there is no negotiation and nothing older to fall back to.
- */
+/** The end-to-end dialect carried by the handshake and every sealed record. */
 export const SESSION_PROTOCOL_ID = 'ferretry-relay/2' as const;
-
-/** The end-to-end dialect a pre-device-key peer speaks, recognised only to refuse it in words. */
-export const PREVIOUS_SESSION_PROTOCOL_ID = 'ferretry-relay/1' as const;
 
 /** First byte of every frame. Not ASCII, so a text frame accidentally sent here fails loudly. */
 export const FRAME_MAGIC = 0xfe as const;
