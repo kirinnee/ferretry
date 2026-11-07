@@ -1,6 +1,18 @@
-import { parseRuntimeIds, type RuntimeIds } from '@ferretry/fleet';
-import type { RuntimeNamesPort } from '../../lib/fleet/start-resolution.ts';
-import type { AccountInventoryPort, CoreAccount, FileSystemPort } from '../../lib/index.ts';
+import { parseRuntimeIds, type RuntimeIds } from '../lib/account/ids.ts';
+import type { HostFiles } from './ports.ts';
+
+/**
+ * GAP(ferrets): the start-resolution port that reads runtime names and the account inventory port belong to Ferrets
+ * (`lib/fleet/start-resolution.ts`, `lib/index.ts` of the old daemon); these are the one method of each that this file
+ * satisfies, kept local until the Ferrets contract names them.
+ */
+export interface RuntimeNamesPort {
+  ids(): Promise<RuntimeIds | undefined>;
+}
+
+export interface AccountInventoryPort<Account> {
+  accounts(): Promise<readonly Account[]>;
+}
 
 /**
  * The fleet's `ids.json` (docs/design/account-model.md R6), read so a start can resolve a runtime by
@@ -12,7 +24,7 @@ import type { AccountInventoryPort, CoreAccount, FileSystemPort } from '../../li
  */
 export class RuntimeIdsFile implements RuntimeNamesPort {
   constructor(
-    private readonly files: FileSystemPort,
+    private readonly files: Pick<HostFiles, 'readText'>,
     private readonly path: string,
   ) {}
 
@@ -33,13 +45,13 @@ export class RuntimeIdsFile implements RuntimeNamesPort {
  * The fleet's account inventory with its runtime names beside it: the ONE inventory a daemon shares,
  * so every start resolves an old wrapper name without any call site passing a second thing.
  */
-export class RuntimeAwareAccountInventory implements AccountInventoryPort, RuntimeNamesPort {
+export class RuntimeAwareAccountInventory<Account> implements AccountInventoryPort<Account>, RuntimeNamesPort {
   constructor(
-    private readonly inventory: AccountInventoryPort,
+    private readonly inventory: AccountInventoryPort<Account>,
     private readonly names: RuntimeNamesPort,
   ) {}
 
-  async accounts(): Promise<readonly CoreAccount[]> {
+  async accounts(): Promise<readonly Account[]> {
     return await this.inventory.accounts();
   }
 

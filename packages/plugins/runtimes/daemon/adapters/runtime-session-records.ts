@@ -7,16 +7,30 @@
  * storage's locked read-modify-write, the same one a migration uses, so a writer queued behind it reads
  * the new name and one queued ahead of it is what it reads.
  */
-import { SessionStateSchema } from '@ferretry/protocol';
+import { z } from 'zod';
+import { SESSION_STATUSES } from '../lib/service/foreign.ts';
 import {
   type RuntimeSessionRecord,
   renamedSessionConfig,
   type SessionRuntimeRename,
 } from '../lib/service/runtime-sessions.ts';
-import type { DaemonStorage } from '../storage/session-storage.ts';
 
-/** What this needs of the session storage. */
-export type RuntimeSessionStorage = Pick<DaemonStorage, 'listSessions' | 'readConfig' | 'readState' | 'updateConfig'>;
+/**
+ * What this needs of the session storage.
+ *
+ * GAP(ferrets): the daemon's session storage (`session-storage.ts`) is Ferrets'; this is the four calls the
+ * runtime change makes of it, kept local until the Ferrets contract names a store for them.
+ */
+export interface RuntimeSessionStorage {
+  listSessions(): readonly { readonly id: string }[];
+  readConfig(id: string): Promise<unknown>;
+  readState(id: string): Promise<unknown>;
+  /** The locked read-modify-write of one session's config. */
+  updateConfig(id: string, change: (current: unknown) => unknown): Promise<unknown>;
+}
+
+/** The one field of a session's state this reads. GAP(ferrets): today's `SessionStateSchema` is Ferrets'. */
+const SessionStatusOnlySchema = z.object({ status: z.enum(SESSION_STATUSES) });
 
 const text = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined);
 
@@ -26,7 +40,7 @@ function recordOf(id: string, config: unknown, state: unknown): RuntimeSessionRe
   const fields = config as Readonly<Record<string, unknown>>;
   const agent = text(fields.agent);
   const harness = fields.harness;
-  const status = SessionStateSchema.safeParse(state);
+  const status = SessionStatusOnlySchema.safeParse(state);
   if (agent === undefined || (harness !== 'claude' && harness !== 'codex') || !status.success) return undefined;
   const executable = Array.isArray(fields.command) ? text(fields.command[0]) : undefined;
   return {

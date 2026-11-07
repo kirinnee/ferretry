@@ -7,14 +7,17 @@
  * parser of the account rows would be a second opinion about the launch inventory. So this hands back
  * the fleet library's own parse, and the inventory stays the one reader of what can be launched.
  */
-import { type FleetManifest, FleetManifestSchema } from '@ferretry/fleet';
-import type { FileSystemPort } from '../../lib/index.ts';
+import { type FleetManifest, FleetManifestSchema } from '../lib/manifest.ts';
+import type { HostFiles } from './ports.ts';
 
 /**
  * The manifest, or `undefined` when no apply has published one yet. Throws, naming the file, when it
  * exists and is not a manifest: an unreadable manifest is damaged evidence, never an empty fleet.
  */
-export async function readFleetManifest(files: FileSystemPort, path: string): Promise<FleetManifest | undefined> {
+export async function readFleetManifest(
+  files: Pick<HostFiles, 'readText'>,
+  path: string,
+): Promise<FleetManifest | undefined> {
   const text = await files.readText(path);
   if (text === undefined) return undefined;
   let payload: unknown;

@@ -1,6 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { closeSync, constants, fchmodSync, fstatSync, openSync, readSync, writeSync } from 'node:fs';
-import { cp, lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { FleetManifestSchema } from '../lib/manifest.ts';
@@ -25,21 +23,35 @@ import {
   type SettingsObject,
   serializeSettings,
 } from '../lib/settings.ts';
-import { type SharedHistoryMigration, SharedHistoryUnavailableError } from '../lib/shared-history.ts';
-import { fencedBy } from '../lib/state-home-fence.ts';
-import type { FileIdentity, FolderDisk, GuardedFolder } from '../lib/state-home-guard.ts';
-import { type FleetApplyLock, type FleetApplyLockOptions, fleetApplyLockFor } from './apply-lock.ts';
-import { ConfinedDestinationError, DestinationFolders, readFolderFile } from './destination-folders.ts';
-import {
-  assertSourceUnfenced,
-  copyFencedSourceInto,
-  FencedSourceError,
-  type ResolvedSourceFence,
-  resolveSourceFence,
-  type SourceFence,
-} from './fenced-source.ts';
-import { FileMutationJournal, isMutationReservedName, STAGE_PREFIX } from './mutation-journal.ts';
-import { fileIdentityOf } from './node-guard-disk.ts';
+import type {
+  ApplyLock,
+  ApplyLockOptions,
+  DestinationFolders,
+  FileIdentity,
+  FolderDisk,
+  GuardedFolder,
+  MutationJournal,
+  ProvisionerDisk,
+  ProvisionerHost,
+  ProvisionerKernel,
+  ResolvedSourceFence,
+  SharedHistoryPooling,
+  SourceFence,
+} from './ports.ts';
+
+/*
+ * GAP(kernel): this provisioner is written over a `ProvisionerHost` (`./ports.ts`), not over `node:fs`. The apply claim,
+ * the mutation journal, the checked destination folders, the source fence and the descriptor calls are kernel-owned
+ * (fence/descriptor io) and not available to a plugin; none of them is copied here. The shared-history migration is
+ * `conversation`'s (GAP(conversation)). The order of operations, the checks and every sentence are today's.
+ */
+
+/** One account home a shared-history preview could not read. GAP(conversation): the preview shape is the pool's. */
+interface HistoryRefusal {
+  readonly account: string;
+  readonly home: string;
+  readonly reason: string;
+}
 
 const MODE_BITS = 0o7777;
 
@@ -77,12 +89,17 @@ const isSingleComponent = (name: string): boolean =>
  * account's own folder, which its harness can write, so a `chmod` by path could be redirected by a link swapped in
  * there — onto a file in the state home. A link there now is refused (`ELOOP`) instead.
  */
-async function chmodStaged(folder: GuardedFolder, staged: string, mode: number): Promise<void> {
+async function chmodStaged(
+  disk: ProvisionerDisk,
+  folder: GuardedFolder,
+  staged: string,
+  mode: number,
+): Promise<void> {
   const descriptor = await folder.openFile(staged, 'read');
   try {
-    fchmodSync(descriptor, mode);
+    disk.fchmod(descriptor, mode);
   } finally {
-    closeSync(descriptor);
+    disk.close(descriptor);
   }
 }
 
@@ -138,19 +155,18 @@ const traversesDestination = (operation: FleetWriteOperation): boolean =>
  * and the retract treats it as a reason to keep the tree rather than a reason to remove it.
  */
 async function identityOf(
+  disk: ProvisionerDisk,
   information: FileIdentity,
   read: () => Promise<number>,
   shown: string,
 ): Promise<string | undefined> {
   if (information.kind === 'directory') return `dir:${information.device}:${information.inode}`;
   if (information.size > MAX_PUBLISH_DIGEST_BYTES) return undefined;
-  const digest = contentProof(await read(), information.size, shown);
+  const digest = contentProof(disk, await read(), information.size, shown);
   if (digest === undefined) return undefined;
   const { device, inode, size, modified, mode, owner, group } = information;
   return `file:${device}:${inode}:${size}:${String(modified)}:${mode}:${owner}:${group}:${digest}`;
 }
-
-const READ_PROOF = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
 /**
  * Hash exactly the bytes the stat said were there, and refuse if the file turns out to differ.
@@ -179,20 +195,20 @@ const READ_PROOF = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBL
  * Synchronous for the reason `readRegularFile` is: every file of a published tree is proved, and Bun's
  * asynchronous file-handle calls cost more than reading a small file whole.
  */
-function contentProof(descriptor: number, size: number, shown: string): string | undefined {
+function contentProof(disk: ProvisionerDisk, descriptor: number, size: number, shown: string): string | undefined {
   try {
-    if (!fstatSync(descriptor).isFile()) throw new Error(`refusing to read ${shown}: it is no longer a regular file`);
+    if (!disk.isRegular(descriptor)) throw new Error(`refusing to read ${shown}: it is no longer a regular file`);
     const bytes = Buffer.alloc(size);
     let filled = 0;
     while (filled < size) {
-      const bytesRead = readSync(descriptor, bytes, filled, size - filled, filled);
+      const bytesRead = disk.readAt(descriptor, bytes, filled, size - filled, filled);
       if (bytesRead === 0) return undefined;
       filled += bytesRead;
     }
-    if (readSync(descriptor, Buffer.alloc(1), 0, 1, size) !== 0) return undefined;
+    if (disk.readAt(descriptor, Buffer.alloc(1), 0, 1, size) !== 0) return undefined;
     return new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
   } finally {
-    closeSync(descriptor);
+    disk.close(descriptor);
   }
 }
 
@@ -222,23 +238,23 @@ function endsCanonicalResolution(error: unknown): boolean {
 }
 
 /** The canonical form of a directory, or of its nearest existing ancestor plus the missing tail. */
-async function canonicalDirectory(directory: string): Promise<string> {
+async function canonicalDirectory(disk: ProvisionerDisk, directory: string): Promise<string> {
   const parent = path.dirname(directory);
   if (parent === directory) return directory;
   try {
-    return await realpath(directory);
+    return await disk.realpath(directory);
   } catch (error) {
     if (!endsCanonicalResolution(error)) throw error;
-    return path.join(await canonicalDirectory(parent), path.basename(directory));
+    return path.join(await canonicalDirectory(disk, parent), path.basename(directory));
   }
 }
 
 /** Canonicalize every ancestor while leaving the final entry itself lexical. */
-async function canonicalPath(target: string): Promise<string> {
+async function canonicalPath(disk: ProvisionerDisk, target: string): Promise<string> {
   const resolved = path.resolve(target);
   const parent = path.dirname(resolved);
   if (parent === resolved) return resolved;
-  return path.join(await canonicalDirectory(parent), path.basename(resolved));
+  return path.join(await canonicalDirectory(disk, parent), path.basename(resolved));
 }
 
 function isInside(root: string, candidate: string): boolean {
@@ -260,9 +276,11 @@ export class FileFleetProvisioner implements FleetProvisioner {
   /** Tail of the serialized apply chain. Reads and previews are unaffected. */
   private queue: Promise<void> = Promise.resolve();
   constructor(
+    /** The disk calls and the kernel's checked-folder helpers this provisioner is parameterised over (`./ports.ts`). */
+    private readonly host: ProvisionerHost,
     allowedRoots: readonly string[],
-    private readonly sharedHistory?: SharedHistoryMigration,
-    private readonly lockOptions: FleetApplyLockOptions = {},
+    private readonly sharedHistory?: SharedHistoryPooling,
+    private readonly lockOptions: ApplyLockOptions = {},
     /**
      * The daemon's own directories, which no copy or link may take a source from
      * (`../lib/state-home-fence.ts`). Absent, sources are not fenced — only a caller with no state
@@ -291,7 +309,15 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
   /** The source fence as the disk has it now, or `undefined` when sources are not fenced. */
   private async resolvedSourceFence(): Promise<ResolvedSourceFence | undefined> {
-    return this.sourceFence === undefined ? undefined : await resolveSourceFence(this.sourceFence);
+    return this.sourceFence === undefined ? undefined : await this.kernel.resolveSourceFence(this.sourceFence);
+  }
+
+  private get disk(): ProvisionerDisk {
+    return this.host.disk;
+  }
+
+  private get kernel(): ProvisionerKernel {
+    return this.host.kernel;
   }
 
   /**
@@ -300,7 +326,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
    * `tops` are the runtimes' own folders, below which a platform without descriptor paths moves and removes nothing.
    */
   private async destinationFolders(tops: readonly string[] = []): Promise<DestinationFolders> {
-    return new DestinationFolders((await this.resolvedSourceFence())?.homes, this.destinationDisk, tops);
+    return this.kernel.destinationFolders((await this.resolvedSourceFence())?.homes, this.destinationDisk, tops);
   }
 
   /**
@@ -311,8 +337,8 @@ export class FileFleetProvisioner implements FleetProvisioner {
    * keyed on them would give each caller its own lock and serialize nothing. Every caller plans
    * against the same `manifestPath`, so its directory is the one name they all agree on.
    */
-  private lockFor(plan: FleetApplyPlan): FleetApplyLock {
-    return fleetApplyLockFor(plan.manifestPath, this.lockOptions);
+  private lockFor(plan: FleetApplyPlan): ApplyLock {
+    return this.kernel.applyLockFor(plan.manifestPath, this.lockOptions);
   }
 
   async preview(plan: FleetApplyPlan): Promise<FleetApplyPreview> {
@@ -386,7 +412,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
   ): Promise<FleetApplyResult> {
     await this.preflightApply(plan, documents);
 
-    const journal = new FileMutationJournal(
+    const journal = this.kernel.mutationJournal(
       target => this.assertWritablePath(target),
       await this.destinationFolders(plan.manifest.accounts.map(account => account.home)),
     );
@@ -418,8 +444,8 @@ export class FileFleetProvisioner implements FleetProvisioner {
           } catch (error) {
             // Refused before anything was moved or removed (see `ConfinedDestinationError`): this operation is
             // left as the disk has it, and the result says so.
-            if (!(error instanceof ConfinedDestinationError)) throw error;
-            skipped.push({ path: operation.path, reason: error.message });
+            if (!this.kernel.isConfinedDestination(error)) throw error;
+            skipped.push({ path: operation.path, reason: reasonOf(error) });
             pruned = undefined;
           }
           await journal.sealOperation(mark);
@@ -459,11 +485,11 @@ export class FileFleetProvisioner implements FleetProvisioner {
     const sharedHistory = [];
     for (const request of plan.sharedHistoryRequests ?? []) {
       try {
-        sharedHistory.push(await this.sharedHistoryMigration().materialize(request));
+        sharedHistory.push(await this.sharedHistoryPooling().materialize(request));
       } catch (error) {
         // Not made, and said so: the rest of the apply stands (`SharedHistoryUnavailableError`).
-        if (error instanceof SharedHistoryUnavailableError) {
-          skipped.push({ path: path.join(request.poolRoot, request.kind), reason: error.message });
+        if (this.sharedHistoryPooling().isUnavailable(error)) {
+          skipped.push({ path: path.join(request.poolRoot, request.kind), reason: reasonOf(error) });
           continue;
         }
         throw new FleetApplyFailureError({
@@ -486,7 +512,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
   }
 
   /** Undo the batch and classify what the host is now, which is the only thing a caller can act on. */
-  private async rollback(journal: FileMutationJournal, stage: string, error: unknown): Promise<Error> {
+  private async rollback(journal: MutationJournal, stage: string, error: unknown): Promise<Error> {
     const { unrestored, displaced } = await journal.rollback();
     const reason = error instanceof Error ? error.message : String(error);
     // "Rolled back" is a claim about the host, not about the fleet: anything of somebody else's
@@ -504,7 +530,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     });
   }
 
-  private async writeDocument(document: FleetDocumentWrite, journal: FileMutationJournal): Promise<void> {
+  private async writeDocument(document: FleetDocumentWrite, journal: MutationJournal): Promise<void> {
     await this.assertWritablePath(document.path);
     await journal.captureDirectory(path.dirname(document.path));
     await journal.capture(document.path);
@@ -522,13 +548,15 @@ export class FileFleetProvisioner implements FleetProvisioner {
     await this.writeFileAtomically(document.path, document.content, document.mode, journal);
   }
 
-  private async assertExpected(document: FleetDocumentWrite, journal: FileMutationJournal): Promise<void> {
+  private async assertExpected(document: FleetDocumentWrite, journal: MutationJournal): Promise<void> {
     const found =
       (await journal.withBackup(document.path, async (folder, backup) => {
         // A document that was a link is the owner's own (a config file kept in a dotfiles checkout), read as the
         // link leads; anything else is read through its folder without following a link put there since.
         const linked = (await folder.describe(backup))?.kind === 'link';
-        const bytes = linked ? await readFile(await folder.entry(backup)) : await readFolderFile(folder, backup);
+        const bytes = linked
+          ? await this.disk.readBytes(await folder.entry(backup))
+          : await this.kernel.readFolderFile(folder, backup);
         return new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
       })) ?? ABSENT_DOCUMENT_REVISION;
     if (found === document.expect) return;
@@ -596,18 +624,18 @@ export class FileFleetProvisioner implements FleetProvisioner {
         if (pending.has(source) || pendingFolders.has(source)) {
           // Not on the disk yet — nor, on a first apply, the asset tree it lands in — so only its name can be
           // asked, against the fence as configured; the guard asks again when it is copied.
-          const home = this.sourceFence === undefined ? undefined : fencedBy(this.sourceFence, source);
-          if (home !== undefined) throw new FencedSourceError(operation.source, 'state-home', home);
-        } else if (fence === undefined) await stat(operation.source);
+          const home = this.sourceFence === undefined ? undefined : this.kernel.fencedBy(this.sourceFence, source);
+          if (home !== undefined) throw this.kernel.sourceRefusal(operation.source, 'state-home', home);
+        } else if (fence === undefined) await this.disk.statIsDirectory(operation.source);
         // Every hop and the real path, before anything is written: a fenced source refuses the apply whole.
-        else await assertSourceUnfenced(fence, operation.source);
+        else await this.kernel.assertSourceUnfenced(fence, operation.source);
         continue;
       }
       if (operation.kind !== 'settings') continue;
       for (const layer of operation.layers) {
         if (layer.from === 'inline') continue;
         const written = pending.get(path.resolve(layer.path));
-        parseSettings(written ?? (await readFile(layer.path, 'utf8')), operation.format);
+        parseSettings(written ?? (await this.disk.readText(layer.path)), operation.format);
       }
     }
   }
@@ -618,8 +646,8 @@ export class FileFleetProvisioner implements FleetProvisioner {
       const refusals = preview.refusals;
       if (refusals.length === 0) continue;
       throw new Error(
-        `refusing to migrate ${preview.kind} history while ${refusals.length} account home(s) cannot be read: ${refusals
-          .map(refusal => `${refusal.account} (${refusal.home}): ${refusal.reason}`)
+        `refusing to pool ${preview.kind} history while ${refusals.length} account home(s) cannot be read: ${refusals
+          .map((refusal: HistoryRefusal) => `${refusal.account} (${refusal.home}): ${refusal.reason}`)
           .join('; ')}`,
       );
     }
@@ -638,7 +666,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     operations: readonly FleetWriteOperation[],
     sharedHistory: FleetApplyPreview['sharedHistory'],
   ): Promise<readonly FleetWriteOperation[]> {
-    const refusedHomes = sharedHistory.flatMap(preview => preview.refusals.map(refusal => refusal.home));
+    const refusedHomes = sharedHistory.flatMap(preview => preview.refusals.map((refusal: HistoryRefusal) => refusal.home));
     // An unresolvable state home, or an asset opening that reaches a protected one, refuses the plan here
     // as it does at apply — even when no operation reads a source.
     await this.resolvedSourceFence();
@@ -662,21 +690,21 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
   private async previewSharedHistory(plan: FleetApplyPlan): Promise<FleetApplyPreview['sharedHistory']> {
     if ((plan.sharedHistoryRequests?.length ?? 0) === 0) return [];
-    const migration = this.sharedHistoryMigration();
+    const pooling = this.sharedHistoryPooling();
     const previews = [];
     for (const request of plan.sharedHistoryRequests ?? []) {
       try {
-        previews.push(await migration.preview(request));
+        previews.push(await pooling.preview(request));
       } catch (error) {
         // A migration this host cannot make safely is left out of the plan, not a reason to refuse the apply: the
         // apply reports it as skipped.
-        if (!(error instanceof SharedHistoryUnavailableError)) throw error;
+        if (!pooling.isUnavailable(error)) throw error;
       }
     }
     return previews;
   }
 
-  private sharedHistoryMigration(): SharedHistoryMigration {
+  private sharedHistoryPooling(): SharedHistoryPooling {
     if (this.sharedHistory === undefined) {
       throw new Error('shared-history operations were planned without a shared-history filesystem adapter');
     }
@@ -697,16 +725,16 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
   private async isWritablePath(target: string, followFinalComponent = false): Promise<boolean> {
     const canonical = followFinalComponent
-      ? await canonicalDirectory(path.resolve(target))
-      : await canonicalPath(target);
-    const roots = await Promise.all(this.allowedRoots.map(canonicalDirectory));
+      ? await canonicalDirectory(this.disk, path.resolve(target))
+      : await canonicalPath(this.disk, target);
+    const roots = await Promise.all(this.allowedRoots.map(async root => await canonicalDirectory(this.disk, root)));
     return roots.some(root => isInside(root, canonical));
   }
 
   /** Returns pruned names, or `undefined` when filesystem evidence proves the operation a no-op. */
   private async applyOperation(
     operation: FleetWriteOperation,
-    journal: FileMutationJournal,
+    journal: MutationJournal,
   ): Promise<readonly string[] | undefined> {
     if (operation.kind === 'directory') {
       await journal.captureDirectory(operation.path, operation.mode);
@@ -769,7 +797,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
   }
 
   /** Removes the entry at `target` — a file, a link or a tree — through its checked folder, never following a link. */
-  private async removeEntry(target: string, journal: FileMutationJournal): Promise<void> {
+  private async removeEntry(target: string, journal: MutationJournal): Promise<void> {
     await journal.folders.within(path.dirname(target), async folder => {
       if (folder !== undefined) await journal.folders.remove(folder, path.basename(target));
     });
@@ -779,7 +807,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
   private async writeEntry(
     operation: Extract<FleetWriteOperation, { readonly kind: 'symlink' | 'copy' | 'file' }>,
     folder: GuardedFolder,
-    journal: FileMutationJournal,
+    journal: MutationJournal,
   ): Promise<void> {
     const leaf = path.basename(operation.path);
     if (operation.kind === 'symlink') {
@@ -790,7 +818,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       // Asked again at the write: what the link leads to is read later by the harness, so this is the last
       // moment the daemon can refuse it. A credential link is the planner's own and leads into the home.
       const fence = operation.dangling === true ? undefined : await this.resolvedSourceFence();
-      if (fence !== undefined) await assertSourceUnfenced(fence, operation.source);
+      if (fence !== undefined) await this.kernel.assertSourceUnfenced(fence, operation.source);
       await folder.symlink(operation.source, leaf);
       return;
     }
@@ -798,30 +826,27 @@ export class FileFleetProvisioner implements FleetProvisioner {
     if (operation.kind === 'copy') {
       // A copy stages a tree beside the destination and removes it after, by every name in it: where that removal
       // could be redirected (`ConfinedDestinationError`), nothing is staged at all.
-      if (await journal.folders.confined(folder)) throw new ConfinedDestinationError(operation.path);
+      if (await journal.folders.confined(folder)) throw this.kernel.confinedDestination(operation.path);
       // Profile assets may be files or directories. Dereference every source link: a copied account
       // home must not reintroduce a symlink beneath FY_HOME, where StateFileSystem deliberately
       // rejects symlink components to prevent an operation escaping its state-home boundary.
-      const source = await stat(operation.source);
+      const sourceIsDirectory = await this.disk.statIsDirectory(operation.source);
       // Built beside the destination, so publishing it never crosses a device. Staging is what keeps
       // a *half-copied* tree from ever being live: the copy either completes into the staged name or
       // fails there, and the destination survives untouched either way. It is not what makes the
       // publish itself atomic — see `publish`, which materialises a directory entry by entry with
       // exclusive primitives and unwinds exactly what it created if it cannot finish.
-      const staged = `${STAGE_PREFIX}${randomUUID()}`;
+      const staged = `${this.kernel.stagePrefix}${randomUUID()}`;
       try {
         // Fenced: each file is checked and read through the descriptor that was checked, so a source
         // swapped for a link into the state home after the preflight copies nothing.
         const fence = await this.resolvedSourceFence();
         if (fence === undefined)
-          await cp(operation.source, await folder.entry(staged), {
-            recursive: source.isDirectory(),
-            dereference: true,
-          });
-        else await copyFencedSourceInto(fence, operation.source, folder, staged);
+          await this.disk.copyTree(operation.source, await folder.entry(staged), { recursive: sourceIsDirectory });
+        else await this.kernel.copyFencedSourceInto(fence, operation.source, folder, staged);
         // A template linked out of a read-only store copies as 0444; force the copied root writable
         // so a harness can rewrite a file it owns. Directories remain private to the account.
-        await chmodStaged(folder, staged, operation.mode ?? (source.isDirectory() ? 0o700 : 0o644));
+        await chmodStaged(this.disk, folder, staged, operation.mode ?? (sourceIsDirectory ? 0o700 : 0o644));
         if (!(await journal.capture(operation.path, folder))) await journal.folders.remove(folder, leaf);
         await this.publish(folder, staged, operation.path, journal);
       } finally {
@@ -846,7 +871,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       const information = await folder.describe(leaf);
       if (information === undefined) return undefined;
       if (information.kind !== 'file') throw new Error(`${label} must be a regular file: ${target}`);
-      return (await readFolderFile(folder, leaf)).toString('utf8');
+      return (await this.kernel.readFolderFile(folder, leaf)).toString('utf8');
     });
   }
 
@@ -860,7 +885,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     directory: string,
     marker: string,
     keep: ReadonlySet<string>,
-    journal: FileMutationJournal,
+    journal: MutationJournal,
   ): Promise<readonly string[]> {
     // Read, judged and moved aside through ONE checked handle on the folder, so a folder swapped for a link
     // after it was opened is never swept: what is listed, read and moved is in the folder that was checked.
@@ -875,12 +900,12 @@ export class FileFleetProvisioner implements FleetProvisioner {
         // destroy the only copy of what this very batch may still need to put back. One predicate
         // covers every reserved prefix, so a prefix added later is skipped here without this line
         // having to be found and widened.
-        if (isMutationReservedName(entry)) continue;
+        if (this.kernel.isMutationReservedName(entry)) continue;
         const target = path.join(directory, entry);
         if ((await folder.describe(entry))?.kind !== 'file') continue;
         // An unreadable file inside a directory the fleet created at 0700 is an anomaly, and
         // swallowing it would leave a stale wrapper on PATH with nothing said about it.
-        const content = (await readFolderFile(folder, entry)).toString('utf8');
+        const content = (await this.kernel.readFolderFile(folder, entry)).toString('utf8');
         if (!content.includes(marker)) continue;
         await journal.capture(target, folder);
         // The decision was made from the file as it was read; the capture moved aside the file as it
@@ -914,7 +939,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
   private async pruneDirectory(
     directory: string,
     keep: ReadonlySet<string>,
-    journal: FileMutationJournal,
+    journal: MutationJournal,
   ): Promise<void> {
     // Opened through the guard and swept through that one handle. A container a harness swapped for a link
     // (into the state home, say) is refused here — or, swapped after this opened it, is never the folder the
@@ -928,7 +953,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
         if (keep.has(entry)) continue;
         // A backup or staging name belongs to this very batch; sweeping one away would destroy the only
         // copy of what a rollback needs to put back.
-        if (isMutationReservedName(entry)) continue;
+        if (this.kernel.isMutationReservedName(entry)) continue;
         // capture() renames the entry aside and records the restore. It reports false only when this
         // batch already captured the path, which cannot happen here: every path this plan writes under
         // the container is in the keep set.
@@ -949,14 +974,14 @@ export class FileFleetProvisioner implements FleetProvisioner {
     only: readonly string[],
     keep: ReadonlySet<string>,
     record: string | undefined,
-    journal: FileMutationJournal,
+    journal: MutationJournal,
   ): Promise<void> {
     const recorded = record === undefined ? new Set<string>() : await this.recordedEntries(record, journal.folders);
     const folder = await journal.folders.existing(directory);
     if (folder === undefined) return;
     try {
       for (const entry of only) {
-        if (keep.has(entry) || isMutationReservedName(entry) || !isSingleComponent(entry)) continue;
+        if (keep.has(entry) || this.kernel.isMutationReservedName(entry) || !isSingleComponent(entry)) continue;
         const target = path.join(directory, entry);
         const information = await folder.describe(entry);
         if (information === undefined) continue;
@@ -985,10 +1010,10 @@ export class FileFleetProvisioner implements FleetProvisioner {
     return new Set(parsed.success ? parsed.data.entries : []);
   }
 
-  private async stillCarries(journal: FileMutationJournal, target: string, marker: string): Promise<boolean> {
+  private async stillCarries(journal: MutationJournal, target: string, marker: string): Promise<boolean> {
     const carries = await journal.withBackup(target, async (folder, backup) => {
       if ((await folder.describe(backup))?.kind !== 'file') return false;
-      return (await readFolderFile(folder, backup)).toString('utf8').includes(marker);
+      return (await this.kernel.readFolderFile(folder, backup)).toString('utf8').includes(marker);
     });
     return carries ?? false;
   }
@@ -1007,7 +1032,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     }
     for (const layer of layers) {
       resolved.push(
-        layer.from === 'inline' ? layer.settings : parseSettings(await readFile(layer.path, 'utf8'), format),
+        layer.from === 'inline' ? layer.settings : parseSettings(await this.disk.readText(layer.path), format),
       );
     }
     return serializeSettings(mergeSettingsLayers(resolved), format);
@@ -1040,7 +1065,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     let document: string;
     try {
       // Without following a link: the name was a regular file a moment ago, and a link put there since is not it.
-      document = (await readFolderFile(folder, leaf)).toString('utf8');
+      document = (await this.kernel.readFolderFile(folder, leaf)).toString('utf8');
     } catch (error) {
       throw new Error(`refusing to merge settings over ${destination}: it could not be read (${reasonOf(error)})`);
     }
@@ -1051,7 +1076,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     }
   }
 
-  private async writeManifest(plan: FleetApplyPlan, journal: FileMutationJournal): Promise<void> {
+  private async writeManifest(plan: FleetApplyPlan, journal: MutationJournal): Promise<void> {
     await this.assertWritablePath(plan.manifestPath);
     const content = `${JSON.stringify(plan.manifest, null, 2)}\n`;
     await journal.captureDirectory(path.dirname(plan.manifestPath));
@@ -1068,7 +1093,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     destination: string,
     content: string,
     mode: number,
-    journal: FileMutationJournal,
+    journal: MutationJournal,
   ): Promise<void> {
     const folder = await journal.folders.made(path.dirname(destination), DEFAULT_FOLDER_MODE);
     const temporary = `.${path.basename(destination)}.${randomUUID()}.tmp`;
@@ -1077,10 +1102,10 @@ export class FileFleetProvisioner implements FleetProvisioner {
       try {
         const bytes = Buffer.from(content);
         for (let written = 0; written < bytes.byteLength; )
-          written += writeSync(descriptor, bytes, written, bytes.byteLength - written);
-        fchmodSync(descriptor, mode);
+          written += this.disk.write(descriptor, bytes, written, bytes.byteLength - written);
+        this.disk.fchmod(descriptor, mode);
       } finally {
-        closeSync(descriptor);
+        this.disk.close(descriptor);
       }
       await this.publish(folder, temporary, destination, journal);
     } finally {
@@ -1105,7 +1130,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     folder: GuardedFolder,
     staged: string,
     destination: string,
-    journal: FileMutationJournal,
+    journal: MutationJournal,
   ): Promise<void> {
     const leaf = path.basename(destination);
     const information = await folder.describe(staged);
@@ -1179,7 +1204,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
   private async retractPublication(
     destination: string,
     created: readonly PublishedName[],
-    journal: FileMutationJournal,
+    journal: MutationJournal,
   ): Promise<void> {
     try {
       await journal.displace(destination, async moved => await this.isExactlyPublished(moved, created));
@@ -1208,13 +1233,13 @@ export class FileFleetProvisioner implements FleetProvisioner {
       const entry = expected.get(relative);
       // No proof was taken, so there is nothing this could match against. Keep the tree.
       if (entry === undefined || entry.identity === undefined) return false;
-      const information = fileIdentityOf(await lstat(target, { bigint: true }));
+      const information = await this.disk.identity(target);
       if ((information.kind === 'directory') !== entry.directory) return false;
-      const read = async (): Promise<number> => openSync(target, READ_PROOF);
-      if ((await identityOf(information, read, target)) !== entry.identity) return false;
+      const read = async (): Promise<number> => this.disk.openForProof(target);
+      if ((await identityOf(this.disk, information, read, target)) !== entry.identity) return false;
       matched += 1;
       if (!entry.directory) return true;
-      for (const name of await readdir(target)) {
+      for (const name of await this.disk.list(target)) {
         const child = relative === '' ? name : `${relative}/${name}`;
         if (!(await account(path.join(target, name), child))) return false;
       }
@@ -1356,7 +1381,12 @@ export class FileFleetProvisioner implements FleetProvisioner {
     if (information.kind !== 'file') {
       throw new Error(`refusing to publish ${shown}: the staged entry is not a regular file`);
     }
-    const identity = await identityOf(information, async () => await place.source.openFile(place.name, 'read'), from);
+    const identity = await identityOf(
+      this.disk,
+      information,
+      async () => await place.source.openFile(place.name, 'read'),
+      from,
+    );
     await place.made.link(place.source, place.name, place.name);
     return identity;
   }

@@ -24,8 +24,9 @@
  * `config.toml` keeps the login in a keyring has no file to share (gap G5), and is said so.
  *
  * Nothing is launched: a `PATH` lookup and file reads, so it is safe to run on a page open.
+ *
+ * The reads go through {@link HostFiles}; GAP(kernel): the host's harness homes have no root the plugin may declare.
  */
-import { lstat, readdir, readFile, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
 import { isHarnessOwnedSkillEntry } from '../lib/assets.ts';
 import {
@@ -45,7 +46,7 @@ import {
 import { classifyCredential, type CredentialMaterial } from '../lib/identity.ts';
 import type { HarnessKind } from '../lib/manifest.ts';
 import { parseSettings } from '../lib/settings.ts';
-import type { StoredCredentialMaterialReader } from './credential-classifier.ts';
+import type { HostFiles, StoredCredentialMaterialReader } from './ports.ts';
 
 /** Resolving a bare command name on this machine's `PATH`. The daemon's one harness locator. */
 export interface HostCommandResolver {
@@ -53,6 +54,8 @@ export interface HostCommandResolver {
 }
 
 export interface HostHarnessScanDeps {
+  /** The host's files, read only. */
+  readonly files: HostFiles;
   /** The person's REAL home. */
   readonly userHome: string;
   /** `CLAUDE_CONFIG_DIR` as the person's shell has it, if at all. */
@@ -75,11 +78,6 @@ const errorText = (error: unknown): string => (error instanceof Error ? error.me
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const isMissing = (error: unknown): boolean => {
-  const code = (error as { code?: unknown } | undefined)?.code;
-  return code === 'ENOENT' || code === 'ENOTDIR';
-};
 
 /** The email in a JWT's payload, without checking its signature: display only. */
 function jwtEmail(token: unknown): string | undefined {
@@ -129,7 +127,7 @@ export class HostHarnessScanner {
       this.#skills('claude', join(home, 'skills')),
     ]);
     const login = await this.#login('claude', mcp, undefined);
-    return this.#complete({
+    return await this.#complete({
       harness: 'claude',
       login,
       instructions,
@@ -150,7 +148,7 @@ export class HostHarnessScanner {
     if (home === undefined) {
       const reason = 'CODEX_HOME is set to a relative path, so your Codex setup could not be found';
       const source = this.deps.codexHome ?? '';
-      return this.#complete({
+      return await this.#complete({
         harness: 'codex',
         login: { state: 'not-shareable', reason },
         instructions: { kind: 'unreadable', source, reason },
@@ -167,7 +165,7 @@ export class HostHarnessScanner {
       this.#skills('codex', join(home, 'skills')),
     ]);
     const login = await this.#login('codex', settings, home);
-    return this.#complete({
+    return await this.#complete({
       harness: 'codex',
       login,
       instructions,
@@ -179,20 +177,20 @@ export class HostHarnessScanner {
   }
 
   /** The located command and the MCP commands this machine lacks, added to what was read. */
-  #complete(scan: Omit<HostHarnessScan, 'command' | 'missingCommands'>): HostHarnessScan {
+  async #complete(scan: Omit<HostHarnessScan, 'command' | 'missingCommands'>): Promise<HostHarnessScan> {
     const command = this.deps.commands.resolve(scan.harness);
     const partial: HostHarnessScan = { ...scan, missingCommands: [] };
     const missing = new Set<string>();
     for (const server of scannedMcpServers(partial)) {
-      if (server.command !== undefined && !this.#commandExists(server.command)) missing.add(server.command);
+      if (server.command !== undefined && !(await this.#commandExists(server.command))) missing.add(server.command);
     }
     return { ...partial, ...(command === undefined ? {} : { command }), missingCommands: [...missing] };
   }
 
-  #commandExists(command: string): boolean {
+  async #commandExists(command: string): Promise<boolean> {
     if (command.includes('/')) {
       // A path is checked where it points, never looked up on PATH.
-      return isAbsolute(command) && Bun.file(command).size > 0;
+      return isAbsolute(command) && ((await this.deps.files.stat(command))?.size ?? 0) > 0;
     }
     return this.deps.commands.resolve(command) !== undefined;
   }
@@ -260,13 +258,14 @@ export class HostHarnessScanner {
 
   async #read(path: string): Promise<HostDocumentRead> {
     try {
-      const info = await stat(path);
-      if (!info.isFile()) return { kind: 'unreadable', source: path, reason: 'it is not a file' };
+      const info = await this.deps.files.stat(path);
+      if (info === undefined) return { kind: 'absent', source: path };
+      if (info.kind !== 'file') return { kind: 'unreadable', source: path, reason: 'it is not a file' };
       if (info.size > this.deps.maxDocumentBytes) return { kind: 'too-large', source: path, bytes: info.size };
-      const text = await readFile(path, 'utf8');
+      const text = await this.deps.files.readText(path);
+      if (text === undefined) return { kind: 'absent', source: path };
       return { kind: 'text', source: path, text, bytes: Buffer.byteLength(text) };
     } catch (error) {
-      if (isMissing(error)) return { kind: 'absent', source: path };
       return { kind: 'unreadable', source: path, reason: errorText(error) };
     }
   }
@@ -275,9 +274,10 @@ export class HostHarnessScanner {
   async #skills(harness: HarnessKind, directory: string): Promise<{ found: HostSkill[]; problems: string[] }> {
     let entries: string[];
     try {
-      entries = (await readdir(directory)).sort();
+      const names = await this.deps.files.list(directory);
+      if (names === undefined) return { found: [], problems: [] };
+      entries = [...names].sort();
     } catch (error) {
-      if (isMissing(error)) return { found: [], problems: [] };
       return { found: [], problems: [`Your skills folder ${directory} could not be read (${errorText(error)}).`] };
     }
     const found: HostSkill[] = [];
@@ -286,7 +286,9 @@ export class HostHarnessScanner {
       if (item.startsWith('.') || isHarnessOwnedSkillEntry(harness, item)) continue;
       const source = join(directory, item);
       try {
-        if (!(await stat(source)).isDirectory()) continue;
+        const entry = await this.deps.files.stat(source);
+        if (entry === undefined) throw new Error('it is gone');
+        if (entry.kind !== 'directory') continue;
         const digest = await this.#digest(source);
         if (digest === undefined) {
           problems.push(`Skill "${item}" has more than ${String(this.#maxSkillFiles)} files, so it was not imported.`);
@@ -300,6 +302,12 @@ export class HostHarnessScanner {
     return { found, problems };
   }
 
+  async #bytes(path: string): Promise<Uint8Array> {
+    const bytes = await this.deps.files.readBytes(path);
+    if (bytes === undefined) throw new Error(`${path} is gone`);
+    return bytes;
+  }
+
   /** A digest over every file's relative path and bytes, in a stable order; `undefined` when too many. */
   async #digest(root: string): Promise<string | undefined> {
     const hasher = new Bun.CryptoHasher('sha256');
@@ -307,10 +315,10 @@ export class HostHarnessScanner {
     let files = 0;
     const all: string[] = [];
     for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-      for (const name of await readdir(next)) {
+      for (const name of (await this.deps.files.list(next)) ?? []) {
         const path = join(next, name);
-        const info = await lstat(path);
-        if (info.isDirectory()) pending.push(path);
+        const info = await this.deps.files.lstat(path);
+        if (info?.kind === 'directory') pending.push(path);
         else all.push(path);
       }
     }
@@ -318,8 +326,8 @@ export class HostHarnessScanner {
       files += 1;
       if (files > this.#maxSkillFiles) return undefined;
       hasher.update(`${relative(root, path)}\0`);
-      const info = await lstat(path);
-      hasher.update(info.isSymbolicLink() ? `link\0` : await readFile(path));
+      const info = await this.deps.files.lstat(path);
+      hasher.update(info?.kind === 'link' ? `link\0` : await this.#bytes(path));
       hasher.update('\0');
     }
     return hasher.digest('hex');
