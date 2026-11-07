@@ -100,11 +100,6 @@ export const MAX_SESSION_SECONDS = 43_200 as const;
  */
 export const MAX_TUNNEL_BODY_BYTES = 32 * 1_024 * 1_024;
 
-/** What an UPDATED machine says to an app from before device keys. */
-export const OLDER_APP_SENTENCE =
-  'This app is older than the machine it is talking to. Reload the page, or close and reopen the installed app, ' +
-  'to update it, then pair this device again.';
-
 /**
  * What one UTF-16 code unit costs once it is inside a JSON string, in UTF-8 bytes.
  *

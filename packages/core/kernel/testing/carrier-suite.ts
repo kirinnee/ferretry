@@ -3,11 +3,16 @@ import type { CarrierKey } from '../contract/ids.ts';
 import type {
   Carrier,
   CarrierLink,
+  CarrierPeer as SessionPeer,
+  IdentitySigner,
   SealedFrame,
   SealedOutbound,
   SessionEnd,
   SessionLayer,
 } from '../contract/session.ts';
+import { createIdentitySigner } from '../host/session/signer.ts';
+import { encodeFrame, FRAME_KINDS, type SessionId, sessionIdFromBytes } from '../host/session/wire/frames.ts';
+import { type TestIdentity, testIdentity } from './identity.ts';
 
 /** The far end of a carrier's own transport, driven by the suite (a WebSocket client, a relay peer, a data channel). */
 export interface CarrierPeer {
@@ -33,19 +38,57 @@ export interface CarrierHarness {
 export class RecordingSessionLayer implements SessionLayer {
   readonly links: RecordingLink[] = [];
   readonly carriers: CarrierKey[] = [];
+  /** What the carrier said about each link's peer, in open order. */
+  readonly peers: (SessionPeer | undefined)[] = [];
+  /** A real signer over a throwaway identity ({@link testIdentity}), so a carrier's claim can be verified. */
+  readonly signer: IdentitySigner;
+  readonly identity: Promise<TestIdentity>;
 
-  open(carrier: CarrierKey): CarrierLink {
+  constructor() {
+    this.identity = testIdentity();
+    const identity = this.identity;
+    const signer = identity.then(created => createIdentitySigner(created.key));
+    this.signer = {
+      sign: async request => await (await signer).sign(request),
+      signTunnel: async request => await (await signer).signTunnel(request),
+      signCatalog: async request => await (await signer).signCatalog(request),
+      signSecretOffer: async request => await (await signer).signSecretOffer(request),
+    };
+  }
+
+  /** Every connection a carrier asked for, with the links opened on it. */
+  readonly connections: { readonly carrier: CarrierKey; readonly links: RecordingLink[] }[] = [];
+
+  connection(carrier: CarrierKey): { open(peer?: SessionPeer): CarrierLink } {
+    const record = { carrier, links: [] as RecordingLink[] };
+    this.connections.push(record);
+    return {
+      open: peer => {
+        const link = this.open(carrier, peer) as RecordingLink;
+        record.links.push(link);
+        return link;
+      },
+    };
+  }
+
+  open(carrier: CarrierKey, peer?: SessionPeer): CarrierLink {
     this.carriers.push(carrier);
+    this.peers.push(peer);
     const link = new RecordingLink();
     this.links.push(link);
     return link;
+  }
+
+  /** As the kernel does when a mode accepted the holder of link `index`: calls the peer's `proved`. */
+  prove(index: number): void {
+    this.peers[index]?.proved?.();
   }
 }
 
 export class RecordingLink implements CarrierLink {
   readonly inbounds: Uint8Array[] = [];
   closedWith: string | undefined;
-  /** What `next()` will answer, in order: a frame, `undefined` (nothing may leave now) or `'ended'`. */
+  /** What `next()` will answer, in order: a frame, `undefined` (nothing may leave now) or a {@link SessionEnd} (the session is over). */
   readonly queue: (SealedFrame | SessionEnd | undefined)[] = [];
   nextCalls = 0;
   private readonly listeners = new Set<() => void>();
@@ -74,19 +117,39 @@ export class RecordingLink implements CarrierLink {
 }
 
 const ENDED: SessionEnd = Object.freeze({ code: 4400, reason: 'the session ended' });
-const frame = (sequence: number, text: string): SealedFrame => ({ sequence, bytes: new TextEncoder().encode(text) });
-const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
+/** The session id every suite frame carries: sixteen fixed bytes, so a carrier that routes by it sees one session. */
+export const SUITE_SESSION_ID: SessionId = (() => {
+  const id = sessionIdFromBytes(Uint8Array.from({ length: 16 }, (_, index) => index + 1));
+  if (id === null) throw new Error('suite session id');
+  return id;
+})();
+
+/**
+ * A VALID wire frame (the 28-byte envelope a real direct or relay carrier checks) carrying `payload` as a data
+ * record, built with the real encoder: what the suite sends and offers, so a real carrier can run it unchanged.
+ */
+export function suiteFrame(sequence: number, payload: string, sessionId: SessionId = SUITE_SESSION_ID): Uint8Array {
+  return encodeFrame({ kind: FRAME_KINDS.data, sessionId, sequence, payload: new TextEncoder().encode(payload) });
+}
+
+/** How the suite builds the frames it sends and offers; a carrier with its own envelope supplies its encoder. */
+export interface CarrierSuiteOptions {
+  readonly frame?: (sequence: number, payload: string) => Uint8Array;
+}
 
 /**
  * The carrier conformance suite (§3.9, §4.8, §7.3): a carrier moves only sealed bytes, opens one link per peer under
  * its own key, takes outbound frames ONLY from `next()` at write time (so the session layer's per-frame permit is the
- * last word), writes nothing when `next()` answers nothing, ends the peer on `'ended'`, and closes every link when
+ * last word), writes nothing when `next()` answers nothing, ends the peer on a `SessionEnd`, and closes every link when
  * stopped or when the peer goes. Every carrier plugin runs this against its own harness.
  */
 export function carrierConformance(
   name: string,
   make: (layer: RecordingSessionLayer) => Promise<CarrierHarness>,
+  options: CarrierSuiteOptions = {},
 ): void {
+  const bytesOf = options.frame ?? ((sequence: number, payload: string) => suiteFrame(sequence, payload));
+  const frame = (sequence: number, payload: string): SealedFrame => ({ sequence, bytes: bytesOf(sequence, payload) });
   describe(`carrier conformance: ${name}`, () => {
     const started = async (): Promise<{
       layer: RecordingSessionLayer;
@@ -126,10 +189,12 @@ export function carrierConformance(
     test('hands inbound bytes to the session layer unchanged and in order', async () => {
       const h = await started();
       const peer = await h.harness.connect();
-      peer.send(new TextEncoder().encode('one'));
-      peer.send(new TextEncoder().encode('two'));
+      const one = bytesOf(1, 'one');
+      const two = bytesOf(2, 'two');
+      peer.send(one);
+      peer.send(two);
       await h.harness.flush();
-      expect((h.layer.links[0]?.inbounds ?? []).map(decode)).toEqual(['one', 'two']);
+      expect(h.layer.links[0]?.inbounds ?? []).toEqual([one, two]);
       await done(h);
     });
 
@@ -138,9 +203,11 @@ export function carrierConformance(
       const peer = await h.harness.connect();
       await h.harness.flush();
       const link = h.layer.links[0] as RecordingLink;
-      link.offer(frame(1, 'a'), frame(2, 'b'));
+      const a = frame(1, 'a');
+      const b = frame(2, 'b');
+      link.offer(a, b);
       await h.harness.flush();
-      expect(peer.received().map(decode)).toEqual(['a', 'b']);
+      expect(peer.received()).toEqual([a.bytes, b.bytes]);
       expect(link.nextCalls).toBeGreaterThanOrEqual(2);
       await done(h);
     });
@@ -157,7 +224,7 @@ export function carrierConformance(
       await done(h);
     });
 
-    test("ends the peer when next() answers 'ended'", async () => {
+    test('ends the peer when next() answers a SessionEnd', async () => {
       const h = await started();
       const peer = await h.harness.connect();
       await h.harness.flush();

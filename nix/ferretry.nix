@@ -90,7 +90,7 @@ let
     outputHashAlgo = "sha256";
     # When a build reports a hash mismatch here, the install inputs changed what it installs: take the
     # `got:` hash. It is the same on every builder, so a mismatch is never fixed by rerunning.
-    outputHash = "sha256-1oBwCdLLkBTl7zJ4cQu78sTW/gseAdwJWfShcC5HTdM=";
+    outputHash = "sha256-V/NLeeF1vssIuXl1zAvx2UZOrEC3KUOOQVGML3K8l0M=";
     dontFixup = true;
 
     buildPhase = ''
@@ -193,13 +193,19 @@ let
     postInstall = ''
       wrapProgram "$out/bin/fyd" --set-default FY_CLOUDFLARED ${lib.getExe pkgs.cloudflared}
     '';
-    # The daemon host is the kernel package's (docs/rebuild/spine.md D1): its first `bin` entry.
+    # The daemon host is the kernel package's (docs/rebuild/spine.md D1): its first `bin` entry. Every
+    # `bin` entry of the Browsers package ships beside it: the browser worker the daemon runs from its
+    # own directory (the kernel never points into a plugin, so the worker's bin is the plugin's).
     executables = [
       {
         name = "fyd";
         entry = "packages/core/kernel/${(lib.importJSON "${src}/packages/core/kernel/package.json").bin.fyd}";
       }
-    ];
+    ]
+    ++ lib.mapAttrsToList (name: entry: {
+      inherit name;
+      entry = "packages/plugins/browsers/${entry}";
+    }) (lib.importJSON "${src}/packages/plugins/browsers/package.json").bin;
   };
 in
 {

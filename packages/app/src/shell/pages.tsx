@@ -95,14 +95,24 @@ export function DaemonHomePage({ daemon }: { readonly daemon: string }) {
 }
 
 /** A daemon's settings: one tab per plugin, saved on that daemon (§5.2). */
-export function DaemonSettingsPage({ daemon, tab }: { readonly daemon: string; readonly tab?: string }) {
+export function DaemonSettingsPage({
+  daemon,
+  tab,
+  tabId,
+}: {
+  readonly daemon: string;
+  readonly tab?: string;
+  readonly tabId?: string;
+}) {
   const { runtime } = useShell();
   useRuntimeVersion(runtime);
   const tabs = runtime.surfaces.flatMap(entry =>
     (entry.manifest.ui?.settings ?? []).map(setting => ({ plugin: entry.id, ...setting })),
   );
   tabs.sort((a, b) => a.order - b.order || a.plugin.localeCompare(b.plugin));
-  const active = tabs.find(candidate => candidate.plugin === tab) ?? tabs[0];
+  // A tab is found by its plugin AND its own id; a plugin's first tab is what `settings/<plugin>` names.
+  const active =
+    tabs.find(candidate => candidate.plugin === tab && (tabId === undefined || candidate.id === tabId)) ?? tabs[0];
   return (
     <section className="fy-page">
       <h1>Settings</h1>
@@ -110,7 +120,7 @@ export function DaemonSettingsPage({ daemon, tab }: { readonly daemon: string; r
         {tabs.map(candidate => (
           <Link
             key={`${candidate.plugin}.${candidate.id}`}
-            to={daemonSettingsHref(daemon, candidate.plugin)}
+            to={daemonSettingsHref(daemon, candidate.plugin, candidate.id)}
             className={candidate === active ? 'fy-tab fy-tab--active' : 'fy-tab'}
           >
             {candidate.label}

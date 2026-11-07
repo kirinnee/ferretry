@@ -1,10 +1,20 @@
 import { err, type Instant, ok, type Result } from '@ferretry/std';
-import type { Clock, SqliteHandle, StateDamage, StateFileDef, StatePort, StateRead } from '../../contract/index.ts';
+import {
+  type Clock,
+  type JsonlRecords,
+  MAX_STATE_TAIL_BYTES,
+  type SqliteHandle,
+  type StateDamage,
+  type StateFileDef,
+  type StatePort,
+  type StateRead,
+  type StateVersion,
+} from '../../contract/index.ts';
 import { StoreDamagedError, UndeclaredStateFileError } from './errors.ts';
 import { encodeDocument, stateLabel } from './format.ts';
 import type { HostFs } from './host-fs.ts';
 import { assertRecordSize } from './jsonl-scan.ts';
-import { readBytesFile, readJsonDocument, readJsonlRecords } from './readers.ts';
+import { readBytesFile, readJsonDocument, readJsonlLines, readJsonlRecords } from './readers.ts';
 import { KeyedSerialExecutor } from './serial-executor.ts';
 import { nodeSqliteFiles, openSqlite, type SqliteFiles } from './sqlite-store.ts';
 
@@ -31,6 +41,9 @@ export interface StatePortOptions {
   readonly clock?: Pick<Clock, 'now'>;
   /** What boot found already (`openPluginState`), so `damaged()` is right before the first read. */
   readonly initialDamage?: readonly StateDamage[];
+  readonly initialNarrowed?: readonly StateDamage[];
+  /** The host's live serving-state projection; called synchronously on damage and repair. */
+  readonly changed?: (damage: readonly StateDamage[]) => void;
   readonly sqliteFiles?: SqliteFiles;
   /** Told each time a file is found damaged (logging, audit). */
   readonly report?: (event: StateDamageEvent) => void;
@@ -40,6 +53,8 @@ export interface StatePortOptions {
 export interface HostStatePort extends StatePort {
   /** Files that are damaged but read as their narrower value (`onDamaged: { narrower }`): never the subsystem. */
   narrowed(): readonly StateDamage[];
+  /** Where a DECLARED sqlite file lives, for a worker to open itself; anything else throws. */
+  sqliteGrant(def: StateFileDef, name?: string): { readonly path: string; readonly label: string };
 }
 
 interface Located {
@@ -80,7 +95,21 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     paths.set(def.path, def.name);
   }
   const damaged = new Map<string, StateDamage>((options.initialDamage ?? []).map(damage => [damage.file, damage]));
-  const narrowed = new Map<string, StateDamage>();
+  const narrowed = new Map<string, StateDamage>((options.initialNarrowed ?? []).map(damage => [damage.file, damage]));
+
+  /**
+   * A plain name, or, for an opaque NAMED TREE (a def whose path ends `/*`, today's Conversation files under
+   * `state/conversation/<ferret>/`), path-safe segments such as `F12/turns/turn-001.md`: each segment a plain
+   * name, none `.` or `..`, and the tree's folder claimed by no other declared file.
+   */
+  const nameAllowed = (def: StateFileDef, name: string): boolean => {
+    const plain = (segment: string): boolean => COLLECTION_NAME.test(segment) && segment !== '.' && segment !== '..';
+    if (!name.includes('/')) return plain(name);
+    if (def.store !== 'opaque' || !def.path.endsWith('/*')) return false;
+    const folder = def.path.slice(0, -1);
+    if ([...declared.values()].some(other => other.name !== def.name && other.path.startsWith(folder))) return false;
+    return name.split('/').every(plain);
+  };
 
   const locate = (def: StateFileDef, name: string | undefined): Located => {
     const known = declared.get(def.name);
@@ -93,7 +122,7 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
           ? `state ${def.name} is a collection: it needs a name`
           : `state ${def.name} is one file: it takes no name`,
       );
-    if (name !== undefined && (!COLLECTION_NAME.test(name) || name === '.' || name === '..'))
+    if (name !== undefined && !nameAllowed(def, name))
       throw new UndeclaredStateFileError(`state ${def.name}: "${name}" is not a valid name`);
     const relative = name === undefined ? def.path : def.path.replace('*', name);
     return { path: `${root}/${relative}`, relative, label: stateLabel(pluginId, relative) };
@@ -103,11 +132,30 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     const policy = def.onDamaged === 'subsystem' ? 'subsystem' : 'narrower';
     if (policy === 'subsystem') damaged.set(damage.file, damage);
     else narrowed.set(damage.file, damage);
+    if (policy === 'subsystem') options.changed?.([...damaged.values()]);
     options.report?.({ damage, policy, ...(options.clock === undefined ? {} : { at: options.clock.now() }) });
   };
   const healthy = (label: string): void => {
-    damaged.delete(label);
+    const repaired = damaged.delete(label);
     narrowed.delete(label);
+    if (repaired) options.changed?.([...damaged.values()]);
+  };
+
+  /** Line-by-line reading (`records` / `tail`): only an io fault or a missing required file is a damage. */
+  const lenient = async <Shape>(
+    def: StateFileDef<string, Shape>,
+    name: string | undefined,
+    maxBytes: number | undefined,
+  ): Promise<JsonlRecords<Shape>> => {
+    const at = locate(def, name);
+    if (def.store !== 'jsonl') throw new TypeError(`state ${def.name}: only a jsonl file is read line by line`);
+    const read = await readJsonlLines(fs, def, at.path, at.label, maxBytes);
+    if (!read.ok) {
+      note(def, read.error);
+      if (def.onDamaged === 'subsystem') throw new StoreDamagedError(read.error);
+      return { records: [], unreadable: 0 };
+    }
+    return read.value;
   };
 
   /** A file once found damaged is never written over: it is looked at again, and cleared only if it was repaired. */
@@ -133,7 +181,58 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     throw new TypeError(`state ${def.name}: a ${def.store} file is not read with read()`);
   };
 
+  const locateTree = (def: StateFileDef, name: string): Located => {
+    const at = locate(def, name);
+    if (def.store !== 'opaque' || !def.path.endsWith('/*'))
+      throw new TypeError('state operation needs an opaque named tree');
+    return at;
+  };
+
+  /** Check every parent with lstat; a planted link never becomes a route into another folder. */
+  const treeParents = async (path: string, create: boolean): Promise<boolean> => {
+    const parts = path
+      .slice(home.length + 1)
+      .split('/')
+      .slice(0, -1);
+    let parent = home;
+    for (const part of ['', ...parts]) {
+      if (part !== '') parent += `/${part}`;
+      const info = await fs.info(parent);
+      if (info === undefined) {
+        if (!create) return false;
+        await fs.ensureDirectory(parent, PRIVATE_DIRECTORY_MODE);
+      } else if (!info.directory) throw new TypeError('state parent is not a directory');
+    }
+    return true;
+  };
+
   const port: HostStatePort = {
+    async stat(def, name) {
+      const at = locateTree(def, name);
+      if (!(await treeParents(at.path, false))) return undefined;
+      const info = await fs.info(at.path);
+      if (info === undefined) return undefined;
+      const kind =
+        info.symlink === true ? 'symlink' : info.directory ? 'directory' : info.regularFile ? 'file' : undefined;
+      if (kind === undefined) throw new TypeError('state entry is not a file, directory or symlink');
+      return { kind, modifiedMs: info.modifiedAtMs };
+    },
+    async createPrivateDirectory(def, name) {
+      const at = locateTree(def, name);
+      await treeParents(at.path, true);
+      await fs.createPrivateDirectory(at.path);
+    },
+    async removeEmptyDirectory(def, name) {
+      const at = locateTree(def, name);
+      if (!(await treeParents(at.path, false))) return;
+      await fs.removeEmptyDirectory(at.path);
+    },
+    sqliteGrant(def: StateFileDef, name?: string) {
+      const at = locate(def, name);
+      if (def.store !== 'sqlite' && def.store !== 'sqlite-cache')
+        throw new TypeError(`state ${def.name}: only a sqlite file is opened on a worker`);
+      return { path: at.path, label: at.label };
+    },
     async read<Shape>(def: StateFileDef<string, Shape>, name?: string): Promise<StateRead<Shape>> {
       const at = locate(def, name);
       const result = await readRaw(def, at);
@@ -163,7 +262,7 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
 
     async update<Shape>(
       def: StateFileDef<string, Shape>,
-      fn: (current: Shape | undefined) => Shape,
+      fn: (current: Shape | undefined) => Shape | Promise<Shape>,
       name?: string,
     ): Promise<Result<Shape, StateDamage>> {
       const at = locate(def, name);
@@ -176,7 +275,9 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
           return err(current.error);
         }
         healthy(at.label);
-        const next = fn(current.value);
+        const next = await fn(current.value);
+        // Declined: the transform answered the very value it was given, so nothing is written.
+        if (current.value !== undefined && next === current.value) return ok(next);
         await fs.writeAtomic(at.path, `${encodeDocument(def, next, true)}\n`, fileMode(def));
         return ok(next);
       });
@@ -194,17 +295,29 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     },
 
     async *lines<Shape>(def: StateFileDef<string, Shape>, name?: string): AsyncIterable<Shape> {
+      // Today's journal read: a bad line is skipped and the rest still read (records() counts what was skipped).
+      for (const record of (await lenient(def, name, undefined)).records) yield record;
+    },
+
+    async version(def: StateFileDef, name?: string): Promise<StateVersion | undefined> {
       const at = locate(def, name);
-      if (def.store !== 'jsonl') throw new TypeError(`state ${def.name}: only a jsonl file is read with lines()`);
-      const records = await readJsonlRecords(fs, def, at.path, at.label);
-      if (!records.ok) {
-        note(def, records.error);
-        // The whole file is checked before the first line is handed out: half a history is not a history.
-        if (def.onDamaged === 'subsystem') throw new StoreDamagedError(records.error);
-        return;
-      }
-      healthy(at.label);
-      for (const record of records.value) yield record;
+      const info = await fs.info(at.path);
+      if (info === undefined) return undefined;
+      return { size: info.size, etag: `${info.inode}:${info.size}:${info.modifiedAtMs}` };
+    },
+
+    async records<Shape>(def: StateFileDef<string, Shape>, name?: string): Promise<JsonlRecords<Shape>> {
+      return await lenient(def, name, undefined);
+    },
+
+    async tail<Shape>(
+      def: StateFileDef<string, Shape>,
+      options: { readonly maxBytes: number; readonly name?: string },
+    ): Promise<JsonlRecords<Shape>> {
+      const { maxBytes } = options;
+      if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_STATE_TAIL_BYTES)
+        throw new TypeError(`state ${def.name}: tail reads 1 to ${MAX_STATE_TAIL_BYTES} bytes`);
+      return await lenient(def, options.name, maxBytes);
     },
 
     async list(def: StateFileDef): Promise<readonly string[]> {
@@ -224,6 +337,12 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
         }
         healthy(at.label);
       });
+    },
+
+    pathOf(def: StateFileDef, name?: string): string {
+      const at = locate(def, name);
+      if (def.store !== 'opaque') throw new TypeError(`state ${def.name}: only an opaque file's path is handed out`);
+      return at.path;
     },
 
     sqlite(def: StateFileDef, name?: string): SqliteHandle {

@@ -563,7 +563,7 @@ read from GitHub, never taken on a caller's word. The owner, the card's owner fe
 report one, and so may a sub-ferret on the card it is doing, since it is the one that saw the deploy; anyone else is
 `403 forbidden`. The move is the daemon's, through the same `triggerMove` every fact uses: into the first lane of
 the card's variant that enters on the trigger, recorded `auto` with the trigger and with `reportedBy` naming who
-reported it (and `reportedVia: "admin-token"` beside it, as `actorVia` is beside an actor). It never goes back: a
+reported it (an owner on the admin token is `{ kind: "owner", via: "admin-token" }`). It never goes back: a
 card already there or past it is unchanged, and the answer is the card as it is. A dependency holds it as it holds a
 move: a blocked card is not moved on to a later category (`409 blocked-by`, naming the blockers); sideways it moves,
 and says what blocked it, and the owner's report moves it on as a fact would. A sub-ferret reports only on the card it

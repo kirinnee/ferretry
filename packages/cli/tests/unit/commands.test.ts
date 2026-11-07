@@ -5,6 +5,7 @@ import should from 'should';
 import { ASK_ROUTES, askRows } from '../../src/lib/commands/ask.ts';
 import { diagnose, renderFindings } from '../../src/lib/commands/doctor.ts';
 import { compiledWords, findWords } from '../../src/lib/commands/words.ts';
+import type { DaemonController } from '../../src/lib/daemon/controller.ts';
 import { runFy } from '../../src/lib/run.ts';
 import { boardEntry, fakeWorld, inventoryOf, registryOf, skeletonEntry } from './fakes.ts';
 import { route } from '@ferretry/kernel/manifest';
@@ -142,6 +143,34 @@ describe('fy words', () => {
     should(await runFy(['words', 'task'], fake.world)).equal(0);
     should(fake.io.stdout()).containEql('Board');
     should(fake.io.stderr()).containEql('compiled into this fy');
+  });
+
+  it('should read the glossary through the guard, and send nothing but the inventory read to a daemon whose Kernel differs', async () => {
+    // Arrange
+    let inventoryReads = 0;
+    const fake = fakeWorld({
+      registry,
+      readInventory: async () => {
+        inventoryReads += 1;
+        return inventoryOf({ id: 'kernel', contract: 'another-kernel' });
+      },
+    });
+
+    // Act
+    const code = await runFy(['words', 'task'], fake.world);
+
+    // Assert
+    should(code).equal(0);
+    should(inventoryReads).be.above(0);
+    should(fake.transport.sent).deepEqual([]);
+    should(fake.io.stdout()).containEql('Board');
+    should(fake.io.stderr()).containEql('compiled into this fy');
+  });
+
+  it('should send the glossary read as the Kernel’s route once the inventory agrees', async () => {
+    const fake = fakeWorld({ registry });
+    await runFy(['words'], fake.world);
+    should(fake.transport.sent).deepEqual([{ method: 'GET', path: '/v1/glossary' }]);
   });
 
   it('should say the glossary is empty when nothing declares a word', async () => {
@@ -301,11 +330,63 @@ describe('fy daemon', () => {
     should(already.io.stdout()).containEql('already running');
   });
 
-  it('should say stop and restart are not built yet', async () => {
+  it('V-0244 V-0237 should run stop and restart on the controller of the world, and pass --when-idle', async () => {
+    const { world } = fakeWorld();
+    const calls: string[] = [];
+    const controller = {
+      stop: async () => void calls.push('stop'),
+      restart: async (options: unknown) => void calls.push(`restart ${JSON.stringify(options)}`),
+    } as unknown as DaemonController;
+    let code = 0;
+    const wired = { ...world, daemon: () => ({ controller, exitCode: () => code }) };
+    should(await runFy(['daemon', 'stop'], wired)).equal(0);
+    should(await runFy(['daemon', 'restart'], wired)).equal(0);
+    should(await runFy(['daemon', 'restart', '--when-idle'], wired)).equal(0);
+    code = 3;
+    should(await runFy(['daemon', 'stop'], wired)).equal(3);
+    should(calls).deepEqual(['stop', 'restart {}', 'restart {"whenIdle":true}', 'stop']);
+  });
+
+  it('V-0236 V-0233 V-0249 V-0234 V-0251 should route reset, install, uninstall, logs and which, with their flags', async () => {
+    const { world } = fakeWorld();
+    const calls: string[] = [];
+    const record = (name: string) => async (options?: unknown) =>
+      void calls.push(`${name} ${JSON.stringify(options ?? {})}`);
+    const controller = {
+      reset: record('reset'),
+      install: record('install'),
+      uninstall: record('uninstall'),
+      logs: record('logs'),
+      which: record('which'),
+    } as unknown as DaemonController;
+    const wired = { ...world, daemon: () => ({ controller, exitCode: () => 0 }) };
+    for (const words of [
+      ['daemon', 'reset', '--yes'],
+      ['daemon', 'reset', '-y'],
+      ['daemon', 'reset'],
+      ['daemon', 'install'],
+      ['daemon', 'uninstall'],
+      ['daemon', 'logs', '-f'],
+      ['daemon', 'logs'],
+      ['daemon', 'which', '--json'],
+    ])
+      should(await runFy(words, wired)).equal(0);
+    should(calls).deepEqual([
+      'reset {"yes":true}',
+      'reset {"yes":true}',
+      'reset {"yes":false}',
+      'install {}',
+      'uninstall {}',
+      'logs {"follow":true}',
+      'logs {"follow":false}',
+      'which {"json":true}',
+    ]);
+  });
+
+  it('should say a world without daemon-control adapters has none, rather than pretending', async () => {
     const { world, io } = fakeWorld();
     should(await runFy(['daemon', 'stop'], world)).equal(69);
-    should(await runFy(['daemon', 'restart'], world)).equal(69);
-    should(io.stderr()).containEql('Restarting the daemon from fy is not built yet');
+    should(io.stderr()).containEql('no local daemon-control adapters');
   });
 });
 
@@ -371,6 +452,36 @@ describe('fy ask', () => {
     should(io.stdout()).containEql('answered a1');
     transport.replies.push({ status: 200, body: { id: 'a1' } });
     should(await runFy(['ask', 'show', 'a1'], world)).equal(0);
+  });
+
+  it('S59 a person-only shell route from a pane is refused before any connection is opened', async () => {
+    // Arrange
+    const { world, io, connects, transport } = fakeWorld({
+      registry: registryOf(skeletonEntry(asksManifest, 'h-asks')),
+      inventory: inventoryOf({ id: 'asks', contract: 'h-asks' }),
+      environment: { FY_SESSION_ID: 's1' },
+    });
+
+    // Act
+    const code = await runFy(['ask', 'answer', 'a1', 'yes'], world);
+
+    // Assert
+    should(code).equal(1);
+    should(io.stderr()).containEql("this is the owner's command; a ferret's pane can't run it");
+    should(connects).deepEqual([]);
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('S59 an open shell route from a pane still connects and is sent', async () => {
+    const { world, connects, transport } = fakeWorld({
+      registry: registryOf(skeletonEntry(asksManifest, 'h-asks')),
+      inventory: inventoryOf({ id: 'asks', contract: 'h-asks' }),
+      environment: { FY_SESSION_ID: 's1' },
+    });
+    transport.replies.push({ status: 200, body: [] });
+    should(await runFy(['ask', 'list'], world)).equal(0);
+    should(connects).have.length(1);
+    should(transport.sent).deepEqual([{ method: 'GET', path: '/v1/asks' }]);
   });
 
   it('should refuse an answer without an id and text, and an unknown subcommand', async () => {

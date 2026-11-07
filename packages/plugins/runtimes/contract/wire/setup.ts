@@ -71,7 +71,7 @@ export type ToolInstallResult = z.infer<typeof ToolInstallResultSchema>;
 
 /** The person's own login for one harness, as the scan classified it. Never the credential. */
 export const HostLoginSchema = z.strictObject({
-  state: z.enum(['signed-in', 'refresh-due', 'not-signed-in', 'unreadable', 'not-shareable']),
+  state: z.enum(['signed-in', 'refresh-due', 'not-signed-in', 'unreadable', 'not-shareable', 'unknown']),
   email: NonEmptyStringSchema.optional(),
   reason: NonEmptyStringSchema.optional(),
 });

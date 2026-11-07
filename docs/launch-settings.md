@@ -13,7 +13,7 @@ when a ferret is created).
 | Fast mode, from the ⚡ switch or `/fast`                          | sent to the running CLI and confirmed by what it reports ([fast-mode.md](fast-mode.md))  |
 | What other devices may do (grants, operator password)             | the daemon decides every request with the document as it is now ([grants.md](grants.md)) |
 | What agents may control (terminals, browsers, files, …)           | the daemon asks the policy on every agent call ([agent-tools.md](agent-tools.md))        |
-| Passive learning, per ferret (Actions)                            | re-instructs the running ferret with a queued message ([learning.md](learning.md))       |
+| Passive learning, per ferret (Actions)                            | re-instructs the running ferret with a queued message ([lessons.md](lessons.md))         |
 | Warden, speed-up keys, secrets in the secret store                | the daemon reads them when it uses them, never the CLI                                   |
 
 ## On restart
@@ -191,7 +191,7 @@ count. It covers the ferrets of the machine whose page it is, even in the all-ma
 | Setting                                                                                                                 | Decided                                |
 | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | The default runtime for new agents                                                                                      | when a start names no runtime          |
-| The machine's passive-learning default                                                                                  | at start ([learning.md](learning.md))  |
+| The machine's passive-learning default                                                                                  | at start ([lessons.md](lessons.md))    |
 | What the start asked for: mode, board access, remote control, the owner's harness flags, name, parent, folder, timeouts | at start, then kept for every relaunch |
 
 ## How a launch is built

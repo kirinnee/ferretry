@@ -19,7 +19,11 @@
   "dependencies": {
     "@ferretry/kernel": "workspace:*",
     "@ferretry/std": "workspace:*",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "@neslinesli93/qpdf-wasm": "0.3.0",
+    "@ferretry/core-asks": "workspace:*",
+    "@ferretry/core-ferrets": "workspace:*",
+    "@ferretry/core-gate": "workspace:*"
   },
   "sideEffects": false
 }

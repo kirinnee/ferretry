@@ -1,0 +1,31 @@
+<!-- PROVENANCE: reconstructed, NOT a live capture. Microsoft Entra "Stay signed in?" (KMSI) page, the document after an approved number match. Ids #KmsiCheckboxField and #idSIButton9 from public descriptions of the live page (https://github.com/RohanMuppa/brightspace-mcp-server/issues/79); the English text is the page's usual wording, NOT verified against a capture. Scrubbed: a@example.com. Replace with a scrubbed live capture. URL: https://login.microsoftonline.com/kmsi -->
+<!doctype html>
+<html dir="ltr" lang="en">
+  <head>
+    <title>Sign in to your account</title>
+  </head>
+  <body class="cb">
+    <form name="f1" method="post" action="/kmsi">
+      <div id="lightbox" class="sign-in-box">
+        <div class="identityBanner"><div id="displayName" class="identity">a@example.com</div></div>
+        <div id="kmsiTitle" class="row text-title" role="heading" aria-level="1">Stay signed in?</div>
+        <div class="row">
+          <div id="KmsiDescription" class="text-block-body">
+            Do this to reduce the number of times you are asked to sign in.
+          </div>
+        </div>
+        <div class="row">
+          <label
+            ><input type="checkbox" id="KmsiCheckboxField" name="DontShowAgain" /><span
+              >Don't show this again</span
+            ></label
+          >
+        </div>
+        <div class="row">
+          <input type="button" id="idBtn_Back" class="button" value="No" />
+          <input type="submit" id="idSIButton9" class="button button-primary" value="Yes" />
+        </div>
+      </div>
+    </form>
+  </body>
+</html>

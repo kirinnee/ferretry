@@ -1,0 +1,812 @@
+import { describe, expect, it } from 'bun:test';
+import { boardErr, boardOk } from '../../../contract/index.ts';
+import { NO_BOARD_FILTERS, toServerQuery } from '../../../app/lib/board-model.ts';
+import { BOARD_DERIVE_MS, DaemonBoardStore } from '../../../app/lib/board-store.ts';
+import type { DaemonId } from '../../../app/lib/machine.ts';
+import {
+  boardAnswer,
+  card,
+  deferred,
+  fakeEnvironment,
+  fakePort,
+  flush,
+  laneSetFor,
+  laptop,
+  OTHER_PROJECT,
+  PROJECT,
+  workstation,
+} from './board-support.ts';
+
+const query = toServerQuery(NO_BOARD_FILTERS);
+const lanes = laneSetFor();
+const event = (cardIds: string[]) => ({ projectId: PROJECT, cardIds });
+
+const open = (port = fakePort(), environment = fakeEnvironment()) => {
+  const store = new DaemonBoardStore(port, environment);
+  return { store, port, environment };
+};
+
+const cardsOf = (store: DaemonBoardStore, key: string, daemonId: DaemonId) =>
+  [...(store.view(key)?.slices.get(daemonId)?.cards.values() ?? [])].map(entry => `${entry.id}:${entry.laneId}`);
+
+describe('DaemonBoardStore reads', () => {
+  it('reads every machine and keeps a same-numbered card on each, apart', async () => {
+    const port = fakePort({
+      board: async daemon =>
+        boardAnswer([card('F12', { title: daemon.daemonId })], { projectId: PROJECT, laneSet: lanes }),
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [laptop, workstation]);
+    await flush();
+    expect(store.view(key)?.slices.get(laptop.daemonId)?.cards.get('F12')?.title).toBe(laptop.daemonId);
+    expect(store.view(key)?.slices.get(workstation.daemonId)?.cards.get('F12')?.title).toBe(workstation.daemonId);
+    expect(store.view(key)?.slices.get(laptop.daemonId)?.status).toBe('ready');
+    expect(store.view(key)?.slices.get(laptop.daemonId)?.version).toBe('4.110.0');
+    expect(store.view(key)?.slices.get(laptop.daemonId)?.laneSets.get(PROJECT)).toEqual(lanes);
+  });
+
+  it('shares one view between pages asking the same thing and drops it when the last lets go', async () => {
+    const { store, port } = open();
+    const first = store.watch(query, [laptop]);
+    const second = store.watch(query, [laptop]);
+    await flush();
+    expect(first.key).toBe(second.key);
+    expect(port.calls.filter(call => call.startsWith('board:'))).toHaveLength(1);
+    first.release();
+    expect(store.view(first.key)).not.toBeNull();
+    second.release();
+    second.release();
+    expect(store.view(first.key)).toBeNull();
+  });
+
+  it('asks a project with no served lane set for its lanes, one tiny read each', async () => {
+    const port = fakePort({
+      board: async (_daemon, asked, _cursor, limit) =>
+        limit === 1 ? boardAnswer([], { projectId: asked.project, laneSet: lanes }) : boardAnswer([card('F1')]),
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    await flush();
+    expect(store.view(key)?.slices.get(laptop.daemonId)?.laneSets.get(PROJECT)).toEqual(lanes);
+  });
+
+  it('uses the projects route when the daemon serves it', async () => {
+    const port = fakePort({
+      board: async () => boardAnswer([card('F1')]),
+      projects: async () => [{ id: PROJECT, name: 'ferretry', path: '/x', laneSet: lanes }],
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    await flush();
+    expect(store.view(key)?.slices.get(laptop.daemonId)?.laneSets.get(PROJECT)).toEqual(lanes);
+    expect(port.calls.some(call => call.startsWith('board:') && call.endsWith(`:${PROJECT}:`))).toBe(false);
+  });
+
+  it('says a machine failed without blanking the cards it already had', async () => {
+    let fail = false;
+    const port = fakePort({
+      board: async () => {
+        if (fail) throw new Error('daemon down');
+        return boardAnswer([card('F1')], { projectId: PROJECT, laneSet: lanes });
+      },
+    });
+    const { store, environment } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    await flush();
+    fail = true;
+    environment.advance(BOARD_DERIVE_MS);
+    environment.fire();
+    await flush();
+    const slice = store.view(key)?.slices.get(laptop.daemonId);
+    expect(slice?.status).toBe('error');
+    expect(slice?.error).toBe('daemon down');
+    expect(slice?.cards.has('F1')).toBe(true);
+  });
+
+  it('marks a board longer than the pages read as truncated and never deletes what it did not read', async () => {
+    let pages = 0;
+    const port = fakePort({
+      board: async () => {
+        pages += 1;
+        return boardAnswer([card(`F${pages}`)], { projectId: PROJECT, laneSet: lanes, nextCursor: 'more' });
+      },
+    });
+    const { store, environment } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    await flush();
+    expect(store.view(key)?.slices.get(laptop.daemonId)?.truncated).toBe(true);
+    const firstPage = [...(store.view(key)?.slices.get(laptop.daemonId)?.cards.keys() ?? [])];
+    expect(firstPage).toEqual(['F1', 'F2', 'F3', 'F4']);
+    pages = 100;
+    environment.advance(BOARD_DERIVE_MS);
+    environment.fire();
+    await flush();
+    expect(store.view(key)?.slices.get(laptop.daemonId)?.cards.has('F1')).toBe(true);
+  });
+});
+
+describe('DaemonBoardStore live updates', () => {
+  const live = async (initial = [card('F1'), card('F2')]) => {
+    const served = new Map(initial.map(entry => [entry.id, entry]));
+    const port = fakePort({
+      board: async () => boardAnswer([...served.values()], { projectId: PROJECT, laneSet: lanes }),
+      card: async (daemon, id) => {
+        port.calls.push(`card:${daemon.daemonId}:${id}`);
+        const found = served.get(id);
+        return found === undefined ? null : { card: found, laneSet: lanes };
+      },
+    });
+    const harness = open(port);
+    const { key } = harness.store.watch(query, [laptop]);
+    await flush();
+    return { ...harness, served, key };
+  };
+
+  it('re-reads only the cards a board.changed names, not the board', async () => {
+    const { store, port, served, key } = await live();
+    const boardReads = port.calls.filter(call => call.startsWith('board:')).length;
+    served.set('F2', card('F2', { laneId: 'review' }));
+    store.noteEvent(laptop.daemonId, event(['F2', 'F2']));
+    await flush();
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual(['F1:implement', 'F2:review']);
+    expect(port.calls.filter(call => call.startsWith('card:'))).toEqual([`card:${laptop.daemonId}:F2`]);
+    expect(port.calls.filter(call => call.startsWith('board:'))).toHaveLength(boardReads);
+  });
+
+  it('adds a new card, and takes out one the machine no longer has', async () => {
+    const { store, served, key } = await live();
+    served.set('F3', card('F3'));
+    served.delete('F1');
+    store.noteEvent(laptop.daemonId, event(['F3', 'F1']));
+    await flush();
+    expect(cardsOf(store, key, laptop.daemonId).sort()).toEqual(['F2:implement', 'F3:implement']);
+  });
+
+  it('takes a card out of a board it no longer belongs to (closed, on the open board)', async () => {
+    const { store, served, key } = await live();
+    served.set('F1', card('F1', { laneId: 'closed' }));
+    store.noteEvent(laptop.daemonId, event(['F1']));
+    await flush();
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual(['F2:implement']);
+  });
+
+  it('ignores other events, malformed ones, and machines nothing is watching', async () => {
+    const { store, port } = await live();
+    const before = port.calls.length;
+    store.noteEvent(laptop.daemonId, { type: 'session.started', data: {} });
+    store.noteEvent(laptop.daemonId, { projectId: PROJECT, cardIds: 'F1' });
+    store.noteEvent(workstation.daemonId, event(['F1']));
+    await flush();
+    expect(port.calls).toHaveLength(before);
+  });
+
+  it('leaves the board alone when a card read fails', async () => {
+    const { store, port, key } = await live();
+    port.card = async () => {
+      throw new Error('boom');
+    };
+    store.noteEvent(laptop.daemonId, event(['F1']));
+    await flush();
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual(['F1:implement', 'F2:implement']);
+  });
+
+  it('does not let a whole-board read issued before an event overwrite the newer card', async () => {
+    const held = deferred<ReturnType<typeof boardAnswer>>();
+    let slow = false;
+    const port = fakePort({
+      board: async () => {
+        if (!slow) return boardAnswer([card('F1')], { projectId: PROJECT, laneSet: lanes });
+        return await held.promise;
+      },
+      card: async () => ({ card: card('F1', { laneId: 'review' }), laneSet: lanes }),
+    });
+    const { store, environment } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    await flush();
+    slow = true;
+    environment.advance(BOARD_DERIVE_MS);
+    environment.fire();
+    await flush();
+    store.noteEvent(laptop.daemonId, event(['F1']));
+    await flush();
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual(['F1:review']);
+    // The older read settles last, still describing the card where it was.
+    held.resolve(boardAnswer([card('F1', { laneId: 'implement' })], { projectId: PROJECT, laneSet: lanes }));
+    await flush();
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual(['F1:review']);
+  });
+
+  it('does not let an older whole-board read bring back a card an event removed', async () => {
+    const held = deferred<ReturnType<typeof boardAnswer>>();
+    let slow = false;
+    const port = fakePort({
+      board: async () => {
+        if (!slow) return boardAnswer([card('F1')], { projectId: PROJECT, laneSet: lanes });
+        return await held.promise;
+      },
+      card: async () => null,
+    });
+    const { store, environment } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    await flush();
+    slow = true;
+    environment.advance(BOARD_DERIVE_MS);
+    environment.fire();
+    await flush();
+    store.noteEvent(laptop.daemonId, event(['F1']));
+    await flush();
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual([]);
+    held.resolve(boardAnswer([card('F1')], { projectId: PROJECT, laneSet: lanes }));
+    await flush();
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual([]);
+  });
+
+  it('lets a whole-board read issued after an event win, including a removal', async () => {
+    const { store, served, key, environment } = await live();
+    served.delete('F2');
+    environment.advance(BOARD_DERIVE_MS);
+    environment.fire();
+    await flush();
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual(['F1:implement']);
+  });
+
+  it('carries a returned lane set into the view', async () => {
+    const wider = { ...lanes, version: 2 };
+    const { store, port, key } = await live();
+    port.card = async () => ({ card: card('F1', { laneId: 'review' }), laneSet: wider });
+    store.noteEvent(laptop.daemonId, event(['F1']));
+    await flush();
+    expect(store.view(key)?.slices.get(laptop.daemonId)?.laneSets.get(PROJECT)?.version).toBe(2);
+  });
+});
+
+describe('DaemonBoardStore cadence', () => {
+  it('re-reads the whole board every thirty seconds while a page is open, and stops when it closes', async () => {
+    const { store, port, environment } = open(fakePort());
+    const watching = store.watch(query, [laptop]);
+    await flush();
+    const reads = () => port.calls.filter(call => call.startsWith('board:')).length;
+    expect(reads()).toBe(1);
+    environment.fire();
+    await flush();
+    expect(reads()).toBe(1);
+    environment.advance(BOARD_DERIVE_MS);
+    environment.fire();
+    await flush();
+    expect(reads()).toBe(2);
+    environment.advance(BOARD_DERIVE_MS);
+    environment.fire();
+    await flush();
+    expect(reads()).toBe(3);
+    watching.release();
+    expect(environment.pending()).toBe(0);
+  });
+
+  it('holds a view asked for without a beat by events alone, and a beat from any watcher keeps it', async () => {
+    const { store, port, environment } = open(fakePort());
+    const quiet = store.watch(query, [laptop], { beat: false });
+    await flush();
+    expect(environment.pending()).toBe(0);
+    const beating = store.watch(query, [laptop]);
+    expect(environment.pending()).toBe(1);
+    environment.advance(BOARD_DERIVE_MS);
+    environment.fire();
+    await flush();
+    expect(port.calls.filter(call => call.startsWith('board:'))).toHaveLength(2);
+    beating.release();
+    quiet.release();
+    expect(environment.pending()).toBe(0);
+  });
+
+  it('stops the whole-board beat when the last beating watcher lets go, though a quiet one stays', async () => {
+    const { store, port, environment } = open(fakePort());
+    const quiet = store.watch(query, [laptop], { beat: false });
+    const beating = store.watch(query, [laptop]);
+    await flush();
+    expect(environment.pending()).toBe(1);
+    beating.release();
+    expect(environment.pending()).toBe(0);
+    const reads = port.calls.filter(call => call.startsWith('board:')).length;
+    environment.advance(BOARD_DERIVE_MS * 3);
+    environment.fire();
+    await flush();
+    expect(port.calls.filter(call => call.startsWith('board:'))).toHaveLength(reads);
+    quiet.release();
+  });
+
+  it('reads nothing while the page is hidden and the next beat after it is shown', async () => {
+    const { store, port, environment } = open(fakePort());
+    store.watch(query, [laptop]);
+    await flush();
+    environment.show(false);
+    environment.advance(BOARD_DERIVE_MS);
+    environment.fire();
+    await flush();
+    expect(port.calls.filter(call => call.startsWith('board:'))).toHaveLength(1);
+    environment.show(true);
+    environment.advance(BOARD_DERIVE_MS);
+    environment.fire();
+    await flush();
+    expect(port.calls.filter(call => call.startsWith('board:'))).toHaveLength(2);
+  });
+
+  it('refreshes one machine on demand', async () => {
+    const { store, port } = open(fakePort());
+    const { key } = store.watch(query, [laptop, workstation]);
+    await flush();
+    await store.refresh(key, laptop.daemonId);
+    await store.refresh('missing', laptop.daemonId);
+    expect(port.calls.filter(call => call === `board:${laptop.daemonId}:*:`)).toHaveLength(2);
+    expect(port.calls.filter(call => call === `board:${workstation.daemonId}:*:`)).toHaveLength(1);
+  });
+});
+
+describe('DaemonBoardStore forgetting a machine', () => {
+  it('drops its slices and ignores what it was still being asked', async () => {
+    const held = deferred<ReturnType<typeof boardAnswer>>();
+    const port = fakePort({
+      board: async daemon =>
+        daemon.daemonId === laptop.daemonId
+          ? await held.promise
+          : boardAnswer([card('F2')], { projectId: PROJECT, laneSet: lanes }),
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [laptop, workstation]);
+    await flush();
+    store.clearDaemon(laptop.daemonId);
+    held.resolve(boardAnswer([card('F1')], { projectId: PROJECT, laneSet: lanes }));
+    await flush();
+    expect(store.view(key)?.slices.has(laptop.daemonId)).toBe(false);
+    expect(cardsOf(store, key, workstation.daemonId)).toEqual(['F2:implement']);
+    store.noteEvent(laptop.daemonId, event(['F1']));
+    await flush();
+    expect(store.view(key)?.slices.has(laptop.daemonId)).toBe(false);
+  });
+});
+
+describe('DaemonBoardStore writes', () => {
+  it('puts the card the daemon answers into every view and page showing it', async () => {
+    const moved = card('F1', { laneId: 'review' });
+    const port = fakePort({
+      board: async () => boardAnswer([card('F1')], { projectId: PROJECT, laneSet: lanes }),
+      card: async () => ({ card: card('F1'), laneSet: lanes }),
+      act: async () => boardOk({ card: moved, laneSet: lanes }),
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    const releaseTask = store.watchTask(laptop, 'F1');
+    await flush();
+    const answer = await store.act(laptop, 'F1', { action: 'move', to: 'review' });
+    expect(answer.ok).toBe(true);
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual(['F1:review']);
+    expect(store.taskState(laptop.daemonId, 'F1').task?.laneId).toBe('review');
+    releaseTask();
+  });
+
+  it('changes nothing when the daemon refuses, and hands the refusal back', async () => {
+    const refusal = { status: 409, message: 'needs a reason', boardCode: 'reason-required' as const };
+    const port = fakePort({
+      board: async () => boardAnswer([card('F1')], { projectId: PROJECT, laneSet: lanes }),
+      act: async () => boardErr(refusal),
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    await flush();
+    const answer = await store.act(laptop, 'F1', { action: 'move', to: 'plan', reason: 'x' });
+    expect(answer).toEqual(boardErr(refusal));
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual(['F1:implement']);
+  });
+});
+
+describe('DaemonBoardStore create', () => {
+  const request = { kind: 'feature', title: 'Try it', ask: { text: 'do it', source: 'owner (board)' } } as const;
+
+  it('puts the card the daemon opened into the views showing that machine', async () => {
+    const port = fakePort({
+      board: async () => boardAnswer([card('F1')], { projectId: PROJECT, laneSet: lanes }),
+      create: async () => boardOk({ card: card('F9'), laneSet: lanes }),
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    await flush();
+    const answer = await store.create(laptop, request);
+    expect(answer.ok && answer.value.id).toBe('F9');
+    expect(cardsOf(store, key, laptop.daemonId).sort()).toEqual(['F1:implement', 'F9:implement']);
+  });
+
+  it('changes nothing when the daemon refuses, and hands the refusal back', async () => {
+    const refusal = { status: 403, message: 'owner only', boardCode: 'owner-gate' as const };
+    const port = fakePort({
+      board: async () => boardAnswer([card('F1')], { projectId: PROJECT, laneSet: lanes }),
+      create: async () => boardErr(refusal),
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    await flush();
+    expect(await store.create(laptop, request)).toEqual(boardErr(refusal));
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual(['F1:implement']);
+  });
+
+  it('does not place a card the machine was forgotten before it was opened', async () => {
+    const opened = deferred<ReturnType<typeof boardOk>>();
+    const port = fakePort({
+      board: async () => boardAnswer([card('F1')], { projectId: PROJECT, laneSet: lanes }),
+      create: async () => (await opened.promise) as never,
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    await flush();
+    const pending = store.create(laptop, request);
+    store.clearDaemon(laptop.daemonId);
+    opened.resolve(boardOk({ card: card('F9'), laneSet: lanes }));
+    expect((await pending).ok).toBe(true);
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual([]);
+  });
+
+  it('skips views that do not show the machine', async () => {
+    const port = fakePort({
+      board: async () => boardAnswer([card('F1')], { projectId: PROJECT, laneSet: lanes }),
+      create: async () => boardOk({ card: card('F9'), laneSet: lanes }),
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [workstation]);
+    await flush();
+    await store.create(laptop, request);
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual([]);
+  });
+});
+
+describe('DaemonBoardStore one card and projects', () => {
+  it('reads one card, says when the machine has none, re-reads on its event and on the beat', async () => {
+    let task: ReturnType<typeof card> | null = card('F1');
+    const port = fakePort({ card: async () => (task === null ? null : { card: task, laneSet: lanes }) });
+    const { store, environment } = open(port);
+    const release = store.watchTask(laptop, 'F1');
+    store.watchTask(laptop, 'F1')();
+    await flush();
+    expect(store.taskState(laptop.daemonId, 'F1')).toMatchObject({ status: 'ready', missing: false });
+    task = card('F1', { laneId: 'review' });
+    store.noteEvent(laptop.daemonId, event(['F1']));
+    await flush();
+    expect(store.taskState(laptop.daemonId, 'F1').task?.laneId).toBe('review');
+    task = null;
+    environment.advance(BOARD_DERIVE_MS);
+    environment.fire();
+    await flush();
+    expect(store.taskState(laptop.daemonId, 'F1')).toMatchObject({ missing: true, task: null });
+    release();
+    expect(environment.pending()).toBe(0);
+    expect(store.taskState(laptop.daemonId, 'F1').status).toBe('idle');
+  });
+
+  it('holds a card watched without a beat by events alone, and a later beat from any watcher arms the timer', async () => {
+    let task = card('F1');
+    const port = fakePort({ card: async () => ({ card: task, laneSet: lanes }) });
+    const { store, environment } = open(port);
+    const quiet = store.watchTask(laptop, 'F1', { beat: false });
+    await flush();
+    expect(environment.pending()).toBe(0);
+    task = card('F1', { laneId: 'review' });
+    store.noteEvent(laptop.daemonId, event(['F1']));
+    await flush();
+    expect(store.taskState(laptop.daemonId, 'F1').task?.laneId).toBe('review');
+    expect(environment.pending()).toBe(0);
+    const beating = store.watchTask(laptop, 'F1');
+    expect(environment.pending()).toBe(1);
+    beating();
+    quiet();
+    expect(environment.pending()).toBe(0);
+  });
+
+  it('stops the beat on a card when the last beating holder lets go, though a quiet inline holder stays', async () => {
+    const port = fakePort({ card: async () => ({ card: card('F1'), laneSet: lanes }) });
+    const { store, environment } = open(port);
+    const quiet = store.watchTask(laptop, 'F1', { beat: false });
+    const first = store.watchTask(laptop, 'F1');
+    const second = store.watchTask(laptop, 'F1');
+    await flush();
+    expect(environment.pending()).toBe(1);
+    first();
+    expect(environment.pending()).toBe(1);
+    second();
+    expect(environment.pending()).toBe(0);
+    const reads = port.calls.filter(call => call.startsWith('card:')).length;
+    environment.advance(BOARD_DERIVE_MS * 3);
+    environment.fire();
+    await flush();
+    expect(port.calls.filter(call => call.startsWith('card:'))).toHaveLength(reads);
+    expect(store.taskState(laptop.daemonId, 'F1').status).toBe('ready');
+    quiet();
+    expect(store.taskState(laptop.daemonId, 'F1').status).toBe('idle');
+  });
+
+  it('keeps the card it had when a re-read fails', async () => {
+    let fail = false;
+    const port = fakePort({
+      card: async () => {
+        if (fail) throw new Error('nope');
+        return { card: card('F1'), laneSet: lanes };
+      },
+    });
+    const { store, environment } = open(port);
+    store.watchTask(laptop, 'F1');
+    await flush();
+    fail = true;
+    environment.advance(BOARD_DERIVE_MS);
+    environment.fire();
+    await flush();
+    expect(store.taskState(laptop.daemonId, 'F1')).toMatchObject({ status: 'error', error: 'nope' });
+    expect(store.taskState(laptop.daemonId, 'F1').task?.id).toBe('F1');
+  });
+
+  it('reads each machine’s projects once and reads none from a machine with none', async () => {
+    const port = fakePort({
+      projects: async daemon => {
+        port.calls.push(`projects:${daemon.daemonId}`);
+        return daemon.daemonId === laptop.daemonId ? [{ id: PROJECT, name: 'ferretry', path: null, laneSet: lanes }] : [];
+      },
+    });
+    const { store } = open(port);
+    const releaseLaptop = store.watchProjects(laptop);
+    store.watchProjects(workstation);
+    store.watchProjects(laptop)();
+    await flush();
+    expect(store.projectsState(laptop.daemonId)).toMatchObject({ status: 'ready' });
+    expect(store.projectsState(laptop.daemonId).projects?.[0]?.name).toBe('ferretry');
+    expect(store.projectsState(workstation.daemonId)).toMatchObject({ status: 'ready', projects: [] });
+    expect(port.calls.filter(call => call === `projects:${laptop.daemonId}`)).toHaveLength(1);
+    releaseLaptop();
+    releaseLaptop();
+  });
+
+  it('keeps projects it had and reports the error when a refresh fails, and forgets them with the machine', async () => {
+    let fail = false;
+    const port = fakePort({
+      projects: async () => {
+        if (fail) throw new Error('later');
+        return [];
+      },
+    });
+    const { store } = open(port);
+    store.watchProjects(laptop);
+    await flush();
+    fail = true;
+    await store.refreshProjects(laptop);
+    expect(store.projectsState(laptop.daemonId)).toMatchObject({ status: 'error', error: 'later', projects: [] });
+    store.clearDaemon(laptop.daemonId);
+    expect(store.projectsState(laptop.daemonId).status).toBe('idle');
+  });
+});
+
+describe('DaemonBoardStore lanes', () => {
+  const changed = { ...lanes, version: 2, confirmedBy: null, proposedBy: 'ferret' };
+
+  it('puts the set the daemon answers into the project list and every board showing the project', async () => {
+    const port = fakePort({
+      projects: async () => [
+        { id: PROJECT, name: 'ferretry', path: null, laneSet: lanes },
+        { id: OTHER_PROJECT, name: 'other', path: null, laneSet: null },
+      ],
+      board: async () => boardAnswer([], { projectId: PROJECT, laneSet: lanes }),
+      lanes: async (_daemon, projectId, request) => {
+        port.calls.push(`lanes:${projectId}:${request.action}`);
+        return boardOk({ laneSet: changed, ask: 'not-needed' });
+      },
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    store.watchProjects(laptop);
+    await flush();
+    let heard = 0;
+    store.subscribe(() => {
+      heard += 1;
+    });
+    const answer = await store.changeLanes(laptop, PROJECT, { action: 'confirm', version: 1 });
+    expect(answer.ok).toBe(true);
+    expect(port.calls).toContain(`lanes:${PROJECT}:confirm`);
+    expect(store.projectsState(laptop.daemonId).projects?.map(project => project.laneSet?.version ?? null)).toEqual([
+      2,
+      null,
+    ]);
+    expect(store.view(key)?.slices.get(laptop.daemonId)?.laneSets.get(PROJECT)?.version).toBe(2);
+    expect(heard).toBeGreaterThan(0);
+  });
+
+  it('changes nothing when the daemon refuses, and hands the refusal back', async () => {
+    const port = fakePort({
+      projects: async () => [{ id: PROJECT, name: 'ferretry', path: null, laneSet: lanes }],
+      lanes: async () => boardErr({ status: 409, message: 'moved on', code: 'version-conflict' }),
+    });
+    const { store } = open(port);
+    store.watchProjects(laptop);
+    await flush();
+    const answer = await store.changeLanes(laptop, PROJECT, { action: 'confirm', version: 1 });
+    expect(!answer.ok && answer.error.code).toBe('version-conflict');
+    expect(store.projectsState(laptop.daemonId).projects?.[0]?.laneSet).toEqual(lanes);
+  });
+
+  it('copes with a machine whose projects were never read, and drops an answer for a forgotten machine', async () => {
+    const gate = deferred<void>();
+    gate.resolve();
+    const port = fakePort({
+      lanes: async () => {
+        await gate.promise;
+        return boardOk({ laneSet: changed, ask: 'not-needed' });
+      },
+    });
+    const { store } = open(port);
+    expect((await store.changeLanes(laptop, PROJECT, { action: 'confirm', version: 1 })).ok).toBe(true);
+    expect(store.projectsState(laptop.daemonId).projects).toBeNull();
+    store.watchProjects(laptop);
+    const pending = store.changeLanes(laptop, PROJECT, { action: 'confirm', version: 1 });
+    store.clearDaemon(laptop.daemonId);
+    expect((await pending).ok).toBe(true);
+    expect(store.projectsState(laptop.daemonId).projects).toBeNull();
+  });
+});
+
+describe('DaemonBoardStore odds and ends', () => {
+  it('stops telling a listener once it unsubscribes', async () => {
+    const { store } = open();
+    let heard = 0;
+    const stop = store.subscribe(() => {
+      heard += 1;
+    });
+    store.watch(query, [laptop]);
+    await flush();
+    const before = heard;
+    expect(before).toBeGreaterThan(0);
+    stop();
+    store.clearDaemon(laptop.daemonId);
+    expect(heard).toBe(before);
+  });
+
+  it('falls back to no lane set when the one-card lane read fails', async () => {
+    const port = fakePort({
+      board: async (_daemon, _asked, _cursor, limit) => {
+        if (limit === 1) throw new Error('no');
+        return boardAnswer([card('F1')]);
+      },
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    await flush();
+    expect(store.view(key)?.slices.get(laptop.daemonId)?.laneSets.get(PROJECT)).toBeNull();
+  });
+
+  it('drops a card watch with its machine and ignores that card’s late answer', async () => {
+    const held = deferred<{ card: ReturnType<typeof card>; laneSet: typeof lanes } | null>();
+    const port = fakePort({ card: async () => await held.promise });
+    const { store, environment } = open(port);
+    store.watchTask(laptop, 'F1');
+    await flush();
+    store.clearDaemon(laptop.daemonId);
+    held.resolve({ card: card('F1'), laneSet: lanes });
+    await flush();
+    expect(store.taskState(laptop.daemonId, 'F1').status).toBe('idle');
+    expect(environment.pending()).toBe(0);
+  });
+
+  it('ignores a failing card read that comes back after its machine was forgotten', async () => {
+    const held = deferred<null>();
+    const port = fakePort({ card: async () => await held.promise });
+    const { store } = open(port);
+    store.watchTask(laptop, 'F1');
+    await flush();
+    store.clearDaemon(laptop.daemonId);
+    held.reject(new Error('late'));
+    await flush();
+    expect(store.taskState(laptop.daemonId, 'F1').error).toBeNull();
+  });
+});
+
+describe('DaemonBoardStore card ids', () => {
+  it('reads the machine’s ids once, however many surfaces ask', async () => {
+    const port = fakePort({ ids: async () => ['F1', 'F364'] });
+    const { store } = open(port);
+    expect(store.idsState(laptop.daemonId).status).toBe('idle');
+    store.watchIds(laptop);
+    store.watchIds(laptop);
+    await flush();
+    store.watchIds(laptop);
+    expect([...(store.idsState(laptop.daemonId).ids ?? [])]).toEqual(['F1', 'F364']);
+    expect(store.idsState(laptop.daemonId).status).toBe('ready');
+    expect(store.idsState(workstation.daemonId).ids).toBeNull();
+  });
+
+
+  it('adds the ids a board.changed names, and tells the page once', async () => {
+    const { store } = open(fakePort({ ids: async () => ['F1'] }));
+    store.watchIds(laptop);
+    await flush();
+    let told = 0;
+    store.subscribe(() => {
+      told += 1;
+    });
+    store.noteEvent(laptop.daemonId, event(['F1']));
+    expect(told).toBe(0);
+    store.noteEvent(laptop.daemonId, event(['F1', 'F2']));
+    expect([...(store.idsState(laptop.daemonId).ids ?? [])]).toEqual(['F1', 'F2']);
+    expect(told).toBe(1);
+  });
+
+
+  it('says a failed read, and reads again on the next ask', async () => {
+    let answers = 0;
+    const port = fakePort({
+      ids: async () => {
+        answers += 1;
+        if (answers === 1) throw new Error('offline');
+        return ['F1'];
+      },
+    });
+    const { store } = open(port);
+    store.watchIds(laptop);
+    await flush();
+    expect(store.idsState(laptop.daemonId)).toMatchObject({ status: 'error', error: 'offline', ids: null });
+    store.watchIds(laptop);
+    await flush();
+    expect(store.idsState(laptop.daemonId)).toMatchObject({ status: 'ready', error: null });
+    expect(answers).toBe(2);
+  });
+
+  it('keeps the ids it has while it re-reads, and ignores a read that is already running', async () => {
+    const held = deferred<readonly string[]>();
+    let reads = 0;
+    const port = fakePort({
+      ids: async () => {
+        reads += 1;
+        return reads === 1 ? ['F1'] : await held.promise;
+      },
+    });
+    const { store } = open(port);
+    store.watchIds(laptop);
+    await flush();
+    const again = store.refreshIds(laptop);
+    const overlapping = store.refreshIds(laptop);
+    expect([...(store.idsState(laptop.daemonId).ids ?? [])]).toEqual(['F1']);
+    held.resolve(['F1', 'F2']);
+    await Promise.all([again, overlapping]);
+    expect(reads).toBe(2);
+    expect([...(store.idsState(laptop.daemonId).ids ?? [])]).toEqual(['F1', 'F2']);
+  });
+
+  it('forgets a machine’s ids with it, and ignores a read or a failure that lands after', async () => {
+    const held = deferred<readonly string[]>();
+    const { store } = open(fakePort({ ids: async () => await held.promise }));
+    store.watchIds(laptop);
+    await flush();
+    store.clearDaemon(laptop.daemonId);
+    held.resolve(['F1']);
+    await flush();
+    expect(store.idsState(laptop.daemonId).status).toBe('idle');
+
+    const failing = deferred<readonly string[]>();
+    const second = open(fakePort({ ids: async () => await failing.promise })).store;
+    second.watchIds(laptop);
+    await flush();
+    second.clearDaemon(laptop.daemonId);
+    failing.reject(new Error('late'));
+    await flush();
+    expect(second.idsState(laptop.daemonId).error).toBeNull();
+  });
+});
+
+describe('DaemonBoardStore start', () => {
+  it('hands the start of a card to the port, on the machine that holds it', async () => {
+    const started: string[] = [];
+    const { store } = open(
+      fakePort({
+        start: async (machine, id, key) => {
+          started.push(`${machine.daemonId}:${id}:${key}`);
+          return boardOk({ card: id, ferret: 'worker', started: true });
+        },
+      }),
+    );
+
+    const result = await store.start(laptop, 'F1' as never, 'click-1');
+
+    expect(started).toEqual([`${laptop.daemonId}:F1:click-1`]);
+    expect(result).toEqual(boardOk({ card: 'F1', ferret: 'worker', started: true }));
+  });
+});
