@@ -3,7 +3,7 @@ import should from 'should';
 import { ensureDom } from '@ferretry/app/testing';
 
 ensureDom();
-import { readChart } from '../../../../app/render/fy-render-chart.ts';
+import { readChart } from '../../../../app/render/fy-render-chart-model.ts';
 import { type ResolvedTheme, THEME_TOKENS, type ThemeToken } from '../../../../app/render/fy-render-palette.ts';
 
 /**

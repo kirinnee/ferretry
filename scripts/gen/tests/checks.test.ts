@@ -4,7 +4,7 @@
  */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { contextFor } from '../lib/check.ts';
+import { contextFor, parseArgs } from '../lib/check.ts';
 import type { Finding } from '../lib/graph.ts';
 import { check as actRunner } from '../../validate/act-runner.ts';
 import { bannedIn, check as bannedGlobals } from '../../validate/banned-globals.ts';
@@ -14,7 +14,14 @@ import { check as contractGraph } from '../../validate/contract-graph.ts';
 import { check as coreClosed } from '../../validate/core-closed.ts';
 import { parity, readChanges } from '../../validate/descriptor-parity.ts';
 import { check as glossary, glossaryFindings } from '../../validate/glossary.ts';
-import { enforcerSymbols, guaranteeFindings, parseTsv } from '../../validate/guarantees.ts';
+import {
+  check as guarantees,
+  enforcerSymbols,
+  guaranteeFindings,
+  ownerCheck as guaranteeOwner,
+  parseJunit,
+  parseTsv,
+} from '../../validate/guarantees.ts';
 import { check as hostFiles } from '../../validate/host-files.ts';
 import { check as manifestMatch } from '../../validate/manifest-match.ts';
 import { compatIn } from '../../validate/no-compat.ts';
@@ -763,6 +770,261 @@ describe('guarantees', () => {
     expect(found).not.toContain('G4');
     expect(messages(guaranteeFindings(rows, tests, new Set(['board']), undefined, true))).toContain('G2');
     expect(enforcerSymbols('`decideCapability`, `packages/x.ts`, `GET /v1/x`, `fys_`')).toEqual(['decideCapability']);
+  });
+});
+
+describe('guarantees: a kept row needs a test that PASSES (redesign §10.5)', () => {
+  const TSV_HEAD = 'id\tstatus\towner\twith\tenforcer\tdoc\ttest\n';
+  const row = (id: string, status: 'kept' | 'split' | 'removed', owner = 'alpha'): string =>
+    `${id}\t${status}\t${owner}\t-\t-\tgrants\t${status === 'removed' ? '-' : id}\n`;
+  // The titles are spliced in, so this file holds no literal test title that starts with a real row id.
+  const titled = (...names: string[]): string =>
+    `import { test } from 'bun:test';\n${names.map(name => `test('${name}', () => {});`).join('\n')}\n`;
+  const titledAs = (modifier: string, name: string): string =>
+    `import { test } from 'bun:test';\ntest.${modifier}('${name}', () => {});\n`;
+  const junit = (...cases: { name: string; file: string; status?: 'failure' | 'skipped' }[]): string =>
+    `<?xml version="1.0"?><testsuites>${cases
+      .map(c =>
+        c.status === undefined
+          ? `<testcase name="${c.name}" file="${c.file}" />`
+          : `<testcase name="${c.name}" file="${c.file}"><${c.status} /></testcase>`,
+      )
+      .join('')}</testsuites>`;
+  const A = 'packages/plugins/alpha/tests/unit/a.test.ts';
+  const planted = (
+    rows: string,
+    tests: string,
+    reports: Record<string, string>,
+    extra: Partial<FixturePackage> = {},
+  ) => {
+    const f = ws([{ id: 'alpha', ...extra }, { id: 'beta' }]);
+    f.write('docs/rebuild/guarantees.tsv', TSV_HEAD + rows);
+    f.write(A, tests);
+    for (const [path, xml] of Object.entries(reports)) f.write(path, xml);
+    return f;
+  };
+  const both = async (f: Fixture, extra = {}) => [
+    ...(await run(guarantees, f, extra)),
+    ...(await run(guaranteeOwner, f, extra)),
+  ];
+
+  test('reads a JUnit report: ids by test name, failure and error mean failed, skipped means skipped', () => {
+    const xml = [
+      '<testsuites><testsuite name="a">',
+      '<testcase name="G1 passes" classname="x" file="./p/a.test.ts" line="1" assertions="1" />',
+      '<testcase name="G2 fails &amp; says so" file="p/a.test.ts"><failure type="AssertionError" /></testcase>',
+      '<testcase name="G3a errors" file="p/a.test.ts"><error /></testcase>',
+      '<testcase name="G4 todo" file="p/a.test.ts"><skipped message="TODO" /></testcase>',
+      '<testcase name="G5" file="p/a.test.ts" />',
+      '<testcase name="the title has no row id" file="p/a.test.ts" />',
+      '</testsuite></testsuites>',
+    ].join('\n');
+    expect(parseJunit(xml).map(r => `${r.id}:${r.status}:${r.file}`)).toEqual([
+      'G1:passed:p/a.test.ts',
+      'G2:failed:p/a.test.ts',
+      'G3a:failed:p/a.test.ts',
+      'G4:skipped:p/a.test.ts',
+      'G5:passed:p/a.test.ts',
+    ]);
+    expect(parseJunit(xml)[1]?.name).toBe('G2 fails & says so');
+  });
+
+  test('a kept row whose id-named test passes is quiet; with no test at all it fails', async () => {
+    const quiet = planted(row('G1', 'kept'), titled('G1 holds'), {
+      'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A }),
+    });
+    expect(messages(await both(quiet))).toBe('');
+    const none = planted(row('G1', 'kept'), titled('something else'), {
+      'coverage/unit/junit.xml': junit({ name: 'something else', file: A }),
+    });
+    expect(messages(await both(none))).toContain('G1: kept row owned by alpha has no test named "G1 …"');
+  });
+
+  test('a test named with the id that FAILS fails the row, even though the title exists', async () => {
+    const f = planted(row('G1', 'kept'), titled('G1 holds'), {
+      'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A, status: 'failure' }),
+    });
+    expect(messages(await both(f))).toContain('G1: kept row owned by alpha has a FAILING test');
+  });
+
+  test('a test that exists but was skipped, or is in no report, does not prove the row', async () => {
+    const skippedRun = planted(row('G1', 'kept'), titled('G1 holds'), {
+      'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A, status: 'skipped' }),
+    });
+    expect(messages(await both(skippedRun))).toContain(
+      'G1: kept row owned by alpha has a test named "G1 …" but no passing run',
+    );
+    const notRun = planted(row('G1', 'kept'), titled('G1 holds'), {
+      'coverage/unit/junit.xml': junit({ name: 'G9 another', file: A }),
+    });
+    expect(messages(await both(notRun))).toContain('no passing run');
+  });
+
+  test('every test named with the id must pass: one failing sibling fails the row', async () => {
+    const f = planted(row('G1', 'kept'), titled('G1 one', 'G1 two'), {
+      'coverage/unit/junit.xml': junit({ name: 'G1 one', file: A }, { name: 'G1 two', file: A, status: 'failure' }),
+    });
+    expect(messages(await both(f))).toContain('FAILING test');
+  });
+
+  test('a quarantine rerun that passes rescues a first run that failed; two failing runs do not', async () => {
+    const rescued = planted(row('G1', 'kept'), titled('G1 holds'), {
+      'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A, status: 'failure' }),
+      'coverage/unit/rerun/junit.xml': junit({ name: 'G1 holds', file: A }),
+    });
+    expect(messages(await both(rescued))).toBe('');
+    const still = planted(row('G1', 'kept'), titled('G1 holds'), {
+      'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A, status: 'failure' }),
+      'coverage/unit/rerun/junit.xml': junit({ name: 'G1 holds', file: A, status: 'failure' }),
+    });
+    expect(messages(await both(still))).toContain('FAILING test');
+  });
+
+  test("a pass in another package's suite is not the owner's proof", async () => {
+    const f = planted(row('G1', 'kept'), titled('G1 holds'), {
+      'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: 'packages/plugins/beta/tests/unit/b.test.ts' }),
+    });
+    expect(messages(await both(f))).toContain('no passing run');
+  });
+
+  test('a split row is a kept row: its kept half needs a passing test', async () => {
+    const missing = planted(row('G2', 'split'), titled('unrelated'), {
+      'coverage/unit/junit.xml': junit({ name: 'unrelated', file: A }),
+    });
+    expect(messages(await both(missing))).toContain('G2: split row owned by alpha has no test named "G2 …"');
+    const failing = planted(row('G2', 'split'), titled('G2 kept half'), {
+      'coverage/unit/junit.xml': junit({ name: 'G2 kept half', file: A, status: 'failure' }),
+    });
+    expect(messages(await both(failing))).toContain('G2: split row owned by alpha has a FAILING test');
+    const ok = planted(row('G2', 'split'), titled('G2 kept half'), {
+      'coverage/unit/junit.xml': junit({ name: 'G2 kept half', file: A }),
+    });
+    expect(messages(await both(ok))).toBe('');
+  });
+
+  test('a REMOVED row that leaves a test behind fails; a kept half beside it is never flagged', async () => {
+    const f = planted(
+      row('G2', 'split') + row('G3', 'removed') + row('G4', 'kept'),
+      titled('G2 kept half', 'G4 holds', 'G3 the removed half'),
+      {
+        'coverage/unit/junit.xml': junit(
+          { name: 'G2 kept half', file: A },
+          { name: 'G4 holds', file: A },
+          { name: 'G3 the removed half', file: A },
+        ),
+      },
+    );
+    const found = messages(await both(f));
+    expect(found).toContain('G3: REMOVED row still has a test');
+    expect(found).not.toContain('G2');
+    expect(found).not.toContain('G4');
+    const clean = planted(row('G2', 'split') + row('G3', 'removed'), titled('G2 kept half'), {
+      'coverage/unit/junit.xml': junit({ name: 'G2 kept half', file: A }),
+    });
+    expect(messages(await both(clean))).toBe('');
+  });
+
+  test('a .failing or .skip or .todo test is no proof', async () => {
+    for (const modifier of ['failing', 'skip', 'todo']) {
+      const f = planted(row('G1', 'kept'), titledAs(modifier, 'G1 holds'), {
+        'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A }),
+      });
+      expect(messages(await both(f))).toContain('has no test named');
+    }
+  });
+
+  test('no report at all is a finding; --existence-only (the commit hook) and --package opt out of it', async () => {
+    const f = planted(row('G1', 'kept'), titled('G1 holds'), {});
+    expect(messages(await both(f))).toContain('no JUnit report found');
+    expect(messages(await both(f, { existenceOnly: true }))).toBe('');
+    expect(messages(await both(f, { packageId: 'alpha' }))).toBe('');
+  });
+
+  test('--results names the report: a file, or a folder searched for junit.xml', async () => {
+    const f = planted(row('G1', 'kept'), titled('G1 holds'), {
+      'elsewhere/run-1/junit.xml': junit({ name: 'G1 holds', file: A }),
+      'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A, status: 'failure' }),
+    });
+    expect(messages(await both(f, { results: ['elsewhere'] }))).toBe('');
+    expect(messages(await both(f, { results: ['elsewhere/run-1/junit.xml'] }))).toBe('');
+    expect(messages(await both(f))).toContain('FAILING test');
+  });
+
+  test('a pending owner is skipped in the pass proof unless --strict; the realworld tier proves nothing', async () => {
+    const f = ws([{ id: 'alpha' }], { pending: ['alpha'] });
+    f.write('docs/rebuild/guarantees.tsv', TSV_HEAD + row('G1', 'kept'));
+    f.write(A, titled('G1 holds'));
+    f.write('coverage/unit/junit.xml', junit({ name: 'G1 holds', file: A, status: 'failure' }));
+    expect(messages(await run(guarantees, f))).toBe('');
+    expect(messages(await run(guarantees, f, { strict: true }))).toContain('FAILING test');
+    const real = planted(row('G1', 'kept'), titled('G1 holds'), {
+      'coverage/realworld/junit.xml': junit({ name: 'G1 holds', file: A }),
+      'coverage/unit/junit.xml': junit({ name: 'G9 other', file: A }),
+    });
+    expect(messages(await both(real))).toContain('no passing run');
+  });
+
+  // CI wiring: quick.sh judges the unit reports, integration.sh the integration report, each with its own --tier.
+  describe('--tier: each CI job proves the rows tested in its own tier', () => {
+    const I = 'packages/plugins/alpha/tests/integration/i.test.ts';
+    const tiered = (reports: Record<string, string>) => {
+      const f = planted(row('G1', 'kept') + row('G2', 'kept'), titled('G1 holds'), reports);
+      f.write(I, titled('G2 holds'));
+      return f;
+    };
+
+    test('the unit job does not need an integration-only row in the unit report, and the integration job the reverse', async () => {
+      const f = tiered({
+        'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A }),
+        'coverage/int/junit.xml': junit({ name: 'G2 holds', file: I }),
+      });
+      expect(messages(await run(guarantees, f, { tier: 'unit', results: ['coverage/unit'] }))).toBe('');
+      expect(messages(await run(guarantees, f, { tier: 'int', results: ['coverage/int'] }))).toBe('');
+      // Without a tier the unit report alone still leaves the integration row unproven.
+      expect(messages(await run(guarantees, f, { results: ['coverage/unit'] }))).toContain('G2');
+    });
+
+    test('an integration row whose test FAILED fails the integration job, not the unit job', async () => {
+      const f = tiered({
+        'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A }),
+        'coverage/int/junit.xml': junit({ name: 'G2 holds', file: I, status: 'failure' }),
+      });
+      expect(messages(await run(guarantees, f, { tier: 'unit', results: ['coverage/unit'] }))).toBe('');
+      expect(messages(await run(guarantees, f, { tier: 'int', results: ['coverage/int'] }))).toContain('FAILING test');
+    });
+
+    test('a unit row that failed still fails the unit job, and an integration job with no report says so', async () => {
+      const f = tiered({ 'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A, status: 'failure' }) });
+      expect(messages(await run(guarantees, f, { tier: 'unit', results: ['coverage/unit'] }))).toContain(
+        'FAILING test',
+      );
+      expect(messages(await run(guarantees, f, { tier: 'int', results: ['coverage/int'] }))).toContain(
+        'no JUnit report',
+      );
+    });
+
+    test('the integration job does not repeat a row with no test at all (the unit job reports that)', async () => {
+      const f = planted(row('G1', 'kept'), titled('G9 other'), {
+        'coverage/int/junit.xml': junit({ name: 'G9 other', file: A }),
+      });
+      expect(messages(await run(guarantees, f, { tier: 'unit', results: ['coverage/unit'] }))).toContain(
+        'no test named',
+      );
+      expect(messages(await run(guarantees, f, { tier: 'int', results: ['coverage/int'] }))).toBe('');
+    });
+
+    test('--tier takes unit or int only', () => {
+      expect(parseArgs(['--tier', 'int']).tier).toBe('int');
+      expect(() => parseArgs(['--tier', 'sit'])).toThrow('--tier is unit or int');
+    });
+  });
+
+  test("the quarantine's junit.rerun.xml counts: a flake rescued by the rerun does not fail the proof", async () => {
+    const f = planted(row('G1', 'kept'), titled('G1 holds'), {
+      'coverage/unit/groups/x/junit.xml': junit({ name: 'G1 holds', file: A, status: 'failure' }),
+      'coverage/unit/groups/x/junit.rerun.xml': junit({ name: 'G1 holds', file: A }),
+    });
+    expect(messages(await both(f, { results: ['coverage/unit'] }))).toBe('');
   });
 });
 

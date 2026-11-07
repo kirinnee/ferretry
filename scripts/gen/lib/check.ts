@@ -20,6 +20,15 @@ export interface CheckContext {
   readonly base?: string;
   /** Check rows owned by pending packages too (`guarantees`). */
   readonly strict?: boolean;
+  /** `--results <path>` (repeatable): JUnit files or folders holding them, where `guarantees` reads whether a test passed. */
+  readonly results?: readonly string[];
+  /** `--existence-only`: `guarantees` proves a test exists, not that it passed (the commit hook, which runs no tests). */
+  readonly existenceOnly?: boolean;
+  /**
+   * `--tier unit|int`: `guarantees` proves only the rows that have a test in that tier, from the report that tier wrote.
+   * A row tested in the other tier alone is that tier's to prove, never a missing report here.
+   */
+  readonly tier?: 'unit' | 'int';
 }
 
 export interface Check {
@@ -30,7 +39,14 @@ export interface Check {
 
 export function contextFor(
   root: string,
-  options: { readonly packageId?: string; readonly base?: string; readonly strict?: boolean } = {},
+  options: {
+    readonly packageId?: string;
+    readonly base?: string;
+    readonly strict?: boolean;
+    readonly results?: readonly string[];
+    readonly existenceOnly?: boolean;
+    readonly tier?: 'unit' | 'int';
+  } = {},
 ): CheckContext {
   let model: Promise<Model> | undefined;
   return {
@@ -48,12 +64,18 @@ export function parseArgs(args: readonly string[]): {
   readonly packageId?: string;
   readonly base?: string;
   readonly strict: boolean;
+  readonly results?: readonly string[];
+  readonly existenceOnly: boolean;
+  readonly tier?: 'unit' | 'int';
   readonly rest: readonly string[];
 } {
   let root = join(import.meta.dir, '..', '..', '..');
   let packageId: string | undefined;
   let base: string | undefined;
   let strict = false;
+  let existenceOnly = false;
+  let tier: 'unit' | 'int' | undefined;
+  const results: string[] = [];
   const rest: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i] as string;
@@ -61,13 +83,22 @@ export function parseArgs(args: readonly string[]): {
     else if (arg === '--package') packageId = args[++i];
     else if (arg === '--base') base = args[++i];
     else if (arg === '--strict') strict = true;
-    else rest.push(arg);
+    else if (arg === '--existence-only') existenceOnly = true;
+    else if (arg === '--results') results.push(args[++i] as string);
+    else if (arg === '--tier') {
+      const value = args[++i];
+      if (value !== 'unit' && value !== 'int') throw new Error(`--tier is unit or int, not "${value ?? ''}"`);
+      tier = value;
+    } else rest.push(arg);
   }
   return {
     root,
     ...(packageId === undefined ? {} : { packageId }),
     ...(base === undefined ? {} : { base }),
     strict,
+    existenceOnly,
+    ...(tier === undefined ? {} : { tier }),
+    ...(results.length === 0 ? {} : { results }),
     rest,
   };
 }

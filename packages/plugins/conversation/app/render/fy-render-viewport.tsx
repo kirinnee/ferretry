@@ -61,7 +61,7 @@ import {
   ZOOM_STEP,
   zoomBy,
   zoomTo,
-} from './fy-render-viewport.ts';
+} from './fy-render-viewport-model.ts';
 
 const NO_EDGES: Edges = { bottom: false, left: false, right: false, top: false };
 

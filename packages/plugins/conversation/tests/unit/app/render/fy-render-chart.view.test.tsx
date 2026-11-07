@@ -5,7 +5,7 @@ import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/
 import { FyRenderChart, type FyRenderChartModules } from '../../../../app/render/fy-render-chart.tsx';
 import type { ChartHandle, ChartMount } from '../../../../app/render/fy-render-chart-engine.ts';
 import type { FyRenderSandboxFailure } from '../../../../app/render/fy-render-sandbox.tsx';
-import { readChart } from '../../../../app/render/fy-render-chart.ts';
+import { readChart } from '../../../../app/render/fy-render-chart-model.ts';
 import {
   paletteKey,
   type ResolvedTheme,

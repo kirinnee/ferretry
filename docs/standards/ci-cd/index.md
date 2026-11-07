@@ -103,6 +103,13 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   on its separate runner to 8.371 seconds, so the owner/lead contention rule requires
   this ordering rather than a timeout increase. Its summary names each group's
   slowest test and duration from JUnit, with `unit-timings.tsv` in the part artifact.
+- **The guarantee proof reads the JUnit reports.** After its last part, Quick runs
+  `bun scripts/gen/check.ts guarantees --tier unit --results coverage/unit --results coverage/scripts`, and the
+  Integration job ends with `bun scripts/validate/guarantees.ts --tier int --results coverage/int`: every kept
+  Appendix D row needs a test named with its id that PASSED in its own tier's report (a quarantine rerun that passed
+  counts), and any default-mode finding keeps the job red. `--tier` is why a row tested in one tier alone is never
+  "missing" from the other tier's report. Strict mode (`--strict`, rows of still-pending packages) becomes required
+  once `ports-pending.json` is empty.
 - **Parallel read-only hooks.** Quick discovers hooks from the generated pre-commit
   configuration and runs four at a time on PRs (two on main), each with its own output, duration and
   temporary pre-commit cache. Their scripts do not write checkout files; the hook
