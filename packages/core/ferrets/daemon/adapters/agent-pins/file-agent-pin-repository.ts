@@ -1,5 +1,5 @@
 import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
-import { type AgentPin, AgentPinFileSchema, type AgentPinRepository } from '../../lib/agent-pins/index.ts';
+import { type AgentPin, AgentPinsDocumentSchema, type AgentPinRepository } from '../../lib/agent-pins/index.ts';
 
 /** The body `agent-pins.json` holds; the kernel store stamps and checks its `format`. */
 export type AgentPinFile = { readonly pins: readonly AgentPin[] };
@@ -23,7 +23,7 @@ export class StateAgentPinRepository implements AgentPinRepository {
     const read = await this.state.read(this.file);
     // A damaged or foreign file is not the owner's pin list; starting empty is the honest answer.
     if (!read.ok || read.value === undefined) return [];
-    const parsed = AgentPinFileSchema.safeParse(read.value);
+    const parsed = AgentPinsDocumentSchema.safeParse(read.value);
     return parsed.success ? parsed.data.pins : [];
   }
 

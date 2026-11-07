@@ -611,7 +611,7 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
           `${JSON.stringify(shape.command)} this fork creates with`,
       ),
       demand(held.parent === undefined, `it descends from ${JSON.stringify(held.parent)} rather than from nothing`),
-      demand(held.sessionCapabilityHash !== undefined, 'it holds no credential of its own'),
+      demand(held.capabilityHash !== undefined, 'it holds no credential of its own'),
       agree('incarnation', config.data.incarnation, `${id}-1`),
       agree('runtime generation', config.data.runtimeGeneration, 1),
       agree('harness', config.data.harness, plan.target.harness),
@@ -671,7 +671,7 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
    */
   private async assertCredential(id: SessionId, record: SessionLifecycleRecord): Promise<void> {
     if (record.state.status !== 'created') return;
-    const expected = record.config.sessionCapabilityHash;
+    const expected = record.config.capabilityHash;
     let environment: Readonly<Record<string, string>>;
     try {
       environment = await this.ports.environment.read(id);
