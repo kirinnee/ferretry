@@ -15,7 +15,7 @@ import {
 } from '../../../daemon/lib/protocol/worktrees.ts';
 import type { IWorktreeGateway } from './ports.ts';
 
-/** The managed-worktree routes (today's paths; none names a retired word). */
+/** The managed-worktree routes (today's paths: none of them names a replaced word). */
 export const WORKTREE_ROUTES = {
   list: 'GET /v1/worktrees',
   check: 'GET /v1/worktrees/removal',

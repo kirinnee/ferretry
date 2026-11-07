@@ -108,6 +108,7 @@ interface StoreWatch {
 }
 
 /** The file whose change means a store may have changed: what `CachedCredentialReads` stamps. */
+// read-scoped: none — it names a credential store's path and reads nothing
 const storeFile = (resolution: StoredCredentialResolution): string =>
   resolution.harness === 'claude' ? resolution.credentialFile : resolution.canonicalFile;
 
