@@ -9,6 +9,9 @@
 import type { V4Paths } from '../v4/layout.ts';
 import type { V5Writer } from '../v5/write.ts';
 import type { NotCarried, StepReport } from '../report.ts';
+import { ferretsStep } from './ferrets.ts';
+import { terminalsStep } from './terminals.ts';
+import { harnessHomesStep } from './harness-homes.ts';
 import { identityStep, vaultStep } from './secrets.ts';
 
 export interface StepContext {
@@ -51,30 +54,7 @@ const CACHE: NotCarried = {
 };
 
 export const STEPS: readonly Step[] = [
-  pending(
-    {
-      id: 'ferrets',
-      title: 'Ferrets (identity, lineage, archive, tokens)',
-      owner: ['core-ferrets'],
-      reads: [
-        'state/sessions/<sid>/{config,state}.json, events.jsonl',
-        'state/archived-sessions.json',
-        'state/{callsigns,system-callsigns,agent-pins,worktrees}.json',
-        'state/forks/',
-        'state/restarts/queue.json',
-      ],
-      sealed: [],
-      notCarried: [
-        CACHE,
-        { what: 'v4 session-version markers', why: 'v5 files carry their own format' },
-        {
-          what: 'per-ferret environment.json (a plaintext credential)',
-          why: 'never opened; v5 keeps only its hash (sessionCapabilityHash) and re-mints at the next launch',
-        },
-      ],
-    },
-    'the Ferrets state schema (@ferretry/core-ferrets/contract)',
-  ),
+  ferretsStep,
   pending(
     {
       id: 'conversation',
@@ -92,39 +72,8 @@ export const STEPS: readonly Step[] = [
     },
     'the Conversation state schema (@ferretry/plugin-conversation/contract)',
   ),
-  pending(
-    {
-      id: 'terminals',
-      title: 'Terminals (running ferrets handed over by pane handle)',
-      owner: ['plugin-terminals'],
-      reads: [
-        'state/sessions/<sid>/terminal-pane.json',
-        'tmux.sock (home root; the live socket is hard-linked, never connected to)',
-      ],
-      sealed: [],
-      notCarried: [
-        {
-          what: 'in-flight input holds',
-          why: 'a hold mid-delivery is closed and its pane quarantined, as at any restart',
-        },
-      ],
-    },
-    'the Terminals state schema and the runner attach handle (spine D15)',
-  ),
-  pending(
-    {
-      id: 'harness-homes',
-      title: 'Harness folders (Claude Code / Codex conversations, for resume)',
-      owner: ['plugin-claude-code', 'plugin-codex'],
-      reads: [
-        'fleet/homes/<runtime uuid>/ (keyed by runtime)',
-        'fleet/shared/<claude|codex>/ (the transcripts; moved whole, never parsed)',
-      ],
-      sealed: [],
-      notCarried: [],
-    },
-    'the agent-homes location declared by the Claude Code and Codex plugins',
-  ),
+  terminalsStep,
+  harnessHomesStep,
   pending(
     {
       id: 'board',

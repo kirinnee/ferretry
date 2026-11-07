@@ -40,12 +40,24 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
   report names a file and its size, never content.
 - The live tmux socket is given a second name in the new home with `link(2)`, so v5 reaches the same running server.
 
-## State (Phase A)
+## State (Phase B)
 
-The skeleton, preflight, sealed mover, report and the ordered step table (`src/steps/index.ts`) exist; **every
-conversion step is `pending`** until its v5 owner lands a state schema, so today the tool always exits 3. Each step
-names what it waits for. Fixture homes built from the real 4.291.5 release are in `fixtures/` (CI-only on shared
-boxes).
+The preflight, sealed mover, report and ordered step table (`src/steps/index.ts`) exist. Vault, identity, ferrets,
+terminals and harness-homes have real conversions. The other steps remain `pending`, so the default conversion
+still exits 3. Each step names what it waits for. Fixture homes built from the real 4.291.5 release are in
+`fixtures/` (CI-only on shared boxes).
+
+Ferret records keep ids, parent edges, names, runtime, work folder, resume ids, pane handles and credential hashes.
+Declared files without a v5 schema are **not written**: history, names (including former runtime names), archive,
+worktrees, forks, moves, auto-resume, restarts and terminals.json. Other missing fields are listed in `notCarried`.
+In particular, there are no v5 record fields for provenance, transfer edges, project/card references or rewritten
+transcript home/file pointers.
+
+Harness files are copied unopened under `state/<claude-code|codex>/agent-homes/`: runtime UUID directories hold
+runtime-owned files; `_shared` holds each shared transcript pool (including Codex SQLite). Modes and times of these
+opaque files are preserved. Links are omitted, never followed or re-made: the contracts do not yet declare a link
+policy or a runtime-to-ferret home mapping. Those are explicit gaps; these copies alone do not make resume ready.
+Sign-in files and `fleet/credentials/` belong to the pending Logins step.
 
 ## Tests
 
