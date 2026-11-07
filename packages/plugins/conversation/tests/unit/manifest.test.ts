@@ -4,7 +4,7 @@ import manifest from '../../manifest.ts';
 describe('conversation manifest', () => {
   const routes = manifest.actions.routes;
   test('declares every route of the conversation mounts, each with a full descriptor', () => {
-    expect(routes).toHaveLength(40);
+    expect(routes).toHaveLength(38);
     expect(manifest.actions.sockets).toHaveLength(1);
     for (const route of routes) {
       expect(['operator', 'authenticated']).toContain(route.minimum);
@@ -48,6 +48,14 @@ describe('conversation manifest', () => {
     for (const file of manifest.data.state) expect(file.format).toBe(1);
     expect(manifest.data.state.find(file => file.name === 'search')?.store).toBe('sqlite-cache');
     expect(manifest.data.state.find(file => file.name === 'message-token-key')?.mode).toBe(0o600);
+  });
+  test("a ferret's screen (Terminals') and its recorded events (Ferrets') are not Conversation's routes or verbs", () => {
+    const paths = [...routes, ...manifest.actions.sockets].map(route => route.path);
+    expect(paths).not.toContain('/v1/ferrets/:ferretId/snapshot');
+    expect(paths).not.toContain('/v1/ferrets/:ferretId/events');
+    const verbs = manifest.actions.cli.map(verb => verb.verb);
+    expect(verbs).not.toContain('snapshot');
+    expect(verbs).not.toContain('events');
   });
   test('the verbs and the one agent tool are declared', () => {
     expect(manifest.actions.cli.map(verb => verb.verb)).toContain('link keep');

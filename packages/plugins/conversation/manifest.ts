@@ -126,8 +126,6 @@ export default definePlugin({
       }),
 
       // ── reading (session-reads) ───────────────────────────────────────────────────────────────
-      route('GET /v1/ferrets/:ferretId/events', { ...FERRET, ...READ, ...SECRETS }),
-      route('GET /v1/ferrets/:ferretId/snapshot', { ...FERRET, ...READ, ...SECRETS }),
       route('GET /v1/ferrets/:ferretId/logs', { ...FERRET, ...READ, ...SECRETS }), // R265: strong etag over redacted text
       route('GET /v1/ferrets/:ferretId/log-page', { ...FERRET, ...READ, ...SECRETS }), // R266 (kept half)
       route('GET /v1/ferrets/:ferretId/log-search', { ...FERRET, ...READ, ...SECRETS }),
@@ -240,8 +238,6 @@ export default definePlugin({
       verb('queue edit', { summary: 'change a queued message before it is typed' }),
       verb('queue cancel', { summary: 'withdraw a queued message' }),
       verb('logs', { summary: "read a ferret's conversation log" }),
-      verb('snapshot', { summary: "a ferret's screen as text" }),
-      verb('events', { summary: "follow a ferret's events" }),
       verb('compact-at', { summary: 'when a ferret squeezes its memory' }),
       verb('search', { summary: 'find cards and asks by what they say' }),
       verb('render', { summary: 'save a picture a ferret can show in a message' }),

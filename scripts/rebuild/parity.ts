@@ -205,6 +205,10 @@ function ownerOf(file: string, what = ''): string {
   // Ferrets declares the working-tree viewer (`/v1/ferrets/:ferretId/fs*`, read through WorkFolders, S47) and the pin
   // board (`/v1/ferrets/:ferretId/pins`), and holds the one-writer conversation lease `fy history claim` takes.
   if (/fy (?:fs|files|pin|history)\b|pins\.json/.test(semantic)) return 'ferrets';
+  // A ferret's screen is the Terminals' (its pane); its recorded events are the Ferrets' (lead ruling, port-conversation
+  // r2 #4). Conversation declares neither.
+  if (/\/sessions\/:sessionid\/snapshot\b|\bfy snapshot\b/.test(semantic)) return 'terminals';
+  if (/\/sessions\/:sessionid\/events\b|\bfy events\b/.test(semantic)) return 'ferrets';
   if (/fy harness\b|statusline/.test(semantic)) return /codex/.test(semantic) ? 'codex' : 'claude-code';
   if (/config_(?:read|write|validate)/.test(semantic)) return 'kernel';
   if (/harness.*codex|codex.*harness/.test(semantic)) return 'codex';
