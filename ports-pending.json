@@ -4,7 +4,6 @@
     "gate",
     "vault",
     "ferrets",
-    "access",
     "connections",
     "updates",
     "claude-code",
@@ -55,6 +54,16 @@
       "GAP(ferrets): the AskUserQuestion hook is installed, but Ferrets does not yet supply FY_QUESTION_FILE or consume and deliver the question",
       "the ten settings/hooks item verbs return 69 until the item-service route exists",
       "the permission and dialog answer panels render nothing until Ferrets offers a prompt-state read"
+    ],
+    "codex": [
+      "GAP(kernel): skill launch parts are not materialized into the Codex home: RootHandle.copyTree (with link) exists, but its source must be one of Codex's own roots and no root Codex may declare reaches a skill part's folder (LaunchPart.path); needs a lead decision on that root",
+      "GAP(kernel): the five `fy harness codex settings` verbs refuse with exit 69, because a CLI half has no config/item service route to call yet"
+    ],
+    "logins": [
+      "GAP(kernel): a fresh home has no state/logins/credentials base, and the kernel's credentials root refuses every call until it exists, so no owned login can be read or signed in on a new machine until the kernel makes the base (sent to the kernel porter)",
+      "the cli half is a skeleton: fy login verbs are declared but not ported",
+      "the app half is a skeleton: the sign-in, add-login and local-models panels are declared but not ported",
+      "S176 and S177 (the credential worker guarantees) are skipped as unproved, not ported"
     ]
   },
   "pendingHalves": {

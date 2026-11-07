@@ -66,7 +66,63 @@ export interface CarrierDialer {
   readonly order: number;
   /** A dial for this daemon, or `undefined` when this carrier cannot reach it (the next one is asked). */
   dial(daemon: PairedDaemon): CarrierDial | undefined;
+  /** The lane carrier-control requests ride instead (R634); absent, they ride {@link dial} like any other. */
+  readonly control?: CarrierControl;
 }
+
+/**
+ * WHAT ONE CARRIER-CONTROL REQUEST RIDES (§15 "The choice", R634): `GET` and `PUT /v1/tunnel` travel the daemon's own
+ * address or a rendezvous, never the tunnel or WebRTC, whatever the preference is — switching the tunnel on cannot
+ * ride the tunnel it turns on, and switching it off over itself would end the connection carrying the answer. The
+ * shell sends every request whose path is in `paths` over a session of its own opened through `dial`, and the carrier
+ * remembers no winner from it. Copied from today's `DaemonCarrierRouter.control`.
+ */
+export interface CarrierControl {
+  /** The request paths that are carrier control, matched exactly. */
+  readonly paths: readonly string[];
+  /** A dial over the introducing carriers only, or `undefined` when none reaches this daemon. */
+  dial(daemon: PairedDaemon): CarrierDial | undefined;
+}
+
+/** One carrier a pairing may cross, in the order the walk tries it. */
+export interface PairingLeg {
+  readonly kind: 'direct' | 'relay';
+  /** The daemon's direct address, or the rendezvous origin. */
+  readonly address: string;
+  readonly dial: CarrierDial;
+  /** How long this leg's session may take to answer before the walk moves on. The heartbeat grace by default. */
+  readonly deadlineMs?: number;
+}
+
+/**
+ * One redemption over one leg, answered by the daemon's own sealed outcome (the shell's session). Rejects with
+ * `RelayPairingRefusedError` for a refusal inside the channel, with `PairingOutcomeUnknownError` when the code was sent
+ * and the session ended before the answer, and with a `RelaySessionError` when nothing reached the daemon.
+ */
+export type PairingAttempt = (leg: PairingLeg) => Promise<RelayPairingOutcome>;
+
+/** A pairing's sealed outcome and the carrier that carried it. */
+export type PairedOver = RelayPairingOutcome & {
+  readonly via: { readonly kind: 'direct' | 'relay'; readonly address: string };
+};
+
+/**
+ * WHICH CARRIERS FIRST CONTACT WALKS (Connections only; R582, R633): the daemon's own address first, always, then the
+ * one rendezvous this build discovered, whatever the connection preference. The shell opens each leg's sealed `pair`
+ * session ({@link PairingAttempt}), so the daemon is proved against the QR's fingerprint before the code leaves the
+ * page on every leg; Connections decides the order, the deadlines, when a failure advances the walk and how a walk
+ * that failed everywhere is reported. Copied from today's `relay-pairing.ts` and `exchangePairing`.
+ */
+export interface PairingCarriers {
+  pair(input: PairDirectInput, attempt: PairingAttempt): Promise<PairedOver>;
+}
+
+/**
+ * The one network read a provider may make that is not a session: the hosted relay directory's public advertisement
+ * (R580). The shell answers only a `GET` to the build-time directory origin (`__FY_RELAY_DIRECTORY__`) and refuses
+ * every other address, so this can never become a daemon request that skips the session.
+ */
+export type DirectoryFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 /** What a `pair` session needs: the daemon's direct address and fingerprint from the QR, the code, and the key. */
 export interface PairDirectInput {
@@ -100,6 +156,14 @@ export interface ConnectPorts {
    * contact with a daemon is the shell's own direct carrier and no plugin's.
    */
   readonly pairDirect: (input: PairDirectInput) => Promise<RelayPairingOutcome>;
+  /**
+   * Opens a `pair` session over the carriers Connections' {@link PairingCarriers} walks (direct first, then the one
+   * discovered rendezvous; R582) and answers the outcome with the carrier that carried it. With no walk registered it
+   * is {@link pairDirect} over the pairing's address.
+   */
+  readonly pair?: (input: PairDirectInput) => Promise<PairedOver>;
+  /** The hosted relay directory read ({@link DirectoryFetch}); absent when this build names no directory. */
+  readonly directory?: DirectoryFetch;
 }
 
 /** What a plugin app half may hand the shell. Each part is a factory over the {@link ConnectPorts}. */
@@ -108,6 +172,8 @@ export interface ShellProvides {
   readonly claims?: (ports: ConnectPorts) => DeviceClaims;
   /** Connections only. */
   readonly carriers?: (ports: ConnectPorts) => readonly CarrierDialer[];
+  /** Connections only: the carriers a pairing walks. */
+  readonly pairing?: (ports: ConnectPorts) => PairingCarriers;
 }
 
 /** An app half with its `shell` section. */
@@ -138,6 +204,7 @@ function shellProvidesOf(entry: SurfaceEntry): ShellProvides | undefined {
 export interface RegisteredConnect {
   readonly claims: DeviceClaims | undefined;
   readonly carriers: readonly CarrierDialer[];
+  readonly pairing: PairingCarriers | undefined;
   readonly failures: readonly { readonly plugin: string; readonly reason: string }[];
 }
 
@@ -148,6 +215,7 @@ export interface RegisteredConnect {
  */
 export function registeredConnect(surfaces: readonly SurfaceEntry[], ports: ConnectPorts): RegisteredConnect {
   let claims: DeviceClaims | undefined;
+  let pairing: PairingCarriers | undefined;
   const carriers: CarrierDialer[] = [];
   const failures: { plugin: string; reason: string }[] = [];
   const attempt = <T>(plugin: string, build: () => T): T | undefined => {
@@ -169,7 +237,11 @@ export function registeredConnect(surfaces: readonly SurfaceEntry[], ports: Conn
     if (makeCarriers !== undefined && CARRIER_TAKERS.includes(entry.id)) {
       carriers.push(...(attempt(entry.id, () => makeCarriers(ports)) ?? []));
     }
+    const makePairing = provides.pairing;
+    if (makePairing !== undefined && pairing === undefined && CARRIER_TAKERS.includes(entry.id)) {
+      pairing = attempt(entry.id, () => makePairing(ports));
+    }
   }
   carriers.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-  return { claims, carriers, failures };
+  return { claims, carriers, pairing, failures };
 }
