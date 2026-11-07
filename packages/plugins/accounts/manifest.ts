@@ -5,6 +5,8 @@ import { RedactionSources } from './contract/pending-mask-source.ts';
 import { AccessPort, DevicesChanged } from '@ferretry/plugin-access/contract';
 import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
 import { FerretsPort } from '@ferretry/core-ferrets/contract';
+import { BoardPort } from '@ferretry/plugin-board/contract';
+import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
 import { LOGIN_SECRETS } from './contract/routes/sealed.ts';
 import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
@@ -52,9 +54,10 @@ export default definePlugin({
   /** Optional: a revoked or expired device's standing sign-in rules are suspended (P124, S119). */
   /**
    * `browsers`: the address of a page a ferret names (`account_hint` by page). `ferrets`: where a ferret works, which
-   * orders its sign-in cards (I184). Both optional: without them, today's behaviour without the read.
+   * orders its sign-in cards (I184); its project is the Board's (`projectOf`), named by Projects. All optional: without them,
+   * today's behaviour without the read.
    */
-  uses: { access: AccessPort, browsers: BrowsersPort, ferrets: FerretsPort },
+  uses: { access: AccessPort, browsers: BrowsersPort, ferrets: FerretsPort, board: BoardPort, projects: ProjectsPort },
   provides: { accounts: AccountsPort },
 
   actions: {

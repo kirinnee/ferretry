@@ -114,6 +114,9 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     passkeys: { subscribe: () => () => undefined },
     devices: new SignInRuleDevicePurge(),
   });
+  // An orderly stop writes a suspension or a use whose write failed earlier (S118, S123); what a crash before any
+  // write lands still loses is declared (docs/secrets.md).
+  kernel.lifecycle.onStop(async () => await rules.flush());
   const recipes = new LoginRecipeService({
     accounts,
     refuse: (refusal, words) => new LoginEntryError(refusal as LoginEntryError['refusal'], words),

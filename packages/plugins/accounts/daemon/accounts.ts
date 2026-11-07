@@ -14,7 +14,14 @@ import { accountHintSummary, placeHosts } from '../contract/routes/index.ts';
 import { machineName } from './adapters/host.ts';
 import { KernelAccountDefaultsWriter } from './adapters/kernel-defaults-writer.ts';
 import { StateAccountIndexStore } from './adapters/state-account-index-store.ts';
-import { ferretPlace, ownerHome, pageUrlOf, realpath } from './adapters/pending-reads.ts';
+import {
+  boardProjectOf,
+  ownerFerretOf,
+  ownerHome,
+  pageUrlOf,
+  registeredProjects,
+  workFolderOf,
+} from './adapters/pending-reads.ts';
 import { MemoryCipher, vaultSealedStore } from './adapters/vault-sealed.ts';
 import { LOGIN_SECRETS } from '../contract/routes/sealed.ts';
 import { AccountDefaults } from './lib/account-defaults.ts';
@@ -23,7 +30,7 @@ import { LoginDirectory } from './lib/logins.ts';
 import type { AccountSealedStore } from './lib/seal.ts';
 import { SessionSignInContext } from './lib/sign-in-context.ts';
 import { TwoFactorSeedAgendaAdapter } from './lib/two-factor-agenda.ts';
-import { TwoFactorSeedStages } from './lib/two-factor-seeds.ts';
+import { lateSeedCards, TwoFactorSeedStages } from './lib/two-factor-seeds.ts';
 import { accountHint, accountRoutes, type RecipeMasking } from './routes/accounts.ts';
 
 import { accountSecurity } from './adapters/pending-security.ts';
@@ -89,18 +96,20 @@ export function buildAccounts(
   const accounts = logins.accounts;
   const choice = new SessionSignInContext({
     defaults: async () => inEffect() ?? {},
-    // I184: where the calling ferret works, from Ferrets (TODO(contract), `pending-reads.ts`). Until Ferrets says, a
-    // session reads as Unfiled with no folder, so only the site lines order a card (the next rule, never a lost card).
-    // No Projects port names a project yet, so a project line matches by its board id alone.
-    projectOf: async ferret => (await ferretPlace(ctx.uses.ferrets, ferret))?.project ?? 'unfiled',
-    projects: async () => [],
+    // I184: the project is the Board's (`projectOf`, from the credential-derived ferret), named by the Projects registry
+    // and matched by id; the folder is Ferrets' REAL work folder, only for Unfiled. A plugin that is off or says nothing
+    // leaves the site lines alone (the next rule, never a lost card).
+    projectOf: async ferret => await boardProjectOf(ctx.uses.board, ferret),
+    projects: async () => await registeredProjects(ctx.uses.projects),
     sessions: {
       read: async ferret => {
-        const folder = (await ferretPlace(ctx.uses.ferrets, ferret))?.folder;
+        const folder = await workFolderOf(ctx.uses.ferrets, ferret);
         return folder === undefined ? null : { cwd: folder };
       },
     },
-    realpath,
+    // Ferrets answers a folder only while it is still its own real path (a symlink swap answers nothing), so there is
+    // nothing left to resolve here.
+    realpath: async path => path,
     home: ownerHome(),
   });
   const seeds = new TwoFactorSeedStages({
@@ -112,6 +121,13 @@ export function buildAccounts(
     anyPasskey: accountSecurity(ctx.uses.access).passkeys.any,
     hostName: machineName(),
     agenda: new TwoFactorSeedAgendaAdapter(ctx.needs.asks),
+    // The input card a seed is set up from (I173): where the daemon saw its target, and "use it now" (the Vault's).
+    cards: lateSeedCards(() => ({
+      cardTarget: requestId => ctx.needs.vault.cardTarget?.(requestId),
+      useNow: async (requestId, use) => (await ctx.needs.vault.useNow?.(requestId, use)) ?? false,
+    })),
+    // The owner at their own shell has no ferret: their card goes under the most recently active live one.
+    ownerSession: async () => await ownerFerretOf(ctx.uses.ferrets),
   });
   const recipes = (): RecipeMasking | undefined => options.recipes?.();
 

@@ -103,6 +103,7 @@ export default implementDaemon(manifest, {
         await settle(async () => (await acting.act(id, { action: 'edit', progress: parts }, callerOf(by))).card),
       heldBy: world.heldBy,
       switchOf: async project => await world.switches.read(BoardProjectIdSchema.parse(project)),
+      projectOf: async ferret => await world.lanes.projectOf(ferret),
     };
 
     // ── jobs: the sweep, the gates' reconcile, the GitHub watch ─────────────────────────────────────────────────
