@@ -16,8 +16,10 @@ import { decodeFrame, FRAME_KINDS } from '@ferretry/kernel/wire';
 import { type RealSessionLayer, realSessionLayer, settle } from '../../support/kernel-layer.ts';
 import { openKernelSession } from '../../../daemon/index.ts';
 import {
+  DIRECT_UPGRADES_PER_PEER,
   type DirectSession,
   EVICTED_REASON,
+  MAX_DIRECT_UNPROVEN_PER_PEER,
   MAX_DIRECT_UNPROVEN_SESSIONS,
 } from '../../../daemon/lib/relay/direct-carrier.ts';
 import { directCarrierSocketRoute } from '../../../daemon/lib/runtime/mounts/direct-carrier.ts';
@@ -69,14 +71,14 @@ function direct(fx: RealSessionLayer) {
     sessions: () => fx.layer,
     openSession: openKernelSession,
   });
-  const arrive = async (peer: string): Promise<Socket> => {
+  const arrive = async (peer: string, carrier = 'direct'): Promise<Socket> => {
     const request: ApiRequest = {
       method: 'GET',
       path: `/v1/rendezvous/${fx.daemonId}/client`,
       query: new Map(),
       headers: new Map(),
       clientAddress: peer,
-      arrival: { kind: 'carried', carrier: 'direct' as never },
+      arrival: { kind: 'carried', carrier: carrier as never },
       text: async () => '',
     };
     const attach = await route.accept({ request, params: new Map([['daemonId', fx.daemonId]]) } as never);
@@ -120,6 +122,51 @@ describe('direct admission over the real session layer', () => {
     expect(nineteenth.closed).toBeUndefined();
     expect(sockets[1]!.closed).toBeUndefined();
     expect(sockets[2]!.closed).toEqual({ code: 4429, reason: EVICTED_REASON });
+    route.stop();
+  });
+
+  test('R661 each carrier has its own bounds: the tunnel never evicts a direct socket, nor the reverse', async () => {
+    const fx = await realSessionLayer();
+    const { route, arrive } = direct(fx);
+    const direct1 = await arrive('198.51.100.1');
+    // The tunnel fills its whole unproven allowance and one over: only ITS oldest goes.
+    const tunnelSockets: Socket[] = [];
+    for (let index = 1; index <= MAX_DIRECT_UNPROVEN_SESSIONS + 1; index += 1)
+      tunnelSockets.push(await arrive(`203.0.113.${index}`, 'tunnel'));
+    await settle();
+
+    expect(tunnelSockets[0]!.closed).toEqual({ code: 4429, reason: EVICTED_REASON });
+    expect(tunnelSockets.slice(1).every(socket => socket.closed === undefined)).toBe(true);
+    expect(direct1.closed).toBeUndefined();
+
+    // And the other way: the network filling its allowance leaves every tunnel socket alone.
+    const directSockets: Socket[] = [direct1];
+    for (let index = 2; index <= MAX_DIRECT_UNPROVEN_SESSIONS + 1; index += 1)
+      directSockets.push(await arrive(`198.51.100.${index}`));
+    await settle();
+
+    expect(direct1.closed).toEqual({ code: 4429, reason: EVICTED_REASON });
+    expect(tunnelSockets.slice(1).every(socket => socket.closed === undefined)).toBe(true);
+    route.stop();
+  });
+
+  test('R661 a tunnel filling its per-address caps refuses nobody on the network, even from the same address', async () => {
+    const fx = await realSessionLayer();
+    const { route, arrive } = direct(fx);
+    const edge = '203.0.113.9';
+
+    // The tunnel's unproven-per-address cap: the next one from the same edge address is refused (429).
+    for (let index = 0; index < MAX_DIRECT_UNPROVEN_PER_PEER; index += 1) await arrive(edge, 'tunnel');
+    await expect(arrive(edge, 'tunnel')).rejects.toMatchObject({ status: 429 });
+    // ... and a session on the network from the very same address string is its own count.
+    const lan = await arrive(edge);
+    expect(lan.closed).toBeUndefined();
+
+    // The tunnel's upgrade budget for one address, spent entirely: the network's is untouched.
+    const other = '203.0.113.77';
+    for (let index = 0; index < DIRECT_UPGRADES_PER_PEER; index += 1) (await arrive(other, 'tunnel')).handler?.close();
+    await expect(arrive(other, 'tunnel')).rejects.toMatchObject({ status: 429 });
+    expect((await arrive(other)).closed).toBeUndefined();
     route.stop();
   });
 });

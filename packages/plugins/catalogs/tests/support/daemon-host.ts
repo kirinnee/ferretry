@@ -350,7 +350,7 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
         ...ctx,
         kernel: {
           ...ctx.kernel,
-          identity: { daemonId: wireIdentity.daemonId, daemonName: 'Publisher' },
+          identity: { ...ctx.kernel.identity, daemonId: wireIdentity.daemonId, daemonName: 'Publisher' },
           signer,
         } as typeof ctx.kernel,
       });

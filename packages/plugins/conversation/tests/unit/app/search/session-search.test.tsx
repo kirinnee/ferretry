@@ -5,13 +5,13 @@
 
 import { describe, expect, test } from 'bun:test';
 import { ensureDom, render, run, runAsync } from '@ferretry/app/testing';
-import { type ReactNode, useEffect } from 'react';
 import {
   MAX_SESSION_SEARCH_QUERY_LENGTH,
   type SessionFileIndexCoverage,
   type SessionFileIndexEntry,
   type SessionFileIndexSkip,
-} from '../../../../app/search/ferret-file-index.ts';
+} from '@ferretry/core-ferrets/contract';
+import { type ReactNode, useEffect } from 'react';
 import {
   type FerretCardsRead,
   type FerretSearchCard,

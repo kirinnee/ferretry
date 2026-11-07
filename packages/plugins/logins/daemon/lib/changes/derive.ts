@@ -9,13 +9,7 @@
  * Sign-out is not an edit (it runs the harness's own logout) and is handled by the service. Pure.
  */
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
-import {
-  LOGIN_NAME,
-  LoginFileSchema,
-  loginLoosening,
-  type LoginChange,
-  type LoginFile,
-} from '../../../contract/index.ts';
+import { LOGIN_NAME, LoginFileSchema, type LoginChange, type LoginFile } from '../../../contract/index.ts';
 import { credentialIssues, credentialOf, type Credential } from '../shared/credential.ts';
 import { credentialHarnesses, credentialVariables, hasHalves } from '../shared/halves.ts';
 import { type HarnessKind, harnessKey } from '../shared/harness.ts';
@@ -68,9 +62,10 @@ export const inUseSentence = (users: readonly string[]): string =>
 
 /**
  * A login removal is NEVER held for the owner. Removing a login that has a budget lifts that budget, which the kernel
- * holds until the owner confirms; a held removal would leave the login in effect and be put through later by a path
- * that does not ask what uses it. So Logins refuses it up front, naming both steps: the budget goes first (the owner
- * confirms that), and the removal then is an ordinary write that asks what uses the login again.
+ * holds for a caller it governs; a held removal would leave the login in effect and be put through later by a path
+ * that does not ask what uses it. So the removal is made with `refuseIfHeld`: whoever the kernel lets lift a budget
+ * (the owner, or a confirmed step-up) removes the login in one step, and a caller it would hold is refused with this
+ * sentence naming both steps. The refusal is the kernel's answer at apply, never a second copy of its rule here.
  */
 export const BUDGET_FIRST_SENTENCE =
   'This login has a budget, so it was not removed: first drop its budget (you confirm that), then remove the login.';
@@ -380,8 +375,6 @@ export function deriveLoginChange(
       const users = facts.usedBy(change.id);
       // C10: a runtime on it would have nothing to launch with.
       if (users.length > 0) refuse(inUseSentence(users));
-      // The same rule the kernel judges a removal by: a removal that would be held is refused here instead.
-      if (loginLoosening(change.id, file, undefined).length > 0) refuse(BUDGET_FIRST_SENTENCE);
       const consequences: string[] = [];
       const credential = credentialOf(file);
       if (file.store === 'host') {

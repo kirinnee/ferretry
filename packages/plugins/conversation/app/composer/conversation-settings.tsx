@@ -35,7 +35,7 @@ const SECTIONS = {
     id: 'composer-suggestions',
     label: 'Open suggestions with',
     description:
-      'Choose which keys open the composer’s reference menu: the @ ladder (@ files, @@ agents, @@@ agenda, @@@@ tasks), the direct symbols (@ files, :agent, !agenda, &task), or both; and whether $ opens skills. Suggestions only — a reference you write or paste yourself still resolves and links, and the / and % menus always open.',
+      'Choose which keys open the composer’s reference menu: the @ ladder (@ files, @@ agents, @@@ asks, @@@@ cards), the direct symbols (@ files, :agent, !ask, &card), or both; and whether $ opens skills. Suggestions only — a reference you write or paste yourself still resolves and links, and the / and % menus always open.',
   },
 } as const satisfies Record<string, SectionDefinition>;
 

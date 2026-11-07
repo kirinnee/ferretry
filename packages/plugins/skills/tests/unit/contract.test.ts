@@ -12,11 +12,15 @@ describe('skills contract', () => {
     expect((await skillsConformance(fakeSkills)).ok).toBe(true);
   });
 
-  test('the manifest declares 11 routes, 8 verbs, 2 reference renderers and takes launch.parts', () => {
+  test('the manifest declares 11 routes, 8 verbs, 2 reference renderers and takes launch.parts and reference.catalog for / and $', () => {
     expect(manifest.actions.routes.length).toBe(11);
     expect(manifest.actions.cli.length).toBe(8);
     expect(manifest.ui.renderers.map(entry => entry.key)).toEqual(['reference:/', 'reference:$']);
-    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['launch.parts']);
+    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual([
+      'launch.parts',
+      'reference.catalog',
+      'reference.catalog',
+    ]);
   });
 
   test('G172 (declaration only) both previews are filesystem.use', () => {

@@ -6,7 +6,7 @@ import { pluginClient, type SendOptions } from '../../src/lib/client.ts';
 import { DaemonRefusal } from '../../src/lib/errors.ts';
 import { PluginPausedError } from '../../src/lib/guard.ts';
 import { PERSON_ONLY_REFUSAL } from '../../src/lib/credential.ts';
-import { ToolClient, toolPath } from '../../src/lib/tool-client.ts';
+import { ToolClient } from '../../src/lib/tool-client.ts';
 import type { DaemonRequest } from '../../src/lib/request.ts';
 import { boardEntry, depsOf, FeedingTransport, inventoryOf, RecordingTransport, registryOf } from './fakes.ts';
 
@@ -300,11 +300,36 @@ describe('the guarded client', () => {
   });
 });
 
+const healthyDeps = () => depsOf(registry, healthy);
+
 describe('the agent-tool client', () => {
   it('should send a tool call through the same guard, as a POST of the input', async () => {
     const { deps, transport } = depsOf(registry, healthy);
     await new ToolClient(deps).call('board', 'card_show', { id: 'a' });
-    should(transport.sent).deepEqual([{ method: 'POST', path: toolPath('board', 'card_show'), body: { id: 'a' } }]);
+    should(transport.sent).deepEqual([
+      { method: 'POST', path: '/v1/agent/tools', body: { tool: 'card_show', input: { id: 'a' } } },
+    ]);
+  });
+
+  it('S61 tool(name, input) on the plugin client takes the same road: guarded for the caller and the owner, one POST to the tool door', async () => {
+    const { deps, transport } = depsOf(registry, healthy);
+    await pluginClient(deps, 'board').tool('card_show', { id: 'a' });
+    should(transport.sent).deepEqual([
+      { method: 'POST', path: '/v1/agent/tools', body: { tool: 'card_show', input: { id: 'a' } } },
+    ]);
+    await pluginClient(deps, 'board').tool('card_show');
+    should(transport.sent[1]).deepEqual({ method: 'POST', path: '/v1/agent/tools', body: { tool: 'card_show' } });
+  });
+
+  it('tool(name) is blocked unsent when the owner’s contract differs, refused in a pane when person-only, and when nobody declares it', async () => {
+    const stale = depsOf(registry, inventoryOf({ id: 'board', contract: 'other' }));
+    await should(pluginClient(stale.deps, 'board').tool('card_show', {})).be.rejectedWith(PluginPausedError);
+    should(stale.transport.sent).deepEqual([]);
+    const paned = depsOf(registry, healthy, { inPane: true });
+    await should(pluginClient(paned.deps, 'board').tool('card_rules', {})).be.rejectedWith(PERSON_ONLY_REFUSAL);
+    should(paned.transport.sent).deepEqual([]);
+    should(paned.reads.count).equal(0);
+    await should(pluginClient(healthyDeps().deps, 'board').tool('nope', {})).be.rejectedWith(/no plugin declares the tool/u);
   });
 
   it('should block a tool of a plugin the daemon does not agree on, unsent', async () => {

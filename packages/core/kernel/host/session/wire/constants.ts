@@ -13,6 +13,9 @@ export const RELAY_PROTOCOL_ID = 'ferretry-relay/1' as const;
 /** The end-to-end dialect carried by the handshake and every sealed record. */
 export const SESSION_PROTOCOL_ID = 'ferretry-relay/2' as const;
 
+/** The end-to-end dialect a pre-device-key peer speaks, recognised only to refuse it in words. */
+export const PREVIOUS_SESSION_PROTOCOL_ID = 'ferretry-relay/1' as const;
+
 /** First byte of every frame. Not ASCII, so a text frame accidentally sent here fails loudly. */
 export const FRAME_MAGIC = 0xfe as const;
 

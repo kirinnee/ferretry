@@ -47,7 +47,7 @@ import {
   TurnEnded,
 } from './contract/index.ts';
 import { AskAnswered, AsksPort, AskSources } from '@ferretry/core-asks/contract';
-import { FerretChanged, FerretsPort, FerretStopping, SitrepLines } from '@ferretry/core-ferrets/contract';
+import { FerretChanged, FerretsPort, FerretStopping, LaunchParts, SitrepLines } from '@ferretry/core-ferrets/contract';
 
 // Shared descriptor pieces. The fields answer independent questions (§7.1); only what repeats is shared.
 const FERRET = { minimum: 'operator', caller: 'any', noStore: true } as const;
@@ -317,6 +317,8 @@ export default definePlugin({
       { hook: FerretChanged },
       // A stop is being attempted: the unlocked attachments are zeroed whether or not it then succeeds.
       { hook: FerretStopping },
+      // What a launch says about hypermedia: only a switch the owner set (a ferret with none keeps its mode default).
+      { hook: LaunchParts },
     ],
     offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },

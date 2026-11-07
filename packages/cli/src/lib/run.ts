@@ -10,6 +10,7 @@ import {
   type FollowingClient,
   pluginClient,
   routeFactsBeforeContact,
+  toolFactsBeforeContact,
   type Surfaces,
   surfacesOf,
 } from './client.ts';
@@ -222,6 +223,7 @@ async function runPluginVerb(
     clock: world.host.clock,
     sleep: (delay, signal) => world.host.sleep(delay, signal),
     readText: path => world.host.readText(path),
+    exists: path => world.host.exists(path),
     env: pluginEnvironment(world.environment, world.host.cwd()),
     ownState: world.host.ownState(plugin.manifest),
   });
@@ -266,6 +268,10 @@ function lazyClient(deps: () => Promise<ClientDeps>, id: string, surfaces: Surfa
     call: async (route, init) => {
       routeFactsBeforeContact(surfaces, paned, route);
       return await pluginClient(await deps(), id).call(route, init);
+    },
+    tool: async (name, input) => {
+      toolFactsBeforeContact(surfaces, paned, name);
+      return await pluginClient(await deps(), id).tool(name, input);
     },
     subscribe: (event, listener) => follow(event, listener, () => undefined),
     follow,

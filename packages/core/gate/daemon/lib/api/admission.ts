@@ -179,7 +179,7 @@ export class GateAdmission implements Admission {
   }
 
   admit(input: AdmissionInput & { readonly table: 'route' | 'socket' | 'tool' }): AdmissionDecision {
-    return this.#authorize(input.descriptor, input.request, input.params);
+    return this.#authorize(input.descriptor, input.request, input.params, input.table);
   }
 
   readmit(request: ApiRequest, descriptor: ScopedRoute): boolean {
@@ -346,7 +346,12 @@ export class GateAdmission implements Admission {
     return authentication;
   }
 
-  #authorize(descriptor: ScopedRoute, request: ApiRequest, params: RouteParameters): AdmissionDecision {
+  #authorize(
+    descriptor: ScopedRoute,
+    request: ApiRequest,
+    params: RouteParameters,
+    table?: 'route' | 'socket' | 'tool',
+  ): AdmissionDecision {
     // A MEMBER IS REFUSED BY THE MAIN TABLE BEFORE ANYTHING ELSE, the public shortcut included.
     if (request.principal?.kind === 'member') return forbidden(request);
     if (servedPublicly(descriptor)) {
@@ -376,6 +381,17 @@ export class GateAdmission implements Admission {
         );
       }
     }
+
+    // THE AGENT TOOL DOOR ACTS ONLY FOR THE FERRET ITS OWN TOKEN NAMES (S61, R-0246): the tool table is that door's, and
+    // there a header cannot choose who the caller is, whatever other credential carries it.
+    if (table === 'tool' && authentication.tokenClass !== 'ferret' && (headerValue(request, SESSION_ID_HEADER)?.trim() ?? '') !== '')
+      return refused(
+        errorResponse(
+          403,
+          `the agent tools act for the ferret whose own token is presented; ${SESSION_ID_HEADER} cannot name one for any other credential`,
+          'session_header_refused',
+        ),
+      );
 
     const actor = resolveApiActor({
       tokenClass: authentication.tokenClass,
