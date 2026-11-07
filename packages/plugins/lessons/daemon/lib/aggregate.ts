@@ -14,7 +14,7 @@ const MinerObservationSchema = z.object({
   quote: z.string(),
   source: z.string().optional(),
 });
-export type MinerObservation = z.infer<typeof MinerObservationSchema>;
+type MinerObservation = z.infer<typeof MinerObservationSchema>;
 
 /** Untrusted candidate rule emitted by a miner session. */
 const MinerProposalSchema = z.object({
@@ -27,7 +27,7 @@ const MinerProposalSchema = z.object({
   scope: z.enum(['global', 'repo']).optional(),
   observationKeys: z.array(z.string()),
 });
-export type MinerProposal = z.infer<typeof MinerProposalSchema>;
+type MinerProposal = z.infer<typeof MinerProposalSchema>;
 
 export interface MinerOutput {
   readonly observations?: readonly MinerObservation[];
@@ -62,7 +62,7 @@ export function parseMinerOutput(value: unknown): MinerOutput | undefined {
   };
 }
 
-export interface AggregateStats {
+interface AggregateStats {
   readonly observationsProposed: number;
   readonly observationsVerified: number;
   readonly rejectedQuotes: number;

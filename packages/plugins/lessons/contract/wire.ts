@@ -335,3 +335,16 @@ export type LessonsScanProgress = z.infer<typeof LessonsScanProgressSchema>;
 /** `GET /v1/lessons/scan`: the newest scan, if any. */
 export const LessonsScanViewSchema = z.strictObject({ scan: LessonsScanProgressSchema.optional() });
 export type LessonsScanView = z.infer<typeof LessonsScanViewSchema>;
+
+// ── The ferrets a view names ─────────────────────────────────────────────────────────────────────
+
+/**
+ * One ferret as Lessons' screens name it: for evidence ("who said it"), the scan's "Specific ferrets" and its
+ * "Projects", which are the folders ferrets run in. A helper has a name; a lead has none to show.
+ */
+export const LessonsFerretSchema = z.strictObject({
+  ferretId: z.string().min(1),
+  name: z.string().min(1).optional(),
+  folder: z.string().min(1),
+});
+export type LessonsFerret = z.infer<typeof LessonsFerretSchema>;

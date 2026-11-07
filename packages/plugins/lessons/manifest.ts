@@ -113,6 +113,13 @@ export default definePlugin({
         audit: READ,
         guard: { none: 'which ferrets are instructed to file lessons' },
       }),
+      route('GET /v1/lessons/directory', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: READ,
+        guard: { none: 'the ferrets a view names: id, name and folder' },
+      }),
       route('PATCH /v1/ferrets/:ferretId/lessons', {
         minimum: 'operator',
         caller: 'any',

@@ -18,7 +18,7 @@ import { LESSONS_MINER_NAME, lessonSessionFacts } from './ferret-sessions.ts';
 const RECORD_CAP = 1_200;
 
 /** Where a miner writes its answer: a dotfile in its own folder, read and removed by the ingest. */
-export function minerOutputPath(folder: string, run: string): string {
+function minerOutputPath(folder: string, run: string): string {
   return `${folder.replace(/\/+$/u, '')}/.fy-lessons-${run}.json`;
 }
 

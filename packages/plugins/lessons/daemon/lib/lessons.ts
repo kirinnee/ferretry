@@ -8,6 +8,7 @@ import type {
   Proposal,
   ProposalCategory,
   FerretLessons,
+  LessonsFerret,
 } from '../../contract/index.ts';
 import type { AgentLessonToolResult } from '../../contract/index.ts';
 import { insertLesson, lessonFileEtag, repoInstructionsFileName, unifiedDiff } from './apply.ts';
@@ -146,6 +147,15 @@ export class LessonsService {
   constructor(private readonly deps: LessonsDependencies) {}
 
   // ── Passive switch ─────────────────────────────────────────────────────────────────────────────
+
+  /** The ferrets a view names. */
+  async directory(): Promise<readonly LessonsFerret[]> {
+    return (await this.deps.sessions.list()).map(fact => ({
+      ferretId: fact.ferretId,
+      ...(fact.teammate === undefined ? {} : { name: fact.teammate }),
+      folder: fact.cwd,
+    }));
+  }
 
   /** Every ferret's switch, as recorded. A ferret with no record is not instructed. */
   async ferretLessons(): Promise<readonly FerretLessons[]> {

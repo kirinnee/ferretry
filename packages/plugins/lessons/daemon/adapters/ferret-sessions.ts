@@ -3,7 +3,7 @@ import type { FerretId, FerretSummary, FerretsApi } from '@ferretry/core-ferrets
 import type { LessonSessionFacts, LessonSessionsPort, OwnerMessage } from '../lib/lessons.ts';
 
 /** The name the scan's miner ferrets carry: a scan never reads a miner. */
-export const LESSONS_MINER_LABEL = 'ferretry-lessons';
+const LESSONS_MINER_LABEL = 'ferretry-lessons';
 export const LESSONS_MINER_NAME = 'Lesson Scan';
 
 /** How far back the owner's latest message is looked for. */

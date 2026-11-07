@@ -416,6 +416,7 @@ export function lessonsRoutes(subsystem: LessonsSubsystem) {
     'GET /v1/lessons/proposals/:id/apply-preview': async call =>
       jsonResponse(await subsystem.lessons.applyPreview(pathProposalId(call)).catch(lessonsRefusal)),
     'POST /v1/lessons/proposals/:id/apply': async call => await apply(subsystem, call),
+    'GET /v1/lessons/directory': async () => jsonResponse(await subsystem.lessons.directory()),
     'GET /v1/lessons/ferrets': async () => jsonResponse(await subsystem.lessons.ferretLessons()),
     'PATCH /v1/ferrets/:ferretId/lessons': async call => await setPassive(subsystem, call),
     'POST /v1/lessons/scan/estimate': async call =>

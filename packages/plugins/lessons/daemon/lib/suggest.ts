@@ -10,9 +10,6 @@ import type { Observation, Tombstone } from './types.ts';
  * open — in which case its count and its evidence grow — or one the owner already rejected.
  */
 
-/** The global instructions component lessons are applied to: `components/instructions/<name>.yaml`. */
-export const GLOBAL_LESSONS_COMPONENT = 'lessons';
-
 /** Its document, relative to the fleet asset tree. */
 export const GLOBAL_LESSONS_FILE = 'instructions/lessons.md';
 
@@ -24,7 +21,7 @@ export function lessonTarget(category: ProposalCategory, project: string | undef
 }
 
 /** What the daemon itself attaches to a suggestion: never anything the ferret wrote. */
-export interface SuggestionEvidence {
+interface SuggestionEvidence {
   /** The owner's latest message in the session, or the rule itself when the owner has said nothing. */
   readonly quote: string;
   readonly source: ObservationSource;
@@ -45,7 +42,7 @@ export interface SuggestionInput {
   readonly at: string;
 }
 
-export type SuggestionOutcome = 'filed' | 'merged' | 'previously-rejected';
+type SuggestionOutcome = 'filed' | 'merged' | 'previously-rejected';
 
 export interface SuggestionResult {
   readonly outcome: SuggestionOutcome;
