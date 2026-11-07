@@ -14,7 +14,7 @@
  * so a link to a filtered board is the board.
  */
 
-import type { CardId } from '../lib/rules/index.ts';
+import type { CardId } from '../../contract/index.ts';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useSyncExternalStore } from 'react';
 import { type BoardActions, createBoardActions } from '../lib/board-actions.ts';
 import {

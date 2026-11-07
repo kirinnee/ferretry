@@ -13,7 +13,7 @@ export const BOARD_SIDE_VIEW_KEY = 'fy-board-side-view-v1';
 
 export type BoardSideView = 'kanban' | 'list';
 
-/** A device that has never chosen opens on the List; a device that stored the retired Cards view does too. */
+/** A device that has never chosen opens on the List;. */
 export const DEFAULT_BOARD_SIDE_VIEW: BoardSideView = 'list';
 
 /** Anything but the two known words is the default: a stale ("cards") or hand-edited value resets cleanly. */

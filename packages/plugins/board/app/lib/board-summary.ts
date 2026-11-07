@@ -10,7 +10,7 @@
  * Pure values in, pure values out: the caller passes `now`.
  */
 
-import type { LaneCategory } from './rules/index.ts';
+import type { LaneCategory } from '../../contract/index.ts';
 import { inDateRange } from './board-model.ts';
 import { groupUnderHuman, type HumanCard, humanScope } from './board-human.ts';
 import { ageLabel } from './board-present.ts';

@@ -39,7 +39,7 @@ import {
   type Workflow,
   WorkflowSchema,
   VERIFY_GATE,
-} from './rules/index.ts';
+} from '../../contract/index.ts';
 import type { LaneWriteError } from './board-client.ts';
 
 export interface LaneDraft {
@@ -231,12 +231,12 @@ export const reopenTaken = (
   lane: Pick<Lane, 'category' | 'enterOn' | 'ownerGate' | 'stage'>,
   exceptOptionId: string,
 ): boolean =>
-  gateOptions(lane).some(option => option.id !== exceptOptionId && option.outcome.kind === 'reopen-with-agenda');
+  gateOptions(lane).some(option => option.id !== exceptOptionId && option.outcome.kind === 'reopen-with-ask');
 
 /** Points an option somewhere. A second reopen, and a lane that is the gate's own, are refused. */
 export const setGateOptionOutcome = (draft: LaneDraft, id: string, optionId: string, outcome: GateOutcome): LaneDraft =>
   changeGate(draft, id, (options, lane) => {
-    if (outcome.kind === 'reopen-with-agenda' && reopenTaken(lane, optionId)) return options;
+    if (outcome.kind === 'reopen-with-ask' && reopenTaken(lane, optionId)) return options;
     if (outcome.kind === 'lane' && outcome.laneId === id) return options;
     return options.map(option => (option.id === optionId ? { ...option, outcome } : option));
   });
@@ -246,7 +246,7 @@ export const outcomeValue = (outcome: GateOutcome): string => {
   switch (outcome.kind) {
     case 'lane':
       return `lane:${outcome.laneId}`;
-    case 'reopen-with-agenda':
+    case 'reopen-with-ask':
       return 'reopen';
     default:
       return outcome.kind;
@@ -255,7 +255,7 @@ export const outcomeValue = (outcome: GateOutcome): string => {
 
 export const outcomeFromValue = (value: string): GateOutcome | null => {
   if (value === 'next' || value === 'close') return { kind: value };
-  if (value === 'reopen') return { kind: 'reopen-with-agenda' };
+  if (value === 'reopen') return { kind: 'reopen-with-ask' };
   const laneId = value.startsWith('lane:') ? value.slice('lane:'.length) : '';
   return laneId === '' ? null : { kind: 'lane', laneId };
 };
@@ -264,7 +264,7 @@ export const outcomeFromValue = (value: string): GateOutcome | null => {
 export const OUTCOME_LABELS: Readonly<Record<GateOutcome['kind'], string>> = {
   next: 'Next lane',
   lane: 'A specific lane',
-  'reopen-with-agenda': 'Not good (reopen and talk)',
+  'reopen-with-ask': 'Not good (reopen and talk)',
   close: 'Close',
 };
 

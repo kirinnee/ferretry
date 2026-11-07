@@ -39,7 +39,7 @@ import {
   type ReleasedIn,
   type CardKind,
   CardKindSchema,
-} from './rules/index.ts';
+} from '../../contract/index.ts';
 import { compareReleaseVersions } from './release-order.ts';
 import { isPrivateCard, splitAvailable } from './board-human.ts';
 import type { DaemonId } from './machine.ts';

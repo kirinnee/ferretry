@@ -9,7 +9,7 @@
  * among the owned, and an owned card is not repeated among the children's.
  */
 
-import { formatCardRef, type LaneCategory, type CardRef } from './rules/index.ts';
+import { formatCardRef, type LaneCategory, type CardRef } from '../../contract/index.ts';
 import { groupUnderHuman, humanScope, isPrivateCard } from './board-human.ts';
 import type { BoardModel } from './board-model.ts';
 import type { BoardLoadStatus } from './board-store.ts';
@@ -198,7 +198,6 @@ const ACTIVITY_TONE: Readonly<Record<BoardCardOf['task']['activity'], ChatChipTo
   active: 'ok',
   idle: 'quiet',
   stale: 'warn',
-  waiting: 'pend',
   orphaned: 'err',
 };
 

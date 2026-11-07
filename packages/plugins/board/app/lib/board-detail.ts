@@ -11,8 +11,8 @@ import {
   ADMIN_TOKEN_ACTOR_NOTE,
   ADMIN_TOKEN_ACTOR_WORDS,
   attachmentsPhrase,
-  type BoardActor,
-  type BoardActorVia,
+  type CardActor,
+  type CardActorVia,
   type BoardEditableField,
   type CardEvent,
   type CardView,
@@ -22,7 +22,7 @@ import {
   type LaneSet,
   type PrLink,
   type CardRef,
-} from './rules/index.ts';
+} from '../../contract/index.ts';
 import type { FerretNames } from './board-present.ts';
 
 type Lanes = Pick<LaneSet, 'lanes'>;
@@ -50,8 +50,6 @@ export const activityText = (task: Pick<CardView, 'activity'>, category: LaneCat
       return 'Idle';
     case 'stale':
       return 'Stale: idle longer than its lane allows';
-    case 'waiting':
-      return 'Waiting on something outside the ferret';
     case 'orphaned':
       return 'No ferret is left on it';
   }
@@ -104,10 +102,10 @@ export interface HistoryContext {
   readonly laneName: (laneId: string) => string;
 }
 
-const actorName = (actor: BoardActor, via: BoardActorVia | undefined, names: FerretNames): string => {
+const actorName = (actor: CardActor, via: CardActorVia | undefined, names: FerretNames): string => {
   if (actor.kind === 'owner') return via === 'admin-token' ? 'Admin token' : 'You';
   if (actor.kind === 'daemon') return 'Ferretry';
-  return names(actor.sessionId);
+  return names(actor.ferret);
 };
 
 export interface HistoryRow {
@@ -360,7 +358,7 @@ const FIELD_WORDS: Readonly<Record<BoardEditableField, string>> = {
   terms: 'the terms',
   brief: 'the brief',
   howToTest: 'How to test',
-  status: 'the status',
+  progress: 'the progress',
 };
 
 /** The card has a PR, a branch, a doc or a release to show. */
@@ -400,9 +398,9 @@ export const askOrigin = (
 };
 
 /** Who opened a card, as its byline says it. The admin token is said for what it is: it may be either. */
-const askAuthor = (author: BoardActor, via: BoardActorVia | undefined, names: FerretNames): string => {
+const askAuthor = (author: CardActor, via: CardActorVia | undefined, names: FerretNames): string => {
   if (author.kind === 'owner') return via === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : 'you';
-  if (author.kind === 'ferret') return names(author.sessionId);
+  if (author.kind === 'ferret') return names(author.ferret);
   return 'the daemon';
 };
 

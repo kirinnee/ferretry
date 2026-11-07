@@ -4,7 +4,7 @@
  * (`parseLaneProposalReference`), and the choice label is the board's own.
  */
 
-import { LANE_PROPOSAL_ANSWERS, parseLaneProposalReference } from './rules/index.ts';
+import { LANE_PROPOSAL_ANSWERS, parseLaneProposalReference } from '../../contract/index.ts';
 
 /** The one answer shape this reads: a multiple-choice response with the label the owner pressed. */
 export interface ChoiceAnswer {

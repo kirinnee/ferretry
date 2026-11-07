@@ -7,7 +7,7 @@
  * (`isBackwardMove`); this file only turns it into the page's three outcomes.
  */
 
-import { isBackwardMove, type LaneSet } from './rules/index.ts';
+import { isBackwardMove, type LaneSet } from '../../contract/index.ts';
 
 export type MovePlan =
   /** Already in that lane. */

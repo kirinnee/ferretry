@@ -24,7 +24,7 @@
 
 const BRACKET_PREFIX = /^\[([^[\]]+)\]\s*(.*)$/s;
 
-export interface ParsedTask {
+export interface ParsedWork {
   /** Bracketed prefix, when the value had one AND had a task after it. */
   readonly prefix: string | null;
   /** The task text. Empty only when the name itself was empty. */
@@ -32,7 +32,7 @@ export interface ParsedTask {
 }
 
 /** Splits a session name into its teammate prefix and its task. */
-export const parseTaskName = (name?: string | null): ParsedTask => {
+export const parseWorkName = (name?: string | null): ParsedWork => {
   const raw = (name ?? '').trim();
   if (!raw) return { prefix: null, task: '' };
   const matched = BRACKET_PREFIX.exec(raw);
@@ -49,8 +49,8 @@ export const parseTaskName = (name?: string | null): ParsedTask => {
  * True when the task string says nothing the teammate callsign did not already
  * say — used by callers that render both and want to skip the duplicate.
  */
-export const taskIsRedundant = (name: string | undefined, teammate: string | undefined): boolean => {
-  const { task } = parseTaskName(name);
+export const workIsRedundant = (name: string | undefined, teammate: string | undefined): boolean => {
+  const { task } = parseWorkName(name);
   if (!task) return true;
   return Boolean(teammate) && task.toLowerCase() === (teammate ?? '').trim().toLowerCase();
 };

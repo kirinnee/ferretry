@@ -31,7 +31,7 @@ import {
   type LaneSet,
   type LaneTemplateName,
   type CardMessage,
-} from './rules/index.ts';
+} from '../../contract/index.ts';
 import type { LaneWriteError } from './board-client.ts';
 import { checkMove } from './board-model.ts';
 import type { DaemonBoardStore } from './board-store.ts';

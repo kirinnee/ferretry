@@ -39,7 +39,7 @@ import {
   LaneSetActionRequestSchema,
   type LaneSetChangeResponse,
   LaneSetChangeResponseSchema,
-} from './rules/index.ts';
+} from '../../contract/index.ts';
 
 /** The most cards one page asks for; a board larger than a few pages is shown as partial, not paged on. */
 const BOARD_PAGE_SIZE = 500;

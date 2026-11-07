@@ -18,7 +18,7 @@
  * keeps the older rule ({@link isFerretCard}), so the toggle works the same on an older machine.
  */
 
-import { isSubCard, type CardRef } from './rules/index.ts';
+import { isSubCard, type CardRef } from '../../contract/index.ts';
 
 type TaskAsker = 'person' | 'agent';
 

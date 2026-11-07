@@ -7,7 +7,7 @@
  * the Board's cards draw no owner buttons.
  */
 
-import type { LaneCategory, LaneSet } from './rules/index.ts';
+import type { LaneCategory, LaneSet } from '../../contract/index.ts';
 
 type DoneLanes = Pick<LaneSet, 'lanes'>;
 

@@ -5,7 +5,7 @@
  * another shape. They never touch the network or the clock, so each is a plain value-to-value test.
  */
 
-import type { LaneCategory } from './rules/index.ts';
+import type { LaneCategory } from '../../contract/index.ts';
 import { type BoardFilters, type BoardModel, NO_BOARD_FILTERS } from './board-model.ts';
 
 export type BoardCardOf = BoardModel['cards'][number];

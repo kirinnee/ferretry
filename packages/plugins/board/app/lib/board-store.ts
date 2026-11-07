@@ -24,7 +24,7 @@
  */
 
 import {
-  BoardChangedEventSchema,
+  BoardChangedSchema,
   type BoardCounts,
   type BoardProject,
   type BoardProjectId,
@@ -41,7 +41,7 @@ import {
   type LaneSet,
   type LaneSetActionRequestInput,
   type LaneSetChangeResponse,
-} from './rules/index.ts';
+} from '../../contract/index.ts';
 import {
   type BoardPort,
   type BoardRead,
@@ -428,10 +428,10 @@ export class DaemonBoardStore {
    * ignored, and so is one for a machine nothing is watching.
    */
   noteEvent(daemonId: DaemonId, payload: unknown): void {
-    const changed = BoardChangedEventSchema.safeParse(payload);
+    const changed = BoardChangedSchema.safeParse(payload);
     if (!changed.success) return;
-    this.#noteIds(daemonId, changed.data.cards);
-    void this.reconcile(daemonId, changed.data.cards);
+    this.#noteIds(daemonId, changed.data.cardIds);
+    void this.reconcile(daemonId, changed.data.cardIds);
   }
 
   /** Re-reads these cards of one machine, and only these, into every view and task page that holds them. */

@@ -11,7 +11,7 @@
  * stale or idle, whatever the daemon derived.
  */
 
-import { type CardView, formatCardRef, type LaneCategory, type PrLink } from './rules/index.ts';
+import { type CardView, formatCardRef, type LaneCategory, type PrLink } from '../../contract/index.ts';
 import { displayCallsign } from './callsign.ts';
 
 /** How a segment is coloured; `quiet` is the plain meta text. */
@@ -106,8 +106,6 @@ const activitySegment = (task: CardView, category: LaneCategory | null, now: num
         'warn',
         'Idle for longer than its lane allows. Nudge it or move it.',
       );
-    case 'waiting':
-      return make('waiting', 'waiting', 'pend', 'Waiting on something outside the ferret');
     case 'orphaned':
       return make('orphaned', 'orphaned', 'err', 'No ferret is left on it. Start one.');
   }
