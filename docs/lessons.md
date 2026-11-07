@@ -23,8 +23,11 @@ The **only** thing the passive switch controls is whether a ferret is _instructe
 
 - `lessons.yaml` `passiveDefault` (default `true`) decides it for every NEW ferret, and that file is the
   only place it lives. Settings › Lessons writes it with `PATCH /v1/lessons/config` through the kernel's
-  config writer, which edits only that key (comments survive), refuses the write when the file holds a raw
-  secret (the answer never repeats it) and keeps no copy of the switch anywhere else. The answer is the
+  config writer. The save is the whole settings IN EFFECT plus the switch, and the writer edits only the
+  keys whose value changes (comments survive), so a broken value or a hand edit not yet reloaded is
+  overwritten with the value in effect, never put into effect with the owner's save (a file with a
+  top-level key the schema does not know is refused instead; the owner repairs it by hand). The switch
+  never takes a raw secret (the answer never repeats it), and no copy of it is kept anywhere else. The answer is the
   settings IN EFFECT; when the kernel holds the edit for the owner, the old value stays in effect and
   `held` lists what waits (Settings › Lessons shows it). Unlike today, on 5.0 the owner's switch is
   refused (`409 config_held`, nothing written, the held edit kept) while a hand edit of `lessons.yaml` is
@@ -32,6 +35,11 @@ The **only** thing the passive switch controls is whether a ferret is _instructe
   versions and in effect at once (docs/config-files.md rule 3; GAP until the kernel offers an
   owner-acknowledged write).
   A miner or a warden is never instructed.
+- **Loosening waits for the owner** (docs/config-files.md rule 2). A miner is a real ferret launch, so an
+  edit of `lessons.yaml` that loosens what lesson mining may spend is HELD and the tighter version stays in
+  effect: lesson mining turned on, or its caps raised (`maxMinersPerRun`, `maxFerretsPerRun`,
+  `batchSize`), or its cadence shortened (`intervalMinutes`, `minSpawnGapMinutes` lowered). Tightening,
+  and the miner's `agent`, `model` or `passiveDefault`, apply at once.
 - `PATCH /v1/ferrets/:ferretId/lessons {passive}` switches one ferret.
 - The teaching is a per-ferret part of the launch, contributed through the `launch.parts` hook: Lessons
   answers the hook with the teaching when the ferret is instructed, and nothing otherwise.
