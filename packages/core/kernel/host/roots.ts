@@ -2,6 +2,7 @@ import type { Result } from '@ferretry/std';
 import { err, instantFromEpochMs, ok } from '@ferretry/std';
 import { basename, dirname, join, relative } from 'node:path';
 import type { FencedPath, FolderRefusal, WorkFolders } from '../contract/bound.ts';
+import type { HeldRoot, PinnedFileKind, PinnedFileProbe, PinnedOpenOptions, PinnedTarget } from '../contract/pinned.ts';
 import { insideFence } from '../contract/home.ts';
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import type {
@@ -547,6 +548,81 @@ interface HandleSetup {
   readonly pins: PinRegistry | undefined;
 }
 
+/** What a held owner's root needs to judge every walk beneath it: the disk, the home it must not reach, the proven stores. */
+interface PinFenceSetup {
+  readonly fs: HostFs;
+  readonly home: string;
+  readonly immutable: () => Promise<readonly string[]>;
+}
+
+/**
+ * A held owner's root whose every walk is judged against the fence AGAIN (S40, S47). The root itself was checked at
+ * the pin, but a root can be an ancestor of the home (a ferret working in `~`), and the descriptor walk beneath it
+ * knows nothing of the home. So each `open` and each `probe` asks, like every other op of an owner's root: the fence
+ * is recomputed (a home that cannot be identified refuses), the path is refused by name before the walk starts, and
+ * every component the walk opened is refused by device and inode (a bind mount or alias a name would miss) — the walk
+ * never serves a byte from, or lists, the home. A file with several names is refused unless it is proven immutable
+ * (S49), as `withCheckedFile` does. Same `policyCwd`, the object the registry minted.
+ */
+function fencedPin(pinned: HeldRoot, setup: PinFenceSetup): HeldRoot {
+  const { fs, home, immutable } = setup;
+  const fenceNow = async (): Promise<Fence> => {
+    const fence = await fenceOf(fs, home).catch(() => undefined);
+    return fence ?? refuse('fenced');
+  };
+  const named = (rel: string): string => join(pinned.rootReal, rel);
+  return Object.freeze({
+    rootReal: pinned.rootReal,
+    policyCwd: pinned.policyCwd,
+    open: async (rel: string, options?: PinnedOpenOptions): Promise<PinnedTarget> => {
+      const fence = await fenceNow();
+      if (fencedByName(fence, named(rel))) return refuse('fenced');
+      const target = await pinned.open(rel, options);
+      try {
+        const real = join(pinned.rootReal, target.canonical);
+        if (
+          fencedByName(fence, real) ||
+          target.identities.some(entry =>
+            fence.identities.some(held => held.device === entry.dev && held.inode === entry.ino),
+          )
+        )
+          return refuse('fenced');
+        if (
+          target.metadata.type === 'file' &&
+          (target.metadata.links ?? 1) > 1 &&
+          !(await hardLinkAllowed(fs, await immutable(), real))
+        )
+          return refuse('hard_link');
+      } catch (error) {
+        await target.close();
+        throw error;
+      }
+      return target;
+    },
+    probe: (): PinnedFileProbe => {
+      const inner = pinned.probe();
+      return {
+        // A verdict on names: one inside the home is `unsupported` (nothing a read would serve) without being walked.
+        classify: async (rels, budget) => {
+          const fence = await fenceNow();
+          const asked = rels.map(rel => fencedByName(fence, named(rel)));
+          const kinds = await inner.classify(
+            rels.filter((_, index) => !asked[index]),
+            budget,
+          );
+          const out: PinnedFileKind[] = [];
+          let next = 0;
+          for (let index = 0; index < rels.length && (asked[index] || next < kinds.length); index += 1)
+            out.push(asked[index] ? 'unsupported' : (kinds[next++] as PinnedFileKind));
+          return out;
+        },
+        close: () => inner.close(),
+      };
+    },
+    close: () => pinned.close(),
+  });
+}
+
 function rootHandle(setup: HandleSetup): RootHandle {
   const { fs, home, name, plugin, base, anchor, scopedParent, check, immutable, random, pins } = setup;
   const ownerRoot = OWNER_ROOTS.has(name);
@@ -752,7 +828,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
         await pinned.close();
         throw error;
       }
-      return pinned;
+      return scope.base.fence === undefined ? pinned : fencedPin(pinned, { fs, home, immutable });
     },
   };
   HANDLES.set(handle, { plugin, real: path => real(path), realParent: path => realParent(path) });
