@@ -35,6 +35,7 @@ import {
   QuestionAnswered,
   QuestionAsked,
   QuestionSchema,
+  ReferenceCatalog,
   RELATED_SEARCHED_AUDIT,
   RENDER_SAVED_AUDIT,
   SEND_CANCELLED_AUDIT,
@@ -133,6 +134,9 @@ export default definePlugin({
       route('GET /v1/ferrets/:ferretId/log-page', { ...FERRET, ...READ, ...SECRETS }), // R266 (kept half)
       route('GET /v1/ferrets/:ferretId/log-search', { ...FERRET, ...READ, ...SECRETS }),
       route('GET /v1/ferrets/:ferretId/messages', { ...FERRET, ...READ, ...SECRETS }), // G41: bounded fragments
+      // The composer's reference menus (lead decision Q6): each prefix's owner provides its entries through `reference.catalog`.
+      // Ungoverned itself, but each provider's own demand (files, terminals, pages) is asked of the caller before it answers.
+      route('GET /v1/ferrets/:ferretId/references', { ...FERRET, ...READ, ...SECRETS, consultsGrants: true }),
       // R267 / G162: an image handle never changes for an append-only transcript, so no `noStore`.
       route('GET /v1/ferrets/:ferretId/transcript-images/:handle', {
         minimum: 'operator',
@@ -284,6 +288,8 @@ export default definePlugin({
       panel('composer.tools', { id: 'attachments', order: 10 }),
       panel('ferret.side', { id: 'queue', order: 10 }),
       panel('ferret.toolbar', { id: 'compact-at', order: 30 }),
+      // This device's conversation width (lead decision Q11).
+      panel('device.settings', { id: 'chat-width', order: 20 }),
     ],
     settings: [settingsTab('conversation', { label: 'Conversation', order: 20 })],
     renderers: [renderer('ask', { source: 'question' })],
@@ -306,7 +312,7 @@ export default definePlugin({
       // A stop is being attempted: the unlocked attachments are zeroed whether or not it then succeeds.
       { hook: FerretStopping },
     ],
-    offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }],
+    offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },
 
   // The harness plugins read their own history through `harness-history` (links); `imports` is the one path the owner
