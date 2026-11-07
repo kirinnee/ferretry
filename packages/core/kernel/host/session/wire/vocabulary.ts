@@ -75,6 +75,11 @@ export function relayDataByteBudget(maxPlaintextBytes: number): number {
  */
 export const RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE = 4441 as const;
 
+/** What an UPDATED machine says to an app from before device keys (R2): the sentence that names which side is old. */
+export const OLDER_APP_SENTENCE =
+  'This app is older than the machine it is talking to. Reload the page, or close and reopen the installed app, ' +
+  'to update it, then pair this device again.';
+
 /** How long one proof of the device key authorises one session for. */
 export const ACCESS_LEASE_SECONDS = 900 as const;
 
