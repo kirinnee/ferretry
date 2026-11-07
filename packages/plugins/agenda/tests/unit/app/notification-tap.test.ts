@@ -44,7 +44,7 @@ const tapTarget = (payload: PushNotificationPayload): string =>
 
 describe('inboxTargetPath / inboxTargetFromSearch', () => {
   it('opens a buzz on the ask’s own page', () => {
-    expect(inboxTargetPath(daemonId('laptop'), 'session 1', A3)).toBe('/agenda/session%201/A3');
+    expect(inboxTargetPath(daemonId('laptop'), 'session 1', A3)).toBe('/d/laptop/agenda/session%201/A3');
   });
 
   it('reads a conversation and an item named on a query', () => {

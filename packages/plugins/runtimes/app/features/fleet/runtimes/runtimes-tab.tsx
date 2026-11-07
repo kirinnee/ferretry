@@ -18,7 +18,7 @@ import { cn } from '../../../ui.ts';
 import { Badge, Button } from '../../../ui.ts';
 import { HARNESS_NAMES } from '../components/component-model.ts';
 import { credentialEmail } from '../../../lib/logins-view.ts';
-import { CONVERSATIONS_HREF } from '../../../lib/conversations-link.ts';
+import { conversationsHref } from '../../../lib/conversations-link.ts';
 import { type MoveFerret, moveFerretWith } from '../../../lib/move-ferret.ts';
 import { AccountStatus } from '../shell/account-status.tsx';
 import { type AccountChanges, useAccountChanges } from '../shell/apply-change-panel.tsx';
@@ -693,7 +693,7 @@ export function RuntimesTab({
               </Button>
               <a
                 className="inline-flex min-h-control items-center text-cell font-semibold text-accent underline"
-                href={CONVERSATIONS_HREF}
+                href={conversationsHref(currentDaemon())}
                 data-import-conversations-link=""
                 onClick={followInApp}
               >

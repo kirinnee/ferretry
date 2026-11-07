@@ -4,7 +4,7 @@
  * descriptor fields.
  */
 import { describe, expect, test } from 'bun:test';
-import { owner } from '@ferretry/kernel/testing';
+import { ferret, owner, warden } from '@ferretry/kernel/testing';
 import { SpeedupTestResultSchema, SpeedupsViewSchema, SttEnhancementResultSchema } from '../../../contract/index.ts';
 import manifest from '../../../manifest.ts';
 import { CEREBRAS_KEY, GROQ_KEY, voiceHost } from './host.ts';
@@ -19,6 +19,20 @@ describe('the voice routes', () => {
     expect(response.status).toBe(200);
     expect(SttEnhancementResultSchema.parse(response.json()).text).toBe('Hello, world.');
     expect(String(response.body)).not.toContain(GROQ_KEY);
+  });
+
+  test('R-0400 POST /v1/stt/enhance is a person act (no unattended spend): a ferret and a warden are refused before anything is sent, a person is served', async () => {
+    const { host, sent } = await voiceHost();
+    expect(manifest.actions.routes.find(route => route.key === 'POST /v1/stt/enhance')?.caller).toBe('person');
+    const body = { text: 'helo wold', provider: 'groq' };
+    for (const caller of [ferret('f1'), warden()]) {
+      const refused = await host.request('POST', '/v1/stt/enhance', { body, as: caller });
+      expect(refused.status).toBe(403);
+    }
+    expect(sent).toHaveLength(0);
+    const served = await host.request('POST', '/v1/stt/enhance', { body, as: owner() });
+    expect(served.status).toBe(200);
+    expect(sent).toHaveLength(1);
   });
 
   test('R-0199 GET /v1/speedups lists each provider by name, set or not, never a value', async () => {
