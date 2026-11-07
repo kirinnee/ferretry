@@ -24,6 +24,9 @@ export const processes: SpawnPort = {
   run: async () => {
     throw new Error('test does not use run');
   },
+  runBytes: async () => {
+    throw new Error('test does not use runBytes');
+  },
   start: (program, args, options) => {
     const child = Bun.spawn([program, ...args], {
       env:

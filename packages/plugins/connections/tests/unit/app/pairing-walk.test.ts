@@ -4,12 +4,18 @@
  * layer and its pair mode. Only the network (`BrowserNetwork`) and the timers are scripted.
  */
 import { describe, expect, test } from 'bun:test';
-import { type PairDirectInput, PairingOutcomeUnknownError, RelayPairingRefusedError, toBase64Url } from '@ferretry/app';
+import {
+  type PairDirectInput,
+  PairingOutcomeUnknownError,
+  type RelayCrypto,
+  RelayPairingRefusedError,
+  toBase64Url,
+} from '@ferretry/app';
 import { pairOverCarriers, WebCryptoRelayCrypto } from '@ferretry/app/testing';
 import { AmbiguousPairingError, pairingCandidates, pairingWalk } from '../../../app/pairing/walk.ts';
 import { PairingUnreachableError } from '../../../app/pairing/unreachable.ts';
 import { BrowserNetwork, HandTimers, type ScriptedHost } from '../../support/browser-network.ts';
-import { type KernelFixture, kernelFixture } from '../../support/kernel-session.ts';
+import { impostorDaemon, type KernelFixture, kernelFixture } from '../../support/kernel-session.ts';
 
 const shellCrypto = new WebCryptoRelayCrypto();
 const DIRECT = 'https://laptop.example.test';
@@ -38,7 +44,11 @@ interface Run {
 }
 
 /** `hosted`: the discovered rendezvous, or `null` for a document whose directory advertised none. */
-async function walkOver(hosts: Record<string, ScriptedHost>, hosted: string | null = RELAY): Promise<Run> {
+async function walkOver(
+  hosts: Record<string, ScriptedHost>,
+  hosted: string | null = RELAY,
+  crypto: RelayCrypto = shellCrypto,
+): Promise<Run> {
   const fx = await kernelFixture();
   const network = new BrowserNetwork(fx, hosts);
   const timers = new HandTimers();
@@ -50,33 +60,64 @@ async function walkOver(hosts: Record<string, ScriptedHost>, hosted: string | nu
   const noDirect = () => {
     throw new Error('the shell’s own direct dial is not used once Connections registered a walk');
   };
-  return { fx, network, timers, pair: pairOverCarriers(shellCrypto, noDirect, timers.after, () => walk) };
+  return { fx, network, timers, pair: pairOverCarriers(crypto, noDirect, timers.after, () => walk) };
 }
 
 const hostOf = (url: string): string => new URL(url).host;
+
+/** The browser's crypto, counting every key derivation, seal and signature it performs (R570). */
+function countingCrypto(): { readonly crypto: RelayCrypto; readonly calls: Record<string, number> } {
+  const calls: Record<string, number> = { deriveSharedSecret: 0, deriveKey: 0, seal: 0, signEd25519: 0 };
+  const crypto = new Proxy(shellCrypto, {
+    get(target, name, receiver) {
+      const value = Reflect.get(target, name, receiver) as unknown;
+      if (typeof name !== 'string' || !(name in calls) || typeof value !== 'function') {
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+      return (...args: unknown[]) => {
+        calls[name] = (calls[name] ?? 0) + 1;
+        return (value as (...given: unknown[]) => unknown).apply(target, args);
+      };
+    },
+  });
+  return { crypto, calls };
+}
 const bytesContain = (frames: readonly Uint8Array[], text: string): boolean =>
   frames.some(frame => new TextDecoder().decode(frame).includes(text));
 
 describe('the daemon is proved before anything is sent', () => {
   for (const row of ['P24', 'R570', 'P135'])
-    test(`${row} a daemon that does not hash to the QR-pinned fingerprint gets no pair record and no code, on any leg`, async () => {
-      // Arrange — both legs reach a real daemon, but the link pins ANOTHER daemon's fingerprint.
-      const run = await walkOver({
-        [hostOf(DIRECT)]: { kind: 'carries', carrier: 'direct' },
-        [hostOf(RELAY)]: { kind: 'carries', carrier: 'relay' },
-      });
-      const impostorPin = (await kernelFixture()).daemonId;
+    test(`${row} a daemon whose signed hello does not hash to the QR-pinned fingerprint is refused before any key, proof or code, on every leg`, async () => {
+      // Arrange — both legs reach a HOSTILE daemon: it claims the pinned fingerprint and answers with a daemon hello
+      // properly signed by its OWN identity, so only the browser's own pin check stands between it and the code.
+      const impostor = await impostorDaemon();
+      const counting = countingCrypto();
+      const run = await walkOver(
+        {
+          [hostOf(DIRECT)]: { kind: 'impostor', answer: impostor.answer },
+          [hostOf(RELAY)]: { kind: 'impostor', answer: impostor.answer },
+        },
+        RELAY,
+        counting.crypto,
+      );
+      const input = await pairingInput(run.fx.daemonId);
 
       // Act
-      const failure = await run.pair(await pairingInput(impostorPin)).catch((error: unknown) => error);
+      const failure = await run.pair(input).catch((error: unknown) => error);
 
-      // Assert — the walk tried both legs, refused to key either, and the pair mode was never asked.
+      // Assert — the walk tried both legs and refused to key either: each leg carried exactly one frame (the client
+      // hello), no sealed record (no pair record, so no code and no device proof), and no shared secret or session key
+      // was derived, nothing sealed and nothing signed by this browser.
       expect(failure).toBeInstanceOf(PairingUnreachableError);
       expect(run.network.dialled.map(url => new URL(url).host)).toEqual([hostOf(DIRECT), hostOf(RELAY)]);
+      for (const host of [hostOf(DIRECT), hostOf(RELAY)]) {
+        expect(run.network.sent.get(host)).toHaveLength(1);
+        expect(run.network.records(host)).toEqual([]);
+        expect(bytesContain(run.network.sent.get(host) ?? [], CODE)).toBe(false);
+        expect(bytesContain(run.network.sent.get(host) ?? [], input.key.publicKey)).toBe(false);
+      }
+      expect(counting.calls).toEqual({ deriveSharedSecret: 0, deriveKey: 0, seal: 0, signEd25519: 0 });
       expect(run.fx.pair.attempts).toEqual([]);
-      expect(run.network.records(hostOf(DIRECT))).toEqual([]);
-      expect(run.network.records(hostOf(RELAY))).toEqual([]);
-      expect(bytesContain(run.network.sent.get(hostOf(RELAY)) ?? [], CODE)).toBe(false);
       run.fx.layer.close();
     });
 

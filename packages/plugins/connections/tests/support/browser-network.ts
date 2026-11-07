@@ -25,7 +25,9 @@ export type ScriptedHost =
   | { readonly kind: 'carries'; readonly carrier: 'direct' | 'relay' | 'tunnel'; readonly dropAfterFrames?: number }
   | { readonly kind: 'dead' }
   | { readonly kind: 'silent' }
-  | { readonly kind: 'absent'; readonly code: number };
+  | { readonly kind: 'absent'; readonly code: number }
+  /** Opens like a rendezvous, says `ready`, answers each frame with `answer`'s reply, and hangs up on one it cannot. */
+  | { readonly kind: 'impostor'; readonly answer: (bytes: Uint8Array) => Promise<Uint8Array | undefined> };
 
 const tick = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0));
 
@@ -63,6 +65,14 @@ export class BrowserNetwork {
         const bytes = new Uint8Array(data);
         this.sent.set(host, [...(this.sent.get(host) ?? []), bytes]);
         link?.inbound(bytes);
+        if (script.kind === 'impostor') {
+          // Anything it cannot answer (a sealed record after the handshake) ends the socket, so a browser that keyed a
+          // channel to it fails at once rather than waiting out a deadline.
+          void script.answer(bytes).then(reply => {
+            if (reply === undefined) end(1011, 'the impostor has nothing to say');
+            else deliver(reply);
+          });
+        }
         if (script.kind === 'carries' && script.dropAfterFrames !== undefined) {
           const count = this.sent.get(host)?.length ?? 0;
           if (count >= script.dropAfterFrames) end(1006, '');
@@ -91,6 +101,17 @@ export class BrowserNetwork {
         end(script.code, 'no daemon holds this rendezvous');
         return;
       }
+      const sessionId = sessionIdFromBytes(kernelCrypto.randomBytes(SESSION_ID_BYTES)) as SessionId;
+      const ready = encodeFrame({
+        kind: FRAME_KINDS.control,
+        sessionId,
+        sequence: 0,
+        payload: encodeControlMessage({ t: 'ready', protocol: RELAY_PROTOCOL_ID, limits: RELAY_LIMITS }),
+      });
+      if (script.kind === 'impostor') {
+        deliver(ready);
+        return;
+      }
       const opened = this.fx.layer.open(script.carrier as CarrierKey, { address: '198.51.100.7' });
       link = opened;
       const pump = (): void => {
@@ -102,15 +123,7 @@ export class BrowserNetwork {
           deliver(next.bytes);
         }
       };
-      const sessionId = sessionIdFromBytes(kernelCrypto.randomBytes(SESSION_ID_BYTES)) as SessionId;
-      deliver(
-        encodeFrame({
-          kind: FRAME_KINDS.control,
-          sessionId,
-          sequence: 0,
-          payload: encodeControlMessage({ t: 'ready', protocol: RELAY_PROTOCOL_ID, limits: RELAY_LIMITS }),
-        }),
-      );
+      deliver(ready);
       opened.outbound.onReady(pump);
       pump();
     });

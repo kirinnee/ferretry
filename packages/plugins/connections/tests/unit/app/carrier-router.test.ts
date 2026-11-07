@@ -412,7 +412,6 @@ describe('retired generations (connections-app R1 finding 2)', () => {
     expect(carriedOver(r.fx)).toEqual(['/v1/first direct', '/v1/second relay']);
     expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'relay' } });
     expect(PREFERENCE_CHANGED_REASON).toBe('the connection preference for this machine changed');
-    transport.close();
     r.fx.layer.close();
   });
 });
@@ -460,7 +459,6 @@ describe('a winner that fails under a write is forgotten (connections-app R1 fin
     expect(choiceAfterLoss?.ok).not.toBe(true);
     expect(announced).toBeGreaterThan(0);
     expect(carriedOver(r.fx)).toEqual(['/v1/first relay', '/v1/example relay', '/v1/second direct']);
-    transport.close();
     r.fx.layer.close();
   });
 });
