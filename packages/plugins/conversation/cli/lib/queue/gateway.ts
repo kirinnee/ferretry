@@ -1,5 +1,10 @@
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { type FerretQueue, FerretQueueSchema, type QueuedMessage, QueuedMessageSchema } from '../../../contract/index.ts';
+import {
+  type FerretQueue,
+  FerretQueueSchema,
+  type QueuedMessage,
+  QueuedMessageSchema,
+} from '../../../contract/index.ts';
 import type { QueueGateway } from './ports.ts';
 
 /** Reads and changes the queue routes through the plugin client; replies are parsed against the contract. */
