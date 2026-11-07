@@ -37,7 +37,6 @@ import type { SessionId } from './lib/session-id.ts';
 import { DEFAULT_CALLSIGN_POOL, suggestCallsigns } from './lib/names/index.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from './lib/protocol/agent-address.ts';
 import { FerretRegistry } from './lib/registry/registry.ts';
-import { isDeniedPath, normalizeRelativePath } from './lib/session/filesystem/path-policy.ts';
 import { FerretTokenDirectory, type TokenEntry } from './lib/tokens/tokens.ts';
 import { RegistryWorkFolders } from './lib/work-folders/work-folders.ts';
 import { buildWorktrees } from './modules/worktrees.ts';
@@ -514,25 +513,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
           .map(ferret => ({ callsign: ferret.name, ownerId: ferret.id, claimedAtMs: 0, expiresAtMs: nowMs + 1 }));
         const start = Math.floor(nowMs / 1000) % DEFAULT_CALLSIGN_POOL.length;
         return jsonResponse([...suggestCallsigns(DEFAULT_CALLSIGN_POOL, claims, nowMs, count, start)]);
-      },
-      'GET /v1/ferrets/:ferretId/fs/file': async call => {
-        const id = await pathFerret(call);
-        agentMayReach(call, id);
-        const relative = normalizeRelativePath(queryValue(call.request, 'path'));
-        if (relative === '') throw new ApiError(400, 'query parameter "path" is required', 'invalid_path');
-        if (isDeniedPath(relative)) throw new ApiError(403, `${relative} is never served`, 'denied');
-        const folder = workFolders.check(id, relative);
-        if (!folder.ok) throw new ApiError(403, `${relative} is outside the ferret's folder`, 'escapes_root');
-        const root = kernel.roots.root('work', { ferret: id });
-        const resolved = root.resolve(relative);
-        if (!resolved.ok) throw new ApiError(403, `${relative} may not be read (${resolved.error})`, 'escapes_root');
-        const stat = await root.stat(resolved.value);
-        if (stat === undefined) throw new ApiError(404, `${relative} does not exist`, 'not_found');
-        if (stat.kind !== 'file') throw new ApiError(400, `${relative} is not a file`, 'not_a_file');
-        const text = await root.readText(resolved.value, 1024 * 1024);
-        return await kernel.redaction.read(
-          (scope): ApiResponse => jsonResponse({ path: relative, size: stat.size, content: scope.text(text) }),
-        );
       },
     },
   };
