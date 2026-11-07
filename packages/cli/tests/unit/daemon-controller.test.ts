@@ -18,7 +18,15 @@ interface Options {
   readonly midTurn?: readonly number[];
   readonly interactive?: boolean;
   readonly answer?: string;
-  readonly home?: 'claimed' | 'unclaimed' | 'absent';
+  readonly home?: 'claimed' | 'unclaimed' | 'absent' | 'empty';
+  /** What the process port answers to "does this pid hold the daemon lock": absent means yes. */
+  readonly holdsOpen?: boolean | undefined;
+  /** What the shell launcher comes to when a verb needs the home made. */
+  readonly launch?: 'ok' | 'fails';
+  /** A nix-shell offer answering with this alternative executable. */
+  readonly nixOffer?: string;
+  /** The protocol the serving daemon reports. */
+  readonly protocol?: number;
   readonly counts?: ResetCounts | undefined;
   readonly binary?: 'found' | 'missing';
 }
@@ -41,7 +49,7 @@ async function harness(options: Options = {}) {
   const trail: string[] = [];
   const disk = new Map<string, string>();
   let current: LocalUpdateHealth | undefined =
-    options.running === false ? undefined : { protocol: 1, version: '5.0.0', pid: 4321 };
+    options.running === false ? undefined : { protocol: options.protocol ?? 1, version: '5.0.0', pid: 4321 };
   const processes: IDaemonProcessPort = {
     run: async argv => {
       trail.push(`run:${argv.join(' ')}`);
@@ -64,7 +72,7 @@ async function harness(options: Options = {}) {
       return true;
     },
     alive: () => current !== undefined,
-    holdsOpen: async () => true,
+    holdsOpen: async () => ('holdsOpen' in options ? options.holdsOpen : true),
   };
   const files: IServiceFilePort = {
     exists: async path => disk.has(path),
@@ -77,7 +85,15 @@ async function harness(options: Options = {}) {
     },
     ensureDirectory: async () => {},
   };
-  const claims: IStateHomeClaimPort = { claim: async () => {}, inspect: async () => options.home ?? 'claimed' };
+  let homeState = options.home ?? 'claimed';
+  const claims: IStateHomeClaimPort = {
+    // As in production: a supervisor cannot claim a home the daemon has not made.
+    claim: async () => {
+      if (homeState !== 'claimed')
+        throw new Error(`${layout.stateHome} is not a Ferretry home; the daemon creates it on its first start`);
+    },
+    inspect: async () => homeState,
+  };
   const service = new SystemdSupervisor(layout, processes, files, claims);
   if (options.installed === true) await service.install('/fake/bin/old-fyd');
   trail.length = 0;
@@ -134,6 +150,19 @@ async function harness(options: Options = {}) {
       },
     },
     claims,
+    launcher: async () => {
+      trail.push('launch');
+      if (options.launch === 'fails') return { started: false, why: 'cannot find fyd beside this program' };
+      homeState = 'claimed';
+      current = { protocol: 1, version: '5.0.0', pid: 4399 };
+      return { started: true };
+    },
+    nixShellOffer: {
+      offer: async found => {
+        trail.push(`offer:${found.path}:claims=${String(locks.length)}`);
+        return options.nixOffer === undefined ? undefined : { ...found, path: options.nixOffer };
+      },
+    },
     prompt,
     interactive: () => options.interactive ?? false,
     clientName: 'fy',
@@ -141,7 +170,18 @@ async function harness(options: Options = {}) {
     out,
     turns: { midTurn: async () => turns.shift() ?? 0 },
   });
-  return { controller, layout, trail, out, prompt, locks, releases, disk, health: () => current };
+  return {
+    controller,
+    layout,
+    trail,
+    out,
+    prompt,
+    locks,
+    releases,
+    disk,
+    health: () => current,
+    home: () => homeState,
+  };
 }
 
 describe('fy daemon stop', () => {
@@ -331,5 +371,156 @@ describe('fy daemon reset', () => {
     await h.controller.reset({ yes: true });
     expect(h.locks.every(lock => lock.startsWith('reset:'))).toBe(true);
     expect(h.releases.length).toBe(h.locks.length);
+  });
+});
+
+describe('a home the daemon has not made yet (fresh machine, or after a reset)', () => {
+  const at = (trail: readonly string[], prefix: string) => trail.findIndex(line => line.startsWith(prefix));
+
+  test('V-0233 fy daemon install on a fresh machine brings the daemon up once so it makes the home, then installs', async () => {
+    const h = await harness({ running: false, home: 'absent' });
+    await h.controller.install();
+    expect(h.trail.filter(line => line === 'launch')).toEqual(['launch']);
+    expect(at(h.trail, 'launch')).toBeLessThan(at(h.trail, 'run:systemctl --user enable'));
+    expect(h.disk.get(h.layout.systemdUnitFile)).toContain('/fake/bin/fyd');
+    expect(h.out.text).toContain('user service installed from');
+    expect(h.home()).toBe('claimed');
+  });
+
+  test('V-0233 an empty home is the same: it is the daemon that makes it a home', async () => {
+    const h = await harness({ running: false, home: 'empty' });
+    await h.controller.install();
+    expect(h.trail).toContain('launch');
+    expect(h.out.text).toContain('starting fyd once so it creates it');
+  });
+
+  test('V-0233 a home that is already ours is never launched for', async () => {
+    const h = await harness({ running: false });
+    await h.controller.install();
+    expect(h.trail).not.toContain('launch');
+  });
+
+  test('V-0233 a home that is there but is not ours is never launched into: the supervisors refuse it', async () => {
+    const h = await harness({ running: false, home: 'unclaimed' });
+    await expect(h.controller.install()).rejects.toThrow('is not a Ferretry home');
+    expect(h.trail).not.toContain('launch');
+    expect(h.disk.has(h.layout.systemdUnitFile)).toBe(false);
+  });
+
+  test('V-0233 a launcher that cannot start the daemon refuses the install with its words, writing no definition', async () => {
+    const h = await harness({ running: false, home: 'absent', launch: 'fails' });
+    await expect(h.controller.install()).rejects.toThrow('cannot find fyd beside this program');
+    expect(h.disk.has(h.layout.systemdUnitFile)).toBe(false);
+  });
+
+  test('V-0237 fy daemon restart after a reset launches once so the home exists, then restarts it: one daemon, never two', async () => {
+    const h = await harness({ running: false, home: 'absent' });
+    await h.controller.restart();
+    expect(h.trail.filter(line => line === 'launch')).toEqual(['launch']);
+    expect(h.trail.filter(line => line === 'spawn')).toEqual(['spawn']);
+    expect(at(h.trail, 'launch')).toBeLessThan(at(h.trail, 'spawn'));
+    expect(h.trail).toContain('signal:4399:SIGTERM');
+    expect(h.out.text).toContain('ok: fyd restarted (pid 4322)');
+  });
+
+  test('V-0237 restart on a home that is ours does not launch', async () => {
+    const h = await harness();
+    await h.controller.restart();
+    expect(h.trail).not.toContain('launch');
+  });
+
+  test('V-0236 reset leaves an empty home alone as not-a-marked-home, exactly as before', async () => {
+    const h = await harness({ home: 'empty' });
+    await expect(h.controller.reset({ yes: true })).rejects.toThrow('carries no Ferretry marker');
+    expect(h.trail).toEqual([]);
+  });
+});
+
+describe('a daemon on another protocol is still the daemon (skew remedy)', () => {
+  test('V-0244 fy daemon stop stops a daemon whose protocol differs, rather than calling it not running', async () => {
+    const h = await harness({ protocol: 9 });
+    await h.controller.stop();
+    expect(h.trail).toContain('signal:4321:SIGTERM');
+    expect(h.out.text).toContain('ok: fyd stopped');
+  });
+
+  test('V-0237 fy daemon restart replaces a daemon on another protocol with exactly one new one', async () => {
+    const h = await harness({ protocol: 9 });
+    await h.controller.restart();
+    expect(h.trail.filter(line => line === 'spawn')).toEqual(['spawn']);
+    expect(h.trail.indexOf('signal:4321:SIGTERM')).toBeLessThan(h.trail.indexOf('spawn'));
+    expect(h.out.text).not.toContain('was not running');
+    expect(h.out.text).toContain('ok: fyd restarted (pid 4322)');
+  });
+
+  test('V-0251 fy daemon which reports a daemon on another protocol as running', async () => {
+    const h = await harness({ protocol: 9 });
+    await h.controller.which({});
+    expect(h.out.text).toContain('running: pid 4321 version 5.0.0');
+  });
+});
+
+describe('only a daemon that provably holds the state home is signalled (V-0244, V-0237, V-0236)', () => {
+  const nothingTouched = (trail: readonly string[]) =>
+    trail.filter(line => /^(signal|measure|remove|spawn|end-terminals)/u.test(line));
+
+  for (const [name, holds] of [
+    ['a pid that does not hold the lock', false],
+    ['a host with neither /proc nor lsof', undefined],
+  ] as const) {
+    test(`V-0244 fy daemon stop refuses ${name}, signalling nothing`, async () => {
+      const h = await harness({ holdsOpen: holds });
+      await expect(h.controller.stop()).rejects.toThrow(holds === false ? 'does not hold' : 'neither /proc nor lsof');
+      expect(nothingTouched(h.trail)).toEqual([]);
+      expect(h.health()?.pid).toBe(4321);
+    });
+
+    test(`V-0237 fy daemon restart refuses ${name}, signalling and starting nothing`, async () => {
+      const h = await harness({ holdsOpen: holds });
+      await expect(h.controller.restart()).rejects.toThrow(
+        holds === false ? 'does not hold' : 'neither /proc nor lsof',
+      );
+      expect(nothingTouched(h.trail)).toEqual([]);
+    });
+
+    test(`V-0236 fy daemon reset refuses ${name}: no signal, no measure, no removal`, async () => {
+      const h = await harness({ holdsOpen: holds });
+      await expect(h.controller.reset({ yes: true })).rejects.toThrow(
+        holds === false ? 'does not hold' : 'neither /proc nor lsof',
+      );
+      expect(nothingTouched(h.trail)).toEqual([]);
+    });
+  }
+
+  test('V-0244 a unit that supervises another FY_HOME is refused by stop, and nothing is signalled or sent to systemd', async () => {
+    const h = await harness({ installed: true });
+    const unit = h.layout.systemdUnitFile;
+    h.disk.set(unit, (h.disk.get(unit) ?? '').replaceAll(h.layout.stateHome, '/other/home'));
+    await expect(h.controller.stop()).rejects.toThrow('/other/home');
+    expect(h.trail.filter(line => /^(signal|run:systemctl --user (stop|restart))/u.test(line))).toEqual([]);
+  });
+
+  test('V-0236 a unit that supervises another FY_HOME is refused by reset before anything is measured or removed', async () => {
+    const h = await harness({ installed: true });
+    const unit = h.layout.systemdUnitFile;
+    h.disk.set(unit, (h.disk.get(unit) ?? '').replaceAll(h.layout.stateHome, '/other/home'));
+    await expect(h.controller.reset({ yes: true })).rejects.toThrow('/other/home');
+    expect(nothingTouched(h.trail)).toEqual([]);
+  });
+});
+
+describe('fy daemon install and the nix shell (V-0233)', () => {
+  test('V-0233 offers the nix profile before it takes the claim, and installs the executable the offer chose', async () => {
+    const h = await harness({ running: false, nixOffer: '/home/user/.nix-profile/bin/fyd' });
+    await h.controller.install();
+    expect(h.trail).toContain('offer:/fake/bin/fyd:claims=0');
+    expect(h.disk.get(h.layout.systemdUnitFile)).toContain('/home/user/.nix-profile/bin/fyd');
+  });
+
+  test('V-0233 a declined or unneeded offer installs the executable that was found', async () => {
+    const h = await harness({ running: false });
+    await h.controller.install();
+    expect(h.trail).toContain('offer:/fake/bin/fyd:claims=0');
+    expect(h.disk.get(h.layout.systemdUnitFile)).toContain('/fake/bin/fyd');
   });
 });

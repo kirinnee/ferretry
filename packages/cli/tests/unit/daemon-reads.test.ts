@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RunRecordDaemonHealth } from '../../src/adapters/daemon/health.ts';
+import { BunDaemonProcess } from '../../src/adapters/daemon/process.ts';
 import { homeMarker } from '../../src/adapters/daemon/state-home-marker.ts';
 import { ClientResetInventory, RESET_ROUTES } from '../../src/lib/daemon/reset-inventory.ts';
 
@@ -21,6 +22,14 @@ describe('the daemon health the lifecycle verbs read', () => {
     );
     expect(await health.probe()).toMatchObject({ pid: 4321, version: '5.0.0' });
     expect(asked).toEqual(['http://127.0.0.1:7457/healthz']);
+  });
+
+  test('V-0244 a daemon on another protocol still answers: process control never judges the protocol', async () => {
+    const health = new RunRecordDaemonHealth(
+      async () => 'http://127.0.0.1:7457',
+      async () => json({ status: 'ok', uptimeSeconds: 5, pid: 4321, version: '4.9.0', protocol: 9 }),
+    );
+    expect(await health.probe()).toEqual({ pid: 4321, version: '4.9.0', protocol: 9 });
   });
 
   test('V-0244 a booting daemon (503), a stranger and a refusal are all "did not answer"', async () => {
@@ -56,11 +65,13 @@ describe('what a reset counts', () => {
 });
 
 describe('the state home marker a reset requires', () => {
-  test('V-0236 tells absent, claimed and unclaimed homes apart', async () => {
+  test('V-0236 tells absent, empty, claimed and unclaimed homes apart', async () => {
     const root = await mkdtemp(join(tmpdir(), 'fy-marker-'));
     try {
       expect(await homeMarker.inspect(join(root, 'nope'))).toBe('absent');
       await mkdir(join(root, 'plain'));
+      expect(await homeMarker.inspect(join(root, 'plain'))).toBe('empty');
+      await writeFile(join(root, 'plain', 'logs'), '');
       expect(await homeMarker.inspect(join(root, 'plain'))).toBe('unclaimed');
       await mkdir(join(root, 'ours'));
       await writeFile(
@@ -68,6 +79,37 @@ describe('the state home marker a reset requires', () => {
         JSON.stringify({ format: 1, createdBy: 'fyd 5.0.0', createdAt: '2026-11-07T00:00:00.000Z' }),
       );
       expect(await homeMarker.inspect(join(root, 'ours'))).toBe('claimed');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('which process holds the daemon lock (V-0244, V-0237, V-0236)', () => {
+  test('V-0244 a host with neither /proc nor lsof cannot say, and the answer is "unknown", never "yes"', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'fy-proc-'));
+    try {
+      const lock = join(root, 'daemon.lock');
+      await writeFile(lock, '');
+      const process = new BunDaemonProcess({ procDirectory: join(root, 'no-proc'), lsof: join(root, 'no-lsof') });
+      expect(await process.holdsOpen(4321, lock)).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('V-0244 a pid whose descriptors do not include the lock does not hold it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'fy-proc-'));
+    try {
+      const lock = join(root, 'daemon.lock');
+      await writeFile(lock, '');
+      await mkdir(join(root, 'proc', 'self', 'fd'), { recursive: true });
+      await mkdir(join(root, 'proc', '4321', 'fd'), { recursive: true });
+      await symlink(join(root, 'elsewhere'), join(root, 'proc', '4321', 'fd', '3'));
+      const process = new BunDaemonProcess({ procDirectory: join(root, 'proc') });
+      expect(await process.holdsOpen(4321, lock)).toBe(false);
+      await symlink(lock, join(root, 'proc', '4321', 'fd', '4'));
+      expect(await process.holdsOpen(4321, lock)).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
