@@ -21,7 +21,20 @@
     "@ferretry/kernel": "workspace:*",
     "@ferretry/std": "workspace:*",
     "zod": "4.4.3",
-    "@ferretry/plugin-connections": "workspace:*"
+    "@ferretry/plugin-connections": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "lucide-react": "^0.468.0",
+    "qrcode-terminal": "0.12.0"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react-test-renderer": "^19.0.0",
+    "@types/react-test-renderer": "^19.0.0",
+    "@happy-dom/global-registrator": "^20.11.1",
+    "should": "^13.2.3",
+    "@types/qrcode-terminal": "0.12.2"
+  }
 }
