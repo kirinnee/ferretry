@@ -25,7 +25,7 @@ import type {
   RestartRequest,
   RestartResult,
   RestartStatus,
-} from '../../protocol/session-restart.ts';
+} from '../../../../contract/index.ts';
 
 /** One ferret as the restart sees it. */
 export interface RestartSubject {

@@ -1,4 +1,4 @@
-import type { RestartQueued, RestartResult, RestartStatus } from '../../../daemon/lib/protocol/session-restart.ts';
+import type { RestartQueued, RestartResult, RestartStatus } from '../../../contract/index.ts';
 
 export const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? '' : 's'}`;
 const label = (entry: { readonly id: string; readonly name?: string }): string =>

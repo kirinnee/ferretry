@@ -1,4 +1,4 @@
-import type { RestartRequest } from '../../../daemon/lib/protocol/session-restart.ts';
+import type { RestartRequest } from '../../../contract/index.ts';
 import { SessionCommandError } from '../session/errors.ts';
 import type { SessionPresenter } from '../session/presenter.ts';
 import type { IRestartGateway } from './ports.ts';

@@ -1,14 +1,15 @@
 import { defineState } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { FerretTitleSchema } from './ids.ts';
+import { InstantSchema } from '@ferretry/std';
+import { FerretTitleSchema, FerretWaitingSchema } from './ids.ts';
 import { StartOptionsSchema } from './port.ts';
 import { AgentPinsDocumentSchema, FerretPinsDocumentSchema } from './pins.ts';
 import { SessionConfigSchema, SessionStateSchema } from './view/ferret-view.ts';
 
 /**
  * The per-ferret documents Ferrets keeps under `state/ferrets/` (§9.2), declared in the contract so the daemon that
- * reads them and the converter that writes them share ONE definition. Moved here whole from the daemon's
- * `lib/state.ts`; the daemon imports them back.
+ * reads them and the converter that writes them share ONE definition (the manifest declares them too, and a manifest
+ * imports only contracts). The daemon imports them back.
  *
  * Every body is STRICT: an unknown key is refused (the file reads as damaged), never stripped and never passed through.
  * Every document is `"format": 1` first — the state port stamps and checks it, so the schema describes the body without
@@ -113,4 +114,38 @@ export const FerretDetailsFile = defineState({
   schema: FerretDetailsSchema,
   mode: 0o600,
   onDamaged: { narrower: 'a damaged details.json reads as no start options and no title' },
+});
+
+/**
+ * What a finished ferret handed back with `signal done`: `state/ferrets/<ferret>/summary.md`, beside its `ferret.json`
+ * (today's session `summary.md`, written by the signal's `FileSignalArtifacts.writeSummary`). Text as the ferret wrote
+ * it, never parsed here: `FerretsApi.summary` hands it to a reader that masks it inside one `Redaction.read`.
+ */
+export const FerretSummaryFiles = defineState<'summary', Uint8Array>({
+  name: 'summary',
+  path: '*/summary.md',
+  store: 'opaque',
+  format: 1,
+  mode: 0o600,
+});
+
+/**
+ * A ferret's declared wait and the time it has been credited for waiting: `state/ferrets/<ferret>/waiting.json` (today's
+ * `waiting` and `waitingCreditSeconds` on the session's state document). `ferret.json` is frozen, and a wait moves
+ * far more often than who a ferret is. The credit outlives the wait: the turn ceiling must never charge a ferret for
+ * time it spent deliberately parked. Private to Ferrets.
+ */
+export const FerretWaitFiles = defineState({
+  name: 'waiting',
+  path: '*/waiting.json',
+  store: 'json',
+  format: 1,
+  schema: z.strictObject({
+    waiting: FerretWaitingSchema.optional(),
+    creditSeconds: z.number().int().nonnegative().optional(),
+    /** When the ferret said `signal done` (see `FerretSummary.finishedAt`). */
+    finishedAt: InstantSchema.optional(),
+  }),
+  mode: 0o600,
+  onDamaged: { narrower: 'a damaged waiting.json reads as no declared wait and no credit' },
 });

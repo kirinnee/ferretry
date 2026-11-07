@@ -22,7 +22,10 @@ import { join } from 'node:path';
 import { type SessionState, SessionStateSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { InlineObserverHost } from '../../../../../daemon/adapters/session/observer/inline-observer-host.ts';
-import { SessionObservationApplier } from '../../../../../daemon/adapters/session/observer/session-observation-applier.ts';
+import {
+  recordTurnChange,
+  SessionObservationApplier,
+} from '../../../../../daemon/adapters/session/observer/session-observation-applier.ts';
 import { WorkerObserverHost } from '../../../../../daemon/adapters/session/observer/worker-observer-host.ts';
 import {
   DEFAULT_WORKER_SUPERVISOR_SETTINGS,
@@ -35,25 +38,28 @@ import { SessionObserver } from '../../../../../daemon/lib/session/observer/obse
 import type { SessionBinding } from '../../../../../daemon/lib/session/observer/protocol.ts';
 import type { SessionTranscriptTail } from '../../../../../daemon/lib/session/peers/reads.ts';
 import type { PaneState } from '../../../../../daemon/lib/session/peers/tmux.ts';
-import type { SessionTurnPorts } from '../../../../../daemon/lib/session/peers/turn.ts';
+import { turnPaneEvidenceOf } from '../../../../../daemon/lib/session/observer/pane.ts';
+import type { SessionTurnPorts, TurnWatchSession } from '../../../../../daemon/lib/session/peers/turn.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import { MemoryAnswerLedger, testTurnWatcher } from '../../../../support/daemon/observer-peers.ts';
+import { parityTmux, tmuxPort } from '../../../../support/daemon/observer-parity-tmux.ts';
 import {
-  MemoryAnswerLedger,
-  testTurnWatcher,
-  UNWIRED_PANE_WORK,
-  UNWIRED_QUESTIONS,
-  UnwiredPeer,
-  unwiredTranscriptSource,
-} from '../../../../support/daemon/observer-peers.ts';
+  SCRIPTED_PANE_FRAMES,
+  SCRIPTED_PANE_PARSERS,
+  SCRIPTED_PANE_WORK,
+  SCRIPTED_QUESTIONS,
+  scriptedTranscriptSource,
+} from '../../../../support/daemon/observer-stand-ins.ts';
 import { memoryStorage } from '../../../../support/daemon/storage.ts';
 import { FileEventHub } from '../../support/file-event-hub.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
 /*
- * HOST-PROVIDED IN CORE. The real tmux client (`TmuxController` over `BunTmuxProcess`, terminals), the transcript
- * parsers (conversation), the storage-backed turn ports (`StorageTurnPorts`, conversation), the file answer ledger
- * (conversation, here in memory), the question projection (conversation, claude-code/codex) and the bundled worker
- * URL (kernel) are other owners' code. Each stand-in below throws, naming it, until the host's own is wired in.
+ * THE OBSERVER'S PEERS IN CORE. The pre-3a path and the host under test read the same real tmux pane and the same
+ * transcript files through the scripted peers in `tests/support/daemon/observer-stand-ins.ts` (the question
+ * projection, the pane parsers and frames, the transcript source), and a worker thread runs the same peers
+ * (`observer-parity-worker.ts`). What the real terminals and conversation code make of a real harness's screens and
+ * records is those plugins' to test in their own suites.
  */
 const {
   projectStructuredQuestion,
@@ -61,34 +67,9 @@ const {
   projectObservedRuntime,
   structuredQuestionStatePatch,
   observedRuntimeStatePatch,
-} = UNWIRED_QUESTIONS;
-interface ParityTmux {
-  launch(spec: {
-    readonly session: string;
-    readonly cwd: string;
-    readonly command: readonly [string, ...string[]];
-    readonly width?: number;
-    readonly height?: number;
-  }): Promise<unknown>;
-  visible(session: string): Promise<string | undefined>;
-}
-const unwiredTmux = (_tmux: string, _socket: string): ParityTmux => ({
-  launch: async () => {
-    throw new UnwiredPeer('TmuxController over BunTmuxProcess (terminals)');
-  },
-  visible: async () => {
-    throw new UnwiredPeer('TmuxController over BunTmuxProcess (terminals)');
-  },
-});
-const unwiredTurnPorts = (): SessionTurnPorts & { paneState(id: SessionId): Promise<PaneState | undefined> } => {
-  const refuse = async (): Promise<never> => {
-    throw new UnwiredPeer('StorageTurnPorts (conversation)');
-  };
-  return { sessions: refuse, transcript: refuse, pane: refuse, record: refuse, paneState: refuse, clock };
-};
-const bundledWorkerUrl = (_name: 'session'): string => {
-  throw new UnwiredPeer('bundledWorkerUrl (kernel)');
-};
+} = SCRIPTED_QUESTIONS;
+const bundledWorkerUrl = (_name: 'session'): URL =>
+  new URL('../../../../support/daemon/observer-parity-worker.ts', import.meta.url);
 
 const NOW = '2026-10-22T08:00:00.000Z';
 const clock = { now: () => NOW };
@@ -206,10 +187,10 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
   );
   await chmod(player, 0o755);
   const socket = join(root, 'tmux.sock');
-  const controller = unwiredTmux(tmux, socket);
+  const controller = parityTmux(tmux, socket);
   await controller.launch({ session: tmuxSession, cwd: root, command: ['/bin/sh', player], width: 100, height: 40 });
 
-  const source = unwiredTranscriptSource(harness);
+  const source = scriptedTranscriptSource(harness);
   const side = async (name: string): Promise<Side> => {
     const storage = await openStorage(join(root, name));
     await storage.writeConfig(id, { id, name: 'Parity', tmuxSession, harness, mode: 'interactive' });
@@ -235,7 +216,34 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
   });
 
   // THE PRE-3a PATH.
-  const watcher = testTurnWatcher(unwiredTurnPorts());
+  const turnPorts = (owner: Side) => {
+    const frames = SCRIPTED_PANE_FRAMES(tmuxPort(tmux, socket), clock);
+    const paneState = async (): Promise<PaneState | undefined> => await frames.state(tmuxSession);
+    const ports: SessionTurnPorts & { paneState(id: SessionId): Promise<PaneState | undefined> } = {
+      sessions: async () => {
+        const read = await Promise.all(
+          owner.storage.listSessions().map(async ({ id: listed }): Promise<TurnWatchSession | undefined> => {
+            const parsed = SessionStateSchema.safeParse(await owner.storage.readState(listed));
+            return parsed.success ? { id: listed, state: parsed.data } : undefined;
+          }),
+        );
+        return read.filter((entry): entry is TurnWatchSession => entry !== undefined);
+      },
+      transcript: async session => {
+        const tail = await owner.tail.tail(session, 400);
+        return tail.kind === 'read' ? tail.events : undefined;
+      },
+      pane: async () => {
+        const frame = await paneState();
+        return frame === undefined ? undefined : turnPaneEvidenceOf(frame, SCRIPTED_PANE_PARSERS);
+      },
+      record: async (session, change, at) => await recordTurnChange(owner.storage, session, change, at),
+      paneState,
+      clock,
+    };
+    return ports;
+  };
+  const watcher = testTurnWatcher(turnPorts(reference));
   const referenceSerial = new KeyedSerialExecutor();
   const referenceProject = async (session: SessionId): Promise<void> => {
     const storage = reference.storage;
@@ -275,14 +283,14 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
   };
 
   // THE HOST UNDER TEST: the inline host, or the worker host over it with a real session-worker thread.
-  const hostPanes = unwiredTurnPorts();
+  const hostPanes = turnPorts(host);
   const applier = new SessionObservationApplier(
     host.storage,
     host.ledger,
     new KeyedSerialExecutor(),
-    UNWIRED_QUESTIONS,
+    SCRIPTED_QUESTIONS,
   );
-  const fold = new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex'), UNWIRED_QUESTIONS);
+  const fold = new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex'), SCRIPTED_QUESTIONS);
   const answerSerial = new KeyedSerialExecutor();
   const inline = new InlineObserverHost(
     {
@@ -303,7 +311,7 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
         processes: async () => {
           throw new Error('not looked at here');
         },
-        paneWork: UNWIRED_PANE_WORK,
+        paneWork: SCRIPTED_PANE_WORK,
       },
       clock,
       yieldToLoop: async () => undefined,
@@ -359,7 +367,7 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
       liveness: {
         redact: async text => text,
         processes: async () => ({ kind: 'unobserved', reason: 'not looked at here' }) as never,
-        paneWork: UNWIRED_PANE_WORK,
+        paneWork: SCRIPTED_PANE_WORK,
       },
       clock,
       barrierMs: 5_000,
@@ -460,7 +468,7 @@ async function shouldAgree(subject: Pair): Promise<void> {
 describe.each([['inline'], ['worker']] as const)(
   'the %s observer host against the pre-3a path, over real panes and transcripts',
   kind => {
-    it.skip('pending port: terminals TmuxController over BunTmuxProcess; conversation transcript reader and question policy — should journal and record the same Claude turn: idle, working, permission, ended', async () => {
+    it('should journal and record the same Claude turn: idle, working, permission, ended', async () => {
       // Arrange
       const subject = await pair('claude', CLAUDE_IDLE, kind);
       await subject.frame(CLAUDE_IDLE);
@@ -492,7 +500,7 @@ describe.each([['inline'], ['worker']] as const)(
       await shouldAgree(subject);
     });
 
-    it.skip('pending port: terminals TmuxController over BunTmuxProcess; conversation transcript reader and question policy — should journal and record the same Codex turn and its observed runtime', async () => {
+    it('should journal and record the same Codex turn and its observed runtime', async () => {
       // Arrange
       const subject = await pair('codex', CODEX_IDLE, kind);
       await subject.frame(CODEX_IDLE);
@@ -514,7 +522,7 @@ describe.each([['inline'], ['worker']] as const)(
       await shouldAgree(subject);
     });
 
-    it.skip('pending port: terminals TmuxController over BunTmuxProcess; conversation transcript reader and question policy — should project the same structured question, its answer, and the stop that ends the turn', async () => {
+    it('should project the same structured question, its answer, and the stop that ends the turn', async () => {
       // Arrange
       const subject = await pair('claude', CLAUDE_WORKING, kind);
       await subject.frame(CLAUDE_WORKING);

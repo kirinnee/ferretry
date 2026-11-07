@@ -5,7 +5,7 @@ import {
   type RestartRequest,
   type RestartResult,
   type RestartStatus,
-} from '../../protocol/session-restart.ts';
+} from '../../../../contract/index.ts';
 import { type CallContext, headerValue, jsonResponse, type RouteHandler } from '@ferretry/kernel/contract';
 import { parseBody } from '../../http/body.ts';
 import { ferretOf } from '@ferretry/core-gate/contract';
