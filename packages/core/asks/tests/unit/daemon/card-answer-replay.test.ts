@@ -23,3 +23,18 @@ it('refuses named missing and already answered asks without falling through to t
   );
   expect(board.applied).toHaveLength(1);
 });
+
+it('recognizes the same card-answer receipt after the carrying item is closed', async () => {
+  const board = await cardAnswers();
+  const answer = { cardAsk: reference(), response: { kind: 'multiple-choice', choice: 'Done' } };
+  await board.post(answer);
+  const closed = await board.agenda.resolve(
+    's1',
+    'A1',
+    { kind: 'agent', sessionId: 's1', name: null },
+    'The work is settled',
+  );
+  expect(closed.ok).toBe(true);
+  expect((await board.post(answer)).status).toBe(200);
+  expect(board.applied).toHaveLength(1);
+});

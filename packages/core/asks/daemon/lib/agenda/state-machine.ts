@@ -2892,7 +2892,16 @@ function cardAsk(ledger: AgendaLedger, command: CardAskCommand): AgendaMutation 
   if (command.actor.kind !== 'daemon')
     return failure('forbidden', 'only the daemon puts an ask about a card on an agenda');
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
-  if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
+  if (target === undefined) {
+    const closed = ledger.entries.find(entry => entry.lifecycle === 'addressed' && entry.item.id === command.id);
+    const operation = command.operation;
+    if (
+      operation.kind === 'answered' &&
+      closed?.item.cardAsks?.some(ask => ask.answer?.receipt === operation.answer.receipt)
+    )
+      return unchanged(ledger);
+    return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
+  }
   if (target.item.notice === true) {
     return failure('invalid', `${command.id} is a notice, so it carries no ask about a card`);
   }
