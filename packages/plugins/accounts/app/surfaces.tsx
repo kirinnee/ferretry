@@ -2,7 +2,6 @@ import type { RendererProps } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
 import { SignInApprovalRefSchema } from '../contract/wire.ts';
 import { AccountsSurface } from './features/accounts/accounts-surface.tsx';
-import { CopyPlanHost } from './features/secure-copy/copy-plan-host.tsx';
 import { CopyRulesSurface } from './features/secure-copy/copy-rules-surface.tsx';
 import { SignInRuleSuggestionHost } from './features/secure-copy/sign-in-rule-suggestion-host.tsx';
 import { SignInRulesSurface } from './features/secure-copy/sign-in-rules-surface.tsx';
@@ -54,7 +53,7 @@ const PLAIN_FALLBACK = 'Answer it with fy.';
 
 /**
  * `ask:sign-in-approval`: the daemon's own approval cards, drawn only from the daemon-set ref. A staged 2FA seed is the
- * owner's seed card; a task plan, a paste plan, a ferret's rule suggestion and an approve-on-phone push each have their
+ * owner's seed card; a task plan, a ferret's rule suggestion and an approve-on-phone push each have their
  * card, read from the daemon by id (never from the ask's text). A suspended rule and a recipe proposal are shown as the
  * daemon's words and where to act, as today's agenda showed them. A ref this half does not know draws plain.
  */
@@ -73,8 +72,6 @@ export function signInApprovalRenderer(client: AccountsClient) {
       if (ferret !== undefined) {
         if (card.kind === 'task-plan')
           return <TaskPlanHost client={client} ferret={ferret} planId={card.planId} agentName={ferret} />;
-        if (card.kind === 'copy-plan')
-          return <CopyPlanHost client={client} ferret={ferret} planId={card.planId} agentName={ferret} />;
         if (card.kind === 'rule-suggestion')
           return (
             <SignInRuleSuggestionHost

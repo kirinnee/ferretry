@@ -1,16 +1,12 @@
 /**
- * The browser's half of secure copy (docs/secure-copy.md): the owner's pre-approval rules and a ferret's paste
- * plans. Nothing here is a value: a rule and a plan are routes (a program or an origin each way), counts and
+ * The browser's half of secure copy (docs/secure-copy.md): the owner's pre-approval rules. Nothing here is a value:
+ * a rule is a route (a program or an origin each way), counts and
  * times. Nothing is cached at module scope, because rules belong to a machine. Every call goes out through the plugin
  * client by route key; every answer is parsed by its schema.
  */
 
 import { z } from 'zod';
 import {
-  type CopyPlan,
-  type CopyPlanList,
-  CopyPlanListSchema,
-  CopyPlanSchema,
   type CopyRouteFrom,
   CopyRouteFromSchema,
   type CopyRouteTo,
@@ -188,18 +184,6 @@ export async function confirmPasteRuleStage(
 /** REVOKE a paste rule: one tap, no passkey (it only takes away). */
 export async function removeRule(client: CopyClient, ruleId: string): Promise<void> {
   await ask(client, 'DELETE /v1/copy-rules/:ruleId', RemovedSchema, { params: { ruleId } });
-}
-
-export async function listPlans(client: CopyClient): Promise<CopyPlanList> {
-  return await ask(client, 'GET /v1/copy-plans', CopyPlanListSchema);
-}
-
-/** Allows the plan's items by index; none declines it. */
-export async function answerPlan(client: CopyClient, plan: CopyPlan, items: readonly number[]): Promise<CopyPlan> {
-  return await ask(client, 'POST /v1/ferrets/:ferretId/copy-plans/:planId/approve', CopyPlanSchema, {
-    params: { ferretId: plan.sessionId, planId: plan.id },
-    body: { items: [...items] },
-  });
 }
 
 /** Where a value comes from and goes, in plain words: the contract's, which the daemon's rows use too. */

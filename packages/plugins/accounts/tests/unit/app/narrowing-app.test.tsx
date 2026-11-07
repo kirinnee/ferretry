@@ -11,6 +11,7 @@ import {
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
   SIGN_IN_RULE_TERMINAL_RESIDUAL,
 } from '../../../contract/routes/index.ts';
+import { PASTE_RULE_NO_PASSKEY_WORDS } from '../../../app/lib/secure-copy.ts';
 import { AccountRulesRevoke } from '../../../app/features/accounts/account-rules.tsx';
 import { CopyRulesSurface } from '../../../app/features/secure-copy/copy-rules-surface.tsx';
 import { SignInRulesSurface } from '../../../app/features/secure-copy/sign-in-rules-surface.tsx';
@@ -182,24 +183,41 @@ describe('what only takes away asks no passkey', () => {
     expect(asked).toEqual([]);
   });
 
-  it('G128f a paste rule is made only through its own stage and passkey, never by a one-step add', async () => {
+  it('a new paste rule submitted with no passkey stages, drops the stage, never commits and says why (fail closed)', async () => {
+    const STAGE = `prs_${'2'.repeat(24)}`;
+    const staged = {
+      stage: STAGE,
+      kind: 'rule',
+      does: 'Ferretry pastes what gh prints into vercel in a terminal, for any ferret on this machine, without asking.',
+      rows: [{ label: 'From', value: 'what gh prints' }],
+      runsAnything: false,
+      expiresAt: '2026-11-02T09:02:00.000Z',
+    };
     const fake = fakeClient(call =>
       call.method === 'POST'
-        ? { stage: `prs_${'2'.repeat(24)}` }
-        : call.path === '/v1/copy-rules/stages'
-          ? { stages: [] }
-          : call.path.endsWith('/settings')
-            ? { settings: { allowProfileTargets: false }, profileRules: [] }
-            : { rules: [] },
+        ? staged
+        : call.method === 'DELETE'
+          ? { stage: STAGE, dropped: true }
+          : call.path === '/v1/copy-rules/stages'
+            ? { stages: [] }
+            : call.path.endsWith('/settings')
+              ? { settings: { allowProfileTargets: false }, profileRules: [] }
+              : { rules: [] },
     );
     const screen = await view(<CopyRulesSurface client={fake.client} />);
 
     await click(screen.q('[data-copy-rule-add-open]'));
     await typeInto(screen.q('[data-copy-rule-from]'), 'gh');
     await typeInto(screen.q('[data-copy-rule-to]'), 'vercel');
+    await click(screen.q('[data-copy-rule-form] button[type="submit"]'));
     await settle();
 
-    expect(fake.calls.some(call => call.route === 'POST /v1/copy-rules')).toBe(false);
+    expect(fake.calls.filter(call => call.method !== 'GET').map(call => `${call.method} ${call.path}`)).toEqual([
+      'POST /v1/copy-rules/stages',
+      `DELETE /v1/copy-rules/stages/${STAGE}`,
+    ]);
+    expect(fake.calls.some(call => call.path.endsWith('/commit'))).toBe(false);
+    expect(screen.container.textContent).toContain(PASTE_RULE_NO_PASSKEY_WORDS);
   });
 });
 

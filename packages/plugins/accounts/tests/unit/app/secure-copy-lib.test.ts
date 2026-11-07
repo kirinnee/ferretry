@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import type { PasteRule, PasteRuleStaged } from '../../../contract/routes/index.ts';
 import {
-  answerPlan,
   confirmPasteRuleStage,
   fromWords,
-  listPlans,
   listRules,
   removeRule,
   ruleFromForm,
@@ -22,42 +20,19 @@ const RULE: PasteRule = {
   createdBy: { kind: 'host' },
 };
 
-const PLAN = {
-  id: 'b'.repeat(32),
-  sessionId: 's 1',
-  agendaItemId: 'A8',
-  items: [{ from: RULE.from, to: RULE.to, why: 'token' }],
-  state: 'pending' as const,
-  raisedAt: '2026-08-05T09:00:00.000Z',
-  expiresAt: '2026-08-05T11:00:00.000Z',
-};
-
 describe('the secure copy client', () => {
   it('dials the owner routes and parses each answer', async () => {
     const fake = fakeClient(call =>
-      call.path === '/v1/copy-rules' && call.method === 'GET'
-        ? { rules: [RULE] }
-        : call.path === '/v1/copy-rules'
-          ? RULE
-          : call.method === 'DELETE'
-            ? { removed: true }
-            : call.path === '/v1/copy-plans'
-              ? { plans: [PLAN] }
-              : { ...PLAN, state: 'approved', approved: [0] },
+      call.path === '/v1/copy-rules' && call.method === 'GET' ? { rules: [RULE] } : { removed: true },
     );
 
     expect((await listRules(fake.client)).rules).toHaveLength(1);
     await removeRule(fake.client, RULE.id);
-    expect((await listPlans(fake.client)).plans).toHaveLength(1);
-    expect((await answerPlan(fake.client, PLAN, [0])).state).toBe('approved');
 
     expect(fake.calls.map(call => `${call.method} ${call.path}`)).toEqual([
       'GET /v1/copy-rules',
       `DELETE /v1/copy-rules/${RULE.id}`,
-      'GET /v1/copy-plans',
-      `POST /v1/ferrets/s%201/copy-plans/${PLAN.id}/approve`,
     ]);
-    expect(fake.calls[3]?.body).toEqual({ items: [0] });
   });
 });
 

@@ -1,7 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import * as api from '../../../app/features/accounts/accounts-api.ts';
-import { CopyPlanHost } from '../../../app/features/secure-copy/copy-plan-host.tsx';
 import { SignInRuleSuggestionHost } from '../../../app/features/secure-copy/sign-in-rule-suggestion-host.tsx';
 import { TaskPlanHost } from '../../../app/features/secure-copy/task-plan-host.tsx';
 import { PhoneApprovalHost } from '../../../app/features/sign-in-approval/phone-approval-host.tsx';
@@ -93,7 +92,8 @@ describe('the app half', () => {
     const task = drawn({ kind: 'task-plan', planId: PLAN });
     should(task.type).equal(TaskPlanHost);
     should(task.props).match({ ferret: 'sess-1', planId: PLAN });
-    should(drawn({ kind: 'copy-plan', planId: PLAN }).type).equal(CopyPlanHost);
+    // A paste plan has no card of its own: the one-step approve was a widening outside any stage.
+    should(drawn({ kind: 'copy-plan', planId: PLAN }).type).equal('section');
     const suggestion = drawn({ kind: 'rule-suggestion', suggestion: 'srg_dddddddddddddddd' });
     should(suggestion.type).equal(SignInRuleSuggestionHost);
     should(suggestion.props).match({ suggestionId: 'srg_dddddddddddddddd', ferret: 'sess-1' });
