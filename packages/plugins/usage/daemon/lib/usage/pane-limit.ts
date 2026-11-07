@@ -8,6 +8,7 @@ export interface HarnessDialog {
 /** The quota block of a session that hit a limit, as far as this module reads it. */
 export interface SessionQuotaFacts {
   readonly limitNotice?: string | undefined;
+  readonly atLimit?: boolean | undefined;
   readonly retryAt?: number | undefined;
   readonly unavailableReason?: string | undefined;
 }

@@ -147,6 +147,7 @@ export interface AnalyticsPricingCatalogDiff {
  * A missing feed row is NEVER a removal. Absence says only what this fetch did not contain, while
  * deleting an effective price is a deliberate manual operation in the protocol contract.
  */
+// read-scoped: none — a comparison of rate tables; no pane, page or vault text passes through it
 export function diffAnalyticsPricingCatalog(
   catalog: AnalyticsPricingCatalog,
   feed: AnalyticsPricingFeed,

@@ -91,16 +91,16 @@ const isHttpCode = (error: unknown, ...codes: readonly string[]): boolean =>
   error instanceof DaemonCallError && error.code !== undefined && codes.includes(error.code);
 
 const isCatalogConflict = (error: unknown): boolean =>
-  isHttpCode(error, 'analytics_pricing_stale_catalog', 'analytics_pricing_stale_sources');
+  isHttpCode(error, 'pricing_stale_catalog', 'pricing_stale_sources');
 
 const isPreviewConflict = (error: unknown): boolean =>
   isHttpCode(
     error,
-    'analytics_pricing_stale_catalog',
-    'analytics_pricing_stale_sources',
-    'analytics_pricing_unknown_preview',
-    'analytics_pricing_expired_preview',
-    'analytics_pricing_preview_mismatch',
+    'pricing_stale_catalog',
+    'pricing_stale_sources',
+    'pricing_unknown_preview',
+    'pricing_expired_preview',
+    'pricing_preview_mismatch',
   );
 
 const formatInstant = (instant: string): string => instant.replace('T', ' ').replace('.000Z', 'Z');
@@ -382,7 +382,7 @@ function RateActions({
 
 /**
  * The prices the model catalogs give the models no operator rate claims (docs/model-catalog.md
- * § Prices): what analytics charges a session at when nobody configured one. Read-only — they change
+ * § Prices): what insights charges a session at when nobody configured one. Read-only — they change
  * with the catalog — and Override starts a manual rate from one, which then wins for that model.
  */
 function ModelCatalogRates({
@@ -639,7 +639,7 @@ function PricingEditor({
       ) : null}
       {editing !== null ? (
         <p className="mb-0 mt-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-meta leading-base text-warn">
-          Editing an effective historical rate can reprice rows during later analytics reingestion. Create a new
+          Editing an effective historical rate can reprice rows during later insights reingestion. Create a new
           effective window instead when prior history must keep its original price.
         </p>
       ) : null}
@@ -824,14 +824,14 @@ function ApplicabilityDisclosure({ view }: { readonly view: AnalyticsPricingView
   return (
     <section className="kt-panel p-panel" aria-labelledby="pricing-coverage-heading" data-pricing-applicability="">
       <h4 id="pricing-coverage-heading" className="m-0 text-ui font-semibold text-fg">
-        What analytics applies
+        What insights applies
       </h4>
       <p
         className="mb-0 mt-1 text-meta leading-base text-muted"
         data-rate-applicability={`image:${view.rateApplicability.image},tool:${view.rateApplicability.tool}`}
       >
         {imageStored && toolStored
-          ? 'Image and tool rates can be recorded, but are not currently applied to analytics because reliable billable evidence is unavailable.'
+          ? 'Image and tool rates can be recorded, but are not currently applied to insights because reliable billable evidence is unavailable.'
           : 'Image and tool applicability follows the daemon record shown for this catalog.'}
       </p>
       <p
@@ -1359,7 +1359,7 @@ export function PricingSettings({
       <header className="kt-panel p-panel">
         <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className={cn(EYEBROW, 'text-accent')}>Analytics catalog</p>
+            <p className={cn(EYEBROW, 'text-accent')}>Insights catalog</p>
             <h3 id="model-pricing-heading" className="mb-0 mt-1 text-row font-semibold text-fg">
               Model pricing
             </h3>

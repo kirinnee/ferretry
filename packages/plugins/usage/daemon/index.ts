@@ -38,7 +38,7 @@ import { AnalyticsPricingService } from './lib/analytics/pricing-service.ts';
 import { foldAnalyticsTurns } from './lib/analytics/turn-fold.ts';
 import { BudgetService, type BudgetNotice } from './lib/budget/service.ts';
 import { SpendMeter } from './lib/budget/meter.ts';
-import { budgetedLogins } from './lib/budget/state.ts';
+import { budgetAlternative, budgetedLogins } from './lib/budget/state.ts';
 import { budgetNoticeText } from './lib/budget/notice.ts';
 import { serialExecutor, type TurnUsageSource } from './lib/ports.ts';
 import { PerformanceProfiler, type ProcessReading } from './lib/performance/profiler.ts';
@@ -197,13 +197,8 @@ export default implementDaemon(manifest, {
       alternative: async (login, holds) => {
         const list = await needs.logins.list().catch(() => undefined);
         const current = list?.logins.find(candidate => candidate.id === login);
-        return list?.logins.find(
-          candidate =>
-            candidate.id !== login &&
-            candidate.disabled === undefined &&
-            holds[candidate.id] === undefined &&
-            candidate.harness === current?.harness,
-        )?.id;
+        const usable = list?.logins.filter(candidate => candidate.disabled === undefined && candidate.harness === current?.harness);
+        return budgetAlternative(usable?.map(candidate => candidate.id) ?? [], login, nowMs(), holds);
       },
       notify: async (notice: BudgetNotice) => {
         const text = budgetNoticeText(notice, 'fy', (await needs.logins.list().catch(() => undefined))?.machine ?? 'this machine');

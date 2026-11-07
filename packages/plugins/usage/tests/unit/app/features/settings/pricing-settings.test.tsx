@@ -418,7 +418,7 @@ describe('PricingSettings', () => {
   });
 
   it('requires explicit removal confirmation and surfaces a stale-write conflict without deleting the row', async () => {
-    const api = pricingApi(pricingView(), new FyHttpError('catalog moved', 409, 'analytics_pricing_stale_catalog'));
+    const api = pricingApi(pricingView(), new FyHttpError('catalog moved', 409, 'pricing_stale_catalog'));
     const renderer = await renderPricing(api);
 
     press(renderer, 'data-pricing-remove', manualRate().pricingKey);
@@ -495,7 +495,7 @@ describe('PricingSettings', () => {
     const api = pricingApi(
       pricingView(),
       preview(),
-      new FyHttpError('that pricing preview expired', 410, 'analytics_pricing_expired_preview'),
+      new FyHttpError('that pricing preview expired', 410, 'pricing_expired_preview'),
       refreshedPreview,
     );
     const renderer = await renderPricing(api);
@@ -601,7 +601,7 @@ describe('PricingSettings', () => {
     run(() => buttonNamed(renderer, 'Confirm removal').props.onClick());
     await settle();
 
-    alphaRemove.reject(new FyHttpError('alpha catalog moved', 409, 'analytics_pricing_stale_catalog'));
+    alphaRemove.reject(new FyHttpError('alpha catalog moved', 409, 'pricing_stale_catalog'));
     await settle();
 
     expect(marked(renderer, 'data-pricing-daemon', 'beta')).toHaveLength(1);
@@ -793,7 +793,7 @@ describe('PricingSettings', () => {
   it('says the same refusal in the editor and beside the catalog when a save meets a moved catalog', async () => {
     const api = pricingApi(
       pricingView({ catalog: [] }),
-      new FyHttpError('catalog moved', 409, 'analytics_pricing_stale_catalog'),
+      new FyHttpError('catalog moved', 409, 'pricing_stale_catalog'),
     );
     const renderer = await renderPricing(api);
 
@@ -813,7 +813,7 @@ describe('PricingSettings', () => {
   });
 
   it('reports a moved catalog on the preview surface and marks the shown catalog stale', async () => {
-    const api = pricingApi(pricingView(), new FyHttpError('sources moved', 409, 'analytics_pricing_stale_sources'));
+    const api = pricingApi(pricingView(), new FyHttpError('sources moved', 409, 'pricing_stale_sources'));
     const renderer = await renderPricing(api);
 
     change(renderer, 'data-pricing-source-select', '', 'openai-feed');

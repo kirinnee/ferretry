@@ -18,4 +18,6 @@ export {
   type ProviderQuotaSource,
   type ProviderQuotaSpend,
   type ProviderQuotaWindow,
+  ProviderQuotaWindowSchema,
+  ProviderQuotaReadingSchema,
 } from '@ferretry/plugin-logins/contract';

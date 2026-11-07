@@ -18,8 +18,9 @@ export function providerQuotaLogins(list: LoginList, presets: ProviderPresetCata
       else if (variable.kind === 'secret' && variable.secrets.length === 1)
         variables[variable.name] = `\${secret:${variable.secrets[0]}}`;
     }
-    const secretVariables = preset?.variables.filter(variable => variable.kind === 'secret') ?? [];
-    const keyed = secretVariables.length === 1 ? secretVariables[0] : undefined;
+    // The preset names its key by its first secret variable (the Claude Code half is listed first): a Codex-only login of a
+    // two-CLI preset holds the same SECRET under its own half's variable, which the plan finds by that secret name.
+    const keyed = preset?.variables.find(variable => variable.kind === 'secret');
     return [
       {
         id: login.id,
