@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { type CardActionRequest, CardCreateRequestSchema } from '../../../contract/index.ts';
 import should from 'should';
 import { BoardError, BoardService, BoardUnavailableError, type OwnerWords } from '../../../daemon/lib/board/index.ts';
-import { card, MemoryBoardStore, PROJECT, world } from './support.ts';
+import { card, ferretActor, MemoryBoardStore, PROJECT, world } from './support.ts';
 
 const SESSION = 'lead';
 const OWNER_SAID = 'Build a board that shows only the work the owner asked for';
@@ -93,25 +93,72 @@ describe('strict private choices through SessionOwnerWords', () => {
   }
 });
 
-describe('F-0001 GAP: a daemon with no owner-words read', () => {
-  it('should let a ferret make its own card private, judged on the card as stored, instead of refusing the board', async () => {
-    // Arrange: no OwnerWords port at all (Conversation offers no turn-author read yet)
+describe('F-0001 a daemon that cannot read what the owner said', () => {
+  it('F-0001 should refuse a ferret making its own card private as an unavailable board, not judge it on the card as stored', async () => {
+    // Arrange: no OwnerWords port (Conversation is off, so who wrote each turn cannot be read)
     const stored = card({ ask, askedBy: 'agent', visibility: 'public', visibilitySource: 'chosen' });
     const ports = world({ store: new MemoryBoardStore([stored]) });
+    const store = ports.store as MemoryBoardStore;
     const subject = new BoardService(ports);
+    const writes = store.writes.length;
 
-    // Act
-    const changed = await subject.act(stored.id, { action: 'visibility', visibility: 'private' }, lead);
-
-    // Assert
-    should(changed.card.visibility).equal('private');
+    // Act + Assert
+    await subject.act(stored.id, { action: 'visibility', visibility: 'private' }, lead).then(
+      () => should.fail(undefined, undefined, 'a guess hid a card'),
+      (error: unknown) => should(error).be.instanceOf(BoardUnavailableError),
+    );
+    should(store.writes.length).equal(writes);
+    should(store.cards.get(stored.id)?.visibility).equal('public');
   });
 
-  it('should make a ferret’s new private card without asking for owner words it cannot read', async () => {
+  it('F-0001 should refuse a ferret’s new private card the same way, and make nothing', async () => {
+    const ports = world({ store: new MemoryBoardStore([]) });
+    const subject = new BoardService(ports);
+
+    await subject.create(request('private'), lead).then(
+      () => should.fail(undefined, undefined, 'a guess hid a new card'),
+      (error: unknown) => should(error).be.instanceOf(BoardUnavailableError),
+    );
+    should((ports.store as MemoryBoardStore).cards.size).equal(0);
+  });
+
+  it('F-0001 should still make a card that is not private: a new card never fails for want of the owner’s words', async () => {
     const subject = new BoardService(world({ store: new MemoryBoardStore([]) }));
 
-    const made = await subject.create(request('private'), lead);
+    const made = await subject.create(request(), lead);
 
-    should(made.card.visibility).equal('private');
+    should(made.card.id).be.ok();
+  });
+});
+
+describe('F-0001 a card whose creator ferret was removed', () => {
+  /** Conversation answers a strict read of a ferret the registry no longer has as "nobody the owner spoke to": no words, no failure. */
+  const removedCreator = () => {
+    const gone = card({
+      createdBy: ferretActor('gone'),
+      ask: { text: 'a ferret’s own follow-up errand', source: 'session:gone' },
+      askedBy: 'agent',
+      visibility: 'public',
+      visibilitySource: 'chosen',
+    });
+    const words: OwnerWords = { said: async () => [] };
+    const ports = world({ store: new MemoryBoardStore([gone]), ownerWords: words });
+    return { gone, ports, subject: new BoardService(ports) };
+  };
+
+  it('F-0001 should be made private by its owner ferret: the strict read of the removed creator settles, it does not refuse for ever', async () => {
+    const { gone, ports, subject } = removedCreator();
+
+    await subject.act(gone.id, { action: 'visibility', visibility: 'private' }, lead);
+
+    should((ports.store as MemoryBoardStore).cards.get(gone.id)?.visibility).equal('private');
+  });
+
+  it('F-0001 should be made private by the owner', async () => {
+    const { gone, ports, subject } = removedCreator();
+
+    await subject.act(gone.id, { action: 'visibility', visibility: 'private' }, { kind: 'owner' });
+
+    should((ports.store as MemoryBoardStore).cards.get(gone.id)?.visibility).equal('private');
   });
 });

@@ -16,10 +16,13 @@ it('R666 a connector receives SIGTERM then SIGKILL after the kernel clock grace'
     run: async () => {
       throw new Error('unused');
     },
+    runBytes: () => Promise.reject(new Error('the fixture runs no bytes')),
     start: (program, args, options) => {
       launches.push({ program, args, env: options?.env });
       return {
         pid: 123,
+        pipes: [],
+        closePipes: () => undefined,
         stdout: new ReadableStream({ start: c => c.close() }),
         stderr: new ReadableStream({ start: c => c.close() }),
         write: () => {},

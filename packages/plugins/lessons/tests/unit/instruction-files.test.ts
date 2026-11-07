@@ -24,7 +24,7 @@ function disk(paths: readonly string[]) {
         },
         stat: async path =>
           files.has(path) || [...files.keys()].some(file => file.startsWith(`${path}/`))
-            ? { kind: 'file', size: 0, modified: '2026-11-07T00:00:00.000Z' as never }
+            ? { kind: 'file', size: 0, modified: '2026-11-07T00:00:00.000Z' as never, mode: 0o600, links: 1 }
             : undefined,
         readText: async path => files.get(path) ?? '',
         readBytes: async () => new Uint8Array(),
@@ -35,6 +35,15 @@ function disk(paths: readonly string[]) {
         remove: async path => {
           files.delete(path);
         },
+        readTail: () => Promise.reject(new Error('the fixture has no readTail')),
+        writeBytes: () => Promise.reject(new Error('the fixture has no writeBytes')),
+        copyTree: () => Promise.reject(new Error('the fixture has no copyTree')),
+        ensurePrivateDirectory: () => Promise.reject(new Error('the fixture has no ensurePrivateDirectory')),
+        entries: () => Promise.reject(new Error('the fixture has no entries')),
+        lstat: () => Promise.reject(new Error('the fixture has no lstat')),
+        makeDirectory: () => Promise.reject(new Error('the fixture has no makeDirectory')),
+        realPath: () => Promise.reject(new Error('the fixture has no realPath')),
+        pin: () => Promise.reject(new Error('the fixture has no pin')),
       };
       return handle;
     },
@@ -113,7 +122,7 @@ describe('the project a Repo lesson applies to (finding 3)', () => {
       },
       list: async () => [],
       remove: async () => {},
-    } as RootHandle;
+    } as unknown as RootHandle;
     const ferrets = new FakeFerrets();
     ferrets.add({ id: ferretId('helper'), folder: '/repo' });
     const store = { readGlobal: async () => undefined, writeGlobal: async () => {} };

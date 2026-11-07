@@ -10,6 +10,11 @@ class RootRefusal extends Error {
   }
 }
 
+/** A root operation the browser tools never use through this stand-in. */
+const unused = (operation: string) => async (): Promise<never> => {
+  throw new Error(`the browser tools use no ${operation} through the root`);
+};
+
 const inside = (base: string, path: string): boolean => {
   const rel = relative(base, path);
   return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel));
@@ -41,6 +46,7 @@ export function workRoots(folder: string, stateHome: string): RootsPort {
     readText: async path => await readFile(await real(path), 'utf8'),
     readBytes: async (path, limit) => {
       const bytes = new Uint8Array(await readFile(await real(path)));
+      if (typeof limit === 'object') return bytes.slice(limit.offset, limit.offset + limit.length);
       return limit === undefined ? bytes : bytes.slice(0, limit);
     },
     writeText: async () => {
@@ -50,11 +56,26 @@ export function workRoots(folder: string, stateHome: string): RootsPort {
     stat: async (path): Promise<RootStat | undefined> => {
       const info = await lstat(await real(path)).catch(() => undefined);
       if (info === undefined || (!info.isFile() && !info.isDirectory())) return undefined;
-      return { kind: info.isFile() ? 'file' : 'directory', size: info.size, modified: instantFromEpochMs(info.mtimeMs) };
+      return {
+        kind: info.isFile() ? 'file' : 'directory',
+        size: info.size,
+        modified: instantFromEpochMs(info.mtimeMs),
+        mode: info.mode & 0o7777,
+        links: info.nlink,
+      };
     },
     remove: async () => {
       throw new Error('the browser tools remove nothing through the root');
     },
+    readTail: unused('readTail'),
+    writeBytes: unused('writeBytes'),
+    copyTree: unused('copyTree'),
+    ensurePrivateDirectory: unused('ensurePrivateDirectory'),
+    entries: unused('entries'),
+    lstat: unused('lstat'),
+    makeDirectory: unused('makeDirectory'),
+    realPath: unused('realPath'),
+    pin: unused('pin'),
   };
   return { root: () => handle };
 }

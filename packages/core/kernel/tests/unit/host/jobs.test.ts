@@ -64,6 +64,39 @@ describe('job ownership across build and serving transitions', () => {
     expect(clock.pending()).toBe(0);
   });
 
+  test('repeated damage and repair during one slow run arms the job once, and stop cancels it', async () => {
+    const clock = fixedClock();
+    const jobs = new JobRunner(clock, silentLog);
+    let ran = 0;
+    let finishFirst: () => void = () => undefined;
+    jobs.portFor('owner').add({
+      id: 'work',
+      schedule: { every: milliseconds(10) },
+      run: async () => {
+        ran++;
+        // The first run ignores its abort signal, so both repairs below wait on it.
+        if (ran === 1) await new Promise<void>(resolve => (finishFirst = resolve));
+      },
+    });
+    jobs.start();
+    await clock.advance(0);
+    expect(ran).toBe(1);
+    jobs.pause('owner');
+    jobs.resume('owner');
+    jobs.pause('owner');
+    jobs.resume('owner');
+    finishFirst();
+    await jobs.settle();
+    await clock.advance(0);
+    expect(clock.pending()).toBe(1);
+    const before = ran;
+    await clock.advance(10);
+    await jobs.settle();
+    expect(ran - before).toBe(1);
+    await jobs.stop();
+    expect(clock.pending()).toBe(0);
+  });
+
   test('damage cancels a failed job backoff as well as its interval', async () => {
     const clock = fixedClock();
     const jobs = new JobRunner(clock, silentLog);

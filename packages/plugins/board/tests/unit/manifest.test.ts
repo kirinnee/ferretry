@@ -24,13 +24,14 @@ describe('board manifest', () => {
       expect(person.has(key)).toBe(true);
     expect([...person].filter(key => key.includes('/plans'))).toEqual([]);
   });
-  test('it takes the card ask source, start.decide, sitrep.lines, turn.ended and ferret.started (D2 #12), uses Conversation, and offers card.moving', () => {
+  test('it takes the card ask source, start.decide, sitrep.lines, turn.ended, ferret.started (D2 #12) and Conversation’s search.sources, uses Conversation, and offers card.moving', () => {
     expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual([
       'ask.sources',
       'start.decide',
       'sitrep.lines',
       'turn.ended',
       'ferret.started',
+      'search.sources',
     ]);
     expect(manifest.hooks.takes[0]?.key).toBe('card');
     expect(manifest.hooks.offers.map(offer => offer.hook.name)).toEqual(['card.moving']);

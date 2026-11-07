@@ -12,6 +12,11 @@ export const realPorts = {
           worker.addEventListener('message', handler);
           return () => worker.removeEventListener('message', handler);
         },
+        onExit: listener => {
+          const handler = (event: Event): void => listener({ code: (event as CloseEvent).code ?? 0 });
+          worker.addEventListener('close', handler);
+          return () => worker.removeEventListener('close', handler);
+        },
         terminate: async () => {
           worker.terminate();
         },

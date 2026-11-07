@@ -59,6 +59,7 @@ const fireTimer = (): void => fire?.();
 const silent = (): WorkerHandle => ({
   post: () => undefined,
   onMessage: () => () => undefined,
+  onExit: () => () => undefined,
   terminate: async () => {},
 });
 

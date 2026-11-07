@@ -53,4 +53,11 @@ export class SessionCredentialGateway implements DaemonTransport {
   send(request: DaemonRequest, options: SendOptions): Promise<DaemonReply> {
     return this.#inner.send(request, options);
   }
+
+  events(
+    listener: Parameters<HttpTransport['events']>[0],
+    onClose: Parameters<HttpTransport['events']>[1],
+  ): () => void {
+    return this.#inner.events(listener, onClose);
+  }
 }

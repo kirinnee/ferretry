@@ -1,5 +1,10 @@
 import { basename, dirname, isAbsolute, join, normalize, parse } from 'node:path';
 const DAEMON_LOCK_FILENAME = 'run/daemon.lock';
+/**
+ * The opaque `tmux.sock` that the Terminals manifest declares as its state, inside that plugin's state folder. The
+ * kernel offers no port that names a state file's path, so the one verb that ends the server spells it here.
+ */
+const SESSION_TERMINAL_SOCKET_FILE = 'state/terminals/tmux.sock';
 import { type CallerLocale, daemonLocale } from './locale.ts';
 
 /** The service managers this CLI knows how to drive, plus the no-manager fallback. */
@@ -71,6 +76,12 @@ export interface DaemonLayout {
    * port, a container or a second installation cannot share.
    */
   readonly daemonLockFile: string;
+  /**
+   * The socket of the private tmux server every ferret's agent runs under. The CLI never talks to it except to END
+   * it, and only on `reset`: the server is not the daemon and outlives a stop, so a reset that only stopped the daemon
+   * would leave every agent running and writing into the home it had just removed.
+   */
+  readonly sessionTerminalSocket: string;
   /**
    * The one tree of CLI-owned installation artifacts, keyed by `XDG_STATE_HOME` and the product.
    *
@@ -250,6 +261,7 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     homeDirectory,
     stateHome,
     daemonLockFile: join(stateHome, DAEMON_LOCK_FILENAME),
+    sessionTerminalSocket: join(stateHome, SESSION_TERMINAL_SOCKET_FILE),
     stateArtifactRoot,
     logDirectory,
     logFile: join(logDirectory, `${daemonName}.log`),

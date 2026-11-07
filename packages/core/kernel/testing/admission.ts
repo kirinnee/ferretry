@@ -42,6 +42,37 @@ export function testPrincipal(caller: TestCaller, leaseUntil: Instant): ApiReque
   };
 }
 
+/** Which credential a test caller presents, in today's words: the owner's admin token, a ferret's session token. */
+export type TestTokenClass = 'admin' | 'warden' | 'device' | 'session';
+
+export function tokenClassOf(caller: TestCaller): TestTokenClass | undefined {
+  switch (caller.kind) {
+    case 'owner':
+      return 'admin';
+    case 'ferret':
+      return 'session';
+    case 'device':
+      return 'device';
+    case 'warden':
+      return 'warden';
+    default:
+      return undefined;
+  }
+}
+
+/** Today's dispatcher `meetsMinimum`, copied: `operator` admits every credential but a warden's. */
+export function meetsMinimum(tokenClass: TestTokenClass, minimum: ScopedRoute['minimum']): boolean {
+  switch (minimum) {
+    case 'none':
+    case 'authenticated':
+      return true;
+    case 'operator':
+      return tokenClass !== 'warden';
+    case 'admin-token':
+      return tokenClass === 'admin';
+  }
+}
+
 /** The stand-in's standing: who called. Gate's real standing replaces it when the real Gate is passed. */
 export interface StandInStanding {
   readonly caller: TestCaller;
@@ -51,8 +82,9 @@ export interface StandInStanding {
  * The Admission stand-in (§7.8: "the real Gate when available, else a stand-in behind the Admission port"). It is a
  * narrow, deny-by-default reading of today's descriptor questions, enough to test a plugin's own behaviour: it is
  * NOT Gate and proves no Gate guarantee. `minimum: 'none'` admits anyone; otherwise an anonymous caller is `401`;
- * `caller: 'person'` refuses a ferret (`403 owner_only`); `admin-token` is the owner only; `operator` refuses
- * ferrets and wardens; a warden needs the route's `wardenRemedy` in its remedies; `privilegedOnly` needs a privileged
+ * `caller: 'person'` refuses a ferret (`403 owner_only`); the minimum is today's `meetsMinimum` over the caller's
+ * token class (`admin-token` is the owner only, `operator` refuses only a warden); a warden needs the route's
+ * `wardenRemedy` in its remedies; `privilegedOnly` needs a privileged
  * local arrival; a device needs the route's capability in its list when it was given one.
  */
 export function standInAdmission(callerOf: (request: ApiRequest) => TestCaller): Admission {
@@ -62,11 +94,15 @@ export function standInAdmission(callerOf: (request: ApiRequest) => TestCaller):
   });
   const decide = (request: ApiRequest, d: ScopedRoute): AdmissionDecision<CallStanding> => {
     const caller = callerOf(request);
+    const tokenClass = tokenClassOf(caller);
+    const belowMinimum = (): AdmissionDecision<never> =>
+      refuse(403, `the presented credential may not use ${request.method} ${request.path}`, 'forbidden');
     const actor: Actor = caller.kind === 'warden' ? 'warden' : caller.kind === 'ferret' ? 'ferret' : 'owner-tools';
     const admitted = { outcome: 'admitted', standing: { caller } as CallStanding, actor } as const;
     if (caller.kind === 'warden') {
       if (d.wardenRemedy === undefined || !(caller.remedies ?? []).includes(d.wardenRemedy))
         return refuse(403, 'A warden may not act here.', 'forbidden');
+      if (!meetsMinimum('warden', d.minimum)) return belowMinimum();
       return admitted;
     }
     if (d.minimum === 'none') return admitted;
@@ -77,10 +113,7 @@ export function standInAdmission(callerOf: (request: ApiRequest) => TestCaller):
         `Only the owner may do this.${d.ferretDoor === undefined ? '' : ` ${d.ferretDoor}`}`,
         'owner_only',
       );
-    if (d.minimum === 'admin-token' && caller.kind !== 'owner')
-      return refuse(403, 'Only the owner at the machine may do this.', 'forbidden');
-    if (d.minimum === 'operator' && caller.kind === 'ferret')
-      return refuse(403, 'Only the operator may do this.', 'forbidden');
+    if (tokenClass === undefined || !meetsMinimum(tokenClass, d.minimum)) return belowMinimum();
     if (
       d.privilegedOnly === true &&
       !(request.arrival.kind === 'local' && request.arrival.privileged) &&

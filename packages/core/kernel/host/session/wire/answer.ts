@@ -9,7 +9,7 @@
  */
 
 import { type ApiResponse, finalised } from '../../../contract/http.ts';
-import { isPublishedResponse } from '../../responses.ts';
+import { isPublishedResponse } from './publication.ts';
 import { encodeDaemonRecord, responseRecords } from './records.ts';
 
 export interface AnswerRecord {

@@ -3,8 +3,17 @@ import { err, instantFromEpochMs, ok } from '@ferretry/std';
 import { basename, dirname, join, relative } from 'node:path';
 import type { FencedPath, FolderRefusal, WorkFolders } from '../contract/bound.ts';
 import { insideFence } from '../contract/home.ts';
-import type { RootHandle, RootName, RootsPort, RootStat } from '../contract/ports.ts';
-import type { FileIdentity, HostFs, OpenedDirectory } from './adapters/node-fs.ts';
+import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
+import type {
+  RootEntry,
+  RootHandle,
+  RootLstat,
+  RootName,
+  RootsPort,
+  RootStat,
+  RootWriteOptions,
+} from '../contract/ports.ts';
+import type { FileIdentity, HostFs, OpenedDirectory, OpenedFile } from './adapters/node-fs.ts';
 import {
   absolute,
   type Fence,
@@ -18,10 +27,20 @@ import {
   same,
   within,
 } from './fence-guard.ts';
+import type { PinRegistry } from './pins.ts';
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
 const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports']);
 const READ_ONLY_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'imports']);
+/** Internal roots only one plugin may have, whatever another manifest declares. */
+const ROOT_OWNERS: Partial<Record<RootName, string>> = { credentials: 'logins' };
+const DEFAULT_COPY_ENTRIES = 10_000;
+const windowOk = (offset: number, length: number): boolean =>
+  Number.isSafeInteger(offset) &&
+  offset >= 0 &&
+  Number.isSafeInteger(length) &&
+  length >= 0 &&
+  length <= MAX_ROOT_WINDOW_BYTES;
 
 export interface RootLayout {
   readonly home: string;
@@ -222,9 +241,10 @@ async function fileProblem(scope: Scope, real: string, opened: FileIdentity): Pr
 
 /**
  * Today's `openOutsideStateHomes`: judged by real path and identity BEFORE the open (so a device is never opened),
- * opened once without following a link, proven to be the file that was checked, then read through THAT descriptor.
+ * opened once without following a link, proven to be the file that was checked, then read through THAT descriptor —
+ * whole, up to a limit, a window or a tail: every read of a root goes through here.
  */
-async function readChecked(scope: Scope, full: string, limit: number | undefined): Promise<Uint8Array> {
+async function withCheckedFile<T>(scope: Scope, full: string, use: (file: OpenedFile) => Promise<T>): Promise<T> {
   const real = await scope.fs.realpath(full);
   const before = await scope.fs.identity(real);
   if (before === undefined) return refuse('changed');
@@ -234,7 +254,7 @@ async function readChecked(scope: Scope, full: string, limit: number | undefined
   try {
     const problem = await fileProblem(scope, real, handle.identity);
     if (problem !== undefined) refuse(problem);
-    return await handle.read(limit);
+    return await use(handle);
   } finally {
     await handle.close();
   }
@@ -293,14 +313,18 @@ async function ensureScopedBase(
 }
 
 /**
- * Today's `createOutsideStateHomes`, atomically: the nearest existing folder is opened and checked, every missing
- * folder below it is made THROUGH it one at a time and checked in turn, the content goes into a NEW temp file made
- * through the checked folder (`O_EXCL | O_NOFOLLOW`), and that is renamed over the leaf in the same folder.
+ * Today's `createOutsideStateHomes` for a folder: the nearest existing folder at or above `full` is opened and
+ * checked, and (with `make`) every missing folder below it is made THROUGH it one at a time, with `mode`, and checked
+ * in turn. Answers the checked folder at `full`, still open; the caller closes it. Without `make`, a missing folder is
+ * refused.
  */
-async function writeChecked(scope: Scope, full: string, data: string, random: () => string): Promise<void> {
-  const leaf = basename(full);
-  if (leaf === '' || full === scope.base.real) refuse('not_a_file');
-  let existing = dirname(full);
+async function openFolderMaking(
+  scope: Scope,
+  full: string,
+  mode: number,
+  make: boolean,
+): Promise<{ readonly folder: OpenedDirectory; readonly real: string }> {
+  let existing = full;
   const missing: string[] = [];
   let parent = await scope.fs.realpath(existing).catch(() => undefined);
   while (parent === undefined && within(scope.base.real, dirname(existing)) && dirname(existing) !== existing) {
@@ -308,13 +332,13 @@ async function writeChecked(scope: Scope, full: string, data: string, random: ()
     existing = dirname(existing);
     parent = await scope.fs.realpath(existing).catch(() => undefined);
   }
-  if (parent === undefined) return refuse('outside');
-  if (!within(scope.base.real, join(parent, ...missing, leaf))) refuse('link_escape');
+  if (parent === undefined || (!make && missing.length > 0)) return refuse('outside');
+  if (!within(scope.base.real, join(parent, ...missing))) refuse('link_escape');
   let folder = await openCheckedFolder(scope, parent);
   try {
     for (const segment of missing) {
       const at = await entry(scope, folder, parent, segment);
-      await scope.fs.mkdir(at, 0o700).catch(() => refuse('changed'));
+      await scope.fs.mkdir(at, mode).catch(() => refuse('changed'));
       const made = await scope.fs.openDirectory(at).catch(() => refuse('changed'));
       await folder.close();
       folder = made;
@@ -322,9 +346,50 @@ async function writeChecked(scope: Scope, full: string, data: string, random: ()
       const problem = await folderProblem(scope, parent, made.identity);
       if (problem !== undefined) refuse(problem);
     }
+  } catch (error) {
+    await folder.close();
+    throw error;
+  }
+  return { folder, real: parent };
+}
+
+/**
+ * Today's `createOutsideStateHomes`, atomically: the leaf's folder is opened and checked (missing folders made through
+ * it), the content goes into a NEW temp file made through the checked folder (`O_EXCL | O_NOFOLLOW`), and that is
+ * renamed over the leaf in the same folder. `exclusive` creates the leaf itself the same way and never replaces;
+ * `replaceExisting` replaces only a regular file already at the name (never through a link), keeping its mode.
+ */
+async function writeChecked(
+  scope: Scope,
+  full: string,
+  data: string | Uint8Array,
+  random: () => string,
+  options: RootWriteOptions = {},
+): Promise<void> {
+  const leaf = basename(full);
+  if (leaf === '' || full === scope.base.real) refuse('not_a_file');
+  const { folder, real: parent } = await openFolderMaking(
+    scope,
+    dirname(full),
+    0o700,
+    options.replaceExisting !== true,
+  );
+  try {
+    if (options.exclusive === true) {
+      // An existing name (a link included) fails the create itself: its own error says so.
+      const created = await scope.fs.writeNew(await entry(scope, folder, parent, leaf), data, options.mode ?? 0o600);
+      if (created.kind !== 'file' || created.links !== 1) refuse('changed');
+      return;
+    }
+    let mode = options.mode ?? 0o600;
+    if (options.replaceExisting === true) {
+      const current = await scope.fs.identity(await entry(scope, folder, parent, leaf));
+      if (current?.kind !== 'file') return refuse(current?.kind === 'link' ? 'link_escape' : 'outside');
+      mode = options.mode ?? current.mode;
+    }
     const temp = `.${leaf}.${random()}.tmp`;
     const created = await scope.fs
-      .writeNew(await entry(scope, folder, parent, temp), data, 0o600)
+      .writeNew(await entry(scope, folder, parent, temp), data, mode)
       .catch(() => refuse('changed'));
     if (created.kind !== 'file' || created.links !== 1) refuse('changed');
     const madeTemp = await entry(scope, folder, parent, temp);
@@ -386,6 +451,25 @@ async function removeChecked(scope: Scope, full: string): Promise<void> {
   }
 }
 
+/** The names in a checked folder, each with its own (never followed) identity reached through that folder. */
+async function entriesChecked(
+  scope: Scope,
+  full: string,
+): Promise<readonly { readonly name: string; readonly identity: FileIdentity | undefined }[]> {
+  const real = await scope.fs.realpath(full).catch(() => undefined);
+  if (real === undefined) return [];
+  const folder = await openCheckedFolder(scope, real);
+  try {
+    const names = await scope.fs.list(await entry(scope, folder, real, ''));
+    const out = [];
+    for (const name of names)
+      out.push({ name, identity: await scope.fs.identity(await entry(scope, folder, real, name)) });
+    return out;
+  } finally {
+    await folder.close();
+  }
+}
+
 async function listChecked(scope: Scope, full: string): Promise<readonly string[]> {
   const real = await scope.fs.realpath(full).catch(() => undefined);
   if (real === undefined) return [];
@@ -397,41 +481,77 @@ async function listChecked(scope: Scope, full: string): Promise<readonly string[
   }
 }
 
-async function statChecked(scope: Scope, full: string): Promise<RootStat | undefined> {
+/** The leaf at `full` itself (never followed), reached through its checked folder. */
+async function leafIdentity(scope: Scope, full: string): Promise<FileIdentity | undefined> {
+  if (full === scope.base.real) return await scope.fs.identity(full);
   const parent = await scope.fs.realpath(dirname(full)).catch(() => undefined);
   if (parent === undefined) return undefined;
-  if (full === scope.base.real) {
-    const info = await scope.fs.identity(full);
-    return info?.kind === 'directory'
-      ? { kind: 'directory', size: info.size, modified: instantFromEpochMs(info.mtimeMs) }
-      : undefined;
-  }
   const folder = await openCheckedFolder(scope, parent);
   try {
-    const info = await scope.fs.identity(await entry(scope, folder, parent, basename(full)));
-    if (info === undefined || (info.kind !== 'file' && info.kind !== 'directory')) return undefined;
-    return { kind: info.kind, size: info.size, modified: instantFromEpochMs(info.mtimeMs) };
+    return await scope.fs.identity(await entry(scope, folder, parent, basename(full)));
   } finally {
     await folder.close();
   }
 }
 
+async function statChecked(scope: Scope, full: string): Promise<RootStat | undefined> {
+  const info = await leafIdentity(scope, full);
+  if (info === undefined || (info.kind !== 'file' && info.kind !== 'directory')) return undefined;
+  return {
+    kind: info.kind,
+    size: info.size,
+    modified: instantFromEpochMs(info.mtimeMs),
+    mode: info.mode,
+    links: info.links,
+  };
+}
+
+/** A leaf as the disk reported it, in the port's words. */
+const leafOf = (info: FileIdentity): RootLstat => ({
+  kind: info.kind === 'link' ? 'symlink' : info.kind,
+  size: info.size,
+  modified: instantFromEpochMs(info.mtimeMs),
+  mode: info.mode,
+  links: info.links,
+});
+
 const decoder = new TextDecoder();
 
-function rootHandle(
-  fs: HostFs,
-  home: string,
-  name: RootName,
-  base: () => string | undefined,
-  anchor: string | undefined,
-  scopedParent: string | undefined,
-  check: (path: string) => Result<FencedPath, FolderRefusal> | undefined,
-  immutable: () => Promise<readonly string[]>,
-  random: () => string,
-): RootHandle {
+/** One path checked in one root: where it is, and what the operation on it knows. */
+interface Checked {
+  readonly full: string;
+  readonly scope: Scope;
+}
+
+/** What `copyTree` may ask of a SOURCE handle: its own checks, never a path of its own choosing. */
+interface SourceAccess {
+  readonly plugin: string;
+  readonly real: (path: FencedPath) => Promise<Checked>;
+  readonly realParent: (path: FencedPath) => Promise<Checked>;
+}
+
+/** Every handle the kernel made, with the plugin it was made for and its checked resolvers (for `copyTree`). */
+const HANDLES = new WeakMap<object, SourceAccess>();
+
+interface HandleSetup {
+  readonly fs: HostFs;
+  readonly home: string;
+  readonly name: RootName;
+  readonly plugin: string;
+  readonly base: () => string | undefined;
+  readonly anchor: string | undefined;
+  readonly scopedParent: string | undefined;
+  readonly check: (path: string) => Result<FencedPath, FolderRefusal> | undefined;
+  readonly immutable: () => Promise<readonly string[]>;
+  readonly random: () => string;
+  readonly pins: PinRegistry | undefined;
+}
+
+function rootHandle(setup: HandleSetup): RootHandle {
+  const { fs, home, name, plugin, base, anchor, scopedParent, check, immutable, random, pins } = setup;
   const ownerRoot = OWNER_ROOTS.has(name);
   const readOnly = READ_ONLY_ROOTS.has(name);
-  const real = async (path: FencedPath, create = false): Promise<{ readonly full: string; readonly scope: Scope }> => {
+  const real = async (path: FencedPath, create = false): Promise<Checked> => {
     const root = base();
     if (root === undefined) refuse(name === 'work' ? 'unknown_ferret' : 'outside');
     if (create && scopedParent !== undefined) {
@@ -444,10 +564,75 @@ function rootHandle(
     if (!resolved.ok) return refuse(resolved.error);
     return { full: resolved.value.full, scope: { fs, base: resolved.value.base, ownerRoot, immutable } };
   };
+  /**
+   * The leaf NOT followed: its parent resolved and checked, the leaf's own name appended and judged by name. What sits
+   * at the name (a link included) is then judged by the call itself, reached through the checked folder.
+   */
+  const realParent = async (path: FencedPath, create = false): Promise<Checked> => {
+    const slash = path.lastIndexOf('/');
+    const leaf = path.slice(slash + 1);
+    if (slash <= 0 || leaf === '' || leaf === '.' || leaf === '..') return await real(path, create);
+    const parent = await real(path.slice(0, slash) as FencedPath, create);
+    const full = join(parent.full, leaf);
+    if (!within(parent.scope.base.real, full)) refuse('link_escape');
+    if (parent.scope.base.fence !== undefined && fencedByName(parent.scope.base.fence, full)) refuse('fenced');
+    return { full, scope: parent.scope };
+  };
   const writable = (): void => {
     if (readOnly) refuse('read_only');
   };
-  return {
+  const read = async <T>(path: FencedPath, use: (file: OpenedFile) => Promise<T>): Promise<T> => {
+    const { full, scope } = await real(path);
+    return await withCheckedFile(scope, full, use);
+  };
+  const write = async (path: FencedPath, data: string | Uint8Array, options?: RootWriteOptions): Promise<void> => {
+    writable();
+    const leafOnly = options?.exclusive === true || options?.replaceExisting === true;
+    const { full, scope } = leafOnly ? await realParent(path, true) : await real(path, true);
+    await writeChecked(scope, full, data, random, options);
+  };
+  /**
+   * Copies `from` (a folder of `source`) into the NEW folder `to`: each name checked against the source's own fence,
+   * each file read off the disk through one checked descriptor, never through a link or a hard link, and each written
+   * as a new file through this root's checked folder.
+   */
+  const copyInto = async (
+    source: SourceAccess,
+    from: FencedPath,
+    to: FencedPath,
+    budget: { left: number },
+  ): Promise<void> => {
+    const sourceFolder = await source.real(from);
+    const names = await listChecked(sourceFolder.scope, sourceFolder.full);
+    const target = await realParent(to, true);
+    const made = await openFolderMaking(target.scope, dirname(target.full), 0o700, true);
+    try {
+      await fs
+        .mkdir(await entry(target.scope, made.folder, made.real, basename(target.full)), 0o700)
+        .catch(() => refuse('outside'));
+    } finally {
+      await made.folder.close();
+    }
+    for (const leafName of names) {
+      budget.left -= 1;
+      if (budget.left < 0) refuse('outside');
+      const sourceName = `${from}/${leafName}` as FencedPath;
+      const targetName = `${to}/${leafName}` as FencedPath;
+      // Check each name against its source handle's fence, even when it will be skipped as a link.
+      const leaf = await source.realParent(sourceName);
+      const info = await leafIdentity(leaf.scope, leaf.full);
+      if (info === undefined) continue;
+      if (info.kind === 'directory') await copyInto(source, sourceName, targetName, budget);
+      else if (info.kind === 'file' && info.links <= 1) {
+        const file = await source.real(sourceName);
+        const bytes = await withCheckedFile(file.scope, file.full, async opened => await opened.read());
+        const written = await realParent(targetName, true);
+        await writeChecked(written.scope, written.full, bytes, random, { exclusive: true, mode: info.mode & 0o777 });
+      }
+      // a link is left alone (never entered), a device or a hard-linked file is never read
+    }
+  };
+  const handle: RootHandle = {
     name,
     resolve: relativePath => {
       const root = base();
@@ -456,22 +641,94 @@ function rootHandle(
       if (!lexical.ok) return lexical;
       return check(lexical.value) ?? lexical;
     },
-    readText: async (path, limit) => {
-      const { full, scope } = await real(path);
-      return decoder.decode(await readChecked(scope, full, limit));
-    },
+    readText: async (path, limit) => decoder.decode(await read(path, async file => await file.read(limit))),
     readBytes: async (path, limit) => {
-      const { full, scope } = await real(path);
-      return await readChecked(scope, full, limit);
+      if (typeof limit === 'object') {
+        if (!windowOk(limit.offset, limit.length)) refuse('outside');
+        return (await read(path, async file => await file.readWindow(limit.offset, limit.length))).bytes;
+      }
+      return await read(path, async file => await file.read(limit));
     },
-    writeText: async (path, text) => {
+    readTail: async (path, maxBytes) => {
+      if (!windowOk(0, maxBytes)) refuse('outside');
+      return await read(path, async file => await file.readWindow(-maxBytes, maxBytes));
+    },
+    writeText: async (path, text, options) => await write(path, text, options),
+    writeBytes: async (path, bytes, options) => await write(path, bytes, options),
+    copyTree: async (source, from, to, options) => {
+      writable();
+      const known = HANDLES.get(source);
+      if (known === undefined || known.plugin !== plugin) return refuse('not_declared');
+      const sourceFolder = await known.real(from);
+      const checkedSource = await openCheckedFolder(sourceFolder.scope, sourceFolder.full).catch((error: unknown) => {
+        if (error instanceof RootError && error.refusal === 'not_a_file') refuse('outside');
+        throw error;
+      });
+      await checkedSource.close();
+      const target = await realParent(to, true);
+      if (options?.link === true) {
+        const made = await openFolderMaking(target.scope, dirname(target.full), 0o700, false);
+        try {
+          await fs.symlink(sourceFolder.full, await entry(target.scope, made.folder, made.real, basename(target.full)));
+        } finally {
+          await made.folder.close();
+        }
+        return;
+      }
+      // A copy lands in a NEW folder: nothing already there (a planted link) can redirect what it writes.
+      if ((await leafIdentity(target.scope, target.full)) !== undefined) refuse('outside');
+      await copyInto(known, from, to, { left: options?.maxEntries ?? DEFAULT_COPY_ENTRIES });
+    },
+    ensurePrivateDirectory: async path => {
+      writable();
+      const { full, scope } = await realParent(path, true);
+      const made = await openFolderMaking(scope, dirname(full), 0o700, true);
+      try {
+        const at = await entry(scope, made.folder, made.real, basename(full));
+        const info = await scope.fs.identity(at);
+        if (info !== undefined && info.kind !== 'directory') refuse('outside');
+        if (info === undefined) await scope.fs.mkdir(at, 0o700).catch(() => refuse('changed'));
+        const folder = await scope.fs.openDirectory(at).catch(() => refuse('changed'));
+        try {
+          const problem = await folderProblem(scope, join(made.real, basename(full)), folder.identity);
+          if (problem !== undefined) refuse(problem);
+          await folder.chmod(0o700);
+        } finally {
+          await folder.close();
+        }
+      } finally {
+        await made.folder.close();
+      }
+    },
+    lstat: async (path): Promise<RootLstat | undefined> => {
+      const { full, scope } = await realParent(path);
+      const info = await leafIdentity(scope, full);
+      return info === undefined ? undefined : leafOf(info);
+    },
+    makeDirectory: async (path, options) => {
       writable();
       const { full, scope } = await real(path, true);
-      await writeChecked(scope, full, text, random);
+      const made = await openFolderMaking(scope, full, options?.mode ?? 0o700, true);
+      await made.folder.close();
+    },
+    realPath: async path => {
+      // `real` resolved every existing component inside the root; the whole must exist (a broken link throws), and a
+      // name that moved between the two answers is refused rather than re-resolved.
+      const { full } = await real(path);
+      const again = await fs.realpath(full);
+      if (again !== full) refuse('link_escape');
+      return full as FencedPath;
     },
     list: async path => {
       const { full, scope } = await real(path);
       return await listChecked(scope, full);
+    },
+    entries: async path => {
+      const { full, scope } = await real(path);
+      const out: RootEntry[] = [];
+      for (const found of await entriesChecked(scope, full))
+        if (found.identity !== undefined) out.push({ name: found.name, ...leafOf(found.identity) });
+      return out;
     },
     stat: async path => {
       const { full, scope } = await real(path);
@@ -482,7 +739,24 @@ function rootHandle(
       const { full, scope } = await real(path);
       await removeChecked(scope, full);
     },
+    pin: async (path, options) => {
+      if (pins === undefined) return refuse('not_declared');
+      const { full, scope } = await real(path);
+      const pinned = await pins.pin(plugin, full, options);
+      // The name was checked; now the OBJECT held: what the descriptor resolves to must still be in the root.
+      try {
+        if (!within(scope.base.real, pinned.rootReal)) refuse('link_escape');
+        if (scope.base.fence !== undefined && (await fencedReal(fs, scope.base.fence, pinned.rootReal)))
+          refuse('fenced');
+      } catch (error) {
+        await pinned.close();
+        throw error;
+      }
+      return pinned;
+    },
   };
+  HANDLES.set(handle, { plugin, real: path => real(path), realParent: path => realParent(path) });
+  return handle;
 }
 
 export interface RootsOptions {
@@ -490,6 +764,8 @@ export interface RootsOptions {
   readonly random?: () => string;
   /** Where a file with several names may be read once proven immutable (S49); today's `/nix/store`. */
   readonly hardLinkRoots?: readonly string[];
+  /** The kernel's pin registry, for `RootHandle.pin`; absent, every pin is refused. */
+  readonly pins?: PinRegistry;
 }
 
 /** The roots port for one plugin: only roots its manifest declared (§3.7); anything else throws. */
@@ -509,6 +785,8 @@ export function rootsPortFor(
   return {
     root: (name, scope) => {
       if (!allowed.has(name)) throw new RootError('not_declared');
+      const owner = ROOT_OWNERS[name];
+      if (owner !== undefined && owner !== layout.plugin) throw new RootError('not_declared');
       const subfolder = scope?.subfolder;
       const internalSubfolder = (): string | undefined => {
         // An internal root's subfolder is one relative path below its anchor: never absolute, never `..`, no NUL.
@@ -521,6 +799,7 @@ export function rootsPortFor(
         switch (name) {
           case 'agent-homes':
           case 'downloads':
+          case 'credentials':
             return home;
           case 'worktrees':
             return dirname(absolute(layout.worktrees, 'the worktrees folder'));
@@ -538,6 +817,8 @@ export function rootsPortFor(
           }
           case 'downloads':
             return `${home}/state/${layout.plugin}/downloads`;
+          case 'credentials':
+            return `${home}/state/${layout.plugin}/credentials`;
           case 'worktrees':
             return absolute(layout.worktrees, 'the worktrees folder');
           case 'work':
@@ -558,7 +839,19 @@ export function rootsPortFor(
         name === 'agent-homes' && subfolder !== undefined && subfolder !== ''
           ? `${home}/state/${layout.plugin}/agent-homes`
           : undefined;
-      return rootHandle(fs, home, name, base, anchor, scopedParent, check, immutable, random);
+      return rootHandle({
+        fs,
+        home,
+        name,
+        plugin: layout.plugin,
+        base,
+        anchor,
+        scopedParent,
+        check,
+        immutable,
+        random,
+        pins: options.pins,
+      });
     },
   };
 }

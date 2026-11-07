@@ -40,7 +40,12 @@ export const QuestionSchema = z.strictObject({
 });
 export type Question = z.infer<typeof QuestionSchema>;
 
-/** One entry of `answers.jsonl`: what the owner answered, kept so an answered question does not come back. */
+/**
+ * What the owner answered to ONE question, as a view of the answer. It is NOT a line of `answers.jsonl`: that file holds
+ * the answer ledger's receipts, one per request, written before any key is driven (`AnswerLineSchema`). A receipt
+ * carries the request id, the question's tool-use id, the fingerprint of the answer and how far the operation got, and
+ * never the answer's words.
+ */
 export const AnswerRecordSchema = z.strictObject({
   v: z.literal(1),
   toolUseId: z.string().min(1),

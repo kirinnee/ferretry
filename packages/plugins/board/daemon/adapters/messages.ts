@@ -1,4 +1,5 @@
 import { type FerretsApi, FerretIdSchema } from '@ferretry/core-ferrets/contract';
+import { createHash } from 'node:crypto';
 import type { ConversationApi, SendResult } from '@ferretry/plugin-conversation/contract';
 import type { BoardReopenAttachments } from '../../contract/index.ts';
 import {
@@ -8,7 +9,6 @@ import {
   nudgeTarget,
   type ReopenDelivery,
   type ReopenMessenger,
-  type TranscriptEvent,
   type TranscriptTailResult,
 } from '../lib/board/index.ts';
 
@@ -30,23 +30,30 @@ export interface FerretMessenger {
 export const uncarriedFilesLine = (count: number): string =>
   `The owner also attached ${count === 1 ? 'a file' : `${count} files`} that could not be copied to this chat.`;
 
-/** How many delivered keys are remembered, so the same message is not typed twice. */
-const KEPT_KEYS = 1024;
+/** The longest send id Conversation takes, and the characters its files and ids allow. */
+const SEND_ID = /^[A-Za-z0-9._:-]{1,128}$/u;
+
+/**
+ * The send id of one board message: the key itself when Conversation takes it as an id, else a name made of its digest.
+ * The same key is always the same id, which is all "the same message twice is one message" asks of it: a done message's
+ * key names every card in it, and could be longer than an id may be.
+ */
+export const sendIdOf = (key: string): string =>
+  SEND_ID.test(key) ? key : `board-${createHash('sha256').update(key).digest('hex').slice(0, 48)}`;
 
 /**
  * Board's messages through Conversation's ordinary send path, as the owner's (today's `SendReopenMessenger` and the
  * board's alert send). A helper is never the recipient: its lead is (`nudgeTarget`). Read late (`current`), so
  * Conversation turned on or off is followed without a restart.
  *
- * GAPS (Conversation's contract): `SendRequest` carries no send id, so "the same key twice is one message" holds only
- * within one daemon run (the keys are remembered here, not in Conversation's ledger); a held-back alert is not journalled
- * on the ferret (no journal write), only logged; and `transcript()` carries messages only, never tool calls, so the
- * transcript checks that read a turn's tool calls (a PR a ferret opened, the turn-end check) find none until
- * Conversation's transcript page carries them (needed additive read: tool-call events in the tail).
+ * The key is the send's id (`SendRequest.sendId`), so "the same key twice is one message" holds across daemon runs: the
+ * queue and Conversation's send ledger keep it, and nothing is remembered here. The transcript tail carries the tool
+ * calls and results (`transcriptEvents`), so the checks that read a turn's tool calls (a PR a ferret opened, the turn-end
+ * check) see them.
+ *
+ * GAP (Conversation's contract): a held-back alert is not journalled on the ferret (no journal write), only logged.
  */
 export class ConversationMessages implements FerretMessenger {
-  private readonly delivered = new Map<string, ReopenDelivery>();
-
   constructor(
     private readonly conversation: () => ConversationApi | undefined,
     private readonly ferrets: Pick<FerretsApi, 'get'>,
@@ -60,8 +67,6 @@ export class ConversationMessages implements FerretMessenger {
     key: string,
     attachments?: BoardReopenAttachments,
   ): Promise<ReopenDelivery> {
-    const known = this.delivered.get(key);
-    if (known !== undefined) return known;
     const conversation = this.conversation();
     if (conversation === undefined) return this.held(ferret, message);
     const to = FerretIdSchema.safeParse(await nudgeTarget(this.helpers, ferret));
@@ -75,6 +80,7 @@ export class ConversationMessages implements FerretMessenger {
         { kind: 'owner' },
         {
           message: text,
+          sendId: sendIdOf(key),
           ...(attachments !== undefined && carried ? { attachmentIds: [...attachments.ids] } : {}),
         },
       );
@@ -82,9 +88,7 @@ export class ConversationMessages implements FerretMessenger {
         this.diagnostics.warn(`a board message for ${to.data} was refused: ${sent.error.message}`);
         return 'absent';
       }
-      const how = deliveryOf(sent.value);
-      this.remember(key, how);
-      return how;
+      return deliveryOf(sent.value);
     } catch (error) {
       this.diagnostics.warn(`a board message for ${to.data} was not sent: ${errorText(error)}`);
       return 'absent';
@@ -112,15 +116,9 @@ export class ConversationMessages implements FerretMessenger {
     const id = FerretIdSchema.safeParse(ferret);
     if (conversation === undefined || !id.success) return { kind: 'unresolved' };
     try {
-      const page = await conversation.transcript(id.data, { limit });
+      const page = await conversation.transcriptEvents(id.data, { limit });
       if (!page.ok) return page.error.code === 'not_found' ? { kind: 'unresolved' } : { kind: 'unreadable' };
-      const events: TranscriptEvent[] = page.value.messages.map(each => ({
-        kind: 'message',
-        role: each.role,
-        text: each.text,
-        ...(each.timestamp === undefined ? {} : { timestamp: each.timestamp }),
-      }));
-      return { kind: 'read', events };
+      return { kind: 'read', events: page.value.events };
     } catch {
       return { kind: 'unreadable' };
     }
@@ -131,11 +129,6 @@ export class ConversationMessages implements FerretMessenger {
       `a board message for ${ferret} was held: Conversation is off on this daemon, so it was not typed: ${message}`,
     );
     return 'absent';
-  }
-
-  private remember(key: string, how: ReopenDelivery): void {
-    this.delivered.set(key, how);
-    if (this.delivered.size > KEPT_KEYS) this.delivered.delete(this.delivered.keys().next().value as string);
   }
 }
 

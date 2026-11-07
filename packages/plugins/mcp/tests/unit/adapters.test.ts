@@ -29,11 +29,26 @@ function memoryRoot(
     list: async () => [],
     stat: async path =>
       path in files
-        ? { kind: 'file' as const, size: files[path]!.length, modified: '2026-01-01T00:00:00Z' as never }
+        ? {
+            kind: 'file' as const,
+            size: files[path]!.length,
+            modified: '2026-01-01T00:00:00Z' as never,
+            mode: 0o600,
+            links: 1,
+          }
         : (options.dirs ?? []).includes(path)
-          ? { kind: 'directory' as const, size: 0, modified: '2026-01-01T00:00:00Z' as never }
+          ? { kind: 'directory' as const, size: 0, modified: '2026-01-01T00:00:00Z' as never, mode: 0o600, links: 1 }
           : undefined,
     remove: async () => undefined,
+    readTail: () => Promise.reject(new Error('the fixture has no readTail')),
+    writeBytes: () => Promise.reject(new Error('the fixture has no writeBytes')),
+    copyTree: () => Promise.reject(new Error('the fixture has no copyTree')),
+    ensurePrivateDirectory: () => Promise.reject(new Error('the fixture has no ensurePrivateDirectory')),
+    entries: () => Promise.reject(new Error('the fixture has no entries')),
+    lstat: () => Promise.reject(new Error('the fixture has no lstat')),
+    makeDirectory: () => Promise.reject(new Error('the fixture has no makeDirectory')),
+    realPath: () => Promise.reject(new Error('the fixture has no realPath')),
+    pin: () => Promise.reject(new Error('the fixture has no pin')),
   };
   return Object.assign(handle, { files });
 }
@@ -63,12 +78,17 @@ describe('RootMcpProjectFiles', () => {
   });
 
   test('refuses a path that leaves the ferret folder, something that is not a file, and one too large', async () => {
-    const root = memoryRoot({ '/w/big/.mcp.json': 'x'.repeat(1024 * 1024 + 1) }, { outside: ['/w/out'], dirs: ['/w/dir'] });
+    const root = memoryRoot(
+      { '/w/big/.mcp.json': 'x'.repeat(1024 * 1024 + 1) },
+      { outside: ['/w/out'], dirs: ['/w/dir'] },
+    );
     const files = new RootMcpProjectFiles(async () => ({ root, base: '/w' }));
 
     await expect(files.read('f1', '/w/out/.mcp.json')).rejects.toBeInstanceOf(McpProjectFileError);
     await expect(files.read('f1', '/w/dir')).rejects.toBeInstanceOf(McpProjectFileError);
-    await expect(files.read('f1', '/w/big/.mcp.json')).rejects.toMatchObject({ message: expect.stringContaining('1 MiB') });
+    await expect(files.read('f1', '/w/big/.mcp.json')).rejects.toMatchObject({
+      message: expect.stringContaining('1 MiB'),
+    });
     await expect(files.replace('f1', '/w/out/.mcp.json', 'x', null)).rejects.toBeInstanceOf(McpProjectFileError);
   });
 });
@@ -89,7 +109,10 @@ describe('RootMcpHarnessDocuments', () => {
   });
 
   test('says a document does not parse without quoting it, and refuses a directory or a path outside the root', async () => {
-    const root = memoryRoot({ '/w/bad.json': '{"env":{"KEY":"sk-live-SECRET"}, oops' }, { outside: ['/w/out'], dirs: ['/w/dir'] });
+    const root = memoryRoot(
+      { '/w/bad.json': '{"env":{"KEY":"sk-live-SECRET"}, oops' },
+      { outside: ['/w/out'], dirs: ['/w/dir'] },
+    );
     const documents = new RootMcpHarnessDocuments(() => ({ root, base: '/w' }), parse);
 
     const broken = await documents.read('/w/bad.json', 'json').catch((error: unknown) => error);
