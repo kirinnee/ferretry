@@ -211,7 +211,7 @@ describe('the composed Vault input half', () => {
   });
 
   for (const end of [{ state: 'stopped' }, { gone: true }] as const) {
-    test(`I108 the composed Vault drops a ${'gone' in end ? 'gone' : 'stopped'} ferret's delivered value before its TTL`, async () => {
+    test(`I108 J-0055 the composed Vault drops a ${'gone' in end ? 'gone' : 'stopped'} ferret's delivered value before its TTL`, async () => {
       const { host, deliver } = await setup();
       host.emit(FerretsChanged, { ferret: FERRET, generation: 1, state: 'working' });
       await host.settle();
@@ -229,7 +229,7 @@ describe('the composed Vault input half', () => {
     });
   }
 
-  test('I108 missing or unreadable ferret state keeps masking until a known end', async () => {
+  test('I108 J-0055 missing or unreadable ferret state keeps masking until a known end', async () => {
     const { host, deliver } = await setup();
     expect((await deliver()).status).toBe(200);
     const redaction = host.provided(RedactionPort);
