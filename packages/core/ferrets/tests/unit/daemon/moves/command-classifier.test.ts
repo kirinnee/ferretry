@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { classifyCommand, classifyToolName } from '../../../../daemon/lib/moves/command-classifier.ts';
 
-describe('migration command classifier', () => {
+describe('move command classifier', () => {
   it('should classify known read-only, repeatable, and mutating commands', () => {
     // Act + Assert
     for (const command of ['rg pattern', 'git status', 'curl https://example.test', 'sudo ls -la'])

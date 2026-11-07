@@ -6,12 +6,12 @@
  * (the module contributes no audit rule): the session journal records a handover.
  */
 export const callers: readonly string[] = [
-  'GET /v1/sessions/:sessionId/handover authenticated any',
-  'POST /v1/sessions/:sessionId/handover operator any',
-  'POST /v1/sessions/:sessionId/handover/cancel operator any',
+  'GET /v1/ferrets/:ferretId/handover authenticated any',
+  'POST /v1/ferrets/:ferretId/handover operator any',
+  'POST /v1/ferrets/:ferretId/handover/cancel operator any',
 ];
 
 export const notAudited: Readonly<Record<string, string>> = {
-  'POST /v1/sessions/:sessionId/handover': 'drives an existing session; its journal records it',
-  'POST /v1/sessions/:sessionId/handover/cancel': 'drives an existing session; its journal records it',
+  'POST /v1/ferrets/:ferretId/handover': 'drives an existing session; its journal records it',
+  'POST /v1/ferrets/:ferretId/handover/cancel': 'drives an existing session; its journal records it',
 };

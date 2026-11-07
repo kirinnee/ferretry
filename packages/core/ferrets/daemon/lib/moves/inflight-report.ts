@@ -1,7 +1,7 @@
 import type { SessionStatus } from '../protocol/session-base.ts';
 import type { KnownProcess } from './harness-provenance.ts';
 import { refusalSentence } from './inflight-describe.ts';
-import { type InflightVerdict, verdictBlocksMigration, worstVerdict } from './verdict.ts';
+import { type InflightVerdict, verdictBlocksMove, worstVerdict } from './verdict.ts';
 
 export interface OpenToolInfo {
   readonly toolUseId: string;
@@ -78,7 +78,7 @@ export function isBusyStatus(status: SessionStatus): boolean {
 }
 
 /**
- * Combines observable signals into a fail-closed migration safety report.
+ * Combines observable signals into a fail-closed move safety report.
  *
  * A blind spot — an inspection that failed, or a session that reports work while the inspection
  * sees none — contributes an `unknown` verdict, because the gate must refuse what it cannot see.
@@ -132,7 +132,7 @@ export interface GateDecision {
  */
 export function gateInflight(report: InflightReport, options: { readonly force?: boolean } = {}): GateDecision {
   if (report.empty) return { proceed: true, forced: false, reason: 'no in-flight work' };
-  if (!verdictBlocksMigration(report.worstVerdict))
+  if (!verdictBlocksMove(report.worstVerdict))
     return { proceed: true, forced: false, reason: `in-flight work is ${report.worstVerdict}` };
   const cause = refusalSentence(report);
   if (options.force) return { proceed: true, forced: true, reason: `forced past ${cause}` };

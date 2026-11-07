@@ -7,7 +7,7 @@ import { NodeCodexRolloutIndex } from '../../../src/adapters/session/transcript/
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**
- * The transcripts a migration carries between logins, on a real filesystem inside a throwaway tree.
+ * The transcripts a move carries between logins, on a real filesystem inside a throwaway tree.
  */
 
 const SESSION = '/state/sessions/mvd5yjxz-c22a4a22';

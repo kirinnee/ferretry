@@ -1,7 +1,7 @@
 /**
  * Cross-harness handover — the daemon's vocabulary and its narrow ports.
  *
- * A HANDOVER IS NOT A MIGRATION, and the two words must never become synonyms here. A migration
+ * A HANDOVER IS NOT A MOVE, and the two words must never become synonyms here. A move
  * keeps one session id and restamps its identity document so one conversation continues under
  * another account of the SAME family. A handover crosses families, and the conversation is exactly
  * the thing that cannot cross: the transcript, the turn counter, the open-tool ids and the resume

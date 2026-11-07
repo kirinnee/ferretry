@@ -1,11 +1,11 @@
 import type { SessionView } from '../../../../daemon/lib/protocol/session.ts';
 import { describe, expect, it } from 'bun:test';
 import {
-  MIGRATION_REPLAY_MAX_ENTRIES,
-  MigrationReplayCapacityError,
-  MigrationReplayGuard,
-  MigrationReplayMismatchError,
-  migrationReplayKey,
+  MOVE_REPLAY_MAX_ENTRIES,
+  MoveReplayCapacityError,
+  MoveReplayGuard,
+  MoveReplayMismatchError,
+  moveReplayKey,
 } from '../../../../daemon/lib/moves/replay-guard.ts';
 
 /** Stands in for the taxonomy's `failed`: a failure raised past the point of no return. */
@@ -15,7 +15,7 @@ const view = (agent: string): SessionView => ({ config: { agent } }) as unknown 
 
 const key = (requestId: string, sessionId = 'session-a') => ({ sessionId, requestId });
 
-/** A deferred migration, so an in-flight replay can be observed before the original settles. */
+/** A deferred move, so an in-flight replay can be observed before the original settles. */
 const deferred = () => {
   let settle: (value: SessionView) => void = () => undefined;
   let fail: (error: unknown) => void = () => undefined;
@@ -30,16 +30,16 @@ const deferred = () => {
 const retainAll = () => true;
 const retainNone = () => false;
 
-describe('migrationReplayKey', () => {
+describe('moveReplayKey', () => {
   it('separates the same request id on different sessions', () => {
-    expect(migrationReplayKey(key('r1', 'session-a'))).not.toBe(migrationReplayKey(key('r1', 'session-b')));
-    expect(migrationReplayKey(key('r1'))).toBe(migrationReplayKey(key('r1')));
+    expect(moveReplayKey(key('r1', 'session-a'))).not.toBe(moveReplayKey(key('r1', 'session-b')));
+    expect(moveReplayKey(key('r1'))).toBe(moveReplayKey(key('r1')));
   });
 });
 
-describe('MigrationReplayGuard', () => {
-  it('performs one destructive migration for a concurrent in-flight replay, and both observe it', async () => {
-    const guard = new MigrationReplayGuard(retainAll);
+describe('MoveReplayGuard', () => {
+  it('performs one destructive move for a concurrent in-flight replay, and both observe it', async () => {
+    const guard = new MoveReplayGuard(retainAll);
     const gate = deferred();
     let performed = 0;
     const perform = () => {
@@ -59,7 +59,7 @@ describe('MigrationReplayGuard', () => {
   });
 
   it('replays a completed success without relaunching again', async () => {
-    const guard = new MigrationReplayGuard(retainAll);
+    const guard = new MoveReplayGuard(retainAll);
     let performed = 0;
     const perform = async () => {
       performed += 1;
@@ -74,10 +74,10 @@ describe('MigrationReplayGuard', () => {
   it('lets a pre-destructive refusal be re-evaluated under the same request id', async () => {
     // This is the sheet's "Retry safety check": the preflight refused, nothing was destroyed, the
     // reader resolved the blocker, and asking again must consult the session's CURRENT condition.
-    const guard = new MigrationReplayGuard(retainNone);
+    const guard = new MoveReplayGuard(retainNone);
     const outcomes: Array<() => Promise<SessionView>> = [
       async () => {
-        throw new Error('in-flight work refuses this migration');
+        throw new Error('in-flight work refuses this move');
       },
       async () => view('codex-auto-atomi'),
     ];
@@ -97,7 +97,7 @@ describe('MigrationReplayGuard', () => {
   it('never re-attempts a failure that happened after the session was destroyed', async () => {
     // The pane is already killed and the document restamped. An automatic retry 250ms later must be
     // told what happened, not allowed to relaunch a session that has no pane left.
-    const guard = new MigrationReplayGuard(retainAll);
+    const guard = new MoveReplayGuard(retainAll);
     let performed = 0;
     const perform = async (): Promise<SessionView> => {
       performed += 1;
@@ -110,8 +110,8 @@ describe('MigrationReplayGuard', () => {
     expect(performed).toBe(1);
   });
 
-  it('refuses one request id presented with two different targets, and performs neither migration', async () => {
-    const guard = new MigrationReplayGuard(retainAll);
+  it('refuses one request id presented with two different targets, and performs neither move', async () => {
+    const guard = new MoveReplayGuard(retainAll);
     let performed = 0;
     const perform = async () => {
       performed += 1;
@@ -119,7 +119,7 @@ describe('MigrationReplayGuard', () => {
     };
 
     await guard.run(key('r1'), 'target-a', perform);
-    await expect(guard.run(key('r1'), 'target-b', perform)).rejects.toBeInstanceOf(MigrationReplayMismatchError);
+    await expect(guard.run(key('r1'), 'target-b', perform)).rejects.toBeInstanceOf(MoveReplayMismatchError);
     expect(performed).toBe(1);
 
     // A mismatch against an entry that is still RUNNING is refused the same way.
@@ -131,8 +131,8 @@ describe('MigrationReplayGuard', () => {
     expect(performed).toBe(1);
   });
 
-  it('keeps distinct request ids as distinct migrations', async () => {
-    const guard = new MigrationReplayGuard(retainAll);
+  it('keeps distinct request ids as distinct moves', async () => {
+    const guard = new MoveReplayGuard(retainAll);
     let performed = 0;
     const perform = async () => {
       performed += 1;
@@ -141,19 +141,19 @@ describe('MigrationReplayGuard', () => {
 
     expect((await guard.run(key('r1'), 'target-a', perform)).config.agent).toBe('agent-1');
     expect((await guard.run(key('r2'), 'target-a', perform)).config.agent).toBe('agent-2');
-    // Same request id, different session: also a distinct migration.
+    // Same request id, different session: also a distinct move.
     expect((await guard.run(key('r1', 'session-b'), 'target-a', perform)).config.agent).toBe('agent-3');
     expect(performed).toBe(3);
   });
 
-  it('still replays an early success and an early committed failure after very many later migrations', async () => {
+  it('still replays an early success and an early committed failure after very many later moves', async () => {
     // THE REGRESSION THIS PINS. The guard used to keep a bounded 64-entry history, so 64 later
-    // migrations discarded an earlier receipt and the next request carrying that earlier id found a
+    // moves discarded an earlier receipt and the next request carrying that earlier id found a
     // clean slate and relaunched a session that had already been relaunched. The bound was counted in
-    // MIGRATIONS, not seconds, so no retry window was short enough to be safe. Nothing settled may be
-    // forgotten while the process lives, and 500 unrelated migrations is well past any bound a future
+    // MOVES, not seconds, so no retry window was short enough to be safe. Nothing settled may be
+    // forgotten while the process lives, and 500 unrelated moves is well past any bound a future
     // change might reintroduce.
-    const guard = new MigrationReplayGuard(committedFailure => committedFailure instanceof CommittedError);
+    const guard = new MoveReplayGuard(committedFailure => committedFailure instanceof CommittedError);
     let performed = 0;
     const succeed = async () => {
       performed += 1;
@@ -188,10 +188,10 @@ describe('MigrationReplayGuard', () => {
     expect(performed).toBe(502);
   });
 
-  it('keeps every concurrent migration recognisable, however many are in flight at once', async () => {
-    // The in-flight map must hold every running migration: a replay that failed to find its original
+  it('keeps every concurrent move recognisable, however many are in flight at once', async () => {
+    // The in-flight map must hold every running move: a replay that failed to find its original
     // would start a second relaunch.
-    const guard = new MigrationReplayGuard(retainAll);
+    const guard = new MoveReplayGuard(retainAll);
     const gates = Array.from({ length: 24 }, () => deferred());
     let performed = 0;
     const perform = (index: number) => () => {
@@ -222,9 +222,9 @@ describe('MigrationReplayGuard', () => {
  * to refuse NEW work rather than discard OLD receipts, because refusing destroys nothing and
  * discarding re-authorizes a destructive relaunch.
  */
-describe('MigrationReplayGuard admission', () => {
+describe('MoveReplayGuard admission', () => {
   it('refuses a new identity at capacity WITHOUT performing it', async () => {
-    const guard = new MigrationReplayGuard(retainAll, 2);
+    const guard = new MoveReplayGuard(retainAll, 2);
     let performed = 0;
     const perform = async () => {
       performed += 1;
@@ -238,7 +238,7 @@ describe('MigrationReplayGuard admission', () => {
 
     // The third is turned away, and the destructive thunk is never invoked — that is the whole point
     // of checking admission before `perform`.
-    await expect(guard.run(key('r3'), 'target-a', perform)).rejects.toBeInstanceOf(MigrationReplayCapacityError);
+    await expect(guard.run(key('r3'), 'target-a', perform)).rejects.toBeInstanceOf(MoveReplayCapacityError);
     expect(performed).toBe(2);
     expect(guard.size).toBe(2);
 
@@ -248,9 +248,9 @@ describe('MigrationReplayGuard admission', () => {
   });
 
   it('still serves every existing success and committed failure while full', async () => {
-    // A memory limit that stopped answering for migrations already performed would BE the
+    // A memory limit that stopped answering for moves already performed would BE the
     // re-destruction hazard it was added to prevent.
-    const guard = new MigrationReplayGuard(committed => committed instanceof CommittedError, 2);
+    const guard = new MoveReplayGuard(committed => committed instanceof CommittedError, 2);
     let performed = 0;
     const succeed = async () => {
       performed += 1;
@@ -266,7 +266,7 @@ describe('MigrationReplayGuard admission', () => {
     expect(guard.size).toBe(2);
 
     // Full: new work is refused.
-    await expect(guard.run(key('fresh'), 'target-a', succeed)).rejects.toBeInstanceOf(MigrationReplayCapacityError);
+    await expect(guard.run(key('fresh'), 'target-a', succeed)).rejects.toBeInstanceOf(MoveReplayCapacityError);
 
     // ...and both receipts still answer, without re-performing anything.
     expect((await guard.run(key('done'), 'target-a', succeed)).config.agent).toBe(success.config.agent);
@@ -274,13 +274,13 @@ describe('MigrationReplayGuard admission', () => {
     expect(performed).toBe(2);
 
     // A mismatched target on a held id is still the mismatch answer, not the capacity answer: the
-    // caller needs to know its id names another migration, and a full ledger does not change that.
-    await expect(guard.run(key('done'), 'target-b', succeed)).rejects.toBeInstanceOf(MigrationReplayMismatchError);
+    // caller needs to know its id names another move, and a full ledger does not change that.
+    await expect(guard.run(key('done'), 'target-b', succeed)).rejects.toBeInstanceOf(MoveReplayMismatchError);
     expect(performed).toBe(2);
   });
 
   it('serves an in-flight replay while full, rather than refusing it as new work', async () => {
-    const guard = new MigrationReplayGuard(retainAll, 1);
+    const guard = new MoveReplayGuard(retainAll, 1);
     const gate = deferred();
     let performed = 0;
     const perform = () => {
@@ -290,8 +290,8 @@ describe('MigrationReplayGuard admission', () => {
 
     const first = guard.run(key('r1'), 'target-a', perform);
     expect(guard.size).toBe(1);
-    // The slot is taken by a RUNNING migration, so a different id is refused...
-    await expect(guard.run(key('r2'), 'target-a', perform)).rejects.toBeInstanceOf(MigrationReplayCapacityError);
+    // The slot is taken by a RUNNING move, so a different id is refused...
+    await expect(guard.run(key('r2'), 'target-a', perform)).rejects.toBeInstanceOf(MoveReplayCapacityError);
     // ...while the retry of the running one joins it.
     const replay = guard.run(key('r1'), 'target-a', perform);
     expect(performed).toBe(1);
@@ -302,14 +302,14 @@ describe('MigrationReplayGuard admission', () => {
     expect(performed).toBe(1);
   });
 
-  it('frees admission when a migration is refused before it touches the pane', async () => {
+  it('frees admission when a move is refused before it touches the pane', async () => {
     // Pre-destructive refusals release their slot, which is why a fleet that trips the preflight all
     // day long consumes no admission at all and can never reach the cap by refusals alone.
-    const guard = new MigrationReplayGuard(retainNone, 1);
+    const guard = new MoveReplayGuard(retainNone, 1);
     let performed = 0;
     const refuse = async (): Promise<SessionView> => {
       performed += 1;
-      throw new Error('in-flight work refuses this migration');
+      throw new Error('in-flight work refuses this move');
     };
     const succeed = async () => {
       performed += 1;
@@ -324,14 +324,14 @@ describe('MigrationReplayGuard admission', () => {
     expect(guard.size).toBe(1);
 
     // ...and now that the slot holds a committed receipt, the cap bites again.
-    await expect(guard.run(key('another'), 'target-a', succeed)).rejects.toBeInstanceOf(MigrationReplayCapacityError);
+    await expect(guard.run(key('another'), 'target-a', succeed)).rejects.toBeInstanceOf(MoveReplayCapacityError);
     expect(performed).toBe(2);
   });
 
   it('cannot overshoot the cap when many callers arrive at once', async () => {
     // Admission is checked and the slot reserved in one synchronous step, so concurrent callers cannot
     // both pass one free slot.
-    const guard = new MigrationReplayGuard(retainAll, 4);
+    const guard = new MoveReplayGuard(retainAll, 4);
     const gates = Array.from({ length: 32 }, () => deferred());
     let performed = 0;
     const perform = (index: number) => () => {
@@ -344,7 +344,7 @@ describe('MigrationReplayGuard admission', () => {
     const attempts = gates.map((_gate, index) =>
       guard.run(key(`r${index}`), 'target-a', perform(index)).then(
         () => 'admitted' as const,
-        error => (error instanceof MigrationReplayCapacityError ? ('refused' as const) : ('other' as const)),
+        error => (error instanceof MoveReplayCapacityError ? ('refused' as const) : ('other' as const)),
       ),
     );
 
@@ -364,7 +364,7 @@ describe('MigrationReplayGuard admission', () => {
   });
 
   it('treats a non-positive cap as one admission, and publishes a human-scale production default', async () => {
-    const guard = new MigrationReplayGuard(retainAll, 0);
+    const guard = new MoveReplayGuard(retainAll, 0);
     let performed = 0;
     const perform = async () => {
       performed += 1;
@@ -372,25 +372,25 @@ describe('MigrationReplayGuard admission', () => {
     };
 
     await guard.run(key('r1'), 'target-a', perform);
-    await expect(guard.run(key('r2'), 'target-a', perform)).rejects.toBeInstanceOf(MigrationReplayCapacityError);
+    await expect(guard.run(key('r2'), 'target-a', perform)).rejects.toBeInstanceOf(MoveReplayCapacityError);
     expect(performed).toBe(1);
 
-    // Large enough that deliberate human migrations never reach it; small enough that the ledger is
+    // Large enough that deliberate human moves never reach it; small enough that the ledger is
     // megabytes rather than a heap.
-    expect(MIGRATION_REPLAY_MAX_ENTRIES).toBe(4096);
+    expect(MOVE_REPLAY_MAX_ENTRIES).toBe(4096);
   });
 
   // A non-finite cap used to DISABLE admission rather than widen it: `Math.trunc` passes NaN and
   // Infinity through, `Math.max` keeps them, and `size >= NaN` / `size >= Infinity` are both always
   // false — so the ledger became unbounded again while looking configured. Each of these must admit
-  // exactly one migration and refuse the second.
+  // exactly one move and refuse the second.
   for (const [label, cap] of [
     ['NaN', Number.NaN],
     ['+Infinity', Number.POSITIVE_INFINITY],
     ['-Infinity', Number.NEGATIVE_INFINITY],
   ] as const) {
-    it(`admits exactly one migration when the cap is ${label}`, async () => {
-      const guard = new MigrationReplayGuard(retainAll, cap);
+    it(`admits exactly one move when the cap is ${label}`, async () => {
+      const guard = new MoveReplayGuard(retainAll, cap);
       let performed = 0;
       const perform = async () => {
         performed += 1;
@@ -403,9 +403,7 @@ describe('MigrationReplayGuard admission', () => {
 
       // And the ledger is genuinely closed afterwards, not merely slow to fill.
       for (const requestId of ['r2', 'r3', 'r4']) {
-        await expect(guard.run(key(requestId), 'target-a', perform)).rejects.toBeInstanceOf(
-          MigrationReplayCapacityError,
-        );
+        await expect(guard.run(key(requestId), 'target-a', perform)).rejects.toBeInstanceOf(MoveReplayCapacityError);
       }
       expect(performed).toBe(1);
       expect(guard.size).toBe(1);
@@ -416,8 +414,8 @@ describe('MigrationReplayGuard admission', () => {
     });
   }
 
-  it('truncates a fractional cap rather than admitting the extra migration', async () => {
-    const guard = new MigrationReplayGuard(retainAll, 2.9);
+  it('truncates a fractional cap rather than admitting the extra move', async () => {
+    const guard = new MoveReplayGuard(retainAll, 2.9);
     let performed = 0;
     const perform = async () => {
       performed += 1;
@@ -426,12 +424,12 @@ describe('MigrationReplayGuard admission', () => {
 
     await guard.run(key('r1'), 'target-a', perform);
     await guard.run(key('r2'), 'target-a', perform);
-    await expect(guard.run(key('r3'), 'target-a', perform)).rejects.toBeInstanceOf(MigrationReplayCapacityError);
+    await expect(guard.run(key('r3'), 'target-a', perform)).rejects.toBeInstanceOf(MoveReplayCapacityError);
     expect(performed).toBe(2);
   });
 
   it('defaults to the production cap when none is given', async () => {
-    const guard = new MigrationReplayGuard(retainAll);
+    const guard = new MoveReplayGuard(retainAll);
     let performed = 0;
     const perform = async () => {
       performed += 1;

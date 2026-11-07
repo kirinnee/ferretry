@@ -23,7 +23,7 @@ function headline(interrupted: number): string {
 /**
  * The message sent to a restarted agent, or `undefined` when there is nothing worth saying.
  *
- * Restart and same-harness migrate resume the same conversation, so the agent already knows what it
+ * Restart and same-harness move resume the same conversation, so the agent already knows what it
  * was doing. It is told only when the session was mid-turn AND the inventory holds something not
  * known safe to lose — a blind spot counts, because "could not look" is not "nothing there". It is
  * Ferretry's own sentence — Ferretry is its subject, with no tag or footer — and the turn it rides carries

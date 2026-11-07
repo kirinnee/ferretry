@@ -15,7 +15,7 @@ const table = [
   'malformed',
 ].join('\n');
 
-describe('migration process inventory decisions', () => {
+describe('move process inventory decisions', () => {
   it('should parse only valid rows and preserve command metadata', () => {
     // Act
     const actual = parseProcessTable(table);

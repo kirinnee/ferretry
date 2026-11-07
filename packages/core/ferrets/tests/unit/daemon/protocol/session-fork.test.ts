@@ -313,10 +313,10 @@ describe('the session fork protocol', () => {
       'session_fork_failed',
     ]);
     assertRejects([
-      // Crossing harness families is ALLOWED and merely lossy, so a migration's refusal is not one a
+      // Crossing harness families is ALLOWED and merely lossy, so a move's refusal is not one a
       // fork can ever answer with. This is the difference the two taxonomies exist to keep apart.
-      { name: 'a migration refusal', schema: fork.ForkSessionFailureSchema, value: 'harness_mismatch' },
-      { name: 'a migration downgrade', schema: fork.ForkSessionFailureSchema, value: 'context_downgrade' },
+      { name: 'a move refusal', schema: fork.ForkSessionFailureSchema, value: 'harness_mismatch' },
+      { name: 'a move downgrade', schema: fork.ForkSessionFailureSchema, value: 'context_downgrade' },
       // Every well-formed selection mismatch answers with the ONE code above. A taxonomy of near
       // spellings would let a caller distinguish "tampered" from "rewritten" from "wrong session",
       // which turns the refusal into an oracle over a transcript it was refused permission to read.

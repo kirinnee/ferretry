@@ -1,26 +1,26 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { harnessConversionRefusal, harnessMigrationRefusal } from '../../../../daemon/lib/moves/harness-fit.ts';
+import { harnessConversionRefusal, harnessMoveRefusal } from '../../../../daemon/lib/moves/harness-compatibility.ts';
 
 /**
  * The same-kind constraint the CLI promised and the daemon did not check.
  *
- * `fy session migrate` has always described itself as continuing a session on another same-kind fleet
- * account, while the migrator resolved the requested account and rebuilt the target from
+ * `fy session move` has always described itself as continuing a session on another same-kind fleet
+ * account, while the mover resolved the requested account and rebuilt the target from
  * `account.kind` without ever comparing it to the source harness. Both directions of the crossing are
  * tested because they fail differently and neither was refused.
  */
 
-describe('the migration harness check', () => {
+describe('the move harness check', () => {
   it('should allow a move onto an account of the session own family', () => {
     // The ordinary case, and the whole point of the operation: a rate-limited claude session moves
     // onto another claude account and keeps its conversation.
     // Act + Assert
     should(
-      harnessMigrationRefusal({ sourceHarness: 'claude', targetHarness: 'claude', targetAgent: 'claude-auto-two' }),
+      harnessMoveRefusal({ sourceHarness: 'claude', targetHarness: 'claude', targetAgent: 'claude-auto-two' }),
     ).be.undefined();
     should(
-      harnessMigrationRefusal({ sourceHarness: 'codex', targetHarness: 'codex', targetAgent: 'codex-auto-two' }),
+      harnessMoveRefusal({ sourceHarness: 'codex', targetHarness: 'codex', targetAgent: 'codex-auto-two' }),
     ).be.undefined();
   });
 
@@ -29,12 +29,12 @@ describe('the migration harness check', () => {
     // transcript reads nothing, and a claude harness handed a codex rollout reads nothing — but each
     // was permitted, and each destroyed the pane before anyone found out.
     // Act
-    const toCodex = harnessMigrationRefusal({
+    const toCodex = harnessMoveRefusal({
       sourceHarness: 'claude',
       targetHarness: 'codex',
       targetAgent: 'codex-auto-target',
     });
-    const toClaude = harnessMigrationRefusal({
+    const toClaude = harnessMoveRefusal({
       sourceHarness: 'codex',
       targetHarness: 'claude',
       targetAgent: 'claude-auto-target',
@@ -45,10 +45,10 @@ describe('the migration harness check', () => {
     should(toCodex).containEql('runs the claude harness');
     should(toCodex).containEql('codex-auto-target is a codex account');
     // The refusal has to be actionable: what the caller does instead is name a same-family account.
-    should(toCodex).containEql('migrate onto a claude account');
+    should(toCodex).containEql('move onto a claude account');
     should(toClaude).containEql('runs the codex harness');
     should(toClaude).containEql('claude-auto-target is a claude account');
-    should(toClaude).containEql('migrate onto a codex account');
+    should(toClaude).containEql('move onto a codex account');
     // And it names the one way across: converting the conversation.
     should(toCodex).containEql('Convert the conversation instead (Move to Codex…, or `--convert`)');
     should(toClaude).containEql('(Move to Claude…, or `--convert`)');
@@ -60,22 +60,22 @@ describe('the migration harness check', () => {
     // destroys a pane. A document from a future daemon, or a manifest declaring a family this build
     // has never heard of, is precisely where "they look the same" is worth nothing.
     // Act
-    const unknownSource = harnessMigrationRefusal({
+    const unknownSource = harnessMoveRefusal({
       sourceHarness: 'gemini',
       targetHarness: 'claude',
       targetAgent: 'claude-auto-target',
     });
-    const unknownTarget = harnessMigrationRefusal({
+    const unknownTarget = harnessMoveRefusal({
       sourceHarness: 'claude',
       targetHarness: 'gemini',
       targetAgent: 'gemini-auto-target',
     });
-    const bothUnknownAndIdentical = harnessMigrationRefusal({
+    const bothUnknownAndIdentical = harnessMoveRefusal({
       sourceHarness: 'gemini',
       targetHarness: 'gemini',
       targetAgent: 'gemini-auto-target',
     });
-    const blank = harnessMigrationRefusal({ sourceHarness: '', targetHarness: '', targetAgent: 'nameless' });
+    const blank = harnessMoveRefusal({ sourceHarness: '', targetHarness: '', targetAgent: 'nameless' });
 
     // Assert
     should(unknownSource).containEql('records harness "gemini"');

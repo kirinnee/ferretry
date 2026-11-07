@@ -1,14 +1,14 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { MigrationController, renderConversionPreview } from '../../../../cli/lib/move/controller.ts';
+import { MoveController, renderConversionPreview } from '../../../../cli/lib/move/controller.ts';
 import { RecordingProgress } from '../progress/fixtures.ts';
-import { migrationHarness, READY_PREVIEW, RecordingMigrationGateway } from './fixtures.ts';
+import { moveHarness, READY_PREVIEW, RecordingMoveGateway } from './fixtures.ts';
 
-describe('session migration', () => {
-  it('should trim and pass the complete migration request through the daemon gate', async () => {
+describe('session move', () => {
+  it('should trim and pass the complete move request through the daemon gate', async () => {
     // Arrange
-    const { gateway, io, presenter } = migrationHarness();
-    const subject = new MigrationController(gateway, presenter);
+    const { gateway, io, presenter } = moveHarness();
+    const subject = new MoveController(gateway, presenter);
 
     // Act
     await subject.execute('  Fable  ', {
@@ -34,8 +34,8 @@ describe('session migration', () => {
 
   it('should omit blank optional models and let the client mint an idempotency key', async () => {
     // Arrange
-    const { gateway, presenter } = migrationHarness();
-    const subject = new MigrationController(gateway, presenter);
+    const { gateway, presenter } = moveHarness();
+    const subject = new MoveController(gateway, presenter);
 
     // Act
     await subject.execute('ses-1', { agent: 'codex-secondary', model: '   ' });
@@ -48,8 +48,8 @@ describe('session migration', () => {
 
   it('should pass a conversation choice through and refuse one the daemon does not know', async () => {
     // Arrange
-    const { gateway, presenter } = migrationHarness();
-    const subject = new MigrationController(gateway, presenter);
+    const { gateway, presenter } = moveHarness();
+    const subject = new MoveController(gateway, presenter);
 
     // Act
     await subject.execute('ses-1', { agent: 'claude-default', conversation: ' previous ' });
@@ -70,8 +70,8 @@ describe('session migration', () => {
 
   it('should print the schema-parsed session under --json', async () => {
     // Arrange
-    const { gateway, io, presenter } = migrationHarness();
-    const subject = new MigrationController(gateway, presenter);
+    const { gateway, io, presenter } = moveHarness();
+    const subject = new MoveController(gateway, presenter);
 
     // Act
     await subject.execute('ses-1', { agent: 'codex-secondary', json: true });
@@ -82,8 +82,8 @@ describe('session migration', () => {
 
   it('should reject blank required values before the destructive call', async () => {
     // Arrange
-    const { gateway, presenter } = migrationHarness();
-    const subject = new MigrationController(gateway, presenter);
+    const { gateway, presenter } = moveHarness();
+    const subject = new MoveController(gateway, presenter);
 
     // Act + Assert
     await should(subject.execute('   ', { agent: 'codex-secondary' })).be.rejectedWith(
@@ -98,8 +98,8 @@ describe('session migration', () => {
 
   it('should treat --convert as the convert conversation and refuse it beside a different --conversation', async () => {
     // Arrange
-    const { gateway, presenter } = migrationHarness();
-    const subject = new MigrationController(gateway, presenter);
+    const { gateway, presenter } = moveHarness();
+    const subject = new MoveController(gateway, presenter);
 
     // Act
     await subject.execute('ses-1', { agent: 'codex-secondary', convert: true });
@@ -115,8 +115,8 @@ describe('session migration', () => {
 
   it('should print a conversion preview, as lines or JSON, without moving anything', async () => {
     // Arrange
-    const { gateway, io, presenter } = migrationHarness();
-    const subject = new MigrationController(gateway, presenter);
+    const { gateway, io, presenter } = moveHarness();
+    const subject = new MoveController(gateway, presenter);
 
     // Act
     await subject.execute('ses-1', { agent: 'codex-secondary', model: 'gpt-5.6-sol', convert: true, preview: true });
@@ -134,8 +134,8 @@ describe('session migration', () => {
 
   it('should refuse --preview without --convert, since only a conversion has one', async () => {
     // Arrange
-    const { gateway, presenter } = migrationHarness();
-    const subject = new MigrationController(gateway, presenter);
+    const { gateway, presenter } = moveHarness();
+    const subject = new MoveController(gateway, presenter);
 
     // Act + Assert
     await should(subject.execute('ses-1', { agent: 'codex-secondary', preview: true })).be.rejectedWith(
@@ -193,7 +193,7 @@ describe('session migration', () => {
       'Run the same command without --preview to move it. The original conversation stays on disk.',
     ]);
     should(refused).deepEqual(["Can't convert onto claude-default: Too new."]);
-    should(new RecordingMigrationGateway()).have.property('previews');
+    should(new RecordingMoveGateway()).have.property('previews');
   });
 
   it('should say why a Codex version the converter was not tested on is still allowed to take the move', () => {
@@ -213,12 +213,12 @@ describe('session migration', () => {
   });
 });
 
-describe('session migration progress', () => {
+describe('session move progress', () => {
   it('should name the move, and leave the result for after the step', async () => {
     // Arrange
     const progress = new RecordingProgress();
-    const { gateway, io, presenter } = migrationHarness();
-    const subject = new MigrationController(gateway, presenter, progress);
+    const { gateway, io, presenter } = moveHarness();
+    const subject = new MoveController(gateway, presenter, progress);
 
     // Act
     await subject.execute('ses-1', { agent: 'codex-secondary' });
@@ -231,8 +231,8 @@ describe('session migration progress', () => {
   it('should name the preview too', async () => {
     // Arrange
     const progress = new RecordingProgress();
-    const { gateway, presenter } = migrationHarness();
-    const subject = new MigrationController(gateway, presenter, progress);
+    const { gateway, presenter } = moveHarness();
+    const subject = new MoveController(gateway, presenter, progress);
 
     // Act
     await subject.execute('ses-1', { agent: 'codex-secondary', convert: true, preview: true });

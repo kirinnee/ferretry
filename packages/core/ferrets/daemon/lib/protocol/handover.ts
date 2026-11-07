@@ -94,7 +94,7 @@ const HandoverAgentSpecSchema = z.strictObject({
 });
 
 /**
- * POST /v1/sessions/:sessionId/handover body. `requestId` is NOT in the body: it travels on
+ * POST /v1/ferrets/:ferretId/handover body. `requestId` is NOT in the body: it travels on
  * FY_REQUEST_ID_HEADER, and the resolved target + plan are frozen by the daemon onto the receipt.
  * `coordinator` is non-null IF AND ONLY IF the source is on a board: a board root that sends `null` and a
  * boardless root that names a coordinator are both refused `coordinator_required`, because each is the same

@@ -89,16 +89,16 @@ describe('renderInflightCli', () => {
 });
 
 describe('renderInflightReport', () => {
-  it('should record what was running without claiming the migration happened', () => {
+  it('should record what was running without claiming the move happened', () => {
     // Act
     const actual = renderInflightReport(busy(), { ...meta, targetModel: 'opus' });
 
     // Assert
-    should(actual).startWith('# Migration in-flight report\n');
+    should(actual).startWith('# Move in-flight report\n');
     should(actual).containEql('- Session: `session-1`');
     should(actual).containEql('onto: `claude-loge` (model `opus`) — **PENDING');
     should(actual).containEql('- Requested at: 2026-07-31T09:00:00.000Z');
-    should(actual).containEql('- Status at migrate: tool_running (turn 12)');
+    should(actual).containEql('- Status at move: tool_running (turn 12)');
     should(actual).containEql('- Worst verdict: **DESTRUCTIVE**');
     should(actual).not.containEql('FORCED past');
     should(actual).containEql('| DESTRUCTIVE | Bash | `git push origin main` |');
@@ -108,7 +108,7 @@ describe('renderInflightReport', () => {
     should(actual).endWith('before acting.\n\n');
   });
 
-  it('should announce a forced migration as the destruction it is', () => {
+  it('should announce a forced move as the destruction it is', () => {
     // Act
     const actual = renderInflightReport(busy(), { ...meta, forced: true });
 
@@ -122,7 +122,7 @@ describe('renderInflightReport', () => {
     const actual = renderInflightReport(idle(), meta);
 
     // Assert
-    should(actual).containEql('_No open tools or descendant processes were observed at migrate time._');
+    should(actual).containEql('_No open tools or descendant processes were observed at move time._');
     should(actual).not.containEql('### Open harness tools');
     should(actual).not.containEql('### Descendant processes');
     should(actual).not.containEql('### Codex background terminals');
@@ -136,6 +136,6 @@ describe('renderInflightReport', () => {
     // Assert
     should(actual).containEql('### Blind spots');
     should(actual).containEql('- ps exited 1: cannot \\| allocate memory');
-    should(actual).not.containEql('_No open tools or descendant processes were observed at migrate time._');
+    should(actual).not.containEql('_No open tools or descendant processes were observed at move time._');
   });
 });

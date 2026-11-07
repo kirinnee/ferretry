@@ -60,7 +60,7 @@ import {
 import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
 
 /**
- * Forking a conversation from an exact message: the one route `POST /v1/sessions/:sessionId/fork` and the whole
+ * Forking a conversation from an exact message: the one route `POST /v1/ferrets/:ferretId/fork` and the whole
  * restart-safe machine behind it (the preparer, the target resolver and binder, the durable receipt store and the
  * service that drives them).
  *
@@ -68,7 +68,7 @@ import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
  * `DaemonWorld` carries: the receipt store, the preparer and its contributors, the binder and the serial executor are
  * fixed production adapters; every owner the fork borrows is a need), no jobs and no releases of its own: every
  * constructor in {@link createForkSubsystem} is pure (it captures its inputs and reads nothing), so the single build sits
- * where the fork was always assembled — after the runtime and migration dependencies it borrows from and before the
+ * where the fork was always assembled — after the runtime and move dependencies it borrows from and before the
  * subsystem literal that mounts it. It claims no protocol feature.
  *
  * THE FORK STAYS COMPOSED OF THE SESSIONS' OWNERS. Session lifecycle, launch, account resolution, planning, the runtime
@@ -150,7 +150,7 @@ export interface SessionForkNeeds {
  * grammar with nothing to keep it honest against the owner's. Uninjected, the contributor reports a
  * structured `not_implemented` omission, which is the honest answer and a visible one.
  *
- * The serial executor is its OWN queue, for the reason the migration's is: a fork holds its key
+ * The serial executor is its OWN queue, for the reason the move's is: a fork holds its key
  * across a create, an import and a launch, and must not make every unrelated document write in this
  * daemon wait behind it.
  */
@@ -268,7 +268,7 @@ function createForkSubsystem(parts: SessionForkNeeds): SessionForkSubsystem {
       clock: { now: () => parts.clock.now() },
       // The composite key becomes the executor's string key HERE, through the core's own renderer,
       // so two forks of different sources never queue behind each other for sharing a request id.
-      // Its own executor, for the reason the migration has one: a fork holds its key across a
+      // Its own executor, for the reason the move has one: a fork holds its key across a
       // create, an import and a launch, and must not make unrelated document writes wait on it.
       serial: { run: async (key, work) => await forkQueue.run(sessionForkKey(key), work) },
     }),

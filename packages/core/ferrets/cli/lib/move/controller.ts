@@ -1,19 +1,19 @@
 import {
   type ConversionPreview,
-  type MigrationConversation,
-  MigrationConversationSchema,
-} from '../../../daemon/lib/protocol/session.ts';
+  type MoveConversation,
+  MoveConversationSchema,
+} from '../../../daemon/lib/protocol/move.ts';
 import { type IProgress, NO_PROGRESS, withStep } from '../progress/index.ts';
 import type { SessionPresenter } from '../session/presenter.ts';
-import type { IMigrationGateway } from './ports.ts';
+import type { IMoveGateway } from './ports.ts';
 
-/** Flags accepted by `fy migrate`. */
-export interface MigrationCommandOptions {
+/** Flags accepted by `fy move`. */
+export interface MoveCommandOptions {
   readonly agent: string;
   readonly model?: string;
   readonly allowContextDowngrade?: boolean;
   readonly forceInflight?: boolean;
-  /** `resume` (the daemon's default), `fresh`, `previous` or `convert`; see `MigrationConversation`. */
+  /** `resume` (the daemon's default), `fresh`, `previous` or `convert`; see `MoveConversation`. */
   readonly conversation?: string;
   /** Shorthand for `--conversation convert`: a move onto the other harness. */
   readonly convert?: boolean;
@@ -24,14 +24,14 @@ export interface MigrationCommandOptions {
 }
 
 /** Moves one session to another account through the daemon's mandatory preflight gate. */
-export class MigrationController {
+export class MoveController {
   constructor(
-    private readonly gateway: IMigrationGateway,
+    private readonly gateway: IMoveGateway,
     private readonly presenter: SessionPresenter,
     private readonly progress: IProgress = NO_PROGRESS,
   ) {}
 
-  async execute(reference: string, options: MigrationCommandOptions): Promise<void> {
+  async execute(reference: string, options: MoveCommandOptions): Promise<void> {
     const id = reference.trim();
     if (id === '') throw new Error('a session id or callsign is required');
     const agent = options.agent.trim();
@@ -56,7 +56,7 @@ export class MigrationController {
       this.progress,
       `Moving ${id} to ${agent}`,
       async () =>
-        await this.gateway.migrate(
+        await this.gateway.move(
           id,
           agent,
           model,
@@ -71,11 +71,10 @@ export class MigrationController {
 }
 
 /** The `--conversation` choice, refused before the destructive call when it is not one the daemon knows. */
-function conversationChoice(value: string | undefined, convert: boolean): MigrationConversation | undefined {
+function conversationChoice(value: string | undefined, convert: boolean): MoveConversation | undefined {
   if (value === undefined) return convert ? 'convert' : undefined;
-  const parsed = MigrationConversationSchema.safeParse(value.trim());
-  if (!parsed.success)
-    throw new Error(`--conversation must be one of ${MigrationConversationSchema.options.join(', ')}`);
+  const parsed = MoveConversationSchema.safeParse(value.trim());
+  if (!parsed.success) throw new Error(`--conversation must be one of ${MoveConversationSchema.options.join(', ')}`);
   if (convert && parsed.data !== 'convert')
     throw new Error(`--convert and --conversation ${parsed.data} ask for different things; pass one of them`);
   return parsed.data;

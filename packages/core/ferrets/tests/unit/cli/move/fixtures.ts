@@ -1,16 +1,17 @@
-import type { ConversionPreview, MigrationConversation, SessionView } from '../../../../daemon/lib/protocol/session.ts';
-import type { IMigrationGateway } from '../../../../cli/lib/move/ports.ts';
+import type { SessionView } from '../../../../daemon/lib/protocol/session.ts';
+import type { ConversionPreview, MoveConversation } from '../../../../daemon/lib/protocol/move.ts';
+import type { IMoveGateway } from '../../../../cli/lib/move/ports.ts';
 import { capturedPresenter } from '../session/controller-doubles.ts';
 import { sessionView } from '../session/session-fixtures.ts';
 
-interface MigrationCall {
+interface MoveCall {
   readonly id: string;
   readonly agent: string;
   readonly model?: string;
   readonly allowContextDowngrade?: boolean;
   readonly forceInflight?: boolean;
   readonly requestId?: string;
-  readonly conversation?: MigrationConversation;
+  readonly conversation?: MoveConversation;
 }
 
 /** A preview of a Claude conversation converting onto Codex, with every count non-zero. */
@@ -38,8 +39,8 @@ export const READY_PREVIEW: Extract<ConversionPreview, { readonly kind: 'ready' 
   },
 };
 
-export class RecordingMigrationGateway implements IMigrationGateway {
-  readonly calls: MigrationCall[] = [];
+export class RecordingMoveGateway implements IMoveGateway {
+  readonly calls: MoveCall[] = [];
   readonly previews: { readonly id: string; readonly agent: string; readonly model?: string }[] = [];
 
   constructor(
@@ -56,14 +57,14 @@ export class RecordingMigrationGateway implements IMigrationGateway {
     return Promise.resolve(this.preview);
   }
 
-  migrate(
+  move(
     id: string,
     agent: string,
     model?: string,
     allowContextDowngrade?: boolean,
     requestId?: string,
     forceInflight?: boolean,
-    conversation?: MigrationConversation,
+    conversation?: MoveConversation,
   ): Promise<SessionView> {
     this.calls.push({
       id,
@@ -78,7 +79,7 @@ export class RecordingMigrationGateway implements IMigrationGateway {
   }
 }
 
-export function migrationHarness(gateway = new RecordingMigrationGateway()) {
+export function moveHarness(gateway = new RecordingMoveGateway()) {
   const { io, presenter } = capturedPresenter();
   return { gateway, io, presenter };
 }

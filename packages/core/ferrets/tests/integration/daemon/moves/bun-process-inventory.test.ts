@@ -114,7 +114,7 @@ describe('PaneProcessInventory', () => {
   });
 
   it('should report a pane tmux confirms is gone as an empty observation, not a blind spot', async () => {
-    // THE COMMONEST MIGRATION THERE IS. A session whose account died has no pane at all, and a
+    // THE COMMONEST MOVE THERE IS. A session whose account died has no pane at all, and a
     // failed pane-pid read used to be unobservable unconditionally — which made the report carry an
     // `unknown` verdict and the gate refuse the very move the operator was trying to make. tmux is
     // asked outright, and a session it says does not exist ran nothing.
@@ -476,7 +476,7 @@ describe('TmuxPaneSnapshot', () => {
   it('should answer nothing at all for a pane tmux confirms is gone', async () => {
     // `undefined` is the codex footer of a session that no longer has a terminal: there is nothing
     // to count, which is different from a footer that could not be read. Raising here would make
-    // every stopped codex session refuse its own migration on evidence nobody could have produced.
+    // every stopped codex session refuse its own move on evidence nobody could have produced.
     // Arrange
     const tmux = new FakeTmux({ code: 1, stdout: '', stderr: "can't find pane\n" }, NO_SUCH_SESSION);
 

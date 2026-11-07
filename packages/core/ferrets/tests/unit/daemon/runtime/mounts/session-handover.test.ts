@@ -171,7 +171,7 @@ function beginRequest(
   const supplied = FY_REQUEST_ID_HEADER in headers ? headers : withRequestId(headers);
   return request({
     method: 'POST',
-    path: `/v1/sessions/${sessionId}/handover`,
+    path: `/v1/ferrets/${sessionId}/handover`,
     headers: supplied,
     body: typeof body === 'string' ? body : JSON.stringify(body),
   });
@@ -181,7 +181,7 @@ function getRequest(
   sessionId: string,
   headers: Readonly<Record<string, string>> = human,
 ): Parameters<ApiDispatcher['dispatch']>[0] {
-  return request({ method: 'GET', path: `/v1/sessions/${sessionId}/handover`, headers });
+  return request({ method: 'GET', path: `/v1/ferrets/${sessionId}/handover`, headers });
 }
 
 function cancelRequest(
@@ -192,7 +192,7 @@ function cancelRequest(
   const supplied = FY_REQUEST_ID_HEADER in headers ? headers : withRequestId(headers);
   return request({
     method: 'POST',
-    path: `/v1/sessions/${sessionId}/handover/cancel`,
+    path: `/v1/ferrets/${sessionId}/handover/cancel`,
     headers: supplied,
     body: typeof body === 'string' ? body : JSON.stringify(body),
   });
@@ -298,7 +298,7 @@ describe('the session handover mount', () => {
     const vanished = await subject.dispatch(
       request({
         method: 'POST',
-        path: '/v1/sessions/s1/handover/cancel',
+        path: '/v1/ferrets/s1/handover/cancel',
         headers: withRequestId(human, 'req-gone'),
         unreadableBody: true,
       }),
@@ -333,7 +333,7 @@ describe('the session handover mount', () => {
     const response = await subject.dispatch(
       request({
         method: 'POST',
-        path: '/v1/sessions/s1/handover/cancel',
+        path: '/v1/ferrets/s1/handover/cancel',
         headers: withRequestId(human, 'req-big'),
         body: oversized,
         // In installments, so the refusal can be shown to happen before the whole body is materialised.
@@ -430,7 +430,7 @@ describe('the session handover mount', () => {
   });
 
   it('should answer each refusal the subsystem raises with its own status and code', async () => {
-    // These are genuinely different next actions: reach for fy migrate, run the handover yourself,
+    // These are genuinely different next actions: reach for fy move, run the handover yourself,
     // name a coordinator for a board root, wait for the predecessor, or investigate a step that failed
     // after the retirement.
     // Arrange
@@ -441,7 +441,7 @@ describe('the session handover mount', () => {
           'coordinator_required',
           'a board root must name the coordinator descendant that succeeds its own',
         ),
-        same: new HandoverError('harness_same', 'codex-auto is also a claude account — use fy migrate'),
+        same: new HandoverError('harness_same', 'codex-auto is also a claude account — use fy move'),
         unknown: new HandoverError('harness_unknown', 'neither family could be recognised'),
         gone: new HandoverError('source_not_found', 'no session gone'),
         busy: new HandoverError('board_busy', 'board already carries an outstanding invitation'),
@@ -504,13 +504,13 @@ describe('the session handover mount', () => {
     const beginWithoutId = await subject.dispatch(
       request({
         method: 'POST',
-        path: '/v1/sessions/s1/handover',
+        path: '/v1/ferrets/s1/handover',
         headers: human,
         body: JSON.stringify(VALID_BODY),
       }),
     );
     const cancelWithoutId = await subject.dispatch(
-      request({ method: 'POST', path: '/v1/sessions/s1/handover/cancel', headers: human, body: '{}' }),
+      request({ method: 'POST', path: '/v1/ferrets/s1/handover/cancel', headers: human, body: '{}' }),
     );
 
     // Assert

@@ -1,7 +1,7 @@
-import type { InflightItem, MigrationRefusal } from '../protocol/session.ts';
+import type { InflightItem, MoveRefusal } from '../protocol/move.ts';
 import type { InflightReport } from './inflight-report.ts';
 import { age, truncate } from './render-text.ts';
-import { type InflightVerdict, verdictBlocksMigration } from './verdict.ts';
+import { type InflightVerdict, verdictBlocksMove } from './verdict.ts';
 
 const DETAIL_WIDTH = 120;
 
@@ -50,7 +50,7 @@ function itemsOf(report: InflightReport): readonly InflightItem[] {
       verdict: tool.verdict,
       title: toolTitle(tool.verdict, tool.name),
       detail: truncate(tool.summary, DETAIL_WIDTH),
-      blocks: verdictBlocksMigration(tool.verdict),
+      blocks: verdictBlocksMove(tool.verdict),
     });
   for (const entry of report.processes) {
     if (entry.known !== undefined) continue;
@@ -60,7 +60,7 @@ function itemsOf(report: InflightReport): readonly InflightItem[] {
       title: processTitle(entry.verdict),
       detail: truncate(entry.argv, DETAIL_WIDTH),
       age: age(entry.startedSecondsAgo),
-      blocks: verdictBlocksMigration(entry.verdict),
+      blocks: verdictBlocksMove(entry.verdict),
       // Only the agent's own background jobs carry their pid: it is what the agent is asked to stop.
       ...(entry.toolShell === undefined ? {} : { pid: entry.pid, backgroundJob: true as const }),
     });
@@ -81,7 +81,7 @@ function itemsOf(report: InflightReport): readonly InflightItem[] {
 }
 
 /** The inventory as data the PWA lists in the confirmation. */
-export function describeInflight(report: InflightReport): MigrationRefusal {
+export function describeInflight(report: InflightReport): MoveRefusal {
   const items = itemsOf(report);
   const blockers = items.filter(item => item.blocks);
   const blockedBy = blockers.some(item => item.verdict === 'destructive_to_interrupt')

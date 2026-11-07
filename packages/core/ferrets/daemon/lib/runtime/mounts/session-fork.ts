@@ -15,15 +15,15 @@ import type { AuditedRouteRule } from '../../audit/routes.ts';
 import type { ModuleContribution } from '../modules.ts';
 
 /**
- * Forking a conversation from an exact message: `POST /v1/sessions/:sessionId/fork`.
+ * Forking a conversation from an exact message: `POST /v1/ferrets/:ferretId/fork`.
  *
- * WHAT A FORK IS HERE, AND WHY IT IS NOT A MIGRATION. A migration keeps the session and changes the
+ * WHAT A FORK IS HERE, AND WHY IT IS NOT A MOVE. A move keeps the session and changes the
  * account beneath it: the pane is killed, the configuration document is restamped, and the session
  * that comes back is the same session. A fork touches its source NOTHING at all. It reads the source
  * through one durable message, writes a brand-new session with a fresh identity, and leaves the
  * source, its descendants, its waiters and its pointers byte-for-byte as they were.
  *
- * THAT DIFFERENCE IS THE WHOLE REASON THIS MOUNT HOLDS NO REPLAY GUARD. The migrate route keeps an
+ * THAT DIFFERENCE IS THE WHOLE REASON THIS MOUNT HOLDS NO REPLAY GUARD. The move route keeps an
  * in-memory ledger because a lost response there could relaunch a pane a second time, and the memory
  * of "this id already destroyed something" cannot be rebuilt from disk. A fork destroys nothing, and
  * its idempotency is DURABLE: the fork service claims a receipt keyed on `(source, request id)`
@@ -31,7 +31,7 @@ import type { ModuleContribution } from '../modules.ts';
  * same plan. An in-memory guard beside that would be a SECOND owner of the same fact — one that
  * forgets on restart and would let exactly the retry the durable receipt exists to catch through.
  *
- * SO THE REQUEST ID IS STILL MANDATORY, for the reason the migrate's is: the protocol client retries
+ * SO THE REQUEST ID IS STILL MANDATORY, for the reason the move's is: the protocol client retries
  * this POST up to three times on transport failure, and a fork with no logical identity cannot be
  * recognised on its second arrival. The daemon refuses to begin one rather than accept a caller's
  * word that it will never retry. It is a header rather than a body field because that is what the
@@ -116,7 +116,7 @@ const REFUSAL_STATUS: Readonly<Record<ForkSessionFailure, number>> = {
   // 409: the id is usable, but it already names a different fork, and the caller has to decide which
   // one it meant. Not 400 — the request itself is well formed.
   request_id_reused: 409,
-  // 500, and SAFE TO RETRY, unlike the migrate's `failed`. A fork writes nothing to its source and
+  // 500, and SAFE TO RETRY, unlike the move's `failed`. A fork writes nothing to its source and
   // every step after the durable receipt is bound to the fresh target and idempotent, so presenting
   // the same request id again re-drives the same fork rather than creating a second session.
   session_fork_failed: 500,
@@ -132,7 +132,7 @@ function refuse(error: unknown): never {
 
 /** The raw path parameter, decoded. A parameter that regains a separator never reaches the service. */
 function pathSessionId(context: RouteContext): string {
-  const raw = context.params.get('sessionId') ?? '';
+  const raw = context.params.get('ferretId') ?? '';
   const decoded = decodeParameter(raw);
   if (decoded === undefined || decoded === '')
     throw new ApiError(400, 'the session id in the path is not usable', 'invalid_session_id');
@@ -182,7 +182,7 @@ export function sessionForkRoutes(subsystem: SessionForkSubsystem): readonly Api
   return [
     {
       method: 'POST',
-      path: '/v1/sessions/:sessionId/fork',
+      path: '/v1/ferrets/:ferretId/fork',
       minimum: 'operator',
       caller: 'person',
       noStore: true,
@@ -195,9 +195,9 @@ export function sessionForkRoutes(subsystem: SessionForkSubsystem): readonly Api
 const SESSION_FORK_AUDIT_RULES: readonly AuditedRouteRule[] = [
   {
     method: 'POST',
-    path: '/v1/sessions/:sessionId/fork',
+    path: '/v1/ferrets/:ferretId/fork',
     event: 'session.opened',
-    subject: 'sessionId',
+    subject: 'ferretId',
     detail: { action: 'fork' },
   },
 ];
@@ -205,7 +205,7 @@ const SESSION_FORK_AUDIT_RULES: readonly AuditedRouteRule[] = [
 /**
  * What the session-fork module adds to the daemon: the one fork route and its audit rule.
  *
- * The literal `fork` is the final segment of a two-segment pattern under `/v1/sessions/:sessionId`, so it can neither
+ * The literal `fork` is the final segment of a two-segment pattern under `/v1/ferrets/:ferretId`, so it can neither
  * shadow nor be shadowed by a sibling subsystem, nor by the shallower session read.
  */
 export function sessionForkContribution(subsystem: SessionForkSubsystem): ModuleContribution {

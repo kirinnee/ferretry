@@ -376,10 +376,10 @@ function refused(failure: HandoverFailure, sentence: readonly string[]): Handove
 }
 
 /**
- * The mirror of the migration's family check: a handover refuses SAMENESS.
+ * The mirror of the move's family check: a handover refuses SAMENESS.
  *
  * An unrecognised family on either side is a refusal rather than a comparison, for the reason the
- * migration gate already gives: two strings this build cannot parse are not shown to be different
+ * move gate already gives: two strings this build cannot parse are not shown to be different
  * just because they look it, and the answer to "I cannot prove this" is not to destroy a pane.
  */
 function harnessDecision(sourceHarness: string, targetHarness: string, targetAgent: string): HandoverEligibility {
@@ -404,7 +404,7 @@ function harnessDecision(sourceHarness: string, targetHarness: string, targetAge
     return refused('harness_same', [
       `this session runs the ${source.data} harness and ${targetAgent} is also a ${target.data} account; a`,
       'handover throws the conversation away because the target cannot read it, so moving inside one family',
-      'would destroy a transcript for nothing — use a migration, which keeps it',
+      'would destroy a transcript for nothing — use a move, which keeps it',
     ]);
   }
   return { ok: true, sourceHarness: source.data, replacementHarness: target.data };

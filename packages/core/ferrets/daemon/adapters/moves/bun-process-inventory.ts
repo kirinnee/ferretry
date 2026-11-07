@@ -256,7 +256,7 @@ export class PaneProcessInventory implements ProcessInventoryPort {
       if (pane.code !== 0) {
         // ASK A SECOND QUESTION BEFORE CALLING THIS A BLIND SPOT. A failed pane-pid read used to be
         // unobservable unconditionally, which is right when tmux may be hiding something and wrong
-        // for the commonest migration there is: a session whose account died has no pane at all, and
+        // for the commonest move there is: a session whose account died has no pane at all, and
         // "I could not look" then blocks the very move the operator is trying to make. tmux is asked
         // outright whether the session exists, and only a session it CONFIRMS is gone becomes an
         // empty observation — a server that will not answer either question stays a blind spot.
@@ -323,11 +323,11 @@ async function paneConfirmedAbsent(tmux: TmuxCommandPort, tmuxSession: string): 
 
 /**
  * Reads a pane's visible text through the socket-scoped tmux port, so the codex footer can be
- * counted without the migrate subsystem ever naming a command of its own.
+ * counted without the move subsystem ever naming a command of its own.
  *
  * A capture that fails is asked the same second question the inventory above asks, and for the same
  * reason: a session tmux confirms is gone has no footer to read, and raising there would turn every
- * stopped codex session into a blind spot that refuses its own migration.
+ * stopped codex session into a blind spot that refuses its own move.
  */
 export class TmuxPaneSnapshot implements PaneSnapshotPort {
   constructor(private readonly tmux: TmuxCommandPort) {}

@@ -18,7 +18,7 @@ const process = (verdict: ProcessInfo['verdict']): ProcessInfo => ({ pid: 42, ar
 const seen = (...processes: readonly ProcessInfo[]): ProcessObservation => ({ kind: 'observed', processes });
 const blind = (reason: string): ProcessObservation => ({ kind: 'unobservable', reason });
 
-describe('migration in-flight reporting', () => {
+describe('move in-flight reporting', () => {
   it('should consider an inactive session with only safe work empty', () => {
     // Act
     const actual = assembleInflightReport({

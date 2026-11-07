@@ -1,18 +1,18 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { renderMigrationOutcome, type MigrationOutcome } from '../../../../daemon/lib/moves/outcome-render.ts';
+import { renderMoveOutcome, type MoveOutcome } from '../../../../daemon/lib/moves/outcome-render.ts';
 
-const attempt: MigrationOutcome = {
+const attempt: MoveOutcome = {
   ok: false,
   from: 'claude-loge',
   targetAgent: 'codex-terra',
   at: '2026-07-31T09:05:00.000Z',
 };
 
-describe('renderMigrationOutcome', () => {
+describe('renderMoveOutcome', () => {
   it('should confirm a successful move and what the daemon sees afterwards', () => {
     // Act
-    const actual = renderMigrationOutcome({
+    const actual = renderMoveOutcome({
       ...attempt,
       ok: true,
       targetModel: 'gpt-5.6',
@@ -21,10 +21,10 @@ describe('renderMigrationOutcome', () => {
 
     // Assert
     should(actual.split('\n')).deepEqual([
-      '## Outcome — MIGRATION SUCCEEDED',
+      '## Outcome — MOVE SUCCEEDED',
       '',
       '- Settled at: 2026-07-31T09:05:00.000Z',
-      '- Migrated from `claude-loge` onto `codex-terra` (model `gpt-5.6`).',
+      '- Moved from `claude-loge` onto `codex-terra` (model `gpt-5.6`).',
       '- Session now on: `codex-terra` (model `gpt-5.6`)',
       '- Status now: `running`',
       '- The relaunch under the new account completed; everything above describes what it interrupted.',
@@ -35,7 +35,7 @@ describe('renderMigrationOutcome', () => {
 
   it('should flag a success that landed on an account nobody asked for', () => {
     // Act
-    const actual = renderMigrationOutcome({ ...attempt, ok: true, observed: { binary: 'claude-sol' } });
+    const actual = renderMoveOutcome({ ...attempt, ok: true, observed: { binary: 'claude-sol' } });
 
     // Assert
     should(actual).containEql('- Session now on: `claude-sol` — note: this is not the requested `codex-terra`.');
@@ -44,7 +44,7 @@ describe('renderMigrationOutcome', () => {
 
   it('should omit the observation entirely when the daemon reported none', () => {
     // Act
-    const actual = renderMigrationOutcome({ ...attempt, ok: true });
+    const actual = renderMoveOutcome({ ...attempt, ok: true });
 
     // Assert
     should(actual).not.containEql('- Session now on:');
@@ -53,11 +53,11 @@ describe('renderMigrationOutcome', () => {
 
   it('should never claim a rollback it did not verify', () => {
     // Act
-    const actual = renderMigrationOutcome({ ...attempt, detail: '  daemon refused  ' });
+    const actual = renderMoveOutcome({ ...attempt, detail: '  daemon refused  ' });
 
     // Assert
-    should(actual).containEql('## Outcome — MIGRATION FAILED');
-    should(actual).containEql('- **The migration did NOT complete.**');
+    should(actual).containEql('## Outcome — MOVE FAILED');
+    should(actual).containEql('- **The move did NOT complete.**');
     should(actual).containEql('- Error: daemon refused');
     should(actual).containEql('- Session state after the failure: **UNKNOWN**');
     should(actual).containEql('restored to `claude-loge` is NOT confirmed');
@@ -65,7 +65,7 @@ describe('renderMigrationOutcome', () => {
 
   it('should report a failure with no detail without inventing one', () => {
     // Act
-    const actual = renderMigrationOutcome({ ...attempt, detail: '   ' });
+    const actual = renderMoveOutcome({ ...attempt, detail: '   ' });
 
     // Assert
     should(actual).containEql('- Error: no detail reported');
@@ -73,10 +73,10 @@ describe('renderMigrationOutcome', () => {
 
   it('should distinguish the three places a failed attempt can leave the session', () => {
     // Act
-    const original = renderMigrationOutcome({ ...attempt, observed: { binary: 'claude-loge', status: 'waiting' } });
-    const staged = renderMigrationOutcome({ ...attempt, observed: { binary: 'codex-terra', model: 'gpt-5.6' } });
-    const elsewhere = renderMigrationOutcome({ ...attempt, observed: { binary: 'claude-sol' } });
-    const nowhere = renderMigrationOutcome({ ...attempt, observed: { status: 'stopped' } });
+    const original = renderMoveOutcome({ ...attempt, observed: { binary: 'claude-loge', status: 'waiting' } });
+    const staged = renderMoveOutcome({ ...attempt, observed: { binary: 'codex-terra', model: 'gpt-5.6' } });
+    const elsewhere = renderMoveOutcome({ ...attempt, observed: { binary: 'claude-sol' } });
+    const nowhere = renderMoveOutcome({ ...attempt, observed: { status: 'stopped' } });
 
     // Assert
     should(original).containEql('the ORIGINAL account; the session did not move.');

@@ -22,9 +22,9 @@ describe('the session-handover module build', () => {
     expect(built.id).toBe('sessionHandover');
     expect(releases).toEqual([]);
     expect((built.contributes.routes ?? []).map(route => `${route.method} ${route.path}`)).toEqual([
-      'POST /v1/sessions/:sessionId/handover',
-      'GET /v1/sessions/:sessionId/handover',
-      'POST /v1/sessions/:sessionId/handover/cancel',
+      'POST /v1/ferrets/:ferretId/handover',
+      'GET /v1/ferrets/:ferretId/handover',
+      'POST /v1/ferrets/:ferretId/handover/cancel',
     ]);
     expect(built.contributes.sockets).toBeUndefined();
     expect(built.contributes.audit).toBeUndefined();

@@ -2,8 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { ProcessObservation } from '../../../../daemon/lib/moves/inflight-report.ts';
 import {
-  type MigrateTargetView,
-  MigrationPreflight,
+  type MoveTargetView,
+  MovePreflight,
   type PaneSnapshotPort,
 } from '../../../../daemon/lib/moves/preflight-service.ts';
 import type { ProcessInventoryPort } from '../../../../daemon/lib/moves/process-inventory-port.ts';
@@ -32,7 +32,7 @@ class StubPanes implements PaneSnapshotPort {
   }
 }
 
-const view = (overrides: Partial<MigrateTargetView> = {}): MigrateTargetView => ({
+const view = (overrides: Partial<MoveTargetView> = {}): MoveTargetView => ({
   sessionId: 'session-1',
   harness: 'claude',
   tmuxSession: 'fy-session-1',
@@ -50,7 +50,7 @@ const chatTail = [
   },
 ];
 
-describe('MigrationPreflight', () => {
+describe('MovePreflight', () => {
   it('should join every signal into one report keyed on the target pane', async () => {
     // Arrange
     const inventory = new StubInventory({
@@ -58,7 +58,7 @@ describe('MigrationPreflight', () => {
       processes: [{ pid: 900, argv: 'vitest run', verdict: 're_armable' }],
     });
     const panes = new StubPanes('');
-    const preflight = new MigrationPreflight(inventory, panes);
+    const preflight = new MovePreflight(inventory, panes);
 
     // Act
     const report = await preflight.inspect(view({ status: 'tool_running', openTools: ['tool-1'] }), chatTail);
@@ -99,10 +99,8 @@ describe('MigrationPreflight', () => {
     const inventory = new StubInventory({ kind: 'observed', processes: [] });
 
     // Act
-    const codex = await new MigrationPreflight(inventory, panes).inspect(view({ harness: 'codex' }));
-    const claude = await new MigrationPreflight(inventory, new StubPanes('2 background terminals running')).inspect(
-      view(),
-    );
+    const codex = await new MovePreflight(inventory, panes).inspect(view({ harness: 'codex' }));
+    const claude = await new MovePreflight(inventory, new StubPanes('2 background terminals running')).inspect(view());
 
     // Assert
     should(panes.sessions).deepEqual(['fy-session-1']);
@@ -114,7 +112,7 @@ describe('MigrationPreflight', () => {
 
   it('should turn an unreadable codex pane into a blind spot rather than a zero count', async () => {
     // Arrange
-    const preflight = new MigrationPreflight(
+    const preflight = new MovePreflight(
       new StubInventory({ kind: 'observed', processes: [] }),
       new StubPanes(new Error('no server running')),
     );
@@ -135,10 +133,10 @@ describe('MigrationPreflight', () => {
 
   it('should treat a codex pane that is confirmed gone as no background terminals at all', async () => {
     // A stopped session has no footer to read, which is not the same as a footer nobody could read.
-    // Blind-spotting it would refuse the migration of every dead codex session — the exact case an
+    // Blind-spotting it would refuse the move of every dead codex session — the exact case an
     // operator moves a session for — on evidence that could not exist.
     // Arrange
-    const preflight = new MigrationPreflight(
+    const preflight = new MovePreflight(
       new StubInventory({ kind: 'observed', processes: [] }),
       new StubPanes(undefined),
     );
@@ -155,7 +153,7 @@ describe('MigrationPreflight', () => {
 
   it('should refuse a session whose pane could not be walked at all', async () => {
     // Arrange
-    const preflight = new MigrationPreflight(
+    const preflight = new MovePreflight(
       new StubInventory({ kind: 'unobservable', reason: 'the pane pid could not be resolved: no server running' }),
       new StubPanes(''),
     );
@@ -170,7 +168,7 @@ describe('MigrationPreflight', () => {
 
   it('should expose the report, forensic record, outcome and handoff it exists to produce', async () => {
     // Arrange
-    const preflight = new MigrationPreflight(
+    const preflight = new MovePreflight(
       new StubInventory({
         kind: 'observed',
         processes: [{ pid: 900, argv: 'rm -rf work', verdict: 'destructive_to_interrupt' }],
@@ -198,7 +196,7 @@ describe('MigrationPreflight', () => {
     should(summary).containEql('  proc  [DESTRUCTIVE] pid 900 (?): rm -rf work');
     should(document).containEql('- **FORCED past a destructive/unknown refusal');
     should(document).containEql('| DESTRUCTIVE | 900 | ? | ? | `rm -rf work` |');
-    should(settled).containEql('## Outcome — MIGRATION SUCCEEDED');
+    should(settled).containEql('## Outcome — MOVE SUCCEEDED');
     should(preflight.handoff(report, '/state/report.md', 'interactive')).be.undefined();
     const busy = await preflight.inspect(view({ status: 'tool_running' }));
     should(preflight.handoff(busy, '/state/report.md', 'interactive')).containEql('read /state/report.md');
@@ -208,7 +206,7 @@ describe('MigrationPreflight', () => {
 describe('the agent’s own jobs a refusal names', () => {
   it('should hand back only the blocking processes the agent started from its tool shell', async () => {
     // Arrange
-    const preflight = new MigrationPreflight(
+    const preflight = new MovePreflight(
       new StubInventory({
         kind: 'observed',
         processes: [

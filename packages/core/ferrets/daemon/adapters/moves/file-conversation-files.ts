@@ -13,7 +13,7 @@ import type { CodexRolloutIndex } from '../../lib/session/transcript/index.ts';
 const NEWEST = 64;
 
 /**
- * The transcripts a migration carries between logins, on disk.
+ * The transcripts a move carries between logins, on disk.
  *
  * THE COPY IS ATOMIC, through a temporary file beside the target, because the harness that is about to
  * resume the conversation reads this file first: a torn copy is a conversation that resumes with its

@@ -24,16 +24,16 @@ describe('the session-fork module build', () => {
     expect(built.jobs).toEqual({});
     expect(releases).toEqual([]);
     expect((built.contributes.routes ?? []).map(route => `${route.method} ${route.path}`)).toEqual([
-      'POST /v1/sessions/:sessionId/fork',
+      'POST /v1/ferrets/:ferretId/fork',
     ]);
     expect(built.contributes.sockets).toBeUndefined();
     expect(built.contributes.features).toBeUndefined();
     expect(built.contributes.audit?.routes).toEqual([
       {
         method: 'POST',
-        path: '/v1/sessions/:sessionId/fork',
+        path: '/v1/ferrets/:ferretId/fork',
         event: 'session.opened',
-        subject: 'sessionId',
+        subject: 'ferretId',
         detail: { action: 'fork' },
       },
     ]);

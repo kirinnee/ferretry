@@ -250,7 +250,7 @@ describe('session handover protocol', () => {
       resolvedTarget: { replacement: resolvedReplacement, coordinator: resolvedCoordinator },
       phase: 'refused' as const,
       phaseHistory: history(['requested', 'refused']),
-      refusal: { failure: 'harness_same', message: 'use fy migrate' },
+      refusal: { failure: 'harness_same', message: 'use fy move' },
     };
     // Act + Assert — stranded is board-only past accepted; abandoned names a replacement pre-acceptance;
     // refused precedes creation (and may omit the replacement id).

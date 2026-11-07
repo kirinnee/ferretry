@@ -9,7 +9,7 @@ import { ConversationMessagePointSchema, ExactConversationMessagePointSchema } f
  *
  * THE BODY CARRIES ONLY WHAT THE CALLER CHOOSES. The source session is named by the route path, and
  * the durable identity of one fork is the `x-fy-request-id` HEADER rather than a field — that is what
- * makes the route safe to retry, and it is the same shape `migrate` already uses. A request id spelled
+ * makes the route safe to retry, and it is the same shape `move` already uses. A request id spelled
  * in the body would be a second owner of the same fact and could disagree with the header the
  * transport actually retried under.
  *
@@ -121,7 +121,7 @@ export type ForkSessionPlanSummary = z.infer<typeof ForkSessionPlanSummarySchema
  * relay, and a path on the daemon's host is not a fact it can act on.
  *
  * A fork that could not happen is NOT an arm of this type. It is an HTTP refusal whose code is a
- * {@link ForkSessionFailureSchema} value, because a fork — unlike a migration — destroys nothing on
+ * {@link ForkSessionFailureSchema} value, because a fork — unlike a move — destroys nothing on
  * the way to failing, so there is never a half-performed fork whose structure a caller must inspect.
  */
 export const ForkSessionOutcomeSchema = z.strictObject({
@@ -146,7 +146,7 @@ export type ForkSessionOutcome = z.infer<typeof ForkSessionOutcomeSchema>;
  *
  * THERE IS NO `harness_mismatch`. Crossing harness families is ALLOWED for a fork and merely lossy,
  * so the honest answer is a committed outcome whose `plan.notCarried` names what could not cross —
- * not a refusal. That is the single largest difference from a migration, whose taxonomy this must
+ * not a refusal. That is the single largest difference from a move, whose taxonomy this must
  * never be mistaken for.
  *
  * The array is the single owner and the schema derives from it, so adding a code is one edit and the

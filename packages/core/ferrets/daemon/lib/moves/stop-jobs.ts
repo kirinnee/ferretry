@@ -1,6 +1,6 @@
 /**
  * Stopping the background jobs a ferret started itself — what the Warden does to clear a move's way when the
- * owner set `autoMigrate.forceStopBackground`, and nothing else ever calls.
+ * owner set `autoMove.forceStopBackground`, and nothing else ever calls.
  *
  * WHICH PROCESSES, AND ONLY THOSE. A job is what `identifyAgentJobs` traced to the agent's own tool shell — a
  * `<shell> -c …` child of the harness CLI in THIS session's pane — and everything below that shell, as the first
@@ -28,7 +28,7 @@
 import { type AgentJob, blockingAgentJobs } from './agent-jobs.ts';
 import type { InflightReport, ProcessInfo } from './inflight-report.ts';
 import type { ProcRow } from './process-table.ts';
-import { verdictBlocksMigration } from './verdict.ts';
+import { verdictBlocksMove } from './verdict.ts';
 
 export type StopSignal = 'SIGTERM' | 'SIGKILL';
 
@@ -98,7 +98,7 @@ export function sameProcess(seen: SeenProcess, now: ProcRow, readAtMs: number): 
 export function jobProcesses(report: InflightReport): readonly ProcessInfo[] {
   const shells = new Set(
     report.processes.flatMap(row =>
-      row.toolShell !== undefined && verdictBlocksMigration(row.verdict) ? [row.toolShell] : [],
+      row.toolShell !== undefined && verdictBlocksMove(row.verdict) ? [row.toolShell] : [],
     ),
   );
   return report.processes.filter(row => row.toolShell !== undefined && shells.has(row.toolShell)).toReversed();
@@ -176,7 +176,7 @@ export class AgentJobStopper {
   }
 }
 
-/** What the Warden may do about a ferret's background jobs, beside a migration. No route serves either. */
+/** What the Warden may do about a ferret's background jobs, beside a move. No route serves either. */
 export interface AgentJobControl {
   /** The ferret's own jobs that keep a move's safety check from passing. */
   blockingJobs(sessionId: string): Promise<readonly AgentJob[]>;

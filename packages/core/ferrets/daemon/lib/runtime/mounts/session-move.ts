@@ -1,16 +1,15 @@
 import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
+import { type SessionRelaunchSettings, type SessionView } from '../../protocol/session.ts';
 import {
   AskToStopJobsRequestSchema,
   type AskToStopJobsResult,
   type ContextDowngrade,
   type ConversionPreview,
   ConversionPreviewRequestSchema,
-  MigrateSessionRequestSchema,
-  type MigrationConversation,
-  type MigrationRefusal,
-  type SessionRelaunchSettings,
-  type SessionView,
-} from '../../protocol/session.ts';
+  MoveSessionRequestSchema,
+  type MoveConversation,
+  type MoveRefusal,
+} from '../../protocol/move.ts';
 import type { AuditedRouteRule } from '../../audit/routes.ts';
 import { parseActor } from '../../api/actor.ts';
 import { parseBody, parseOptionalBody } from '../../api/body.ts';
@@ -19,39 +18,39 @@ import { type ApiRequest, type ApiResponse, decodeParameter, headerValue } from 
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
-  MIGRATION_REPLAY_MAX_ENTRIES,
-  MigrationReplayCapacityError,
-  MigrationReplayGuard,
-  MigrationReplayMismatchError,
+  MOVE_REPLAY_MAX_ENTRIES,
+  MoveReplayCapacityError,
+  MoveReplayGuard,
+  MoveReplayMismatchError,
 } from '../../moves/replay-guard.ts';
 import type { ModuleContribution } from '../modules.ts';
 
 /**
- * Moving a live session onto another account: `POST /v1/sessions/:sessionId/migrate`.
+ * Moving a live session onto another account: `POST /v1/ferrets/:ferretId/move`.
  *
- * `MigrationPreflight` — the gate that inventories a pane's in-flight work and REFUSES to destroy
+ * `MovePreflight` — the gate that inventories a pane's in-flight work and REFUSES to destroy
  * work it cannot show will survive the relaunch — was built, fully tested, constructed in the world
- * as `migratePreflight`, and called by nothing. The protocol client's `migrate()` has always spoken
+ * as `movePreflight`, and called by nothing. The protocol client's `move()` has always spoken
  * this route, and the daemon answered `unknown_route`, so the one safety gate in the product guarded
  * an operation the product could not perform.
  *
- * WHAT A MIGRATION IS HERE. The session keeps its id, its directory, its journal and its whole
+ * WHAT A MOVE IS HERE. The session keeps its id, its directory, its journal and its whole
  * conversation on disk; what changes is the account and model its NEXT incarnation runs under. The
  * old pane is snapshotted and killed, the configuration document is restamped, and the replacement
  * agent is handed a turn document pointing at the forensic report of what the kill interrupted.
  *
  * THE GATE IS FORCED ONLY BY AN EXPLICIT `forceInflight: true`, and the default is the refusal. A
- * `destructive_to_interrupt` or `unknown` verdict is a 409 `migration_refused` carrying the inventory
+ * `destructive_to_interrupt` or `unknown` verdict is a 409 `move_refused` carrying the inventory
  * as data (`inflight`) so a person can read what is running; the PWA's "Restart anyway" resends the
  * request with the flag after an explicit confirm. A forced move is journalled
- * (`session.migrate_forced`) with the inventory it went past, and the forensic report says FORCED.
+ * (`session.move_forced`) with the inventory it went past, and the forensic report says FORCED.
  * The unattended callers — the warden's failover and the quota loop — send `false` and cannot
  * choose otherwise: a loop with no human watching may not decide that work is expendable. That holds
- * for `autoMigrate.forceStopBackground` too: it lets the Warden stop the ferret's own background jobs
- * (`migrate/stop-jobs.ts`), and the move that follows is unforced, so anything else in the way still
+ * for `autoMove.forceStopBackground` too: it lets the Warden stop the ferret's own background jobs
+ * (`move/stop-jobs.ts`), and the move that follows is unforced, so anything else in the way still
  * refuses it.
  *
- * A MIGRATION IS SAME-KIND, and `harness_mismatch` is the refusal that makes that true. The CLI has
+ * A MOVE IS SAME-KIND, and `harness_mismatch` is the refusal that makes that true. The CLI has
  * always described this operation as continuing a session on another same-kind account while the
  * daemon checked nothing, so the constraint the product promised was the one constraint it did not
  * have. It is decided where the account is resolved — the only place that knows both families — and it
@@ -60,11 +59,11 @@ import type { ModuleContribution } from '../modules.ts';
  *
  * `allowContextDowngrade` is NOT that force flag: it answers a different question — whether the
  * caller accepts a target whose context window is smaller than the one this session is running in,
- * which silently truncates the conversation the migration exists to preserve.
+ * which silently truncates the conversation the move exists to preserve.
  */
 
-/** Why a migration could not be performed. */
-export type SessionMigrateFailure =
+/** Why a move could not be performed. */
+export type SessionMoveFailure =
   /** The id is not one the state-home layout would accept, so it must never become a path. */
   | 'invalid'
   /** No such session. */
@@ -87,7 +86,7 @@ export type SessionMigrateFailure =
   | 'refused'
   /**
    * The account is not the session's own harness family, or one of the two families could not be
-   * recognised. See {@link harnessMigrationRefusal} for why crossing families is unrecoverable
+   * recognised. See {@link harnessMoveRefusal} for why crossing families is unrecoverable
    * rather than merely untidy.
    */
   | 'harness_mismatch'
@@ -106,37 +105,37 @@ export type SessionMigrateFailure =
    */
   | 'no_jobs';
 
-/** A refusal raised by the composition root's migrator, in a taxonomy `src/lib` may name. */
-export class SessionMigrateError extends Error {
+/** A refusal raised by the composition root's mover, in a taxonomy `src/lib` may name. */
+export class SessionMoveError extends Error {
   constructor(
-    readonly failure: SessionMigrateFailure,
+    readonly failure: SessionMoveFailure,
     message: string,
     /** The data behind the sentence: the inventory on a `refused`, the two windows on a `context_downgrade`. */
-    readonly data?: { readonly inflight?: MigrationRefusal; readonly downgrade?: ContextDowngrade },
+    readonly data?: { readonly inflight?: MoveRefusal; readonly downgrade?: ContextDowngrade },
   ) {
     super(message);
-    this.name = 'SessionMigrateError';
+    this.name = 'SessionMoveError';
   }
 }
 
 /**
- * Migrating one session onto another account.
+ * Moving one session onto another account.
  *
  * The request is passed through as the protocol parsed it rather than as three arguments, because
  * every field is a decision the composition root makes against the fleet manifest and this host —
  * which account, which model, and whether a smaller context window is acceptable — and none of them
  * is a decision this mount is entitled to make on the caller's behalf.
  */
-export interface SessionMigrateSubsystem {
-  migrate(
+export interface SessionMoveSubsystem {
+  move(
     sessionId: string,
     request: {
       readonly agent: string;
       readonly model?: string;
       readonly allowContextDowngrade: boolean;
       readonly forceInflight: boolean;
-      /** Omitted, the bound conversation is resumed or the migration refused. */
-      readonly conversation?: MigrationConversation;
+      /** Omitted, the bound conversation is resumed or the move refused. */
+      readonly conversation?: MoveConversation;
       /** Words that open the turn the relaunched agent is handed — why it was moved. Never set by the route. */
       readonly note?: string;
       /** Who moved it, so that turn is drawn as theirs. Never set by the route: the Warden's own moves only. */
@@ -167,7 +166,7 @@ export interface SessionMigrateSubsystem {
 }
 
 /** The HTTP status and code each refusal answers with. */
-const REFUSALS: Readonly<Record<SessionMigrateFailure, { readonly status: number; readonly code: string }>> = {
+const REFUSALS: Readonly<Record<SessionMoveFailure, { readonly status: number; readonly code: string }>> = {
   invalid: { status: 400, code: 'invalid_session_id' },
   not_found: { status: 404, code: 'not-found' },
   unusable: { status: 409, code: 'session_unusable' },
@@ -178,7 +177,7 @@ const REFUSALS: Readonly<Record<SessionMigrateFailure, { readonly status: number
   unservable_model: { status: 409, code: 'unservable_model' },
   // 409 rather than 403: the session's own condition refuses this, and it is answerable — the
   // caller waits for the work to finish, or stops it deliberately, and asks again.
-  refused: { status: 409, code: 'migration_refused' },
+  refused: { status: 409, code: 'move_refused' },
   // 409 rather than 404 or 400: the account exists, is available, and is a perfectly good target for
   // a NEW session — it is this session that cannot go there. The caller's remedy is to name an
   // account of the same family, which is a different request, not a different spelling of this one.
@@ -187,34 +186,34 @@ const REFUSALS: Readonly<Record<SessionMigrateFailure, { readonly status: number
   // 409 like the refusals above it: the session's own condition, answerable by a different request —
   // `conversation: 'fresh'` — that only the person may make.
   unresumable: { status: 409, code: 'conversation_unresumable' },
-  failed: { status: 500, code: 'session_migrate_failed' },
+  failed: { status: 500, code: 'session_move_failed' },
   // 409: the session's own condition — there is nothing of the agent's to ask about — and the remedy is
   // the safety check the caller was about to run again anyway.
   no_jobs: { status: 409, code: 'no_background_jobs' },
 };
 
-/** Restates a migration refusal in the HTTP vocabulary. */
+/** Restates a move refusal in the HTTP vocabulary. */
 function refuse(error: unknown): never {
-  if (error instanceof SessionMigrateError) {
+  if (error instanceof SessionMoveError) {
     const refusal = REFUSALS[error.failure];
     throw new ApiError(refusal.status, error.message, refusal.code, undefined, error.data);
   }
-  // 409: the id is usable, but it already names a different migration, and the caller has to decide
+  // 409: the id is usable, but it already names a different move, and the caller has to decide
   // which one it meant. Not 400 — the request itself is well formed.
-  if (error instanceof MigrationReplayMismatchError) throw new ApiError(409, error.message, 'request_id_reused');
+  if (error instanceof MoveReplayMismatchError) throw new ApiError(409, error.message, 'request_id_reused');
   // 503: the request is valid and the caller did nothing wrong — this daemon has simply recorded as
-  // many migrations as it will hold, and it refuses to start another rather than discard a receipt and
+  // many moves as it will hold, and it refuses to start another rather than discard a receipt and
   // let some later retry relaunch a session twice. NOTHING WAS DESTROYED to produce this answer.
   //
   // 503 rather than 429, because this is not a rate: waiting does not clear it. The ledger frees a
-  // slot only when a migration is refused before it touches the pane, and otherwise not until the
+  // slot only when a move is refused before it touches the pane, and otherwise not until the
   // process restarts — which the message says outright, since it is the operator's actual remedy.
-  if (error instanceof MigrationReplayCapacityError) throw new ApiError(503, error.message, 'migration_ledger_full');
+  if (error instanceof MoveReplayCapacityError) throw new ApiError(503, error.message, 'move_ledger_full');
   throw error;
 }
 
 /**
- * Whether a rejection arrived AFTER the migration destroyed the pane.
+ * Whether a rejection arrived AFTER the move destroyed the pane.
  *
  * Only `failed` is: its own doc comment says "the relaunch under the new account was attempted and
  * failed. The session records why" — the kill and the restamp are already behind it, so an automatic
@@ -230,7 +229,7 @@ function refuse(error: unknown): never {
  * a destructive operation is that the destruction happened.
  */
 function committedAfterDestruction(error: unknown): boolean {
-  return error instanceof SessionMigrateError ? error.failure === 'failed' : true;
+  return error instanceof SessionMoveError ? error.failure === 'failed' : true;
 }
 
 /** Who a request came from, in the words the journal keeps: a calling ferret's session, else the owner. */
@@ -242,7 +241,7 @@ export function moverOf(actor: string | undefined): string {
 
 /** The raw path parameter, decoded. A parameter that regains a separator never reaches the service. */
 function pathSessionId(context: RouteContext): string {
-  const raw = context.params.get('sessionId') ?? '';
+  const raw = context.params.get('ferretId') ?? '';
   const decoded = decodeParameter(raw);
   if (decoded === undefined || decoded === '')
     throw new ApiError(400, 'the session id in the path is not usable', 'invalid_session_id');
@@ -250,10 +249,10 @@ function pathSessionId(context: RouteContext): string {
 }
 
 /**
- * The logical request id this migration is identified by.
+ * The logical request id this move is identified by.
  *
  * MANDATORY, for the same reason the start's is: the protocol client retries this POST up to three
- * times on transport failure, and a migration kills and relaunches a pane. A request that cannot be
+ * times on transport failure, and a move kills and relaunches a pane. A request that cannot be
  * recognised on its second arrival cannot be protected from performing its destruction twice, so the
  * daemon refuses to begin one rather than accept a caller's word that it will never retry.
  */
@@ -262,20 +261,20 @@ function requestId(request: ApiRequest): string {
   if (value === '')
     throw new ApiError(
       400,
-      `a migration must carry ${FY_REQUEST_ID_HEADER}: without it a retried request relaunches the session a second time`,
+      `a move must carry ${FY_REQUEST_ID_HEADER}: without it a retried request relaunches the session a second time`,
       'missing_request_id',
     );
   return value;
 }
 
-/** Migrates a session, or answers a stated refusal — at most once per logical request id. */
-async function migrate(
-  subsystem: SessionMigrateSubsystem,
-  guard: MigrationReplayGuard,
+/** Moves a session, or answers a stated refusal — at most once per logical request id. */
+async function move(
+  subsystem: SessionMoveSubsystem,
+  guard: MoveReplayGuard,
   context: RouteContext,
 ): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
-  const request = await parseBody(context.request, MigrateSessionRequestSchema);
+  const request = await parseBody(context.request, MoveSessionRequestSchema);
   const id = requestId(context.request);
   const target = {
     agent: request.agent,
@@ -287,7 +286,7 @@ async function migrate(
   };
   // The fingerprint is the PARSED target, not the raw bytes: the start's digest has to hash the bytes
   // because a third party presents it later as proof, whereas this only ever compares two requests
-  // the daemon parsed itself — and two spellings of one target are the same migration.
+  // the daemon parsed itself — and two spellings of one target are the same move.
   const fingerprint = JSON.stringify([
     target.agent,
     target.model ?? null,
@@ -296,17 +295,17 @@ async function migrate(
     target.conversation ?? 'resume',
   ]);
   const view = await guard
-    .run({ sessionId, requestId: id }, fingerprint, async () => await subsystem.migrate(sessionId, target))
+    .run({ sessionId, requestId: id }, fingerprint, async () => await subsystem.move(sessionId, target))
     .catch(refuse);
   return jsonResponse(view);
 }
 
 /**
- * `admin` scope, for the same reason the start, the stop and the revive are: a migration kills one
+ * `admin` scope, for the same reason the start, the stop and the revive are: a move kills one
  * agent process holding the daemon's own privileges and launches another under a different account.
  *
- * The body is MANDATORY here, unlike the revive's: a migration with no target agent is not a
- * migration with a default, it is a request that names nothing to move to.
+ * The body is MANDATORY here, unlike the revive's: a move with no target agent is not a
+ * move with a default, it is a request that names nothing to move to.
  *
  * `noStore` because the answer is a live session view whose agent, model and status are exactly what
  * the call changed; a cached one describes the account the session just left.
@@ -314,20 +313,20 @@ async function migrate(
  * `maxReplayEntries` exists so a test can reach the ledger's admission limit in three requests instead
  * of four thousand. Production never passes it.
  */
-export function sessionMigrateRoutes(
-  subsystem: SessionMigrateSubsystem,
-  maxReplayEntries: number = MIGRATION_REPLAY_MAX_ENTRIES,
+export function sessionMoveRoutes(
+  subsystem: SessionMoveSubsystem,
+  maxReplayEntries: number = MOVE_REPLAY_MAX_ENTRIES,
 ): readonly ApiRoute[] {
   // One guard per mount, so it lives as long as the daemon does. A guard created per request would
   // recognise nothing, which is the bug this route had.
-  const guard = new MigrationReplayGuard(committedAfterDestruction, maxReplayEntries);
+  const guard = new MoveReplayGuard(committedAfterDestruction, maxReplayEntries);
   return [
     {
-      // A read of what a Restart (a migration onto the same account) would change, so it lives with
-      // the migration. `operator`, as the migration is: the answer describes how this session's
-      // process was launched, which is the migration's own business.
+      // A read of what a Restart (a move onto the same account) would change, so it lives with
+      // the move. `operator`, as the move is: the answer describes how this session's
+      // process was launched, which is the move's own business.
       method: 'GET',
-      path: '/v1/sessions/:sessionId/relaunch-settings',
+      path: '/v1/ferrets/:ferretId/relaunch-settings',
       minimum: 'operator',
       caller: 'any',
       noStore: true,
@@ -337,7 +336,7 @@ export function sessionMigrateRoutes(
       // A read, though a POST: it names an account and a model. `operator` like the move it previews,
       // and no request id, because it writes nothing and a repeat costs only the read.
       method: 'POST',
-      path: '/v1/sessions/:sessionId/conversion-preview',
+      path: '/v1/ferrets/:ferretId/conversion-preview',
       minimum: 'operator',
       caller: 'any',
       noStore: true,
@@ -355,17 +354,17 @@ export function sessionMigrateRoutes(
     },
     {
       method: 'POST',
-      path: '/v1/sessions/:sessionId/migrate',
+      path: '/v1/ferrets/:ferretId/move',
       minimum: 'operator',
       caller: 'any',
       noStore: true,
-      handle: async context => await migrate(subsystem, guard, context),
+      handle: async context => await move(subsystem, guard, context),
     },
     {
       // `operator`, as sending the agent a message is: that is all this does. No request id, because the
       // queue id is derived from the jobs themselves, so a repeat answers with the message already queued.
       method: 'POST',
-      path: '/v1/sessions/:sessionId/migrate/ask-to-stop-jobs',
+      path: '/v1/ferrets/:ferretId/move/ask-to-stop-jobs',
       minimum: 'operator',
       caller: 'any',
       noStore: true,
@@ -378,26 +377,26 @@ export function sessionMigrateRoutes(
 }
 
 /**
- * The security log's rule for the ask-to-stop-jobs route: a refused migration's "ask the agent to stop its background jobs"
+ * The security log's rule for the ask-to-stop-jobs route: a refused move's "ask the agent to stop its background jobs"
  * puts Ferretry's words in the agent's queue, so it prompts the agent as a send does and is recorded the same way.
  */
-const SESSION_MIGRATE_AUDIT_RULES: readonly AuditedRouteRule[] = [
+const SESSION_MOVE_AUDIT_RULES: readonly AuditedRouteRule[] = [
   {
     method: 'POST',
-    path: '/v1/sessions/:sessionId/migrate/ask-to-stop-jobs',
+    path: '/v1/ferrets/:ferretId/move/ask-to-stop-jobs',
     event: 'agent.prompted',
-    subject: 'sessionId',
+    subject: 'ferretId',
     detail: { action: 'ask-to-stop-jobs' },
   },
 ];
 
 /**
- * What the session-migrate module adds to the daemon: the four migration routes and the ask-to-stop-jobs audit rule.
+ * What the session-move module adds to the daemon: the four move routes and the ask-to-stop-jobs audit rule.
  *
- * The migration registers beside the revive it is built on: both are one-segment patterns under `/v1/sessions/:sessionId`
+ * The move registers beside the revive it is built on: both are one-segment patterns under `/v1/ferrets/:ferretId`
  * that differ only in their final literal, so neither can shadow the other, and both belong above the deeper per-session
  * subsystems.
  */
-export function sessionMigrateContribution(subsystem: SessionMigrateSubsystem): ModuleContribution {
-  return { routes: sessionMigrateRoutes(subsystem), audit: { routes: SESSION_MIGRATE_AUDIT_RULES } };
+export function sessionMoveContribution(subsystem: SessionMoveSubsystem): ModuleContribution {
+  return { routes: sessionMoveRoutes(subsystem), audit: { routes: SESSION_MOVE_AUDIT_RULES } };
 }

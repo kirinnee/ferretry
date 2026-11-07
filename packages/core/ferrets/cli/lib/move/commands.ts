@@ -1,10 +1,10 @@
 import type { Command } from 'commander';
-import type { MigrationCommandOptions, MigrationController } from './controller.ts';
+import type { MoveCommandOptions, MoveController } from './controller.ts';
 
-/** Mounts the daemon-gated session migration as `fy migrate`. */
-export function registerMigrationCommands(program: Command, controller: MigrationController): void {
+/** Mounts the daemon-gated session move as `fy move`. */
+export function registerMoveCommands(program: Command, controller: MoveController): void {
   program
-    .command('migrate')
+    .command('move')
     .description('continue a session on another runtime (another harness only with --convert)')
     .argument('<id>', 'session id or callsign')
     .requiredOption('-a, --agent <agent>', 'the runtime to move the session onto')
@@ -26,9 +26,9 @@ export function registerMigrationCommands(program: Command, controller: Migratio
       'move onto a runtime of the OTHER harness (Claude ↔ Codex) by converting the conversation; same as --conversation convert',
     )
     .option('--preview', 'with --convert: show what the conversion would carry and change nothing')
-    .option('--request-id <id>', 'stable idempotency key for an explicit retry of this migration')
-    .option('--json', 'print the migrated session as JSON')
-    .action(async (id: string, options: MigrationCommandOptions) => {
+    .option('--request-id <id>', 'stable idempotency key for an explicit retry of this move')
+    .option('--json', 'print the moved session as JSON')
+    .action(async (id: string, options: MoveCommandOptions) => {
       await controller.execute(id, options);
     });
 }

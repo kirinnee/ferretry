@@ -1,23 +1,23 @@
 import { describe, it } from 'bun:test';
 import { Command } from 'commander';
 import should from 'should';
-import { registerMigrationCommands } from '../../../../cli/lib/move/commands.ts';
-import { MigrationController } from '../../../../cli/lib/move/controller.ts';
-import { migrationHarness } from './fixtures.ts';
+import { registerMoveCommands } from '../../../../cli/lib/move/commands.ts';
+import { MoveController } from '../../../../cli/lib/move/controller.ts';
+import { moveHarness } from './fixtures.ts';
 
 function run(argv: string[]) {
-  const { gateway, io, presenter } = migrationHarness();
+  const { gateway, io, presenter } = moveHarness();
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-  registerMigrationCommands(program, new MigrationController(gateway, presenter));
+  registerMoveCommands(program, new MoveController(gateway, presenter));
   return { parsed: program.parseAsync(['node', 'fy', ...argv]), gateway, io };
 }
 
-describe('migration command surface', () => {
-  it('should map every daemon-supported migration option', async () => {
+describe('move command surface', () => {
+  it('should map every daemon-supported move option', async () => {
     // Arrange + Act
     const { parsed, gateway, io } = run([
-      'migrate',
+      'move',
       'Fable',
       '--agent',
       'codex-secondary',
@@ -47,14 +47,14 @@ describe('migration command surface', () => {
 
   it('should require the target account', async () => {
     // Arrange + Act + Assert
-    await should(run(['migrate', 'Fable']).parsed).be.rejected();
+    await should(run(['move', 'Fable']).parsed).be.rejected();
   });
 
   it('should pass an explicit force past the in-flight check, and never force by default', async () => {
     // Arrange + Act
-    const forced = run(['migrate', 'Fable', '--agent', 'codex-secondary', '--force-inflight']);
+    const forced = run(['move', 'Fable', '--agent', 'codex-secondary', '--force-inflight']);
     await forced.parsed;
-    const plain = run(['migrate', 'Fable', '--agent', 'codex-secondary']);
+    const plain = run(['move', 'Fable', '--agent', 'codex-secondary']);
     await plain.parsed;
 
     // Assert
@@ -64,9 +64,9 @@ describe('migration command surface', () => {
 
   it('should send --convert as the convert conversation, and --preview as a read that moves nothing', async () => {
     // Arrange + Act
-    const moved = run(['migrate', 'Fable', '--agent', 'codex-secondary', '--convert']);
+    const moved = run(['move', 'Fable', '--agent', 'codex-secondary', '--convert']);
     await moved.parsed;
-    const previewed = run(['migrate', 'Fable', '--agent', 'codex-secondary', '--convert', '--preview']);
+    const previewed = run(['move', 'Fable', '--agent', 'codex-secondary', '--convert', '--preview']);
     await previewed.parsed;
 
     // Assert

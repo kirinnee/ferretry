@@ -3,19 +3,21 @@ import { join } from 'node:path';
 import type { HarnessKind } from '@ferretry/fleet';
 import { type Harness } from '../lib/protocol/session-base.ts';
 import {
-  type AskToStopJobsResult,
-  type ConversionPreview,
-  type ConversionSummary as ConversionSummaryView,
-  type MigrationConversation,
   SessionConfigSchema,
   SessionStateSchema,
   type SessionView,
   type TranscriptProvenance,
 } from '../lib/protocol/session.ts';
+import {
+  type AskToStopJobsResult,
+  type ConversionPreview,
+  type ConversionSummary as ConversionSummaryView,
+  type MoveConversation,
+} from '../lib/protocol/move.ts';
 import type { z } from 'zod';
 import { deliverStopSignal, KeyedSerialExecutor, type SystemClock, BunProcessProbe } from '../../src/adapters/index.ts';
 import { FileConversationFiles } from '../adapters/moves/file-conversation-files.ts';
-import { FileMigrationReportStore } from '../adapters/moves/file-move-report.ts';
+import { FileMoveReportStore } from '../adapters/moves/file-move-report.ts';
 import { readPersistedReasoningEffort } from '../../src/adapters/session/harness/index.ts';
 import { lifecycleConfigDocument } from '../adapters/session/lifecycle/index.ts';
 import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
@@ -55,10 +57,10 @@ import {
   type HarnessVersionPort,
   handoffPointerPaths,
   harnessConversionRefusal,
-  harnessMigrationRefusal,
+  harnessMoveRefusal,
   jsonObject,
-  type MigrationPreflight,
-  type MigrationReportStore,
+  type MovePreflight,
+  type MoveReportStore,
   needsRolloutFormatProbe,
   type ObservedSession,
   type ProcRow,
@@ -73,9 +75,9 @@ import {
   type SessionId,
   type SessionLaunchService,
   SessionLifecycleConfigSchema,
-  SessionMigrateError,
-  type SessionMigrateFailure,
-  type SessionMigrateSubsystem,
+  SessionMoveError,
+  type SessionMoveFailure,
+  type SessionMoveSubsystem,
   type SessionPlanner,
   type SessionResumeService,
   type SessionTranscriptReader,
@@ -84,7 +86,7 @@ import {
   tryParseSessionId,
 } from '../../src/lib/index.ts';
 import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
-import { sessionMigrateContribution } from '../lib/runtime/mounts/session-move.ts';
+import { sessionMoveContribution } from '../lib/runtime/mounts/session-move.ts';
 import {
   restoreRestamped,
   settleRejectedRelaunch,
@@ -92,18 +94,18 @@ import {
 } from '../lib/session/resume/unrevived-relaunch.ts';
 
 /**
- * Moving a live session onto another account: `POST /v1/sessions/:sessionId/migrate`, its safety gate, the conversion
+ * Moving a live session onto another account: `POST /v1/ferrets/:ferretId/move`, its safety gate, the conversion
  * preview, the relaunch settings and the "ask the agent to stop its background jobs" route, over the service that drives
- * them ({@link createSessionMigrateSubsystem}).
+ * them ({@link createSessionMoveSubsystem}).
  *
  * See `./learning.ts` for what a module file owns. This module has no `Seams` (it replaces no production adapter that
  * `DaemonWorld` carries: the process probe, the report store, the conversation files, the conversion checks and the serial
- * executor are fixed production adapters; every owner the migration borrows is a need), no jobs, no releases of its own and
- * no protocol features: every constructor in the build is pure, so the single build sits where the migration was always
+ * executor are fixed production adapters; every owner the move borrows is a need), no jobs, no releases of its own and
+ * no protocol features: every constructor in the build is pure, so the single build sits where the move was always
  * assembled.
  *
  * Session lifecycle, launch, resume and account resolution are session code that stays in `fyd.ts` (the session-resume PR
- * moves restart/resume), so they reach this module only as typed {@link SessionMigrateNeeds}: the very locals the old call
+ * moves restart/resume), so they reach this module only as typed {@link SessionMoveNeeds}: the very locals the old call
  * passed. Every value the old code read LATE (the queue, the pane registration, the launch settings, the harness discovery)
  * is a closure written at the call site in `fyd.ts`, so each is read at the same moment it always was.
  *
@@ -111,17 +113,17 @@ import {
  * module's contribution.
  */
 
-/** What the session-migrate module is built from. */
-export interface SessionMigrateNeeds {
+/** What the session-move module is built from. */
+export interface SessionMoveNeeds {
   /** The state home's directories: the report store and a session's private directory are beneath them. */
   readonly paths: FoundationPaths;
   readonly storage: DaemonStorage;
   readonly sessions: SessionDirectorySubsystem;
   /** The SAME service the revive uses — see `createSessionResume` in `fyd.ts`. */
   readonly resume: SessionResumeService;
-  readonly preflight: MigrationPreflight;
+  readonly preflight: MovePreflight;
   /** Puts one Ferretry-authored message in the session's queue (a closure over the queue and its deliverer). */
-  readonly askAgent: SessionMigrateParts['askAgent'];
+  readonly askAgent: SessionMoveParts['askAgent'];
   readonly planner: SessionPlanner;
   readonly accounts: AccountInventoryPort;
   readonly executables: ExecutableResolverPort;
@@ -132,35 +134,35 @@ export interface SessionMigrateNeeds {
   /** The Codex rollout index the conversation files correlate a rollout by. */
   readonly codexRollouts: CodexRolloutIndex;
   /** The harness CLI itself, discovered the SAME way a start's readiness check and the doctor do. */
-  readonly locateHarness: SessionMigrateParts['locateHarness'];
-  readonly readableHandoffs: SessionMigrateParts['readableHandoffs'];
-  readonly fixedSettings: SessionMigrateParts['fixedSettings'];
-  readonly paneIdentity: SessionMigrateParts['paneIdentity'];
+  readonly locateHarness: SessionMoveParts['locateHarness'];
+  readonly readableHandoffs: SessionMoveParts['readableHandoffs'];
+  readonly fixedSettings: SessionMoveParts['fixedSettings'];
+  readonly paneIdentity: SessionMoveParts['paneIdentity'];
   /** The launch-service factory the daemon builds each launch service from (`createSessionLaunch` in `fyd.ts`). */
   readonly createSessionLaunch: (storage: DaemonStorage) => SessionLaunchService;
   /** The binary name a person drives, which an account resolution is typed with (`CLIENT_NAME` in `fyd.ts`). */
   readonly clientName: string;
 }
 
-/** What other code uses of the session-migrate module. */
-export type SessionMigrateProvides = SessionMigrateSubsystem & AgentJobControl;
+/** What other code uses of the session-move module. */
+export type SessionMoveProvides = SessionMoveSubsystem & AgentJobControl;
 
-/** The collaborators a migration needs. Grouped because eight positional arguments in the order the
+/** The collaborators a move needs. Grouped because eight positional arguments in the order the
  *  flow happens to use them is a call site nobody can check. */
-interface SessionMigrateParts {
+interface SessionMoveParts {
   readonly storage: DaemonStorage;
-  /** Pids read wherever they are on the host, for following a stopped job out of its pane (`migrate/stop-jobs.ts`). */
+  /** Pids read wherever they are on the host, for following a stopped job out of its pane (`move/stop-jobs.ts`). */
   readonly processes: { lookup(pids: readonly number[]): Promise<ReadonlyMap<number, ProcRow>> };
   readonly sessions: SessionDirectorySubsystem;
   /** The SAME service the revive uses — see `createSessionResumeSubsystem`. */
   readonly resume: SessionResumeService;
-  readonly preflight: MigrationPreflight;
+  readonly preflight: MovePreflight;
   /**
-   * Puts one Ferretry-authored message in the session's queue — the only thing a refused migration's
+   * Puts one Ferretry-authored message in the session's queue — the only thing a refused move's
    * "ask the agent to stop its background jobs" does. `created` is false when `messageId` was queued before.
    */
   readonly askAgent: (id: SessionId, message: { readonly id: string; readonly text: string }) => Promise<boolean>;
-  readonly reports: MigrationReportStore;
+  readonly reports: MoveReportStore;
   readonly planner: SessionPlanner;
   readonly accounts: AccountInventoryPort;
   readonly executables: ExecutableResolverPort;
@@ -176,7 +178,7 @@ interface SessionMigrateParts {
   readonly transcripts: SessionTranscriptReader;
   /** The target account's own transcript evidence, taken before the relaunch argv is authorized. */
   readonly transcriptProvenance: TranscriptProvenanceCapture;
-  /** The transcripts a migration reads and carries into the target login's home. */
+  /** The transcripts a move reads and carries into the target login's home. */
   readonly conversationFiles: ConversationFilesPort;
   /** The validation run a converted conversation must pass before a cross-harness move switches. */
   readonly conversionCheck: ConversionCheckPort;
@@ -196,7 +198,7 @@ interface SessionMigrateParts {
   readonly fixedSettings: (executable: string, harness: HarnessKind) => Promise<string | undefined>;
   /** The registered pane's identity (pane id, pid, process start), or nothing when none can be read. */
   readonly paneIdentity: (id: SessionId) => Promise<string | undefined>;
-  /** Serializes whole migrations of one session, so two cannot restamp the same document. */
+  /** Serializes whole moves of one session, so two cannot restamp the same document. */
   readonly serial: KeyedSerialExecutor;
   /** The SAME rebuild a revive runs, asked whether it would change anything. */
   readonly launch: SessionLaunchService;
@@ -204,27 +206,27 @@ interface SessionMigrateParts {
   readonly clientName: string;
 }
 
-/** The documents a migration reasons about, parsed by the schemas that govern them. */
-interface MigrateSubject {
+/** The documents a move reasons about, parsed by the schemas that govern them. */
+interface MoveSubject {
   readonly config: z.infer<typeof SessionConfigSchema>;
   readonly state: z.infer<typeof SessionStateSchema>;
   readonly tmuxSession: string;
 }
 
-/** How each account-resolution refusal is restated in the migration's own taxonomy. The resolver is
+/** How each account-resolution refusal is restated in the move's own taxonomy. The resolver is
  *  shared with the start, and its vocabulary is the start's. */
-const MIGRATE_RESOLUTION_REFUSALS: Partial<Record<SessionControlFailure, SessionMigrateFailure>> = {
+const MOVE_RESOLUTION_REFUSALS: Partial<Record<SessionControlFailure, SessionMoveFailure>> = {
   unknown_agent: 'unknown_agent',
   unavailable: 'unavailable',
 };
 
-/** How each resume refusal is restated once a migration is the thing that asked for the relaunch. */
-function migrateRelaunchRefusal(error: unknown): never {
-  // A guard or a dedupe conflict cannot reach here: the migration states its own policy, which sets
+/** How each resume refusal is restated once a move is the thing that asked for the relaunch. */
+function moveRelaunchRefusal(error: unknown): never {
+  // A guard or a dedupe conflict cannot reach here: the move states its own policy, which sets
   // neither an expected status nor the dedupe heuristic. Everything the domain refuses is therefore
   // the session's own condition — a live pane holding an unanswered question, an unconfirmed kill.
-  if (error instanceof ResumeRefused) throw new SessionMigrateError('refused', error.message);
-  throw new SessionMigrateError('failed', error instanceof Error ? error.message : String(error));
+  if (error instanceof ResumeRefused) throw new SessionMoveError('refused', error.message);
+  throw new SessionMoveError('failed', error instanceof Error ? error.message : String(error));
 }
 
 /**
@@ -249,7 +251,7 @@ export function currentContextWindow(
   });
 }
 
-/** What a migration's relaunch is bound to: a carried conversation, a fresh one, or a refusal. */
+/** What a move's relaunch is bound to: a carried conversation, a fresh one, or a refusal. */
 type RelaunchConversation =
   | {
       readonly kind: 'carry';
@@ -307,7 +309,7 @@ interface ConversionSubject {
  * version. Shared by the preview and the move, so what a person confirms is what is written.
  */
 async function planConversion(
-  parts: SessionMigrateParts,
+  parts: SessionMoveParts,
   subject: ConversionSubject,
   nativeShell = true,
 ): Promise<ConversationConvert> {
@@ -370,7 +372,7 @@ async function planConversion(
  * switched. Any doubt is `unresumable` with the reason, and the session is left exactly as it was.
  */
 async function convertRelaunchConversation(
-  parts: SessionMigrateParts,
+  parts: SessionMoveParts,
   subject: ConversionSubject,
 ): Promise<RelaunchConversation> {
   const native = await planConversion(parts, subject);
@@ -435,7 +437,7 @@ function conversionSummaryView(summary: ConvertedConversationSummary): Conversio
 }
 
 /**
- * The conversation a migration relaunches into, decided from reads alone.
+ * The conversation a move relaunches into, decided from reads alone.
  *
  * `fresh` is the person's explicit choice and captures the target's evidence as a start would.
  * `resume` carries the bound conversation ({@link planConversationCarry}); `previous` first rebinds
@@ -443,7 +445,7 @@ function conversionSummaryView(summary: ConvertedConversationSummary): Conversio
  * ({@link previousConversation}) — the repair for a session an earlier Restart moved onto an empty one.
  */
 async function decideRelaunchConversation(
-  parts: SessionMigrateParts,
+  parts: SessionMoveParts,
   subject: {
     readonly id: SessionId;
     readonly config: z.infer<typeof SessionConfigSchema>;
@@ -452,7 +454,7 @@ async function decideRelaunchConversation(
     readonly targetAgent: string;
     readonly targetModel: string;
     readonly targetWindow: number;
-    readonly conversation: MigrationConversation;
+    readonly conversation: MoveConversation;
   },
 ): Promise<RelaunchConversation> {
   const { id, config, harness, executable } = subject;
@@ -500,11 +502,11 @@ async function decideRelaunchConversation(
  * Moving one session onto another account, over the preflight that was built for exactly this and
  * never called.
  *
- * WHAT A MIGRATION IS MADE OF, and why each part is where it is:
+ * WHAT A MOVE IS MADE OF, and why each part is where it is:
  *
- *   * THE GATE RUNS FIRST AND WRITES NOTHING. `MigrationPreflight` inventories the pane's process
+ *   * THE GATE RUNS FIRST AND WRITES NOTHING. `MovePreflight` inventories the pane's process
  *     tree, the codex footer and the session's own open tools, and refuses work it cannot show will
- *     survive the kill. Nothing above it is allowed to mutate the session, so a refused migration
+ *     survive the kill. Nothing above it is allowed to mutate the session, so a refused move
  *     leaves a session exactly as it found it.
  *   * THE REPORT IS WRITTEN BEFORE THE PANE DIES, because it is the only account of what the kill
  *     destroyed and the pane is the evidence. It is also what the replacement agent is handed: the
@@ -517,12 +519,12 @@ async function decideRelaunchConversation(
  *     per-session queue — is the resume domain's, already built and tested. `replaceLiveTerminal`
  *     is what stops it taking its send shortcut and typing the handoff into the agent being replaced.
  *
- * ONLY `revived` IS A MIGRATION. The resume domain answers three other dispositions, and two of them
+ * ONLY `revived` IS A MOVE. The resume domain answers three other dispositions, and two of them
  * are relaunch failures that do NOT throw: `preserved` means the replacement reported failure while
  * the OLD harness was still at a prompt, and `retry-scheduled` means the relaunch failed and a retry
  * was booked. Both leave the session on the account it started on while its record already names the
  * new one, so both settle the report as a FAILURE. Treating the absence of an exception as success
- * here is precisely how a migration reports a move that did not happen.
+ * here is precisely how a move reports a move that did not happen.
  *
  * THE CONFIGURATION IS NOT ROLLED BACK when the relaunch fails, and the report says so in those
  * words. A rollback is a second write that can fail on its own, and it would race whatever the resume
@@ -530,9 +532,9 @@ async function decideRelaunchConversation(
  * this very document. Reporting "left staged on the target" is a fact; reporting a rollback that was
  * attempted and not verified would not be.
  */
-function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigrateSubsystem & AgentJobControl {
+function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsystem & AgentJobControl {
   /** The preflight's look at a session, shared by the move and by the ask that clears its way. */
-  const inspect = async (id: SessionId, { config, state, tmuxSession }: MigrateSubject) =>
+  const inspect = async (id: SessionId, { config, state, tmuxSession }: MoveSubject) =>
     await parts.preflight.inspect(
       {
         sessionId: id,
@@ -546,31 +548,31 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       },
       // The session's OWN transcript, resolved from the provenance its start recorded. A session
       // with none reads as an empty tail, which classifies every open tool `unknown` and refuses
-      // the migration — the same fail-closed answer this call gave before, now reached only when
+      // the move — the same fail-closed answer this call gave before, now reached only when
       // the evidence is genuinely absent rather than always.
       await parts.transcripts.tail({ sessionId: id, harness: config.harness === 'codex' ? 'codex' : 'claude' }),
     );
 
   /** Both documents plus the tmux address, or a stated refusal. A session whose pair does not parse
    *  is one nothing may restamp: the write would merge new fields over a document already broken. */
-  const subject = async (id: SessionId): Promise<MigrateSubject> => {
+  const subject = async (id: SessionId): Promise<MoveSubject> => {
     const raw = await parts.storage.readConfig(id);
     const config = SessionConfigSchema.safeParse(raw);
     const state = SessionStateSchema.safeParse(await parts.storage.readState(id));
     if (!config.success || !state.success)
-      throw new SessionMigrateError('unusable', `the documents for session ${id} do not satisfy the protocol`);
+      throw new SessionMoveError('unusable', `the documents for session ${id} do not satisfy the protocol`);
     // The tmux address lives in the lifecycle's half of the same document, and it is what every
     // signal the preflight reads is addressed by.
     const lifecycle = SessionLifecycleConfigSchema.safeParse(lifecycleConfigDocument(raw));
     if (!lifecycle.success)
-      throw new SessionMigrateError('unusable', `session ${id} records no terminal this daemon could inspect`);
+      throw new SessionMoveError('unusable', `session ${id} records no terminal this daemon could inspect`);
     return { config: config.data, state: state.data, tmuxSession: lifecycle.data.tmuxSession };
   };
 
   /** The view of a session this mount just moved. A document it cannot read back is a wiring fault. */
   const view = async (id: SessionId, when: string): Promise<SessionView> => {
     const found = await parts.sessions.get(id).catch(() => undefined);
-    if (found === undefined) throw new SessionMigrateError('failed', `session ${id} ${when} but cannot be read back`);
+    if (found === undefined) throw new SessionMoveError('failed', `session ${id} ${when} but cannot be read back`);
     return found;
   };
 
@@ -590,13 +592,13 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
   const resolveTarget = async (agent: string) =>
     await resolveStartAccount(parts.accounts, agent, parts.executables, parts.clientName).catch((error: unknown) => {
       if (!(error instanceof SessionControlError)) throw error;
-      const failure = MIGRATE_RESOLUTION_REFUSALS[error.failure];
+      const failure = MOVE_RESOLUTION_REFUSALS[error.failure];
       if (failure === undefined) throw error;
-      throw new SessionMigrateError(failure, error.message);
+      throw new SessionMoveError(failure, error.message);
     });
 
   /**
-   * The model a move plans on the target — the same planner the start uses, so the model a migration
+   * The model a move plans on the target — the same planner the start uses, so the model a move
    * records and the window it is measured against come from the one decision rather than two that can
    * disagree. Shared by the move and the conversion preview, so the window a person was shown is the
    * window the move fits.
@@ -617,7 +619,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       ...(config.parent === undefined ? {} : { parent: config.parent }),
     };
     // A RESTART KEEPS THE MODEL THE SESSION IS ON. A request that names no model used to plan the
-    // target's default, so Restart CLI — a migration onto the same account — quietly moved a session
+    // target's default, so Restart CLI — a move onto the same account — quietly moved a session
     // the owner had switched to another model back onto the default. The model it is on now is asked
     // for instead; only when the target cannot serve it does the target's default decide, as before.
     const current = currentLaunchModel(config, state, model => canServeModel(account, model));
@@ -632,10 +634,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     return { keep, planned };
   };
 
-  const migrate = async (
-    id: SessionId,
-    request: Parameters<SessionMigrateSubsystem['migrate']>[1],
-  ): Promise<SessionView> => {
+  const move = async (id: SessionId, request: Parameters<SessionMoveSubsystem['move']>[1]): Promise<SessionView> => {
     const { config, state, tmuxSession } = await subject(id);
     const { account, executable } = await resolveTarget(request.agent);
     // SAME-KIND, ENFORCED HERE — the first thing decided once both families are known, and before any
@@ -647,26 +646,26 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     // target's format, so it is refused the other way round — onto the session's own family.
     const converting = request.conversation === 'convert';
     const families = { sourceHarness: config.harness, targetHarness: account.kind, targetAgent: account.agent };
-    const mismatch = converting ? harnessConversionRefusal(families) : harnessMigrationRefusal(families);
-    if (mismatch !== undefined) throw new SessionMigrateError('harness_mismatch', mismatch);
+    const mismatch = converting ? harnessConversionRefusal(families) : harnessMoveRefusal(families);
+    if (mismatch !== undefined) throw new SessionMoveError('harness_mismatch', mismatch);
     const { keep, planned } = planModel(id, config, state, account, request.model);
     // And the effort it is on, which no request names — unless the move crosses harnesses, whose effort
     // vocabularies differ: the target then starts on its own login's setting.
     const effort = converting ? undefined : currentLaunchEffort(config, state);
-    // A MIGRATION ONTO A MODEL THE TARGET DOES NOT SERVE IS REFUSED, for the same reason the start
-    // refuses it and with more at stake: a migration that quietly landed on the account's default
+    // A MOVE ONTO A MODEL THE TARGET DOES NOT SERVE IS REFUSED, for the same reason the start
+    // refuses it and with more at stake: a move that quietly landed on the account's default
     // would move a live conversation into a different model and a different context window while the
     // report handed back named the one that was asked for. Refused at the same point the family
     // mismatch is, so the refusal costs nothing and leaves the session exactly where it was.
-    if (planned.kind === 'unservable-model') throw new SessionMigrateError('unservable_model', planned.reason);
+    if (planned.kind === 'unservable-model') throw new SessionMoveError('unservable_model', planned.reason);
     const plan = planned.plan;
     // Rebuilt rather than patched: the remote-control arguments are the TARGET harness's, and a
     // codex session inheriting a claude session's flags would relaunch into an argument error.
     //
-    // AUTHORIZED with the start's own rule, because a migration does not go through the lifecycle
+    // AUTHORIZED with the start's own rule, because a move does not go through the lifecycle
     // service that applies it. The relaunch reads this argv straight out of the document written
     // below, so without this check a fleet manifest publishing something that is not an auto wrapper
-    // would be launchable by a migrate and refused by a start.
+    // would be launchable by a move and refused by a start.
     //
     // THE CONVERSATION GOES WITH THE SESSION. A Restart, or a move onto another login of the same
     // harness, relaunches the CLI into the conversation it is bound to — the transcript carried into
@@ -690,7 +689,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     const fixedSettings =
       account.kind === 'claude' && compactAt !== undefined ? await parts.fixedSettings(executable, account.kind) : '';
     if (fixedSettings === undefined)
-      throw new SessionMigrateError(
+      throw new SessionMoveError(
         'unavailable',
         `${account.agent}'s fixed settings could not be read, so its compaction trigger cannot be applied`,
       );
@@ -713,7 +712,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
           defaultSessionLifecycleSettings,
         );
       } catch (error) {
-        throw new SessionMigrateError('unavailable', error instanceof Error ? error.message : String(error));
+        throw new SessionMoveError('unavailable', error instanceof Error ? error.message : String(error));
       }
     })();
     // The window the session runs in, read the way the plan reads the target's: the harness's own report, the
@@ -731,7 +730,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     // A CONVERSION FITS THE TARGET BY CONSTRUCTION: it keeps the newest history the target's window can
     // hold, tells the target how much it left out, and the preview the person confirmed said so.
     if (plan.contextWindow < window && !request.allowContextDowngrade && !relaunchesSameModel && !converting)
-      throw new SessionMigrateError(
+      throw new SessionMoveError(
         'context_downgrade',
         `${account.agent} serves ${plan.model} with a ${plan.contextWindow}-token window and this session is ` +
           `running in ${window}, so part of this conversation would be cut off. ` +
@@ -741,16 +740,16 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     const report = await inspect(id, { config, state, tmuxSession });
     const decision = parts.preflight.gate(report, { force: request.forceInflight });
     if (!decision.proceed)
-      throw new SessionMigrateError('refused', `${decision.reason}\n${parts.preflight.summarize(report)}`, {
+      throw new SessionMoveError('refused', `${decision.reason}\n${parts.preflight.summarize(report)}`, {
         inflight: parts.preflight.describe(report),
       });
     // NEVER A SILENT NEW CONVERSATION. Still before the first write, so a refusal leaves the session
     // exactly as it was and the person can choose to start fresh.
     if (relaunchConversation.kind === 'unresumable')
-      throw new SessionMigrateError('unresumable', relaunchConversation.reason);
+      throw new SessionMoveError('unresumable', relaunchConversation.reason);
     const at = parts.clock.now();
     if (decision.forced)
-      await parts.storage.append(id, 'session.migrate_forced', {
+      await parts.storage.append(id, 'session.move_forced', {
         to: account.agent,
         verdict: report.worstVerdict,
         went_past: parts.preflight
@@ -782,7 +781,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
           await parts.conversationFiles.write(attachment.file, Buffer.from(attachment.data, 'base64'));
         await parts.conversationFiles.write(converted.transcript.file, converted.transcript.text);
       } catch (error) {
-        throw new SessionMigrateError(
+        throw new SessionMoveError(
           'failed',
           `the converted conversation could not be written into ${account.agent}'s home (${converted.transcript.file}): ` +
             (error instanceof Error ? error.message : String(error)),
@@ -793,7 +792,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     const carried = relaunchConversation.copy;
     if (carried !== undefined)
       await parts.conversationFiles.copy(carried.from, carried.to).catch((error: unknown) => {
-        throw new SessionMigrateError(
+        throw new SessionMoveError(
           'failed',
           `the conversation could not be copied into ${account.agent}'s home (${carried.to}): ` +
             (error instanceof Error ? error.message : String(error)),
@@ -846,15 +845,15 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         command: [...command],
         incarnation: `${id}-${generation}`,
         runtimeGeneration: generation,
-        migration: { from, to: account.agent, at },
+        move: { from, to: account.agent, at },
         // The whole history, for the spend meter: the last 999 earlier moves and this one.
-        migrations: [...priorMigrations(retained).slice(-999), { from, to: account.agent, at }],
+        moves: [...priorMoves(retained).slice(-999), { from, to: account.agent, at }],
         ...(relaunchConversation.provenance === undefined ? {} : { transcript: relaunchConversation.provenance }),
         updatedAt: at,
       };
     });
     const by = request.movedBy ?? 'owner';
-    await parts.storage.append(id, 'session.migrating', {
+    await parts.storage.append(id, 'session.moving', {
       from,
       to: account.agent,
       by,
@@ -895,7 +894,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
           ...(record === undefined ? {} : { observed: record }),
         }),
       );
-      await parts.storage.append(id, ok ? 'session.migrated' : 'session.migrate_failed', {
+      await parts.storage.append(id, ok ? 'session.moved' : 'session.move_failed', {
         from,
         to: account.agent,
         by,
@@ -910,7 +909,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       .resume({
         id,
         // Neither an expected status nor the dedupe heuristic: an operator asked for THIS session by
-        // id, and the preflight above is the guard a migration has.
+        // id, and the preflight above is the guard a move has.
         policy: { automatic: false, dedupeSharedRecoveryScope: false, replaceLiveTerminal: true },
         // A move the Warden made is drawn as Ferretry · Warden on the turn it hands over, and opens with why.
         ...(request.actor === undefined ? {} : { actor: request.actor }),
@@ -927,7 +926,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
           rollBack,
         });
         await settle(false, (error instanceof Error ? error.message : String(error)) + rolledBack);
-        migrateRelaunchRefusal(error);
+        moveRelaunchRefusal(error);
       });
     if (outcome.disposition !== 'revived') {
       const detail = await settleUnrevivedRelaunch({
@@ -939,12 +938,12 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         rollBack,
       });
       await settle(false, detail);
-      throw new SessionMigrateError('failed', detail);
+      throw new SessionMoveError('failed', detail);
     }
     await settle(true);
-    // Read back through the SAME reader the list and the single read serve, so a migration answers
+    // Read back through the SAME reader the list and the single read serve, so a move answers
     // with the view those surfaces will show rather than a projection of its own writes.
-    return await view(id, 'was migrated');
+    return await view(id, 'was moved');
   };
 
   /**
@@ -989,9 +988,8 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
   const existing = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
     if (id === undefined)
-      throw new SessionMigrateError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
-    if (parts.storage.findSession(id) === undefined)
-      throw new SessionMigrateError('not_found', `no session ${reference}`);
+      throw new SessionMoveError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
+    if (parts.storage.findSession(id) === undefined) throw new SessionMoveError('not_found', `no session ${reference}`);
     return id;
   };
 
@@ -1004,7 +1002,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     const report = await inspect(id, await subject(id));
     const jobs = parts.preflight.agentJobs(report);
     if (jobs.length === 0)
-      throw new SessionMigrateError(
+      throw new SessionMoveError(
         'no_jobs',
         'none of the agent’s own background jobs is in the way any more — run the safety check again',
       );
@@ -1014,12 +1012,12 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
   };
 
   return {
-    // The Warden's own reach into a move's way (`warden/auto-migrate-service.ts`); no route serves either.
+    // The Warden's own reach into a move's way (`warden/auto-move-service.ts`); no route serves either.
     blockingJobs: async reference => {
       const id = existing(reference);
       return parts.preflight.agentJobs(await inspect(id, await subject(id)));
     },
-    // Serialized with migrations of the same session, so a move never reads the tree while it is being cleared.
+    // Serialized with moves of the same session, so a move never reads the tree while it is being cleared.
     stopAgentJobs: async reference => {
       const id = existing(reference);
       const target = await subject(id);
@@ -1039,41 +1037,40 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     },
     askToStopJobs: async reference => await askToStopJobs(existing(reference)),
     conversionPreview: async (reference, request) => await conversionPreview(existing(reference), request),
-    migrate: async (reference, request) => {
+    move: async (reference, request) => {
       const id = tryParseSessionId(reference);
       if (id === undefined)
-        throw new SessionMigrateError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
+        throw new SessionMoveError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
       if (parts.storage.findSession(id) === undefined)
-        throw new SessionMigrateError('not_found', `no session ${reference}`);
-      // WHOLE migrations serialize, not just their writes: the gate reads a pane, the restamp writes
-      // the document that pane's replacement is launched from, and a second migration interleaving
+        throw new SessionMoveError('not_found', `no session ${reference}`);
+      // WHOLE moves serialize, not just their writes: the gate reads a pane, the restamp writes
+      // the document that pane's replacement is launched from, and a second move interleaving
       // between the two would relaunch the first one's target under the second one's account.
-      return await parts.serial.run(id, async () => await migrate(id, request));
+      return await parts.serial.run(id, async () => await move(id, request));
     },
     relaunchSettings: async reference => {
       const id = tryParseSessionId(reference);
       if (id === undefined)
-        throw new SessionMigrateError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
+        throw new SessionMoveError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
       if (parts.storage.findSession(id) === undefined)
-        throw new SessionMigrateError('not_found', `no session ${reference}`);
+        throw new SessionMoveError('not_found', `no session ${reference}`);
       return await parts.launch.drift(id);
     },
   };
 }
 
 /**
- * A session's moves before this one, oldest first: its `migrations` list, or — on a session that predates it —
- * the single `migration` it carries. Read from the raw config, so a malformed entry is dropped, not thrown.
+ * A session's moves before this one, oldest first: its `moves` list. Read from the raw config, so a malformed entry
+ * is dropped, not thrown.
  */
-function priorMigrations(config: Readonly<Record<string, unknown>>): { from: string; to: string; at: string }[] {
-  const parsed = SessionConfigSchema.pick({ migration: true, migrations: true }).safeParse(config);
+function priorMoves(config: Readonly<Record<string, unknown>>): { from: string; to: string; at: string }[] {
+  const parsed = SessionConfigSchema.pick({ moves: true }).safeParse(config);
   if (!parsed.success) return [];
-  if (parsed.data.migrations !== undefined) return [...parsed.data.migrations];
-  return parsed.data.migration === undefined ? [] : [parsed.data.migration];
+  return [...(parsed.data.moves ?? [])];
 }
 
-export const sessionMigrateModule: DaemonModule<void, SessionMigrateNeeds, SessionMigrateProvides> = {
-  id: 'sessionMigrate',
+export const sessionMoveModule: DaemonModule<void, SessionMoveNeeds, SessionMoveProvides> = {
+  id: 'sessionMove',
   build: (needs, _seams, _lifecycle) => {
     const {
       paths,
@@ -1096,15 +1093,15 @@ export const sessionMigrateModule: DaemonModule<void, SessionMigrateNeeds, Sessi
       createSessionLaunch,
       clientName,
     } = needs;
-    // Hoisted so the handover and restart subsystems share this exact migrator.
-    const sessionMigrate = createSessionMigrateSubsystem({
+    // Hoisted so the handover and restart subsystems share this exact mover.
+    const sessionMove = createSessionMoveSubsystem({
       storage,
       processes: new BunProcessProbe(Bun.which('ps') ?? undefined),
       sessions,
       resume,
       preflight,
       askAgent,
-      reports: new FileMigrationReportStore(id => createSessionPaths(paths, id).directory),
+      reports: new FileMoveReportStore(id => createSessionPaths(paths, id).directory),
       planner,
       accounts,
       executables,
@@ -1121,17 +1118,17 @@ export const sessionMigrateModule: DaemonModule<void, SessionMigrateNeeds, Sessi
       readableHandoffs,
       fixedSettings,
       paneIdentity,
-      // Its own queue: a migration holds its lock across a pane kill and a relaunch, and must not
+      // Its own queue: a move holds its lock across a pane kill and a relaunch, and must not
       // make every unrelated document write in the process wait behind it.
       serial: new KeyedSerialExecutor(),
       launch: createSessionLaunch(storage),
       clientName,
     });
     return {
-      id: 'sessionMigrate',
-      provides: sessionMigrate,
+      id: 'sessionMove',
+      provides: sessionMove,
       jobs: {},
-      contributes: sessionMigrateContribution(sessionMigrate),
+      contributes: sessionMoveContribution(sessionMove),
     };
   },
 };

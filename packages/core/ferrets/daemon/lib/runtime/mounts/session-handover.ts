@@ -16,11 +16,11 @@ import type { ModuleContribution } from '../modules.ts';
 
 /**
  * Handing a top-level session to a different harness: three routes under
- * `/v1/sessions/:sessionId/handover`.
+ * `/v1/ferrets/:ferretId/handover`.
  *
- * A HANDOVER IS NOT A MIGRATION, and this mount is the place that keeps the two words apart. A
- * migration keeps one session id and restamps its identity document so one conversation continues
- * under another account of the SAME family — see `session-migrate.ts`. A handover crosses families,
+ * A HANDOVER IS NOT A MOVE, and this mount is the place that keeps the two words apart. A
+ * move keeps one session id and restamps its identity document so one conversation continues
+ * under another account of the SAME family — see `session-move.ts`. A handover crosses families,
  * and the conversation is exactly the thing that cannot cross: the transcript, the turn counter, the
  * open-tool ids and the resume arguments are all the source harness's, and the target harness cannot
  * read any of them. So a handover starts a NEW top-level session, carries every durable coordination
@@ -50,7 +50,7 @@ import type { ModuleContribution } from '../modules.ts';
  * every table: an unusable path id, a missing request id, and a body the schema refused — and each of
  * those is decided before the subsystem is reached, so the daemon's state is untouched.
  *
- * THE REQUEST ID IS MANDATORY ON BOTH POSTs, for the same reason the migration's is: the protocol
+ * THE REQUEST ID IS MANDATORY ON BOTH POSTs, for the same reason the move's is: the protocol
  * client retries a POST on transport failure, and a handover creates a session and changes board
  * membership. A request that cannot be recognised on its second arrival cannot be protected from
  * performing those effects twice, so the daemon refuses to begin or cancel one rather than accept a
@@ -113,11 +113,11 @@ const REFUSALS: Readonly<Record<SessionHandoverFailure, { readonly status: numbe
   // seated with, or sends `coordinator: null` for a root that has no board.
   coordinator_required: { status: 409, code: 'coordinator_required' },
   // The target is the source's own family, so a handover would throw a transcript away for nothing;
-  // the caller's remedy is `fy migrate`, which keeps the conversation. A different request, not a
+  // the caller's remedy is `fy move`, which keeps the conversation. A different request, not a
   // different spelling of this one.
   harness_same: { status: 409, code: 'harness_same' },
   // One of the two families is a name this build does not recognise, so sameness cannot be proved
-  // either way. Refused rather than guessed at, for the same reason the migration's family gate is.
+  // either way. Refused rather than guessed at, for the same reason the move's family gate is.
   harness_unknown: { status: 409, code: 'harness_unknown' },
   // No such session (begin) or no receipt for one (GET). 404: there is nothing here to act on.
   source_not_found: { status: 404, code: 'not-found' },
@@ -152,7 +152,7 @@ const REFUSALS: Readonly<Record<SessionHandoverFailure, { readonly status: numbe
   // Re-preparing the transfer after a crash produced a different plan than the receipt recorded: an
   // internal inconsistency an operator must investigate, not a state a caller can retry past.
   plan_drifted: { status: 500, code: 'handover_plan_drifted' },
-  // A step failed after the predecessor was already stopped. Like the migration's `failed`, the
+  // A step failed after the predecessor was already stopped. Like the move's `failed`, the
   // destruction is behind it, so an automatic retry would act on a session with no predecessor left.
   step_failed: { status: 500, code: 'session_handover_failed' },
   // An operator cancelled before the point of no return; the receipt records it. 409 rather than 200
@@ -172,7 +172,7 @@ function refuse(error: unknown): never {
 
 /** The raw path parameter, decoded. A parameter that regains a separator never reaches the service. */
 function pathSessionId(context: RouteContext): string {
-  const raw = context.params.get('sessionId') ?? '';
+  const raw = context.params.get('ferretId') ?? '';
   const decoded = decodeParameter(raw);
   if (decoded === undefined || decoded === '')
     throw new ApiError(400, 'the session id in the path is not usable', 'invalid_session_id');
@@ -182,7 +182,7 @@ function pathSessionId(context: RouteContext): string {
 /**
  * The logical request id this begin or cancel is identified by.
  *
- * MANDATORY, for the same reason the migration's is: the protocol client retries these POSTs on
+ * MANDATORY, for the same reason the move's is: the protocol client retries these POSTs on
  * transport failure, and a handover creates a session and changes board membership. A request that
  * cannot be recognised on its second arrival cannot be protected from performing those effects twice,
  * so the daemon refuses to begin or cancel one rather than accept a caller's word that it will never
@@ -288,7 +288,7 @@ async function cancel(subsystem: SessionHandoverSubsystem, context: RouteContext
 /**
  * The handover surface.
  *
- * Both POSTs are `operator` scope, for the same reason the migrate is: a handover creates a privileged
+ * Both POSTs are `operator` scope, for the same reason the move is: a handover creates a privileged
  * session and changes board membership. The GET is `authenticated`, because reading what happened is a
  * lesser thing than causing it, and a paired device may do the former where it may not do the latter.
  *
@@ -299,7 +299,7 @@ export function sessionHandoverRoutes(subsystem: SessionHandoverSubsystem): read
   return [
     {
       method: 'POST',
-      path: '/v1/sessions/:sessionId/handover',
+      path: '/v1/ferrets/:ferretId/handover',
       minimum: 'operator',
       caller: 'any',
       noStore: true,
@@ -307,7 +307,7 @@ export function sessionHandoverRoutes(subsystem: SessionHandoverSubsystem): read
     },
     {
       method: 'GET',
-      path: '/v1/sessions/:sessionId/handover',
+      path: '/v1/ferrets/:ferretId/handover',
       minimum: 'authenticated',
       caller: 'any',
       noStore: true,
@@ -315,7 +315,7 @@ export function sessionHandoverRoutes(subsystem: SessionHandoverSubsystem): read
     },
     {
       method: 'POST',
-      path: '/v1/sessions/:sessionId/handover/cancel',
+      path: '/v1/ferrets/:ferretId/handover/cancel',
       minimum: 'operator',
       caller: 'any',
       noStore: true,
@@ -327,10 +327,10 @@ export function sessionHandoverRoutes(subsystem: SessionHandoverSubsystem): read
 /**
  * What the session-handover module adds to the daemon: the three handover routes.
  *
- * The handover registers immediately after the migration it is the cross-family counterpart of, so the two operations a
- * caller chooses between sit together. Its three paths are one and two segments under `/v1/sessions/:sessionId` ending in
+ * The handover registers immediately after the move it is the cross-family counterpart of, so the two operations a
+ * caller chooses between sit together. Its three paths are one and two segments under `/v1/ferrets/:ferretId` ending in
  * the literal `handover` — and `handover/cancel` beneath it, registered in the same table after its parent — so none can
- * shadow or be shadowed by the migrate or the deeper per-session subsystems.
+ * shadow or be shadowed by the move or the deeper per-session subsystems.
  *
  * It contributes no audit rule: the two POSTs are listed as not audited in the module's contract fragment, because the
  * session journal records them.

@@ -33,7 +33,7 @@ function fromChatRecord(value: object): ChatToolUse | undefined {
  * transcript that is where this join's evidence actually comes from. Translating it into the
  * journal shape first would be a second vocabulary for the same fact, and the failure mode of
  * getting that translation wrong is silent: an unrecognized record makes an open tool `unknown`,
- * which the gate refuses on — a migration blocked by a shape mismatch, reported as danger.
+ * which the gate refuses on — a move blocked by a shape mismatch, reported as danger.
  */
 function fromTranscriptEvent(value: object): ChatToolUse | undefined {
   if ((value as { readonly kind?: unknown }).kind !== 'tool-call') return undefined;

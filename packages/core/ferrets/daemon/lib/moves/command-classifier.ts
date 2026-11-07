@@ -188,7 +188,7 @@ function classifySegment(segment: string): InflightVerdict {
   return safeHeads.has(head) ? 'safe_to_kill' : 'unknown';
 }
 
-/** Safely classify a shell command; ambiguous syntax deliberately refuses migration. */
+/** Safely classify a shell command; ambiguous syntax deliberately refuses move. */
 export function classifyCommand(command: string): InflightVerdict {
   const segments = splitSegments(command.trim());
   return segments.length === 0 ? 'unknown' : worstVerdict(segments.map(classifySegment));

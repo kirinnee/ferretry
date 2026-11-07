@@ -31,7 +31,7 @@ export const rearmableScripts = words(
   'build test tests lint check checks typecheck tsc compile fmt format coverage unit e2e bench ci verify validate prettier eslint',
 );
 export const destructiveScripts = words(
-  'deploy publish release prod push migrate db db:migrate reset clean prepublish postinstall preinstall install',
+  'deploy publish release prod push move db db:move reset clean prepublish postinstall preinstall install',
 );
 
 /** `config` is absent on purpose: `git config a b` writes. It gets its own classifier. */

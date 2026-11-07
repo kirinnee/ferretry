@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { verdictBlocksMigration, worstVerdict } from '../../../../daemon/lib/moves/verdict.ts';
+import { verdictBlocksMove, worstVerdict } from '../../../../daemon/lib/moves/verdict.ts';
 
-describe('migration verdict policy', () => {
+describe('move verdict policy', () => {
   it('should rank destructive work above unknown and safe work', () => {
     // Act
     const verdict = worstVerdict(['safe_to_kill', 're_armable', 'unknown', 'destructive_to_interrupt']);
@@ -13,9 +13,9 @@ describe('migration verdict policy', () => {
 
   it('should refuse unclassified or destructive work by default', () => {
     // Act + Assert
-    should(verdictBlocksMigration('safe_to_kill')).be.false();
-    should(verdictBlocksMigration('re_armable')).be.false();
-    should(verdictBlocksMigration('unknown')).be.true();
-    should(verdictBlocksMigration('destructive_to_interrupt')).be.true();
+    should(verdictBlocksMove('safe_to_kill')).be.false();
+    should(verdictBlocksMove('re_armable')).be.false();
+    should(verdictBlocksMove('unknown')).be.true();
+    should(verdictBlocksMove('destructive_to_interrupt')).be.true();
   });
 });

@@ -32,7 +32,7 @@ import {
  * serves back, that the store the route reads and the store the loop rosters are one document, and
  * that arming the loop returns a disarm which actually stops it. Those are the exact edges a unit test
  * with a fake in the middle cannot see, and every one of them was a real defect class in this
- * migration — a subsystem constructed and never called, or a loop nothing armed.
+ * move — a subsystem constructed and never called, or a loop nothing armed.
  */
 
 const AT = '2026-02-01T00:00:00.000Z';
@@ -105,7 +105,7 @@ describe('the mounted handover surface', () => {
     const response = await dispatcher.dispatch(
       request({
         method: 'GET',
-        path: '/v1/sessions/source-1/handover',
+        path: '/v1/ferrets/source-1/handover',
         headers: { authorization: 'Bearer admin-secret' },
       }),
     );

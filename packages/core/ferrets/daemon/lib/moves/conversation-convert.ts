@@ -18,7 +18,7 @@ import { codexRolloutRelativePath } from '../transcript/convert/write-codex.ts';
  * Moving a session onto the OTHER harness by converting its conversation: the plan, and the ports it
  * is carried out through.
  *
- * A same-harness migration carries the transcript as it is ({@link planConversationCarry}). Across
+ * A same-harness move carries the transcript as it is ({@link planConversationCarry}). Across
  * harnesses there is nothing to carry — Codex cannot read a Claude transcript — so the conversation is
  * WRITTEN AGAIN in the target's format under a fresh id the target owns, and the session is rebound to
  * that. The source transcript is left exactly where it was: it is the record of what happened, and the

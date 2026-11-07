@@ -984,7 +984,7 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
    * A transcript record already on the target must be the TARGET's own, and internally consistent.
    *
    * "Not the source's file" is not enough. A provenance record is what every later reader — the
-   * migration preflight, analytics, learning extraction, the transcript tail — resolves this
+   * move preflight, analytics, learning extraction, the transcript tail — resolves this
    * session's transcript through, so a syntactically valid record naming somebody else's file hands
    * one agent's conversation to another session, and the mistake is invisible afterwards. The record
    * is therefore reconciled with the two things that would have had to be true for this daemon to

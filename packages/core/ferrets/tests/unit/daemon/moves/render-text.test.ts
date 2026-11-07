@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { age, escapeCell, truncate, verdictLabels } from '../../../../daemon/lib/moves/render-text.ts';
 
-describe('migration report text helpers', () => {
+describe('move report text helpers', () => {
   it('should scale an age to the unit a reader can act on', () => {
     // Act + Assert
     should(age(0)).equal('0s');

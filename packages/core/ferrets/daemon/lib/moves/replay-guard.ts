@@ -1,8 +1,8 @@
 /**
- * THE MIGRATION'S REPLAY GUARD — one logical migration performs at most one destructive relaunch.
+ * THE MOVE'S REPLAY GUARD — one logical move performs at most one destructive relaunch.
  *
  * WHY THIS EXISTS AT ALL. `FyApiClient.request` retries a POST up to three times on transport
- * failure, 250ms and 500ms apart, and a migration is the most destructive operation the daemon
+ * failure, 250ms and 500ms apart, and a move is the most destructive operation the daemon
  * offers: the pane is snapshotted, killed, the configuration document is restamped, and a
  * replacement agent is launched. A relaunch takes seconds, so the second attempt of a retry sequence
  * arrives while the first is still mid-flight, and the third arrives while the session is a
@@ -16,7 +16,7 @@
  * "returns a coherent result" means here: a replay never learns something the original did not.
  *
  * WHICH FAILURES ARE REMEMBERED IS THE WHOLE SAFETY ARGUMENT, and it is not one rule but two,
- * because a migration has a point of no return in the middle of it.
+ * because a move has a point of no return in the middle of it.
  *
  *   BEFORE the pane is touched, a refusal means NOTHING HAPPENED. The preflight found in-flight work,
  *   the target account was unknown, the context window would shrink. These are answerable conditions:
@@ -28,7 +28,7 @@
  *   HAPPENED and the relaunch did not complete. Dropping that would let the retry — which is
  *   automatic, and 250ms away — attempt a second destructive relaunch against a session that has
  *   already lost its pane. So it is RETAINED and re-raised, and the caller is told the same thing the
- *   original was told: this migration failed after it committed, the session records why, go look.
+ *   original was told: this move failed after it committed, the session records why, go look.
  *
  * The guard cannot tell those apart by itself — the failure taxonomy belongs to the route that owns
  * the subsystem — so the caller injects `retainFailure`. A classifier that cannot decide should say
@@ -38,11 +38,11 @@
  * THE PAYLOAD FINGERPRINT IS AUTHORIZATION, not an optimisation, and it is the same argument the
  * start's recovery digest makes. A request id is minted by the CALLER. If one arrives twice carrying
  * two different targets, answering the second with the first's result would tell a caller its
- * migration to account B succeeded when what happened was a migration to account A. That is worse
- * than any error, so a mismatch is refused outright and neither migration is performed.
+ * move to account B succeeded when what happened was a move to account A. That is worse
+ * than any error, so a mismatch is refused outright and neither move is performed.
  *
  * THE ONE THING THIS DOES NOT COVER, stated plainly: THE LEDGER IS PROCESS-LOCAL BY DESIGN. It is a
- * `Map` in one daemon process, so a daemon RESTART forgets every migration it has performed, and a
+ * `Map` in one daemon process, so a daemon RESTART forgets every move it has performed, and a
  * retry that spans a restart is unguarded. Nor is it shared between daemons — each paired daemon
  * guards only its own sessions, which is what multi-daemon isolation requires and not a limitation.
  *
@@ -53,51 +53,51 @@
  * nobody observes, while the daemon looks healthy. See the class comment for the bug that taught this.
  *
  * Closing the restart window needs the record to live beside the session on disk — the session
- * already carries a migration report, so that is where it would go — and it is deliberately not
+ * already carries a move report, so that is where it would go — and it is deliberately not
  * attempted here: whether a destructive operation's receipt belongs in the state home is a durability
  * decision about the state home, not one a route mount gets to make. The window it actually leaves is
  * narrow: a daemon restart landing inside a single client's ~750ms retry sequence, which also means
  * the daemon died mid-relaunch and the session needs a human either way.
  *
  * SCOPING. The key pairs the session id with the request id, because a request id is caller-minted
- * and two sessions could be asked to migrate under the same one; keying on the pair means such a
- * collision cannot make one session's migration answer for another's.
+ * and two sessions could be asked to move under the same one; keying on the pair means such a
+ * collision cannot make one session's move answer for another's.
  */
 
 import type { SessionView } from '../protocol/session.ts';
 
-/** One logical migration, identified the way the route identifies it. */
-export interface MigrationReplayKey {
+/** One logical move, identified the way the route identifies it. */
+export interface MoveReplayKey {
   readonly sessionId: string;
   readonly requestId: string;
 }
 
 /** Raised when one request id is presented with two different targets. */
-export class MigrationReplayMismatchError extends Error {
+export class MoveReplayMismatchError extends Error {
   constructor(readonly requestId: string) {
     super(
-      `request id ${JSON.stringify(requestId)} was already used for a different migration target: one request id names one migration`,
+      `request id ${JSON.stringify(requestId)} was already used for a different move target: one request id names one move`,
     );
-    this.name = 'MigrationReplayMismatchError';
+    this.name = 'MoveReplayMismatchError';
   }
 }
 
 /**
- * How many logical migrations one daemon process will admit.
+ * How many logical moves one daemon process will admit.
  *
- * A ceiling on RECEIPTS, chosen against how migrations actually happen: a human decides to move a
+ * A ceiling on RECEIPTS, chosen against how moves actually happen: a human decides to move a
  * session, so a busy fleet produces a few dozen a day and a single session a handful in its life.
  * Four thousand of them is years of deliberate use, and the whole ledger at that size is a few
  * megabytes — a key, a fingerprint and one `SessionView` per entry. So the cap is unreachable by real
  * operation and reachable only by a caller minting fresh ids on purpose, which is exactly who it is
  * for.
  *
- * Nothing about it is a retention window. Compare `MigrationReplayCapacityError` below.
+ * Nothing about it is a retention window. Compare `MoveReplayCapacityError` below.
  */
-export const MIGRATION_REPLAY_MAX_ENTRIES = 4096;
+export const MOVE_REPLAY_MAX_ENTRIES = 4096;
 
 /**
- * Raised when a NEW migration cannot be admitted because the ledger is full.
+ * Raised when a NEW move cannot be admitted because the ledger is full.
  *
  * THIS IS THE FAIL-CLOSED HALF OF THE LEDGER, and it exists because "never forget a receipt" and
  * "bounded memory" cannot both hold unconditionally — one of them has to yield, and which one is a
@@ -105,29 +105,29 @@ export const MIGRATION_REPLAY_MAX_ENTRIES = 4096;
  *
  * Forgetting yields nothing safely: a discarded receipt re-authorizes a destructive relaunch that
  * already happened, silently, while the daemon looks healthy. Refusing yields safely: the caller is
- * told, in the response, that this daemon will not start another migration, and NOTHING IS DESTROYED
+ * told, in the response, that this daemon will not start another move, and NOTHING IS DESTROYED
  * to produce that answer. So new work is refused and every existing receipt is still served.
  *
  * The only caller that can reach this is one minting unique request ids without ever completing a
- * migration — the memory-exhaustion path Darcy identified. A real operator hits an unreachable
+ * move — the memory-exhaustion path Darcy identified. A real operator hits an unreachable
  * ceiling; an id generator hits a wall instead of the daemon's heap.
  */
-export class MigrationReplayCapacityError extends Error {
+export class MoveReplayCapacityError extends Error {
   constructor(readonly limit: number) {
     super(
-      `this daemon has already recorded ${limit} migrations and will not admit another: a migration receipt is never discarded, because discarding one would let a retry relaunch a session that was already relaunched. Restart the daemon to clear the ledger.`,
+      `this daemon has already recorded ${limit} moves and will not admit another: a move receipt is never discarded, because discarding one would let a retry relaunch a session that was already relaunched. Restart the daemon to clear the ledger.`,
     );
-    this.name = 'MigrationReplayCapacityError';
+    this.name = 'MoveReplayCapacityError';
   }
 }
 
-/** The stable string identity of one logical migration. */
-export function migrationReplayKey({ sessionId, requestId }: MigrationReplayKey): string {
+/** The stable string identity of one logical move. */
+export function moveReplayKey({ sessionId, requestId }: MoveReplayKey): string {
   return JSON.stringify([sessionId, requestId]);
 }
 
 /** Decides whether a rejection happened after the session was already destroyed. */
-export type MigrationFailureRetention = (error: unknown) => boolean;
+export type MoveFailureRetention = (error: unknown) => boolean;
 
 /**
  * The admission cap, normalised so that no input can switch admission off.
@@ -140,8 +140,8 @@ export type MigrationFailureRetention = (error: unknown) => boolean;
  *
  * Non-finite therefore normalises to 1 — the same direction every other bad input already took, and
  * the same direction the rest of this file takes when it cannot be sure: refuse rather than allow. A
- * daemon that admits one migration is visibly, immediately wrong and gets fixed; one that admits
- * unlimited migrations looks healthy until it dies. Throwing would also be defensible, but it would
+ * daemon that admits one move is visibly, immediately wrong and gets fixed; one that admits
+ * unlimited moves looks healthy until it dies. Throwing would also be defensible, but it would
  * make a misconfigured cap fail at daemon boot rather than at the route, and fail-closed keeps every
  * bad value on one path.
  */
@@ -152,7 +152,7 @@ function admissionLimit(value: number): number {
 
 interface ReplayEntry {
   readonly fingerprint: string;
-  /** Present while the migration is running; every replay awaits this exact promise. */
+  /** Present while the move is running; every replay awaits this exact promise. */
   running?: Promise<SessionView>;
   /** Present once it succeeded. */
   view?: SessionView;
@@ -161,21 +161,21 @@ interface ReplayEntry {
 }
 
 /**
- * Remembers migrations by logical identity so a retried POST joins the original instead of starting
+ * Remembers moves by logical identity so a retried POST joins the original instead of starting
  * a second one.
  *
  * A SETTLED RECEIPT IS NEVER FORGOTTEN WHILE THE PROCESS LIVES, and that is a correctness
  * requirement rather than a tuning choice. An earlier version of this class kept a bounded 64-entry
- * history, reasoning that a client's retry window is under a second and no real fleet migrates often
+ * history, reasoning that a client's retry window is under a second and no real fleet moves often
  * enough for the bound to matter. That reasoning was wrong in the only direction that counts: the
- * bound is measured in MIGRATIONS, not in time, so 64 later migrations silently discard an earlier
+ * bound is measured in MOVES, not in time, so 64 later moves silently discard an earlier
  * receipt, and the next request carrying that earlier id finds a clean slate and RELAUNCHES A SESSION
  * THAT WAS ALREADY RELAUNCHED. A cache whose eviction policy can re-authorize destruction is not a
  * safety mechanism. There is no capacity to tune, because no capacity is safe: any finite bound is a
- * number of migrations after which the guard stops guarding.
+ * number of moves after which the guard stops guarding.
  *
- * WHAT THIS COSTS, so the trade is explicit: one map entry per logical migration for the daemon's
- * lifetime — a key string, a fingerprint, and either a `SessionView` or one error. Migrations are
+ * WHAT THIS COSTS, so the trade is explicit: one map entry per logical move for the daemon's
+ * lifetime — a key string, a fingerprint, and either a `SessionView` or one error. Moves are
  * destructive operations a human performs deliberately, a handful per session at most, so the ledger
  * grows at human pace and is bounded in practice by the process lifetime the section below describes.
  * Retaining a few thousand receipts costs a few megabytes; forgetting one costs a destroyed session.
@@ -183,50 +183,50 @@ interface ReplayEntry {
  * THE LEDGER IS THEREFORE CAPPED BY ADMISSION RATHER THAN BY EVICTION, and the difference is the whole
  * design. Eviction bounds memory by dropping OLD receipts, which re-authorizes destruction that
  * already happened. Admission bounds memory by refusing NEW work, which destroys nothing: at
- * `MIGRATION_REPLAY_MAX_ENTRIES` a fresh identity is turned away with
- * `MigrationReplayCapacityError` — before `perform` is called — while every receipt already held is
- * still served in full. Read the cap as "how many migrations this process will ever start", never as
+ * `MOVE_REPLAY_MAX_ENTRIES` a fresh identity is turned away with
+ * `MoveReplayCapacityError` — before `perform` is called — while every receipt already held is
+ * still served in full. Read the cap as "how many moves this process will ever start", never as
  * "how many it remembers"; those were the same number in the bug this class used to have, and they
  * must never be the same number again.
  *
  * ONLY COMMITTED OUTCOMES OCCUPY A SLOT, which is what keeps the cap far away from real use. A
- * migration refused BEFORE the pane is touched frees its slot on the way out, so a fleet that trips
+ * move refused BEFORE the pane is touched frees its slot on the way out, so a fleet that trips
  * the preflight all day long consumes no admission at all. The ledger grows only when destruction
  * actually happened, or while it is happening.
  */
-export class MigrationReplayGuard {
+export class MoveReplayGuard {
   readonly #entries = new Map<string, ReplayEntry>();
-  readonly #retainFailure: MigrationFailureRetention;
+  readonly #retainFailure: MoveFailureRetention;
   readonly #maxEntries: number;
 
-  constructor(retainFailure: MigrationFailureRetention, maxEntries: number = MIGRATION_REPLAY_MAX_ENTRIES) {
+  constructor(retainFailure: MoveFailureRetention, maxEntries: number = MOVE_REPLAY_MAX_ENTRIES) {
     this.#retainFailure = retainFailure;
     this.#maxEntries = admissionLimit(maxEntries);
   }
 
-  /** How many logical migrations this process is currently holding. */
+  /** How many logical moves this process is currently holding. */
   get size(): number {
     return this.#entries.size;
   }
 
   /**
-   * The view this logical migration produced, performing it at most once.
+   * The view this logical move produced, performing it at most once.
    *
    * `perform` is a thunk rather than a promise so it is never invoked for a replay: the whole
    * guarantee is that the destructive work does not begin a second time. `fingerprint` is the
    * caller's rendering of the target this id names.
    *
    * Admission is checked ONLY on the path that would add an identity, and only after every replay
-   * branch above it has been ruled out. A full ledger must never stop answering for the migrations it
+   * branch above it has been ruled out. A full ledger must never stop answering for the moves it
    * already holds — that would turn a memory limit into exactly the re-destruction hazard the limit
    * was added to avoid.
    */
-  async run(key: MigrationReplayKey, fingerprint: string, perform: () => Promise<SessionView>): Promise<SessionView> {
-    const identity = migrationReplayKey(key);
+  async run(key: MoveReplayKey, fingerprint: string, perform: () => Promise<SessionView>): Promise<SessionView> {
+    const identity = moveReplayKey(key);
     const existing = this.#entries.get(identity);
 
     if (existing !== undefined) {
-      if (existing.fingerprint !== fingerprint) throw new MigrationReplayMismatchError(key.requestId);
+      if (existing.fingerprint !== fingerprint) throw new MoveReplayMismatchError(key.requestId);
       if (existing.view !== undefined) return existing.view;
       if ('committedFailure' in existing) throw existing.committedFailure;
       if (existing.running !== undefined) return await existing.running;
@@ -239,7 +239,7 @@ export class MigrationReplayGuard {
     // check and the reservation below it: `perform()` is a call, not an `await`, and it runs
     // synchronously to its own first suspension point before handing a promise back — so no other
     // caller's `run` can interleave in the gap and let two admissions pass one free slot.
-    if (this.#entries.size >= this.#maxEntries) throw new MigrationReplayCapacityError(this.#maxEntries);
+    if (this.#entries.size >= this.#maxEntries) throw new MoveReplayCapacityError(this.#maxEntries);
 
     const started = perform();
     this.#entries.set(identity, { fingerprint, running: started });

@@ -1,30 +1,30 @@
 import { randomUUID } from 'node:crypto';
 import { appendFile, mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { MigrationReportStore } from '../../lib/moves/report-store.ts';
+import type { MoveReportStore } from '../../lib/moves/report-store.ts';
 import type { SessionId } from '../../lib/session-id.ts';
 
 /** The one report per session, beside the turn documents a revive writes into the same directory. */
-const REPORT_FILE = 'migration-inflight.md';
+const REPORT_FILE = 'move-inflight.md';
 
 /**
- * The migration report inside the session's own private directory.
+ * The move report inside the session's own private directory.
  *
  * The first half is written ATOMICALLY through a temporary file, for the same reason the turn store
  * is: the agent that reads this document is handed its path by the very relaunch that follows the
- * write, so a torn document is one a migrated agent reads as its account of what was interrupted.
+ * write, so a torn document is one a moved agent reads as its account of what was interrupted.
  *
  * The outcome half is APPENDED rather than rewritten, because by then the inventory it follows is
  * the only surviving evidence of what the kill destroyed — a rewrite that failed part-way would take
  * that with it. An append also keeps the file honest about ordering: the pending inventory was true
  * when it was written, and the outcome is a later fact about it.
  *
- * ONE report per session, deliberately overwritten by a second migration. A session that is moved
- * twice was moved twice for a reason, and the journal carries both `session.migrating` events with
+ * ONE report per session, deliberately overwritten by a second move. A session that is moved
+ * twice was moved twice for a reason, and the journal carries both `session.moving` events with
  * their targets; keeping a numbered pile of reports in the session directory would grow without
  * bound while the handoff message could only ever name one of them.
  */
-export class FileMigrationReportStore implements MigrationReportStore {
+export class FileMoveReportStore implements MoveReportStore {
   constructor(
     private readonly sessionDirectory: (id: SessionId) => string,
     private readonly uniqueId: () => string = randomUUID,

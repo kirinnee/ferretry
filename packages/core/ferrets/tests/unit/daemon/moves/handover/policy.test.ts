@@ -148,7 +148,7 @@ describe('handover eligibility', () => {
     });
     should(decision).match({ ok: false, refusal: { failure: 'harness_same' } });
     should(decision.ok).be.false();
-    if (!decision.ok) should(decision.refusal.message).match(/migration/u);
+    if (!decision.ok) should(decision.refusal.message).match(/move/u);
   });
 
   it('refuses rather than guesses when either family is a name it does not know', () => {

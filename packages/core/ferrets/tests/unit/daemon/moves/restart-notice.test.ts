@@ -9,7 +9,7 @@ import {
 import { interruptedCount, restartNotice } from '../../../../daemon/lib/moves/restart-notice.ts';
 import type { InflightVerdict } from '../../../../daemon/lib/moves/verdict.ts';
 
-const REPORT = '/state/sessions/session-1/migration-inflight.md';
+const REPORT = '/state/sessions/session-1/move-inflight.md';
 
 const tool = (verdict: InflightVerdict): OpenToolInfo => ({
   toolUseId: `tool-${verdict}`,

@@ -123,7 +123,7 @@ function forkRequest(
   const supplied = FY_REQUEST_ID_HEADER in headers ? headers : withRequestId(headers);
   return request({
     method: 'POST',
-    path: `/v1/sessions/${sessionId}/fork`,
+    path: `/v1/ferrets/${sessionId}/fork`,
     headers: supplied,
     body: typeof body === 'string' ? body : JSON.stringify(body),
   });
@@ -141,7 +141,7 @@ describe('the session fork mount', () => {
     // Assert
     should(routes).have.length(1);
     should(routes[0]?.method).equal('POST');
-    should(routes[0]?.path).equal('/v1/sessions/:sessionId/fork');
+    should(routes[0]?.path).equal('/v1/ferrets/:ferretId/fork');
     should(routes[0]?.minimum).equal('operator');
     should(routes[0]?.noStore).be.true();
   });
@@ -224,7 +224,7 @@ describe('the session fork mount', () => {
   });
 
   it('should not remember a request id, because the durable receipt owns replay', async () => {
-    // A migration keeps an in-memory ledger because a repeat could destroy a pane twice and the
+    // A move keeps an in-memory ledger because a repeat could destroy a pane twice and the
     // memory cannot be rebuilt from disk. A fork destroys nothing and its receipt IS on disk, so a
     // second ledger here would forget on restart and answer for a fact it does not own. The mount
     // must therefore pass a repeated id straight through and let the service replay it.

@@ -12,10 +12,10 @@ export interface ObservedSession {
 }
 
 /**
- * The settled result of one migration attempt. `observed` is deliberately separate from
+ * The settled result of one move attempt. `observed` is deliberately separate from
  * `targetAgent`: the target is what was ASKED FOR, `observed` is what the daemon REPORTS.
  */
-export interface MigrationOutcome {
+export interface MoveOutcome {
   readonly ok: boolean;
   /** The wrapper the session was on before the attempt. */
   readonly from: string;
@@ -47,12 +47,12 @@ function wrapperLine(observed: ObservedSession, from: string, targetAgent: strin
   return `- Session now on: \`${binary}\`${model} — neither the original \`${from}\` nor the requested \`${targetAgent}\`.`;
 }
 
-function successLines(outcome: MigrationOutcome, model: string): readonly string[] {
+function successLines(outcome: MoveOutcome, model: string): readonly string[] {
   const lines: string[] = [
-    '## Outcome — MIGRATION SUCCEEDED',
+    '## Outcome — MOVE SUCCEEDED',
     '',
     `- Settled at: ${outcome.at}`,
-    `- Migrated from \`${outcome.from}\` onto \`${outcome.targetAgent}\`${model}.`,
+    `- Moved from \`${outcome.from}\` onto \`${outcome.targetAgent}\`${model}.`,
   ];
   if (outcome.observed?.binary)
     lines.push(
@@ -66,13 +66,13 @@ function successLines(outcome: MigrationOutcome, model: string): readonly string
   return lines;
 }
 
-function failureLines(outcome: MigrationOutcome, model: string): readonly string[] {
+function failureLines(outcome: MoveOutcome, model: string): readonly string[] {
   const lines: string[] = [
-    '## Outcome — MIGRATION FAILED',
+    '## Outcome — MOVE FAILED',
     '',
     `- Settled at: ${outcome.at}`,
     `- Requested target: \`${outcome.targetAgent}\`${model} (from \`${outcome.from}\`)`,
-    '- **The migration did NOT complete.** Everything above describes what was in flight when it was tried.',
+    '- **The move did NOT complete.** Everything above describes what was in flight when it was tried.',
     `- Error: ${truncate(outcome.detail?.trim() || 'no detail reported', 600)}`,
   ];
   if (outcome.observed) {
@@ -89,13 +89,13 @@ function failureLines(outcome: MigrationOutcome, model: string): readonly string
 }
 
 /**
- * The `## Outcome` section appended to the session's `migration-inflight.md` once the attempt
+ * The `## Outcome` section appended to the session's `move-inflight.md` once the attempt
  * settles. This is the ONLY part of the report allowed to state that the move happened. On failure
  * it reports the error plus whatever the daemon actually observes afterwards — and says UNKNOWN
  * rather than claiming a rollback it did not verify, because a daemon-side refusal, a half-applied
  * config, and a clean restore are all reachable.
  */
-export function renderMigrationOutcome(outcome: MigrationOutcome): string {
+export function renderMoveOutcome(outcome: MoveOutcome): string {
   const model = modelSuffix(outcome.targetModel);
   const lines = outcome.ok ? successLines(outcome, model) : failureLines(outcome, model);
   return `${lines.join('\n')}\n`;

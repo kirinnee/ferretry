@@ -38,23 +38,23 @@ export interface ReportMeta {
 }
 
 /**
- * The markdown written to the session's `migration-inflight.md` — the handoff note AND the forensic
- * record of what a forced migration destroyed.
+ * The markdown written to the session's `move-inflight.md` — the handoff note AND the forensic
+ * record of what a forced move destroyed.
  *
- * This half is written BEFORE the migration is attempted, so it must never claim the move happened:
+ * This half is written BEFORE the move is attempted, so it must never claim the move happened:
  * at this point the target is REQUESTED, not reached. The settled truth is appended afterwards by
- * `renderMigrationOutcome`.
+ * `renderMoveOutcome`.
  */
 export function renderInflightReport(report: InflightReport, meta: ReportMeta): string {
   const model = meta.targetModel ? ` (model \`${meta.targetModel}\`)` : '';
   const lines: string[] = [
-    '# Migration in-flight report',
+    '# Move in-flight report',
     '',
     `- Session: \`${meta.sessionId}\``,
-    `- Migration requested onto: \`${meta.targetAgent}\`${model} — **PENDING at the time this section was ` +
+    `- Move requested onto: \`${meta.targetAgent}\`${model} — **PENDING at the time this section was ` +
       'written; see the Outcome section below for what actually happened.**',
     `- Requested at: ${meta.at}`,
-    `- Status at migrate: ${report.status} (turn ${report.turn})`,
+    `- Status at move: ${report.status} (turn ${report.turn})`,
     `- Worst verdict: **${verdictLabels[report.worstVerdict]}**`,
   ];
   if (meta.forced)
@@ -69,7 +69,7 @@ export function renderInflightReport(report: InflightReport, meta: ReportMeta): 
     ...codexSection(report),
     ...blindSpotSection(report),
   );
-  if (nothingObserved(report)) lines.push('_No open tools or descendant processes were observed at migrate time._', '');
+  if (nothingObserved(report)) lines.push('_No open tools or descendant processes were observed at move time._', '');
   lines.push(...guidance());
   return `${lines.join('\n')}\n`;
 }

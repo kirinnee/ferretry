@@ -11,7 +11,7 @@
  * that cannot be redone: it never writes to, stops, restamps or journals its source, and every step
  * after the receipt is claimed is bound to the fresh target and idempotent. So a step that failed
  * is simply re-driven on the next attempt, and a step that fails deterministically refuses
- * identically every time — which is the honest answer. Compare a migration, whose failures must be
+ * identically every time — which is the honest answer. Compare a move, whose failures must be
  * remembered precisely because it destroys a pane before it relaunches one.
  */
 

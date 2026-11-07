@@ -23,7 +23,7 @@ import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
 import { sessionHandoverContribution } from '../lib/runtime/mounts/session-handover.ts';
 
 /**
- * The cross-harness handover: the three routes under `/v1/sessions/:sessionId/handover`, the durable receipt store, the
+ * The cross-harness handover: the three routes under `/v1/ferrets/:ferretId/handover`, the durable receipt store, the
  * state machine behind them and the reconcile loop that finishes a handover nobody is watching.
  *
  * See `./learning.ts` for what a module file owns. This module has no `Seams` (it replaces no production adapter that
@@ -36,7 +36,7 @@ import { sessionHandoverContribution } from '../lib/runtime/mounts/session-hando
  * immediately — a daemon that has just restarted is when a handover is most likely to be mid-ladder). It is armed
  * beside the warden sweep and after the bind, on the line `start()` always had.
  *
- * Session lifecycle, launch, resume and migrate stay in `fyd.ts`: the module reaches the session directory, the
+ * Session lifecycle, launch, resume and move stay in `fyd.ts`: the module reaches the session directory, the
  * planner and the account resolution only as typed {@link SessionHandoverNeeds}, the very locals the old call passed.
  * What it provides is the service itself, read by nothing but its own route, and the loop, which `MountedSubsystems`
  * still carries as `handoverReconcile` (the boot trace names that field).
@@ -132,7 +132,7 @@ interface SessionHandoverWiring {
 /**
  * The cross-harness handover, wired to the surfaces that already exist.
  *
- * WHAT THIS OPERATION IS, in one line, because the word next to it means something else: a migration
+ * WHAT THIS OPERATION IS, in one line, because the word next to it means something else: a move
  * keeps a session and moves it to another account of the SAME family, and a handover crosses families,
  * which the conversation cannot survive — so a NEW top-level session is started, every durable
  * coordination fact is carried into it, it proves it holds and can use the predecessor's board
@@ -147,7 +147,7 @@ interface SessionHandoverWiring {
  * parallel domain the seam exists to prevent, and it would have to be deleted — with its receipts
  * already on disk — the moment the real one landed.
  *
- * The consequence is stated rather than hidden: `POST /v1/sessions/:id/handover` refuses every request
+ * The consequence is stated rather than hidden: `POST /v1/ferrets/:id/handover` refuses every request
  * until those land, and the refusal says which piece is missing. Everything else about the operation —
  * the receipt store, the phase ladder, the reconciler, the refusal taxonomy, the routes — is real,
  * wired and exercised, which is what makes landing the seam a small change rather than a second
@@ -224,7 +224,7 @@ export function createSessionHandoverSubsystem(
       accounts: {
         resolve: async (agent, model) => {
           const { account } = await resolveStartAccount(wiring.accounts, agent, wiring.executables, wiring.clientName);
-          // The SAME planner the start and the migration use, so the model a handover records and the
+          // The SAME planner the start and the move use, so the model a handover records and the
           // window it is measured against come from one decision rather than two that can disagree.
           const planned = wiring.planner.plan({
             id: 'handover-probe',
@@ -314,7 +314,7 @@ export const sessionHandoverModule: DaemonModule<
     // Remembering which receipts are open, so the reconciler reads them all only at boot and on its
     // backstop, rather than every session directory every fifteen seconds.
     const handoverReceipts = new RememberedHandoverReceipts(new FileHandoverReceiptStore(paths.sessions));
-    // Hoisted for the reason the migration is: the reconcile loop drives THIS service rather
+    // Hoisted for the reason the move is: the reconcile loop drives THIS service rather
     // than a second one of its own. Two would each hold their own per-session serialization chain
     // over one receipt document, and the whole point of that chain is that a begin and a reconciler
     // tick for one predecessor cannot interleave.

@@ -1,4 +1,4 @@
-/** How safely an in-flight operation can be interrupted for account migration. */
+/** How safely an in-flight operation can be interrupted for account move. */
 export type InflightVerdict = 'safe_to_kill' | 're_armable' | 'destructive_to_interrupt' | 'unknown';
 
 const rank: Readonly<Record<InflightVerdict, number>> = {
@@ -15,7 +15,7 @@ export function worstVerdict(verdicts: readonly InflightVerdict[]): InflightVerd
   return worst;
 }
 
-/** Migration must refuse destructive and unclassified work unless explicitly forced. */
-export function verdictBlocksMigration(verdict: InflightVerdict): boolean {
+/** Move must refuse destructive and unclassified work unless explicitly forced. */
+export function verdictBlocksMove(verdict: InflightVerdict): boolean {
   return verdict === 'destructive_to_interrupt' || verdict === 'unknown';
 }

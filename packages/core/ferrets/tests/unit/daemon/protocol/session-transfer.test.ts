@@ -166,19 +166,6 @@ describe('session transfer protocol', () => {
     should(transfer.ConversationFacetSchema.parse({ messages: [] })).deepEqual({ messages: [] });
   });
 
-  it('should strip the retired boardAccess from a stored plan instead of rejecting it', () => {
-    // Arrange — a plan persisted while the task-board ACL still stamped its durable config.
-    const stored = JSON.parse(
-      JSON.stringify({ ...plan, durable: { ...plan.durable, boardAccess: 'none' } }),
-    ) as unknown;
-
-    // Act
-    const parsed = transfer.SessionTransferPlanSchema.parse(stored);
-
-    // Assert
-    should(parsed.durable).deepEqual(plan.durable);
-  });
-
   it('should keep the durable message row binding-free so a plan stored before bindings still reads', () => {
     // The read row extends THIS base with a required `selectionBinding`. That evidence is about a
     // request being made now — it is verified once, before anything is claimed — so a copy frozen

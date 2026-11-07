@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
-import { HarnessSchema, InteractionModeSchema, TranscriptProvenanceSchema, withoutBoardAccess } from './session.ts';
+import { HarnessSchema, InteractionModeSchema, TranscriptProvenanceSchema } from './session.ts';
 import { ConversationMessagePointSchema } from './session-transfer-edge.ts';
 
 export type {
@@ -180,7 +180,7 @@ const SessionTransferDurableConfigShapeSchema = z.strictObject({
   retry: TransferRetryPolicySchema,
 });
 
-const SessionTransferDurableConfigSchema = z.preprocess(withoutBoardAccess, SessionTransferDurableConfigShapeSchema);
+const SessionTransferDurableConfigSchema = SessionTransferDurableConfigShapeSchema;
 
 const SessionTransferFacetsSchema = z.strictObject({
   conversation: ConversationFacetSchema.nullable(),

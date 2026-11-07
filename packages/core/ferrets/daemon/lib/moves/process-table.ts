@@ -58,7 +58,7 @@ export function descendantsOf(rootPid: number, rows: readonly ProcRow[]): readon
 }
 
 /**
- * Maps observable process rows into migration inventory entries. A row {@link identifyKnownProcesses}
+ * Maps observable process rows into move inventory entries. A row {@link identifyKnownProcesses}
  * recognised as the agent's own is safe to stop: the restart relaunches it with the CLI. One
  * `identifyAgentJobs` traced to the agent's tool shell carries that shell as `toolShell`.
  */

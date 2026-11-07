@@ -209,7 +209,7 @@ describe('the message the agent is sent', () => {
     const backward = agentJobsMessageId([...jobs].reverse());
 
     // Assert
-    should(forward).equal('migrate-jobs-5100-5101');
+    should(forward).equal('move-jobs-5100-5101');
     should(backward).equal(forward);
     should(agentJobsMessageId(jobs.slice(0, 1))).not.equal(forward);
   });
@@ -223,7 +223,7 @@ describe('the message the agent is sent', () => {
 
     // Assert
     should(id.length).be.belowOrEqual(128);
-    should(id).match(/^migrate-jobs-h[0-9a-f]{8}$/);
+    should(id).match(/^move-jobs-h[0-9a-f]{8}$/);
     should(agentJobsMessageId([...many].reverse())).equal(id);
   });
 });

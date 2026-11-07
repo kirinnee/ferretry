@@ -117,7 +117,7 @@ function resolutionFailure(error: unknown): ForkSessionFailure | undefined {
 /**
  * The wire failure for anything this daemon can raise on a fork.
  *
- * The default is `session_fork_failed` and it is SAFE, unlike a migration's: a fork writes nothing
+ * The default is `session_fork_failed` and it is SAFE, unlike a move's: a fork writes nothing
  * to its source and every step after the durable receipt is bound to the fresh target and
  * idempotent, so an unclassified failure leaves a re-drivable receipt rather than a half-destroyed
  * session. That is why a corrupt receipt, a phase regression and an unexpected I/O error can all

@@ -4,12 +4,12 @@ import type { TranscriptProvenance } from '../protocol/session.ts';
 import { claudeTranscriptFile } from '../session/transcript/claude-path.ts';
 
 /**
- * What a Restart or a same-harness migration does with the conversation the session is bound to.
+ * What a Restart or a same-harness move does with the conversation the session is bound to.
  *
- * THE DEFECT THIS EXISTS FOR. A migration used to re-capture the target's transcript exactly as a
+ * THE DEFECT THIS EXISTS FOR. A move used to re-capture the target's transcript exactly as a
  * start does, and for Claude a capture MINTS a new harness session id. The relaunch then ran
  * `--session-id <new id>`, a file that did not exist yet, so the replacement CLI opened an empty
- * conversation — and Restart CLI, which is a migration onto the same login, wiped the agent's memory
+ * conversation — and Restart CLI, which is a move onto the same login, wiped the agent's memory
  * every time it was pressed. The previous conversation stayed on disk with nothing pointing at it.
  *
  * A RESTART CONTINUES THE CONVERSATION. The bound harness session id is carried: Claude relaunches
@@ -25,9 +25,9 @@ import { claudeTranscriptFile } from '../session/transcript/claude-path.ts';
  * Pure: the caller reads the disk, copies the file and writes the record.
  */
 
-/** What a migration knows about the conversation before it decides. */
+/** What a move knows about the conversation before it decides. */
 export interface ConversationCarryRequest {
-  /** The harness family, which a migration has already proved is the same on both sides. */
+  /** The harness family, which a move has already proved is the same on both sides. */
   readonly harness: Harness;
   /** The transcript the session is bound to now, as its configuration records it. */
   readonly source: TranscriptProvenance | undefined;

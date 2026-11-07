@@ -2,7 +2,7 @@ import { isHarnessCommand, type KnownProcess } from './harness-provenance.ts';
 import type { InflightReport } from './inflight-report.ts';
 import type { ProcRow } from './process-table.ts';
 import { age, truncate } from './render-text.ts';
-import { verdictBlocksMigration } from './verdict.ts';
+import { verdictBlocksMove } from './verdict.ts';
 
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'mksh', 'fish']);
 /** `-c`, or a cluster that carries it: `-lc`, `-ic`. */
@@ -55,7 +55,7 @@ export function identifyAgentJobs(
   return shellOf;
 }
 
-/** One background job that keeps a migration from going ahead, as the agent is told about it. */
+/** One background job that keeps a move from going ahead, as the agent is told about it. */
 export interface AgentJob {
   readonly pid: number;
   readonly command: string;
@@ -63,13 +63,13 @@ export interface AgentJob {
 }
 
 /**
- * The agent's own jobs that BLOCK this migration — what it is asked to stop. Empty when nothing it
+ * The agent's own jobs that BLOCK this move — what it is asked to stop. Empty when nothing it
  * started is in the way, which is also the answer when something else blocks: the ask is only offered
  * where stopping these is the whole remedy.
  */
 export function blockingAgentJobs(report: InflightReport): readonly AgentJob[] {
   return report.processes
-    .filter(entry => entry.toolShell !== undefined && verdictBlocksMigration(entry.verdict))
+    .filter(entry => entry.toolShell !== undefined && verdictBlocksMove(entry.verdict))
     .map(entry => ({
       pid: entry.pid,
       command: truncate(entry.argv, COMMAND_WIDTH),
@@ -105,7 +105,7 @@ export function agentJobsMessage(jobs: readonly AgentJob[]): string {
 export function agentJobsMessageId(jobs: readonly AgentJob[]): string {
   const pids = [...new Set(jobs.map(job => job.pid))].sort((left, right) => left - right).join('-');
   // A queue id is at most 128 characters; a long list is named by a digest of the same words instead.
-  return pids.length <= MAX_LISTED_ID ? `migrate-jobs-${pids}` : `migrate-jobs-h${fnv1a(pids)}`;
+  return pids.length <= MAX_LISTED_ID ? `move-jobs-${pids}` : `move-jobs-h${fnv1a(pids)}`;
 }
 
 const MAX_LISTED_ID = 100;
