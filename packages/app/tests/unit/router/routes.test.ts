@@ -11,6 +11,7 @@ const table = routeTable([card, newCard, join, shadow]);
 describe('routes', () => {
   test('the shell pages', () => {
     expect(table.parse('/')).toEqual({ kind: 'home' });
+    expect(table.parse('/app/')).toEqual({ kind: 'home' });
     expect(table.parse('/settings')).toEqual({ kind: 'device-settings' });
     expect(table.parse('/d/d1')).toEqual({ kind: 'daemon-home', daemon: 'd1' });
     expect(table.parse('/d/d1/settings')).toEqual({ kind: 'daemon-settings', daemon: 'd1' });

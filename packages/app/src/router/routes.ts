@@ -57,7 +57,7 @@ function matchParts(pattern: readonly string[], actual: readonly string[]): Reco
 }
 
 /** Shell segments a plugin screen may not take (they would shadow the shell's own pages). */
-const RESERVED_ROOTS = new Set(['d', 'settings', 'assets', 'icons']);
+const RESERVED_ROOTS = new Set(['app', 'd', 'settings', 'assets', 'icons']);
 const RESERVED_DAEMON_ROOTS = new Set(['settings']);
 
 export interface RouteTable {
@@ -93,6 +93,8 @@ export function routeTable(screens: Iterable<ScreenRef>): RouteTable {
   return {
     parse(pathname) {
       const parts = segments(pathname);
+      // The installed app's document is served at `/app/` (`public/_redirects`); that prefix is the app's home.
+      if (parts[0] === 'app') parts.shift();
       if (parts.length === 0) return { kind: 'home' };
       if (parts.length === 1 && parts[0] === 'settings') return { kind: 'device-settings' };
       if (parts[0] === 'd') {
@@ -128,3 +130,5 @@ export const daemonHomeHref = (daemon: string): string => `/d/${encodeURICompone
 export const daemonSettingsHref = (daemon: string, tab?: string): string =>
   `/d/${encodeURIComponent(daemon)}/settings${tab === undefined ? '' : `/${encodeURIComponent(tab)}`}`;
 export const DEVICE_SETTINGS_HREF = '/settings';
+/** The app's home (the daemon list). `/` is the public landing page; the app lives under `/app/`. */
+export const HOME_HREF = '/app/';
