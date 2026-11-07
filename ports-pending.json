@@ -39,8 +39,6 @@
       "the new-ferret and move pages mount the offered slots (ferrets.new-ferret-account, ferrets.move-account) when ported; Runtimes already contributes the account picker to both"
     ],
     "warden": [
-      "liveness monitor (dead_monitor, sus_thinking, sus_subprocess, agent_frozen never fire): Terminals’ port (of, holders) has no look at a ferret’s own pane; needs a Terminals additive pane liveness sample (frame, token counter, transcript size, process tree) per D2 #19",
-      "leftover browsers are never closed: neither Terminals (of, holders) nor Browsers (state, pagesOf) reads a ferret pane’s processes or closes one; needs an additive close of the browsers left under a ferret’s pane (D2 #19)",
       "failover and auto-move refuse: needs Ferrets’ additive move(ferret, runtime), today’s migrate (D2 #19)",
       "auto-revive is wired through FerretsApi.resume but inert: needs a death cause on FerretSummary (D2 #19)",
       "investigators refuse, so nothing is spent: needs Ferrets’ start taking a work folder and reports read back through summary(ferret) (D2 #19, #15)",

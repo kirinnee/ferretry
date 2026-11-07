@@ -8,6 +8,7 @@ import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing
 import { fakeKernel } from '../../support/kernel.ts';
 import { waitFor } from '../../support/wait-for.ts';
 import { wardenHost } from './host.ts';
+import { FERRET, livenessHost } from './liveness-host.ts';
 
 const MINUTE = 60_000;
 
@@ -82,5 +83,32 @@ describe('job parity', () => {
     disarm();
 
     expect(early).toBe(boot);
+  });
+
+  test('J-0034 the liveness monitor is armed with the sweep, and from then each 30 s tick looks at a ferret through Terminals', async () => {
+    const host = livenessHost({ sample: () => ({ paneHash: 'same', pane: '❯ ', subprocessAlive: false }) });
+    await new Promise(resolve => setTimeout(resolve, 15));
+    expect(host.looks()).toBe(0);
+
+    const disarm = host.arm();
+    await host.ticks(2);
+    disarm();
+
+    expect(host.looks()).toBe(2);
+  });
+
+  test('J-0035 the tick nudges a quiet ferret only while the Warden is on and may nudge alone', async () => {
+    const quiet = () => ({ paneHash: 'same', pane: '❯ ', subprocessAlive: false });
+    const sentTo = async (config: unknown): Promise<number> => {
+      const host = livenessHost({ sample: quiet, config });
+      const disarm = host.arm();
+      await host.ticks(12);
+      disarm();
+      return (await host.conversation.sends(FERRET)).sends.length;
+    };
+
+    expect(await sentTo(undefined)).toBe(1);
+    expect(await sentTo({ mayActAlone: { nudge: false } })).toBe(0);
+    expect(await sentTo({ enabled: false })).toBe(0);
   });
 });

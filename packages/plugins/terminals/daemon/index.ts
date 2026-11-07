@@ -527,6 +527,9 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
   const provided: TerminalsApi = {
     of: async ferret => (await service.list(ferret).catch(() => ({ terminals: [] }))).terminals,
     holders: async () => await service.holders(),
+    // The Warden's two looks at a ferret's own pane: read only, through the attach proof (`lib/session/pane-look.ts`).
+    liveness: async ferret => await processes.look.liveness(ferret).catch(() => ({})),
+    paneBrowsers: async ferret => await processes.look.browsers(ferret),
   };
 
   const routes = terminalRouteHandlers(subsystem);

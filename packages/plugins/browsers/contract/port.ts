@@ -25,6 +25,14 @@ export interface BrowsersApi {
    * (Runtimes keeps it and no contract serves it), so Browsers cannot say, and leaves it absent rather than guess.
    */
   browserPorts?(): Promise<{ readonly shared: boolean }>;
+  /**
+   * Close the browsers a ferret launched that still run under its own pane, read afresh at this moment (today's
+   * `closeLeftoverBrowsers`), and answer how many were closed. Nothing is closed — `0` — while a tool command runs
+   * under the pane (it may be using that browser), or when Terminals is off (the pane cannot be read). Only top-level
+   * browsers in THAT pane's process tree are sent SIGTERM: never the ferret itself, never a helper's browser, never
+   * anything outside its tree. Throws when the pane's tree could not be read, or a signal was refused.
+   */
+  closeLeftoverBrowsers(ferret: FerretId): Promise<number>;
 }
 
 export const BrowsersPort = definePort<BrowsersApi>('browsers');

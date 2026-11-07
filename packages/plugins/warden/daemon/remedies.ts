@@ -1,5 +1,6 @@
 import type { AsksApi } from '@ferretry/core-asks/contract';
 import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
+import type { BrowsersApi } from '@ferretry/plugin-browsers/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { hasOpenQuestion } from './fleet.ts';
 import type { WardenRemedyPort, WardenResumeOutcome } from './lib/index.ts';
@@ -12,6 +13,8 @@ export interface WardenRemedyHost {
   readonly asks: AsksApi;
   /** Told after every remedy, whether it was done or failed (the `WardenActed` event). */
   readonly acted: (ferret: string, action: string, outcome: 'done' | 'failed') => void;
+  /** Browsers, while it is on (an optional use): it closes the browsers left under a ferret's pane. */
+  readonly browsers?: () => BrowsersApi | undefined;
 }
 
 /** The reason the Warden's restart gives Ferrets for the stop half of it (today's restart recorded the Warden). */
@@ -84,10 +87,22 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
       await act(ferret, 'stop', async () => await ferrets.stop(ferret as FerretId, 'polite', reason)),
     // GAP(ferrets): moving a ferret to another login needs Ferrets' additive `move`; until then a failover refuses.
     failover: async () => refuse('Moving a ferret to another account'),
-    // GAP(terminals/browsers): today closed the browsers left under the ferret's own pane, read from its process tree.
-    // Neither Terminals' port (`of`, `holders`) nor Browsers' (`state`, `pagesOf`) reads a pane's processes or closes
-    // one, so nothing is closed and the sweep reports zero.
-    closeLeftoverBrowsers: async () => 0,
+    // Today's remedy, through Browsers: the pane's tree is read again at this moment (through Terminals), nothing is
+    // closed while a tool command runs, and only top-level browsers under THAT pane are signalled — never the ferret.
+    // The sweep calls this only when the owner lets the Warden close leftovers alone (`mayActAlone.closeLeftovers`).
+    // Browsers off: nothing closes, and the sweep is never told of a leftover to close (`withLiveness`).
+    closeLeftoverBrowsers: async ferret => {
+      const browsers = host.browsers?.();
+      if (browsers === undefined) return 0;
+      try {
+        const closed = await browsers.closeLeftoverBrowsers(ferret as FerretId);
+        if (closed > 0) acted(ferret, 'close_leftover', 'done');
+        return closed;
+      } catch (error) {
+        acted(ferret, 'close_leftover', 'failed');
+        throw error;
+      }
+    },
   };
 
   return {

@@ -20,6 +20,7 @@ import { pageToolHost } from './tools/page-host.ts';
 import { BrowserTools } from './tools/service.ts';
 import type { RecordedSurfaceEvent } from './tools/types.ts';
 import { processHost } from './adapters/host.ts';
+import { closeLeftoverBrowsers, spawnTerminate } from './leftovers.ts';
 import { BrowserLoginWindowService } from './worker/control/adapters/login-window.ts';
 import { NodeBrowserLoginRuntime, XvfbDisplay } from './worker/control/adapters/login-runtime.ts';
 import { BrowserProfileStore } from './worker/control/adapters/profile-store.ts';
@@ -248,6 +249,12 @@ export function buildBrowsers(
             ...(page.incognito === true ? { incognito: true as const } : {}),
           }));
         },
+        // The Warden's remedy for a browser left under a ferret's pane: its tree read again now, through Terminals.
+        closeLeftoverBrowsers: async ferret =>
+          await closeLeftoverBrowsers(ferret, {
+            terminals: () => ctx.uses.terminals.current(),
+            terminate: spawnTerminate(kernel.spawn),
+          }),
       },
     },
     hooks: { 'input.targets:page': target.adapter },

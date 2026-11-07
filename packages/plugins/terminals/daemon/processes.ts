@@ -8,7 +8,9 @@
  * pid, the pid's start and the private server's session, re-observed and matched before anything is read, typed
  * or signalled (G29, G34). A name is never a candidate.
  */
+import { createHash } from 'node:crypto';
 import type { FerretsApi } from '@ferretry/core-ferrets/contract';
+import { targetRef } from '@ferretry/core-vault/contract';
 import type { ApiResponse, CallContext, FerretId, KernelPorts, RedactionScope } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import {
@@ -52,9 +54,11 @@ import { consoleInputHandler } from './lib/runtime/mounts/session-console-input.
 import { processHandlers } from './lib/runtime/mounts/session-processes.ts';
 import { type RegisteredTerminalPane, SessionAttachService } from './lib/session/attach/index.ts';
 import { SessionConsoleService } from './lib/session/console/index.ts';
+import { PaneLook } from './lib/session/pane-look.ts';
 import { ProcessHistory } from './lib/session/processes/history.ts';
 import type { ProcessTextRedactor, SessionTranscriptTailPort } from './lib/session/processes/ports.ts';
 import { SessionProcessService } from './lib/session/processes/service.ts';
+import { hasSessionArguments } from './lib/tmux/commands.ts';
 import type { TmuxCommandPort } from './lib/tmux/contracts.ts';
 import { TmuxController } from './lib/tmux/controller.ts';
 
@@ -106,6 +110,8 @@ export interface LaunchLimits {
 export interface Processes {
   readonly routes: ProcessRoutes;
   readonly limits: LaunchLimits;
+  /** The read-only looks at a ferret's own pane the Warden takes (`liveness`, `paneBrowsers`). */
+  readonly look: PaneLook;
 }
 
 /** Every vault-scrubbed string in the Processes tab goes through ONE `Redaction.read` per answer (S17). */
@@ -130,10 +136,11 @@ export function buildProcesses(deps: ProcessesDeps): Processes {
     observer,
   );
   const console = new SessionConsoleService(attach, deps.tmux);
+  const provenance = new HarnessProcessProvenance(deps.binaryName, new ProjectMcpServers());
   const processes = new SessionProcessService({
     panes: attach,
     tree,
-    provenance: new HarnessProcessProvenance(deps.binaryName, new ProjectMcpServers()),
+    provenance,
     files: new RegularOutputFile(),
     signals: new SigtermProcessSignal(),
     transcript: deps.transcript ?? { tail: async () => ({ kind: 'unresolved' }) },
@@ -141,6 +148,30 @@ export function buildProcesses(deps: ProcessesDeps): Processes {
     history: new ProcessHistory(),
     clock: { nowMs },
     refusedOutputRoots: deps.refusedOutputRoots,
+  });
+
+  // ─── the Warden's looks at a ferret's own pane (read only) ──────────────────────────────────────────────────────
+  const look = new PaneLook({
+    panes: attach,
+    tree,
+    provenance,
+    // Confirmed gone: no registration, or tmux answers that its session does not exist (today's second question).
+    paneAbsent: async ferret => {
+      const registered = await deps.paneOf(ferret as FerretId);
+      if (registered === undefined) return true;
+      return (await deps.tmux.execute(hasSessionArguments(registered.tmuxSession))).code !== 0;
+    },
+    // The visible screen of the PROVED pane, read as an act on it (a hold refuses it) and masked inside that act.
+    screen: async paneId => {
+      const answer = await kernel.act(targetRef('terminal', paneId), 'read', async () => {
+        const captured = await deps.tmux.execute(['capture-pane', '-p', '-t', paneId]);
+        if (captured.code !== 0) throw new Error(captured.stderr.trim() || `tmux exited ${captured.code}`);
+        return await kernel.redaction.read(scope => ({ kind: 'content' as const, text: scope.text(captured.stdout) }));
+      });
+      return answer.ok ? answer.value.text : undefined;
+    },
+    digest: text => createHash('sha256').update(text, 'utf8').digest('hex'),
+    nowMs,
   });
 
   // ─── ferret limits ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -252,5 +283,6 @@ export function buildProcesses(deps: ProcessesDeps): Processes {
       command: async (ferret, command, kind) => await (await built).planner.command(ferret, command, kind),
       browserCommand: async command => await (await built).planner.browserCommand(command),
     },
+    look,
   };
 }

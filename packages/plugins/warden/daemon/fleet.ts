@@ -1,7 +1,17 @@
 import { type AskSummary, type AsksApi, SourceKeySchema } from '@ferretry/core-asks/contract';
 import type { FerretId, FerretsApi, FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
-import { type ExchangeSend, type WardenFleetSession, type WardenSessionStatus, withBatchMembers } from './lib/index.ts';
+import {
+  type ExchangeSend,
+  type LivenessTarget,
+  textFingerprint,
+  WARDEN_LABEL,
+  type WardenFleetSession,
+  type WardenLivenessMonitor,
+  type WardenSessionStatus,
+  withBatchMembers,
+  withLivenessLedger,
+} from './lib/index.ts';
 
 const HARNESS_OF: Readonly<Record<string, 'claude' | 'codex'>> = { 'claude-code': 'claude', codex: 'codex' };
 
@@ -52,8 +62,8 @@ const statusOf = (ferret: FerretSummary): WardenSessionStatus => {
 
 /**
  * One ferret as the sweep reads it. Ferrets knows who it is and which of four states it is in; the finer facts today's
- * detector measures (pane frames, token counters, tool processes) are not in the Ferrets contract, so they are absent
- * here and the classifiers that need them stay quiet (declared GAP, listed on `daemon/index.ts`).
+ * detector measures (pane frames, token counters, tool processes) come from the liveness monitor, laid over this by
+ * {@link withLiveness} while Terminals is on. Without it they are absent and the classifiers that need them stay quiet.
  */
 export function wardenFleetSession(
   ferret: FerretSummary,
@@ -101,7 +111,8 @@ export function wardenFleetSession(
     directory,
     cwd: ferret.folder,
     turn,
-    // Ferrets owns the runner; a ferret it calls running has a live handle by its own account.
+    // Without the liveness monitor (Terminals off), Ferrets' own account: a ferret it calls running has a live handle,
+    // so `dead_monitor` does not run. With it, {@link withLiveness} says whether the monitor is really watching.
     hasLiveMonitor: ferret.state !== 'stopped',
     observedSince: ferret.stateAt,
   };
@@ -185,4 +196,68 @@ export async function exchangeSends(conversation: ConversationApi, ferret: Ferre
     cursor = listed.nextCursor;
   }
   return withBatchMembers(sends, (await conversation.queue(ferret)).messages);
+}
+
+/** What the sweep reads of the liveness monitor for one ferret (today's `wardenFleetSession` overlay, `fyd.ts`). */
+export type LivenessOverlay = Pick<
+  WardenLivenessMonitor,
+  'ledger' | 'watching' | 'frozenAt' | 'observedSince' | 'leftoverBrowserSince'
+>;
+
+/**
+ * A ferret with what the liveness monitor saw laid over it, as today: its ledger over its own state, watched only
+ * while the monitor has looked at it recently (a working ferret it cannot look at is a `dead_monitor`), frozen when
+ * the reflex confirmed it, silence measured from when this daemon began watching (now, for one no tick has reached),
+ * and since when a browser it launched has outlived its turn. `leftovers: false` (Browsers off) leaves that last
+ * fact out, so the leftover check does not run: nothing could close what it found.
+ */
+export function withLiveness(
+  session: WardenFleetSession,
+  monitor: LivenessOverlay,
+  nowIso: string,
+  leftovers: boolean,
+): WardenFleetSession {
+  const id = session.config.id;
+  const { frozenAt: _frozen, leftoverBrowserSince: _leftover, ...rest } = session;
+  const frozenAt = monitor.frozenAt(id);
+  const leftoverBrowserSince = leftovers ? monitor.leftoverBrowserSince(id) : undefined;
+  return {
+    ...rest,
+    state: withLivenessLedger(session.state, monitor.ledger(id)),
+    hasLiveMonitor: monitor.watching(id),
+    ...(frozenAt === undefined ? {} : { frozenAt }),
+    observedSince: monitor.observedSince(id) ?? nowIso,
+    ...(leftoverBrowserSince === undefined ? {} : { leftoverBrowserSince }),
+  };
+}
+
+/**
+ * The ferrets the liveness monitor may look at (today's `targets`): every ferret the sweep reads, wardens excluded.
+ * Ferrets records no declared wait and no per-ferret nudge or frozen time, so none is waiting and the reflex uses its
+ * defaults (declared GAP).
+ */
+export function livenessTargets(fleet: readonly WardenFleetSession[]): readonly LivenessTarget[] {
+  return fleet
+    .filter(session => session.config.label !== WARDEN_LABEL)
+    .map(session => ({
+      id: session.config.id,
+      status: session.state.status,
+      turn: session.turn ?? 0,
+      mode: session.config.mode,
+      waiting: false,
+      ...(session.state.turnState === undefined ? {} : { turnState: session.state.turnState }),
+    }));
+}
+
+/** How many of the newest transcript events the liveness digest covers: enough that a new one always changes it. */
+export const LIVENESS_TAIL_EVENTS = 20;
+
+/**
+ * A fingerprint of the ferret's transcript tail, from Conversation (the transcript's owner): it moves when the
+ * conversation grows. Total: a transcript that cannot be read is `undefined`, no evidence this tick. Only the
+ * fingerprint is kept, never the text.
+ */
+export async function transcriptDigest(conversation: ConversationApi, ferret: FerretId): Promise<string | undefined> {
+  const tail = await conversation.transcriptEvents(ferret, { limit: LIVENESS_TAIL_EVENTS }).catch(() => undefined);
+  return tail?.ok === true ? textFingerprint(JSON.stringify(tail.value.events)) : undefined;
 }
