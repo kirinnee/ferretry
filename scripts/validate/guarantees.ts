@@ -12,6 +12,8 @@
  * (every `junit.xml` under `coverage/`, or each `--results <path>`) and fails a kept row when a test named with its id, in its
  * owner's suite, failed, or when no run of one passed (it was skipped, or is in no report). With no report at all it
  * says so, rather than passing on titles alone; `--existence-only` (the commit hook, which runs no tests) opts out.
+ * `--tier unit|int` (CI: each test job judges its own report) proves only the rows with a test in that tier, so a row
+ * tested in the integration tier alone is never "missing" from the unit report, nor a unit row from the integration one.
  *
  * `guarantee-owner` fails when a row's tests all live outside its owner's suite, or when an identifier the row's
  * enforcer names (in backticks) resolves to no symbol in the owner package or a contract it consumes. Owners that are
@@ -118,14 +120,14 @@ export function parseJunit(xml: string): TestResult[] {
   return out;
 }
 
-/** `--results` paths (files, or folders searched for `junit.xml`); default every tier's report under `coverage/`. */
+/** `--results` paths (files, or folders searched for `junit.xml` and the quarantine's `junit.rerun.xml`); default every tier's report under `coverage/`. */
 export function readResults(root: string, paths: readonly string[] | undefined): TestResult[] | undefined {
   const files = new Set<string>();
   for (const path of paths ?? ['coverage']) {
     const abs = resolve(root, path);
     if (!existsSync(abs)) continue;
     if (statSync(abs).isDirectory()) {
-      for (const rel of new Bun.Glob('**/junit.xml').scanSync({ cwd: abs, onlyFiles: true })) {
+      for (const rel of new Bun.Glob('**/junit{,.rerun}.xml').scanSync({ cwd: abs, onlyFiles: true })) {
         // The realworld tier gates nothing and holds machine-dependent tests: it proves no guarantee.
         if (paths === undefined && rel.startsWith('realworld/')) continue;
         files.add(join(abs, rel));
@@ -134,6 +136,24 @@ export function readResults(root: string, paths: readonly string[] | undefined):
   }
   if (files.size === 0) return undefined;
   return [...files].flatMap(file => parseJunit(readFileSync(file, 'utf8')));
+}
+
+/** The integration tier lives in `tests/integration/`; every other test file (unit, scripts, ...) is the unit report's. */
+export const inTier = (file: string, tier: 'unit' | 'int'): boolean =>
+  (tier === 'int') === /(?:^|\/)tests\/integration\//.test(file);
+
+/** The id → files map narrowed to one tier (an id with no file in the tier is dropped). */
+export function tierTests(
+  tests: ReadonlyMap<string, readonly string[]>,
+  tier: 'unit' | 'int' | undefined,
+): ReadonlyMap<string, readonly string[]> {
+  if (tier === undefined) return tests;
+  const out = new Map<string, readonly string[]>();
+  for (const [id, files] of tests) {
+    const mine = files.filter(file => inTier(file, tier));
+    if (mine.length > 0) out.set(id, mine);
+  }
+  return out;
 }
 
 export function readRows(root: string): GuaranteeRow[] | Finding {
@@ -334,7 +354,9 @@ export const check: Check = {
     const tests = testIds(ctx.root, ws);
     const cut = releaseCut(ctx.root);
     const strict = ctx.strict === true;
-    const found = guaranteeFindings(relevant, tests, pending, cut, strict);
+    // A tier judges its own rows' passes; "no test" and "REMOVED row left a test" are tier-independent, so the
+    // unit job reports them once and the integration job does not repeat them.
+    const found = ctx.tier === 'int' ? [] : guaranteeFindings(relevant, tests, pending, cut, strict);
     if (ctx.existenceOnly === true) return found;
     const results = readResults(ctx.root, ctx.results);
     if (results === undefined)
@@ -349,7 +371,18 @@ export const check: Check = {
                 'no JUnit report found (run the unit tier, or pass --results <junit.xml|folder>), so no test is proven to PASS; --existence-only checks titles alone',
             },
           ];
-    return [...found, ...passFindings(relevant, tests, results, owner => ownerFolder(ws, owner), pending, cut, strict)];
+    return [
+      ...found,
+      ...passFindings(
+        relevant,
+        tierTests(tests, ctx.tier),
+        results,
+        owner => ownerFolder(ws, owner),
+        pending,
+        cut,
+        strict,
+      ),
+    ];
   },
 };
 

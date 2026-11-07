@@ -21,4 +21,9 @@ status=0
 # sealed HOME, Chrome profiles and tmux sockets; ports are OS-assigned (test-tiers contract).
 ./scripts/ci/parallel.sh coverage/ci/int 6 ./scripts/ci/test.sh int -- "${groups[@]}" || status=1
 ./scripts/ci/coverage-ledger.sh int --groups coverage/int/groups || status=1
+# THE GUARANTEE PROOF (redesign §10.5), integration half: the rows with a test in tests/integration/ passed in the
+# JUnit reports this job just wrote (the unit rows are proven by quick.sh from the unit reports). Only the `guarantees` check
+# runs here: `guarantee-owner` reads source alone and quick.sh already judges it.
+# STRICT MODE becomes required once `ports-pending.json` is empty: add `--strict` here too (see quick.sh).
+bun scripts/validate/guarantees.ts --tier int --results coverage/int || status=1
 exit "${status}"
