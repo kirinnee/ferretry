@@ -131,7 +131,10 @@ export type DaemonHalf<M extends Manifest> = Section<'routes', { readonly [K in 
   Section<'hooks', HookImplsOf<M>> &
   Section<'subscribers', SubscribersOf<M>> &
   Section<'doctor', { readonly [K in DoctorIdsOf<M>]: DoctorRun }> &
-  Section<'resolvers', { readonly [K in ResolverIdsOf<M>]: NetworkResolver }>;
+  Section<'resolvers', { readonly [K in ResolverIdsOf<M>]: NetworkResolver }> & {
+    /** Once per boot after state and ports are ready, under the home lock, before listeners. Best effort; at most 5 seconds. */
+    readonly beforeListen?: (ctx: DaemonContext<M>) => Promise<void>;
+  };
 
 export interface DaemonImplementation<M extends Manifest = Manifest> {
   readonly half: 'daemon';

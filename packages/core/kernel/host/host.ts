@@ -17,6 +17,7 @@ import type { ConfigDef, PortToken } from '../contract/define.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError } from '../contract/http.ts';
 import { CORE_IDS, type PluginId } from '../contract/ids.ts';
+import { beforeListen } from './before-listen.ts';
 import { type HomeLockLease, StateHomeLockedError } from './state/home-lock.ts';
 import { Carriers, type DoctorCheck, DoctorChecks, PluginsChanged, SessionModes } from '../contract/kernel.ts';
 import type {
@@ -497,6 +498,7 @@ async function bootClaimedHome(options: HostOptions, trace: string[]): Promise<B
   };
   let frozen: PostBuildSnapshot | undefined;
   let phase: 'building' | 'bound' | 'started' = 'building';
+  const bootContexts = new Map<string, DaemonContext<Manifest>>();
   const providerHalf = (token: PortToken<unknown>): { record: PluginRecord; key: string } | undefined => {
     const provider = graph.providers.get(token.name);
     const record = provider === undefined ? undefined : records.get(provider);
@@ -653,6 +655,7 @@ async function bootClaimedHome(options: HostOptions, trace: string[]): Promise<B
       if (built === null || typeof built !== 'object' || typeof (built as { then?: unknown }).then === 'function')
         throw new TypeError('build must return the half synchronously');
       record.half = built;
+      bootContexts.set(manifest.id, ctx);
       record.status = record.damage.length > 0 ? 'damaged' : 'serving';
       hooks.attach(manifest.id, built.hooks as Readonly<Record<string, unknown>> | undefined, 'live');
       for (const event of manifest.data?.subscribes ?? []) {
@@ -878,6 +881,14 @@ async function bootClaimedHome(options: HostOptions, trace: string[]): Promise<B
     doctor: async () => [...bootNotes, ...(await doctorLines(records, hooks, jobs, data.refused))],
     stop: () => stopHost(),
   };
+
+  for (const [id, ctx] of bootContexts) {
+    const record = records.get(id);
+    const run = record?.half?.beforeListen;
+    if (record?.status !== 'serving' || run === undefined) continue;
+    trace.push(`beforeListen:${id}`);
+    await beforeListen(() => run(ctx), id, clock, log);
+  }
 
   // 7. Listen: the local listener and every carrier.
   trace.push('listen');

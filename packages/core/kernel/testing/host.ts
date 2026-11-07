@@ -1,4 +1,6 @@
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
+import { beforeListen } from '../host/before-listen.ts';
+import type { DaemonContext } from '../manifest/implement.ts';
 import { failureResponse } from '../host/responses.ts';
 import type { HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
@@ -305,6 +307,7 @@ async function start(world: World): Promise<TestHost> {
   const admission = options.gate ?? standInAdmission(request => callers.get(request) ?? owner());
 
   const built: Built[] = [];
+  const bootContexts = new Map<string, DaemonContext<Manifest>>();
   const providedBy = new Map<string, unknown>();
   const usesBound = { done: false };
 
@@ -665,7 +668,7 @@ async function start(world: World): Promise<TestHost> {
   const kernelFor = (manifest: Manifest): KernelPorts => {
     let state = world.states.get(manifest.id);
     if (state === undefined) {
-      state = new MemoryStateFolder();
+      state = new MemoryStateFolder(() => clock.nowMs());
       world.states.set(manifest.id, state);
     }
     const publishes = new Set((manifest.data?.publishes ?? []).map(event => event.name));
@@ -853,18 +856,25 @@ async function start(world: World): Promise<TestHost> {
           return lookup(options.uses ?? {}, field, token) ?? providedBy.get(token.name);
         },
       };
-    const half = impl.build({
+    const ctx = {
       manifest,
       needs,
       uses,
       kernel: kernelFor(manifest),
       hooks: hooksFor(manifest),
-    } as never) as Record<string, any>;
+    } as DaemonContext<Manifest>;
+    const half = impl.build(ctx as never) as Record<string, any>;
+    bootContexts.set(manifest.id, ctx);
     for (const [field, token] of Object.entries(manifest.provides ?? {}))
       providedBy.set(token.name, half.provides?.[field]);
     built.push({ impl, manifest, half });
   }
   usesBound.done = true;
+  for (const { manifest, half } of built) {
+    const ctx = bootContexts.get(manifest.id);
+    if (ctx !== undefined && half?.beforeListen !== undefined)
+      await beforeListen(() => half.beforeListen(ctx), manifest.id, clock, logFor(manifest.id));
+  }
   const snapshot: PostBuildSnapshot = Object.freeze({
     instructions: [],
     words: built.flatMap(b => (b.manifest.words ?? []).map(word => ({ ...word, plugin: b.manifest.id as never }))),
