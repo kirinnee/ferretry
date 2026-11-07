@@ -21,6 +21,12 @@ export interface V5Writer {
   json<Shape>(def: V5FileDef<Shape>, value: Shape): Promise<void>;
   jsonl<Shape>(def: V5FileDef<Shape>, lines: readonly Shape[]): Promise<void>;
   /**
+   * A document whose v5 schema describes the body WITHOUT `format` (the kernel stamps it on write and strips it on
+   * read: `packages/core/kernel/host/state/format.ts`). The body is parsed by the schema, then written with
+   * `"format": <def.format>` first, exactly as the kernel's own write lands it.
+   */
+  stamped<Shape extends object>(def: V5FileDef<Shape>, body: Shape): Promise<void>;
+  /**
    * An `opaque` file whose owner reads its own exact bytes (Asks' per-ferret agenda files): written as given, 0600.
    * The caller has already checked the bytes against what the v5 reader accepts.
    */
@@ -47,6 +53,11 @@ export function v5Writer(home: string, options: { readonly dryRun: boolean }): V
     async jsonl(def, lines) {
       const text = lines.map(line => JSON.stringify(def.schema.parse(line))).join('\n');
       await place(def.path, lines.length === 0 ? '' : `${text}\n`, def.mode ?? 0o600);
+    },
+    async stamped(def, body) {
+      const parsed = def.schema.parse(body) as Record<string, unknown>;
+      if ('format' in parsed) throw new TypeError(`${def.path}: a stamped body names no format of its own`);
+      await place(def.path, `${JSON.stringify({ format: def.format, ...parsed }, null, 2)}\n`, def.mode ?? 0o600);
     },
     async opaque(relativePath, bytes) {
       await place(relativePath, bytes, 0o600);
