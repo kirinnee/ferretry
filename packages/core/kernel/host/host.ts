@@ -830,6 +830,16 @@ async function doctorLines(
       });
   for (const note of hooks.notes) lines.push({ plugin: 'kernel', state: 'warn', detail: note });
   for (const refused of dataRefused) lines.push({ plugin: refused.folder, state: 'fail', detail: refused.sentence });
+  // Contributed checks first, in contribution order (G158: reachability leads `fyd --check`), then the declared ones.
+  const checks: readonly { readonly id: string; readonly item: DoctorCheck }[] = hooks.contributions(DoctorChecks);
+  for (const check of checks) {
+    try {
+      const finding = await check.item.run();
+      lines.push({ plugin: check.id, state: finding.state, detail: finding.detail });
+    } catch {
+      lines.push({ plugin: check.id, state: 'fail', detail: `The check ${check.item.title} failed to run.` });
+    }
+  }
   // Each started plugin's declared checks (manifest `doctor`), in start order; a check that throws is a failure that
   // names the check, never the thrown text (which may carry anything).
   for (const [id, record] of records) {
@@ -853,15 +863,6 @@ async function doctorLines(
       } catch {
         lines.push({ plugin: id, check, state: 'fail', detail: `The check ${check} failed to run.` });
       }
-    }
-  }
-  const checks: readonly { readonly id: string; readonly item: DoctorCheck }[] = hooks.contributions(DoctorChecks);
-  for (const check of checks) {
-    try {
-      const finding = await check.item.run();
-      lines.push({ plugin: check.id, state: finding.state, detail: finding.detail });
-    } catch {
-      lines.push({ plugin: check.id, state: 'fail', detail: `The check ${check.item.title} failed to run.` });
     }
   }
   return lines;
