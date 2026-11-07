@@ -664,7 +664,12 @@ export class StepUpService {
       return { ok: true, rotated: false, ...stamp };
     // The device was revoked between the assertion and the swap: nothing to step up any more.
     if (
-      !(await this.deps.rotation.rotate({ deviceId: device.deviceId, deviceKey: rotation.deviceKey, transcriptHash }))
+      !(await this.deps.rotation.rotate({
+        deviceId: device.deviceId,
+        deviceKey: rotation.deviceKey,
+        transcriptHash,
+        appSession: device.appSession,
+      }))
     )
       return refuse('not-a-device');
     return { ok: true, rotated: true, ...stamp };

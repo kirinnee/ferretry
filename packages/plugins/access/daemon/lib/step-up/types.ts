@@ -147,6 +147,8 @@ export interface DeviceKeyRotationPort {
     readonly deviceKey: string;
     /** The carrying session's transcript hash, so that session is the one NOT closed. */
     readonly transcriptHash: Uint8Array;
+    /** The carrying session (the kernel principal's session): spared when the device's other sessions lapse. */
+    readonly appSession?: string;
   }): Promise<boolean>;
 }
 

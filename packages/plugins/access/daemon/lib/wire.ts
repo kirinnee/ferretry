@@ -51,6 +51,7 @@ export {
   type StoredProofStepUpAct,
   UnlockGrantedSchema,
   stepUpKeepsProof,
+  stepUpRefusalCode,
   stepUpSkippableAtMachine,
 } from '@ferretry/core-gate/contract';
 export {
