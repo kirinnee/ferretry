@@ -4,7 +4,7 @@ import type { FerretId, SpawnResult } from '@ferretry/kernel/contract';
 import { type Instant, ok } from '@ferretry/std';
 import { ClaudeHarness } from '../../daemon/adapters/claude-harness.ts';
 import { PaneDirectory } from '../../daemon/adapters/tmux-pane.ts';
-import { mkdir, mkdtemp, readFile, rm, symlink, utimes } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { rootsPortFor } from '../../../../core/kernel/host/roots.ts';
@@ -122,6 +122,82 @@ describe('ClaudeHarness', () => {
     await Bun.write(join(fixture, 'outside.json'), '{}');
     await symlink(join(fixture, 'outside.json'), join(HOME, 'settings.json'));
     await expect(harness.prepareHome(spec())).rejects.toThrow('link_escape');
+  });
+
+  const AGENT_HOMES = () => join(fixture, 'fy-home/state/claude-code/agent-homes');
+  const listing = async (folder: string) => (await readdir(folder)).sort();
+
+  for (const target of ['sibling', 'outside'] as const) {
+    test(`S42 a ferret home linked to a ${target} folder is refused before any write`, async () => {
+      const { harness } = build();
+      const destination = target === 'sibling' ? join(AGENT_HOMES(), 'f2') : join(fixture, 'outside');
+      await mkdir(destination, { recursive: true });
+      await writeFile(join(destination, 'CLAUDE.md'), 'other-home-fixture');
+      const linked = join(AGENT_HOMES(), 'f3');
+      await symlink(destination, linked);
+      const f3 = spec({ ferret: 'f3', home: linked });
+      await expect(harness.prepareHome(f3)).rejects.toThrow('root refused');
+      await expect(harness.start(f3, runner({}), {} as never)).rejects.toThrow('root refused');
+      expect(await listing(destination)).toEqual(['CLAUDE.md']);
+      expect(await readFile(join(destination, 'CLAUDE.md'), 'utf8')).toBe('other-home-fixture');
+      expect((await lstat(linked)).isSymbolicLink()).toBe(true);
+    });
+  }
+
+  test('S42 a linked agent-homes parent is refused before any write', async () => {
+    const { harness } = build();
+    const outside = join(fixture, 'outside');
+    await mkdir(outside);
+    await rm(AGENT_HOMES(), { recursive: true });
+    await symlink(outside, AGENT_HOMES());
+    await expect(harness.prepareHome(spec({ ferret: 'f9', home: join(AGENT_HOMES(), 'f9') }))).rejects.toThrow(
+      'link_escape',
+    );
+    expect(await readdir(outside)).toEqual([]);
+  });
+
+  test('S42 a home swapped for a sibling link after launch is refused at read time', async () => {
+    const { harness, writeHome } = build();
+    const record = JSON.stringify({ type: 'assistant', uuid: 'theirs', timestamp: T, message: { content: [] } });
+    await harness.start(spec(), runner({}), {} as never);
+    // f2 holds a conversation association and transcript of its own, under f1's assigned id.
+    const f2 = join(AGENT_HOMES(), 'f2');
+    await writeFile(join(f2, 'conversation.json'), JSON.stringify({ format: 1, id: 'conv-1', cwd: '/work' }));
+    await mkdir(join(f2, 'projects/-work'), { recursive: true });
+    await writeFile(join(f2, 'projects/-work/conv-1.jsonl'), record);
+    await writeHome('projects/-work/conv-1.jsonl', record.replace('theirs', 'ours'));
+    expect((await harness.transcript.read(FERRET)).map(entry => entry.id)).toEqual(['ours']);
+    await rm(HOME, { recursive: true });
+    await symlink(f2, HOME);
+    expect(await harness.transcript.read(FERRET)).toEqual([]);
+    expect(await harness.usage.turns(FERRET)).toEqual([]);
+    await expect(harness.prepareHome(spec())).rejects.toThrow('root refused');
+    expect(await listing(f2)).toEqual(['conversation.json', 'projects']);
+  });
+
+  test('S42 a fresh ferret with only the agent-homes parent gets a private home made by the kernel and launches', async () => {
+    const { harness } = build();
+    const fresh = join(AGENT_HOMES(), 'fresh');
+    const started: { command?: readonly string[] } = {};
+    const result = await harness.start(spec({ ferret: 'fresh', home: fresh }), runner(started), {} as never);
+    expect(result.ok).toBe(true);
+    expect((await lstat(fresh)).isDirectory()).toBe(true);
+    expect((await lstat(fresh)).mode & 0o777).toBe(0o700);
+    expect(await listing(fresh)).toEqual(
+      ['.claude.json', 'CLAUDE.md', 'conversation.json', 'launch-settings.json', 'mcp.json', 'settings.json'].sort(),
+    );
+    expect(started.command).toContain(`CLAUDE_CONFIG_DIR=${fresh}`);
+  });
+
+  test('S42 an existing home is narrowed to 0700, and a home that is a file is refused', async () => {
+    const { harness } = build();
+    await chmod(HOME, 0o755);
+    await harness.prepareHome(spec());
+    expect((await lstat(HOME)).mode & 0o777).toBe(0o700);
+    const asFile = join(AGENT_HOMES(), 'f4');
+    await writeFile(asFile, 'not-a-folder');
+    await expect(harness.prepareHome(spec({ ferret: 'f4', home: asFile }))).rejects.toThrow('root refused');
+    expect(await readFile(asFile, 'utf8')).toBe('not-a-folder');
   });
 
   test('discovers conversations from an absolute read-only history scope with real roots', async () => {

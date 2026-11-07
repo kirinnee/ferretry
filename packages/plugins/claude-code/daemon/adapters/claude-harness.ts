@@ -119,9 +119,9 @@ export class ClaudeHarness implements Harness {
   }
 
   async prepareHome(spec: LaunchSpec): Promise<HomePlan> {
-    const home = this.home(spec.ferret);
-    if (this.fenced(home.resolve('')) !== spec.home)
-      throw new Error('the launch home does not match the ferret agent-homes subfolder');
+    const home = await this.ensureHome(spec);
+    // GAP (skills): `skill` parts are not materialized. `copyTree` takes only this plugin's own root handles, and no
+    // root this manifest declares reaches a skill source; it waits for the Skills plugin to hand one over.
     const text = homeText({
       folder: spec.folder,
       permissionMode: this.deps.config.file(configFile)?.permissionMode ?? 'auto',
@@ -307,6 +307,20 @@ export class ClaudeHarness implements Harness {
     if (!started.ok) return started;
     this.deps.panes.remember(spec.ferret, started.value.handle);
     return ok({ running: started.value, harnessConversation: conversation.id });
+  }
+
+  /**
+   * The ferret's home, made before anything is written through it (today's `directory` operation, 0700): created or
+   * narrowed by the kernel through the checked `agent-homes` folder, refused when a link or a file is at its name. The
+   * scoped handle then re-proves on every read and write that no link from FY_HOME down rebases it (S42).
+   */
+  private async ensureHome(spec: LaunchSpec): Promise<RootHandle> {
+    const home = this.home(spec.ferret);
+    if (this.fenced(home.resolve('')) !== spec.home)
+      throw new Error('the launch home does not match the ferret agent-homes subfolder');
+    const homes = this.deps.roots.root('agent-homes');
+    await homes.ensurePrivateDirectory(this.fenced(homes.resolve(spec.ferret)));
+    return home;
   }
 
   private home(ferret: FerretId): RootHandle {

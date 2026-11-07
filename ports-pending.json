@@ -52,6 +52,12 @@
       "Board (an optional use) gives the orphaned cards but no lane-set or focus read: an orphaned card’s lane reads as its id, and a ferret the Warden resumes is told no card; needs Board additives for both",
       "an orphaned card is told by a notice on one ferret’s own board (an ask), not on today’s single machine item that listed every orphan: needs Asks’ machine-wide item",
       "a sub-ferret overdue on a report is flagged but never nudged, nor its parent told: overdue-report nudges need Ferrets’ waiting/done on FerretSummary and its signal route (today skipped a ferret that declared a wait or signalled done)"
+    ],
+    "claude-code": [
+      "GAP(skills): selected skill parts are not materialized into the ferret home; copyTree takes only this plugin's own root handles, and no root the manifest declares reaches a skill source",
+      "GAP(ferrets): the AskUserQuestion hook is installed, but Ferrets does not yet supply FY_QUESTION_FILE or consume and deliver the question",
+      "the ten settings/hooks item verbs return 69 until the item-service route exists",
+      "the permission and dialog answer panels render nothing until Ferrets offers a prompt-state read"
     ]
   },
   "pendingHalves": {
