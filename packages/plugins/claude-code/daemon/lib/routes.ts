@@ -1,5 +1,11 @@
-import { ApiError, decodeParameter, jsonResponse, type RouteHandler } from '@ferretry/kernel/contract';
-import { isFerretCall, STEP_UP_REQUIRED_CODE, type StepUpRequiredBody } from '@ferretry/core-gate/contract';
+import {
+  ApiError,
+  type ApiResponse,
+  decodeParameter,
+  jsonResponse,
+  type RouteHandler,
+} from '@ferretry/kernel/contract';
+import { ownerOnly } from '@ferretry/core-gate/contract';
 import type { ZodType, z } from 'zod';
 import {
   HARNESS_UPDATE_CODES,
@@ -78,39 +84,68 @@ export function updateViewRoute(update: HarnessUpdateSubsystem): RouteHandler {
   return async () => jsonResponse(await update.view());
 }
 
-const CONFIGURE = { capability: 'fleet', axis: 'configure' } as const;
+/** The largest body the start route has a use for: a version and a yes (today's harness update route). */
+const MAX_START_BODY_BYTES = 4 * 1024;
 
 /**
- * Starting an update. A ferret may never start one (it would be an agent replacing the program it runs as), and a
- * governed device confirms with a passkey first; the step-up is spent only once the update has been accepted.
+ * The start request, parsed at the boundary as today's harness update route did: the read is bounded, a body that does
+ * not satisfy the schema never becomes a domain value, and the caller is told which field was wrong without the
+ * submitted values coming back.
+ */
+async function readStart(call: Parameters<RouteHandler>[0]): Promise<z.output<typeof HarnessUpdateStartRequestSchema>> {
+  let text: string;
+  try {
+    text = await call.request.text(MAX_START_BODY_BYTES);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'BodyTooLargeError')
+      throw new ApiError(413, error.message, 'body_too_large');
+    throw new ApiError(400, 'the request body could not be read', 'unreadable_body');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new ApiError(400, 'the request body is not valid JSON', 'invalid_json');
+  }
+  const result = HarnessUpdateStartRequestSchema.safeParse(parsed);
+  if (result.success) return result.data;
+  const detail = result.error.issues
+    .map(issue => `${issue.path.join('.') === '' ? 'body' : issue.path.join('.')}: ${issue.message}`)
+    .join('; ');
+  throw new ApiError(400, `the request body is invalid — ${detail}`, 'invalid_request', result.error.issues);
+}
+
+/** A domain refusal as a 409. The unverified one is an ANSWER, because its body carries both versions. */
+function refuseStart(error: unknown): ApiResponse {
+  if (!(error instanceof HarnessUpdateRefusal)) throw error;
+  if (error.unverified !== undefined)
+    return jsonResponse(
+      { error: error.message, code: HARNESS_UPDATE_CODES.unverified, ...error.unverified } satisfies z.infer<
+        typeof HarnessUpdateUnverifiedBodySchema
+      >,
+      409,
+    );
+  throw new ApiError(409, error.message, error.code);
+}
+
+/**
+ * Starting an update: today's `harness-update.ts`. A ferret may never start one (it would be an agent replacing the
+ * program it runs as), and a governed device confirms with a passkey first — the gate is Gate's {@link ownerOnly}, the
+ * daemon update's own, so the acts can never be governed differently. The proof is spent only once the update has been
+ * accepted.
  */
 export function updateStartRoute(update: HarnessUpdateSubsystem): RouteHandler {
   return async call => {
-    const request = await parseBody(call, HarnessUpdateStartRequestSchema);
-    if (isFerretCall(call))
-      throw new ApiError(403, 'a ferret cannot update Claude Code on this machine; the owner does', 'forbidden');
-    if (call.governance?.governed === true && call.presentation?.freshStepUp !== true)
-      return jsonResponse(
-        {
-          error: 'to update Claude Code on this machine from this device, confirm with a passkey',
-          code: STEP_UP_REQUIRED_CODE,
-          demand: CONFIGURE,
-        } satisfies StepUpRequiredBody,
-        403,
-      );
+    const request = await readStart(call);
+    const refused = ownerOnly(call, 'update the agent CLIs on this machine');
+    if (refused !== undefined) return refused;
+    let view: Awaited<ReturnType<HarnessUpdateSubsystem['start']>>;
     try {
-      const view = await update.start(request);
-      if (call.governance?.governed === true) call.spendFreshStepUp?.();
-      return jsonResponse(view, 202);
+      view = await update.start(request);
     } catch (error) {
-      if (!(error instanceof HarnessUpdateRefusal)) throw error;
-      // The unverified refusal is an ANSWER, because its body carries both versions.
-      if (error.unverified !== undefined)
-        return jsonResponse(
-          { error: error.message, code: HARNESS_UPDATE_CODES.unverified, ...error.unverified } satisfies z.infer<typeof HarnessUpdateUnverifiedBodySchema>,
-          409,
-        );
-      throw new ApiError(409, error.message, error.code);
+      return refuseStart(error);
     }
+    if (call.governance?.governed === true) call.spendFreshStepUp?.();
+    return jsonResponse(view, 202);
   };
 }

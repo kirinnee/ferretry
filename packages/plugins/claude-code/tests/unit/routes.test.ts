@@ -2,7 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ApiResponse } from '@ferretry/kernel/contract';
-import { HARNESS_UPDATE_CODES, PermissionAnswerResultSchema, HarnessDialogAnswerResultSchema } from '../../contract/index.ts';
+import { deviceStanding, ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
+import {
+  HARNESS_UPDATE_CODES,
+  PermissionAnswerResultSchema,
+  HarnessDialogAnswerResultSchema,
+} from '../../contract/index.ts';
 import { DialogAnswerService } from '../../daemon/lib/dialog/service.ts';
 import { parseHarnessDialog } from '../../daemon/lib/pane/harness-dialog.ts';
 import { parsePermissionPrompt } from '../../daemon/lib/pane/permission-prompt.ts';
@@ -35,7 +40,7 @@ class Pane {
   }
 }
 
-const call = (body: unknown, extra: Record<string, unknown> = {}) =>
+const call = (body: unknown, extra: object = {}) =>
   ({
     request: { text: async () => JSON.stringify(body) },
     params: new Map([['ferretId', 'f1']]),
@@ -54,6 +59,24 @@ const refused = async (promise: Promise<unknown>): Promise<{ status: number; cod
   );
   return error as { status: number; code?: string };
 };
+
+/**
+ * A remote device as Gate admits it: governed, holding a fresh passkey proof until a route spends it. Each request reads
+ * the standing again, as Gate stamps a new one per call, so a spent proof is gone on the next.
+ */
+function remoteDevice(fresh: boolean) {
+  const state = { fresh, spent: 0 };
+  const standing = () => ({
+    ...deviceStanding('phone'),
+    governance: { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) },
+    presentation: { local: false, adminToken: false, actor: 'device:phone', stepUp: false, freshStepUp: state.fresh },
+    spendFreshStepUp: () => {
+      state.spent += 1;
+      state.fresh = false;
+    },
+  });
+  return { state, standing };
+}
 
 describe('the permission answer route', () => {
   const requestId = (frame: string): string => parsePermissionPrompt(frame)?.id as string;
@@ -178,7 +201,13 @@ describe('the update start route', () => {
 
   test('G25 a governed device without a fresh passkey proof is asked for one, and nothing starts', async () => {
     let started = 0;
-    const route = updateStartRoute({ view: async () => view, start: async () => { started += 1; return view; } });
+    const route = updateStartRoute({
+      view: async () => view,
+      start: async () => {
+        started += 1;
+        return view;
+      },
+    });
 
     const response = body(await route(call({}, { governance: { governed: true }, presentation: {} })));
 
@@ -238,11 +267,101 @@ describe('the update start route', () => {
     expect(error).toMatchObject({ status: 409, code: 'harness_update_in_progress' });
   });
 
-  test('a body that is not an update request is a 400', async () => {
+  test('a body that is not an update request is a 400 naming the field, as today', async () => {
     const route = updateStartRoute(accepting([]));
 
     const error = await refused(route(call({ target: 'not-a-version' })));
 
-    expect(error).toMatchObject({ status: 400, code: 'invalid_body' });
+    expect(error).toMatchObject({ status: 400, code: 'invalid_request' });
+  });
+
+  test('a body that is not JSON is a 400, as today', async () => {
+    const route = updateStartRoute(accepting([]));
+
+    const error = await refused(route({ request: { text: async () => 'not json' }, params: new Map() } as never));
+
+    expect(error).toMatchObject({ status: 400, code: 'invalid_json' });
+  });
+
+  test('G25 a ferret is refused before anything starts', async () => {
+    let started = 0;
+    const route = updateStartRoute({
+      view: async () => view,
+      start: async () => {
+        started += 1;
+        return view;
+      },
+    });
+
+    const error = await refused(route(call({}, ferretStanding('F1' as never))));
+
+    expect(error).toMatchObject({ status: 403, code: 'forbidden' });
+    expect(started).toBe(0);
+  });
+
+  test('G25 the demand a governed device is asked for is fleet.configure', async () => {
+    const route = updateStartRoute(accepting([]));
+
+    const response = body(await route(call({}, remoteDevice(false).standing())));
+
+    expect([response.status, response.json.demand]).toEqual([403, { capability: 'fleet', axis: 'configure' }]);
+  });
+
+  test('G25 a spent passkey proof does not start a second update', async () => {
+    let started = 0;
+    const route = updateStartRoute({
+      view: async () => view,
+      start: async () => {
+        started += 1;
+        return view;
+      },
+    });
+    const phone = remoteDevice(true);
+
+    const first = body(await route(call({}, phone.standing())));
+    const second = body(await route(call({}, phone.standing())));
+
+    expect([first.status, second.status, second.json.code, started, phone.state.spent]).toEqual([
+      202,
+      403,
+      'grant_step_up_required',
+      1,
+      1,
+    ]);
+  });
+
+  test('G25 the owner at the machine starts an update with no passkey, and nothing is spent', async () => {
+    let spent = 0;
+    const route = updateStartRoute(accepting([]));
+
+    const response = body(
+      await route(
+        call(
+          {},
+          {
+            ...ownerStanding(),
+            spendFreshStepUp: () => {
+              spent += 1;
+            },
+          },
+        ),
+      ),
+    );
+
+    expect([response.status, spent]).toEqual([202, 0]);
+  });
+
+  test('G25 a refused update does not spend the passkey proof', async () => {
+    const route = updateStartRoute({
+      view: async () => view,
+      start: async () => {
+        throw new HarnessUpdateRefusal(HARNESS_UPDATE_CODES.inProgress, 'busy');
+      },
+    });
+    const phone = remoteDevice(true);
+
+    const error = await refused(route(call({}, phone.standing())));
+
+    expect([error.status, phone.state.spent]).toEqual([409, 0]);
   });
 });
