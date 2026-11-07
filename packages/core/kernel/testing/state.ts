@@ -142,7 +142,10 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
     if (isBytes(file)) {
       if (!(value instanceof Uint8Array) && typeof value !== 'string')
         throw new TypeError(`state ${file.name}: a ${file.store} file holds bytes`);
-      folder.bytes.set(pathOf(file, name), typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value));
+      folder.bytes.set(
+        pathOf(file, name),
+        typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value),
+      );
       folder.landed();
       return;
     }

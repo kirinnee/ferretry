@@ -167,26 +167,42 @@ describe('identity signer: catalog signatures', () => {
     const signature = fromBase64UrlFixed(signed.signature, 64) as Uint8Array;
     expect(await relayCrypto.verifyEd25519(identity.publicKeySpki, signature, expected)).toBe(true);
     expect(signed).toMatchObject({ daemonId: identity.daemonId, publicKey: toBase64Url(identity.publicKeySpki) });
-    expect(await verifyCatalogSignature(relayCrypto, signed.publicKey, 'manifest', canonical, signed.signature)).toBe(true);
+    expect(await verifyCatalogSignature(relayCrypto, signed.publicKey, 'manifest', canonical, signed.signature)).toBe(
+      true,
+    );
   });
 
   it('a manifest signature does not verify as versions, as a link, as other bytes, nor as a claim', async () => {
     const identity = await newDaemonIdentity();
     const signed = await createIdentitySigner(identity).signCatalog({ kind: 'manifest', canonical });
-    expect(await verifyCatalogSignature(relayCrypto, signed.publicKey, 'versions', canonical, signed.signature)).toBe(false);
-    expect(await verifyCatalogSignature(relayCrypto, signed.publicKey, 'link', canonical, signed.signature)).toBe(false);
-    expect(await verifyCatalogSignature(relayCrypto, signed.publicKey, 'manifest', utf8Bytes('{}'), signed.signature)).toBe(false);
+    expect(await verifyCatalogSignature(relayCrypto, signed.publicKey, 'versions', canonical, signed.signature)).toBe(
+      false,
+    );
+    expect(await verifyCatalogSignature(relayCrypto, signed.publicKey, 'link', canonical, signed.signature)).toBe(
+      false,
+    );
+    expect(
+      await verifyCatalogSignature(relayCrypto, signed.publicKey, 'manifest', utf8Bytes('{}'), signed.signature),
+    ).toBe(false);
     const nonce = (await relayCrypto.sha256(canonical)).slice(0, NONCE_BYTES);
     const claim = decodeClaim(signed.publicKey, signed.signature)!;
     expect(
-      (await verifyRendezvousClaim(relayCrypto, { daemonId: identity.daemonId, relayHost: host, challenge: nonce }, claim)).ok,
+      (
+        await verifyRendezvousClaim(
+          relayCrypto,
+          { daemonId: identity.daemonId, relayHost: host, challenge: nonce },
+          claim,
+        )
+      ).ok,
     ).toBe(false);
   });
 
   it('refuses an unknown kind or a canonical that is not bytes', async () => {
     const signer = createIdentitySigner(await newDaemonIdentity());
     await expect(signer.signCatalog({ kind: 'offer' as 'link', canonical })).rejects.toThrow(TypeError);
-    await expect(signer.signCatalog({ kind: 'link', canonical: '{}' as unknown as Uint8Array })).rejects.toThrow(TypeError);
+    await expect(signer.signCatalog({ kind: 'link', canonical: '{}' as unknown as Uint8Array })).rejects.toThrow(
+      TypeError,
+    );
   });
 });
 
@@ -199,17 +215,26 @@ describe('kernel.signer: each signature is offered only to the plugin that needs
     expect((await connections.sign({ host, nonce })).signature.length).toBeGreaterThan(0);
     await expect(connections.signCatalog({ kind: 'manifest', canonical: utf8Bytes('{}') })).rejects.toThrow(TypeError);
     const catalogs = signerFor('catalogs', signer);
-    expect((await catalogs.signCatalog({ kind: 'versions', canonical: utf8Bytes('{}') })).signature.length).toBeGreaterThan(0);
+    expect(
+      (await catalogs.signCatalog({ kind: 'versions', canonical: utf8Bytes('{}') })).signature.length,
+    ).toBeGreaterThan(0);
     await expect(catalogs.sign({ host, nonce })).rejects.toThrow(TypeError);
     const board = signerFor('board', signer);
-    await expect(board.sign({ host, nonce })).rejects.toThrow('board may not ask the daemon identity for that signature.');
+    await expect(board.sign({ host, nonce })).rejects.toThrow(
+      'board may not ask the daemon identity for that signature.',
+    );
     await expect(board.signTunnel({ action: 'release', host, nonce })).rejects.toThrow(TypeError);
     await expect(board.signCatalog({ kind: 'link', canonical: utf8Bytes('{}') })).rejects.toThrow(TypeError);
   });
 });
 
 describe('identity signer: secret-import offers (Vault)', () => {
-  const request = { v: 1, importId: 'imp_abc', publicKey: toBase64Url(new Uint8Array(32).fill(7)), expiresAt: '2026-11-07T10:00:00.000Z' };
+  const request = {
+    v: 1,
+    importId: 'imp_abc',
+    publicKey: toBase64Url(new Uint8Array(32).fill(7)),
+    expiresAt: '2026-11-07T10:00:00.000Z',
+  };
 
   it('signs today’s offerSignedBytes: every field length-prefixed, the label first', async () => {
     const identity = await newDaemonIdentity();
@@ -231,7 +256,9 @@ describe('identity signer: secret-import offers (Vault)', () => {
     expect(await relayCrypto.verifyEd25519(identity.publicKeySpki, signature, expected)).toBe(true);
     const offer = { ...request, ...signed };
     expect(await verifySecretOfferSignature(relayCrypto, offer)).toBe(true);
-    expect(await verifySecretOfferSignature(relayCrypto, { ...offer, expiresAt: '2026-11-08T10:00:00.000Z' })).toBe(false);
+    expect(await verifySecretOfferSignature(relayCrypto, { ...offer, expiresAt: '2026-11-08T10:00:00.000Z' })).toBe(
+      false,
+    );
     const other = await newDaemonIdentity();
     expect(await verifySecretOfferSignature(relayCrypto, { ...offer, daemonId: other.daemonId })).toBe(false);
   });
@@ -240,7 +267,9 @@ describe('identity signer: secret-import offers (Vault)', () => {
     const identity = await newDaemonIdentity();
     const signer = createIdentitySigner(identity);
     const signed = await signer.signSecretOffer(request);
-    expect(await verifyCatalogSignature(relayCrypto, signed.identityKey, 'manifest', utf8Bytes('{}'), signed.signature)).toBe(false);
+    expect(
+      await verifyCatalogSignature(relayCrypto, signed.identityKey, 'manifest', utf8Bytes('{}'), signed.signature),
+    ).toBe(false);
     await expect(signerFor('connections', signer).signSecretOffer(request)).rejects.toThrow(TypeError);
     expect((await signerFor('vault', signer).signSecretOffer(request)).signature).toBe(signed.signature);
     await expect(signer.signSecretOffer({ ...request, importId: '' })).rejects.toThrow(TypeError);

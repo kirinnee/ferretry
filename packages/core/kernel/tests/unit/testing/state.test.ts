@@ -5,7 +5,13 @@ import { MemoryStateFolder } from '../../../testing/state.ts';
 
 const Sealed = defineState({ name: 'sealed', path: 'vault.sealed', store: 'secret', format: 1 });
 const Blob = defineState({ name: 'blob', path: 'blobs/*.bin', store: 'opaque', format: 1 });
-const Doc = defineState({ name: 'doc', path: 'doc.json', store: 'json', format: 1, schema: z.strictObject({ n: z.number() }) });
+const Doc = defineState({
+  name: 'doc',
+  path: 'doc.json',
+  store: 'json',
+  format: 1,
+  schema: z.strictObject({ n: z.number() }),
+});
 
 describe('the test host state port mirrors the real one for secret and opaque stores', () => {
   test('bytes in, the same bytes out: no schema parse, no format stamp', async () => {

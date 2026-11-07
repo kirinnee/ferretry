@@ -767,7 +767,8 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
           if (view !== undefined && view.etag !== writeOptions.ifMatch) return { kind: 'conflict' };
         }
         const removed = await remove(target.plugin, target.def as ConfigDef, target.name, writeOptions);
-        if (removed.kind === 'applied') return { kind: 'written', etag: ABSENT_CONFIG_ETAG, loosened: removed.loosened };
+        if (removed.kind === 'applied')
+          return { kind: 'written', etag: ABSENT_CONFIG_ETAG, loosened: removed.loosened };
         if (removed.kind === 'held')
           return { kind: 'held', etag: ABSENT_CONFIG_ETAG, id: removed.id, sentences: removed.sentences };
         return { kind: 'refused', reason: removed.reason, issues: [] };

@@ -207,7 +207,8 @@ interface Built {
  */
 export async function testHost(options: TestHostOptions): Promise<TestHost> {
   const throwaway = await testIdentity();
-  const identity: IdentityPort = options.identity ?? Object.freeze({ daemonId: throwaway.daemonId, daemonName: 'test-daemon' });
+  const identity: IdentityPort =
+    options.identity ?? Object.freeze({ daemonId: throwaway.daemonId, daemonName: 'test-daemon' });
   const identitySigner = createIdentitySigner(throwaway.key);
   const world: World = {
     options,
@@ -421,7 +422,12 @@ async function start(world: World): Promise<TestHost> {
       fileState(def, name) {
         assertDeclared(def);
         const all = world.config.get(keyOf(def));
-        const raw = def.shape === 'file' ? all : name === undefined ? undefined : (all as Record<string, unknown> | undefined)?.[name];
+        const raw =
+          def.shape === 'file'
+            ? all
+            : name === undefined
+              ? undefined
+              : (all as Record<string, unknown> | undefined)?.[name];
         if (raw === undefined) return { state: 'absent', inEffect: false, sentences: [] };
         const parsed = def.schema.safeParse(raw);
         return parsed.success
@@ -446,13 +452,19 @@ async function start(world: World): Promise<TestHost> {
           }
         } else {
           next = { ...((before as Record<string, unknown> | undefined) ?? {}), ...edit.patch };
-          for (const [field, value] of Object.entries(edit.patch)) if (value === undefined) delete (next as Record<string, unknown>)[field];
+          for (const [field, value] of Object.entries(edit.patch))
+            if (value === undefined) delete (next as Record<string, unknown>)[field];
         }
         const checked = def.schema.safeParse(next);
         if (!checked.success)
-          return { kind: 'refused', reason: 'schema', issues: checked.error.issues.map(issue => ({ path: key, message: issue.message })) };
+          return {
+            kind: 'refused',
+            reason: 'schema',
+            issues: checked.error.issues.map(issue => ({ path: key, message: issue.message })),
+          };
         const etag = JSON.stringify(next);
-        if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null)) return { kind: 'conflict' };
+        if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null))
+          return { kind: 'conflict' };
         const prior = before === undefined ? undefined : def.schema.safeParse(before);
         const sentences = def.loosens(prior?.success === true ? prior.data : undefined, checked.data);
         if (sentences.length > 0) return { kind: 'held', etag, id: `${key}@held`, sentences };
