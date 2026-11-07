@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { buildTunnelVerbs } from '../../../cli/tunnel/commands.ts';
 import { TUNNEL_OFF_SENTENCE } from '../../../contract/index.ts';
+import manifest from '../../../manifest.ts';
 
 const view = { enabled: false, explicit: false, state: 'off', tunnelUrl: null, sentence: TUNNEL_OFF_SENTENCE };
 describe('tunnel CLI', () => {
@@ -37,7 +38,18 @@ describe('tunnel CLI', () => {
     await verbs['tunnel status']({ args: [], options: { json: true } });
     expect(lines).toEqual([TUNNEL_OFF_SENTENCE, JSON.stringify(view)]);
   });
-  it('V-0245 an invalid daemon answer is refused rather than printed', async () => {
+  it('V-0245 the bare tunnel verb is declared and shows the live status, as status does', async () => {
+    const { calls, lines, verbs } = harness();
+    expect(manifest.actions.cli.map(decl => decl.verb)).toContain('tunnel');
+    expect(await verbs.tunnel({ args: [], options: {} })).toBe(0);
+    expect(await verbs.tunnel({ args: [], options: { json: true } })).toBe(0);
+    expect(calls).toEqual([
+      { route: 'GET /v1/tunnel', init: undefined },
+      { route: 'GET /v1/tunnel', init: undefined },
+    ]);
+    expect(lines).toEqual([TUNNEL_OFF_SENTENCE, JSON.stringify(view)]);
+  });
+  it('an invalid daemon answer is refused rather than printed', async () => {
     const verbs = buildTunnelVerbs({ call: async () => ({}), subscribe: () => () => undefined } as PluginClient, {
       out: () => {
         throw new Error('printed');
