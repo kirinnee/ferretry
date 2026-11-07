@@ -1,11 +1,12 @@
 import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
-import { VaultPort } from '@ferretry/core-vault/contract';
+import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
 import {
   MCP_AUDIT,
   MCP_CONFIG,
   MCP_INVENTORY_STATE,
+  MCP_OAUTH_SECRETS,
   MCP_OAUTH_STATE,
   MCP_PAYLOADS_STATE,
   MCP_READ_MODELS,
@@ -34,7 +35,8 @@ export default definePlugin({
   kinds: ['item', 'command', 'view'],
   words: MCP_WORDS,
 
-  needs: { ferrets: FerretsPort, vault: VaultPort },
+  // `sealed`: the sign-in's own refresh tokens and client secrets (MCP_OAUTH_SECRETS), never another plugin's.
+  needs: { ferrets: FerretsPort, vault: VaultPort, sealed: SealedDocumentsPort },
 
   provides: { mcp: McpPort },
 
@@ -175,7 +177,7 @@ export default definePlugin({
   },
 
   data: {
-    state: [MCP_INVENTORY_STATE, MCP_OAUTH_STATE, MCP_PAYLOADS_STATE],
+    state: [MCP_INVENTORY_STATE, MCP_OAUTH_STATE, MCP_OAUTH_SECRETS.state, MCP_PAYLOADS_STATE],
     config: [MCP_CONFIG],
     readModels: MCP_READ_MODELS,
     publishes: [McpSignInChanged, McpServerAdded],

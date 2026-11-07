@@ -202,7 +202,13 @@ function ownerOf(file: string, what = ''): string {
   if (/session-version/.test(semantic)) return 'ferrets';
   if (/push\.json|push-vapid/.test(semantic)) return 'access';
   if (/fy input\b/.test(semantic)) return 'vault';
-  if (/fy (?:fs|files|pin)\b|pins\.json/.test(semantic)) return 'conversation';
+  // Ferrets declares the working-tree viewer (`/v1/ferrets/:ferretId/fs*`, read through WorkFolders, S47) and the pin
+  // board (`/v1/ferrets/:ferretId/pins`), and holds the one-writer conversation lease `fy history claim` takes.
+  if (/fy (?:fs|files|pin|history)\b|pins\.json/.test(semantic)) return 'ferrets';
+  // A ferret's screen is the Terminals' (its pane); its recorded events are the Ferrets' (lead ruling, port-conversation
+  // r2 #4). Conversation declares neither.
+  if (/\/sessions\/:sessionid\/snapshot\b|\bfy snapshot\b/.test(semantic)) return 'terminals';
+  if (/\/sessions\/:sessionid\/events\b|\bfy events\b/.test(semantic)) return 'ferrets';
   if (/fy harness\b|statusline/.test(semantic)) return /codex/.test(semantic) ? 'codex' : 'claude-code';
   if (/config_(?:read|write|validate)/.test(semantic)) return 'kernel';
   if (/harness.*codex|codex.*harness/.test(semantic)) return 'codex';
@@ -248,6 +254,8 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
   if (kind === 'S' && /legacy-tasks-redirect|version-skew|feature-unavailable|daemon-features/.test(what + file))
     return 'removed by design (§9.6: old routes/probes/fallback UI)';
   if (kind === 'V' && /fy daemon adopt\b/.test(what)) return 'removed by design (§9.1, §9.2: old home adoption)';
+  if (kind === 'V' && what === 'fy import')
+    return 'removed by design (§1.4: imports are links; its one verb is `fy link`)';
   if (kind === 'R' && /legacy-tasks/.test(file)) return 'removed by design (§9.1, §9.2: per-ferret tasks/old readers)';
   if (kind === 'F' && (/\/cgroups\//.test(what) || /\/cgroups\/legacy-documents/.test(file)))
     return 'removed by design (§9.2: old cgroups directory)';

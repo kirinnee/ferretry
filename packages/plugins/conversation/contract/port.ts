@@ -1,7 +1,7 @@
 import { definePort } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
-import type { AnswerRequest } from './wire-question.ts';
+import type { AnswerRequest, Question } from './wire-question.ts';
 import type {
   AttachmentDownload,
   AttachmentUploadRequest,
@@ -90,6 +90,8 @@ export interface ConversationApi {
   ): Promise<Result<LogSearch, ConversationRefusal>>;
 
   // questions
+  /** The question the ferret is waiting on, as the harness asked it; none when it asks nothing. */
+  question(ferret: FerretId): Promise<Question | undefined>;
   answer(ferret: FerretId, request: AnswerRequest): Promise<Result<void, ConversationRefusal>>;
 
   // compaction
