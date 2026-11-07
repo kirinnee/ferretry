@@ -591,6 +591,40 @@ describe('the session layer: requests', () => {
     expect(client.end).toEqual({ code: 4400, reason: 'what it was about to send changed before it left' });
   });
 
+  for (const change of ['body', 'status', 'header value', 'header order'] as const) {
+    test(`R516 R517 a same-object late answer changing its ${change} after sealing is withheld`, async () => {
+      const fx = await fixture();
+      const plain = {
+        status: 200,
+        headers: new Map([
+          ['a', '1'],
+          ['b', '2'],
+        ]),
+        body: 'private output',
+      };
+      fx.dispatch = async () => ({ ...plain, late: () => plain });
+      const { client } = await serving(fx);
+      try {
+        const before = client.records.length;
+        await client.send(req(1));
+        // Queue and seal the original answer without pulling it from the carrier yet.
+        await wait(60);
+        if (change === 'body') plain.body = 'withheld';
+        else if (change === 'status') plain.status = 403;
+        else if (change === 'header value') plain.headers.set('a', 'changed');
+        else {
+          plain.headers.delete('a');
+          plain.headers.set('a', '1');
+        }
+        await client.pump();
+        expect(client.records.length).toBe(before);
+        expect(client.end).toEqual({ code: 4400, reason: 'what it was about to send changed before it left' });
+      } finally {
+        fx.layer.close();
+      }
+    });
+  }
+
   test('R515 an unchanged late publication passes its permit and is sent', async () => {
     const fx = await fixture();
     const plain = jsonResponse({ shown: true });
