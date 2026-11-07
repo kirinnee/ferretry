@@ -60,8 +60,10 @@ export interface Admission<Standing extends object = CallStanding, Member extend
   judgeConfigWrite?(input: ConfigWriteJudgement): 'apply' | 'hold';
   /**
    * Told after every handler of a descriptor that has `audit: { record }`, once per call, with the final status —
-   * refusals included (today's audited-route decorator recorded every outcome). Never changes the answer; a throw
-   * is swallowed.
+   * the handler's own refusals (an `ApiError`) and failures included, as today's audited-route decorator recorded
+   * every outcome of the handler. A call admission refused, or a plugin not serving, never reached a handler and is
+   * not told (today: "a request the authorization boundary refuses before the handler runs is not recorded").
+   * Never changes the answer; a throw is swallowed.
    */
   recorded?(call: RecordedCall): void;
 }
@@ -88,8 +90,10 @@ export interface RecordedCall {
   readonly actor?: Actor;
   /** The session principal the call carried, if any. */
   readonly principal?: ApiRequest['principal'];
-  /** The final status the caller was answered (or, for a socket, the upgrade's). */
+  /** The final status the caller was answered (or, for a socket, the upgrade's: 101 when accepted). */
   readonly status: number;
+  /** The answer as built (a route's), for a rule that reads NAMES out of it; absent for a socket. */
+  readonly response?: ApiResponse;
 }
 
 /** One `GET /v1/plugins` entry (§9.6): `contract` is the effective contract hash. */

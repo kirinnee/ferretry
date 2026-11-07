@@ -218,3 +218,65 @@ describe('the actor reaches kernel.act from admission (§4.7)', () => {
     expect(seen).toBe('owner-tools');
   });
 });
+
+describe('the dispatcher tells Gate about audited calls (Admission.recorded)', () => {
+  const audited = (handle: MountedRoute['handle']): MountedRoute =>
+    mounted('/v1/grants', { method: 'PATCH', audit: { record: 'grants.changed' as never }, handle });
+
+  test('called once per request with the final status and the full call: success and the handler’s own refusal', async () => {
+    const admission = recordingAdmission();
+    const seen: { status: number; actor?: string; path: string; standing?: object; response?: unknown }[] = [];
+    admission.recorded = call =>
+      void seen.push({
+        status: call.status,
+        actor: call.actor,
+        path: call.descriptor.path,
+        standing: call.standing,
+        response: call.response,
+      });
+    let refuse = false;
+    const route = audited(async () => {
+      if (refuse) throw new ApiError(409, 'no', 'conflict');
+      return jsonResponse({ ok: true });
+    });
+    const d = dispatcher([route], admission);
+    await d.dispatch(request('PATCH', '/v1/grants'));
+    refuse = true;
+    const refused = await d.dispatch(request('PATCH', '/v1/grants'));
+    expect(refused.status).toBe(409);
+    expect(seen.map(entry => entry.status)).toEqual([200, 409]);
+    expect(seen[0]).toMatchObject({ actor: 'owner-tools', path: '/v1/grants', standing: { actor: 'owner' } });
+    expect((seen[0]?.response as { status: number }).status).toBe(200);
+  });
+
+  test('a handler failure is recorded as its 500; admission refusals and skip routes are not recorded', async () => {
+    const admission = recordingAdmission(path => path !== '/v1/denied');
+    const statuses: number[] = [];
+    admission.recorded = call => void statuses.push(call.status);
+    const d = dispatcher(
+      [
+        audited(async () => {
+          throw new Error('boom');
+        }),
+        mounted('/v1/denied', { method: 'PATCH', audit: { record: 'grants.changed' as never } }),
+        mounted('/v1/plain'),
+      ],
+      admission,
+    );
+    expect((await d.dispatch(request('PATCH', '/v1/grants'))).status).toBe(500);
+    expect((await d.dispatch(request('PATCH', '/v1/denied'))).status).toBe(401);
+    await d.dispatch(request('GET', '/v1/plain'));
+    expect(statuses).toEqual([500]);
+  });
+
+  test('a recorder that throws never changes the answer', async () => {
+    const admission = recordingAdmission();
+    admission.recorded = () => {
+      throw new Error('audit down');
+    };
+    const response = await dispatcher([audited(async () => jsonResponse({ ok: true }))], admission).dispatch(
+      request('PATCH', '/v1/grants'),
+    );
+    expect(response.status).toBe(200);
+  });
+});
