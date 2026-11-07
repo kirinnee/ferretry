@@ -144,6 +144,34 @@ describe('fy words', () => {
     should(fake.io.stderr()).containEql('compiled into this fy');
   });
 
+  it('should read the glossary through the guard, and send nothing but the inventory read to a daemon whose Kernel differs', async () => {
+    // Arrange
+    let inventoryReads = 0;
+    const fake = fakeWorld({
+      registry,
+      readInventory: async () => {
+        inventoryReads += 1;
+        return inventoryOf({ id: 'kernel', contract: 'another-kernel' });
+      },
+    });
+
+    // Act
+    const code = await runFy(['words', 'task'], fake.world);
+
+    // Assert
+    should(code).equal(0);
+    should(inventoryReads).be.above(0);
+    should(fake.transport.sent).deepEqual([]);
+    should(fake.io.stdout()).containEql('Board');
+    should(fake.io.stderr()).containEql('compiled into this fy');
+  });
+
+  it('should send the glossary read as the Kernel’s route once the inventory agrees', async () => {
+    const fake = fakeWorld({ registry });
+    await runFy(['words'], fake.world);
+    should(fake.transport.sent).deepEqual([{ method: 'GET', path: '/v1/glossary' }]);
+  });
+
   it('should say the glossary is empty when nothing declares a word', async () => {
     const { world, io } = fakeWorld({ registry: registryOf(), probe: down });
     should(await runFy(['words'], world)).equal(0);

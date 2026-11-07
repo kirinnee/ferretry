@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { PROTOCOL } from '@ferretry/kernel/contract';
 import should from 'should';
-import { judgePlugin, pausedSentence } from '../../src/lib/guard.ts';
+import { judgeCall, judgePlugin, pausedSentence } from '../../src/lib/guard.ts';
 import { inventoryOf } from './fakes.ts';
 
 const compiled = { board: 'h1' };
@@ -60,5 +60,71 @@ describe('judgePlugin (the client guard, §9.6)', () => {
     );
     should(pausedSentence({ ok: false, reason: 'missing' }, 'Board', 'board', 'fy')).containEql('does not have Board');
     should(pausedSentence({ ok: false, reason: 'daemon-newer' }, 'Board', 'board', 'fy')).containEql('update fy');
+  });
+});
+
+describe('judgeCall (every core package first, §9.6)', () => {
+  const compiled = { kernel: 'hk', gate: 'hg', asks: 'ha', vault: 'hv', ferrets: 'hf', board: 'h1' };
+  const core = [
+    { id: 'kernel', contract: 'hk' },
+    { id: 'gate', contract: 'hg' },
+    { id: 'asks', contract: 'ha' },
+    { id: 'vault', contract: 'hv' },
+    { id: 'ferrets', contract: 'hf' },
+  ];
+
+  it('should allow a plugin when every core package and the plugin match', () => {
+    should(judgeCall(inventoryOf(...core, { id: 'board', contract: 'h1' }), compiled, 'board')).deepEqual({ ok: true });
+  });
+
+  it('should block a matching plugin when a core package differs, is off or is missing', () => {
+    const differs = core.map(entry => (entry.id === 'gate' ? { ...entry, contract: 'other' } : entry));
+    should(judgeCall(inventoryOf(...differs, { id: 'board', contract: 'h1' }), compiled, 'board')).deepEqual({
+      ok: false,
+      reason: 'core',
+      core: 'gate',
+      why: 'different',
+    });
+    const off = core.map(entry => (entry.id === 'vault' ? { ...entry, on: false } : entry));
+    should(judgeCall(inventoryOf(...off, { id: 'board', contract: 'h1' }), compiled, 'board')).deepEqual({
+      ok: false,
+      reason: 'core',
+      core: 'vault',
+      why: 'off',
+    });
+    const noFerrets = {
+      protocol: PROTOCOL,
+      plugins: [...core.slice(0, 4), { id: 'board', contract: 'h1' }].map(entry => ({ ...entry, on: true })),
+    };
+    should(judgeCall(noFerrets, compiled, 'board')).deepEqual({
+      ok: false,
+      reason: 'core',
+      core: 'ferrets',
+      why: 'missing',
+    });
+  });
+
+  it('should block everything when this fy has no compiled hash for a core package', () => {
+    const { kernel: _kernel, ...withoutKernel } = compiled;
+    should(judgeCall(inventoryOf(...core, { id: 'board', contract: 'h1' }), withoutKernel, 'board')).deepEqual({
+      ok: false,
+      reason: 'core',
+      core: 'kernel',
+      why: 'different',
+    });
+  });
+
+  it('should still say which side is older before any core verdict', () => {
+    const older = { protocol: PROTOCOL - 1, plugins: [] } as never;
+    should(judgeCall(older, compiled, 'board')).deepEqual({ ok: false, reason: 'daemon-older' });
+  });
+
+  it('should name the core package and the fix', () => {
+    should(
+      pausedSentence({ ok: false, reason: 'core', core: 'gate', why: 'different' }, 'Gate', 'gate', 'fy'),
+    ).containEql('Gate, which everything needs, differs between fy and the daemon');
+    should(
+      pausedSentence({ ok: false, reason: 'core', core: 'gate', why: 'missing' }, 'Gate', 'gate', 'fy'),
+    ).containEql('does not have Gate, which everything needs');
   });
 });

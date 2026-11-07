@@ -1,6 +1,7 @@
 /** `fy words [word]` (§1.3): a word, its owner and what it replaced. */
 import { z } from 'zod';
 import type { Word } from '@ferretry/kernel/contract';
+import { pluginClient } from '../client.ts';
 import { EXIT } from '../errors.ts';
 import { renderTable } from '../render.ts';
 import type { CommandRegistry } from '../registry.ts';
@@ -17,7 +18,8 @@ const WordSchema = z.object({
   plugin: z.string(),
 });
 
-/** The daemon serves the joined glossary at `GET /v1/glossary` (data plugins' words included). */
+/** The Kernel serves the joined glossary at `GET /v1/glossary` (data plugins' words included). */
+const GLOSSARY_ROUTE = 'GET /v1/glossary';
 const GlossarySchema = z.union([z.array(WordSchema), z.object({ words: z.array(WordSchema) })]);
 
 /** The words compiled into this fy: every code plugin's manifest. A data plugin's words come only from the daemon. */
@@ -49,15 +51,16 @@ function renderWords(words: readonly OwnedWord[], titles: Readonly<Record<string
   );
 }
 
-/** The daemon's joined glossary, or `undefined` when it is not answering or not readable. */
+/**
+ * The daemon's joined glossary, or `undefined` when it is not answering, not readable, or blocked. It is read through
+ * the guarded client as the Kernel's route (§9.6): the inventory is read and every core hash checked first, so a daemon
+ * on another build is sent nothing but that bootstrap read.
+ */
 async function daemonWords(ctx: Parameters<ShellVerb>[0]): Promise<readonly OwnedWord[] | undefined> {
   if ((await ctx.world.probe()).state !== 'up') return undefined;
   try {
-    const reply = await (await ctx.deps()).transport.send(
-      { method: 'GET', path: '/v1/glossary' },
-      { repeatable: true },
-    );
-    const parsed = GlossarySchema.safeParse(reply.status === 200 ? reply.body : undefined);
+    const body = await pluginClient(await ctx.deps(), 'kernel').call(GLOSSARY_ROUTE);
+    const parsed = GlossarySchema.safeParse(body);
     if (!parsed.success) return undefined;
     return Array.isArray(parsed.data) ? parsed.data : parsed.data.words;
   } catch {

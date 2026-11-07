@@ -1,4 +1,4 @@
-import type { DaemonReply, DaemonTransport } from '../../lib/client.ts';
+import type { DaemonReply, DaemonTransport, SendOptions } from '../../lib/client.ts';
 import type { DaemonRequest } from '../../lib/request.ts';
 import {
   type Attempt,
@@ -36,7 +36,7 @@ export interface HttpTransportOptions {
 export class HttpTransport implements DaemonTransport {
   constructor(private readonly options: HttpTransportOptions) {}
 
-  async send(request: DaemonRequest, { repeatable }: { readonly repeatable: boolean }): Promise<DaemonReply> {
+  async send(request: DaemonRequest, { repeatable, recheck }: SendOptions): Promise<DaemonReply> {
     const base = await this.options.baseUrl();
     await this.options.beforeSend?.(base);
     const headers = new Headers(this.options.headers);
@@ -62,11 +62,24 @@ export class HttpTransport implements DaemonTransport {
         return how === undefined ? { kind: 'failed', error } : { kind: 'unreachable', how, error };
       }
     };
+    // A resend follows a daemon that was away: it may have come back on another build, so the caller's guard is asked
+    // again BEFORE the request goes out a second time. Its refusal ends the wait; a daemon still away keeps it going.
+    const again = async (): Promise<Attempt<Response>> => {
+      if (recheck !== undefined) {
+        try {
+          await recheck();
+        } catch (error) {
+          const how = classifyUnreachable(error);
+          return how === undefined ? { kind: 'failed', error } : { kind: 'unreachable', how, error };
+        }
+      }
+      return await attempt();
+    };
     const first = await attempt();
     const outcome =
       this.options.restart === undefined
         ? first
-        : await waitOutRestart({ ...this.options.restart, attempt, first, repeatable });
+        : await waitOutRestart({ ...this.options.restart, attempt: again, first, repeatable });
     if (outcome.kind !== 'answered') throw outcome.error;
     const text = await outcome.value.text();
     return { status: outcome.value.status, body: parseBody(text) };
