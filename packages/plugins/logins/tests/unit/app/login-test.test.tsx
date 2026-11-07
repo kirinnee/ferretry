@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import type { LoginTestAct } from '../../../contract/index.ts';
+import type { LoginEnvironment, LoginTestAct } from '../../../contract/index.ts';
 import { LoginScopeChip } from '../../../app/components/login-scope-chip.tsx';
+import { LoginEnvironmentSection } from '../../../app/features/login-environment.tsx';
 import { LoginTest } from '../../../app/features/login-test.tsx';
 import { interact, mount, must } from '../support/dom.ts';
 import { type Call, scripted } from './support/client.ts';
@@ -102,6 +103,84 @@ describe('LoginScopeChip', () => {
         chip.getAttribute('data-login-scope'),
       ),
     ).toEqual(['claude-code', 'codex', 'both']);
+    await view.unmount();
+  });
+});
+
+describe('LoginEnvironmentSection', () => {
+  const secretRef = (name: string): string => `\${secret:${name}}`;
+  const base: LoginEnvironment = {
+    preset: { id: 'zai-glm', label: 'GLM / Z.ai', docs: 'https://docs.z.ai/devpack/tool/claude' },
+    variables: [
+      { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secrets: ['ZAI_API_KEY'], set: true },
+      { name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: 'https://api.z.ai/api/anthropic' },
+      { name: 'ANTHROPIC_API_KEY', kind: 'plain', value: '' },
+      { name: 'GATEWAY', kind: 'secret', secrets: ['GW_KEY'], set: false },
+      { name: 'ODD_TOKEN', kind: 'hidden' },
+    ],
+    quotaSource: 'zai-coding-plan',
+    missingSecrets: ['GW_KEY'],
+    test: { available: true, spends: 'nothing', note: 'Reads your quota. Spends nothing.' },
+  };
+
+  it('shows plain values, secret NAMES with set ✓ or needs, the reference, the provider and what is missing', async () => {
+    const view = await mount(
+      <LoginEnvironmentSection
+        loginId="zai-glm"
+        environment={{
+          ...base,
+          missingPreset: 'gone',
+          cloudCredential: {
+            reference: 'aws-profile:work',
+            kind: 'aws-profile',
+            sentence: 'Uses your AWS profile work on this machine. It is named here, never copied.',
+            variable: 'AWS_PROFILE',
+          },
+          codexProvider: { id: 'kimi', name: 'Kimi', baseUrl: 'https://api.moonshot.ai/v1' },
+        }}
+        client={scripted({})}
+        online
+      />,
+    );
+    const c = view.container;
+    const row = (name: string) => c.querySelector(`[data-login-variable="${name}"]`)?.textContent;
+    expect(row('ANTHROPIC_AUTH_TOKEN')).toBe(`ANTHROPIC_AUTH_TOKEN ${secretRef('ZAI_API_KEY')} set ✓`);
+    expect(row('ANTHROPIC_BASE_URL')).toBe('ANTHROPIC_BASE_URLhttps://api.z.ai/api/anthropic');
+    expect(row('ANTHROPIC_API_KEY')).toBe('ANTHROPIC_API_KEY""');
+    expect(row('GATEWAY')).toBe('GATEWAYneeds GW_KEY');
+    expect(row('ODD_TOKEN')).toBe('ODD_TOKENhidden');
+    expect(c.textContent).toContain('Made from GLM / Z.ai');
+    expect(c.querySelector('[data-login-missing-preset]')?.textContent).toContain('Preset gone');
+    expect(c.querySelector('[data-login-cloud]')?.textContent).toContain('aws-profile:work');
+    expect(c.querySelector('[data-login-codex-provider]')?.textContent).toBe(
+      'Codex model provider: Kimi · https://api.moonshot.ai/v1',
+    );
+    expect(c.querySelector('[data-login-needs]')?.textContent).toContain('needs: GW_KEY — add it');
+    expect(c.querySelector('[data-login-test-run]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('leaves out what a login without a preset, reference or provider does not have', async () => {
+    const view = await mount(
+      <LoginEnvironmentSection
+        loginId="hand"
+        environment={{
+          variables: [],
+          quotaSource: 'transcript-pricing',
+          missingSecrets: ['A_KEY', 'B_KEY'],
+          codexProvider: { id: 'ollama', name: 'ollama' },
+          test: { available: false, reason: 'No preset.' },
+        }}
+        client={scripted({})}
+        online={false}
+      />,
+    );
+    const c = view.container;
+    expect(c.textContent).not.toContain('Made from');
+    expect(c.querySelector('[data-login-cloud]')).toBeNull();
+    expect(c.querySelector('[data-login-codex-provider]')?.textContent).toBe('Codex model provider: ollama');
+    expect(c.querySelector('[data-login-needs]')?.textContent).toContain('add them');
+    expect(c.textContent).toContain('No Test: No preset.');
     await view.unmount();
   });
 });
