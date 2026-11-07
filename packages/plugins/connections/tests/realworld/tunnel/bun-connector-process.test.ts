@@ -2,7 +2,7 @@ import { clock, processes as kernelProcesses } from '../../support/io.ts';
 // Realworld: asserts wall-clock speed; the outcome depends on the machine, not the code.
 import { afterEach, describe, it } from 'bun:test';
 import should from 'should';
-import { BunConnectorProcesses } from '../../../adapters/tunnel/bun-connector-process.ts';
+import { BunConnectorProcesses } from '../../../daemon/adapters/tunnel/bun-connector-process.ts';
 import { fakeCloudflared, removeTempDirectories, waitFor } from '../../integration/tunnel/support.ts';
 
 afterEach(removeTempDirectories);

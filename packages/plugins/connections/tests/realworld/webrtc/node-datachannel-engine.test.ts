@@ -7,7 +7,7 @@ import {
   type EnginePeerConnection,
   NodeDataChannelEngine,
   type NodeDataChannelModule,
-} from '../../../adapters/webrtc/index.ts';
+} from '../../../daemon/adapters/webrtc/index.ts';
 
 describe('the node-datachannel WebRTC engine', () => {
   it('should prove the real native engine by echoing between two loopback peers', async () => {

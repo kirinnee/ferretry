@@ -15,7 +15,7 @@ import {
   tunnelServiceAddress,
   tunnelServiceOrigin,
   type TunnelServicePort,
-} from '../../daemon/lib/tunnel/index.ts';
+} from '../../lib/tunnel/index.ts';
 
 /** The narrow slice of `fetch` these reads need, injected so no suite dials out. */
 export type TunnelServiceFetch = (input: string, init?: RequestInit) => Promise<Response>;

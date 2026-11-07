@@ -1,7 +1,7 @@
 import { expect, it } from 'bun:test';
 import type { SpawnPort } from '@ferretry/kernel/contract';
 import { fixedClock } from '@ferretry/kernel/testing';
-import { BunConnectorProcesses } from '../../../adapters/tunnel/bun-connector-process.ts';
+import { BunConnectorProcesses } from '../../../daemon/adapters/tunnel/bun-connector-process.ts';
 import { CLOUDFLARED_ARGUMENTS } from '../../../daemon/lib/tunnel/connector.ts';
 
 it('R666 a connector receives SIGTERM then SIGKILL after the kernel clock grace', async () => {

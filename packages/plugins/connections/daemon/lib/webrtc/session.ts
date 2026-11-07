@@ -1,16 +1,15 @@
 import { isSessionEnd, type CarrierKey, type SessionLayer } from '@ferretry/kernel/contract';
 import {
   decodeFrame,
-  encodeControlMessage,
   encodeFrame,
   FRAME_KINDS,
   SESSION_CLOSE_CODES,
-  RELAY_LIMITS,
   RELAY_PROTOCOL_ID,
   SESSION_ID_BYTES,
   type SessionId,
   sessionIdFromBytes,
-} from '../../../worker/src/lib/index.ts';
+} from '@ferretry/kernel/wire';
+import { encodeControlMessage, RELAY_LIMITS } from '../relay/control.ts';
 import type { RelayLinkScheduler, WebRtcSessionFactory } from './carrier.ts';
 
 /** A source of unguessable bytes — WebCrypto in production. */
