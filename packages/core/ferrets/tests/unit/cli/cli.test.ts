@@ -319,6 +319,31 @@ describe('the ferrets cli half', () => {
     expect(err.at(-1)).toBe(`refusing to remove ${WORKTREE_PATH} without a confirmation — pass --yes to authorize it`);
   });
 
+  test('R502 ps keeps one last list per connection: the second read names its etag and a 304 serves the held list', async () => {
+    const named: (string | undefined)[] = [];
+    const out: string[] = [];
+    const client: PluginClient = {
+      call: async () => {
+        throw new Error('a list read goes through the conditional read when the shell has one');
+      },
+      subscribe: () => () => undefined,
+      conditional: async (key, _params, init) => {
+        expect(key).toBe(FERRET_ROUTES.list);
+        named.push(init?.ifNoneMatch);
+        return init?.ifNoneMatch === undefined
+          ? { status: 200, etag: '"t1"', body: [ferret] }
+          : { status: 304, etag: '"t1"' };
+      },
+    };
+    const half = cli.build?.({ manifest, client, io: { out: t => out.push(t), err: () => undefined, isTty: false } });
+    const ps = (half?.verbs as Readonly<Record<string, (invocation: VerbInvocation) => Promise<number>>>).ps;
+    if (ps === undefined) throw new Error('ps is implemented');
+    expect(await ps({ args: [], options: {} })).toBe(0);
+    expect(await ps({ args: [], options: {} })).toBe(0);
+    expect(named).toEqual([undefined, '"t1"']);
+    expect(out.filter(text => text.includes('wren')).length).toBe(2);
+  });
+
   test('a shell refusal goes back to the shell with its own exit code, never re-worded', async () => {
     const refusal = new ShellRefusal('Ferrets is paused on this daemon');
     const { verb } = run({}, refusal);

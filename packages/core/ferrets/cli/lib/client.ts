@@ -14,6 +14,7 @@ import type { ISessionApi, RenameChange, SignalAnswer, SignalKind, SignalOptions
 import type { ISessionSubtree } from './session/subtree-controller.ts';
 import type { CredentialRevoked, ISessionCredentialGateway } from './session/revoke-credential.ts';
 import type { IStopSessionGateway } from './stop/types.ts';
+import { HeldFleetList } from './session/held-list.ts';
 
 /**
  * Every Ferrets route the `fy` verbs call, by its manifest key (route paths: `/v1/ferrets/…`, today's elsewhere).
@@ -73,11 +74,28 @@ function lostStartAnswer(error: unknown): boolean {
 export class ClientSessionApi
   implements ISessionApi, ISessionSubtree, IStopSessionGateway, ISessionPinGateway, ISessionCredentialGateway
 {
-  constructor(private readonly client: PluginClient) {}
+  /** R502: the one last list this connection holds, read conditionally while the shell can (the held list's reader). */
+  readonly #held: HeldFleetList | undefined;
+
+  constructor(private readonly client: PluginClient) {
+    const conditional = client.conditional?.bind(client);
+    this.#held =
+      conditional === undefined
+        ? undefined
+        : new HeldFleetList(async headers => {
+            const tag = headers['if-none-match'];
+            const answer = await conditional(FERRET_ROUTES.list, {}, tag === undefined ? {} : { ifNoneMatch: tag });
+            return {
+              status: answer.status,
+              ...(answer.etag === undefined ? {} : { etag: answer.etag }),
+              body: answer.status === 200 ? JSON.stringify(answer.body) : '',
+            };
+          });
+  }
 
   async list(): Promise<readonly ListedFerret[]> {
-    const answer = await this.client.call<unknown>(FERRET_ROUTES.list);
-    return ListedSchema.parse(answer);
+    if (this.#held !== undefined) return await this.#held.list();
+    return ListedSchema.parse(await this.client.call<unknown>(FERRET_ROUTES.list));
   }
 
   async get(reference: string): Promise<FerretSummary> {
@@ -99,7 +117,7 @@ export class ClientSessionApi
     const payload = JSON.stringify(body);
     const captured: unknown = JSON.parse(payload);
     const init = Object.freeze({ body: captured, headers: Object.freeze({ 'x-fy-request-id': requestId }) });
-    // GG's header shape. Until the shell forwards GG, the server answers 400 missing_request_id, fail closed.
+    // The one header a half may set (PluginCallHeaders); the shell forwards it, and a start without it is refused.
     let originalError: unknown;
     try {
       return await this.client.call<{ id: string }>(FERRET_ROUTES.start, init);
