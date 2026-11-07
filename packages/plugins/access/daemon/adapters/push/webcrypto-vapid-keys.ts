@@ -24,7 +24,6 @@ import { PushError, type VapidKeyPort } from '../../lib/push/index.ts';
  * and nothing else, and Bun's WebCrypto ships it, so this needs no dependency.
  */
 
-
 /** Uncompressed EC point: one tag byte, then the two 32-byte coordinates. */
 const COORDINATE_BYTES = 32;
 const UNCOMPRESSED_TAG = 0x04;
@@ -123,8 +122,7 @@ export class StateVapidKeys implements VapidKeyPort, VapidSigner {
 
   private async load(): Promise<VapidIdentity> {
     const document = await this.state.read(PushKeysFile);
-    if (!document.ok)
-      throw new PushError('corrupt_store', 'the notification signing key is not a usable P-256 key');
+    if (!document.ok) throw new PushError('corrupt_store', 'the notification signing key is not a usable P-256 key');
     if (document.value === undefined) return await this.mint();
     return await this.adopt(document.value.privateKeyJwk);
   }
@@ -164,4 +162,3 @@ export class StateVapidKeys implements VapidKeyPort, VapidSigner {
     }
   }
 }
-

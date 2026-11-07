@@ -6,7 +6,8 @@ import {
   type GrantRefusal,
   type GrantsPatch,
   type GrantsView,
-  capabilityNamed, type Instant,
+  capabilityNamed,
+  type Instant,
 } from '../wire.ts';
 import type {
   CallerGovernance,

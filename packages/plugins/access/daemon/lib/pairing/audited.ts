@@ -33,7 +33,6 @@ export interface PairingAuditOptions {
   readonly failures: AuditFailureReporter;
 }
 
-
 /**
  * The pairing state machine, with every redemption written to the security log.
  *

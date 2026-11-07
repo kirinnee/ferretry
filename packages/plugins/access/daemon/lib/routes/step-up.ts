@@ -56,13 +56,13 @@ type PasteRuleStageId = `prs_${string}`;
  * contract may not import theirs, so the four codes and two sentences are copied here.
  */
 const STAGE_REFUSALS = {
-  twoFactor: { code: "stage_not_found" },
-  taskPlan: { code: "stage_not_found" },
-  signInRule: { code: "stage_not_found", words: "That approval timed out or was already answered. Start it again." },
+  twoFactor: { code: 'stage_not_found' },
+  taskPlan: { code: 'stage_not_found' },
+  signInRule: { code: 'stage_not_found', words: 'That approval timed out or was already answered. Start it again.' },
   pasteRule: {
-    code: "paste_rule_stage_not_found",
+    code: 'paste_rule_stage_not_found',
     words:
-      "That paste rule is not waiting for a passkey any more: it was approved, dropped or timed out. Add it again.",
+      'That paste rule is not waiting for a passkey any more: it was approved, dropped or timed out. Add it again.',
   },
 } as const;
 
@@ -70,9 +70,11 @@ const STAGE_REFUSALS = {
  * The device and page a session's principal names: the kernel-stamped holder, and the session as the step-up's app
  * session (the kernel's `SessionPrincipal` carries no separate app-session id yet).
  */
-export function sessionDevice(context: RouteContext): { readonly deviceId: string; readonly appSession: string } | undefined {
+export function sessionDevice(
+  context: RouteContext,
+): { readonly deviceId: string; readonly appSession: string } | undefined {
   const principal = context.request.principal;
-  return principal?.kind === "device" ? { deviceId: principal.holder, appSession: principal.session } : undefined;
+  return principal?.kind === 'device' ? { deviceId: principal.holder, appSession: principal.session } : undefined;
 }
 
 /** The status and sentence for each refusal. A sentence names the person's next step, never a value. */
@@ -114,10 +116,10 @@ export const callerOf = (context: RouteContext): StepUpCaller => {
   const { request, credential, actor } = context;
   const device = sessionDevice(context);
   return {
-  ...(device === undefined ? {} : { device }),
-  ...(request.transcriptHash === undefined ? {} : { transcriptHash: request.transcriptHash }),
-  hostLocal: arrivedOnHost(request, credential?.tokenClass === 'admin'),
-  ...(actor === undefined ? {} : { actor }),
+    ...(device === undefined ? {} : { device }),
+    ...(request.transcriptHash === undefined ? {} : { transcriptHash: request.transcriptHash }),
+    hostLocal: arrivedOnHost(request, credential?.tokenClass === 'admin'),
+    ...(actor === undefined ? {} : { actor }),
   };
 };
 
@@ -218,7 +220,8 @@ export function stepUpRoutes(
         // Saving a 2FA seed binds its challenge, and so its proof, to the ONE staged save it names (its account and stage):
         // no proof stamped for the act is ever minted unbound, and only that stage's commit can spend it.
         if (body.act === STEP_UP_ACTS.addTwoFactorKey) {
-          const bound = body.subject === undefined ? undefined : seeds?.boundSubjectOf(body.subject as TwoFactorStageId);
+          const bound =
+            body.subject === undefined ? undefined : seeds?.boundSubjectOf(body.subject as TwoFactorStageId);
           if (bound === undefined)
             return errorResponse(
               404,
@@ -257,11 +260,7 @@ export function stepUpRoutes(
                   deviceId,
                 );
           if (bound === undefined)
-            return errorResponse(
-              404,
-              STAGE_REFUSALS.pasteRule.words,
-              STAGE_REFUSALS.pasteRule.code,
-            );
+            return errorResponse(404, STAGE_REFUSALS.pasteRule.words, STAGE_REFUSALS.pasteRule.code);
           return answer(await service.stepUpOptions(caller(context), body.origin, body.act, bound), value =>
             StepUpOptionsSchema.parse(value),
           );
@@ -275,17 +274,14 @@ export function stepUpRoutes(
           const challenge =
             stage === undefined || deviceId === undefined ? undefined : rules?.challengeOf(stage, deviceId);
           if (stage === undefined || challenge === undefined)
-            return errorResponse(
-              404,
-              STAGE_REFUSALS.signInRule.words,
-              STAGE_REFUSALS.signInRule.code,
-            );
+            return errorResponse(404, STAGE_REFUSALS.signInRule.words, STAGE_REFUSALS.signInRule.code);
           return answer(await service.stepUpOptions(caller(context), body.origin, body.act, stage, challenge), value =>
             StepUpOptionsSchema.parse(value),
           );
         }
-        return answer(await service.stepUpOptions(caller(context), body.origin, body.act as MachineSkippableStepUpAct | undefined), value =>
-          StepUpOptionsSchema.parse(value),
+        return answer(
+          await service.stepUpOptions(caller(context), body.origin, body.act as MachineSkippableStepUpAct | undefined),
+          value => StepUpOptionsSchema.parse(value),
         );
       },
     },

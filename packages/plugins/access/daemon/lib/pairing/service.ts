@@ -29,7 +29,8 @@ import {
   PublishedCarriersSchema,
   isReservedActorPhrase,
   pairingLinkUrl,
-  type Instant, instantFromEpochMs,
+  type Instant,
+  instantFromEpochMs,
 } from '../wire.ts';
 import { DeviceKeySchema } from '../proof/device-proof.ts';
 import { secretsMatch } from '../wire.ts';

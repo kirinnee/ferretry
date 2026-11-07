@@ -163,4 +163,3 @@ function normalizeDaemonName(value: string): string {
   }
   return DaemonNameSchema.parse(bounded === '' ? 'Ferretry daemon' : bounded);
 }
-

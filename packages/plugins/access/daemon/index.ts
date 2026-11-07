@@ -4,15 +4,13 @@ import manifest from '../manifest.ts';
 import { type AccessHost, AccessRuntime } from './runtime.ts';
 
 /**
- * The facts no port gives Access yet (see {@link AccessHost}): the kernel's identity port and Connections'
- * `advertisement()` are being added. Until they land, Access cannot open its device grants (they are bound to the
+ * The facts no port gives Access yet (see {@link AccessHost}): the kernel's identity port is being added. Until they land, Access cannot open its device grants (they are bound to the
  * daemon identity), so every route answers `503 plugin_unavailable` and every session mode refuses — fail closed.
  */
 const pendingHost: AccessHost = {
   identity: () => {
     throw new Error('the kernel does not hand Access the daemon identity yet');
   },
-  advertisement: () => ({ advertisement: { kind: 'none', refusal: 'no-port' } }),
   allowedOrigins: () => [HOSTED_APP_ORIGIN],
   ed25519: {
     verifyEd25519: async (publicKeySpki, signature, message) => {

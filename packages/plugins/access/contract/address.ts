@@ -1,7 +1,7 @@
 /**
- * The host-name facts pairing's reach answer reads (today's `protocol/src/lib/address.ts` and the refusal list of
- * `advertisement.ts`), copied verbatim. Placement gives both files to the kernel's wire; until the kernel contract
- * exports them, Access keeps this private copy and re-points its imports when it does.
+ * The host-name facts pairing's reach answer reads (today's `protocol/src/lib/address.ts`), copied verbatim. Placement
+ * gives them to the kernel's wire; until the kernel contract exports them, Access keeps this private copy and re-points
+ * its imports when it does. The advertisement itself is Connections' (`ConnectionsApi.advertisement()`).
  */
 
 /**
@@ -109,21 +109,10 @@ export function isWildcardHost(host: string): boolean {
   return groups.every(group => group === 0);
 }
 
-/** Why a daemon has no address another device can dial (today's `ADVERTISEMENT_REFUSALS`). */
-export const ADVERTISEMENT_REFUSALS = ['loopback-bind', 'wildcard-bind', 'no-port'] as const;
-export type AdvertisementRefusal = (typeof ADVERTISEMENT_REFUSALS)[number];
-
-/** What the daemon can hand out as its own address (today's `Advertisement`, `advertisement.ts`), verbatim. */
-export type Advertisement =
-  /** An address a DIFFERENT device can dial. Mint the link and draw the QR. */
-  | { readonly kind: 'address'; readonly url: string; readonly origin: 'operator' | 'derived' }
-  /**
-   * Correct for a browser ON this machine, dead off it. Mint the link, show it, and SAY SO.
-   *
-   * NOT A REFUSAL. One person, one laptop, a browser on loopback is the common case this product is
-   * built around, and that install must keep working. What it must not do is draw a QR: a QR is an
-   * offer to another device, and this address cannot be redeemed by one.
-   */
-  | { readonly kind: 'local-only'; readonly url: string }
-  /** There is nothing to hand out. Refuse the link, keep the code, and name the fix. */
-  | { readonly kind: 'none'; readonly refusal: AdvertisementRefusal };
+/** What the daemon can hand out as its own address, and why it has none: Connections owns both. */
+export {
+  ADVERTISEMENT_REFUSALS,
+  type Advertisement,
+  type AdvertisementRefusal,
+  type ConnectionAdvertisement,
+} from '@ferretry/plugin-connections/contract';

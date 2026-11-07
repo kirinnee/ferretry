@@ -27,7 +27,8 @@ import {
   type StoredStepUpProof,
   StoredStepUpProofSchema,
   type UnlockGranted,
-  type Instant, instantFromEpochMs,
+  type Instant,
+  instantFromEpochMs,
 } from '../wire.ts';
 import { fromBase64Url, toBase64Url } from '../proof/binary.ts';
 import { secretsMatch } from '../wire.ts';
@@ -868,7 +869,9 @@ function challengeStampOf(
   if (bound === undefined || bound === '') return { ok: false };
   if (!stepUpKeepsProof(act))
     return challenge === undefined ? { ok: true, stamp: { kind: 'bound', act, bound } } : { ok: false };
-  const derived = challenge?.length === CHALLENGE_BYTES && STEP_UP_SUBJECTS[act as keyof typeof STEP_UP_SUBJECTS].safeParse(bound).success;
+  const derived =
+    challenge?.length === CHALLENGE_BYTES &&
+    STEP_UP_SUBJECTS[act as keyof typeof STEP_UP_SUBJECTS].safeParse(bound).success;
   return derived ? { ok: true, stamp: { kind: 'kept', act, stage: bound } } : { ok: false };
 }
 

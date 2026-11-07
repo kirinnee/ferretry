@@ -192,7 +192,11 @@ async function devicesView(
  */
 function addsAccessRefusal(message: string, act: NonNullable<StepUpDemand['act']>): ApiResponse {
   return jsonResponse(
-    { error: message, code: STEP_UP_REQUIRED_CODE, demand: { capability: 'pairing', axis: 'use', act } } satisfies StepUpRequiredBody,
+    {
+      error: message,
+      code: STEP_UP_REQUIRED_CODE,
+      demand: { capability: 'pairing', axis: 'use', act },
+    } satisfies StepUpRequiredBody,
     403,
   );
 }

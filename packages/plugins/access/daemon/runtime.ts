@@ -31,7 +31,7 @@ import { epochMs, instantFromEpochMs, milliseconds } from '@ferretry/std';
 import { z } from 'zod';
 import {
   type AccessApi,
-  type Advertisement,
+  type ConnectionAdvertisement,
   type Buzz,
   DevicesChanged,
   PairedDeviceIdSchema,
@@ -83,16 +83,11 @@ import type { ApiRoute } from './lib/wire.ts';
 
 /**
  * What Access needs from the host that no kernel or plugin port gives yet (sent to the lead): the daemon identity
- * (kernel), the advertisement (Connections' `advertisement()`, being added), the app origins a passkey may answer for,
+ * (kernel), the app origins a passkey may answer for,
  * and the Ed25519 check a key rotation's proof needs (kernel wire). The real ports replace this one by one.
  */
 export interface AccessHost {
   identity(): { readonly daemonId: string; readonly daemonName: string };
-  advertisement(): {
-    readonly advertisement: Advertisement;
-    readonly discoveredRelayUrl?: string;
-    readonly port?: number;
-  };
   allowedOrigins(): readonly string[];
   readonly ed25519: Ed25519Verifier;
   /** The command a remedy sentence names (`fy`). */
@@ -239,7 +234,11 @@ export class AccessRuntime {
         },
       },
     });
-    const advertised = host.advertisement();
+    // Connections owns the host-facing reach (`advertisement()`). Without it, the honest answer is `none`: the code is
+    // still minted, the link is refused and the fix is named (P84).
+    const advertised: ConnectionAdvertisement = this.#deps.connections()?.advertisement() ?? {
+      advertisement: { kind: 'none', refusal: 'no-port' },
+    };
     pairing = new AccessPairingService(
       {
         daemonId: state.daemonId,
