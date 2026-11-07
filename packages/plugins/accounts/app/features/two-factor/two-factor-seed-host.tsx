@@ -41,7 +41,7 @@ export interface TwoFactorSeedHostProps {
     readonly why?: string;
     readonly context?: string;
   };
-  /** Asks for the passkey bound to the stage. Absent when this browser cannot (no Access ceremony here yet). */
+  /** Asks for the passkey bound to the stage. Absent when this browser cannot. */
   readonly addKey?: (stage: TwoFactorStageId, words: string) => Promise<boolean>;
   readonly onDone?: () => void;
 }

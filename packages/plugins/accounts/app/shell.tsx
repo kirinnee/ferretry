@@ -11,9 +11,7 @@
  *   - grantRefusalNotice ..... pwa/src/lib/grants.ts ................. STAND-IN: Gate's `grant_*` codes; one plain
  *                                                                        explanation, then the daemon's own sentence
  *                                                                        (Access's app port carries the full copy)
- *   - useAddKeyStepUp ........ pwa/src/lib/store.tsx ................. NOT PASSED: Access's passkey ceremony is not on
- *                                                                        this base, so `addKey` is absent and no seed
- *                                                                        can be saved from here (today's no-passkey path)
+ *   - useAddKeyStepUp and the other bound asks  pwa/src/lib/store.tsx ... `passkeys.ts` (the shell's `usePasskeyAsk`)
  */
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
@@ -109,8 +107,8 @@ export const X = icon(
  * What a bound passkey shows for a staged change, as STRUCTURE: the daemon's one plain line, its label/value rows, the
  * red warnings its structured flags give, and the amber cautions apart from them (today's `StepUpWords`). Nothing here
  * is split out of text, so a row can never land in the warnings (secrev-1320 L1). The passkey ceremony itself is
- * Access's and is not on this base: no half here is handed an ask, so a change that widens something is refused
- * with today's no-passkey sentence and nothing is approved (the same path as a device that cannot run a passkey).
+ * Access's, asked through the shell's one prompt (`passkeys.ts`); where nothing can ask, a change that widens
+ * something is refused with today's no-passkey sentence and nothing is approved.
  */
 export interface PasskeyWords {
   readonly does: string;

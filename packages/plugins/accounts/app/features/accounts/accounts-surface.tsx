@@ -16,6 +16,7 @@ import type {
 } from '../../../contract/routes/index.ts';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DefaultsRead } from '../../lib/accounts-screen.ts';
+import type { RuleAsk } from '../../lib/sign-in-rules.ts';
 import { readDefaults } from '../../shell.tsx';
 import {
   type AccountsClient,
@@ -64,12 +65,15 @@ async function readAll(client: AccountsClient): Promise<Loaded> {
 export function AccountsSurface({
   client: given,
   addKey,
+  askPasskey,
   withKeys = true,
 }: {
   /** The machine's client (the shell builds the half per machine). */
   readonly client: AccountsClient;
   /** Asks for the passkey bound to a staged seed. Absent when this machine or this browser cannot save a seed. */
   readonly addKey?: (stage: TwoFactorStageId, words: string) => Promise<boolean>;
+  /** Asks for the passkey bound to a staged sign-in rule. Absent where nothing can ask: no rule can then be widened. */
+  readonly askPasskey?: RuleAsk;
   /** Whether this machine has 2FA keys; false hides their tab. */
   readonly withKeys?: boolean;
 }) {
@@ -177,8 +181,7 @@ export function AccountsSurface({
       onNavigate={() => setError(null)}
       onRefresh={() => void refresh()}
       ops={ops}
-      // The passkey ceremony is Access's and not on this base: no widening can be approved here (today's no-passkey path).
-      rules={{ client, askPasskey: undefined }}
+      rules={{ client, askPasskey }}
     />
   );
 }

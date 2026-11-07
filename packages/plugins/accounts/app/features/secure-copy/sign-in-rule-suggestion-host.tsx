@@ -33,7 +33,7 @@ export interface SignInRuleSuggestionHostProps {
   readonly agentName?: string;
   /** The ferret that asked: the owner may limit the rule to it. */
   readonly ferret?: string;
-  /** Asks for the passkey bound to the stage; absent where this device cannot ask (no Access ceremony here yet). */
+  /** Asks for the passkey bound to the stage; absent where this device cannot ask. */
   readonly askPasskey?: RulesBinding['askPasskey'];
   readonly onDone?: () => void;
 }

@@ -31,7 +31,7 @@ export interface TaskPlanHostProps {
   readonly ferret: string;
   readonly planId: string;
   readonly agentName?: string;
-  /** Asks for the passkey bound to the stage; absent where this device cannot ask (no Access ceremony here yet). */
+  /** Asks for the passkey bound to the stage; absent where this device cannot ask. */
   readonly askPasskey?: ApprovalPorts['askPasskey'];
   readonly onDone?: () => void;
 }
