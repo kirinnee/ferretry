@@ -6,7 +6,7 @@
  */
 import { InstantSchema, NonEmptyStringSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { HarnessKeySchema } from './core.ts';
+import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 
 /** A runtime's name: letters, digits and dashes, none at either end (R1). It is the CLI word a person types. */
 export const RuntimeNameSchema = z

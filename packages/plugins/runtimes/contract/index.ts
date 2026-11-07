@@ -5,7 +5,8 @@
 import { type Brand, InstantSchema } from '@ferretry/std';
 import { defineConfig, defineEvent, definePort, neverLoosens, type Word } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { configDef, FerretsPort, HarnessKeySchema } from './core.ts';
+import { FerretsPort, HarnessKeySchema } from '@ferretry/core-ferrets/contract';
+import { configDef } from './config-def.ts';
 import {
   ModelSetFileSchema,
   ProfileFileSchema,

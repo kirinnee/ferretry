@@ -15,7 +15,7 @@
  */
 import { type Brand, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { HarnessKeySchema } from './core.ts';
+import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 
 const HarnessKindSchema = HarnessKeySchema;
 const NonEmpty = z.string().min(1);

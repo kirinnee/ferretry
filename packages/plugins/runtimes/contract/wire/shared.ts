@@ -14,7 +14,7 @@
  */
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { HarnessKeySchema } from '../core.ts';
+import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 
 export { HarnessKeySchema, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema };
 

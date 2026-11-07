@@ -6,7 +6,7 @@
 import { defineConfig, defineEvent, definePort, defineState, type Loosens, type Word } from '@ferretry/kernel/contract';
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { configDef } from './core.ts';
+import { configDef } from './config-def.ts';
 import {
   type NixFacts,
   NarHashSchema,

@@ -6,17 +6,15 @@ import {
   ONBOARDING_WORDS,
   OnboardingChanged,
   OnboardingPort,
-  OnboardingSteps,
 } from './contract/index.ts';
-import { audit, cap } from './contract/core.ts';
+import { audit, cap } from '@ferretry/core-gate/contract';
 
 /**
  * Onboarding (§2.3, §6.1): the first run. It lists the steps every plugin declared in its manifest (the post-build
- * snapshot), runs their `find`, records the answers, and asks nothing a step did not need. Replaces today's
- * `fleet setup scan` (`GET /v1/fleet/setup/scan`, `fleet.configure`) and the app's onboarding feature, so the
- * descriptors follow the scan's: reading progress is `fleet.use`; running a find (it looks at the machine, like the
- * scan) and recording an answer are `fleet.configure`, the answer a person's act. None of them grants anything: what a
- * step asks for goes through the owning plugin's own governed route.
+ * snapshot) and records the answers. A step's live check is a route its owning plugin declares, which the app calls
+ * (Claude Code / Codex: their update view; Shells: `GET /v1/shells/nix`; Runtimes: the setup scan). Replaces today's
+ * `fleet setup scan` (`fleet.configure`) and the app's onboarding feature, so the descriptors follow the scan's: reading
+ * progress is `fleet.use`; recording an answer is `fleet.configure`, a person's act. None of them grants anything.
  */
 export default definePlugin({
   id: 'onboarding',
@@ -37,15 +35,7 @@ export default definePlugin({
         capability: cap('fleet', 'use'),
         noStore: true,
         audit: { skip: 'a read' },
-        guard: { none: 'step titles, states and one-sentence findings; never a credential or a sign-in path' },
-      }),
-      route('POST /v1/onboarding/steps/:plugin/:stepId/find', {
-        minimum: 'operator',
-        caller: 'any',
-        capability: cap('fleet', 'configure'),
-        noStore: true,
-        audit: { skip: 'reads the machine like the setup scan did; writes nothing but a remembered finding' },
-        guard: { none: 'one-sentence findings; a step never returns a credential or a sign-in path' },
+        guard: { none: 'step titles, states and step ids and states only' },
       }),
       route('POST /v1/onboarding/steps/:plugin/:stepId', {
         minimum: 'operator',
@@ -79,10 +69,6 @@ export default definePlugin({
     state: [ONBOARDING_PROGRESS],
     readModels: ONBOARDING_READ_MODELS,
     publishes: [OnboardingChanged],
-  },
-
-  hooks: {
-    offers: [{ hook: OnboardingSteps }],
   },
 
   permissions: { roots: [], network: [], spawn: [], secrets: [] },

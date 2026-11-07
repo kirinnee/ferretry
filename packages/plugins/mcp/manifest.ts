@@ -1,5 +1,6 @@
 import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
-import { audit, cap, LaunchParts } from './contract/core.ts';
+import { audit, cap } from '@ferretry/core-gate/contract';
+import { LaunchParts } from '@ferretry/core-ferrets/contract';
 import {
   MCP_AUDIT,
   MCP_CONFIG,

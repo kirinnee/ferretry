@@ -11,7 +11,7 @@
  * (`claude` → `claude-code`, the plugin id), the env grammar and the secure-URL rule of the fleet's component schema.
  */
 import { z } from 'zod';
-import { HarnessKeySchema } from './core.ts';
+import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 
 // ─── foreign pieces, inlined ─────────────────────────────────────────────────────────────────────────────────────
 

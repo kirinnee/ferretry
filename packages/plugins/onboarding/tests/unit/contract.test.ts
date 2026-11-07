@@ -19,12 +19,12 @@ describe('onboarding contract', () => {
 
   test('an answer is done, later or skipped; never found or asked', () => {
     expect(StepAnswerRequestSchema.safeParse({ state: 'later' }).success).toBe(true);
-    expect(StepAnswerRequestSchema.safeParse({ state: 'found' }).success).toBe(false);
+    expect(StepAnswerRequestSchema.safeParse({ state: 'pending' }).success).toBe(false);
   });
 
-  test('recording an answer is a person act and offers the onboarding.steps hook', () => {
+  test('recording an answer is a person act, and the plugin offers no hook', () => {
     const answer = manifest.actions.routes.find(route => route.key === 'POST /v1/onboarding/steps/:plugin/:stepId');
     expect(answer?.caller).toBe('person');
-    expect(manifest.hooks.offers.map(offer => offer.hook.name)).toEqual(['onboarding.steps']);
+    expect('hooks' in manifest).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 import { definePlugin, route, settingsTab, verb } from '@ferretry/kernel/manifest';
-import { cap } from './contract/core.ts';
+import { cap } from '@ferretry/core-gate/contract';
 import {
   LAYOUTS_ITEMS,
   LAYOUTS_READ_MODELS,

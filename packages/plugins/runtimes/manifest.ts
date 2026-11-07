@@ -1,5 +1,5 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
-import { audit, cap } from './contract/core.ts';
+import { audit, cap } from '@ferretry/core-gate/contract';
 import {
   FerretsPort,
   MODEL_SET_ITEMS,

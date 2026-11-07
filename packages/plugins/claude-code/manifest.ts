@@ -12,7 +12,8 @@ import {
   ClaudeCodePort,
   ClaudeCodeUpdateFinished,
 } from './contract/index.ts';
-import { audit, cap, Harnesses } from './contract/core.ts';
+import { audit, cap } from '@ferretry/core-gate/contract';
+import { Harnesses } from '@ferretry/core-ferrets/contract';
 
 /**
  * Claude Code (§2.3): a harness. It takes `harnesses:claude-code` from Ferrets and needs a `runners` provider only at

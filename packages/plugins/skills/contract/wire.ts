@@ -12,7 +12,7 @@
  */
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { HarnessKeySchema } from './core.ts';
+import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 
 // ─── inventory (docs/skills-inventory.md) ────────────────────────────────────────────────────────────────────────
 

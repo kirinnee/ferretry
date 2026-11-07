@@ -1,5 +1,7 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
-import { audit, cap, Logins, VaultPort } from './contract/core.ts';
+import { audit, cap } from '@ferretry/core-gate/contract';
+import { Logins } from '@ferretry/core-ferrets/contract';
+import { VaultPort } from '@ferretry/core-vault/contract';
 import {
   ENDPOINTS_CONFIG,
   LOGIN_KINDS,
@@ -134,10 +136,12 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('login ls', { summary: 'the logins on this machine, with their status and usage' }),
-      verb('login add', { summary: 'add a login: sign claude-code or codex in, or build one from a provider preset' }),
+      verb('login ls', { summary: 'the logins on this machine, with whether each works and its usage' }),
+      verb('login add', {
+        summary: 'add a login: sign claude-code or codex in, or build one for a provider from its list',
+      }),
       verb('login check', { summary: 'check now whether a login still works (a refresh for Codex)' }),
-      verb('login test', { summary: 'test an environment login with one request, the cheapest its provider allows' }),
+      verb('login test', { summary: 'test an environment login with one call, the cheapest its provider allows' }),
       verb('login presets', { summary: 'the provider presets an environment login can be made from' }),
       verb('login signin', { summary: 'sign a login in, or in again' }),
       verb('login signout', { summary: 'sign a login out; every runtime on it then needs sign-in' }),

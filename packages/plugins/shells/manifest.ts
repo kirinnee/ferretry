@@ -10,7 +10,8 @@ import {
   ShellsChanged,
   ShellsPort,
 } from './contract/index.ts';
-import { audit, cap, LaunchParts } from './contract/core.ts';
+import { audit, cap } from '@ferretry/core-gate/contract';
+import { LaunchParts } from '@ferretry/core-ferrets/contract';
 
 /**
  * Shells (§2.3, §4.9): each ferret gets its own nix shell. NEW in 5.0, so there is no route table of today's to copy;
@@ -100,7 +101,7 @@ export default definePlugin({
     cli: [
       verb('shell ls', { summary: 'the shells on this machine, locked and built or not' }),
       verb('shell show', { summary: 'one shell, its locked source and narHash' }),
-      verb('shell add', { summary: 'add a shell: resolve it, show what it resolved to, and lock it on your yes' }),
+      verb('shell add', { summary: 'add a shell: resolve it, show what it resolved to, and pin it on your yes' }),
       verb('shell relock', { summary: 'resolve a shell again; a different narHash needs your yes again' }),
       verb('shell build', { summary: 'build a shell now and cache it by narHash' }),
       verb('shell rm', { summary: 'remove a shell' }),

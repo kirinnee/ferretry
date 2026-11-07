@@ -17,11 +17,10 @@ export function fakeOnboarding(): FakeOnboarding {
   const find = (plugin: string, id: string) => steps.find(step => step.plugin === plugin && step.id === id);
   const view = (): OnboardingView => ({
     steps: [...steps].sort((a, b) => a.order - b.order),
-    complete: steps.every(step => step.state !== 'pending' && step.state !== 'asked'),
+    complete: steps.every(step => step.state !== 'pending'),
   });
   return {
     view: async () => view(),
-    find: async (plugin, step) => find(plugin, step),
     answer: async (plugin, step, answer: StepAnswerRequest) => {
       const found = find(plugin, step);
       if (found === undefined) return undefined;
@@ -43,8 +42,6 @@ export async function onboardingConformance(make: () => OnboardingApi): Promise<
   const failures: string[] = [];
   const api = make();
   if (!OnboardingViewSchema.safeParse(await api.view()).success) failures.push('view() returns an OnboardingView');
-  if ((await api.find('no-such-plugin', 'no-such-step')) !== undefined)
-    failures.push('find() of an unknown step is undefined');
   if ((await api.answer('no-such-plugin', 'no-such-step', { state: 'done' })) !== undefined)
     failures.push('answer() of an unknown step is undefined');
   return failures.length === 0 ? ok(true) : err(failures);

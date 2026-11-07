@@ -13,7 +13,7 @@ import {
 } from '@ferretry/kernel/contract';
 import type { Word } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { configDef } from './core.ts';
+import { configDef } from './config-def.ts';
 import {
   DiscoverySchema,
   HarnessConfigSchema,

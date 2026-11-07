@@ -1,20 +1,17 @@
 /**
- * @ferretry/plugin-onboarding/contract — wire schemas, the step kind (§4.12), port + token, events, state, words.
- * Onboarding OFFERS the `onboarding` step kind: other plugins add steps through their manifests' `onboarding` list.
+ * @ferretry/plugin-onboarding/contract — wire schemas, port + token, events, state, words.
+ * Onboarding lists the steps every plugin declared in its manifest (the post-build snapshot) and remembers where each
+ * stands (§6.1). It offers no hook: a step's live check is a route its owning plugin declares, which the app calls.
  */
-import { defineEvent, defineHook, definePort, defineState, type Word } from '@ferretry/kernel/contract';
+import { defineEvent, definePort, defineState, type Word } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import {
   type OnboardingView,
   ProgressSchema,
   type StepAnswerRequest,
-  type StepFound,
-  StepFoundSchema,
   StepIdSchema,
   StepPluginSchema,
   type StepView,
-  type StepAsk,
-  StepAskSchema,
 } from './wire.ts';
 
 export * from './wire.ts';
@@ -23,42 +20,12 @@ export const ONBOARDING_WORDS: readonly Word[] = [
   { word: 'step', means: 'one thing the first run does: find, ask or leave for later', insteadOf: [] },
 ];
 
-// ─── the step kind (§4.12) ───────────────────────────────────────────────────────────────────────────────────────
-
-/**
- * What a plugin's step does. `find` detects something already on the machine (a signed-in harness, nix, a folder);
- * `ask` is the smallest question if `find` found nothing; `later` names the moment it will ask instead.
- * A step whose `find` found it needs no question.
- */
-export interface OnboardingStep {
-  readonly id: string;
-  find?(): Promise<StepFound>;
-  ask?(): Promise<StepAsk>;
-  readonly later?: string;
-}
-
-/**
- * The hook a step's CODE reaches Onboarding through (contribute). The step's id, title and order are manifest
- * metadata (`manifest.onboarding`) and need no hook; only a `find`/`ask` that RUNS does.
- *
- * OPEN QUESTION FOR THE LEAD: this hook is not in the §3.5 table, and taking it would be a plugin → plugin contract
- * edge (every plugin with a step would import this contract), which spine.md §4 rule 3 allows only for Usage → Logins
- * and Packs → Runtimes. Until the lead decides (core hook, or the edge), plugins declare steps as manifest metadata
- * only and Onboarding lists them without running their `find`.
- */
-export const OnboardingSteps = defineHook('onboarding.steps', {
-  mode: 'contribute',
-  item: z.custom<OnboardingStep>(),
-});
-
 // ─── port ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface OnboardingApi {
-  /** The steps in order with where each stands. */
+  /** The steps in order, from the snapshot, with where each stands. */
   view(): Promise<OnboardingView>;
-  /** Runs one step's `find` (reads only). */
-  find(plugin: string, step: string): Promise<StepView | undefined>;
-  /** Records how the owner answered. */
+  /** Records how the owner (or the app, after a step's live check) answered. */
   answer(plugin: string, step: string, answer: StepAnswerRequest): Promise<StepView | undefined>;
   reset(): Promise<void>;
 }
@@ -82,8 +49,6 @@ export const ONBOARDING_PROGRESS = defineState({
   format: 1,
   schema: ProgressSchema,
 });
-
-export { StepAskSchema, StepFoundSchema };
 
 // ─── audit kinds ─────────────────────────────────────────────────────────────────────────────────────────────────
 

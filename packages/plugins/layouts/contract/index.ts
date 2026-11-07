@@ -4,7 +4,7 @@
  */
 import { defineConfig, defineEvent, definePort, neverLoosens, type Word } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { configDef } from './core.ts';
+import { configDef } from './config-def.ts';
 import {
   type CurrentLayout,
   LayoutIdSchema,

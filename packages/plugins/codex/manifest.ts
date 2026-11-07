@@ -9,7 +9,8 @@ import {
   CodexPort,
   CodexUpdateFinished,
 } from './contract/index.ts';
-import { cap, Harnesses } from './contract/core.ts';
+import { cap } from '@ferretry/core-gate/contract';
+import { Harnesses } from '@ferretry/core-ferrets/contract';
 
 /**
  * Codex (§2.3): a harness, the same way as Claude Code. It takes `harnesses:codex` from Ferrets and needs a `runners`
