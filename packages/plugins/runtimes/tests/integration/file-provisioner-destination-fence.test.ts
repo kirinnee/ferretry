@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from 'bun:test';
+import { afterEach, it } from 'bun:test';
 import {
   chmod,
   lstat,
@@ -16,13 +16,11 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
-import { DestinationFolders } from '../../src/adapters/destination-folders.ts';
-import { FileFleetProvisioner } from '../../daemon/adapters/file-provisioner.ts';
-import { FileMutationJournal } from '../../src/adapters/mutation-journal.ts';
-import { NodeGuardDisk } from '../../src/adapters/node-guard-disk.ts';
+
 import type { FleetManifest } from '../../daemon/lib/manifest.ts';
 import { FleetApplyFailureError, type FleetApplyPlan, type FleetWriteOperation } from '../../daemon/lib/provisioning.ts';
-import { type FolderDisk, type GuardedFolder, resolveStateHomes } from '../../src/lib/state-home-guard.ts';
+import type { FolderDisk, GuardedFolder } from '../../daemon/adapters/ports.ts';
+import { DestinationFolders, FileMutationJournal, NodeGuardDisk, newProvisioner, resolveStateHomes, suite } from './support/provisioner-host.ts';
 
 /**
  * The provisioner's destination side (docs/agent-tools.md#component-destinations): a runtime's
@@ -46,6 +44,7 @@ async function temporary(): Promise<string> {
 const manifestOf = (home: string): FleetManifest => ({
   version: 1,
   generatedAt: '2027-01-15T08:00:00.000Z',
+  runtimes: [],
   accounts: [
     {
       secretEnv: {},
@@ -98,7 +97,7 @@ async function world(options: WorldOptions = {}) {
   for (const [name, content] of Object.entries(SECRETS)) await writeFile(path.join(home, name), content);
   await mkdir(path.join(skills, 'stale'), { recursive: true });
   await writeFile(path.join(skills, 'stale', 'SKILL.md'), 'A skill the profile no longer has.\n');
-  const subject = new FileFleetProvisioner(
+  const subject = newProvisioner(
     [home],
     undefined,
     {},
@@ -138,7 +137,7 @@ const settled = async (attempt: Promise<unknown>): Promise<unknown> => {
   }
 };
 
-describe('FileFleetProvisioner destination side', () => {
+suite('FileFleetProvisioner destination side', () => {
   it('should move and delete nothing in the state home when a runtime folder is swapped for a link right after its check', async () => {
     // Arrange — the skills folder passes its `directory` check, and the moment after, the harness swaps it for a
     // link into the home's state folder. The sweep that follows used to list the home's files through the link,
@@ -183,7 +182,7 @@ describe('FileFleetProvisioner destination side', () => {
     const aside = path.join(runtime, 'skills-moved-away');
     const original = FileMutationJournal.prototype.capture;
     let swapped = false;
-    FileMutationJournal.prototype.capture = async function (this: FileMutationJournal, ...args) {
+    FileMutationJournal.prototype.capture = async function (this: FileMutationJournal, ...args: [string, ...unknown[]]) {
       const [target] = args;
       if (!swapped && path.dirname(path.resolve(target)) === skills) {
         swapped = true;
@@ -339,7 +338,7 @@ async function textsUnder(folder: string): Promise<readonly string[]> {
   return texts;
 }
 
-describe('secrev-1262 M2 — without descriptor paths (macOS) nothing below a runtime is moved or removed', () => {
+suite('secrev-1262 M2 — without descriptor paths (macOS) nothing below a runtime is moved or removed', () => {
   it('should skip, and report, every operation that would move or remove a name below the runtime', async () => {
     // Arrange — every step there goes by path after a proof, so a well-timed swap could redirect it.
     const { home, assets, runtime, skills, subject, plan } = await world({ disk: new NodeGuardDisk(false) });
@@ -412,12 +411,12 @@ describe('secrev-1262 M2 — without descriptor paths (macOS) nothing below a ru
   });
 });
 
-describe('secrev-1262 L1 — a Linux host with no /proc refuses loudly', () => {
+suite('secrev-1262 L1 — a Linux host with no /proc refuses loudly', () => {
   it('should refuse the apply rather than read every destination folder as empty', async () => {
     // Arrange
     const { machine, home, skills, plan } = await world();
     const noProc = new NodeGuardDisk(true, '/etc/group', path.join(machine, 'no-proc'));
-    const subject = new FileFleetProvisioner([home], undefined, {}, undefined, noProc);
+    const subject = newProvisioner([home], undefined, {}, undefined, noProc);
 
     // Act
     const outcome = await settled(subject.apply(plan([{ kind: 'prune-directory', path: skills, keep: [] }])));
@@ -428,7 +427,7 @@ describe('secrev-1262 L1 — a Linux host with no /proc refuses loudly', () => {
   });
 });
 
-describe('secrev-1262 L2 — a pipe where a staged file was never blocks the daemon', () => {
+suite('secrev-1262 L2 — a pipe where a staged file was never blocks the daemon', () => {
   it('should refuse a staged file swapped for a pipe between its look and its read', async () => {
     // Arrange — a blocking open of a pipe with no writer never returns, on the thread holding the apply claim.
     const { home, assets, skills, subject, plan } = await world();
@@ -460,7 +459,7 @@ describe('secrev-1262 L2 — a pipe where a staged file was never blocks the dae
   });
 });
 
-describe('secrev-1262 — a publish swapped mid-tree reaches nothing in the home', () => {
+suite('secrev-1262 — a publish swapped mid-tree reaches nothing in the home', () => {
   /** An asset skill with a file and a sub-folder of two files. */
   const kitIn = async (assets: string): Promise<string> => {
     const kit = path.join(assets, 'skills', 'kit');
@@ -535,7 +534,7 @@ describe('secrev-1262 — a publish swapped mid-tree reaches nothing in the home
   });
 });
 
-describe('secrev-1262 — a removal swapped mid-tree on a real disk', () => {
+suite('secrev-1262 — a removal swapped mid-tree on a real disk', () => {
   // Hooks the disk's by-path open, which a descriptor-calls disk (macOS) never makes; its own swap test is in
   // descriptor-calls.test.ts.
   it.skipIf(process.platform !== 'linux')(
@@ -549,7 +548,7 @@ describe('secrev-1262 — a removal swapped mid-tree on a real disk', () => {
       const homes = await resolveStateHomes({ homes: [home, state, path.join(home, 'config')] }, new NodeGuardDisk());
       let swapped = false;
       class SwappingDisk extends NodeGuardDisk {
-        override async openDirectory(at: string) {
+        async openDirectory(at: string) {
           if (!swapped && at.endsWith('/sub')) {
             swapped = true;
             const real = path.join(await realpath(path.dirname(at)), 'sub');
@@ -562,7 +561,7 @@ describe('secrev-1262 — a removal swapped mid-tree on a real disk', () => {
 
       // Act
       const outcome = await settled(
-        folders.within(skills, async folder => await folders.remove(folder as GuardedFolder, 'tree')),
+        folders.within(skills, async (folder: unknown) => await folders.remove(folder as GuardedFolder, 'tree')),
       );
 
       // Assert
@@ -575,7 +574,7 @@ describe('secrev-1262 — a removal swapped mid-tree on a real disk', () => {
   );
 });
 
-describe('the destination side — what each refusal says', () => {
+suite('the destination side — what each refusal says', () => {
   it('should refuse a host destination whose folder is a link into the state home, naming the home', async () => {
     // Arrange — a host config folder outside the home (a root of its own) that is a link into the home's state.
     const { machine, home, state, plan } = await world();
@@ -583,7 +582,7 @@ describe('the destination side — what each refusal says', () => {
     await mkdir(host);
     await symlink(state, path.join(host, '.claude'));
     const fence = { homes: [home, state, path.join(home, 'config')], open: [] };
-    const subject = new FileFleetProvisioner([home, host], undefined, {}, fence);
+    const subject = newProvisioner([home, host], undefined, {}, fence);
 
     // Act
     const outcome = await settled(
@@ -607,7 +606,7 @@ describe('the destination side — what each refusal says', () => {
     const outcome = await settled(
       folders.within(
         runtime,
-        async folder => await folders.child(folder as GuardedFolder, 'nothing-here', 'the label'),
+        async (folder: unknown) => await folders.child(folder as GuardedFolder, 'nothing-here', 'the label'),
       ),
     );
 
@@ -655,7 +654,7 @@ describe('the destination side — what each refusal says', () => {
   });
 });
 
-describe('secrev-1262 delta — without descriptor reach the move is refused unless the folder is known safe', () => {
+suite('secrev-1262 delta — without descriptor reach the move is refused unless the folder is known safe', () => {
   it('should confine a runtime folder that did not exist yet, under a linked folder, once it is made', async () => {
     // Arrange — a host runtime folder that is not there at the first check, under a folder reached through a link:
     // judged by the configured string, the folder made later (at its real place) would read as outside it.
@@ -694,7 +693,7 @@ describe('secrev-1262 delta — without descriptor reach the move is refused unl
     const settingsPath = path.join(claude, 'settings.json');
     await writeFile(settingsPath, '{"effort":"high"}\n');
     const disk = Object.assign(new NodeGuardDisk(false), { descriptorCallsUnavailable: 'libSystem would not load' });
-    const subject = new FileFleetProvisioner(
+    const subject = newProvisioner(
       [home, path.join(machine, 'host')],
       undefined,
       {},
@@ -726,7 +725,7 @@ describe('secrev-1262 delta — without descriptor reach the move is refused unl
   });
 });
 
-describe('the destination side — retiring what an earlier apply put in a runtime', () => {
+suite('the destination side — retiring what an earlier apply put in a runtime', () => {
   it('should retire only a link or a name the last apply recorded, through the checked folder', async () => {
     // Arrange — a link, a recorded file, and a person's own file the record does not name.
     const { runtime, assets, subject, plan } = await world();

@@ -14,14 +14,13 @@ import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
-import { FileFleetProvisioner } from '../../daemon/adapters/file-provisioner.ts';
-import { FileSharedHistoryFileSystem } from '../../src/adapters/file-shared-history.ts';
+
 import { CLAUDE_QUESTION_HOOKS, codexTrustOverride } from '../../daemon/lib/account/fixed-layer.ts';
 import { EMPTY_RUNTIME_IDS, type RuntimeIds } from '../../daemon/lib/account/ids.ts';
 import { materialiseFleet } from '../../daemon/lib/account/materialise.ts';
 import { type AccountModelDocument, parseAccountModel } from '../../daemon/lib/account/schema.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation } from '../../daemon/lib/provisioning.ts';
-import { SharedHistoryMigration } from '../../src/lib/shared-history.ts';
+import { newProvisioner, suite } from './support/provisioner-host.ts';
 import {
   HISTORY_CLAIM_HELD_EXIT_CODE,
   type RuntimeWrapperInput,
@@ -98,10 +97,9 @@ async function machine(): Promise<Machine> {
   await writeFile(path.join(assets, 'components', 'instructions', 'extra.md'), 'Extra guidance.\n');
   await mkdir(path.join(assets, 'skills', 'review'), { recursive: true });
   await writeFile(path.join(assets, 'skills', 'review', 'SKILL.md'), '---\nname: review\n---\n');
-  const provisioner = new FileFleetProvisioner(
-    [root],
-    new SharedHistoryMigration(new FileSharedHistoryFileSystem([root])),
-  );
+  // GAP(conversation): the shared-history pooling and its file system are the lease store's; no pooling is wired here,
+  // so a plan carrying history requests is refused by the provisioner rather than pooled.
+  const provisioner = newProvisioner([root]);
   let ids: RuntimeIds = EMPTY_RUNTIME_IDS;
   const minted = [ID_CLAUDE, ID_CODEX];
   return {
@@ -139,7 +137,7 @@ const exists = async (target: string): Promise<boolean> => {
 
 const isLink = async (target: string): Promise<boolean> => (await lstat(target)).isSymbolicLink();
 
-describe('materialising the account model onto disk', () => {
+suite('materialising the account model onto disk', () => {
   it('should write each config directory, its credential link, the wrappers, ids.json and the manifest', async () => {
     // Arrange
     const host = await machine();
@@ -262,11 +260,11 @@ describe('materialising the account model onto disk', () => {
   });
 });
 
-describe('the narrowed sweep on its own', () => {
+suite('the narrowed sweep on its own', () => {
   const sweep = async (root: string, operation: FleetWriteOperation): Promise<void> => {
     const fleet = path.join(root, 'fleet');
-    await new FileFleetProvisioner([root]).apply({
-      manifest: { version: 1, generatedAt: GENERATED_AT, accounts: [] },
+    await newProvisioner([root]).apply({
+      manifest: { version: 1, generatedAt: GENERATED_AT, accounts: [], runtimes: [] },
       manifestPath: path.join(fleet, 'manifest.json'),
       operations: [operation],
     });

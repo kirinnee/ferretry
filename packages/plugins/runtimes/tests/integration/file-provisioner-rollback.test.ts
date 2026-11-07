@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from 'bun:test';
+import { afterEach, it } from 'bun:test';
 import { constants } from 'node:fs';
 import {
   chmod,
@@ -19,8 +19,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
-import { FileFleetProvisioner } from '../../daemon/adapters/file-provisioner.ts';
-import { fileIdentityOf } from '../../src/adapters/node-guard-disk.ts';
+
 import type { FleetManifest } from '../../daemon/lib/manifest.ts';
 import {
   type FleetApplyFailure,
@@ -28,7 +27,11 @@ import {
   type FleetApplyPlan,
   type FleetWriteOperation,
 } from '../../daemon/lib/provisioning.ts';
-import type { SharedHistoryMigration } from '../../src/lib/shared-history.ts';
+import type { SharedHistoryPooling } from '../../daemon/adapters/ports.ts';
+import { nodeProvisionerDisk } from './support/node-host.ts';
+import { newProvisioner, suite } from './support/provisioner-host.ts';
+
+const fileIdentityOf = async (path: string) => await nodeProvisionerDisk.identity(path);
 
 /**
  * A whole number of seconds, so `utimes` can restore it to the exact value a stat reported.
@@ -54,6 +57,7 @@ afterEach(async () => {
 const manifest = (): FleetManifest => ({
   version: 1,
   generatedAt: '2027-01-15T08:00:00.000Z',
+  runtimes: [],
   accounts: [
     {
       secretEnv: {},
@@ -122,7 +126,7 @@ const assertNoResidue = async (directory: string): Promise<void> => {
   should(residue).deepEqual([]);
 };
 
-describe('FileFleetProvisioner rollback', () => {
+suite('FileFleetProvisioner rollback', () => {
   it('should refuse to set the mode of a directory path that is a symbolic link', async () => {
     // Arrange — the account home is a link to a directory that is itself inside the allowed roots,
     // so every containment check passes. `chmod` follows the link, and `lstat` reports a link rather
@@ -144,7 +148,7 @@ describe('FileFleetProvisioner rollback', () => {
     };
 
     // Act
-    const actual = await failureOf(new FileFleetProvisioner([root]).apply(plan));
+    const actual = await failureOf(newProvisioner([root]).apply(plan));
 
     // Assert — refused at the link, so the target keeps the permissions it had.
     should(actual.kind).equal('rolled-back');
@@ -168,7 +172,7 @@ describe('FileFleetProvisioner rollback', () => {
     };
 
     // Act
-    const actual = await new FileFleetProvisioner([root]).apply(plan);
+    const actual = await newProvisioner([root]).apply(plan);
 
     // Assert — the apply landed, and the link is still a link to the same directory.
     should(actual.manifestPath).equal(plan.manifestPath);
@@ -195,7 +199,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'copy', source, path: destination }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     let published = 0;
     // A concurrent writer taking one of the names, which is exactly what `link` is there to catch.
     const interfered = new Proxy(subject, {
@@ -236,7 +240,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'copy', source, path: destination }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     const intruder = path.join(destination, 'theirs.md');
     let published = 0;
     // The second file fails, and by then a stranger has written into the directory this publish
@@ -284,7 +288,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'copy', source, path: destination }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     let published = 0;
     let replaced = '';
     // Deterministic interleaving: the second publish swaps the first file for a stranger's — a
@@ -336,7 +340,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'copy', source, path: destination }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     let published = 0;
     let swapped = '';
     const racing = new Proxy(subject, {
@@ -387,7 +391,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'copy', source, path: destination }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     let published = 0;
     let edited = '';
     const racing = new Proxy(subject, {
@@ -408,7 +412,7 @@ describe('FileFleetProvisioner rollback', () => {
           // exactly afterwards, which leaves the content as the only thing that can differ.
           const staged = args[0] as string;
           await utimes(staged, PINNED_TIME_SECONDS, PINNED_TIME_SECONDS);
-          const fresh = fileIdentityOf(await lstat(staged, { bigint: true }));
+          const fresh = await fileIdentityOf(staged);
           const identity = await original.call(target, staged, args[1], fresh, ...args.slice(3));
 
           // Same inode, opened by name and written in place — no unlink, no new file — and the same
@@ -460,7 +464,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'copy', source, path: destination }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     let published = 0;
     let swapped = '';
     const racing = new Proxy(subject, {
@@ -533,7 +537,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'copy', source, path: destination }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     let published = 0;
     // Pinned interleaving: the swap happens after the first child lands and before the next one.
     const racing = new Proxy(subject, {
@@ -587,7 +591,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'copy', source, path: destination }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     let published = 0;
     // The publish fails part-way, and somebody claims the freed name in the moment between the
     // retract that frees it and the restore that would put the account's content back.
@@ -641,7 +645,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'copy', source, path: destination }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     let published = 0;
     const interfered = new Proxy(subject, {
       get(target, property, receiver) {
@@ -694,7 +698,7 @@ describe('FileFleetProvisioner rollback', () => {
     };
 
     // Act
-    const actual = await failureOf(new FileFleetProvisioner([root]).apply(plan));
+    const actual = await failureOf(newProvisioner([root]).apply(plan));
 
     // Assert — a clean restore, proved rather than assumed, on 2500 entries.
     should(actual.kind).equal('rolled-back');
@@ -720,7 +724,7 @@ describe('FileFleetProvisioner rollback', () => {
         poisonAfter(blocker),
       ],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const actual = await failureOf(subject.apply(plan));
@@ -750,7 +754,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'copy', source, path: destination }, poisonAfter(blocker)],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const actual = await failureOf(subject.apply(plan));
@@ -778,7 +782,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'copy', source, path: destination }, poisonAfter(blocker)],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const actual = await failureOf(subject.apply(plan));
@@ -814,7 +818,7 @@ describe('FileFleetProvisioner rollback', () => {
         poisonAfter(blocker),
       ],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const actual = await failureOf(subject.apply(plan));
@@ -837,7 +841,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'file', path: contested, content: 'ours\n', mode: 0o600 }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     const interrupted = new Proxy(subject, {
       get(target, property, receiver) {
         if (property !== 'writeFileAtomically') return Reflect.get(target, property, receiver);
@@ -871,7 +875,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'copy', source: path.join(root, 'assets', 'absent'), path: destination }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const promise = subject.apply(plan);
@@ -902,7 +906,7 @@ describe('FileFleetProvisioner rollback', () => {
         },
       ],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const promise = subject.apply(plan);
@@ -935,7 +939,7 @@ describe('FileFleetProvisioner rollback', () => {
         poisonAfter(blocker),
       ],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const actual = await failureOf(subject.apply(plan));
@@ -962,7 +966,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'symlink', source: path.join(root, 'new-target.md'), path: link }, poisonAfter(blocker)],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const actual = await failureOf(subject.apply(plan));
@@ -990,7 +994,7 @@ describe('FileFleetProvisioner rollback', () => {
         poisonAfter(blocker),
       ],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const actual = await failureOf(subject.apply(plan));
@@ -1023,7 +1027,7 @@ describe('FileFleetProvisioner rollback', () => {
         poisonAfter(path.join(root, 'interfere')),
       ],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     const racing = new Proxy(subject, {
       get(target, property, receiver) {
         if (property !== 'applyOperation') return Reflect.get(target, property, receiver);
@@ -1062,7 +1066,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'prune', path: binDirectory, marker: '# managed-marker', keep: [] }, poisonAfter(blocker)],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const actual = await failureOf(subject.apply(plan));
@@ -1091,7 +1095,7 @@ describe('FileFleetProvisioner rollback', () => {
         poisonAfter(blocker),
       ],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const actual = await failureOf(subject.apply(plan));
@@ -1118,7 +1122,7 @@ describe('FileFleetProvisioner rollback', () => {
         { kind: 'file', path: replaced, content: 'replacement\n', mode: 0o600 },
       ],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     const failing = new Proxy(subject, {
       get(target, property, receiver) {
         if (property !== 'writeManifest') return Reflect.get(target, property, receiver);
@@ -1154,7 +1158,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [poisonAfter(blocker)],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const actual = await failureOf(
@@ -1185,7 +1189,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'file', path: asset, content: 'replacement\n', mode: 0o600 }, swap, poisonAfter(blocker)],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     // Swapping the home for a link out of the roots between the capture and the rollback is what a
     // hostile or merely broken host looks like; the restore must refuse rather than follow it.
     const hostile = new Proxy(subject, {
@@ -1242,14 +1246,14 @@ describe('FileFleetProvisioner rollback', () => {
       materialize: async () => {
         throw new Error('history pool is locked');
       },
-    } as unknown as SharedHistoryMigration;
+    } as unknown as SharedHistoryPooling;
     const plan: FleetApplyPlan = {
       manifest: manifest(),
       manifestPath,
       operations: [{ kind: 'file', path: wrapper, content: '#!/bin/sh\nexec true\n', mode: 0o755 }],
       sharedHistoryRequests: [{ kind: 'claude', poolRoot: path.join(root, 'fleet', 'shared'), homes: [] }],
     };
-    const subject = new FileFleetProvisioner([root], sharedHistory);
+    const subject = newProvisioner([root], sharedHistory);
 
     // Act
     const actual = await failureOf(subject.apply(plan));
@@ -1300,7 +1304,7 @@ describe('FileFleetProvisioner rollback', () => {
         );
         throw new Error('history pool is locked');
       },
-    } as unknown as SharedHistoryMigration;
+    } as unknown as SharedHistoryPooling;
     const plan: FleetApplyPlan = {
       manifest: manifest(),
       manifestPath,
@@ -1309,7 +1313,7 @@ describe('FileFleetProvisioner rollback', () => {
     };
 
     // Act
-    const actual = await failureOf(new FileFleetProvisioner([root], sharedHistory).apply(plan));
+    const actual = await failureOf(newProvisioner([root], sharedHistory).apply(plan));
 
     // Assert — reported in both places, so a reader that shows only the committed state still sees
     // it, and one that shows both can tell they are the same claim rather than two.
@@ -1335,7 +1339,7 @@ describe('FileFleetProvisioner rollback', () => {
         );
         throw new Error('history pool cannot be inspected');
       },
-    } as unknown as SharedHistoryMigration;
+    } as unknown as SharedHistoryPooling;
     const plan: FleetApplyPlan = {
       manifest: manifest(),
       manifestPath,
@@ -1344,7 +1348,7 @@ describe('FileFleetProvisioner rollback', () => {
     };
 
     // Act
-    const actual = await new FileFleetProvisioner([root], sharedHistory).apply(plan).catch((error: unknown) => error);
+    const actual = await newProvisioner([root], sharedHistory).apply(plan).catch((error: unknown) => error);
 
     // Assert
     should(actual).be.instanceOf(Error);
@@ -1372,7 +1376,7 @@ describe('FileFleetProvisioner rollback', () => {
       materialize: async () => {
         throw new Error('history pool is locked');
       },
-    } as unknown as SharedHistoryMigration;
+    } as unknown as SharedHistoryPooling;
     const plan: FleetApplyPlan = {
       manifest: manifest(),
       manifestPath,
@@ -1381,7 +1385,7 @@ describe('FileFleetProvisioner rollback', () => {
     };
 
     // Act
-    const actual = await failureOf(new FileFleetProvisioner([root], sharedHistory).apply(plan));
+    const actual = await failureOf(newProvisioner([root], sharedHistory).apply(plan));
 
     // Assert
     should(actual.kind).equal('history-failed-after-commit');
@@ -1412,7 +1416,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'copy', source, path: destination }, interfere, poisonAfter(path.join(root, 'interfere'))],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     const racing = new Proxy(subject, {
       get(target, property, receiver) {
         if (property !== 'applyOperation') return Reflect.get(target, property, receiver);
@@ -1453,7 +1457,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'copy', source, path: destination }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     const racing = new Proxy(subject, {
       get(target, property, receiver) {
         if (property !== 'publishFile') return Reflect.get(target, property, receiver);
@@ -1491,7 +1495,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'prune', path: binDirectory, marker: '# managed-marker', keep: [] }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     const racing = new Proxy(subject, {
       get(target, property, receiver) {
         if (property !== 'stillCarries') return Reflect.get(target, property, receiver);
@@ -1519,7 +1523,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const actual = await failureOf(
@@ -1543,7 +1547,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     await subject.apply(plan, [{ path: document, content: 'be brief\n', mode: 0o600, expect: 'absent' }]);
@@ -1565,7 +1569,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     await subject.apply(plan, [{ path: document, content: 'ignored: true\n', mode: 0o600, remove: true }]);
@@ -1588,7 +1592,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     const digest = new Bun.CryptoHasher('sha256').update(text).digest('hex');
 
     // Act
@@ -1614,7 +1618,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     await subject.apply(plan, [{ path: document, content: '', mode: 0o600, remove: true, expect: 'absent' }]);
@@ -1638,7 +1642,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [poisonAfter(blocker)],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const actual = await failureOf(subject.apply(plan, [{ path: document, content: '', mode: 0o600, remove: true }]));
@@ -1673,7 +1677,7 @@ describe('FileFleetProvisioner rollback', () => {
         poisonAfter(blocker),
       ],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
     const racing = new Proxy(subject, {
       get(target, property, receiver) {
         if (property !== 'applyOperation') return Reflect.get(target, property, receiver);
@@ -1735,14 +1739,14 @@ describe('FileFleetProvisioner rollback', () => {
           refusals: [],
         };
       },
-    } as unknown as SharedHistoryMigration;
+    } as unknown as SharedHistoryPooling;
     const planFor = (name: string): FleetApplyPlan => ({
       manifest: manifest(),
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'file', path: path.join(root, 'fleet', 'bin', name), content: `${name}\n`, mode: 0o755 }],
       sharedHistoryRequests: [{ kind: 'claude', poolRoot: path.join(root, 'fleet', 'shared'), homes: [] }],
     });
-    const subject = new FileFleetProvisioner([root], sharedHistory);
+    const subject = newProvisioner([root], sharedHistory);
 
     // Act
     await Promise.all([subject.apply(planFor('first')), subject.apply(planFor('second'))]);
@@ -1764,7 +1768,7 @@ describe('FileFleetProvisioner rollback', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'file', path: replaced, content: 'next\n', mode: 0o755 }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const actual = await subject.apply(plan);

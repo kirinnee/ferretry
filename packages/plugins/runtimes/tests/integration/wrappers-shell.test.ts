@@ -7,7 +7,6 @@ import { describe, it } from 'bun:test';
 import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MAX_ROUTING_PROMPT_CHARS } from '@ferretry/protocol';
 import should from 'should';
 import {
   AGENDA_INSTRUCTION,
@@ -69,6 +68,9 @@ const argumentsAfterQuestionLine = (wrapper: string, mode: string | undefined, l
   });
   return stdout.toString().trimEnd().split('\n');
 };
+
+// GAP(packs): the routing prompt's limit is Packs' (`pack.ts`); its contract does not carry it yet.
+const MAX_ROUTING_PROMPT_CHARS = 1_200;
 
 describe('the question tool, per ferret (O3)', () => {
   it("should withhold Claude's question tool, before the prompt, unless the ferret is interactive", () => {

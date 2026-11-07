@@ -4,11 +4,11 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, rm, stat, symlink } from 'node:
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
-import { FileFleetProvisioner } from '../../daemon/adapters/file-provisioner.ts';
-import { isMutationReservedName } from '../../src/adapters/mutation-journal.ts';
+
 import type { FleetManifest } from '../../daemon/lib/manifest.ts';
 import type { FleetApplyPlan } from '../../daemon/lib/provisioning.ts';
-import type { SharedHistoryMigration, SharedHistoryRequest } from '../../src/lib/shared-history.ts';
+import type { SharedHistoryPooling, SharedHistoryRequest } from '../../daemon/adapters/ports.ts';
+import { isMutationReservedName, newProvisioner, suite } from './support/provisioner-host.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -25,6 +25,7 @@ afterEach(async () => {
 const manifest = (): FleetManifest => ({
   version: 1,
   generatedAt: '2027-01-15T08:00:00.000Z',
+  runtimes: [],
   accounts: [
     {
       secretEnv: {},
@@ -42,7 +43,7 @@ const manifest = (): FleetManifest => ({
   ],
 });
 
-describe('FileFleetProvisioner', () => {
+suite('FileFleetProvisioner', () => {
   it('should create the fleet root itself, because a first run has nothing else to create', async () => {
     // Arrange
     const parent = await temporaryDirectory();
@@ -52,7 +53,7 @@ describe('FileFleetProvisioner', () => {
       manifestPath: path.join(root, 'manifest.json'),
       operations: [{ kind: 'directory', path: root, mode: 0o700 }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const preview = await subject.preview(plan);
@@ -82,7 +83,7 @@ describe('FileFleetProvisioner', () => {
         { kind: 'symlink', source, path: linked },
       ],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const actual = await subject.apply(plan);
@@ -117,7 +118,7 @@ describe('FileFleetProvisioner', () => {
         { kind: 'symlink', source: skill, path: linked },
       ],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     await subject.apply(plan, [
@@ -145,7 +146,7 @@ describe('FileFleetProvisioner', () => {
         },
       ],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const promise = subject.apply(plan);
@@ -172,7 +173,7 @@ describe('FileFleetProvisioner', () => {
         manifest: await readFile(manifestPath, 'utf8'),
       });
     };
-    const subject = new FileFleetProvisioner([root], undefined, {}, undefined, undefined, async mutate => {
+    const subject = newProvisioner([root], undefined, {}, undefined, undefined, async mutate => {
       await observe();
       const result = await mutate();
       await observe();
@@ -200,7 +201,7 @@ describe('FileFleetProvisioner', () => {
       `${JSON.stringify({ owner: 999_999, token: 'left-behind', at: 0 })}\n`,
     );
     let entered = false;
-    const subject = new FileFleetProvisioner(
+    const subject = newProvisioner(
       [root],
       undefined,
       { waitMs: 20, pollMs: 5 },
@@ -246,14 +247,14 @@ describe('FileFleetProvisioner', () => {
         wrapperObservedByMigration = await readFile(wrapper, 'utf8');
         throw new Error('shared-history migration failed');
       },
-    } as unknown as SharedHistoryMigration;
+    } as unknown as SharedHistoryPooling;
     const plan: FleetApplyPlan = {
       manifest: manifest(),
       manifestPath,
       operations: [{ kind: 'file', path: wrapper, content: '#!/bin/sh\nexec true "$@"\n', mode: 0o755 }],
       sharedHistoryRequests: [{ kind: 'claude', poolRoot: path.join(root, 'fleet', 'shared'), homes: [] }],
     };
-    const subject = new FileFleetProvisioner([root], sharedHistory);
+    const subject = newProvisioner([root], sharedHistory);
 
     // Act
     const preview = await subject.preview(plan);
@@ -311,7 +312,7 @@ describe('FileFleetProvisioner', () => {
         materializedKinds.push(request.kind);
         return request.kind === 'claude' ? clean : refused;
       },
-    } as unknown as SharedHistoryMigration;
+    } as unknown as SharedHistoryPooling;
     const plan: FleetApplyPlan = {
       manifest: manifest(),
       manifestPath,
@@ -321,14 +322,14 @@ describe('FileFleetProvisioner', () => {
         { kind: 'codex', poolRoot: path.join(root, 'fleet', 'shared'), homes: [] },
       ],
     };
-    const subject = new FileFleetProvisioner([root], sharedHistory);
+    const subject = newProvisioner([root], sharedHistory);
 
     // Act
     const promise = subject.apply(plan);
 
     // Assert
     await should(promise).be.rejectedWith(
-      /refusing to migrate codex history while 1 account home\(s\) cannot be read: codex-outside/u,
+      /refusing to pool codex history while 1 account home\(s\) cannot be read: codex-outside/u,
     );
     should(previewedKinds).deepEqual(['claude', 'codex']);
     should(materializedKinds).deepEqual([]);
@@ -343,7 +344,7 @@ describe('FileFleetProvisioner', () => {
     const copied = path.join(root, 'fleet', 'homes', 'one', 'template.json');
     await Bun.write(source, '{}\n');
     await chmod(source, 0o444);
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     await subject.apply({
@@ -365,7 +366,7 @@ describe('FileFleetProvisioner', () => {
     await mkdir(source);
     await Bun.write(path.join(source, 'skill.md'), 'copied skill\n');
     await symlink(source, linkedSource, 'dir');
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     await subject.apply({
@@ -387,7 +388,7 @@ describe('FileFleetProvisioner', () => {
       const base = path.join(root, 'base.json');
       const destination = path.join(root, 'fleet', 'homes', 'one', 'settings.json');
       await Bun.write(base, '{"model":"base","permissions":{"allow":["Read"],"deny":["Bash"]}}');
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       await subject.apply({
@@ -421,7 +422,7 @@ describe('FileFleetProvisioner', () => {
       const root = await temporaryDirectory();
       const destination = path.join(root, 'fleet', 'homes', 'one', 'settings.json');
       await Bun.write(destination, '{"effortLevel":"high","model":"stale"}');
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       await subject.apply({
@@ -450,7 +451,7 @@ describe('FileFleetProvisioner', () => {
       const root = await temporaryDirectory();
       const destination = path.join(root, 'fleet', 'homes', 'one', 'settings.json');
       await Bun.write(destination, 'not json at all');
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       const promise = subject.apply({
@@ -479,7 +480,7 @@ describe('FileFleetProvisioner', () => {
       const destination = path.join(root, 'fleet', 'homes', 'one', 'settings.json');
       await mkdir(destination, { recursive: true });
       await Bun.write(path.join(destination, 'someone-elses.txt'), 'not ours\n');
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       const promise = subject.apply({
@@ -510,7 +511,7 @@ describe('FileFleetProvisioner', () => {
       await Bun.write(template, '{"fromTemplate":true}');
       await mkdir(path.dirname(destination), { recursive: true });
       await symlink(template, destination);
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       await subject.apply({
@@ -538,7 +539,7 @@ describe('FileFleetProvisioner', () => {
       const root = await temporaryDirectory();
       const destination = path.join(root, 'fleet', 'homes', 'one', 'config.toml');
       await Bun.write(destination, 'model = "stale"\nkeep = true\n');
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       await subject.apply({
@@ -568,7 +569,7 @@ describe('FileFleetProvisioner', () => {
       const broken = path.join(root, 'broken.json');
       const destination = path.join(root, 'fleet', 'homes', 'one', 'settings.json');
       await Bun.write(broken, '{ not json');
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       const promise = subject.apply({
@@ -602,7 +603,7 @@ describe('FileFleetProvisioner', () => {
       await Bun.write(path.join(bin, 'stale-wrapper'), `#!/bin/sh\n${marker}\nexec true\n`);
       await Bun.write(path.join(bin, 'users-own-script'), '#!/bin/sh\nexec true\n');
       await mkdir(path.join(bin, 'a-directory'), { recursive: true });
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       const actual = await subject.apply({
@@ -628,7 +629,7 @@ describe('FileFleetProvisioner', () => {
       await Bun.write(real, `${marker}\n`);
       await mkdir(bin, { recursive: true });
       await symlink(real, path.join(bin, 'a-link'));
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       const actual = await subject.apply({
@@ -653,7 +654,7 @@ describe('FileFleetProvisioner', () => {
       const reserved = ['.fy-fleet-backup-abc', '.fy-fleet-displaced-abc', '.fy-fleet-staged-abc'];
       for (const name of reserved) await Bun.write(path.join(bin, name), `#!/bin/sh\n${marker}\nexec true\n`);
       await Bun.write(path.join(bin, 'stale-wrapper'), `#!/bin/sh\n${marker}\nexec true\n`);
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       const actual = await subject.apply({
@@ -670,7 +671,7 @@ describe('FileFleetProvisioner', () => {
     it('should treat a missing directory as nothing to prune', async () => {
       // Arrange
       const root = await temporaryDirectory();
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       const actual = await subject.apply({
@@ -688,7 +689,7 @@ describe('FileFleetProvisioner', () => {
     // Arrange
     const root = await temporaryDirectory();
     const other = await temporaryDirectory();
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const promise = subject.apply({
@@ -710,7 +711,7 @@ describe('FileFleetProvisioner', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const promise = method === 'preview' ? subject.preview(plan) : subject.apply(plan);
@@ -730,7 +731,7 @@ describe('FileFleetProvisioner', () => {
         manifestPath: path.join(other, 'manifest.json'),
         operations: [],
       };
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       const promise = method === 'preview' ? subject.preview(plan) : subject.apply(plan);
@@ -742,7 +743,7 @@ describe('FileFleetProvisioner', () => {
 
   it('should require at least one allowed root', () => {
     // Act
-    const act = () => new FileFleetProvisioner([]);
+    const act = () => newProvisioner([]);
 
     // Assert
     should(act).throw(/at least one allowed fleet root/);
@@ -757,7 +758,7 @@ describe('FileFleetProvisioner', () => {
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [{ kind: 'directory', path: other, mode: 0o700 }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const promise = subject.preview(plan);
@@ -790,7 +791,7 @@ describe('FileFleetProvisioner', () => {
     const sharedHistory = {
       preview: async () => expectedHistory,
       materialize: async () => expectedHistory,
-    } as unknown as SharedHistoryMigration;
+    } as unknown as SharedHistoryPooling;
     const plan: FleetApplyPlan = {
       manifest: manifest(),
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
@@ -806,7 +807,7 @@ describe('FileFleetProvisioner', () => {
         },
       ],
     };
-    const subject = new FileFleetProvisioner([root], sharedHistory);
+    const subject = newProvisioner([root], sharedHistory);
 
     // Act
     const actual = await subject.preview(plan);
@@ -842,7 +843,7 @@ describe('FileFleetProvisioner', () => {
     const sharedHistory = {
       preview: async () => expectedHistory,
       materialize: async () => expectedHistory,
-    } as unknown as SharedHistoryMigration;
+    } as unknown as SharedHistoryPooling;
     const plan: FleetApplyPlan = {
       manifest: manifest(),
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
@@ -858,7 +859,7 @@ describe('FileFleetProvisioner', () => {
         },
       ],
     };
-    const subject = new FileFleetProvisioner([root], sharedHistory);
+    const subject = newProvisioner([root], sharedHistory);
 
     // Act
     const promise = subject.preview(plan);
@@ -880,7 +881,7 @@ describe('FileFleetProvisioner', () => {
         { kind: 'file', path: path.join(other, 'escape'), content: 'no\n', mode: 0o600 },
       ],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const promise = subject.apply(plan);
@@ -908,7 +909,7 @@ describe('FileFleetProvisioner', () => {
         { kind: 'file', path: escaped, content: 'escaped\n', mode: 0o600 },
       ],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     const promise = subject.apply(plan);
@@ -924,7 +925,7 @@ describe('FileFleetProvisioner', () => {
       // Arrange
       const root = await temporaryDirectory();
       const directory = path.join(root, 'fleet', 'homes', 'one', 'skills');
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       const actual = await subject.apply({
@@ -944,7 +945,7 @@ describe('FileFleetProvisioner', () => {
       const root = await temporaryDirectory();
       const directory = path.join(root, 'fleet', 'homes', 'one', 'skills');
       await Bun.write(directory, 'a file where a directory should be');
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       const promise = subject.apply({
@@ -969,7 +970,7 @@ describe('FileFleetProvisioner', () => {
       operations: [],
       sharedHistoryRequests: [{ kind: 'claude', poolRoot: path.join(root, 'fleet', 'shared'), homes: [] }],
     };
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act + Assert
     const message = 'shared-history operations were planned without a shared-history filesystem adapter';
@@ -1000,7 +1001,7 @@ describe('FileFleetProvisioner', () => {
       const destination = path.join(root, 'fleet', 'homes', 'one', 'settings.json');
       await Bun.write(destination, '{"effortLevel":"high"}');
       await chmod(destination, 0o000);
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       const promise = subject.apply(settingsPlan(root, destination));
@@ -1025,7 +1026,7 @@ describe('FileFleetProvisioner', () => {
         }
         return (real as (...args: unknown[]) => unknown)(target, ...rest);
       }) as unknown as typeof fs.lstat);
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       try {
         // Act
@@ -1053,7 +1054,7 @@ describe('FileFleetProvisioner', () => {
         }
         return (real as (...args: unknown[]) => unknown)(target, ...rest);
       }) as unknown as typeof fs.lstat);
-      const subject = new FileFleetProvisioner([root]);
+      const subject = newProvisioner([root]);
 
       // Act
       let promise: Promise<unknown>;
@@ -1085,7 +1086,7 @@ describe('FileFleetProvisioner', () => {
       await rm(path.join(to, 'SKILL.md'));
       await symlink(elsewhere, path.join(to, 'SKILL.md'));
     }) as unknown as typeof fs.cp);
-    const subject = new FileFleetProvisioner([root]);
+    const subject = newProvisioner([root]);
 
     // Act
     let promise: Promise<unknown>;
@@ -1113,11 +1114,11 @@ describe('FileFleetProvisioner', () => {
   });
 });
 
-describe('FileFleetProvisioner source fence at preview', () => {
+suite('FileFleetProvisioner source fence at preview', () => {
   it('should refuse to preview an empty plan when the fence cannot be resolved, as apply does', async () => {
     // Arrange
     const root = await temporaryDirectory();
-    const subject = new FileFleetProvisioner([root], undefined, {}, { homes: [root], open: [root], hardLinkRoots: [] });
+    const subject = newProvisioner([root], undefined, {}, { homes: [root], open: [root], hardLinkRoots: [] });
     const plan: FleetApplyPlan = {
       manifest: manifest(),
       manifestPath: path.join(root, 'fleet', 'manifest.json'),

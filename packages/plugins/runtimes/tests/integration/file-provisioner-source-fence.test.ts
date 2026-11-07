@@ -1,4 +1,4 @@
-import { afterEach, describe, it, spyOn } from 'bun:test';
+import { afterEach, it, spyOn } from 'bun:test';
 import * as fsSync from 'node:fs';
 import * as fs from 'node:fs/promises';
 import {
@@ -17,9 +17,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
-import { FILE_OPENINGS } from '../../src/adapters/descriptor-calls.ts';
-import { FileFleetProvisioner } from '../../daemon/adapters/file-provisioner.ts';
-import { STAGE_PREFIX } from '../../src/adapters/mutation-journal.ts';
+import { FILE_OPENINGS, newProvisioner, STAGE_PREFIX, suite } from './support/provisioner-host.ts';
 import type { FleetManifest } from '../../daemon/lib/manifest.ts';
 import type { FleetApplyPlan, FleetWriteOperation } from '../../daemon/lib/provisioning.ts';
 
@@ -42,7 +40,7 @@ async function temporary(): Promise<string> {
   return directory;
 }
 
-const manifest: FleetManifest = { version: 1, generatedAt: '2027-01-15T08:00:00.000Z', accounts: [] };
+const manifest: FleetManifest = { version: 1, generatedAt: '2027-01-15T08:00:00.000Z', accounts: [], runtimes: [] };
 
 /** A state home with its secrets, its asset tree, a runtime home to provision into, and a place outside it. */
 async function world() {
@@ -63,7 +61,7 @@ async function world() {
   await writeFile(path.join(home, 'state', 'secrets.key'), 'vault-key\n');
   await writeFile(path.join(outside, 'CLAUDE.md'), 'Outside guidance.\n');
   await writeFile(path.join(assets, 'shared.md'), 'Shared guidance.\n');
-  const subject = new FileFleetProvisioner(
+  const subject = newProvisioner(
     [home],
     undefined,
     {},
@@ -93,7 +91,7 @@ const refusal = async (attempt: Promise<unknown>): Promise<string> => {
   throw new Error('the apply was not refused');
 };
 
-describe('the provisioner component-source fence', () => {
+suite('the provisioner component-source fence', () => {
   it('should refuse a copy whose source is a file inside the state home, and write nothing', async () => {
     // Arrange
     const { home, runtime, apply } = await world();
@@ -280,7 +278,7 @@ describe('the provisioner component-source fence', () => {
   });
 });
 
-describe('secrev-1260 L3 — the staged copy before it is published', () => {
+suite('secrev-1260 L3 — the staged copy before it is published', () => {
   const swapForTokenLink = async (staged: string, token: string): Promise<void> => {
     await rm(staged, { force: true });
     await symlink(token, staged);

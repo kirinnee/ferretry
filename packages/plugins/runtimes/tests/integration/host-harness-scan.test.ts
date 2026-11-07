@@ -7,10 +7,10 @@ import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
-import type { StoredCredentialMaterialReader } from '../../src/adapters/credential-classifier.ts';
-import { PlatformFleetCredentialStore } from '../../src/adapters/credential-store.ts';
 import { HostHarnessScanner, type HostHarnessScanDeps } from '../../daemon/adapters/host-harness-scan.ts';
+import type { StoredCredentialMaterialReader } from '../../daemon/adapters/ports.ts';
 import { planImport } from '../../daemon/lib/account/import.ts';
+import { fileCredentials, nodeHostFiles } from './support/node-host.ts';
 
 const NOW = Date.parse('2026-10-13T00:00:00Z');
 const HOUR = 3_600_000;
@@ -35,23 +35,12 @@ async function put(file: string, content: string): Promise<void> {
 const jwt = (claims: Record<string, unknown>): string =>
   `e30.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.sig`;
 
-const store = (): PlatformFleetCredentialStore =>
-  new PlatformFleetCredentialStore({
-    platform: 'linux',
-    command: {
-      run: async () => {
-        throw new Error('no command on linux');
-      },
-    },
-    now: () => NOW,
-    keychainAccount: 'placeholder',
-  });
-
 const scanner = (userHome: string, patch: Partial<HostHarnessScanDeps> = {}): HostHarnessScanner =>
   new HostHarnessScanner({
+    files: nodeHostFiles,
     userHome,
     commands: { resolve: name => (['claude', 'codex', 'npx'].includes(name) ? `/bin/${name}` : undefined) },
-    credentials: store(),
+    credentials: fileCredentials,
     now: () => NOW,
     maxDocumentBytes: 4096,
     ...patch,
