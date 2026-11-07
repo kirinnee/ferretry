@@ -6,10 +6,7 @@ import { buildVerbTable, type VerbConflict } from '../../src/lib/verbs.ts';
  * Verb clashes known and owned elsewhere, each with the change that removes it. A pair should leave this list in the
  * branch that drops the clash; a NEW clash fails below. Keyed `owner ← keptFrom: line` (the owner left out ← the one kept).
  */
-const KNOWN_PENDING: Readonly<Record<string, string>> = {
-  'usage ← logins: login budget':
-    'already on rebuild/5.0: Logins and Usage both declare it; the lead settles which keeps it',
-};
+const KNOWN_PENDING: Readonly<Record<string, string>> = {};
 
 const keyOf = (conflict: VerbConflict): string => `${conflict.owner} ← ${conflict.keptFrom}: ${conflict.line}`;
 
