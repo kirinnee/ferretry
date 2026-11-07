@@ -444,7 +444,7 @@ export const daemonRequest = (daemon: DaemonConnection, path: string, init: Requ
 
 // ─ where a daemon's pages live
 export const daemonHomePath = (id: DaemonId): string => `/d/${encodeURIComponent(id)}`;
-export const daemonAgendaPath = (id: DaemonId): string => `${daemonHomePath(id)}/inbox`;
+export const daemonAgendaPath = (id: DaemonId): string => `${daemonHomePath(id)}/agenda`;
 export const daemonBoardPath = (id: DaemonId): string => `${daemonHomePath(id)}/board`;
 export const daemonBoardCardPath = (id: DaemonId, taskId: string): string =>
   `${daemonBoardPath(id)}/${encodeURIComponent(taskId)}`;
