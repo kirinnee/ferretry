@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { revealHidden } from '../../../src/ui/lib/reveal-hidden.ts';
 
 describe('revealHidden', () => {
+  it('holds its own character class as escapes, never as the characters', () => {
+    const source = readFileSync(new URL('../../../src/ui/lib/reveal-hidden.ts', import.meta.url), 'utf8');
+    // A source that holds a hidden character itself could not be read or reviewed (Trojan Source).
+    expect(revealHidden(source)).toBe(source);
+    expect(source).toContain(String.raw`\u202E`);
+  });
+
   it('writes out the characters that change how text looks without being seen', () => {
     expect(revealHidden('a‮b')).toBe('a⟨U+202E⟩b');
     expect(revealHidden('a​b')).toBe('a⟨U+200B⟩b');

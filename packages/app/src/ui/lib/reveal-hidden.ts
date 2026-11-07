@@ -9,7 +9,7 @@
  * interlinear annotation marks; and every other format character Unicode defines. Written as escapes, so this source
  * never holds one itself.
  */
-const HIDDEN_CHARACTER_SOURCE = String.raw`­͏؜ᅟᅠ឴឵᠋-᠏​-‏ -‮⁠-⁤⁦-⁯⠀ㅤ︀-️﻿ﾠ￹-￻\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}\p{Cf}`;
+const HIDDEN_CHARACTER_SOURCE = String.raw`\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}\p{Cf}`;
 
 /** A fresh global matcher each time, since `lastIndex` is state. */
 const hiddenCharacters = (): RegExp =>
