@@ -10,7 +10,6 @@ import {
   MAX_CONCURRENT_REQUESTS,
   MAX_PLAINTEXT_BYTES,
   MAX_PRE_CREDENTIAL_SESSIONS,
-  OLDER_APP_SENTENCE,
   RELAY_SESSION_CONCLUDED_CLOSE_CODE,
   RELAY_SESSION_CONCLUDED_CLOSE_REASON,
   relayDataByteBudget,
@@ -191,11 +190,11 @@ describe('the session layer: frames and the handshake', () => {
     expect(client.channel).toBeUndefined();
   });
 
-  test('R2 R67 a peer speaking the previous dialect gets 4426 and a sentence naming the side to update', async () => {
+  test('R67 a hello outside the current schema gets the generic protocol refusal', async () => {
     const fx = await fixture();
     const client = TestClient.open(fx);
-    await client.handshake(fx.daemonId, hello => ({ ...hello, protocol: 'ferretry-relay/1' }));
-    expect(client.end).toEqual({ code: 4426, reason: OLDER_APP_SENTENCE });
+    await client.handshake(fx.daemonId, hello => ({ ...hello, protocol: 'unknown-wire' }));
+    expect(client.end).toEqual({ code: 4400, reason: 'unparseable client hello' });
   });
 
   test('R72 key agreement aborts on an all-zero X25519 output', async () => {
@@ -699,6 +698,21 @@ describe('the session layer: requests', () => {
     await client.pump();
     expect(client.last('res')?.['status']).toBe(200);
     expect(client.end).toBeUndefined();
+  });
+
+  test('R516 R517 a shared plain headers map mutated after sealing is withheld at carrier pull', async () => {
+    const fx = await fixture();
+    const headers = new Map([['x-fixture', 'before']]);
+    const shared = { status: 200, headers, body: 'fixture-content' };
+    fx.dispatch = async () => ({ ...shared, late: () => shared });
+    const { client } = await serving(fx);
+    const before = client.records.length;
+    await client.send(req(1));
+    await wait(60);
+    headers.set('x-fixture', 'after');
+    await client.pump();
+    expect(client.records.length).toBe(before);
+    expect(client.end).toEqual({ code: 4400, reason: 'what it was about to send changed before it left' });
   });
 
   test('a handler that throws is answered 500 and the session goes on', async () => {

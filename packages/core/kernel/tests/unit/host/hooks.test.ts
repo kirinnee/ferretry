@@ -165,8 +165,11 @@ describe('the hooks engine (§3.5)', () => {
     expect(engine.provider(Provide, 'a')).toBe('unavailable');
     engine.attach('p1', { 't.provide:a': { value: 1 } }, 'live');
     expect(engine.provider(Provide, 'a')).toEqual({ value: 1 });
+    const cached = engine.provider(Provide, 'a');
     engine.markFailed('p1');
     expect(engine.provider(Provide, 'a')).toBe('unavailable');
+    if (cached === 'unavailable') throw new Error('fixture provider');
+    expect(() => (cached as { value: number }).value).toThrow('not running');
   });
 
   test('contribute: by order then id; a duplicate id and a failing taker are left out and noted', () => {

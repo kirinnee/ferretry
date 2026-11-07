@@ -109,7 +109,7 @@ export function bannedIn(file: string, where = file): Finding[] {
 
 /**
  * Code that runs OUTSIDE the kernel, so it has no kernel ports to reach the world through (lead decision 17). Each
- * entry is a package-relative folder, matched by prefix, with its reason; nothing else is exempt.
+ * entry is a package-relative folder or file, matched by prefix, with its reason; nothing else is exempt.
  */
 export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folder: string; readonly reason: string }[] =
   [
@@ -117,8 +117,13 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
     { pkg: 'catalogs', folder: 'worker/', reason: 'the standalone Cloudflare catalog Worker, deployed on its own' },
     {
       pkg: 'connections',
-      folder: 'adapters/webrtc/',
-      reason: 'the WebRTC native adapter (node-datachannel), loaded below the carrier rather than through a port',
+      folder: 'adapters/webrtc/node-datachannel-engine.ts',
+      reason: 'the WebRTC native engine (node-datachannel), loaded below the carrier rather than through a port',
+    },
+    {
+      pkg: 'browsers',
+      folder: 'daemon/worker/adapters/',
+      reason: 'the agent-browser worker, its own process (lead decision, port-browsers r1)',
     },
   ];
 

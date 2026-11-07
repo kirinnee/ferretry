@@ -94,7 +94,6 @@ import {
   NONCE_BYTES,
   newReceiveWindow,
   newSendWindow,
-  OLDER_APP_SENTENCE,
   openChannel,
   openRecord,
   padJoinOutcome,
@@ -114,7 +113,6 @@ import {
   sealRecord,
   sessionApiRequest,
   sessionStreamRequest,
-  speaksPreviousSessionProtocol,
   streamDataFrame,
   streamDataRecord,
   toBase64Url,
@@ -412,7 +410,7 @@ class SealedSession implements CarrierLink {
   }
 
   endIfVerifiedBy(mode: 'device' | 'pair' | 'member'): void {
-    if (this.#live() && this.#standing?.mode === mode)
+    if (this.#live() && (this.#standing?.mode === mode || this.#phase === 'proving'))
       this.#endSession(SESSION_CLOSE_CODES.authRejected, 'unknown device credential');
   }
 
@@ -541,10 +539,7 @@ class SealedSession implements CarrierLink {
     }
     const hello = decodeClientHello(frame.payload);
     if (hello === null) {
-      // A peer still speaking the previous end-to-end dialect is told which side is old (R2, R67).
-      if (speaksPreviousSessionProtocol(frame.payload))
-        this.#endSession(SESSION_CLOSE_CODES.versionUnsupported, OLDER_APP_SENTENCE);
-      else this.#endSession(SESSION_CLOSE_CODES.protocolError, 'unparseable client hello');
+      this.#endSession(SESSION_CLOSE_CODES.protocolError, 'unparseable client hello');
       return;
     }
     const answered = await answerClientHandshake(this.deps.crypto, this.deps.identity, wireId, hello);

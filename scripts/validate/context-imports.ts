@@ -40,6 +40,14 @@ export function refusal(edge: ImportEdge): string | undefined {
   }
   if (toStd) return undefined;
 
+  // The app shell's public browser facilities are the common seam for app halves.
+  // Tests may also use its shared harness; daemon/CLI halves and private src paths may not.
+  if (toPkg.name === '@ferretry/app') {
+    if ((from === 'app' || from === 'tests') && ['@ferretry/app', '@ferretry/app/ui'].includes(edge.specifier))
+      return undefined;
+    if (from === 'tests' && edge.specifier === '@ferretry/app/testing') return undefined;
+  }
+
   if (same) {
     if (from === 'tests' || from === 'other' || from === 'root') return undefined;
     if (from.startsWith('kernel-')) {

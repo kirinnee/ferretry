@@ -41,6 +41,9 @@ export interface StatePortOptions {
   readonly clock?: Pick<Clock, 'now'>;
   /** What boot found already (`openPluginState`), so `damaged()` is right before the first read. */
   readonly initialDamage?: readonly StateDamage[];
+  readonly initialNarrowed?: readonly StateDamage[];
+  /** The host's live serving-state projection; called synchronously on damage and repair. */
+  readonly changed?: (damage: readonly StateDamage[]) => void;
   readonly sqliteFiles?: SqliteFiles;
   /** Told each time a file is found damaged (logging, audit). */
   readonly report?: (event: StateDamageEvent) => void;
@@ -92,7 +95,7 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     paths.set(def.path, def.name);
   }
   const damaged = new Map<string, StateDamage>((options.initialDamage ?? []).map(damage => [damage.file, damage]));
-  const narrowed = new Map<string, StateDamage>();
+  const narrowed = new Map<string, StateDamage>((options.initialNarrowed ?? []).map(damage => [damage.file, damage]));
 
   /**
    * A plain name, or, for an opaque NAMED TREE (a def whose path ends `/*`, today's Conversation files under
@@ -129,11 +132,13 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     const policy = def.onDamaged === 'subsystem' ? 'subsystem' : 'narrower';
     if (policy === 'subsystem') damaged.set(damage.file, damage);
     else narrowed.set(damage.file, damage);
+    if (policy === 'subsystem') options.changed?.([...damaged.values()]);
     options.report?.({ damage, policy, ...(options.clock === undefined ? {} : { at: options.clock.now() }) });
   };
   const healthy = (label: string): void => {
-    damaged.delete(label);
+    const repaired = damaged.delete(label);
     narrowed.delete(label);
+    if (repaired) options.changed?.([...damaged.values()]);
   };
 
   /** Line-by-line reading (`records` / `tail`): only an io fault or a missing required file is a damage. */

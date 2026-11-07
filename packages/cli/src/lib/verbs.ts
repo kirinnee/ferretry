@@ -20,6 +20,10 @@ const SHELL_VERB_LINES = [
   { verb: 'daemon start', summary: 'start the daemon now (any other command starts it by itself)' },
   { verb: 'daemon stop', summary: 'stop the daemon' },
   { verb: 'daemon restart', summary: 'restart the daemon; ferrets keep running' },
+  {
+    verb: 'update',
+    summary: 'update this machine, restart its daemon, and roll back if the new version does not serve',
+  },
   { verb: 'ask', summary: 'list the asks waiting for an answer, and answer one' },
 ] as const satisfies readonly { readonly verb: string; readonly summary: string }[];
 

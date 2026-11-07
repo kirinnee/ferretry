@@ -16,6 +16,15 @@ export interface BrowsersApi {
   state(): Promise<BrowserStateView>;
   /** The pages one ferret holds, by id and name only. */
   pagesOf(ferret: FerretId): Promise<readonly BrowserPageRef[]>;
+  /**
+   * Whether this host shares its loopback ports with other local users: the machine's `browserPorts` is anything but
+   * `random` (today's `FleetLoginService` reading). Logins takes it as an optional use (lead decision 19, L2); an
+   * absent method means the host is treated as shared, which fails closed.
+   *
+   * GAP (card F1931): Browsers does not provide it yet — 5.0 serves Browsers no read of the machine's `browserPorts`
+   * (Runtimes keeps it and no contract serves it), so Browsers cannot say, and leaves it absent rather than guess.
+   */
+  browserPorts?(): Promise<{ readonly shared: boolean }>;
 }
 
 export const BrowsersPort = definePort<BrowsersApi>('browsers');

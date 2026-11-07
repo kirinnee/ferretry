@@ -39,7 +39,7 @@ function rootOf(home: string, work: string) {
     { home, plugin: 'ferrets', worktrees: `${home}-worktrees` },
     ['work'],
     () => workFolders(work),
-    pins,
+    { pins },
   );
   const root = roots.root('work', { ferret: 'F1' as FerretId });
   const at = (relative: string): FencedPath => {

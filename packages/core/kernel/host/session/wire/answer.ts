@@ -39,20 +39,20 @@ function snapshot(response: ApiResponse): ApiResponse {
 }
 
 function sameAnswer(left: ApiResponse, right: ApiResponse): boolean {
-  if (left.status !== right.status) return false;
-  // Header order affects the JSON envelope, so equality must preserve it.
+  if (left.status !== right.status || left.body !== right.body) return false;
+  // Header order affects the wire envelope. A plain source may own and mutate its backing map.
   const entries = [...right.headers];
-  if (left.headers.size !== entries.length) return false;
-  if (![...left.headers].every(([key, value], index) => entries[index]?.[0] === key && entries[index]?.[1] === value))
-    return false;
-  return left.body === right.body;
+  return (
+    left.headers.size === entries.length &&
+    [...left.headers].every(([key, value], index) => entries[index]?.[0] === key && entries[index]?.[1] === value)
+  );
 }
 
 export function answerRecords(id: number, response: ApiResponse): readonly AnswerRecord[] {
   const initial = finalised(response);
-  let current = response.late === undefined || isPublishedResponse(initial) ? initial : snapshot(initial);
+  let source = response.late === undefined || isPublishedResponse(initial) ? initial : snapshot(initial);
   const render = (answer: ApiResponse): readonly Uint8Array[] => responseRecords(id, answer).map(encodeDaemonRecord);
-  let encoded = render(current);
+  let encoded = render(snapshot(source));
   return encoded.map((plaintext, index) => ({
     plaintext,
     ...(index === 0 ? {} : { part: true as const }),
@@ -62,13 +62,14 @@ export function answerRecords(id: number, response: ApiResponse): readonly Answe
           permit: (): boolean => {
             try {
               const next = finalised(response);
-              // Only kernel publications are immutable. Plain late sources can edit the same object or map.
+              // Only a nominal kernel publication proves immutability. Copy and compare plain sources,
+              // including a source that returns the same object after editing its headers (R515–R517).
               if (
-                next !== current &&
-                (isPublishedResponse(current) || isPublishedResponse(next) || !sameAnswer(current, next))
+                next !== source &&
+                (isPublishedResponse(source) || isPublishedResponse(next) || !sameAnswer(source, next))
               ) {
-                current = isPublishedResponse(next) ? next : snapshot(next);
-                encoded = render(current);
+                source = isPublishedResponse(next) ? next : snapshot(next);
+                encoded = render(source);
               }
               const again = encoded[index];
               return again !== undefined && sameBytes(again, plaintext);

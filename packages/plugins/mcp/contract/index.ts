@@ -5,8 +5,10 @@
  */
 import type { Word } from '@ferretry/kernel/contract';
 import { defineConfig, defineEvent, definePort, defineState, neverLoosens } from '@ferretry/kernel/contract';
+import { defineSealedDocument } from '@ferretry/core-vault/contract';
 import { z } from 'zod';
 import { configDef } from './config-def.ts';
+import { McpOAuthStateFileSchema } from './oauth-state.ts';
 import {
   type McpCheckResult,
   type McpInventory,
@@ -15,6 +17,8 @@ import {
   McpItemSchema,
 } from './wire.ts';
 
+export * from './oauth-state.ts';
+export * from './rules.ts';
 export * from './wire.ts';
 
 export const MCP = 'mcp' as const;
@@ -60,6 +64,24 @@ export const MCP_INVENTORY_STATE = defineState({
   format: 1,
   schema: McpInventoryFileSchema,
 });
+
+/** Sign-in facts that are not secret: issuer, endpoints, client id, expiry (never a token). */
+export const MCP_OAUTH_STATE = defineState({
+  name: 'oauth',
+  path: 'oauth.json',
+  store: 'json',
+  format: 1,
+  schema: McpOAuthStateFileSchema,
+});
+
+/**
+ * `state/mcp/oauth-secrets.json`: today's `state/mcp-oauth-secrets.json` — the refresh tokens and registered client
+ * secrets, sealed under the Vault's key (vault-shaped: the name is the AAD, entries stamped). `store: 'secret'`, so
+ * the kernel never parses it and a move carries it byte for byte (spine D16). Only the sign-in service opens it,
+ * through the Vault's sealed-document port, to send a value to the provider that issued it. No route lists it, `use`
+ * cannot spend it and `${secret:…}` cannot resolve it (S8, S174).
+ */
+export const MCP_OAUTH_SECRETS = defineSealedDocument({ name: 'oauth-secrets', path: 'oauth-secrets.json' });
 
 /** Pinned payloads (§4.9): a package with its integrity hash, fetched once and run from here. Opaque to the kernel. */
 export const MCP_PAYLOADS_STATE = defineState({ name: 'payloads', path: 'payloads/*', store: 'opaque', format: 1 });

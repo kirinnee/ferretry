@@ -15,7 +15,7 @@ describe('the worker lane: housekeeping waits, then runs one job at a time', () 
     const yields: string[] = [];
     const order: string[] = [];
     let release: () => void = () => {};
-    const runner = new JobRunner(clock, silentLog, {
+    const runner = new JobRunner(clock, silentLog, () => true, {
       backgroundDelayMs: 120_000,
       yieldToLoop: async () => {
         yields.push(order.at(-1) ?? '');
@@ -64,7 +64,7 @@ describe('the worker lane: housekeeping waits, then runs one job at a time', () 
   test('a fire while the job already waits queues no second copy', async () => {
     const clock = fixedClock();
     let runs = 0;
-    const runner = new JobRunner(clock, silentLog, { backgroundDelayMs: 120_000 });
+    const runner = new JobRunner(clock, silentLog, () => true, { backgroundDelayMs: 120_000 });
     const port = runner.portFor('fleet');
     port.add({
       id: 'refresh',

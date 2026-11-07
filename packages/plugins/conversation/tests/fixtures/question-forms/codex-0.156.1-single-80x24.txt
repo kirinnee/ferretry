@@ -1,0 +1,24 @@
+  and build the next test with staggered connection ages.". After I answer,
+  reply only "ok".
+
+
+
+  Question 1/1 (1 unanswered)
+  Test 4c collapsed, and the next test depends on which pool settings prod
+  Valkey client really uses. How should we find out?
+
+  › 1. Read one prod pod (Recommended)  I run a read-only command on one prod
+                                        Jaeger pod that prints only the pool-
+                                        setting names and values. Nothing is
+                                        changed.
+    2. I will check Vault               You look in Vault apps/ssp/jaeger for
+                                        the pool keys and tell me what is
+                                        there.
+    3. Skip; test with jitter           Assume the library defaults and build
+                                        the next test with staggered
+                                        connection ages.
+    4. None of the above                Optionally, add details in notes
+                                        (tab).
+
+  tab to add notes | enter to submit answer | esc to interrupt
+
