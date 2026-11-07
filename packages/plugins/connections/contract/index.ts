@@ -4,5 +4,6 @@ export * from './port.ts';
 export * from './wire.ts';
 export * from './words.ts';
 export * from './advertisement.ts';
+export * from './hosted-directory.ts';
 
 export * from './tunnel-service.ts';

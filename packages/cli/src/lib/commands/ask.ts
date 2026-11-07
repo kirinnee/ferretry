@@ -6,7 +6,6 @@
  */
 import { skeletonSentence } from '@ferretry/kernel/contract';
 import { optionText } from '../argv.ts';
-import { pluginClient } from '../client.ts';
 import { EXIT, ShellError } from '../errors.ts';
 import { renderTable } from '../render.ts';
 import type { ShellVerb } from '../shell-context.ts';
@@ -39,7 +38,7 @@ export const askVerb: ShellVerb = async ctx => {
     io.err(`${skeletonSentence(ctx.surfaces.titles[ASKS] ?? 'Asks')}\n`);
     return EXIT.unavailable;
   }
-  const client = pluginClient(await ctx.deps(), ASKS);
+  const client = ctx.client(ASKS);
   const [first, ...rest] = ctx.invocation.args;
   if (first === undefined || first === 'list') {
     const rows = askRows(await client.call(ASK_ROUTES.list));

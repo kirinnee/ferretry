@@ -90,3 +90,33 @@ export const SearchWorkToolInputSchema = z.strictObject({
   open: z.boolean().optional(),
   all: z.boolean().optional(),
 });
+
+/** A hit without its match and score: who a piece of work is, as every answer about it says. */
+export type WorkIdentity = WorkHit extends infer Hit
+  ? Hit extends WorkHit
+    ? Omit<Hit, 'match' | 'score'>
+    : never
+  : never;
+
+/**
+ * A piece of work as its source knows it, nothing scrubbed yet: Conversation scrubs every text before it is indexed or
+ * shown. A source hands back the same object while the piece of work has not changed, so the search re-indexes by
+ * identity.
+ */
+export interface RawWork {
+  /** `card:F303`, or `ask:A3`. */
+  readonly key: string;
+  readonly kind: WorkKind;
+  readonly identity: WorkIdentity;
+  readonly updatedAtMs: number;
+  /** In a fixed order; empties are dropped. Only the fields named here are searchable. */
+  readonly fields: readonly (readonly [z.infer<typeof WorkFieldSchema>, string | null | undefined])[];
+}
+
+/** Where some of the work comes from (Board hands over its cards through `search.sources`). */
+export interface WorkSource {
+  readonly id: string;
+  /** Read on every search (a source held in memory) rather than only when it changed or a sweep runs. */
+  readonly cheap?: true;
+  list(): Promise<readonly RawWork[]>;
+}

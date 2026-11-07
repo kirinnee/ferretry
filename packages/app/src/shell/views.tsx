@@ -88,15 +88,22 @@ export function ScreenView({
   return <PluginView daemon={daemon} plugin={screen.plugin} section="screens" id={screen.id} props={{ params }} />;
 }
 
-/** Every panel the layout places in one slot, for one daemon and one subject (a ferret, a card). */
+/**
+ * Every panel the layout places in one slot, for one daemon and one subject (a ferret, a card).
+ *
+ * A slot a plugin screen OFFERS (`<plugin>.<name>`) may take `props`: the data and callbacks that plugin's contract
+ * declares for it, handed to every panel mounted there next to the `subject`. The shell does not read them.
+ */
 export function PanelSlot({
   daemon,
   slot,
   subject,
+  props,
 }: {
   readonly daemon: string;
   readonly slot: string;
   readonly subject?: string;
+  readonly props?: Readonly<Record<string, unknown>>;
 }) {
   const { plan } = useShell();
   const panels: readonly PanelRef[] = plan.panels(slot);
@@ -110,7 +117,7 @@ export function PanelSlot({
             plugin={panel.plugin}
             section="panels"
             id={panel.id}
-            props={subject === undefined ? {} : { subject }}
+            props={subject === undefined ? { ...props } : { ...props, subject }}
           />
         </div>
       ))}

@@ -1,6 +1,8 @@
 import { defineEvent, defineHook } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { BoardChangedSchema, CardActorSchema, CardIdSchema, LaneIdSchema } from './wire.ts';
+import { LaneIdSchema } from './lanes.ts';
+import { CardIdSchema } from './refs.ts';
+import { BoardChangedSchema, CardActorSchema } from './wire.ts';
 
 /** Takers say yes or no to a card moving lanes (decide, 200 ms). The first no wins with its reason. Taken by none yet. */
 export const CardMoving = defineHook('card.moving', {

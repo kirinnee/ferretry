@@ -18,6 +18,9 @@
  */
 
 import { daemonHomeHref, HOME_HREF } from '../router/routes.ts';
+import { NOTIFICATION_OPEN_ACK, NOTIFICATION_OPEN_MESSAGE, PUSH_LABEL_PARAMETER, PUSH_SCOPE_ROOT } from './facts.ts';
+
+export { NOTIFICATION_OPEN_ACK, NOTIFICATION_OPEN_MESSAGE, PUSH_SCOPE_ROOT } from './facts.ts';
 
 /**
  * The Ferretry mark every notification carries, from the app's own committed icons. Same-origin paths, so a push never
@@ -31,12 +34,6 @@ export const notificationBrand = (): { readonly icon: string; readonly badge: st
   icon: NOTIFICATION_ICON,
   badge: NOTIFICATION_BADGE,
 });
-
-/** The path every per-machine push registration lives under. Never a page the app serves. */
-export const PUSH_SCOPE_ROOT = '/push/';
-
-/** The query parameter the worker reads its machine's label from. */
-const LABEL_PARAMETER = 'machine';
 
 /** The machine one push registration serves, as this browser registered it. */
 export interface PushMachine {
@@ -60,7 +57,7 @@ export const pushMachineOf = (scope: string, scriptUrl: string): PushMachine | n
   } catch {
     return null;
   }
-  const label = URL.parse(scriptUrl)?.searchParams.get(LABEL_PARAMETER)?.trim() ?? '';
+  const label = URL.parse(scriptUrl)?.searchParams.get(PUSH_LABEL_PARAMETER)?.trim() ?? '';
   return { daemonId, label: label === '' ? daemonId : label };
 };
 
@@ -92,9 +89,6 @@ export const notificationUrl = (raw: unknown, origin: string, machine: PushMachi
 };
 
 // ─── a tap opens its page inside the running app, not by reloading it ─────────────────────────────────────────────
-
-export const NOTIFICATION_OPEN_MESSAGE = 'fy-notification-open';
-export const NOTIFICATION_OPEN_ACK = 'fy-notification-opened';
 
 /** How long the worker waits for the page to say it took the open before it navigates the window instead. */
 export const NOTIFICATION_OPEN_ACK_MS = 1_000;

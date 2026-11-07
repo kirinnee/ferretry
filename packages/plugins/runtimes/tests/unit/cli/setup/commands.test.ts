@@ -110,10 +110,10 @@ describe('runtime scan', () => {
   });
 });
 
-describe('runtime import', () => {
+describe('runtime link', () => {
   it('should import one tool with no questions, under the suggested name', async () => {
     const world = fakeWorld({ interactive: false });
-    await runVerb(world, 'runtime import', ['claude']);
+    await runVerb(world, 'runtime link', ['claude']);
     should(world.prompt.questions).be.empty();
     should(world.gateway.called('stage')[0]?.args[0]).eql({ kind: 'setup.import', include: ['claude-code'] });
     should(world.out.text('report')).match(/fz runtime ls/);
@@ -121,7 +121,7 @@ describe('runtime import', () => {
 
   it('should take --name for the runtime it creates', async () => {
     const world = fakeWorld({ interactive: false, gateway: { scan: bothInstalled } });
-    await runVerb(world, 'runtime import', ['Codex'], { name: 'codex-smoke' });
+    await runVerb(world, 'runtime link', ['Codex'], { name: 'codex-smoke' });
     should(world.gateway.called('stage')[0]?.args[0]).eql({
       kind: 'setup.import',
       include: ['codex'],
@@ -134,7 +134,7 @@ describe('runtime import', () => {
       interactive: false,
       gateway: { scan: () => ({ ...bothInstalled(), format: 'present' }) },
     });
-    await runVerb(world, 'runtime import', ['codex']);
+    await runVerb(world, 'runtime link', ['codex']);
     should(world.out.text('report')).match(
       /Codex is not signed in yet: find its login with `fz login ls`, then run `fz login signin <login>` before you launch\./,
     );
@@ -142,22 +142,22 @@ describe('runtime import', () => {
 
   it('should refuse a tool that is not installed, naming how to get it, and stage nothing', async () => {
     const world = fakeWorld({ interactive: false });
-    await should(runVerb(world, 'runtime import', ['codex'])).be.rejectedWith(
-      'Codex is not installed on studio. Install it with `fz onboard`, then import it.',
+    await should(runVerb(world, 'runtime link', ['codex'])).be.rejectedWith(
+      'Codex is not installed on studio. Install it with `fz onboard`, then link it.',
     );
     should(world.gateway.called('stage')).be.empty();
   });
 
   it('should refuse a tool it does not know, and one that was not named', async () => {
-    await should(runVerb(fakeWorld(), 'runtime import', ['gemini'])).be.rejectedWith(/use claude or codex/);
-    await should(runVerb(fakeWorld(), 'runtime import')).be.rejectedWith(/Say which tool/);
+    await should(runVerb(fakeWorld(), 'runtime link', ['gemini'])).be.rejectedWith(/use claude or codex/);
+    await should(runVerb(fakeWorld(), 'runtime link')).be.rejectedWith(/Say which tool/);
   });
 
   it('should refuse when the machine takes no import yet, with the reason', async () => {
     const world = fakeWorld({
       gateway: { scan: () => scan({ importing: { available: false, reason: 'Account changes are switched off.' } }) },
     });
-    await should(runVerb(world, 'runtime import', ['claude'])).be.rejectedWith('Account changes are switched off.');
+    await should(runVerb(world, 'runtime link', ['claude'])).be.rejectedWith('Account changes are switched off.');
   });
 
   it('should say when the login and profile already have a runtime', async () => {
@@ -167,7 +167,7 @@ describe('runtime import', () => {
         scan: () => scan({ duplicates: [{ harness: 'claude-code', existing: 'mine', suggested: 'mine-2' }] }),
       },
     });
-    await runVerb(world, 'runtime import', ['claude'], { json: true });
+    await runVerb(world, 'runtime link', ['claude'], { json: true });
     should(world.out.text('report'))
       .match(/mine already uses that Claude Code login and profile, so no new runtime is added\./)
       .and.not.match(/fz runtime ls/);
@@ -179,7 +179,7 @@ describe('runtime import', () => {
         machine: () => machine({ authority: authorityOf({ mayApply: false, applyRefusal: 'step-up-required' }) }),
       },
     });
-    await should(runVerb(world, 'runtime import', ['claude'])).be.rejectedWith(/passkey confirmation/);
+    await should(runVerb(world, 'runtime link', ['claude'])).be.rejectedWith(/passkey confirmation/);
     should(world.gateway.called('scan')).be.empty();
     should(world.gateway.called('stage')).be.empty();
   });

@@ -101,6 +101,34 @@ test('R-0372 unavailable stop keeps its live handle and token and answers 503', 
   }
 });
 
+test('a stop says ferret.stopping before it can fail: a missing harness or runner, or a harness stop that throws', async () => {
+  for (const failure of ['harness', 'runner', 'throws'] as const) {
+    const f = fixture();
+    await f.service.resume(f.id);
+    const heard: string[] = [];
+    f.ports.stopping = ferret => heard.push(ferret);
+    if (failure === 'throws')
+      f.harness.stop = async () => {
+        throw new Error('the pane would not close');
+      };
+    else f.ports[failure] = () => undefined;
+    await expect(f.service.stop(f.id, 'now')).rejects.toBeDefined();
+    expect(heard).toEqual([f.id]);
+  }
+});
+
+test('a stop that succeeds says ferret.stopping once, before ferret.changed; a stopped ferret says nothing', async () => {
+  const f = fixture();
+  await f.service.resume(f.id);
+  const heard: string[] = [];
+  f.ports.stopping = () => heard.push('stopping');
+  f.ports.changed = payload => heard.push(payload.change);
+  await f.service.stop(f.id, 'now');
+  expect(heard).toEqual(['stopping', 'stopped']);
+  await f.service.stop(f.id, 'now');
+  expect(heard).toEqual(['stopping', 'stopped']);
+});
+
 test('R-0332 thrown launch ports revoke the token and allow a later resume', async () => {
   for (const port of ['environment', 'harness', 'save'] as const) {
     const f = fixture();
@@ -265,4 +293,42 @@ test('Z2 a record with no stored mode cannot be selected as an automatic agent',
   const f = fixture();
   expect((await f.service.get(f.id))?.mode).toBeUndefined();
   expect((await f.service.list()).filter(summary => summary.mode === 'auto')).toEqual([]);
+});
+
+test('ferret.started (D2 #12): a start tells its takers who started, where, the brief and the card, once, after the record', async () => {
+  const f = fixture();
+  const child = ferretId('sprout');
+  f.ports.newId = () => child;
+  f.ports.newName = () => 'sprout';
+  const order: string[] = [];
+  const started: unknown[] = [];
+  f.ports.changed = payload => order.push(`changed:${payload.change}`);
+  f.ports.started = payload => {
+    order.push('started');
+    started.push(payload);
+  };
+
+  const answer = await f.service.start({
+    folder: '/work',
+    by: 'ferret',
+    parent: f.id,
+    prompt: 'Fix the badge colour',
+    options: { card: 'F12', label: 'ui' },
+  });
+
+  expect(answer.ok).toBe(true);
+  expect(started).toEqual([
+    {
+      ferret: child,
+      name: 'sprout',
+      role: 'helper',
+      parent: f.id,
+      folder: '/work',
+      by: 'ferret',
+      brief: 'Fix the badge colour',
+      label: 'ui',
+      card: 'F12',
+    },
+  ]);
+  expect(order.slice(0, 2)).toEqual(['changed:started', 'started']);
 });

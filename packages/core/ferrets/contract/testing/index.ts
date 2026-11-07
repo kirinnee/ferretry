@@ -376,7 +376,8 @@ export class FakeFerrets implements FerretsApi {
     this.starts.push(request);
     this.#next += 1;
     const id = ferretId(`f${this.#next}`);
-    const { model, card, title } = request.options ?? {};
+    // The start options the real summary carries (`summaryOf`): its model, card, label and title.
+    const { model, card, label, title } = request.options ?? {};
     this.add({
       id,
       name: request.name ?? id,
@@ -385,6 +386,7 @@ export class FakeFerrets implements FerretsApi {
       ...(request.parent === undefined ? {} : { parent: request.parent }),
       ...(model === undefined ? {} : { model }),
       ...(card === undefined ? {} : { card }),
+      ...(label === undefined ? {} : { label }),
       ...(title === undefined ? {} : { title }),
     });
     return ok(id);
@@ -416,6 +418,14 @@ export class FakeFerrets implements FerretsApi {
   async sitrep(ferret: FerretId): Promise<Sitrep | undefined> {
     const summary = this.#ferrets.get(ferret);
     return summary === undefined ? undefined : { ferret: summary, lines: [], blockers: [] };
+  }
+  readonly #summaries = new Map<FerretId, string>();
+  /** TEST ONLY: what a ferret's `signal done` wrote to its `summary.md`. */
+  setSummary(ferret: FerretId, text: string): void {
+    this.#summaries.set(ferret, text);
+  }
+  async summary(ferret: FerretId): Promise<string | undefined> {
+    return this.#ferrets.get(ferret)?.state === 'stopped' ? this.#summaries.get(ferret) : undefined;
   }
   readonly #controls = new Map<FerretId, Partial<AgentControl>>();
   /** TEST ONLY: what one ferret may control, over today's defaults. */

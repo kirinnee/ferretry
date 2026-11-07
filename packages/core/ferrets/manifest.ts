@@ -7,6 +7,8 @@ import {
   ArchiveFile,
   AutoResumeFile,
   FerretChanged,
+  FerretStopping,
+  FerretStarted,
   FerretFiles,
   FerretHistoryFiles,
   FerretIndexFile,
@@ -33,6 +35,7 @@ import {
   AgentPinsFile,
   FerretDetailsFiles,
   FerretPinFiles,
+  FerretSummaryFiles,
   SessionConfigFiles,
   SessionStateFiles,
 } from './daemon/lib/state.ts';
@@ -357,6 +360,7 @@ export default definePlugin({
       AgentPinsFile,
       FerretPinFiles,
       FerretDetailsFiles,
+      FerretSummaryFiles,
     ],
     // Cast: see packages/core/gate/manifest.ts (leaf `ConfigDef<unknown>` variance; reported to the lead).
     config: [LimitsConfigFile as ConfigDef<any>],
@@ -371,6 +375,8 @@ export default definePlugin({
       { hook: StartDecide },
       { hook: SitrepLines },
       { hook: FerretChanged },
+      { hook: FerretStopping },
+      { hook: FerretStarted },
     ],
     takes: [{ hook: Bearers, key: 'ferret' }],
   },

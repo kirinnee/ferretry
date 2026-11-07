@@ -12,14 +12,14 @@ import { resolveDaemonLayout } from '../../lib/daemon/layout.ts';
 import type { IStateHomeClaimPort } from '../../lib/daemon/ports.ts';
 import { DirectSupervisor, LaunchdSupervisor, SystemdSupervisor } from '../../lib/daemon/supervisor.ts';
 import type { Environment } from '../../lib/credential.ts';
-import { daemonConfigPath } from '../../lib/home.ts';
-import { resolveDaemonUrl } from '../../lib/address.ts';
+import { daemonRunPath } from '../../lib/home.ts';
+import { parseDaemonRun, resolveDaemonUrl } from '../../lib/address.ts';
 import { UpdateLifecycle } from '../../lib/update/lifecycle.ts';
 import type { IDaemonUpdateViewPort } from '../../lib/update/ports.ts';
 import { NixProfileSwitch } from '../../lib/update/profile-switch.ts';
 import { PlainProgress } from '../../lib/update/progress.ts';
 import type { DaemonUpdaterDeps } from '../../lib/update/updater.ts';
-import { readDaemonConfigDocument } from '../daemon/config-file.ts';
+import { readDaemonRunDocument } from '../daemon/run-file.ts';
 import { FileDaemonLifecycleLock } from '../daemon/lifecycle-lock.ts';
 import { NixStoreGcRoot } from '../daemon/nix-gc-root.ts';
 import { BunDaemonProcess } from '../daemon/process.ts';
@@ -144,8 +144,8 @@ export function buildUpdateMachine(
     executable,
     health: async () => {
       try {
-        // Always this home's own listener. FY_URL may name a forwarded or remote daemon.
-        const url = resolveDaemonUrl('', await readDaemonConfigDocument(daemonConfigPath(inputs.home)));
+        // Always this home's own listener, as the kernel recorded it. FY_URL may name a forwarded or remote daemon.
+        const url = resolveDaemonUrl('', parseDaemonRun(await readDaemonRunDocument(daemonRunPath(inputs.home))));
         const response = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(3_000) });
         if (!response.ok) return undefined;
         return HealthSchema.extend({ pid: z.number().int().min(2) })

@@ -26,7 +26,8 @@ export default provideToShell(implementApp(manifest, { build }), {
 
 - **`DeviceClaims`** (Access): `claim(daemon)` answers the `device` session claim (the non-extractable key handle, from
   `ports.crypto.deviceKeyHandle`) or `undefined`; `pairingKey(daemonId)` answers the key a `pair` session registers;
-  `forget(daemonId)` drops the key when the pairing is removed.
+  `forget(daemonId)` drops the key when the pairing is removed. `pairingKey` returns a memory-only key; persist it
+  only inside its `save`, after validating the response.
 - **`CarrierDialer`** (Connections): `{ id, order, dial(daemon) }`; the lowest `order` that answers a dial carries the
   session. With no carrier registered the shell dials the pairing's address directly.
 - **`ConnectPorts`** is everything a provider may touch, bound once in `src/main.tsx`: the session crypto, WebCrypto,
