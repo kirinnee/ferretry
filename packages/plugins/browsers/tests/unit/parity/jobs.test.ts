@@ -12,7 +12,7 @@
  * - J-0079 (`tunnel.start`) is the daemon's Cloudflare tunnel carrier — Connections', not a browser timer.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
+import { FakeGate, ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import type { ChildHandle, Clock, FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
@@ -237,7 +237,7 @@ describe('the daemon’s waits on the kernel clock', () => {
       host = await testHost({
         plugins: [half],
         uses: { ferrets: { get: async (id: string) => (id === 'f1' ? { name: id } : undefined) } },
-        fakes: { vault: new FakeVault() },
+        fakes: { vault: new FakeVault(), gate: new FakeGate() },
         gate,
         clock,
       });

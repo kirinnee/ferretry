@@ -8,7 +8,7 @@ import {
 import should from 'should';
 import { type PasteRuleCaller, PasteRuleService, routeOf, SecureCopyError } from '../../../../daemon/lib/index.ts';
 import { FACTS } from '../support/facts.ts';
-import { type InputTargetFacts } from '@ferretry/core-vault/contract';
+import type { InputTargetFacts } from '@ferretry/core-vault/contract';
 
 const OWNER: PasteRuleCaller = { kind: 'owner', actor: { kind: 'host' } };
 const PHONE: PasteRuleCaller = { kind: 'owner', actor: { kind: 'device', deviceId: 'phone-1' } };

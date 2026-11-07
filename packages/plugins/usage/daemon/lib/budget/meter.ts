@@ -20,7 +20,7 @@
  */
 import type { TurnUsage } from '@ferretry/core-ferrets/contract';
 import { epochMs } from '@ferretry/std';
-import { type AnalyticsTokenUsage } from '../analytics/pricing.ts';
+import type { AnalyticsTokenUsage } from '../analytics/pricing.ts';
 import { turnTokenUsage } from '../analytics/turn-fold.ts';
 
 const SLOT_MS = 15 * 60_000;

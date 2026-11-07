@@ -11,7 +11,7 @@
  * it is not counted.
  */
 import type { AskRef } from '../../../contract/index.ts';
-import { type Card, type CardId } from '../../../contract/index.ts';
+import type { Card, CardId } from '../../../contract/index.ts';
 import { effectiveAssignee } from './authority.ts';
 import type { CardAskLinkSource, CardAsks } from './ports.ts';
 

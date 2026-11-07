@@ -9,8 +9,8 @@ import {
   type XvfbChild,
   XvfbDisplay,
 } from '../../../../daemon/worker/control/adapters/login-runtime.ts';
-import { type BrowserLoginChild } from '../../../../daemon/worker/control/adapters/login-window.ts';
-import { type ListenerProverPort } from '../../../../daemon/worker/control/adapters/listener-prover.ts';
+import type { BrowserLoginChild } from '../../../../daemon/worker/control/adapters/login-window.ts';
+import type { ListenerProverPort } from '../../../../daemon/worker/control/adapters/listener-prover.ts';
 import { BrowserControlError } from '../../../../daemon/worker/control/policy.ts';
 import { loginProcesses } from '../../../support/process-workers.ts';
 

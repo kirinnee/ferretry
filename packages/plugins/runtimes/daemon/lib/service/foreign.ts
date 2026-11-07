@@ -11,7 +11,7 @@
 import type { z } from 'zod';
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import type { HarnessKind } from '../manifest.ts';
-import { BrowserModeSchema, BrowserPortsSettingSchema, ORIGIN_KEY_PATTERN } from '../../../contract/index.ts';
+import { type BrowserModeSchema, type BrowserPortsSettingSchema, ORIGIN_KEY_PATTERN } from '../../../contract/index.ts';
 
 /** A runtime's old name and its new one (the edits that re-point every other file that names it). */
 // GAP(kernel): `fleet/src/lib/config-files/render.ts`.

@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import { type FyEventStreamFrame, FyEventStreamFrameSchema } from '../../../../../daemon/lib/protocol/session.ts';
-import { type SessionLiveActivity } from '../../../../../daemon/lib/protocol/session-live.ts';
+import type { SessionLiveActivity } from '../../../../../daemon/lib/protocol/session-live.ts';
 import should from 'should';
 import type { SocketDownstream } from '@ferretry/kernel/contract';
 import {

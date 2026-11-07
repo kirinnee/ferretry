@@ -66,7 +66,7 @@ describe('registerProject', () => {
 
     await registerProject(fake, { kind: 'new-folder', path: '/work/fresh' } as never);
 
-    expect((calls[0]?.init as { body: { initializeGit: unknown } }).body.initializeGit).toBe(false);
+    expect((calls[0]?.init as { body: { initializeGit: unknown } } | undefined)?.body.initializeGit).toBe(false);
   });
 
   test('refuses to send a request the contract rejects, without calling the daemon', async () => {
