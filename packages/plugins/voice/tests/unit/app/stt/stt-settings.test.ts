@@ -17,7 +17,7 @@ import {
   parseDictationShortcut,
   parseSttSettings,
   STT_SETTINGS_KEY,
-  STT_SETTINGS_VERSION,
+  STT_SETTINGS_FORMAT,
   type SttSettings,
   type SttSettingsStorage,
   SttSettingsStore,
@@ -62,7 +62,7 @@ class BlockedStorage implements SttSettingsStorage {
 }
 
 const stored = (overrides: Record<string, unknown> = {}): string =>
-  JSON.stringify({ v: STT_SETTINGS_VERSION, ...overrides });
+  JSON.stringify({ format: STT_SETTINGS_FORMAT, ...overrides });
 
 describe('parseDictationShortcut', () => {
   it('reads a persisted chord back in canonical modifier order', () => {
@@ -119,7 +119,7 @@ describe('parseSttSettings', () => {
     );
 
     should(settings).deepEqual({
-      v: STT_SETTINGS_VERSION,
+      format: STT_SETTINGS_FORMAT,
       enabled: false,
       enhancement: false,
       dictionary: ['kteam = kteem'],
@@ -150,52 +150,23 @@ describe('parseSttSettings', () => {
     }
   });
 
-  it('migrates a v1 payload: every earlier choice is kept and the new one defaults to review', () => {
-    const settings = parseSttSettings(
-      JSON.stringify({
-        v: 1,
-        enabled: false,
-        enhancement: false,
-        dictionary: ['kteam = kteem'],
-        userContext: 'jargon',
-        enhancementProvider: 'cerebras',
-        enhancementModel: 'gpt-oss-120b',
-        shortcut: { code: 'KeyD', key: 'd', modifiers: ['Alt'] },
-        engine: 'browser',
-        liveWordsOptIn: true,
-      }),
-    );
-
-    should(settings).deepEqual({
-      v: STT_SETTINGS_VERSION,
-      enabled: false,
-      enhancement: false,
-      dictionary: ['kteam = kteem'],
-      userContext: 'jargon',
-      enhancementProvider: 'cerebras',
-      enhancementModel: 'gpt-oss-120b',
-      shortcut: { code: 'KeyD', key: 'd', modifiers: ['Alt'] },
-      engine: 'browser',
-      liveWordsOptIn: true,
-      afterDictation: 'review',
-    });
+  it('stores format 1 and nothing named v (clean slate, D2 #8)', () => {
+    should(STT_SETTINGS_FORMAT).equal(1);
+    should(DEFAULT_STT_SETTINGS.format).equal(1);
+    should(Object.keys(DEFAULT_STT_SETTINGS)).not.containEql('v');
+    const storage = new MemoryStorage(null);
+    new SttSettingsStore(storage).update({ engine: 'parakeet' });
+    const written = JSON.parse(storage.writes.at(-1) ?? '{}') as Record<string, unknown>;
+    should(written.format).equal(1);
+    should(written).not.have.property('v');
   });
 
-  it('rewrites a v1 payload at the current version on the next save, without losing it', () => {
-    should(STT_SETTINGS_VERSION).equal(2);
-    const storage = new MemoryStorage(JSON.stringify({ v: 1, engine: 'parakeet', dictionary: ['tmux'] }));
-    const store = new SttSettingsStore(storage);
-    should(store.get().engine).equal('parakeet');
-    should(store.get().afterDictation).equal('review');
-
-    store.update({ afterDictation: 'insert' });
-
-    const written = JSON.parse(storage.writes.at(-1) ?? '{}') as Record<string, unknown>;
-    should(written.v).equal(2);
-    should(written.afterDictation).equal('insert');
-    should(written.engine).equal('parakeet');
-    should(written.dictionary).deepEqual(['tmux']);
-    should(new SttSettingsStore(new MemoryStorage(storage.getItem())).get().afterDictation).equal('insert');
+  it('reads no older payload: a `v` record of any number resets to the defaults, never converted', () => {
+    for (const v of [1, 2]) {
+      const raw = JSON.stringify({ v, engine: 'parakeet', dictionary: ['tmux'], afterDictation: 'insert' });
+      should(parseSttSettings(raw)).deepEqual(DEFAULT_STT_SETTINGS);
+      should(new SttSettingsStore(new MemoryStorage(raw)).get()).deepEqual(DEFAULT_STT_SETTINGS);
+    }
   });
 
   it('keeps live words OFF by default, and ignores the old default an earlier build left behind', () => {
@@ -225,10 +196,10 @@ describe('parseSttSettings', () => {
     should(DEFAULT_STT_SETTINGS.engine).be.null();
   });
 
-  it('resets on a version this build has never seen, rather than half-reading it', () => {
-    should(parseSttSettings(JSON.stringify({ v: 4, enabled: false }))).deepEqual(DEFAULT_STT_SETTINGS);
-    should(parseSttSettings(JSON.stringify({ v: 3, afterDictation: 'insert' }))).deepEqual(DEFAULT_STT_SETTINGS);
-    should(parseSttSettings(JSON.stringify({ v: '2', afterDictation: 'insert' }))).deepEqual(DEFAULT_STT_SETTINGS);
+  it('resets on a format this build has never seen, rather than half-reading it', () => {
+    should(parseSttSettings(JSON.stringify({ format: 4, enabled: false }))).deepEqual(DEFAULT_STT_SETTINGS);
+    should(parseSttSettings(JSON.stringify({ format: 2, afterDictation: 'insert' }))).deepEqual(DEFAULT_STT_SETTINGS);
+    should(parseSttSettings(JSON.stringify({ format: '1', afterDictation: 'insert' }))).deepEqual(DEFAULT_STT_SETTINGS);
     should(parseSttSettings(JSON.stringify({ enabled: false }))).deepEqual(DEFAULT_STT_SETTINGS);
   });
 

@@ -22,7 +22,7 @@ const memory = (initial: Record<string, string> = {}) => {
 describe('defaults', () => {
   test("Auto-read is OFF; rate 1.1; 60 seconds; the last message of the turn; the device's best voice", () => {
     expect(DEFAULT_LIVE_VOICE_SETTINGS).toEqual({
-      v: 1,
+      format: 1,
       autoRead: false,
       voiceId: null,
       rate: 1.1,
@@ -42,13 +42,13 @@ describe('parseLiveVoiceSettings: defensive, capped, versioned', () => {
     expect(parseLiveVoiceSettings('{nope')).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
     expect(parseLiveVoiceSettings('[1]')).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
     expect(parseLiveVoiceSettings('"x"')).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
-    expect(parseLiveVoiceSettings(JSON.stringify({ v: 2, autoRead: true }))).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
+    expect(parseLiveVoiceSettings(JSON.stringify({ format: 2, autoRead: true }))).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
     expect(parseLiveVoiceSettings(JSON.stringify({ autoRead: true }))).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
   });
 
   test('a good record round-trips', () => {
     const good = {
-      v: 1,
+      format: 1,
       autoRead: true,
       voiceId: 'uri:Samantha',
       rate: 1.5,
@@ -60,34 +60,37 @@ describe('parseLiveVoiceSettings: defensive, capped, versioned', () => {
 
   test('each bad field falls back by itself and the good ones are kept', () => {
     const parsed = parseLiveVoiceSettings(
-      JSON.stringify({ v: 1, autoRead: 'yes', voiceId: 7, rate: 'fast', maxSeconds: 'long', whatToRead: 'all' }),
+      JSON.stringify({ format: 1, autoRead: 'yes', voiceId: 7, rate: 'fast', maxSeconds: 'long', whatToRead: 'all' }),
     );
     expect(parsed).toEqual(DEFAULT_LIVE_VOICE_SETTINGS);
-    const mixed = parseLiveVoiceSettings(JSON.stringify({ v: 1, autoRead: true, rate: 'fast', whatToRead: 'every' }));
+    const mixed = parseLiveVoiceSettings(
+      JSON.stringify({ format: 1, autoRead: true, rate: 'fast', whatToRead: 'every' }),
+    );
     expect(mixed.autoRead).toBe(true);
     expect(mixed.whatToRead).toBe('every');
     expect(mixed.rate).toBe(1.1);
   });
 
   test('rate is clamped to 0.8 – 2.0', () => {
-    expect(parseLiveVoiceSettings(JSON.stringify({ v: 1, rate: 9 })).rate).toBe(2);
-    expect(parseLiveVoiceSettings(JSON.stringify({ v: 1, rate: 0.1 })).rate).toBe(0.8);
-    expect(parseLiveVoiceSettings(JSON.stringify({ v: 1, rate: -4 })).rate).toBe(0.8);
+    expect(parseLiveVoiceSettings(JSON.stringify({ format: 1, rate: 9 })).rate).toBe(2);
+    expect(parseLiveVoiceSettings(JSON.stringify({ format: 1, rate: 0.1 })).rate).toBe(0.8);
+    expect(parseLiveVoiceSettings(JSON.stringify({ format: 1, rate: -4 })).rate).toBe(0.8);
   });
 
   test('max length: 30 s up to an hour, null is no limit, absent is a minute, out of range is a minute', () => {
-    const seconds = (value: unknown) => parseLiveVoiceSettings(JSON.stringify({ v: 1, maxSeconds: value })).maxSeconds;
+    const seconds = (value: unknown) =>
+      parseLiveVoiceSettings(JSON.stringify({ format: 1, maxSeconds: value })).maxSeconds;
     expect(seconds(30)).toBe(30);
     expect(seconds(3600)).toBe(3600);
     expect(seconds(null)).toBeNull();
     expect(seconds(29)).toBe(60);
     expect(seconds(3601)).toBe(60);
     expect(seconds(45.5)).toBe(60);
-    expect(parseLiveVoiceSettings(JSON.stringify({ v: 1 })).maxSeconds).toBe(60);
+    expect(parseLiveVoiceSettings(JSON.stringify({ format: 1 })).maxSeconds).toBe(60);
   });
 
   test('the voice id is capped and an empty one means the best voice', () => {
-    const id = (value: unknown) => parseLiveVoiceSettings(JSON.stringify({ v: 1, voiceId: value })).voiceId;
+    const id = (value: unknown) => parseLiveVoiceSettings(JSON.stringify({ format: 1, voiceId: value })).voiceId;
     expect(id('x'.repeat(MAX_VOICE_ID_CHARS))).toBe('x'.repeat(MAX_VOICE_ID_CHARS));
     expect(id('x'.repeat(MAX_VOICE_ID_CHARS + 1))).toBeNull();
     expect(id('')).toBeNull();
@@ -95,8 +98,10 @@ describe('parseLiveVoiceSettings: defensive, capped, versioned', () => {
   });
 
   test('unknown extra fields are dropped, so nothing hostile is carried along', () => {
-    const parsed = parseLiveVoiceSettings(JSON.stringify({ v: 1, autoRead: true, token: 'secret', text: 'a reply' }));
-    expect(Object.keys(parsed).sort()).toEqual(['autoRead', 'maxSeconds', 'rate', 'v', 'voiceId', 'whatToRead']);
+    const parsed = parseLiveVoiceSettings(
+      JSON.stringify({ format: 1, autoRead: true, token: 'secret', text: 'a reply' }),
+    );
+    expect(Object.keys(parsed).sort()).toEqual(['autoRead', 'format', 'maxSeconds', 'rate', 'voiceId', 'whatToRead']);
   });
 
   test('normalise clamps what a caller hands in', () => {
@@ -114,7 +119,7 @@ describe('parseLiveVoiceSettings: defensive, capped, versioned', () => {
 
 describe('LiveVoiceSettingsStore', () => {
   test('starts from storage, writes through, and tells subscribers once per real change', () => {
-    const storage = memory({ [LIVE_VOICE_SETTINGS_KEY]: JSON.stringify({ v: 1, autoRead: true }) });
+    const storage = memory({ [LIVE_VOICE_SETTINGS_KEY]: JSON.stringify({ format: 1, autoRead: true }) });
     const store = new LiveVoiceSettingsStore(storage);
     expect(store.get().autoRead).toBe(true);
     let calls = 0;
@@ -125,7 +130,7 @@ describe('LiveVoiceSettingsStore', () => {
     store.update({ rate: 1.6 });
     expect(calls).toBe(1);
     expect(store.get()).not.toBe(before);
-    expect(JSON.parse(storage.data.get(LIVE_VOICE_SETTINGS_KEY) ?? '{}')).toMatchObject({ v: 1, rate: 1.6 });
+    expect(JSON.parse(storage.data.get(LIVE_VOICE_SETTINGS_KEY) ?? '{}')).toMatchObject({ format: 1, rate: 1.6 });
     // A patch that changes nothing keeps the snapshot and tells nobody.
     const same = store.get();
     store.update({ rate: 1.6 });
@@ -174,7 +179,7 @@ describe('LiveVoiceSettingsStore', () => {
     });
     store.reload();
     expect(calls).toBe(0);
-    storage.data.set(LIVE_VOICE_SETTINGS_KEY, JSON.stringify({ v: 1, autoRead: true, whatToRead: 'every' }));
+    storage.data.set(LIVE_VOICE_SETTINGS_KEY, JSON.stringify({ format: 1, autoRead: true, whatToRead: 'every' }));
     expect(store.reload()).toMatchObject({ autoRead: true, whatToRead: 'every' });
     expect(calls).toBe(1);
   });
@@ -193,5 +198,13 @@ describe('LiveVoiceSettingsStore', () => {
     fail = false;
     store.update({ autoRead: false });
     expect(store.persisted).toBe(true);
+  });
+});
+
+describe('D2 #8: the stored record carries format 1, never v', () => {
+  test('an old `v: 1` record is not read (clean slate) and a write carries `format: 1` only', () => {
+    expect(parseLiveVoiceSettings(JSON.stringify({ v: 1, autoRead: true }))).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
+    expect(DEFAULT_LIVE_VOICE_SETTINGS.format).toBe(1);
+    expect(Object.keys(DEFAULT_LIVE_VOICE_SETTINGS)).not.toContain('v');
   });
 });

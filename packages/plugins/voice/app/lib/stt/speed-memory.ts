@@ -9,7 +9,7 @@
  * moment it fails.
  *
  * The same rules as `fy:voice:stt-settings` (`stt-settings.ts`):
- *   - VERSIONED. A payload from a version this build does not know is discarded, not half-read.
+ *   - VERSIONED. The record carries `format: 1`; a payload of any other format is discarded, not half-read.
  *   - CAPPED. At most {@link MAX_FAILURES} entries, newest kept; one entry per model and path. Nothing
  *     here grows, and a hostile or corrupt payload cannot make it.
  *   - NEVER THROWS. Malformed, oversized or wrong-shaped storage reads as "nothing learned", field by
@@ -24,7 +24,7 @@ import { FAILURE_FORGET_MS, NO_MEMORY, SPEED_PATH_ORDER, type SpeedFailure, type
 import { SPEED_MEMORY_STORAGE_KEY } from '../storage-names.ts';
 
 export const SPEED_MEMORY_KEY = SPEED_MEMORY_STORAGE_KEY;
-export const SPEED_MEMORY_VERSION = 1;
+export const SPEED_MEMORY_FORMAT = 1;
 /** Eight models, three paths: more entries than this can only be junk. */
 export const MAX_FAILURES = 24;
 /** A payload larger than this is not read. */
@@ -67,8 +67,8 @@ export const parseSpeedMemory = (raw: string | null): SpeedMemory => {
     return NO_MEMORY;
   }
   if (typeof value !== 'object' || value === null) return NO_MEMORY;
-  const record = value as { v?: unknown; failures?: unknown };
-  if (record.v !== SPEED_MEMORY_VERSION || !Array.isArray(record.failures)) return NO_MEMORY;
+  const record = value as { format?: unknown; failures?: unknown };
+  if (record.format !== SPEED_MEMORY_FORMAT || !Array.isArray(record.failures)) return NO_MEMORY;
   const failures = record.failures.slice(0, MAX_FAILURES * 2).flatMap(item => {
     const entry = entryOf(item);
     return entry === null ? [] : [entry];
@@ -78,7 +78,7 @@ export const parseSpeedMemory = (raw: string | null): SpeedMemory => {
 
 /** Memory → storage text. */
 export const serialiseSpeedMemory = (memory: SpeedMemory): string =>
-  JSON.stringify({ v: SPEED_MEMORY_VERSION, failures: normalise(memory.failures) });
+  JSON.stringify({ format: SPEED_MEMORY_FORMAT, failures: normalise(memory.failures) });
 
 /** `localStorage`, or anything shaped like it; `null` where the browser has none. */
 export interface SpeedMemoryStorage {

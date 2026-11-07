@@ -102,7 +102,10 @@ describe('<AutoReadSettings>', () => {
     const root = await show(r);
     await interact(() => must(root.querySelector<HTMLElement>('[role="switch"]'), 'switch').click());
     expect(r.store.get().autoRead).toBe(true);
-    expect(JSON.parse(r.storage.data.get('fy:voice:live-settings') ?? '{}')).toMatchObject({ v: 1, autoRead: true });
+    expect(JSON.parse(r.storage.data.get('fy:voice:live-settings') ?? '{}')).toMatchObject({
+      format: 1,
+      autoRead: true,
+    });
     const toggle = must(root.querySelector<HTMLElement>('[role="switch"]'), 'switch');
     expect(toggle.getAttribute('aria-checked')).toBe('true');
     expect(toggle.textContent).toContain('On');

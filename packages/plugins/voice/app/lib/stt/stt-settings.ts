@@ -5,11 +5,11 @@
  * around a module-level singleton and a `kteam-stt-v1` key.
  *
  * Kept from kteam, deliberately:
- *   - VERSIONED. A shape change bumps the version. A payload from a version this build
- *     does not know is discarded rather than half-read, which is a clean slate
- *     instead of a crash on a shape it has never seen. A version it DOES know
- *     (`READABLE_VERSIONS`) is read field by field and rewritten at the current version
- *     on the next save, so adding a field never costs anyone their dictionary or engine.
+ *   - VERSIONED. The record carries `format: 1`. A payload of any other format
+ *     is discarded rather than half-read, which is a clean slate
+ *     instead of a crash on a shape it has never seen. There is no older format
+ *     to read: a different format resets to the defaults (clean slate), and a missing
+ *     or malformed field inside format 1 takes its default, field by field.
  *   - DEFENSIVE AND CAPPED. Any malformed, wrong-version, oversized or hostile
  *     payload degrades to the defaults, field by field. Parsing never throws.
  *   - STORAGE DENIAL IS NORMAL. Private windows, disabled storage and quota
@@ -48,9 +48,7 @@ import { ON_DEVICE_MODEL_IDS, type OnDeviceModelId } from './model-catalog.ts';
 import { STT_SETTINGS_STORAGE_KEY } from '../storage-names.ts';
 
 export const STT_SETTINGS_KEY = STT_SETTINGS_STORAGE_KEY;
-export const STT_SETTINGS_VERSION = 2;
-/** v1 predates `afterDictation`; it parses with that field defaulted, so nothing else is lost. */
-const READABLE_VERSIONS: readonly number[] = [1, STT_SETTINGS_VERSION];
+export const STT_SETTINGS_FORMAT = 1;
 
 /**
  * Dictionary caps, mirrored from `enhancement.ts` so a textarea can refuse
@@ -124,7 +122,7 @@ type AfterDictationId = (typeof AFTER_DICTATION_OPTIONS)[number]['id'];
 export { MAX_USER_CONTEXT_CHARS };
 
 export interface SttSettings {
-  readonly v: typeof STT_SETTINGS_VERSION;
+  readonly format: typeof STT_SETTINGS_FORMAT;
   /**
    * Master resource switch. False means browser speech recognition cannot
    * start. The browser owns and releases its recognition service.
@@ -177,7 +175,7 @@ export interface SttSettings {
 }
 
 export const DEFAULT_STT_SETTINGS: SttSettings = Object.freeze({
-  v: STT_SETTINGS_VERSION,
+  format: STT_SETTINGS_FORMAT,
   enabled: true,
   enhancement: true,
   dictionary: Object.freeze([]) as readonly string[],
@@ -253,10 +251,9 @@ export const parseSttSettings = (raw: string | null): SttSettings => {
   } catch {
     return DEFAULT_STT_SETTINGS;
   }
-  if (!isRecord(parsed) || typeof parsed.v !== 'number' || !READABLE_VERSIONS.includes(parsed.v))
-    return DEFAULT_STT_SETTINGS;
+  if (!isRecord(parsed) || parsed.format !== STT_SETTINGS_FORMAT) return DEFAULT_STT_SETTINGS;
   return {
-    v: STT_SETTINGS_VERSION,
+    format: STT_SETTINGS_FORMAT,
     enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : DEFAULT_STT_SETTINGS.enabled,
     enhancement: typeof parsed.enhancement === 'boolean' ? parsed.enhancement : DEFAULT_STT_SETTINGS.enhancement,
     dictionary: parseDictionaryLines(parsed.dictionary),
@@ -271,7 +268,7 @@ export const parseSttSettings = (raw: string | null): SttSettings => {
   };
 };
 
-export type SttSettingsPatch = Readonly<Partial<Omit<SttSettings, 'v'>>>;
+export type SttSettingsPatch = Readonly<Partial<Omit<SttSettings, 'format'>>>;
 
 /**
  * Normalise before writing, so a caller cannot persist an out-of-range shape
@@ -325,7 +322,7 @@ export class SttSettingsStore {
 
   /** Partial update; unspecified fields keep their current value. */
   update(patch: SttSettingsPatch): SttSettings {
-    const next = normaliseSttSettings({ ...this.#snapshot, ...patch, v: STT_SETTINGS_VERSION });
+    const next = normaliseSttSettings({ ...this.#snapshot, ...patch, format: STT_SETTINGS_FORMAT });
     this.#snapshot = next;
     this.#persisted = this.#persist(next);
     for (const listener of [...this.#listeners]) listener();

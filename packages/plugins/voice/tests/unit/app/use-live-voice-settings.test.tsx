@@ -50,12 +50,12 @@ describe('useLiveVoiceSettings', () => {
     );
     const root = mounted.container;
     expect(button(root).textContent).toBe('last');
-    storage.data.set(LIVE_VOICE_SETTINGS_KEY, JSON.stringify({ v: 1, whatToRead: 'every' }));
+    storage.data.set(LIVE_VOICE_SETTINGS_KEY, JSON.stringify({ format: 1, whatToRead: 'every' }));
     await interact(() => storageEvent('some-other-key'));
     expect(button(root).textContent).toBe('last');
     await interact(() => storageEvent(LIVE_VOICE_SETTINGS_KEY));
     expect(button(root).textContent).toBe('every');
-    storage.data.set(LIVE_VOICE_SETTINGS_KEY, JSON.stringify({ v: 1, whatToRead: 'last' }));
+    storage.data.set(LIVE_VOICE_SETTINGS_KEY, JSON.stringify({ format: 1, whatToRead: 'last' }));
     await interact(() => storageEvent(null));
     expect(button(root).textContent).toBe('last');
   });

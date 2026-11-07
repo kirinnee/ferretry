@@ -71,7 +71,10 @@ describe('saving a key on this device', () => {
     should(wrapping).be.instanceof(CryptoKey);
     should(wrapping.extractable).be.false();
     await should(crypto.subtle.exportKey('raw', wrapping)).be.rejected();
-    const sealed = records.values.get('provider:groq') as { data: ArrayBuffer; endsWith: string };
+    const sealed = records.values.get('provider:groq') as { format: number; data: ArrayBuffer; endsWith: string };
+    // D2 #8: the sealed record carries `format: 1`, never `v`.
+    should(sealed.format).equal(1);
+    should(sealed).not.have.property('v');
     should(sealed.endsWith).equal('AB');
     should(new TextDecoder().decode(sealed.data)).not.containEql(GROQ_KEY);
     should(JSON.stringify([...records.values.entries()])).not.containEql(GROQ_KEY);
@@ -133,7 +136,7 @@ describe('what the settings screen may learn', () => {
   it('should say a damaged record or a blocked store is unreadable, never "none"', async () => {
     // Arrange
     const { records, keys } = vault();
-    records.values.set('provider:groq', { v: 1, iv: 'not bytes' });
+    records.values.set('provider:groq', { format: 1, iv: 'not bytes' });
     records.values.set('provider:cerebras', 'nonsense');
 
     // Act + Assert
@@ -292,13 +295,13 @@ describe('the IndexedDB records', () => {
     const records = new IndexedDbSpeedupKeyRecords(database);
 
     // Act
-    await records.put('slot', { v: 1 });
+    await records.put('slot', { format: 1 });
     const kept = await records.get('slot');
     await records.delete('slot');
     const gone = await records.get('slot');
 
     // Assert
-    should(kept).eql({ v: 1 });
+    should(kept).eql({ format: 1 });
     should(gone).be.undefined();
     should(database.opened[0]).eql({ name: 'fy-voice', version: 1 });
     should([...database.stores]).eql(['keys', 'entries']);

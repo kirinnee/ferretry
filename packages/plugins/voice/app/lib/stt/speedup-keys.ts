@@ -70,10 +70,10 @@ export class SpeedupKeyShapeError extends Error {
 }
 
 const WRAPPING_SLOT = 'wrapping-key';
-const RECORD_VERSION = 1;
+const RECORD_FORMAT = 1;
 
 interface SealedKey {
-  readonly v: typeof RECORD_VERSION;
+  readonly format: typeof RECORD_FORMAT;
   readonly iv: Uint8Array<ArrayBuffer>;
   readonly data: ArrayBuffer;
   readonly endsWith: string;
@@ -83,7 +83,7 @@ const isSealed = (value: unknown): value is SealedKey => {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
   return (
-    record.v === RECORD_VERSION &&
+    record.format === RECORD_FORMAT &&
     record.iv instanceof Uint8Array &&
     record.data instanceof ArrayBuffer &&
     typeof record.endsWith === 'string'
@@ -130,7 +130,7 @@ export class DeviceSpeedupKeys {
       wrapping,
       new TextEncoder().encode(key),
     );
-    const sealed: SealedKey = { v: RECORD_VERSION, iv, data, endsWith: key.slice(-2) };
+    const sealed: SealedKey = { format: RECORD_FORMAT, iv, data, endsWith: key.slice(-2) };
     await this.records.put(slotOf(provider), sealed);
   }
 

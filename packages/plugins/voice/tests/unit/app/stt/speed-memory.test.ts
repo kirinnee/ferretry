@@ -8,7 +8,7 @@ import {
   MAX_FAILURES,
   parseSpeedMemory,
   SPEED_MEMORY_KEY,
-  SPEED_MEMORY_VERSION,
+  SPEED_MEMORY_FORMAT,
   SpeedMemoryStore,
   serialiseSpeedMemory,
 } from '../../../../app/lib/stt/speed-memory.ts';
@@ -39,14 +39,17 @@ describe('parseSpeedMemory', () => {
     should(parseSpeedMemory('null')).equal(NO_MEMORY);
   });
 
-  it('discards a payload from a version it does not know', () => {
-    const payload = { v: SPEED_MEMORY_VERSION + 1, failures: [{ model: 'parakeet', path: 'wasm-threads', at: NOW }] };
+  it('discards a payload of a format it does not know', () => {
+    const payload = {
+      format: SPEED_MEMORY_FORMAT + 1,
+      failures: [{ model: 'parakeet', path: 'wasm-threads', at: NOW }],
+    };
     should(parseSpeedMemory(JSON.stringify(payload))).equal(NO_MEMORY);
   });
 
   it('keeps the good entries and drops the bad ones, one by one', () => {
     const payload = {
-      v: SPEED_MEMORY_VERSION,
+      format: SPEED_MEMORY_FORMAT,
       failures: [
         { model: 'parakeet', path: 'wasm-threads', at: NOW },
         { model: 'no-such-model', path: 'wasm-threads', at: NOW },
@@ -67,7 +70,7 @@ describe('parseSpeedMemory', () => {
 
   it('keeps one entry per model and path, the newest', () => {
     const payload = {
-      v: SPEED_MEMORY_VERSION,
+      format: SPEED_MEMORY_FORMAT,
       failures: [
         { model: 'parakeet', path: 'wasm-threads', at: 1 },
         { model: 'parakeet', path: 'wasm-threads', at: 9 },
@@ -79,7 +82,7 @@ describe('parseSpeedMemory', () => {
   });
 
   it('refuses an oversized payload without parsing it', () => {
-    const big = JSON.stringify({ v: SPEED_MEMORY_VERSION, failures: [], pad: 'x'.repeat(10_000) });
+    const big = JSON.stringify({ format: SPEED_MEMORY_FORMAT, failures: [], pad: 'x'.repeat(10_000) });
     should(parseSpeedMemory(big)).equal(NO_MEMORY);
   });
 
@@ -91,7 +94,7 @@ describe('parseSpeedMemory', () => {
       path: paths[i % paths.length],
       at: NOW + i,
     }));
-    should(parseSpeedMemory(JSON.stringify({ v: SPEED_MEMORY_VERSION, failures })).failures.length).be.belowOrEqual(
+    should(parseSpeedMemory(JSON.stringify({ format: SPEED_MEMORY_FORMAT, failures })).failures.length).be.belowOrEqual(
       MAX_FAILURES,
     );
   });
@@ -173,5 +176,15 @@ describe('SpeedMemoryStore', () => {
     should(store.read()).equal(NO_MEMORY);
     should(store.recordFailure('parakeet', 'wasm-threads', NOW)).equal(false);
     should(store.read().failures).deepEqual([{ model: 'parakeet', path: 'wasm-threads', at: NOW }]);
+  });
+});
+
+describe('D2 #8: the stored record carries format 1, never v', () => {
+  it('writes `format: 1` and reads no `v` record', () => {
+    const written = JSON.parse(serialiseSpeedMemory(NO_MEMORY)) as Record<string, unknown>;
+    should(written.format).equal(1);
+    should(written).not.have.property('v');
+    const old = JSON.stringify({ v: 1, failures: [{ model: 'parakeet', path: 'wasm-threads', at: NOW }] });
+    should(parseSpeedMemory(old)).equal(NO_MEMORY);
   });
 });

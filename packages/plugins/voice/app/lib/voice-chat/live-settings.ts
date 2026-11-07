@@ -3,7 +3,7 @@
  * (F137 slice 2 — "Auto-read replies"). Same rules as `fy:voice:stt-settings` (`lib/stt/stt-settings.ts`), kept
  * deliberately:
  *
- *   - VERSIONED. A payload from a version this build does not know is discarded, never half-read.
+ *   - VERSIONED. The record carries `format: 1`; a payload of any other format is discarded, never half-read.
  *   - DEFENSIVE AND CAPPED. Each field is parsed by its own zod schema with a `.catch` to its default, so
  *     one bad field never costs the others, and nothing hostile or oversized survives: parsing never throws.
  *   - STORAGE DENIAL IS NORMAL. Every access is wrapped; a refused write leaves `persisted` false and the
@@ -22,8 +22,7 @@ import { clampSpeechRate, DEFAULT_SPEECH_RATE } from './voice-choice.ts';
 import { LIVE_VOICE_STORAGE_KEY } from '../storage-names.ts';
 
 export const LIVE_VOICE_SETTINGS_KEY = LIVE_VOICE_STORAGE_KEY;
-const LIVE_VOICE_SETTINGS_VERSION = 1;
-const READABLE_VERSIONS: readonly number[] = [LIVE_VOICE_SETTINGS_VERSION];
+const LIVE_VOICE_SETTINGS_FORMAT = 1;
 
 /** A voice id is the browser's `voiceURI`; nothing longer than this is a real one. */
 export const MAX_VOICE_ID_CHARS = 200;
@@ -57,7 +56,7 @@ export const WHAT_TO_READ_OPTIONS = [
 type WhatToReadId = (typeof WHAT_TO_READ_OPTIONS)[number]['id'];
 
 export interface LiveVoiceSettings {
-  readonly v: typeof LIVE_VOICE_SETTINGS_VERSION;
+  readonly format: typeof LIVE_VOICE_SETTINGS_FORMAT;
   /** Read each finished reply aloud on its own. OFF by default: nothing speaks unless the person asks. */
   readonly autoRead: boolean;
   /** The chosen voice (`SpeakerVoice.id`), or null for the device's best pick. */
@@ -70,7 +69,7 @@ export interface LiveVoiceSettings {
 }
 
 export const DEFAULT_LIVE_VOICE_SETTINGS: LiveVoiceSettings = Object.freeze({
-  v: LIVE_VOICE_SETTINGS_VERSION,
+  format: LIVE_VOICE_SETTINGS_FORMAT,
   autoRead: false,
   voiceId: null,
   rate: DEFAULT_SPEECH_RATE,
@@ -111,10 +110,10 @@ export const parseLiveVoiceSettings = (raw: string | null): LiveVoiceSettings =>
   }
   if (!isRecord(parsed)) return DEFAULT_LIVE_VOICE_SETTINGS;
   // biome-ignore lint/complexity/useLiteralKeys: `parsed` is an index signature (`noPropertyAccessFromIndexSignature`), so the key is read by name.
-  const version = parsed['v'];
-  if (typeof version !== 'number' || !READABLE_VERSIONS.includes(version)) return DEFAULT_LIVE_VOICE_SETTINGS;
+  const format = parsed['format'];
+  if (format !== LIVE_VOICE_SETTINGS_FORMAT) return DEFAULT_LIVE_VOICE_SETTINGS;
   const fields = fieldsSchema.parse(parsed);
-  return { v: LIVE_VOICE_SETTINGS_VERSION, ...fields };
+  return { format: LIVE_VOICE_SETTINGS_FORMAT, ...fields };
 };
 
 /** What one reading needs of the settings: the voice, the speed and how long it may run. */
@@ -126,7 +125,7 @@ export const readOptionsOf = (
   maxSeconds: settings.maxSeconds,
 });
 
-export type LiveVoiceSettingsPatch = Readonly<Partial<Omit<LiveVoiceSettings, 'v'>>>;
+export type LiveVoiceSettingsPatch = Readonly<Partial<Omit<LiveVoiceSettings, 'format'>>>;
 
 /** Normalise before writing, so a caller cannot persist an out-of-range shape. */
 export const normaliseLiveVoiceSettings = (next: LiveVoiceSettings): LiveVoiceSettings =>
@@ -166,7 +165,7 @@ export class LiveVoiceSettingsStore {
 
   /** Partial update; unspecified fields keep their value. A patch that changes nothing keeps the snapshot. */
   update(patch: LiveVoiceSettingsPatch): LiveVoiceSettings {
-    const next = normaliseLiveVoiceSettings({ ...this.#snapshot, ...patch, v: LIVE_VOICE_SETTINGS_VERSION });
+    const next = normaliseLiveVoiceSettings({ ...this.#snapshot, ...patch, format: LIVE_VOICE_SETTINGS_FORMAT });
     if (JSON.stringify(next) === JSON.stringify(this.#snapshot)) return this.#snapshot;
     this.#snapshot = next;
     this.#persisted = this.#persist(next);
