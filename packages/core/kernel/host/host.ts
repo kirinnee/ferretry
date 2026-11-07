@@ -629,6 +629,7 @@ async function bootLocked(
       },
     },
     lifecycle,
+    contract: { hash: () => options.contractHash?.(manifest.id) ?? 'unhashed' },
   });
 
   // 4. Build in start order.

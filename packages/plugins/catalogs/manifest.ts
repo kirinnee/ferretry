@@ -450,6 +450,12 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
+      memberRoute('GET /v1/shared/contract', {
+        member: 'unlocked',
+        noStore: true,
+        audit: SKIP_READ,
+        guard: GUARD_NONE,
+      }),
       memberRoute('GET /v1/shared/me', { member: 'unlocked', noStore: true, audit: SKIP_READ, guard: GUARD_NONE }),
       memberRoute('DELETE /v1/shared/me/keys/self', {
         member: 'unlocked',
