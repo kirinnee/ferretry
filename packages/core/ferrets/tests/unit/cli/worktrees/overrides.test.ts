@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { grantedConfirmations, grantedOverrides, unclearedBlockers } from '../../../../cli/lib/worktrees/overrides';
-import { blocker, decision } from './fixtures';
+import { grantedConfirmations, grantedOverrides, unclearedBlockers } from '../../../../cli/lib/worktrees/overrides.ts';
+import { blocker, decision } from './fixtures.ts';
 
 describe('removal consent', () => {
   it('should grant nothing when no consent flag was passed', () => {

@@ -8,7 +8,7 @@ const controller = (caller?: string, gateway = new RecordingRestartGateway()) =>
   const harness = restartHarness(gateway);
   return {
     ...harness,
-    controller: new RestartController(harness.gateway, harness.presenter, caller, undefined, () => 'req-1'),
+    controller: new RestartController(harness.gateway, harness.presenter, caller),
   };
 };
 
@@ -21,7 +21,7 @@ describe('RestartController', () => {
     await sut.execute([], { outdated: true });
 
     // Assert
-    should(gateway.requests).deepEqual([{ request: { scope: 'outdated' }, requestId: 'req-1' }]);
+    should(gateway.requests).deepEqual([{ request: { scope: 'outdated' } }]);
     should(io.out).deepEqual([
       'Restarted now: 1',
       '  Wren (ses-1)',
@@ -34,15 +34,15 @@ describe('RestartController', () => {
     ]);
   });
 
-  it('should send every running ferret, with the caller, under the given request id', async () => {
+  it('should send every running ferret, with the caller', async () => {
     // Arrange
     const { controller: sut, gateway } = controller('ses-9');
 
     // Act
-    await sut.execute([], { all: true, requestId: ' retry-7 ' });
+    await sut.execute([], { all: true });
 
     // Assert
-    should(gateway.requests).deepEqual([{ request: { scope: 'all', caller: 'ses-9' }, requestId: 'retry-7' }]);
+    should(gateway.requests).deepEqual([{ request: { scope: 'all', caller: 'ses-9' } }]);
   });
 
   it('should restart the ferrets named', async () => {
@@ -142,7 +142,7 @@ describe('RestartController', () => {
     should(JSON.parse(io.out[1] ?? '')).deepEqual({ cancelled: 2 });
   });
 
-  it('should refuse a mix of modes, blank ids and a blank request id before any call', async () => {
+  it('should refuse a mix of modes and blank ids before any call', async () => {
     // Arrange
     const { controller: sut, gateway } = controller();
 
@@ -151,25 +151,11 @@ describe('RestartController', () => {
       sut.execute([], { outdated: true, all: true }).catch((e: unknown) => e),
       sut.execute(['Wren'], { cancel: true }).catch((e: unknown) => e),
       sut.execute(['  '], {}).catch((e: unknown) => e),
-      sut.execute([], { all: true, requestId: '  ' }).catch((e: unknown) => e),
     ]);
 
     // Assert
     for (const result of results) should((result as SessionCommandError).exitCode).equal(2);
     should(gateway.requests).deepEqual([]);
     should(gateway.cancels).equal(0);
-  });
-
-  it('should use a random request id when none is given', async () => {
-    // Arrange
-    const gateway = new RecordingRestartGateway();
-    const { io: _io, presenter } = restartHarness(gateway);
-    const sut = new RestartController(gateway, presenter);
-
-    // Act
-    await sut.execute([], { all: true });
-
-    // Assert
-    should(gateway.requests[0]?.requestId).match(/^[0-9a-f-]{36}$/);
   });
 });

@@ -1,28 +1,27 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { buildStopPlan } from '../../../src/lib/stop/plan';
+import { buildStopPlan } from '../../../../cli/lib/stop/plan.ts';
 import {
   confirmationPhrase,
-  defaultStopReason,
   renderStopPlan,
   renderStopSweep,
   selectorDescription,
   targetDisplay,
-} from '../../../src/lib/stop/render';
-import type { StopSweepResult, StopTarget } from '../../../src/lib/stop/types';
-import { session } from './fixtures';
+} from '../../../../cli/lib/stop/render.ts';
+import type { StopSweepResult, StopTarget } from '../../../../cli/lib/stop/types.ts';
+import { session } from './fixtures.ts';
 
 const FLEET = [
   session({ id: 'lead' }),
   session({ id: 'mid', parent: 'lead' }),
-  session({ id: 'worker-a', parent: 'mid', teammate: 'ana' }),
+  session({ id: 'worker-a', parent: 'mid' }),
   session({ id: 'worker-b', parent: 'mid' }),
 ];
 
 const target = (overrides: Partial<StopTarget> = {}): StopTarget => ({
   id: 'worker-a',
   name: 'Fix Thing',
-  status: 'running',
+  status: 'working',
   depth: 2,
   caller: false,
   callerAncestor: false,
@@ -90,7 +89,7 @@ describe('plan rendering', () => {
 
     // Assert
     should(actual).containEql('Will leave 2 live descendants running without this parent:');
-    should(actual).containEql('  - ana — worker-a (worker-a)');
+    should(actual).containEql('  - worker-a (worker-a)');
   });
 
   it('should use the singular descendant noun for exactly one orphan', () => {
@@ -160,14 +159,6 @@ describe('confirmation phrase', () => {
 
     // Assert
     should(actual).equal('stop 4 including caller and lead');
-  });
-});
-
-describe('default stop reason', () => {
-  it('should record the command that ended the session under the shipped binary name', () => {
-    // Act + Assert
-    should(defaultStopReason({ kind: 'cascade', rootId: 'abc' }, 'fy')).equal('stopped by fy stop cascade abc');
-    should(defaultStopReason({ kind: 'label', label: 'batch' }, 'fy')).equal('stopped by fy stop label batch');
   });
 });
 

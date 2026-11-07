@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { CONFIRMATION_WORD, WorktreeController } from '../../../../cli/lib/worktrees/controller';
+import { CONFIRMATION_WORD, WorktreeController } from '../../../../cli/lib/worktrees/controller.ts';
 import {
   blocker,
   CALLER_CWD,
@@ -11,7 +11,7 @@ import {
   ScriptedPrompt,
   worktree,
   WORKTREE_PATH,
-} from './fixtures';
+} from './fixtures.ts';
 
 function controller(
   gateway = new RecordingWorktreeGateway(),

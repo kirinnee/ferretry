@@ -1,29 +1,29 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { buildStopPlan, callerAncestorIds, isStoppable, StopSelectorError } from '../../../src/lib/stop/plan';
-import { ids, session } from './fixtures';
+import { buildStopPlan, callerAncestorIds, isStoppable, StopSelectorError } from '../../../../cli/lib/stop/plan.ts';
+import { ids, session } from './fixtures.ts';
 
 const FLEET = [
   session({ id: 'lead' }),
   session({ id: 'mid', parent: 'lead' }),
-  session({ id: 'worker-a', parent: 'mid', teammate: 'ana', label: 'batch' }),
-  session({ id: 'worker-b', parent: 'mid', teammate: 'bo', label: 'batch' }),
-  session({ id: 'done', parent: 'mid', status: 'completed', label: 'batch' }),
+  session({ id: 'worker-a', parent: 'mid', label: 'batch' }),
+  session({ id: 'worker-b', parent: 'mid', label: 'batch' }),
+  session({ id: 'done', parent: 'mid', status: 'stopped', label: 'batch' }),
   session({ id: 'outsider', label: 'other' }),
 ];
 
 describe('stoppability', () => {
-  it('should treat the four settled terminal states as unstoppable', () => {
+  it('should treat a stopped ferret as unstoppable', () => {
     // Act + Assert
-    for (const status of ['completed', 'failed', 'stalled', 'stopped'] as const) {
+    for (const status of ['stopped'] as const) {
       should(isStoppable(session({ id: 'x', status }))).be.false();
     }
   });
 
-  it('should keep kill_failed stoppable because another stop is its recovery path', () => {
+  it('should keep every live state stoppable', () => {
     // Act + Assert
-    should(isStoppable(session({ id: 'x', status: 'kill_failed' }))).be.true();
-    should(isStoppable(session({ id: 'x', status: 'waiting' }))).be.true();
+    should(isStoppable(session({ id: 'x', status: 'working' }))).be.true();
+    should(isStoppable(session({ id: 'x', status: 'idle' }))).be.true();
   });
 });
 
@@ -72,7 +72,7 @@ describe('cascade selection', () => {
     should(plan.leftRunning).be.empty();
   });
 
-  it('should order same-depth targets by teammate then id', () => {
+  it('should order same-depth targets by name then id', () => {
     // Act
     const plan = buildStopPlan(FLEET, { kind: 'cascade', rootId: 'mid' });
 

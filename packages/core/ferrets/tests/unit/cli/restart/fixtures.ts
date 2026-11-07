@@ -1,4 +1,9 @@
-import type { RestartCancelResult, RestartRequest, RestartResult, RestartStatus } from '@ferretry/protocol';
+import type {
+  RestartCancelResult,
+  RestartRequest,
+  RestartResult,
+  RestartStatus,
+} from '../../../../daemon/lib/protocol/session-restart.ts';
 import type { IRestartGateway } from '../../../../cli/lib/restart/ports.ts';
 import { capturedPresenter } from '../session/controller-doubles.ts';
 
@@ -19,7 +24,7 @@ const STATUS: RestartStatus = {
 };
 
 export class RecordingRestartGateway implements IRestartGateway {
-  readonly requests: { request: RestartRequest; requestId?: string }[] = [];
+  readonly requests: { request: RestartRequest }[] = [];
   cancels = 0;
 
   constructor(
@@ -28,8 +33,8 @@ export class RecordingRestartGateway implements IRestartGateway {
     private readonly cancelled: RestartCancelResult = { cancelled: 2 },
   ) {}
 
-  restart(request: RestartRequest, requestId?: string): Promise<RestartResult> {
-    this.requests.push({ request, ...(requestId === undefined ? {} : { requestId }) });
+  restart(request: RestartRequest): Promise<RestartResult> {
+    this.requests.push({ request });
     return Promise.resolve(this.result);
   }
 

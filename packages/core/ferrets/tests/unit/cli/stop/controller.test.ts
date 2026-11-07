@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import type { FerretSummary as SessionView } from '../../../../contract/index.ts';
 import should from 'should';
-import { BulkStopController, inheritStopReason } from '../../../src/lib/stop/controller';
-import type { BulkStopOptions, BulkStopSelector, IStopIo, IStopPrompt } from '../../../src/lib/stop/types';
-import { session } from './fixtures';
+import { BulkStopController } from '../../../../cli/lib/stop/controller.ts';
+import type { BulkStopOptions, BulkStopSelector, IStopIo, IStopPrompt } from '../../../../cli/lib/stop/types.ts';
+import { session } from './fixtures.ts';
 
 const FLEET = [
   session({ id: 'lead' }),
@@ -16,7 +16,7 @@ interface Recorded {
   readonly out: string[];
   readonly errors: string[];
   readonly exitCodes: number[];
-  readonly stopped: Array<{ id: string; reason: string }>;
+  readonly stopped: Array<{ id: string }>;
   readonly asked: string[];
 }
 
@@ -61,13 +61,13 @@ function harness(options: HarnessOptions = {}) {
     get: async (id: string): Promise<SessionView> => {
       if (options.getFails) throw new Error(options.getFails);
       const known = [...fleet, ...(options.resolvable ?? [])];
-      const found = known.find(view => view.config.id === id || view.config.name === id);
+      const found = known.find(view => view.id === id || view.name === id);
       if (!found) throw new Error(`unknown session "${id}"`);
       return found;
     },
-    stop: async (id: string, reason?: string): Promise<SessionView> => {
+    stop: async (id: string): Promise<SessionView> => {
       if (options.stopFails?.has(id)) throw new Error(`daemon refused ${id}`);
-      recorded.stopped.push({ id, reason: reason ?? '' });
+      recorded.stopped.push({ id });
       return session({ id, status: 'stopped' });
     },
   };
@@ -80,35 +80,6 @@ function harness(options: HarnessOptions = {}) {
   const run = (selector: BulkStopSelector, runOptions: BulkStopOptions = {}) => controller.run(selector, runOptions);
   return { recorded, run };
 }
-
-describe('reason inheritance', () => {
-  it('should adopt a reason written before the subcommand', () => {
-    // Act
-    const actual = inheritStopReason({ yes: true }, 'parent reason');
-
-    // Assert
-    should(actual.reason).equal('parent reason');
-  });
-
-  it('should let a reason written on the subcommand win', () => {
-    // Act
-    const actual = inheritStopReason({ reason: 'own' }, 'parent reason');
-
-    // Assert
-    should(actual.reason).equal('own');
-  });
-
-  it('should leave the options untouched when no parent reason exists', () => {
-    // Arrange
-    const options = { yes: true };
-
-    // Act
-    const actual = inheritStopReason(options, undefined);
-
-    // Assert
-    should(actual).equal(options);
-  });
-});
 
 describe('dry run', () => {
   it('should print the plan and stop nothing', async () => {
@@ -129,7 +100,7 @@ describe('dry run', () => {
 describe('empty selections', () => {
   it('should report nothing eligible without prompting', async () => {
     // Arrange
-    const { recorded, run } = harness({ fleet: [session({ id: 'solo', status: 'completed' })] });
+    const { recorded, run } = harness({ fleet: [session({ id: 'solo', status: 'stopped' })] });
 
     // Act
     const actual = await run({ kind: 'label', label: 'nothing' }, {});
@@ -272,31 +243,6 @@ describe('confirmation', () => {
 });
 
 describe('the sweep', () => {
-  it('should record the default reason naming the shipped binary', async () => {
-    // Arrange
-    const { recorded, run } = harness();
-
-    // Act
-    await run({ kind: 'label', label: 'batch' }, { yes: true });
-
-    // Assert
-    should(recorded.stopped[0]?.reason).equal('stopped by fy stop label batch');
-  });
-
-  it('should prefer an explicit reason and ignore a blank one', async () => {
-    // Arrange
-    const explicit = harness();
-    const blank = harness();
-
-    // Act
-    await explicit.run({ kind: 'label', label: 'batch' }, { yes: true, reason: '  shift over  ' });
-    await blank.run({ kind: 'label', label: 'batch' }, { yes: true, reason: '   ' });
-
-    // Assert
-    should(explicit.recorded.stopped[0]?.reason).equal('shift over');
-    should(blank.recorded.stopped[0]?.reason).equal('stopped by fy stop label batch');
-  });
-
   it('should continue past a refused stop and exit non-zero', async () => {
     // Arrange
     const { recorded, run } = harness({ stopFails: new Set(['worker-a']) });
