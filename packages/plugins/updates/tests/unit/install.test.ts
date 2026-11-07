@@ -74,6 +74,11 @@ const cases: SchemaCase[] = [
   },
   { name: 'version', schema: update.VersionSchema, value: '5.0.0' },
   { name: 'status', schema: update.UpdateStatusSchema, value: { current: '5.0.0', available: false, autoInstall: false, midTurn: 0 } },
+  {
+    name: 'settings held',
+    schema: update.DaemonUpdateSettingsHeldSchema,
+    value: { held: ['updates install automatically when idle'], view },
+  },
   { name: 'config', schema: update.UpdatesConfigSchema, value: { autoInstall: false } },
   { name: 'settings patch', schema: update.DaemonUpdateSettingsPatchSchema, value: { autoInstall: true } },
 ];
@@ -253,7 +258,7 @@ describe('planUpdate', () => {
       'sudo apt-get update && sudo apt-get install --only-upgrade fy',
     );
     should(commands({ kind: 'system-package', manager: 'yum' })[0]).equal('sudo yum upgrade fy');
-    should(commands({ kind: 'standalone', directory: '/opt/fy' })).deepEqual(['fy daemon update']);
+    should(commands({ kind: 'standalone', directory: '/opt/fy' })).deepEqual(['fy update']);
     should(commands({ kind: 'unknown', reason: 'x' })).deepEqual([]);
   });
   it('says which system manager applies a home-manager install, in the step text', () => {

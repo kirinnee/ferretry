@@ -27,7 +27,7 @@ describe('renderUpdateStatus', () => {
     should(renderUpdateStatus({ install: { kind: 'homebrew', cask: 'ferretry' }, update }, 'fy')).deepEqual([
       '  installed via Homebrew cask ferretry',
       '  update available 1.2.3 → 1.3.0 (https://github.com/kirinnee/ferretry/releases/tag/v1.3.0)',
-      '  to update: fy daemon update',
+      '  to update: fy update',
     ]);
   });
 

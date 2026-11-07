@@ -32,7 +32,7 @@ export const UpdateOutcomeSchema = z.enum(['succeeded', 'rolled-back', 'failed']
 export type UpdateOutcome = z.infer<typeof UpdateOutcomeSchema>;
 
 /**
- * What `fy daemon update --report <file>` writes when it finishes, for the NEW daemon to read.
+ * What `fy update --report <file>` writes when it finishes, for the NEW daemon to read.
  *
  * It is the one thing that crosses the restart: the process that started the update is gone by the
  * time it ends, so the outcome has to wait on disk for whichever daemon comes up.

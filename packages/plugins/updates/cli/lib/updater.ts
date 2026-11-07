@@ -30,7 +30,7 @@ import type {
 import { isYes, lastLine, lastLines, type NixProfileSwitch } from './profile-switch.ts';
 import { stepObserver } from './step-observer.ts';
 
-/** Flags `fy daemon update` accepts. */
+/** Flags `fy update` accepts. */
 export interface DaemonUpdateOptions {
   /** Report only: what is installed, what is latest, and what updating would take. */
   readonly check?: boolean;
@@ -100,7 +100,7 @@ type Applied =
   | { readonly kind: 'failed'; readonly message: string };
 
 /**
- * `fy daemon update`: one transaction per install method — check, wait for idle, upgrade with the
+ * `fy update`: one transaction per install method — check, wait for idle, upgrade with the
  * method's own tool, restart, prove the new version serves, and roll back when it does not.
  *
  * The contract and its reasons are `docs/updating.md`. Two rules shape every branch here:
@@ -233,7 +233,7 @@ export class DaemonUpdater {
         [
           intent.plan.explanation,
           ...renderPlan(intent.plan, this.deps.clientName),
-          `or run ${this.deps.clientName} daemon update --switch-to-profile`,
+          `or run ${this.deps.clientName} update --switch-to-profile`,
         ].join('\n'),
       );
     }
@@ -529,7 +529,7 @@ export class DaemonUpdater {
 
 /** A plan's steps, one line each, for a terminal. */
 export function renderPlan(plan: UpdatePlan, clientName: string): string[] {
-  if (plan.kind === 'self') return [`to update: ${clientName} daemon update`];
+  if (plan.kind === 'self') return [`to update: ${clientName} update`];
   if (plan.steps.length === 0) return [];
   return [
     'steps:',

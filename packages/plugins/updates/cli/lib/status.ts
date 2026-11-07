@@ -52,6 +52,6 @@ export function renderUpdateStatus(status: DaemonUpdateStatus, clientName: strin
 
 /** The one command a person runs next for this plan. */
 export function nextStep(plan: UpdatePlan, clientName: string): string {
-  if (plan.kind === 'self') return `${clientName} daemon update`;
+  if (plan.kind === 'self') return `${clientName} update`;
   return plan.steps[0]?.command ?? plan.explanation;
 }

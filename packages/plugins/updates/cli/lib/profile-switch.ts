@@ -27,7 +27,7 @@ export const isYes = (answer: string): boolean => /^y(es)?$/iu.test(answer.trim(
  * link that follows the profile — so after this, `nix profile upgrade` and a restart are the whole
  * update, forever.
  *
- * NEVER SILENT. Both callers ask first: `fy daemon install` at a terminal, and `fy daemon update` only
+ * NEVER SILENT. Both callers ask first: `fy daemon install` at a terminal, and `fy update` only
  * with `--switch-to-profile` or a yes. Nothing here rewrites a service definition; the caller installs
  * the path this returns, through the ordinary install.
  */

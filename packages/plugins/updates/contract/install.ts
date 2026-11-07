@@ -179,7 +179,7 @@ export const UpdateStepSchema = z.strictObject({
 export type UpdateStep = z.infer<typeof UpdateStepSchema>;
 
 export const UpdatePlanSchema = z.discriminatedUnion('kind', [
-  /** Ferretry can do it: one click in the app, or `fy daemon update`. */
+  /** Ferretry can do it: one click in the app, or `fy update`. */
   z.strictObject({
     kind: z.literal('self'),
     steps: z.array(UpdateStepSchema).min(1),
@@ -315,7 +315,7 @@ export function planUpdate(method: InstallMethod, context: UpdatePlanContext): U
         kind: 'self',
         steps: [
           {
-            command: `${context.clientName} daemon update`,
+            command: `${context.clientName} update`,
             note: `downloads, verifies and swaps the binaries in ${method.directory}`,
           },
         ],

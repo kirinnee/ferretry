@@ -103,7 +103,7 @@ export interface DaemonUpdateSubsystem {
 /**
  * Knowing the latest release, and starting an update — see `docs/updating.md`.
  *
- * THE DAEMON NEVER UPDATES ITSELF IN-PROCESS. It starts `<client> daemon update`, which outlives the
+ * THE DAEMON NEVER UPDATES ITSELF IN-PROCESS. It starts `<client> update`, which outlives the
  * restart it performs and leaves a report for whichever daemon comes up. Everything here is deciding
  * WHETHER and WHEN: a check at boot and at most every six hours, one update at a time, and
  * automatically only when somebody turned that on.
