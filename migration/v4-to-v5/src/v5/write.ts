@@ -5,7 +5,46 @@
  */
 import { chmod, mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { parseDocument } from 'yaml';
 import type { z } from 'zod';
+
+/**
+ * The part of a v5 `defineConfig` declaration the writer needs: one file under `config/`, or a folder of
+ * `<name>.yaml` items. A contract's own `ConfigDef` fits; a def declared only in a manifest is restated with the same
+ * file name and the schema its contract exports.
+ */
+export type V5ConfigTarget =
+  | { readonly shape: 'file'; readonly file: string; readonly schema: z.ZodType<unknown> }
+  | {
+      readonly shape: 'collection';
+      readonly collection: string;
+      readonly name: RegExp;
+      readonly schema: z.ZodType<unknown>;
+    };
+
+/** Where a config file lands, relative to the v5 home: `config/<file>` or `config/<collection>/<name>.yaml`. */
+export function configPath(target: V5ConfigTarget, name?: string): string {
+  return target.shape === 'file'
+    ? join('config', target.file)
+    : join('config', target.collection, `${name ?? ''}.yaml`);
+}
+
+/**
+ * Why v5 would refuse this text at this place, or `undefined` when it accepts it. The text is read back exactly as the
+ * v5 kernel reads a config file (YAML 1.2, unique keys, an empty file is an empty mapping) and parsed with the
+ * declared schema. The answer names key paths and zod issue codes only, never a value.
+ */
+export function v5ConfigProblem(target: V5ConfigTarget, name: string | undefined, text: string): string | undefined {
+  if (target.shape === 'collection' && (name === undefined || !target.name.test(name)))
+    return `the name is not a valid v5 ${target.collection} item name`;
+  const document = parseDocument(text, { version: '1.2', uniqueKeys: true, prettyErrors: false });
+  if (document.errors.length > 0) return 'the written YAML does not read back';
+  const parsed = target.schema.safeParse(document.toJS() ?? {});
+  if (parsed.success) return undefined;
+  return parsed.error.issues
+    .map(issue => `${issue.path.length === 0 ? '(top)' : issue.path.join('.')} (${issue.code})`)
+    .join(', ');
+}
 
 /** The part of a v5 `defineState` / `defineConfig` declaration the writer needs. */
 export interface V5FileDef<Shape> {
@@ -31,6 +70,11 @@ export interface V5Writer {
    * The caller has already checked the bytes against what the v5 reader accepts.
    */
   opaque(relativePath: string, bytes: string | Uint8Array): Promise<void>;
+  /**
+   * An owner-edited YAML config file under `config/`, 0600, written as given (comments kept). Refused unless v5
+   * would accept it at that place ({@link v5ConfigProblem}); the error names the path and key paths only.
+   */
+  config(target: V5ConfigTarget, name: string | undefined, text: string): Promise<void>;
   /** Where a byte-for-byte file lands (sealed blobs, a harness's own folder). */
   resolve(relativePath: string): string;
 }
@@ -61,6 +105,12 @@ export function v5Writer(home: string, options: { readonly dryRun: boolean }): V
     },
     async opaque(relativePath, bytes) {
       await place(relativePath, bytes, 0o600);
+    },
+    async config(target, name, text) {
+      const path = configPath(target, name);
+      const problem = v5ConfigProblem(target, name, text);
+      if (problem !== undefined) throw new Error(`${path}: v5 refuses it: ${problem}`);
+      await place(path, text, 0o600);
     },
     resolve(relativePath) {
       return join(home, relativePath);
