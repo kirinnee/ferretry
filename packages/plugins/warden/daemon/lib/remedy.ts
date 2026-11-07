@@ -19,6 +19,26 @@
 import type { WardenActionKind, WardenMayActAlone } from './protocol.ts';
 import type { WardenRecommendation, WardenVerdictKind } from './verdicts.ts';
 
+/** A browser a leftover close left alone, by pid, and the closed reason why (Browsers' `LeftAloneWhy`, never text). */
+export interface WardenLeftAlone {
+  readonly pid: number;
+  readonly why: string;
+}
+
+/**
+ * Whether a close left a browser alone because ownership could not be proved (`not-proved`, `invalid-pid`). That is
+ * the owner's business; `gone` and `tool-running` are a race with the browser or a tool, not an ownership question.
+ */
+export function leftAloneUnproved(leftAlone: readonly WardenLeftAlone[]): boolean {
+  return leftAlone.some(browser => browser.why === 'not-proved' || browser.why === 'invalid-pid');
+}
+
+/** What one leftover close did: how many browsers closed, and each one left alone. */
+export interface WardenLeftoverClose {
+  readonly closed: number;
+  readonly leftAlone: readonly WardenLeftAlone[];
+}
+
 /** Carrying out a verdict. Each method throws when the act did not take. */
 export interface WardenRemedyPort {
   nudge(sessionId: string, message: string): Promise<void>;
@@ -33,9 +53,10 @@ export interface WardenRemedyPort {
   failover(sessionId: string, agent: string): Promise<void>;
   /**
    * Close the browsers a ferret launched that still run under its pane — the ferret itself untouched.
-   * The process tree is read again at the moment of closing; answers how many were closed.
+   * The process tree is read again at the moment of closing, and each browser re-proved just before its signal;
+   * answers how many were closed and every one left alone (with why). Throws only when the pane could not be read.
    */
-  closeLeftoverBrowsers(sessionId: string): Promise<number>;
+  closeLeftoverBrowsers(sessionId: string): Promise<WardenLeftoverClose>;
 }
 
 /** The act a verdict asks for, before the owner's permissions are applied. */

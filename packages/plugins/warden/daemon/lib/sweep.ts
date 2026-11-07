@@ -203,7 +203,9 @@ import {
 import {
   jevActDetail,
   jevNudgeMessage,
+  leftAloneUnproved,
   mayActAlone,
+  type WardenLeftAlone,
   verdictAct,
   type WardenRemedyPort,
   type WardenVerdictAct,
@@ -625,6 +627,15 @@ export interface WardenSweepSettings extends WardenPromptSettings {
    * and nothing is typed to anyone.
    */
   readonly nudgesOverdue: boolean;
+  /**
+   * Whether the liveness reflex nudges a quiet ferret (`reflex`), or only detects.
+   *
+   * The act is safe only when the fleet says which ferrets declared a wait (they are never nudged) and each
+   * ferret's own nudge and frozen times (`reflexSettingsFor`): without those, a ferret waiting on CI by
+   * declaration, or started with a longer nudge time, is typed to after the default five minutes. False:
+   * `agent_frozen`, `sus_*` and `dead_monitor` still fire, and nothing is typed to anyone.
+   */
+  readonly reflexNudges: boolean;
   /** This machine's name, read when a notification is written, so one among every machine's says which. */
   readonly machineName?: () => string | undefined;
 }
@@ -1375,7 +1386,7 @@ export class WardenSweepService {
         });
         continue;
       }
-      if (!config.enabled || !config.mayActAlone.nudge) continue;
+      if (!this.settings.reflexNudges || !config.enabled || !config.mayActAlone.nudge) continue;
       const base = {
         at,
         sessionId: event.sessionId,
@@ -2198,18 +2209,43 @@ export class WardenSweepService {
         continue;
       }
       try {
-        const closed = await this.ports.remedies.closeLeftoverBrowsers(candidate.sessionId);
-        if (closed === 0) continue;
-        next = this.recordAction(next, {
-          ...base,
-          outcome: 'done',
-          detail: `Closed ${closed === 1 ? 'a leftover browser' : `${closed} leftover browsers`}: its turn had ended and nothing else of its own was running. The ferret itself was not touched.`,
-        });
-        this.ports.journal.record('fleet.warden_leftover_closed', {
-          sessionId: candidate.sessionId,
-          browsers: closed,
-          since: candidate.since,
-        });
+        const { closed, leftAlone } = await this.ports.remedies.closeLeftoverBrowsers(candidate.sessionId);
+        const left = leftAloneSentence(leftAlone);
+        const refused = leftAlone.filter(browser => browser.why === 'signal-refused').length;
+        if (closed > 0) {
+          next = this.recordAction(next, {
+            ...base,
+            outcome: 'done',
+            detail: `Closed ${closed === 1 ? 'a leftover browser' : `${closed} leftover browsers`}: its turn had ended and nothing else of its own was running. The ferret itself was not touched.${left}`,
+          });
+          this.ports.journal.record('fleet.warden_leftover_closed', {
+            sessionId: candidate.sessionId,
+            browsers: closed,
+            since: candidate.since,
+            leftAlone,
+          });
+        } else if (refused > 0) {
+          // Every browser it could prove refused the signal: the close did not take.
+          next = this.recordAction(next, {
+            ...base,
+            outcome: 'failed',
+            detail: `Closing its leftover browser did not take: the signal was refused.${left}`,
+          });
+        } else if (leftAlone.length > 0) {
+          // Nothing it could prove was there to close. A pid it could not prove ownership of is shown to the owner
+          // (held); `gone` / `tool-running` alone are a race, not an ownership question, so they are journal-only.
+          if (leftAloneUnproved(leftAlone))
+            next = this.recordAction(next, {
+              ...base,
+              outcome: 'held',
+              detail: `A browser this ferret launched is still running after its turn ended, but the Warden could not prove it is the ferret’s own, so it closed nothing.${left}`,
+            });
+          this.ports.journal.record('fleet.warden_leftover_left_alone', {
+            sessionId: candidate.sessionId,
+            since: candidate.since,
+            leftAlone,
+          });
+        }
       } catch (error) {
         next = this.recordAction(next, {
           ...base,
@@ -3859,4 +3895,10 @@ function withJevHandoff(
       ...(outcome.node === undefined ? {} : { node: outcome.node }),
     }),
   };
+}
+
+/** What a leftover close left alone, for the owner: each pid and the closed reason, never a command line. */
+function leftAloneSentence(leftAlone: readonly WardenLeftAlone[]): string {
+  if (leftAlone.length === 0) return '';
+  return ` Left alone: ${leftAlone.map(browser => `pid ${browser.pid} (${browser.why.replaceAll('-', ' ')})`).join(', ')}.`;
 }

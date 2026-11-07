@@ -23,6 +23,7 @@ import type {
   OwnerWordsOptions,
   TranscriptEventsOptions,
   TranscriptEventTail,
+  TranscriptLogTail,
   TranscriptPage,
 } from './wire-read.ts';
 import type { WorkRelatedRequest, WorkRelatedResponse, WorkSearchQuery, WorkSearchResponse } from './wire-search.ts';
@@ -94,6 +95,15 @@ export interface ConversationApi {
     ferret: FerretId,
     options?: TranscriptEventsOptions,
   ): Promise<Result<TranscriptEventTail, ConversationRefusal>>;
+  /**
+   * The same newest events as ONE text, EVERY kind rendered as the operator's log reads it (today's
+   * `operatorReads.logs`), masked inside one redaction read. What the Warden fingerprints to see that a transcript
+   * grew, a long think or a usage line included. Optional (additive); refuses as `transcriptEvents` does.
+   */
+  transcriptLog?(
+    ferret: FerretId,
+    options?: TranscriptEventsOptions,
+  ): Promise<Result<TranscriptLogTail, ConversationRefusal>>;
   /**
    * What the owner said to the ferret, turn by turn, as far as the records say who wrote each. Strict refuses when a
    * record cannot be read (`unreadable`), where the default answers with what it could.
