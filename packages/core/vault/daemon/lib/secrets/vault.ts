@@ -1,0 +1,222 @@
+/**
+ * The only thing in this daemon that opens a secret, and the only surface that changes one.
+ *
+ * TWO CLASSES ON PURPOSE, and the split is the security design rather than tidiness:
+ *
+ * - `SecretDirectory` is what a ROUTE is handed. It can list, replace and delete. It has no method
+ *   that returns a value and no field it could reach one through, so "there is no API that returns a
+ *   secret" is a fact about the type rather than a rule a reviewer has to check.
+ * - `SecretVault` opens ciphertext. Exactly two things are given one — the redactor, which turns
+ *   values into masks, and the use executor, which puts them in a child's environment and returns
+ *   only that child's scrubbed output. Neither hands a value back to its caller.
+ *
+ * If a future change needs a vault somewhere else, that is the moment to re-derive the whole
+ * property; adding a getter here quietly deletes it.
+ */
+
+import type { Clock } from '@ferretry/kernel/contract';
+import type { Instant } from '@ferretry/std';
+import { MAX_SECRETS_PER_DAEMON, type SecretName, type SecretSummary } from '../../../contract/index.ts';
+
+import {
+  type SealedSecret,
+  type SecretCipherPort,
+  type SecretDocumentStore,
+  SecretStoreError,
+  type SecretVaultDocument,
+} from './types.ts';
+
+/** The document a store that has never been written stands in for. */
+function emptyDocument(cipher: string): SecretVaultDocument {
+  return { format: 1, cipher, entries: {} };
+}
+
+/**
+ * A document whose cipher this daemon does not implement is DAMAGED, not empty.
+ *
+ * A daemon that silently ignored an unknown cipher would report an empty store over entries it
+ * simply cannot read, and the person would recreate every secret on top of them.
+ */
+function requireCipherMatch(document: SecretVaultDocument, algorithm: string): SecretVaultDocument {
+  if (document.cipher !== algorithm)
+    throw new SecretStoreError(
+      'unreadable',
+      `the vault was sealed with ${document.cipher}, which this daemon does not open`,
+    );
+  return document;
+}
+
+/** Name and timestamps, sorted by name so a listing is stable between reads. */
+function summaries(document: SecretVaultDocument): readonly SecretSummary[] {
+  return (
+    Object.entries(document.entries)
+      // The instants rest as the clock wrote them; the listing hands them back as the instants they are.
+      .map(([name, entry]) => ({ name, createdAt: entry.createdAt as Instant, updatedAt: entry.updatedAt as Instant }))
+      .sort((left, right) => left.name.localeCompare(right.name))
+  );
+}
+
+/**
+ * The management surface: what exists, replacing one, removing one.
+ *
+ * There is deliberately no `get`. A value goes in and is never handed back — not to a route, not to
+ * the CLI, not to a browser, not to a diagnostic. Replacing is the only edit, because a value is
+ * opaque: there is nothing to show a person that they could sensibly amend.
+ */
+export class SecretDirectory {
+  /**
+   * The change in progress. Every change reads the whole document and writes it back, so two at once would
+   * lose one: the second write would drop what the first added. Changes therefore take turns, over every
+   * writer this instance is handed to (the routes, a paste, an import, an MCP sign-in refresh).
+   */
+  private turn: Promise<unknown> = Promise.resolve();
+
+  constructor(
+    private readonly store: SecretDocumentStore,
+    private readonly cipher: SecretCipherPort,
+    private readonly clock: Clock,
+  ) {}
+
+  /** What this daemon holds. Raises `SecretStoreError` when it cannot tell — never an empty list. */
+  async list(): Promise<readonly SecretSummary[]> {
+    return summaries(await this.document());
+  }
+
+  /**
+   * Stores a value under a name, replacing whatever was there.
+   *
+   * `createdAt` SURVIVES a replacement: "this credential has existed since March and was rotated on
+   * Tuesday" is two different facts, and collapsing them loses the one an operator audits by.
+   */
+  async put(name: SecretName, value: string): Promise<SecretSummary> {
+    return await this.inTurn(async () => await this.write(await this.document(), name, value));
+  }
+
+  /**
+   * Stores a value only if the name still holds one exactly when `exists` says, checked and written in one
+   * turn: what a paste the owner allowed as "new" (or as "replaces") needs, so it can never overwrite a value
+   * that arrived after the card was drawn. Says what it found without writing: `changed`, `full`, or
+   * `unreadable` when the store cannot be read. A failure while WRITING still raises, because then the value
+   * may or may not be there.
+   */
+  async putIf(name: SecretName, value: string, exists: boolean): Promise<'stored' | 'changed' | 'full' | 'unreadable'> {
+    return await this.inTurn(async () => {
+      let document: SecretVaultDocument;
+      try {
+        document = await this.document();
+      } catch {
+        return 'unreadable';
+      }
+      if ((document.entries[name] !== undefined) !== exists) return 'changed';
+      if (!exists && Object.keys(document.entries).length >= MAX_SECRETS_PER_DAEMON) return 'full';
+      await this.write(document, name, value);
+      return 'stored';
+    });
+  }
+
+  /**
+   * Stores each value whose name the store does NOT hold, and leaves every name it does hold exactly as it is
+   * — value, `createdAt` and `updatedAt` all untouched. Checked and written in ONE turn and ONE document
+   * write, so a name that arrives between a caller's own `list()` and this call is kept rather than
+   * overwritten, and the batch is all or nothing: when the names that are missing would take the store past
+   * its limit, it raises `full` and writes nothing. Answers which names it stored, which it kept, and the instant it
+   * stored them at (each stored entry's `createdAt` and `updatedAt`).
+   *
+   * What a copy from another machine needs (docs/secrets.md): it can add a key, never replace one.
+   */
+  async putMissing<Name extends SecretName>(
+    entries: readonly (readonly [Name, string])[],
+  ): Promise<{ readonly stored: readonly Name[]; readonly kept: readonly Name[]; readonly at: Instant }> {
+    // A name given twice is stored once, with the first value.
+    const wanted = new Map<Name, string>();
+    for (const [name, value] of entries) if (!wanted.has(name)) wanted.set(name, value);
+    return await this.inTurn(async () => {
+      const document = await this.document();
+      const missing = [...wanted].filter(([name]) => document.entries[name] === undefined);
+      if (Object.keys(document.entries).length + missing.length > MAX_SECRETS_PER_DAEMON)
+        throw new SecretStoreError('full', `this daemon already holds ${MAX_SECRETS_PER_DAEMON} secrets`);
+      const at = this.clock.now();
+      const sealed = await Promise.all(
+        missing.map(
+          async ([name, value]): Promise<readonly [Name, SealedSecret]> => [
+            name,
+            { ...(await this.cipher.seal(name, value)), createdAt: at, updatedAt: at },
+          ],
+        ),
+      );
+      if (sealed.length > 0)
+        await this.store.write({ ...document, entries: { ...document.entries, ...Object.fromEntries(sealed) } });
+      const stored = new Set(sealed.map(([name]) => name));
+      return {
+        at,
+        stored: [...wanted.keys()].filter(name => stored.has(name)),
+        kept: [...wanted.keys()].filter(name => !stored.has(name)),
+      };
+    });
+  }
+
+  private async write(document: SecretVaultDocument, name: SecretName, value: string): Promise<SecretSummary> {
+    const existing = document.entries[name];
+    if (existing === undefined && Object.keys(document.entries).length >= MAX_SECRETS_PER_DAEMON)
+      throw new SecretStoreError('full', `this daemon already holds ${MAX_SECRETS_PER_DAEMON} secrets`);
+    const at = this.clock.now();
+    const sealed: SealedSecret = {
+      ...(await this.cipher.seal(name, value)),
+      createdAt: existing?.createdAt ?? at,
+      updatedAt: at,
+    };
+    await this.store.write({ ...document, entries: { ...document.entries, [name]: sealed } });
+    return { name, createdAt: sealed.createdAt as Instant, updatedAt: sealed.updatedAt as Instant };
+  }
+
+  /** Removes a secret. Answers whether there was one, so a caller can report an honest 404. */
+  async remove(name: SecretName): Promise<boolean> {
+    return await this.inTurn(async () => {
+      const document = await this.document();
+      if (document.entries[name] === undefined) return false;
+      const { [name]: _removed, ...rest } = document.entries;
+      await this.store.write({ ...document, entries: rest });
+      return true;
+    });
+  }
+
+  /** Runs one change after the one before it settles, whether that one succeeded or not. */
+  private async inTurn<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.turn.then(work, work);
+    this.turn = run.catch(() => undefined);
+    return await run;
+  }
+
+  private async document(): Promise<SecretVaultDocument> {
+    const stored = await this.store.read();
+    if (stored === undefined) return emptyDocument(this.cipher.algorithm);
+    return requireCipherMatch(stored, this.cipher.algorithm);
+  }
+}
+
+/**
+ * The plaintext side. Nothing that is handed one of these returns what it read.
+ *
+ * Deliberately NOT memoized. A cache would be hidden state whose invalidation is another thing to
+ * get wrong, and opening a few hundred small AES-GCM entries costs less than the file read that
+ * precedes it.
+ */
+export class SecretVault {
+  constructor(
+    private readonly store: SecretDocumentStore,
+    private readonly cipher: SecretCipherPort,
+  ) {}
+
+  /**
+   * Every secret this daemon holds, opened.
+   *
+   * A store that has never been written answers an EMPTY map, which is a fact. A store that is
+   * damaged raises, because the caller — redaction, or a launch — must not proceed believing there
+   * are no values to mask or to inject.
+   */
+  async values(): Promise<ReadonlyMap<SecretName, string>> {
+    const stored = await this.store.read();
+    if (stored === undefined) return new Map();
+    return await this.cipher.openAll(requireCipherMatch(stored, this.cipher.algorithm).entries);
+  }
+}
