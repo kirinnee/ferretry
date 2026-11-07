@@ -63,7 +63,7 @@ import {
 import { EventBus } from './events.ts';
 import { dependentsOf, type GraphRefusal, planGraph } from './graph.ts';
 import { type Deadline, HookEngine } from './hooks.ts';
-import { type InventoryEntry, kernelRoutes } from './kernel-half.ts';
+import { type InventoryEntry, type KernelHalfSources, kernelRoutes, kernelSockets } from './kernel-half.ts';
 import { JobRunner } from './jobs.ts';
 import type { ResponseCompressor } from './compression.ts';
 import { pluginsYamlLine, readAcceptedPlugins, writeAcceptedPlugins } from './accepted-plugins.ts';
@@ -828,17 +828,31 @@ async function bootLocked(
         contract: options.contractHash?.(manifest.id) ?? 'unhashed',
       };
     });
-  const kernelHandlers = kernelRoutes({
+  const project = (request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[] | undefined => {
+    const admission = bound.admission;
+    if (admission === undefined) return undefined;
+    try {
+      return admission.inventory(request, entries);
+    } catch {
+      return undefined;
+    }
+  };
+  const eventPublishers = new Map<string, string>(
+    manifests.flatMap(manifest => (manifest.data?.publishes ?? []).map(event => [event.name, manifest.id] as const)),
+  );
+  const kernelSources: KernelHalfSources = {
     version: options.version,
     inventory,
-    project: (request, entries) => {
-      const admission = bound.admission;
-      if (admission === undefined) return undefined;
-      try {
-        return admission.inventory(request, entries);
-      } catch {
-        return undefined;
-      }
+    project,
+    bus: {
+      subscribe: listener => events.onAny(listener),
+      publisher: name => eventPublishers.get(name),
+      // The same projection `GET /v1/plugins` answers with: what the caller may discover, core only without one.
+      admits: (request, plugin) => {
+        const entries = inventory();
+        const shown = project(request, entries) ?? entries.filter(entry => isCore(entry.id));
+        return shown.some(entry => entry.id === plugin);
+      },
     },
     snapshot: () => frozen as PostBuildSnapshot,
     doctor: async () => doctorReport([...bootNotes, ...(await doctorLines(records, hooks, jobs, data.refused))]),
@@ -847,7 +861,9 @@ async function bootLocked(
       uptimeSeconds: Math.max(0, Math.round((clock.nowMs() - startedAtMs) / 1000)),
       pid: options.pid ?? 0,
     }),
-  });
+  };
+  const kernelHandlers = kernelRoutes(kernelSources);
+  const kernelBus = kernelSockets(kernelSources);
   const routes: MountedRoute[] = [];
   const sockets: MountedSocket[] = [];
   const memberRoutes: MountedMemberRoute[] = [];
@@ -864,9 +880,11 @@ async function bootLocked(
       routes.push({ ...decl, owner, ...(handle === undefined ? {} : { handle }) });
     }
     for (const decl of manifest.actions?.sockets ?? []) {
-      const accept = (half?.sockets as Readonly<Record<string, unknown>> | undefined)?.[
-        decl.key
-      ] as MountedSocket['accept'];
+      const accept = (
+        manifest.id === 'kernel'
+          ? (kernelBus as Readonly<Record<string, unknown>>)
+          : (half?.sockets as Readonly<Record<string, unknown>> | undefined)
+      )?.[decl.key] as MountedSocket['accept'];
       sockets.push({ ...decl, owner, ...(accept === undefined ? {} : { accept }) });
     }
     for (const decl of manifest.actions?.memberRoutes ?? []) {

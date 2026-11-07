@@ -7,6 +7,8 @@ import { PROTOCOL } from '../contract/session.ts';
 import type { DoctorReport } from '../contract/doctor.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { RouteHandler } from '../contract/route.ts';
+import type { SocketAccept } from '../contract/socket.ts';
+import { busAccept, type BusSources } from './bus-socket.ts';
 import type kernelManifest from '../plugin.ts';
 
 type KernelRouteKey = NonNullable<(typeof kernelManifest)['actions']>['routes'][number]['key'];
@@ -19,9 +21,18 @@ export interface KernelHalfSources {
   /** Gate's per-standing projection (§9.6). `undefined` (no Gate, or it threw) = only the five core pieces. */
   project(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[] | undefined;
   snapshot(): PostBuildSnapshot;
+  /** What `GET /v1/bus` reads. */
+  bus: BusSources;
   /** A fresh diagnosis: every plugin's declared checks are run now. */
   doctor(): Promise<DoctorReport>;
   liveness(): { readonly status: 'starting' | 'ok'; readonly uptimeSeconds: number; readonly pid: number };
+}
+
+type KernelSocketKey = NonNullable<(typeof kernelManifest)['actions']>['sockets'][number]['key'];
+
+/** The kernel's own sockets: the event bus. */
+export function kernelSockets(sources: KernelHalfSources): Readonly<Record<KernelSocketKey, SocketAccept>> {
+  return { 'GET /v1/bus': busAccept(sources.bus) };
 }
 
 /** The kernel's own routes (§9.6, §1.3). Their descriptors are in `plugin.ts`. */

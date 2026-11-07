@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Carriers, DoctorChecks, defineConfig, PluginsChanged, SessionModes } from './contract/index.ts';
-import { definePlugin, route } from './manifest/index.ts';
+import { definePlugin, route, socket } from './manifest/index.ts';
 
 /** `config/plugins.yaml` (§3.6): on or off per plugin. Core is always on whatever it says. */
 export const PluginsYamlSchema = z.strictObject({
@@ -86,6 +86,15 @@ export default definePlugin({
         caller: 'any',
         audit: { skip: 'public vocabulary' },
         guard: { none: 'public vocabulary' },
+      }),
+    ],
+    sockets: [
+      // The plugin event bus (`PluginClient.subscribe`): one { name, payload } frame per event the caller may see.
+      socket('GET /v1/bus', {
+        minimum: 'authenticated',
+        caller: 'any',
+        audit: { skip: 'a live feed of wake-ups records nothing' },
+        guard: 'secrets',
       }),
     ],
   },
