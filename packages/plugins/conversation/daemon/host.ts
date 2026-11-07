@@ -159,7 +159,10 @@ export function buildConversationA(deps: {
   /** `question.json`: the question the ferret is waiting on, as the harness asked it (written where the transcript is read). */
   const askedQuestion = async (ferret: string): Promise<Question | undefined> => {
     const read = await kernel.state.read(QUESTION_STATE, ferret);
-    return read.ok ? read.value : undefined;
+    if (!read.ok || read.value === undefined) return undefined;
+    // The transcript it was proved against stays in the file: the route and the port answer the question only.
+    const { transcript: _proof, ...question } = read.value;
+    return question;
   };
 
   const mounts: MountRoute[] = [

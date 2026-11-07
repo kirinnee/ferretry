@@ -105,7 +105,7 @@ describe('the files a ferret’s conversation is kept in', () => {
   test('F-0331 the question a ferret asked is its question.json', async () => {
     const { state, touched } = recorded();
     expect(QUESTION_STATE.path).toBe('*/question.json');
-    expect(await readAskedQuestion(state, 'f1', '/home/user/transcript.jsonl', 0)).toBeUndefined();
+    expect(await readAskedQuestion(state, 'f1', '/home/user/transcript.jsonl')).toBeUndefined();
     expect(touched).toEqual(['*/question.json f1']);
   });
 
