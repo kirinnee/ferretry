@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import { type AccountList, type LoginFieldRole } from '../../../../daemon/lib/inputs/borrowed.ts';
-import { type AskId } from '@ferretry/core-asks/contract';
+import { type AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
 import { type InputDeliverBody, type InputEvent, padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import { type InputRaise, type InputTarget, type InputTargetFacts } from '../../../../contract/index.ts';
 import should from 'should';
@@ -80,7 +80,7 @@ function build(
 ) {
   const writes: Writes[] = [];
   const observed: (readonly InputTargetField[])[] = [];
-  const closed: AskId[] = [];
+  const closed: AgendaId[] = [];
   const cards: InputCard[] = [];
   const told: string[] = [];
   const fills: { id: string; role: LoginFieldRole }[] = [];
@@ -151,7 +151,7 @@ function build(
     agenda: {
       raise: async (_session, raised) => {
         cards.push(raised);
-        return { ok: true, id: `A${card++}` as AskId };
+        return { ok: true, id: `A${card++}` as AgendaId };
       },
       close: async (_session, cardId) => void closed.push(cardId),
       promptOf: async () => 'Google login for the deploy console',
@@ -516,12 +516,12 @@ describe('a card of several fields', () => {
       ...LOGIN,
       target: { kind: 'browser', key: 'two' },
       fields: [{ id: 'code', sensitivity: 'private', element: { kind: 'ref', ref: 'e3' } }],
-      chain: 'A1' as AskId,
+      chain: 'A1' as AgendaId,
     });
     await service.raise(SESSION, {
       ...LOGIN,
       target: { kind: 'browser', key: 'three' },
-      chain: 'A2' as AskId,
+      chain: 'A2' as AgendaId,
     });
     const requests = await service.list(HOST);
 
@@ -585,7 +585,7 @@ describe('a card of several fields', () => {
       {
         type: 'surface.input_requested',
         requestId: 'f'.repeat(32),
-        agendaItemId: 'A4' as AskId,
+        agendaItemId: 'A4' as AgendaId,
         sessionId: SESSION,
         target: { kind: 'browser', key: 'app' },
         sensitivity: 'secret',
@@ -699,10 +699,10 @@ describe('review regressions: a card of several fields', () => {
 
   it('should refuse a chain to a card that is not one of this session’s input requests', async () => {
     const { service } = build();
-    const unknown = await refused(service.raise(SESSION, { ...LOGIN, chain: 'A9' as AskId }));
+    const unknown = await refused(service.raise(SESSION, { ...LOGIN, chain: 'A9' as AgendaId }));
     await service.raise(SESSION, LOGIN);
     // A1 is this session's card; another session may not claim to continue it.
-    const foreign = await refused(service.raise('mvv6b4qw-0000other', { ...LOGIN, chain: 'A1' as AskId }));
+    const foreign = await refused(service.raise('mvv6b4qw-0000other', { ...LOGIN, chain: 'A1' as AgendaId }));
 
     should(unknown.message).equal(
       'chain names A9, which is not an input request of this session; raise this card without chain',

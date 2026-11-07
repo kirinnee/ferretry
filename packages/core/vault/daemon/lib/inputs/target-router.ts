@@ -8,7 +8,7 @@ import type {
   TypeOptions,
   TypeResult,
 } from './ports.ts';
-import type { ClearJob, ClearOutcome } from '../sign-in-grants/clear.ts';
+import type { ClearJob, ClearOutcome } from '../../../contract/index.ts';
 
 /**
  * Sends each request to the adapter for its kind of target: a terminal's (one value, one write), a page's, or the
@@ -28,7 +28,7 @@ export class InputTargetRouter implements InputTargetPort {
       return this.store === undefined
         ? { ok: false, reason: 'unsupported' }
         : await this.store.observe(sessionId, target, fields);
-    if (target.kind === 'browser') {
+    if (target.kind === 'page') {
       return this.browser === undefined
         ? { ok: false, reason: 'unsupported' }
         : await this.browser.observe(sessionId, target, fields);
@@ -42,7 +42,7 @@ export class InputTargetRouter implements InputTargetPort {
     fields: readonly InputTargetField[],
     expected: InputTargetFacts,
   ): Promise<ObserveResult> {
-    if (target.kind === 'browser')
+    if (target.kind === 'page')
       return this.browser?.refind === undefined
         ? { ok: false, reason: 'unsupported' }
         : await this.browser.refind(sessionId, target, fields, expected);
@@ -62,7 +62,7 @@ export class InputTargetRouter implements InputTargetPort {
       return this.store === undefined
         ? 'target_gone'
         : await this.store.type(sessionId, target, values, submit, expected);
-    if (target.kind === 'browser')
+    if (target.kind === 'page')
       return this.browser === undefined
         ? 'target_gone'
         : await this.browser.type(sessionId, target, values, submit, expected, options);
@@ -83,18 +83,18 @@ export class InputTargetRouter implements InputTargetPort {
     facts: InputTargetFacts,
     fieldIds: readonly string[],
   ): Promise<'hidden' | 'shown' | 'aborted'> {
-    if (target.kind !== 'browser' || this.browser?.probe === undefined) return 'aborted';
+    if (target.kind !== 'page' || this.browser?.probe === undefined) return 'aborted';
     return await this.browser.probe(sessionId, target, facts, fieldIds);
   }
 
   /** Only a page is cleared: a terminal's line-mode prompt consumes what was typed. */
   async clear(sessionId: string, target: InputTarget, job: ClearJob): Promise<ClearOutcome> {
-    if (target.kind !== 'browser' || this.browser?.clear === undefined) return 'unknown';
+    if (target.kind !== 'page' || this.browser?.clear === undefined) return 'unknown';
     return await this.browser.clear(sessionId, target, job);
   }
 
   async shoot(sessionId: string, target: InputTarget, facts: InputTargetFacts): Promise<InputShot | undefined> {
     // A terminal's card draws its own text; only a page is pictured.
-    return target.kind === 'browser' ? await this.browser?.shoot?.(sessionId, target, facts) : undefined;
+    return target.kind === 'page' ? await this.browser?.shoot?.(sessionId, target, facts) : undefined;
   }
 }

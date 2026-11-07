@@ -1,5 +1,4 @@
-import { AskIdSchema } from '@ferretry/core-asks/contract';
-import { durationWords, InstantSchema } from '@ferretry/std';
+import { durationWords } from '@ferretry/std';
 import { z } from 'zod';
 import {
   INPUT_MAX_FIELDS,
@@ -62,6 +61,18 @@ import {
  */
 
 /** Why a card's hold lasts as long as it does (the contract's `InputHoldReasonSchema`). */
+/** An ISO-8601 instant with an explicit timezone (today's `common.ts`, kept as written: an input card's times). */
+const InstantSchema = z.iso.datetime({ offset: true });
+
+/**
+ * The card an input request is drawn on, as today's agenda names it (`A12`). Asks' `AskId` is the same text; the
+ * adapter to Asks parses it at the boundary (`daemon/adapters/inputs/asks.ts`).
+ */
+export const AgendaIdSchema = z.string().regex(/^A[1-9][0-9]*$/u);
+export type AgendaId = z.infer<typeof AgendaIdSchema>;
+/** The longest card title today's agenda keeps; an input card's title is the daemon's own words, within it. */
+export const MAX_AGENDA_TITLE_LENGTH = 60;
+
 export type InputLockReason = z.infer<typeof InputHoldReasonSchema>;
 /** How long a card's hold lasts and why (the contract's `InputHoldSchema`). */
 export type InputLock = z.infer<typeof InputHoldSchema>;
@@ -357,7 +368,7 @@ export const InputRequestSchema = z.strictObject({
   /** From the agent's session credential, never from a body. */
   sessionId: boundedLine(128),
   /** The agenda card that presents it (`kind: 'input'`): the owner knows it as `!A<n>`. */
-  agendaItemId: AskIdSchema,
+  agendaItemId: AgendaIdSchema,
   /** A paste of a secure copy: where the value comes from. The owner allows it; there is nothing to type. */
   source: InputSourceSchema.optional(),
   target: InputTargetSchema,
@@ -369,7 +380,7 @@ export const InputRequestSchema = z.strictObject({
   submit: InputSubmitModeSchema,
   raisedAt: InstantSchema,
   expiresAt: InstantSchema,
-  chain: AskIdSchema.optional(),
+  chain: AgendaIdSchema.optional(),
   /** Which step of a chained login this is: 2 for the card that follows the first. Absent for a lone card. */
   step: z.number().int().min(2).max(16).optional(),
   observed: InputTargetFactsSchema.optional(),
@@ -401,7 +412,7 @@ export type InputRequest = z.infer<typeof InputRequestSchema>;
  * `secret`. `screen` is the target's text through the redactor.
  */
 export const InputAgentViewSchema = z.strictObject({
-  id: AskIdSchema,
+  id: AgendaIdSchema,
   state: InputRequestStateSchema,
   observed: z
     .strictObject({
@@ -645,7 +656,7 @@ export type InputJournalEventType = z.infer<typeof InputJournalEventTypeSchema>;
 export const InputEventSchema = z.strictObject({
   type: InputJournalEventTypeSchema,
   requestId: InputRequestIdSchema,
-  agendaItemId: AskIdSchema,
+  agendaItemId: AgendaIdSchema,
   sessionId: boundedLine(128),
   target: z.strictObject({ kind: InputTargetKindSchema, key: SurfaceKeySchema }),
   sensitivity: InputSensitivitySchema,

@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AskId } from '@ferretry/core-asks/contract';
+import { type AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
 import { type InputRaise, type InputTargetFacts } from '../../../../contract/index.ts';
 import { PutLoginEntryRequestSchema, type SignInId, type SignInRuleDraft, type SignInRuleId } from '../../../../daemon/lib/inputs/borrowed.ts';
 import { DAEMON_FEATURES, daemonFeatureList } from '@ferretry/protocol';
@@ -286,7 +286,7 @@ async function harness(options: Options = {}) {
         if (options.actDuringRaise === true) acted = clock.now;
         options.onRaise?.(h as Harness);
         quietAtRaise.push(service.quietCard(session, raised.requestId));
-        return { ok: true, id: `A${card++}` as AskId };
+        return { ok: true, id: `A${card++}` as AgendaId };
       },
       close: async (_session, at, note) => void closes.push(`${at}: ${note}`),
       promptOf: async () => undefined,
@@ -821,7 +821,7 @@ describe('the ferret reads no state a card with no rule never shows, even mid-fi
       onJournal: async (type, at) => {
         if (!type.endsWith('delivering')) return;
         // A concurrent input_wait at the last step before the write, then the owner revokes the rule.
-        during = JSON.stringify(await at.service.agentView(SESSION, 'A1' as AskId, 0));
+        during = JSON.stringify(await at.service.agentView(SESSION, 'A1' as AgendaId, 0));
         const id = at.rules.fillable()[0]?.body.id;
         if (id !== undefined) await at.rules.revoke({ kind: 'owner', actor: { kind: 'host' } }, id);
       },
@@ -851,7 +851,7 @@ describe('the ferret reads no state a card with no rule never shows, even mid-fi
 
     const raising = raised(h);
     await atCheck;
-    const during = JSON.stringify(await h.service.agentView(SESSION, 'A1' as AskId, 0));
+    const during = JSON.stringify(await h.service.agentView(SESSION, 'A1' as AgendaId, 0));
     h.proofs.held.clear();
     open();
     const { view } = await raising;
@@ -865,7 +865,7 @@ describe('the ferret reads no state a card with no rule never shows, even mid-fi
     let waiting: Promise<unknown> | undefined;
     const h = await harness({
       onJournal: async (type, at) => {
-        if (type.endsWith('delivering')) waiting = at.service.agentView(SESSION, 'A1' as AskId, 60_000);
+        if (type.endsWith('delivering')) waiting = at.service.agentView(SESSION, 'A1' as AgendaId, 60_000);
       },
     });
     await ruleFor(h, await github(h));

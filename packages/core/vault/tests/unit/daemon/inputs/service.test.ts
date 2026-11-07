@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AskId } from '@ferretry/core-asks/contract';
+import { type AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
 import { INPUT_MAX_REBINDS, type InputRaise, type InputTargetFacts } from '../../../../contract/index.ts';
 import { type InputDeliverBody, type InputEvent, type InputQuarantineEvent, type InputRequest, padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import should from 'should';
@@ -58,8 +58,8 @@ interface World {
   /** Times the target was looked for again after it changed under the card. */
   refinds: number;
   cards: InputCard[];
-  closed: { id: AskId; note: string }[];
-  told: { id: AskId; message: string }[];
+  closed: { id: AgendaId; note: string }[];
+  told: { id: AgendaId; message: string }[];
   audits: InputAuditEntry[];
   events: InputEvent[];
   names: string[] | undefined;
@@ -190,7 +190,7 @@ function build(overrides: Partial<World> = {}) {
       raise: async (_session, card) => {
         if (!w.cardOk) return { ok: false, message: 'the board is full' };
         w.cards.push(card);
-        return { ok: true, id: `A${w.nextCard++}` as AskId };
+        return { ok: true, id: `A${w.nextCard++}` as AgendaId };
       },
       close: async (_session, id, note) => void w.closed.push({ id, note }),
       promptOf: async () => {
@@ -319,7 +319,7 @@ describe('InputRequestService.raise', () => {
       ...RAISE,
       target: { kind: 'terminal', key: 'other' },
       sensitivity: 'plain',
-      chain: 'A1' as AskId,
+      chain: 'A1' as AgendaId,
     });
 
     should(built.w.cards.map(card => card.title)).eql(['Needs an answer', 'Needs an answer']);
@@ -381,7 +381,7 @@ describe('InputRequestService.raise', () => {
   });
 });
 
-async function findId(service: InputRequestService, card: AskId): Promise<string | undefined> {
+async function findId(service: InputRequestService, card: AgendaId): Promise<string | undefined> {
   const open = await service.list(HOST);
   return open.find(request => request.agendaItemId === card)?.id;
 }
@@ -781,7 +781,7 @@ describe('the value never leaves the one write', () => {
     const result = await service.deliver(SESSION, id, bodyFor(digest), HOST);
     seen.push(
       result,
-      await service.agentView(SESSION, 'A1' as AskId, 0),
+      await service.agentView(SESSION, 'A1' as AgendaId, 0),
       await service.list(HOST),
       w.cards,
       w.closed,
@@ -860,9 +860,9 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
 
   it('should end a request when its card is dismissed, once', async () => {
     const { w, service } = await raised();
-    await service.cardDismissed(SESSION, 'A1' as AskId);
-    await service.cardDismissed(SESSION, 'A1' as AskId);
-    await service.cardDismissed(SESSION, 'A9' as AskId);
+    await service.cardDismissed(SESSION, 'A1' as AgendaId);
+    await service.cardDismissed(SESSION, 'A1' as AgendaId);
+    await service.cardDismissed(SESSION, 'A9' as AgendaId);
 
     should(w.closed.length).equal(0);
     should(w.told.length).equal(1);
@@ -879,7 +879,7 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
     should(w.told[0]?.message).containEql('expired');
     // The card closes in words that say it once (#B147).
     should(w.closed[0]?.note).equal('Input request expired.');
-    should((await service.agentView(SESSION, 'A1' as AskId, 0)).state).equal('expired');
+    should((await service.agentView(SESSION, 'A1' as AgendaId, 0)).state).equal('expired');
   });
 
   it('should find what is pending on a terminal and nothing after the end', async () => {
@@ -911,7 +911,7 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
 
   it('should let the agent wait for the answer and wake as soon as it comes', async () => {
     const { w, service, id, digest } = await raised();
-    const waiting = service.agentView(SESSION, 'A1' as AskId, 5_000);
+    const waiting = service.agentView(SESSION, 'A1' as AgendaId, 5_000);
     await service.deliver(SESSION, id, bodyFor(digest), HOST);
     const view = await waiting;
 
@@ -923,7 +923,7 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
 
   it('should return the pending view when the wait runs out', async () => {
     const { w, service } = await raised();
-    const waiting = service.agentView(SESSION, 'A1' as AskId, 5_000);
+    const waiting = service.agentView(SESSION, 'A1' as AgendaId, 5_000);
     await Promise.resolve();
     w.sleeps[0]?.();
 
@@ -932,8 +932,8 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
 
   it('should say an agent has no such request', async () => {
     const { service } = await raised();
-    const error = await refused(service.agentView(SESSION, 'A9' as AskId, 0));
-    const wrong = await refused(service.agentView('x-1', 'A1' as AskId, 0));
+    const error = await refused(service.agentView(SESSION, 'A9' as AgendaId, 0));
+    const wrong = await refused(service.agentView('x-1', 'A1' as AgendaId, 0));
 
     should(error.code).equal('not_found');
     should(wrong.code).equal('not_found');
@@ -976,7 +976,7 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
     const restoring = second.service.restore();
     await new Promise(resolve => setTimeout(resolve, 0));
     const [back] = await second.service.list(HOST);
-    const view = await second.service.agentView(SESSION, 'A1' as AskId, 0);
+    const view = await second.service.agentView(SESSION, 'A1' as AgendaId, 0);
     const error = await refused(second.service.deliver(SESSION, back?.id ?? '', bodyFor('a'.repeat(64)), HOST));
     release();
     await restoring;

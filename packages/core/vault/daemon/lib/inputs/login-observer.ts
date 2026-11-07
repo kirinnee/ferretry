@@ -221,7 +221,7 @@ const hostOf = (origin: string): string | undefined => {
 
 /** Where a delivery's facts belong: the page's host, or the terminal's key. */
 export function placeOf(facts: InputTargetFacts, matchKey: string | undefined): string | undefined {
-  if (facts.kind === 'browser') return hostOf(facts.origin);
+  if (facts.kind === 'page') return hostOf(facts.origin);
   if (facts.kind === 'terminal') return matchKey;
   return undefined;
 }
@@ -231,7 +231,7 @@ export function placeOf(facts: InputTargetFacts, matchKey: string | undefined): 
  * per field, the frame's origin, the tag and the attributes that say what it is. A terminal: the place and the program.
  */
 export function identityOf(facts: InputTargetFacts, place: string): string | undefined {
-  if (facts.kind === 'browser')
+  if (facts.kind === 'page')
     return digest([
       'page',
       facts.origin,
@@ -269,7 +269,7 @@ function rootPromptProved(facts: InputTargetFacts): boolean {
 /** Every secret field went into a password input, or the terminal hid typing for a program that asks for secrets. */
 export function maskedAt(facts: InputTargetFacts, fields: readonly InputRequestField[]): boolean | undefined {
   if (facts.kind === 'terminal') return facts.echo === 'off' && facts.recognisedConsumer;
-  if (facts.kind !== 'browser') return undefined;
+  if (facts.kind !== 'page') return undefined;
   const secret = new Set(fields.filter(field => field.sensitivity !== 'plain').map(field => field.id));
   const typed = facts.fields.filter(field => secret.has(field.fieldId));
   return typed.length > 0 && typed.every(field => field.field.tag === 'input' && field.field.type === 'password');
@@ -422,7 +422,7 @@ export class LoginObserver {
    * (so an act armed before the card counts too), or, for a page, it ever ran a page script in this session.
    */
   private steered(delivery: LoginDelivery): boolean {
-    const kind = delivery.target.kind === 'browser' ? 'browser' : 'terminal';
+    const kind = delivery.target.kind === 'page' ? 'browser' : 'terminal';
     if (kind === 'browser' && this.scripted.has(delivery.sessionId)) return true;
     // A raise time that cannot be read counts as steered: no fact is kept on a clock it cannot trust.
     if (!Number.isFinite(delivery.since)) return true;
@@ -439,7 +439,7 @@ export class LoginObserver {
     if (place === undefined) return;
     const identity = identityOf(delivery.facts, place);
     if (identity === undefined) return;
-    const surface = delivery.facts.kind === 'browser' ? 'page' : 'terminal';
+    const surface = delivery.facts.kind === 'page' ? 'page' : 'terminal';
     const base = { at: place, surface, identity } as const;
     const codeField = delivery.fields.some(field => field.sensitivity === 'code' || field.sensitivity === 'private');
     const passwordField = delivery.fields.some(field => field.sensitivity === 'secret');
@@ -485,9 +485,9 @@ export class LoginObserver {
    * Total.
    */
   async codeTyped(typed: CodeDelivery): Promise<boolean | undefined> {
-    const kind = typed.target.kind === 'browser' ? 'browser' : 'terminal';
+    const kind = typed.target.kind === 'page' ? 'browser' : 'terminal';
     const worked =
-      typed.facts.kind === 'browser'
+      typed.facts.kind === 'page'
         ? await this.pageMoved(typed, typed.facts.navigationId)
         : typed.facts.kind === 'terminal'
           ? await this.promptLeft(typed, typed.facts.promptLine)
@@ -548,7 +548,7 @@ export class LoginObserver {
     waiting: Awaiting,
     codeField: boolean,
   ): Promise<void> {
-    const startDocument = delivery.facts.kind === 'browser' ? delivery.facts.navigationId : undefined;
+    const startDocument = delivery.facts.kind === 'page' ? delivery.facts.navigationId : undefined;
     const elapsed = (): number => this.ports.now() - delivery.deliveredAt;
     const keep = async (seen: Omit<LoginObservation, 'at' | 'surface' | 'identity'>): Promise<void> => {
       if (!this.steered(delivery)) await this.record(signIn, { ...base, ...seen });
@@ -559,7 +559,7 @@ export class LoginObserver {
     };
     // The page is watched from the submit, so a page that moves on before the echo looks is seen moving.
     const watch = async (): Promise<void> => {
-      if (delivery.target.kind !== 'browser' || startDocument === undefined) return;
+      if (delivery.target.kind !== 'page' || startDocument === undefined) return;
       let moved: boolean | undefined;
       // The owner's own device tap writes `tapped` in the same keep, so it is decided and steered exactly as moving on is.
       const tap = delivery.by !== undefined && ownerTapped(delivery.by);
@@ -609,7 +609,7 @@ export class LoginObserver {
       if (signIn === undefined) continue;
       void this.record(signIn, {
         at: waiting.place,
-        surface: waiting.delivery.facts.kind === 'browser' ? 'page' : 'terminal',
+        surface: waiting.delivery.facts.kind === 'page' ? 'page' : 'terminal',
         identity,
         secondFactor: 'code',
       });
@@ -664,7 +664,7 @@ export class InputLoginProbe implements LoginProbePort {
   ): Promise<boolean | undefined> {
     if (values.length === 0) return undefined;
     const text =
-      target.kind === 'browser'
+      target.kind === 'page'
         ? await this.pages.text(sessionId, target.key, surfaces)
         : target.kind === 'terminal'
           ? await this.terminals?.screen(sessionId, target.key, surfaces)

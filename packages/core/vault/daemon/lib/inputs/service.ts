@@ -1,13 +1,14 @@
 import { type AccountId, type AccountKey, type CopyMeta, copyHandle, factorAskWords, fillRoleFor, grantFilledLineFor, type GrantMissReason, LOGIN_PASSWORD_MIN_LENGTH, LOGIN_USERNAME_MAX_LENGTH, type LoginEntryId, type PushSubject, placeKeys, type SignInChoiceContext, type SignInId, TASK_PLAN_MISS_AGENT_NOTE, type TwoFactorId } from './borrowed.ts';
-import { type AskId, MAX_ASK_SUBJECT_LENGTH } from '@ferretry/core-asks/contract';
+import { type AgendaId, MAX_AGENDA_TITLE_LENGTH } from './wire.ts';
 import { INPUT_DEFAULT_EXPIRY_SECONDS, INPUT_MAX_CHECK_FAILURES, INPUT_MAX_PENDING_PER_FERRET, INPUT_MAX_RAISES_PER_HOUR, INPUT_MAX_REBINDS, INPUT_PROMPT_MAX_LENGTH, INPUT_QUARANTINE_SECONDS, type InputFieldRaise, type InputRaise, type InputSensitivity, type InputShot, type InputTarget, type InputTargetFacts, strongestSensitivity } from '../../../contract/index.ts';
 import { INPUT_ERROR_CODES, INPUT_JOURNAL_EVENT_TYPES, INPUT_QUARANTINE_EVENT_TYPES, INPUT_CODE_VISIBLE_NOTICE, INPUT_PLAIN_VALUE_NOTICE, INPUT_QUARANTINE_WORDS, INPUT_SINGLE_FIELD_ID, type InputActor, type InputAgentView, type InputAuditDetail, type InputAuditEvent, type InputDeliverBody, type InputDeliverResult, type InputEvent, type InputQuarantine, type InputQuarantineEvent, type InputReason, type InputRequest, type InputRequestField, type InputRisk, inputRaiseFields, inputValueProblem, observerByOf, savedRolesOf, unpadInputValue, worstRisk } from './wire.ts';
-import { LoginEntryError, type LoginFieldValues } from '../secrets/accounts.ts';
-import { type ClearJob, type ClearOutcome, clearJobOf } from '../sign-in-grants/clear.ts';
-import type { GrantReservation } from '../sign-in-grants/ledger.ts';
-import { type GrantMatch, type GrantSighting, matchSignInGrant, type SignInGrant } from '../sign-in-grants/matcher.ts';
-import type { SignInGrantSource } from '../sign-in-grants/plans.ts';
-import { GRANT_MISS_CONTEXT_LINE, grantStops } from '../sign-in-grants/reasons.ts';
+import { LoginEntryError, type LoginFieldValues } from './borrowed.ts';
+import type { ClearJob, ClearOutcome } from '../../../contract/index.ts';
+import { clearJobOf } from './borrowed-grants.ts';
+import type { GrantReservation } from './borrowed-grants.ts';
+import { type GrantMatch, type GrantSighting, matchSignInGrant, type SignInGrant } from './borrowed-grants.ts';
+import type { SignInGrantSource } from './borrowed-grants.ts';
+import { GRANT_MISS_CONTEXT_LINE, grantStops } from './borrowed-grants.ts';
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
@@ -148,7 +149,7 @@ interface Held {
    * The cards this request was shown on before its current one: a code Ferretry made that did not go through opens the
    * request again on a new card ({@link InputRequestService.reopen}), and the ferret may still wait on the old id.
    */
-  readonly formerCards: AskId[];
+  readonly formerCards: AgendaId[];
   /** The target's key for saved logins (`sudo@kirin-box`), from what the DAEMON saw; never from the agent. */
   matchKey?: string;
   /**
@@ -189,7 +190,7 @@ const isPageHold = (hold: QuarantineHold): boolean => hold.names.every(name => n
 /** The names a hold on a request's target takes: its key and up to three more it was seen under, a page's marked. */
 function holdNames(request: InputRequest, seenNames: readonly string[] | undefined): readonly string[] {
   const surfaceNames = [...new Set([request.target.key, ...(seenNames ?? [])])].slice(0, 4);
-  return request.target.kind === 'browser' ? surfaceNames.map(pageName) : surfaceNames;
+  return request.target.kind === 'page' ? surfaceNames.map(pageName) : surfaceNames;
 }
 
 /** How long before a grant fill's page hold ends its clear takes a hold of its own and runs. */
@@ -347,7 +348,7 @@ export class InputRequestService {
     const sensitivity = strongestSensitivity(fields);
     // A page is pictured now, before the owner is asked and long before anything is typed into it.
     const shot =
-      seen.facts.kind === 'browser'
+      seen.facts.kind === 'page'
         ? await this.deps.target.shoot?.(sessionId, target, seen.facts).catch(() => undefined)
         : undefined;
     // How long the target is kept from the ferret after the write (lock.ts): only what the daemon saw decides it.
@@ -514,7 +515,7 @@ export class InputRequestService {
         binding: bindingOf(seen.facts),
         title,
         formerCards: [],
-        ...(seen.facts.kind === 'browser' ? { raisedOn: seen.facts.navigationId } : {}),
+        ...(seen.facts.kind === 'page' ? { raisedOn: seen.facts.navigationId } : {}),
         ...(matchKey === undefined ? {} : { matchKey }),
         ...(raise.secretHint === undefined ? {} : { hint: raise.secretHint }),
         ...(await this.redactedTypedUsername(sessionId, seen.facts, matchKey)),
@@ -798,7 +799,7 @@ export class InputRequestService {
         seen.now,
         {
           place: seen.matchKey,
-          ...(facts.kind === 'browser' ? { pageId: facts.pageId, navigationId: facts.navigationId } : {}),
+          ...(facts.kind === 'page' ? { pageId: facts.pageId, navigationId: facts.navigationId } : {}),
           // The ferret did nothing to the session's pages since then (reads and waits are no acts).
           untouchedSince: (at: number) => !this.tainted(held.request.sessionId, at),
         },
@@ -989,7 +990,7 @@ export class InputRequestService {
    * of THIS session's input requests that this daemon holds: another session's card, an unknown one, or one from
    * before a restart is refused, so a card never claims to continue a login it is not part of.
    */
-  private stepAfter(sessionId: string, chain: AskId): number {
+  private stepAfter(sessionId: string, chain: AgendaId): number {
     const before = this.byCard(sessionId, chain);
     if (before === undefined)
       throw new InputRequestError(
@@ -1000,7 +1001,7 @@ export class InputRequestService {
   }
 
   /** What the agent reads about its request: where it stands, never the value. Waits up to `waitMs` for a final state. */
-  async agentView(sessionId: string, id: AskId, waitMs: number): Promise<InputAgentView> {
+  async agentView(sessionId: string, id: AgendaId, waitMs: number): Promise<InputAgentView> {
     await this.sweep();
     const held = this.byCard(sessionId, id);
     if (held === undefined) throw new InputRequestError('not_found', `no input request ${id} in this session`);
@@ -1196,7 +1197,7 @@ export class InputRequestService {
     sessionId: string,
     target: { readonly kind: string; readonly key: string },
     options?: { readonly typing?: boolean },
-  ): AskId | undefined {
+  ): AgendaId | undefined {
     for (const { request } of this.held.values()) {
       if (request.sessionId !== sessionId || isFinal(request)) continue;
       if (options?.typing === true && request.fields.every(field => field.sensitivity === 'code')) continue;
@@ -1351,7 +1352,7 @@ export class InputRequestService {
       const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true);
       const shown = await this.project(sessionId, seen.facts, names);
       const shot =
-        seen.facts.kind === 'browser'
+        seen.facts.kind === 'page'
           ? await this.deps.target.shoot?.(sessionId, request.target, seen.facts).catch(() => undefined)
           : undefined;
       this.raising.set(request.id, { sessionId, subject: 'one-time-code' });
@@ -1375,7 +1376,7 @@ export class InputRequestService {
       held.binding = bindingOf(seen.facts);
       held.probed = false;
       rekey(held, targetMatchKey(seen.facts, this.deps.hostName ?? ''));
-      if (seen.facts.kind === 'browser') held.raisedOn = seen.facts.navigationId;
+      if (seen.facts.kind === 'page') held.raisedOn = seen.facts.navigationId;
       if (shot === undefined) delete held.shot;
       else held.shot = shot;
       held.request = {
@@ -1420,7 +1421,7 @@ export class InputRequestService {
   }
 
   /** The owner dismissed the card without answering: the request ends, and the card is already closed. */
-  async cardDismissed(sessionId: string, id: AskId): Promise<void> {
+  async cardDismissed(sessionId: string, id: AgendaId): Promise<void> {
     const held = this.byCard(sessionId, id);
     // Only the card the request is on now: a card it was on before is closed already, and says nothing of this one.
     if (held === undefined || held.request.state !== 'pending' || held.request.agendaItemId !== id) return;
@@ -1543,7 +1544,7 @@ export class InputRequestService {
       .filter(
         held =>
           held.request.sessionId === sessionId &&
-          held.request.target.kind === 'browser' &&
+          held.request.target.kind === 'page' &&
           held.navigation !== undefined &&
           held.names.some(name => marked.includes(pageName(name))),
       )
@@ -1644,7 +1645,7 @@ export class InputRequestService {
     }
     // A page's fields are named by elements the journal does not keep (they are the agent's words), and a page
     // rarely outlives the daemon: its card ends, and the agent raises it again if it still needs the values.
-    if (target.kind === 'browser') {
+    if (target.kind === 'page') {
       await this.finish(held, 'cancelled', 'interrupted', undefined, { closeCard: true, tellAgent: true });
       return;
     }
@@ -1801,7 +1802,7 @@ export class InputRequestService {
         values.push({ field: field.id, text });
       }
       held.names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
-      if (seen.facts.kind === 'browser') held.navigation = seen.facts.navigationId;
+      if (seen.facts.kind === 'page') held.navigation = seen.facts.navigationId;
       // Checked again at the write, AFTER any saved value was opened (so a saved login still fills the role the owner
       // chose): a code field now going into a password is held, masked and recorded as a secret. Never back.
       const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true);
@@ -1876,7 +1877,7 @@ export class InputRequestService {
       // that document (`until-moved-on`, secrev-1333 M1), once the browser armed its pagehide clear: a page that moves
       // on and comes back from the back/forward cache then shows the field empty. Unarmed, it keeps the plain window.
       const follows =
-        clear === undefined && seen.facts.kind === 'browser' && held.request.lock?.reason === 'until-moved-on';
+        clear === undefined && seen.facts.kind === 'page' && held.request.lock?.reason === 'until-moved-on';
       const arming = { armed: false };
       const outcome: TypeResult = await this.deps.target
         .type(request.sessionId, request.target, values, submitted, seen.facts, {
@@ -2059,7 +2060,7 @@ export class InputRequestService {
   }
 
   private signInMovedOn(request: InputRequest, facts: InputTargetFacts): void {
-    if (facts.kind !== 'browser' || !request.fields.some(field => field.sensitivity === 'secret')) return;
+    if (facts.kind !== 'page' || !request.fields.some(field => field.sensitivity === 'secret')) return;
     this.deps.identities?.cleared?.(request.sessionId, facts.pageId);
   }
 
@@ -2242,7 +2243,7 @@ export class InputRequestService {
    * with no observer wired. Nothing is asked of a terminal: its lock never reads the ferret's acts.
    */
   private steerOf(sessionId: string, facts: InputTargetFacts, since: number): PageSteer | undefined {
-    if (facts.kind !== 'browser') return undefined;
+    if (facts.kind !== 'page') return undefined;
     const host = placeOf(facts, undefined);
     const site = host === undefined ? undefined : siteOf(host);
     const machine = this.deps.grants?.scriptedOrigins();
@@ -2278,7 +2279,7 @@ export class InputRequestService {
    */
   private liveLock(request: InputRequest): InputRequest['lock'] {
     const { lock, observed } = request;
-    if (lock === undefined || request.state !== 'pending' || observed?.kind !== 'browser') return lock;
+    if (lock === undefined || request.state !== 'pending' || observed?.kind !== 'page') return lock;
     const steered = this.steerOf(request.sessionId, observed, Date.parse(request.raisedAt));
     return steered === undefined ? lock : longerLock(lock, steeredLock(steered));
   }
@@ -2535,7 +2536,7 @@ export class InputRequestService {
    */
   private async refound(held: Held, looked: ObserveResult): Promise<ObserveResult> {
     const { request, binding } = held;
-    if (request.target.kind !== 'browser' && binding !== undefined && looked.ok && mayRebind(binding, looked.facts))
+    if (request.target.kind !== 'page' && binding !== undefined && looked.ok && mayRebind(binding, looked.facts))
       return looked;
     if (request.observed === undefined || this.deps.target.refind === undefined) return looked;
     return await this.deps.target.refind(
@@ -2586,13 +2587,13 @@ export class InputRequestService {
     rekey(held, targetMatchKey(seen.facts, this.deps.hostName ?? ''));
     // A card redrawn onto another document than the one it was raised on says so, above any other flag but red.
     const moved =
-      seen.facts.kind === 'browser' && held.raisedOn !== undefined && seen.facts.navigationId !== held.raisedOn;
+      seen.facts.kind === 'page' && held.raisedOn !== undefined && seen.facts.navigationId !== held.raisedOn;
     const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true).map(
       field => (moved ? { ...field, risk: worstRisk([NEW_DOCUMENT_FLAG, field.risk]) as InputRisk } : field),
     );
     // The new picture is taken before the owner is asked again, exactly as at raise.
     const shot =
-      seen.facts.kind === 'browser'
+      seen.facts.kind === 'page'
         ? await this.deps.target.shoot?.(request.sessionId, request.target, seen.facts).catch(() => undefined)
         : undefined;
     if (shot === undefined) delete held.shot;
@@ -2733,7 +2734,7 @@ export class InputRequestService {
     held.waiters.clear();
   }
 
-  private byCard(sessionId: string, id: AskId): Held | undefined {
+  private byCard(sessionId: string, id: AgendaId): Held | undefined {
     for (const held of this.held.values()) {
       if (held.request.sessionId === sessionId && held.request.agendaItemId === id) return held;
     }
@@ -2753,7 +2754,7 @@ export class InputRequestService {
     const facts =
       request.observed?.kind === 'terminal' && quarantined ? maskedFacts(request.observed) : request.observed;
     const terminal = facts?.kind === 'terminal' ? facts : undefined;
-    const page = facts?.kind === 'browser' ? facts : undefined;
+    const page = facts?.kind === 'page' ? facts : undefined;
     const pending = request.state === 'pending';
     return {
       id: request.agendaItemId,
@@ -2813,7 +2814,9 @@ export class InputRequestService {
     submitted?: boolean,
     deliveryId?: string,
   ): Promise<void> {
-    await this.deps.journal.publish(request.sessionId, {
+    await this.deps.journal.publish(
+      request.sessionId,
+      {
       type: INPUT_JOURNAL_EVENT_TYPES[kind],
       requestId: request.id,
       agendaItemId: request.agendaItemId,
@@ -2826,9 +2829,11 @@ export class InputRequestService {
       ...(deliveryId === undefined ? {} : { deliveryId }),
       ...(submitted === undefined ? {} : { submitted }),
       ...(reason === undefined ? {} : { reason }),
-      ...(kind === 'requested' || kind === 'delivering' ? { expiresAt: request.expiresAt } : {}),
-      at: instant(this.deps.clock.now()),
-    });
+        ...(kind === 'requested' || kind === 'delivering' ? { expiresAt: request.expiresAt } : {}),
+        at: instant(this.deps.clock.now()),
+      },
+      request,
+    );
   }
 
   private async record(
@@ -3049,7 +3054,7 @@ function riskOf(field: Pick<InputRequestField, 'id' | 'sensitivity'>, facts: Inp
     return facts.exists
       ? { level: 'amber', reason: 'This replaces the value the secret holds now; the old value is gone for good.' }
       : { level: 'green', reason: 'Saved encrypted on this machine; ferrets can use it by name and never read it.' };
-  if (facts.kind === 'browser') return pageRiskOf(field, facts);
+  if (facts.kind === 'page') return pageRiskOf(field, facts);
   if (sensitivity === 'private') return { level: 'amber', reason: PRIVATE_FLAG };
   if (sensitivity === 'code') return CODE_FLAG;
   if (facts.echo === 'on')
@@ -3104,7 +3109,7 @@ const PAGE_PRIVATE_FLAG = `This value will show on the page; Ferretry hides the 
  */
 function pageRiskOf(
   field: Pick<InputRequestField, 'id' | 'sensitivity'>,
-  facts: Extract<InputTargetFacts, { readonly kind: 'browser' }>,
+  facts: Extract<InputTargetFacts, { readonly kind: 'page' }>,
 ): InputRisk {
   const found = facts.fields.find(each => each.fieldId === field.id);
   if (found === undefined || !found.visible)
@@ -3136,8 +3141,8 @@ const CODE_DID_NOT_GO_THROUGH = "The saved key's code didn't go through: type th
 
 /** A title cut to what an agenda card holds, on a word where it can be. */
 function clipped(title: string): string {
-  if (title.length <= MAX_ASK_SUBJECT_LENGTH) return title;
-  return `${title.slice(0, MAX_ASK_SUBJECT_LENGTH - 1).trimEnd()}…`;
+  if (title.length <= MAX_AGENDA_TITLE_LENGTH) return title;
+  return `${title.slice(0, MAX_AGENDA_TITLE_LENGTH - 1).trimEnd()}…`;
 }
 
 /**
@@ -3165,7 +3170,7 @@ function typedUsernameAt(
   facts: InputTargetFacts,
   matchKey: string | undefined,
 ): Pick<Held, 'typedUsername'> {
-  if (identities === undefined || facts.kind !== 'browser' || matchKey === undefined) return {};
+  if (identities === undefined || facts.kind !== 'page' || matchKey === undefined) return {};
   const typed = identities.at(sessionId, facts.pageId, matchKey);
   return typed === undefined ? {} : { typedUsername: typed };
 }
@@ -3226,7 +3231,7 @@ function ruleMayPaste(copy: CopyMeta, facts: InputTargetFacts, fields: readonly 
   // On a page, a rule names the TOP page's origin, so it pastes unasked only where the card would be green for
   // every field: a visible, uncovered password field of that very page (not a frame from another site), on https,
   // with no challenge showing. Anything the card would flag waits for the owner.
-  if (facts.kind === 'browser')
+  if (facts.kind === 'page')
     return facts.challenge === undefined && fields.every(field => pageRiskOf(field, facts).level === 'green');
   return true;
 }

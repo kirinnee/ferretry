@@ -44,7 +44,7 @@ const FULL = (reason: InputLock['reason']): InputLock => ({ seconds: INPUT_QUARA
 
 /** Every secret field of a page goes into a password input the card would flag green. */
 export function pageFieldsQualify(facts: InputTargetFacts, fields: readonly InputRequestField[]): boolean {
-  if (facts.kind !== 'browser' || !facts.secure || facts.challenge !== undefined) return false;
+  if (facts.kind !== 'page' || !facts.secure || facts.challenge !== undefined) return false;
   const secret = fields.filter(field => field.sensitivity === 'secret').map(field => field.id);
   const typed = facts.fields.filter(field => secret.includes(field.fieldId));
   return (
@@ -204,7 +204,7 @@ export function passwordTarget(
     if (facts.echo !== 'off') return false;
     return !(codeProgram && CODE_PROMPT.test(line) && !NOT_A_CODE.test(line));
   }
-  if (facts.kind !== 'browser') return false;
+  if (facts.kind !== 'page') return false;
   const found = facts.fields.find(field => field.fieldId === fieldId);
   if (found === undefined) return false;
   return (
@@ -267,7 +267,7 @@ export function lockFor(
 ): InputLock {
   if (fields.some(field => field.sensitivity === 'private')) return FULL('code');
   if (facts.kind === 'terminal') return terminalHides(facts) ? SHORT('hidden-terminal') : FULL('terminal-shows');
-  if (facts.kind !== 'browser') return FULL('not-proven');
+  if (facts.kind !== 'page') return FULL('not-proven');
   if (context.steered !== undefined) return steeredLock(context.steered);
   if (!pageFieldsQualify(facts, fields)) return FULL('not-password-field');
   const history = pageHistory(facts, context.observed, context.submitted);
@@ -314,7 +314,7 @@ export function probeable(
   context: Omit<LockContext, 'probed'>,
 ): boolean {
   if (
-    facts.kind !== 'browser' ||
+    facts.kind !== 'page' ||
     context.steered !== undefined ||
     fields.some(field => field.sensitivity === 'private' || field.sensitivity === 'code')
   )

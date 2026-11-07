@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AskId } from '@ferretry/core-asks/contract';
+import { type AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
 import { type InputDeliverBody, type InputRequest, padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import { type InputRaise, type InputTargetFacts } from '../../../../contract/index.ts';
 import { PutLoginEntryRequestSchema } from '../../../../daemon/lib/inputs/borrowed.ts';
@@ -105,7 +105,7 @@ function harness(
     agenda: {
       raise: async (_session, raised) => {
         sinks.push(JSON.stringify(raised));
-        return { ok: true, id: `A${card++}` as AskId };
+        return { ok: true, id: `A${card++}` as AgendaId };
       },
       close: async (_session, _id, note) => void sinks.push(note),
       promptOf: async () => 'sudo wants your password',

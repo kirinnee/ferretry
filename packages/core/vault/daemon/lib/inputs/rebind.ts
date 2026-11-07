@@ -25,7 +25,7 @@ import { digestValue } from './digest.ts';
  * Keyed like every digest here (`digest.ts`): it is compared, never shown.
  */
 export function bindingOf(facts: InputTargetFacts): string {
-  if (facts.kind === 'browser')
+  if (facts.kind === 'page')
     return digestValue({
       kind: facts.kind,
       pageId: facts.pageId,
@@ -54,5 +54,5 @@ export function bindingOf(facts: InputTargetFacts): string {
 /** What was seen now may take the card's place: the same binding, and on a page every field visible to the owner. */
 export function mayRebind(binding: string, facts: InputTargetFacts): boolean {
   if (bindingOf(facts) !== binding) return false;
-  return facts.kind !== 'browser' || facts.fields.every(field => field.visible);
+  return facts.kind !== 'page' || facts.fields.every(field => field.visible);
 }

@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AskId } from '@ferretry/core-asks/contract';
+import { type AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
 import { type InputDeliverBody, padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import { type InputRaise, type InputTargetFacts } from '../../../../contract/index.ts';
 import { PutLoginEntryRequestSchema, type TwoFactorId } from '../../../../daemon/lib/inputs/borrowed.ts';
@@ -137,7 +137,7 @@ function harness(options: Options = {}) {
       raise: async (_session, raised) => {
         cards.push(raised);
         sinks.push(JSON.stringify(raised));
-        return { ok: true, id: `A${card++}` as AskId };
+        return { ok: true, id: `A${card++}` as AgendaId };
       },
       close: async (_session, _id, note) => void sinks.push(note),
       promptOf: async () => undefined,
@@ -822,9 +822,9 @@ describe('a request opened again is on its new card only', () => {
     await h.service.deliver(SESSION, request.id, useCode(request.observedDigest as string, 'GITHUB'), HOST);
     await settled();
 
-    await h.service.cardDismissed(SESSION, 'A1' as AskId);
+    await h.service.cardDismissed(SESSION, 'A1' as AgendaId);
     should((await h.service.list(HOST)).map(open => open.agendaItemId)).deepEqual(['A2']);
-    await h.service.cardDismissed(SESSION, 'A2' as AskId);
+    await h.service.cardDismissed(SESSION, 'A2' as AgendaId);
     should(await h.service.list(HOST)).deepEqual([]);
   });
 });

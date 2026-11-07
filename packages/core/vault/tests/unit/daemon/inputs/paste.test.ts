@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AskId } from '@ferretry/core-asks/contract';
+import { type AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
 import { type InputDeliverBody, type InputEvent, padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import { type InputRaise, type InputTargetFacts, type SecretName } from '../../../../contract/index.ts';
 import { type PasteRule, type PasteRuleSettings } from '../../../../daemon/lib/inputs/borrowed.ts';
@@ -123,7 +123,7 @@ async function world(
     agenda: {
       raise: async (_session, raised) => {
         cards.push({ title: raised.title, ask: raised.ask });
-        return { ok: true, id: `A${card++}` as AskId };
+        return { ok: true, id: `A${card++}` as AgendaId };
       },
       close: async (_session, closedId, note) => void closed.push(`${closedId}: ${note}`),
       promptOf: async () => 'the new Vercel token for production',

@@ -1,4 +1,4 @@
-import type { AskId } from '@ferretry/core-asks/contract';
+import type { AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
 import type { InputEvent } from '../../../../daemon/lib/inputs/wire.ts';
 import type { InputRaise, InputShot, InputTargetFacts } from '../../../../contract/index.ts';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
@@ -92,7 +92,7 @@ export function inputRequestService(
       },
     },
     agenda: options.agenda ?? {
-      raise: async () => ({ ok: true, id: `A${card++}` as AskId }),
+      raise: async () => ({ ok: true, id: `A${card++}` as AgendaId }),
       close: async () => undefined,
       promptOf: async () => 'sudo wants your password',
     },

@@ -1,4 +1,4 @@
-import { InstantSchema, NonNegativeIntegerSchema } from '@ferretry/std';
+import { NonNegativeIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { MIN_SECRET_VALUE_LENGTH, SecretNameSchema } from '../../../contract/index.ts';
 
@@ -16,6 +16,9 @@ import { MIN_SECRET_VALUE_LENGTH, SecretNameSchema } from '../../../contract/ind
 
 /** Whether the secret store can be read (today's `secrets.ts`; only the input service's saved-login listing reads it). */
 export const SecretStoreHealthSchema = z.enum(['ready', 'damaged']);
+
+/** An ISO-8601 instant with an explicit timezone (today's `common.ts`, kept as written). */
+const InstantSchema = z.iso.datetime({ offset: true });
 
 // ─── from mcp-oauth.ts ───
 
@@ -124,7 +127,92 @@ export const SignInRuleScopeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('session'), session: oneLine(128) }),
 ]);
 
+export type SignInRuleScope = z.infer<typeof SignInRuleScopeSchema>;
+
 const unique = (values: readonly string[]): boolean => new Set(values).size === values.length;
+
+/**
+ * WHY A RULE WAS SUSPENDED. Sticky: changing the pinned fact back does not resume it; only a new passkey does. The
+ * first ten are also grant misses (a fill found them); `passkey-removed` follows the registry, and `store-write-failed`
+ * keeps a rule suspended in memory when its file could not be written.
+ */
+export const SIGN_IN_RULE_SUSPENSIONS = [
+  'place-changed',
+  'recipe-changed',
+  'form-changed',
+  'did-not-move-on',
+  'account-changed',
+  'factor-changed',
+  'sign-in-gone',
+  'proof-invalid',
+  'scripted-origin',
+  'program-changed',
+  'passkey-removed',
+  'store-write-failed',
+] as const;
+
+export const SignInRuleSuspensionSchema = z.enum(SIGN_IN_RULE_SUSPENSIONS);
+
+export type SignInRuleSuspension = z.infer<typeof SignInRuleSuspensionSchema>;
+
+// ─── from task-plan.ts ───
+
+/**
+ * WHY A PRE-APPROVAL DID NOT FILL, or why a line can't be pre-approved at all. Each has one fixed sentence
+ * ({@link grantMissWords}); the ferret is never told which ({@link TASK_PLAN_MISS_AGENT_NOTE}).
+ */
+export const GRANT_MISS_REASONS = [
+  'expired',
+  'other-session',
+  'stopped',
+  'used-up',
+  'sign-in-gone',
+  'place-changed',
+  'recipe-changed',
+  'not-here',
+  'field-not-covered',
+  'code-not-ticked',
+  'ferret-named-another',
+  'account-lacks-field',
+  'rate',
+  'not-https',
+  'frame',
+  'password-field',
+  'field-hidden',
+  'challenge',
+  'scripted',
+  'code-target',
+  'form-changed',
+  'not-proved',
+  'not-system',
+  'did-not-move-on',
+  // A standing sign-in rule only (sign-in-rules.ts).
+  'suspended',
+  'out-of-scope',
+  'account-changed',
+  'factor-changed',
+  'proof-invalid',
+  'no-history',
+  'code-without-sign-in',
+  'scripted-origin',
+  'program-changed',
+  // At propose time only: the line is `unavailable`.
+  'not-in-accounts',
+  'via-provider',
+  'tool-not-covered',
+] as const;
+
+export const GrantMissReasonSchema = z.enum(GRANT_MISS_REASONS);
+
+export type GrantMissReason = z.infer<typeof GrantMissReasonSchema>;
+
+// ─── from sign-in-rules.ts ───
+
+/** The suspension a fill's miss causes, or `undefined` for a miss that leaves the rule as it was. */
+export const signInRuleSuspensionOf = (reason: GrantMissReason): SignInRuleSuspension | undefined => {
+  const parsed = SignInRuleSuspensionSchema.safeParse(reason);
+  return parsed.success ? parsed.data : undefined;
+};
 
 // ─── from account-ids.ts ───
 
@@ -401,53 +489,26 @@ export const TASK_PLAN_MAX_LINES = COPY_PLAN_MAX_ITEMS;
 export const TASK_PLAN_TERMINAL_TOOLS = ['sudo', 'su', 'doas'] as const;
 
 /**
- * WHY A PRE-APPROVAL DID NOT FILL, or why a line can't be pre-approved at all. Each has one fixed sentence
- * ({@link grantMissWords}); the ferret is never told which ({@link TASK_PLAN_MISS_AGENT_NOTE}).
+ * The misses that STOP a line (or SUSPEND a standing rule): every later fill under it asks. There is no resume; a new
+ * plan, or a rule approved again, is a new passkey. The last five come only from a rule's own checks.
  */
-export const GRANT_MISS_REASONS = [
-  'expired',
-  'other-session',
-  'stopped',
-  'used-up',
-  'sign-in-gone',
+export const GRANT_STOPPING_REASONS = [
   'place-changed',
   'recipe-changed',
-  'not-here',
-  'field-not-covered',
-  'code-not-ticked',
-  'ferret-named-another',
-  'account-lacks-field',
-  'rate',
-  'not-https',
-  'frame',
-  'password-field',
-  'field-hidden',
-  'challenge',
-  'scripted',
-  'code-target',
   'form-changed',
-  'not-proved',
-  'not-system',
   'did-not-move-on',
-  // A standing sign-in rule only (sign-in-rules.ts).
-  'suspended',
-  'out-of-scope',
   'account-changed',
   'factor-changed',
   'proof-invalid',
-  'no-history',
-  'code-without-sign-in',
   'scripted-origin',
   'program-changed',
-  // At propose time only: the line is `unavailable`.
-  'not-in-accounts',
-  'via-provider',
-  'tool-not-covered',
-] as const;
+] as const satisfies readonly GrantMissReason[];
 
-export const GrantMissReasonSchema = z.enum(GRANT_MISS_REASONS);
-
-export type GrantMissReason = z.infer<typeof GrantMissReasonSchema>;
+/** Whether a miss leaves a standing rule suspended: a stopping reason, one already suspended, or the sign-in gone. */
+export const ruleMissSuspends = (reason: GrantMissReason): boolean =>
+  reason === 'suspended' ||
+  reason === 'sign-in-gone' ||
+  (GRANT_STOPPING_REASONS as readonly GrantMissReason[]).includes(reason);
 
 /**
  * THE OWNER'S LINE for a card a pre-approval filled, by its source, with the place when it is known (`github.com`,
@@ -474,6 +535,20 @@ export const TaskPlanLineNumberSchema = z
   .int()
   .min(0)
   .max(TASK_PLAN_MAX_LINES - 1);
+
+// ─── from login-entries.ts ───
+
+/** The fields an entry can hold, and which of them are secret. */
+export const LOGIN_FIELD_ROLES = ['username', 'password', 'totp'] as const;
+
+export const LoginFieldRoleSchema = z.enum(LOGIN_FIELD_ROLES);
+
+// ─── from task-plan.ts ───
+
+/** A field a sign-in line fills: the account's username, its password, or a code Ferretry makes from its 2FA key. */
+export const SignInFieldSchema = LoginFieldRoleSchema;
+
+export type SignInField = z.infer<typeof SignInFieldSchema>;
 
 // ─── from login-entries.ts ───
 
@@ -534,11 +609,6 @@ export const LoginMatchSchema = z
   );
 
 export type LoginMatch = z.infer<typeof LoginMatchSchema>;
-
-/** The fields an entry can hold, and which of them are secret. */
-export const LOGIN_FIELD_ROLES = ['username', 'password', 'totp'] as const;
-
-export const LoginFieldRoleSchema = z.enum(LOGIN_FIELD_ROLES);
 
 export type LoginFieldRole = z.infer<typeof LoginFieldRoleSchema>;
 
@@ -1763,3 +1833,39 @@ export function factorAskWords(
   return `One-time code: ${codes.map(shortKeyWords).join(' or ')}`;
 }
 
+
+// ─── from daemon/src/lib/secrets/accounts.ts ───
+
+/** Why a change to an account or sign-in was refused: each is a different thing for the person to do. */
+export type LoginRefusal =
+  | 'unknown_login'
+  | 'login_exists'
+  | 'label_required'
+  | 'no_such_field'
+  | 'bad_via'
+  | 'unknown_proposal'
+  | 'stale_proposal'
+  | 'unknown_sign_in'
+  | 'place_taken'
+  | 'invalid_change'
+  | 'account_has_sign_ins'
+  | 'account_has_2fa_keys'
+  | 'no_sign_in'
+  | 'merge_refused'
+  | 'unknown_2fa_key'
+  | 'add_2fa_key_needs_passkey';
+
+export class LoginEntryError extends Error {
+  constructor(
+    readonly refusal: LoginRefusal,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'LoginEntryError';
+  }
+}
+
+export interface LoginFieldValues {
+  readonly username?: string;
+  readonly password?: string;
+}

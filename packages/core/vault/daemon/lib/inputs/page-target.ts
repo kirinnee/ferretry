@@ -1,7 +1,7 @@
 import type { BrowserElementTarget } from './borrowed.ts';
 import type { InputShot, InputTarget, InputTargetFacts } from '../../../contract/index.ts';
-import type { BrowserInputFieldsPort, BrowserPushNumberRead } from '../browser/transport/input-contracts.ts';
-import type { ClearJob, ClearOutcome } from '../sign-in-grants/clear.ts';
+import type { BrowserInputFieldsPort, BrowserPushNumberRead } from './target-seams.ts';
+import type { ClearJob, ClearOutcome } from '../../../contract/index.ts';
 import type {
   InputFieldValue,
   InputTargetField,
@@ -44,7 +44,7 @@ export class PageInputTarget implements InputTargetPort {
   ) {}
 
   async observe(sessionId: string, target: InputTarget, fields: readonly InputTargetField[]): Promise<ObserveResult> {
-    if (target.kind !== 'browser') return { ok: false, reason: 'unsupported' };
+    if (target.kind !== 'page') return { ok: false, reason: 'unsupported' };
     const pointers: { id: string; target: BrowserElementTarget }[] = [];
     for (const field of fields) {
       if (field.element === undefined) return { ok: false, reason: 'unsupported' };
@@ -71,7 +71,7 @@ export class PageInputTarget implements InputTargetPort {
     fields: readonly InputTargetField[],
     expected: InputTargetFacts,
   ): Promise<ObserveResult> {
-    if (target.kind !== 'browser' || expected.kind !== 'browser') return { ok: false, reason: 'unsupported' };
+    if (target.kind !== 'page' || expected.kind !== 'page') return { ok: false, reason: 'unsupported' };
     const pointers: { id: string; target: BrowserElementTarget }[] = [];
     for (const field of fields) {
       if (field.element === undefined) return { ok: false, reason: 'unsupported' };
@@ -97,7 +97,7 @@ export class PageInputTarget implements InputTargetPort {
     expected: InputTargetFacts,
     options?: TypeOptions,
   ): Promise<TypeResult> {
-    if (target.kind !== 'browser' || expected.kind !== 'browser') return 'target_gone';
+    if (target.kind !== 'page' || expected.kind !== 'page') return 'target_gone';
     let began = false;
     try {
       return await this.host.inputOnPage(sessionId, target.key, async (port, pageId) => {
@@ -145,7 +145,7 @@ export class PageInputTarget implements InputTargetPort {
    * goes wrong is `unknown`, which stops the line.
    */
   async clear(sessionId: string, target: InputTarget, job: ClearJob): Promise<ClearOutcome> {
-    if (target.kind !== 'browser') return 'unknown';
+    if (target.kind !== 'page') return 'unknown';
     try {
       return await this.host.inputOnPage(sessionId, target.key, async (port, pageId) =>
         port.inputClear === undefined ? ('unknown' as const) : await port.inputClear(pageId, job),
@@ -157,7 +157,7 @@ export class PageInputTarget implements InputTargetPort {
 
   /** A picture of the fields for the owner's card, taken before anything is typed; nothing when it cannot be had. */
   async shoot(sessionId: string, target: InputTarget, facts: InputTargetFacts): Promise<InputShot | undefined> {
-    if (target.kind !== 'browser' || facts.kind !== 'browser') return undefined;
+    if (target.kind !== 'page' || facts.kind !== 'page') return undefined;
     try {
       return await this.host.inputOnPage(sessionId, target.key, async (port, pageId) =>
         pageId === facts.pageId ? await port.inputShot(pageId, facts) : undefined,
@@ -207,7 +207,7 @@ export class PageInputTarget implements InputTargetPort {
     facts: InputTargetFacts,
     fieldIds: readonly string[],
   ): Promise<'hidden' | 'shown' | 'aborted'> {
-    if (target.kind !== 'browser' || facts.kind !== 'browser') return 'aborted';
+    if (target.kind !== 'page' || facts.kind !== 'page') return 'aborted';
     try {
       return await this.host.inputOnPage(sessionId, target.key, async (port, pageId) =>
         pageId === facts.pageId && port.inputProbe !== undefined
