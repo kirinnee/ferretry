@@ -92,6 +92,8 @@ export interface StartRequest {
   readonly login?: string;
   readonly folder: string;
   readonly prompt?: string;
+  /** Start bound to an existing harness conversation (§6.2). */
+  readonly harnessConversation?: string;
   readonly by: 'owner' | 'ferret' | 'pack' | 'board';
   /** How to start it beyond who and where ({@link StartOptionsSchema}). */
   readonly options?: StartOptions;

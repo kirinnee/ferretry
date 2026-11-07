@@ -26,7 +26,7 @@ import type {
   StartFailure,
   StartRequest,
 } from '../../../contract/index.ts';
-import { HARNESS_KEYS } from '../../../contract/index.ts';
+import { FerretRecordSchema, HARNESS_KEYS } from '../../../contract/index.ts';
 import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
 import type { FerretDetails } from '../state.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
@@ -166,6 +166,8 @@ export class FerretsService implements FerretsApi {
   }
 
   async start(request: StartRequest): Promise<Result<FerretId, StartFailure>> {
+    if (!FerretRecordSchema.shape.harnessConversation.safeParse(request.harnessConversation).success)
+      return failed('refused', 'the harness conversation id must contain between 1 and 256 characters');
     if (request.parent !== undefined && this.registry.get(request.parent) === undefined)
       return failed('refused', `no ferret ${request.parent} to be the lead of this one`);
     const name =
@@ -208,17 +210,19 @@ export class FerretsService implements FerretsApi {
       ...(request.pack === undefined ? {} : { pack: request.pack }),
       role,
       harness: harnessKey,
+      mode: request.options?.mode ?? 'auto',
       runner: 'tmux',
       ...(request.runtime === undefined ? {} : { runtime: request.runtime }),
       ...(request.login === undefined ? {} : { login: request.login }),
       folder: folder.value,
       state: 'starting',
+      ...(request.harnessConversation === undefined ? {} : { harnessConversation: request.harnessConversation }),
       createdAt: at,
       stateAt: at,
     };
     return await this.serial.run(id, async () => {
       await this.write(record, undefined, 'started');
-      return await this.launch(record, request.prompt, undefined);
+      return await this.launch(record, request.prompt, record.harnessConversation);
     });
   }
 
@@ -501,6 +505,7 @@ export class FerretsService implements FerretsApi {
             (entry.when.harness === undefined || entry.when.harness === record.harness),
         ),
       ...(prompt === undefined ? {} : { prompt }),
+      ...(conversation === undefined ? {} : { harnessConversation: conversation }),
     };
     const parts = (
       await Promise.all(

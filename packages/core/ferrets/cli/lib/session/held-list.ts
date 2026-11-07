@@ -6,7 +6,7 @@ import { type FerretSummary, FerretSummarySchema } from '../../../contract/index
  * Every open surface re-reads the fleet on a beat, and an unchanged one answers `304` instead of its whole list
  * again. One list is held per reader, which is per daemon connection: the held entry is captured BEFORE the request,
  * the request names its tag in `If-None-Match`, and a `304` answers a fresh copy of the held list (a caller can never
- * change what the next caller is given). An answer with no `etag` holds nothing, so the next read is a full one.
+ * change what the next caller is given). An answer without an `etag` is a broken list response and is refused.
  */
 
 /** One raw exchange: the shell's transport for `GET /v1/ferrets` with the given headers. */
@@ -28,8 +28,10 @@ export class HeldFleetList {
     const answer = await this.transport(held === undefined ? {} : { 'if-none-match': held.etag });
     if (held !== undefined && answer.status === 304) return ListSchema.parse(JSON.parse(held.body));
     if (answer.status !== 200) throw new Error(`the fleet read answered ${answer.status}`);
+    if (answer.etag === undefined || answer.etag.trim() === '')
+      throw new Error('the fleet read did not include an etag');
     const list = ListSchema.parse(JSON.parse(answer.body));
-    this.#held = answer.etag === undefined ? undefined : { etag: answer.etag, body: answer.body };
+    this.#held = { etag: answer.etag, body: answer.body };
     return list;
   }
 }

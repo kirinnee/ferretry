@@ -414,7 +414,7 @@ describe('today’s start fields, the title, and the stop and resume words', () 
     });
     const view = (await h.request('GET', `/v1/ferrets/${id}`)).json<Record<string, unknown>>();
     expect(view).toMatchObject({ model: 'opus', card: 'F21', title: 'Fix the login' });
-    expect(view.label).toBeUndefined();
+    expect(view.label).toBe('mine');
     const details = JSON.parse(h.state('ferrets').raw(FerretDetailsFiles, id) as string);
     expect(details).toEqual({
       format: 1,
