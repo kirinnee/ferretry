@@ -60,6 +60,8 @@ const STORE_STATUS: Readonly<Record<SecretStoreError['failure'], number>> = {
 const USE_STATUS: Readonly<Record<SecretUseError['refusal'], number>> = {
   invalid_cwd: 400,
   unknown_secret: 404,
+  // Nothing ran: a declared mask provider is down, so output could not be masked. Retrying later is safe.
+  masks_unavailable: 503,
 };
 
 /** How each clone refusal answers. An unreadable identity is this daemon's fault, so it is a 503. */

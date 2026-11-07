@@ -32,14 +32,15 @@
 import {
   MAX_SECRET_USE_OUTPUT_BYTES,
   type SecretName,
-  secretMask,
   type SecretUseCommand,
   type SecretUseResult,
 } from '../../../contract/index.ts';
 import { isAbsolute } from 'node:path';
 import type { ChildEnvironments } from './child-environments.ts';
-import { earnedRecipes, redactSecretValues, resolveChildEnvironment } from './policy.ts';
+import { earnedRecipes, resolveChildEnvironment } from './policy.ts';
 import type { SecretChildRunner } from './types.ts';
+import { MaskSourceUnavailableError } from './mask-source.ts';
+import { namedMasks, NO_REDACTION, type Scrub, type TextRedactor } from './redaction.ts';
 import type { SecretVault } from './vault.ts';
 
 /** Why a use was refused before anything ran. */
@@ -68,7 +69,7 @@ export const NO_RECIPES: SecretRecipes = { read: async () => ({}) };
 /**
  * Runs one command with secrets in its environment and returns its scrubbed output.
  *
- * Every string that leaves here has been through `redactSecretValues`, INCLUDING the case where the
+ * Every string that leaves here has been through `redactOutput`, INCLUDING the case where the
  * command's whole purpose was to print the value. That is the attack the integration tier tests by
  * name, because it is the one a person will actually try.
  */
@@ -79,7 +80,19 @@ export class SecretUseService {
     /** Mints the opaque handle the child's environment travels in (lead decision 9). */
     private readonly environments: ChildEnvironments,
     private readonly recipes: SecretRecipes = NO_RECIPES,
+    private readonly masks?: TextRedactor,
   ) {}
+
+  /** Opens the masks for one run; an unavailable declared source is a typed refusal, not a raw failure. */
+  private async openMasks<T>(work: (scrub: Scrub) => Promise<T>): Promise<T> {
+    try {
+      return await (this.masks ?? NO_REDACTION).scoped(work);
+    } catch (error) {
+      if (error instanceof MaskSourceUnavailableError)
+        throw new SecretUseError('masks_unavailable', 'the values to mask could not be opened, so nothing was run');
+      throw error;
+    }
+  }
 
   async run(request: SecretUseCommand): Promise<SecretUseResult> {
     // A relative directory would run the child wherever this daemon happens to be, which is its own
@@ -93,51 +106,45 @@ export class SecretUseService {
       { ...earnedRecipes(await this.recipes.read(), named), ...request.env },
       values,
     );
-    const outcome = await this.runner.run({
-      command: request.command,
-      cwd: request.cwd,
-      env: this.environments.mint(environment),
-      ...(environment.PATH === undefined ? {} : { path: environment.PATH }),
-      timeoutMs: request.timeoutMs,
-      maxOutputBytes: MAX_SECRET_USE_OUTPUT_BYTES,
+    // Keep the injected snapshot even if the vault rotates during the child. It joins current,
+    // contributed and typed values BEFORE any of them can rewrite the original output.
+    const injected = namedMasks(values);
+    // The masks open BEFORE anything spawns, and this one snapshot masks the output afterwards. A declared mask
+    // provider that cannot open refuses here (S19) — after a spawn the command's side effects would be done and its
+    // output lost, and every retry would run it again.
+    const { outcome, masked } = await this.openMasks(async scrub => {
+      const outcome = await this.runner.run({
+        command: request.command,
+        cwd: request.cwd,
+        env: this.environments.mint(environment),
+        ...(environment.PATH === undefined ? {} : { path: environment.PATH }),
+        timeoutMs: request.timeoutMs,
+        maxOutputBytes: MAX_SECRET_USE_OUTPUT_BYTES,
+      });
+      // A value the vault rotated DURING the child is not in the snapshot taken before it, so the vault's own current
+      // values join the injected ones; the contributed and typed values come from the snapshot, never a second open.
+      // That read is best-effort: the child has already run, so a vault that fails now must not throw away its output
+      // (a retry would run it again). The injected snapshot and the open lease still hold every pre-run value.
+      const current = await this.vault.values().then(
+        rotated => namedMasks(rotated),
+        () => [],
+      );
+      const during = [...injected, ...current];
+      return {
+        outcome,
+        masked: {
+          stdout: scrub.text(outcome.stdout, outcome.truncated, during),
+          stderr: scrub.text(outcome.stderr, outcome.truncated, during),
+        },
+      };
     });
     return {
       outcome: outcome.outcome,
       ...(outcome.exitCode === undefined ? {} : { exitCode: outcome.exitCode }),
-      stdout: redactOutput(outcome.stdout, values, outcome.truncated),
-      stderr: redactOutput(outcome.stderr, values, outcome.truncated),
+      stdout: masked.stdout,
+      stderr: masked.stderr,
       truncated: outcome.truncated,
       used: named,
     };
   }
-}
-
-/** A child's output with every known value masked, including one the output limit cut in half. */
-function redactOutput(text: string, values: ReadonlyMap<SecretName, string>, cut: boolean): string {
-  const redacted = redactSecretValues(text, values);
-  return cut ? maskCutValue(redacted, values) : redacted;
-}
-
-/**
- * Masks the BEGINNING of a value that a cut left at the very end of the text.
- *
- * A WHOLE-VALUE MATCH CANNOT SEE IT. Output is capped before it reaches redaction — and a timeout
- * kills the child mid-write — so a value straddling the cut arrives as a prefix that is not the value
- * and passes straight through, handing the reader that many characters of the credential. The cost of
- * the fix is that a truncated output whose last characters merely LOOK like the start of a value loses
- * them to a mask; on output that was already cut short that is the right side to err on.
- *
- * A byte cut can split a character, which the decoder writes as U+FFFD, so trailing replacement
- * characters are set aside before matching — otherwise one would shield the prefix in front of it.
- */
-function maskCutValue(text: string, values: ReadonlyMap<SecretName, string>): string {
-  const body = text.replace(/\uFFFD+$/u, '');
-  let longest: { readonly name: SecretName; readonly length: number } | undefined;
-  for (const [name, value] of values)
-    for (let length = Math.min(value.length - 1, body.length); length > (longest?.length ?? 0); length--)
-      if (body.endsWith(value.slice(0, length))) {
-        longest = { name, length };
-        break;
-      }
-  return longest === undefined ? text : body.slice(0, body.length - longest.length) + secretMask(longest.name);
 }
