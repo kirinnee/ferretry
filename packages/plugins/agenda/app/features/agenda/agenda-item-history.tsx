@@ -1,10 +1,10 @@
 /**
- * THE CONVERSATION OF AN OPEN AGENDA ITEM — the owner's and the ferret's words about it, in the chat's two shapes: the
- * owner's words are a bubble with its time at the foot; the ferret's are text with its name above and its time below.
- * Oldest first, with no tool calls and no thinking — the relevance rule that decides what is here is `itemHistory`'s.
- * The chat's own rows and receipt ticks are Conversation's and are not drawn here: the ticks belonged to the chat's
- * send ledger, which this half does not read. Every reply is drawn WHOLE: nothing is cut, however long. FOLDED until
- * the owner opens it (and remembered per item, like the other folded parts), so the item does not scroll for ever.
+ * THE CONVERSATION OF AN OPEN AGENDA ITEM — the owner's and the ferret's words about it, in the chat's two shapes
+ * (`history-rows.tsx`): the owner's words are a bubble with its time and its receipt ticks at the foot; the ferret's are
+ * text with its name above and its time below. Oldest first, with no tool calls and no thinking — the relevance rule
+ * that decides what is here is `itemHistory`'s. The ticks claim only what is known (`historyReceipt`). Every reply is
+ * drawn WHOLE: nothing is cut, however long. FOLDED until the owner opens it (and remembered per item, like the other
+ * folded parts), so the item does not scroll for ever.
  *
  * The edits ("Updated to v2") are not words anyone said: they are the activity log's (`agenda-activity-log.tsx`).
  */
@@ -13,6 +13,7 @@ import { Check } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { AgendaFold } from './agenda-fold.tsx';
+import { AgentWordsRow, OwnWordsRow } from './history-rows.tsx';
 
 /** What Ferretry itself is called where its own words (a closing note, a notice) are drawn. */
 const DAEMON_NAME = 'Ferretry';
@@ -22,17 +23,6 @@ type SpokenEvent = Exclude<HistoryEvent, { readonly kind: 'revision' }>;
 /** What was SAID, of the item's history: the owner's and the ferret's words, never an edit. */
 const spokenEvents = (events: readonly HistoryEvent[]): readonly SpokenEvent[] =>
   events.filter((event): event is SpokenEvent => event.kind !== 'revision');
-
-/** A time of 0 is "not known": the row then shows none, as the chat's does. */
-function RowTime({ at }: { readonly at: number }) {
-  if (at === 0) return null;
-  const when = new Date(at);
-  return (
-    <time className="fy-hist__time" dateTime={when.toISOString()}>
-      {when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-    </time>
-  );
-}
 
 /** "from chat": words the ferret copied from the owner's chat onto the item (`fy agenda log`), not typed on it. */
 function FromChat() {
@@ -68,24 +58,26 @@ function HistoryRow({ event, ferret, renderProse }: HistoryRowProps) {
     const chosen = event.form === 'answer' || event.form === 'done';
     return (
       <li className="fy-hist__me" data-history="owner" data-history-kind={event.form}>
-        <div className="fy-hist__bubble">
+        <OwnWordsRow at={event.at} reached={event.reached}>
           <p className="fy-hist__said">
             {chosen ? <Check aria-hidden="true" className="fy-hist__check" size={14} strokeWidth={2.5} /> : null}
             {event.text}
           </p>
           {event.note === undefined ? null : <p className="fy-hist__note">{event.note}</p>}
           {event.fromChat === true ? <FromChat /> : null}
-          <RowTime at={event.at} />
-        </div>
+        </OwnWordsRow>
       </li>
     );
   }
   return (
     <li className="fy-hist__ag" data-history={event.daemon === true ? 'daemon' : 'ferret'}>
-      <span className="fy-hist__who">{event.daemon === true ? DAEMON_NAME : ferret}</span>
-      {event.fromChat === true ? <FromChat /> : null}
-      <div className="fy-hist__text">{renderProse(event.text)}</div>
-      <RowTime at={event.at} />
+      <AgentWordsRow
+        aside={event.fromChat === true ? <FromChat /> : undefined}
+        at={event.at}
+        label={event.daemon === true ? DAEMON_NAME : ferret}
+      >
+        <div className="fy-hist__text">{renderProse(event.text)}</div>
+      </AgentWordsRow>
     </li>
   );
 }

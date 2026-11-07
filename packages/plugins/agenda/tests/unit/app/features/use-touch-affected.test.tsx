@@ -7,7 +7,7 @@ import {
   useTouchAffected,
   type MediaQueryListLike,
   type TouchModalitySignals,
-} from '../../../../app/shell.ts';
+} from '@ferretry/app/ui';
 import { render } from '@ferretry/app/testing';
 
 const DESKTOP: TouchModalitySignals = {

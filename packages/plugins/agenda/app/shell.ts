@@ -22,6 +22,10 @@ export {
   ContextFilterChips,
   CopyButton,
   cn,
+  type ComposerQuoteTarget,
+  composerQuoteTarget,
+  registerComposerQuoteTarget,
+  useQuoteMenu,
   escapeCloses,
   type Marquee,
   marqueeOf,
@@ -169,3 +173,6 @@ export const displayCallsign = (raw: string | null | undefined): string => {
     .map(segment => (segment === '' ? segment : `${segment[0]?.toUpperCase() ?? ''}${segment.slice(1)}`))
     .join('-');
 };
+
+/** A machine's own pages (`/d/<id>`) and the app's home: the notification paths' roots. */
+export { daemonHomeHref, HOME_HREF } from '@ferretry/app';

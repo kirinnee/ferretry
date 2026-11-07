@@ -196,8 +196,8 @@ describe('unread conversations', () => {
 });
 
 describe('conversation links', () => {
-  test('a conversation link this app builds names the item as ?ask=', () => {
-    expect(agendaConversationPath(STUDIO, 'ses 1', 'A3')).toBe('/d/studio/session/ses%201?ask=A3');
+  test('a conversation link this app builds is the ask’s own page, the conversation under the ask', () => {
+    expect(agendaConversationPath(STUDIO, 'ses 1', 'A3')).toBe('/agenda/ses%201/A3');
   });
 
   test('a machine item opens in the Inbox, not a conversation', () => {

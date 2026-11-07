@@ -8,8 +8,8 @@ import {
 } from '../../../../app/features/agenda/use-item-lifecycle.ts';
 import { daemonConnection } from '../../../../app/shell.ts';
 import { daemonSessionScope } from '../../../../app/shell.ts';
-import { type AppStore, StoreProvider } from '../../../../app/shell.ts';
-import { browserFetch } from '../../../../app/shell.ts';
+import { AgendaClientContext } from '../../../../app/lib/agenda-client-context.tsx';
+import { callFromFetch, type TestFetch } from '../../../support/app/call-from-fetch.ts';
 import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
 import { interact, type Mounted, mount } from '@ferretry/app/testing';
 import { settleUntil } from '@ferretry/app/testing';
@@ -18,7 +18,9 @@ const connection = daemonConnection({ daemonId: 'daemon-a' });
 const scope = daemonSessionScope(connection, 'sess');
 
 let view: Mounted | null = null;
-const realFetch = globalThis.fetch;
+/** What the daemon answers this suite's calls with: set per test, reached only through the half's client. */
+let answer: TestFetch = async () => new Response('{}', { status: 404 });
+const client = callFromFetch((url, init) => answer(url, init));
 let calls: Array<{ method: string; path: string; body?: string }> = [];
 let versions: { latest: number; seen?: number } = { latest: 3, seen: 1 };
 let fail = false;
@@ -40,7 +42,7 @@ beforeEach(() => {
   hold = null;
   endless = false;
   thread = ['one', 'two', 'three'];
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  answer = async (input, init) => {
     const url = new URL(String(input));
     const path = url.pathname.replace('/v1/ferrets/sess/agenda/A5', '') + url.search;
     calls.push({
@@ -71,11 +73,10 @@ beforeEach(() => {
       });
     }
     return json({}, 404);
-  }) as typeof fetch;
+  };
 });
 
 afterEach(async () => {
-  globalThis.fetch = realFetch;
   await view?.unmount();
   view = null;
 });
@@ -90,7 +91,6 @@ const Probe = ({ initial }: { readonly initial: UseItemLifecycleInput }) => {
 };
 
 const draw = async (item: AgendaItem | undefined, extra: Partial<UseItemLifecycleInput> = {}): Promise<void> => {
-  const store = { carrier: { fetch: browserFetch } } as unknown as AppStore;
   const input: UseItemLifecycleInput = {
     connection,
     scope,
@@ -100,9 +100,9 @@ const draw = async (item: AgendaItem | undefined, extra: Partial<UseItemLifecycl
     ...extra,
   };
   view = await mount(
-    <StoreProvider store={store}>
+    <AgendaClientContext.Provider value={client}>
       <Probe initial={input} />
-    </StoreProvider>,
+    </AgendaClientContext.Provider>,
   );
   await interact(() => Promise.resolve());
 };

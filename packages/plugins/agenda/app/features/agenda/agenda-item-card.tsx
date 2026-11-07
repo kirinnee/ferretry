@@ -76,6 +76,7 @@ import { AgendaTabs, Section } from './agenda-tabs.tsx';
 import { markTerms, TermLayer } from './agenda-terms.tsx';
 import { agendaTypeMeta } from './agenda-type.tsx';
 import { VersionDiffPanel } from './agenda-version-diff.tsx';
+import { HowToTest } from './how-to-test.tsx';
 import { useChangedTabs } from './use-changed-tabs.ts';
 import type { DoneCloseView } from './use-done-close-flow.ts';
 import { useDownSwipe } from './use-down-swipe.ts';
@@ -347,7 +348,7 @@ function CardAskBlock({
       {ask.howToTest === null || ask.howToTest.trim() === '' ? null : (
         <div className="fy-card__need-part" data-agenda-card-ask-test="">
           <h5 className="fy-card__label">How to test</h5>
-          <div className="fy-board-test">{renderProse(ask.howToTest)}</div>
+          <HowToTest renderProse={renderProse} text={ask.howToTest} />
         </div>
       )}
       {offer === null ? null : (
@@ -670,7 +671,7 @@ export function AgendaItemCard({
               )}
               {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
               {cardsForm}
-              {gated && body !== null ? <div className="fy-board-test">{renderProse(body)}</div> : null}
+              {gated && body !== null ? <HowToTest renderProse={renderProse} text={body} /> : null}
               {choosing && showList ? (
                 <OptionsList
                   busy={busy}

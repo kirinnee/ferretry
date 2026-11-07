@@ -11,6 +11,7 @@ export interface LedgerSendRecord {
   readonly fate: string;
   readonly acceptedAt?: string;
   readonly message?: string;
+  readonly attachmentIds?: readonly string[];
   readonly held?: true;
   readonly withdrawn?: true;
 }

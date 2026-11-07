@@ -3,6 +3,7 @@ import { type AgendaGate, type AgendaItem, gateAskOptions, gateReference } from 
 import { useState } from 'react';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import type { InboxCard } from '../../../../app/lib/agenda-inbox.ts';
+import type { GateItem } from '../../../../app/lib/gate-items.ts';
 import {
   agendaItem,
   choices,
@@ -33,7 +34,8 @@ const GATE_OPTIONS: Pick<AgendaGate, 'options'> = {
   ],
 };
 
-const gateItem = (id: string, cardId: string, extra: Partial<AgendaItem> = {}): AgendaItem =>
+/** A view of a thread as its card ask: an item with the gate it stands for (`GateItem`). */
+const gateItem = (id: string, cardId: string, extra: Partial<GateItem> = {}): GateItem =>
   agendaItem(id, {
     subject: 'Try it: open the pairing page',
     why: 'Pairing QR is in Tested.',
@@ -53,7 +55,7 @@ const gateItem = (id: string, cardId: string, extra: Partial<AgendaItem> = {}): 
       options: [...GATE_OPTIONS.options],
     },
     ...extra,
-  } as Partial<AgendaItem>);
+  } as unknown as Partial<AgendaItem>) as GateItem;
 
 const owner = sessionView('sess-g', { config: { teammate: 'judson', name: 'Pairing QR' } as never });
 const gate = inboxCard(gateItem('G1', 'F1'), owner);
@@ -478,7 +480,7 @@ describe('Not good on a card ask drawn on a thread', () => {
       agendaItem('T1', {
         subject: 'Which colour for the badge?',
         ask: choices('Blue', 'Green'),
-        gateAttached: askOf(cardId),
+        cardAsks: [{ gate: askOf(cardId), at: '2026-08-01T10:00:00.000Z' }],
       } as Partial<AgendaItem>),
       owner,
     );

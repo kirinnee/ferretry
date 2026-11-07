@@ -1,0 +1,55 @@
+import { describe, expect, test } from 'bun:test';
+import { awaitingOwner, isGateLane } from '../../../app/lib/awaiting-owner.ts';
+import { GATE_LANES, gateCard } from '../../support/app/gate-lanes.ts';
+
+// Board places the card on its lanes; the rule reads the card and the project's lanes as Board hands them over.
+const placed = async (extra: Record<string, unknown>) => ({ found: gateCard('F1', extra), laneSet: GATE_LANES });
+
+const stageIn = async (extra: Record<string, unknown>) => {
+  const { found, laneSet } = await placed(extra);
+  return awaitingOwner(found, laneSet);
+};
+
+describe('isGateLane', () => {
+  test('a verify lane and an owner-gated active lane are gates', () => {
+    expect(isGateLane({ category: 'verify' })).toBe(true);
+    expect(isGateLane({ category: 'active', ownerGate: true })).toBe(true);
+  });
+  test('the closing lane, even gated, and ordinary lanes are not', () => {
+    expect(isGateLane({ category: 'closed', ownerGate: true })).toBe(false);
+    expect(isGateLane({ category: 'active' })).toBe(false);
+    expect(isGateLane({ category: 'backlog' })).toBe(false);
+    expect(isGateLane({ category: 'review' })).toBe(false);
+    expect(isGateLane({ category: 'shipped' })).toBe(false);
+  });
+});
+
+describe('awaitingOwner', () => {
+  test('a person-asked card in the verify lane waits for a try; in the plan gate, for an approval', async () => {
+    expect(await stageIn({ laneId: 'tested' })).toBe('try');
+    expect(await stageIn({ laneId: 'plan' })).toBe('approve');
+  });
+
+  test.each(['todo', 'implement', 'review', 'merged', 'released', 'closed'])('never in %s', async laneId => {
+    expect(await stageIn({ laneId })).toBeNull();
+  });
+
+  test('an internal card in a gate lane never waits on the owner', async () => {
+    expect(await stageIn({ laneId: 'tested', askedBy: 'agent' })).toBeNull();
+    expect(await stageIn({ laneId: 'plan', askedBy: 'agent' })).toBeNull();
+  });
+
+  test('a sub-card in a gate lane never waits on the owner, who tests its parent', async () => {
+    expect(await stageIn({ laneId: 'tested', parent: { id: 'F9' } })).toBeNull();
+    expect(await stageIn({ laneId: 'plan', parent: { id: 'F9' } })).toBeNull();
+  });
+
+  test('a dropped card never waits on the owner', async () => {
+    expect(await stageIn({ laneId: 'tested', dropped: { at: '2026-08-01T10:00:00.000Z', reason: 'no' } })).toBeNull();
+  });
+
+  test('a card whose project lanes are unknown never waits on the owner', async () => {
+    const { found } = await placed({ laneId: 'tested' });
+    expect(awaitingOwner(found, null)).toBeNull();
+  });
+});

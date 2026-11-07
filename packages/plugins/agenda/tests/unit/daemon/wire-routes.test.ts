@@ -18,12 +18,13 @@ import { agendaRoutes, type AgendaRouteParts } from '../../../daemon/routes.ts';
 import { MACHINE_AGENDA_ID } from '../../../app/wire/index.ts';
 import { raiseAsk } from './support.ts';
 
-test('Agenda remains pending until app-shell-fill supplies its runtime and shell', async () => {
+test('Agenda’s app half is bound: no half of it is pending, and what is still open is named by GAP', async () => {
   const pending = await Bun.file(new URL('../../../../../../ports-pending.json', import.meta.url)).json();
-  expect(pending.pendingHalves.agenda).toContain('app');
-  const reason = await Bun.file(new URL('../../../APP-PENDING.md', import.meta.url)).text();
-  expect(reason).toContain('app-shell-fill');
-  expect(reason).toContain('Parity rows remain unchecked');
+  expect(pending.pendingHalves.agenda).toBeUndefined();
+  expect(pending.pendingAppPorts.some((port: { plugin: string }) => port.plugin === 'agenda')).toBe(false);
+  const open = await Bun.file(new URL('../../../app/NEEDS-APP-SHELL.txt', import.meta.url)).text();
+  expect(open).toContain('GAP(agenda-channel-header)');
+  expect(open).toContain('GAP(agenda-composer)');
 });
 
 const AT = '2026-11-07T12:00:00.000Z';

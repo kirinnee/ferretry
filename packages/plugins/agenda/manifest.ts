@@ -126,7 +126,10 @@ export default definePlugin({
       screen('agenda', { path: '/agenda', nav: { label: 'Agenda', icon: 'inbox', order: 10 } }),
       screen('agenda-ask', { path: '/agenda/:ferret/:ask' }),
     ],
-    panels: [panel('ferret.side', { id: 'ferret-agenda', order: 10 })],
+    panels: [
+      panel('ferret.side', { id: 'ferret-agenda', order: 10 }),
+      panel('ferret.toolbar', { id: 'ferret-agenda-mode', order: 60 }),
+    ],
     settings: [settingsTab('agenda', { label: 'Agenda', order: 20 })],
     // The ask page OFFERS the `agenda.conversation` slot (contract/slots.ts, lead decision Q9): Conversation contributes
     // the ferret's conversation and composer under an open ask; Agenda imports nothing of Conversation's.

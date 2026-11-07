@@ -55,7 +55,11 @@ export class AgendaRollupStore {
   readonly #inFlight = new Map<DaemonId, Promise<void>>();
   readonly #generations = new Map<DaemonId, number>();
 
-  constructor(private readonly client: AgendaCall) {}
+  /**
+   * `client` is the half's one client (one machine per half); a reader that holds several machines' clients (a test of
+   * the Inbox over machines) hands the client for each instead.
+   */
+  constructor(private readonly client: AgendaCall | ((daemon: DaemonConnection) => AgendaCall)) {}
 
   subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener);
@@ -69,7 +73,8 @@ export class AgendaRollupStore {
     const existing = this.#inFlight.get(daemon.daemonId);
     if (existing !== undefined) return existing;
     const generation = this.#generations.get(daemon.daemonId) ?? 0;
-    const promise = fetchAgendaRollup(daemon, this.client)
+    const client = typeof this.client === 'function' ? this.client(daemon) : this.client;
+    const promise = fetchAgendaRollup(daemon, client)
       .then(
         boards => {
           if ((this.#generations.get(daemon.daemonId) ?? 0) === generation) this.#hold(daemon.daemonId, boards, true);

@@ -36,6 +36,9 @@ export default implementApp(manifest, {
         'ferret-agenda': lazyComponent<PanelProps>(
           async () => (await surfacesOf()).panels['ferret-agenda'] as AppComponent<PanelProps>,
         ),
+        'ferret-agenda-mode': lazyComponent<PanelProps>(
+          async () => (await surfacesOf()).panels['ferret-agenda-mode'] as AppComponent<PanelProps>,
+        ),
       },
       settings: {
         agenda: lazyComponent<SettingsProps>(

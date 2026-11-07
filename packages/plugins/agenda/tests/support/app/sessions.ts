@@ -14,7 +14,7 @@ export interface SessionFixtureOverrides {
   readonly state?: Partial<SessionState>;
   readonly directory?: string;
   readonly journalSequence?: number;
-  readonly revive?: SessionView['revive'];
+  readonly revive?: unknown;
   readonly pinnedAt?: string;
 }
 

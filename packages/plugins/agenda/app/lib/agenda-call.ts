@@ -58,11 +58,15 @@ export const responseError = (failure: unknown): DaemonResponseError => {
 
 export type AgendaCallInit = NonNullable<Parameters<PluginClient['call']>[1]>;
 
-/** One call by route key; every failure surfaces as a {@link DaemonResponseError}. */
+/**
+ * One call by route key; every failure that says anything surfaces as a {@link DaemonResponseError}. A failure that
+ * carries nothing at all (not even an object) is passed on as it came, so a reader shows its own plain words for it.
+ */
 export const agendaCall = async (client: AgendaCall, route: string, init: AgendaCallInit = {}): Promise<unknown> => {
   try {
     return await client.call(route, init);
   } catch (failure) {
+    if (typeof failure !== 'object' || failure === null) throw failure;
     throw responseError(failure);
   }
 };

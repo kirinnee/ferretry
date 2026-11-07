@@ -5,7 +5,6 @@ import { swipeTargets } from '../../../../app/lib/agenda-answers.ts';
 import type { InboxCard } from '../../../../app/lib/agenda-inbox.ts';
 import { daemonConnection, daemonId } from '../../../../app/shell.ts';
 import { registerComposerQuoteTarget } from '../../../../app/shell.ts';
-import { type AppStore, StoreProvider } from '../../../../app/shell.ts';
 import {
   agendaItem,
   choices,
@@ -115,7 +114,7 @@ describe('the open Inbox item', () => {
     expect(who.querySelector('[data-inbox-who-card]')?.textContent).toBe('&F12');
     expect(who.textContent).toContain('Laptop');
     const chat = must(who.querySelector<HTMLAnchorElement>('[data-inbox-open-chat]'), 'Open chat');
-    expect(chat.getAttribute('href')).toBe('/d/laptop/session/sess-2?agenda=A2');
+    expect(chat.getAttribute('href')).toBe('/agenda/sess-2/A2');
     // ✕ goes back to the Inbox, and says so.
     expect(mounted.container.querySelector('[data-agenda-close]')?.getAttribute('aria-label')).toBe(
       'Back to the Inbox',
@@ -444,7 +443,7 @@ describe('the open Inbox item’s History', () => {
       daemonId('laptop'),
     );
     const mounted = await mount(
-      <StoreProvider store={{ connections: { list: () => [] } } as unknown as AppStore}>
+      <>
         <InboxHarness
           cards={[stored]}
           fake={fakeInbox()}
@@ -461,7 +460,7 @@ describe('the open Inbox item’s History', () => {
             />
           )}
         />
-      </StoreProvider>,
+      </>,
     );
     await interact(() => Promise.resolve());
     await openConversation(mounted.container);

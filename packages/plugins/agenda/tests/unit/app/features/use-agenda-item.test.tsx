@@ -1,12 +1,13 @@
-import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
+import type { ReactNode } from 'react';
 import { agendaListSnapshot, type AgendaItem, type AgendaListRecord } from '../../../../app/wire/index.ts';
 import { projectionRecord, projectionSnapshot } from '../../../support/app/agenda-projection.ts';
 import { useAgendaItem } from '../../../../app/features/agenda/use-agenda-item.ts';
+import { AgendaClientContext } from '../../../../app/lib/agenda-client-context.tsx';
+import { SESSION_AGENDA_ITEM } from '../../../../app/lib/agenda-wire.ts';
 import { daemonConnection } from '../../../../app/shell.ts';
 import { daemonSessionScope } from '../../../../app/shell.ts';
-import { boundDaemonId } from '../../../../app/shell.ts';
-import type { DaemonFetch } from '../../../../app/shell.ts';
-import { type AppStore, StoreProvider } from '../../../../app/shell.ts';
+import { callFromFetch, type TestFetch } from '../../../support/app/call-from-fetch.ts';
 import { ensureDom } from '@ferretry/app/testing';
 ensureDom();
 import { render, run, runAsync } from '@ferretry/app/testing';
@@ -21,47 +22,63 @@ const Probe = ({ item }: { item?: AgendaItem | AgendaListRecord }) => {
   latest = useAgendaItem(connection, scope, item);
   return null;
 };
-const fetchers: { mockRestore(): void }[] = [];
+
+/** The half's one client, answered by a scripted fetcher; `read` records every request it was asked for. */
+const scripted = () => {
+  const read = mock<TestFetch>(async () => Response.json(projectionRecord()));
+  const client = callFromFetch((url, init) => read(url, init));
+  const With = ({ children }: { readonly children: ReactNode }) => (
+    <AgendaClientContext.Provider value={client}>{children}</AgendaClientContext.Provider>
+  );
+  return { read, client, With };
+};
+
+const networks: { mockRestore(): void }[] = [];
 afterEach(() => {
-  for (const read of fetchers.splice(0)) read.mockRestore();
+  for (const network of networks.splice(0)) network.mockRestore();
 });
 
 describe('loading a resolved agenda document', () => {
-  test('reads through the paired carrier instead of an unauthenticated plain network request', async () => {
+  test('reads through the half’s client by route key, never as a plain network request', async () => {
     // Arrange
     const network = spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Plain HTTP must not be used.'));
-    fetchers.push(network);
-    const requests: RequestInit[] = [];
-    const routed: DaemonFetch = async (_input, init) => {
-      requests.push(init ?? {});
-      return Response.json(projectionRecord());
-    };
-    const store = { carrier: { fetch: routed } } as unknown as AppStore;
+    networks.push(network);
+    const { read, client, With } = scripted();
     // Act
     await runAsync(async () => {
       render(
-        <StoreProvider store={store}>
+        <With>
           <Probe item={header} />
-        </StoreProvider>,
+        </With>,
       );
     });
     // Assert
     expect(network).not.toHaveBeenCalled();
-    expect(requests).toHaveLength(1);
-    expect(boundDaemonId(requests[0])).toBe(connection.daemonId);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(client.calls.map(call => call.route)).toEqual([SESSION_AGENDA_ITEM]);
     expect(latest.item).toEqual(projectionRecord());
   });
+
   test('keeps active and older full records available without a read', () => {
     // Arrange
-    const read = spyOn(globalThis, 'fetch');
-    fetchers.push(read);
+    const { read, With } = scripted();
     const full = projectionRecord();
     // Act
-    const view = render(<Probe item={full} />);
+    const view = render(
+      <With>
+        <Probe item={full} />
+      </With>,
+    );
     // Assert
     expect(latest.item).toBe(full);
     expect(read).not.toHaveBeenCalled();
-    run(() => view.update(<Probe />));
+    run(() =>
+      view.update(
+        <With>
+          <Probe />
+        </With>,
+      ),
+    );
     expect(latest.item).toBeUndefined();
   });
 
@@ -71,21 +88,33 @@ describe('loading a resolved agenda document', () => {
     const pending = new Promise<Response>(resolve => {
       finish = resolve;
     });
-    const read = spyOn(globalThis, 'fetch')
-      .mockReturnValueOnce(pending)
-      .mockResolvedValue(Response.json(projectionRecord()));
-    fetchers.push(read);
-    const view = render(<Probe item={header} />);
+    const { read, With } = scripted();
+    read.mockImplementationOnce(() => pending);
+    const view = render(
+      <With>
+        <Probe item={header} />
+      </With>,
+    );
     expect(latest.loading).toBe(true);
     // Act
-    run(() => view.update(<Probe />));
+    run(() =>
+      view.update(
+        <With>
+          <Probe />
+        </With>,
+      ),
+    );
     await runAsync(async () => {
       finish?.(Response.json(projectionRecord()));
     });
     // Assert
     expect(latest.item).toBeUndefined();
     await runAsync(async () => {
-      view.update(<Probe item={header} />);
+      view.update(
+        <With>
+          <Probe item={header} />
+        </With>,
+      );
     });
     expect(read).toHaveBeenCalledTimes(2);
     expect(latest.item).toEqual(projectionRecord());
@@ -94,13 +123,15 @@ describe('loading a resolved agenda document', () => {
 
   test('keeps a failed read visible with a retry, and clears the error after success', async () => {
     // Arrange
-    const read = spyOn(globalThis, 'fetch')
-      .mockRejectedValueOnce(new Error('The machine is offline.'))
-      .mockResolvedValue(Response.json(projectionRecord()));
-    fetchers.push(read);
+    const { read, With } = scripted();
+    read.mockImplementationOnce(() => Promise.reject(new Error('The machine is offline.')));
     // Act
     await runAsync(async () => {
-      render(<Probe item={header} />);
+      render(
+        <With>
+          <Probe item={header} />
+        </With>,
+      );
     });
     // Assert
     expect(latest.error).toBe('The machine is offline.');
@@ -114,11 +145,15 @@ describe('loading a resolved agenda document', () => {
 
   test('gives an unreadable failure a plain message', async () => {
     // Arrange
-    const read = spyOn(globalThis, 'fetch').mockRejectedValue(undefined);
-    fetchers.push(read);
+    const { read, With } = scripted();
+    read.mockImplementation(() => Promise.reject(undefined));
     // Act
     await runAsync(async () => {
-      render(<Probe item={header} />);
+      render(
+        <With>
+          <Probe item={header} />
+        </With>,
+      );
     });
     // Assert
     expect(latest.error).toBe('Could not read this item.');

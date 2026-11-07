@@ -6,6 +6,7 @@
  * (`agendaAskPath`).
  */
 
+import { useMemo } from 'react';
 import { useScreenHref } from '../shell.ts';
 
 /** The Agenda page (the manifest's `agenda` screen). */
@@ -24,6 +25,11 @@ export interface AgendaLinks {
 
 export const useAgendaLinks = (): AgendaLinks => {
   const href = useScreenHref();
+  return useMemo(() => agendaLinks(href), [href]);
+};
+
+/** The links over one route table (`useScreenHref`'s answer). */
+export const agendaLinks = (href: ReturnType<typeof useScreenHref>): AgendaLinks => {
   return {
     chat: (daemonId, ferret) => href(daemonId, 'conversation', 'chat', { ferret }) ?? AGENDA_PAGE_PATH,
     agenda: daemonId => href(daemonId, 'agenda', 'agenda') ?? AGENDA_PAGE_PATH,

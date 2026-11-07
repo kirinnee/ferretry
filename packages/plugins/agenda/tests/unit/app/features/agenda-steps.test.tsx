@@ -64,7 +64,10 @@ describe('agenda card Markdown and hypermedia', () => {
     expect(body.querySelector('h2')?.textContent).toBe('Why');
     expect(body.querySelectorAll('li')).toHaveLength(2);
     expect(body.querySelector('strong')?.textContent).toBe('old');
-    expect(view.container.querySelector('[data-fy-render-type="svg"]')).not.toBeNull();
+    // The step goes through the chat's renderer whole. Drawing an fy-render block is Conversation's fence kind (it
+    // brings it to the surface as `fences`); a surface without it shows the block as its source, never as markup.
+    expect(view.container.querySelector('[data-fy-render-type]')).toBeNull();
+    expect([...view.container.querySelectorAll('pre')].some(pre => pre.textContent?.includes('type: svg'))).toBe(true);
   });
 
   test('links a reference the surface proved and leaves an unproven one as prose', async () => {

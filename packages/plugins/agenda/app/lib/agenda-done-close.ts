@@ -46,6 +46,45 @@ export const doneCloseLabel = (refs: readonly TaskRef[]): string =>
 export const doneCloseShortLabel = (refs: readonly TaskRef[]): string =>
   refs.length === 1 && refs[0] !== undefined ? `Close ${formatTaskRef(refs[0])}` : `Close ${refs.length} cards`;
 
+/** One lane of a card's board, as far as a Done reads it (Board's lane set, opaque to this half). */
+export interface LaneForClose {
+  readonly id: string;
+  readonly category: string;
+}
+
+/** The card as the board read it: what a Done needs. */
+export interface CardForClose {
+  readonly laneId: string;
+  readonly dropped: boolean;
+  readonly laneSet: {
+    readonly lanes: readonly LaneForClose[];
+    readonly doneLane?: string | null | undefined;
+  } | null;
+}
+
+/**
+ * The lane a Done moves the card into, `'closed'` when it already is, or why it cannot be closed. Board's own Done
+ * rule, as far as a close reads it: the set's declared Done lane when it is a closing lane, else its first closing
+ * lane; nothing for a dropped card, a card in a lane the set does not have, or a set with no closing lane.
+ */
+export const closePlan = (
+  card: CardForClose | undefined,
+):
+  | { readonly kind: 'move'; readonly laneId: string }
+  | { readonly kind: 'closed' }
+  | { readonly kind: 'refused'; readonly message: string } => {
+  if (card === undefined) return { kind: 'refused', message: 'the card could not be read' };
+  const refused = { kind: 'refused', message: 'the board has no Done for this card' } as const;
+  const laneSet = card.laneSet;
+  const category = laneSet?.lanes.find(lane => lane.id === card.laneId)?.category;
+  if (laneSet === null || card.dropped || category === undefined) return refused;
+  if (category === 'closed') return { kind: 'closed' };
+  const done =
+    laneSet.lanes.find(lane => lane.id === laneSet.doneLane && lane.category === 'closed')?.id ??
+    laneSet.lanes.find(lane => lane.category === 'closed')?.id;
+  return done === undefined ? refused : { kind: 'move', laneId: done };
+};
+
 /**
  * Closes each card in turn and stops at the first that will not close. A failure names the card and, when
  * earlier ones did close, says so — they stay closed.

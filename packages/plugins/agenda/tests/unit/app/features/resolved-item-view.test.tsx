@@ -1,10 +1,13 @@
-import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
+import type { ReactElement } from 'react';
 import { agendaListSnapshot, MACHINE_AGENDA_ID } from '../../../../app/wire/index.ts';
 import { projectionRecord, projectionSnapshot } from '../../../support/app/agenda-projection.ts';
 import { ResolvedItemView } from '../../../../app/features/agenda/resolved-item-view.tsx';
 import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view.tsx';
 import type { InboxResolved } from '../../../../app/lib/agenda-inbox.ts';
 import { daemonConnection } from '../../../../app/shell.ts';
+import { AgendaClientContext } from '../../../../app/lib/agenda-client-context.tsx';
+import { callFromFetch, type TestFetch } from '../../../support/app/call-from-fetch.ts';
 import { ensureDom } from '@ferretry/app/testing';
 ensureDom();
 import { render, run, runAsync } from '@ferretry/app/testing';
@@ -22,10 +25,10 @@ const row: InboxResolved = {
   view: sessionView(MACHINE_AGENDA_ID),
   record,
 };
-const fetchers: { mockRestore(): void }[] = [];
-afterEach(() => {
-  for (const read of fetchers.splice(0)) read.mockRestore();
-});
+/** The half's one client, answered by `read`; the view reaches nothing else. */
+const withClient = (read: TestFetch, element: ReactElement) => (
+  <AgendaClientContext.Provider value={callFromFetch(read)}>{element}</AgendaClientContext.Provider>
+);
 
 describe('the machine resolved item view', () => {
   test('also reads an older record whose conversation must be rebuilt', () => {
@@ -40,20 +43,22 @@ describe('the machine resolved item view', () => {
   });
   test('loads the full machine item and opens it read-only, including its edits', async () => {
     // Arrange
-    const read = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(projectionRecord()));
-    fetchers.push(read);
+    const read = mock<TestFetch>(async () => Response.json(projectionRecord()));
     let closed = 0;
     let view: ReturnType<typeof render> | undefined;
     // Act
     await runAsync(async () => {
       view = render(
-        <ResolvedItemView
-          row={row}
-          connection={connection}
-          onClose={() => {
-            closed++;
-          }}
-        />,
+        withClient(
+          read,
+          <ResolvedItemView
+            row={row}
+            connection={connection}
+            onClose={() => {
+              closed++;
+            }}
+          />,
+        ),
       );
     });
     // Assert
@@ -70,14 +75,12 @@ describe('the machine resolved item view', () => {
 
   test('shows a read failure and retries without losing the header', async () => {
     // Arrange
-    const read = spyOn(globalThis, 'fetch')
-      .mockRejectedValueOnce(new Error('Offline'))
-      .mockResolvedValue(Response.json(projectionRecord()));
-    fetchers.push(read);
+    const read = mock<TestFetch>(async () => Response.json(projectionRecord()));
+    read.mockImplementationOnce(() => Promise.reject(new Error('Offline')));
     let view: ReturnType<typeof render> | undefined;
     // Act
     await runAsync(async () => {
-      view = render(<ResolvedItemView row={row} connection={connection} onClose={() => {}} />);
+      view = render(withClient(read, <ResolvedItemView row={row} connection={connection} onClose={() => {}} />));
     });
     // Assert
     expect(view?.root.findByProps({ role: 'alert' }).children).toEqual(['Offline']);

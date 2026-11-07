@@ -4,7 +4,7 @@
  * answered with its owner's own controls, through that owner's routes. Today the inbox imported each owner's card
  * (`TwoFactorSeedHost`, `PhoneApprovalHost`, `TaskPlanHost`, `CopyPlanHost`, `SignInRuleSuggestionHost`,
  * `InputCardHost`); here each is mounted by its RENDERER KEY, so the owner draws it and this half imports none of
- * them. A notice about cards is Board's (`ask:card`, {@link AgendaCardsHost}).
+ * them. A notice's cards are drawn by {@link AgendaCardsHost}, its Start and Close through a host's board.
  *
  * - `ask:sign-in-approval` is Accounts': the value names the ref's kind (`two-factor-seed`, `phone-approval`,
  *   `task-plan`, `copy-plan`, `sign-in-rule-suggestion`) with the ask's words, the shape Accounts' renderer reads.

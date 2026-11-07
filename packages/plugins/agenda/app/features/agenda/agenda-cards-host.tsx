@@ -1,13 +1,18 @@
 /**
- * The cards a machine notice is about (`AgendaItem.cards`): one row per card, the daemon's own line and the card
- * itself. A card is Board's, so Board draws it, through its `ask:card` renderer (the card's reference and title, a link
- * to its page); this half imports nothing of Board's. With no Board on the machine (or outside a shell) the row shows
- * the card's plain reference. Starting a ferret on a card and closing one are Board's writes, made on the card's page.
+ * The cards a machine notice is about (`AgendaItem.cards`), with their buttons. The rows are the daemon's; the three
+ * buttons are Board's writes (`agendaCardsActions`): Open goes to the card's page (Board's `card` screen, when Board is
+ * installed), Start and Close are made through the {@link AgendaCardsBoard} a host provides
+ * ({@link AgendaCardsBoardProvider}). Agenda has no need on Board's routes, so without a host the board is idle: Open
+ * still goes to the card, Start and Close are refused with the reason — today's harness behaviour, and now the shell's
+ * until Board contributes the board (GAP(cards-board)).
  */
 
-import { type AgendaCardRow, formatTaskRef } from '../../wire/index.ts';
-import { RendererView } from '../../shell.ts';
+import type { AgendaCardRow } from '../../wire/index.ts';
+import { createContext, type ReactNode, useContext, useMemo, useRef } from 'react';
+import { type AgendaCardsBoard, agendaCardsActions, boardErr } from '../../lib/agenda-cards-actions.ts';
+import { useAgendaLinks } from '../../lib/agenda-links.ts';
 import type { DaemonConnection } from '../../shell.ts';
+import { AgendaCardsList } from './agenda-cards-list.tsx';
 
 export interface AgendaCardsHostProps {
   readonly connection: DaemonConnection;
@@ -15,25 +20,42 @@ export interface AgendaCardsHostProps {
   readonly onNavigate?: (to: string) => void;
 }
 
-/** Board's renderer for a card an ask names. */
-export const CARD_ASK_RENDERER = 'ask:card';
+const NOT_HERE = 'Cards are Board’s, and Board is not reachable from here: open the card to do this on its page.';
 
-export function AgendaCardsHost({ connection, cards }: AgendaCardsHostProps) {
-  return (
-    <ul className="fy-attn-cards" data-agenda-cards={cards.length}>
-      {cards.map(card => (
-        <li className="fy-attn-cards__row" data-agenda-card={card.task.id} key={formatTaskRef(card.task)}>
-          <span className="fy-attn-cards__card">
-            <RendererView
-              daemon={connection.daemonId}
-              fallback={formatTaskRef(card.task)}
-              rendererKey={CARD_ASK_RENDERER}
-              value={{ card: card.task.id }}
-            />
-          </span>
-          <span className="fy-attn-cards__line">{card.line}</span>
-        </li>
-      ))}
-    </ul>
+/** The board when no host provides one: every write is refused, saying where it can be made. */
+const IDLE_BOARD: AgendaCardsBoard = {
+  start: async () => boardErr({ status: 503, message: NOT_HERE }),
+  drop: async () => boardErr({ status: 503, message: NOT_HERE }),
+};
+
+const AgendaCardsBoardContext = createContext<AgendaCardsBoard>(IDLE_BOARD);
+
+/** Hands the notices below it the board their Start and Close write through. */
+export function AgendaCardsBoardProvider({
+  board,
+  children,
+}: {
+  readonly board: AgendaCardsBoard;
+  readonly children?: ReactNode;
+}) {
+  return <AgendaCardsBoardContext.Provider value={board}>{children}</AgendaCardsBoardContext.Provider>;
+}
+
+const NOWHERE = (): void => undefined;
+
+export function AgendaCardsHost({ connection, cards, onNavigate = NOWHERE }: AgendaCardsHostProps) {
+  const board = useContext(AgendaCardsBoardContext);
+  // The route table may be rebuilt on any render; the actions (and the retry key of a Start in flight) must not be.
+  const current = useAgendaLinks();
+  const links = useRef(current);
+  links.current = current;
+  const actions = useMemo(
+    () =>
+      agendaCardsActions(board, connection.daemonId, onNavigate, {
+        card: (daemonId, id) => links.current.card(daemonId, id),
+        chat: (daemonId, ferret) => links.current.chat(daemonId, ferret),
+      }),
+    [board, connection.daemonId, onNavigate],
   );
+  return <AgendaCardsList actions={actions} cards={cards} />;
 }

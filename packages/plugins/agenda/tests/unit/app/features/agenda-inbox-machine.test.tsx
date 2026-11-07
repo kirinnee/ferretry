@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { callFromFetch, type TestFetch } from '../../../support/app/call-from-fetch.ts';
 import { agendaListSnapshot } from '../../../../app/wire/index.ts';
 import { projectionRecord, projectionSnapshot } from '../../../support/app/agenda-projection.ts';
 import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
@@ -58,7 +59,7 @@ const open = async (cards: readonly InboxCard[], initialOpen?: string, paired = 
 describe('the Machine group in the Inbox', () => {
   test('opens a resolved machine deep link in the Inbox when it has no chat to navigate to', async () => {
     // Arrange
-    const read = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(projectionRecord()));
+    const read = mock<TestFetch>(async () => Response.json(projectionRecord()));
     try {
       const record = must(agendaListSnapshot(projectionSnapshot(0, 1)).resolved[0], 'resolved header');
       const row: InboxResolved = {
@@ -72,6 +73,7 @@ describe('the Machine group in the Inbox', () => {
       // Act
       view = await mount(
         <InboxHarness
+          client={callFromFetch(read)}
           cards={[]}
           fake={fakeInbox()}
           resolved={[row]}
@@ -97,7 +99,7 @@ describe('the Machine group in the Inbox', () => {
   });
   test('opens a resolved machine header from the list through its one-item read', async () => {
     // Arrange
-    const read = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(projectionRecord()));
+    const read = mock<TestFetch>(async () => Response.json(projectionRecord()));
     try {
       const record = must(agendaListSnapshot(projectionSnapshot(0, 1)).resolved[0], 'resolved header');
       const row: InboxResolved = {
@@ -109,6 +111,7 @@ describe('the Machine group in the Inbox', () => {
       };
       view = await mount(
         <InboxHarness
+          client={callFromFetch(read)}
           cards={[]}
           fake={fakeInbox()}
           resolved={[row]}
@@ -292,6 +295,7 @@ describe('the Machine group in the Inbox', () => {
 
   test('links its item to the Inbox, not to a conversation', () => {
     expect(agendaConversationPath(daemonId('studio'), 'machine-agenda', 'M1')).not.toContain('/session/');
-    expect(agendaConversationPath(daemonId('studio'), 'sess-1', 'A1')).toContain('/session/sess-1');
+    // A ferret's item opens on its own ask page, its conversation under the ask.
+    expect(agendaConversationPath(daemonId('studio'), 'sess-1', 'A1')).toBe('/agenda/sess-1/A1');
   });
 });

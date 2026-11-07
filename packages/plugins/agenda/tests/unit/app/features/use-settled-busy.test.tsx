@@ -1,13 +1,15 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 
-import { useSettledBusy } from '../../../../app/shell.ts';
-import { unitClock } from '../../../../daemon/tests/support/unit-clock.ts';
+import { useSettledBusy } from '@ferretry/app/ui';
+import { unitClock } from '../../../support/app/unit-clock.ts';
 import { render, run } from '@ferretry/app/testing';
 
 const Probe = ({ busy, onValue }: { busy: boolean; onValue: (shown: boolean) => void }) => {
   onValue(useSettledBusy(busy, 300, 800));
   return null;
 };
+
+afterEach(() => unitClock.release());
 
 describe('useSettledBusy', () => {
   it('takes the first value as is, shows work only after it lasts, and hides it only after a pause', async () => {

@@ -110,7 +110,8 @@ import {
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import type { DaemonConnection, DaemonId } from '../../shell.ts';
 import { daemonSessionScope } from '../../shell.ts';
-import { escapeCloses } from '../../shell.ts';
+import { composerQuoteTarget, escapeCloses } from '../../shell.ts';
+import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import {
   choiceLabel,
   type GateItem,
@@ -217,22 +218,34 @@ const renderInboxCard = (
   </Fragment>
 );
 
-/** The ferret scope an item's lifecycle reads under: its ferret's conversation and THIS item's slot. */
+/**
+ * The card's own composer, as it registers itself with the app's composer targets (`registerComposerQuoteTarget`): its
+ * ferret's conversation and THIS item's draft slot. The chat box registers under the conversation alone, so a quote or a
+ * quick reply here never reads or empties the chat's words, nor another card's.
+ */
 const scopeOf = (card: InboxCard) => daemonSessionScope({ daemonId: card.daemonId }, card.view.config.id, card.item.id);
 
 /**
- * Answers the open item. The composer under it is Conversation's (the ask screen's `agenda.conversation` slot), so
- * what is typed there goes to the ferret's chat as a message of its own; it does not ride the answer as its note.
+ * Answers the open item: what is typed in the item's own composer rides as the answer's note (the chat's own rule,
+ * `withComposerNote`), and the composer is emptied once it is spent. The composer is whoever registered for the item's
+ * scope (Conversation's, in the `agenda.conversation` slot); with none, the answer goes alone.
  */
-const answerWithDraft = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: InboxCard, action: InboxAction) =>
-  answerCard(host, card, action);
+const answerWithDraft = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: InboxCard, action: InboxAction) => {
+  const composer = composerQuoteTarget(scopeOf(card));
+  const draft = composer?.draft() ?? '';
+  const sent = withComposerNote(action, composerNoteFor(card.item, draft));
+  answerCard(host, card, sent);
+  if (sent !== action || inputDraftDiscarded(card.item, draft)) composer?.replaceDraft('');
+};
 
 /**
- * A form item's one Send: the picks on the card go as one answer into the undo window. Throws the sentence the page
- * shows when Send must wait (empty fields, asked once).
+ * A form item's one Send: the picks on the card and what is typed in the composer go as one answer into the undo
+ * window. Throws the sentence the page shows when Send must wait (empty fields, asked once).
  */
 const answerForm = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: InboxCard): void => {
-  sendForm(card.key, card.item, '', action => answerCard(host, card, action));
+  const composer = composerQuoteTarget(scopeOf(card));
+  sendForm(card.key, card.item, composer?.draft() ?? '', action => answerCard(host, card, action));
+  composer?.replaceDraft('');
 };
 
 const copyWriter = browserClipboardWriter();
@@ -347,6 +360,7 @@ function OpenItem({
         <AgendaItemView
           busy={false}
           closeLabel="Back to the Inbox"
+          daemonId={card.daemonId}
           error={failureFor(inbox.deferredState.failed, card.key) ?? conversation.error}
           ferret={inboxWho(card).ferret}
           formKey={card.key}
@@ -365,6 +379,7 @@ function OpenItem({
           {...(onProgress === undefined ? {} : { onProgress })}
           {...(canSnooze ? { onSnooze: (until: string) => act(snoozeAction(until)) } : {})}
           position={{ index: place.index, total: place.total }}
+          quoteScope={scopeOf(card)}
           {...askFormFor(inbox, card, onNavigate)}
           renderProse={agendaProse(copyWriter)}
           // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
@@ -511,7 +526,39 @@ function CardTools({
   );
 }
 
-/** What a "Not good" (or "Not yet") sends: the owner's words. Files with the answer are Board's send-back. */
+/**
+ * How a page takes files with a "Not good" (a picture of what went wrong): whether the card's machine takes them with
+ * an answer, and the upload into the item's own conversation (the daemon carries them to the card's ferret). A host
+ * that can upload hands these in; absent either, the box is words alone.
+ */
+export interface AnswerFilePorts {
+  readonly answerFiles?: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
+  readonly uploadAttachment?:
+    | ((daemon: DaemonConnection, sessionId: string, file: File) => Promise<{ readonly id: string }>)
+    | undefined;
+}
+
+/** Whether this machine takes files with an answer, once it has said. */
+function useAnswerFiles(ports: AnswerFilePorts | undefined, daemon: DaemonConnection | undefined): boolean {
+  const [takes, setTakes] = useState(false);
+  const answerFiles = ports?.answerFiles;
+  const upload = ports?.uploadAttachment;
+  useEffect(() => {
+    let live = true;
+    setTakes(false);
+    if (answerFiles === undefined || upload === undefined || daemon === undefined) return;
+    answerFiles(daemon).then(
+      answer => live && setTakes(answer),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [answerFiles, upload, daemon]);
+  return takes;
+}
+
+/** What a "Not good" (or "Not yet") sends: the owner's words, and the files they attached. */
 interface GateWords {
   readonly reason: string;
   readonly attachmentIds: readonly string[];
@@ -527,6 +574,7 @@ function GateWhy({
   daemon,
   error,
   optional,
+  ports,
   subject,
   onSend,
   onCancel,
@@ -538,12 +586,29 @@ function GateWhy({
   readonly daemon: DaemonConnection | undefined;
   readonly error: string | null;
   readonly optional: boolean;
+  /** What the machine needs to take files with the answer; absent, the box is words alone. */
+  readonly ports?: AnswerFilePorts | undefined;
   readonly onSend: (sent: GateWords, sessionId: string | null) => void;
   readonly onCancel: () => void;
 }) {
   const [words, setWords] = useState('');
+  const [attached, setAttached] = useState<readonly string[]>([]);
   const fieldId = useId();
+  const picker = useRef<HTMLInputElement | null>(null);
+  // "Not yet" leaves the card where it is: there is no ferret to show a picture to.
+  const takes = useAnswerFiles(optional ? undefined : ports, daemon);
+  const upload = ports?.uploadAttachment;
   if (daemon === undefined) return null;
+  const sessionId = card.view.config.id;
+  const files = takes && upload !== undefined;
+  const pick = (chosen: FileList | null): void => {
+    if (!files || chosen === null) return;
+    for (const file of [...chosen])
+      upload(daemon, sessionId, file).then(
+        (stored: { readonly id: string }) => setAttached(ids => [...ids, stored.id]),
+        () => undefined,
+      );
+  };
   const heading = optional
     ? `Not yet: anything to add about ${subject}?`
     : `Not good: what went wrong with ${subject}?`;
@@ -555,7 +620,7 @@ function GateWhy({
         onSubmit={event => {
           event.preventDefault();
           if (!ready) return;
-          onSend({ reason: words.trim(), attachmentIds: [] }, null);
+          onSend({ reason: words.trim(), attachmentIds: files ? attached : [] }, files ? sessionId : null);
         }}
       >
         <label className="fy-send-back__heading" htmlFor={fieldId}>
@@ -574,6 +639,20 @@ function GateWhy({
           </p>
         )}
         <div className="fy-send-back__actions">
+          {files ? (
+            <>
+              <button
+                aria-label="Attach a file"
+                className="kt-btn"
+                data-composer-attach=""
+                onClick={() => picker.current?.click()}
+                type="button"
+              >
+                +
+              </button>
+              <input hidden multiple onChange={event => pick(event.currentTarget.files)} ref={picker} type="file" />
+            </>
+          ) : null}
           <button className="kt-btn" onClick={onCancel} type="button">
             Cancel
           </button>
@@ -999,6 +1078,8 @@ export interface AgendaInboxPageProps {
   readonly renderComposer?: (card: InboxCard, answerForm: (() => void) | undefined) => ReactNode;
   /** How "Clear all from agent ferrets" reaches the machines. Absent: the Agents filter has no such button. */
   readonly clearPort?: ClearPort;
+  /** How a "Not good" takes files (`AnswerFilePorts`). Absent: its box is words alone. */
+  readonly answerPorts?: AnswerFilePorts;
   /**
    * An item was opened here (it is the deck's top card): its alerts come down on this device and the owner's others
    * (docs/notifications.md § When an alert is cleared). Called once each time a different item opens. Absent: nothing.
@@ -1363,6 +1444,7 @@ export function AgendaInboxPage({
   withFerretsOpen = false,
   renderComposer,
   clearPort,
+  answerPorts,
   onItemOpened,
 }: AgendaInboxPageProps) {
   const headingId = useId();
@@ -1897,6 +1979,7 @@ export function AgendaInboxPage({
                   subject={gateWhySubject(deck[0].item, gateWhy.action)}
                   error={failureFor(inbox.deferredState.failed, deck[0].key)}
                   onCancel={() => setGateWhy(null)}
+                  ports={answerPorts}
                   onSend={(sent, from) => {
                     const label = choiceLabel(gateWhy.action);
                     if (label === null || deck[0] === undefined) return;

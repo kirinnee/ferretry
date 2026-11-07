@@ -34,17 +34,22 @@ const withGate = inboxCard(
   agendaItem('A4', {
     subject: 'Which colour?',
     ask: choices('Blue', 'Green'),
-    gateAttached: {
-      cardId: 'F12',
-      laneId: 'tested',
-      laneName: 'Try it',
-      entry: 3,
-      projectId: 'p1',
-      options: [
-        { id: 'o0', label: 'Done', outcome: 'close' },
-        { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
-      ],
-    },
+    cardAsks: [
+      {
+        at: '2026-08-01T10:00:00.000Z',
+        gate: {
+          cardId: 'F12',
+          laneId: 'tested',
+          laneName: 'Try it',
+          entry: 3,
+          projectId: 'p1',
+          options: [
+            { id: 'o0', label: 'Done', outcome: 'close' },
+            { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
+          ],
+        },
+      },
+    ],
   } as never),
   sessionView('sess-2', { config: { teammate: 'kai', name: 'Release train' } as never }),
   'Laptop',

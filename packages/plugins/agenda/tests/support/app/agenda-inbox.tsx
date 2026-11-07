@@ -7,6 +7,10 @@
 import { type AgendaAsk, type AgendaItem, agendaTurn } from '../../../app/wire/index.ts';
 import type { SessionView } from '../../../app/shell.ts';
 import { type ReactElement, useEffect, useSyncExternalStore } from 'react';
+import { ScreenHrefProvider, type ScreenHrefOf } from '@ferretry/app';
+import { AgendaClientContext } from '../../../app/lib/agenda-client-context.tsx';
+import type { AgendaCall } from '../../../app/lib/agenda-call.ts';
+import { agendaLinks } from '../../../app/lib/agenda-links.ts';
 import type { AgendaInbox } from '../../../app/hooks/use-agenda-inbox.ts';
 import {
   type BoardItemRead,
@@ -161,6 +165,7 @@ export function InboxHarness({
   parked = [],
   parkedWhole = false,
   loadResolved = () => undefined,
+  client,
   render,
 }: {
   readonly fake: FakeInbox;
@@ -172,6 +177,8 @@ export function InboxHarness({
   readonly parked?: AgendaInbox['parked'];
   readonly parkedWhole?: boolean;
   readonly loadResolved?: () => void;
+  /** The half's one client the views call through (a scripted one); absent, every call is refused. */
+  readonly client?: AgendaCall;
   readonly render: (inbox: AgendaInbox) => ReactElement;
 }) {
   const state = useSyncExternalStore(fake.deferred.subscribe, fake.deferred.getSnapshot);
@@ -216,6 +223,26 @@ export function InboxHarness({
     replied: fake.replied,
     repliedState: replied,
     connectionFor: () => undefined,
+    // As the runtime binds it: Board's lane editor on the machine the cards are on.
+    laneEditor: project => agendaLinks(SCREENS).lanes(cards[0]?.daemonId ?? '', project),
   };
-  return render(inbox);
+  const drawn = <ScreenHrefProvider href={SCREENS}>{render(inbox)}</ScreenHrefProvider>;
+  return client === undefined ? (
+    drawn
+  ) : (
+    <AgendaClientContext.Provider value={client}>{drawn}</AgendaClientContext.Provider>
+  );
 }
+
+/**
+ * The route table the suites draw in, as a shell with Conversation and Board installed would spell it: a ferret's chat,
+ * a card, and this half's own Agenda page, each on its machine.
+ */
+export const SCREENS: ScreenHrefOf = (daemon, plugin, screen, params = {}) => {
+  const at = `/d/${encodeURIComponent(daemon)}`;
+  if (plugin === 'conversation' && screen === 'chat') return `${at}/session/${encodeURIComponent(params.ferret ?? '')}`;
+  if (plugin === 'board' && screen === 'card') return `${at}/board/${encodeURIComponent(params.id ?? '')}`;
+  if (plugin === 'board' && screen === 'board') return `${at}/board/${encodeURIComponent(params.project ?? '')}`;
+  if (plugin === 'agenda' && screen === 'agenda') return `${at}/inbox`;
+  return undefined;
+};

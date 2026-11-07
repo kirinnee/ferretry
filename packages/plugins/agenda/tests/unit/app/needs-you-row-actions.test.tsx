@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { DaemonId } from '../../../app/shell.ts';
 import { AgendaInboxContext } from '../../../app/hooks/use-agenda-inbox.ts';
-import { SessionsBarNeedsYou } from '../../../app/shell.ts';
+import { NeedsYouGroup as SessionsBarNeedsYou } from '../../../app/features/agenda/agenda-nav.tsx';
 import { agendaItem, fakeInbox, InboxHarness, inboxCard } from '../../support/app/agenda-inbox.tsx';
 import { type Mounted, mount, must } from '@ferretry/app/testing';
 import { sessionView } from '../../support/app/sessions.ts';
