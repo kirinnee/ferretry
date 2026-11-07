@@ -20,7 +20,7 @@ import { milliseconds } from '@ferretry/std';
  * no peer needs them — see `WebRtcPeerEngine` for what holding them cost.
  */
 
-import { WEBRTC_GATHER_CAP_MS, WEBRTC_GATHER_REFLEXIVE_GRACE_MS } from '../../contract/index.ts';
+import { WEBRTC_GATHER_CAP_MS, WEBRTC_GATHER_REFLEXIVE_GRACE_MS } from '../../../contract/index.ts';
 import {
   WEBRTC_SELF_TEST_CHANNEL,
   WEBRTC_SELF_TEST_TIMEOUT_MS,
@@ -32,7 +32,7 @@ import {
   WebRtcOfferRefused,
   type WebRtcPeerEngine,
   type WebRtcPeerPort,
-} from '../../daemon/lib/webrtc/index.ts';
+} from '../../lib/webrtc/index.ts';
 
 /** The slice of a data channel this adapter touches. */
 export interface EngineDataChannel {

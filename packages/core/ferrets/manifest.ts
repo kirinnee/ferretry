@@ -170,7 +170,7 @@ export default definePlugin({
       route('POST /v1/ferrets', {
         minimum: 'operator',
         caller: 'any',
-        audit: { skip: 'a start is recorded in the ferret history, as today' },
+        audit: { record: AUDIT_KINDS['session.opened'] },
         guard: { none: 'answers the new ferret id only' },
       }),
       // R-0187: four segments deep with a literal third, so it never matches a ferret id. The payload digest is the proof.
@@ -463,7 +463,7 @@ export default definePlugin({
   // Moves and forks (copying today's reach): a harness home is read through the read-only `harness-history` root, a
   // pane's process tree through `ps` and procfs (tmux joins when the pane preflight is bound, through Terminals' runner).
   permissions: {
-    roots: ['agent-homes', 'worktrees', 'work', 'harness-history'],
+    roots: ['worktrees', 'work', 'harness-history'],
     spawn: ['ps'],
     hostFacts: true,
   },

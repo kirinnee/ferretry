@@ -51,13 +51,13 @@ function harness() {
         release: () => {},
       },
     },
-    sessionLayer: {
+    sessionLayer: () => ({
       open: () => {
         throw new Error('no channel has opened');
       },
       connection: noConnection,
       signer: unusedSigner,
-    },
+    }),
     device: () => ({ deviceId: 'verified-holder', appSession: 'verified-page' }),
     onStop: () => {},
   });

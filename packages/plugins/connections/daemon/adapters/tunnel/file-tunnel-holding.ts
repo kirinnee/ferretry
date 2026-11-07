@@ -1,8 +1,8 @@
 import type { StatePort } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { TunnelOriginSchema } from '../../contract/index.ts';
-import manifest from '../../manifest.ts';
-import type { TunnelHolding, TunnelHoldingPort } from '../../daemon/lib/tunnel/carrier.ts';
+import { TunnelOriginSchema } from '../../../contract/index.ts';
+import manifest from '../../../manifest.ts';
+import type { TunnelHolding, TunnelHoldingPort } from '../../lib/tunnel/carrier.ts';
 
 const HoldingSchema = z.strictObject({ origin: z.string().min(1).max(2048), tunnelUrl: TunnelOriginSchema });
 

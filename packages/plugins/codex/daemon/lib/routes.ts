@@ -3,13 +3,13 @@
  *
  * THE `fleet` CAPABILITY, like the daemon's own update: reading is `use`, starting an update is `configure`. A remote
  * device also confirms with a passkey, and a ferret may never start one — it would be an agent replacing the program it
- * runs as. The gate is the daemon update's own, so the two acts can never be governed differently.
+ * runs as. The gate is the daemon update's own (Gate's `ownerOnly`), so the acts can never be governed differently.
  *
  * The read is also when npm is asked for the newest version: opening the panel, or `fy harness codex status`, is the
  * only thing that ever asks.
  */
 import { ApiError, type CallContext, jsonResponse, type RouteHandler } from '@ferretry/kernel/contract';
-import { isFerretCall, STEP_UP_REQUIRED_CODE, type StepUpRequiredBody } from '@ferretry/core-gate/contract';
+import { ownerOnly } from '@ferretry/core-gate/contract';
 import type { z } from 'zod';
 import {
   HARNESS_UPDATE_CODES,
@@ -49,7 +49,8 @@ async function readStart(call: CallContext): Promise<z.output<typeof HarnessUpda
   try {
     text = await call.request.text(MAX_BODY_BYTES);
   } catch (error) {
-    if (error instanceof Error && error.name === 'BodyTooLargeError') throw new ApiError(413, error.message, 'body_too_large');
+    if (error instanceof Error && error.name === 'BodyTooLargeError')
+      throw new ApiError(413, error.message, 'body_too_large');
     throw new ApiError(400, 'the request body could not be read', 'unreadable_body');
   }
   let parsed: unknown;
@@ -64,20 +65,6 @@ async function readStart(call: CallContext): Promise<z.output<typeof HarnessUpda
     .map(issue => `${issue.path.join('.') === '' ? 'body' : issue.path.join('.')}: ${issue.message}`)
     .join('; ');
   throw new ApiError(400, `the request body is invalid — ${detail}`, 'invalid_request', result.error.issues);
-}
-
-/** Refuses a ferret, and a governed device that has not confirmed with a passkey. */
-function ownerOnly(call: CallContext, act: string): ReturnType<typeof jsonResponse> | undefined {
-  if (isFerretCall(call)) throw new ApiError(403, `a ferret cannot ${act}; the owner does`, 'forbidden');
-  if (call.governance?.governed !== true || call.presentation?.freshStepUp === true) return undefined;
-  return jsonResponse(
-    {
-      error: `to ${act} from this device, confirm with a passkey`,
-      code: STEP_UP_REQUIRED_CODE,
-      demand: { capability: 'fleet', axis: 'configure' },
-    } satisfies StepUpRequiredBody,
-    403,
-  );
 }
 
 export function codexUpdateRoutes(subsystem: HarnessUpdateSubsystem): {

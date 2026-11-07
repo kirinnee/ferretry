@@ -26,7 +26,7 @@ export interface LaunchSpec {
   readonly effort?: string;
   /** The work folder, fenced (`WorkFolders`). */
   readonly folder: FencedPath;
-  /** The ferret's home under the harness's own `agent-homes` root. */
+  /** The ferret's home under the harness's own `agent-homes` root: the harness's `homeFor` answer, unchanged. */
   readonly home: FencedPath;
   /** Instructions from the post-build snapshot, filtered by `when`, ordered. */
   readonly instructions: readonly InstructionEntry[];
@@ -218,7 +218,20 @@ export interface Harness {
   update?(): Promise<UpdateResult>;
   /** Which login kinds it can spend. */
   readonly accepts: readonly LoginKindKey[];
-  /** Writes instructions, MCP config and skills in its own format, inside the ferret's home only. */
+  /**
+   * The ferret's home, which only the harness can name: it resolves its own `state/<harness>/agent-homes/<ferret>`
+   * through its OWN `agent-homes` root (scope `{ ferret, subfolder: ferret }`), never a path Ferrets built. The answer
+   * is a canonical absolute path: already normalized, no `.` or `..` segment, no doubled or trailing `/`, and never `/`
+   * itself. Ferrets asks for it before every start and launches with exactly this answer in `LaunchSpec.home`; a harness
+   * that throws or answers any other spelling is not started (fail closed). Resolving names a path only: the folder is
+   * created and narrowed (0700) by `prepareHome`.
+   */
+  homeFor(ferret: FerretId): Promise<FencedPath>;
+  /**
+   * Writes instructions, MCP config and skills in its own format, inside the ferret's home only, after creating or
+   * narrowing that home privately. Refuses a `spec.home` that is not its own `homeFor` answer. Ferrets calls it
+   * before every start and resume, before the runner is asked for anything.
+   */
   prepareHome(spec: LaunchSpec): Promise<HomePlan>;
   start(spec: LaunchSpec, runner: Runner, env: ChildEnvironment): Promise<Result<Started, StartRefusal>>;
   resume(

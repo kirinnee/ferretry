@@ -5,7 +5,7 @@
 
 import { afterEach, describe, it } from 'bun:test';
 import should from 'should';
-import { HostedTunnelService } from '../../../adapters/tunnel/hosted-tunnel-service.ts';
+import { HostedTunnelService } from '../../../daemon/adapters/tunnel/hosted-tunnel-service.ts';
 
 const servers: Array<{ stop: (closeActive?: boolean) => Promise<void> }> = [];
 

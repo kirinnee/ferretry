@@ -45,7 +45,6 @@ function fixture() {
     launchParts: () => [],
     sitrepSources: () => [],
     instructions: () => [],
-    home: () => fenced('/homes/fern'),
     folder: path => ok(fenced(path)),
     changed: () => {},
     vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },

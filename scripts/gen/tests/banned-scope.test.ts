@@ -20,7 +20,7 @@ describe('banned-globals scope: the explicit outside-the-kernel list', () => {
   test('the relay and catalog Workers and the WebRTC native adapter are exempt, each with a reason', () => {
     expect(bannedScope(...at('connections', 'worker/src/index.ts'))).toBe(false);
     expect(bannedScope(...at('catalogs', 'worker/index.ts'))).toBe(false);
-    expect(bannedScope(...at('connections', 'adapters/webrtc/node-datachannel-engine.ts'))).toBe(false);
+    expect(bannedScope(...at('connections', 'daemon/adapters/webrtc/node-datachannel-engine.ts'))).toBe(false);
     expect(bannedScope(...at('browsers', 'daemon/worker/adapters/agent-browser.ts'))).toBe(false);
     expect(OUTSIDE_THE_KERNEL.every(entry => entry.reason.length > 0)).toBe(true);
   });

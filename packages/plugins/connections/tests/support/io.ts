@@ -1,7 +1,7 @@
 import { accessSync, constants, statSync } from 'node:fs';
 import type { Clock, SpawnPort } from '@ferretry/kernel/contract';
 import { InstantSchema } from '@ferretry/std';
-import { CloudflaredLocator } from '../../adapters/tunnel/cloudflared-locator.ts';
+import { CloudflaredLocator } from '../../daemon/adapters/tunnel/cloudflared-locator.ts';
 
 /** Native adapters used only by integration/realworld tests, never by a product half. */
 export const clock: Clock = {

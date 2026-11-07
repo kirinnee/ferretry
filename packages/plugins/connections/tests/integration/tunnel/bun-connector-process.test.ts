@@ -6,7 +6,7 @@ import { clock, processes as kernelProcesses } from '../../support/io.ts';
 
 import { afterEach, describe, it } from 'bun:test';
 import should from 'should';
-import { BunConnectorProcesses, forEachLine } from '../../../adapters/tunnel/bun-connector-process.ts';
+import { BunConnectorProcesses, forEachLine } from '../../../daemon/adapters/tunnel/bun-connector-process.ts';
 import { CLOUDFLARED_ARGUMENTS, connectorEnvironment } from '../../../daemon/lib/tunnel/index.ts';
 import { connectorRecords, fakeCloudflared, removeTempDirectories, sha256, waitFor } from './support.ts';
 

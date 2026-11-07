@@ -69,7 +69,16 @@ export const AuditRecordSchema = z.strictObject({
 export type AuditRecord = z.infer<typeof AuditRecordSchema>;
 
 /** What a subsystem hands Gate to record; Gate stamps `format` and `at`. */
-export type AuditDraft = Omit<AuditRecord, 'format' | 'at' | 'event'> & { readonly event: PolicyRef<'audit'> };
+export type AuditDraft = Omit<AuditRecord, 'format' | 'at' | 'event'> & {
+  readonly event: PolicyRef<'audit'>;
+  /**
+   * `daemon` when the DAEMON did this on its own — an idle expiry — rather than somebody at the machine (today's
+   * `AuditEntry.cause`). The actor is still `host`, because it is the machine acting; but how OFTEN it happens is not
+   * the owner's choice, so a daemon-caused kept record is rationed like a remote one and can never rotate the kept
+   * store. Never written to the record.
+   */
+  readonly cause?: 'daemon';
+};
 
 export const AUDIT_MAX_LIMIT = 200 as const;
 export const AUDIT_DEFAULT_LIMIT = 50 as const;

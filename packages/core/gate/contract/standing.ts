@@ -150,9 +150,9 @@ export interface WardenRemedyAuthorizer {
 
 // ─── step-up claims ───────────────────────────────────────────────────────────────────────────────────────────────
 
-/** What a kept step-up proof holds: the holder and the assertion bytes as signed (today's `StoredStepUpProof`). */
+/** What a kept step-up proof holds: the device and the assertion bytes as signed (today's `StoredStepUpProof`). */
 export interface StoredStepUpProof {
-  readonly holder: HolderId;
+  readonly deviceId: string;
   readonly credentialId: string;
   readonly clientDataJSON: string;
   readonly authenticatorData: string;

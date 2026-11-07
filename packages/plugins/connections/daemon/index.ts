@@ -42,6 +42,7 @@ import { decideAdvertisement } from './lib/runtime/advertisement.ts';
 import { browserOrigins, directoryOriginOf } from './lib/runtime/browser-origins.ts';
 import { carrierRoutes } from './lib/runtime/mounts/carriers.ts';
 import { PublishedCarrierSet } from './lib/runtime/published-carriers.ts';
+import { composeOtherConnections, kernelTunnelHost, type TunnelHostPort } from './compose-b.ts';
 
 /** Host-facing listener facts plus the Kernel identity and fixed-label claim signer. */
 export interface ConnectionBindings {
@@ -58,7 +59,7 @@ export interface ConnectionBindings {
   readonly socketFactory?: RelayWebSocketFactory;
   readonly randomBytes?: (length: number) => Uint8Array;
 }
-/** The second port half supplies these after its tunnel/WebRTC services are built. */
+/** The tunnel and WebRTC services, composed by `compose-b.ts` (a suite may supply its own). */
 export interface OtherConnections {
   readonly tunnel: Carrier;
   readonly webrtc: Carrier;
@@ -82,7 +83,8 @@ const configFile = manifest.data.config[0] as ConfigFileDef<ConnectionsConfig>;
 export function buildConnections(
   ctx: DaemonContext<typeof manifest>,
   bindings?: ConnectionBindings,
-  other?: OtherConnections,
+  supplied?: OtherConnections,
+  tunnelHost?: TunnelHostPort,
 ) {
   const config = ctx.kernel.config.file(configFile);
   const relays: readonly DaemonRelayCarrierEntry[] =
@@ -95,6 +97,8 @@ export function buildConnections(
   let published = new PublishedCarrierSet(bindings?.directUrl, []);
   let sources: readonly RelayCarrierSource[] = [];
   let initial: Promise<void> | undefined;
+  /** The tunnel's address while cloudflared holds a registered connection; kept across the discovery read. */
+  let tunnelUrl: string | undefined;
   const initialise = (): Promise<void> =>
     (initial ??= (async () => {
       const advertisement = relayCarriersNeedDiscovery(relays)
@@ -109,8 +113,25 @@ export function buildConnections(
       if (resolved.kind === 'refused') throw new ApiError(503, resolved.reason, 'plugin_failed');
       sources = resolved.sources;
       published = new PublishedCarrierSet(bindings?.directUrl, sources);
+      if (tunnelUrl !== undefined) published.tunnel(tunnelUrl);
       ctx.kernel.events.publish(CarriersChanged, { kinds: published.current().map(c => c.kind) });
     })());
+  const publishTunnel = (url: string | undefined): void => {
+    tunnelUrl = url;
+    published.tunnel(url);
+    ctx.kernel.events.publish(CarriersChanged, { kinds: published.current().map(c => c.kind) });
+  };
+  const other =
+    supplied ??
+    (bindings === undefined
+      ? undefined
+      : composeOtherConnections({
+          kernel: ctx.kernel,
+          config,
+          ...(bindings.directoryOrigin === undefined ? {} : { directoryOrigin: bindings.directoryOrigin }),
+          host: tunnelHost ?? kernelTunnelHost(),
+          publishTunnel,
+        }));
   ctx.kernel.jobs.add({
     id: 'relay-discovery',
     schedule: { onceAfterStart: true },
