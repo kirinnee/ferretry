@@ -86,9 +86,10 @@ describe('conversion', () => {
   });
 
   test('the v4 home is never written', async () => {
-    const before = await readdir(from, { recursive: true });
+    // Recursive readdir order is not stable across calls: compare the sets of names.
+    const before = (await readdir(from, { recursive: true })).sort();
     await convert({ from, to, dryRun: false, lock: notHeld, now: () => at });
-    expect(await readdir(from, { recursive: true })).toEqual(before);
+    expect((await readdir(from, { recursive: true })).sort()).toEqual(before);
   });
 
   test('every step reports, in the owner’s order of importance', async () => {
