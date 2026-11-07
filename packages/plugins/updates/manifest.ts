@@ -17,8 +17,8 @@ import {
 
 /**
  * Updates (§2.3): keeps the daemon current — checks for a release, installs it when no ferret is mid-turn, restarts,
- * and tells the app when a daemon is behind. Routes copied from today's `runtime/mounts/{daemon-update,
- * harness-update}.ts`; the agent CLIs' `fy harness <id> update` verbs belong to the harness plugins (§1.4).
+ * and tells the app when a daemon is behind. Routes copied from today's `runtime/mounts/daemon-update.ts`; the agent
+ * CLIs' updates (`/v1/<harness>/update`, `fy harness <id> update`) belong to the harness plugins (§1.4).
  */
 export default definePlugin({
   id: 'updates',
@@ -51,22 +51,6 @@ export default definePlugin({
         guard: GUARD_NONE,
       }),
       route('PATCH /v1/daemon/update/settings', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: CONFIGURE.fleet,
-        noStore: true,
-        audit: { record: AUDIT.securityChanged },
-        guard: GUARD_NONE,
-      }),
-      route('GET /v1/harnesses/update', {
-        minimum: 'operator',
-        caller: 'any',
-        capability: USE.fleet,
-        noStore: true,
-        audit: SKIP_READ,
-        guard: GUARD_NONE,
-      }),
-      route('POST /v1/harnesses/update', {
         minimum: 'operator',
         caller: 'person',
         capability: CONFIGURE.fleet,
@@ -111,7 +95,7 @@ export default definePlugin({
   doctor: ['update'],
 
   permissions: {
-    network: ['api.github.com', 'github.com', 'objects.githubusercontent.com', 'registry.npmjs.org'],
-    spawn: ['nix', 'brew', 'dpkg', 'rpm', 'apt-get', 'dnf', 'yum', 'npm', 'pnpm', 'bun', 'volta', 'claude', 'codex'],
+    network: ['api.github.com', 'github.com', 'objects.githubusercontent.com'],
+    spawn: ['nix', 'brew', 'dpkg', 'rpm', 'apt-get', 'dnf', 'yum'],
   },
 });

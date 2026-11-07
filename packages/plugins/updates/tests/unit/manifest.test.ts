@@ -2,13 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import manifest from '../../manifest.ts';
 
 describe('updates manifest', () => {
-  test("declares today's daemon and agent-CLI update routes", () => {
+  test("declares today's daemon update routes (harness updates are the harness plugins')", () => {
     expect(manifest.actions.routes.map(route => route.key).sort()).toEqual([
       'GET /v1/daemon/update',
-      'GET /v1/harnesses/update',
       'PATCH /v1/daemon/update/settings',
       'POST /v1/daemon/update',
-      'POST /v1/harnesses/update',
     ]);
   });
   test('every act that runs new code is a person act on fleet.configure, kept in the audit log', () => {
