@@ -224,8 +224,13 @@
       "version": "5.0.0",
       "dependencies": {
         "@ferretry/core-gate": "workspace:*",
+        "@ferretry/core-vault": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-access": "workspace:*",
+        "@ferretry/plugin-connections": "workspace:*",
+        "@ferretry/plugin-projects": "workspace:*",
         "@ferretry/std": "workspace:*",
+        "qrcode-generator": "^2.0.4",
         "zod": "4.4.3",
       },
     },

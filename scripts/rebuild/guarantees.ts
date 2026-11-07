@@ -174,6 +174,11 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
     reason:
       "the log and work searches are Conversation's (lead ruling, port-conversation r2 #8): it matches on scrubbed text and cuts every snippet from it; the Kernel logs and the Vault redaction stay co-owners",
   },
+  G66: {
+    owner: 'catalogs',
+    reason:
+      "the download-link routes are Catalogs' (Gate R2 ruling): its handlers refuse a ferret every act but list and read (403 forbidden); Gate's descriptor check stays a co-owner",
+  },
   G167: {
     owner: 'agenda',
     reason: 'POST /v1/push/seen moved to Agenda (DECISIONS-1 #4); Agenda computes the seen outcome',
