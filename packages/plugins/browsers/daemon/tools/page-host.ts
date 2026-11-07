@@ -41,5 +41,7 @@ export function pageToolHost(tools: BrowserTools): PageToolHost {
     askOwner: async (caller, page, message) =>
       await tools.askOwner(toolCaller(caller), await surfaceOf(caller, page), message),
     drove: async (caller, page) => await tools.droveOn(toolCaller(caller), await surfaceOf(caller, page)),
+    // The page an act touched, for the sign-in lock: the surface `resolve` cleared, with today's hosts around the act.
+    actedPage: async (caller, page) => await tools.actedPage(caller.ferret, surfaces.get(page)),
   };
 }

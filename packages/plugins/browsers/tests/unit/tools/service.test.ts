@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fixedClock } from '@ferretry/kernel/testing';
+import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import should from 'should';
 import { pageTarget } from '../../../daemon/pages/acts.ts';
 import type { BrowserActGuard } from '../../../daemon/pages/service.ts';
@@ -11,7 +12,7 @@ import { heldViewerHost } from '../../../daemon/stream/held-host.ts';
 import { nodeStagedFiles } from '../../../daemon/tools/adapters/staged-files.ts';
 import { SurfaceControl } from '../../../daemon/tools/control.ts';
 import { rootFiles } from '../../../daemon/tools/files.ts';
-import { ApiError, type CallContext } from '@ferretry/kernel/contract';
+import { ApiError, type CallContext, type FerretId } from '@ferretry/kernel/contract';
 import { holdSentence, PageHeld } from '../../../daemon/holds/index.ts';
 import { controlRoutes, toolHandler } from '../../../daemon/tools/index.ts';
 import { BrowserToolError, BrowserTools, type BrowserToolPorts } from '../../../daemon/tools/service.ts';
@@ -45,6 +46,13 @@ class FakeBrowser {
   readonly acts: string[] = [];
   /** An act the browser fails, by action: what it throws (a worker's error carries the page's own words). */
   readonly failOn = new Map<string, () => Error>();
+  /** Where a page script leaves its page, and the origin of the world it ran in (`undefined`: none read). */
+  scriptMoves: string | undefined;
+  scriptOrigin: string | undefined;
+  /** A script that ran, then failed before it could say where it ended. */
+  scriptFails = false;
+  /** Called inside the script's turn, after the guard ran and before the script answers. */
+  duringScript: (() => void) | undefined;
 
   status = async (_sessionId: string) =>
     ({
@@ -116,8 +124,17 @@ class FakeBrowser {
   };
 
   attachViewer = async () => ({ detach: () => undefined }) as never;
-  scriptOnPage = async () => {
-    throw new Error('not exercised');
+  scriptOnPage = async (_sessionId: string, key: string, script: { source: string }, guard?: BrowserActGuard) => {
+    const page = this.page(key);
+    await guard?.({ document: async () => ({}), host: async () => new URL(page.url).host } as never);
+    this.duringScript?.();
+    if (this.scriptFails) throw new Error('Execution context was destroyed');
+    if (this.scriptMoves !== undefined) page.url = this.scriptMoves;
+    return {
+      ...(this.acted(page) as object),
+      text: `ran:${script.source}`,
+      ...(this.scriptOrigin === undefined ? {} : { scriptOrigin: this.scriptOrigin }),
+    } as never;
   };
   closePage = async () => undefined as never;
   lifecycleOnPage = async () => {
@@ -131,7 +148,9 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
-async function harness(options: { readonly allows?: boolean } = {}) {
+async function harness(
+  options: { readonly allows?: boolean; readonly policy?: (kind: string) => boolean; readonly vault?: FakeVault } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), 'ferretry-browser-tools-'));
   roots.push(root);
   const work = join(root, 'work');
@@ -146,9 +165,22 @@ async function harness(options: { readonly allows?: boolean } = {}) {
       { now: () => clock.nowMs() },
     ),
     kernel: kernel.kernel,
-    policy: { allows: async () => options.allows ?? true },
+    policy: { allows: async kind => options.policy?.(kind) ?? options.allows ?? true },
     files: rootFiles(workRoots(work, join(work, '.fy')), nodeStagedFiles(join(root, 'upload'), clock)),
     binaryName: 'fy',
+    // Bound as the daemon half binds them: the Vault's sign-in lock hears scripts and page acts (I98–I100).
+    ...(options.vault === undefined
+      ? {}
+      : {
+          scriptedOrigins: {
+            running: () => (options.vault as FakeVault).scriptRunning(),
+            scriptedOn: (host: string | undefined) => (options.vault as FakeVault).scriptedOn(host),
+          },
+          pageActs: {
+            acted: (sessionId: string, script: boolean) =>
+              (options.vault as FakeVault).pageActed(sessionId as FerretId, script),
+          },
+        }),
   });
   return { root, work, browser, kernel, tools };
 }
@@ -390,5 +422,88 @@ describe('the viewer stream’s input, through the act runner (R549)', () => {
     // Assert
     should(refused?.message).equal('This is held right now because the owner just typed a private value into it.');
     should(browser.inputs).have.length(0);
+  });
+});
+
+describe('the browser tools — what a ferret did to a page, told to the Vault’s sign-in lock (I98)', () => {
+  it('I98 a page script is one script act on its page, and tells the Vault it runs, where it ran and where it left the page', async () => {
+    // Arrange
+    const vault = new FakeVault();
+    const { browser, kernel, tools } = await harness({ vault });
+    await tools.call(agent, { tool: 'browser.open', name: 'app', url: 'https://accounts.example.test/login' });
+    browser.scriptOrigin = 'https://frame.example.test';
+    browser.scriptMoves = 'https://elsewhere.example.org/';
+    let runningDuring = -1;
+    browser.duringScript = () => {
+      runningDuring = vault.scriptsRunning;
+    };
+
+    // Act
+    await tools.call(agent, { tool: 'browser.eval', name: 'app', function: '() => document.title' });
+
+    // Assert — one `script` act on the page's hold target, the machine-wide "running" closed only after it,
+    // every host the script could have touched tainted, and the act filed as a script on that page.
+    should(kernel.acts.filter(act => act.op === 'script').map(act => act.target)).deepEqual([
+      { kind: 'page', key: 'p1' },
+    ]);
+    should(runningDuring).equal(1);
+    should(vault.scriptsRunning).equal(0);
+    should(vault.scriptedHosts).deepEqual(['accounts.example.test', 'frame.example.test', 'elsewhere.example.org']);
+    should(vault.pageActs.map(act => [act.ferret, act.script, act.placed?.id])).deepEqual([
+      ['s1', false, 'p1'],
+      ['s1', true, 'p1'],
+    ]);
+  });
+
+  it('I98 a script that ran but could not say where it ended taints every host, and its act is still placed', async () => {
+    // Arrange
+    const vault = new FakeVault();
+    const { browser, tools } = await harness({ vault });
+    await tools.call(agent, { tool: 'browser.open', name: 'app', url: 'https://accounts.example.test/login' });
+    browser.scriptFails = true;
+
+    // Act
+    const failed = await failure(tools.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' }));
+
+    // Assert — the host it was on, then `undefined` (any host: the lock reads it as scripted everywhere).
+    should(failed).be.instanceOf(Error);
+    should(vault.scriptedHosts).deepEqual(['accounts.example.test', undefined]);
+    should(vault.scriptsRunning).equal(0);
+    should(vault.pageActs.at(-1)).match({ ferret: 's1', script: true });
+    should(vault.pageActs.at(-1)?.placed?.id).equal('p1');
+  });
+
+  it('I98 a script refused by the owner’s Page scripts switch runs nothing and tells the Vault nothing', async () => {
+    // Arrange — the daemon half's policy today: Browsers on, Page scripts off (fails closed).
+    const vault = new FakeVault();
+    const { tools: refusing } = await harness({ vault, policy: kind => kind === 'browser' });
+    await refusing.call(agent, { tool: 'browser.open', name: 'app', url: 'https://accounts.example.test/' });
+    const told = vault.pageActs.length;
+
+    // Act
+    const refused = await refusal(refusing.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' }));
+
+    // Assert
+    should(refused.code).equal('forbidden');
+    should(vault.pageActs.length).equal(told);
+    should(vault.scriptedHosts).deepEqual([]);
+  });
+
+  it('I100 a read tells the Vault nothing; a click is told, and placed on its page with the hosts around it', async () => {
+    // Arrange
+    const vault = new FakeVault();
+    const { tools } = await harness({ vault });
+    await tools.call(agent, { tool: 'browser.open', name: 'app', url: 'https://accounts.example.test/login' });
+    const told = vault.pageActs.length;
+
+    // Act
+    await tools.call(agent, { tool: 'browser.read', name: 'app', mode: 'text' });
+    await tools.call(agent, { tool: 'browser.click', name: 'app', selector: '#next' });
+    await tools.call(person, { tool: 'browser.click', name: 'app', selector: '#next' });
+
+    // Assert — only the ferret's click; a person's act is not the ferret's steering.
+    const acts = vault.pageActs.slice(told);
+    should(acts).have.length(1);
+    should(acts[0]?.placed).deepEqual({ id: 'p1', hosts: ['accounts.example.test'] });
   });
 });

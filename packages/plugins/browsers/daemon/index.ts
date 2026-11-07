@@ -19,11 +19,13 @@ import { controlRoutes, toolHandlers } from './tools/index.ts';
 import { pageToolHost } from './tools/page-host.ts';
 import { BrowserTools } from './tools/service.ts';
 import type { RecordedSurfaceEvent } from './tools/types.ts';
-import { processHost } from './worker/adapters/host.ts';
+import { processHost } from './adapters/host.ts';
 import { BrowserLoginWindowService } from './worker/control/adapters/login-window.ts';
 import { NodeBrowserLoginRuntime, XvfbDisplay } from './worker/control/adapters/login-runtime.ts';
 import { BrowserProfileStore } from './worker/control/adapters/profile-store.ts';
+import type { StartWorker } from './worker/client.ts';
 import { NodeSessionBrowserLauncher } from './worker/launcher.ts';
+import { workerCommand } from './worker/program.ts';
 
 /** A browser nobody watches or drives stops after this long, so a forgotten one does not hold the one shared profile. */
 const BROWSER_IDLE_TIMEOUT_MS = 15 * 60_000;
@@ -39,7 +41,7 @@ const PAGE_CHANGES: Readonly<Record<string, 'opened' | 'taken-over' | 'handed-ba
 
 /**
  * Browsers' daemon half (§2.3; today's `bin/modules/browser.ts` and its `fyd.ts` wiring): the machine's ONE agent
- * Chrome and the Bun worker thread that drives it (`kernel.workers`), the pages each ferret holds, the viewer stream,
+ * Chrome and the worker PROCESS that drives it (`kernel.spawn`, as today), the pages each ferret holds, the viewer stream,
  * the human sign-in window, the proxy test and state, surface control, and the browser tools. Every page act goes
  * through `kernel.act` with its `Op`; page text, addresses and titles are read under `kernel.redaction` (S16).
  */
@@ -47,7 +49,7 @@ export default implementDaemon(manifest, { build: ctx => buildBrowsers(ctx) });
 
 /** What a test may stand in for when it builds the half (`../tests/unit/daemon.test.ts`); the daemon passes nothing. */
 export interface BrowsersSeams {
-  /** Starts the agent browser; by default Chrome under the Bun worker thread. */
+  /** Starts the agent browser; by default Chrome and the worker process, both through `kernel.spawn`. */
   readonly launcher?: BrowserSessionLauncher;
   /** Who each page signs in; by default a fresh ledger on the kernel clock. */
   readonly identities?: TypedIdentities;
@@ -59,23 +61,43 @@ export function buildBrowsers(
   seams: BrowsersSeams = {},
 ): DaemonHalf<typeof manifest> {
   const { kernel } = ctx;
+  const vault = ctx.needs.vault;
   const host = processHost();
   const config = (): BrowsersConfig | undefined =>
     kernel.config.file(manifest.data.config[0] as ConfigFileDef<BrowsersConfig>);
   const which = (name: string) => () => host.which(name);
+  // The sign-in window's and the private display's processes and time: kernel.spawn and the kernel clock.
+  const processes = {
+    spawn: kernel.spawn,
+    clock: kernel.clock,
+    platform: host.platform,
+    environment: host.environment,
+  };
 
   // ── the agent browser and its worker ─────────────────────────────────────────────────────────────────────────
   const profile = new BrowserProfileStore(host.stateDirectory);
-  const display = new XvfbDisplay({ executable: which('Xvfb'), authorityDirectory: profile.displayDirectory });
+  const display = new XvfbDisplay({
+    executable: which('Xvfb'),
+    authorityDirectory: profile.displayDirectory,
+    processes,
+  });
+  // The worker is a process of its own, as today (lead decision, port-browsers r1): the compiled worker beside the
+  // daemon, or Node over the source entry, started through kernel.spawn under a name permissions.spawn declares.
+  const command = workerCommand(host.workerProgram(), host.which('node'));
+  const startWorker: StartWorker = (args, env) => {
+    if ('refused' in command) throw new Error(command.refused);
+    return kernel.spawn.start(command.program, [...command.args, ...args], { env });
+  };
   const launcher =
     seams.launcher ??
     new NodeSessionBrowserLauncher(
       profile,
-      () => kernel.workers.start(new URL('./worker/main.ts', import.meta.url), { name: 'browser' }),
-      kernel.clock,
+      startWorker,
+      { clock: kernel.clock, spawn: kernel.spawn, fetch: kernel.fetch, host },
       host.environment,
       undefined,
       {
+        workerRefusal: () => ('refused' in command ? command.refused : undefined),
         mode: async () => config()?.mode ?? 'headless',
         // GAP: the Vault has no port that hands Browsers a proxy credential (use, never read), so a proxy that
         // names `${secret:…}` credentials refuses the launch rather than going around the proxy.
@@ -130,6 +152,7 @@ export function buildBrowsers(
   // ── the human sign-in window ─────────────────────────────────────────────────────────────────────────────────
   const loginRuntime = new NodeBrowserLoginRuntime({
     display,
+    processes,
     secretsDirectory: profile.browserDirectory,
     x11vncExecutable: which('x11vnc'),
     timeoutExecutable: which('timeout'),
@@ -147,7 +170,7 @@ export function buildBrowsers(
     saved: async () => config()?.proxy,
     // GAP: as above, no Vault port reads a proxy credential for Browsers; a proxy with credentials tests as `secret`.
     secrets: async () => new Map(),
-    probe: new TunnelProxyProbe(),
+    probe: new TunnelProxyProbe({ clock: kernel.clock }),
     now: () => kernel.clock.nowMs(),
   });
 
@@ -176,9 +199,23 @@ export function buildBrowsers(
     files: rootFiles(kernel.roots, nodeStagedFiles(host.uploadDirectory, kernel.clock)),
     binaryName: 'fy',
     typedIdentities: identities,
+    // Where page scripts ran and what a ferret did to a page, told to the Vault's sign-in lock (lead DECISIONS-2 #5,
+    // I98–I100; today's `scriptedOrigins` and `loginActs`).
+    scriptedOrigins: {
+      running: () => vault.scriptRunning?.() ?? (() => undefined),
+      scriptedOn: scriptHost => vault.scriptedOn?.(scriptHost),
+    },
+    pageActs: { acted: (sessionId, script) => vault.pageActed?.(sessionId as FerretId, script) },
   });
   // The `page` input target and the four tools that type into a page or hand it over, on the same checks as the rest.
-  const target = pageTarget({ kernel, pages, host: pageToolHost(tools), identities });
+  const target = pageTarget({
+    kernel,
+    pages,
+    host: pageToolHost(tools),
+    identities,
+    vault,
+    acts: { acted: (ferret, script) => vault.pageActed?.(ferret, script) },
+  });
 
   kernel.lifecycle.onStop(async () => {
     await pages.closeAll().catch(() => undefined);

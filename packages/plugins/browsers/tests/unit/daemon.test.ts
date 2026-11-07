@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from 'bun:test';
 import { ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
+import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import type { FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { ferret, type TestCaller, type TestHost, testHost } from '@ferretry/kernel/testing';
@@ -25,7 +26,8 @@ const as = (id: string): { readonly as: TestCaller } => {
   return { as: ferret(id) };
 };
 
-async function built(): Promise<{ host: TestHost; tabs: Tabs; identities: TypedIdentities }> {
+async function built(): Promise<{ host: TestHost; tabs: Tabs; identities: TypedIdentities; vault: FakeVault }> {
+  const vault = new FakeVault();
   const tabs = new Tabs();
   const identities = new TypedIdentities(() => Date.parse('2026-11-07T10:00:00.000Z'));
   const half = implementDaemon(daemon.manifest, {
@@ -34,8 +36,14 @@ async function built(): Promise<{ host: TestHost; tabs: Tabs; identities: TypedI
   const gate = new StandInAdmission(request =>
     request.arrival.kind === 'local' && request.arrival.privileged ? ferretStanding(calling) : ownerStanding(),
   );
-  const host = await testHost({ plugins: [half], uses: { ferrets: FERRETS }, gate, secrets: [SECRET] });
-  return { host, tabs, identities };
+  const host = await testHost({
+    plugins: [half],
+    uses: { ferrets: FERRETS },
+    fakes: { vault },
+    gate,
+    secrets: [SECRET],
+  });
+  return { host, tabs, identities, vault };
 }
 
 /**
@@ -51,7 +59,7 @@ describe('the browsers daemon half', () => {
 
   it('should build over the test host and answer the machine browser state with nothing running', async () => {
     // Arrange
-    host = await testHost({ plugins: [daemon] });
+    host = await testHost({ plugins: [daemon], fakes: { vault: new FakeVault() } });
 
     // Act
     const state = await host.request('GET', '/v1/browser/state');
@@ -75,6 +83,43 @@ describe('the browsers daemon half', () => {
     should(typed).deepEqual({ text: 'Done on %browser:app.' });
     should(world.tabs.typed).deepEqual([{ pageId: 'p1', text: 'alice' }]);
     should(host.acts.filter(act => act.op === 'type').map(act => act.target)).deepEqual([{ kind: 'page', key: 'p1' }]);
+  });
+
+  it('I100 should tell the Vault of a ferret’s page act before it runs, and place it on the page and the hosts it was on once it ends', async () => {
+    // Arrange
+    const world = await built();
+    host = world.host;
+    await host.tool('browser_open', { name: 'app', url: 'https://accounts.example.test/login' }, as('f1'));
+    const before = world.vault.pageActs.length;
+
+    // Act — a navigation (one of today's 25 tools) and a type (one of the four page tools), by the ferret.
+    await host.tool('browser_navigate', { name: 'app', url: 'https://mail.example.test/' }, as('f1'));
+    await host.tool('browser_type', { name: 'app', selector: '#user', text: 'alice' }, as('f1'));
+    await host.tool('browser_read', { name: 'app' }, as('f1'));
+
+    // Assert — both acts were told and placed on page p1 with the hosts around them; a read tells nothing.
+    const acts = world.vault.pageActs.slice(before);
+    should(acts.map(act => [act.ferret, act.script, act.placed?.id])).deepEqual([
+      ['f1', false, 'p1'],
+      ['f1', false, 'p1'],
+    ]);
+    should(acts[0]?.placed?.hosts).containEql('mail.example.test');
+    should(world.vault.scriptedHosts).deepEqual([]);
+  });
+
+  it('I99 should still tell the Vault of an act a ferret aimed at a page that turned out not to be theirs, placed nowhere', async () => {
+    // Arrange
+    const world = await built();
+    host = world.host;
+    await host.tool('browser_open', { name: 'app', url: 'https://example.test/login' }, as('f1'));
+    const before = world.vault.pageActs.length;
+
+    // Act — another ferret aims at a name that is not in its session.
+    const refused = await host.tool('browser_click', { name: 'app', selector: '#go' }, as('f2'));
+
+    // Assert — told before it ran; no page could be looked up, so it counts on every page (null).
+    should(refused.isError).be.true();
+    should(world.vault.pageActs.slice(before).map(act => [act.ferret, act.placed])).deepEqual([['f2', null]]);
   });
 
   it('should refuse browser_type on a page of another ferret, naming no page of theirs', async () => {

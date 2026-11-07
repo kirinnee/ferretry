@@ -1,4 +1,4 @@
-import { describe, it } from 'bun:test';
+import { describe, it, test } from 'bun:test';
 import should from 'should';
 import { disablePasskeys } from '../../../daemon/worker/passkeys.ts';
 import { type InputCdpSession } from '../../../daemon/target/lib/fields.ts';
@@ -19,8 +19,8 @@ function recording(
   };
 }
 
-describe('I123 disablePasskeys', () => {
-  it('enables WebAuthn without its UI, adds a virtual authenticator that cannot verify, and makes every touch bad', async () => {
+describe('disablePasskeys', () => {
+  test('I123 enables WebAuthn without its UI, adds a virtual authenticator that cannot verify, and makes every touch bad', async () => {
     const session = recording({ 'WebAuthn.addVirtualAuthenticator': { authenticatorId: 'auth-1' } });
     await disablePasskeys(session);
     should(session.calls).eql([

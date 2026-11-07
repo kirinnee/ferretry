@@ -3,18 +3,21 @@ import { fixedClock } from '@ferretry/kernel/testing';
 import type { BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
 import should from 'should';
 import { BrowserWorkerClient, type WorkerClientOptions } from '../../../daemon/worker/client.ts';
-import { threadWorkers } from '../../support/thread-workers.ts';
+import type { ChildHandle } from '@ferretry/kernel/contract';
+import { processWorkers } from '../../support/process-workers.ts';
+import { waitFor } from '../../support/wait-for.ts';
 import { wallClock } from '../../support/wall-clock.ts';
 
-/** The scripted worker, as a Bun worker thread the way `kernel.workers.start` makes one. */
-const THREADS = threadWorkers(new URL('./fixtures/fake-worker.mjs', import.meta.url));
+/** The scripted worker, as a worker PROCESS the way the daemon half starts one (`kernel.spawn`). */
+const WORKERS = processWorkers(new URL('./fixtures/fake-worker.mjs', import.meta.url));
 const VIEWPORT = { width: 800, height: 600 } as const;
 
 const started: BrowserWorkerClient[] = [];
 
 async function connect(overrides: Partial<WorkerClientOptions> = {}): Promise<BrowserWorkerClient> {
   const client = await BrowserWorkerClient.connect({
-    start: THREADS.start,
+    start: WORKERS.start,
+    environment: { PATH: process.env.PATH, HOME: process.env.HOME, FY_SECRET: 'must-not-be-forwarded' },
     clock: wallClock(),
     endpoint: 'ready',
     readyTimeoutMs: 5_000,
@@ -43,7 +46,7 @@ async function rejection(work: Promise<unknown>): Promise<{ code?: string; statu
 }
 
 afterEach(async () => {
-  // Never leave a thread behind: these are real worker threads.
+  // Never leave a child behind: these are real worker processes.
   await Promise.all(started.splice(0).map(client => client.close().catch(() => undefined)));
 });
 
@@ -124,6 +127,99 @@ describe('browser worker client — lifecycle', () => {
 
     // Assert
     should((await rejection(client.location())).code).equal('not_running');
+  });
+});
+
+/** Whether the process still exists; signal 0 only probes, it delivers nothing. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Waits for a reaped child to leave the process table, and says so only once it has. */
+async function settledDead(pid: number): Promise<boolean> {
+  await waitFor(() => !alive(pid), `process ${String(pid)} to leave the process table`);
+  return true;
+}
+
+/** Workers no signal reaches: the kernel's child, with a `kill` that does nothing (today's patched spawn). */
+const UNSIGNALLABLE = (args: readonly string[], env: Readonly<Record<string, string>>): ChildHandle => ({
+  ...WORKERS.start(args, env),
+  kill: () => undefined,
+});
+
+describe('browser worker client — a process of its own (today’s, port-browsers r1)', () => {
+  it('should escalate to SIGKILL for a worker that traps SIGTERM and ignores a closed stdin', async () => {
+    // Arrange: the fixture traps SIGTERM and keeps a timer alive, like a worker closing Chrome.
+    const client = await connect({ endpoint: 'stubborn-close', shutdownTimeoutMs: 150 });
+    const pid = client.pid;
+
+    // Act
+    await client.close();
+
+    // Assert: close() only reports success once the child is genuinely gone, not merely signalled.
+    should(await settledDead(pid)).be.true();
+  });
+
+  it('should grant the worker only the allowlisted environment, plus a forced loopback proxy bypass', async () => {
+    // Arrange
+    const client = await connect({
+      environment: {
+        PATH: process.env.PATH,
+        HOME: '/home/example',
+        LANG: 'en_US.UTF-8',
+        FY_SECRET: 'must-not-be-forwarded',
+        HTTP_PROXY: 'http://proxy.invalid:3128',
+        NO_PROXY: 'nothing',
+      },
+    });
+
+    // Act
+    const granted = reportedParams((await client.navigate('p1', 'environment')).url) as Record<string, string>;
+
+    // Assert: nothing outside the allowlist reaches the browser, and loopback never goes via a proxy.
+    should(granted.PATH).equal('set');
+    should(granted.HOME).equal('/home/example');
+    should(granted.LANG).equal('en_US.UTF-8');
+    should(granted).not.have.property('FY_SECRET');
+    should(granted).not.have.property('HTTP_PROXY');
+    should(granted.NO_PROXY).equal('127.0.0.1,localhost,::1');
+    should(granted['no_proxy']).equal('127.0.0.1,localhost,::1');
+  });
+
+  it('should report a worker that cannot be signalled as unterminated, rather than call it closed', async () => {
+    // Arrange: no signal reaches the worker, so it never exits within the shutdown budget.
+    const client = await connect({ start: UNSIGNALLABLE, endpoint: 'stubborn-close', shutdownTimeoutMs: 100 });
+    const pid = client.pid;
+
+    // Act
+    const failure = await rejection(client.close());
+    process.kill(pid, 'SIGKILL');
+
+    // Assert
+    should(failure.code).equal('upstream_failed');
+    should(failure.status).equal(504);
+    should(failure.message).equal('browser worker could not be terminated');
+    should(await settledDead(pid)).be.true();
+  });
+
+  it('should still fail everything in flight when a worker that broke the protocol cannot be signalled', async () => {
+    // Arrange
+    const client = await connect({ start: UNSIGNALLABLE, maxProtocolLineChars: 64 });
+    const pid = client.pid;
+
+    // Act
+    const failure = await rejection(client.navigate('p1', 'overflows'));
+    process.kill(pid, 'SIGKILL');
+
+    // Assert: the violation is what is reported; the failed signal is not.
+    should(failure.message).equal('browser worker emitted an oversized protocol record');
+    should(await client.unexpectedExit).equal(-1);
+    should(await settledDead(pid)).be.true();
   });
 });
 

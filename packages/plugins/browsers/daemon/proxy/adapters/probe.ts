@@ -1,4 +1,6 @@
 import { isIP, type Socket } from 'node:net';
+import type { Clock } from '@ferretry/kernel/contract';
+import { milliseconds } from '@ferretry/std';
 import { connect as tlsConnect } from 'node:tls';
 import {
   classifyNetworkError,
@@ -25,7 +27,14 @@ const verifiedTls: SecureUpgrade = (tunnel, host) => tlsConnect({ socket: tunnel
  * ends as a timeout.
  */
 export class TunnelProxyProbe implements ProxyProbe {
-  constructor(private readonly options: { readonly timeoutMs?: number; readonly secure?: SecureUpgrade } = {}) {}
+  constructor(
+    private readonly options: {
+      /** The kernel clock the whole probe's deadline runs on. */
+      readonly clock: Pick<Clock, 'after'>;
+      readonly timeoutMs?: number;
+      readonly secure?: SecureUpgrade;
+    },
+  ) {}
 
   async run(request: {
     readonly endpoint: ProxyEndpoint;
@@ -33,17 +42,17 @@ export class TunnelProxyProbe implements ProxyProbe {
   }): Promise<ProbeOutcome> {
     const timeoutMs = this.options.timeoutMs ?? PROBE_TIMEOUT_MS;
     const sockets = new Set<Socket>();
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancel: (() => void) | undefined;
     const deadline = new Promise<ProbeOutcome>(resolve => {
-      timer = setTimeout(() => {
+      cancel = this.options.clock.after(milliseconds(timeoutMs), () => {
         for (const socket of sockets) socket.destroy();
         resolve({ ok: false, errorClass: 'timeout' });
-      }, timeoutMs);
+      });
     });
     try {
       return await Promise.race([deadline, this.attempt(request, timeoutMs, sockets)]);
     } finally {
-      clearTimeout(timer);
+      cancel?.();
       for (const socket of sockets) socket.destroy();
     }
   }

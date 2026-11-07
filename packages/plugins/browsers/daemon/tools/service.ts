@@ -99,6 +99,40 @@ export interface TypedIdentityLedger {
   forget(sessionId: string): void;
 }
 
+/** The page an act touched, as the Vault's sign-in lock groups acts (today's `ActedPage`; `VaultApi.pageActed`). */
+export interface ActedPage {
+  readonly id: string;
+  readonly incognito?: true;
+  readonly openerId?: string;
+  readonly hosts?: readonly string[];
+}
+
+/**
+ * Today's `loginActs`: told BEFORE a ferret's call that may change a page runs (`script`: a page script), and placed on
+ * the page it touched once the call is over (`undefined`: every page). Bound to `VaultApi.pageActed` (I98–I100).
+ */
+export interface PageActs {
+  acted(sessionId: string, script: boolean): { placed(page: ActedPage | undefined): void } | undefined;
+}
+
+/**
+ * The tools whose call changes no page, so they tell the sign-in lock nothing (today's `LEAVES_SURFACES`, its browser
+ * part; `browser.tabs` listing is checked by its action).
+ */
+const LEAVES_PAGES: ReadonlySet<BrowserToolCall['tool']> = new Set([
+  'browser.list',
+  'browser.read',
+  'browser.screenshot',
+  'browser.wait_for',
+  'browser.console',
+  'browser.network',
+  'browser.pdf',
+]);
+
+/** Whether a call may change a page (today's `actsOn`, for pages). */
+const actsOnPage = (call: BrowserToolCall): boolean =>
+  !LEAVES_PAGES.has(call.tool) && !(call.tool === 'browser.tabs' && call.action === 'list');
+
 /** Where a page script ran, for the Vault's standing fill rules (today's `scriptedOrigins`). */
 export interface ScriptedOrigins {
   running?(): () => void;
@@ -118,6 +152,8 @@ export interface BrowserToolPorts {
   readonly binaryName: string;
   readonly typedIdentities?: TypedIdentityLedger;
   readonly scriptedOrigins?: ScriptedOrigins;
+  /** Told of every page act a ferret makes, before it runs (the Vault's sign-in lock, I99 and I100). */
+  readonly pageActs?: PageActs;
 }
 
 /** The tools that change what a person would see, and so put up the driving marker. */
@@ -275,6 +311,8 @@ export class BrowserTools {
   constructor(private readonly ports: BrowserToolPorts) {}
 
   async call(caller: ToolCaller, call: BrowserToolCall): Promise<BrowserToolAnswer> {
+    let note: { placed(page: ActedPage | undefined): void } | undefined;
+    const seen: { surface?: ResolvedSurface } = {};
     try {
       if (caller.kind === 'agent' && !LISTING_TOOLS.has(call.tool) && !(await this.ports.policy.allows('browser')))
         throw new BrowserToolError('forbidden', controlRefusal('browser'));
@@ -284,10 +322,42 @@ export class BrowserTools {
       // must not read the shared profile's sign-ins through a script while the owner has them off.
       if (call.tool === 'browser.eval' && !(await this.ports.policy.allows('scripts')))
         throw new BrowserToolError('forbidden', pageScriptsRefusal(this.ports.binaryName));
-      return await this.dispatch(caller, call);
+      // Told BEFORE anything runs, for a ferret's call that may change a page: a sign-in's after-submit facts the
+      // ferret could have steered are not kept. Until the call ends it counts on every page (I100).
+      if (caller.kind === 'agent' && actsOnPage(call))
+        note = this.ports.pageActs?.acted(caller.sessionId, call.tool === 'browser.eval') ?? undefined;
+      // The page is known only once the call has run: dispatch resolves it.
+      return await this.dispatch(caller, call, seen);
     } catch (error) {
       throw await this.withheld(caller, call, translate(error) ?? error);
+    } finally {
+      if (note !== undefined) note.placed(await this.actedPage(caller.sessionId, seen.surface));
     }
+  }
+
+  /**
+   * The page an agent's act touched, once it is over, for the sign-in lock (today's `actedPage`): its id and context,
+   * and every host it was on around the act — where it was when it was resolved, where it is now, and where its popups
+   * are now (a popup lives in its opener's cookies and storage, and the act may have opened it). `hosts` is left out
+   * when one of them can't be read, so the act counts on every host; nothing when no page was resolved (every page).
+   */
+  async actedPage(sessionId: string, surface: ResolvedSurface | undefined): Promise<ActedPage | undefined> {
+    if (surface?.surface !== 'browser') return undefined;
+    const page = {
+      id: surface.id,
+      ...(surface.incognito === true ? { incognito: true as const } : {}),
+      ...(surface.openerId === undefined ? {} : { openerId: surface.openerId }),
+    };
+    const pages = await this.ports.browser
+      .status(sessionId)
+      .then(status => status.pages)
+      .catch(() => undefined);
+    if (pages === undefined) return page;
+    const now = pages.filter(each => each.id === surface.id || each.openerId === surface.id).map(each => each.url);
+    const urls = surface.url === undefined && surface.opened !== true ? undefined : [surface.url, ...now];
+    const hosts = urls?.filter(url => url !== undefined).map(url => hostOf(url));
+    if (hosts === undefined || hosts.some(host => host === undefined)) return page;
+    return { ...page, hosts: [...new Set(hosts as string[])] };
   }
 
   /** Every live driving marker, standing takeover and hand-over of a ferret's pages. */
@@ -419,7 +489,11 @@ export class BrowserTools {
       .catch(() => undefined);
   }
 
-  private async dispatch(caller: ToolCaller, call: BrowserToolCall): Promise<BrowserToolAnswer> {
+  private async dispatch(
+    caller: ToolCaller,
+    call: BrowserToolCall,
+    seen: { surface?: ResolvedSurface } = {},
+  ): Promise<BrowserToolAnswer> {
     const { sessionId } = caller;
     switch (call.tool) {
       case 'browser.list':
@@ -446,6 +520,7 @@ export class BrowserTools {
           ...(page.incognito === true ? { incognito: true } : {}),
           opened: true,
         };
+        seen.surface = surface;
         await this.drove(caller, call, surface);
         await this.announce(caller, surface, call.askOwner);
         const kind = call.incognito === true ? 'an incognito page, ' : '';
@@ -456,6 +531,7 @@ export class BrowserTools {
       }
       default: {
         const surface = await this.resolve(sessionId, call.name);
+        seen.surface = surface;
         if (caller.kind === 'agent') await this.assertAgentMay(sessionId, surface);
         const result = await this.onSurface(caller, call, surface);
         await this.drove(caller, call, surface);

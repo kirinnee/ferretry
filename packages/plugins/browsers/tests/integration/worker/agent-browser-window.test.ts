@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
 import should from 'should';
-import { threadWorkers } from '../../support/thread-workers.ts';
-import { wallClock } from '../../support/wall-clock.ts';
+import { launcherPorts, loginProcesses, REAL_WORKER } from '../../support/process-workers.ts';
+
+const PROCESSES = loginProcesses();
 import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
 import { XvfbDisplay } from '../../../daemon/worker/control/adapters/login-runtime.ts';
 import { NodeSessionBrowserLauncher } from '../../../daemon/worker/launcher.ts';
@@ -25,7 +26,8 @@ import { waitFor } from '../../support/wait-for.ts';
 const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
 const xvfb = Bun.which('Xvfb');
 /** The real browser worker, as a Bun worker thread the way `kernel.workers.start` makes one. */
-const WORKERS = threadWorkers(new URL('../../../daemon/worker/main.ts', import.meta.url));
+/** The real worker entry as its own process under Node, as a source checkout runs it. */
+const WORKERS = REAL_WORKER();
 
 let root = '';
 let site: ReturnType<typeof Bun.serve>;
@@ -57,17 +59,21 @@ describe.if(process.platform === 'linux')('the agent browser as a real window, i
       },
     });
     base = `http://127.0.0.1:${String(site.port)}`;
-    display = new XvfbDisplay({ authorityDirectory: join(root, 'x11'), executable: () => xvfb ?? undefined });
+    display = new XvfbDisplay({
+      processes: PROCESSES,
+      authorityDirectory: join(root, 'x11'),
+      executable: () => xvfb ?? undefined,
+    });
     browser = new BrowserSessionService(
       { get: async id => (id === 's1' ? {} : undefined) },
       new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
         WORKERS.start,
-        wallClock(),
+        launcherPorts(),
         { FY_CHROME_BIN: chrome, PATH: process.env.PATH, HOME: process.env.HOME },
         undefined,
         // Over the loopback PORT, named outright: the default, and the transport whose `navigator.webdriver`
-        // stays false. The DevTools pipe, which only an owner turns on, is agent-browser-pipe.test.ts.
+        // stays false. The DevTools pipe is refused for now (launcher.test.ts; GAP).
         { mode: async () => 'window', display, platform: 'linux', transport: async () => 'port' },
       ),
       () => Date.now(),

@@ -1,6 +1,24 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { ConsoleLog, type DialogTimers, type EmulationTargets, type HeldDialogPort, type LifecycleScope, type LoggedRequestPort, type LoggedResponsePort, NetworkLog, PageDialogs, PageEmulation, type WaitableLocator, type WaitablePage, consoleLevelOf, isCredentialHeader, runLifecycleRequest, waitForCondition, withoutUserInfo } from '../../../daemon/worker/page-lifecycle.ts';
+import {
+  ConsoleLog,
+  type DialogTimers,
+  type EmulationTargets,
+  type HeldDialogPort,
+  type LifecycleScope,
+  type LoggedRequestPort,
+  type LoggedResponsePort,
+  NetworkLog,
+  PageDialogs,
+  PageEmulation,
+  type WaitableLocator,
+  type WaitablePage,
+  consoleLevelOf,
+  isCredentialHeader,
+  runLifecycleRequest,
+  waitForCondition,
+  withoutUserInfo,
+} from '../../../daemon/worker/adapters/page-lifecycle.ts';
 
 /** Timers that fire only when a test says so. */
 class ManualTimers implements DialogTimers {

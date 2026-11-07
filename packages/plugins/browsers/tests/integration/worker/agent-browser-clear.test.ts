@@ -3,8 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { threadWorkers } from '../../support/thread-workers.ts';
-import { wallClock } from '../../support/wall-clock.ts';
+import { launcherPorts, REAL_WORKER } from '../../support/process-workers.ts';
 import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
 import { NodeSessionBrowserLauncher } from '../../../daemon/worker/launcher.ts';
 import { type BrowserAutomation } from '../../../daemon/pages/automation.ts';
@@ -23,7 +22,8 @@ import { BrowserSessionService } from '../../../daemon/pages/service.ts';
 
 const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
 /** The real browser worker, as a Bun worker thread the way `kernel.workers.start` makes one. */
-const WORKERS = threadWorkers(new URL('../../../daemon/worker/main.ts', import.meta.url));
+/** The real worker entry as its own process under Node, as a source checkout runs it. */
+const WORKERS = REAL_WORKER();
 const SECRET = 'correct-horse-battery-staple';
 
 const LOGIN = `<html><head><title>Sign in</title></head><body>
@@ -90,10 +90,10 @@ describe.if(process.platform === 'linux')('a grant fill’s field emptying, in a
       new NodeSessionBrowserLauncher(
         new BrowserProfileStore(root),
         WORKERS.start,
-        wallClock(),
+        launcherPorts(),
         { FY_CHROME_BIN: chrome, PATH: process.env.PATH, HOME: process.env.HOME },
         undefined,
-        { mode: async () => 'headless', platform: 'linux', transport: async () => 'pipe' },
+        { mode: async () => 'headless', platform: 'linux', transport: async () => 'port' },
       ),
       () => Date.now(),
     );

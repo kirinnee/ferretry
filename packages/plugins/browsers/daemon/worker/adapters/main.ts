@@ -1,10 +1,16 @@
 /**
- * The machine's agent-browser worker: a Bun worker thread the daemon half starts through `kernel.workers` (§7.4).
- * The daemon leases and launches ONE Chrome over the machine's dedicated agent profile, and this thread drives only
- * that Chrome, by the transport the daemon chose: `pipe` — the daemon's ends of Chrome's DevTools pipe (this thread
- * shares the daemon's process, so it reads and writes those descriptors itself), which nobody else on the host holds
- * — or the loopback CDP endpoint URL Chrome listens on. The first message is `{ kind: 'start' }` with the endpoint;
- * every later message is one JSON request line, and every record goes back as one JSON line.
+ * The machine's agent-browser worker: a PROCESS of its own (lead decision, port-browsers r1 — today's
+ * `bin/browser-worker.ts`), because Playwright's CDP WebSocket upgrade never completes under Bun's `node:http`
+ * (`rebuild-ref scripts/release/compile-executable.ts:10-17`). The daemon half starts it through `kernel.spawn` —
+ * Node over this file in a source checkout, the compiled worker beside the daemon in a build — and speaks today's
+ * worker protocol over its pipes: one JSON request line on stdin, one JSON record line on stdout.
+ *
+ * The daemon leases and launches ONE Chrome over the machine's dedicated agent profile, and this process drives only
+ * that Chrome, by the transport the daemon chose: `pipe` — the other ends of Chrome's DevTools pipe, handed over as
+ * fds 3 (requests to Chrome) and 4 (replies and events from it), which nobody else on the host holds and which take
+ * Chrome down with this process — or the loopback CDP endpoint URL Chrome listens on. Its arguments are the endpoint
+ * and, optionally, the directory downloads are staged in. (GAP: the kernel cannot yet hand Chrome's pipe ends to a
+ * second child, so the daemon refuses a pipe launch; this side is kept as today's.)
  *
  * THERE IS NO ACTIVE TAB. Every request that touches a page names it (`pageId`), every input — a
  * person's or an agent's — is dispatched to that page's own CDP session, and every screencast is
@@ -18,11 +24,18 @@
  * An INCOGNITO page gets its own browser context (its own cookies and storage, shared with nothing),
  * closed with the page.
  */
-import { close } from 'node:fs';
+import { closeSync } from 'node:fs';
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
-import { BROWSER_MODIFIERS, type BrowserModifier, type BrowserMouseButton, type BrowserTarget } from '../pages/wire/target.ts';
-import { type BrowserInputEvent } from '../pages/wire/browser.ts';
-import { BrowserPageLifecycleRequestSchema } from '../pages/wire/page-lifecycle.ts';
+import { Socket } from 'node:net';
+import { createInterface } from 'node:readline';
+import {
+  BROWSER_MODIFIERS,
+  type BrowserModifier,
+  type BrowserMouseButton,
+  type BrowserTarget,
+} from '../../pages/wire/target.ts';
+import { type BrowserInputEvent } from '../../pages/wire/browser.ts';
+import { BrowserPageLifecycleRequestSchema } from '../../pages/wire/page-lifecycle.ts';
 import {
   type Browser,
   type BrowserContext,
@@ -33,13 +46,10 @@ import {
   type Page,
   type WebSocket,
 } from 'playwright-core';
-import {
-  CDP_PIPE_ENDPOINT,
-  CdpPipeTransport,
-} from './cdp-pipe.ts';
-import { recogniseBrowserChallenge } from '../challenges/recognise.ts';
-import { type CopyablePage, readCopyElement } from './copy-read.ts';
-import { DownloadStage } from './download-stage.ts';
+import { CDP_PIPE_ENDPOINT, CDP_PIPE_FROM_CHROME_FD, CDP_PIPE_TO_CHROME_FD, CdpPipeTransport } from '../cdp-pipe.ts';
+import { recogniseBrowserChallenge } from '../../challenges/recognise.ts';
+import { type CopyablePage, readCopyElement } from '../copy-read.ts';
+import { DownloadStage } from '../download-stage.ts';
 import {
   describeInputDocument,
   type InputablePage,
@@ -49,8 +59,8 @@ import {
   type InputLocator,
   type InputSubject,
   playwrightNodeOf,
-} from '../target/lib/fields.ts';
-import { type InputWorkerPages, isInputMethod, serveInputMethod } from '../target/lib/worker-serve.ts';
+} from '../../target/lib/fields.ts';
+import { type InputWorkerPages, isInputMethod, serveInputMethod } from '../../target/lib/worker-serve.ts';
 import {
   browserElementParam,
   browserTargetParam,
@@ -60,7 +70,7 @@ import {
   shootPage,
   typeInto,
   uploadFiles,
-} from '../pages/page-acts.ts';
+} from '../../pages/page-acts.ts';
 import {
   ConsoleLog,
   NetworkLog,
@@ -70,20 +80,15 @@ import {
   type WaitablePage,
 } from './page-lifecycle.ts';
 import { runPageScript } from './page-script.ts';
-import { disablePasskeys } from './passkeys.ts';
-import { type PointerPosition, pointerAfter, pointerSequence } from '../pages/pointer.ts';
-import { type PointerPage, performPointerAct, pointerActParam } from '../pages/pointer-acts.ts';
-import type { PushNumberPage } from '../challenges/push-number-read.ts';
+import { disablePasskeys } from '../passkeys.ts';
+import { type PointerPosition, pointerAfter, pointerSequence } from '../../pages/pointer.ts';
+import { type PointerPage, performPointerAct, pointerActParam } from '../../pages/pointer-acts.ts';
+import type { PushNumberPage } from '../../challenges/push-number-read.ts';
 
-/** How this thread reaches Chrome, from the `start` message. */
-let endpoint: string | undefined;
-/** The daemon's ends of Chrome's DevTools pipe, when the endpoint is the pipe. */
-let cdpPipe: { readonly toChrome: number; readonly fromChrome: number } | undefined;
+const endpoint = process.argv[2];
 /** Where downloads and PDFs are staged for the daemon; without it the worker stages nothing. */
-let downloads = stage(undefined);
-
-function stage(stageDirectory: string | undefined): DownloadStage {
-  return new DownloadStage({
+const stageDirectory = process.argv[3];
+const downloads = new DownloadStage({
   directory: stageDirectory,
   disk: {
     mkdirp: async directory => void (await mkdir(directory, { recursive: true, mode: 0o700 })),
@@ -93,8 +98,7 @@ function stage(stageDirectory: string | undefined): DownloadStage {
   },
   now: () => Date.now(),
   sleep: async milliseconds => await new Promise(resolve => setTimeout(resolve, milliseconds)),
-  });
-}
+});
 const MAX_PAGES = 200;
 const DEFAULT_VIEWPORT = { width: 1280, height: 800 } as const;
 const MAX_ERROR_CHARS = 200;
@@ -153,13 +157,31 @@ const DIALOG_RACED = new Set([
 ]);
 
 /**
- * Chrome's DevTools pipe, as the transport Playwright's `connectOverCDP` takes. The daemon's ends are NON-BLOCKING
- * sockets, which file streams fail on with EAGAIN; `Bun.file(fd)` waits for them properly. Neither `Bun.file` reader
- * nor writer closes a descriptor it did not open, so closing the request side is explicit, and ending it is what
- * tells Chrome to quit.
+ * Chrome's DevTools pipe on fds 3 and 4, as the transport Playwright's `connectOverCDP` takes (today's): Node reads
+ * them as sockets; under Bun (the compiled worker) `Bun.file(fd)` waits on the non-blocking ends properly.
  */
-function chromePipe(pipe: { readonly toChrome: number; readonly fromChrome: number }): CdpPipeTransport {
-  const toChrome = Bun.file(pipe.toChrome).writer();
+function chromePipe(): CdpPipeTransport {
+  return typeof globalThis.Bun === 'undefined' ? nodeChromePipe() : bunChromePipe();
+}
+
+function nodeChromePipe(): CdpPipeTransport {
+  const toChrome = new Socket({ fd: CDP_PIPE_TO_CHROME_FD, readable: false, writable: true });
+  const fromChrome = new Socket({ fd: CDP_PIPE_FROM_CHROME_FD, readable: true, writable: false });
+  const transport = new CdpPipeTransport({
+    write: bytes => void toChrome.write(bytes),
+    close: () => void toChrome.end(() => toChrome.destroy()),
+  });
+  // A write that fails means Chrome is gone, and the read side reports that end.
+  toChrome.on('error', () => undefined);
+  fromChrome.on('data', (chunk: Buffer) => transport.receive(chunk));
+  fromChrome.on('end', () => transport.ended());
+  fromChrome.on('error', error => transport.ended(safeError(error)));
+  return transport;
+}
+
+/** Neither `Bun.file` reader nor writer closes a descriptor it did not open, so closing fd 3 is explicit. */
+function bunChromePipe(): CdpPipeTransport {
+  const toChrome = Bun.file(CDP_PIPE_TO_CHROME_FD).writer();
   const transport = new CdpPipeTransport({
     write: bytes => {
       toChrome.write(bytes);
@@ -168,12 +190,12 @@ function chromePipe(pipe: { readonly toChrome: number; readonly fromChrome: numb
     close: () => {
       void Promise.resolve(toChrome.end())
         .catch(() => undefined)
-        .finally(() => close(pipe.toChrome, () => undefined));
+        .finally(() => closeSync(CDP_PIPE_TO_CHROME_FD));
     },
   });
   void (async () => {
     try {
-      for await (const chunk of Bun.file(pipe.fromChrome).stream()) transport.receive(chunk);
+      for await (const chunk of Bun.file(CDP_PIPE_FROM_CHROME_FD).stream()) transport.receive(chunk);
       transport.ended();
     } catch (error) {
       transport.ended(safeError(error));
@@ -183,7 +205,7 @@ function chromePipe(pipe: { readonly toChrome: number; readonly fromChrome: numb
 }
 
 function send(record: unknown): void {
-  postMessage(`${JSON.stringify(record)}\n`);
+  process.stdout.write(`${JSON.stringify(record)}\n`);
 }
 
 function safeError(error: unknown): string {
@@ -1031,55 +1053,26 @@ function parse(line: string): Request {
   };
 }
 
-/**
- * Where the worker PROCESS exited, the thread says so: `{ type: 'exit', code }` is the client's `exited`, and the
- * client then terminates the thread. A thread cannot end the daemon's process, so it never calls `process.exit`.
- */
-function exit(code: number): void {
-  postMessage({ type: 'exit', code });
-}
-
 async function answer(request: Request): Promise<void> {
   try {
     const result = await run(request);
     send({ id: request.id, ok: true, result });
-    if (request.method === 'close') exit(0);
+    if (request.method === 'close') process.exit(0);
   } catch (error) {
     send({ id: request.id, ok: false, error: safeError(error) });
   }
 }
 
-/** The `start` message: the endpoint, where downloads are staged, and the pipe's descriptors when there is one. */
-function startOf(message: unknown): boolean {
-  if (typeof message !== 'string') return false;
-  let value: unknown;
-  try {
-    value = JSON.parse(message);
-  } catch {
-    return false;
-  }
-  if (typeof value !== 'object' || value === null || (value as { kind?: unknown }).kind !== 'start') return false;
-  const start = value as { endpoint?: unknown; stageDirectory?: unknown; cdpPipe?: unknown };
-  endpoint = typeof start.endpoint === 'string' && start.endpoint !== '' ? start.endpoint : undefined;
-  downloads = stage(typeof start.stageDirectory === 'string' ? start.stageDirectory : undefined);
-  const pipe = start.cdpPipe as { toChrome?: unknown; fromChrome?: unknown } | undefined;
-  cdpPipe =
-    typeof pipe?.toChrome === 'number' && typeof pipe.fromChrome === 'number'
-      ? { toChrome: pipe.toChrome, fromChrome: pipe.fromChrome }
-      : undefined;
-  return true;
-}
-
 export async function startBrowserWorker(): Promise<void> {
   if (!endpoint) {
     send({ type: 'fatal', error: 'a CDP endpoint is required' });
-    exit(2);
+    process.exitCode = 2;
     return;
   }
   try {
     browser =
       endpoint === CDP_PIPE_ENDPOINT
-        ? await chromium.connectOverCDP(chromePipeOf(), { timeout: CONNECT_TIMEOUT_MS })
+        ? await chromium.connectOverCDP(chromePipe(), { timeout: CONNECT_TIMEOUT_MS })
         : await chromium.connectOverCDP(endpoint, { timeout: CONNECT_TIMEOUT_MS });
     context = browser.contexts()[0];
     if (!context) throw new Error('Chrome exposed no persistent browser context');
@@ -1089,35 +1082,29 @@ export async function startBrowserWorker(): Promise<void> {
     send({ type: 'ready' });
   } catch (error) {
     send({ type: 'fatal', error: safeError(error) });
-    exit(1);
-  }
-}
-
-function chromePipeOf(): CdpPipeTransport {
-  if (cdpPipe === undefined) throw new Error('the pipe endpoint needs the pipe');
-  return chromePipe(cdpPipe);
-}
-
-function onLine(line: string): void {
-  let request: Request;
-  try {
-    request = parse(line);
-  } catch (error) {
-    send({ id: undefined, ok: false, error: safeError(error) });
+    process.exitCode = 1;
     return;
   }
-  // Input, frame acknowledgements and the dialog and log reads never wait: a person typing must not
-  // queue behind a page load, nor a dialog answer behind the click that is stuck on that dialog.
-  if (unqueued(request)) void answer(request);
-  else void queued(keyOf(request), async () => await answer(request));
+  const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  lines.on('line', line => {
+    let request: Request;
+    try {
+      request = parse(line);
+    } catch (error) {
+      send({ id: undefined, ok: false, error: safeError(error) });
+      return;
+    }
+    // Input, frame acknowledgements and the dialog and log reads never wait: a person typing must not
+    // queue behind a page load, nor a dialog answer behind the click that is stuck on that dialog.
+    if (unqueued(request)) void answer(request);
+    else void queued(keyOf(request), async () => await answer(request));
+  });
+  // The daemon went away (or closed our stdin): stop every screencast, close the browser connection, and exit.
+  process.stdin.on('end', () => {
+    void Promise.all([...screencasts.keys()].map(id => stopScreencast(id))).finally(
+      () => void browser?.close().finally(() => process.exit(0)),
+    );
+  });
 }
 
-let started = false;
-addEventListener('message', (event: MessageEvent) => {
-  if (!started) {
-    started = startOf(event.data);
-    if (started) void startBrowserWorker();
-    return;
-  }
-  if (typeof event.data === 'string') for (const line of event.data.split('\n')) if (line !== '') onLine(line);
-});
+if (import.meta.main) await startBrowserWorker();

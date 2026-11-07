@@ -5,6 +5,9 @@ import type { Clock, FencedPath } from '@ferretry/kernel/contract';
 import type { StagedFileMover } from '../files.ts';
 import { STAGED_FILE_TTL_MS } from '../files-policy.ts';
 
+// GAP (kernel port, banned-globals stays visible here): a page's staged copies are opened `O_NOFOLLOW` in a private
+// folder so a link planted there is never followed; no kernel root handle opens a file that way.
+
 /** Today's `SAVED_FILE_MODE`, `DIRECTORY_MODE` and `PRIVATE_DIRECTORY_MODE` (`agent-files/files.ts`). */
 const SAVED_FILE_MODE = 0o644;
 const DIRECTORY_MODE = 0o755;

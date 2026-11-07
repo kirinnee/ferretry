@@ -85,17 +85,19 @@ export function dial(upstream: ProxyEndpoint, timeoutMs: number): Promise<Socket
             ...(isIP(upstream.host) === 0 ? { servername: upstream.host } : {}),
           })
         : tcpConnect({ host: upstream.host, port: upstream.port });
-    const timer = setTimeout(() => {
+    // The connect deadline is the socket's own inactivity timeout (nothing arrives before it connects), so no global
+    // timer is armed; it is switched off once connected, where the caller's own deadlines take over.
+    socket.setTimeout(timeoutMs, () => {
       socket.destroy();
       reject(new Error('timed out'));
-    }, timeoutMs);
+    });
     socket.once(upstream.scheme === 'https' ? 'secureConnect' : 'connect', () => {
-      clearTimeout(timer);
+      socket.setTimeout(0);
       socket.setNoDelay(true);
       resolve(socket);
     });
     socket.once('error', error => {
-      clearTimeout(timer);
+      socket.setTimeout(0);
       reject(error);
     });
   });

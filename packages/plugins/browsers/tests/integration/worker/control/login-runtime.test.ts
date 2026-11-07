@@ -3,10 +3,19 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'n
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import should from 'should';
-import { type BrowserDisplayPort, NodeBrowserLoginRuntime, type XvfbChild, XvfbDisplay } from '../../../../daemon/worker/control/adapters/login-runtime.ts';
+import {
+  type BrowserDisplayPort,
+  NodeBrowserLoginRuntime,
+  type XvfbChild,
+  XvfbDisplay,
+} from '../../../../daemon/worker/control/adapters/login-runtime.ts';
 import { type BrowserLoginChild } from '../../../../daemon/worker/control/adapters/login-window.ts';
 import { type ListenerProverPort } from '../../../../daemon/worker/control/adapters/listener-prover.ts';
 import { BrowserControlError } from '../../../../daemon/worker/control/policy.ts';
+import { loginProcesses } from '../../../support/process-workers.ts';
+
+/** The window's processes and time on real children (`kernel.spawn` and the clock, as the daemon half binds them). */
+const PROCESSES = loginProcesses();
 
 /**
  * The host effects the human login window performs, over real spawns of FAKE executables.
@@ -108,7 +117,12 @@ describe('XvfbDisplay', () => {
     const record = join(root, 'argv.txt');
     const executable = await script(root, 'Xvfb', `printf '%s\\n' "$@" > '${record}'\nprintf '99\\n'\nsleep 5`);
     const authorityDirectory = join(root, 'x11');
-    const subject = new XvfbDisplay({ authorityDirectory, executable: () => executable, pollIntervalMs: 1 });
+    const subject = new XvfbDisplay({
+      processes: PROCESSES,
+      authorityDirectory,
+      executable: () => executable,
+      pollIntervalMs: 1,
+    });
 
     try {
       // Act
@@ -153,7 +167,12 @@ describe('XvfbDisplay', () => {
       `for last; do :; done\ncp "$last" '${seen}'\nprintf '99\\n'\nsleep 5`,
     );
     const authorityDirectory = join(root, 'x11');
-    const subject = new XvfbDisplay({ authorityDirectory, executable: () => executable, pollIntervalMs: 1 });
+    const subject = new XvfbDisplay({
+      processes: PROCESSES,
+      authorityDirectory,
+      executable: () => executable,
+      pollIntervalMs: 1,
+    });
     const display = await subject.display();
     const file = subject.authority() ?? '';
 
@@ -205,11 +224,13 @@ describe('XvfbDisplay', () => {
     const root = await workspace();
     const executable = await script(root, 'Xvfb', `printf '5\\n'\nsleep 5`);
     const first = new XvfbDisplay({
+      processes: PROCESSES,
       authorityDirectory: join(root, 'x11'),
       executable: () => executable,
       pollIntervalMs: 1,
     });
     const second = new XvfbDisplay({
+      processes: PROCESSES,
       authorityDirectory: join(root, 'x11'),
       executable: () => executable,
       pollIntervalMs: 1,
@@ -236,7 +257,12 @@ describe('XvfbDisplay', () => {
     const root = await workspace();
     const executable = await script(root, 'Xvfb', 'exit 4');
     const authorityDirectory = join(root, 'x11');
-    const subject = new XvfbDisplay({ authorityDirectory, executable: () => executable, pollIntervalMs: 1 });
+    const subject = new XvfbDisplay({
+      processes: PROCESSES,
+      authorityDirectory,
+      executable: () => executable,
+      pollIntervalMs: 1,
+    });
 
     // Act
     await subject.display().catch(() => undefined);
@@ -252,6 +278,7 @@ describe('XvfbDisplay', () => {
     const record = join(root, 'argv.txt');
     const executable = await script(root, 'Xvfb', `printf '%s\\n' "$@" > '${record}'\nprintf '7\\n'\nsleep 5`);
     const subject = new XvfbDisplay({
+      processes: PROCESSES,
       authorityDirectory: await x11Directory(),
       executable: () => executable,
       screen: { width: 800, height: 600 },
@@ -272,7 +299,11 @@ describe('XvfbDisplay', () => {
 
   it('should refuse with a sentence naming what to install when the host has no Xvfb', async () => {
     // Arrange
-    const subject = new XvfbDisplay({ authorityDirectory: await x11Directory(), executable: () => undefined });
+    const subject = new XvfbDisplay({
+      processes: PROCESSES,
+      authorityDirectory: await x11Directory(),
+      executable: () => undefined,
+    });
 
     // Act
     const failure = await subject.display().catch((error: unknown) => error);
@@ -288,6 +319,7 @@ describe('XvfbDisplay', () => {
   it('should refuse in the words its owner gives it, when it serves something other than the login window', async () => {
     // Arrange
     const subject = new XvfbDisplay({
+      processes: PROCESSES,
       authorityDirectory: await x11Directory(),
       executable: () => undefined,
       missing: () => 'install Xvfb for a real window',
@@ -309,6 +341,7 @@ describe('XvfbDisplay', () => {
     const root = await workspace();
     const executable = await script(root, 'Xvfb', `printf '3\\n'\nsleep 5`);
     const subject = new XvfbDisplay({
+      processes: PROCESSES,
       authorityDirectory: await x11Directory(),
       executable: () => (present ? executable : undefined),
       pollIntervalMs: 1,
@@ -331,6 +364,7 @@ describe('XvfbDisplay', () => {
     const root = await workspace();
     const executable = await script(root, 'Xvfb', 'exit 4');
     const subject = new XvfbDisplay({
+      processes: PROCESSES,
       authorityDirectory: await x11Directory(),
       executable: () => executable,
       pollIntervalMs: 1,
@@ -358,6 +392,7 @@ describe('XvfbDisplay', () => {
     const outcomes = await Promise.all(
       [closedWithoutNewline, notANumber, brokenPipe].map(async child => {
         const subject = new XvfbDisplay({
+          processes: PROCESSES,
           authorityDirectory: await x11Directory(),
           executable: () => '/usr/bin/Xvfb',
           spawn: () => child,
@@ -386,6 +421,7 @@ describe('XvfbDisplay', () => {
     const hung: XvfbChild = { ...child, stdout: new ReadableStream<Uint8Array>({ start: () => undefined }) };
     const signals: string[] = [];
     const subject = new XvfbDisplay({
+      processes: PROCESSES,
       authorityDirectory: await x11Directory(),
       executable: () => '/usr/bin/Xvfb',
       spawn: () => ({ ...hung, kill: signal => signals.push(signal) }),
@@ -408,6 +444,7 @@ describe('XvfbDisplay', () => {
     // Arrange
     const signals: string[] = [];
     const subject = new XvfbDisplay({
+      processes: PROCESSES,
       authorityDirectory: await x11Directory(),
       executable: () => '/usr/bin/Xvfb',
       spawn: () => ({ ...fakeXvfb(['5\n']), kill: signal => signals.push(signal) }),
@@ -449,7 +486,11 @@ describe('NodeBrowserLoginRuntime', () => {
   it('should describe this host from its own environment by default', async () => {
     // Arrange
     const root = await workspace();
-    const subject = new NodeBrowserLoginRuntime({ display: fakeDisplay(), secretsDirectory: root });
+    const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
+      display: fakeDisplay(),
+      secretsDirectory: root,
+    });
 
     // Assert
     should(subject.platform).equal(process.platform);
@@ -464,7 +505,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const display = fakeDisplay();
-    const subject = new NodeBrowserLoginRuntime({ display, secretsDirectory: root });
+    const subject = new NodeBrowserLoginRuntime({ processes: PROCESSES, display, secretsDirectory: root });
 
     // Act
     const resolved = await subject.display();
@@ -485,16 +526,19 @@ describe('NodeBrowserLoginRuntime', () => {
 
     // Act
     const chosen = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
       ...base,
       chromeOverride: () => override,
       exists: candidate => candidate === override,
     }).chromeExecutable();
     const discovered = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
       ...base,
       exists: candidate => candidate === '/usr/bin/chromium',
     }).chromeExecutable();
     const missing = () =>
       new NodeBrowserLoginRuntime({
+        processes: PROCESSES,
         ...base,
         environmentSource: { PATH: '' },
         exists: () => false,
@@ -511,8 +555,13 @@ describe('NodeBrowserLoginRuntime', () => {
   it('should name the missing program rather than spawning whatever answers to its name', async () => {
     // Arrange
     const root = await workspace();
-    const absent = new NodeBrowserLoginRuntime({ display: fakeDisplay(), secretsDirectory: root });
+    const absent = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
+      display: fakeDisplay(),
+      secretsDirectory: root,
+    });
     const present = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
       x11vncExecutable: () => '/usr/bin/x11vnc',
@@ -534,7 +583,11 @@ describe('NodeBrowserLoginRuntime', () => {
     const good = await script(root, 'chrome', "printf 'Google Chrome 130.0.6723.116 \\n'");
     const failing = await script(root, 'broken', 'exit 3');
     const silent = await script(root, 'silent', 'exit 0');
-    const subject = new NodeBrowserLoginRuntime({ display: fakeDisplay(), secretsDirectory: root });
+    const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
+      display: fakeDisplay(),
+      secretsDirectory: root,
+    });
 
     // Act
     const version = await subject.chromeVersion(good);
@@ -556,7 +609,11 @@ describe('NodeBrowserLoginRuntime', () => {
       'chrome',
       `printf 'HOME=%s\\n' "$HOME" > '${record}'\nprintf 'LANG=[%s]\\n' "$LANG" >> '${record}'`,
     );
-    const subject = new NodeBrowserLoginRuntime({ display: fakeDisplay(), secretsDirectory: root });
+    const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
+      display: fakeDisplay(),
+      secretsDirectory: root,
+    });
 
     // Act
     const child = subject.spawn([executable], { HOME: root, LANG: undefined });
@@ -571,7 +628,11 @@ describe('NodeBrowserLoginRuntime', () => {
   it('should take a port that is genuinely free on loopback', async () => {
     // Arrange
     const root = await workspace();
-    const subject = new NodeBrowserLoginRuntime({ display: fakeDisplay(), secretsDirectory: root });
+    const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
+      display: fakeDisplay(),
+      secretsDirectory: root,
+    });
 
     // Act
     const port = await subject.freePort();
@@ -588,6 +649,7 @@ describe('NodeBrowserLoginRuntime', () => {
     const root = await workspace();
     const ports = { cdp: 20_004, relay: 20_005, vnc: 20_006 };
     const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
       ports: async () => ({ kind: 'fixed', ports }),
@@ -604,6 +666,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
       ports: async () => ({ kind: 'random' }),
@@ -620,6 +683,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
       ports: async () => ({ kind: 'refused', reason: 'uid 999 gets ports outside 1024–32767' }),
@@ -637,7 +701,11 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const directory = join(root, 'browser');
-    const subject = new NodeBrowserLoginRuntime({ display: fakeDisplay(), secretsDirectory: directory });
+    const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
+      display: fakeDisplay(),
+      secretsDirectory: directory,
+    });
 
     // Act
     const file = await subject.writePassword('abcd2345');
@@ -661,7 +729,11 @@ describe('NodeBrowserLoginRuntime', () => {
     const stale = join(directory, 'vnc-password');
     await writeFile(stale, 'old\n');
     await chmod(stale, 0o644);
-    const subject = new NodeBrowserLoginRuntime({ display: fakeDisplay(), secretsDirectory: directory });
+    const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
+      display: fakeDisplay(),
+      secretsDirectory: directory,
+    });
 
     // Act
     await subject.writePassword('efgh6789');
@@ -676,7 +748,11 @@ describe('NodeBrowserLoginRuntime', () => {
     // `-passwdfile rm:` deletes it after reading, so the usual case is a file that is already gone.
     // Arrange
     const root = await workspace();
-    const subject = new NodeBrowserLoginRuntime({ display: fakeDisplay(), secretsDirectory: root });
+    const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
+      display: fakeDisplay(),
+      secretsDirectory: root,
+    });
     const file = await subject.writePassword('ijkl2345');
 
     // Act
@@ -696,6 +772,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // check — and it is written by the wait's own sleep port, so no real time decides when.
     let polls = 0;
     const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
       pollIntervalMs: 1,
@@ -720,6 +797,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
       pollIntervalMs: 1,
@@ -740,6 +818,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
       readinessTimeoutMs: 7,
@@ -763,6 +842,7 @@ describe('NodeBrowserLoginRuntime', () => {
       // Arrange
       const root = await workspace();
       const subject = new NodeBrowserLoginRuntime({
+        processes: PROCESSES,
         display: fakeDisplay(),
         secretsDirectory: root,
         pollIntervalMs: 1,
@@ -785,6 +865,7 @@ describe('NodeBrowserLoginRuntime', () => {
       // Arrange: the port was taken before x11vnc (pid 4242, which holds nothing) could bind it.
       const root = await workspace();
       const subject = new NodeBrowserLoginRuntime({
+        processes: PROCESSES,
         display: fakeDisplay(),
         secretsDirectory: root,
         pollIntervalMs: 1,
@@ -806,6 +887,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
       pollIntervalMs: 1,
@@ -825,6 +907,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
       listenerProver: UNPROVABLE,
@@ -845,6 +928,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
       terminateGraceMs: 5,

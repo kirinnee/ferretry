@@ -13,7 +13,7 @@ import { rootFiles } from '../../../daemon/tools/files.ts';
 import { BrowserToolError as AgentToolError, BrowserTools as AgentToolService } from '../../../daemon/tools/service.ts';
 import type { ToolCaller as AgentToolCaller } from '../../../daemon/tools/types.ts';
 import { browserKernel } from '../../support/kernel.ts';
-import { threadWorkers } from '../../support/thread-workers.ts';
+import { launcherPorts, REAL_WORKER } from '../../support/process-workers.ts';
 import { wallClock } from '../../support/wall-clock.ts';
 import { workRoots } from '../../support/work-root.ts';
 import { waitFor } from '../../support/wait-for.ts';
@@ -30,7 +30,8 @@ import { waitFor } from '../../support/wait-for.ts';
 
 const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
 /** The real browser worker, as a Bun worker thread the way `kernel.workers.start` makes one. */
-const WORKERS = threadWorkers(new URL('../../../daemon/worker/main.ts', import.meta.url));
+/** The real worker entry as its own process under Node, as a source checkout runs it. */
+const WORKERS = REAL_WORKER();
 const sessions = new Set(['s1', 's2']);
 
 /** A page with one thing for each pointer-and-keys tool to do, each writing what it saw into a log. */
@@ -148,7 +149,7 @@ beforeAll(async () => {
     new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
       WORKERS.start,
-      wallClock(),
+      launcherPorts(),
       {
         FY_CHROME_BIN: chrome,
         PATH: process.env.PATH,

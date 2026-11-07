@@ -3,6 +3,9 @@ import { join } from 'node:path';
 import { loopbackListenersOn, PROC_TCP_TABLES } from '../../../proxy/wire/tcp-listeners.ts';
 import { type ListenerProof, proveListener } from '../index.ts';
 
+// GAP (kernel port, banned-globals stays visible here): proving who holds a loopback port reads `/proc/net/tcp*` and
+// `/proc/<pid>/fd` — host/proc listener facts no 5.0 kernel port gives (port-kernel's `hostFacts` is not on 5.0).
+
 /** How the prover reads the host: its `/proc`, and this process's uid. Both are injected so a test can stage a
  *  fake `/proc` (tables, fd links, stat lines) in a temp directory instead of depending on a real squatter. */
 export interface ListenerProverOptions {

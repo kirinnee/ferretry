@@ -3,6 +3,8 @@ import { chmod, mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer, createConnection } from 'node:net';
 import { hostname as osHostname, userInfo } from 'node:os';
 import { join } from 'node:path';
+import type { Clock, SpawnPort } from '@ferretry/kernel/contract';
+import { milliseconds } from '@ferretry/std';
 import { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, type BrowserViewport } from '../../../pages/wire/browser.ts';
 import { type ResolvedBrowserPorts } from '../../../proxy/wire/ports.ts';
 import {
@@ -15,6 +17,10 @@ import {
 } from '../index.ts';
 import { type ListenerProverPort, ProcListenerProver } from './listener-prover.ts';
 import type { BrowserLoginChild, BrowserLoginRuntime } from './login-window.ts';
+
+// GAP (kernel port, banned-globals stays visible here): the display cookie and the one-shot VNC password are private
+// files (0600 in a 0700 folder, written by rename) no kernel port writes; spawns and time already go through
+// `kernel.spawn` and the clock (`LoginProcesses`).
 
 /**
  * The host effects `BrowserLoginWindowService` was written against, and the X display it renders on.
@@ -41,6 +47,33 @@ import type { BrowserLoginChild, BrowserLoginRuntime } from './login-window.ts';
  * waiting for wall-clock milliseconds — and a resolved wait leaves no armed timer behind to keep a
  * shutting-down daemon's event loop alive.
  */
+
+/**
+ * How the window reaches the host's processes and time: `kernel.spawn` (Xvfb, x11vnc, `timeout` and the window's
+ * Chrome, each a name `permissions.spawn` declares) and the kernel clock, bound by the daemon half; a test hands in
+ * real ones over the host's adapters. The platform and environment are the host facts no kernel port gives yet
+ * (`../../../adapters/host.ts`, a declared GAP).
+ */
+export interface LoginProcesses {
+  readonly spawn: Pick<SpawnPort, 'start' | 'run'>;
+  readonly clock: Pick<Clock, 'nowMs' | 'sleep'>;
+  readonly platform: NodeJS.Platform;
+  readonly environment: Readonly<Record<string, string | undefined>>;
+}
+
+/** Drains a stream for the child's whole life: the kernel pipes stdout and stderr, and a full pipe blocks a child. */
+async function drain(stream: ReadableStream<Uint8Array>): Promise<void> {
+  try {
+    for await (const _chunk of stream) {
+      // discarded
+    }
+  } catch {
+    // The pipe closing with the child is the normal end of this drain.
+  }
+}
+
+/** A child's exit as the window reads it: a signal (no code) is -1, never a clean 0. */
+const exitCode = (exited: Promise<number | null>): Promise<number> => exited.then(code => code ?? -1);
 
 /** A spawned program the runtime only starts, watches and signals. */
 export type BrowserLoginSpawner = (
@@ -157,12 +190,13 @@ function definedEnvironment(source: Readonly<Record<string, string | undefined>>
 /** The timing block with every field resolved, so no wait has to defend against a missing default. */
 function resolveTiming(
   timing: BrowserLoginTiming,
+  clock: LoginProcesses['clock'],
 ): Required<Pick<BrowserLoginTiming, 'readinessTimeoutMs' | 'pollIntervalMs' | 'now' | 'sleep'>> {
   return {
     readinessTimeoutMs: timing.readinessTimeoutMs ?? DEFAULT_TIMING.readinessTimeoutMs,
     pollIntervalMs: timing.pollIntervalMs ?? DEFAULT_TIMING.pollIntervalMs,
-    now: timing.now ?? (() => Date.now()),
-    sleep: timing.sleep ?? (async milliseconds => await Bun.sleep(milliseconds)),
+    now: timing.now ?? (() => clock.nowMs()),
+    sleep: timing.sleep ?? (async ms => await clock.sleep(milliseconds(ms))),
   };
 }
 
@@ -178,6 +212,8 @@ export interface XvfbDisplayOptions extends BrowserLoginTiming {
    */
   readonly executable: () => string | undefined;
   readonly screen?: BrowserViewport;
+  /** `kernel.spawn` and the clock (the platform and environment are not read here). */
+  readonly processes: Pick<LoginProcesses, 'spawn' | 'clock'>;
   readonly spawn?: (argv: readonly string[]) => XvfbChild;
   /**
    * A directory this process owns where the display's cookie file lives — the daemon's own state
@@ -224,14 +260,17 @@ export class XvfbDisplay implements BrowserDisplayPort {
   private authorityFile: string | undefined;
 
   constructor(private readonly options: XvfbDisplayOptions) {
-    this.timing = resolveTiming(options);
+    this.timing = resolveTiming(options, options.processes.clock);
     this.spawn =
       options.spawn ??
-      (argv => {
-        const child = Bun.spawn({ cmd: [...argv], stdin: 'ignore', stdout: 'pipe', stderr: 'ignore' });
+      (([program, ...args]) => {
+        if (program === undefined) throw new BrowserControlError('launch_failed', 'no Xvfb command to run');
+        const child = options.processes.spawn.start(program, args);
+        // Stdout is read (`-displayfd`); stderr was ignored today, and is drained here.
+        void drain(child.stderr);
         return {
           pid: child.pid,
-          exited: child.exited,
+          exited: exitCode(child.exited),
           stdout: child.stdout,
           kill: signal => child.kill(signal),
         };
@@ -378,6 +417,8 @@ export interface BrowserLoginRuntimeOptions extends BrowserLoginTiming {
   /** Where the one-shot VNC password file is written. The daemon's own browser directory, so the
    *  secret never lands in a world-readable temp path. */
   readonly secretsDirectory: string;
+  /** `kernel.spawn`, the clock, and this host's platform and environment. */
+  readonly processes: LoginProcesses;
   readonly platform?: NodeJS.Platform;
   readonly environmentSource?: Readonly<Record<string, string | undefined>>;
   readonly hostname?: string;
@@ -426,33 +467,30 @@ export class NodeBrowserLoginRuntime implements BrowserLoginRuntime {
   private readonly prover: ListenerProverPort;
 
   constructor(private readonly options: BrowserLoginRuntimeOptions) {
-    this.platform = options.platform ?? process.platform;
-    this.environmentSource = options.environmentSource ?? process.env;
+    this.platform = options.platform ?? options.processes.platform;
+    this.environmentSource = options.environmentSource ?? options.processes.environment;
     this.hostname = options.hostname ?? osHostname();
     this.sshUser = options.sshUser ?? userInfo().username;
-    this.timing = resolveTiming(options);
+    this.timing = resolveTiming(options, options.processes.clock);
     this.terminateGraceMs = options.terminateGraceMs ?? DEFAULT_TIMING.terminateGraceMs;
     this.exists = options.exists ?? (candidate => existsSync(candidate));
     this.spawner =
       options.spawn ??
-      ((argv, environment) => {
+      (([program, ...args], environment) => {
+        if (program === undefined) throw new BrowserControlError('launch_failed', 'no command to run');
         // stdio is DISCARDED, never inherited: Chrome and x11vnc are chatty, and a pipe nobody
-        // drains fills and blocks the child mid-window.
-        const child = Bun.spawn({
-          cmd: [...argv],
-          env: definedEnvironment(environment),
-          stdin: 'ignore',
-          stdout: 'ignore',
-          stderr: 'ignore',
-        });
-        return { pid: child.pid, exited: child.exited, kill: signal => child.kill(signal) };
+        // drains fills and blocks the child mid-window (the kernel pipes both; both are drained).
+        const child = options.processes.spawn.start(program, args, { env: definedEnvironment(environment) });
+        void drain(child.stdout);
+        void drain(child.stderr);
+        return { pid: child.pid, exited: exitCode(child.exited), kill: signal => child.kill(signal) };
       });
     this.reader =
       options.run ??
-      (async argv => {
-        const child = Bun.spawn({ cmd: [...argv], stdin: 'ignore', stdout: 'pipe', stderr: 'ignore' });
-        const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-        return { code, stdout };
+      (async ([program, ...args]) => {
+        if (program === undefined) throw new BrowserControlError('launch_failed', 'no command to run');
+        const ran = await options.processes.spawn.run(program, args);
+        return { code: ran.exitCode ?? -1, stdout: ran.stdout };
       });
     this.probePort = options.probePort ?? (port => loopbackAccepts(port));
     this.freePortOf = options.freePort ?? (() => loopbackFreePort());

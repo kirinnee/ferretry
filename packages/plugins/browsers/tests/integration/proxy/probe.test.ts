@@ -1,6 +1,7 @@
 import { afterEach, describe, it } from 'bun:test';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import should from 'should';
+import { wallClock } from '../../support/wall-clock.ts';
 import { TunnelProxyProbe } from '../../../daemon/proxy/adapters/probe.ts';
 import { proxyEndpoint } from '../../../daemon/proxy/index.ts';
 
@@ -17,7 +18,7 @@ async function listen(server: Server): Promise<number> {
   );
 }
 
-const plain = new TunnelProxyProbe({ secure: socket => socket, timeoutMs: 1_500 });
+const plain = new TunnelProxyProbe({ clock: wallClock(), secure: socket => socket, timeoutMs: 1_500 });
 
 async function origin(reply: string): Promise<number> {
   return await listen(createServer(socket => socket.once('data', () => socket.end(reply))));
@@ -111,6 +112,7 @@ describe('the proxy probe, against loopback fakes', () => {
   it('reports tls when the secure step fails', async () => {
     const port = await httpProxy(await origin(OK('203.0.113.7')));
     const failing = new TunnelProxyProbe({
+      clock: wallClock(),
       timeoutMs: 1_500,
       secure: (socket: Socket) => {
         queueMicrotask(() =>

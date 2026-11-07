@@ -18,6 +18,10 @@ import {
   sameBrowserProfileLease,
 } from '../index.ts';
 
+// GAP (kernel port, banned-globals stays visible here): Chrome takes a REAL `--user-data-dir`, so the agent profile, its
+// lease file and the symlink checks need a real state path and a lease no kernel port gives (`kernel.state` stores
+// documents, not a folder Chrome writes); the lease's `acquiredAt` (`new Date()`) moves to the clock with it.
+
 const leaseName = 'profile.lock';
 const reclaimName = 'profile.lock.reclaim';
 const metadataName = 'profile.metadata.json';

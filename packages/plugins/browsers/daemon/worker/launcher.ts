@@ -1,5 +1,5 @@
-import { close, existsSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { milliseconds } from '@ferretry/std';
 import type { BrowserMode, BrowserProxyStatus } from '../../contract/index.ts';
 import type { ResolvedBrowserPorts } from '../proxy/wire/ports.ts';
 import {
@@ -16,13 +16,13 @@ import {
 } from './control/index.ts';
 import { browserProxyStatus, proxyEndpoint, type ResolvedBrowserProxy } from '../proxy/index.ts';
 import type { BrowserSessionLauncher } from '../pages/service.ts';
-import type { Clock, WorkerHandle } from '@ferretry/kernel/contract';
+import type { ChildHandle, Clock, FetchPort, SpawnPort } from '@ferretry/kernel/contract';
 import { type BrowserAutomation } from '../pages/automation.ts';
-import { CDP_PIPE_ENDPOINT } from './cdp-pipe.ts';
+import type { BrowserHost } from '../adapters/host.ts';
 import { type ListenerProverPort, ProcListenerProver } from './control/adapters/listener-prover.ts';
 import type { BrowserDisplayPort } from './control/adapters/login-runtime.ts';
 import { ProxySignInRelay } from '../proxy/adapters/sign-in-relay.ts';
-import { BrowserWorkerClient, type CdpPipeEnds, type WorkerClientOptions } from './client.ts';
+import { BrowserWorkerClient, type StartWorker, type WorkerClientOptions } from './client.ts';
 
 /** Launches the machine's ONE agent Chrome — in the machine's Browser mode (headless by default; a real
  * window when the owner asked for one), over the dedicated agent profile, shared by every session — and the
@@ -31,19 +31,18 @@ import { BrowserWorkerClient, type CdpPipeEnds, type WorkerClientOptions } from 
  * and a lease kept because cleanup could not be confirmed closes the profile to EVERY later launch,
  * this same session's retry included; only confirmed cleanup or dead-owner recovery frees it.
  *
- * The worker is a Bun worker thread the kernel starts (`kernel.workers`); it reaches Chrome over the machine's
- * DevTools transport (`CdpTransport`). Over the PIPE (`CDP_PIPE_SWITCH`) Chrome is spawned with its fds 3 and 4
- * wired, and the worker thread, which shares this process, drives the daemon's ends; they are closed once the
- * worker is gone: nothing on this host — another account included —
- * has an address to drive the owner's signed-in profile through, and there is no free-port probe for anyone
- * to race. Over a PORT, Chrome listens on loopback and the worker connects to it once it answers — and only
+ * The worker is a PROCESS of its own (`kernel.spawn`, as today; lead decision, port-browsers r1), and Chrome is
+ * spawned through `kernel.spawn` too. It reaches Chrome over the machine's DevTools transport (`CdpTransport`).
+ * Today's PIPE (`CDP_PIPE_SWITCH`: Chrome's fds 3 and 4 handed to the worker as ITS fds 3 and 4, so nothing on this
+ * host has an address to drive the owner's signed-in profile through) is REFUSED here, saying why: the kernel's spawn
+ * gives a child no extra pipes and cannot hand one child's ends to another (GAP, kernel spawn). Over a PORT — the
+ * default — Chrome listens on loopback and the worker connects to it once it answers — and only
  * once the kernel shows the listener is THIS Chrome's own socket (`lib/browser/control/listener-proof.ts`):
  * the port is picked free and released before Chrome binds it, and a squatter who took it in between would
  * otherwise be the endpoint the worker drives. Either
  * way the daemon spawns Chrome itself, so it holds the real child: the pid on the lease, the exit it waits
- * on and the process it reaps are Chrome's own. A worker that dies takes the pipe's only other end with it;
- * Chrome reads end-of-file and quits, and the browser is torn down and started fresh on the next need
- * rather than reattached — a pipe, unlike a port, cannot be reconnected to. */
+ * on and the process it reaps are Chrome's own. A worker that dies is a browser restart: the daemon reaps Chrome
+ * ITSELF (`LeasedBrowser`), never trusting the worker to have closed it, and starts a fresh pair on the next need. */
 /** Who holds the agent profile's lease: the machine's agent browser, not any one session. */
 const AGENT_BROWSER_HOLDER = 'agent-browser';
 
@@ -55,6 +54,11 @@ const AGENT_BROWSER_HOLDER = 'agent-browser';
  * which on a desktop host is the operator's real session — and the composition root closes it at shutdown.
  */
 export interface SessionBrowserModeOptions {
+  /**
+   * Why the worker cannot start on this host (no worker beside the daemon, no Node for a source checkout), checked
+   * BEFORE the profile is leased like today's `worker.kind === 'missing'`; `undefined` when it can.
+   */
+  readonly workerRefusal?: () => string | undefined;
   /** Scope-mode wrappers exec in place, preserving Chrome's PID, lease and DevTools fds 3/4. */
   readonly limits?: { browserCommand(command: readonly string[]): Promise<readonly string[]> };
   /** This machine's Browser mode right now. Absent means headless, which is what every daemon ran before. */
@@ -69,7 +73,7 @@ export interface SessionBrowserModeOptions {
   readonly proxy?: () => Promise<ResolvedBrowserProxy | undefined>;
   /**
    * How the worker reaches Chrome's DevTools protocol, read at every launch like the mode. Absent, or
-   * unreadable, means the default (`defaultCdpTransport`): the port. The pipe runs only when this names it.
+   * unreadable, means the default (`defaultCdpTransport`): the port. A pipe is refused ({@link PIPE_TRANSPORT_REFUSAL}).
    */
   readonly transport?: () => Promise<CdpTransport>;
   /** The DevTools port a PORT-transport Chrome is told to take. Defaults to a free one the kernel picks. */
@@ -90,12 +94,30 @@ export interface SessionBrowserModeOptions {
   readonly shutdownTimeoutMs?: number;
 }
 
+/** The sentence a pipe-transport launch is refused with, before anything is leased or spawned. */
+export const PIPE_TRANSPORT_REFUSAL =
+  "The browser's DevTools pipe is not available in this build: the browser worker is a process of its own, and " +
+  "Ferretry cannot yet hand it Chrome's end of the pipe. Use the private loopback port, the default.";
+
+/**
+ * What the launcher reaches the world through: the kernel's ports, and the host facts no kernel port gives a half
+ * yet (`./adapters/host.ts`, a declared GAP).
+ */
+export interface LauncherPorts {
+  readonly clock: Clock;
+  /** `kernel.spawn`: Chrome and its `--version`, under a name `permissions.spawn` declares. */
+  readonly spawn: Pick<SpawnPort, 'start' | 'run'>;
+  /** `kernel.fetch`: Chrome's `/json/version` on loopback (`permissions.network`). */
+  readonly fetch: FetchPort;
+  readonly host: Pick<BrowserHost, 'platform' | 'arch' | 'exists' | 'which'>;
+}
+
 export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
   constructor(
     private readonly profile: BrowserProfilePort,
-    /** Starts the browser worker thread (`kernel.workers.start` over `./main.ts`). */
-    private readonly workers: () => WorkerHandle,
-    private readonly clock: Clock,
+    /** Starts the browser worker PROCESS (`kernel.spawn.start` of the worker program; `../index.ts`). */
+    private readonly workers: StartWorker,
+    private readonly ports: LauncherPorts,
     private readonly environment: Readonly<Record<string, string | undefined>>,
     private readonly connectWorker: (options: WorkerClientOptions) => Promise<BrowserWorkerClient> = options =>
       BrowserWorkerClient.connect(options),
@@ -103,17 +125,22 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
   ) {}
 
   async launch(viewport: { readonly width: number; readonly height: number }): Promise<BrowserAutomation> {
-    // The precondition is checked BEFORE the profile is leased: a machine with no browser has nothing to clean
-    // up, and the refusal is the one plain sentence that names the fix.
-    const executable = selectChromeExecutable(process.platform, this.environment.FY_CHROME_BIN, existsSync, {
+    // Both preconditions are checked BEFORE the profile is leased: a machine with no worker or no browser has
+    // nothing to clean up, and the refusal is the one plain sentence that names the fix.
+    const noWorker = this.modes.workerRefusal?.();
+    if (noWorker !== undefined) throw new BrowserControlError('launch_failed', noWorker);
+    const host = this.ports.host;
+    const executable = selectChromeExecutable(host.platform, this.environment.FY_CHROME_BIN, host.exists, {
       home: this.environment.HOME,
       path: this.environment.PATH,
-      available: command => Bun.which(command, { PATH: this.environment.PATH ?? '' }) !== null,
+      available: command => host.which(command, this.environment.PATH) !== undefined,
     });
     // The display is a precondition too: a Linux real window with no Xvfb refuses here, before any lease.
-    const platform = this.modes.platform ?? process.platform;
+    const platform = this.modes.platform ?? host.platform;
     const mode = await this.mode();
     const transport = (await this.modes.transport?.().catch(() => undefined)) ?? defaultCdpTransport();
+    // Refused before anything is leased or spawned, and never quietly swapped for the port: GAP (kernel spawn).
+    if (transport === 'pipe') throw new BrowserControlError('launch_failed', PIPE_TRANSPORT_REFUSAL);
     const ports = await this.modes.ports?.();
     if (ports?.kind === 'refused') throw new BrowserControlError('launch_failed', ports.reason);
     const fixed = ports?.kind === 'fixed' ? ports.ports : undefined;
@@ -122,17 +149,16 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       if (refusal !== undefined) throw new BrowserControlError('launch_failed', refusal);
     }
     const proxy = await this.modes.proxy?.();
-    const version = await chromeVersion(executable);
+    const version = await chromeVersion(this.ports.spawn, executable);
     const display = mode === 'window' && platform === 'linux' ? await this.privateDisplay() : undefined;
     const lease = await this.profile.acquire({ sessionId: AGENT_BROWSER_HOLDER });
-    let chrome: ReturnType<typeof Bun.spawn> | undefined;
+    let chrome: ChromeChild | undefined;
     let relay: ProxySignInRelay | undefined;
-    let pipe: CdpPipeEnds | undefined;
     try {
-      const cdp: CdpEndpoint =
-        transport === 'pipe'
-          ? { kind: 'pipe' }
-          : { kind: 'port', port: fixed?.cdp ?? (await (this.modes.cdpPort ?? freePort)()) };
+      const cdp: Extract<CdpEndpoint, { readonly kind: 'port' }> = {
+        kind: 'port',
+        port: fixed?.cdp ?? (await (this.modes.cdpPort ?? freePort)()),
+      };
       if (proxy?.credentials !== undefined) {
         relay = await ProxySignInRelay.start(
           proxyEndpoint(proxy.setting.url),
@@ -141,7 +167,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
           fixed === undefined ? {} : { port: fixed.relay },
         );
       }
-      const userAgent = honestChromeUserAgent(version, platform, process.arch);
+      const userAgent = honestChromeUserAgent(version, platform, host.arch);
       const chromeCommand = [
         // HEADLESS unless the owner chose a real window. A real window keeps every page's window painting
         // while another has focus (`agentBrowserArguments`), because an agent may be driving — and a
@@ -158,62 +184,57 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
               }),
         }),
       ];
-      chrome = Bun.spawn({
-        cmd: [...((await this.modes.limits?.browserCommand(chromeCommand)) ?? chromeCommand)],
-        // The window's cookie rides with its display: a Chrome without it is refused by the private X server.
-        env: defined(
-          browserEnvironment(
-            display,
-            this.environment,
-            display === undefined ? undefined : this.modes.display?.authority(),
+      const [program, ...args] = (await this.modes.limits?.browserCommand(chromeCommand)) ?? chromeCommand;
+      if (program === undefined) throw new BrowserControlError('launch_failed', 'no Chrome command to run');
+      chrome = chromeChild(
+        this.ports.spawn.start(program, args, {
+          // The window's cookie rides with its display: a Chrome without it is refused by the private X server.
+          env: defined(
+            browserEnvironment(
+              display,
+              this.environment,
+              display === undefined ? undefined : this.modes.display?.authority(),
+            ),
           ),
-        ),
-        // Over the pipe, fds 3 and 4 are the DevTools protocol (`--remote-debugging-pipe`): Chrome reads
-        // requests on 3 and writes replies and events on 4. Stderr is drained for the launch diagnostic.
-        stdio: cdp.kind === 'pipe' ? ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] : ['ignore', 'ignore', 'pipe'],
-      });
-      if (cdp.kind === 'pipe') pipe = cdpPipeEnds(chrome);
-      const diagnostics = collectTail(chrome.stderr as ReadableStream<Uint8Array>);
+        }),
+      );
+      // Stderr is kept for the launch diagnostic; stdout (ignored today) is drained so it can never fill.
+      void drain(chrome.stdout);
+      const diagnostics = collectTail(chrome.stderr);
       // Recorded BEFORE anything else can fail: from here on, the Chrome holding the profile is this pid.
       await lease.updateChromePid(chrome.pid, version);
-      const endpoint = cdp.kind === 'pipe' ? CDP_PIPE_ENDPOINT : `http://127.0.0.1:${cdp.port}`;
-      if (cdp.kind === 'port') {
-        await waitForCdp(
-          endpoint,
-          cdp.port,
-          chrome,
-          diagnostics,
-          this.modes.listenerProver ?? new ProcListenerProver(),
-        );
-      }
+      const endpoint = `http://127.0.0.1:${cdp.port}`;
+      await waitForCdp(
+        this.ports,
+        endpoint,
+        cdp.port,
+        chrome,
+        diagnostics,
+        this.modes.listenerProver ?? new ProcListenerProver(),
+      );
       let worker: BrowserWorkerClient;
       try {
         worker = await this.connectWorker({
           start: this.workers,
-          clock: this.clock,
+          clock: this.ports.clock,
           endpoint,
-          ...(pipe === undefined ? {} : { cdpPipe: pipe }),
+          environment: this.environment,
           readyTimeoutMs: WORKER_ATTACH_TIMEOUT_MS,
           ...(this.modes.stageDirectory === undefined ? {} : { stageDirectory: this.modes.stageDirectory }),
         });
       } catch (error) {
-        throw await attachFailure(error, chrome, diagnostics);
+        throw await attachFailure(this.ports.clock, error, chrome, diagnostics);
       }
-      // The worker thread drives these ends now; the leased browser closes them once the worker is gone.
-      // Forgotten here, so the failure path below never closes a descriptor the browser still uses.
-      const held = pipe;
-      pipe = undefined;
       return new LeasedBrowser(
         worker,
         chrome,
         lease,
+        this.ports.clock,
         this.modes.shutdownTimeoutMs,
         relay,
         proxy === undefined ? undefined : browserProxyStatus(proxy.setting),
-        held,
       );
     } catch (error) {
-      if (pipe !== undefined) closePipe(pipe);
       // A failed launch owns the same ordering obligation as a close: the browser it started is still
       // holding this profile, so the lease is released only once that Chrome is CONFIRMED gone — and
       // never on the strength of a signal alone. SIGKILL first because a Chrome its worker never attached
@@ -221,7 +242,10 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       // outcome and never the reported one: the caller still gets the error that failed the launch —
       // and the obvious retry of that same session is refused by the store like anyone else, because
       // the Chrome this record still names may be the one that would not die.
-      if (chrome === undefined || (await reapChrome(chrome, 'SIGKILL', this.modes.shutdownTimeoutMs))) {
+      if (
+        chrome === undefined ||
+        (await reapChrome(this.ports.clock, chrome, 'SIGKILL', this.modes.shutdownTimeoutMs))
+      ) {
         await lease.release().catch(() => undefined);
       }
       await relay?.close().catch(() => undefined);
@@ -258,22 +282,24 @@ class LeasedBrowser implements BrowserAutomation {
   private teardown?: Promise<void>;
   constructor(
     private readonly worker: BrowserWorkerClient,
-    private readonly chrome: ReturnType<typeof Bun.spawn>,
+    private readonly chrome: ChromeChild,
     private readonly lease: Awaited<ReturnType<BrowserProfilePort['acquire']>>,
+    private readonly clock: Clock,
     private readonly shutdownTimeoutMs: number = CHROME_SHUTDOWN_TIMEOUT_MS,
     private readonly relay?: ProxySignInRelay,
     readonly proxy?: BrowserProxyStatus,
-    private readonly pipe?: CdpPipeEnds,
   ) {
     // Either child settling means the SESSION is over: the worker without Chrome drives nothing, and
-    // Chrome without its worker is an unreachable window still holding the profile — the pipe died with
-    // the worker, and nothing can attach to Chrome again. So both mean the same teardown, and the one that
+    // Chrome without its worker is a window still holding the profile that nothing drives — and is never
+    // reattached to. So both mean the same teardown, and the one that
     // survived is what teardown exists to kill. The browser service then launches a fresh pair on the
     // next need: a worker crash is a browser restart, never a reattach.
-    this.unexpectedExit = Promise.race([worker.unexpectedExit, chrome.exited]).then(async code => {
-      await this.stop();
-      return code;
-    });
+    this.unexpectedExit = Promise.race([worker.unexpectedExit, chrome.exited.then(code => code ?? -1)]).then(
+      async code => {
+        await this.stop();
+        return code;
+      },
+    );
   }
   navigate: BrowserAutomation['navigate'] = (pageId, url) => this.worker.navigate(pageId, url);
   click: BrowserAutomation['click'] = (pageId, target, options) => this.worker.click(pageId, target, options);
@@ -333,10 +359,9 @@ class LeasedBrowser implements BrowserAutomation {
     // not confirm that, so the answer is kept rather than swallowed: a worker still standing is a
     // browser still reachable, whatever happened to Chrome.
     const workerGone = await this.worker.close().then(succeeded, failed);
-    // The worker thread is gone, so nothing reads or writes the pipe's daemon ends any more.
-    if (this.pipe !== undefined) closePipe(this.pipe);
-    // Chrome is reaped either way — a worker that would not die is no reason to leave a browser up.
-    const chromeGone = await reapChrome(this.chrome, 'SIGTERM', this.shutdownTimeoutMs);
+    // Chrome is reaped HERE, by the daemon that spawned it, either way — a worker that would not die, or one that
+    // died first, is no reason to leave a browser up (and the worker's process group is not signalled: GAP).
+    const chromeGone = await reapChrome(this.clock, this.chrome, 'SIGTERM', this.shutdownTimeoutMs);
     await this.relay?.close().catch(() => undefined);
     // Released LAST and only on BOTH confirmations: a lease that outlives either child by even a
     // moment lets a login window or the next session open a second Chrome over a profile the first one
@@ -368,21 +393,22 @@ const CHROME_SHUTDOWN_TIMEOUT_MS = 2_000;
  * before it finished starting has not written one yet.
  */
 async function reapChrome(
-  chrome: ReturnType<typeof Bun.spawn>,
+  clock: Clock,
+  chrome: ChromeChild,
   first: 'SIGTERM' | 'SIGKILL',
   timeoutMs: number = CHROME_SHUTDOWN_TIMEOUT_MS,
 ): Promise<boolean> {
   signalChrome(chrome, first);
-  if (await exitedWithin(chrome, timeoutMs)) return true;
+  if (await exitedWithin(clock, chrome, timeoutMs)) return true;
   signalChrome(chrome, 'SIGKILL');
-  return await exitedWithin(chrome, timeoutMs);
+  return await exitedWithin(clock, chrome, timeoutMs);
 }
 
 /** Named so a shutdown reads as the two-outcome question it is, rather than as a swallowed rejection. */
 const succeeded = (): boolean => true;
 const failed = (): boolean => false;
 
-function signalChrome(chrome: ReturnType<typeof Bun.spawn>, signal: 'SIGTERM' | 'SIGKILL'): void {
+function signalChrome(chrome: ChromeChild, signal: 'SIGTERM' | 'SIGKILL'): void {
   try {
     chrome.kill(signal);
   } catch {
@@ -391,17 +417,60 @@ function signalChrome(chrome: ReturnType<typeof Bun.spawn>, signal: 'SIGTERM' | 
 }
 
 /** A wait that is always cleared, so a reaped child leaves no timer holding the runtime alive. */
-async function exitedWithin(chrome: ReturnType<typeof Bun.spawn>, timeoutMs: number): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+async function exitedWithin(clock: Clock, chrome: ChromeChild, timeoutMs: number): Promise<boolean> {
+  let cancel: (() => void) | undefined;
   try {
     return await Promise.race([
       chrome.exited.then(() => true),
       new Promise<boolean>(resolve => {
-        timer = setTimeout(() => resolve(false), timeoutMs);
+        cancel = clock.after(milliseconds(timeoutMs), () => resolve(false));
       }),
     ]);
   } finally {
-    if (timer !== undefined) clearTimeout(timer);
+    cancel?.();
+  }
+}
+
+/** Chrome as the daemon holds it: the kernel's child, and the code it exited with once it has. */
+interface ChromeChild {
+  readonly pid: number;
+  readonly stdout: ReadableStream<Uint8Array>;
+  readonly stderr: ReadableStream<Uint8Array>;
+  readonly exited: Promise<number | null>;
+  /** `undefined` while it runs; `null` when a signal ended it. */
+  exitCode(): number | null | undefined;
+  kill(signal: 'SIGTERM' | 'SIGKILL'): void;
+}
+
+function chromeChild(child: ChildHandle): ChromeChild {
+  let code: number | null | undefined;
+  const exited = child.exited.then(
+    value => {
+      code = value;
+      return value;
+    },
+    () => {
+      code = null;
+      return null;
+    },
+  );
+  return {
+    pid: child.pid,
+    stdout: child.stdout,
+    stderr: child.stderr,
+    exited,
+    exitCode: () => code,
+    kill: signal => child.kill(signal),
+  };
+}
+
+async function drain(stream: ReadableStream<Uint8Array>): Promise<void> {
+  try {
+    for await (const _chunk of stream) {
+      // discarded
+    }
+  } catch {
+    // The pipe closing with the child is the normal end of this drain.
   }
 }
 
@@ -410,11 +479,11 @@ function defined(source: Readonly<Record<string, string | undefined>>): Record<s
   for (const [key, value] of Object.entries(source)) if (value !== undefined) result[key] = value;
   return result;
 }
-async function chromeVersion(executable: string): Promise<string> {
-  const child = Bun.spawn({ cmd: [executable, '--version'], stdout: 'pipe', stderr: 'ignore' });
-  const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-  const version = stdout.trim();
-  if (code !== 0 || version === '') throw new BrowserControlError('launch_failed', 'Chrome did not report a version');
+async function chromeVersion(spawn: Pick<SpawnPort, 'run'>, executable: string): Promise<string> {
+  const ran = await spawn.run(executable, ['--version']);
+  const version = ran.stdout.trim();
+  if (ran.exitCode !== 0 || version === '')
+    throw new BrowserControlError('launch_failed', 'Chrome did not report a version');
   return version;
 }
 async function freePort(): Promise<number> {
@@ -436,28 +505,32 @@ async function freePort(): Promise<number> {
  */
 // read-scoped: none — it waits for Chrome's DevTools port and shows no page text
 async function waitForCdp(
+  ports: Pick<LauncherPorts, 'clock' | 'fetch'>,
   endpoint: string,
   port: number,
-  chrome: ReturnType<typeof Bun.spawn>,
+  chrome: ChromeChild,
   diagnostics: () => string,
   prover: ListenerProverPort,
 ): Promise<void> {
-  const deadline = Date.now() + 20_000;
+  const deadline = ports.clock.nowMs() + 20_000;
   let exited = false;
-  while (Date.now() < deadline) {
+  while (ports.clock.nowMs() < deadline) {
     const proof = await prover.prove(port, chrome.pid);
     if (proof.kind === 'foreign') throw new BrowserControlError('launch_failed', listenerHeldRefusal(port, proof.uid));
     if (
       proof.kind !== 'absent' &&
-      (await fetch(`${endpoint}/json/version`)
+      (await ports.fetch
+        .request(`${endpoint}/json/version`)
         .then(response => response.ok)
         .catch(() => false))
     )
       return;
-    exited = await Promise.race([chrome.exited.then(() => true), Bun.sleep(100).then(() => false)]);
+    exited = await exitedWithin(ports.clock, chrome, 100);
     if (exited) break;
   }
-  const why = exited ? `Chrome exited with code ${chrome.exitCode ?? 'unknown'}` : 'Chrome was still running after 20s';
+  const why = exited
+    ? `Chrome exited with code ${chrome.exitCode() ?? 'unknown'}`
+    : 'Chrome was still running after 20s';
   const said = diagnostics();
   throw new BrowserControlError(
     'launch_failed',
@@ -465,30 +538,11 @@ async function waitForCdp(
   );
 }
 
-/**
- * How long a freshly spawned Chrome and its worker get to finish the DevTools handshake — over the pipe that
- * is Chrome's whole start-up, which a port spends polling its endpoint instead, so it gets that budget.
- */
+/** How long a freshly spawned Chrome and its worker get to finish the DevTools handshake (today's budget). */
 const WORKER_ATTACH_TIMEOUT_MS = 25_000;
 
 /** How long a Chrome whose worker could not attach gets to show that it is the one that died. */
 const CHROME_EXIT_GRACE_MS = 250;
-
-/**
- * The daemon's ends of Chrome's DevTools pipe — numbers, because both slots were spawned as `'pipe'`. Reading
- * `stdio` hands them to the caller to close; Bun creates them close-on-exec, so no other child this daemon
- * starts inherits an end by accident.
- */
-function cdpPipeEnds(chrome: ReturnType<typeof Bun.spawn>): CdpPipeEnds {
-  const [, , , toChrome, fromChrome] = chrome.stdio as unknown as readonly [null, null, null, number, number];
-  return { toChrome, fromChrome };
-}
-
-/** Closes the daemon's ends of the pipe. Called exactly once per launch, never on a descriptor reused since. */
-function closePipe(pipe: CdpPipeEnds): void {
-  close(pipe.toChrome, () => undefined);
-  close(pipe.fromChrome, () => undefined);
-}
 
 /**
  * Why a worker could not attach, told as Chrome's failure when Chrome is what died: a Chrome that exits closes
@@ -496,15 +550,16 @@ function closePipe(pipe: CdpPipeEnds): void {
  * browser's own words about why it would not start.
  */
 async function attachFailure(
+  clock: Clock,
   error: unknown,
-  chrome: ReturnType<typeof Bun.spawn>,
+  chrome: ChromeChild,
   diagnostics: () => string,
 ): Promise<unknown> {
-  if (!(await exitedWithin(chrome, CHROME_EXIT_GRACE_MS))) return error;
+  if (!(await exitedWithin(clock, chrome, CHROME_EXIT_GRACE_MS))) return error;
   const said = diagnostics();
   return new BrowserControlError(
     'launch_failed',
-    `Chrome exited with code ${chrome.exitCode ?? 'unknown'} before its worker could attach${said === '' ? '' : `: ${said}`}`,
+    `Chrome exited with code ${chrome.exitCode() ?? 'unknown'} before its worker could attach${said === '' ? '' : `: ${said}`}`,
   );
 }
 
