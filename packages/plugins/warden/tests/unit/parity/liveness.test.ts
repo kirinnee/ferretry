@@ -1,8 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { fakeBrowsers } from '@ferretry/plugin-browsers/contract/testing';
+import { LeftAloneWhySchema } from '@ferretry/plugin-browsers/contract';
 import type { LivenessSample } from '@ferretry/plugin-terminals/contract';
 import { FERRET, livenessHost } from './liveness-host.ts';
+import { WardenLeftAloneWhySchema } from '../../../contract/index.ts';
 
 /** A harness's live status line, its elapsed clock climbing a tick at a time while its token counter stays flat. */
 const thinking = (look: number): LivenessSample => {
@@ -276,5 +278,11 @@ describe('the Warden closes a browser left under a ferret’s pane (today’s re
 
     // Assert
     should(browsers.closed).eql([]);
+  });
+});
+
+describe('the reasons a WardenActed event gives for a browser left alone', () => {
+  it('should be exactly Browsers’ own closed set (Browsers owns the words; the contract spells them again)', () => {
+    should([...WardenLeftAloneWhySchema.options].sort()).eql([...LeftAloneWhySchema.options].sort());
   });
 });
