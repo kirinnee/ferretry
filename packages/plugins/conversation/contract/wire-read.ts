@@ -70,6 +70,18 @@ export const TranscriptEventTailSchema = z.strictObject({
 });
 export type TranscriptEventTail = z.infer<typeof TranscriptEventTailSchema>;
 
+/**
+ * The newest events of a ferret's transcript as ONE masked text, every kind rendered as the operator's log reads it —
+ * messages, reasoning, tool calls and results, usage, turn markers, compactions, errors, attachments
+ * (`ConversationApi.transcriptLog`).
+ */
+export const TranscriptLogTailSchema = z.strictObject({
+  v: z.literal(1),
+  ferret: FerretIdSchema,
+  log: z.string(),
+});
+export type TranscriptLogTail = z.infer<typeof TranscriptLogTailSchema>;
+
 export interface TranscriptEventsOptions {
   /** How many of the newest events; the transcript's own bound when absent. */
   readonly limit?: number;

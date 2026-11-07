@@ -255,10 +255,13 @@ export const LIVENESS_TAIL_EVENTS = 20;
 
 /**
  * A fingerprint of the ferret's transcript tail, from Conversation (the transcript's owner): it moves when the
- * conversation grows. Total: a transcript that cannot be read is `undefined`, no evidence this tick. Only the
- * fingerprint is kept, never the text.
+ * conversation grows. Its input is today's (`operatorReads.logs(id, 20)`): the masked log text of the newest events of
+ * EVERY kind — reasoning, usage, turn markers and compactions as well as messages and tool calls — so a long think
+ * that writes only reasoning still moves it. Total: a transcript that cannot be read, or a Conversation without that
+ * read, is `undefined`, no evidence this tick. Only the fingerprint is kept, never the text.
  */
 export async function transcriptDigest(conversation: ConversationApi, ferret: FerretId): Promise<string | undefined> {
-  const tail = await conversation.transcriptEvents(ferret, { limit: LIVENESS_TAIL_EVENTS }).catch(() => undefined);
-  return tail?.ok === true ? textFingerprint(JSON.stringify(tail.value.events)) : undefined;
+  if (conversation.transcriptLog === undefined) return undefined;
+  const tail = await conversation.transcriptLog(ferret, { limit: LIVENESS_TAIL_EVENTS }).catch(() => undefined);
+  return tail?.ok === true ? textFingerprint(tail.value.log) : undefined;
 }

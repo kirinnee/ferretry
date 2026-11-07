@@ -36,3 +36,24 @@ describe('the port’s transcript tail with tool calls', () => {
     await host.stop();
   });
 });
+
+describe('the port’s log tail of every event kind (transcriptLog, additive)', () => {
+  test('a ferret whose harness is not connected yet is refused in words, never answered with an empty log', async () => {
+    const host = await boot();
+    const read = host.provided(ConversationPort).transcriptLog;
+    if (read === undefined) throw new Error('Conversation provides transcriptLog');
+    expect(await read(F1, { limit: 20 })).toEqual({
+      ok: false,
+      error: { code: 'conversation_harness_unavailable', message: HARNESS_PENDING },
+    });
+    await host.stop();
+  });
+
+  test('a ferret nobody knows is not_found', async () => {
+    const host = await boot();
+    const read = host.provided(ConversationPort).transcriptLog;
+    if (read === undefined) throw new Error('Conversation provides transcriptLog');
+    expect(await read(ferretId('ghost'))).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    await host.stop();
+  });
+});

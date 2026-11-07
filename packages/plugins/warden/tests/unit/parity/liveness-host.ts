@@ -55,6 +55,9 @@ export function livenessHost(options: LivenessHostOptions = {}) {
           transcriptEvents: async () => {
             throw new Error('the transcript cannot be read');
           },
+          transcriptLog: async () => {
+            throw new Error('the transcript cannot be read');
+          },
         }
       : base;
   let looks = 0;
