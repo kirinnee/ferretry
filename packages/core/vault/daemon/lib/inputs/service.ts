@@ -1333,8 +1333,8 @@ export class InputRequestService {
       if (request.state !== 'delivered' || (await this.deps.sessions.ended(sessionId))) return;
       const before = request.agendaItemId;
       const tell = async (message: string): Promise<void> => await this.deps.notifier.tell(sessionId, before, message);
-      const where = `%${request.target.kind}:${request.target.key}`;
-      const cannot = `${before}: the code Ferretry made did not go through on ${where}. Read it, and if it still asks for a code, raise a fresh ${request.target.kind}_request_input.`;
+      const where = `%${toolWord(request.target.kind)}:${request.target.key}`;
+      const cannot = `${before}: the code Ferretry made did not go through on ${where}. Read it, and if it still asks for a code, raise a fresh ${toolWord(request.target.kind)}_request_input.`;
       const busy = [...this.held.values()].some(
         other =>
           other !== held &&
@@ -3286,20 +3286,23 @@ function tellOf(
   uncertain: boolean,
   unsettled: boolean,
 ): string {
-  const { kind, key } = request.target;
+  const { key } = request.target;
+  const kind = request.target.kind;
+  // The ferret names a page by its tool and reference words, `browser` (`browser_request_input`, `%browser:app`).
+  const named = toolWord(kind);
   const surface = surfaceWord(kind);
-  const tool = `${kind}_request_input`;
+  const tool = `${named}_request_input`;
   if (kind === 'secret') return storeTellOf(request, state, reason, uncertain, unsettled);
   if (uncertain)
-    return `${request.agendaItemId} was interrupted while the owner's value was going into %${kind}:${key}; it may be partly or fully typed there. Read the ${surface} before you act once its quarantine allows; if you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
+    return `${request.agendaItemId} was interrupted while the owner's value was going into %${named}:${key}; it may be partly or fully typed there. Read the ${surface} before you act once its quarantine allows; if you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
   if (state === 'delivered' && request.outcome?.by.kind === 'plan')
-    return `${request.agendaItemId}: Ferretry filled the sign-in on %${kind}:${key} under your task plan. Read the ${surface} to continue once its quarantine allows.`;
+    return `${request.agendaItemId}: Ferretry filled the sign-in on %${named}:${key} under your task plan. Read the ${surface} to continue once its quarantine allows.`;
   if (state === 'delivered' && request.outcome?.by.kind === 'sign-in-rule')
-    return `${request.agendaItemId}: Ferretry filled the sign-in on %${kind}:${key} under a rule the owner approved in advance. Read the ${surface} to continue once its quarantine allows.`;
+    return `${request.agendaItemId}: Ferretry filled the sign-in on %${named}:${key} under a rule the owner approved in advance. Read the ${surface} to continue once its quarantine allows.`;
   if (state === 'delivered' && request.source !== undefined)
-    return `${request.agendaItemId}: ${copyHandle(request.source.name)} was pasted into %${kind}:${key}. Read the ${surface} to continue once its quarantine allows.`;
+    return `${request.agendaItemId}: ${copyHandle(request.source.name)} was pasted into %${named}:${key}. Read the ${surface} to continue once its quarantine allows.`;
   if (state === 'delivered')
-    return `${request.agendaItemId} was answered and typed into %${kind}:${key}. Read the ${surface} to continue.`;
+    return `${request.agendaItemId} was answered and typed into %${named}:${key}. Read the ${surface} to continue.`;
   return `${request.agendaItemId} ended without a value (${state}${reason === undefined ? '' : `: ${reasonWords(reason, kind, unsettled)}`}). If you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
 }
 
@@ -3390,4 +3393,9 @@ interface GrantWrite {
    * changed before Enter (`program-changed`): the grant stops.
    */
   uncertain(because: 'did-not-move-on' | 'program-changed'): Promise<void>;
+}
+
+/** The word a ferret's tools and references use for a target kind: a page is the browser's (`%browser:`, §4.7). */
+function toolWord(kind: InputTarget['kind']): string {
+  return kind === 'page' ? 'browser' : kind;
 }

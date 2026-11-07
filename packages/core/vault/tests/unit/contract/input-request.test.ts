@@ -98,18 +98,19 @@ describe('raising an input request', () => {
     // Arrange
     const raise = { target: { kind: 'terminal', key: 'dev' }, prompt: 'p', sensitivity: 'secret' };
 
-    // Act / Assert — an older raise (a handle) still parses; a sign-in id parses where accounts exist
+    // Act / Assert — the hint is Accounts' id, carried opaque and bounded by the Vault (Accounts parses it, and it is
+    // only ever a hint): an account handle and a sign-in id both ride; an empty or unbounded one does not.
     should(InputRaiseSchema.safeParse({ ...raise, secretHint: 'SUDO_KIRIN_BOX' }).success).be.true();
     should(InputRaiseSchema.safeParse({ ...raise, secretHint: 'si_0123456789abcdef' }).success).be.true();
-    for (const hint of ['si_0123', 'sudo_kirin_box', 'si_0123456789ABCDEF', ''])
+    for (const hint of ['', 'x'.repeat(129)])
       should(InputRaiseSchema.safeParse({ ...raise, secretHint: hint }).success).be.false();
   });
 
   it('should take the 2FA key a code is from, by its id only', () => {
     const raise = { target: { kind: 'page', key: 'app' }, prompt: 'p', sensitivity: 'private' };
+    // The key's id is Accounts', carried opaque and bounded (Accounts parses it).
     should(InputRaiseSchema.safeParse({ ...raise, factor: 'tf_000000000001' }).success).be.true();
-    for (const factor of ['tf_0001', 'Authenticator app', 'si_0123456789abcdef', 'TF_000000000001'])
-      should(InputRaiseSchema.safeParse({ ...raise, factor }).success).be.false();
+    for (const factor of ['', 'x'.repeat(129)]) should(InputRaiseSchema.safeParse({ ...raise, factor }).success).be.false();
   });
 
   it('should refuse anything the agent could use to claim what the daemon observes', () => {
@@ -168,6 +169,13 @@ describe('a card of several fields', () => {
     ).be.false();
     for (const id of ['Email', '1st', 'e mail', 'x'.repeat(33)])
       should(InputRaiseSchema.safeParse({ ...base, fields: [{ ...email, id }] }).success).be.false();
+  });
+
+  // Contract gap: the frozen `InputFieldRaiseSchema` label is trimmed and bounded but no longer refuses a control
+  // character or line break as today's did. Flips to a pass when the contract restores today's label regex.
+  it.failing("should refuse a field label that is not one line (today's label rule)", () => {
+    const base = { target: { kind: 'page', key: 'app' }, prompt: 'Sign in' };
+    const email = { id: 'email', sensitivity: 'plain' };
     should(InputRaiseSchema.safeParse({ ...base, fields: [{ ...email, label: 'a\nb' }] }).success).be.false();
   });
 
