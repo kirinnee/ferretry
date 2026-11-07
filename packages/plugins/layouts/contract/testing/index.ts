@@ -3,25 +3,14 @@ import { err, ok, type Result } from '@ferretry/std';
 import {
   type CurrentLayout,
   CurrentLayoutSchema,
+  DEFAULT_LAYOUT,
+  DEFAULT_THEME,
   type LayoutList,
   LayoutListSchema,
   type LayoutsApi,
-  LayoutSchema,
-  ThemeSchema,
 } from '../index.ts';
 
-/** The built-in default (the same values as `layouts/default.yaml`), so a fake can answer without reading a file. */
-export const DEFAULT_LAYOUT = LayoutSchema.parse({
-  id: 'default',
-  nav: { side: 'left', style: 'rail', items: ['agenda', 'ferrets', 'board', 'insights', 'settings'] },
-  side: { show: 'wide-only', holds: 'ferret' },
-  top: ['daemon-picker', 'search'],
-  'composer.tools': ['mic', 'attach'],
-  panels: { 'ferret.side': ['cards-of-ferret', 'sitrep', 'usage'] },
-  density: 'comfortable',
-  phone: { nav: { side: 'bottom', items: ['agenda', 'ferrets', 'board'] } },
-});
-export const DEFAULT_THEME = ThemeSchema.parse({ id: 'default', tokens: {} });
+export { DEFAULT_LAYOUT, DEFAULT_THEME };
 
 export function fakeLayouts(): LayoutsApi {
   const current: CurrentLayout = { layout: DEFAULT_LAYOUT, theme: DEFAULT_THEME };
