@@ -38,7 +38,7 @@ export const ReferenceCatalogEntrySchema = z.strictObject({
 });
 export type ReferenceCatalogEntry = z.infer<typeof ReferenceCatalogEntrySchema>;
 
-/** `GET /v1/ferrets/:ferretId/references/:prefix`: the entries the owner of `prefix` offers for one ferret. */
+/** `GET /v1/ferrets/:ferretId/references?prefix=…&q=…` (a query, because a path segment cannot carry `/`): the entries the owner of `prefix` offers for one ferret. */
 export const ReferenceCatalogAnswerSchema = z.strictObject({
   ferret: FerretIdSchema,
   prefix: ReferenceCatalogPrefixSchema,
