@@ -31,8 +31,13 @@ import type {
   RootName,
   SpawnOptions,
   SpawnResult,
+  IdentityPort,
+  WebSocketClient,
 } from '../contract/ports.ts';
 import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
+import { createIdentitySigner, signerFor } from '../host/session/signer.ts';
+import { testIdentity } from './identity.ts';
+import type { IdentitySigner } from '../contract/session.ts';
 import type { CallContext, MemberRouteHandler, RouteDescriptor, RouteHandler } from '../contract/route.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
@@ -70,6 +75,10 @@ export interface TestHostOptions {
   ) => SpawnResult | Promise<SpawnResult>;
   /** Answers `kernel.fetch.request` for declared hosts. Without it a fetch fails. */
   readonly fetch?: (url: URL, init?: RequestInit) => Response | Promise<Response>;
+  /** Answers `kernel.websocket.connect` for declared hosts (`ws:`/`wss:`). Without it a dial fails. */
+  readonly websocket?: (url: URL) => WebSocketClient;
+  /** What `kernel.identity` answers. Default: the throwaway identity's id and `test-daemon`. */
+  readonly identity?: IdentityPort;
   /** Text the stand-in redaction masks (same-width `*`). */
   readonly secrets?: readonly string[];
 }
@@ -97,6 +106,8 @@ export interface OpenSocket {
 
 export interface TestHost {
   readonly clock: DrivenClock;
+  /** What `kernel.identity` answers; `kernel.signer` signs with this identity's throwaway key (gated as the real host). */
+  readonly identity: IdentityPort;
   readonly minted: TestMintedIds;
   /** Every `kernel.act` decision, in order. */
   readonly acts: readonly ActRecord[];
@@ -137,6 +148,8 @@ export interface TestHost {
 
 interface World {
   readonly options: TestHostOptions;
+  readonly identity: IdentityPort;
+  readonly identitySigner: IdentitySigner;
   readonly clock: DrivenClock;
   readonly states: Map<string, MemoryStateFolder>;
   readonly minted: TestMintedIds;
@@ -192,8 +205,13 @@ interface Built {
  * check (`finalised`), real `closeAck`.
  */
 export async function testHost(options: TestHostOptions): Promise<TestHost> {
+  const throwaway = await testIdentity();
+  const identity: IdentityPort = options.identity ?? Object.freeze({ daemonId: throwaway.daemonId, daemonName: 'test-daemon' });
+  const identitySigner = createIdentitySigner(throwaway.key);
   const world: World = {
     options,
+    identity,
+    identitySigner,
     clock: options.clock ?? fixedClock(),
     states: new Map(),
     minted: new TestMintedIds(),
@@ -206,7 +224,7 @@ export async function testHost(options: TestHostOptions): Promise<TestHost> {
 }
 
 async function start(world: World): Promise<TestHost> {
-  const { options, clock } = world;
+  const { options, clock, identity, identitySigner } = world;
   const acts: ActRecord[] = [];
   const published: { event: string; payload: unknown }[] = [];
   const logs: { level: string; scope: string; message: string; fields?: LogFields }[] = [];
@@ -492,6 +510,20 @@ async function start(world: World): Promise<TestHost> {
           return options.fetch(parsed, init);
         },
       },
+      websocket: {
+        connect(url) {
+          const parsed = new URL(String(url));
+          if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:')
+            throw new Error(`${manifest.id}: ${parsed.protocol} is not a WebSocket address`);
+          if (!(manifest.permissions?.network ?? []).includes(parsed.host))
+            throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
+          if (options.websocket === undefined)
+            throw new Error(`${manifest.id}: dial ${parsed.host} with no websocket fake`);
+          return options.websocket(parsed);
+        },
+      },
+      identity,
+      signer: signerFor(manifest.id, identitySigner),
       act: testActRunner({
         holds: () => holds,
         actor: () => actorScope.getStore() ?? 'ferret',
@@ -661,6 +693,7 @@ async function start(world: World): Promise<TestHost> {
   };
 
   const host: TestHost = {
+    identity,
     clock,
     minted: world.minted,
     acts,

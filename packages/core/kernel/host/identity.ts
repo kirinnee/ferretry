@@ -93,3 +93,21 @@ export async function loadIdentity(fs: HostFs, home: string): Promise<IdentityOu
     return { kind: 'damaged', sentence: `${path} cannot be read; restore it from a backup.` };
   }
 }
+
+/** At most this many characters of a daemon name (today's `PAIRING_DEVICE_NAME_MAX_LENGTH`). */
+export const DAEMON_NAME_MAX_LENGTH = 100;
+
+/**
+ * Today's `normalizeDaemonName`, byte for byte: hostnames are platform text, not a display-name contract, so control
+ * and format characters go, the rest is trimmed and bounded, and an empty result is `Ferretry daemon`.
+ */
+export function daemonNameFrom(hostname: string): string {
+  const cleaned = hostname.replaceAll(/[\p{Cc}\p{Cf}]/gu, '').trim();
+  let bounded = '';
+  for (const symbol of cleaned) {
+    if (bounded.length + symbol.length > DAEMON_NAME_MAX_LENGTH) break;
+    bounded += symbol;
+  }
+  const name = bounded.trim();
+  return name === '' ? 'Ferretry daemon' : name;
+}

@@ -122,4 +122,3 @@ worker.addEventListener('message', event => {
     ),
   );
 });
-

@@ -28,6 +28,7 @@ export {
   carrierConformance,
 } from './carrier-suite.ts';
 export { type DrivenClock, fixedClock } from './clock.ts';
+export { type TestIdentity, testIdentity } from './identity.ts';
 export {
   type OpenSocket,
   type RequestInit2 as TestRequestInit,

@@ -6,7 +6,7 @@
 export * from './act.ts';
 export { systemClock } from './adapters/clock.ts';
 export { type HostFs, nodeFs } from './adapters/node-fs.ts';
-export { bunSpawn, bunWorkers, globalFetch } from './adapters/process.ts';
+export { bunSpawn, bunWebSockets, bunWorkers, globalFetch, noWebSockets } from './adapters/process.ts';
 export { currentActor, DEFAULT_ACTOR, runInCall } from './call-scope.ts';
 export * from './data-plugins.ts';
 export * from './dispatch.ts';

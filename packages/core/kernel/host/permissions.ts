@@ -1,5 +1,5 @@
 import type { ChildEnvironmentOpener } from '../contract/bound.ts';
-import type { FetchPort, SpawnOptions, SpawnPort } from '../contract/ports.ts';
+import type { FetchPort, SpawnOptions, SpawnPort, WebSocketPort } from '../contract/ports.ts';
 import { resolveEnv } from './adapters/process.ts';
 
 export class PermissionError extends Error {
@@ -71,5 +71,27 @@ export function openChildEnvironments(base: SpawnPort, opener: () => ChildEnviro
   return {
     run: async (program, args, options) => await base.run(program, args, resolved(options)),
     start: (program, args, options) => base.start(program, args, resolved(options)),
+  };
+}
+
+/**
+ * WebSocket clients only to hosts the manifest declared in `permissions.network`, `ws:`/`wss:` only; refused with the
+ * same `PermissionError` as {@link restrictFetch}, synchronously, before a socket opens.
+ */
+export function restrictWebSocket(plugin: string, declared: readonly string[], base: WebSocketPort): WebSocketPort {
+  return {
+    connect: url => {
+      let parsed: URL;
+      try {
+        parsed = new URL(String(url));
+      } catch {
+        throw new PermissionError(`${plugin} asked for a malformed address.`);
+      }
+      if (parsed.protocol !== 'wss:' && parsed.protocol !== 'ws:')
+        throw new PermissionError(`${plugin} may only open WebSocket connections.`);
+      if (!hostAllowed(parsed.hostname, declared))
+        throw new PermissionError(`${plugin} may not reach ${parsed.hostname}: its manifest does not declare it.`);
+      return base.connect(parsed);
+    },
   };
 }

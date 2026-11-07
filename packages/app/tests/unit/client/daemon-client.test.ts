@@ -75,7 +75,12 @@ describe('the guard', () => {
       .call('GET /v1/board')
       .catch(e => e);
     expect((failure as DaemonCallError).code).toBe('plugin_paused');
-    expect(await client.forPackage('agenda').call('GET /v1/agenda').catch(e => e.code)).toBe('not_found');
+    expect(
+      await client
+        .forPackage('agenda')
+        .call('GET /v1/agenda')
+        .catch(e => e.code),
+    ).toBe('not_found');
   });
 
   test('an undeclared route is a programming error', async () => {

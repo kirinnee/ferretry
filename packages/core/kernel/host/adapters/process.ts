@@ -5,6 +5,8 @@ import type {
   SpawnOptions,
   SpawnPort,
   SpawnResult,
+  WebSocketClient,
+  WebSocketPort,
   WorkerHandle,
   WorkersPort,
 } from '../../contract/ports.ts';
@@ -100,6 +102,20 @@ export function bunWorkers(): WorkersPort {
           worker.terminate();
         },
       };
+    },
+  };
+}
+
+/** Today's relay carrier dial, `new WebSocket(url)` and nothing more; the host narrows it per plugin. */
+export function bunWebSockets(): WebSocketPort {
+  return { connect: url => new WebSocket(url) as unknown as WebSocketClient };
+}
+
+/** The adapter a host without one gets: every dial refused, so a test can never reach the network by accident. */
+export function noWebSockets(): WebSocketPort {
+  return {
+    connect: () => {
+      throw new Error('This host opens no WebSocket connections.');
     },
   };
 }

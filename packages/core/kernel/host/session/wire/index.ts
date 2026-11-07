@@ -13,3 +13,6 @@ export * from './member.ts';
 export * from './proofs.ts';
 export * from './records.ts';
 export * from './vocabulary.ts';
+export * from './tunnel-request.ts';
+export * from './catalog-signature.ts';
+export * from './secret-offer.ts';

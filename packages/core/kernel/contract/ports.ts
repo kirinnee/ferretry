@@ -3,6 +3,7 @@ import type { ActRunner, OpaqueId } from './act.ts';
 import type { ChildEnvironment, FencedPath, FolderRefusal, Redaction } from './bound.ts';
 import type { ConfigCollectionDef, ConfigFileDef, EventDef, StateFileDef } from './define.ts';
 import type { FerretId } from './ids.ts';
+import type { IdentitySigner } from './session.ts';
 import type { PostBuildSnapshot } from './snapshot.ts';
 
 /**
@@ -20,6 +21,15 @@ export interface KernelPorts {
   readonly workers: WorkersPort;
   readonly spawn: SpawnPort;
   readonly fetch: FetchPort;
+  /** WebSocket clients to the hosts the manifest declared in `permissions.network` (`ws:`/`wss:` only). */
+  readonly websocket: WebSocketPort;
+  /** Who this daemon is, read-only: its id and name, never its key. */
+  readonly identity: IdentityPort;
+  /**
+   * The daemon identity's fixed-label signatures (claim, tunnel, catalog), each refused unless this plugin is the
+   * one allowed it (`sign`/`signTunnel`: Connections; `signCatalog`: Catalogs). No key export, no raw signing.
+   */
+  readonly signer: IdentitySigner;
   readonly act: ActRunner;
   readonly ids: IdsPort;
   readonly redaction: Redaction;
@@ -227,6 +237,41 @@ export interface SpawnPort {
 /** HTTP to the hosts the manifest declared in `permissions.network`; anything else is refused before a socket opens. */
 export interface FetchPort {
   request(url: string | URL, init?: RequestInit): Promise<Response>;
+}
+
+// websocket ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The subset of a WebSocket a client uses (today's relay carrier's `RelayWebSocket`), so a test supplies one. */
+export interface WebSocketClient {
+  binaryType: string;
+  onopen: ((event: unknown) => void) | null;
+  onmessage: ((event: { readonly data: unknown }) => void) | null;
+  onclose: ((event: unknown) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  send(data: Uint8Array | string): void;
+  close(code?: number, reason?: string): void;
+}
+
+/**
+ * Outbound WebSocket clients, restricted like {@link FetchPort}: `ws:`/`wss:` to a declared host only, refused
+ * (a `PermissionError`, thrown synchronously) before a socket opens. Dialled as today's relay carrier dialled:
+ * the URL alone, no extra headers; deadlines and keepalive are the caller's.
+ */
+export interface WebSocketPort {
+  connect(url: string | URL): WebSocketClient;
+}
+
+// identity ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The daemon's identity as any plugin may read it (§2.2): the id the pairing QR and the rendezvous path carry, and
+ * the daemon's display name (today's normalised hostname). The key is never reachable from here.
+ */
+export interface IdentityPort {
+  /** `fy_daemon_` + base64url SHA-256 of the identity's SPKI (R41). */
+  readonly daemonId: string;
+  /** The host name with control and format characters removed, trimmed, at most 100 characters. */
+  readonly daemonName: string;
 }
 
 // snapshot / lifecycle ─────────────────────────────────────────────────────────────────────────────────────────────

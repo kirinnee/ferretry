@@ -19,7 +19,12 @@ describe('routes', () => {
   });
 
   test('a per-daemon screen carries its daemon and decoded params', () => {
-    expect(table.parse('/d/d1/board/F%2012')).toEqual({ kind: 'screen', daemon: 'd1', screen: card, params: { card: 'F 12' } });
+    expect(table.parse('/d/d1/board/F%2012')).toEqual({
+      kind: 'screen',
+      daemon: 'd1',
+      screen: card,
+      params: { card: 'F 12' },
+    });
   });
 
   test('a literal segment wins over a parameter', () => {

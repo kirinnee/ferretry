@@ -1,7 +1,8 @@
 import type { Manifest } from '../manifest/types.ts';
 import { systemClock } from './adapters/clock.ts';
 import { nodeFs } from './adapters/node-fs.ts';
-import { bunSpawn, bunWorkers, globalFetch } from './adapters/process.ts';
+import { hostname } from 'node:os';
+import { bunSpawn, bunWebSockets, bunWorkers, globalFetch } from './adapters/process.ts';
 import { createConfigFiles } from './config/index.ts';
 import type { HostAdapters, HostConfig, PluginStateHandle } from './host.ts';
 import { type LogSink, scopedLog } from './log.ts';
@@ -93,6 +94,8 @@ export function realAdapters(
     spawn: bunSpawn(options.childEnv ?? {}),
     fetch: globalFetch(),
     workers: bunWorkers(),
+    websocket: bunWebSockets(),
+    hostname: () => hostname(),
   };
 }
 
