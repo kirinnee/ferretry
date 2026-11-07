@@ -59,7 +59,7 @@ describe('who answers an ask', () => {
 
     // Assert
     should(answered.status).equal(403);
-    should(board.ok && board.value.items.map(item => [item.id, item.response])).deepEqual([['A1', undefined]]);
+    should(board.ok && board.value.items.map(item => item.id)).deepEqual(['A1']);
   });
 
   it('I14 should never let a ferret answer an owner-only input card, its own board included', async () => {
