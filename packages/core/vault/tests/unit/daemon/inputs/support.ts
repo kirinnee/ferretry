@@ -60,6 +60,8 @@ export function inputRequestService(
     readonly arms?: boolean;
     /** Called each time the journal is written (a request or a hold), before it answers. */
     readonly journalled?: (event: unknown) => void;
+    /** The security log the service records into; absent: one that takes every record and keeps none. */
+    readonly audit?: InputRequestServiceDependencies['audit'];
   } = {},
 ) {
   const live = options.session ?? SESSION;
@@ -108,7 +110,11 @@ export function inputRequestService(
       quarantine: async (_session, event) => void options.journalled?.(event),
       quarantines: async () => [],
     },
-    audit: { record: async () => undefined, saved: async () => undefined, stored: async () => undefined },
+    audit: options.audit ?? {
+      record: async () => undefined,
+      saved: async () => undefined,
+      stored: async () => undefined,
+    },
     clock,
     ids: { requestId: () => (id++).toString(16).padStart(32, '0') },
     timers: { after: async () => await new Promise<void>(() => undefined) },

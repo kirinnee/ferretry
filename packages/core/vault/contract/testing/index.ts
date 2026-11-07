@@ -5,8 +5,10 @@
  * Browsers run their `input.targets` adapters through `inputTargetConformance`. The fakes pass the same suites.
  */
 import { describe, expect, test } from 'bun:test';
+import { isFerretCall } from '@ferretry/core-gate/contract';
 import {
   type Actor,
+  type CallContext,
   type CellGrid,
   type FerretId,
   type GuardStamp,
@@ -23,7 +25,7 @@ import {
 } from '@ferretry/kernel/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import type { InputRaise, InputRequestId, InputRequestState } from '../inputs.ts';
-import type { ActedPage, ChildEnvironment, PageActNote, VaultApi } from '../port.ts';
+import type { ActedPage, ChildEnvironment, PageActNote, TerminalRevealRefusal, VaultApi } from '../port.ts';
 import {
   type SealedDocumentDef,
   type SealedDocumentHandle,
@@ -386,11 +388,34 @@ export class FakeVault implements VaultApi {
   scriptsRunning = 0;
   readonly #inputs = new Map<InputRequestId, InputRequestState>();
   #nextInput = 0;
+  /** Every "Show anyway" recorded (`grantTerminalReveal`), in order: what the real Vault audits. */
+  readonly grantedReveals: { ferret: FerretId; key: string }[] = [];
+  /** When true, a reveal cannot be recorded and is refused, as the real Vault refuses one (I83). */
+  recordFails = false;
 
   constructor(
     private readonly child: FakeChild = command => ({ stdout: command.command.join(' '), stderr: '' }),
     private readonly transport: FakeTransport = () => ({ kind: 'completion', payload: {} }),
+    /** The holds a granted reveal is minted in, so `holds.decide` honours it; absent, grants are honoured by none. */
+    private readonly holds?: FakeInputHolds,
   ) {}
+
+  /**
+   * The real Vault's owner gate, from the call's standing (Gate's `isFerretCall`): a ferret, the warden, or a call
+   * with no credential is refused; otherwise recorded, then minted (I77, I83).
+   */
+  async grantTerminalReveal(
+    ferret: FerretId,
+    key: string,
+    caller: CallContext,
+  ): Promise<Result<RevealGrant, TerminalRevealRefusal>> {
+    if (caller.credential === undefined || isFerretCall(caller))
+      return err({ refused: 'owner_only', sentence: 'only a person chooses to see a held terminal' });
+    if (this.recordFails) return err({ refused: 'unrecorded', sentence: 'the reveal could not be recorded' });
+    this.grantedReveals.push({ ferret, key });
+    const target = targetRef('terminal', key);
+    return ok(this.holds?.reveal(target) ?? ({ target, until: '2999-01-01T00:00:00.000Z' } as unknown as RevealGrant));
+  }
 
   pageActed(ferret: FerretId, script: boolean): PageActNote {
     const act: { ferret: FerretId; script: boolean; placed?: ActedPage | null } = { ferret, script };

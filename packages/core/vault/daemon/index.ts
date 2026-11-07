@@ -30,6 +30,7 @@ import type { AgendaId } from './lib/inputs/wire.ts';
 import { EphemeralAwareRedactor } from './lib/inputs/ephemeral-redactor.ts';
 import { EphemeralValues } from './lib/inputs/ephemeral-values.ts';
 import { InputRequestError } from './lib/inputs/errors.ts';
+import { grantTerminalReveal } from './lib/inputs/reveals.ts';
 import { secretRouteHandlers } from './lib/runtime/mounts/secrets.ts';
 import { OutboundProviderAuthorizer } from './lib/secrets/authorizer.ts';
 import { ChildEnvironments } from './lib/secrets/child-environments.ts';
@@ -173,6 +174,9 @@ export default implementDaemon(manifest, {
       },
       cancelInput: async (ferret, id) => await inputs.service.cancelForFerret(ferret, id),
       inputState: async id => await inputs.service.requestState(id),
+      // "Show anyway" (I77, I83): owner-gated, recorded, and only then minted; honoured only by `inputs.holds`.
+      grantTerminalReveal: async (ferret, key, caller) =>
+        await grantTerminalReveal(inputs.service, inputs.reveals, ferret, key, caller),
       // What a ferret did to a page and where page scripts ran, told by Browsers (lead DECISIONS-2 #5, I98–I100):
       // the login observer's act notes and the machine-wide script taint a page card's lock reads.
       pageActed: (ferret, script) => inputs.observer?.acted(ferret, 'browser', script) ?? { placed: () => undefined },

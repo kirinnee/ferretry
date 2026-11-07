@@ -1,4 +1,11 @@
-import { defineEvent, definePort, type FerretId, type TargetRef } from '@ferretry/kernel/contract';
+import {
+  type CallContext,
+  defineEvent,
+  definePort,
+  type FerretId,
+  type RevealGrant,
+  type TargetRef,
+} from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
 import { z } from 'zod';
 import type { InputRaise, InputRequestId, InputRequestState } from './inputs.ts';
@@ -35,6 +42,15 @@ export interface PageActNote {
 }
 
 /**
+ * Why "Show anyway" was refused (I77, I83): the caller is not the owner (a ferret, the warden, or a call that carries
+ * no credential), or the reveal could not be recorded. `sentence` is the person-facing reason; it names no value.
+ */
+export type TerminalRevealRefusal = {
+  readonly refused: 'owner_only' | 'unrecorded';
+  readonly sentence: string;
+};
+
+/**
  * The Vault port (§2.2, §3.7): secrets by NAME only. There is no getter, and none may be added (it would delete the
  * feature): `run` executes a command with the values in that child's environment and returns masked output;
  * `authorizeFetch` places ONE named secret on ONE request to an allowlisted host and returns only what came back.
@@ -62,6 +78,21 @@ export interface VaultApi {
   raiseInput(ferret: FerretId, raise: InputRaise): Promise<Result<InputRequestId, string>>;
   cancelInput(ferret: FerretId, id: InputRequestId): Promise<void>;
   inputState(id: InputRequestId): Promise<InputRequestState | undefined>;
+  /**
+   * "Show anyway" for ONE viewer connection of a terminal in quarantine (I77, I83; today's
+   * `InputRequestService.revealed`). Owner only, from the call's server-derived standing (`caller` is the kernel's
+   * `CallContext` of the viewer's socket, never a claim): a ferret's call, the warden's or one with no credential is
+   * refused. Recorded as `input.quarantine_revealed` BEFORE any grant exists, and refused when that record cannot be
+   * made. The grant names one terminal (`key` is the key the viewer's acts name), is honoured only for the
+   * `owner-viewer` actor, only by the `InputHolds` of the Vault that minted it, and only until it runs out; it is held
+   * by that one connection and never stored. Named `grant…`, not `reveal…`: it hands out a permission, never a value,
+   * and the no-getter rule (`vaultConformance`) stays as strict as it is.
+   */
+  grantTerminalReveal(
+    ferret: FerretId,
+    key: string,
+    caller: CallContext,
+  ): Promise<Result<RevealGrant, TerminalRevealRefusal>>;
   /**
    * WHAT A FERRET DID TO A PAGE, told by Browsers (lead DECISIONS-2 #5; today's `loginActs.acted`, I98–I100): a ferret
    * is about to act on a page of its own, or run a page script (`script`). A sign-in's after-submit facts the ferret

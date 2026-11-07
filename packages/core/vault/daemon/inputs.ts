@@ -16,6 +16,7 @@ import { type LoginFactSink, LoginObserver, type LoginProbePort } from './lib/in
 import type { InputChoicePort, InputLoginPort, InputPasteRules, InputSealedPort } from './lib/inputs/ports.ts';
 import type { QuarantineRegistry } from './lib/inputs/quarantine.ts';
 import { type SecretStoreDirectory, SecretStoreTarget } from './lib/inputs/secret-store-target.ts';
+import { RevealGrants } from './lib/inputs/reveals.ts';
 import { InputRequestService } from './lib/inputs/service.ts';
 import { INPUT_REQUEST_SWEEP_MS } from './lib/inputs/sweep.ts';
 import { InputTargetRouter } from './lib/inputs/target-router.ts';
@@ -75,6 +76,8 @@ export interface Inputs {
   readonly tools: { readonly input_wait: ToolHandler };
   /** The kernel-bound `InputHolds` Vault provides as `inputHolds`. */
   readonly holds: BoundInputHolds;
+  /** The "Show anyway" grants this Vault minted; the only ones `holds` honours (I77). */
+  readonly reveals: RevealGrants;
   /** Vault's `ask.sources` provider for the key `input`: the input card's ref and title. */
   readonly askSource: AskSourceSpec;
 }
@@ -129,6 +132,7 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
   // Where page scripts ran across the machine, as Browsers tells it (VaultApi.scriptRunning / scriptedOn).
   const scripts = new MachineScripts(() => clock.nowMs());
   const acts = new HeardActs(observer, () => [...service.openSessions(), ...deps.quarantine.sessions()]);
+  const reveals = new RevealGrants(() => clock.nowMs());
   const service: InputRequestService = new InputRequestService({
     observer: acts.view(observer),
     scripts,
@@ -176,7 +180,8 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     scripts,
     routes: inputRequestRoutes(service),
     tools: inputTools(service),
-    holds: new InputHoldsOverService(service, deps.quarantine, () => clock.nowMs(), acts),
+    holds: new InputHoldsOverService(service, deps.quarantine, () => clock.nowMs(), acts, reveals),
+    reveals,
     askSource: INPUT_ASK_SOURCE_SPEC,
   };
 }

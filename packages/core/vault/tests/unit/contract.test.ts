@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { StatePort } from '@ferretry/kernel/contract';
+import { ferretStanding, ownerStanding, wardenStanding } from '@ferretry/core-gate/contract/testing';
+import type { CallContext, FerretId, StatePort, TargetRef } from '@ferretry/kernel/contract';
 import {
   allowedDestination,
   defineSealedDocument,
@@ -219,5 +220,34 @@ describe('input requests', () => {
         ],
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('FakeVault "Show anyway", as the real Vault grants it', () => {
+  const pane = { kind: 'terminal', key: '%1' } as unknown as TargetRef;
+  const callOf = (standing: object) => ({ params: new Map(), ...standing }) as unknown as CallContext;
+
+  test('I77 the owner gets a grant its holds honour for the viewer; a ferret, the warden and no credential do not', async () => {
+    const holds = new FakeInputHolds();
+    holds.quarantine(pane);
+    const vault = new FakeVault(undefined, undefined, holds);
+
+    const granted = await vault.grantTerminalReveal('f1' as FerretId, '%1', callOf(ownerStanding()));
+    if (!granted.ok) throw new Error('expected a grant');
+    expect(holds.decide(pane, 'stream', 'owner-viewer', granted.value)).toBe('allow');
+    expect(holds.decide(pane, 'stream', 'owner-viewer')).toEqual({ refused: 'quarantined' });
+    for (const standing of [ferretStanding('f1' as FerretId), wardenStanding('w1' as FerretId), {}]) {
+      const refused = await vault.grantTerminalReveal('f1' as FerretId, '%1', callOf(standing));
+      expect(refused.ok ? 'granted' : refused.error.refused).toBe('owner_only');
+    }
+    expect(vault.grantedReveals).toEqual([{ ferret: 'f1' as FerretId, key: '%1' }]);
+  });
+
+  test('I83 a reveal that cannot be recorded is refused and nothing is granted', async () => {
+    const vault = new FakeVault();
+    vault.recordFails = true;
+    const refused = await vault.grantTerminalReveal('f1' as FerretId, '%1', callOf(ownerStanding()));
+    expect(refused.ok ? 'granted' : refused.error.refused).toBe('unrecorded');
+    expect(vault.grantedReveals).toEqual([]);
   });
 });

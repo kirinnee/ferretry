@@ -16,6 +16,7 @@ import { closeAck } from '../../../../contract/index.ts';
 import { HeardActs, InputHoldsOverService } from '../../../../daemon/adapters/inputs/holds.ts';
 import { LoginObserver } from '../../../../daemon/lib/inputs/login-observer.ts';
 import { QuarantineRegistry } from '../../../../daemon/lib/inputs/quarantine.ts';
+import { REVEAL_GRANT_MS, RevealGrants } from '../../../../daemon/lib/inputs/reveals.ts';
 import { inputTools } from '../../../../daemon/lib/runtime/tools/input-wait.ts';
 import { digestLine } from '../../../../daemon/lib/inputs/digest.ts';
 import type { InputRequestService } from '../../../../daemon/lib/inputs/service.ts';
@@ -193,14 +194,21 @@ describe('InputHolds, as the act runner asks it', () => {
   it('I77 should show a quarantined terminal only to the owner’s viewer, under an unexpired reveal for that terminal', () => {
     const quarantine = new QuarantineRegistry({ now: () => NOW });
     quarantine.begin(SESSION, ['dev'], 'host');
-    const holds = new InputHoldsOverService(noCards, quarantine, () => NOW);
+    const grants = new RevealGrants(() => NOW);
+    const holds = new InputHoldsOverService(noCards, quarantine, () => NOW, undefined, grants);
+    const expired = new RevealGrants(() => NOW - REVEAL_GRANT_MS - 1);
+    const lapsed = new InputHoldsOverService(noCards, quarantine, () => NOW, undefined, expired);
 
-    should(holds.decide(DEV, 'stream', 'owner-viewer', revealOf(DEV, NOW + 60_000))).equal('allow');
-    should(holds.decide(DEV, 'read', 'ferret', revealOf(DEV, NOW + 60_000))).deepEqual({ refused: 'quarantined' });
-    should(holds.decide(DEV, 'stream', 'owner-viewer', revealOf(DEV, NOW - 1))).deepEqual({ refused: 'quarantined' });
-    should(holds.decide(DEV, 'stream', 'owner-viewer', revealOf({ ...DEV, key: 'other' }, NOW + 60_000))).deepEqual({
+    should(holds.decide(DEV, 'stream', 'owner-viewer', grants.mint('dev'))).equal('allow');
+    should(holds.decide(DEV, 'read', 'ferret', grants.mint('dev'))).deepEqual({ refused: 'quarantined' });
+    should(lapsed.decide(DEV, 'stream', 'owner-viewer', expired.mint('dev'))).deepEqual({ refused: 'quarantined' });
+    should(holds.decide(DEV, 'stream', 'owner-viewer', grants.mint('other'))).deepEqual({ refused: 'quarantined' });
+    // A shape cast to the brand is not a reveal, and holds built without the registry honour none.
+    should(holds.decide(DEV, 'stream', 'owner-viewer', revealOf(DEV, NOW + 60_000))).deepEqual({
       refused: 'quarantined',
     });
+    const without = new InputHoldsOverService(noCards, quarantine, () => NOW);
+    should(without.decide(DEV, 'stream', 'owner-viewer', grants.mint('dev'))).deepEqual({ refused: 'quarantined' });
   });
 
   it('I32 should let a ferret type into a target whose pending card holds only codes, and refuse it any other card', async () => {

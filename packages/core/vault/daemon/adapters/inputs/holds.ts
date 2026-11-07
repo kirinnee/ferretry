@@ -9,6 +9,7 @@ import {
 } from '@ferretry/kernel/contract';
 import type { LoginObserver } from '../../lib/inputs/login-observer.ts';
 import type { QuarantineRegistry } from '../../lib/inputs/quarantine.ts';
+import type { RevealGrants } from '../../lib/inputs/reveals.ts';
 import type { InputRequestService, InputRequestServiceDependencies } from '../../lib/inputs/service.ts';
 
 /**
@@ -82,7 +83,8 @@ const stricter = (a: Answer, b: Answer): Answer => (RANK(b) > RANK(a) ? b : a);
  * - A pending card with any non-`code` field refuses every ferret op that writes; a card of only codes lets the
  *   ferret's `keys` and `type` through (I32).
  * - A terminal in quarantine refuses every op that reads, for the ferret AND the owner's tools; the ferret can still
- *   send keys; the owner's viewer sees it only with an unexpired reveal for that target (I72, I77).
+ *   send keys; the owner's viewer sees it only with an unexpired reveal for that target that THIS Vault minted
+ *   (`grants`; without them no reveal is honoured) (I72, I77).
  * - A page hold refuses every op that reads while the page shows a document a value went into, and every op that
  *   pictures for the whole window unless every hold on it follows its document (`until-moved-on`, then only while it
  *   shows one). Once the page left those documents, reads are answered masked (I116, I117). The document is the one
@@ -100,6 +102,7 @@ export class InputHoldsOverService implements BoundInputHolds {
     private readonly quarantine: Pick<QuarantineRegistry, 'sessions' | 'until' | 'replayUntil'>,
     private readonly nowMs: () => number,
     private readonly acts?: HeardActs,
+    private readonly grants?: Pick<RevealGrants, 'minted'>,
   ) {}
 
   async prepare(target: TargetRef, op: Op, actor: Actor): Promise<void> {
@@ -161,9 +164,13 @@ export class InputHoldsOverService implements BoundInputHolds {
     return [...new Set([...this.quarantine.sessions(), ...this.service.openSessions()])];
   }
 
-  /** Only the owner's viewer may look anyway, and only under a reveal for this very target that has not run out. */
+  /**
+   * Only the owner's viewer may look anyway, and only under a reveal this Vault minted (by identity: a cast shape is
+   * not one) for this very target that has not run out.
+   */
   private revealed(actor: Actor, target: TargetRef, reveal: RevealGrant | undefined): boolean {
     if (actor !== 'owner-viewer' || reveal === undefined) return false;
+    if (this.grants?.minted(reveal) !== true) return false;
     if (reveal.target.kind !== target.kind || reveal.target.key !== target.key) return false;
     return Date.parse(reveal.until) > this.nowMs();
   }

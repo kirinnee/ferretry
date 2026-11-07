@@ -146,6 +146,7 @@ export function fakeVault(raised: { ferret: string; raise: InputRaise }[]): Vaul
     run: refuse,
     authorizeFetch: refuse,
     childEnvironment: refuse,
+    grantTerminalReveal: refuse,
     raiseInput: async (ferret, raise) => {
       raised.push({ ferret, raise });
       return ok('0'.repeat(32) as InputRequestId);
