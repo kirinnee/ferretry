@@ -561,10 +561,14 @@ describe("StepUpRegistry stored proof (a standing rule's kept assertion, invaria
     // Act + Assert — another stage, tab, device or challenge neither takes it nor spends it
     should(registry.claimStoredProof(phone, NOW, STEP_UP_ACTS.approveSignInRule, OTHER, CHALLENGE)).be.undefined();
     should(registry.claimStoredProof(phone, NOW, STEP_UP_ACTS.approveSignInRule, '', CHALLENGE)).be.undefined();
-    should(registry.claimStoredProof(phoneOtherTab, NOW, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE)).be.undefined();
+    should(
+      registry.claimStoredProof(phoneOtherTab, NOW, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE),
+    ).be.undefined();
     should(registry.claimStoredProof(laptop, NOW, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE)).be.undefined();
     should(registry.claimStoredProof(phone, NOW, STEP_UP_ACTS.approveSignInRule, RULE, ANOTHER)).be.undefined();
-    should(registry.claimStoredProof(phone, NOW, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE.subarray(1))).be.undefined();
+    should(
+      registry.claimStoredProof(phone, NOW, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE.subarray(1)),
+    ).be.undefined();
     should(registry.claimStoredProof(phone, NOW, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE)).eql(evidence());
     should(registry.claimStoredProof(phone, NOW, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE)).be.undefined();
   });
@@ -595,7 +599,9 @@ describe("StepUpRegistry stored proof (a standing rule's kept assertion, invaria
 
     // Act + Assert
     should(registry.claimStoredProof(phone, NOW, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE)).be.undefined();
-    should(registry.claimStoredProof(phoneOtherTab, NOW, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE)).be.undefined();
+    should(
+      registry.claimStoredProof(phoneOtherTab, NOW, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE),
+    ).be.undefined();
     // @ts-expect-error — only a stored-proof act is ever answered
     should(registry.claimStoredProof(phone, NOW, STEP_UP_ACTS.approveTaskPlan, RULE, CHALLENGE)).be.undefined();
     // Neither was spent by those refusals.
@@ -614,7 +620,9 @@ describe("StepUpRegistry stored proof (a standing rule's kept assertion, invaria
     should(() => grantLoosely(phone, NOW, STEP_UP_ACTS.addTwoFactorKey, RULE, kept())).throw(TypeError);
     should(() => grantLoosely(phoneOtherTab, NOW, STEP_UP_ACTS.approveSignInRule, RULE)).throw(TypeError);
     should(registry.claimFresh(phone, NOW, STEP_UP_ACTS.addTwoFactorKey, RULE)).be.false();
-    should(registry.claimStoredProof(phoneOtherTab, NOW, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE)).be.undefined();
+    should(
+      registry.claimStoredProof(phoneOtherTab, NOW, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE),
+    ).be.undefined();
   });
 
   it('should lapse a stored proof after one challenge lifetime (120 s)', () => {
@@ -629,10 +637,12 @@ describe("StepUpRegistry stored proof (a standing rule's kept assertion, invaria
     // Assert
     should(lifetime).equal(120_000);
     should(until).equal(NOW + lifetime);
-    should(registry.claimStoredProof(phone, NOW + lifetime, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE)).be.undefined();
-    should(registry.claimStoredProof(phoneOtherTab, NOW + lifetime - 1, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE)).eql(
-      evidence(),
-    );
+    should(
+      registry.claimStoredProof(phone, NOW + lifetime, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE),
+    ).be.undefined();
+    should(
+      registry.claimStoredProof(phoneOtherTab, NOW + lifetime - 1, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE),
+    ).eql(evidence());
   });
 
   it('should end a stored proof with its page, and with its revoked device', () => {

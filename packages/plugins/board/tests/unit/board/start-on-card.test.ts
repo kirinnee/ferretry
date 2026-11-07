@@ -122,9 +122,7 @@ describe('starting a ferret on a card', () => {
     const { ports, started } = world();
 
     // Act
-    const failure = await startOnCard(ports, ID, { kind: 'ferret', ferret: 'lead' }).catch(
-      (error: unknown) => error,
-    );
+    const failure = await startOnCard(ports, ID, { kind: 'ferret', ferret: 'lead' }).catch((error: unknown) => error);
 
     // Assert
     should(failure).be.instanceOf(BoardError);
@@ -401,9 +399,7 @@ describe('starting a ferret on a card', () => {
           panes.add(ferret);
           most = Math.max(most, panes.size);
           edit({ assignee: ferret, laneId: 'plan' });
-          return attempts === 1
-            ? { ferret, status: 'failed', reason: 'settle threw' }
-            : { ferret, status: 'started' };
+          return attempts === 1 ? { ferret, status: 'failed', reason: 'settle threw' } : { ferret, status: 'started' };
         },
         stop: async ferret => {
           panes.delete(ferret);

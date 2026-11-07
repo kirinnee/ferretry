@@ -4,7 +4,12 @@ import { sessionsOnOpenCards } from '../../../../../daemon/lib/session/archive/o
 import type { LaneCategory, OpenCardStanding } from '../../../../../daemon/lib/session/peers/board.ts';
 
 /** The lanes of project `p`, as Board resolves a card's lane to its category. */
-const lanes: Readonly<Record<string, LaneCategory>> = { todo: 'backlog', doing: 'active', shipped: 'shipped', done: 'closed' };
+const lanes: Readonly<Record<string, LaneCategory>> = {
+  todo: 'backlog',
+  doing: 'active',
+  shipped: 'shipped',
+  done: 'closed',
+};
 
 /** A card as far as the rule reads it: who owns and holds it, whether it was dropped and in which lane. */
 function card(
@@ -24,7 +29,11 @@ describe('the sessions on open cards', () => {
   });
 
   it('should ignore closed, shipped and dropped cards', () => {
-    const sessions = sessionsOnOpenCards([card('a', 'b', 'done'), card('c', null, 'shipped'), card('d', null, 'doing', true)]);
+    const sessions = sessionsOnOpenCards([
+      card('a', 'b', 'done'),
+      card('c', null, 'shipped'),
+      card('d', null, 'doing', true),
+    ]);
     should([...sessions]).deepEqual([]);
   });
 

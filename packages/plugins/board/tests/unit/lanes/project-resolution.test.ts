@@ -2,10 +2,7 @@ import { describe, it } from 'bun:test';
 
 import { UNFILED_PROJECT_ID } from '../../../contract/index.ts';
 import should from 'should';
-import {
-  isUnderScratchRoot,
-  resolveFerretProject,
-} from '../../../daemon/lib/lanes/index.ts';
+import { isUnderScratchRoot, resolveFerretProject } from '../../../daemon/lib/lanes/index.ts';
 import { DOCS_ID, FERRETRY_ID, project } from './support.ts';
 
 const FERRETRY = project(FERRETRY_ID, '/work/ferretry', '/work/ferretry/.git');

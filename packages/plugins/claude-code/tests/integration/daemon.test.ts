@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { device, ferret, owner, testHost } from '@ferretry/kernel/testing';
 import daemon from '../../daemon/index.ts';
 
-
 /** A machine with no claude on it, a tmux that records what it is told, and a pane that shows `frame`. */
 function machine(frame: string | undefined) {
   const typed: string[][] = [];
@@ -20,8 +19,8 @@ function machine(frame: string | undefined) {
   return { typed, spawn };
 }
 
-const read = async (name: string): Promise<string> => await Bun.file(`${import.meta.dir}/../fixtures/${name}.txt`).text();
-
+const read = async (name: string): Promise<string> =>
+  await Bun.file(`${import.meta.dir}/../fixtures/${name}.txt`).text();
 
 describe('claude-code daemon half', () => {
   test('G31 the permission answer is a person act: a ferret asking for it is refused before anything is read', async () => {

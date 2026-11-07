@@ -1,7 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import * as lifecycle from '../../../../daemon/pages/wire/page-lifecycle.ts';
-import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from '../../../support/schema-cases.ts';
+import {
+  assertCoversEverySchema,
+  assertRejects,
+  assertRoundTrips,
+  type SchemaCase,
+} from '../../../support/schema-cases.ts';
 
 const cases: SchemaCase[] = [
   { name: 'dialog action', schema: lifecycle.BrowserDialogActionSchema, value: 'accept' },

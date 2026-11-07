@@ -46,8 +46,7 @@ export const answerHarnessDialog = async (
       body: HarnessDialogAnswerRequestSchema.parse(answer),
     });
   } catch (error) {
-    if (refusedWith(error, 409, HARNESS_DIALOG_GONE))
-      throw new HarnessDialogGone(error.message);
+    if (refusedWith(error, 409, HARNESS_DIALOG_GONE)) throw new HarnessDialogGone(error.message);
     throw error;
   }
   const result = HarnessDialogAnswerResultSchema.parse(raw);

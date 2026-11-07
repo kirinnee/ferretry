@@ -45,7 +45,7 @@ export interface PaneLimit {
 
 /** One session, as far as this module reads it. */
 export interface PaneLimitSession {
-    /** The login the ferret runs on: the key a usage-feed row carries. */
+  /** The login the ferret runs on: the key a usage-feed row carries. */
   readonly agent: string;
   readonly status: SessionState['status'];
   readonly quota?: SessionState['quota'] | undefined;

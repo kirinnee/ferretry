@@ -8,7 +8,7 @@
  * and small, and every dependency on the verification path is attack surface.
  */
 
-import { concatBytes } from '../../../daemon/adapters/relay.ts';
+import { concatBytes } from '../../../daemon/lib/relay-wire/index.ts';
 import { type CborValue, isCborMap } from './cbor.ts';
 
 /** The COSE algorithms a passkey may use: ES256, EdDSA (Ed25519) and RS256. */

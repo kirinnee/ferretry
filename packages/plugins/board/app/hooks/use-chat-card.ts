@@ -51,7 +51,13 @@ export const useChatCard = ({
     [model, daemonId, ferret, focus, relatives, agents],
   );
   const chip = useMemo(
-    () => chatChip(focus ?? undefined, cards.focus, cards.focus === null ? undefined : cards.places.get(cards.focus.key), status),
+    () =>
+      chatChip(
+        focus ?? undefined,
+        cards.focus,
+        cards.focus === null ? undefined : cards.places.get(cards.focus.key),
+        status,
+      ),
     [focus, cards, status],
   );
   return useMemo(

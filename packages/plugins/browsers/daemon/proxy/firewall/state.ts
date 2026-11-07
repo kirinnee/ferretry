@@ -1,5 +1,11 @@
 import { type BrowserFirewallFailure, type LoopbackFirewallState } from '../wire/firewall.ts';
-import { type BrowserPortsSetting, LOOPBACK_FIREWALL_CONF_PATH, type LoopbackFirewallMarker, loopbackFirewallEntry, resolveBrowserPorts } from '../wire/ports.ts';
+import {
+  type BrowserPortsSetting,
+  LOOPBACK_FIREWALL_CONF_PATH,
+  type LoopbackFirewallMarker,
+  loopbackFirewallEntry,
+  resolveBrowserPorts,
+} from '../wire/ports.ts';
 
 export const LOOPBACK_FIREWALL_SERVICE = 'ferretry-loopback-firewall';
 export const LOOPBACK_FIREWALL_VERIFY_TIMER = 'ferretry-loopback-firewall-verify.timer';

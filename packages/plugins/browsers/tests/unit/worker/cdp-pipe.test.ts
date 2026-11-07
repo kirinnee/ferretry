@@ -1,6 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { CDP_PIPE_ENDPOINT, CDP_PIPE_FROM_CHROME_FD, CDP_PIPE_TO_CHROME_FD, CdpPipeTransport, type CdpPipeWriter } from '../../../daemon/worker/cdp-pipe.ts';
+import {
+  CDP_PIPE_ENDPOINT,
+  CDP_PIPE_FROM_CHROME_FD,
+  CDP_PIPE_TO_CHROME_FD,
+  CdpPipeTransport,
+  type CdpPipeWriter,
+} from '../../../daemon/worker/cdp-pipe.ts';
 
 /** The worker's end of Chrome's fd 3, recorded: what was written, and whether it was ended. */
 class RecordingWriter implements CdpPipeWriter {

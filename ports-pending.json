@@ -27,6 +27,7 @@
     "onboarding"
   ],
   "pendingReasons": {
+    "updates": ["FY_UPDATE_CHECK=off is not honoured: the kernel UpdateHostPort cannot express it (kernel item)"],
     "runtimes": [
       "GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) is not ported into Runtimes; Add runtime and a runtime that needs sign-in link to Logins' tab until Logins' app half draws it",
       "GAP(ferrets): the launch link opens /new?agent=, and no manifest declares the new-ferret page yet (Ferrets ports it later; its runtime field mounts the slot Runtimes contributes to)",

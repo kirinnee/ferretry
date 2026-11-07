@@ -1,7 +1,23 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { BrowserPageSnapshotSchema, BrowserScreencastFrameSchema } from '../../../daemon/pages/wire/browser.ts';
-import { BLANK_PAGE_URL, BrowserTransportError, MAX_WORKER_PAGES, WorkerLineAssembler, boundedReadText, boundedScreenshot, coarseWorkerError, encodeWorkerRequest, normalizeLifecycleReply, normalizeWorkerActionSnapshot, normalizeWorkerDialog, normalizeWorkerDownloads, normalizeWorkerStaged, normalizeWorkerSnapshot, parseWorkerLine } from '../../../daemon/worker/protocol.ts';
+import {
+  BLANK_PAGE_URL,
+  BrowserTransportError,
+  MAX_WORKER_PAGES,
+  WorkerLineAssembler,
+  boundedReadText,
+  boundedScreenshot,
+  coarseWorkerError,
+  encodeWorkerRequest,
+  normalizeLifecycleReply,
+  normalizeWorkerActionSnapshot,
+  normalizeWorkerDialog,
+  normalizeWorkerDownloads,
+  normalizeWorkerStaged,
+  normalizeWorkerSnapshot,
+  parseWorkerLine,
+} from '../../../daemon/worker/protocol.ts';
 
 const page = (id: string, url = `https://example.test/${id}`) => ({ id, url, title: `title ${id}` });
 

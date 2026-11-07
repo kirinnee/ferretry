@@ -298,7 +298,12 @@ const parse = (harness: 'claude' | 'codex', records: readonly object[]): Transcr
     if (harness === 'codex') {
       const type = record.payload?.type;
       if (record.type === 'event_msg' && (type === 'task_started' || type === 'task_complete'))
-        events.push({ ...meta, role: 'system', kind: 'turn', state: type === 'task_started' ? 'started' : 'completed' });
+        events.push({
+          ...meta,
+          role: 'system',
+          kind: 'turn',
+          state: type === 'task_started' ? 'started' : 'completed',
+        });
       if (record.type === 'turn_context')
         events.push({
           ...meta,

@@ -4,7 +4,13 @@
  * bit), the project-server subject, and the one refusal both MCP-add routes and the app run on a value that looks like
  * a raw key (G180). Pure and synchronous.
  */
-import { MCP_OAUTH_CALLBACK_PATH, MCP_PROJECT_SUBJECT_SEPARATOR, type SessionMcpScope, type SessionMcpServer, SecretNameSchema } from './wire.ts';
+import {
+  MCP_OAUTH_CALLBACK_PATH,
+  MCP_PROJECT_SUBJECT_SEPARATOR,
+  type SessionMcpScope,
+  type SessionMcpServer,
+  SecretNameSchema,
+} from './wire.ts';
 
 type SecretName = ReturnType<typeof SecretNameSchema.parse>;
 
@@ -213,7 +219,6 @@ export const mcpServerRefusal = (scope: SessionMcpScope, server: SessionMcpServe
       return 'An argument looks like a raw secret. Put it in an environment variable that references the secret instead.';
   return null;
 };
-
 
 // ── Loopback host spelling (today's `address.ts`, copied: the sign-in's https rule reads it) ──
 const LOOPBACK_IPV4_BLOCK = /^127(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/u;

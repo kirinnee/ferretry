@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
-import { type AccountId, type LoginEntryId, type LoginObservation, type SignInId, type SurfaceKind, TASK_PLAN_TERMINAL_TOOLS, type TwoFactorId } from './borrowed.ts';
+import {
+  type AccountId,
+  type LoginEntryId,
+  type LoginObservation,
+  type SignInId,
+  type SurfaceKind,
+  TASK_PLAN_TERMINAL_TOOLS,
+  type TwoFactorId,
+} from './borrowed.ts';
 import { type InputRequestField, type LoginObserverBy, ownerTapped } from './wire.ts';
 import { type InputTarget, type InputTargetFacts } from '../../../contract/index.ts';
 

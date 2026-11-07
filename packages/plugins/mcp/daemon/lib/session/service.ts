@@ -223,10 +223,7 @@ export class SessionMcpService {
    * The profile change is skipped when the profile already names the component. If the second is
    * refused the component exists and is not in the profile yet; adding again repeats both halves.
    */
-  async addLogin(
-    sessionId: string,
-    request: SessionMcpPreviewRequest,
-  ): Promise<SessionMcpAdded> {
+  async addLogin(sessionId: string, request: SessionMcpPreviewRequest): Promise<SessionMcpAdded> {
     const session = await this.#session(sessionId);
     refuseServer('login', request.server);
     const { runtime, profile, replaces } = await this.#loginTarget(session, request.name);

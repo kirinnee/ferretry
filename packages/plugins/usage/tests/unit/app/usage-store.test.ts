@@ -4,7 +4,12 @@ import type { UsageFeedView } from '../../../contract/index.ts';
 import { fakeClient, refusingClient } from './support/client.ts';
 import { DaemonResponseError } from './support/shell.ts';
 import { daemonConnection } from './support/shell.ts';
-import { type DaemonUsagePort, DaemonUsageStore, daemonUsagePort, USAGE_POLL_MS } from '../../../app/lib/usage-store.ts';
+import {
+  type DaemonUsagePort,
+  DaemonUsageStore,
+  daemonUsagePort,
+  USAGE_POLL_MS,
+} from '../../../app/lib/usage-store.ts';
 import type { QuotaSubject } from '../../../app/lib/usage.ts';
 
 const laptop = daemonConnection({
