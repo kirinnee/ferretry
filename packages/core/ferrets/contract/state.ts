@@ -344,35 +344,169 @@ const AGENT_CONTROL_WORDS: Readonly<Record<keyof AgentControl, string>> = {
   pageScripts: 'page scripts',
 };
 
-const sizeBytes = (value: unknown): number => {
-  const parsed = parseLimitSize(value);
-  if (parsed === undefined || parsed.kind === 'unlimited') return Number.POSITIVE_INFINITY;
-  return parsed.kind === 'bytes' ? parsed.bytes : parsed.percent * 1e12; // percent and bytes compared within kind only
-};
-const raised = (before: unknown, after: unknown): boolean =>
-  after !== undefined && (before === undefined ? true : sizeBytes(after) > sizeBytes(before));
+// ── Loosening (today's `resolveLimits` + `limitsLoosening`, protocol/src/lib/limits.ts:154–:317) ──────────────────
+
+const GIBIBYTE = 1024 ** 3;
+const DEFAULT_FLEET_CPU_WEIGHT = 50;
+const DEFAULT_FERRET_CPU_WEIGHT = 100;
+const DEFAULT_INTERACTIVE_CPU_WEIGHT = 200;
+const DEFAULT_FLEET_TASKS_MAX = 16_384;
+const DEFAULT_FERRET_TASKS_MAX = 4_096;
+/** Memory held back from the fleet: a fixed 4 GiB, never more than half the budget (owner decision !A419). */
+const FLEET_RESERVE_BYTES = 4 * GIBIBYTE;
+
+/** A number of bytes or tasks, `null` when there is no cap. */
+type Cap = number | null;
+
+const reserveBytes = (ceilingBytes: number): number => Math.floor(Math.min(FLEET_RESERVE_BYTES, ceilingBytes / 2));
+
+function sizeCap(value: number | string | undefined, ceilingBytes: number, fallback: Cap): Cap {
+  const parsed = value === undefined ? undefined : parseLimitSize(value);
+  if (parsed === undefined) return fallback;
+  if (parsed.kind === 'unlimited') return null;
+  if (parsed.kind === 'bytes') return parsed.bytes;
+  return Math.max(1, Math.floor((parsed.percent / 100) * ceilingBytes));
+}
+
+function taskCap(value: number | 'infinity' | undefined, fallback: number): Cap {
+  if (value === undefined) return fallback;
+  return value === 'infinity' ? null : value;
+}
+
+/** What a configuration means on a machine with this budget: every absent setting replaced by its computed default. */
+function resolveLimits(config: LimitsFile, memoryCeilingBytes: number) {
+  const ceiling = Math.max(1, Math.floor(memoryCeilingBytes));
+  const reserve = reserveBytes(ceiling);
+  const fleetIn = config.fleet ?? {};
+  const ferretIn = config.perFerret ?? {};
+  const bound = (high: Cap, max: Cap): Cap => (high !== null && max !== null && high > max ? max : high);
+  const fleetMax = sizeCap(fleetIn.memoryMax, ceiling, ceiling - Math.floor(reserve / 2));
+  const fleetHigh = bound(sizeCap(fleetIn.memoryHigh, ceiling, ceiling - reserve), fleetMax);
+  const ferretMax = sizeCap(ferretIn.memoryMax, ceiling, Math.floor(ceiling * 0.3));
+  const ferretHigh = bound(sizeCap(ferretIn.memoryHigh, ceiling, Math.floor(ceiling * 0.25)), ferretMax);
+  return {
+    enabled: config.enabled ?? true,
+    ionice: config.ionice ?? true,
+    fleet: {
+      cpuWeight: fleetIn.cpuWeight ?? DEFAULT_FLEET_CPU_WEIGHT,
+      memoryHigh: fleetHigh,
+      memoryMax: fleetMax,
+      swapMax: sizeCap(fleetIn.swapMax, ceiling, Math.floor(ceiling * 0.1)),
+      tasksMax: taskCap(fleetIn.tasksMax, DEFAULT_FLEET_TASKS_MAX),
+      cpuPercent: fleetIn.cpuPercent ?? null,
+    },
+    perFerret: {
+      cpuWeight: ferretIn.cpuWeight ?? DEFAULT_FERRET_CPU_WEIGHT,
+      interactiveCpuWeight: ferretIn.interactiveCpuWeight ?? DEFAULT_INTERACTIVE_CPU_WEIGHT,
+      memoryHigh: ferretHigh,
+      memoryMax: ferretMax,
+      tasksMax: taskCap(ferretIn.tasksMax, DEFAULT_FERRET_TASKS_MAX),
+      cpuPercent: ferretIn.cpuPercent ?? null,
+    },
+  };
+}
+
+/** Words for each cap, so a held change reads as a sentence the owner can confirm. */
+const FLEET_WORDS = {
+  cpuWeight: 'the CPU weight of all ferrets together',
+  memoryHigh: 'the soft memory limit for all ferrets together',
+  memoryMax: 'the hard memory limit for all ferrets together',
+  swapMax: 'the swap all ferrets together may use',
+  tasksMax: 'the processes all ferrets together may run',
+  cpuPercent: 'the CPU share all ferrets together may use',
+} as const;
+
+const FERRET_WORDS = {
+  cpuWeight: 'the CPU weight of each ferret',
+  interactiveCpuWeight: 'the CPU weight of a ferret you started',
+  memoryHigh: 'the soft memory limit of each ferret',
+  memoryMax: 'the hard memory limit of each ferret',
+  tasksMax: 'the processes each ferret may run',
+  cpuPercent: 'the CPU share each ferret may use',
+} as const;
+
+/** A cap's comparable form when the budget is known: bytes or a count, `Infinity` for none. */
+const comparable = (cap: Cap | undefined): number => (cap === null ? Number.POSITIVE_INFINITY : (cap ?? 0));
 
 /**
- * Which `limits.yaml` edits loosen (docs/ferret-limits.md: raising a cap is held for the owner): turning limits off,
- * raising any memory, swap, task or CPU cap, dropping the disk priority, or switching ON anything agents may control
- * (compared in effect, so removing a stated "off" whose default is on loosens too).
+ * One setting compared WITHOUT knowing the budget. Only edits that are provably not looser pass: the same unit
+ * written lower, a percent under the default's own percent written where nothing was, no change. A change of unit,
+ * or going back to the computed default, cannot be proved tighter, so it is held.
+ */
+function symbolicRaised(before: unknown, after: unknown, defaultPercent: number | undefined): boolean {
+  if (before === after || JSON.stringify(before) === JSON.stringify(after)) return false;
+  if (after === undefined) return true;
+  if (before === undefined) {
+    // Nothing was written, so the baseline is the computed default, which needs the budget. Only a percent that
+    // sits under the default's own percent is provably tighter; `infinity`, bytes, and any percent above it cannot
+    // be shown to be below the default, so they are held.
+    const added = parseLimitSize(after);
+    return !(added?.kind === 'percent' && defaultPercent !== undefined && added.percent <= defaultPercent);
+  }
+  const was = parseLimitSize(before);
+  const now = parseLimitSize(after);
+  if (was === undefined || now === undefined)
+    return typeof after === 'number' && typeof before === 'number' && after > before;
+  if (now.kind === 'unlimited') return was.kind !== 'unlimited';
+  if (was.kind === 'unlimited') return false;
+  if (was.kind !== now.kind) return true;
+  return was.kind === 'bytes'
+    ? now.kind === 'bytes' && now.bytes > was.bytes
+    : now.kind === 'percent' && now.percent > was.percent;
+}
+
+const SIZE_FIELDS = new Set(['memoryHigh', 'memoryMax', 'swapMax']);
+
+/** The computed defaults that are a fixed percent of the budget, by `group.field`; the others need the budget. */
+const DEFAULT_PERCENTS: Readonly<Record<string, number>> = {
+  'fleet.swapMax': 10,
+  'perFerret.memoryHigh': 25,
+  'perFerret.memoryMax': 30,
+};
+
+/** Today's `limitsLoosening`, verbatim: with the budget known it compares what each file RESOLVES to. */
+function limitsLoosening(before: LimitsFile, after: LimitsFile, ceilingBytes?: number): readonly string[] {
+  const sentences: string[] = [];
+  const was = resolveLimits(before, ceilingBytes ?? GIBIBYTE);
+  const now = resolveLimits(after, ceilingBytes ?? GIBIBYTE);
+  if (was.enabled && !now.enabled)
+    sentences.push('ferret limits are switched off, so ferrets may take all of the machine');
+  if (was.ionice && !now.ionice) sentences.push('ferrets no longer run at a lower disk priority');
+  const check = (
+    group: 'fleet' | 'perFerret',
+    field: string,
+    words: string,
+    resolvedBefore: Cap | number | undefined,
+    resolvedAfter: Cap | number | undefined,
+  ): void => {
+    const writtenBefore = (before[group] as Record<string, unknown> | undefined)?.[field];
+    const writtenAfter = (after[group] as Record<string, unknown> | undefined)?.[field];
+    const raised =
+      ceilingBytes !== undefined || !SIZE_FIELDS.has(field)
+        ? comparable(resolvedAfter as Cap) > comparable(resolvedBefore as Cap)
+        : symbolicRaised(writtenBefore, writtenAfter, DEFAULT_PERCENTS[`${group}.${field}`]);
+    if (raised) sentences.push(`${words} was raised`);
+  };
+  for (const field of Object.keys(FLEET_WORDS) as (keyof typeof FLEET_WORDS)[])
+    check('fleet', field, FLEET_WORDS[field], was.fleet[field], now.fleet[field]);
+  for (const field of Object.keys(FERRET_WORDS) as (keyof typeof FERRET_WORDS)[])
+    check('perFerret', field, FERRET_WORDS[field], was.perFerret[field], now.perFerret[field]);
+  return sentences;
+}
+
+/**
+ * Which `limits.yaml` edits loosen (docs/ferret-limits.md: raising a cap is held for the owner): raising any cap or
+ * weight, taking a cap away, switching limits off and turning disk priority off. A config check carries no host
+ * budget, so this is today's conservative comparison: absent settings resolve to their computed defaults, and a
+ * size edit passes only when it is provably not looser (a change of unit, or a written cap replacing a default
+ * that is not a fixed percent, is held).
  */
 export function limitsLoosen(before: LimitsFile | undefined, after: LimitsFile): readonly string[] {
-  const from = before ?? {};
-  const loosened: string[] = [];
-  const controlWas = effectiveAgentControl(before);
-  const controlNow = effectiveAgentControl(after);
+  const loosened = [...limitsLoosening(before ?? {}, after)];
+  const was = effectiveAgentControl(before);
+  const now = effectiveAgentControl(after);
   for (const kind of Object.keys(AGENT_CONTROL_WORDS) as (keyof AgentControl)[])
-    if (!controlWas[kind] && controlNow[kind]) loosened.push(`agents may now control ${AGENT_CONTROL_WORDS[kind]}`);
-  if (from.enabled !== false && after.enabled === false) loosened.push('limits turned off');
-  if (from.ionice !== false && after.ionice === false) loosened.push('ferret disk priority no longer lowered');
-  for (const scope of ['fleet', 'perFerret'] as const)
-    for (const key of ['memoryHigh', 'memoryMax', 'swapMax', 'tasksMax', 'cpuPercent'] as const) {
-      const was = (from[scope] as Record<string, unknown> | undefined)?.[key];
-      const now = (after[scope] as Record<string, unknown> | undefined)?.[key];
-      if (now !== undefined && was !== undefined && raised(was, now)) loosened.push(`${scope}.${key} raised`);
-      if (was !== undefined && now === undefined) loosened.push(`${scope}.${key} removed`);
-    }
+    if (!was[kind] && now[kind]) loosened.push(`agents may now control ${AGENT_CONTROL_WORDS[kind]}`);
   return loosened;
 }
 

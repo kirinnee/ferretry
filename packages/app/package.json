@@ -21,7 +21,8 @@
     "@ferretry/std": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "@ferretry/plugin-layouts": "workspace:*"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.11.1",
