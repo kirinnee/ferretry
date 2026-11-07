@@ -36,6 +36,20 @@ export class FakeLink implements CarrierLink {
   }
 }
 export class FakeSessions implements SessionLayer {
+  readonly signer: SessionLayer['signer'] = {
+    sign: async () => {
+      throw new Error('not used by this fixture');
+    },
+    signTunnel: async () => {
+      throw new Error('not used by this fixture');
+    },
+    signCatalog: async () => {
+      throw new Error('not used by this fixture');
+    },
+    signSecretOffer: async () => {
+      throw new Error('not used by this fixture');
+    },
+  };
   readonly links: FakeLink[] = [];
   readonly carriers: CarrierKey[] = [];
   readonly peers: (CarrierPeer | undefined)[] = [];

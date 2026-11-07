@@ -8,7 +8,7 @@ import { buildConnections, type ConnectionBindings } from '../../../daemon/index
 import { decideAdvertisement } from '../../../daemon/lib/runtime/advertisement.ts';
 const identity = {
   daemonId: 'fy_daemon_' + 'a'.repeat(43),
-  signClaim: async () => ({ publicKeySpki: new Uint8Array(44), signature: new Uint8Array(64) }),
+  sign: async () => ({ daemonId: 'fy_daemon_' + 'a'.repeat(43), publicKey: 'A'.repeat(59), signature: 'A'.repeat(86) }),
 };
 const bindings: ConnectionBindings = {
   identity,

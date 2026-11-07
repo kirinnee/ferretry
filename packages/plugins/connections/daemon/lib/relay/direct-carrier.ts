@@ -15,12 +15,12 @@ import {
   FRAME_KINDS,
   HEARTBEAT_REQUEST,
   HEARTBEAT_RESPONSE,
-  RELAY_CLOSE_CODES,
+  SESSION_CLOSE_CODES,
   RELAY_PROTOCOL_ID,
   SESSION_ID_BYTES,
   sessionIdFromBytes,
   type SessionId,
-} from '../wire-mirror/index.ts';
+} from '@ferretry/kernel/wire';
 import { encodeControlMessage, RELAY_LIMITS } from './control.ts';
 import type { OpenCarrierSession, RelayLinkScheduler } from './session-ports.ts';
 
@@ -92,15 +92,15 @@ export class DirectSession implements SocketHandler {
     const bytes = frameBytes(frame);
     const decoded = bytes === null ? undefined : decodeFrame(bytes);
     if (bytes === null || decoded === undefined || !decoded.ok) {
-      this.#end(RELAY_CLOSE_CODES.protocolError, 'unparseable frame');
+      this.#end(SESSION_CLOSE_CODES.protocolError, 'unparseable frame');
       return;
     }
     if (decoded.frame.kind === FRAME_KINDS.control) {
-      this.#end(RELAY_CLOSE_CODES.protocolError, 'a client may not speak for the rendezvous on a direct socket');
+      this.#end(SESSION_CLOSE_CODES.protocolError, 'a client may not speak for the rendezvous on a direct socket');
       return;
     }
     if (decoded.frame.sessionId.text !== this.#sessionId.text) {
-      this.#end(RELAY_CLOSE_CODES.protocolError, 'a frame named no live session');
+      this.#end(SESSION_CLOSE_CODES.protocolError, 'a frame named no live session');
       return;
     }
     this.#link?.inbound(bytes);
@@ -128,7 +128,7 @@ export class DirectSession implements SocketHandler {
         this.downstream.send(next.bytes);
       }
     } catch {
-      this.#end(RELAY_CLOSE_CODES.relayInternal, 'the daemon could not carry this frame');
+      this.#end(SESSION_CLOSE_CODES.relayInternal, 'the daemon could not carry this frame');
     } finally {
       this.#draining = false;
     }
@@ -141,7 +141,7 @@ export class DirectSession implements SocketHandler {
     this.release();
   }
   evict(): void {
-    this.#end(RELAY_CLOSE_CODES.rendezvousBusy, EVICTED_REASON);
+    this.#end(SESSION_CLOSE_CODES.rendezvousBusy, EVICTED_REASON);
   }
   #end(code: number, reason: string): void {
     if (this.#ended) return;

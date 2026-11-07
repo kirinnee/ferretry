@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { ApiRequest, SessionLayer, SocketDownstream } from '@ferretry/kernel/contract';
 import { DirectSession } from '../../../daemon/lib/relay/direct-carrier.ts';
 import { directCarrierSocketRoute } from '../../../daemon/lib/runtime/mounts/direct-carrier.ts';
-import { decodeFrame, encodeFrame, FRAME_KINDS, sessionIdFromBytes } from '../../../daemon/lib/wire-mirror/index.ts';
+import { decodeFrame, encodeFrame, FRAME_KINDS, sessionIdFromBytes } from '@ferretry/kernel/wire';
 import { decodeControlMessage, encodeControlMessage, RELAY_LIMITS } from '../../../daemon/lib/relay/control.ts';
 import { FakeSessions } from '../../support/sessions.ts';
 

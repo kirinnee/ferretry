@@ -5,6 +5,7 @@ import {
   type CarrierStatus,
   type ConfigFileDef,
   type RouteHandler,
+  type KernelPorts,
   type SessionLayer,
 } from '@ferretry/kernel/contract';
 import { implementDaemon, type DaemonContext } from '@ferretry/kernel/manifest';
@@ -33,7 +34,7 @@ import { decideAdvertisement } from './lib/runtime/advertisement.ts';
 import { carrierRoutes } from './lib/runtime/mounts/carriers.ts';
 import { PublishedCarrierSet } from './lib/runtime/published-carriers.ts';
 
-/** TODO(kernel contract): replace these injected bindings with the additive identity/claim ports. */
+/** Host-facing listener facts plus the Kernel identity and fixed-label claim signer. */
 export interface ConnectionBindings {
   readonly identity: RendezvousSigner;
   readonly openSession: OpenCarrierSession;
@@ -196,4 +197,14 @@ export function buildConnections(
     },
   };
 }
-export default implementDaemon(manifest, { build: ctx => buildConnections(ctx) });
+export function kernelConnectionBindings(kernel: KernelPorts): ConnectionBindings {
+  const config = kernel.config.file(configFile);
+  return {
+    identity: { daemonId: kernel.identity.daemonId, sign: request => kernel.signer.sign(request) },
+    openSession: (layer, key, peer, proved) => layer.open(key, { ...peer, proved }),
+    socketFactory: url => kernel.websocket.connect(url),
+    ...(config?.direct?.host === undefined ? {} : { host: config.direct.host }),
+    ...(config?.direct?.port === undefined ? {} : { port: config.direct.port }),
+  };
+}
+export default implementDaemon(manifest, { build: ctx => buildConnections(ctx, kernelConnectionBindings(ctx.kernel)) });

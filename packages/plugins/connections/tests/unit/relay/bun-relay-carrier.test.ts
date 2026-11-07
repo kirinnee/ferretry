@@ -11,7 +11,7 @@ import {
   type SessionId,
   sessionIdFromBytes,
   toBase64Url,
-} from '../../../daemon/lib/wire-mirror/index.ts';
+} from '@ferretry/kernel/wire';
 import { decodeControlMessage, encodeControlMessage, type ControlMessage } from '../../../daemon/lib/relay/control.ts';
 import { HOSTED_RELAY_BANDWIDTH_REASONS, hostedBandwidthReason } from '../../../daemon/lib/relay/bandwidth.ts';
 import { DaemonRelayConfigSchema } from '../../../daemon/lib/runtime/relay-config.ts';
@@ -19,7 +19,7 @@ import { FakeSessions } from '../../support/sessions.ts';
 const relayCrypto = { randomBytes: (n: number) => new Uint8Array(n).fill(7) };
 const identity = {
   daemonId: 'fy_daemon_' + 'a'.repeat(43),
-  signClaim: async () => ({ publicKeySpki: new Uint8Array(44), signature: new Uint8Array(64) }),
+  sign: async () => ({ daemonId: 'fy_daemon_' + 'a'.repeat(43), publicKey: 'A'.repeat(59), signature: 'A'.repeat(86) }),
 };
 const config = (patch: Record<string, unknown>) => DaemonRelayConfigSchema.parse(patch);
 const controlFrame = (message: ControlMessage, sessionId: SessionId = RENDEZVOUS_SESSION_ID) =>

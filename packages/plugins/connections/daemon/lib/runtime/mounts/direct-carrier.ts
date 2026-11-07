@@ -36,7 +36,7 @@ import {
   MAX_DIRECT_UNPROVEN_PER_PEER,
   MAX_DIRECT_UNPROVEN_SESSIONS,
 } from '../../relay/direct-carrier.ts';
-import { RELAY_CLOSE_CODES } from '../../wire-mirror/index.ts';
+import { SESSION_CLOSE_CODES } from '@ferretry/kernel/wire';
 
 /** How long an admitted upgrade may take to attach before its slot is handed back. */
 const ATTACH_DEADLINE_MS = 10_000;
@@ -194,7 +194,7 @@ export function directCarrierSocketRoute(deps: DirectCarrierDependencies): Socke
         if (reservation.evicted || reservation.released) {
           // Its slot went to somebody else while the upgrade completed: close the socket and hold nothing.
           return {
-            open: async () => downstream.close(RELAY_CLOSE_CODES.rendezvousBusy, EVICTED_REASON),
+            open: async () => downstream.close(SESSION_CLOSE_CODES.rendezvousBusy, EVICTED_REASON),
             fromClient: () => undefined,
             close: () => undefined,
           };

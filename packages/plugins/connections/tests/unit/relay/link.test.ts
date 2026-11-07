@@ -9,7 +9,7 @@ import {
   sessionIdFromBytes,
   type SessionId,
   toBase64Url,
-} from '../../../daemon/lib/wire-mirror/index.ts';
+} from '@ferretry/kernel/wire';
 import { FakeSessions } from '../../support/sessions.ts';
 const id = (n: number) => sessionIdFromBytes(new Uint8Array(16).fill(n))!;
 const control = (message: ControlMessage, sessionId: SessionId = RENDEZVOUS_SESSION_ID) =>
@@ -25,9 +25,9 @@ function harness(failWrites = false) {
     relayHost: 'relay.example',
     identity: {
       daemonId: 'fy_daemon_' + 'a'.repeat(43),
-      signClaim: async () => {
+      sign: async () => {
         signed++;
-        return { publicKeySpki: new Uint8Array(44), signature: new Uint8Array(64) };
+        return { daemonId: 'fy_daemon_' + 'a'.repeat(43), publicKey: 'A'.repeat(59), signature: 'A'.repeat(86) };
       },
     },
     socket: {

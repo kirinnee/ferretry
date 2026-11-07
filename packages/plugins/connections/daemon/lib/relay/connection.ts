@@ -38,7 +38,7 @@ import {
   TunnelOriginSchema,
 } from '../../../contract/index.ts';
 import { z } from 'zod';
-import { parseDaemonId } from '../wire-mirror/identity.ts';
+import { parseDaemonId } from '@ferretry/kernel/wire';
 
 /**
  * Loopback AS THE PUBLISHED SITE'S CONTENT-SECURITY-POLICY READS IT — a third input domain, not a

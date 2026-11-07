@@ -1,5 +1,4 @@
-import type { CarrierKey, CarrierLink, CarrierPeer, SessionLayer } from '@ferretry/kernel/contract';
-import type { ClaimContext, RendezvousClaim } from '../wire-mirror/index.ts';
+import type { CarrierKey, CarrierLink, CarrierPeer, SessionLayer, IdentitySigner } from '@ferretry/kernel/contract';
 
 export interface RelayLinkTimer {
   cancel(): void;
@@ -12,12 +11,12 @@ export interface RelayLinkSocket {
   sendText(text: string): void;
   close(code: number, reason: string): void;
 }
-/** TODO(kernel contract): the kernel owns the identity key and signs the exact copied claim transcript. */
+/** The Kernel owns the identity key and the fixed-label claim transcript. */
 export interface RendezvousSigner {
   readonly daemonId: string;
-  signClaim(context: ClaimContext): Promise<RendezvousClaim>;
+  sign: IdentitySigner['sign'];
 }
-/** TODO(kernel contract): the kernel calls proved only after a device/member proof is verified. */
+/** The kernel calls proved only after a device/member proof is verified. */
 export type OpenCarrierSession = (
   layer: SessionLayer,
   carrier: CarrierKey,

@@ -10,7 +10,7 @@
  */
 
 import { z } from 'zod';
-import { utf8Bytes, utf8Text } from '../wire-mirror/binary.ts';
+import { utf8Bytes, utf8Text } from '@ferretry/kernel/wire';
 import {
   CREDIT_WINDOW_FRAMES,
   ED25519_SIGNATURE_BYTES,
@@ -24,7 +24,7 @@ import {
   RELAY_FEATURES_PARAM,
   RELAY_PROTOCOL_ID,
   type RelayFeature,
-} from '../wire-mirror/constants.ts';
+} from '@ferretry/kernel/wire';
 
 /** base64url of a known byte length, which is how every binary field travels inside JSON. */
 function base64UrlOfBytes(byteLength: number): z.ZodString {

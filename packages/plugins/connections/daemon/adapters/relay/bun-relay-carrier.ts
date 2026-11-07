@@ -35,7 +35,7 @@
 
 import type { Carrier, CarrierStatus, SessionLayer } from '@ferretry/kernel/contract';
 import { decodeControlMessage } from '../../lib/relay/control.ts';
-import { decodeFrame, FRAME_KINDS, RELAY_CLOSE_CODES } from '../../lib/wire-mirror/index.ts';
+import { decodeFrame, FRAME_KINDS, SESSION_CLOSE_CODES } from '@ferretry/kernel/wire';
 import { parseHostedBandwidthRefusal } from '../../lib/relay/bandwidth.ts';
 import { RelayLink, type RelayLinkScheduler, type RelayLinkSocket, type RelayLinkTimer } from '../../lib/relay/link.ts';
 import type { RendezvousSigner } from '../../lib/relay/session-ports.ts';
@@ -113,8 +113,8 @@ const formatSeconds = (milliseconds: number): string => `${(Math.max(0, millisec
  * reason is the same sentence as the in-band one, so either is enough on its own.
  */
 const bandwidthRefusal = (closed: string, said: string | undefined, now: number) => {
-  const closePrefix = `${RELAY_CLOSE_CODES.hostedBandwidth} `;
-  const saidPrefix = `error ${RELAY_CLOSE_CODES.hostedBandwidth} `;
+  const closePrefix = `${SESSION_CLOSE_CODES.hostedBandwidth} `;
+  const saidPrefix = `error ${SESSION_CLOSE_CODES.hostedBandwidth} `;
   if (said?.startsWith(saidPrefix) === true) return parseHostedBandwidthRefusal(said.slice(saidPrefix.length), now);
   if (closed.startsWith(closePrefix)) return parseHostedBandwidthRefusal(closed.slice(closePrefix.length), now);
   return null;
@@ -277,7 +277,7 @@ export class BunRelayCarrier {
     if (bytes !== undefined) this.#noteInBand(bytes);
     if (bytes === undefined) {
       this.#detail = 'the carrier sent a message that is neither text nor bytes';
-      socket.close(RELAY_CLOSE_CODES.protocolError, 'unsupported message type');
+      socket.close(SESSION_CLOSE_CODES.protocolError, 'unsupported message type');
       return;
     }
     // A handler that threw has left this link in a state nobody can describe, so the socket goes
@@ -286,7 +286,7 @@ export class BunRelayCarrier {
     const failed = (error: unknown): void => {
       if (!this.#live(socket, link)) return;
       this.#detail = `the relay link failed: ${error instanceof Error ? error.message : String(error)}`;
-      socket.close(RELAY_CLOSE_CODES.relayInternal, 'the daemon could not carry this frame');
+      socket.close(SESSION_CLOSE_CODES.relayInternal, 'the daemon could not carry this frame');
     };
     this.#inbox = this.#inbox
       .then(async () => {
@@ -353,8 +353,8 @@ export class BunRelayCarrier {
   #abandon(socket: RelayWebSocket, link: RelayLink, detail: string, why: string, liveness: string): void {
     this.#detail = detail;
     this.#say(`liveness: ${liveness}`);
-    socket.close(RELAY_CLOSE_CODES.heartbeatTimeout, why);
-    this.#ended(socket, link, `${RELAY_CLOSE_CODES.heartbeatTimeout} ${why}`);
+    socket.close(SESSION_CLOSE_CODES.heartbeatTimeout, why);
+    this.#ended(socket, link, `${SESSION_CLOSE_CODES.heartbeatTimeout} ${why}`);
   }
 
   /** The rendezvous accepted the claim: this is a carrier, and the backoff starts over. */
@@ -407,14 +407,14 @@ export class BunRelayCarrier {
     if (said !== undefined) how = `${how}; the relay said: ${said}`;
     this.#detail ??= `the rendezvous connection ended (${how})`;
     this.#offlineSince ??= this.#now();
-    if (closed.startsWith(`${RELAY_CLOSE_CODES.claimLost} `)) {
+    if (closed.startsWith(`${SESSION_CLOSE_CODES.claimLost} `)) {
       // The socket was fine; the rendezvous had stopped naming it. Said on its own line because it is
       // the one disconnect that means "phones were being told this machine is gone".
       this.#say('liveness: the rendezvous no longer held this daemon’s claim — claiming again');
     }
     const capacity =
-      closed.startsWith(`${RELAY_CLOSE_CODES.hostedCapacity} `) ||
-      said?.startsWith(`error ${RELAY_CLOSE_CODES.hostedCapacity} `) === true;
+      closed.startsWith(`${SESSION_CLOSE_CODES.hostedCapacity} `) ||
+      said?.startsWith(`error ${SESSION_CLOSE_CODES.hostedCapacity} `) === true;
     this.#capacityRefusals = capacity ? this.#capacityRefusals + 1 : 0;
     const bandwidth = capacity ? null : bandwidthRefusal(closed, said, this.#now());
     const delay = capacity
@@ -454,7 +454,8 @@ export class BunRelayCarrier {
    */
   #keepHandover(link: RelayLink, code: number | undefined): void {
     const issued = link.report().handover;
-    const refused = code !== undefined && code >= 4000 && code <= 4999 && code !== RELAY_CLOSE_CODES.rendezvousClaimed;
+    const refused =
+      code !== undefined && code >= 4000 && code <= 4999 && code !== SESSION_CLOSE_CODES.rendezvousClaimed;
     this.#handover = issued ?? (refused ? undefined : this.#handover);
   }
 

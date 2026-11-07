@@ -12,7 +12,7 @@
  */
 
 import { connectionSocketUrl } from './connection.ts';
-import { HEARTBEAT_GRACE_SECONDS, RELAY_FEATURES_PARAM } from '../wire-mirror/index.ts';
+import { HEARTBEAT_GRACE_SECONDS, RELAY_FEATURES_PARAM } from '@ferretry/kernel/wire';
 import type { DaemonRelayConfig } from '../runtime/relay-config.ts';
 
 /**

@@ -3,20 +3,19 @@ import { isSessionEnd, type CarrierKey, type CarrierLink, type SessionLayer } fr
 import {
   claimContextForChallenge,
   decodeFrame,
-  encodeClaim,
   encodeFrame,
   FRAME_KINDS,
   fromBase64UrlFixed,
   HEARTBEAT_REQUEST,
   HEARTBEAT_RESPONSE,
   NONCE_BYTES,
-  RELAY_CLOSE_CODES,
+  SESSION_CLOSE_CODES,
   RELAY_PROTOCOL_ID,
   RENDEZVOUS_SESSION_ID,
-  type RelayCloseCode,
-  type RelayFrame,
+  type SessionCloseCode,
+  type SessionFrame,
   type SessionId,
-} from '../wire-mirror/index.ts';
+} from '@ferretry/kernel/wire';
 import { decodeControlMessage, encodeControlMessage, type ControlMessage } from './control.ts';
 import type { RelayLinkScheduler, RelayLinkSocket, RelayLinkTimer, RendezvousSigner } from './session-ports.ts';
 export type { RelayLinkScheduler, RelayLinkSocket, RelayLinkTimer } from './session-ports.ts';
@@ -75,7 +74,7 @@ export class RelayLink {
       return;
     }
     if (text === HEARTBEAT_RESPONSE) return;
-    this.#refuseSocket(RELAY_CLOSE_CODES.protocolError, 'the carrier sent an unknown text message');
+    this.#refuseSocket(SESSION_CLOSE_CODES.protocolError, 'the carrier sent an unknown text message');
   }
   async accept(bytes: Uint8Array): Promise<{ settled: Promise<void> }> {
     if (this.#closed) return { settled: Promise.resolve() };
@@ -86,13 +85,13 @@ export class RelayLink {
       const session = this.#sessions.get(decoded.frame.sessionId.text);
       if (session !== undefined) session.link.inbound(bytes);
       else if (!this.#ended.has(decoded.frame.sessionId.text))
-        this.#refuseSocket(RELAY_CLOSE_CODES.protocolError, 'a frame named no live session');
+        this.#refuseSocket(SESSION_CLOSE_CODES.protocolError, 'a frame named no live session');
     }
     return { settled: Promise.resolve() };
   }
   #onOpen(sessionId: SessionId): void {
     if (this.#sessions.has(sessionId.text)) {
-      this.#endSession(sessionId, RELAY_CLOSE_CODES.protocolError, 'this session identifier is already live');
+      this.#endSession(sessionId, SESSION_CLOSE_CODES.protocolError, 'this session identifier is already live');
       return;
     }
     this.#ended.get(sessionId.text)?.cancel();
@@ -115,7 +114,7 @@ export class RelayLink {
           this.deps.socket.send(next.bytes);
         }
       } catch {
-        this.#refuseSocket(RELAY_CLOSE_CODES.relayInternal, 'the daemon could not carry this frame');
+        this.#refuseSocket(SESSION_CLOSE_CODES.relayInternal, 'the daemon could not carry this frame');
       } finally {
         draining = false;
       }
@@ -140,10 +139,10 @@ export class RelayLink {
       payload: encodeControlMessage({ t: 'closed', code, reason }),
     });
   }
-  #sendFrame(frame: RelayFrame): void {
+  #sendFrame(frame: SessionFrame): void {
     if (!this.#closed) this.deps.socket.send(encodeFrame(frame));
   }
-  #refuseSocket(code: RelayCloseCode, reason: string): void {
+  #refuseSocket(code: SessionCloseCode, reason: string): void {
     this.#lastRefusal = `link ${code}: ${reason}`;
     this.close();
     this.deps.socket.close(code, reason);
@@ -159,10 +158,10 @@ export class RelayLink {
     for (const timer of this.#ended.values()) timer.cancel();
     this.#ended.clear();
   }
-  async #onControl(frame: RelayFrame): Promise<void> {
+  async #onControl(frame: SessionFrame): Promise<void> {
     const message = decodeControlMessage(frame.payload);
     if (message === null) {
-      this.#refuseSocket(RELAY_CLOSE_CODES.protocolError, 'unparseable rendezvous control');
+      this.#refuseSocket(SESSION_CLOSE_CODES.protocolError, 'unparseable rendezvous control');
       return;
     }
     switch (message.t) {
@@ -202,7 +201,7 @@ export class RelayLink {
       default:
         // `ready` and `claim` belong to the other two roles. Receiving one means this is not the
         // conversation the daemon thinks it is in.
-        this.#refuseSocket(RELAY_CLOSE_CODES.protocolError, `unexpected rendezvous control: ${message.t}`);
+        this.#refuseSocket(SESSION_CLOSE_CODES.protocolError, `unexpected rendezvous control: ${message.t}`);
     }
   }
 
@@ -215,23 +214,23 @@ export class RelayLink {
    */
   async #onChallenge(message: Extract<ControlMessage, { t: 'challenge' }>): Promise<void> {
     if (this.#claimed) {
-      this.#refuseSocket(RELAY_CLOSE_CODES.protocolError, 'a second challenge arrived after the claim');
+      this.#refuseSocket(SESSION_CLOSE_CODES.protocolError, 'a second challenge arrived after the claim');
       return;
     }
     const challenge = fromBase64UrlFixed(message.nonce, NONCE_BYTES);
     if (challenge === null) {
-      this.#refuseSocket(RELAY_CLOSE_CODES.protocolError, 'the challenge nonce is malformed');
+      this.#refuseSocket(SESSION_CLOSE_CODES.protocolError, 'the challenge nonce is malformed');
       return;
     }
     const context = claimContextForChallenge(this.deps.identity.daemonId, this.deps.relayHost, message.host, challenge);
     if (context === null) {
       this.#refuseSocket(
-        RELAY_CLOSE_CODES.protocolError,
+        SESSION_CLOSE_CODES.protocolError,
         `the rendezvous named host ${JSON.stringify(message.host)}, which this daemon did not configure`,
       );
       return;
     }
-    const claim = await this.deps.identity.signClaim(context);
+    const claim = await this.deps.identity.sign({ host: context.relayHost, nonce: message.nonce });
     if (this.#closed) return;
     this.#sendFrame({
       kind: FRAME_KINDS.control,
@@ -240,7 +239,8 @@ export class RelayLink {
       payload: encodeControlMessage({
         t: 'claim',
         protocol: RELAY_PROTOCOL_ID,
-        ...encodeClaim(claim),
+        publicKey: claim.publicKey,
+        signature: claim.signature,
         ...(this.deps.replaces === undefined ? {} : { replaces: this.deps.replaces }),
       }),
     });
