@@ -97,3 +97,75 @@ describe('published carrier route', () => {
     }
   });
 });
+
+test('P82 only hosted-directory provenance is disclosed to Access', async () => {
+  const withDirectory = implementDaemon(manifest, {
+    build: ctx =>
+      buildConnections(ctx, {
+        ...bindings,
+        directory: { read: async () => ({ kind: 'available', relayUrl: 'https://hosted.example' }) },
+      }),
+  });
+  const host = await testHost({ plugins: [withDirectory] });
+  await host.runJob('relay-discovery');
+  expect(host.provided(ConnectionsPort).advertisement().discoveredRelayUrl).toBe('https://hosted.example');
+  await host.stop();
+});
+test('R213 directory discovery runs once per boot even when the start job is retried', async () => {
+  let reads = 0;
+  const withDirectory = implementDaemon(manifest, {
+    build: ctx =>
+      buildConnections(ctx, {
+        ...bindings,
+        directory: {
+          read: async () => {
+            reads++;
+            return { kind: 'available', relayUrl: 'https://hosted.example' };
+          },
+        },
+      }),
+  });
+  const host = await testHost({ plugins: [withDirectory] });
+  await host.runJob('relay-discovery');
+  await host.runJob('relay-discovery');
+  expect(reads).toBe(1);
+  await host.stop();
+});
+test('R14 a withdrawal at runtime takes effect at the next boot without an app release', async () => {
+  let disabled = false;
+  const withDirectory = implementDaemon(manifest, {
+    build: ctx =>
+      buildConnections(ctx, {
+        ...bindings,
+        directory: {
+          read: async () =>
+            disabled ? { kind: 'disabled' } : { kind: 'available', relayUrl: 'https://hosted.example' },
+        },
+      }),
+  });
+  const host = await testHost({ plugins: [withDirectory] });
+  await host.runJob('relay-discovery');
+  expect(
+    host
+      .provided(ConnectionsPort)
+      .carriers()
+      .some(c => c.kind === 'relay'),
+  ).toBe(true);
+  disabled = true;
+  const rebooted = await host.restart();
+  await rebooted.runJob('relay-discovery');
+  expect(
+    rebooted
+      .provided(ConnectionsPort)
+      .carriers()
+      .some(c => c.kind === 'relay'),
+  ).toBe(false);
+  await rebooted.stop();
+});
+test('R4 a daemon without its identity binding refuses rather than claiming carriers it cannot serve', async () => {
+  const pending = implementDaemon(manifest, { build: ctx => buildConnections(ctx) });
+  const host = await testHost({ plugins: [pending] });
+  expect((await host.request('GET', '/v1/carriers', { as: device('phone') })).status).toBe(503);
+  expect(() => host.provided(ConnectionsPort).advertisement()).toThrow();
+  await host.stop();
+});

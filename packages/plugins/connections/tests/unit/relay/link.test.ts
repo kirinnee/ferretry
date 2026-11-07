@@ -14,7 +14,7 @@ import { FakeSessions } from '../../support/sessions.ts';
 const id = (n: number) => sessionIdFromBytes(new Uint8Array(16).fill(n))!;
 const control = (message: ControlMessage, sessionId: SessionId = RENDEZVOUS_SESSION_ID) =>
   encodeFrame({ kind: FRAME_KINDS.control, sessionId, sequence: 0, payload: encodeControlMessage(message) });
-function harness() {
+function harness(failWrites = false) {
   const layer = new FakeSessions();
   const sent: Uint8Array[] = [];
   const closes: number[] = [];
@@ -32,6 +32,7 @@ function harness() {
     },
     socket: {
       send: b => {
+        if (failWrites) throw new Error('socket write failed');
         sent.push(b);
       },
       sendText: () => undefined,
@@ -152,4 +153,12 @@ describe('rendezvous carrier boundary', () => {
     expect(h.layer.links.every(link => link.closedWith !== undefined)).toBe(true);
     expect(h.layer.links.every(link => link.listeners.size === 0)).toBe(true);
   });
+});
+
+test('R140 an outbound socket failure releases Kernel sessions rather than leaking the queue', async () => {
+  const h = harness(true);
+  await h.link.accept(control({ t: 'open' }, id(1)));
+  h.layer.links[0]!.offer({ sequence: 1, bytes: new Uint8Array([1]) });
+  expect(h.closes).toEqual([4500]);
+  expect(h.layer.links[0]?.closedWith).toBeDefined();
 });

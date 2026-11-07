@@ -25,6 +25,7 @@ import {
   NO_RELAY_DIRECTORY,
   relayCarriersNeedDiscovery,
   type RelayCarrierSource,
+  type RelayDirectoryPort,
 } from './lib/relay/discovery.ts';
 import type { OpenCarrierSession, RendezvousSigner } from './lib/relay/session-ports.ts';
 import { DISCOVERED_RELAY_CARRIER, type DaemonRelayCarrierEntry } from './lib/runtime/relay-config.ts';
@@ -41,6 +42,7 @@ export interface ConnectionBindings {
   readonly port?: number;
   readonly publicUrl?: string;
   readonly directoryOrigin?: string;
+  readonly directory?: RelayDirectoryPort;
   readonly socketFactory?: RelayWebSocketFactory;
   readonly randomBytes?: (length: number) => Uint8Array;
 }
@@ -60,7 +62,7 @@ class UnavailableCarrier implements Carrier {
   }
 }
 const unavailable = () => {
-  throw new ApiError(503, 'the carrier is unavailable until its Kernel bindings are supplied', 'plugin_unavailable');
+  throw new ApiError(503, 'This carrier is unavailable.', 'plugin_unavailable');
 };
 const configFile = manifest.data.config[0] as ConfigFileDef<ConnectionsConfig>;
 
@@ -82,9 +84,12 @@ export function buildConnections(
   const initialise = (): Promise<void> =>
     (initial ??= (async () => {
       const advertisement = relayCarriersNeedDiscovery(relays)
-        ? await new HostedRelayDirectory(bindings?.directoryOrigin, {
-            fetcher: (url, init) => ctx.kernel.fetch.request(url, init),
-          }).read()
+        ? await (
+            bindings?.directory ??
+            new HostedRelayDirectory(bindings?.directoryOrigin, {
+              fetcher: (url, init) => ctx.kernel.fetch.request(url, init),
+            })
+          ).read()
         : NO_RELAY_DIRECTORY;
       const resolved = chooseRelayCarrierSources(relays, advertisement);
       if (resolved.kind === 'refused') throw new ApiError(503, resolved.reason, 'plugin_failed');
@@ -108,7 +113,7 @@ export function buildConnections(
       randomBytes: bindings.randomBytes ?? randomSessionBytes,
       openSession: bindings.openSession,
     });
-  const directProvider = direct ?? new UnavailableCarrier('the direct carrier is waiting for the Kernel identity');
+  const directProvider = direct ?? new UnavailableCarrier('The direct carrier is unavailable.');
   let held: RelayCarrier[] = [];
   const relay: Carrier = {
     start: async (layer, signal) => {
@@ -132,8 +137,7 @@ export function buildConnections(
       for (const carrier of held) await carrier.start(layer, signal);
     },
     status: () => {
-      if (bindings === undefined)
-        return { state: 'failed', sentence: 'the relay carrier is waiting for the Kernel identity' };
+      if (bindings === undefined) return { state: 'failed', sentence: 'The relay carrier is unavailable.' };
       return (
         held.find(c => c.status().state === 'ready')?.status() ??
         held[0]?.status() ?? {
@@ -143,11 +147,17 @@ export function buildConnections(
       );
     },
   };
-  const carriers = () => published.current();
-  const carrierRoute = carrierRoutes({ current: carriers })[0]!;
+  const carriers = () => {
+    if (bindings === undefined) unavailable();
+    return published.current();
+  };
+  const carrierRoute = carrierRoutes({ current: () => published.current() })[0]!;
   return {
     routes: {
-      'GET /v1/carriers': carrierRoute.handle,
+      'GET /v1/carriers': async (call: Parameters<RouteHandler>[0]) => {
+        carriers();
+        return carrierRoute.handle(call);
+      },
       'GET /v1/tunnel': async () => jsonResponse(await (other?.tunnelStatus() ?? unavailable())),
       'PUT /v1/tunnel': other?.tunnelChange ?? unavailable,
       'POST /v1/webrtc/offer': other?.webrtcOffer ?? unavailable,
@@ -156,20 +166,23 @@ export function buildConnections(
     provides: {
       connections: {
         carriers,
-        advertisement: (): ConnectionAdvertisement => ({
-          advertisement: decideAdvertisement({
-            host: bindings?.host ?? config?.direct?.host ?? '127.0.0.1',
-            port: bindings?.port ?? config?.direct?.port,
-            ...(bindings?.publicUrl === undefined ? {} : { operatorPublicUrl: bindings.publicUrl }),
-          }),
-          ...(bindings?.port === undefined ? {} : { port: bindings.port }),
-          ...(() => {
-            const discovered = sources.find(s => s.kind === 'discovered');
-            return discovered?.kind === 'discovered' && discovered.config.enabled
-              ? { discoveredRelayUrl: discovered.config.url }
-              : {};
-          })(),
-        }),
+        advertisement: (): ConnectionAdvertisement => {
+          if (bindings === undefined) unavailable();
+          return {
+            advertisement: decideAdvertisement({
+              host: bindings?.host ?? config?.direct?.host ?? '127.0.0.1',
+              port: bindings?.port ?? config?.direct?.port,
+              ...(bindings?.publicUrl === undefined ? {} : { operatorPublicUrl: bindings.publicUrl }),
+            }),
+            ...(bindings?.port === undefined ? {} : { port: bindings.port }),
+            ...(() => {
+              const discovered = sources.find(s => s.kind === 'discovered');
+              return discovered?.kind === 'discovered' && discovered.config.enabled
+                ? { discoveredRelayUrl: discovered.config.url }
+                : {};
+            })(),
+          };
+        },
         tunnel: () =>
           other?.tunnelStatus() ??
           Promise.reject(new ApiError(503, 'the tunnel carrier is unavailable', 'plugin_unavailable')),

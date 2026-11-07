@@ -114,6 +114,8 @@ export class RelayLink {
           // The Kernel asked the permit inside next(). No await or queued write may follow it.
           this.deps.socket.send(next.bytes);
         }
+      } catch {
+        this.#refuseSocket(RELAY_CLOSE_CODES.relayInternal, 'the daemon could not carry this frame');
       } finally {
         draining = false;
       }

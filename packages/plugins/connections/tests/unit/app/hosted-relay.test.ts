@@ -37,11 +37,11 @@ const DIRECTORY = 'https://relay-directory.example.test';
 const advertisement = (relayUrl: unknown): unknown => ({ version: HOSTED_RELAY_ADVERTISEMENT_VERSION, relayUrl });
 
 /** A fetcher that records what was asked for and answers with one canned response. */
-const answering = (response: Response | Error): { readonly asked: string[]; readonly fetch: HostedRelayFetch } => {
+const answering = (response: Response | Error): { readonly asked: string[]; readonly fetcher: HostedRelayFetch } => {
   const asked: string[] = [];
   return {
     asked,
-    fetch: async (input, init) => {
+    fetcher: async (input, init) => {
       asked.push(`${input} ${init?.cache ?? ''}`.trim());
       if (response instanceof Error) throw response;
       return response;
@@ -71,7 +71,7 @@ describe('parseHostedRelayAdvertisement', () => {
     });
   });
 
-  it('treats null as the kill switch, which is a fact and not an absence', () => {
+  it('R131 treats null as the kill switch, which is a fact and not an absence', () => {
     // The operator can switch the default off without an app release. That is
     // "disabled", and it is not the same as an address this page failed to read.
     expect(parseHostedRelayAdvertisement(advertisement(null))).toEqual({ kind: 'disabled' });
@@ -107,10 +107,10 @@ describe('parseHostedRelayAdvertisement', () => {
 });
 
 describe('readHostedRelayFallback', () => {
-  it('asks the documented path on the origin it was GIVEN, never one of its own', async () => {
-    const { asked, fetch } = answering(Response.json(advertisement('https://relay.example.test')));
+  it('P77 asks the documented path on the origin it was GIVEN, never one of its own', async () => {
+    const { asked, fetcher } = answering(Response.json(advertisement('https://relay.example.test')));
 
-    expect(await readHostedRelayFallback({ directoryUrl: DIRECTORY, fetcher: fetch })).toEqual({
+    expect(await readHostedRelayFallback({ directoryUrl: DIRECTORY, fetcher })).toEqual({
       kind: 'available',
       relayUrl: 'https://relay.example.test',
     });
@@ -124,16 +124,16 @@ describe('readHostedRelayFallback', () => {
     // The state production is in. A relative path would not reach the hosted
     // Worker — it is a separate origin, and no Pages route to it exists — so
     // asking anyway would fetch this app's own HTML and call it an answer.
-    const { asked, fetch } = answering(Response.json(advertisement('https://relay.example.test')));
+    const { asked, fetcher } = answering(Response.json(advertisement('https://relay.example.test')));
 
-    expect(await readHostedRelayFallback({ fetcher: fetch })).toEqual(NO_RELAY_DIRECTORY);
+    expect(await readHostedRelayFallback({ fetcher })).toEqual(NO_RELAY_DIRECTORY);
     expect(asked).toEqual([]);
     expect(NO_RELAY_DIRECTORY.kind).toBe('undetermined');
   });
 
   it('refuses a configured directory that is not an address it may ask', async () => {
-    const { asked, fetch } = answering(Response.json(advertisement(null)));
-    const answer = await readHostedRelayFallback({ directoryUrl: 'http://relay.example.test', fetcher: fetch });
+    const { asked, fetcher } = answering(Response.json(advertisement(null)));
+    const answer = await readHostedRelayFallback({ directoryUrl: 'http://relay.example.test', fetcher });
 
     expect(answer.kind).toBe('undetermined');
     if (answer.kind === 'undetermined') expect(answer.reason).toContain('not an address');
@@ -143,15 +143,15 @@ describe('readHostedRelayFallback', () => {
   it('answers rather than throwing when the directory is unreachable', async () => {
     // A rejected promise here would take a setup screen down over a carrier the
     // reader may not even need.
-    const { fetch } = answering(new Error('connection refused'));
-    const answer = await readHostedRelayFallback({ directoryUrl: DIRECTORY, fetcher: fetch });
+    const { fetcher } = answering(new Error('connection refused'));
+    const answer = await readHostedRelayFallback({ directoryUrl: DIRECTORY, fetcher });
     expect(answer.kind).toBe('undetermined');
     if (answer.kind === 'undetermined') expect(answer.reason).toContain('could not reach');
   });
 
   it('does not read an error page as an answer', async () => {
-    const { fetch } = answering(new Response('gone', { status: 503 }));
-    const answer = await readHostedRelayFallback({ directoryUrl: DIRECTORY, fetcher: fetch });
+    const { fetcher } = answering(new Response('gone', { status: 503 }));
+    const answer = await readHostedRelayFallback({ directoryUrl: DIRECTORY, fetcher });
     expect(answer.kind).toBe('undetermined');
     if (answer.kind === 'undetermined') expect(answer.reason).toContain('503');
   });
@@ -159,15 +159,15 @@ describe('readHostedRelayFallback', () => {
   it('does not read a document that is not JSON as an answer', async () => {
     // The failure a static host actually produces: an SPA rewrite serves the
     // app's own HTML for an unrouted path, with a perfectly healthy 200.
-    const { fetch } = answering(new Response('<!doctype html><title>Ferretry</title>', { status: 200 }));
-    const answer = await readHostedRelayFallback({ directoryUrl: DIRECTORY, fetcher: fetch });
+    const { fetcher } = answering(new Response('<!doctype html><title>Ferretry</title>', { status: 200 }));
+    const answer = await readHostedRelayFallback({ directoryUrl: DIRECTORY, fetcher });
     expect(answer.kind).toBe('undetermined');
     if (answer.kind === 'undetermined') expect(answer.reason).toContain('not a document');
   });
 
   it('carries the switch straight through when it is off', async () => {
-    const { fetch } = answering(Response.json(advertisement(null)));
-    expect(await readHostedRelayFallback({ directoryUrl: DIRECTORY, fetcher: fetch })).toEqual({ kind: 'disabled' });
+    const { fetcher } = answering(Response.json(advertisement(null)));
+    expect(await readHostedRelayFallback({ directoryUrl: DIRECTORY, fetcher })).toEqual({ kind: 'disabled' });
   });
 });
 

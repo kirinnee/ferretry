@@ -46,7 +46,7 @@ const page = (overrides: Partial<CarrierDropEnvironment> = {}) => {
 };
 
 describe('the carrier drop log', () => {
-  it('should keep a drop with what the page could see at that moment', () => {
+  it('R91 should keep a drop with what the page could see at that moment', () => {
     // Arrange
     const { state, environment } = page();
     const log = new CarrierDropLog(environment, memoryStorage());

@@ -110,7 +110,7 @@ describe('reconnectDelayMs', () => {
     expect(reconnectDelayMs(0, 0.5)).toBe(RECONNECT_BASE_MS * 0.75);
   });
 
-  it('retries a drop inside 300 ms, then doubles per attempt from the 300 ms base', () => {
+  it('R90 retries a drop inside 300 ms, then doubles per attempt from the 300 ms base', () => {
     expect(reconnectDelayMs(0, 1)).toBeLessThanOrEqual(300);
     expect(reconnectDelayMs(1, 0)).toBe(300);
     expect(reconnectDelayMs(1, 1)).toBe(600);

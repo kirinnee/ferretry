@@ -113,12 +113,22 @@ export class DirectSession implements SocketHandler {
         const next = this.#link.outbound.next();
         if (next === undefined) break;
         if (isSessionEnd(next)) {
+          this.downstream.send(
+            encodeFrame({
+              kind: FRAME_KINDS.control,
+              sessionId: this.#sessionId,
+              sequence: 0,
+              payload: encodeControlMessage({ t: 'closed', code: next.code, reason: next.reason }),
+            }),
+          );
           this.#end(next.code, next.reason);
           break;
         }
         // The final permit is inside next(); this socket write must be synchronous.
         this.downstream.send(next.bytes);
       }
+    } catch {
+      this.#end(RELAY_CLOSE_CODES.relayInternal, 'the daemon could not carry this frame');
     } finally {
       this.#draining = false;
     }

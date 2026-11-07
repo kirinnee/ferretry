@@ -29,7 +29,7 @@ const memory = (
 };
 
 describe('carrierOrder', () => {
-  test('walks direct, WebRTC, tunnel then relay on Auto, and only the one kind otherwise', () => {
+  test('R6 walks direct, WebRTC, tunnel then relay on Auto, and only the one kind otherwise', () => {
     should(carrierOrder('auto')).eql(['direct', 'webrtc', 'tunnel', 'relay']);
     should(carrierOrder('webrtc')).eql(['webrtc']);
     should(carrierOrder('tunnel')).eql(['tunnel']);
@@ -45,7 +45,7 @@ describe('carrierOrder', () => {
 });
 
 describe('reading a stored preference', () => {
-  test('reads the four words and anything else as Relay, the default', () => {
+  test('R5 reads the four words and anything else as Relay, the default', () => {
     for (const preference of CARRIER_PREFERENCES) should(parseCarrierPreference(preference)).equal(preference);
     should(parseCarrierPreference('Relay')).equal('relay');
     should(parseCarrierPreference('carrier-pigeon')).equal('relay');

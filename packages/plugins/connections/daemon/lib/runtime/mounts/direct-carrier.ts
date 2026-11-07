@@ -63,6 +63,7 @@ interface Reservation {
 /** The socket route a browser dials for a direct session. */
 export function directCarrierSocketRoute(deps: DirectCarrierDependencies): SocketRoute & { stop(): void } {
   let live = 0;
+  let stopped = false;
   const reservations = new Set<Reservation>();
   /** Unproven reservations, oldest first: the order eviction takes them in. */
   const unproven: Reservation[] = [];
@@ -124,6 +125,7 @@ export function directCarrierSocketRoute(deps: DirectCarrierDependencies): Socke
 
   return {
     stop: () => {
+      stopped = true;
       for (const reservation of reservations) {
         reservation.session?.close();
         release(reservation);
@@ -139,6 +141,7 @@ export function directCarrierSocketRoute(deps: DirectCarrierDependencies): Socke
     minimum: 'none',
     caller: 'any',
     accept: async ({ request, params }) => {
+      if (stopped) throw new ApiError(503, 'the direct carrier is stopped', 'plugin_unavailable');
       // A session cannot open a session. The tunnel dispatches a stream's path through this same
       // socket table, and a nested direct session would be a carrier inside a carrier with nobody's
       // locality to stamp on it.
