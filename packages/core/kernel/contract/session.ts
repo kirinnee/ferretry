@@ -264,6 +264,18 @@ export interface HolderWatch {
   regranted(): void;
 }
 
+/** The member-mode proof body; the signature itself is checked through ModeRedemption.prove. */
+export type MemberRedemptionBody =
+  | {
+      readonly act: 'join';
+      readonly code: string;
+      readonly clientName: string;
+      readonly memberKey: string;
+      readonly boxKey: string;
+      readonly passkey?: unknown;
+    }
+  | { readonly act: 'join-options'; readonly code: string; readonly memberKey: string; readonly origin: string };
+
 /** One redemption of a one-time record (a pairing code, a share code), as the kernel hands it to the mode. */
 export interface ModeRedemption {
   readonly proof: ModeProof;
