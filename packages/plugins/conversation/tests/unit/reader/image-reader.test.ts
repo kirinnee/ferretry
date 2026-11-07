@@ -26,7 +26,7 @@ const refusal = async (promise: Promise<unknown>): Promise<TranscriptImageFailur
 const BIG = pngBase64(100_000);
 
 describe('TranscriptImageReader', () => {
-  it('should serve the image a handle names, with its real type and size', async () => {
+  it('G162 should serve the image a handle names, parsed again from the record, with its real type and size', async () => {
     // Arrange
     const transcript = new MemoryTranscript([claudeText(1), claudeUserImage(2, [pngBase64(), jpegBase64()])]);
 
@@ -134,7 +134,7 @@ describe('TranscriptImageReader', () => {
     should(transcript.reads).equal(afterProof + 1);
   });
 
-  it('should give the same strong validator for the same image and a different one for another', async () => {
+  it('R267 should give the same strong validator for the same image and a different one for another', async () => {
     // Arrange
     const transcript = new MemoryTranscript([claudeUserImage(1, [pngBase64(), pngBase64()])]);
     const reader = transcript.reader();
@@ -150,7 +150,7 @@ describe('TranscriptImageReader', () => {
     should(one.etag).match(/^"[A-Za-z0-9_-]+"$/u);
   });
 
-  it('should prove again, never trusting an old proof, when the file has changed', async () => {
+  it('R267 should prove again, never trusting an old proof, when the file has changed', async () => {
     // Arrange
     const transcript = new MemoryTranscript([claudeUserImage(1, [pngBase64()])]);
     const reader = transcript.reader();
