@@ -44,6 +44,15 @@ describe('judgePlugin (the client guard, §9.6)', () => {
     ).deepEqual({ ok: false, reason: 'daemon-newer' });
   });
 
+  it('should say which side to update when the session protocol differs', () => {
+    should(pausedSentence({ ok: false, reason: 'daemon-older' }, 'Board', 'board', 'fy')).containEql(
+      'restart it on the new build with `fy daemon restart`',
+    );
+    should(pausedSentence({ ok: false, reason: 'daemon-newer' }, 'Board', 'board', 'fy')).containEql(
+      'update fy to use it',
+    );
+  });
+
   it('should name the command that fixes each block', () => {
     should(pausedSentence({ ok: false, reason: 'off' }, 'Board', 'board', 'fy')).containEql('`fy plugin on board`');
     should(pausedSentence({ ok: false, reason: 'different' }, 'Board', 'board', 'fy')).containEql(

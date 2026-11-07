@@ -22,7 +22,11 @@ const none = (): readonly string[] => [];
 describe('the plugin graph (§7.6 step 1, §2.4)', () => {
   test('start order puts providers first and core first among ties', () => {
     const plan = planGraph(
-      [plugin('board', { needs: { asks: AsksPort }, provides: { board: BoardPort } }), plugin('agenda', { needs: { board: BoardPort } }), plugin('asks', { provides: { asks: AsksPort } })],
+      [
+        plugin('board', { needs: { asks: AsksPort }, provides: { board: BoardPort } }),
+        plugin('agenda', { needs: { board: BoardPort } }),
+        plugin('asks', { provides: { asks: AsksPort } }),
+      ],
       () => true,
       none,
     );
@@ -32,7 +36,10 @@ describe('the plugin graph (§7.6 step 1, §2.4)', () => {
 
   test('a plugin without its required provider is not started, and its dependents follow', () => {
     const plan = planGraph(
-      [plugin('board', { needs: { asks: AsksPort }, provides: { board: BoardPort } }), plugin('agenda', { needs: { board: BoardPort } })],
+      [
+        plugin('board', { needs: { asks: AsksPort }, provides: { board: BoardPort } }),
+        plugin('agenda', { needs: { board: BoardPort } }),
+      ],
       () => true,
       none,
     );
@@ -55,12 +62,20 @@ describe('the plugin graph (§7.6 step 1, §2.4)', () => {
   });
 
   test('a cycle through taken hooks is refused, naming the plugins', () => {
-    const plan = planGraph([plugin('a'), plugin('b')], () => true, manifest => (manifest.id === 'a' ? ['b'] : ['a']));
+    const plan = planGraph(
+      [plugin('a'), plugin('b')],
+      () => true,
+      manifest => (manifest.id === 'a' ? ['b'] : ['a']),
+    );
     expect(plan.refused.map(refusal => refusal.reason)).toEqual(['cycle', 'cycle']);
   });
 
   test('dependents are everything that transitively needs a plugin', () => {
-    const manifests = [plugin('asks', { provides: { asks: AsksPort } }), plugin('board', { needs: { asks: AsksPort }, provides: { board: BoardPort } }), plugin('agenda', { needs: { board: BoardPort } })];
+    const manifests = [
+      plugin('asks', { provides: { asks: AsksPort } }),
+      plugin('board', { needs: { asks: AsksPort }, provides: { board: BoardPort } }),
+      plugin('agenda', { needs: { board: BoardPort } }),
+    ];
     const plan = planGraph(manifests, () => true, none);
     expect(dependentsOf('asks', plan.order, plan.providers)).toEqual(['board', 'agenda']);
   });

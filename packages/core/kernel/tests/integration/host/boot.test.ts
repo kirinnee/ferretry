@@ -30,10 +30,24 @@ interface BoardApi {
 }
 const BoardPort = definePort<BoardApi>('board');
 const CardMoved = defineEvent('board.card-moved', z.strictObject({ card: z.string() }));
-const Cards = defineState({ name: 'cards', path: 'cards.json', store: 'json', format: 1, schema: z.strictObject({ format: z.literal(1), cards: z.array(z.string()) }) });
+const Cards = defineState({
+  name: 'cards',
+  path: 'cards.json',
+  store: 'json',
+  format: 1,
+  schema: z.strictObject({ format: z.literal(1), cards: z.array(z.string()) }),
+});
 
 function plugins(admission: Admission, events: string[]) {
-  const gate = definePlugin({ id: 'gate', title: 'Gate', version: '5.0.0', api: 5, core: true, kinds: [], provides: { admission: AdmissionPort } });
+  const gate = definePlugin({
+    id: 'gate',
+    title: 'Gate',
+    version: '5.0.0',
+    api: 5,
+    core: true,
+    kinds: [],
+    provides: { admission: AdmissionPort },
+  });
   const board = definePlugin({
     id: 'board',
     title: 'Board',
@@ -43,7 +57,14 @@ function plugins(admission: Admission, events: string[]) {
     kinds: [],
     provides: { board: BoardPort },
     actions: {
-      routes: [route('GET /v1/board', { minimum: 'authenticated', caller: 'any', audit: { skip: 'test' }, guard: { none: 'test' } })],
+      routes: [
+        route('GET /v1/board', {
+          minimum: 'authenticated',
+          caller: 'any',
+          audit: { skip: 'test' },
+          guard: { none: 'test' },
+        }),
+      ],
     },
     data: { state: [Cards], publishes: [CardMoved] },
     hooks: { takes: [{ hook: DoctorChecks }] },
@@ -58,7 +79,16 @@ function plugins(admission: Admission, events: string[]) {
     kinds: [],
     needs: { board: BoardPort },
     data: { subscribes: [CardMoved] },
-    actions: { routes: [route('GET /v1/agenda', { minimum: 'authenticated', caller: 'any', audit: { skip: 'test' }, guard: { none: 'test' } })] },
+    actions: {
+      routes: [
+        route('GET /v1/agenda', {
+          minimum: 'authenticated',
+          caller: 'any',
+          audit: { skip: 'test' },
+          guard: { none: 'test' },
+        }),
+      ],
+    },
   });
   const voice = definePlugin({
     id: 'voice',
@@ -67,7 +97,16 @@ function plugins(admission: Admission, events: string[]) {
     api: 5,
     core: false,
     kinds: [],
-    actions: { routes: [route('GET /v1/voice', { minimum: 'authenticated', caller: 'any', audit: { skip: 'test' }, guard: { none: 'test' } })] },
+    actions: {
+      routes: [
+        route('GET /v1/voice', {
+          minimum: 'authenticated',
+          caller: 'any',
+          audit: { skip: 'test' },
+          guard: { none: 'test' },
+        }),
+      ],
+    },
   });
   return [
     implementDaemon(gate, { build: () => ({ provides: { admission } }) }),
@@ -89,7 +128,14 @@ function plugins(admission: Admission, events: string[]) {
               return jsonResponse({ cards: 1 });
             },
           },
-          hooks: { 'doctor.checks': () => [{ id: 'board-ok', item: { id: 'board-ok', title: 'Board', run: async () => ({ state: 'ok', detail: 'fine' }) } }] },
+          hooks: {
+            'doctor.checks': () => [
+              {
+                id: 'board-ok',
+                item: { id: 'board-ok', title: 'Board', run: async () => ({ state: 'ok', detail: 'fine' }) },
+              },
+            ],
+          },
         };
       },
     }),
@@ -166,7 +212,12 @@ describe('boot (§7.6)', () => {
     const home = await freshHome();
     await mkdir(home, { recursive: true });
     await writeFile(`${home}/notes.txt`, 'mine');
-    const outcome = await bootHost({ home, version: '5.0.0', implementations: [], adapters: realAdapters(home, () => {}, { binary: 'fy' }) });
+    const outcome = await bootHost({
+      home,
+      version: '5.0.0',
+      implementations: [],
+      adapters: realAdapters(home, () => {}, { binary: 'fy' }),
+    });
     expect(outcome.kind).toBe('refused');
     expect(outcome.kind === 'refused' && outcome.sentence).toContain('has no home.json');
     expect(await readFile(`${home}/notes.txt`, 'utf8')).toBe('mine');
@@ -177,7 +228,12 @@ describe('boot (§7.6)', () => {
     await (await boot(home)).stop();
     running.splice(0);
     await writeFile(`${home}/state/kernel/identity.json`, '{"format":2}');
-    const outcome = await bootHost({ home, version: '5.0.0', implementations: [], adapters: realAdapters(home, () => {}, { binary: 'fy' }) });
+    const outcome = await bootHost({
+      home,
+      version: '5.0.0',
+      implementations: [],
+      adapters: realAdapters(home, () => {}, { binary: 'fy' }),
+    });
     expect(outcome.kind).toBe('refused');
   });
 
@@ -188,12 +244,18 @@ describe('boot (§7.6)', () => {
     expect(body(await host.dispatch(request('GET', '/v1/agenda')))).toEqual({ boardCount: 1 });
     const skeleton = await host.dispatch(request('GET', '/v1/voice'));
     expect(skeleton.status).toBe(503);
-    expect(body(skeleton)).toEqual({ error: 'Voice is not built yet in this version of Ferretry.', code: 'plugin_unavailable' });
+    expect(body(skeleton)).toEqual({
+      error: 'Voice is not built yet in this version of Ferretry.',
+      code: 'plugin_unavailable',
+    });
     expect(admission.asked).toEqual(['route GET /v1/board', 'route GET /v1/agenda', 'route GET /v1/voice']);
   });
 
   test('GET /v1/health answers the protocol and version pre-auth; /v1/plugins without a projection shows core only', async () => {
-    const host = await boot(await freshHome(), recordingAdmission(path => path === '/v1/health'));
+    const host = await boot(
+      await freshHome(),
+      recordingAdmission(path => path === '/v1/health'),
+    );
     expect(body(await host.dispatch(request('GET', '/v1/health')))).toEqual({ protocol: 1, version: '5.0.0' });
     const permissive = await boot(await freshHome());
     const inventory = body(await permissive.dispatch(request('GET', '/v1/plugins'))) as { plugins: { id: string }[] };
@@ -229,15 +291,26 @@ describe('boot (§7.6)', () => {
     const home = await freshHome();
     const impls = plugins(recordingAdmission(), []).map(impl =>
       impl.manifest.id === 'board'
-        ? implementDaemon(impl.manifest, { build: () => { throw new Error('no'); } })
+        ? implementDaemon(impl.manifest, {
+            build: () => {
+              throw new Error('no');
+            },
+          })
         : impl,
     );
-    const outcome = await bootHost({ home, version: '5.0.0', implementations: impls, adapters: realAdapters(home, () => {}, { binary: 'fy' }) });
+    const outcome = await bootHost({
+      home,
+      version: '5.0.0',
+      implementations: impls,
+      adapters: realAdapters(home, () => {}, { binary: 'fy' }),
+    });
     if (outcome.kind !== 'running') throw new Error('refused');
     running.push(outcome.host);
     expect(outcome.host.plugins.get('board')?.status).toBe('failed');
     expect(outcome.host.plugins.get('agenda')?.status).toBe('failed');
-    expect((body(await outcome.host.dispatch(request('GET', '/v1/board'))) as { code: string }).code).toBe('plugin_failed');
+    expect((body(await outcome.host.dispatch(request('GET', '/v1/board'))) as { code: string }).code).toBe(
+      'plugin_failed',
+    );
   });
 
   test('a damaged state file makes the plugin answer store_damaged naming the file', async () => {
@@ -256,11 +329,20 @@ describe('boot (§7.6)', () => {
 
 describe('GET /v1/plugins is projected by Gate (§9.6)', () => {
   test('Gate’s projection decides what a caller sees; a throwing projection shows core only', async () => {
-    const limited = { ...recordingAdmission(), inventory: (_request: unknown, entries: readonly { id: string }[]) => entries.filter(entry => entry.id !== 'voice') };
+    const limited = {
+      ...recordingAdmission(),
+      inventory: (_request: unknown, entries: readonly { id: string }[]) =>
+        entries.filter(entry => entry.id !== 'voice'),
+    };
     const host = await boot(await freshHome(), limited as never);
     const seen = body(await host.dispatch(request('GET', '/v1/plugins'))) as { plugins: { id: string; on: boolean }[] };
     expect(seen.plugins.map(plugin => plugin.id).sort()).toEqual(['agenda', 'board', 'gate', 'kernel']);
-    const broken = { ...recordingAdmission(), inventory: () => { throw new Error('x'); } };
+    const broken = {
+      ...recordingAdmission(),
+      inventory: () => {
+        throw new Error('x');
+      },
+    };
     const other = await boot(await freshHome(), broken as never);
     const core = body(await other.dispatch(request('GET', '/v1/plugins'))) as { plugins: { id: string }[] };
     expect(core.plugins.map(plugin => plugin.id)).toEqual(['kernel', 'gate']);
@@ -281,8 +363,12 @@ describe('config/plugins.yaml (§3.6)', () => {
 
   test('turning a plugin on is a loosening edit; turning it off is not', async () => {
     const { PluginsConfig } = await import('../../../plugin.ts');
-    expect(PluginsConfig.loosens({ plugins: { voice: 'off' } }, { plugins: { voice: 'on' } })).toEqual(['turns voice on']);
-    expect(PluginsConfig.loosens({ plugins: { voice: 'off' } }, { plugins: {} })).toEqual(['turns voice on (its off line was removed)']);
+    expect(PluginsConfig.loosens({ plugins: { voice: 'off' } }, { plugins: { voice: 'on' } })).toEqual([
+      'turns voice on',
+    ]);
+    expect(PluginsConfig.loosens({ plugins: { voice: 'off' } }, { plugins: {} })).toEqual([
+      'turns voice on (its off line was removed)',
+    ]);
     expect(PluginsConfig.loosens({ plugins: {} }, { plugins: { voice: 'off' } })).toEqual([]);
   });
 });

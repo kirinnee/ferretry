@@ -1,5 +1,13 @@
 import type { ChildEnvironment, ChildEnvironmentOpener } from '../../contract/bound.ts';
-import type { ChildHandle, FetchPort, SpawnOptions, SpawnPort, SpawnResult, WorkerHandle, WorkersPort } from '../../contract/ports.ts';
+import type {
+  ChildHandle,
+  FetchPort,
+  SpawnOptions,
+  SpawnPort,
+  SpawnResult,
+  WorkerHandle,
+  WorkersPort,
+} from '../../contract/ports.ts';
 
 /**
  * The unrestricted spawn adapter; the host wraps it per plugin (`restrictSpawn`). The child sees the base the host
@@ -11,7 +19,10 @@ export function bunSpawn(
   baseEnv: Readonly<Record<string, string>>,
   opener: () => ChildEnvironmentOpener | undefined = () => undefined,
 ): SpawnPort {
-  const env = (options?: SpawnOptions): Record<string, string> => ({ ...baseEnv, ...resolveEnv(options?.env, opener()) });
+  const env = (options?: SpawnOptions): Record<string, string> => ({
+    ...baseEnv,
+    ...resolveEnv(options?.env, opener()),
+  });
   const start = (program: string, args: readonly string[], options?: SpawnOptions): ChildHandle => {
     const child = Bun.spawn([program, ...args], {
       ...(options?.cwd === undefined ? {} : { cwd: options.cwd }),

@@ -1,5 +1,5 @@
 {
   "extends": "../tsconfig.json",
   "include": ["./**/*.ts"],
-  "exclude": ["**/node_modules", "./gen/**"]
+  "exclude": ["**/node_modules", "./gen/**", "./rebuild/parity.ts"]
 }

@@ -86,7 +86,11 @@ interface SocketData {
   attach: (downstream: import('../contract/socket.ts').SocketDownstream) => Promise<SocketHandler>;
 }
 
-function serve(host: RunningHost, privileged: (peer: string | undefined) => boolean | 'refuse', bind: { unix: string } | { hostname: string; port: number }): Server<SocketData> {
+function serve(
+  host: RunningHost,
+  privileged: (peer: string | undefined) => boolean | 'refuse',
+  bind: { unix: string } | { hostname: string; port: number },
+): Server<SocketData> {
   const fetch = async (request: Request, server: Server<SocketData>): Promise<Response | undefined> => {
     const peer = 'unix' in bind ? undefined : server.requestIP(request)?.address;
     const decided = privileged(peer);
@@ -183,16 +187,17 @@ export async function listenLocal(
   const socketPath = runSocketPath(options.home);
   // A Unix socket path longer than the platform limit (104 bytes on macOS, 108 on Linux) binds nothing usable.
   if (Buffer.byteLength(socketPath) > 103)
-    throw new Error(`The home path is too long for the local socket (${socketPath}); point FY_HOME at a shorter folder.`);
+    throw new Error(
+      `The home path is too long for the local socket (${socketPath}); point FY_HOME at a shorter folder.`,
+    );
   await options.remove(socketPath);
   const unix = serve(host, () => true, { unix: socketPath });
   await options.chmod(socketPath, 0o600);
   const hostname = options.hostname ?? '127.0.0.1';
-  const tcp = serve(
-    host,
-    peer => (peer !== undefined && isLoopbackPeer(peer) ? true : 'refuse'),
-    { hostname, port: options.port },
-  );
+  const tcp = serve(host, peer => (peer !== undefined && isLoopbackPeer(peer) ? true : 'refuse'), {
+    hostname,
+    port: options.port,
+  });
   const bind: DaemonRun = {
     format: 1,
     socket: socketPath,

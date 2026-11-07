@@ -44,5 +44,8 @@
     "unresolved": "off",
     "binaries": "off",
     "enumMembers": "off"
+  },
+  "ignoreIssues": {
+    "packages/plugins/shells/contract/wire.ts": ["duplicates"]
   }
 }

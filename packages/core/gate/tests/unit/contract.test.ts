@@ -43,7 +43,8 @@ credentialProviderConformance('FakeDeviceProvider', () => {
   return {
     provider,
     enrol: () => {
-      const id = holder(`dev-${(next += 1)}`);
+      next += 1;
+      const id = holder(`dev-${next}`);
       provider.enrol(id);
       return id;
     },
@@ -57,7 +58,8 @@ stepUpWitnessConformance('FakeStepUpWitness', () => {
   return {
     witness,
     enrol: async () => {
-      const id = holder(`dev-${(next += 1)}`);
+      next += 1;
+      const id = holder(`dev-${next}`);
       witness.register(id, 'credA');
       return {
         holder: id,

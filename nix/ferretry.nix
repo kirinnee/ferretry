@@ -57,7 +57,9 @@ let
     filter = isInstallInput;
   };
 
-  bunInstall = "bun install --frozen-lockfile --production --ignore-scripts --os=linux --os=darwin --cpu=x64 --cpu=arm64 --filter=fy --filter=@ferretry/kernel";
+  # Every workspace package is installed (`--filter='*'`, production dependencies only): the registry generator loads each
+  # package's manifest at build time, and a manifest resolves `@ferretry/kernel` through its own package-scoped links.
+  bunInstall = "bun install --frozen-lockfile --production --ignore-scripts --os=linux --os=darwin --cpu=x64 --cpu=arm64 --filter='*'";
 
   # A fixed-output derivation's store path is its name and its outputHash, nothing else, so a store
   # that already holds that path never re-runs `bun install` — not when the lockfile moves, not when
@@ -88,7 +90,7 @@ let
     outputHashAlgo = "sha256";
     # When a build reports a hash mismatch here, the install inputs changed what it installs: take the
     # `got:` hash. It is the same on every builder, so a mismatch is never fixed by rerunning.
-    outputHash = "sha256-amqCX5iuJK43s1iiMBqhN6Lb8I/cVJATANzt62s8bck=";
+    outputHash = "sha256-1oBwCdLLkBTl7zJ4cQu78sTW/gseAdwJWfShcC5HTdM=";
     dontFixup = true;
 
     buildPhase = ''
@@ -155,7 +157,7 @@ let
           exit 1
         }
         # The hosts import the git-ignored generated registries; the source tree has none, so generate them
-        # (scripts/local/gen.sh, which says so while the generator is not on this branch yet).
+        # (scripts/local/gen.sh).
         bash scripts/local/gen.sh
         ${lib.concatMapStringsSep "\n" (
           executable:

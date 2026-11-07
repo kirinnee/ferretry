@@ -259,7 +259,7 @@ export default definePlugin({
       verb('terminal handback', { summary: 'hand a terminal you took over back to the ferret' }),
       verb('terminal handover', { summary: 'let the ferret use a terminal you opened' }),
       verb('terminal control', { summary: 'show which terminals a ferret is driving, taken over, or handed to it' }),
-      verb('attach', { summary: "attach this terminal to a ferret's pane (Ctrl-b d detaches)" }),
+      verb('attach', { summary: 'attach to the terminal a ferret runs in (Ctrl-b d detaches)' }),
     ],
   },
 

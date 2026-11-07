@@ -5,7 +5,14 @@ import { jsonResponse, textResponse } from '../../../contract/http.ts';
 import type { ApiRequest } from '../../../contract/http.ts';
 import { DaemonRunSchema } from '../../../contract/run.ts';
 import type { Listening, RunningHost } from '../../../host/host.ts';
-import { isLoopbackPeer, listenLocal, recordedBindAddress, runBindPath, runSocketPath, toResponse } from '../../../host/listener.ts';
+import {
+  isLoopbackPeer,
+  listenLocal,
+  recordedBindAddress,
+  runBindPath,
+  runSocketPath,
+  toResponse,
+} from '../../../host/listener.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -119,7 +126,11 @@ describe('the local listener (§2.2, §4.8)', () => {
       await listener.stop();
       await rm(home, { recursive: true, force: true });
     });
-    await fetch('http://localhost/v1/x', { method: 'POST', body: 'x'.repeat(64), unix: runSocketPath(home) } as RequestInit);
+    await fetch('http://localhost/v1/x', {
+      method: 'POST',
+      body: 'x'.repeat(64),
+      unix: runSocketPath(home),
+    } as RequestInit);
     expect(refused).toBe('body_too_large');
   });
 });

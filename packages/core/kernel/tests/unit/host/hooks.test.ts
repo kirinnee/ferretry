@@ -41,7 +41,14 @@ const manualDeadline = (): Deadline & { fire(): void } => {
 };
 
 const offerer = plugin('gate', {
-  offers: [{ hook: Decide }, { hook: SecurityDecide }, { hook: Transform }, { hook: Provide }, { hook: Contribute }, { hook: Observe }],
+  offers: [
+    { hook: Decide },
+    { hook: SecurityDecide },
+    { hook: Transform },
+    { hook: Provide },
+    { hook: Contribute },
+    { hook: Observe },
+  ],
 });
 
 describe('the hooks engine (§3.5)', () => {
@@ -61,7 +68,15 @@ describe('the hooks engine (§3.5)', () => {
     const deadline = manualDeadline();
     const taker = plugin('p1', { takes: [{ hook: Decide }] });
     const { engine } = HookEngine.plan([offerer, taker], silentLog, deadline);
-    engine.attach('p1', { 't.decide': () => { throw new Error('x'); } }, 'live');
+    engine.attach(
+      'p1',
+      {
+        't.decide': () => {
+          throw new Error('x');
+        },
+      },
+      'live',
+    );
     expect((await engine.decide(Decide, undefined)).allow).toBe(false);
     engine.attach('p1', { 't.decide': () => new Promise(() => {}) }, 'live');
     const waiting = engine.decide(Decide, undefined);
@@ -126,9 +141,26 @@ describe('the hooks engine (§3.5)', () => {
     const b = plugin('p2', { takes: [{ hook: Contribute }] });
     const c = plugin('p3', { takes: [{ hook: Contribute }] });
     const { engine } = HookEngine.plan([offerer, a, b, c], silentLog, manualDeadline());
-    engine.attach('p1', { 't.contribute': () => [{ id: 'z', order: 1, item: 1 }, { id: 'a', order: 2, item: 2 }] }, 'live');
+    engine.attach(
+      'p1',
+      {
+        't.contribute': () => [
+          { id: 'z', order: 1, item: 1 },
+          { id: 'a', order: 2, item: 2 },
+        ],
+      },
+      'live',
+    );
     engine.attach('p2', { 't.contribute': () => [{ id: 'z', order: 0, item: 3 }] }, 'live');
-    engine.attach('p3', { 't.contribute': () => { throw new Error('x'); } }, 'live');
+    engine.attach(
+      'p3',
+      {
+        't.contribute': () => {
+          throw new Error('x');
+        },
+      },
+      'live',
+    );
     expect(engine.contributions(Contribute).map(item => item.id)).toEqual(['z', 'a']);
     expect(engine.notes).toHaveLength(2);
   });
@@ -142,7 +174,16 @@ describe('the hooks engine (§3.5)', () => {
     const a = plugin('p1', { takes: [{ hook: Observe }] });
     const { engine } = HookEngine.plan([offerer, a], silentLog, manualDeadline());
     let heard = 0;
-    engine.attach('p1', { 't.observe': () => { heard += 1; throw new Error('x'); } }, 'live');
+    engine.attach(
+      'p1',
+      {
+        't.observe': () => {
+          heard += 1;
+          throw new Error('x');
+        },
+      },
+      'live',
+    );
     expect(() => engine.observe(Observe, undefined)).not.toThrow();
     await Promise.resolve();
     await Promise.resolve();

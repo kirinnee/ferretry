@@ -43,9 +43,13 @@ export async function identityFromPem(pem: string): Promise<DaemonIdentity> {
   const pkcs8 = pemBody(pem);
   const exportable = await crypto.subtle.importKey('pkcs8', pkcs8, { name: 'Ed25519' }, true, ['sign']);
   const jwk = await crypto.subtle.exportKey('jwk', exportable);
-  const publicKey = await crypto.subtle.importKey('jwk', { kty: jwk.kty, crv: jwk.crv, x: jwk.x }, { name: 'Ed25519' }, true, [
-    'verify',
-  ]);
+  const publicKey = await crypto.subtle.importKey(
+    'jwk',
+    { kty: jwk.kty, crv: jwk.crv, x: jwk.x },
+    { name: 'Ed25519' },
+    true,
+    ['verify'],
+  );
   const spki = new Uint8Array(await crypto.subtle.exportKey('spki', publicKey));
   const fingerprint = base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', spki)));
   const signer = await crypto.subtle.importKey('pkcs8', pkcs8, { name: 'Ed25519' }, false, ['sign']);
@@ -53,7 +57,8 @@ export async function identityFromPem(pem: string): Promise<DaemonIdentity> {
     fingerprint,
     daemonId: `fy_daemon_${fingerprint}`,
     publicKeySpki: spki,
-    sign: async (bytes: Uint8Array) => new Uint8Array(await crypto.subtle.sign({ name: 'Ed25519' }, signer, owned(bytes))),
+    sign: async (bytes: Uint8Array) =>
+      new Uint8Array(await crypto.subtle.sign({ name: 'Ed25519' }, signer, owned(bytes))),
   });
 }
 
@@ -78,7 +83,10 @@ export async function loadIdentity(fs: HostFs, home: string): Promise<IdentityOu
   try {
     const parsed = IdentityFileSchema.safeParse(JSON.parse(await fs.readText(path)));
     if (!parsed.success)
-      return { kind: 'damaged', sentence: `${path} is not a daemon identity file this daemon can read; restore it from a backup.` };
+      return {
+        kind: 'damaged',
+        sentence: `${path} is not a daemon identity file this daemon can read; restore it from a backup.`,
+      };
     await fs.chmod(path, 0o600);
     return { kind: 'ready', identity: await identityFromPem(parsed.data.privateKeyPem), created: false };
   } catch {

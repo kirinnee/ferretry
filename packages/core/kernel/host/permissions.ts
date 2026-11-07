@@ -35,7 +35,9 @@ export function hostAllowed(host: string, declared: readonly string[]): boolean 
   const lower = host.toLowerCase();
   return declared.some(entry => {
     const pattern = entry.toLowerCase();
-    return pattern.startsWith('*.') ? lower.endsWith(pattern.slice(1)) && lower !== pattern.slice(2) : lower === pattern;
+    return pattern.startsWith('*.')
+      ? lower.endsWith(pattern.slice(1)) && lower !== pattern.slice(2)
+      : lower === pattern;
   });
 }
 

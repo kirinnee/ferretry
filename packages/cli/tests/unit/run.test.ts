@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { definePlugin, implementCli, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, implementCli, type PluginClient, verb } from '@ferretry/kernel/manifest';
 import should from 'should';
 import { runFy } from '../../src/lib/run.ts';
 import {
@@ -58,6 +58,19 @@ describe('runFy', () => {
     const { world, io } = fakeWorld({ registry: registryOf(skeletonEntry(boardManifest)) });
     should(await runFy(['board'], world)).equal(69);
     should(io.stderr()).equal('Board is not built yet in this version of Ferretry.\n');
+  });
+
+  it('should refuse a verb that subscribes to events, which this build does not offer', async () => {
+    // Arrange
+    const calls: { client?: PluginClient } = {};
+    const { world } = fakeWorld({ registry: registryOf(boardEntry(calls)) });
+    await runFy(['board'], world);
+
+    // Act
+    const subscribing = (): unknown => calls.client?.subscribe({} as never, () => undefined);
+
+    // Assert
+    should(subscribing).throw(/events are not available/u);
   });
 
   it('should not open a connection for a verb that never calls the daemon', async () => {

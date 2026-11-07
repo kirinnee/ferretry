@@ -358,7 +358,9 @@ describe('config files: live reading and watching', () => {
     const h = configHarness();
     h.fs.seed(h.path('updates.yaml'), 'limit: 5\n');
     let heard = 0;
-    h.files.port('updates').watch(updatesDef as never, () => void (heard += 1));
+    h.files.port('updates').watch(updatesDef as never, () => {
+      heard += 1;
+    });
     await h.files.reload();
     expect(heard).toBe(0);
     await h.files.reload();
@@ -366,7 +368,9 @@ describe('config files: live reading and watching', () => {
     h.fs.seed(h.path('updates.yaml'), 'limit: 4\n');
     await h.files.reload();
     expect(heard).toBe(1);
-    const cancel = h.files.port('updates').watch(updatesDef as never, () => void (heard += 10));
+    const cancel = h.files.port('updates').watch(updatesDef as never, () => {
+      heard += 10;
+    });
     cancel();
     h.fs.seed(h.path('updates.yaml'), 'limit: 3\n');
     await h.files.reload();
@@ -377,7 +381,9 @@ describe('config files: live reading and watching', () => {
     const h = configHarness();
     await h.files.write('updates', updatesDef, undefined, 'limit: 5\n');
     let heard = 0;
-    h.files.port('updates').watch(updatesDef as never, () => void (heard += 1));
+    h.files.port('updates').watch(updatesDef as never, () => {
+      heard += 1;
+    });
     await h.files.write('updates', updatesDef, undefined, 'limit: 50\n');
     expect(heard).toBe(0);
   });
@@ -389,7 +395,9 @@ describe('config files: live reading and watching', () => {
     h.files.port('updates').watch(updatesDef as never, () => {
       throw new Error('listener bug');
     });
-    h.files.port('updates').watch(updatesDef as never, () => void (heard += 1));
+    h.files.port('updates').watch(updatesDef as never, () => {
+      heard += 1;
+    });
     h.fs.seed(h.path('updates.yaml'), 'limit: 4\n');
     await h.files.reload();
     expect(heard).toBe(1);
