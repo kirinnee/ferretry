@@ -1,0 +1,274 @@
+/**
+ * The wire shape of a machine's setup: the first-run scan, installing a tool, the Clone export and
+ * migrating an old account format.
+ *
+ * Every object is strict, so a field the daemon grew without declaring it is REFUSED rather than stripped.
+ */
+import { describe, it } from 'bun:test';
+import should from 'should';
+import * as setup from '../../src/lib/fleet-setup.ts';
+import { INSTANT } from '../fixtures.ts';
+import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
+
+const installed = { harness: 'claude', label: 'Claude Code', installed: true };
+const missing = {
+  harness: 'codex',
+  label: 'Codex',
+  installed: false,
+  install: { kind: 'runnable', command: 'npm install -g @openai/codex' },
+};
+
+const harnessScan = {
+  harness: 'claude',
+  installed: true,
+  account: { state: 'signed-in', email: 'person@example.test' },
+  instructions: { name: 'main', source: '/h/.claude/CLAUDE.md', bytes: 120 },
+  settings: { source: '/h/.claude/settings.json', count: 3, hooks: 1 },
+  mcpServers: ['notes'],
+  skills: ['review'],
+  secretKeys: ['env.ANTHROPIC_API_KEY'],
+  missingCommands: ['uvx'],
+  problems: [],
+};
+
+const scan = {
+  machine: 'work-linux',
+  format: 'none',
+  tools: [installed, missing],
+  harnesses: [harnessScan],
+  instructionsIdentical: true,
+  runtimes: [{ harness: 'claude', name: 'claude-default', profile: 'default' }],
+  updates: [{ reference: 'instructions/main', sources: ['/h/.claude/CLAUDE.md'] }],
+  duplicates: [{ harness: 'claude', existing: 'claude-default', suggested: 'claude-default-2' }],
+  notes: [{ harness: 'claude', text: 'CLAUDE.md and AGENTS.md say the same thing.' }],
+  importing: { available: true },
+};
+
+const bundle = {
+  format: 'ferretry-clone',
+  version: 1,
+  machine: 'studio-mac',
+  exportedAt: INSTANT,
+  credentials: [{ id: 'claude-you', harness: 'claude', label: 'you', email: 'person@example.test' }],
+  components: { instructions: { main: { file: 'components/instructions/main.md' } } },
+  profiles: { default: { layers: ['instructions/main'] } },
+  runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: false } },
+  files: [{ path: 'components/instructions/main.md', content: '# Main' }],
+  notCopied: [{ path: '/etc/hosts', reason: 'outside the asset tree' }],
+};
+
+const KEY = 'abcdefghijklmnopqrstuvwxyz';
+const bundleV2 = { ...bundle, version: 2, daemon: 'daemon-source', keys: { 'instructions/main': KEY } };
+
+const cases: SchemaCase[] = [
+  {
+    name: 'FleetToolInstallPlanSchema',
+    schema: setup.FleetToolInstallPlanSchema,
+    value: { kind: 'no-package-manager', reason: 'No brew or npm was found.', manualCommand: 'npm i -g x' },
+  },
+  { name: 'FleetSetupToolSchema', schema: setup.FleetSetupToolSchema, value: missing },
+  {
+    name: 'FleetToolInstallRequestSchema',
+    schema: setup.FleetToolInstallRequestSchema,
+    value: { harnesses: ['claude', 'codex'] },
+  },
+  {
+    name: 'FleetToolInstallOutcomeSchema',
+    schema: setup.FleetToolInstallOutcomeSchema,
+    value: {
+      harness: 'codex',
+      outcome: 'failed',
+      cause: 'needs-admin',
+      reason: 'Installing needs administrator rights.',
+      manualCommand: 'sudo npm i -g x',
+    },
+  },
+  {
+    name: 'FleetToolInstallResultSchema',
+    schema: setup.FleetToolInstallResultSchema,
+    value: {
+      outcomes: [
+        { harness: 'claude', outcome: 'already-installed' },
+        { harness: 'codex', outcome: 'installed', command: 'npm i -g x' },
+      ],
+    },
+  },
+  {
+    name: 'FleetHostLoginSchema',
+    schema: setup.FleetHostLoginSchema,
+    value: { state: 'unreadable', reason: 'The keychain is locked.' },
+  },
+  { name: 'FleetHarnessScanSchema', schema: setup.FleetHarnessScanSchema, value: harnessScan },
+  { name: 'FleetSetupRuntimeSchema', schema: setup.FleetSetupRuntimeSchema, value: scan.runtimes[0] },
+  { name: 'FleetSetupUpdateSchema', schema: setup.FleetSetupUpdateSchema, value: scan.updates[0] },
+  { name: 'FleetSetupDuplicateSchema', schema: setup.FleetSetupDuplicateSchema, value: scan.duplicates[0] },
+  { name: 'FleetSetupScanSchema', schema: setup.FleetSetupScanSchema, value: scan },
+  { name: 'FleetCloneCredentialSchema', schema: setup.FleetCloneCredentialSchema, value: bundle.credentials[0] },
+  { name: 'FleetCloneFileSchema', schema: setup.FleetCloneFileSchema, value: bundle.files[0] },
+  { name: 'FleetCloneBundleSchema', schema: setup.FleetCloneBundleSchema, value: bundle },
+  { name: 'FleetCloneBundleSchema v2', schema: setup.FleetCloneBundleSchema, value: bundleV2 },
+  { name: 'FleetCloneBundleV1Schema', schema: setup.FleetCloneBundleV1Schema, value: bundle },
+  { name: 'FleetCloneBundleV2Schema', schema: setup.FleetCloneBundleV2Schema, value: bundleV2 },
+  { name: 'OriginKeySchema', schema: setup.OriginKeySchema, value: KEY },
+  { name: 'CloneKeyReferenceSchema', schema: setup.CloneKeyReferenceSchema, value: 'profile/default' },
+  { name: 'FleetSetupRefusalCodeSchema', schema: setup.FleetSetupRefusalCodeSchema, value: 'fleet_setup_busy' },
+];
+
+const rejects = (name: string, schema: SchemaCase['schema'], value: unknown): SchemaCase => ({ name, schema, value });
+
+describe('the machine setup wire contract', () => {
+  it('should round-trip every shape a browser reads and every request it may send', () => {
+    // Act & Assert
+    assertRoundTrips(cases);
+    assertCoversEverySchema(setup, cases);
+  });
+
+  it('should accept every variant of a tool, and an install outcome', () => {
+    // Arrange
+    const values: SchemaCase[] = [
+      { name: 'installed tool', schema: setup.FleetSetupToolSchema, value: installed },
+      {
+        name: 'manual install plan',
+        schema: setup.FleetToolInstallPlanSchema,
+        value: { kind: 'runnable', command: 'brew install claude' },
+      },
+      {
+        name: 'installed outcome',
+        schema: setup.FleetToolInstallOutcomeSchema,
+        value: { harness: 'codex', outcome: 'installed', command: 'npm i -g x' },
+      },
+      {
+        name: 'already installed outcome',
+        schema: setup.FleetToolInstallOutcomeSchema,
+        value: { harness: 'codex', outcome: 'already-installed' },
+      },
+      {
+        name: 'a minimal clone credential',
+        schema: setup.FleetCloneCredentialSchema,
+        value: { id: 'codex-work', harness: 'codex' },
+      },
+    ];
+
+    // Act & Assert
+    assertRoundTrips(values);
+  });
+
+  it('should carry a dual login’s halves, and parse without them for a login that drives one CLI', () => {
+    // Act
+    const dual = setup.FleetCloneCredentialSchema.parse({
+      ...bundle.credentials[0],
+      store: 'environment',
+      claude: { env: { ANTHROPIC_AUTH_TOKEN: '${secret:S}' } },
+      codex: { env: { OPENROUTER_API_KEY: '${secret:S}' }, codexProvider: { id: 'openrouter' } },
+    });
+    const single = setup.FleetCloneCredentialSchema.parse(bundle.credentials[0]);
+
+    // Assert
+    should(dual.claude).deepEqual({ env: { ANTHROPIC_AUTH_TOKEN: '${secret:S}' } });
+    should(dual.codex).deepEqual({ env: { OPENROUTER_API_KEY: '${secret:S}' }, codexProvider: { id: 'openrouter' } });
+    should(single).not.have.property('claude');
+    should(single).not.have.property('codex');
+  });
+
+  it('should name the bundle format and every refusal code', () => {
+    // Act & Assert
+    should(setup.FLEET_CLONE_BUNDLE_FORMAT).equal('ferretry-clone');
+    should([...setup.FLEET_SETUP_REFUSAL_CODES]).deepEqual([
+      'fleet_setup_unreadable',
+      'fleet_setup_refused',
+      'fleet_setup_unauthorized',
+      'fleet_setup_busy',
+    ]);
+  });
+
+  it('should refuse an unknown field, a wrong discriminator and a malformed value', () => {
+    // Arrange / Act / Assert
+    assertRejects([
+      rejects('an install plan of an unknown kind', setup.FleetToolInstallPlanSchema, { kind: 'magic' }),
+      rejects('a runnable plan with an extra key', setup.FleetToolInstallPlanSchema, {
+        kind: 'runnable',
+        command: 'x',
+        sudo: true,
+      }),
+      rejects('a missing tool with no install plan', setup.FleetSetupToolSchema, { ...installed, installed: false }),
+      rejects('an installed tool carrying a plan', setup.FleetSetupToolSchema, {
+        ...installed,
+        install: missing.install,
+      }),
+      rejects('a tool of an unknown harness', setup.FleetSetupToolSchema, { ...installed, harness: 'gemini' }),
+      rejects('an install request naming no harness', setup.FleetToolInstallRequestSchema, { harnesses: [] }),
+      rejects('an install request naming three harnesses', setup.FleetToolInstallRequestSchema, {
+        harnesses: ['claude', 'codex', 'claude'],
+      }),
+      rejects('an install request still carrying a confirmation', setup.FleetToolInstallRequestSchema, {
+        harnesses: ['claude'],
+        operatorPassword: 'fake-password-123',
+      }),
+      rejects('an install outcome of an unknown kind', setup.FleetToolInstallOutcomeSchema, {
+        harness: 'claude',
+        outcome: 'exploded',
+      }),
+      rejects('a failed install with an unknown cause', setup.FleetToolInstallOutcomeSchema, {
+        harness: 'claude',
+        outcome: 'failed',
+        cause: 'gremlins',
+        reason: 'x',
+        manualCommand: 'x',
+      }),
+      rejects('a login with an unknown state', setup.FleetHostLoginSchema, { state: 'maybe' }),
+      rejects('a login carrying a token', setup.FleetHostLoginSchema, { state: 'signed-in', token: 'fake' }),
+      rejects('a harness scan carrying a secret value', setup.FleetHarnessScanSchema, {
+        ...harnessScan,
+        secretValues: { ANTHROPIC_API_KEY: 'fake' },
+      }),
+      rejects('a scan with an unknown format', setup.FleetSetupScanSchema, { ...scan, format: 'version-3' }),
+      rejects('a scan with an extra key', setup.FleetSetupScanSchema, { ...scan, extra: true }),
+      rejects('an unavailable act with no reason', setup.FleetSetupScanSchema, {
+        ...scan,
+        importing: { available: false },
+      }),
+      rejects('a clone credential with an extra key', setup.FleetCloneCredentialSchema, {
+        ...bundle.credentials[0],
+        token: 'fake',
+      }),
+      rejects('a clone file with a numeric content', setup.FleetCloneFileSchema, { path: 'a', content: 1 }),
+      rejects('a bundle of another format', setup.FleetCloneBundleSchema, { ...bundle, format: 'other' }),
+      rejects('a bundle of another version', setup.FleetCloneBundleSchema, { ...bundle, version: 3 }),
+      rejects('a version 1 bundle carrying keys', setup.FleetCloneBundleSchema, { ...bundle, keys: {} }),
+      rejects('a version 2 bundle without its keys', setup.FleetCloneBundleSchema, { ...bundleV2, keys: undefined }),
+      rejects('a version 2 bundle without its daemon', setup.FleetCloneBundleSchema, {
+        ...bundleV2,
+        daemon: undefined,
+      }),
+      rejects('a version 2 bundle with an extra key', setup.FleetCloneBundleSchema, { ...bundleV2, history: [] }),
+      rejects('a key that is not 16 bytes of base32', setup.OriginKeySchema, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'),
+      rejects('a key that is too short', setup.OriginKeySchema, KEY.slice(1)),
+      rejects('a key with a padding character', setup.OriginKeySchema, `${KEY.slice(1)}=`),
+      rejects('a key naming no subject', setup.CloneKeyReferenceSchema, 'main'),
+      rejects('a bundle naming a key that is not a key', setup.FleetCloneBundleSchema, {
+        ...bundleV2,
+        keys: { 'instructions/main': 'x' },
+      }),
+      rejects('a bundle with an extra key', setup.FleetCloneBundleSchema, { ...bundle, history: [] }),
+      rejects('a bundle exported at no instant', setup.FleetCloneBundleSchema, { ...bundle, exportedAt: 'yesterday' }),
+      rejects('a bundle not carrying its files', setup.FleetCloneBundleSchema, { ...bundle, files: undefined }),
+      rejects('a refusal code nobody declared', setup.FleetSetupRefusalCodeSchema, 'fleet_setup_bad'),
+    ]);
+  });
+
+  it('should accept a version 1 and a version 2 bundle, and cap the keys a version 2 bundle carries', () => {
+    // Arrange
+    const keysOf = (count: number): Record<string, string> =>
+      Object.fromEntries(Array.from({ length: count }, (_, index) => [`instructions/item-${String(index)}`, KEY]));
+
+    // Act & Assert
+    should(setup.FleetCloneBundleSchema.parse(bundle).version).equal(1);
+    should(setup.FleetCloneBundleSchema.parse(bundleV2).version).equal(2);
+    should(
+      setup.FleetCloneBundleSchema.safeParse({ ...bundleV2, keys: keysOf(setup.CLONE_BUNDLE_KEYS_LIMIT) }).success,
+    ).be.true();
+    should(
+      setup.FleetCloneBundleSchema.safeParse({ ...bundleV2, keys: keysOf(setup.CLONE_BUNDLE_KEYS_LIMIT + 1) }).success,
+    ).be.false();
+  });
+});
