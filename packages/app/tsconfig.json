@@ -7,6 +7,6 @@
     // `import.meta.env`.
     "types": ["bun", "vite/client"]
   },
-  "include": ["src", "tests", "scripts", "vite.config.ts"],
+  "include": ["src", "tests", "scripts", "vite.config.ts", "tailwind.config.ts"],
   "exclude": []
 }

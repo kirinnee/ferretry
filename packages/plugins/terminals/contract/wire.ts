@@ -271,3 +271,43 @@ export const TerminalsConfigSchema = z.strictObject({
   global: z.number().int().min(1).max(TERMINAL_MAX_GLOBAL).default(TERMINAL_MAX_GLOBAL),
 });
 export type TerminalsConfig = z.infer<typeof TerminalsConfigSchema>;
+
+// ─── state/terminals/terminals.json (format 1) ────────────────────────────────────────────────────────────────────
+
+/** A tmux pane id as tmux prints one (`%12`). It is the `tmux` runner's handle. */
+export const PaneIdSchema = z.string().regex(/^%(?:0|[1-9][0-9]*)$/u, 'a pane id is % then a number');
+
+/**
+ * One ferret's pane, as today's durable terminal pane registration recorded it (`DurableTerminalPaneRegistrar`), less
+ * the `daemonId`/`sessionId` it was filed under: here it is keyed by the ferret, inside this daemon's own state. A pid
+ * is not an identity, so the whole incarnation is kept — pane, pid and its start ticks — and every reader proves the
+ * whole tuple again before acting on it.
+ */
+export const RegisteredPaneSchema = z.strictObject({
+  tmuxSession: z.string().min(1),
+  paneId: PaneIdSchema,
+  pid: z.number().int().positive(),
+  processStartTicks: NonNegativeIntegerSchema,
+  /** tmux's `session_created`, in epoch seconds, when it was known. */
+  sessionCreated: z.number().int().positive().optional(),
+});
+export type RegisteredPane = z.infer<typeof RegisteredPaneSchema>;
+
+/** One terminal surface control change (`surface.*`), as today's session journal carried it; parsed again on replay. */
+export const RecordedSurfaceEventSchema = z.object({ type: z.string().min(1), data: z.unknown() });
+
+/** How many control changes are kept per ferret: the newest decide. */
+export const SURFACE_EVENTS_KEPT_PER_FERRET = 256;
+
+/**
+ * Terminals' state document. The terminals themselves are NOT here: as today, each terminal's registry lives on its
+ * own tmux session (`@fy_terminal_*` options), so it is exactly as live as the session. This holds what tmux does not:
+ * each ferret's registered pane (the processes, console and attach proofs, and limits) and the control history.
+ */
+export const TerminalsStateSchema = z.object({
+  panes: z.record(z.string().min(1), RegisteredPaneSchema).default({}),
+  events: z
+    .record(z.string().min(1), z.array(RecordedSurfaceEventSchema).max(SURFACE_EVENTS_KEPT_PER_FERRET))
+    .default({}),
+});
+export type TerminalsState = z.infer<typeof TerminalsStateSchema>;

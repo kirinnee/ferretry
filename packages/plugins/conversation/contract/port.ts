@@ -1,7 +1,7 @@
 import { definePort } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
-import type { AnswerRequest } from './wire-question.ts';
+import type { AnswerRequest, Question } from './wire-question.ts';
 import type {
   AttachmentDownload,
   AttachmentUploadRequest,
@@ -19,6 +19,10 @@ import type {
   LogSearch,
   LogSearchOptions,
   MessagesTailOptions,
+  OwnerWords,
+  OwnerWordsOptions,
+  TranscriptEventsOptions,
+  TranscriptEventTail,
   TranscriptPage,
 } from './wire-read.ts';
 import type { WorkRelatedRequest, WorkRelatedResponse, WorkSearchQuery, WorkSearchResponse } from './wire-search.ts';
@@ -82,6 +86,19 @@ export interface ConversationApi {
     ferret: FerretId,
     options?: MessagesTailOptions & { readonly cursor?: string },
   ): Promise<Result<TranscriptPage, ConversationRefusal>>;
+  /**
+   * The newest events of the ferret's transcript: messages, the tool calls it made and their results, oldest first. What
+   * Board reads to see what a turn did. Refuses `not_found` when no transcript can be proved to be the ferret's.
+   */
+  transcriptEvents(
+    ferret: FerretId,
+    options?: TranscriptEventsOptions,
+  ): Promise<Result<TranscriptEventTail, ConversationRefusal>>;
+  /**
+   * What the owner said to the ferret, turn by turn, as far as the records say who wrote each. Strict refuses when a
+   * record cannot be read (`unreadable`), where the default answers with what it could.
+   */
+  ownerWords(ferret: FerretId, options?: OwnerWordsOptions): Promise<Result<OwnerWords, ConversationRefusal>>;
   logPage(ferret: FerretId, options?: LogPageOptions): Promise<Result<LogPage, ConversationRefusal>>;
   logSearch(
     ferret: FerretId,
@@ -90,6 +107,8 @@ export interface ConversationApi {
   ): Promise<Result<LogSearch, ConversationRefusal>>;
 
   // questions
+  /** The question the ferret is waiting on, as the harness asked it; none when it asks nothing. */
+  question(ferret: FerretId): Promise<Question | undefined>;
   answer(ferret: FerretId, request: AnswerRequest): Promise<Result<void, ConversationRefusal>>;
 
   // compaction

@@ -1,0 +1,22 @@
+╭─── Claude Code v2.1.220 ────────────────────────────────────────────────────────────────────────────────────────╮
+│                                             │ Tips for getting started                                          │
+│                Welcome back!                │ Run /init to create a CLAUDE.md file with instructions for Claude │
+│                                             │ ───────────────────────────────────────────────────────────────── │
+│                   ▐▛███▜▌                   │ What's new                                                        │
+│                  ▝▜█████▛▘                  │ Check the Claude Code changelog for updates                       │
+│                    ▘▘ ▝▝                    │                                                                   │
+│                                             │                                                                   │
+│   Opus 5 (1M context) · API Usage Billing   │                                                                   │
+│          /home/dev/project           │                                                                   │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+❯ GO please
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Exit plan mode?
+
+  Claude wants to exit plan mode
+
+  ❯ 1. Yes
+    2. No

@@ -12,7 +12,8 @@ import {
   verb,
 } from '@ferretry/kernel/manifest';
 import { AskAnswered, AsksPort, AskSources } from '@ferretry/core-asks/contract';
-import { FerretsPort, SitrepLines, StartDecide } from '@ferretry/core-ferrets/contract';
+import { FerretStarted, FerretsPort, SitrepLines, StartDecide } from '@ferretry/core-ferrets/contract';
+import { ConversationPort, SearchSources, TurnEnded } from '@ferretry/plugin-conversation/contract';
 import {
   BOARD_SKIPPED_AUDIT,
   BOARD_SWITCHED_AUDIT,
@@ -24,20 +25,15 @@ import {
   CARD_CREATED_AUDIT,
   CARD_STARTED_AUDIT,
   CardAskRefSchema,
+  CardProgressToolInputSchema,
   CardMoved,
   CardMoving,
   CardSchema,
   CountersFileSchema,
   cap,
+  FocusFileSchema,
   GithubFileSchema,
   LANES_CHANGED_AUDIT,
-  narrowing,
-  PLAN_COMMITTED_AUDIT,
-  PLAN_CONFIRMED_AUDIT,
-  PLAN_REVOKED_AUDIT,
-  PLAN_STAGE_DROPPED_AUDIT,
-  PLAN_STAGED_AUDIT,
-  PlanToolInputSchema,
   SweepFileSchema,
 } from './contract/index.ts';
 
@@ -59,6 +55,8 @@ const BOARDS = defineState({
   schema: BoardFileSchema,
 });
 const SWEEP = defineState({ name: 'sweep', path: 'sweep.json', store: 'json', format: 1, schema: SweepFileSchema });
+/** Which card each ferret works on, its delegation anchor and its standing skip (Ferrets keeps none of it). */
+const FOCUS = defineState({ name: 'focus', path: 'focus.json', store: 'json', format: 1, schema: FocusFileSchema });
 const GITHUB = defineState({ name: 'github', path: 'github.json', store: 'json', format: 1, schema: GithubFileSchema });
 
 const BOARD_CONFIG = defineConfig({
@@ -70,13 +68,8 @@ const BOARD_CONFIG = defineConfig({
 
 const fleetUse = cap('fleet', 'use');
 const fleetConfigure = cap('fleet', 'configure');
-const terminalUse = cap('terminal', 'use');
-const terminalConfigure = cap('terminal', 'configure');
 const read = { skip: 'a read of cards and lanes' } as const;
 const cardText = { none: 'cards are authored text; no pane, page or vault text' } as const;
-const planText = {
-  none: 'plan lines name accounts by name only, and only to a device that may read accounts',
-} as const;
 
 /**
  * Board (§2.3): cards and lanes for the work you ask for, with each card's progress and its PRs.
@@ -87,11 +80,10 @@ const planText = {
  * Ownership calls (skeletons-work):
  *  - Board owns the lane-set and switch routes of today's `board-projects` mount (`/v1/board/projects/…`): they live in
  *    `state/board/boards/<project>.json`. Projects owns only the `/v1/projects` registry.
- *  - Task plans (`card_plan` and the owner's approval routes) are Board's per §2.3 `Today: … task-plans`; the plan's
- *    approval ask is Accounts' `sign-in-approval` source.
+ *  - Task plans (`card_plan`, the owner's approval routes) are Accounts' (DECISIONS-1 #16: `/v1/accounts/plans`), not Board's.
  *  - Deleted as compatibility: `/v1/tasks`, `/v1/sessions/:id/tasks` (legacy-tasks), `POST /v1/board/import`, `fy board import`.
  *  - There is no GitHub route today: the watch is a job over `state/board/github.json` and `gh`.
- *  - The `/v1/sessions/:id/…` paths are `/v1/ferrets/:ferretId/…`; `tasks` are `cards`; the plan routes say `plans`.
+ *  - The `/v1/sessions/:id/…` paths are `/v1/ferrets/:ferretId/…`; `tasks` are `cards`;
  */
 export default definePlugin({
   id: 'board',
@@ -111,7 +103,8 @@ export default definePlugin({
   ],
 
   needs: { asks: AsksPort, ferrets: FerretsPort },
-  uses: { projects: ProjectsPort },
+  // Conversation (optional, D2 #12): reopen and done delivery, nudges, alerts and the transcript tail. Off: held with a warning.
+  uses: { projects: ProjectsPort, conversation: ConversationPort },
   provides: { board: BoardPort },
 
   actions: {
@@ -228,71 +221,6 @@ export default definePlugin({
         audit: { record: BOARD_SWITCHED_AUDIT },
         guard: { none: 'a boolean' },
       }),
-
-      route('GET /v1/plans', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: terminalUse,
-        noStore: true,
-        audit: read,
-        guard: planText,
-      }),
-      route('GET /v1/ferrets/:ferretId/plans/:plan', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: terminalUse,
-        noStore: true,
-        audit: read,
-        guard: planText,
-      }),
-      route('POST /v1/ferrets/:ferretId/plans/:plan/approval', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: terminalConfigure,
-        noStore: true,
-        audit: { record: PLAN_STAGED_AUDIT },
-        guard: planText,
-      }),
-      route('GET /v1/ferrets/:ferretId/plans/:plan/approval/:stage', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: terminalUse,
-        noStore: true,
-        audit: read,
-        guard: planText,
-      }),
-      route('POST /v1/ferrets/:ferretId/plans/:plan/approval/:stage/commit', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: terminalConfigure,
-        noStore: true,
-        audit: { record: PLAN_COMMITTED_AUDIT },
-        guard: planText,
-      }),
-      route('POST /v1/ferrets/:ferretId/plans/:plan/approval/:stage/confirm-in-app', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: terminalConfigure,
-        noStore: true,
-        audit: { record: PLAN_CONFIRMED_AUDIT },
-        guard: planText,
-      }),
-      route('DELETE /v1/ferrets/:ferretId/plans/:plan/approval/:stage', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: terminalUse,
-        noStore: true,
-        audit: { record: PLAN_STAGE_DROPPED_AUDIT },
-        guard: planText,
-      }),
-      route('POST /v1/ferrets/:ferretId/plans/:plan/revoke', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: narrowing(terminalUse),
-        noStore: true,
-        audit: { record: PLAN_REVOKED_AUDIT },
-        guard: planText,
-      }),
     ],
     agentTools: [
       // NEW name (§3.3): writes one card's progress; the same act as `POST /v1/board/cards/:cardId` with action `edit`.
@@ -303,20 +231,14 @@ export default definePlugin({
         audit: { record: CARD_ACTED_AUDIT },
         guard: cardText,
         summary: 'Rewrite one card’s progress (now, doneSoFar, next).',
-      }),
-      // Today's `card_plan` (`task.plan`): before a card, ask the owner once to pre-approve its sign-ins and pastes.
-      tool('card_plan', {
-        minimum: 'authenticated',
-        caller: 'any',
-        audit: { record: PLAN_STAGED_AUDIT },
-        guard: planText,
-        summary: 'Before a card, ask the owner once to pre-approve its sign-ins and pastes.',
-        input: PlanToolInputSchema,
+        input: CardProgressToolInputSchema,
       }),
     ],
     cli: [
       verb('board', { summary: 'the project board' }),
       verb('board status', { summary: 'whether this project uses the board' }),
+      verb('board on', { summary: 'switch this project’s board on; only the owner' }),
+      verb('board off', { summary: 'switch this project’s board off; only the owner' }),
       verb('board lanes propose', { summary: 'propose a lane set from a template' }),
       verb('board lanes show', { summary: 'a project’s lanes' }),
       verb('board lanes edit', { summary: 'edit a project’s lanes; the owner confirms' }),
@@ -369,7 +291,7 @@ export default definePlugin({
   },
 
   data: {
-    state: [CARDS, COUNTERS, BOARDS, SWEEP, GITHUB],
+    state: [CARDS, COUNTERS, BOARDS, SWEEP, FOCUS, GITHUB],
     config: [BOARD_CONFIG],
     readModels: ['cards', 'progress', 'lanes'],
     publishes: [CardMoved, BoardChanged],
@@ -382,11 +304,16 @@ export default definePlugin({
       { hook: AskSources, key: 'card', schema: CardAskRefSchema },
       { hook: StartDecide, priority: 60 },
       { hook: SitrepLines, priority: 50 },
+      // The turn-end checks (D2 #12) and a started ferret's card (Ferrets' additive `ferret.started`).
+      { hook: TurnEnded },
+      { hook: FerretStarted },
+      // Board's cards are work Conversation's search finds (`search.sources`).
+      { hook: SearchSources },
     ],
     offers: [{ hook: CardMoving, timeoutMs: 200 }],
   },
 
   instructions: [{ id: 'board', text: 'instructions/board.md', when: { role: 'any' } }],
   doctor: ['board-store'],
-  permissions: { roots: [], network: ['api.github.com'], spawn: ['gh'], secrets: [] },
+  permissions: { roots: [], network: ['api.github.com'], spawn: ['gh', 'git', 'ssh'], secrets: [] },
 });

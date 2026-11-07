@@ -604,9 +604,9 @@ its own).
   call on the admin token cannot be told from the owner at the machine. The board and the lane sets record
   it as `admin-token` — "the admin token (the owner at this machine, or a ferret without its own
   credential)" — and never plainly as the owner; only a paired device's act is the owner's. It keeps the
-  owner's authority. The label travels BESIDE the actor (`actorVia`, `createdByVia`, `byVia`, `confirmedVia`),
-  never as a new actor kind, so an older app, CLI or a downgraded daemon drops it and reads the owner, as it
-  always did, instead of refusing the board. **Declared gap:** the agenda still records such a call's
+  owner's authority. On a card the label is the owner actor's own `via` (`{ kind: "owner", via: "admin-token" }`,
+  history, clarifications and `createdBy` alike), never a new actor kind; a lane set's confirmation keeps
+  `confirmedVia` beside it. **Declared gap:** the agenda still records such a call's
   answers and closes as the owner's ("done by you") — [agenda.md](agenda.md).
 
 ### Cutting a ferret off
@@ -852,7 +852,7 @@ The wrapper appends each ferret's own sections to that same value at launch — 
 the lessons teaching, each when its switch is on ([hypermedia.md](hypermedia.md#delivered-as-system-instructions-per-ferret)).
 
 The server's own `initialize` instructions are one line; `lessons_suggest` files a lesson through
-`POST /v1/agent/lessons` ([learning.md](learning.md)); `instructions` answers, from the environment the
+`POST /v1/agent/lessons` ([lessons.md](lessons.md)); `instructions` answers, from the environment the
 server inherited, which of those sections this ferret launched with — the `fy instructions` report
 ([hypermedia.md](hypermedia.md#delivered-as-system-instructions-per-ferret)).
 

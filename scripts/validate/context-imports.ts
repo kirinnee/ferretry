@@ -40,6 +40,14 @@ export function refusal(edge: ImportEdge): string | undefined {
   }
   if (toStd) return undefined;
 
+  // The app shell's public browser facilities are the common seam for app halves.
+  // Tests may also use its shared harness; daemon/CLI halves and private src paths may not.
+  if (toPkg.name === '@ferretry/app') {
+    if ((from === 'app' || from === 'tests') && ['@ferretry/app', '@ferretry/app/ui'].includes(edge.specifier))
+      return undefined;
+    if (from === 'tests' && edge.specifier === '@ferretry/app/testing') return undefined;
+  }
+
   if (same) {
     if (from === 'tests' || from === 'other' || from === 'root') return undefined;
     if (from.startsWith('kernel-')) {
@@ -70,6 +78,10 @@ export function refusal(edge: ImportEdge): string | undefined {
       return from === 'tests' || from === 'contract-testing' || from === 'kernel-testing'
         ? undefined
         : `${to === 'kernel-testing' ? '@ferretry/kernel/testing' : `${toPkg.name}/contract/testing`} is for tests only`;
+    case 'kernel-worker':
+      return from === 'daemon' || from === 'tests' || from === 'kernel-testing'
+        ? undefined
+        : "@ferretry/kernel/worker is imported only by a daemon half's worker module";
     case 'kernel-host':
       return edge.fromPkg.kind === 'shell' || from === 'tests' || from === 'kernel-testing'
         ? undefined

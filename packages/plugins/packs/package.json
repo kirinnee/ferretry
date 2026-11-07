@@ -19,7 +19,19 @@
   "dependencies": {
     "@ferretry/kernel": "workspace:*",
     "@ferretry/std": "workspace:*",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "@ferretry/core-ferrets": "workspace:*",
+    "@ferretry/core-gate": "workspace:*",
+    "@ferretry/plugin-runtimes": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@ferretry/app": "workspace:*",
+    "lucide-react": "^0.468.0"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^20.11.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
+  }
 }

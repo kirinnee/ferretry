@@ -1,4 +1,4 @@
-import type { JsonValue, Result } from '@ferretry/std';
+import type { Duration, Instant, JsonValue, Result } from '@ferretry/std';
 import type {
   ApiOf,
   ContributeHook,
@@ -13,7 +13,8 @@ import type {
   ProvideHook,
   TransformHook,
 } from '../contract/define.ts';
-import type { Cancel, KernelPorts } from '../contract/ports.ts';
+import type { DoctorFinding } from '../contract/kernel.ts';
+import type { Cancel, KernelPorts, StatePort } from '../contract/ports.ts';
 import type { CallContext, MemberRouteHandler, RouteHandler } from '../contract/route.ts';
 import type { SocketAccept } from '../contract/socket.ts';
 import type { Manifest } from './types.ts';
@@ -39,6 +40,10 @@ export type SettingsIdsOf<M> = Field<Elem<Ui<M>, 'settings'>, 'id'>;
 export type RendererKeysOf<M> = Field<Elem<Ui<M>, 'renderers'>, 'key'>;
 export type SubscribesOf<M> = Elem<Data<M>, 'subscribes'>;
 export type TakesOf<M> = Elem<Hooks<M>, 'takes'>;
+export type DoctorIdsOf<M> = M extends { readonly doctor: readonly (infer D extends string)[] } ? D : never;
+type NetworkEntryOf<M> = M extends { readonly permissions: { readonly network: readonly (infer E)[] } } ? E : never;
+export type ResolverIdsOf<M> =
+  NetworkEntryOf<M> extends infer E ? (E extends { readonly resolver: infer R extends string } ? R : never) : never;
 
 type TokensOf<M, K extends 'needs' | 'uses' | 'provides'> = M extends { readonly [P in K]: infer T } ? T : {};
 
@@ -87,6 +92,8 @@ export interface HookInvoker {
   decide<I>(hook: DecideHook<string, I>, input: I): Promise<HookDecision>;
   transform<V>(hook: TransformHook<string, V>, value: V): Promise<Result<V, string>>;
   provider<K extends string, V>(hook: ProvideHook<string, K, V>, key: K): V | 'unavailable';
+  /** The declaring plugin id, even when off, failed or skeleton; undefined when nobody declares that key. */
+  declaredProvider<K extends string, V>(hook: ProvideHook<string, K, V>, key: K): string | undefined;
   providers<K extends string, V>(hook: ProvideHook<string, K, V>): ReadonlyMap<K, V>;
   contributions<I>(hook: ContributeHook<string, I>): readonly Contribution<I>[];
 }
@@ -109,6 +116,12 @@ export interface ToolResult {
 
 export type ToolHandler = (call: CallContext, input: unknown) => Promise<ToolResult>;
 
+/** A declared network resolver: the hosts it allows right now, from the plugin's own config/state only. */
+export type NetworkResolver = () => readonly string[];
+
+/** One declared `fy doctor` check: reads only the plugin's own ports; never a secret in `detail` or `fix`. */
+export type DoctorRun = () => Promise<DoctorFinding>;
+
 /** What `build` returns: one implementation for everything the manifest declares, nothing more (`manifest-match`). */
 export type DaemonHalf<M extends Manifest> = Section<'routes', { readonly [K in RouteKeysOf<M>]: RouteHandler }> &
   Section<'sockets', { readonly [K in SocketKeysOf<M>]: SocketAccept }> &
@@ -116,7 +129,17 @@ export type DaemonHalf<M extends Manifest> = Section<'routes', { readonly [K in 
   Section<'tools', { readonly [K in ToolNamesOf<M>]: ToolHandler }> &
   Section<'provides', PortsOf<TokensOf<M, 'provides'>>> &
   Section<'hooks', HookImplsOf<M>> &
-  Section<'subscribers', SubscribersOf<M>>;
+  Section<'subscribers', SubscribersOf<M>> & /**
+   * A declared check with no run still boots: `fy doctor` reports it as a failure that names it (`has no
+   * implementation`), so a missing check is seen, never silent. A run for an undeclared id is refused.
+   */
+  { readonly doctor?: { readonly [K in DoctorIdsOf<M>]?: DoctorRun } } & Section<
+    'resolvers',
+    { readonly [K in ResolverIdsOf<M>]: NetworkResolver }
+  > & {
+    /** Once per boot after state and ports are ready, under the home lock, before listeners. Best effort; at most 5 seconds. */
+    readonly beforeListen?: (ctx: DaemonContext<M>) => Promise<void>;
+  };
 
 export interface DaemonImplementation<M extends Manifest = Manifest> {
   readonly half: 'daemon';
@@ -136,6 +159,37 @@ export function implementDaemon<const M extends Manifest>(
 
 // ─── app half ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** One open socket route, from the plugin's side (the app shell's `TransportSocket`). */
+export interface PluginSocket {
+  send(frame: string | Uint8Array): void;
+  close(): void;
+}
+
+/** What a plugin hears on a socket route (the app shell's `SocketListeners`). */
+export interface PluginSocketListeners {
+  readonly onFrame: (frame: string | Uint8Array) => void;
+  readonly onClose: (reason: string) => void;
+}
+
+/**
+ * The only headers a half may set on a call (lead decision 7): today's idempotency id for a move or a fork. Anything
+ * else is the shell's (credentials, the contract hash).
+ */
+export interface PluginCallHeaders {
+  readonly 'x-fy-request-id'?: string;
+}
+
+/** `PluginClient.conditional`'s request: the etag the caller holds, and the same allow-listed headers as `call`. */
+export interface PluginConditionalInit {
+  readonly ifNoneMatch?: string;
+  readonly headers?: PluginCallHeaders;
+}
+
+/** A conditional read's answer: the body with its etag, or `304` when the held etag is still current. */
+export type PluginConditionalAnswer =
+  | { readonly status: 200; readonly etag?: string; readonly body: unknown }
+  | { readonly status: 304; readonly etag?: string };
+
 /** The per-daemon generated client a half talks through (§9.6). It checks the plugin's inventory entry first. */
 export interface PluginClient {
   call<Answer = unknown>(
@@ -144,9 +198,25 @@ export interface PluginClient {
       readonly params?: Readonly<Record<string, string>>;
       readonly query?: Readonly<Record<string, string>>;
       readonly body?: unknown;
+      /** Allow-listed: `x-fy-request-id` only, through the same contract-hash guard as the call. */
+      readonly headers?: PluginCallHeaders;
     },
   ): Promise<Answer>;
   subscribe<Name extends string, Payload>(event: EventDef<Name, Payload>, listener: (payload: Payload) => void): Cancel;
+  /**
+   * A guarded duplex socket route (F2): `key` is a socket the manifest (or a contract it imports) declares, opened
+   * through the same contract-hash guard as `call`. Optional until the app shell and the CLI fill it in.
+   */
+  socket?(key: string, params: Readonly<Record<string, string>>, listeners: PluginSocketListeners): PluginSocket;
+  /**
+   * A conditional GET (today's per-connection etag/304 list read, the held fleet list R502): sends `If-None-Match`
+   * and answers `304` without a body when it still matches. Optional until the app shell and the CLI fill it in.
+   */
+  conditional?(
+    key: string,
+    params: Readonly<Record<string, string>>,
+    init?: PluginConditionalInit,
+  ): Promise<PluginConditionalAnswer>;
 }
 
 /** A UI component, framework-neutral here; the app shell narrows it to React. */
@@ -203,10 +273,42 @@ export interface VerbInvocation {
   readonly options: Readonly<Record<string, string | boolean | readonly string[]>>;
 }
 
+/**
+ * The environment a CLI half may read (lead decision 21): `FY_SESSION_ID` and the names the fy shell allows, and
+ * nothing else; a name the shell does not pass reads `undefined`.
+ */
+export type CliEnvironment = Readonly<Partial<Record<string, string>>>;
+
 export interface CliContext<M extends Manifest> {
   readonly manifest: M;
   readonly client: PluginClient;
   readonly io: TerminalIo;
+  /**
+   * UTF-8 text from a path (relative to the CLI working directory); '-' reads stdin.
+   * As today's readRecipe (Bun.file/Bun.stdin.text): no reader size cap. The caller validates length
+   * (a sign-in recipe, for example, must be 1–4000 characters).
+   */
+  readText?(path: string): Promise<string>;
+  /** Own declared opaque defs only; private directory operations and stat require named trees. Optional until fy supplies it. */
+  readonly ownState?: Pick<
+    StatePort,
+    'write' | 'pathOf' | 'stat' | 'remove' | 'list' | 'removeEmptyDirectory' | 'createPrivateDirectory'
+  >;
+  /** The time, for a verb that reports or waits. Optional until the fy shell fills it in. */
+  readonly clock?: { now(): Instant; nowMs(): number };
+  /** Waits, cancellable (a poll loop). */
+  sleep?(delay: Duration, signal?: AbortSignal): Promise<void>;
+  /** `FY_SESSION_ID` and the shell's allowed names only. */
+  readonly env?: CliEnvironment;
+  /** Asks a question at the terminal; `undefined` when there is no terminal to ask at. */
+  prompt?(question: string): Promise<string | undefined>;
+  /** A yes/no at the terminal; `false` when there is no terminal. */
+  confirm?(question: string): Promise<boolean>;
+  /**
+   * Reads a secret typed at the terminal without echoing it (Vault's CLI): the answer goes straight to the caller, is
+   * never logged, never kept, never in a transcript. `undefined` when there is no terminal.
+   */
+  promptHidden?(question: string): Promise<string | undefined>;
 }
 
 /** Answers the exit code. */

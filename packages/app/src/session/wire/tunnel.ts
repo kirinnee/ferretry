@@ -75,9 +75,11 @@ export function relayDataByteBudget(maxPlaintextBytes: number): number {
 export const RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE = 4441 as const;
 
 /** How long one proof of the device key authorises one session for. */
+/** @public A docs/relay-protocol.md number kept with the client's copy of the protocol; the daemon and the rendezvous enforce it. */
 export const ACCESS_LEASE_SECONDS = 900 as const;
 
 /** How long before the lease ends the daemon asks the device to sign again. */
+/** @public A docs/relay-protocol.md number kept with the client's copy of the protocol; the daemon and the rendezvous enforce it. */
 export const ACCESS_RENEW_LEAD_SECONDS = 120 as const;
 
 /**
@@ -88,6 +90,7 @@ export const ACCESS_RENEW_LEAD_SECONDS = 120 as const;
  * proof, which costs it nothing a person notices — and a session that nobody's device can open again
  * (revoked, expired) ends for good.
  */
+/** @public A docs/relay-protocol.md number kept with the client's copy of the protocol; the daemon and the rendezvous enforce it. */
 export const MAX_SESSION_SECONDS = 43_200 as const;
 
 /**

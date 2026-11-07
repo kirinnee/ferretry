@@ -163,6 +163,28 @@ export type ObserveResult<F extends InputTargetFacts = InputTargetFacts> =
     }
   | { readonly ok: false; readonly reason: 'target_gone' | 'unsupported' };
 
+/** A provider whose own sign-in page shows a push number (today's `push-number.ts`). */
+export type PushNumberProvider = 'okta' | 'microsoft' | 'google' | 'duo';
+
+/**
+ * One look at a page for the number a push approval shows (today's `BrowserPushNumberRead`, docs/input-requests.md,
+ * "Approve on your phone"), as the BROWSER answers it: where the page is (its origin and document, read before and
+ * after the look), which provider's challenge the document is when one's document test held, and the number when one
+ * was found. The reader decides whether to believe it (the origin and the session's scripts); the browser only reads.
+ */
+export interface PushNumberRead {
+  /** `scheme://host[:port]` of the page, from the browser. */
+  readonly origin: string;
+  /** The document the look was made in, read before it; a different one after is `missing: 'changed'`. */
+  readonly navigationId: string;
+  /** The provider whose challenge this document is, when its document test held (with or without a number). */
+  readonly provider?: PushNumberProvider;
+  /** The number: 1 to 6 digits, from the provider's own view, visible and no one can type into, in the main frame. */
+  readonly number?: { readonly value: string; readonly from: PushNumberProvider; readonly frameOrigin: string };
+  /** Why there is no number: none recognised, or the page changed meanwhile. */
+  readonly missing?: 'none-found' | 'changed';
+}
+
 /** Today's `TypeResult`. */
 export type TypeResult = 'typed' | 'target_gone' | 'target_changed' | 'uncertain' | 'guard_refused' | 'reader_changed';
 
@@ -236,6 +258,16 @@ export interface InputTargetAdapter {
     facts: InputTargetFacts,
     fieldIds: readonly string[],
   ): Promise<'hidden' | 'shown' | 'aborted'>;
+  /**
+   * Phone approval's look (today's `PageInputTarget.pushNumber`): the push number the ferret's page `key` shows now,
+   * read in the page's own queue from a provider's own challenge view only, never an element a ferret points at, with
+   * the page's id so a page opened again under the name is told apart. Nothing when the page is gone or this target
+   * cannot read one. Accounts' phone approval reaches the page through this, not through a Browsers import.
+   */
+  pushNumber?(
+    ferret: FerretId,
+    key: string,
+  ): Promise<{ readonly pageId: string; readonly read: PushNumberRead } | undefined>;
 }
 
 export const InputTargets = defineHook('input.targets', {

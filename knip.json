@@ -18,7 +18,12 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/*": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
+      "entry": [
+        "tests/**/*.test.{ts,tsx}",
+        "tests/types/*.types.ts",
+        "app/views/*.tsx",
+        "tests/**/fixtures/**/*.{ts,tsx}"
+      ],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/cli": {
@@ -26,7 +31,7 @@
       "project": ["**/*.ts"]
     },
     "packages/app": {
-      "entry": ["src/index.ts", "src/main.tsx", "tests/**/*.test.{ts,tsx}"],
+      "entry": ["src/main.tsx", "src/worker/service-worker.ts", "scripts/*.ts", "tests/**/*.test.{ts,tsx}"],
       "project": ["**/*.{ts,tsx}"]
     }
   },

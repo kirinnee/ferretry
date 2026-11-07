@@ -65,7 +65,7 @@ async function fixture(plugin = 'logins') {
       const info = await fs.lstat(await checked(path));
       if (info === undefined) return undefined;
       if (info.kind !== 'file' && info.kind !== 'directory') throw new Error('not a file or directory');
-      return { kind: info.kind, size: info.size, modified: instantFromEpochMs(info.mtimeMs) };
+      return { kind: info.kind, size: info.size, modified: instantFromEpochMs(info.mtimeMs), mode: 0o600, links: 1 };
     },
     ensurePrivateDirectory: async path => mkdir(await checked(path), { recursive: true, mode: 0o700 }).then(() => {}),
     isSymbolicLink: async path => {
@@ -342,6 +342,8 @@ test('owned passive usage supplies measured windows; a list never rotates Codex,
               });
               return {
                 pid: 8,
+                pipes: [],
+                closePipes: () => undefined,
                 stdout: new ReadableStream({
                   start(controller) {
                     controller.close();
@@ -457,6 +459,8 @@ for (const scenario of sharingCases) {
                     });
                 return {
                   pid: 7,
+                  pipes: [],
+                  closePipes: () => undefined,
                   stdout: new ReadableStream({
                     start(controller) {
                       controller.enqueue(

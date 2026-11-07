@@ -20,7 +20,7 @@ const OWNER = /^[a-z][a-z0-9-]{0,39}$/u;
 const NAME = /^[a-z][a-z0-9-]{0,63}$/u;
 
 /** The shell's own owner id. Not a plugin id; no plugin may be called `app`. */
-export const APP_OWNER = 'app';
+const APP_OWNER = 'app';
 
 function checked(kind: string, value: string, pattern: RegExp): string {
   if (!pattern.test(value)) throw new Error(`not a valid ${kind}: ${JSON.stringify(value)}`);

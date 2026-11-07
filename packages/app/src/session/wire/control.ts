@@ -20,7 +20,7 @@ import {
 const ProtocolIdSchema = z.literal(RELAY_PROTOCOL_ID);
 
 /** Limits a rendezvous publishes so an endpoint never has to guess what it will refuse. */
-export const RelayLimitsSchema = z.strictObject({
+const RelayLimitsSchema = z.strictObject({
   maxFrameBytes: z.literal(MAX_FRAME_BYTES),
   creditWindowFrames: z.literal(CREDIT_WINDOW_FRAMES),
   maxSessions: z.literal(MAX_SESSIONS_PER_RENDEZVOUS),
@@ -28,7 +28,7 @@ export const RelayLimitsSchema = z.strictObject({
 });
 export type RelayLimits = z.infer<typeof RelayLimitsSchema>;
 
-export const ClientControlMessageSchema = z.discriminatedUnion('t', [
+const ClientControlMessageSchema = z.discriminatedUnion('t', [
   /** Rendezvous → client: a session identifier was assigned and the daemon is present. */
   z.strictObject({ t: z.literal('ready'), protocol: ProtocolIdSchema, limits: RelayLimitsSchema }),
   /** Rendezvous → either endpoint: this session has ended, and why. */
