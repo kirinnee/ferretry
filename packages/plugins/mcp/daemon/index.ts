@@ -36,7 +36,9 @@ const NOT_YET = (what: string): never => {
  * - Projects (an optional `uses`) gives the registered roots, so a subfolder of a registered project — a worktree
  *   kept inside it included — is that project, under its root's subject digest, as today. A MANAGED worktree outside
  *   the project (`<home>-worktrees`) is not: Ferrets keeps that registry and its contract has no read of it, so such
- *   a worktree is its own project until one exists. Projects off: every folder is its own project.
+ *   a worktree is its own project until one exists. Projects off: every folder is its own project. The project
+ *   root's `.mcp.json` is still read only through a ferret folder that holds it (`workRootFor`, MCP's one read
+ *   root): from a subfolder, while no ferret works in the project root, nothing is read and nothing renews.
  * - The Vault has no value getter (use, never read). Sign-in writes the ACCESS token by name through `VaultApi.put`;
  *   the refresh token and a registered client secret (the "internal" store) rest in MCP's own sealed document,
  *   `state/mcp/oauth-secrets.json` (today's `mcp-oauth-secrets.json`), opened through the Vault's sealed-document

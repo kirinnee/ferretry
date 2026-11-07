@@ -131,6 +131,8 @@ noted in step 2; `NEW` is `~/.ferretry`, the home the daemon just made (it has `
      - A project server's token is renewed, but not handed to the ferret until the Claude Code harness is ported,
        because that harness is what says whether the runtime declined the server.
      - A managed worktree outside the project folder still counts as a project of its own.
+     - From a subfolder or a worktree, the project's `.mcp.json` is read only while some ferret works in the
+       project's root folder. Ferretry reads files only inside a ferret's folder.
 4. After the main step 4 (Settings) adds the servers, `fy mcp ls` shows each one's sign-in state.
 
 ## 3. Clear each browser, then pair it (owner's hands)
