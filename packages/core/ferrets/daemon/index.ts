@@ -49,6 +49,7 @@ import { StateAgentPinRepository } from './adapters/agent-pins/index.ts';
 import { RegistryPinSessionDirectory, StatePinRepository } from './adapters/pins/index.ts';
 import { KeyedSerialExecutor } from './adapters/storage/keyed-serial-executor.ts';
 import { stateHomeLaunchRefusal } from './lib/route-security/state-home.ts';
+import { terminalLaunchRefusal } from './lib/route-security/launch.ts';
 import { AgentPinService, AgentPinSubsystem, withPinned } from './lib/agent-pins/index.ts';
 import { PinService } from './lib/pins/index.ts';
 import { pinRoutes } from './lib/runtime/mounts/pins.ts';
@@ -402,6 +403,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
           );
         // No identity/link-hop state-home reach is available in this kernel yet. Never replace it with a lexical fence.
         await stateHomeLaunchRefusal(callerIsAgent(call), undefined, parsed.folder);
+        // Project catalogs and the managed-root launch seam are unbound; a governed start fails closed without them.
+        await terminalLaunchRefusal(call, parsed, undefined);
         let startedFerret: FerretId | undefined;
         const start = async (): Promise<ApiResponse> => {
           const started = await service.start({

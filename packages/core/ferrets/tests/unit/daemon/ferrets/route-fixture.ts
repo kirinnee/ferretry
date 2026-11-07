@@ -6,13 +6,7 @@ import type { ApiRequest, CallStanding } from '@ferretry/kernel/contract';
 import { definePlugin } from '@ferretry/kernel/manifest';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
-import {
-  FerretFiles,
-  type FerretId,
-  type FerretRecord,
-  Harnesses,
-  Runners,
-} from '../../../../contract/index.ts';
+import { FerretFiles, type FerretId, type FerretRecord, Harnesses, Runners } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner, ferretId, T0 } from '../../../../contract/testing/index.ts';
 import ferrets from '../../../../daemon/index.ts';
 
@@ -72,6 +66,7 @@ export async function host(
     readonly harness?: FakeHarness;
     readonly runner?: FakeRunner;
     readonly config?: Readonly<Record<string, unknown>>;
+    readonly standing?: (request: ApiRequest) => CallStanding;
   } = {},
 ): Promise<TestHost> {
   const plugins = [
@@ -81,7 +76,7 @@ export async function host(
   ];
   const first = await testHost({
     plugins,
-    gate: new StandInAdmission(standingFor),
+    gate: new StandInAdmission(extra.standing ?? standingFor),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
     ...(extra.config === undefined ? {} : { config: extra.config }),
   });
