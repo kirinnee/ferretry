@@ -140,7 +140,8 @@ export class InlineObserverHost implements SessionObserverHost {
       // rather than inventing an answerable absence from missing evidence.
       if (transcript.kind !== 'read') return;
       const revision = this.revision(id);
-      const current = SessionStateSchema.safeParse(await this.ports.storage.readState(id));
+      // A document the store will not read is a document that does not parse: left alone, as `read` leaves it.
+      const current = SessionStateSchema.safeParse(await this.ports.storage.readState(id).catch(() => undefined));
       if (!current.success) return;
       this.remember(id, revision, current.data);
       const answers = await this.ports.answers.all(id);

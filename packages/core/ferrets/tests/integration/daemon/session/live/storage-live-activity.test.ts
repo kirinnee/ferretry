@@ -468,7 +468,7 @@ describe('the live readout of a compaction', () => {
         .sample()
         .then(sampled => sampled?.compaction);
     const real = readFileSync(
-      join(import.meta.dir, '../../../fixtures/compaction/claude-2.1.28x-compacting-progress.txt'),
+      join(import.meta.dir, '../../../../fixtures/compaction/claude-2.1.28x-compacting-progress.txt'),
       'utf8',
     );
 

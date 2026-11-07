@@ -102,13 +102,13 @@ describe('the parks this daemon holds', () => {
     const storage = opened.storage;
     // Parked, and its status has drifted off the park — the case the roster must not filter away.
     await storage.writeConfig(ONE, config('session-1'));
-    await storage.writeState(ONE, { id: 'session-1', status: 'running', waiting: { since: NOW } });
+    await storage.writeState(ONE, { id: 'session-1', turn: 1, status: 'running', waiting: { since: NOW } });
     // Not parked at all.
     await storage.writeConfig(TWO, config('session-2'));
-    await storage.writeState(TWO, { id: 'session-2', status: 'running' });
+    await storage.writeState(TWO, { id: 'session-2', turn: 1, status: 'running' });
     // Parked, but settled: nothing to wake, and restoring its status would resurrect a verdict.
     await storage.writeConfig(THREE, config('session-3'));
-    await storage.writeState(THREE, { id: 'session-3', status: 'stopped', waiting: { since: NOW } });
+    await storage.writeState(THREE, { id: 'session-3', turn: 1, status: 'stopped', waiting: { since: NOW } });
     const repository = new StorageSignalRepository(storage, clock);
     const subject = new StorageMonitorWaits(storage, repository, signalsOver(repository), SETTINGS);
 
@@ -126,9 +126,9 @@ describe('the parks this daemon holds', () => {
     const { opened } = await openStorage();
     const storage = opened.storage;
     await storage.writeConfig(ONE, config('session-1'));
-    await storage.writeState(ONE, { id: 'session-1', status: 'completed', waiting: { since: NOW } });
+    await storage.writeState(ONE, { id: 'session-1', turn: 1, status: 'completed', waiting: { since: NOW } });
     await storage.writeConfig(TWO, config('session-2'));
-    await storage.writeState(TWO, { id: 'session-2', status: 'waiting', waiting: { since: NOW } });
+    await storage.writeState(TWO, { id: 'session-2', turn: 1, status: 'waiting', waiting: { since: NOW } });
     const durable = new StorageSignalRepository(storage, clock);
     const read: SessionId[] = [];
     const counting: SignalRepository = {
@@ -154,7 +154,7 @@ describe('the parks this daemon holds', () => {
     const { opened } = await openStorage();
     const storage = opened.storage;
     await storage.writeConfig(ONE, config('session-1'));
-    await storage.writeState(ONE, { id: 'session-1', status: 'waiting', waiting: { since: NOW } });
+    await storage.writeState(ONE, { id: 'session-1', turn: 1, status: 'waiting', waiting: { since: NOW } });
     const durable = new StorageSignalRepository(storage, clock);
     const failing: SignalRepository = {
       read: async (id: SessionId) => {
@@ -181,7 +181,7 @@ describe('the two writes a tick makes to a park', () => {
     const storage = opened.storage;
     const since = new Date(NOW_MS - SETTINGS.backstopMs - 1_000).toISOString();
     await storage.writeConfig(ONE, config('session-1'));
-    await storage.writeState(ONE, { id: 'session-1', status: 'waiting', waiting: { since } });
+    await storage.writeState(ONE, { id: 'session-1', turn: 1, status: 'waiting', waiting: { since } });
     const repository = new StorageSignalRepository(storage, clock);
     const subject = new StorageMonitorWaits(storage, repository, signalsOver(repository), SETTINGS);
 
@@ -209,7 +209,7 @@ describe('the two writes a tick makes to a park', () => {
     const { opened } = await openStorage();
     const storage = opened.storage;
     await storage.writeConfig(ONE, config('session-1'));
-    await storage.writeState(ONE, { id: 'session-1', status: 'waiting', waiting: { since: NOW } });
+    await storage.writeState(ONE, { id: 'session-1', turn: 1, status: 'waiting', waiting: { since: NOW } });
     const repository = new StorageSignalRepository(storage, clock);
     const subject = new StorageMonitorWaits(storage, repository, signalsOver(repository), SETTINGS);
 
@@ -232,7 +232,7 @@ describe('the two writes a tick makes to a park', () => {
     const { opened } = await openStorage();
     const storage = opened.storage;
     await storage.writeConfig(ONE, config('session-1'));
-    await storage.writeState(ONE, { id: 'session-1', status: 'running', waiting: { since: NOW } });
+    await storage.writeState(ONE, { id: 'session-1', turn: 1, status: 'running', waiting: { since: NOW } });
     const repository = new StorageSignalRepository(storage, clock);
     const subject = new StorageMonitorWaits(storage, repository, signalsOver(repository), SETTINGS);
 

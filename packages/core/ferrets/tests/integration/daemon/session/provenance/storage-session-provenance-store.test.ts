@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import type { SessionProvenance } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { memoryStorage } from '../../../../support/daemon/storage.ts';
+import { InvalidStateDocumentError } from '../../../../../daemon/adapters/storage/session-storage.ts';
 import { StorageSessionProvenanceStore } from '../../../../../daemon/adapters/session/provenance/storage-session-provenance-store.ts';
 import { SessionConfigFiles } from '../../../../../daemon/lib/state.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
@@ -120,18 +121,24 @@ describe('spawn provenance storage', () => {
     await storage.close();
   });
 
-  it('should replace a configuration that is not an object rather than merge into it', async () => {
-    // Arrange: a document of the wrong kind has no fields to preserve.
-    const storage = await openTemporaryStorage();
+  it('should refuse to stamp a configuration that is not a session document rather than invent one around the stamp', async () => {
+    // Arrange: a document of the wrong kind has no fields to preserve (planted: the store never writes one), and a stamp alone is not a configuration the
+    // declared schema accepts — so the write is refused and the file is left as it was.
+    const { storage, folder } = await memoryStorage({ clock: { now: () => NOW } });
     const id = parseSessionId('20260806-first-stamp');
-    await storage.writeConfig(id, ['not', 'a', 'configuration']);
+    const planted = JSON.stringify({ format: 1, 0: 'not', 1: 'a', 2: 'configuration' });
+    folder.plant(SessionConfigFiles, planted, id);
     const store = new StorageSessionProvenanceStore(storage);
 
     // Act
-    await store.write(id, { provenance: shielded, label: 'fleet-warden' });
+    const refused = await store
+      .write(id, { provenance: shielded, label: 'fleet-warden' })
+      .catch((error: unknown) => error);
 
     // Assert
-    should(await storage.readConfig(id)).eql({ provenance: shielded, label: 'fleet-warden' });
+    should(refused).be.instanceOf(InvalidStateDocumentError);
+    should(folder.raw(SessionConfigFiles, id)).equal(planted);
+    should((await store.read(id)).provenance).be.undefined();
     await storage.close();
   });
 
@@ -148,12 +155,18 @@ describe('spawn provenance storage', () => {
 
   it('should answer undefined for a session whose stamp is present and damaged', async () => {
     // Arrange: descent claimed with no evidence — the half-true state both refinements forbid.
-    const storage = await openTemporaryStorage();
+    // The store refuses to write a stamp the schema rejects, so the document is planted as a damaged file would be.
+    const { storage, folder } = await memoryStorage({ clock: { now: () => NOW } });
     const id = parseSessionId('20260806-damaged');
-    await storage.writeConfig(id, {
-      ...sessionConfig(id),
-      provenance: { v: 1, at: NOW, origin: 'warden', wardenLineage: true, lineageSource: 'none' },
-    });
+    folder.plant(
+      SessionConfigFiles,
+      JSON.stringify({
+        format: 1,
+        ...sessionConfig(id),
+        provenance: { v: 1, at: NOW, origin: 'warden', wardenLineage: true, lineageSource: 'none' },
+      }),
+      id,
+    );
 
     // Act + Assert: the whole config fails to parse, so the recorder resolves afresh rather than
     // reading a damaged record as "no warden".

@@ -323,6 +323,9 @@ describe('storage consistency pass', () => {
     const opened = await openStorage();
     const id = parseSessionId('lost-journal');
     await opened.storage.append(id, 'session.started', { durable: true });
+    // The session still exists on disk through its state document; only its journal (the history file) is gone. A
+    // session whose history was its only file has nothing left to be found lost.
+    await opened.storage.writeState(id, sessionState(id, { status: 'running' }));
     opened.folder.files.delete(FerretHistoryFiles.path.replace('*', id));
     const pass = new StorageConsistencyPass(opened.storage, SETTINGS);
 
@@ -344,6 +347,7 @@ describe('storage consistency pass', () => {
     const lost = parseSessionId('lost-journal');
     const healthy = parseSessionId('healthy-session');
     await opened.storage.append(lost, 'session.started', { durable: true });
+    await opened.storage.writeState(lost, sessionState(lost, { status: 'running' }));
     await opened.storage.append(healthy, 'session.started', { durable: true });
     const pass = new StorageConsistencyPass(opened.storage, SETTINGS);
     const healthyPass = await pass.run(true);

@@ -112,7 +112,9 @@ describe('session storage — names that are not sessions', () => {
     const opened = await openStorage();
     const kept = parseSessionId('kept-session');
     await opened.storage.writeState(kept, sessionState(kept));
-    await opened.raw.write(SessionStateFiles, sessionState('stranger') as never, 'Not A Session!');
+    // The state port refuses to name a file outside the plain-name rule, so a stranger's folder is laid in the state
+    // home as somebody else's tooling would leave it.
+    opened.folder.files.set('Not A Session!/state.json', JSON.stringify({ format: 1, ...sessionState('stranger') }));
     const expected = [{ line: 0, byteOffset: 0, message: 'invalid session directory "Not A Session!"' }];
 
     // Act
