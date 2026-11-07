@@ -1,4 +1,4 @@
-import { connectorBaseEnvironment } from '../../daemon/lib/tunnel/connector.ts';
+import { connectorBaseEnvironment } from '../../lib/tunnel/connector.ts';
 import type { Clock, SpawnPort } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 /**
@@ -13,7 +13,7 @@ import { milliseconds } from '@ferretry/std';
  * connector that ignored its stop would hold a claim on the hostname past the daemon's own life.
  */
 
-import type { ConnectorCommand, ConnectorProcess, ConnectorProcessPort } from '../../daemon/lib/tunnel/index.ts';
+import type { ConnectorCommand, ConnectorProcess, ConnectorProcessPort } from '../../lib/tunnel/index.ts';
 
 /** How long a connector asked to stop has before it is killed. */
 export const CONNECTOR_STOP_GRACE_MS = 5_000;

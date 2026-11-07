@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'bun:test';
-import type { PluginClient } from '@ferretry/kernel/manifest';
-import { buildTunnelVerbs } from '../../../cli/tunnel/commands.ts';
+import type { PluginClient, VerbInvocation } from '@ferretry/kernel/manifest';
+import cli from '../../../cli/index.ts';
 import { TUNNEL_OFF_SENTENCE } from '../../../contract/index.ts';
 import manifest from '../../../manifest.ts';
 
 const view = { enabled: false, explicit: false, state: 'off', tunnelUrl: null, sentence: TUNNEL_OFF_SENTENCE };
+type Verbs = Record<string, (invocation: VerbInvocation) => Promise<number>>;
+
+/** The REAL cli half, built the way the fy shell builds it, over a fake daemon client. */
+function realVerbs(client: PluginClient, io: { out(t: string): void; err(t: string): void; isTty: boolean }): Verbs {
+  if (cli.build === undefined) throw new Error('the connections cli half has no build');
+  return cli.build({ manifest, client, io }).verbs as Verbs;
+}
+
 describe('tunnel CLI', () => {
   function harness() {
     const calls: unknown[] = [];
@@ -19,9 +27,12 @@ describe('tunnel CLI', () => {
     return {
       calls,
       lines,
-      verbs: buildTunnelVerbs(client, { out: text => lines.push(text), err: () => undefined, isTty: false }),
+      verbs: realVerbs(client, { out: text => lines.push(text), err: () => undefined, isTty: false }),
     };
   }
+  it('every verb the manifest declares has a handler in the real cli half', () => {
+    expect(Object.keys(harness().verbs).toSorted()).toEqual(manifest.actions.cli.map(decl => decl.verb).toSorted());
+  });
   it('R657 changes the daemon switch and reports that it applied without restart', async () => {
     const { calls, lines, verbs } = harness();
     expect(await verbs['tunnel on']({ args: [], options: {} })).toBe(0);
@@ -50,7 +61,7 @@ describe('tunnel CLI', () => {
     expect(lines).toEqual([TUNNEL_OFF_SENTENCE, JSON.stringify(view)]);
   });
   it('an invalid daemon answer is refused rather than printed', async () => {
-    const verbs = buildTunnelVerbs({ call: async () => ({}), subscribe: () => () => undefined } as PluginClient, {
+    const verbs = realVerbs({ call: async () => ({}), subscribe: () => () => undefined } as PluginClient, {
       out: () => {
         throw new Error('printed');
       },

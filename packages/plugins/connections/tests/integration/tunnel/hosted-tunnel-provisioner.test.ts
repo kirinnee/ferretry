@@ -5,7 +5,7 @@
 
 import { afterEach, describe, it } from 'bun:test';
 import should from 'should';
-import { HostedTunnelProvisioner } from '../../../adapters/tunnel/hosted-tunnel-provisioner.ts';
+import { HostedTunnelProvisioner } from '../../../daemon/adapters/tunnel/hosted-tunnel-provisioner.ts';
 
 const servers: Array<{ stop: (closeActive?: boolean) => Promise<void> }> = [];
 

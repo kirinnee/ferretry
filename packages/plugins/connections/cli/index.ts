@@ -1,5 +1,8 @@
-import { skeletonCli } from '@ferretry/kernel/manifest';
+import { implementCli } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { buildTunnelVerbs } from './tunnel/commands.ts';
 
-/** Skeleton cli half (§10.3): listed in ports-pending.json until the port lands. */
-export default skeletonCli(manifest);
+/** Connections (cli half, §4.9): `fy tunnel`, `fy tunnel status`, `fy tunnel on`, `fy tunnel off`. */
+export default implementCli(manifest, {
+  build: ({ client, io }) => ({ verbs: buildTunnelVerbs(client, io) }),
+});

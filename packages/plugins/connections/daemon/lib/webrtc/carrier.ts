@@ -31,14 +31,8 @@
  */
 
 import { WEBRTC_SESSION_CHANNEL_LABEL, type WebRtcRefusalCode } from '../../../contract/index.ts';
-import {
-  decodeControlMessage,
-  decodeFrame,
-  encodeControlMessage,
-  encodeFrame,
-  FRAME_KINDS,
-  type SessionId,
-} from '../../../worker/src/lib/index.ts';
+import { decodeFrame, encodeFrame, FRAME_KINDS, type SessionId } from '@ferretry/kernel/wire';
+import { decodeControlMessage, encodeControlMessage } from '../relay/control.ts';
 export interface SessionDevice {
   readonly deviceId: string;
   readonly appSession: string;

@@ -18,9 +18,9 @@ import {
   TunnelProvisionSchema,
   TunnelRefusalSchema,
   TunnelReleaseSchema,
-} from '../../contract/index.ts';
+} from '../../../contract/index.ts';
 import type { z } from 'zod';
-import type { ProvisionerAnswer, TunnelProvisionerPort } from '../../daemon/lib/tunnel/index.ts';
+import type { ProvisionerAnswer, TunnelProvisionerPort } from '../../lib/tunnel/index.ts';
 
 /** How long one provisioning call may take before it is a failure to retry. */
 export const TUNNEL_PROVISION_TIMEOUT_MS = 15_000;
