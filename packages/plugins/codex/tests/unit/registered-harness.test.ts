@@ -27,7 +27,6 @@ describe('the registered Codex harness', () => {
   test('S42 homeFor names state/codex/agent-homes/<ferret> through its own root; the home is made private before any launch and no other home is used', async () => {
     const box = fixture();
     const harness = box.build();
-    if (harness.homeFor === undefined) throw new Error('Codex names its own ferret home');
     expect(await harness.homeFor('f1' as never)).toBe(`${box.base}/f1` as never);
     expect(await harness.homeFor('f2' as never)).toBe(`${box.base}/f2` as never);
     await expect(harness.homeFor('../f2' as never)).rejects.toThrow('plain name');

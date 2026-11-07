@@ -74,7 +74,12 @@ function fixture(harnesses: readonly Harness[], records: readonly FerretRecord[]
     instructions: () => [],
     folder: path => ok(fenced(path)),
     changed: () => {},
-    vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },
+    vault: {
+      childEnvironment: async ferret => {
+        log.push(`vault.childEnvironment ${ferret}`);
+        return ok(emptyChildEnvironment());
+      },
+    },
     asks: { open: async () => [] },
   };
   return { log, registry, tokens, runner, ports, service: new FerretsService(registry, tokens, ports) };
@@ -167,11 +172,8 @@ describe('S42 each harness supplies its own per-ferret home', () => {
     }
   });
 
-  test('S42 a harness that names no home, throws, or answers a relative path is not started (fail closed)', async () => {
+  test('S42 a harness that throws or answers a relative path is not started (fail closed)', async () => {
     const variants: ((harness: FakeHarness) => void)[] = [
-      harness => {
-        (harness as { homeFor?: unknown }).homeFor = undefined;
-      },
       harness => {
         harness.homeFor = async () => {
           throw new Error('/secret/path should never reach a caller');
@@ -198,6 +200,35 @@ describe('S42 each harness supplies its own per-ferret home', () => {
     }
   });
 
+  // The overlap test compares spellings, so a non-canonical answer could name f1's home (or its parent) without being
+  // seen to: each is refused as "no home of its own" before the token, prepareHome, the environment or the runner.
+  for (const [label, second] of [
+    ['a trailing slash on the agent-homes parent (contains f1)', `${CLAUDE_HOMES}/`],
+    ['a doubled slash (names f1)', `${CLAUDE_HOMES}//f1`],
+    ['a dot segment (names f1)', `${CLAUDE_HOMES}/./f1`],
+    ['a dot-dot segment (names f1)', `${CLAUDE_HOMES}/f2/../f1`],
+    ['the filesystem root itself (contains every home)', '/'],
+  ] as const) {
+    test(`S42 a non-canonical home is refused before token, prepare or runner: ${label}`, async () => {
+      const log: string[] = [];
+      const harness = new LoggingHarness('claude-code', CLAUDE_HOMES, log);
+      harness.homeFor = async ferret => fenced(ferret === 'f1' ? `${CLAUDE_HOMES}/f1` : second);
+      const f = fixture([harness], [], log);
+      expect((await f.service.start({ folder: '/work', by: 'owner' })).ok).toBe(true);
+      const started = await f.service.start({ folder: '/work', by: 'owner' });
+      expect(started.ok).toBe(false);
+      if (started.ok) return;
+      expect(started.error).toEqual({
+        code: 'harness_unavailable',
+        reason: 'the claude-code harness did not name a home of its own for this ferret, so it was not started',
+      });
+      expect(log).toEqual([`prepareHome f1 ${CLAUDE_HOMES}/f1`, 'vault.childEnvironment f1', 'runner.start f1']);
+      expect(f.runner.starts).toBe(1);
+      expect(f.tokens.holds(ferretId('f2'))).toBe(false);
+      expect(f.registry.get(ferretId('f2'))?.state).toBe('stopped');
+    });
+  }
+
   test('S42 a prepareHome that throws stops the start before the runner is asked, and revokes the token', async () => {
     const harness = new FakeHarness('claude-code', CLAUDE_HOMES);
     harness.prepareHome = async () => {
@@ -217,16 +248,16 @@ describe('S42 each harness supplies its own per-ferret home', () => {
   });
 });
 
-describe('S42 prepareHome runs before runner.start on every start path', () => {
-  test('S42 a new start: prepareHome with the harness’s home, then the runner (one shared log)', async () => {
+describe('S42 prepareHome runs before the environment is resolved and runner.start, on every start path', () => {
+  test('S42 a new start: prepareHome with the harness’s home, then the environment, then the runner (one log)', async () => {
     const log: string[] = [];
     const f = fixture([new LoggingHarness('claude-code', CLAUDE_HOMES, log)], [], log);
     const started = await f.service.start({ folder: '/work', by: 'owner' });
     expect(started.ok).toBe(true);
-    expect(log).toEqual([`prepareHome f1 ${CLAUDE_HOMES}/f1`, 'runner.start f1']);
+    expect(log).toEqual([`prepareHome f1 ${CLAUDE_HOMES}/f1`, 'vault.childEnvironment f1', 'runner.start f1']);
   });
 
-  test('S42 a start bound to a conversation, a revive, and a revive with a conversation all prepare first', async () => {
+  test('S42 a start bound to a conversation, a revive, and a revive with a conversation all prepare before the environment', async () => {
     const cases = [
       {
         records: [] as FerretRecord[],
@@ -250,7 +281,11 @@ describe('S42 prepareHome runs before runner.start on every start path', () => {
       const f = fixture([harness], records, log);
       const result = await go(f.service);
       if (!result.ok) throw new Error(result.error.reason);
-      expect(log).toEqual([`prepareHome ${id} ${CODEX_HOMES}/${id}`, `runner.start ${id}`]);
+      expect(log).toEqual([
+        `prepareHome ${id} ${CODEX_HOMES}/${id}`,
+        `vault.childEnvironment ${id}`,
+        `runner.start ${id}`,
+      ]);
       expect(harness.launched[0]?.home).toBe(fenced(`${CODEX_HOMES}/${id}`));
     }
   });

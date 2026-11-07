@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import type { AsksApi } from '@ferretry/core-asks/contract';
 import type { ChildEnvironment, VaultApi } from '@ferretry/core-vault/contract';
 import type { FencedPath, HookDecision, InstructionEntry } from '@ferretry/kernel/contract';
@@ -103,6 +104,18 @@ export interface FerretsPorts {
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
   err({ code, reason } as StartFailure);
+
+/**
+ * A home answer Ferrets can judge by spelling: an absolute path that `posix.normalize` leaves unchanged (no `.` or
+ * `..` segment, no doubled `/`), with no trailing `/`, no NUL, and not `/` itself. Checked, never normalized.
+ */
+const canonicalHome = (home: unknown): home is FencedPath =>
+  typeof home === 'string' &&
+  home.startsWith('/') &&
+  home !== '/' &&
+  !home.endsWith('/') &&
+  !home.includes('\0') &&
+  posix.normalize(home) === home;
 
 class ResumeRefusal extends Error {
   constructor(readonly failure: StartFailure) {
@@ -586,21 +599,21 @@ export class FerretsService implements FerretsApi {
 
   /**
    * The ferret's home, as its harness names it (`Harness.homeFor`): Ferrets never builds a home path. Refused, before
-   * any token is issued or file written, when the harness names none, throws, answers a relative path, or answers a
-   * home another harness names for this ferret or this harness names for another ferret (equal, or one inside the
-   * other) — a shared home would let one ferret read or rewrite another's sign-in and transcript.
+   * any token is issued or file written, when the harness throws, answers a path that is not canonical and absolute
+   * (relative, NUL, `/` itself, a trailing or doubled `/`, a `.` or `..` segment), or answers a home another harness
+   * names for this ferret or this harness names for another ferret (equal, or one inside the other) — a shared home
+   * would let one ferret read or rewrite another's sign-in and transcript. The overlap test compares spellings, so
+   * only a canonical answer can be judged by it; anything else is refused rather than normalized (no path building).
    */
   private async home(record: FerretRecord, harness: Harness): Promise<Result<FencedPath, StartFailure>> {
     const unnamed = `the ${record.harness} harness did not name a home of its own for this ferret, so it was not started`;
-    if (harness.homeFor === undefined) return failed('harness_unavailable', unnamed);
     const home = await harness.homeFor(record.id).catch(() => undefined);
-    if (typeof home !== 'string' || !home.startsWith('/') || home.includes('\0'))
-      return failed('harness_unavailable', unnamed);
+    if (!canonicalHome(home)) return failed('harness_unavailable', unnamed);
     const overlaps = (other: string | undefined): boolean =>
       other !== undefined && (other === home || other.startsWith(`${home}/`) || home.startsWith(`${other}/`));
     const answer = async (key: HarnessKey, ferret: FerretId): Promise<string | undefined> => {
       const other = this.ports.harness(key);
-      if (other === undefined || other.homeFor === undefined) return undefined;
+      if (other === undefined) return undefined;
       return await other.homeFor(ferret).catch(() => undefined);
     };
     for (const key of this.ports.harnessKeys())
