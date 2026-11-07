@@ -13,7 +13,8 @@ import { accountHintSummary, placeHosts } from '../contract/routes/index.ts';
 import { machineName } from './adapters/host.ts';
 import { KernelAccountDefaultsWriter } from './adapters/kernel-defaults-writer.ts';
 import { StateAccountIndexStore } from './adapters/state-account-index-store.ts';
-import { UNBUILT_CIPHER, UNBUILT_SEALED_STORE } from './adapters/unbuilt-seal.ts';
+import { MemoryCipher, vaultSealedStore } from './adapters/vault-sealed.ts';
+import { LOGIN_SECRETS } from '../contract/routes/sealed.ts';
 import { AccountDefaults } from './lib/account-defaults.ts';
 import { AccountVault, LoginStoreLock, narrowAccountVault } from './lib/accounts.ts';
 import { LoginDirectory } from './lib/logins.ts';
@@ -46,20 +47,19 @@ const stateFile = (ctx: AccountsContext, name: string): StateFileDef => {
 };
 
 /**
- * Builds half a. `sealed` is the Vault's sealed store for login values; until the Vault's contract offers it, it is
- * absent and every change that seals fails closed (`UNBUILT_SEALED_STORE`), while the listing, hints and every change
- * that seals nothing still work from the index.
+ * Builds half a over the kernel's state port (the index) and the Vault's sealed-document port (the values, in
+ * Accounts' own `login-secrets.json`).
  */
 export function buildAccounts(
   ctx: AccountsContext,
-  options: { readonly sealed?: AccountSealedStore; readonly recipes?: () => RecipeMasking | undefined } = {},
+  options: { readonly recipes?: () => RecipeMasking | undefined } = {},
 ) {
   const { kernel } = ctx;
   const index = new StateAccountIndexStore(kernel.state, stateFile(ctx, 'accounts'));
-  const sealed = options.sealed?.sealed ?? UNBUILT_SEALED_STORE;
-  const cipher = options.sealed?.cipher ?? UNBUILT_CIPHER;
+  const store: AccountSealedStore = vaultSealedStore(ctx.needs.sealed.open(kernel.state, LOGIN_SECRETS));
+  const { sealed, cipher } = store;
   const lock = new LoginStoreLock();
-  const vault = options.sealed === undefined ? undefined : new AccountVault(index, sealed, cipher);
+  const vault = new AccountVault(index, sealed, cipher);
   const narrowed = vault === undefined ? undefined : narrowAccountVault(vault);
   const declared = ctx.manifest.data.config[0];
   if (declared?.shape !== 'file') throw new Error('accounts declares accounts.yaml as its one config file');
@@ -93,18 +93,16 @@ export function buildAccounts(
     realpath: async () => undefined,
     home: '/',
   });
-  const seeds =
-    options.sealed === undefined
-      ? undefined
-      : new TwoFactorSeedStages({
-          accounts,
-          cipher: options.sealed.cipher,
-          clock: kernel.clock,
-          // Access's passkey list is not reachable from Accounts yet: no seed can be saved ("add a passkey first").
-          anyPasskey: async () => false,
-          hostName: machineName(),
-          agenda: new TwoFactorSeedAgendaAdapter(ctx.needs.asks),
-        });
+  const seeds = new TwoFactorSeedStages({
+    accounts,
+    // A staged seed rests sealed in THIS process's memory only (S89), under a key that is never written anywhere.
+    cipher: new MemoryCipher(),
+    clock: kernel.clock,
+    // TODO(contract): Access's `holdsPasskey` is not on this base yet: no seed can be saved ("add a passkey first").
+    anyPasskey: async () => false,
+    hostName: machineName(),
+    agenda: new TwoFactorSeedAgendaAdapter(ctx.needs.asks),
+  });
   const recipes = (): RecipeMasking | undefined => options.recipes?.();
 
   kernel.jobs.add({

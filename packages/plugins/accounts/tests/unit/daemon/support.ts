@@ -112,3 +112,35 @@ export async function plantSeed(
     ...(label === undefined ? {} : { label }),
   });
 }
+
+/**
+ * The Vault's sealed documents in memory WITH `names()` (TODO(vault contract): the Vault's own `FakeSealedDocuments`
+ * gains it with the handle). Counts every call in order, and fails a put or a delete on demand.
+ */
+export class NamedSealedDocuments {
+  readonly values = new Map<string, string>();
+  readonly calls: string[] = [];
+  failPut = false;
+  open(_own: unknown, _document: unknown) {
+    return {
+      put: async (name: string, value: string | Uint8Array) => {
+        this.calls.push(`put ${name}`);
+        if (this.failPut) throw new Error('disk full');
+        this.values.set(name, typeof value === 'string' ? value : new TextDecoder().decode(value));
+      },
+      get: async (name: string) => {
+        this.calls.push(`get ${name}`);
+        return this.values.get(name);
+      },
+      getBytes: async (name: string) => {
+        const value = this.values.get(name);
+        return value === undefined ? undefined : new TextEncoder().encode(value);
+      },
+      delete: async (name: string) => {
+        this.calls.push(`delete ${name}`);
+        return this.values.delete(name);
+      },
+      names: async () => [...this.values.keys()],
+    };
+  }
+}

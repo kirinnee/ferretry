@@ -11,7 +11,14 @@ import { AccountsPort } from '../../../contract/index.ts';
 import accounts from '../../../daemon/index.ts';
 import { accountRoutes } from '../../../daemon/routes/accounts.ts';
 import { TwoFactorSeedStages } from './lib.ts';
-import { CountingSealed, daemonOver, FakeSecretCipher, MemoryLoginIndex, SEED } from './support.ts';
+import {
+  CountingSealed,
+  daemonOver,
+  FakeSecretCipher,
+  MemoryLoginIndex,
+  NamedSealedDocuments,
+  SEED,
+} from './support.ts';
 
 /**
  * The `/v1/accounts` routes of half a (today's `runtime/mounts/accounts-routes`, `factor-seed-routes` and
@@ -21,7 +28,10 @@ import { CountingSealed, daemonOver, FakeSecretCipher, MemoryLoginIndex, SEED } 
  */
 
 const host = async () =>
-  await testHost({ plugins: [accounts], fakes: { vault: new FakeVault(), asks: new FakeAsks() } });
+  await testHost({
+    plugins: [accounts],
+    fakes: { vault: new FakeVault(), asks: new FakeAsks(), sealed: new NamedSealedDocuments() },
+  });
 
 const F1 = 'F1' as FerretId;
 
@@ -126,14 +136,15 @@ describe('the account routes through the kernel', () => {
     should(removed.json<{ defaults: { sites?: unknown } }>().defaults.sites ?? {}).eql({});
   });
 
-  it('should answer the seed routes 503 while the Vault holds no sealed store, and an unported tool as not built', async () => {
+  it('S92 should refuse a seed while no device holds a passkey, and answer an unported tool as not built', async () => {
     const h = await host();
     await h.request('PUT', '/v1/accounts/GITHUB', { body: { label: 'GitHub' } });
     const seed = await h.request('POST', '/v1/accounts/GITHUB/factors/seed', {
       body: { padded: padInputValue(SEED), totpAcknowledged: true },
     });
-    should(seed.status).equal(503);
-    should((await h.request('GET', '/v1/accounts/look-alike')).status).equal(503);
+    should(seed.status).equal(409);
+    should(seed.json<{ code: string }>().code).equal('passkey_required');
+    should((await h.request('GET', '/v1/accounts/look-alike')).json()).match({ v: 1, groups: [] });
     // A declared tool neither half answers yet says so, in the skeleton sentence.
     const tool = await h.tool('secure_list', {}, { as: ferret('F1') });
     should(tool.isError).be.true();

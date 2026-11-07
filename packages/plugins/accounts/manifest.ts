@@ -1,6 +1,7 @@
 import { AskSources, AsksPort, type SourceKey } from '@ferretry/core-asks/contract';
 import { AccessPort, DevicesChanged } from '@ferretry/plugin-access/contract';
-import { VaultPort } from '@ferretry/core-vault/contract';
+import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
+import { LOGIN_SECRETS } from './contract/routes/sealed.ts';
 import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { definePlugin, renderer, route, settingsTab, tool, verb } from '@ferretry/kernel/manifest';
 import {
@@ -41,7 +42,8 @@ export default definePlugin({
   kinds: ['command', 'view', 'item'],
   words: ACCOUNTS_WORDS,
 
-  needs: { vault: VaultPort, asks: AsksPort },
+  /** `sealed`: the passwords and 2FA seeds, in Accounts' own sealed document (`login-secrets.json`). */
+  needs: { vault: VaultPort, asks: AsksPort, sealed: SealedDocumentsPort },
   /** Optional: a revoked or expired device's standing sign-in rules are suspended (P124, S119). */
   uses: { access: AccessPort },
   provides: { accounts: AccountsPort },
@@ -656,6 +658,8 @@ export default definePlugin({
     state: [
       /** The index only: every value is sealed in the Vault under its sealed name. */
       defineState({ name: 'accounts', path: 'accounts.json', store: 'json', format: 1, mode: 0o600 }),
+      /** The values themselves, sealed by the Vault (`LOGIN_SECRETS`). */
+      LOGIN_SECRETS.state,
       defineState({ name: 'sign-in-rules', path: 'sign-in-rules.json', store: 'json', format: 1 }),
       defineState({ name: 'copy-rules', path: 'copy-rules.json', store: 'json', format: 1 }),
       defineState({ name: 'copy-plans', path: 'copy-plans/*.json', store: 'json', format: 1 }),
