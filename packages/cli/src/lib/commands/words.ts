@@ -1,7 +1,6 @@
 /** `fy words [word]` (§1.3): a word, its owner and what it replaced. */
 import { z } from 'zod';
 import type { Word } from '@ferretry/kernel/contract';
-import { pluginClient } from '../client.ts';
 import { EXIT } from '../errors.ts';
 import { renderTable } from '../render.ts';
 import type { CommandRegistry } from '../registry.ts';
@@ -59,7 +58,7 @@ function renderWords(words: readonly OwnedWord[], titles: Readonly<Record<string
 async function daemonWords(ctx: Parameters<ShellVerb>[0]): Promise<readonly OwnedWord[] | undefined> {
   if ((await ctx.world.probe()).state !== 'up') return undefined;
   try {
-    const body = await pluginClient(await ctx.deps(), 'kernel').call(GLOSSARY_ROUTE);
+    const body = await ctx.client('kernel').call(GLOSSARY_ROUTE);
     const parsed = GlossarySchema.safeParse(body);
     if (!parsed.success) return undefined;
     return Array.isArray(parsed.data) ? parsed.data : parsed.data.words;

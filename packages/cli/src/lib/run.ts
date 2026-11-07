@@ -149,7 +149,15 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
   if (entry.owner === 'shell') {
     const handler = SHELL_HANDLERS[entry.line];
     if (handler === undefined) throw new ShellError(`${identity.binary} has no handler for "${entry.line}"`);
-    const context: ShellContext = { world, invocation, table, surfaces, graph: buildPluginGraph(world.registry), deps };
+    const context: ShellContext = {
+      world,
+      invocation,
+      table,
+      surfaces,
+      graph: buildPluginGraph(world.registry),
+      deps,
+      client: caller => lazyClient(deps, caller, surfaces, inPane(world.environment)),
+    };
     return await handler(context);
   }
   return await runPluginVerb(world, entry, invocation, deps, surfaces);
@@ -185,9 +193,10 @@ async function runPluginVerb(
 }
 
 /**
- * A `PluginClient` that builds the guarded client on its first call. The route's own descriptor and the pane's
- * standing are judged FIRST (S59): a person-only call from a ferret's pane is refused before the daemon is probed,
- * started or sent anything, as today's `refuseOwnerCommandInPane` refuses before the gateway.
+ * A `PluginClient` that builds the guarded client on its first call, for plugin verbs and shell verbs alike. The
+ * route's own descriptor and the pane's standing are judged FIRST (S59): a person-only call from a ferret's pane is
+ * refused before the daemon is probed, started or sent anything, as today's `refuseOwnerCommandInPane` refuses before
+ * the gateway.
  */
 function lazyClient(
   deps: () => Promise<ClientDeps>,

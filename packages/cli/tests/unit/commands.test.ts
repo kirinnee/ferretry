@@ -401,6 +401,36 @@ describe('fy ask', () => {
     should(await runFy(['ask', 'show', 'a1'], world)).equal(0);
   });
 
+  it('S59 a person-only shell route from a pane is refused before any connection is opened', async () => {
+    // Arrange
+    const { world, io, connects, transport } = fakeWorld({
+      registry: registryOf(skeletonEntry(asksManifest, 'h-asks')),
+      inventory: inventoryOf({ id: 'asks', contract: 'h-asks' }),
+      environment: { FY_SESSION_ID: 's1' },
+    });
+
+    // Act
+    const code = await runFy(['ask', 'answer', 'a1', 'yes'], world);
+
+    // Assert
+    should(code).equal(1);
+    should(io.stderr()).containEql("this is the owner's command; a ferret's pane can't run it");
+    should(connects).deepEqual([]);
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('S59 an open shell route from a pane still connects and is sent', async () => {
+    const { world, connects, transport } = fakeWorld({
+      registry: registryOf(skeletonEntry(asksManifest, 'h-asks')),
+      inventory: inventoryOf({ id: 'asks', contract: 'h-asks' }),
+      environment: { FY_SESSION_ID: 's1' },
+    });
+    transport.replies.push({ status: 200, body: [] });
+    should(await runFy(['ask', 'list'], world)).equal(0);
+    should(connects).have.length(1);
+    should(transport.sent).deepEqual([{ method: 'GET', path: '/v1/asks' }]);
+  });
+
   it('should refuse an answer without an id and text, and an unknown subcommand', async () => {
     const { world } = withAsks();
     should(await runFy(['ask', 'answer', 'a1'], world)).equal(2);
