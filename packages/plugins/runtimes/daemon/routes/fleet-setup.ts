@@ -29,6 +29,7 @@ import {
   ToolInstallRequestSchema,
   ToolInstallResultSchema,
 } from '../../contract/index.ts';
+import { isSignInSecretName, SIGN_IN_NOT_COPIED } from '../lib/service/foreign.ts';
 import { FleetSetupRefusal, type FleetSetupService } from '../lib/service/setup-service.ts';
 import { parseBody } from './body.ts';
 
@@ -81,6 +82,15 @@ export function fleetSetupRoutes(subsystem: FleetSetupSubsystem) {
     // `keys` of the record (timestamps).
     'POST /v1/runtimes/clone/keys': async call => {
       const request = await parseBody(call.request, CloneKeysRecordRequestSchema);
+      // Vault's rule, applied here because the contract holds only the name's grammar: a sign-in's own secret is never copied.
+      const signIn = request.keys.findIndex(key => isSignInSecretName(key.name));
+      if (signIn >= 0) {
+        throw new ApiError(
+          400,
+          `the request body is invalid — keys.${String(signIn)}.name: ${SIGN_IN_NOT_COPIED}`,
+          'invalid_request',
+        );
+      }
       return await answer(CloneKeysRecordResultSchema, () => subsystem.recordCloneKeys(request));
     },
   } satisfies Record<string, RouteHandler>;

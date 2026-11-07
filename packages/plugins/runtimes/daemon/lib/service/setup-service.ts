@@ -679,7 +679,16 @@ export class FleetSetupService {
       addDuplicates: change.addDuplicates === true ? installed : [],
       digest: text => this.deps.digest(text),
     });
-    const plan = this.#named(raw, change.names ?? {}, reading.model);
+    // The wire keys the names by the Ferrets harness key; the library keys them by its own word.
+    const given = change.names;
+    const plan = this.#named(
+      raw,
+      {
+        ...(given?.['claude-code'] === undefined ? {} : { claude: given['claude-code'] }),
+        ...(given?.codex === undefined ? {} : { codex: given.codex }),
+      },
+      reading.model,
+    );
     const accepted = change.acceptedUpdates ?? [];
     const offered = new Set(plan.updates.map(update => update.reference));
     const unknown = accepted.filter(reference => !offered.has(reference as LayerReferenceText));

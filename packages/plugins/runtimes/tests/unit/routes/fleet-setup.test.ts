@@ -2,34 +2,31 @@
  * A machine's setup at the daemon's front door: the scan, the tool install and the clone export
  * (docs/design/account-model.md §4.3, §4.7, §7).
  *
- * The service behind it is a stub, because what the mount owns is the HTTP shape: that each route calls
- * its one subsystem method, that every answer is parsed through the shared schema, which status a
+ * The service behind it is a stub, because what the routes own is the HTTP shape: that each route calls
+ * its one subsystem method, that every answer is parsed through the contract's schema, which status a
  * refusal becomes, and that a write is handed the caller's governance rather than deciding it.
  */
 import { describe, it } from 'bun:test';
-import {
-  type FleetCloneBundle,
-  type FleetCloneKeysRecordRequest,
-  type FleetCloneReview,
-  type FleetCloneReviewRequest,
-  type FleetSetupScan,
-  type FleetToolInstallRequest,
-  type FleetToolInstallResult,
-  mcpOAuthSecretNames,
-} from '@ferretry/protocol';
+import { instantFromEpochMs } from '@ferretry/std';
 import should from 'should';
-import type { CallerGovernance } from '../../../../src/lib/api/capability.ts';
-import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
-import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import type {
+  CloneBundle,
+  CloneKeysRecordRequest,
+  CloneReview,
+  CloneReviewRequest,
+  SetupScan,
+  ToolInstallRequest,
+  ToolInstallResult,
+} from '../../../contract/index.ts';
+import type { RuntimesAssembly } from '../../../daemon/index.ts';
+import { mcpOAuthSecretNames } from '../../../daemon/lib/foreign.ts';
 import { FleetSetupRefusal } from '../../../daemon/lib/service/setup-service.ts';
-import { type FleetSetupSubsystem, fleetSetupRoutes } from '../../../daemon/routes/fleet-setup.ts';
-import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, GRANTED, human } from './support.ts';
+import { type Hosted, hostRuntimes } from './support.ts';
 
-const SCAN: FleetSetupScan = {
+const SCAN: SetupScan = {
   machine: 'studio',
-  format: 'version-2',
-  tools: [{ harness: 'claude', label: 'Claude Code', installed: true }],
+  format: 'present',
+  tools: [{ harness: 'claude-code', label: 'Claude Code', installed: true }],
   harnesses: [],
   runtimes: [],
   updates: [],
@@ -38,22 +35,24 @@ const SCAN: FleetSetupScan = {
   importing: { available: true },
 };
 
-const INSTALL: FleetToolInstallResult = { outcomes: [{ harness: 'claude', outcome: 'already-installed' }] };
+const INSTALL: ToolInstallResult = { outcomes: [{ harness: 'claude-code', outcome: 'already-installed' }] };
 
-const BUNDLE: FleetCloneBundle = {
+const BUNDLE: CloneBundle = {
   format: 'ferretry-clone',
   version: 1,
   machine: 'studio',
-  exportedAt: '2026-10-13T08:00:00.000Z',
+  daemon: `fy_daemon_${'d'.repeat(43)}`,
+  exportedAt: instantFromEpochMs(1_794_052_800_000),
   credentials: [],
   components: {},
   profiles: {},
   runtimes: {},
   files: [],
   notCopied: [],
+  keys: {},
 };
 
-const REVIEW: FleetCloneReview = {
+const REVIEW: CloneReview = {
   mode: 'update',
   source: { name: 'studio', verified: 'browser' },
   items: [],
@@ -64,144 +63,142 @@ const REVIEW: FleetCloneReview = {
   fingerprint: 'f'.repeat(64),
 };
 
+type SetupStub = RuntimesAssembly['setup'];
+
 interface Calls {
   scans: number;
   exports: number;
   reviews: number;
   forgets: string[];
-  reviewed: { request: FleetCloneReviewRequest; governance: CallerGovernance | undefined }[];
-  installs: { request: FleetToolInstallRequest; governance: CallerGovernance | undefined }[];
+  reviewed: { request: CloneReviewRequest; governance: unknown }[];
+  installs: { request: ToolInstallRequest; governance: unknown }[];
 }
 
-function stub(overrides: Partial<FleetSetupSubsystem> = {}): { subsystem: FleetSetupSubsystem; calls: Calls } {
+function stub(overrides: Partial<SetupStub> = {}): { assembly: RuntimesAssembly; calls: Calls } {
   const calls: Calls = { scans: 0, exports: 0, reviews: 0, forgets: [], reviewed: [], installs: [] };
+  const setup: SetupStub = {
+    scan: async () => {
+      calls.scans += 1;
+      return SCAN;
+    },
+    installTools: async (body, governance) => {
+      calls.installs.push({ request: body, governance });
+      return INSTALL;
+    },
+    exportBundle: async () => {
+      calls.exports += 1;
+      return BUNDLE;
+    },
+    reviewClone: async (body, governance) => {
+      calls.reviews += 1;
+      calls.reviewed.push({ request: body, governance });
+      return REVIEW;
+    },
+    forgetCloneSource: async source => {
+      calls.forgets.push(source);
+      return source === 'studio';
+    },
+    recordCloneKeys: async () => ({ recorded: 0 }),
+    executors: {} as SetupStub['executors'],
+    ...overrides,
+  };
   return {
     calls,
-    subsystem: {
-      scan: async () => {
-        calls.scans += 1;
-        return SCAN;
+    assembly: {
+      catalog: {} as RuntimesAssembly['catalog'],
+      setup,
+      recommend: { recommend: async () => await Promise.reject(new Error('not used here')) },
+      logins: {
+        list: async () => ({ logins: [] }),
+        signOut: async () => await Promise.reject(new Error('not used here')),
       },
-      installTools: async (body, governance) => {
-        calls.installs.push({ request: body, governance });
-        return INSTALL;
-      },
-      exportBundle: async () => {
-        calls.exports += 1;
-        return BUNDLE;
-      },
-      reviewClone: async (body, governance) => {
-        calls.reviews += 1;
-        calls.reviewed.push({ request: body, governance });
-        return REVIEW;
-      },
-      forgetCloneSource: async source => {
-        calls.forgets.push(source);
-        return source === 'studio';
-      },
-      recordCloneKeys: async () => ({ recorded: 0 }),
-      executors: {} as FleetSetupSubsystem['executors'],
-      ...overrides,
     },
   };
 }
 
-const dispatcher = (subsystem: FleetSetupSubsystem): ApiDispatcher =>
-  new ApiDispatcher(new ApiRouter(fleetSetupRoutes(subsystem)), CREDENTIALS, GRANTED);
-
-const get = (path: string) => request({ path, headers: human });
-const post = (path: string, body?: string) =>
-  request({
-    method: 'POST',
-    path,
-    headers: { ...human, 'content-type': 'application/json' },
-    ...(body === undefined ? {} : { body }),
-  });
+const json = <T = Record<string, unknown>>(response: { json<U>(): U }): T => response.json<T>();
+const post = async (hosted: Hosted, path: string, body?: unknown) =>
+  await hosted.host.request('POST', path, body === undefined ? {} : { body });
 
 describe('the fleet setup mount', () => {
   it('should answer the two reads through the shared schema and never let one be cached', async () => {
     // Arrange
-    const { subsystem, calls } = stub();
-    const paths = ['/v1/fleet/setup/scan', '/v1/fleet/export'];
+    const { assembly, calls } = stub();
+    const { host } = await hostRuntimes(assembly);
+    const paths = ['/v1/runtimes/setup/scan', '/v1/runtimes/export'];
 
     // Act
-    const responses = await Promise.all(paths.map(async path => await dispatcher(subsystem).dispatch(get(path))));
+    const responses = await Promise.all(paths.map(async path => await host.request('GET', path)));
 
     // Assert
     should(responses.map(response => response.status)).deepEqual([200, 200]);
     should(responses.map(response => response.headers.get('cache-control'))).deepEqual(['no-store', 'no-store']);
-    should(jsonBody(responses[0] as never)).deepEqual(SCAN);
-    should(jsonBody(responses[1] as never)).deepEqual(BUNDLE);
+    should(json(responses[0] as never)).deepEqual(SCAN);
+    should(json(responses[1] as never)).deepEqual(JSON.parse(JSON.stringify(BUNDLE)));
     should([calls.scans, calls.exports]).deepEqual([1, 1]);
   });
 
   it('should answer a clone review through the shared schema, uncached, and refuse a body that is not one', async () => {
     // Arrange
-    const { subsystem, calls } = stub();
+    const { assembly, calls } = stub();
+    const hosted = await hostRuntimes(assembly);
 
     // Act
-    const answered = await dispatcher(subsystem).dispatch(
-      post('/v1/fleet/clone/review', JSON.stringify({ bundle: BUNDLE })),
-    );
-    const bad = await dispatcher(subsystem).dispatch(post('/v1/fleet/clone/review', JSON.stringify({ nope: 1 })));
+    const answered = await post(hosted, '/v1/runtimes/clone/review', { bundle: BUNDLE });
+    const bad = await post(hosted, '/v1/runtimes/clone/review', { nope: 1 });
 
     // Assert
     should(answered.status).equal(200);
     should(answered.headers.get('cache-control')).equal('no-store');
-    should(jsonBody(answered)).deepEqual(REVIEW);
+    should(json(answered)).deepEqual(REVIEW);
     should(bad.status).equal(400);
     should(calls.reviews).equal(1);
   });
 
   it('should forget a source through the shared schema, uncached, and say whether there was one', async () => {
     // Arrange
-    const { subsystem, calls } = stub();
+    const { assembly, calls } = stub();
+    const hosted = await hostRuntimes(assembly);
 
     // Act
-    const known = await dispatcher(subsystem).dispatch(
-      post('/v1/fleet/clone/forget', JSON.stringify({ source: 'studio' })),
-    );
-    const unknown = await dispatcher(subsystem).dispatch(
-      post('/v1/fleet/clone/forget', JSON.stringify({ source: 'nobody' })),
-    );
-    const bad = await dispatcher(subsystem).dispatch(post('/v1/fleet/clone/forget', JSON.stringify({ source: '' })));
+    const known = await post(hosted, '/v1/runtimes/clone/forget', { source: 'studio' });
+    const unknown = await post(hosted, '/v1/runtimes/clone/forget', { source: 'nobody' });
+    const bad = await post(hosted, '/v1/runtimes/clone/forget', { source: '' });
 
     // Assert
     should(known.headers.get('cache-control')).equal('no-store');
-    should(jsonBody(known)).deepEqual({ forgotten: true });
-    should(jsonBody(unknown)).deepEqual({ forgotten: false });
+    should(json(known)).deepEqual({ forgotten: true });
+    should(json(unknown)).deepEqual({ forgotten: false });
     should(bad.status).equal(400);
     should(calls.forgets).deepEqual(['studio', 'nobody']);
   });
 
   it('should answer 409 when more than one source goes by the name given', async () => {
     // Arrange
-    const { subsystem } = stub({
+    const { assembly } = stub({
       forgetCloneSource: async () => {
         throw new FleetSetupRefusal('fleet_setup_refused', 'More than one source is called studio: a, b.');
       },
     });
+    const hosted = await hostRuntimes(assembly);
 
     // Act
-    const answer = await dispatcher(subsystem).dispatch(
-      post('/v1/fleet/clone/forget', JSON.stringify({ source: 'studio' })),
-    );
+    const answer = await post(hosted, '/v1/runtimes/clone/forget', { source: 'studio' });
 
     // Assert
     should(answer.status).equal(409);
-    should(jsonBody(answer).code).equal('fleet_setup_refused');
+    should(json(answer).code).equal('fleet_setup_refused');
   });
 
   it('should hand a clone review the caller governance and the settings documents, so each file can be checked for THEM', async () => {
-    const { subsystem, calls } = stub();
+    const { assembly, calls } = stub();
+    const hosted = await hostRuntimes(assembly);
     const settings = [
       { path: 'warden.yaml', text: 'enabled: true\n' },
       { path: 'controls', text: '{"agentPermissions":"auto"}' },
     ];
 
-    const answered = await dispatcher(subsystem).dispatch(
-      post('/v1/fleet/clone/review', JSON.stringify({ bundle: BUNDLE, settings })),
-    );
+    const answered = await post(hosted, '/v1/runtimes/clone/review', { bundle: BUNDLE, settings });
 
     should(answered.status).equal(200);
     should(calls.reviewed[0]?.request.settings).deepEqual(settings as never);
@@ -209,15 +206,14 @@ describe('the fleet setup mount', () => {
   });
 
   it('should refuse a review whose settings name a document a copy does not merge', async () => {
-    const { subsystem, calls } = stub();
+    const { assembly, calls } = stub();
+    const hosted = await hostRuntimes(assembly);
     for (const settings of [
       [{ path: 'machine.yaml', text: 'agentPermissions: skip\n' }],
       [{ path: '../../etc/passwd', text: '' }],
       [{ path: 'warden.yaml', text: 'x', extra: 1 }],
     ]) {
-      const bad = await dispatcher(subsystem).dispatch(
-        post('/v1/fleet/clone/review', JSON.stringify({ bundle: BUNDLE, settings })),
-      );
+      const bad = await post(hosted, '/v1/runtimes/clone/review', { bundle: BUNDLE, settings });
       should(bad.status).equal(400);
     }
     should(calls.reviews).equal(0);
@@ -225,13 +221,14 @@ describe('the fleet setup mount', () => {
 
   it('should record the keys a sealed copy filed through the shared schema, and refuse a sign-in token by name', async () => {
     // Arrange
-    const seen: FleetCloneKeysRecordRequest[] = [];
-    const { subsystem } = stub({
+    const seen: CloneKeysRecordRequest[] = [];
+    const { assembly } = stub({
       recordCloneKeys: async request => {
         seen.push(request);
         return { recorded: request.keys.length };
       },
     });
+    const hosted = await hostRuntimes(assembly);
     const body = {
       source: { daemonId: 'daemon-source' },
       filedAt: '2026-10-12T08:00:00.000Z',
@@ -240,56 +237,49 @@ describe('the fleet setup mount', () => {
     const signIn = mcpOAuthSecretNames('linear', 'https://mcp.example.com/mcp').access;
 
     // Act
-    const answered = await dispatcher(subsystem).dispatch(post('/v1/fleet/clone/keys', JSON.stringify(body)));
-    const refused = await dispatcher(subsystem).dispatch(
-      post(
-        '/v1/fleet/clone/keys',
-        JSON.stringify({ ...body, keys: [{ name: signIn, sourceUpdatedAt: body.keys[0]?.sourceUpdatedAt }] }),
-      ),
-    );
-    const extra = await dispatcher(subsystem).dispatch(
-      post(
-        '/v1/fleet/clone/keys',
-        JSON.stringify({ ...body, keys: [{ ...body.keys[0], value: 'sk-live-0123456789' }] }),
-      ),
-    );
+    const answered = await post(hosted, '/v1/runtimes/clone/keys', body);
+    const refused = await post(hosted, '/v1/runtimes/clone/keys', {
+      ...body,
+      keys: [{ name: signIn, sourceUpdatedAt: body.keys[0]?.sourceUpdatedAt }],
+    });
+    const extra = await post(hosted, '/v1/runtimes/clone/keys', {
+      ...body,
+      keys: [{ ...body.keys[0], value: 'sk-live-0123456789' }],
+    });
 
     // Assert
     should(answered.status).equal(200);
     should(answered.headers.get('cache-control')).equal('no-store');
-    should(jsonBody(answered)).deepEqual({ recorded: 1 });
+    should(json(answered)).deepEqual({ recorded: 1 });
     should(seen).have.length(1);
     should(refused.status).equal(400);
     should(extra.status).equal(400);
     // The instant the copy filed them is what the record is anchored on: a report without it is refused.
     const { filedAt: _omitted, ...withoutInstant } = body;
-    const unanchored = await dispatcher(subsystem).dispatch(
-      post('/v1/fleet/clone/keys', JSON.stringify(withoutInstant)),
-    );
+    const unanchored = await post(hosted, '/v1/runtimes/clone/keys', withoutInstant);
     should(unanchored.status).equal(400);
   });
 
   it('should hand a tool install its request and the caller governance, and never cache the answer', async () => {
     // Arrange
-    const { subsystem, calls } = stub();
-    const body = { harnesses: ['claude'] };
+    const { assembly, calls } = stub();
+    const hosted = await hostRuntimes(assembly);
+    const body = { harnesses: ['claude-code'] };
 
     // Act
-    const response = await dispatcher(subsystem).dispatch(
-      post('/v1/fleet/machine/tools/install', JSON.stringify(body)),
-    );
+    const response = await post(hosted, '/v1/runtimes/machine/tools/install', body);
 
     // Assert
     should(response.status).equal(200);
     should(response.headers.get('cache-control')).equal('no-store');
-    should(jsonBody(response)).deepEqual(INSTALL);
-    should(calls.installs.map(call => call.request)).deepEqual([body as FleetToolInstallRequest]);
+    should(json(response)).deepEqual(INSTALL);
+    should(calls.installs.map(call => call.request)).deepEqual([body as ToolInstallRequest]);
     should(calls.installs[0]?.governance).containDeep({ governed: false });
   });
 
   it('should answer 403 for a caller who could not confirm and 409 with the code for every other refusal', async () => {
     // Arrange
-    const { subsystem } = stub({
+    const { assembly } = stub({
       scan: async () => {
         throw new FleetSetupRefusal('fleet_setup_unauthorized', 'confirm with your passkey first');
       },
@@ -300,51 +290,50 @@ describe('the fleet setup mount', () => {
         throw new FleetSetupRefusal('fleet_setup_busy', 'another change is being applied');
       },
     });
+    const hosted = await hostRuntimes(assembly);
 
     // Act
-    const unauthorized = await dispatcher(subsystem).dispatch(get('/v1/fleet/setup/scan'));
-    const unreadable = await dispatcher(subsystem).dispatch(
-      post('/v1/fleet/machine/tools/install', JSON.stringify({ harnesses: ['codex'] })),
-    );
-    const busy = await dispatcher(subsystem).dispatch(get('/v1/fleet/export'));
+    const unauthorized = await hosted.host.request('GET', '/v1/runtimes/setup/scan');
+    const unreadable = await post(hosted, '/v1/runtimes/machine/tools/install', { harnesses: ['codex'] });
+    const busy = await hosted.host.request('GET', '/v1/runtimes/export');
 
     // Assert
     should(unauthorized.status).equal(403);
-    should(jsonBody(unauthorized)).deepEqual({
+    should(json(unauthorized)).deepEqual({
       error: 'confirm with your passkey first',
       code: 'fleet_setup_unauthorized',
     });
     should(unreadable.status).equal(409);
-    should(jsonBody(unreadable)).deepEqual({ error: 'config.yaml could not be read', code: 'fleet_setup_unreadable' });
+    should(json(unreadable)).deepEqual({ error: 'config.yaml could not be read', code: 'fleet_setup_unreadable' });
     should(busy.status).equal(409);
-    should(jsonBody(busy).code).equal('fleet_setup_busy');
+    should(json(busy).code).equal('fleet_setup_busy');
   });
 
   it('should refuse a body that does not match the schema before the service is asked', async () => {
     // Arrange
-    const { subsystem, calls } = stub();
+    const { assembly, calls } = stub();
+    const hosted = await hostRuntimes(assembly);
 
     // Act
-    const badInstall = await dispatcher(subsystem).dispatch(
-      post('/v1/fleet/machine/tools/install', JSON.stringify({ harnesses: [] })),
-    );
+    const badInstall = await post(hosted, '/v1/runtimes/machine/tools/install', { harnesses: [] });
 
     // Assert
     should(badInstall.status).equal(400);
-    should(jsonBody(badInstall).code).equal('invalid_request');
+    should(json(badInstall).code).equal('invalid_request');
     should(calls.installs).have.length(0);
   });
 
   it('should leave an unexpected failure to the dispatcher rather than dress it as a refusal', async () => {
     // Arrange
-    const { subsystem } = stub({
+    const { assembly } = stub({
       scan: async () => {
         throw new Error('the disk went away');
       },
     });
+    const { host } = await hostRuntimes(assembly);
 
     // Act
-    const response = await dispatcher(subsystem).dispatch(get('/v1/fleet/setup/scan'));
+    const response = await host.request('GET', '/v1/runtimes/setup/scan');
 
     // Assert
     should(response.status).equal(500);

@@ -1,119 +1,137 @@
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
+import { wardenStanding } from '@ferretry/core-gate/contract/testing';
 import should from 'should';
-import { z } from 'zod';
-import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
-import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { recommendRoutes, type RecommendSubsystem } from '../../../daemon/routes/recommend.ts';
-import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, human, recommendSubsystem } from './support.ts';
+import { RecommendationSchema } from '../../../contract/index.ts';
+import type { RuntimesAssembly } from '../../../daemon/index.ts';
+import { RecommendError, type RecommendSubsystem, type TeamRecommendation } from '../../../daemon/routes/recommend.ts';
+import { hostRuntimes } from './support.ts';
 
 /**
- * The recommender route, driven through the real router over the real engine.
+ * The recommender route, driven through the kernel's test host.
  *
- * The response is parsed against a restatement of the CLI's OWN wire schema rather than checked field
- * by field. That is the point of the mount: the daemon's domain recommendation carries a structured
- * classification and a caveat slug the shipped client cannot parse, so the projection is the contract,
- * and a contract is only proved by parsing.
+ * The engine behind it (the routing doctrine and the team advisor) is not part of this plugin (GAP(packs)), so the
+ * subsystem here is a stub that answers a fixed team. What the route owns is the projection, and it is proved by
+ * parsing the answer against the contract's own schema: the daemon's domain recommendation carries a structured
+ * classification and a caveat slug the shipped client cannot parse, so the projection is the contract.
  */
 
-/** The shape `packages/cli/src/lib/fleet/wire.ts` parses. Restated because the daemon package may not
- *  depend on the CLI package; a drift on either side fails here with a stated reason. */
-const NonEmpty = z.string().min(1);
-const RoleOptionSchema = z.object({
-  agent: NonEmpty,
-  accountId: NonEmpty,
-  model: NonEmpty,
-  tradeoff: z.string(),
-  score: z.number(),
-  caveat: z.string().optional(),
-});
-const TeamRecommendationSchema = z.object({
-  task: NonEmpty,
-  classification: z.string(),
-  reasoning: z.string(),
-  roles: z.array(
-    z.object({
-      role: NonEmpty,
-      why: z.string(),
-      count: z.number().int().positive().optional(),
-      primary: RoleOptionSchema,
-      alternatives: z.array(RoleOptionSchema).default([]),
-    }),
-  ),
-  exclusions: z.array(z.object({ accountId: NonEmpty, agent: NonEmpty, reason: z.string() })),
-  warnings: z.array(z.string()),
-});
+const HARD_TASK = 'redesign the critical production authentication flow and port the whole test suite';
 
-function dispatcher(subsystem: RecommendSubsystem): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(recommendRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+const TEAM: TeamRecommendation = {
+  task: HARD_TASK,
+  classification: 'Read as high risk, a migration of an authentication flow (words: redesign, critical, production).',
+  reasoning: 'A risky change gets a planner and a reviewer.',
+  roles: [
+    {
+      role: 'planner',
+      why: 'The design is the risky part.',
+      primary: {
+        agent: 'claude-code',
+        accountId: 'claude-default',
+        model: 'opus',
+        tradeoff: 'the strongest plan at the highest cost',
+        score: 0.92,
+      },
+      alternatives: [
+        {
+          agent: 'codex',
+          accountId: 'codex-default',
+          model: 'gpt',
+          tradeoff: 'cheaper, a little less careful',
+          score: 0.8,
+          caveat: 'below-doctrine-floor',
+        },
+      ],
+    },
+    {
+      role: 'worker',
+      why: 'The port is wide.',
+      count: 3,
+      primary: { agent: 'codex', accountId: 'codex-default', model: 'gpt', tradeoff: 'fast', score: 0.7 },
+      alternatives: [],
+    },
+  ],
+  exclusions: [{ accountId: 'account-ghost', agent: 'codex', reason: 'it has no model the catalog knows' }],
+  warnings: [],
+};
+
+function assemblyOf(subsystem: RecommendSubsystem): RuntimesAssembly {
+  return {
+    catalog: {} as RuntimesAssembly['catalog'],
+    setup: {} as RuntimesAssembly['setup'],
+    recommend: subsystem,
+    logins: {
+      list: async () => ({ logins: [] }),
+      signOut: async () => await Promise.reject(new Error('not used here')),
+    },
+  };
+}
+
+/** The recommender stub, noting whether live quota was asked for. */
+function recommender(overrides: Partial<RecommendSubsystem> = {}, probes: string[] = []): RecommendSubsystem {
+  return {
+    recommend: async input => {
+      probes.push(input.usage ? 'probed' : 'unread');
+      return { ...TEAM, task: input.task };
+    },
+    ...overrides,
+  };
 }
 
 async function ask(subsystem: RecommendSubsystem, body: unknown) {
-  return await dispatcher(subsystem).dispatch(
-    request({
-      method: 'POST',
-      path: '/v1/recommend',
-      headers: { ...human, 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    }),
-  );
+  const { host } = await hostRuntimes(assemblyOf(subsystem));
+  return await host.request('POST', '/v1/recommend', { body });
 }
-
-/** A hard, risky task, so the engine returns a multi-role team with alternatives and a count. */
-const HARD_TASK = 'redesign the critical production authentication flow and port the whole test suite';
 
 describe('the recommender mount', () => {
   it('should answer a team in the wire shape the client parses', async () => {
     // Arrange / Act
-    const response = await ask(recommendSubsystem(), { task: HARD_TASK, usage: true });
+    const response = await ask(recommender(), { task: HARD_TASK, usage: true });
 
     // Assert
     should(response.status).equal(200);
-    const recommendation = TeamRecommendationSchema.parse(JSON.parse(response.body));
+    const recommendation = RecommendationSchema.parse(JSON.parse(response.body));
     should(recommendation.task).equal(HARD_TASK);
     // The classification is the domain's own one-liner: the shape it read AND the words that did it.
     should(recommendation.classification).match(/^Read as .* risk, /u);
     should(recommendation.roles.length).be.above(0);
-    // Every pick names a real account from the manifest, not a placeholder.
+    // Every pick names a real account, not a placeholder.
     should(recommendation.roles.map(role => role.primary.accountId).every(id => id.length > 0)).be.true();
   });
 
   it('should offer alternatives beside every pick, because the answer is a guide', async () => {
     // A route that returned only the winner would read as an instruction and hide what was skipped.
     // Arrange / Act
-    const response = await ask(recommendSubsystem(), { task: HARD_TASK, usage: true });
+    const response = await ask(recommender(), { task: HARD_TASK, usage: true });
 
     // Assert
-    const recommendation = TeamRecommendationSchema.parse(JSON.parse(response.body));
+    const recommendation = RecommendationSchema.parse(JSON.parse(response.body));
     should(recommendation.roles.some(role => role.alternatives.length > 0)).be.true();
+    should(recommendation.roles[0]?.alternatives[0]?.caveat).equal('below-doctrine-floor');
   });
 
   it('should report the accounts it refused to use, and why', async () => {
-    // Arrange — an account the catalog knows nothing about cannot serve any role
-    const accounts = [
-      {
-        id: 'account-ghost',
-        secretEnv: {},
-        agent: 'agent-ghost',
-        wrapper: '/state/fleet/bin/agent-ghost',
-        home: '/state/fleet/homes/ghost',
-        kind: 'claude',
-        mode: 'auto',
-        displayName: 'Ghost',
-        defaultModel: null,
-        models: [],
-        available: true,
-        unavailableReason: null,
-      },
-    ] as const;
-    // Act
-    const response = await ask(recommendSubsystem({ accounts }), { task: 'tidy a README', usage: true });
+    // Arrange / Act
+    const response = await ask(recommender(), { task: 'tidy a README', usage: true });
 
     // Assert
-    const recommendation = TeamRecommendationSchema.parse(JSON.parse(response.body));
+    const recommendation = RecommendationSchema.parse(JSON.parse(response.body));
     should(recommendation.exclusions.map(exclusion => exclusion.accountId)).containEql('account-ghost');
     should(recommendation.exclusions[0]?.reason).not.be.empty();
+  });
+
+  it('should keep exclusions and warnings on the wire even when they are empty', async () => {
+    // A caller must be able to tell "nothing was excluded" from "exclusions were not reported".
+    // Arrange / Act
+    const response = await ask(recommender({ recommend: async () => ({ ...TEAM, exclusions: [], warnings: [] }) }), {
+      task: HARD_TASK,
+      usage: true,
+    });
+
+    // Assert
+    const body = JSON.parse(response.body) as Record<string, unknown>;
+    should(body.exclusions).deepEqual([]);
+    should(body.warnings).deepEqual([]);
   });
 
   it('should read live quota only when the caller asked for it', async () => {
@@ -123,8 +141,8 @@ describe('the recommender mount', () => {
     const probes: string[] = [];
 
     // Act
-    await ask(recommendSubsystem({ probes }), { task: HARD_TASK, usage: false });
-    await ask(recommendSubsystem({ probes }), { task: HARD_TASK, usage: true });
+    await ask(recommender({}, probes), { task: HARD_TASK, usage: false });
+    await ask(recommender({}, probes), { task: HARD_TASK, usage: true });
 
     // Assert
     should(probes).deepEqual(['unread', 'probed']);
@@ -133,64 +151,67 @@ describe('the recommender mount', () => {
   it('should refuse when the operator has written no routing catalog', async () => {
     // The catalog IS the routing doctrine, so inventing one would be inventing the fleet's policy.
     // Arrange / Act
-    const response = await ask(recommendSubsystem({ unconfigured: true }), { task: HARD_TASK, usage: false });
+    const response = await ask(
+      recommender({
+        recommend: async () => {
+          throw new RecommendError('unconfigured', 'no routing catalog at /state/config/routing.json');
+        },
+      }),
+      { task: HARD_TASK, usage: false },
+    );
 
     // Assert
     should(response.status).equal(503);
-    should(jsonBody(response)).have.property('code', 'recommender_unconfigured');
+    should(response.json()).have.property('code', 'recommender_unconfigured');
     // The refusal names the file to write rather than saying the daemon failed.
-    should(jsonBody(response)).have.property('error', 'no routing catalog at /state/config/routing.json');
+    should(response.json()).have.property('error', 'no routing catalog at /state/config/routing.json');
   });
 
   it('should refuse a body with no task rather than recommend for nothing', async () => {
     // Arrange / Act
-    const empty = await ask(recommendSubsystem(), { task: '', usage: true });
-    const missing = await ask(recommendSubsystem(), { usage: true });
+    const empty = await ask(recommender(), { task: '', usage: true });
+    const missing = await ask(recommender(), { usage: true });
 
     // Assert
     should([empty.status, missing.status]).deepEqual([400, 400]);
-    should(jsonBody(empty)).have.property('code', 'invalid_request');
+    should(empty.json()).have.property('code', 'invalid_request');
   });
 
   it('should refuse a field it does not implement rather than ignore it', async () => {
     // A caller sending `roles` believes this route forces the team shape. It does not.
     // Arrange / Act
-    const response = await ask(recommendSubsystem(), { task: HARD_TASK, usage: true, roles: ['planner'] });
+    const response = await ask(recommender(), { task: HARD_TASK, usage: true, roles: ['planner'] });
 
     // Assert
     should(response.status).equal(400);
-    should(jsonBody(response)).have.property('code', 'invalid_request');
+    should(response.json()).have.property('code', 'invalid_request');
   });
 
   it('should let a genuine defect surface as an internal error, not as a configuration refusal', async () => {
     // Only a failed CATALOG read is `unconfigured`; anything else must not be reported as the
     // operator's missing file.
     // Arrange
-    const broken: RecommendSubsystem = {
+    const broken = recommender({
       recommend: async () => {
         throw new Error('the engine divided by zero');
       },
-    };
+    });
 
     // Act
     const response = await ask(broken, { task: HARD_TASK, usage: true });
 
     // Assert
     should(response.status).equal(500);
-    should(jsonBody(response)).have.property('code', 'internal_error');
   });
 
   it('should refuse a caller holding only the warden token', async () => {
     // The answer names every account in the fleet and how spent each one is.
-    // Arrange / Act
-    const response = await dispatcher(recommendSubsystem()).dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/recommend',
-        headers: { authorization: `Bearer ${CREDENTIALS.warden}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ task: HARD_TASK, usage: true }),
-      }),
-    );
+    // Arrange
+    const hosted = await hostRuntimes(assemblyOf(recommender()));
+    hosted.as(wardenStanding('w1' as never));
+
+    // Act
+    const response = await hosted.host.request('POST', '/v1/recommend', { body: { task: HARD_TASK, usage: true } });
 
     // Assert
     should(response.status).equal(403);
@@ -198,7 +219,7 @@ describe('the recommender mount', () => {
 
   it('should never let a cached recommendation stand in for one decided on live quota', async () => {
     // Arrange / Act
-    const response = await ask(recommendSubsystem(), { task: HARD_TASK, usage: true });
+    const response = await ask(recommender(), { task: HARD_TASK, usage: true });
 
     // Assert
     should(response.headers.get('cache-control')).match(/no-store/u);

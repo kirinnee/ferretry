@@ -225,3 +225,17 @@ export function lowerHarness<T>(value: T): LoweredHarness<T> {
   };
   return lower(value) as LoweredHarness<T>;
 }
+
+// ── a sign-in's own secrets ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Whether a secret's name is one a sign-in filed itself: an MCP server's OAuth access token. A secret copy refuses these:
+ * the token is half of a sign-in whose refresh half cannot travel, and a copy would be a login that is dead on the other
+ * machine within the hour (docs/secrets.md). GAP(mcp): the name grammar is MCP's (`mcpOAuthSecretNames`); this is its shape.
+ */
+export function isSignInSecretName(name: string): boolean {
+  return /^MCP_(?:[A-Z0-9_]+_)?[0-9A-F]{16}_ACCESS$/u.test(name);
+}
+
+/** The refusal sentence for a key that is a sign-in's. */
+export const SIGN_IN_NOT_COPIED = 'a sign-in is not copied: sign in on the other machine instead';
