@@ -15,7 +15,7 @@ import type { ExecutableFacts, UpdateHostPort } from '../../contract/ports.ts';
 export const UPDATE_LAUNCH_VERB: readonly string[] = Object.freeze(['update', '--run']);
 
 /** The operator / CI switch that keeps a compiled daemon off GitHub (`docs/updating.md`, `scripts/ci/test.sh`). */
-export const UPDATE_CHECK_SWITCH = 'FY_UPDATE_CHECK';
+const UPDATE_CHECK_SWITCH = 'FY_UPDATE_CHECK';
 
 /** A release number as GitHub tags it: `5.1.0`, `v5.1.0`, `5.1.0-rc.1`. */
 const RELEASE = /^v?[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}(?:-[0-9A-Za-z.]{1,40})?$/u;
