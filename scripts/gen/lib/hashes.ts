@@ -40,9 +40,10 @@ const isZod = (value: unknown): value is ZodLike =>
 type ToJsonSchema = (schema: unknown, options: Record<string, unknown>) => unknown;
 
 /** zod's `toJSONSchema`, from the copy the kernel resolves (the workspace uses Bun's isolated linker). */
-export async function loadToJsonSchema(ws: Workspace): Promise<ToJsonSchema> {
-  // A fixture workspace has no node_modules; the SDK's own kernel always resolves zod.
-  const from = ws.byId('kernel')?.dir ?? join(import.meta.dir, '..', '..', '..', 'packages', 'core', 'kernel');
+export async function loadToJsonSchema(): Promise<ToJsonSchema> {
+  // The SDK this generator imports is the kernel that owns zod. A fixture workspace has no node_modules, and its
+  // stand-in kernel package must not be where zod is looked for; in the real workspace both are the same folder.
+  const from = join(import.meta.dir, '..', '..', '..', 'packages', 'core', 'kernel');
   const zodPath = Bun.resolveSync('zod', from);
   const zod = (await import(zodPath)) as { z?: { toJSONSchema: ToJsonSchema }; toJSONSchema?: ToJsonSchema };
   const fn = zod.toJSONSchema ?? zod.z?.toJSONSchema;
