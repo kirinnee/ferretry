@@ -2,9 +2,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { FakeGate } from '@ferretry/core-gate/contract/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { implementDaemon } from '@ferretry/kernel/manifest';
-import { type TestHost, testHost } from '@ferretry/kernel/testing';
+import type { ChildHandle, SpawnOptions } from '@ferretry/kernel/contract';
+import { anonymous, device, type TestHost, testHost } from '@ferretry/kernel/testing';
 import { AUDIT } from '../../contract/index.ts';
 import daemon, { buildBrowsers } from '../../daemon/index.ts';
+import { KernelDetachedLauncher, OPENER_ENVIRONMENT_NAMES, openerEnvironment } from '../../daemon/open-url/launcher.ts';
 import {
   type DetachedLauncherPort,
   OPEN_URL_LIMIT,
@@ -63,6 +65,12 @@ describe('G27 the route is declared by Browsers', () => {
     expect(route?.privilegedOnly).toBe(true);
     expect(route?.noStore).toBe(true);
     expect(route?.capability).toBeUndefined();
+  });
+
+  test('G27 gives the route its own guard reason: one address to the OS, no page read', () => {
+    const route = manifest.actions.routes.find(declared => declared.key === 'POST /v1/system/open-url');
+
+    expect(route?.guard).toEqual({ none: 'hands one validated address to the OS; reads no page' });
   });
 
   test('G27 names only the three openers it may start, each by program name', () => {
@@ -130,6 +138,104 @@ describe('G27 the address is one argv element', () => {
       expect(command.command).not.toContain(' ');
       expect(command.command).not.toContain(href);
     }
+  });
+});
+
+class RecordingSpawn {
+  readonly started: { program: string; args: readonly string[]; options: SpawnOptions | undefined }[] = [];
+  start(program: string, args: readonly string[], options?: SpawnOptions): ChildHandle {
+    this.started.push({ program, args, options });
+    const empty = () => new ReadableStream<Uint8Array>({ start: controller => controller.close() });
+    return {
+      pid: 1,
+      stdout: empty(),
+      stderr: empty(),
+      write: () => undefined,
+      kill: () => undefined,
+      exited: Promise.resolve(0),
+      pipes: [],
+      closePipes: () => undefined,
+    };
+  }
+}
+
+describe('G27 the real launcher', () => {
+  test('G27 starts the opener as program plus argv with the host environment, an ended stdin and no shell', async () => {
+    const spawn = new RecordingSpawn();
+    const environment = { PATH: '/bin', DISPLAY: ':0', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1/bus' };
+    const launcher = new KernelDetachedLauncher(spawn, environment);
+    const href = 'https://example.com/a?b=1 && touch /tmp/x'.replaceAll(' ', '%20');
+
+    await launcher.launch({ command: 'xdg-open', args: [href] });
+
+    expect(spawn.started).toHaveLength(1);
+    const [started] = spawn.started;
+    expect(started?.program).toBe('xdg-open');
+    expect(started?.args).toEqual([href]);
+    expect(started?.program).not.toMatch(/^(sh|bash|cmd|powershell)/);
+    expect(started?.options?.env).toEqual(environment);
+    expect(started?.options?.stdin).toEqual(new Uint8Array());
+  });
+
+  test('G27 gives the opener exactly the allow-listed names, and drops a token or FY_HOME', () => {
+    expect([...OPENER_ENVIRONMENT_NAMES]).toEqual([
+      'PATH',
+      'HOME',
+      'DISPLAY',
+      'WAYLAND_DISPLAY',
+      'XDG_RUNTIME_DIR',
+      'XDG_CURRENT_DESKTOP',
+      'XDG_SESSION_TYPE',
+      'DBUS_SESSION_BUS_ADDRESS',
+      'BROWSER',
+      'LANG',
+    ]);
+    const everything: Record<string, string | undefined> = {
+      LC_ALL: 'C.UTF-8',
+      LC_TIME: 'en_GB.UTF-8',
+      LANGUAGE: 'en',
+      FY_HOME: '/home/someone/.ferretry',
+      FY_ADMIN_TOKEN: 'token-value',
+      ANTHROPIC_API_KEY: 'key-value',
+      LOCAL_SECRET: 'x',
+    };
+    for (const name of OPENER_ENVIRONMENT_NAMES) everything[name] = `value-of-${name}`;
+    everything.BROWSER = undefined;
+
+    const given = openerEnvironment(everything);
+
+    expect(Object.keys(given).sort()).toEqual(
+      [...OPENER_ENVIRONMENT_NAMES.filter(name => name !== 'BROWSER'), 'LC_ALL', 'LC_TIME'].sort(),
+    );
+    expect(JSON.stringify(given)).not.toContain('token-value');
+    expect(JSON.stringify(given)).not.toContain('key-value');
+    expect(given.FY_HOME).toBeUndefined();
+  });
+
+  test('G27 passes the launcher only the allow-listed part of the daemon environment', async () => {
+    const spawn = new RecordingSpawn();
+    const launcher = new KernelDetachedLauncher(spawn, {
+      PATH: '/bin',
+      DISPLAY: ':0',
+      FY_HOME: '/x',
+      FY_ADMIN_TOKEN: 't',
+    });
+
+    await launcher.launch({ command: 'xdg-open', args: ['https://example.com/'] });
+
+    expect(spawn.started[0]?.options?.env).toEqual({ PATH: '/bin', DISPLAY: ':0' });
+  });
+
+  test('G27 passes the Windows handler arguments through unchanged, the address last', async () => {
+    const spawn = new RecordingSpawn();
+    const launcher = new KernelDetachedLauncher(spawn, {});
+    const command = openerCommand('win32', 'https://example.com/');
+
+    await launcher.launch(command);
+
+    expect(spawn.started[0]?.program).toBe(command.command);
+    expect(spawn.started[0]?.args).toEqual([...command.args]);
+    expect(spawn.started[0]?.args.at(-1)).toBe('https://example.com/');
   });
 });
 
@@ -256,6 +362,43 @@ describe('G27 the route, mounted by the daemon half', () => {
 
     expect(credentials.status).toBe(400);
     expect(scheme.status).toBe(400);
+    expect(opener.launched).toEqual([]);
+  });
+
+  test('G27 refuses a relayed caller with 403 and launches nothing', async () => {
+    const { host: built, opener, gate } = await mounted();
+
+    const answer = await built.request('POST', '/v1/system/open-url', {
+      body: { url: 'https://example.com/' },
+      as: device('phone'),
+    });
+
+    expect(answer.status).toBe(403);
+    expect(opener.launched).toEqual([]);
+    expect(gate.audits).toEqual([]);
+  });
+
+  test('G27 refuses a caller with no credential with 401 and launches nothing', async () => {
+    const { host: built, opener } = await mounted();
+
+    const answer = await built.request('POST', '/v1/system/open-url', {
+      body: { url: 'https://example.com/' },
+      as: anonymous(),
+    });
+
+    expect(answer.status).toBe(401);
+    expect(opener.launched).toEqual([]);
+  });
+
+  test.each([
+    ['a missing url', {}],
+    ['an extra field', { url: 'https://example.com/', extra: true }],
+  ])('G27 refuses a body with %s with 400 and launches nothing', async (_name, body) => {
+    const { host: built, opener } = await mounted();
+
+    const answer = await built.request('POST', '/v1/system/open-url', { body });
+
+    expect(answer.status).toBe(400);
     expect(opener.launched).toEqual([]);
   });
 

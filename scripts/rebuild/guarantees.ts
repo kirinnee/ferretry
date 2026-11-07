@@ -182,7 +182,7 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
   G95: {
     owner: 'access',
     reason:
-      "the prompt gate is Access's app half (`StepUpGate`, `app/lib/step-up-gate.ts`, and `distinctDaemonName`, `app/shell-pairing.ts`); see G56 for why Access and not the app shell; Gate keeps the step-up policy as a co-owner",
+      "the prompt gate is Access's app half (`StepUpGate`, `app/lib/step-up-gate.ts`, and `distinctDaemonName`, `app/shell-pairing.ts`, whose clause is OPEN until the step-up dialog is mounted: see OPEN_CLAUSES); see G56 for why Access and not the app shell; Gate keeps the step-up policy as a co-owner",
   },
   G33: {
     owner: 'conversation',
@@ -231,6 +231,15 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
 };
 
 /**
+ * A clause of a kept row that is NOT delivered yet, and the item that delivers it (review guarantees-reown r1 #4). The
+ * row stays with its owner; the ledger and the port brief carry the clause as an OPEN note beside it, so a green row is
+ * not read as a finished one.
+ */
+export const OPEN_CLAUSES: Record<string, string> = {
+  G95: "OPEN: 'Same-named machines are told apart by address' is ported as a helper (distinctDaemonName, tested) but is not shown on screen until the item that mounts Access's StepUpDialog passes it as machineName; nothing mounts the dialog yet, so that clause stays unticked",
+};
+
+/**
  * Appendix D rows the ledger splits into one row per ROUTE (lead ruling guarantees-reown: each route is owned by the
  * plugin that serves it, and each has its own test named with its id). The appendix keeps its one row; the ledger
  * (`guarantees.tsv`) carries these instead, so the appendix totals (1,215 = 1,158 + 26 + 31) still hold.
@@ -262,15 +271,17 @@ export const ROW_SPLITS: Record<string, readonly { id: string; owner: string; ro
 /** The ledger's rows: the Appendix D rows, with every {@link ROW_SPLITS} row replaced by its per-route rows. */
 export function ledgerRows(appendix: readonly Row[]): Row[] {
   return appendix.flatMap(row => {
+    const open = OPEN_CLAUSES[row.id];
     const parts = ROW_SPLITS[row.id];
-    if (parts === undefined) return [row];
+    if (parts === undefined)
+      return [open === undefined ? row : { ...row, notes: [row.notes, open].filter(note => note !== '').join('; ') }];
     return parts.map(part => ({
       ...row,
       id: part.id,
       owner: part.owner,
       with: [...new Set([row.owner, ...row.with].filter(x => x !== part.owner))],
       test: part.id,
-      guarantee: `${part.what} (\`${part.route}\`) is a narrowing: never held, never needs a step-up beyond today's. ${row.guarantee}`,
+      guarantee: `${part.what} (\`${part.route}\`) is a narrowing: never needs a step-up beyond today's. ${row.guarantee}`,
     }));
   });
 }

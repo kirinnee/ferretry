@@ -12,6 +12,7 @@ import {
   CONFIGURE,
   GUARD_ACK,
   GUARD_NONE,
+  GUARD_OPEN_URL,
   PageChanged,
   SKIP_BY_SERVICE,
   SKIP_READ,
@@ -140,7 +141,7 @@ export default definePlugin({
         privilegedOnly: true,
         noStore: true,
         audit: SKIP_BY_SERVICE,
-        guard: GUARD_NONE,
+        guard: GUARD_OPEN_URL,
       }),
     ],
     sockets: [

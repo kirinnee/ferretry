@@ -32,3 +32,12 @@ test('G33 regenerates as Conversation, with Terminals and Gate as co-owners (por
   expect(OWNER_OVERRIDE.G33?.owner).toBe('conversation');
   expect((await regenerated()).get('G33')).toBe('conversation');
 });
+
+test('G95 carries its unmounted clause as OPEN, and a G128 row no longer claims "never held"', async () => {
+  const rows = ledgerRows(parseAppendixD(await Bun.file(join(root, 'docs/design/redesign.md')).text()).rows);
+  const g95 = rows.find(row => row.id === 'G95');
+  expect(g95?.notes).toContain('OPEN');
+  expect(g95?.notes).toContain('StepUpDialog');
+  expect(g95?.notes).toContain('integration fixture');
+  expect(rows.find(row => row.id === 'G128a')?.guarantee).not.toContain('never held');
+});

@@ -232,7 +232,7 @@ export function buildBrowsers(
 
   // ── handing a link to this computer's own browser (G27) ──────────────────────────────────────────────────────
   const openUrl = new OpenUrlService({
-    launcher: seams.opener ?? new KernelDetachedLauncher(kernel.spawn),
+    launcher: seams.opener ?? new KernelDetachedLauncher(kernel.spawn, host.environment),
     audit: { record: async draft => await ctx.needs.gate.audit(draft) },
     nowMs: () => kernel.clock.nowMs(),
     platform: host.platform,

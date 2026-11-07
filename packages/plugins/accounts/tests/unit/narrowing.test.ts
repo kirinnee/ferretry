@@ -15,7 +15,7 @@ function proveNarrowing(key: string, capability: string, axis: 'use' | 'configur
   expect(route).toBeDefined();
   expect(route?.capability?.narrowing).toBe(true);
   expect(route?.capability?.axis).toBe(axis);
-  expect(String(route?.capability?.capability)).toContain(capability);
+  expect(String(route?.capability?.capability)).toBe(capability);
   expect(route?.caller).toBe('person');
   expect(route?.minimum).toBe('operator');
   expect(route?.unlockExempt).toBeUndefined();

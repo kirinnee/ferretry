@@ -31,6 +31,9 @@ export const SKIP_UNRECORDED = { skip: 'not kept in the audit log today' } as co
 export const SKIP_BY_SERVICE = {
   skip: 'the service records link.opened itself, with the host only, for every outcome',
 } as const satisfies AuditDeclaration;
+export const GUARD_OPEN_URL = {
+  none: 'hands one validated address to the OS; reads no page',
+} as const satisfies GuardDeclaration;
 export const GUARD_NONE = {
   none: 'browser lifecycle, proxy state and surface control only; no page text',
 } as const satisfies GuardDeclaration;

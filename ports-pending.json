@@ -68,6 +68,9 @@
     "connections": [
       "GAP(kernel): the tunnel carrier cannot run: the kernel offers no port to bind its own loopback listener (serving only the session route, every arrival remote) and none to find cloudflared (FY_CLOUDFLARED, PATH); the daemon half composes the carrier and says so out loud until a port exists",
       "GAP(parity): the J-, S- and V-0245 rows still point at tests/unit/parity files that are not written"
+    ],
+    "browsers": [
+      "GAP(kernel): the link opener (POST /v1/system/open-url) is not detached from the daemon, as today's was (detached, unref'd): kernel SpawnOptions has no `detached`, so stopping the daemon's process group can take the opener, and a browser it started directly, down with it; needs the kernel's additive detached spawn"
     ]
   },
   "pendingHalves": {
