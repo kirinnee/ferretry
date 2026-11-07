@@ -51,7 +51,7 @@ export function isWildcardHost(host: string): boolean {
   const bare = bareHost(host);
   if (bare === '0.0.0.0') return true;
   const groups = ipv6Groups(bare);
-  return groups !== undefined && groups.every(group => group === 0);
+  return groups?.every(group => group === 0) === true;
 }
 
 export function daemonAddress(host: string, port: number): string {

@@ -11,7 +11,13 @@ import {
   verb,
   type VerbHandler,
 } from '@ferretry/kernel/manifest';
-import { type ClientDeps, type DaemonReply, type DaemonTransport, InventoryCache, surfacesOf } from '../../src/lib/client.ts';
+import {
+  type ClientDeps,
+  type DaemonReply,
+  type DaemonTransport,
+  InventoryCache,
+  surfacesOf,
+} from '../../src/lib/client.ts';
 import type { DaemonRequest } from '../../src/lib/request.ts';
 import type { AnyCliImplementation, CommandRegistry, RegistryEntry } from '../../src/lib/registry.ts';
 import type { CliWorld, Connection, LaunchResult, Probe } from '../../src/lib/world.ts';
@@ -69,7 +75,11 @@ export const wiringManifest = definePlugin({
   actions: { cli: [verb('wiring show')] },
 });
 
-export function entry(manifest: Manifest, contract: string, half: AnyCliImplementation | (() => Promise<AnyCliImplementation>)): RegistryEntry {
+export function entry(
+  manifest: Manifest,
+  contract: string,
+  half: AnyCliImplementation | (() => Promise<AnyCliImplementation>),
+): RegistryEntry {
   return { id: manifest.id, manifest, contract, load: typeof half === 'function' ? half : async () => half };
 }
 
@@ -146,12 +156,21 @@ export interface FakeWorldOptions {
   readonly transport?: RecordingTransport;
 }
 
-export function fakeWorld(options: FakeWorldOptions = {}): { world: CliWorld; io: CapturedIo; transport: RecordingTransport; connects: { asOwner: boolean }[] } {
+export function fakeWorld(options: FakeWorldOptions = {}): {
+  world: CliWorld;
+  io: CapturedIo;
+  transport: RecordingTransport;
+  connects: { asOwner: boolean }[];
+} {
   const io = capturedIo();
   const transport = options.transport ?? new RecordingTransport();
   const connects: { asOwner: boolean }[] = [];
   const inventory = options.inventory ?? inventoryOf();
-  const probe: Probe = options.probe ?? { state: 'up', baseUrl: 'http://127.0.0.1:7431', health: { protocol: PROTOCOL, version: '5.0.0' } };
+  const probe: Probe = options.probe ?? {
+    state: 'up',
+    baseUrl: 'http://127.0.0.1:7431',
+    health: { protocol: PROTOCOL, version: '5.0.0' },
+  };
   const world: CliWorld = {
     io,
     environment: options.environment ?? {},
@@ -166,3 +185,11 @@ export function fakeWorld(options: FakeWorldOptions = {}): { world: CliWorld; io
   };
   return { world, io, transport, connects };
 }
+
+/** A verb that makes one daemon call and succeeds: what most test halves do. */
+export const callsThenOk =
+  (client: PluginClient, route: string, init?: Parameters<PluginClient['call']>[1]): VerbHandler =>
+  async () => {
+    await client.call(route, init);
+    return 0;
+  };

@@ -1,5 +1,10 @@
 import { readFile } from 'node:fs/promises';
-import { daemonUrlPort, foreignListenerRefusal, listenerOwnerVerdict, PROC_TCP_TABLES } from '../../lib/listener-owner.ts';
+import {
+  daemonUrlPort,
+  foreignListenerRefusal,
+  listenerOwnerVerdict,
+  PROC_TCP_TABLES,
+} from '../../lib/listener-owner.ts';
 
 /** The kernel's socket tables, or `undefined` on a host that publishes none (macOS). */
 export async function procTcpTables(

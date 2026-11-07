@@ -26,9 +26,12 @@ export async function readAdminToken(path: string, fileSystem = nodeFileSystem):
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT')
       throw new DaemonTokenFileError(`FY_TOKEN is not set and the daemon token is missing at ${path}`);
-    throw new DaemonTokenFileError(`FY_TOKEN is not set and the daemon token cannot be inspected at ${path}: ${(error as Error).message}`);
+    throw new DaemonTokenFileError(
+      `FY_TOKEN is not set and the daemon token cannot be inspected at ${path}: ${(error as Error).message}`,
+    );
   }
-  if (!metadata.isFile()) throw new DaemonTokenFileError(`FY_TOKEN is not set and the daemon token at ${path} is not a regular file`);
+  if (!metadata.isFile())
+    throw new DaemonTokenFileError(`FY_TOKEN is not set and the daemon token at ${path} is not a regular file`);
   if ((metadata.mode & 0o077) !== 0)
     throw new DaemonTokenFileError(
       `refusing daemon token at ${path}: permissions must be owner-only (current mode ${(metadata.mode & 0o777).toString(8)})`,
@@ -37,7 +40,9 @@ export async function readAdminToken(path: string, fileSystem = nodeFileSystem):
   try {
     text = await fileSystem.readFile(path, 'utf8');
   } catch (error) {
-    throw new DaemonTokenFileError(`FY_TOKEN is not set and the daemon token cannot be read at ${path}: ${(error as Error).message}`);
+    throw new DaemonTokenFileError(
+      `FY_TOKEN is not set and the daemon token cannot be read at ${path}: ${(error as Error).message}`,
+    );
   }
   const token = text.trim();
   if (token === '') throw new DaemonTokenFileError(`FY_TOKEN is not set and the daemon token at ${path} is empty`);

@@ -25,7 +25,10 @@ describe('fy plugin', () => {
   });
 
   it('should show one plugin in words, and a data plugin as the daemon’s', async () => {
-    const { world, io } = fakeWorld({ registry: registryOf(boardEntry()), inventory: inventoryOf({ id: 'board', contract: 'h-board' }, { id: 'tiny', contract: 'x' }) });
+    const { world, io } = fakeWorld({
+      registry: registryOf(boardEntry()),
+      inventory: inventoryOf({ id: 'board', contract: 'h-board' }, { id: 'tiny', contract: 'x' }),
+    });
     should(await runFy(['plugin', 'show', 'board'], world)).equal(0);
     should(io.stdout()).containEql('Board (board) 5.0.0  code plugin, on');
     should(io.stdout()).containEql('verbs     card show, card move, board');
@@ -42,30 +45,58 @@ describe('fy plugin', () => {
 
   const A = definePort<{ a(): void }>('a');
   const dependency = () => {
-    const base = definePlugin({ id: 'base', title: 'Base', version: '5.0.0', api: 5, core: false, kinds: ['command'], provides: { a: A } });
-    const top = definePlugin({ id: 'top', title: 'Top', version: '5.0.0', api: 5, core: false, kinds: ['command'], needs: { a: A } });
+    const base = definePlugin({
+      id: 'base',
+      title: 'Base',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: ['command'],
+      provides: { a: A },
+    });
+    const top = definePlugin({
+      id: 'top',
+      title: 'Top',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: ['command'],
+      needs: { a: A },
+    });
     return registryOf(skeletonEntry(base, 'b'), skeletonEntry(top, 't'));
   };
 
   it('should refuse to turn a plugin off while a running plugin needs it, naming the dependents and the flag', async () => {
-    const { world, io } = fakeWorld({ registry: dependency(), inventory: inventoryOf({ id: 'base', contract: 'b' }, { id: 'top', contract: 't' }) });
+    const { world, io } = fakeWorld({
+      registry: dependency(),
+      inventory: inventoryOf({ id: 'base', contract: 'b' }, { id: 'top', contract: 't' }),
+    });
     should(await runFy(['plugin', 'off', 'base'], world)).equal(1);
     should(io.stderr()).containEql('needed by top');
     should(io.stderr()).containEql('--with-dependents');
   });
 
   it('should, once confirmed, say the write is not built yet instead of pretending', async () => {
-    const { world, io } = fakeWorld({ registry: dependency(), inventory: inventoryOf({ id: 'base', contract: 'b' }, { id: 'top', contract: 't' }) });
+    const { world, io } = fakeWorld({
+      registry: dependency(),
+      inventory: inventoryOf({ id: 'base', contract: 'b' }, { id: 'top', contract: 't' }),
+    });
     should(await runFy(['plugin', 'off', 'base', '--with-dependents'], world)).equal(69);
     should(io.stderr()).containEql('not built yet');
   });
 
   it('should refuse to turn a plugin on while what it needs is off, and a core piece either way', async () => {
-    const { world, io } = fakeWorld({ registry: dependency(), inventory: inventoryOf({ id: 'base', on: false, contract: 'b' }, { id: 'top', on: false, contract: 't' }) });
+    const { world, io } = fakeWorld({
+      registry: dependency(),
+      inventory: inventoryOf({ id: 'base', on: false, contract: 'b' }, { id: 'top', on: false, contract: 't' }),
+    });
     should(await runFy(['plugin', 'on', 'top'], world)).equal(1);
     should(io.stderr()).containEql('needs base');
     const core = definePlugin({ id: 'gate', title: 'Gate', version: '5.0.0', api: 5, core: true, kinds: [] });
-    const coreWorld = fakeWorld({ registry: registryOf(skeletonEntry(core)), inventory: inventoryOf({ id: 'gate', contract: 'g' }) });
+    const coreWorld = fakeWorld({
+      registry: registryOf(skeletonEntry(core)),
+      inventory: inventoryOf({ id: 'gate', contract: 'g' }),
+    });
     should(await runFy(['plugin', 'off', 'gate'], coreWorld.world)).equal(1);
     should(coreWorld.io.stderr()).containEql('core piece');
   });
@@ -96,7 +127,10 @@ describe('fy words', () => {
 
   it('should prefer the daemon’s glossary, data plugins’ words included', async () => {
     const fake = fakeWorld({ registry });
-    fake.transport.replies.push({ status: 200, body: { words: [{ word: 'sitrep', means: 'a ferret report', insteadOf: ['status'], plugin: 'tiny' }] } });
+    fake.transport.replies.push({
+      status: 200,
+      body: { words: [{ word: 'sitrep', means: 'a ferret report', insteadOf: ['status'], plugin: 'tiny' }] },
+    });
     should(await runFy(['words', 'status'], fake.world)).equal(0);
     should(fake.io.stdout()).containEql('sitrep');
     should(fake.io.stderr()).equal('');
@@ -144,7 +178,10 @@ describe('fy doctor', () => {
     const findings = diagnose({
       ...base,
       inventory: inventoryOf({ id: 'board', contract: 'h' }, { id: 'tiny', contract: 'x' }),
-      halves: [{ id: 'board', title: 'Board', skeleton: true }, { id: 'bad', title: 'Bad', skeleton: false, error: 'boom' }],
+      halves: [
+        { id: 'board', title: 'Board', skeleton: true },
+        { id: 'bad', title: 'Bad', skeleton: false, error: 'boom' },
+      ],
       conflicts: [{ line: 'doctor', owner: 'clash', keptFrom: 'shell' }],
     });
     const titles = findings.map(finding => finding.title);
@@ -160,8 +197,13 @@ describe('fy doctor', () => {
   });
 
   it('should render a fix under a failing line, and exit 1 only when something failed', async () => {
-    should(renderFindings(diagnose({ ...base, probe: down, inventory: { unreadable: 'x' } }))).containEql('      fix: fy daemon start');
-    const healthy = fakeWorld({ registry: registryOf(boardEntry()), inventory: inventoryOf({ id: 'board', contract: 'h-board' }) });
+    should(renderFindings(diagnose({ ...base, probe: down, inventory: { unreadable: 'x' } }))).containEql(
+      '      fix: fy daemon start',
+    );
+    const healthy = fakeWorld({
+      registry: registryOf(boardEntry()),
+      inventory: inventoryOf({ id: 'board', contract: 'h-board' }),
+    });
     should(await runFy(['doctor'], healthy.world)).equal(0);
     const broken = fakeWorld({ registry: registryOf(boardEntry()), probe: down });
     should(await runFy(['doctor'], broken.world)).equal(1);
@@ -170,14 +212,20 @@ describe('fy doctor', () => {
 
 describe('fy daemon', () => {
   it('should report a running daemon with its build and whether the plugins agree', async () => {
-    const { world, io } = fakeWorld({ registry: registryOf(boardEntry()), inventory: inventoryOf({ id: 'board', contract: 'h-board' }) });
+    const { world, io } = fakeWorld({
+      registry: registryOf(boardEntry()),
+      inventory: inventoryOf({ id: 'board', contract: 'h-board' }),
+    });
     should(await runFy(['daemon', 'status'], world)).equal(0);
     should(io.stdout()).containEql('version  5.0.0');
     should(io.stdout()).containEql('every plugin of this fy agrees with the daemon');
   });
 
   it('should point at the restart when a plugin differs', async () => {
-    const { world, io } = fakeWorld({ registry: registryOf(boardEntry()), inventory: inventoryOf({ id: 'board', contract: 'other' }) });
+    const { world, io } = fakeWorld({
+      registry: registryOf(boardEntry()),
+      inventory: inventoryOf({ id: 'board', contract: 'other' }),
+    });
     await runFy(['daemon', 'status'], world);
     should(io.stdout()).containEql('board differ or are missing: restart the daemon with `fy daemon restart`');
   });
@@ -209,17 +257,40 @@ describe('fy daemon', () => {
 
 describe('fy ask', () => {
   const asksManifest = definePlugin({
-    id: 'asks', title: 'Asks', version: '5.0.0', api: 5, core: true, kinds: [],
+    id: 'asks',
+    title: 'Asks',
+    version: '5.0.0',
+    api: 5,
+    core: true,
+    kinds: [],
     actions: {
       routes: [
-        route(ASK_ROUTES.list, { minimum: 'authenticated', caller: 'any', audit: { skip: 'read' }, guard: { none: 'ids' } }),
-        route(ASK_ROUTES.show, { minimum: 'authenticated', caller: 'any', audit: { skip: 'read' }, guard: { none: 'ids' } }),
-        route(ASK_ROUTES.answer, { minimum: 'authenticated', caller: 'person', audit: { skip: 'test' }, guard: { none: 'ids' } }),
+        route(ASK_ROUTES.list, {
+          minimum: 'authenticated',
+          caller: 'any',
+          audit: { skip: 'read' },
+          guard: { none: 'ids' },
+        }),
+        route(ASK_ROUTES.show, {
+          minimum: 'authenticated',
+          caller: 'any',
+          audit: { skip: 'read' },
+          guard: { none: 'ids' },
+        }),
+        route(ASK_ROUTES.answer, {
+          minimum: 'authenticated',
+          caller: 'person',
+          audit: { skip: 'test' },
+          guard: { none: 'ids' },
+        }),
       ],
     },
   });
   const withAsks = () => {
-    const fake = fakeWorld({ registry: registryOf(skeletonEntry(asksManifest, 'h-asks')), inventory: inventoryOf({ id: 'asks', contract: 'h-asks' }) });
+    const fake = fakeWorld({
+      registry: registryOf(skeletonEntry(asksManifest, 'h-asks')),
+      inventory: inventoryOf({ id: 'asks', contract: 'h-asks' }),
+    });
     return fake;
   };
 
@@ -259,4 +330,3 @@ describe('fy ask', () => {
     should(() => askRows({ nope: true })).throw(/shape this fy does not read/u);
   });
 });
-

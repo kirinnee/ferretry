@@ -40,9 +40,18 @@ export function diagnose(input: DoctorInput): readonly Finding[] {
   const findings: Finding[] = [];
   const { binary, probe } = input;
   if (probe.state === 'down') {
-    findings.push({ state: 'fail', title: 'daemon', detail: `not answering at ${probe.baseUrl} (${probe.why})`, fix: `${binary} daemon start` });
+    findings.push({
+      state: 'fail',
+      title: 'daemon',
+      detail: `not answering at ${probe.baseUrl} (${probe.why})`,
+      fix: `${binary} daemon start`,
+    });
   } else {
-    findings.push({ state: 'ok', title: 'daemon', detail: `answering at ${probe.baseUrl}, version ${probe.health.version}` });
+    findings.push({
+      state: 'ok',
+      title: 'daemon',
+      detail: `answering at ${probe.baseUrl}, version ${probe.health.version}`,
+    });
     findings.push(
       probe.health.protocol === PROTOCOL
         ? { state: 'ok', title: 'session protocol', detail: `${String(PROTOCOL)}, same as this ${binary}` }
@@ -56,7 +65,11 @@ export function diagnose(input: DoctorInput): readonly Finding[] {
   }
   if ('unreadable' in input.inventory) {
     if (probe.state === 'up')
-      findings.push({ state: 'warn', title: 'plugins', detail: `the plugin list could not be read: ${input.inventory.unreadable}` });
+      findings.push({
+        state: 'warn',
+        title: 'plugins',
+        detail: `the plugin list could not be read: ${input.inventory.unreadable}`,
+      });
   } else {
     const inventory = input.inventory;
     const compiled = Object.fromEntries(input.registry.map(entry => [entry.id, entry.contract]));
@@ -72,22 +85,36 @@ export function diagnose(input: DoctorInput): readonly Finding[] {
     }
     const unknown = inventory.plugins.filter(held => compiled[held.id] === undefined).map(held => held.id);
     if (unknown.length > 0)
-      findings.push({ state: 'ok', title: 'daemon-only plugins', detail: `${unknown.join(', ')} (data plugins, or a newer daemon)` });
+      findings.push({
+        state: 'ok',
+        title: 'daemon-only plugins',
+        detail: `${unknown.join(', ')} (data plugins, or a newer daemon)`,
+      });
     if (!findings.some(finding => finding.title.startsWith('plugin ')))
-      findings.push({ state: 'ok', title: 'plugins', detail: 'every plugin of this build is present, on and in agreement' });
+      findings.push({
+        state: 'ok',
+        title: 'plugins',
+        detail: 'every plugin of this build is present, on and in agreement',
+      });
   }
   for (const half of input.halves)
-    if (half.error !== undefined) findings.push({ state: 'fail', title: `${half.id} commands`, detail: `would not load: ${half.error}` });
+    if (half.error !== undefined)
+      findings.push({ state: 'fail', title: `${half.id} commands`, detail: `would not load: ${half.error}` });
   const skeletons = input.halves.filter(half => half.skeleton).map(half => half.id);
   if (skeletons.length > 0)
-    findings.push({ state: 'warn', title: 'not built yet', detail: `${skeletons.join(', ')} answer "not built yet" in this build` });
+    findings.push({
+      state: 'warn',
+      title: 'not built yet',
+      detail: `${skeletons.join(', ')} answer "not built yet" in this build`,
+    });
   for (const conflict of input.conflicts)
     findings.push({
       state: 'fail',
       title: 'verb conflict',
       detail: `"${conflict.line}" from ${conflict.owner} is left out: ${conflict.keptFrom} already has it`,
     });
-  for (const warning of paneCredentialWarnings(input.environment)) findings.push({ state: 'warn', title: 'credential', detail: warning });
+  for (const warning of paneCredentialWarnings(input.environment))
+    findings.push({ state: 'warn', title: 'credential', detail: warning });
   return findings;
 }
 
@@ -95,7 +122,10 @@ const MARK = { ok: 'ok  ', warn: 'warn', fail: 'FAIL' } as const;
 
 export function renderFindings(findings: readonly Finding[]): string {
   return findings
-    .map(finding => `${MARK[finding.state]}  ${finding.title}: ${finding.detail}${finding.fix === undefined ? '' : `\n      fix: ${finding.fix}`}`)
+    .map(
+      finding =>
+        `${MARK[finding.state]}  ${finding.title}: ${finding.detail}${finding.fix === undefined ? '' : `\n      fix: ${finding.fix}`}`,
+    )
     .join('\n');
 }
 
@@ -115,7 +145,12 @@ export const doctorVerb: ShellVerb = async ctx => {
     try {
       halves.push({ id: entry.id, title: entry.manifest.title, skeleton: (await entry.load()).skeleton === true });
     } catch (error) {
-      halves.push({ id: entry.id, title: entry.manifest.title, skeleton: false, error: error instanceof Error ? error.message : String(error) });
+      halves.push({
+        id: entry.id,
+        title: entry.manifest.title,
+        skeleton: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
   const findings = diagnose({

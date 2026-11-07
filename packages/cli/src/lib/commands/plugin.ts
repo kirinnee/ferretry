@@ -51,7 +51,8 @@ export const pluginList: ShellVerb = async ctx => {
     ]);
   }
   for (const held of inventory.plugins)
-    if (compiled[held.id] === undefined) rows.push([held.id, 'data', held.on ? 'on' : 'off', '-', 'daemon only', '-', '-']);
+    if (compiled[held.id] === undefined)
+      rows.push([held.id, 'data', held.on ? 'on' : 'off', '-', 'daemon only', '-', '-']);
   ctx.world.io.out(`${renderTable(['PLUGIN', 'KIND', 'STATE', 'VERSION', 'CONTRACT', 'ADDS', 'NEEDED BY'], rows)}\n`);
   return EXIT.ok;
 };
@@ -67,8 +68,11 @@ export const pluginShow: ShellVerb = async ctx => {
   const inventory = await (await ctx.deps()).inventory.current();
   const held = inventory.plugins.find(candidate => candidate.id === id);
   if (entry === undefined) {
-    if (held === undefined) throw new ShellError(`no plugin "${id}" (see \`${ctx.world.identity.binary} plugin list\`)`);
-    ctx.world.io.out(`${id}  data plugin, ${held.on ? 'on' : 'off'}\nThis fy has no copy of it; the daemon holds its manifest.\n`);
+    if (held === undefined)
+      throw new ShellError(`no plugin "${id}" (see \`${ctx.world.identity.binary} plugin list\`)`);
+    ctx.world.io.out(
+      `${id}  data plugin, ${held.on ? 'on' : 'off'}\nThis fy has no copy of it; the daemon holds its manifest.\n`,
+    );
     return EXIT.ok;
   }
   const manifest = entry.manifest;
@@ -100,7 +104,10 @@ async function switchPlugin(ctx: ShellContext, to: 'on' | 'off'): Promise<number
   if (id === undefined) throw new ShellError(`usage: ${binary} plugin ${to} <id>`, EXIT.usage);
   const entry = ctx.world.registry.plugins.find(candidate => candidate.id === id);
   if (entry === undefined) throw new ShellError(`no plugin "${id}" in this ${binary} (see \`${binary} plugin list\`)`);
-  if (entry.manifest.core) throw new ShellError(`${entry.manifest.title} is a core piece; core pieces cannot be turned ${to === 'off' ? 'off' : 'on or off'}`);
+  if (entry.manifest.core)
+    throw new ShellError(
+      `${entry.manifest.title} is a core piece; core pieces cannot be turned ${to === 'off' ? 'off' : 'on or off'}`,
+    );
   const inventory = await (await ctx.deps()).inventory.current();
   const stateOf = (plugin: string): boolean | undefined => inventory.plugins.find(held => held.id === plugin)?.on;
   if (to === 'off') {

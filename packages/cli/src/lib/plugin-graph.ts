@@ -19,14 +19,18 @@ export interface PluginGraph {
 export function buildPluginGraph(registry: CommandRegistry): PluginGraph {
   const providers = new Map<string, string>();
   for (const plugin of registry.plugins)
-    for (const token of Object.values(plugin.manifest.provides ?? {})) if (!providers.has(token.name)) providers.set(token.name, plugin.id);
+    for (const token of Object.values(plugin.manifest.provides ?? {}))
+      if (!providers.has(token.name)) providers.set(token.name, plugin.id);
   const edgesById = new Map<string, PluginEdges>();
   const resolve = (tokens: Readonly<Record<string, { readonly name: string }>> | undefined, self: string): string[] =>
     [...new Set(Object.values(tokens ?? {}).map(token => providers.get(token.name)))].filter(
       (id): id is string => id !== undefined && id !== self,
     );
   for (const plugin of registry.plugins)
-    edgesById.set(plugin.id, { needs: resolve(plugin.manifest.needs, plugin.id), uses: resolve(plugin.manifest.uses, plugin.id) });
+    edgesById.set(plugin.id, {
+      needs: resolve(plugin.manifest.needs, plugin.id),
+      uses: resolve(plugin.manifest.uses, plugin.id),
+    });
   const none: PluginEdges = { needs: [], uses: [] };
   const edges = (id: string): PluginEdges => edgesById.get(id) ?? none;
   return {
@@ -44,7 +48,10 @@ export function buildPluginGraph(registry: CommandRegistry): PluginGraph {
       return [...found].sort();
     },
     usersOf(id) {
-      return registry.plugins.filter(plugin => edges(plugin.id).uses.includes(id)).map(plugin => plugin.id).sort();
+      return registry.plugins
+        .filter(plugin => edges(plugin.id).uses.includes(id))
+        .map(plugin => plugin.id)
+        .sort();
     },
   };
 }

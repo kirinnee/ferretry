@@ -163,7 +163,9 @@ async function runPluginVerb(
   });
   const handler = (built.verbs as Readonly<Record<string, VerbHandler | undefined>>)[entry.line];
   if (handler === undefined)
-    throw new ShellError(`${plugin.manifest.title} declares "${entry.line}" but its ${identity.binary} half implements none`);
+    throw new ShellError(
+      `${plugin.manifest.title} declares "${entry.line}" but its ${identity.binary} half implements none`,
+    );
   return await handler(invocation);
 }
 

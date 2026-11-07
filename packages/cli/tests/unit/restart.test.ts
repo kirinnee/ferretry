@@ -78,8 +78,13 @@ describe('waiting out a restart', () => {
         now += ms;
       },
     };
-    should((await waitOutRestart({ ...base, patience: { expected: () => false, waiting: () => undefined } })).kind).equal('unreachable');
-    should((await waitOutRestart({ ...base, patience: { expected: () => true, waiting: () => undefined, windowMs: 1000 } })).kind).equal('unreachable');
+    should(
+      (await waitOutRestart({ ...base, patience: { expected: () => false, waiting: () => undefined } })).kind,
+    ).equal('unreachable');
+    should(
+      (await waitOutRestart({ ...base, patience: { expected: () => true, waiting: () => undefined, windowMs: 1000 } }))
+        .kind,
+    ).equal('unreachable');
     should(now).equal(1000);
     should((await waitOutRestart({ ...base, patience: undefined })).kind).equal('unreachable');
   });

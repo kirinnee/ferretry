@@ -8,10 +8,16 @@ export const daemonStatus: ShellVerb = async ctx => {
   const { io, identity } = ctx.world;
   const probe = await ctx.world.probe();
   if (probe.state === 'down') {
-    io.err(`daemon  not running at ${probe.baseUrl} (${probe.why})\nstart it with \`${identity.binary} daemon start\`\n`);
+    io.err(
+      `daemon  not running at ${probe.baseUrl} (${probe.why})\nstart it with \`${identity.binary} daemon start\`\n`,
+    );
     return EXIT.failure;
   }
-  const lines = [`daemon   running at ${probe.baseUrl}`, `version  ${probe.health.version}`, `protocol ${String(probe.health.protocol)}`];
+  const lines = [
+    `daemon   running at ${probe.baseUrl}`,
+    `version  ${probe.health.version}`,
+    `protocol ${String(probe.health.protocol)}`,
+  ];
   try {
     const inventory = await (await ctx.deps()).inventory.current();
     const off = inventory.plugins.filter(held => !held.on).map(held => held.id);
@@ -48,10 +54,12 @@ export const daemonStart: ShellVerb = async ctx => {
 };
 
 /** Stopping needs the kernel host's stop route (or its lock file), which this build of the host does not serve yet. */
-const unwired = (what: string) => async (ctx: ShellContext): Promise<number> => {
-  ctx.world.io.err(`${skeletonSentence(what)}\n`);
-  return EXIT.unavailable;
-};
+const unwired =
+  (what: string) =>
+  async (ctx: ShellContext): Promise<number> => {
+    ctx.world.io.err(`${skeletonSentence(what)}\n`);
+    return EXIT.unavailable;
+  };
 
 export const daemonStop: ShellVerb = unwired('Stopping the daemon from fy');
 export const daemonRestart: ShellVerb = unwired('Restarting the daemon from fy');

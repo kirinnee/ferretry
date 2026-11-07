@@ -4,7 +4,9 @@ import { buildRequest, isRepeatable, refusalText } from '../../src/lib/request.t
 
 describe('buildRequest', () => {
   it('should encode parameters and the query', () => {
-    should(buildRequest('GET /v1/cards/:id/notes/:note', { params: { id: 'a/b', note: 'x' }, query: { q: 'a b' } })).deepEqual({
+    should(
+      buildRequest('GET /v1/cards/:id/notes/:note', { params: { id: 'a/b', note: 'x' }, query: { q: 'a b' } }),
+    ).deepEqual({
       method: 'GET',
       path: '/v1/cards/a%2Fb/notes/x?q=a+b',
     });

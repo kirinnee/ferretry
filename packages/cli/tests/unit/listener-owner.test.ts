@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { daemonUrlPort, foreignListenerRefusal, listenerOwnerVerdict, parseTcpListeners } from '../../src/lib/listener-owner.ts';
+import {
+  daemonUrlPort,
+  foreignListenerRefusal,
+  listenerOwnerVerdict,
+  parseTcpListeners,
+} from '../../src/lib/listener-owner.ts';
 
 const HEADER = '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode';
 // 127.0.0.1:7431 is 0100007F:1D07; 0.0.0.0:7431 is 00000000:1D07; 8.8.8.8:7431 is 08080808:1D07.
@@ -21,7 +26,9 @@ describe('listener owner (S57)', () => {
   it('S57 a credential is refused when another user holds the port, wildcard binds included', () => {
     const verdict = listenerOwnerVerdict(7431, 1000, [[HEADER, line('00000000', 1001)].join('\n')]);
     should(verdict).deepEqual({ kind: 'foreign', uids: [1001] });
-    should(foreignListenerRefusal('http://127.0.0.1:7431', 'the session credential', verdict)).containEql('held by another user (uid 1001)');
+    should(foreignListenerRefusal('http://127.0.0.1:7431', 'the session credential', verdict)).containEql(
+      'held by another user (uid 1001)',
+    );
   });
 
   it('should ignore a listener that is not reachable from loopback, and report absence', () => {

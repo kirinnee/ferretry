@@ -1,6 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { DEFAULT_DAEMON_URL, isLocalDaemonUrl, isLoopbackHost, isWildcardHost, recordedBindAddress, resolveDaemonUrl } from '../../src/lib/address.ts';
+import {
+  DEFAULT_DAEMON_URL,
+  isLocalDaemonUrl,
+  isLoopbackHost,
+  isWildcardHost,
+  recordedBindAddress,
+  resolveDaemonUrl,
+} from '../../src/lib/address.ts';
 
 describe('loopback', () => {
   it('should read the whole loopback domain', () => {
@@ -28,11 +35,15 @@ describe('resolveDaemonUrl', () => {
   });
 
   it('should follow the bind the daemon recorded, never an advertisement', () => {
-    should(resolveDaemonUrl('', JSON.stringify({ host: '127.0.0.1', port: 8123, publicUrl: 'https://x.example' }))).equal('http://127.0.0.1:8123');
+    should(
+      resolveDaemonUrl('', JSON.stringify({ host: '127.0.0.1', port: 8123, publicUrl: 'https://x.example' })),
+    ).equal('http://127.0.0.1:8123');
   });
 
   it('should follow the bind carrier of the carriers spelling, and answer loopback for a wildcard bind', () => {
-    should(recordedBindAddress({ carriers: [{ kind: 'relay' }, { kind: 'bind', host: '0.0.0.0', port: 9000 }] })).equal('http://127.0.0.1:9000');
+    should(recordedBindAddress({ carriers: [{ kind: 'relay' }, { kind: 'bind', host: '0.0.0.0', port: 9000 }] })).equal(
+      'http://127.0.0.1:9000',
+    );
     should(recordedBindAddress({ host: '::1', port: 9001 })).equal('http://[::1]:9001');
   });
 

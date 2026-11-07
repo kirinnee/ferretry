@@ -1,6 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { credentialPlan, inPane, ownFerretId, paneCredential, paneCredentialWarnings } from '../../src/lib/credential.ts';
+import {
+  credentialPlan,
+  inPane,
+  ownFerretId,
+  paneCredential,
+  paneCredentialWarnings,
+} from '../../src/lib/credential.ts';
 
 describe('credentialPlan', () => {
   it('P90 FY_TOKEN wins outright, over a ferret’s own credential', () => {
@@ -9,9 +15,14 @@ describe('credentialPlan', () => {
   });
 
   it('S52 a ferret presents its own fys_ credential, read from the documented name first', () => {
-    should(paneCredential({ FY_SESSION_TOKEN: 'fys_first', FY_SESSION_BOARD_CAPABILITY: 'fys_second' })).equal('fys_first');
+    should(paneCredential({ FY_SESSION_TOKEN: 'fys_first', FY_SESSION_BOARD_CAPABILITY: 'fys_second' })).equal(
+      'fys_first',
+    );
     should(paneCredential({ FY_SESSION_BOARD_CAPABILITY: 'fys_second' })).equal('fys_second');
-    should(credentialPlan({ FY_SESSION_TOKEN: 'fys_first' }, { asOwner: false })).deepEqual({ kind: 'ferret', bearer: 'fys_first' });
+    should(credentialPlan({ FY_SESSION_TOKEN: 'fys_first' }, { asOwner: false })).deepEqual({
+      kind: 'ferret',
+      bearer: 'fys_first',
+    });
   });
 
   it('S53 the choice is made from the credential alone: a ferret without FY_SESSION_ID is still on its own bearer, never the admin token', () => {
@@ -26,7 +37,10 @@ describe('credentialPlan', () => {
   });
 
   it('S58 --as-owner sets the ferret’s credential aside and says so through its reason', () => {
-    should(credentialPlan({ FY_SESSION_TOKEN: 'fys_abc' }, { asOwner: true })).deepEqual({ kind: 'admin', why: 'as-owner' });
+    should(credentialPlan({ FY_SESSION_TOKEN: 'fys_abc' }, { asOwner: true })).deepEqual({
+      kind: 'admin',
+      why: 'as-owner',
+    });
     should(credentialPlan({}, { asOwner: true })).deepEqual({ kind: 'admin', why: 'person' });
   });
 

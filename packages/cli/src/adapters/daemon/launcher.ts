@@ -13,7 +13,10 @@ export interface LaunchPorts {
   readonly exists: (path: string) => boolean;
   readonly which: (name: string) => string | null;
   /** Starts a process detached from this one, its output discarded. */
-  readonly spawnDetached: (command: readonly string[], environment: Readonly<Record<string, string | undefined>>) => void;
+  readonly spawnDetached: (
+    command: readonly string[],
+    environment: Readonly<Record<string, string | undefined>>,
+  ) => void;
   readonly probe: () => Promise<Probe>;
   readonly sleep: (milliseconds: number) => Promise<void>;
   readonly nowMs: () => number;
@@ -30,7 +33,10 @@ export function findDaemonBinary(ports: Pick<LaunchPorts, 'selfPath' | 'exists' 
 export async function launchDaemon(ports: LaunchPorts): Promise<LaunchResult> {
   const binary = findDaemonBinary(ports);
   if (binary === undefined)
-    return { started: false, why: `cannot find ${DAEMON_BINARY} beside this program or on PATH; install it, or start it yourself` };
+    return {
+      started: false,
+      why: `cannot find ${DAEMON_BINARY} beside this program or on PATH; install it, or start it yourself`,
+    };
   ports.spawnDetached([binary], ports.environment);
   const until = ports.nowMs() + WAIT_MS;
   let last: Probe = await ports.probe();
@@ -40,5 +46,8 @@ export async function launchDaemon(ports: LaunchPorts): Promise<LaunchResult> {
   }
   return last.state === 'up'
     ? { started: true, baseUrl: last.baseUrl }
-    : { started: false, why: `started ${DAEMON_BINARY}, but it is not answering at ${last.baseUrl} (${last.why}); see its log under the home's logs/` };
+    : {
+        started: false,
+        why: `started ${DAEMON_BINARY}, but it is not answering at ${last.baseUrl} (${last.why}); see its log under the home's logs/`,
+      };
 }

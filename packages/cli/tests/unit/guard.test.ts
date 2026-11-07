@@ -21,17 +21,34 @@ describe('judgePlugin (the client guard, §9.6)', () => {
     });
 
   it('should block a plugin this fy has no hash for', () => {
-    should(judgePlugin(inventoryOf({ id: 'other', contract: 'h1' }), compiled, 'other')).deepEqual({ ok: false, reason: 'different' });
+    should(judgePlugin(inventoryOf({ id: 'other', contract: 'h1' }), compiled, 'other')).deepEqual({
+      ok: false,
+      reason: 'different',
+    });
   });
 
   it('should say which side is older when the session protocol differs', () => {
-    should(judgePlugin({ ...inventoryOf({ id: 'board', contract: 'h1' }), protocol: PROTOCOL - 1 } as never, compiled, 'board')).deepEqual({ ok: false, reason: 'daemon-older' });
-    should(judgePlugin({ ...inventoryOf({ id: 'board', contract: 'h1' }), protocol: PROTOCOL + 1 } as never, compiled, 'board')).deepEqual({ ok: false, reason: 'daemon-newer' });
+    should(
+      judgePlugin(
+        { ...inventoryOf({ id: 'board', contract: 'h1' }), protocol: PROTOCOL - 1 } as never,
+        compiled,
+        'board',
+      ),
+    ).deepEqual({ ok: false, reason: 'daemon-older' });
+    should(
+      judgePlugin(
+        { ...inventoryOf({ id: 'board', contract: 'h1' }), protocol: PROTOCOL + 1 } as never,
+        compiled,
+        'board',
+      ),
+    ).deepEqual({ ok: false, reason: 'daemon-newer' });
   });
 
   it('should name the command that fixes each block', () => {
     should(pausedSentence({ ok: false, reason: 'off' }, 'Board', 'board', 'fy')).containEql('`fy plugin on board`');
-    should(pausedSentence({ ok: false, reason: 'different' }, 'Board', 'board', 'fy')).containEql('`fy daemon restart`');
+    should(pausedSentence({ ok: false, reason: 'different' }, 'Board', 'board', 'fy')).containEql(
+      '`fy daemon restart`',
+    );
     should(pausedSentence({ ok: false, reason: 'missing' }, 'Board', 'board', 'fy')).containEql('does not have Board');
     should(pausedSentence({ ok: false, reason: 'daemon-newer' }, 'Board', 'board', 'fy')).containEql('update fy');
   });

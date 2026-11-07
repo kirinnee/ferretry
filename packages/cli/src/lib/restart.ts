@@ -37,7 +37,9 @@ export async function daemonStartingOf(response: Response): Promise<DaemonStarti
     .catch(() => undefined);
   if (typeof body !== 'object' || body === null) return undefined;
   const { code, error } = body as { code?: unknown; error?: unknown };
-  return code === DAEMON_STARTING_CODE ? new DaemonStartingError(typeof error === 'string' ? error : 'starting') : undefined;
+  return code === DAEMON_STARTING_CODE
+    ? new DaemonStartingError(typeof error === 'string' ? error : 'starting')
+    : undefined;
 }
 
 const REFUSED_CODES: ReadonlySet<string> = new Set([
@@ -47,7 +49,13 @@ const REFUSED_CODES: ReadonlySet<string> = new Set([
   'ECONNREFUSED',
   'ENOENT',
 ]);
-const DROPPED_CODES: ReadonlySet<string> = new Set(['ECONNRESET', 'ConnectionClosed', 'EPIPE', 'UND_ERR_SOCKET', 'UND_ERR_CLOSED']);
+const DROPPED_CODES: ReadonlySet<string> = new Set([
+  'ECONNRESET',
+  'ConnectionClosed',
+  'EPIPE',
+  'UND_ERR_SOCKET',
+  'UND_ERR_CLOSED',
+]);
 
 const codeOf = (error: unknown): unknown => {
   if (typeof error !== 'object' || error === null) return undefined;

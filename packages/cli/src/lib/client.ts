@@ -7,7 +7,7 @@
  *    new build is not judged by its old inventory;
  * 3. sends, and turns an HTTP refusal into a final `DaemonRefusal` (S54).
  */
-import { type PluginInventory } from '@ferretry/kernel/contract';
+import type { PluginInventory } from '@ferretry/kernel/contract';
 import type { Manifest, PluginClient } from '@ferretry/kernel/manifest';
 import { DaemonRefusal, EXIT, ShellError } from './errors.ts';
 import { type CompiledContracts, judgePlugin, PluginPausedError, pausedSentence } from './guard.ts';
@@ -32,7 +32,8 @@ export class InventoryCache {
   constructor(private readonly read: () => Promise<PluginInventory>) {}
 
   current(): Promise<PluginInventory> {
-    return (this.#held ??= this.#fresh());
+    this.#held ??= this.#fresh();
+    return this.#held;
   }
 
   refresh(): Promise<PluginInventory> {

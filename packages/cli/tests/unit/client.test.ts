@@ -17,7 +17,10 @@ describe('the guarded client', () => {
     transport.replies.push({ status: 200, body: { id: 'c 1' } });
 
     // Act
-    const answer = await pluginClient(deps, 'board').call('GET /v1/cards/:id', { params: { id: 'c 1' }, query: { full: '1' } });
+    const answer = await pluginClient(deps, 'board').call('GET /v1/cards/:id', {
+      params: { id: 'c 1' },
+      query: { full: '1' },
+    });
 
     // Assert
     should(answer).deepEqual({ id: 'c 1' });
@@ -71,7 +74,10 @@ describe('the guarded client', () => {
 
   it('should also check the owner of a route it consumes from another plugin', async () => {
     // Arrange: a caller plugin that is healthy calls a board route while board is off.
-    const { deps, transport } = depsOf(registry, inventoryOf({ id: 'board', on: false, contract: 'h-board' }, { id: 'caller', contract: 'c' }));
+    const { deps, transport } = depsOf(
+      registry,
+      inventoryOf({ id: 'board', on: false, contract: 'h-board' }, { id: 'caller', contract: 'c' }),
+    );
     (deps.surfaces.compiled as Record<string, string>).caller = 'c';
 
     // Act

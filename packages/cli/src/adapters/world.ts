@@ -64,7 +64,10 @@ export function createWorld(inputs: WorldInputs): CliWorld {
     sleep: milliseconds => Bun.sleep(milliseconds),
   };
   const ferretId = ownFerretId(environment);
-  const clientHeaders = { 'x-ferretry-client': 'cli', ...(ferretId === undefined ? {} : { 'x-ferretry-session-id': ferretId }) };
+  const clientHeaders = {
+    'x-ferretry-client': 'cli',
+    ...(ferretId === undefined ? {} : { 'x-ferretry-session-id': ferretId }),
+  };
 
   return {
     io,
@@ -88,7 +91,12 @@ export function createWorld(inputs: WorldInputs): CliWorld {
       }
       const transport =
         plan.kind === 'ferret'
-          ? new SessionCredentialGateway({ baseUrl, bearer: plan.bearer, ...(ferretId === undefined ? {} : { ferretId }), restart })
+          ? new SessionCredentialGateway({
+              baseUrl,
+              bearer: plan.bearer,
+              ...(ferretId === undefined ? {} : { ferretId }),
+              restart,
+            })
           : new HttpTransport({
               baseUrl,
               headers: clientHeaders,
@@ -102,10 +110,14 @@ export function createWorld(inputs: WorldInputs): CliWorld {
         const reply = await transport.send({ method: 'GET', path: '/v1/plugins' }, { repeatable: true });
         if (reply.status !== 200) {
           const said = (reply.body as { error?: unknown } | undefined)?.error;
-          throw new DaemonRefusal(typeof said === 'string' ? said : `the daemon answered HTTP ${String(reply.status)} to the plugin list`, reply.status);
+          throw new DaemonRefusal(
+            typeof said === 'string' ? said : `the daemon answered HTTP ${String(reply.status)} to the plugin list`,
+            reply.status,
+          );
         }
         const parsed = PluginInventorySchema.safeParse(reply.body);
-        if (!parsed.success) throw new ShellError('the daemon’s plugin list was not in a shape this fy reads; update fy or the daemon');
+        if (!parsed.success)
+          throw new ShellError('the daemon’s plugin list was not in a shape this fy reads; update fy or the daemon');
         return parsed.data;
       });
       return { baseUrl: address, transport, inventory };

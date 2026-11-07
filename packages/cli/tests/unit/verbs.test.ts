@@ -53,7 +53,13 @@ describe('verb table', () => {
     });
     const table = buildVerbTable(registryOf(skeletonEntry(aliasPlugin)));
     const done = resolveVerb(table, ['done', 'c9']);
-    should(done.kind === 'verb' && expandAlias(done.entry, done.rest)).deepEqual(['card', 'move', '--to', 'done', 'c9']);
+    should(done.kind === 'verb' && expandAlias(done.entry, done.rest)).deepEqual([
+      'card',
+      'move',
+      '--to',
+      'done',
+      'c9',
+    ]);
   });
 
   it('should list every owner’s verbs in help, under its title', () => {
@@ -65,7 +71,23 @@ describe('verb table', () => {
   });
 
   it('should skip a declaration that has no typed words', () => {
-    const odd = definePlugin({ id: 'odd', title: 'Odd', version: '5.0.0', api: 5, core: false, kinds: ['command'], actions: { cli: [verb('<id>')] } });
-    should(buildVerbTable(registryOf(entry(odd, 'h', async () => { throw new Error('unused'); }))).entries.some(e => e.owner === 'odd')).be.false();
+    const odd = definePlugin({
+      id: 'odd',
+      title: 'Odd',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: ['command'],
+      actions: { cli: [verb('<id>')] },
+    });
+    should(
+      buildVerbTable(
+        registryOf(
+          entry(odd, 'h', async () => {
+            throw new Error('unused');
+          }),
+        ),
+      ).entries.some(e => e.owner === 'odd'),
+    ).be.false();
   });
 });

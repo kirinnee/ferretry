@@ -2,7 +2,16 @@ import { describe, it } from 'bun:test';
 import { definePlugin, implementCli, verb } from '@ferretry/kernel/manifest';
 import should from 'should';
 import { runFy } from '../../src/lib/run.ts';
-import { boardEntry, boardManifest, entry, fakeWorld, inventoryOf, registryOf, skeletonEntry } from './fakes.ts';
+import {
+  boardEntry,
+  boardManifest,
+  callsThenOk,
+  entry,
+  fakeWorld,
+  inventoryOf,
+  registryOf,
+  skeletonEntry,
+} from './fakes.ts';
 
 describe('runFy', () => {
   it('should print the version and exit 0', async () => {
@@ -64,7 +73,9 @@ describe('runFy', () => {
       actions: { ...boardManifest.actions, cli: [verb('card show')] },
     });
     const half = implementCli(manifest, {
-      build: ctx => ({ verbs: { 'card show': async () => (await ctx.client.call('GET /v1/cards/:id', { params: { id: 'a' } }), 0) } }),
+      build: ctx => ({
+        verbs: { 'card show': callsThenOk(ctx.client, 'GET /v1/cards/:id', { params: { id: 'a' } }) },
+      }),
     });
     const { world, connects, transport } = fakeWorld({
       registry: registryOf(entry(manifest, 'h-board', half)),
@@ -83,7 +94,9 @@ describe('runFy', () => {
   it('S58 --as-owner inside a pane prints its stderr line before acting', async () => {
     const manifest = definePlugin({ ...boardManifest, actions: { cli: [verb('board')] } });
     const half = implementCli(manifest, {
-      build: ctx => ({ verbs: { board: async () => (await ctx.client.call('GET /v1/cards/:id', { params: { id: 'a' } }), 0) } }),
+      build: ctx => ({
+        verbs: { board: callsThenOk(ctx.client, 'GET /v1/cards/:id', { params: { id: 'a' } }) },
+      }),
     });
     const { world, io } = fakeWorld({
       registry: registryOf(entry(manifest, 'h-board', half)),
@@ -97,7 +110,13 @@ describe('runFy', () => {
   it('should print a plugin that is blocked as plugin_paused with its fix, exit 69, and send nothing', async () => {
     const manifest = definePlugin({ ...boardManifest });
     const half = implementCli(manifest, {
-      build: ctx => ({ verbs: { 'card show': async () => (await ctx.client.call('GET /v1/cards/:id', { params: { id: 'a' } }), 0), 'card move': async () => 0, board: async () => 0 } }),
+      build: ctx => ({
+        verbs: {
+          'card show': callsThenOk(ctx.client, 'GET /v1/cards/:id', { params: { id: 'a' } }),
+          'card move': async () => 0,
+          board: async () => 0,
+        },
+      }),
     });
     const { world, io, transport } = fakeWorld({
       registry: registryOf(entry(manifest, 'h-board', half)),
@@ -131,7 +150,12 @@ describe('runFy', () => {
   it('should run an alias as the verb it names, with the arguments carried over', async () => {
     const calls: { args?: readonly string[] } = {};
     const aliasPlugin = definePlugin({
-      id: 'quick', title: 'Quick', version: '5.0.0', api: 5, core: false, kinds: ['command'],
+      id: 'quick',
+      title: 'Quick',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: ['command'],
       actions: { cli: [verb('done', { alias: 'card move --to done' })] },
     });
     const { world } = fakeWorld({ registry: registryOf(boardEntry(calls), skeletonEntry(aliasPlugin)) });
@@ -141,7 +165,12 @@ describe('runFy', () => {
 
   it('should stop an alias that loops', async () => {
     const loop = definePlugin({
-      id: 'loop', title: 'Loop', version: '5.0.0', api: 5, core: false, kinds: ['command'],
+      id: 'loop',
+      title: 'Loop',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: ['command'],
       actions: { cli: [verb('spin', { alias: 'spin' })] },
     });
     const { world, io } = fakeWorld({ registry: registryOf(skeletonEntry(loop)) });

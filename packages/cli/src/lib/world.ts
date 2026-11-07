@@ -26,7 +26,9 @@ export interface Connection {
   readonly inventory: InventoryCache;
 }
 
-export type LaunchResult = { readonly started: true; readonly baseUrl: string } | { readonly started: false; readonly why: string };
+export type LaunchResult =
+  | { readonly started: true; readonly baseUrl: string }
+  | { readonly started: false; readonly why: string };
 
 export interface CliWorld {
   readonly io: TerminalIo;
