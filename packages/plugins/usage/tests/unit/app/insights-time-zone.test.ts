@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
-import './support/dom.ts';
 import {
   DEVICE_TIME_ZONE,
   deviceTimeZone,

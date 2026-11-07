@@ -11,7 +11,7 @@ import {
   type ValueCacheEntry,
 } from '../../../../app/features/analytics/analytics-query-autocomplete.tsx';
 import type { AnalyticsCompletion } from '../../../../app/features/analytics/analytics-query-complete.ts';
-import { render, run, runAsync } from '../support/react.ts';
+import { render, run, runAsync } from '@ferretry/app/testing';
 
 const candidates: AnalyticsCompletion[] = [
   {

@@ -18,7 +18,7 @@ import { daemonInsightsPath, daemonInsightsQueryPath } from '../../../app/shell.
 import manifest from '../../../manifest.ts';
 import { fullReport, minimalReport } from '../contract/performance-report-fixtures.ts';
 import { fakeClient, type RecordedCall } from './support/client.ts';
-import { interact, mount, must } from './support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import { aggregateResponse, group } from './support/analytics-query-fixtures.ts';
 import { rawResponse, rawRow } from './support/analytics-rows.ts';
 import { daemonConnection } from './support/shell.ts';
@@ -88,7 +88,10 @@ describe('usage parity · the app half', () => {
   it('S-0028 AnalyticsQueryPage opens on its default query and asks nothing until Run', async () => {
     const client = fakeClient({ [INSIGHTS]: (call: RecordedCall) => costed(call.query?.q ?? '') });
     const view = await mount(<AnalyticsQueryPage connection={daemonA} client={client} now={NOW} />);
-    const box = must(view.container.querySelector<HTMLTextAreaElement | HTMLInputElement>('[role="combobox"]'), 'the box');
+    const box = must(
+      view.container.querySelector<HTMLTextAreaElement | HTMLInputElement>('[role="combobox"]'),
+      'the box',
+    );
     expect(box.value.length).toBeGreaterThan(0);
     expect(view.container.textContent).toContain('Run a query, or start from an example below.');
     expect(client.calls).toEqual([]);
@@ -119,7 +122,11 @@ describe('usage parity · the app half', () => {
 
   it('S-0046 BudgetSection: the budgets tab gives every login a spend budget editor', async () => {
     const { half } = halfOver({
-      'GET /v1/logins': { format: 1, machine: 'studio-mac', logins: [sampleLogin('claude-personal', { label: 'personal' })] },
+      'GET /v1/logins': {
+        format: 1,
+        machine: 'studio-mac',
+        logins: [sampleLogin('claude-personal', { label: 'personal' })],
+      },
       'GET /v1/usage/budgets': { budgets: [] },
     });
     const view = await mount(asElement(half.settings.budgets({})));
@@ -210,7 +217,9 @@ describe('usage parity · Model pricing and the session surface', () => {
 
   it('S-0205 ResultView shows when the query ran and what it came to', async () => {
     const client = fakeClient({ [INSIGHTS]: (call: RecordedCall) => costed(call.query?.q ?? '') });
-    const view = await mount(<AnalyticsQueryPage connection={daemonA} client={client} now={() => new Date('2026-10-16T12:34:00Z')} />);
+    const view = await mount(
+      <AnalyticsQueryPage connection={daemonA} client={client} now={() => new Date('2026-10-16T12:34:00Z')} />,
+    );
     await submit(view.container);
     expect(view.container.textContent).toContain('Ran at 12:34 UTC');
     expect(view.container.textContent).toContain('claude-opus-5-5');

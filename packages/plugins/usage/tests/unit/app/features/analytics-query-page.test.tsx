@@ -15,8 +15,7 @@ import { fakeClient } from '../support/client.ts';
 import { daemonConnection } from '../support/shell.ts';
 import { DaemonResponseError } from '../support/shell.ts';
 import { aggregateResponse, group } from '../support/analytics-query-fixtures.ts';
-import '../support/dom.ts';
-import { render, run, runAsync } from '../support/react.ts';
+import { render, run, runAsync } from '@ferretry/app/testing';
 
 /** The reads these suites inject are their own; a call that reached this client is a failure. */
 const noClient = fakeClient({});
@@ -82,7 +81,8 @@ describe('AnalyticsQueryPage', () => {
     const seen: string[] = [];
     const renderer = mount(
       <AnalyticsQueryPage
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         requestAnalytics={fleet(calls)}
         now={NOW}
         onQueryChange={query => seen.push(query)}
@@ -105,7 +105,8 @@ describe('AnalyticsQueryPage', () => {
     const calls: string[] = [];
     const renderer = mount(
       <AnalyticsQueryPage
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         connections={[daemonA, daemonB]}
         requestAnalytics={fleet(calls)}
         initialQuery="sum(turns) by (model)"
@@ -120,7 +121,8 @@ describe('AnalyticsQueryPage', () => {
     let fail: unknown = new Error('offline');
     const renderer = mount(
       <AnalyticsQueryPage
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         requestAnalytics={async (_d, query) => {
           if (fail) throw fail;
           return answer(query ?? '');
@@ -139,7 +141,9 @@ describe('AnalyticsQueryPage', () => {
 
   it('shows the parser sentence inline, switches Run and the helpers off, and runs nothing', async () => {
     const calls: string[] = [];
-    const renderer = mount(<AnalyticsQueryPage connection={daemonA} client={noClient} requestAnalytics={fleet(calls)} />);
+    const renderer = mount(
+      <AnalyticsQueryPage connection={daemonA} client={noClient} requestAnalytics={fleet(calls)} />,
+    );
     type(renderer, 'sum(nope)');
     expect(renderer.root.findByProps({ 'data-analytics-parse-error': '' }).children.join('')).toContain(
       'unknown analytics metric',
@@ -177,7 +181,9 @@ describe('AnalyticsQueryPage', () => {
 
   it('runs an example in one click', async () => {
     const calls: string[] = [];
-    const renderer = mount(<AnalyticsQueryPage connection={daemonA} client={noClient} requestAnalytics={fleet(calls)} />);
+    const renderer = mount(
+      <AnalyticsQueryPage connection={daemonA} client={noClient} requestAnalytics={fleet(calls)} />,
+    );
     const example = ANALYTICS_QUERY_EXAMPLES[2]!;
     await runAsync(async () => {
       renderer.root.findByProps({ title: example.hint }).props.onClick();
@@ -192,7 +198,12 @@ describe('AnalyticsQueryPage', () => {
     const storage = memory();
     const calls: string[] = [];
     const renderer = mount(
-      <AnalyticsQueryPage connection={daemonA} client={noClient} requestAnalytics={fleet(calls)} savedStorage={storage} />,
+      <AnalyticsQueryPage
+        connection={daemonA}
+        client={noClient}
+        requestAnalytics={fleet(calls)}
+        savedStorage={storage}
+      />,
     );
     expect(text(renderer)).toContain('Nothing saved yet');
     const name = renderer.root.findByProps({ placeholder: 'Name this query' });
@@ -233,7 +244,12 @@ describe('AnalyticsQueryPage', () => {
       },
     };
     const renderer = mount(
-      <AnalyticsQueryPage connection={daemonA} client={noClient} requestAnalytics={fleet([])} savedStorage={refusing} />,
+      <AnalyticsQueryPage
+        connection={daemonA}
+        client={noClient}
+        requestAnalytics={fleet([])}
+        savedStorage={refusing}
+      />,
     );
     expect(text(renderer)).toContain('Saved queries');
     run(() =>
@@ -246,7 +262,9 @@ describe('AnalyticsQueryPage', () => {
 
   it('finds label values for autocomplete from the last result, else by asking', async () => {
     const calls: string[] = [];
-    const renderer = mount(<AnalyticsQueryPage connection={daemonA} client={noClient} requestAnalytics={fleet(calls)} />);
+    const renderer = mount(
+      <AnalyticsQueryPage connection={daemonA} client={noClient} requestAnalytics={fleet(calls)} />,
+    );
     await submit(renderer);
     calls.length = 0;
     const open = async (value: string) => {
@@ -266,7 +284,8 @@ describe('AnalyticsQueryPage', () => {
   it('answers with an unusable shape as no values', async () => {
     const renderer = mount(
       <AnalyticsQueryPage
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         requestAnalytics={async () =>
           ({ ...answer('x'), kind: 'raw', limit: 1, truncated: false, results: [] }) as never
         }
@@ -284,7 +303,8 @@ describe('AnalyticsQueryPage', () => {
     const resolvers: ((response: AnalyticsResponse) => void)[] = [];
     const renderer = mount(
       <AnalyticsQueryPage
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         requestAnalytics={() => new Promise<AnalyticsResponse>(resolve => resolvers.push(resolve))}
       />,
     );
@@ -313,7 +333,8 @@ describe('AnalyticsQueryPage', () => {
     ];
     const renderer = mount(
       <AnalyticsQueryPage
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         requestAnalytics={fleet([])}
         requestRun={() => new Promise<FleetAnswer>(resolve => resolvers.push(resolve))}
       />,
@@ -349,7 +370,8 @@ describe('AnalyticsQueryPage', () => {
     };
     const page = (timeZone: string) => (
       <AnalyticsQueryPage
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         requestAnalytics={fleet([])}
         requestRun={requestRun}
         timeZone={timeZone}
@@ -395,7 +417,8 @@ describe('AnalyticsQueryPage', () => {
         });
     const page = (zone: string) => (
       <AnalyticsQueryPage
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         requestAnalytics={fleet([])}
         requestRun={requestRunIn(zone)}
         timeZone={zone}
@@ -443,7 +466,8 @@ describe('AnalyticsQueryPage', () => {
     };
     const page = (timeZone: string) => (
       <AnalyticsQueryPage
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         requestAnalytics={fleet([])}
         requestRun={requestRun}
         timeZone={timeZone}
@@ -481,7 +505,8 @@ describe('AnalyticsQueryPage', () => {
       const asked: string[] = [];
       const renderer = mount(
         <AnalyticsQueryPage
-          connection={daemonA} client={noClient}
+          connection={daemonA}
+          client={noClient}
           requestAnalytics={fleet([])}
           requestRun={asking(asked)}
           initialQuery="sum(cost_usd) by (model) [7d]"
@@ -507,7 +532,8 @@ describe('AnalyticsQueryPage', () => {
       const asked: string[] = [];
       const renderer = mount(
         <AnalyticsQueryPage
-          connection={daemonA} client={noClient}
+          connection={daemonA}
+          client={noClient}
           requestAnalytics={fleet([])}
           requestRun={asking(asked)}
           initialQuery="sum(tokens) [7d]"
@@ -533,12 +559,22 @@ describe('AnalyticsQueryPage', () => {
 
     it('keeps the choice on this device', async () => {
       const first = mount(
-        <AnalyticsQueryPage connection={daemonA} client={noClient} requestAnalytics={fleet([])} requestRun={asking([])} />,
+        <AnalyticsQueryPage
+          connection={daemonA}
+          client={noClient}
+          requestAnalytics={fleet([])}
+          requestRun={asking([])}
+        />,
       );
       await choose(first, 'analytics-result-view', 'trend');
       expect(queryViewPreference.read()).toBe('trend');
       const second = mount(
-        <AnalyticsQueryPage connection={daemonA} client={noClient} requestAnalytics={fleet([])} requestRun={asking([])} />,
+        <AnalyticsQueryPage
+          connection={daemonA}
+          client={noClient}
+          requestAnalytics={fleet([])}
+          requestRun={asking([])}
+        />,
       );
       const pressed = second.root
         .findByProps({ 'data-segmented': 'analytics-result-view' })
@@ -551,7 +587,8 @@ describe('AnalyticsQueryPage', () => {
       const asked: string[] = [];
       const renderer = mount(
         <AnalyticsQueryPage
-          connection={daemonA} client={noClient}
+          connection={daemonA}
+          client={noClient}
           requestAnalytics={fleet([])}
           requestRun={asking(asked)}
           initialQuery="sum(tokens)"
@@ -571,7 +608,12 @@ describe('AnalyticsQueryPage', () => {
     it('re-asks an empty query when the view changes: empty is a query that was run, not a page that never ran', async () => {
       const asked: string[] = [];
       const renderer = mount(
-        <AnalyticsQueryPage connection={daemonA} client={noClient} requestAnalytics={fleet([])} requestRun={asking(asked)} />,
+        <AnalyticsQueryPage
+          connection={daemonA}
+          client={noClient}
+          requestAnalytics={fleet([])}
+          requestRun={asking(asked)}
+        />,
       );
       type(renderer, '');
       await submit(renderer);
@@ -594,7 +636,8 @@ describe('AnalyticsQueryPage', () => {
       const asked: string[] = [];
       const renderer = mount(
         <AnalyticsQueryPage
-          connection={daemonA} client={noClient}
+          connection={daemonA}
+          client={noClient}
           requestAnalytics={fleet([])}
           requestRun={asking(asked)}
           initialQuery="sum(turns) by (day) [7d]"
@@ -628,7 +671,8 @@ describe('AnalyticsQueryPage', () => {
       const asked: string[] = [];
       const renderer = mount(
         <AnalyticsQueryPage
-          connection={daemonA} client={noClient}
+          connection={daemonA}
+          client={noClient}
           requestAnalytics={fleet([])}
           requestRun={asking(asked)}
           initialQuery="sum(turns) [7d]"

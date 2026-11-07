@@ -8,7 +8,7 @@ import {
 } from '../../../../app/features/analytics/analytics-query-chart.tsx';
 import type { AnalyticsAggregateResponse } from '../../../../app/features/analytics/analytics-result-table.tsx';
 import { aggregateResponse, group, measure } from '../support/analytics-query-fixtures.ts';
-import { render } from '../support/react.ts';
+import { render } from '@ferretry/app/testing';
 
 const agg = (response: ReturnType<typeof aggregateResponse>) => response as AnalyticsAggregateResponse;
 

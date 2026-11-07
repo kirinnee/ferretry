@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { useState } from 'react';
 
 import { AnalyticsQueryAutocomplete } from '../../../../app/features/analytics/analytics-query-autocomplete.tsx';
-import { interact, mount, must } from '../support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 
 const QUERY = 'sum(tokens) by (model) [7d]';
 

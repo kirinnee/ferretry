@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { INSIGHTS_COLUMN_CLASS, InsightsFrame } from '../../../app/shell/insights-frame.tsx';
-import './support/dom.ts';
-import { interact, type Mounted, mount, must } from './support/dom.ts';
+import { interact, mount, type Mounted, must } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {

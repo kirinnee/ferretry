@@ -12,11 +12,9 @@ import {
 import { fakeClient } from '../support/client.ts';
 import { daemonConnection } from '../support/shell.ts';
 import { daemonSessionScope } from '../support/shell.ts';
-import { RouterProvider } from '../support/router.tsx';
+import { render, RouterProvider, run, runAsync } from '@ferretry/app/testing';
 import { DaemonResponseError } from '../support/shell.ts';
 import { rawResponse, rawRow } from '../support/analytics-rows.ts';
-import '../support/dom.ts';
-import { render, run, runAsync } from '../support/react.ts';
 
 /** The reads these suites inject are their own; a call that reached this client is a failure. */
 const noClient = fakeClient({});
@@ -87,7 +85,8 @@ describe('SessionAnalyticsSurface', () => {
     const calls: string[] = [];
     const renderer = mount(
       <SessionAnalyticsSurface
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         scope={scope}
         requestAnalytics={scoped(TREE, calls)}
         requestFleetAnalytics={fleet(TREE, calls)}
@@ -107,9 +106,7 @@ describe('SessionAnalyticsSurface', () => {
     const rows = renderer.root.findAll(node => node.type === 'li' && node.props['data-cost-row'] !== undefined);
     expect(rows.map(row => row.props['data-cost-row'])).toEqual(['claude-opus-5-5', 'claude-sonnet-5-5', 'unpriced']);
     const link = renderer.root.find(node => node.type === 'a' && node.props['data-open-analytics'] === '');
-    expect(link.props.href).toBe(
-      `/d/daemon-a/insights/query?q=${encodeURIComponent('sum by (model) {tree=="root"}')}`,
-    );
+    expect(link.props.href).toBe(`/d/daemon-a/insights/query?q=${encodeURIComponent('sum by (model) {tree=="root"}')}`);
     expect(renderer.root.findByProps({ 'aria-label': 'Session cost' }).props['data-session-cost']).toBe('ready');
   });
 
@@ -124,7 +121,8 @@ describe('SessionAnalyticsSurface', () => {
     });
     const renderer = mount(
       <SessionAnalyticsSurface
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         scope={scope}
         requestAnalytics={scoped([lone])}
         requestFleetAnalytics={fleet([lone], [], true)}
@@ -142,7 +140,8 @@ describe('SessionAnalyticsSurface', () => {
   it('counts one child in the singular and survives a tree answer that is not rows', async () => {
     const renderer = mount(
       <SessionAnalyticsSurface
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         scope={scope}
         requestAnalytics={scoped([ROOT])}
         requestFleetAnalytics={async (_daemon, query) =>
@@ -160,7 +159,8 @@ describe('SessionAnalyticsSurface', () => {
     expect(text(renderer)).toContain('0 children');
     const one = mount(
       <SessionAnalyticsSurface
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         scope={scope}
         requestAnalytics={scoped([ROOT])}
         requestFleetAnalytics={fleet([ROOT, TREE[1]!])}
@@ -173,7 +173,8 @@ describe('SessionAnalyticsSurface', () => {
   it('says a session that is not indexed yet is not counted, and still links to Analytics', async () => {
     const renderer = mount(
       <SessionAnalyticsSurface
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         scope={scope}
         requestAnalytics={scoped([])}
         requestFleetAnalytics={fleet([])}
@@ -188,7 +189,8 @@ describe('SessionAnalyticsSurface', () => {
   it('reports a failed read without inventing a zero', async () => {
     const renderer = mount(
       <SessionAnalyticsSurface
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         scope={scope}
         requestAnalytics={async () => {
           throw new DaemonResponseError(503, 'busy');
@@ -209,7 +211,8 @@ describe('SessionAnalyticsSurface', () => {
       });
     const renderer = mount(
       <SessionAnalyticsSurface
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         scope={scope}
         requestAnalytics={requestAnalytics}
         requestFleetAnalytics={fleet([])}
@@ -218,7 +221,8 @@ describe('SessionAnalyticsSurface', () => {
     run(() =>
       renderer.update(
         <SessionAnalyticsSurface
-          connection={daemonB} client={noClient}
+          connection={daemonB}
+          client={noClient}
           scope={daemonSessionScope(daemonB, 'root')}
           requestAnalytics={requestAnalytics}
           requestFleetAnalytics={fleet([])}
@@ -239,7 +243,8 @@ describe('SessionAnalyticsSurface', () => {
     const renderer = mount(
       <RouterProvider>
         <SessionAnalyticsSurface
-          connection={daemonA} client={noClient}
+          connection={daemonA}
+          client={noClient}
           scope={scope}
           requestAnalytics={scoped(TREE)}
           requestFleetAnalytics={fleet(TREE)}

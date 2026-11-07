@@ -7,7 +7,7 @@ import {
   useRenderTiming,
 } from '../../../../app/lib/performance/main-thread.ts';
 import { PerformanceRecorder } from '../../../../app/lib/performance/recorder.ts';
-import { mount } from '../support/dom.ts';
+import { mount } from '@ferretry/app/testing';
 
 const handClock = () => {
   let time = 0;

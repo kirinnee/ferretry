@@ -12,7 +12,7 @@ import {
   formatTokenMeasure,
   sortAnalyticsRows,
 } from '../../../../app/features/analytics/analytics-result-table.tsx';
-import { render } from '../support/react.ts';
+import { render } from '@ferretry/app/testing';
 
 const measure = (value: number | null, known = 1, total = 1, knownSum?: number): AnalyticsMeasure => ({
   value,

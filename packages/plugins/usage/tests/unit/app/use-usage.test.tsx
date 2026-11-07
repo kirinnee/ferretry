@@ -4,7 +4,7 @@ import type { UsageFeedView } from '../../../contract/index.ts';
 import { useMachinesUsage, useUsage } from '../../../app/hooks/use-usage.ts';
 import { daemonConnection } from './support/shell.ts';
 import { type DaemonUsagePort, DaemonUsageStore } from '../../../app/lib/usage-store.ts';
-import { interact, mount } from './support/dom.ts';
+import { interact, mount } from '@ferretry/app/testing';
 
 const laptop = daemonConnection({
   daemonId: 'daemon/laptop',

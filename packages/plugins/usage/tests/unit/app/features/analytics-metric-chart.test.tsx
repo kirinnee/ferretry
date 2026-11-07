@@ -6,8 +6,12 @@ import {
   chartLabelKeys,
   type MetricChartPoint,
 } from '../../../../app/features/analytics/analytics-metric-chart.tsx';
-import { durationAxisTicks, formatAxisUsd, formatDollars } from '../../../../app/features/analytics/analytics-overview.ts';
-import { render, run } from '../support/react.ts';
+import {
+  durationAxisTicks,
+  formatAxisUsd,
+  formatDollars,
+} from '../../../../app/features/analytics/analytics-overview.ts';
+import { render, run } from '@ferretry/app/testing';
 
 const point = (key: string, values: readonly number[], extra: Partial<MetricChartPoint> = {}): MetricChartPoint => ({
   key,

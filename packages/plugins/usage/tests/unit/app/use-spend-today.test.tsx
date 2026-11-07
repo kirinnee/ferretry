@@ -4,7 +4,7 @@ import { fakeClient, refusingClient } from './support/client.ts';
 import type { UsageClient } from '../../../app/shell.ts';
 import { daemonConnection } from './support/shell.ts';
 import { rawResponse, rawRow } from './support/analytics-rows.ts';
-import { mount } from './support/dom.ts';
+import { mount } from '@ferretry/app/testing';
 
 const connection = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const NOW = (): Date => new Date('2026-10-16T12:00:00.000Z');

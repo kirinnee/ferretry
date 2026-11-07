@@ -5,10 +5,8 @@ import {
   analyticsErrorMessage,
 } from '../../../../app/features/analytics/analytics-response-view.tsx';
 import { act } from 'react-test-renderer';
-import { RouterProvider } from '../support/router.tsx';
+import { render, RouterProvider } from '@ferretry/app/testing';
 import { DaemonResponseError } from '../support/shell.ts';
-import '../support/dom.ts';
-import { render } from '../support/react.ts';
 
 const index = {
   schemaVersion: 6,
@@ -156,5 +154,4 @@ describe('AnalyticsResponseView', () => {
     // A plain 400 keeps the daemon's own words.
     expect(analyticsErrorMessage(new DaemonResponseError(400, 'bad query', 'invalid_query'))).toBe('bad query');
   });
-
 });

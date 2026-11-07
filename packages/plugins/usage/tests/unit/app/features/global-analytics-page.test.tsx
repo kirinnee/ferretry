@@ -3,7 +3,6 @@ import type { AnalyticsResponse } from '../../../../contract/index.ts';
 import type { ReactElement } from 'react';
 import { act, type ReactTestRenderer } from 'react-test-renderer';
 
-
 import type { AnalyticsRequest } from '../../../../app/features/analytics/analytics-custom-query.tsx';
 import {
   askEveryMachine,
@@ -23,11 +22,9 @@ import {
   INSIGHTS_TIME_ZONE_KEY,
   insightsTimeZonePreference,
 } from '../../../../app/lib/insights-time-zone.ts';
-import { RouterProvider } from '../support/router.tsx';
+import { render, RouterProvider, run, runAsync } from '@ferretry/app/testing';
 import { DaemonResponseError } from '../support/shell.ts';
 import { dayAggregate, rawResponse, rawRow } from '../support/analytics-rows.ts';
-import '../support/dom.ts';
-import { render, run, runAsync } from '../support/react.ts';
 
 /** The reads these suites inject are their own; a call that reached this client is a failure. */
 const noClient = fakeClient({});
@@ -520,7 +517,8 @@ describe('GlobalAnalyticsPage', () => {
     const went: string[] = [];
     const renderer = mount(
       <GlobalAnalyticsPage
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         machines={MACHINES}
         onNavigate={to => went.push(to)}
         requestAnalytics={fleet()}
@@ -539,7 +537,13 @@ describe('GlobalAnalyticsPage', () => {
   it('mounts the Query page with every machine and the query a link brought', () => {
     window.history.replaceState({}, '', '/d/daemon-a/insights/query?q=sum(cost_usd)%20by%20(model)');
     const renderer = mount(
-      <GlobalAnalyticsPage connection={daemonA} client={noClient} view="query" onNavigate={() => {}} QueryPage={QueryStub} />,
+      <GlobalAnalyticsPage
+        connection={daemonA}
+        client={noClient}
+        view="query"
+        onNavigate={() => {}}
+        QueryPage={QueryStub}
+      />,
     );
     expect(textOf(renderer.root.findByProps({ 'data-query-stub': '' }).children)).toStartWith(
       'daemon-a 1 sum(cost_usd) by (model) no-clock',
@@ -554,7 +558,8 @@ describe('GlobalAnalyticsPage', () => {
     const heard: string[] = [];
     const injected = mount(
       <GlobalAnalyticsPage
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         machines={MACHINES}
         view="query"
         onNavigate={() => {}}
@@ -587,7 +592,13 @@ describe('GlobalAnalyticsPage', () => {
     insightsTimeZonePreference.write('Asia/Singapore');
     try {
       const renderer = mount(
-        <GlobalAnalyticsPage connection={daemonA} client={client} onNavigate={() => {}} now={NOW} initialQuery={null} />,
+        <GlobalAnalyticsPage
+          connection={daemonA}
+          client={client}
+          onNavigate={() => {}}
+          now={NOW}
+          initialQuery={null}
+        />,
       );
       await settle();
       expect(client.calls.length).toBeGreaterThan(0);
@@ -617,7 +628,9 @@ describe('GlobalAnalyticsPage', () => {
     };
     window.addEventListener('popstate', onPop);
     try {
-      const renderer = mount(<GlobalAnalyticsPage connection={daemonA} client={noClient} onNavigate={() => {}} QueryPage={QueryStub} />);
+      const renderer = mount(
+        <GlobalAnalyticsPage connection={daemonA} client={noClient} onNavigate={() => {}} QueryPage={QueryStub} />,
+      );
       expect(renderer.toJSON()).toBeNull();
       expect(window.location.pathname + window.location.search).toBe(
         '/d/daemon-a/insights/query?q=count%20by%20(status)',
@@ -634,7 +647,8 @@ describe('GlobalAnalyticsPage', () => {
     const calls: string[] = [];
     const renderer = mount(
       <GlobalAnalyticsPage
-        connection={daemonA} client={noClient}
+        connection={daemonA}
+        client={noClient}
         machines={[MACHINES[0]!, { connection: daemonB, name: MACHINES[0]!.name }]}
         view="query"
         onNavigate={() => {}}
@@ -656,8 +670,12 @@ describe('GlobalAnalyticsPage', () => {
     expect(calls).toEqual(['daemon-a {}', 'daemon-b {}']);
     // Two machines with one display name still link each row to its own machine.
     const links = renderer.root.findAll(node => node.type === 'a' && node.props['data-raw-session'] !== undefined);
-    expect(links.find(link => link.props['data-raw-session'] === 'hadi')?.props.href).toBe('/d/daemon-b/ferrets/hadi/chat');
-    expect(links.find(link => link.props['data-raw-session'] === 'root')?.props.href).toBe('/d/daemon-a/ferrets/root/chat');
+    expect(links.find(link => link.props['data-raw-session'] === 'hadi')?.props.href).toBe(
+      '/d/daemon-b/ferrets/hadi/chat',
+    );
+    expect(links.find(link => link.props['data-raw-session'] === 'root')?.props.href).toBe(
+      '/d/daemon-a/ferrets/root/chat',
+    );
     expect(text(renderer)).not.toContain('did not answer');
 
     // A run that one machine misses says so, with that run's result.

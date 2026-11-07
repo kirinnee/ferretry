@@ -7,7 +7,7 @@ import {
   quotaMoneyText,
   quotaResetsIn,
 } from '../../../app/shell/quota-readout.tsx';
-import { render } from './support/react.ts';
+import { render } from '@ferretry/app/testing';
 
 const NOW = 1_700_000_000_000;
 const inMinutes = (minutes: number): number => NOW + minutes * 60_000;

@@ -1,4 +1,4 @@
-import '../../support/dom.ts';
+import { interact, mount, must, runAsync, settleUntil } from '@ferretry/app/testing';
 import { describe, expect, it } from 'bun:test';
 import type { PerformanceProfileView, PerformanceReport } from '../../../../../contract/index.ts';
 import { fullReport, minimalReport } from '../../../contract/performance-report-fixtures.ts';
@@ -17,9 +17,6 @@ import {
 } from '../../../../../app/features/settings/performance-settings.tsx';
 import { daemonConnection } from '../../support/shell.ts';
 import { PerformanceRecorder } from '../../../../../app/lib/performance/recorder.ts';
-import { interact, mount, must } from '../../support/dom.ts';
-import { runAsync } from '../../support/react.ts';
-import { settleUntil } from '../../support/settle.ts';
 
 const alpha = daemonConnection({
   daemonId: 'alpha',
@@ -161,7 +158,11 @@ describe('PerformanceSettings', () => {
     await settled(shown.container, '[data-performance-report]');
 
     // Assert — the window, the budget, both reports.
-    expect(machine.calls[0]).toEqual({ route: 'POST /v1/diagnostics/profile', params: undefined, body: { seconds: 30 } });
+    expect(machine.calls[0]).toEqual({
+      route: 'POST /v1/diagnostics/profile',
+      params: undefined,
+      body: { seconds: 30 },
+    });
     expect(machine.calls.slice(1).map(call => [call.route, call.params])).toEqual([
       ['GET /v1/diagnostics/profile/:id', { id: 'profile-1' }],
       ['GET /v1/diagnostics/profile/:id', { id: 'profile-1' }],
@@ -196,9 +197,7 @@ describe('PerformanceSettings', () => {
     const machine = daemon(async () => finished(minimalReport()));
 
     // Act
-    const shown = await mount(
-      <PerformanceSettings connection={alpha} client={machine.client} recorder={undefined} />,
-    );
+    const shown = await mount(<PerformanceSettings connection={alpha} client={machine.client} recorder={undefined} />);
     await press(shown.container, '[data-performance-record]');
     await settled(shown.container, '[data-performance-report]');
 
@@ -215,9 +214,7 @@ describe('PerformanceSettings', () => {
     });
 
     // Act
-    const shown = await mount(
-      <PerformanceSettings connection={alpha} client={machine.client} recorder={undefined} />,
-    );
+    const shown = await mount(<PerformanceSettings connection={alpha} client={machine.client} recorder={undefined} />);
     await press(shown.container, '[data-performance-record]');
     await settled(shown.container, '[data-performance-refused]');
 
@@ -292,9 +289,7 @@ describe('PerformanceSettings', () => {
     const working = daemon(async () => finished());
 
     // Act
-    const failed = await mount(
-      <PerformanceSettings connection={alpha} client={failing.client} recorder={undefined} />,
-    );
+    const failed = await mount(<PerformanceSettings connection={alpha} client={failing.client} recorder={undefined} />);
     await press(failed.container, '[data-performance-record]');
     await settled(failed.container, '[data-performance-failed]');
     const blocked = await mount(
@@ -366,11 +361,19 @@ describe('PerformanceSettings', () => {
     const machine = daemon(async () => ({ ...RUNNING, endsAt: '2026-10-21T10:00:00.020Z' }), [async () => finished()]);
 
     // Act
-    const shown = await mount(
-      <PerformanceSettings connection={alpha} client={machine.client} recorder={undefined} />,
-    );
+    const shown = await mount(<PerformanceSettings connection={alpha} client={machine.client} recorder={undefined} />);
     await press(shown.container, '[data-performance-record]');
-    await settled(shown.container, '[data-performance-report]');
+    // The shell's settle turns are event-loop turns, which pass faster than a real twenty-millisecond timer; sleep a
+    // few real milliseconds per turn so the window can close.
+    await settleUntil(
+      () => shown.container.querySelector('[data-performance-report]') !== null,
+      '[data-performance-report]',
+      callback =>
+        runAsync(async () => {
+          await new Promise(resolve => setTimeout(resolve, 5));
+          await callback();
+        }),
+    );
 
     // Assert
     expect(machine.calls.map(call => call.route.split(' ')[0])).toEqual(['POST', 'GET']);

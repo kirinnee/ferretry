@@ -3,7 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import { AnalyticsResponseView } from '../../../../app/features/analytics/analytics-response-view.tsx';
 import { aggregateResponse, group } from '../support/analytics-query-fixtures.ts';
 import { rawResponse, rawRow } from '../support/analytics-rows.ts';
-import { render } from '../support/react.ts';
+import { render } from '@ferretry/app/testing';
 
 const textOf = (node: unknown): string => {
   if (typeof node === 'string') return node;

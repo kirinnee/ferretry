@@ -11,7 +11,7 @@ import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import type { AnalyticsPricingClient } from '../../../../../app/features/settings/pricing-api.ts';
 import { PricingSettings } from '../../../../../app/features/settings/pricing-settings.tsx';
 import { type DaemonConnection, daemonConnection, FyHttpError } from '../../support/shell.ts';
-import { render, run, runAsync } from '../../support/react.ts';
+import { render, run, runAsync } from '@ferretry/app/testing';
 
 const connection = (id = 'alpha') =>
   daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });

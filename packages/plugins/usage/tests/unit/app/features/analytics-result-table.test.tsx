@@ -14,7 +14,7 @@ import {
   formatUsdMicros,
   sortAnalyticsRows,
 } from '../../../../app/features/analytics/analytics-result-table.tsx';
-import { render, run } from '../support/react.ts';
+import { render, run } from '@ferretry/app/testing';
 
 const measure = (value: number | null, known = 1, total = 1): AnalyticsMeasure => ({ value, known, total });
 

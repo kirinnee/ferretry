@@ -3,7 +3,7 @@ import { type LoginBudget, LoginBudgetSchema } from '@ferretry/plugin-logins/con
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { BudgetStanding } from '../../../../../contract/index.ts';
 import { BudgetsSettings } from '../../../../../app/features/settings/budgets-settings.tsx';
-import { interact, mount, must } from '../../support/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import { fakeClient, type RecordedCall } from '../../support/client.ts';
 import { DaemonCallError, daemonConnection } from '../../support/shell.ts';
 
@@ -27,14 +27,14 @@ const period = (overrides: Readonly<Record<string, unknown>> = {}) => ({
 
 const budget = (overrides: Readonly<Record<string, unknown>> = {}): LoginBudget =>
   LoginBudgetSchema.parse({
-  timeZone: 'America/New_York',
-  timeZoneSet: true,
-  daily: period(),
-  weekly: period({ trigger: 200, hard: 300, spentUsd: 150.01, resetsAt: '2026-10-19T04:00:00.000Z' }),
-  level: 'ok',
-  unpriced: 0,
-  measured: true,
-  ...overrides,
+    timeZone: 'America/New_York',
+    timeZoneSet: true,
+    daily: period(),
+    weekly: period({ trigger: 200, hard: 300, spentUsd: 150.01, resetsAt: '2026-10-19T04:00:00.000Z' }),
+    level: 'ok',
+    unpriced: 0,
+    measured: true,
+    ...overrides,
   });
 
 const PERSONAL_BUDGET = budget();
@@ -130,10 +130,10 @@ const press = async (container: HTMLElement, label: string): Promise<void> => {
   await settle();
 };
 
-const writes = (calls: readonly RecordedCall[]): { readonly path: string; readonly text: string; readonly etag: string }[] =>
-  calls
-    .filter(call => call.route === PUT)
-    .map(call => call.body as { path: string; text: string; etag: string });
+const writes = (
+  calls: readonly RecordedCall[],
+): { readonly path: string; readonly text: string; readonly etag: string }[] =>
+  calls.filter(call => call.route === PUT).map(call => call.body as { path: string; text: string; etag: string });
 
 const refusal = (status: number, code: string, message: string) => () => {
   throw new DaemonCallError(status, code, message);
@@ -171,7 +171,10 @@ describe('BudgetsSettings · the list', () => {
     ).toEqual(['personal', 'codex', 'work']);
     await view.unmount();
 
-    const none = fakeClient({ [LOGINS]: { format: 1, machine: 'studio-mac', logins: [] }, [STANDING]: { budgets: [] } });
+    const none = fakeClient({
+      [LOGINS]: { format: 1, machine: 'studio-mac', logins: [] },
+      [STANDING]: { budgets: [] },
+    });
     const empty = await mount(<BudgetsSettings connection={daemonConnection({ daemonId: 'studio' })} client={none} />);
     await settle();
     expect(empty.container.querySelector('[data-budgets-empty]')).not.toBeNull();
