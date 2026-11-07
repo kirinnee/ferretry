@@ -31,7 +31,7 @@ const V4_VAULT_KEY = 'state/secrets.key';
 
 export const mcpStep: Step = {
   id: 'mcp',
-  title: 'MCP sign-ins (issuer, endpoints, client ids, expiry; tokens stay in the vault by name)',
+  title: 'MCP sign-ins (records, and the sealed refresh tokens moved with the vault key)',
   owner: ['plugin-mcp'],
   reads: [V4_MCP_OAUTH],
   sealed: [V4_MCP_OAUTH_SECRETS],
