@@ -1,4 +1,11 @@
-import { Button, RadioChoices, SetupNote, SetupSection } from '@ferretry/app/ui';
+import {
+  Button,
+  type ChangeAuthority,
+  ChangeApplyPanel,
+  RadioChoices,
+  SetupNote,
+  SetupSection,
+} from '@ferretry/app/ui';
 import { useState } from 'react';
 import type { BrowserMode } from '../../../contract/index.ts';
 
@@ -28,9 +35,15 @@ export type SaveOutcome =
   | { readonly kind: 'refused'; readonly sentence: string };
 
 export function BrowserModeSection({
+  machineName,
+  authority,
   mode,
   save,
 }: {
+  /** What this machine is called in the sentence that says it will ask for a passkey. */
+  readonly machineName: string;
+  /** What this browser may change here; `null` while it is being read. */
+  readonly authority: ChangeAuthority | null;
   /** The saved mode. */
   readonly mode: BrowserMode;
   readonly save: (mode: BrowserMode) => Promise<SaveOutcome>;
@@ -74,13 +87,19 @@ export function BrowserModeSection({
         </SetupNote>
       ) : null}
       {pending ? (
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="primary" data-browser-mode-save="" disabled={busy} onClick={submit}>
-            Save browser mode
-          </Button>
-          <Button type="button" data-browser-mode-undo="" onClick={() => setDraft(mode)}>
-            Keep {BROWSER_MODE_WORDS[mode].title}
-          </Button>
+        <div data-browser-mode-save-panel="">
+          <ChangeApplyPanel
+            machineName={machineName}
+            authority={authority}
+            busy={busy}
+            refusal={null}
+            submitLabel="Save browser mode"
+            onSubmit={submit}
+          >
+            <Button type="button" data-browser-mode-undo="" onClick={() => setDraft(mode)}>
+              Keep {BROWSER_MODE_WORDS[mode].title}
+            </Button>
+          </ChangeApplyPanel>
         </div>
       ) : null}
     </SetupSection>
