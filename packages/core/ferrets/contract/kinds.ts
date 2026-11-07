@@ -221,10 +221,11 @@ export interface Harness {
   /**
    * The ferret's home, which only the harness can name: it resolves its own `state/<harness>/agent-homes/<ferret>`
    * through its OWN `agent-homes` root (scope `{ ferret, subfolder: ferret }`), never a path Ferrets built. The answer
-   * is a canonical absolute path: already normalized, no `.` or `..` segment, no doubled or trailing `/`, and never `/`
-   * itself. Ferrets asks for it before every start and launches with exactly this answer in `LaunchSpec.home`; a harness
-   * that throws or answers any other spelling is not started (fail closed). Resolving names a path only: the folder is
-   * created and narrowed (0700) by `prepareHome`.
+   * is a canonical absolute ASCII path: already normalized, no `.` or `..` segment, no doubled or trailing `/`, and
+   * never `/` itself. Ferrets asks for it before every start and launches with exactly this answer in `LaunchSpec.home`;
+   * a harness that throws or answers any other spelling is not started (fail closed). It must also answer a plain
+   * probe id (`home-probe`, never minted) with a home that neither equals, holds nor sits inside the ferret's own.
+   * Resolving names a path only: the folder is created and narrowed (0700) by `prepareHome`.
    */
   homeFor(ferret: FerretId): Promise<FencedPath>;
   /**
