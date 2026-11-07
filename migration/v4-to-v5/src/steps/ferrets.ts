@@ -15,6 +15,10 @@ export const ferretsStep: Step = {
     { what: 'v4 session-version markers', why: 'v5 files carry their own format' },
     { what: 'per-ferret environment.json', why: 'plaintext credential; never opened; the hash alone is carried' },
     {
+      what: 'config.credentialRevoked as a prohibition on future launches',
+      why: 'FerretRecordSchema has no such field; only an existing hash row can retain revoked: true in FerretTokensSchema',
+    },
+    {
       what: 'events.jsonl, summary.md and compaction-history.json → history.jsonl',
       why: 'FerretHistoryFiles declares no v5 entry schema',
     },
