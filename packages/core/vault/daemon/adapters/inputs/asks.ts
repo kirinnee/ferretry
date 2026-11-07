@@ -83,12 +83,23 @@ export class InputAsksAdapter implements InputAgendaPort {
   }
 }
 
-/** Tells the raising ferret how its request ended. Total: a ferret that cannot be told is simply not told. */
+/**
+ * The send id of the message that tells a ferret its request ended: the ferret and the card (the request's, as a
+ * request opened again on a new card is a new card), so a request is told about once however often it is asked.
+ * Today's outbox key was the card id on that ferret's outbox.
+ */
+export const inputTellSendId = (ferret: string, card: AgendaId): string => `input-ended-${ferret}-${card}`;
+
+/**
+ * Tells the raising ferret how its request ended, through Asks (`AsksApi.tell`: the same delivery an owner's answer
+ * uses, held and retried when the ferret's composer is busy). Total: a ferret that cannot be told is simply not told,
+ * and a build whose Asks has no `tell` tells nobody. The words are the service's own and carry no value.
+ */
 export class InputAgentNotifierAdapter implements InputAgentNotifier {
-  constructor(private readonly add: (ferret: FerretId, key: string, message: string) => Promise<unknown>) {}
+  constructor(private readonly asks: Pick<AsksApi, 'tell'>) {}
 
   async tell(sessionId: string, agendaId: AgendaId, message: string): Promise<void> {
-    await this.add(sessionId as FerretId, agendaId, message).catch(() => undefined);
+    await this.asks.tell?.(sessionId as FerretId, message, inputTellSendId(sessionId, agendaId)).catch(() => undefined);
   }
 }
 
