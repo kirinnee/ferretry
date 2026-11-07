@@ -34,6 +34,7 @@ import type {
   IdentityPort,
   WebSocketClient,
 } from '../contract/ports.ts';
+import { parse as parseYaml } from 'yaml';
 import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
 import { createIdentitySigner, signerFor } from '../host/session/signer.ts';
 import { testIdentity } from './identity.ts';
@@ -416,6 +417,48 @@ async function start(world: World): Promise<TestHost> {
         set.add(listener);
         configListeners.set(key, set);
         return () => set.delete(listener);
+      },
+      fileState(def, name) {
+        assertDeclared(def);
+        const all = world.config.get(keyOf(def));
+        const raw = def.shape === 'file' ? all : name === undefined ? undefined : (all as Record<string, unknown> | undefined)?.[name];
+        if (raw === undefined) return { state: 'absent', inEffect: false, sentences: [] };
+        const parsed = def.schema.safeParse(raw);
+        return parsed.success
+          ? { state: 'valid', inEffect: true, sentences: [] }
+          : { state: 'invalid', inEffect: false, sentences: parsed.error.issues.map(issue => issue.message) };
+      },
+      // The real writer's outcomes over the in-memory values: own defs only, schema checked, a loosening held.
+      async write(def, edit, writeOptions = {}) {
+        if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
+        const key = keyOf(def);
+        const name = writeOptions.name;
+        if (def.shape === 'collection' && (name === undefined || !def.name.test(name)))
+          return { kind: 'refused', reason: 'bad_name', issues: [] };
+        const all = world.config.get(key) as Record<string, unknown> | undefined;
+        const before = def.shape === 'file' ? all : name === undefined ? undefined : all?.[name];
+        let next: unknown;
+        if (typeof edit === 'string') {
+          try {
+            next = parseYaml(edit) ?? {};
+          } catch {
+            return { kind: 'refused', reason: 'yaml', issues: [{ path: key, message: 'this is not YAML' }] };
+          }
+        } else {
+          next = { ...((before as Record<string, unknown> | undefined) ?? {}), ...edit.patch };
+          for (const [field, value] of Object.entries(edit.patch)) if (value === undefined) delete (next as Record<string, unknown>)[field];
+        }
+        const checked = def.schema.safeParse(next);
+        if (!checked.success)
+          return { kind: 'refused', reason: 'schema', issues: checked.error.issues.map(issue => ({ path: key, message: issue.message })) };
+        const etag = JSON.stringify(next);
+        if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null)) return { kind: 'conflict' };
+        const prior = before === undefined ? undefined : def.schema.safeParse(before);
+        const sentences = def.loosens(prior?.success === true ? prior.data : undefined, checked.data);
+        if (sentences.length > 0) return { kind: 'held', etag, id: `${key}@held`, sentences };
+        world.config.set(key, def.shape === 'file' ? next : { ...(all ?? {}), [name as string]: next });
+        for (const listener of configListeners.get(key) ?? []) listener();
+        return { kind: 'written', etag, loosened: [] };
       },
     };
   };

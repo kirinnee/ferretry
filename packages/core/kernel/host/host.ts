@@ -17,6 +17,7 @@ import { CORE_IDS, type PluginId } from '../contract/ids.ts';
 import { Carriers, type DoctorCheck, DoctorChecks, PluginsChanged, SessionModes } from '../contract/kernel.ts';
 import type {
   Clock,
+  ConfigFilesWriter,
   ConfigPort,
   FetchPort,
   KernelPorts,
@@ -84,6 +85,8 @@ export interface PluginStateHandle {
 /** The config service the host drives (`host/config`'s `createConfigFiles`). */
 export interface HostConfig {
   port(plugin: string): ConfigPort;
+  /** The writer over every declared file; Gate alone receives it. Absent: Gate gets none. */
+  writer?(): ConfigFilesWriter;
   reload(): Promise<void>;
   startWatching?(): () => void;
 }
@@ -247,6 +250,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   await config.reload();
   const stopWatching = config.startWatching?.();
   const pluginsYaml = readPluginsYaml(config.port('kernel'));
+  const configWriter = config.writer?.();
 
   // 1. Check the enabled graph.
   trace.push('check');
@@ -357,6 +361,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     websocket: restrictWebSocket(manifest.id, manifest.permissions?.network ?? [], websockets),
     identity: identityPort,
     signer: signerFor(manifest.id, sessionSigner),
+    ...(manifest.id === 'gate' && configWriter !== undefined ? { configFiles: configWriter } : {}),
     act,
     ids: { mint: prefix => ids.mint(prefix) },
     redaction,

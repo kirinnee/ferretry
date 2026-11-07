@@ -30,6 +30,8 @@ export interface KernelPorts {
    * one allowed it (`sign`/`signTunnel`: Connections; `signCatalog`: Catalogs). No key export, no raw signing.
    */
   readonly signer: IdentitySigner;
+  /** The writer over every declared config file: Gate's alone, `undefined` for every other plugin. */
+  readonly configFiles?: ConfigFilesWriter;
   readonly act: ActRunner;
   readonly ids: IdsPort;
   readonly redaction: Redaction;
@@ -113,11 +115,114 @@ export interface StatePort {
 
 // config ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Its declared config files and collections, parsed, live (§7.2). Writes go through Gate's config route. */
+/**
+ * Where one declared config file stands (today's config-files entry state): `absent` (no file, nothing in effect),
+ * `valid` (the file is in effect), `invalid` (the file does not check; its last good version stays in effect when
+ * there is one — `inEffect: false` is a FIRST file that never checked: damage, not defaults), `held` (a loosening
+ * edit waits for the owner; the tighter version stays in effect).
+ */
+export interface ConfigFileStatus {
+  readonly state: 'absent' | 'valid' | 'invalid' | 'held';
+  /** Whether some version (the file, or its last good one) is in effect. */
+  readonly inEffect: boolean;
+  /** Plain sentences naming what is wrong (an invalid file) or what widened (a held edit). Never a value. */
+  readonly sentences: readonly string[];
+}
+
+/** A whole new YAML text, or a patch of top-level keys (`undefined` removes a key); a patch keeps comments. */
+export type ConfigEdit = string | { readonly patch: Readonly<Record<string, unknown>> };
+
+/** One problem with a config text, by line, never quoting a value. */
+export interface ConfigWriteIssue {
+  readonly path: string;
+  readonly line?: number;
+  readonly message: string;
+}
+
+/**
+ * What a config write did (today's config-files contract), never thrown: `written` (in effect), `held` (written, but
+ * a loosening waits for the owner — the tighter version stays in effect), `conflict` (the file moved since `ifMatch`),
+ * `refused` (bad YAML, a raw secret, the schema, or not a def the caller may write).
+ */
+export type ConfigWriteOutcome =
+  | { readonly kind: 'written'; readonly etag: string; readonly loosened: readonly string[] }
+  | { readonly kind: 'held'; readonly etag: string; readonly id: string; readonly sentences: readonly string[] }
+  | { readonly kind: 'conflict' }
+  | {
+      readonly kind: 'refused';
+      readonly reason: 'yaml' | 'raw_secret' | 'schema' | 'not_declared' | 'bad_name' | 'not_a_mapping';
+      readonly issues: readonly ConfigWriteIssue[];
+    };
+
+/** Its declared config files and collections, parsed, live (§7.2). */
 export interface ConfigPort {
   file<Shape>(def: ConfigFileDef<Shape>): Shape | undefined;
   collection<Shape>(def: ConfigCollectionDef<Shape>): ReadonlyMap<string, Shape>;
   watch(def: ConfigFileDef<any> | ConfigCollectionDef<any>, listener: () => void): Cancel;
+  /** Tells an absent file from an invalid one (and a held one); `name` picks a collection item. */
+  fileState(def: ConfigFileDef<any> | ConfigCollectionDef<any>, name?: string): ConfigFileStatus;
+  /**
+   * Writes one of ITS OWN declared files through the same writer Gate's config route uses: only the changed keys are
+   * edited, a raw secret is refused, the last good version is kept, and a loosening is HELD for the owner (a plugin
+   * never confirms one). Another plugin's def is refused `not_declared`.
+   */
+  write(
+    def: ConfigFileDef<any> | ConfigCollectionDef<any>,
+    edit: ConfigEdit,
+    options?: { readonly ifMatch?: string; readonly name?: string },
+  ): Promise<ConfigWriteOutcome>;
+}
+
+/** One declared config file or collection item, named for the writer. */
+export interface ConfigTarget {
+  readonly plugin: string;
+  readonly def: ConfigFileDef<any> | ConfigCollectionDef<any>;
+  readonly name?: string;
+}
+
+/** A config file as it is on disk, for an editor: its text, etag and state. */
+export interface ConfigFileRead {
+  readonly path: string;
+  readonly exists: boolean;
+  readonly text: string | undefined;
+  readonly etag: string;
+  readonly status: ConfigFileStatus;
+}
+
+/** An edit held for the owner (the tighter version stays in effect until it is confirmed or discarded). */
+export interface HeldConfig {
+  readonly id: string;
+  readonly plugin: string;
+  readonly path: string;
+  readonly name?: string;
+  readonly etag: string;
+  readonly removal: boolean;
+  readonly sentences: readonly string[];
+}
+
+/**
+ * The writer over EVERY declared config file, given to Gate alone (`kernel.configFiles`; `undefined` for every other
+ * plugin). Gate's config route decides who may write and whether this act may confirm a loosening
+ * (`confirmedLoosening`, after its step-up); the mechanism — atomic write, `ifMatch` conflict, last good, held
+ * loosening, comment-keeping patches, raw-secret refusal — is the kernel's (today's `ConfigFilesService`).
+ */
+export interface ConfigFilesWriter {
+  declarations(): readonly { readonly plugin: string; readonly def: ConfigFileDef<any> | ConfigCollectionDef<any> }[];
+  read(target: ConfigTarget): Promise<ConfigFileRead | undefined>;
+  write(
+    target: ConfigTarget,
+    edit: ConfigEdit,
+    options?: { readonly confirmedLoosening?: boolean; readonly ifMatch?: string },
+  ): Promise<ConfigWriteOutcome>;
+  remove(
+    target: ConfigTarget,
+    options?: { readonly confirmedLoosening?: boolean; readonly ifMatch?: string },
+  ): Promise<ConfigWriteOutcome>;
+  held(): readonly HeldConfig[];
+  /** Confirms ONE held edit by id; `false` when there is no such edit any more. */
+  confirm(id: string): Promise<boolean>;
+  /** Drops ONE held edit: the file goes back to the version in effect. */
+  discard(id: string): Promise<boolean>;
 }
 
 // roots ────────────────────────────────────────────────────────────────────────────────────────────────────────────
