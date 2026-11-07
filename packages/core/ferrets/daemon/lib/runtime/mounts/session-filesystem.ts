@@ -72,6 +72,22 @@ function requiredPath(context: RouteContext): string {
   return target;
 }
 
+/** Today's file query policy. Never silently read the working tree for a HEAD, media or base64 request. */
+function fileQuery(context: RouteContext): void {
+  const scope = queryValue(context.request, 'scope');
+  if (scope !== undefined && scope !== 'media')
+    throw new ApiError(400, 'query parameter "scope" must be "media"', 'invalid_scope');
+  const rev = queryValue(context.request, 'rev');
+  if (scope === 'media' && rev !== undefined)
+    throw new ApiError(400, 'the media folder has no history, so "rev" does not apply', 'invalid_rev');
+  requiredPath(context);
+  if (rev !== undefined && rev !== 'head')
+    throw new ApiError(400, 'query parameter "rev" must be "head"', 'invalid_rev');
+  const format = queryValue(context.request, 'format');
+  if (format !== undefined && format !== 'base64')
+    throw new ApiError(400, 'query parameter "format" must be "base64"', 'invalid_format');
+}
+
 async function list(filesystem: SessionFilesystem, deps: FileBrowserDeps, context: RouteContext): Promise<ApiResponse> {
   const { cwd, fence } = await deps.reach(context);
   try {
@@ -88,7 +104,11 @@ async function list(filesystem: SessionFilesystem, deps: FileBrowserDeps, contex
  * `undefined` on a daemon that keeps none. A function of the session id alone: the caller chooses
  * `scope=media`, never a directory.
  */
-async function index(filesystem: SessionFilesystem, deps: FileBrowserDeps, context: RouteContext): Promise<ApiResponse> {
+async function index(
+  filesystem: SessionFilesystem,
+  deps: FileBrowserDeps,
+  context: RouteContext,
+): Promise<ApiResponse> {
   const { id, cwd, fence } = await deps.reach(context);
   try {
     // Bounds are the domain's own; the only thing a route contributes is the caller's cancellation,
@@ -104,7 +124,11 @@ async function index(filesystem: SessionFilesystem, deps: FileBrowserDeps, conte
   }
 }
 
-async function changes(filesystem: SessionFilesystem, deps: FileBrowserDeps, context: RouteContext): Promise<ApiResponse> {
+async function changes(
+  filesystem: SessionFilesystem,
+  deps: FileBrowserDeps,
+  context: RouteContext,
+): Promise<ApiResponse> {
   const { cwd, fence } = await deps.reach(context);
   try {
     return jsonResponse(await filesystem.changes(cwd, fence === undefined ? {} : { fence }));
@@ -157,11 +181,14 @@ export interface FileBrowserDeps {
    * The ferret the path names, its working folder, and the fence an agent's read sits behind (S47: its own ferret and
    * its helpers only, never the state home); `fence` is `undefined` for a person. Refusals are today's.
    */
-  reach(context: RouteContext): Promise<{ readonly id: string; readonly cwd: string; readonly fence?: SessionReadFence }>;
+  reach(
+    context: RouteContext,
+  ): Promise<{ readonly id: string; readonly cwd: string; readonly fence?: SessionReadFence }>;
 }
 
 /** The four route keys, as `manifest.ts` declares them (today's `/v1/sessions/:sessionId/fs…`, renamed). */
 export const FILE_BROWSER_ROUTE_KEYS = [
+  'GET /v1/ferrets/:ferretId/fs/file',
   'GET /v1/ferrets/:ferretId/fs/index',
   'GET /v1/ferrets/:ferretId/fs/changes',
   'GET /v1/ferrets/:ferretId/fs/diff',
@@ -179,8 +206,8 @@ function notBuilt(): never {
 }
 
 /**
- * The session working-tree read surface, keyed for the manifest. `fs/file` is served by Ferrets' build over the
- * kernel's roots; these four wait for the identity-returning walk.
+ * The working-tree read surface. Every byte read needs today's descriptor pinner, single-link metadata,
+ * gitignore policy and agent home fence. RootHandle.stat/readText cannot prove these checks.
  */
 export function sessionFilesystemRoutes(deps: FileBrowserDeps): { readonly [K in FileBrowserRouteKey]: RouteHandler } {
   const bound =
@@ -192,6 +219,12 @@ export function sessionFilesystemRoutes(deps: FileBrowserDeps): { readonly [K in
       return notBuilt();
     };
   return {
+    'GET /v1/ferrets/:ferretId/fs/file': async context => {
+      await deps.reach(context);
+      fileQuery(context);
+      // No confined readFile adapter is bound in this base. Never substitute an ordinary root read.
+      return notBuilt();
+    },
     'GET /v1/ferrets/:ferretId/fs/index': bound(index),
     'GET /v1/ferrets/:ferretId/fs/changes': bound(changes),
     'GET /v1/ferrets/:ferretId/fs/diff': bound(diff),
