@@ -1,6 +1,10 @@
-import type { Health } from '@ferretry/kernel/contract';
 import type { DaemonManagerKind } from './layout.ts';
-export type LocalUpdateHealth = Health & { readonly pid: number };
+/** What `GET /healthz` says about the serving daemon. `protocol` is any integer: process control never judges it. */
+export interface LocalUpdateHealth {
+  readonly protocol: number;
+  readonly version: string;
+  readonly pid: number;
+}
 /** The result of one external command. */
 export interface CommandOutcome {
   readonly code: number;
@@ -49,8 +53,11 @@ export interface IDaemonProcessPort {
  */
 export interface IStateHomeClaimPort {
   claim(home: string): Promise<unknown>;
-  /** Whether the home exists and carries the Ferretry marker; reads only, never claims. */
-  inspect(home: string): Promise<'absent' | 'claimed' | 'unclaimed'>;
+  /**
+   * Whether the home exists and carries the Ferretry marker; reads only, never claims. `empty` is a directory with
+   * nothing in it, which the daemon's first start makes into a home.
+   */
+  inspect(home: string): Promise<'absent' | 'empty' | 'claimed' | 'unclaimed'>;
 }
 
 /**

@@ -120,6 +120,9 @@ class DaemonShutdownFailedError extends Error {
   }
 }
 
+/** What the shell's launcher came to. */
+export type DaemonLaunchOutcome = { readonly started: true } | { readonly started: false; readonly why: string };
+
 /** The two reads that need a connection to the daemon, supplied by the verb that runs. */
 export interface DaemonControlReads {
   readonly resetInventory: IResetInventoryPort;
@@ -149,6 +152,13 @@ export interface DaemonControllerDeps {
   readonly sessionTerminals: ISessionTerminalServerPort;
   /** Whether the state home carries the Ferretry marker (`home.json`), which a reset requires before it deletes. */
   readonly claims: Pick<IStateHomeClaimPort, 'inspect'>;
+  /**
+   * The shell's own launcher: starts the daemon once and waits for it to answer. It is how a home that is absent or
+   * empty (a fresh machine, or after a reset) comes to exist, because only the daemon's first start creates one.
+   */
+  readonly launcher?: () => Promise<DaemonLaunchOutcome>;
+  /** Offers a nix profile install when `install` finds a daemon running from a `nix shell`. Absent: no offer. */
+  readonly nixShellOffer?: { offer(daemon: InstalledDaemonBinary): Promise<InstalledDaemonBinary | undefined> };
   /** Where the typed reset confirmation is read from; never used off a terminal. */
   readonly prompt: IDaemonPrompt;
   /** Whether anybody is at a terminal, asked when the question is asked. */
@@ -179,7 +189,9 @@ export class DaemonController {
   async install(): Promise<void> {
     // Before the claim: a host with no daemon executable cannot install one, and learning that after waiting out
     // another invocation's claim is up to 140 seconds spent on a foregone refusal.
-    const daemon = this.deps.installedDaemon();
+    const found = this.deps.installedDaemon();
+    // Before the claim too: the offer can wait on a person, and on `nix profile install`.
+    const daemon = (await this.deps.nixShellOffer?.offer(found)) ?? found;
     await this.#serialized('install', () => this.#install(daemon));
   }
 
@@ -278,6 +290,9 @@ export class DaemonController {
     const service = this.#service();
     // Before anything is written: one definition per host, and it may belong to another state home.
     await service.assertServes(undefined);
+    // A fresh machine has no home yet, and a definition cannot be written under one that is not ours: the daemon's
+    // first start makes it. That daemon is then an orphan, and the hand-over below moves it under the manager.
+    await this.#ensureHome();
     // A daemon `fy daemon start` ran before there was a definition holds the state home's lock, so the manager's own
     // daemon would exit at once and leave that one serving with nothing supervising it. It is handed over first.
     const orphan = await this.#orphanOf(service, await this.deps.health.probe());
@@ -317,6 +332,8 @@ export class DaemonController {
     // Locate the executable BEFORE stopping the incumbent: an operator must learn that a host has no daemon on its
     // PATH while the healthy daemon is still serving, never only after the restart created downtime it cannot undo.
     const daemon = this.deps.installedDaemon();
+    // After a reset the home is gone; the restart then has a daemon to stop, which is the one that makes the home.
+    await this.#ensureHome();
     const owner = await this.#owner();
     const health = await this.deps.health.probe();
     await owner.assertServes(health?.pid);
@@ -410,10 +427,28 @@ export class DaemonController {
     );
   }
 
+  /**
+   * Make sure a home exists before a verb writes anything under it. A home that is absent or empty is made by the
+   * daemon's own first start, so the daemon is brought up ONCE through the shell's launcher; this CLI never writes
+   * `home.json` itself. A home that is there but is not ours is left alone: the supervisors refuse it.
+   */
+  async #ensureHome(): Promise<void> {
+    const home = this.deps.layout.stateHome;
+    const state = await this.deps.claims.inspect(home);
+    if (state !== 'absent' && state !== 'empty') return;
+    this.deps.out.warn(`${home} is not a ${this.#name} home yet; starting ${this.#name} once so it creates it`);
+    const launched = (await this.deps.launcher?.()) ?? {
+      started: false as const,
+      why: `${this.#name} cannot be started here to create ${home}`,
+    };
+    if (!launched.started) throw new DaemonStartupFailedError(launched.why);
+  }
+
   /** Refuse to reset a state home that exists but carries no Ferretry marker. */
   async #assertClaimedStateHome(): Promise<void> {
     const home = this.deps.layout.stateHome;
-    if ((await this.deps.claims.inspect(home)) !== 'unclaimed') return;
+    const state = await this.deps.claims.inspect(home);
+    if (state !== 'unclaimed' && state !== 'empty') return;
     throw new DaemonResetRefusedError(
       `refusing to reset ${home}: it carries no Ferretry marker (home.json), so it may not be a Ferretry state ` +
         `home and nothing was removed. Point FY_HOME at the state home you meant`,

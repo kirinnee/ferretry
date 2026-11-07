@@ -14,6 +14,9 @@ import { DirectSupervisor, LaunchdSupervisor, SystemdSupervisor } from '../../li
 import type { Environment } from '../../lib/credential.ts';
 import { daemonRunPath } from '../../lib/home.ts';
 import { PlainProgress } from '../../lib/update/progress.ts';
+import { NixProfileSwitch } from '../../lib/update/profile-switch.ts';
+import { HostInstallFacts } from '../update/install-facts.ts';
+import { CommandPackageManagers } from '../update/package-managers.ts';
 import { executable, versionOf } from '../update/machine.ts';
 import { RunRecordDaemonHealth } from './health.ts';
 import { FileDaemonLifecycleLock } from './lifecycle-lock.ts';
@@ -29,6 +32,7 @@ import { TmuxSessionTerminalServer } from './session-terminals.ts';
 import { terminalPrompt } from '../terminal/prompt.ts';
 import { homeMarker } from './state-home-marker.ts';
 import type { Fetcher } from './http-transport.ts';
+import type { LaunchResult } from '../../lib/world.ts';
 
 export interface DaemonControlInputs {
   readonly environment: Environment;
@@ -41,6 +45,8 @@ export interface DaemonControlInputs {
   readonly daemonName: string;
   readonly selfPath: string;
   readonly fetcher?: Fetcher | undefined;
+  /** The shell's launcher: how a home that does not exist yet comes to (the daemon's first start makes it). */
+  readonly launch: () => Promise<LaunchResult>;
 }
 
 export function buildDaemonController(
@@ -111,6 +117,23 @@ export function buildDaemonController(
     resetInventory: reads.resetInventory,
     sessionTerminals: new TmuxSessionTerminalServer(processes),
     claims,
+    launcher: inputs.launch,
+    nixShellOffer: new NixProfileSwitch({
+      facts: new HostInstallFacts({
+        product: inputs.product,
+        homeDirectory: inputs.userHome,
+        platform: process.platform,
+      }),
+      packages: new CommandPackageManagers((argv, onLine) => processes.runStreaming(argv, onLine)),
+      lifecycle: { executable, versionOf },
+      out,
+      prompt: terminalPrompt,
+      interactive: () => io.isTty,
+      product: inputs.product,
+      clientName: inputs.clientName,
+      daemonName,
+      homeDirectory: inputs.userHome,
+    }),
     prompt: terminalPrompt,
     interactive: () => io.isTty,
     clientName: inputs.clientName,

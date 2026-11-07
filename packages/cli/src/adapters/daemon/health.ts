@@ -1,4 +1,3 @@
-import { HealthSchema } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import type { IDaemonHealthPort, LocalUpdateHealth } from '../../lib/daemon/ports.ts';
 import type { Fetcher } from './http-transport.ts';
@@ -6,7 +5,14 @@ import type { Fetcher } from './http-transport.ts';
 /** The daemon's liveness route, served from the moment its address is bound (`GET /healthz`). */
 const LIVENESS_PATH = '/healthz';
 
-const ServingSchema = HealthSchema.extend({ pid: z.number().int().min(2) }).strip();
+/**
+ * What process control reads: which process serves and which build. The protocol is ANY integer here, because a daemon
+ * on another protocol is exactly the one a person must be able to stop, restart and see (`daemon-older`); judging
+ * the protocol is the guard's job, not this read's.
+ */
+export const ServingSchema = z
+  .object({ protocol: z.number().int(), version: z.string(), pid: z.number().int().min(2) })
+  .strip();
 
 /**
  * Asks the daemon at `baseUrl()` whether it serves, and which process it is. The address is read again for every

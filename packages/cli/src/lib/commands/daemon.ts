@@ -1,5 +1,6 @@
 /** `fy daemon status|start|stop|restart|install|uninstall|logs|which|reset` (§1.4). The daemon starts itself on the first other command (§9.1). */
 import { DaemonUpdateViewSchema } from '@ferretry/plugin-updates/contract';
+import type { Manifest, PluginClient } from '@ferretry/kernel/manifest';
 import { optionOn } from '../argv.ts';
 import type { DaemonController } from '../daemon/controller.ts';
 import { ClientResetInventory } from '../daemon/reset-inventory.ts';
@@ -77,8 +78,20 @@ const controlled =
         return fallback;
       }
     };
+    // EACH of the three counts is asked only while the daemon answers, like the mid-turn read: a daemon that died since
+    // the controller's probe is not started by a read in the middle of a reset.
+    const whileAnswering = (id: Manifest['id']): Pick<PluginClient, 'call'> => ({
+      call: async (route, init) => {
+        if ((await world.probe()).state !== 'up') throw new Error('the daemon stopped answering');
+        return await ctx.client(id).call(route, init);
+      },
+    });
     const built = world.daemon({
-      resetInventory: new ClientResetInventory(ctx.client('vault'), ctx.client('access'), ctx.client('ferrets')),
+      resetInventory: new ClientResetInventory(
+        whileAnswering('vault'),
+        whileAnswering('access'),
+        whileAnswering('ferrets'),
+      ),
       turns: {
         midTurn: () =>
           whileUp(

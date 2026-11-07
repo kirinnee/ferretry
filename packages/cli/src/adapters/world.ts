@@ -112,6 +112,7 @@ export function createWorld(inputs: WorldInputs): CliWorld {
           daemonName: DAEMON_BINARY,
           selfPath: inputs.selfPath,
           fetcher,
+          launch,
         },
         reads,
       ),

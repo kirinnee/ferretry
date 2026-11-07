@@ -1,4 +1,3 @@
-import type { Health } from '@ferretry/kernel/contract';
 import type { DaemonUpdateView, InstallFacts, LatestRelease } from '@ferretry/plugin-updates/contract';
 import type { InstalledDaemonBinary } from './machine.ts';
 import type { CommandOutcome } from './machine.ts';
@@ -90,8 +89,8 @@ export interface IUpdateLifecyclePort {
    * launchd job with no `ProcessType` is throttled by macOS — or `undefined` when it does not.
    */
   staleDefinition(): Promise<string | undefined>;
-  /** The local daemon's health, or `undefined` when it does not answer. */
-  probe(): Promise<Health | undefined>;
+  /** Which build serves; the update never judges the protocol (the guard does). */
+  probe(): Promise<{ readonly version: string } | undefined>;
 }
 
 /** The daemon's own account of its update state; `undefined` when the daemon does not answer. */
