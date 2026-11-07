@@ -89,7 +89,10 @@ export function pairOverDirect(
       socket,
     });
     try {
-      return await session.paired();
+      const outcome = await session.paired();
+      // P28: a refused or unreachable attempt never asks Access to persist the fresh key.
+      await input.key.save(outcome.response);
+      return outcome;
     } finally {
       session.close('the pairing finished');
     }

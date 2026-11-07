@@ -284,6 +284,19 @@ tool	card_plan	added	tasks are cards (design §1.4): today's task_plan; descript
 tool	card_progress	added	new in 5.0: writes one card's progress (design §3.3)
 route	GET /v1/plans	added	new in 5.0: the owner's list of staged plans (design §3.3)
 route	GET /v1/ferrets/:ferretId/question	added	today the ferret view carried pendingQuestion; Conversation serves the pending question on its own read route so `fy answer` needs no id (lead ruling)
+route	GET /v1/analytics	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	GET /v1/analytics/pricing	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	PATCH /v1/analytics/pricing	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	POST /v1/analytics/pricing/sync/apply	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	POST /v1/analytics/pricing/sync/preview	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	GET /v1/usage/insights	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	GET /v1/usage/pricing	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	PATCH /v1/usage/pricing	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	POST /v1/usage/pricing/sync/apply	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	POST /v1/usage/pricing/sync/preview	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	GET /v1/usage/budgets	added	new: a login's budget standing was part of the fleet credentials list; Logins cannot import Usage, so the standing is served by the plugin that computes it (design §2.3)
+route	GET /usage	changed	available was a function of the machine's publicUsageFeed setting; a pure-data manifest cannot hold it, so the route is declared and the handler answers exactly what an unrouted path answers while usage.yaml publicFeed is off
+route	GET /metrics	changed	available was a function of the machine's publicUsageFeed setting; a pure-data manifest cannot hold it, so the route is declared and the handler answers exactly what an unrouted path answers while usage.yaml publicFeed is off
 route	GET /v1/sessions/:sessionId/attach	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId/attach	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/console/input	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
