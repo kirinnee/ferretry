@@ -18,13 +18,13 @@
  *
  * Pure.
  */
+import { SecretNameSchema } from '@ferretry/core-vault/contract';
 import {
   CloudCredentialKindSchema,
-  type FleetPresetGroup,
-  FleetPresetGroupSchema,
+  type PresetGroup as FleetPresetGroup,
+  PresetGroupSchema as FleetPresetGroupSchema,
   ProviderQuotaSourceSchema,
-  SecretNameSchema,
-} from '@ferretry/protocol';
+} from '@ferretry/plugin-logins/contract';
 import { z } from 'zod';
 import { CodexProviderSchema } from '../account/environment.ts';
 import { EnvNameSchema } from '../config.ts';

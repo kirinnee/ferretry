@@ -19,7 +19,7 @@
  *
  * Pure: every function here is string in, string out.
  */
-import { type SecretName, secretReferencesIn } from '@ferretry/protocol';
+import { type SecretName, secretReferencesIn } from '@ferretry/core-vault/contract';
 import {
   binaryName,
   CLAUDE_NO_QUESTIONS_FLAG,

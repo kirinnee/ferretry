@@ -32,7 +32,7 @@
  * Pure: documents in, a plan out. Reading the host is the adapter's; writing the plan is the setup
  * executor's. A content digest is a caller-supplied function, because hashing is not this layer's.
  */
-import { MIN_SECRET_VALUE_LENGTH, secretReference, secretReferencesIn } from '@ferretry/protocol';
+import { MIN_SECRET_VALUE_LENGTH, secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
 import { FLEET_STARTER_MODELS } from '../defaults.ts';

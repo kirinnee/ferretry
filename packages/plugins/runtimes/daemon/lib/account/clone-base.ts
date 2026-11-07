@@ -20,23 +20,20 @@
  * dropped; a source nothing here links to any more is dropped whole; past {@link CLONE_BASE_SOURCES_LIMIT}
  * sources the one copied longest ago goes. A Replace rewrites the source's record from this copy alone.
  */
+import { type Instant, InstantSchema, NonEmptyStringSchema } from '@ferretry/std';
+import { sha256Hex } from '../foreign.ts';
 import {
   CLONE_SETTINGS_KEYS_LIMIT,
-  type CloneDigestKind,
+  type CloneBundle,
+  type CloneFile,
   type CloneSettingsDoc,
   CloneSettingsDocSchema,
   CloneableSecretNameSchema,
-  cloneFileOwned,
-  cloneItemDigest,
-  type FleetCloneBundle,
-  type FleetCloneFile,
-  InstantSchema,
-  isCanonicalAssetPath,
-  NonEmptyStringSchema,
   type OriginKey,
   OriginKeySchema,
-  sha256Hex,
-} from '@ferretry/protocol';
+} from '../../../contract/index.ts';
+import { type CloneDigestKind, cloneItemDigest } from '../clone-digest.ts';
+import { cloneFileOwned, isCanonicalAssetPath } from '../clone-review.ts';
 import { z } from 'zod';
 import { type AccountModel, COMPONENT_KINDS } from './schema.ts';
 
@@ -259,11 +256,11 @@ export class CloneSourceMismatch extends Error {
  * identity at all: nothing is recorded for it.
  */
 export function cloneSourceIdentity(
-  bundle: FleetCloneBundle,
+  bundle: CloneBundle,
   verifiedDaemon: string | undefined,
   displayName: string | undefined,
 ): CloneSourceIdentity | undefined {
-  const claimed = bundle.version === 2 ? bundle.daemon : undefined;
+  const claimed: string | undefined = bundle.daemon;
   // The id is the key of a record entry, so one the record cannot hold is not an identity at all. Only an
   // id filed under the self-reported prefix pays for it; a browser-verified id keeps the full length.
   const filedAs = verifiedDaemon === undefined ? `${SELF_REPORTED_PREFIX}${claimed ?? ''}` : claimed;
@@ -310,7 +307,7 @@ interface BundleItem {
 }
 
 /** Every item of a bundle that can be linked to: components, profiles, runtimes and logins. */
-function bundleItems(bundle: FleetCloneBundle): BundleItem[] {
+function bundleItems(bundle: CloneBundle): BundleItem[] {
   return [
     ...Object.entries(bundle.components).flatMap(([kind, entries]) =>
       Object.entries(entries).flatMap(([name, value]) =>
@@ -337,8 +334,7 @@ function bundleItems(bundle: FleetCloneBundle): BundleItem[] {
  * any key two items claim (a damaged or hostile bundle) — those are left without one, so they are copied
  * but never linked.
  */
-export function cloneOriginKeys(bundle: FleetCloneBundle): ReadonlyMap<string, OriginKey> {
-  if (bundle.version !== 2) return new Map();
+export function cloneOriginKeys(bundle: CloneBundle): ReadonlyMap<string, OriginKey> {
   const present = new Set(bundleItems(bundle).map(item => item.reference));
   const claims = new Map<OriginKey, number>();
   for (const [reference, key] of Object.entries(bundle.keys)) {
@@ -356,8 +352,8 @@ export function cloneOriginKeys(bundle: FleetCloneBundle): ReadonlyMap<string, O
  * profile as the source has it — the next copy then sees it as changed HERE, which is the truth.
  */
 export function cloneBaseEntries(
-  offered: FleetCloneBundle,
-  copied: FleetCloneBundle,
+  offered: CloneBundle,
+  copied: CloneBundle,
   logins: ReadonlyMap<string, string>,
 ): CloneBaseEntry[] {
   const keys = cloneOriginKeys(offered);
@@ -391,7 +387,7 @@ export function cloneBaseEntries(
   return entries;
 }
 
-const ownedFiles = (item: BundleItem, files: readonly FleetCloneFile[]): FleetCloneFile[] =>
+const ownedFiles = (item: BundleItem, files: readonly CloneFile[]): CloneFile[] =>
   files.filter(file => cloneFileOwned(item.value, file.path));
 
 // ── The record after a copy ──────────────────────────────────────────────────────────────────────
@@ -399,7 +395,7 @@ const ownedFiles = (item: BundleItem, files: readonly FleetCloneFile[]): FleetCl
 export interface CloneBaseUpdate {
   readonly source: CloneSourceIdentity;
   /** The instant the copy was applied. */
-  readonly at: string;
+  readonly at: Instant;
   /** Start over: the source's record is rewritten from this copy alone. */
   readonly replace: boolean;
   /** What this copy wrote. */

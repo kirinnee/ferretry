@@ -31,23 +31,18 @@
  * Pure: a model and documents in, a plan out. Reading the source's files and writing the target's
  * are the setup service's.
  */
+import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import {
-  type CloneAgentRuntime,
-  type CloneRunnable,
-  cloneBundleProblem,
-  cloneFileOwned,
-  type CloneLoginTarget,
-  cloneRunnables,
-  FLEET_CLONE_BUNDLE_FORMAT,
-  type FleetCloneBundle,
-  FleetCloneBundleSchema,
-  type FleetCloneCredential,
-  type FleetCloneFile,
-  planCloneLogins,
-  secretReferencesIn,
-  suggestCloneDefault,
-} from '@ferretry/protocol';
-import type { HarnessKind } from '../manifest.ts';
+  CLONE_BUNDLE_FORMAT,
+  type CloneBundle,
+  CloneBundleSchema,
+  type CloneCredential,
+  type CloneFile,
+} from '../../../contract/index.ts';
+import { type CloneAgentRuntime, suggestCloneDefault } from '../clone-default.ts';
+import { type CloneLoginTarget, planCloneLogins } from '../clone-logins.ts';
+import { type CloneRunnable, cloneBundleProblem, cloneFileOwned, cloneRunnables } from '../clone-review.ts';
+import { type HarnessKind, harnessKeyOfKind, harnessKindOfKey } from '../manifest.ts';
 import { canonicalAssetReference } from '../paths.ts';
 import { skillSourceReference } from './adapt.ts';
 import { cloudCredentialSentence, parseCloudCredential } from './environment.ts';
@@ -120,7 +115,7 @@ export interface CloneBundleInput {
   /** Each login's email, where the credentials surface knows one. Display only. */
   readonly emails: Readonly<Record<string, string | undefined>>;
   /** The documents that were read, relative to the asset tree. */
-  readonly files: readonly FleetCloneFile[];
+  readonly files: readonly CloneFile[];
   /** Documents that could not be carried, with the reason. */
   readonly notCopied: readonly { readonly path: string; readonly reason: string }[];
 }
@@ -139,7 +134,7 @@ const plainReferences = (component: Record<string, unknown>): Record<string, unk
 };
 
 /** The bundle `GET /v1/fleet/export` answers: no credential, no history (L1–L3, §7). */
-export function buildCloneBundle(input: CloneBundleInput): FleetCloneBundle {
+export function buildCloneBundle(input: CloneBundleInput): CloneBundle {
   const { model } = input;
   const used = new Set(Object.values(model.runtimes).map(runtime => runtime.credential));
   const credentials = Object.entries(model.credentials)
@@ -148,7 +143,7 @@ export function buildCloneBundle(input: CloneBundleInput): FleetCloneBundle {
       const email = input.emails[id];
       return {
         id,
-        harness: credential.harness,
+        harness: harnessKeyOfKind(credential.harness),
         ...(credential.label === undefined ? {} : { label: credential.label }),
         ...(email === undefined ? {} : { email }),
         // An environment login travels as its file does: plain values, secret NAMES, its references.
@@ -169,7 +164,7 @@ export function buildCloneBundle(input: CloneBundleInput): FleetCloneBundle {
       ),
     ]),
   );
-  const files = new Map<string, FleetCloneFile>();
+  const files = new Map<string, CloneFile>();
   for (const file of input.files) {
     const plain = plainAsset(file.path);
     if (!files.has(plain)) files.set(plain, { path: plain, content: file.content });
@@ -190,8 +185,8 @@ export function buildCloneBundle(input: CloneBundleInput): FleetCloneBundle {
     ...input.notCopied.filter(entry => !files.has(plainAsset(entry.path))).map(entry => ({ ...entry })),
     ...leftOut,
   ];
-  return FleetCloneBundleSchema.parse({
-    format: FLEET_CLONE_BUNDLE_FORMAT,
+  return CloneBundleSchema.parse({
+    format: CLONE_BUNDLE_FORMAT,
     version: 1,
     machine: input.machine,
     exportedAt: input.exportedAt,
@@ -290,7 +285,7 @@ export interface CloneLoginOutcome {
 export interface ClonePlan {
   readonly model: AccountModel;
   /** Documents to write, relative to the asset tree. */
-  readonly files: readonly FleetCloneFile[];
+  readonly files: readonly CloneFile[];
   readonly renamed: readonly CloneRename[];
   /** The empty slots the copy creates: every sign-in that is not matched to a login already here. */
   readonly slots: readonly CloneSlot[];
@@ -338,8 +333,8 @@ const NON_MODEL_KINDS = COMPONENT_KINDS.filter(kind => kind !== 'modelSets');
  * a component reference spelled two ways, or a file no carried component owns. What is planned from an
  * accepted bundle is exactly what the review listed.
  */
-export function parseCloneBundle(input: unknown): FleetCloneBundle {
-  const parsed = FleetCloneBundleSchema.safeParse(input);
+export function parseCloneBundle(input: unknown): CloneBundle {
+  const parsed = CloneBundleSchema.safeParse(input);
   if (!parsed.success) {
     throw new CloneRefusal(
       'That is not a setup exported by Ferretry, or it was exported by a version this machine cannot read.',
@@ -355,7 +350,7 @@ export function parseCloneBundle(input: unknown): FleetCloneBundle {
  * every document only it carried. A skip that names nothing in the bundle is refused, so a stale
  * review can never be mistaken for one that left something out.
  */
-function withoutSkipped(bundle: FleetCloneBundle, skip: readonly string[], sourceName: string): FleetCloneBundle {
+function withoutSkipped(bundle: CloneBundle, skip: readonly string[], sourceName: string): CloneBundle {
   if (skip.length === 0) return bundle;
   const skipped = new Set(skip);
   const components: Record<string, Record<string, unknown>> = {};
@@ -395,7 +390,7 @@ function withoutSkipped(bundle: FleetCloneBundle, skip: readonly string[], sourc
  * Plan copying a bundle onto this machine. Throws {@link CloneRefusal} when the bundle is damaged or
  * the copy would make a configuration this machine cannot read.
  */
-export function planClone(target: AccountModel, offered: FleetCloneBundle, options: CloneOptions): ClonePlan {
+export function planClone(target: AccountModel, offered: CloneBundle, options: CloneOptions): ClonePlan {
   const skipped = [...new Set(options.skip ?? [])].toSorted();
   const sourceName = options.sourceName ?? offered.machine;
   const bundle = withoutSkipped(offered, skipped, sourceName);
@@ -435,7 +430,7 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
     bundle.credentials,
     Object.entries(base.credentials).map(([id, credential]) => ({
       id,
-      harness: credential.harness,
+      harness: harnessKeyOfKind(credential.harness),
       store: credential.store,
       email: targetEmails[id],
       label: credential.label,
@@ -449,7 +444,7 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
       signIns.set(credential.id, {
         sourceId: credential.id,
         outcome: 'matched',
-        harness: credential.harness,
+        harness: harnessKindOfKey(credential.harness),
         target: here.id,
         name: targetEmails[here.id] ?? own.label ?? here.id,
       });
@@ -463,7 +458,7 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
       credential.store === 'environment'
         ? ({ ...environmentCredential(credential), ...origin, ...keyed(`login/${credential.id}`) } as Credential)
         : {
-            harness: credential.harness,
+            harness: harnessKindOfKey(credential.harness),
             store: 'ferretry',
             ...(label === undefined ? {} : { label }),
             ...origin,
@@ -473,7 +468,7 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
       signIns.set(credential.id, {
         sourceId: credential.id,
         outcome: here.candidates === undefined ? 'slot' : 'ask',
-        harness: credential.harness,
+        harness: harnessKindOfKey(credential.harness),
         target: id,
         name: credential.email ?? credential.label ?? credential.id,
         ...(here.candidates === undefined ? {} : { candidates: here.candidates }),
@@ -579,7 +574,7 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
   // Documents: each under the path its component now names. A skill item the target has is kept.
   const existingItems = new Set(options.existingSkillItems);
   const keptSkillItems = new Set<string>();
-  const files: FleetCloneFile[] = [];
+  const files: CloneFile[] = [];
   for (const file of bundle.files) {
     const moved = fileMoves.get(file.path) ?? movedUnderFolder(file.path, folderMoves);
     if (moved !== undefined) {
@@ -758,7 +753,7 @@ function defaultSentence(outcome: CloneDefault, machine: string): string | undef
 /** What applying the copy would do, as the confirm card says it (§4.7 Preview and Done). */
 export function describeClone(
   plan: ClonePlan,
-  bundle: FleetCloneBundle,
+  bundle: CloneBundle,
   machine: string,
   sourceName: string = bundle.machine,
 ): readonly string[] {
@@ -834,7 +829,7 @@ export function describeClone(
  * An environment login as the bundle carries it (docs/provider-presets.md): exactly what its file holds.
  * No file may hold a raw key, so `env` is plain values and `${secret:NAME}` references only.
  */
-function environmentDescriptor(credential: Credential): Partial<FleetCloneCredential> {
+function environmentDescriptor(credential: Credential): Partial<CloneCredential> {
   return {
     store: 'environment',
     ...(credential.env === undefined ? {} : { env: { ...credential.env } }),

@@ -44,7 +44,8 @@
  *
  * Pure and total: bodies are parsed by the caller, every failure is a {@link AdaptProblem}.
  */
-import { mcpOAuthSecretNames, secretReference, secretReferencesIn } from '@ferretry/protocol';
+import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
+import { mcpOAuthSecretNames } from '../foreign.ts';
 import { harnessAsset, HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, type HarnessAssetTable } from '../assets.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { isAssetTreeReference } from '../paths.ts';

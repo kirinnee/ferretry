@@ -23,17 +23,17 @@
  * Pure throughout: no filesystem, no environment, no clock.
  */
 import {
-  BrowserModeSchema,
   BrowserFirewallFailureSchema,
+  BrowserModeSchema,
   BrowserPortsSettingSchema,
   BrowserProxySettingSchema,
-  CONFIG_COMPONENT_KINDS,
+  COMPONENT_KINDS as CONFIG_COMPONENT_KINDS,
   CompactAtSchema,
-  isLoopbackHost,
-  SECRET_REFERENCE_SOURCE,
-} from '@ferretry/protocol';
+} from '../../../contract/index.ts';
+import { SECRET_REFERENCE_SOURCE } from '@ferretry/core-vault/contract';
 import { z } from 'zod';
 import { AliasSchema, EnvSchema, SafeNameSchema, UsageSchema } from '../config.ts';
+import { isLoopbackHost } from '../foreign.ts';
 import { HarnessKindSchema } from '../manifest.ts';
 import { BudgetSchema, TimeZoneSchema } from './budget.ts';
 import { DisabledSchema } from './disabled.ts';

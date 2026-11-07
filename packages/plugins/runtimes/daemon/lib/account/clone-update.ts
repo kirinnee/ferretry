@@ -38,30 +38,27 @@
  * Pure: a model, a bundle, a record and the documents on both sides in; an analysis, a review and a plan
  * out. Reading and writing is the setup service's.
  */
+import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import {
   CLONE_OUTCOME_CHOICES,
   CLONE_SKILLS_DIRECTORY,
+  type CloneBundle,
   type CloneChoice,
   type CloneDecisions,
+  type CloneFile,
   type CloneLoginChoices,
   type CloneMatch,
   type CloneOutcome,
+  type CloneReview,
   type CloneReviewItem,
   type CloneReviewKind,
   type CloneReviewLogin,
-  type CloneRunnable,
-  cloneBundleProblem,
-  cloneItemDigest,
-  cloneLoginRunnable,
-  cloneRunnables,
-  matchCloneSignIn,
-  type FleetCloneBundle,
-  type FleetCloneFile,
-  type FleetCloneReview,
-  secretReferencesIn,
-  sha256Hex,
-} from '@ferretry/protocol';
-import type { HarnessKind } from '../manifest.ts';
+} from '../../../contract/index.ts';
+import { cloneItemDigest } from '../clone-digest.ts';
+import { matchCloneSignIn } from '../clone-logins.ts';
+import { type CloneRunnable, cloneBundleProblem, cloneLoginRunnable, cloneRunnables } from '../clone-review.ts';
+import { sha256Hex } from '../foreign.ts';
+import { type HarnessKind, harnessKeyOfKind, harnessKindOfKey } from '../manifest.ts';
 import { canonicalAssetReference } from '../paths.ts';
 import {
   type CloneBase,
@@ -136,7 +133,7 @@ export interface CloneLoginResolution {
 export interface CloneUpdateInput {
   readonly target: AccountModel;
   /** The source's bundle, accepted by `parseCloneBundle`. */
-  readonly bundle: FleetCloneBundle;
+  readonly bundle: CloneBundle;
   /** The target's name, for the sentences. */
   readonly machine: string;
   /** The source as the person names it. */
@@ -145,7 +142,7 @@ export interface CloneUpdateInput {
   /** What the record holds of this source, or none. */
   readonly base?: CloneBaseSource;
   /** The documents this machine holds for its own items, by path in the asset tree. */
-  readonly targetFiles: readonly FleetCloneFile[];
+  readonly targetFiles: readonly CloneFile[];
   readonly logins: CloneLoginResolution;
   /** The harnesses installed here. */
   readonly installed: readonly HarnessKind[];
@@ -240,7 +237,7 @@ const itemsOfModel = (model: AccountModel): Entry[] => [
   })),
 ];
 
-const itemsOfBundle = (bundle: FleetCloneBundle): Entry[] => [
+const itemsOfBundle = (bundle: CloneBundle): Entry[] => [
   ...COMPONENT_KINDS.flatMap(kind =>
     Object.entries(bundle.components[kind] ?? {}).flatMap(([name, value]) =>
       isRecord(value) ? [{ ref: `${kind}/${name}`, kind, name, value }] : [],
@@ -409,7 +406,7 @@ const ownedHere = (entry: Entry, resolve: Resolve): { readonly path: string }[] 
 const skillItemOf = (path: string): string => path.slice(CLONE_SKILLS_DIRECTORY.length + 1);
 
 /** A side's documents as a map by plain path. */
-const mapOf = (files: readonly FleetCloneFile[]): Map<string, string> => {
+const mapOf = (files: readonly CloneFile[]): Map<string, string> => {
   const map = new Map<string, string>();
   for (const file of files) {
     const path = plain(file.path);
@@ -419,9 +416,9 @@ const mapOf = (files: readonly FleetCloneFile[]): Map<string, string> => {
 };
 
 /** The documents here at their canonical asset path, so a folder reached through an alias reads as the one folder. */
-const canonicalFiles = (files: readonly FleetCloneFile[], roots: AssetRoots): FleetCloneFile[] => {
+const canonicalFiles = (files: readonly CloneFile[], roots: AssetRoots): CloneFile[] => {
   const seen = new Set<string>();
-  const result: FleetCloneFile[] = [];
+  const result: CloneFile[] = [];
   for (const file of files) {
     const path = assetReference(file.path, roots) ?? plain(file.path);
     if (seen.has(path)) continue;
@@ -629,12 +626,12 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
     entry: Entry,
     found: Entry | undefined,
   ): {
-    readonly source: readonly FleetCloneFile[];
-    readonly target: readonly FleetCloneFile[];
+    readonly source: readonly CloneFile[];
+    readonly target: readonly CloneFile[];
     readonly left: number;
   } => {
-    const extraSource: FleetCloneFile[] = [];
-    const extraTarget: FleetCloneFile[] = [];
+    const extraSource: CloneFile[] = [];
+    const extraTarget: CloneFile[] = [];
     // Each omitted folder here, with where its contents sit on the source.
     const omitted: { readonly here: string; readonly there: string }[] = [];
     let left = 0;
@@ -653,7 +650,7 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
     }
     // An omitted folder stands for what beneath it the source did not carry, here: that is never compared. A
     // file the source did carry is compared by its bytes on both sides, so an omission never hides one.
-    const protectedHere = (file: FleetCloneFile): boolean =>
+    const protectedHere = (file: CloneFile): boolean =>
       omitted.some(
         ({ here, there }) =>
           file.path.startsWith(`${here}/`) && !theirFiles.has(`${there}${file.path.slice(here.length)}`),
@@ -895,32 +892,30 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
     });
   }
 
-  // Items here that the source no longer holds (a v2 bundle only: without keys, absent means unknown).
-  if (bundle.version === 2) {
-    for (const entry of pairing.leftover) {
-      const key = entry.value.clonedFromKey as string;
-      if (base?.items[key]?.settled === true) continue;
-      const users = usersOf(target, entry);
-      analysed.push({
-        ref: entry.ref,
-        kind: entry.kind,
-        outcome: 'gone',
-        match: 'key',
-        target: entry,
-        key,
-        note:
-          users.length === 0
-            ? 'The source no longer has it. It stays here unless you remove it.'
-            : `The source no longer has it. ${users.join(', ')} still use${users.length === 1 && !users[0]?.startsWith('the ') ? 's' : ''} it, so it stays unless they go too.`,
-        fields: [],
-        files: [],
-        stamp: false,
-        digests: ['', '', base?.items[key]?.digest ?? ''],
-        usedBy: users,
-        ambiguous: false,
-        removals: [],
-      });
-    }
+  // Items here that the source no longer holds.
+  for (const entry of pairing.leftover) {
+    const key = entry.value.clonedFromKey as string;
+    if (base?.items[key]?.settled === true) continue;
+    const users = usersOf(target, entry);
+    analysed.push({
+      ref: entry.ref,
+      kind: entry.kind,
+      outcome: 'gone',
+      match: 'key',
+      target: entry,
+      key,
+      note:
+        users.length === 0
+          ? 'The source no longer has it. It stays here unless you remove it.'
+          : `The source no longer has it. ${users.join(', ')} still use${users.length === 1 && !users[0]?.startsWith('the ') ? 's' : ''} it, so it stays unless they go too.`,
+      fields: [],
+      files: [],
+      stamp: false,
+      digests: ['', '', base?.items[key]?.digest ?? ''],
+      usedBy: users,
+      ambiguous: false,
+      removals: [],
+    });
   }
 
   // The logins.
@@ -1054,7 +1049,7 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
 // ── The review ───────────────────────────────────────────────────────────────────────────────────
 
 /** The review the app shows: every item that differs, why, and what is chosen for it. */
-export function reviewCloneUpdate(analysis: CloneAnalysis): FleetCloneReview {
+export function reviewCloneUpdate(analysis: CloneAnalysis): CloneReview {
   const { input } = analysis;
   const runnables = new Map(cloneRunnables(input.bundle).map(runnable => [runnable.reference, runnable]));
   const items: CloneReviewItem[] = [];
@@ -1109,7 +1104,7 @@ export function reviewCloneUpdate(analysis: CloneAnalysis): FleetCloneReview {
 export interface CloneUpdatePlan {
   readonly model: AccountModel;
   /** Documents to write, relative to the asset tree: only what differs from what is there. */
-  readonly files: readonly FleetCloneFile[];
+  readonly files: readonly CloneFile[];
   /**
    * Documents to remove, relative to the asset tree: the files the review listed as removed inside a folder
    * a taken item alone owns. Applied in the same batch as the writes and the record, or not at all.
@@ -1324,8 +1319,8 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
     let here: string | undefined = analysis.input.logins.matched.get(credential);
     if (picked !== undefined && picked !== 'slot') {
       const existing = target.credentials[picked];
-      if (existing === undefined || existing.harness !== descriptor.harness) {
-        throw new CloneRefusal(`${picked} isn't a ${descriptor.harness} login on ${input.machine}. Pick another one.`);
+      if (existing === undefined || existing.harness !== harnessKindOfKey(descriptor.harness)) {
+        throw new CloneRefusal(`${picked} isn't a ${harnessKindOfKey(descriptor.harness)} login on ${input.machine}. Pick another one.`);
       }
       here = picked;
     } else if (picked === 'slot') {
@@ -1346,7 +1341,7 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
       descriptor.store === 'environment'
         ? { ...(source.credentials[credential] as Credential), ...origin, ...keyed(`login/${credential}`) }
         : {
-            harness: descriptor.harness,
+            harness: harnessKindOfKey(descriptor.harness),
             store: 'ferretry',
             ...(label === undefined ? {} : { label }),
             ...origin,
@@ -1356,7 +1351,7 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
     loginFor.set(credential, id);
     slots.set(id, {
       id,
-      harness: descriptor.harness,
+      harness: harnessKindOfKey(descriptor.harness),
       ...(descriptor.store === 'environment' ? { environment: true as const } : {}),
     });
   }
@@ -1487,7 +1482,7 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
   }
 
   // Documents: each under the path its component now names, and only when its content differs.
-  const files: FleetCloneFile[] = [];
+  const files: CloneFile[] = [];
   for (const file of bundle.files) {
     const owner = bySource.get(
       [...bySource.keys()].find(reference => {
@@ -1637,7 +1632,7 @@ export function describeCloneUpdate(plan: CloneUpdatePlan, machine: string, sour
  * is an empty slot — an existing login is only ever pointed at, never rewritten (design §14.4).
  */
 export function resolveCloneLogins(
-  bundle: FleetCloneBundle,
+  bundle: CloneBundle,
   target: AccountModel,
   base: CloneBaseSource | undefined,
   targetEmails: Readonly<Record<string, string | undefined>> = {},
@@ -1645,14 +1640,14 @@ export function resolveCloneLogins(
   const keys = cloneOriginKeys(bundle);
   const matched = new Map<string, string>();
   const ask = new Map<string, readonly string[]>();
-  const settle = (credential: FleetCloneBundle['credentials'][number], found: readonly string[]): boolean => {
+  const settle = (credential: CloneBundle['credentials'][number], found: readonly string[]): boolean => {
     if (found.length === 1 && found[0] !== undefined) matched.set(credential.id, found[0]);
     else if (found.length > 1) ask.set(credential.id, found);
     return found.length > 0;
   };
   const heldLogins = Object.entries(target.credentials).map(([id, held]) => ({
     id,
-    harness: held.harness,
+    harness: harnessKeyOfKind(held.harness),
     store: held.store,
     email: targetEmails[id],
     label: held.label,
@@ -1662,12 +1657,12 @@ export function resolveCloneLogins(
     if (key !== undefined) {
       const linked = base?.items[key]?.login;
       const known = linked === undefined ? undefined : target.credentials[linked];
-      if (linked !== undefined && known?.harness === credential.harness) {
+      if (linked !== undefined && known?.harness === harnessKindOfKey(credential.harness)) {
         matched.set(credential.id, linked);
         continue;
       }
       const claimants = Object.entries(target.credentials)
-        .filter(([, held]) => held.clonedFromKey === key && held.harness === credential.harness)
+        .filter(([, held]) => held.clonedFromKey === key && held.harness === harnessKindOfKey(credential.harness))
         .map(([id]) => id)
         .toSorted();
       if (settle(credential, claimants)) continue;

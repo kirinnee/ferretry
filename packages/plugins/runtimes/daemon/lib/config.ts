@@ -7,7 +7,7 @@
  * separator in one would let a configuration write outside the directories it owns.
  */
 import { z } from 'zod';
-import { malformedSecretReference } from '@ferretry/protocol';
+import { malformedSecretReference } from '@ferretry/core-vault/contract';
 import { AccountIdSchema } from './manifest.ts';
 const NonEmptyString = z.string().min(1);
 

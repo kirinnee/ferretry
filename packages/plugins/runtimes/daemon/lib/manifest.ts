@@ -14,7 +14,9 @@
  */
 import { basename } from 'node:path';
 import { z } from 'zod';
-import { CompactAtSchema, malformedSecretReference, secretReferencesIn } from '@ferretry/protocol';
+import { malformedSecretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import { CompactAtSchema } from '../../contract/index.ts';
 
 const NonEmptyString = z.string().min(1);
 
@@ -50,6 +52,12 @@ export type AccountId = z.infer<typeof AccountIdSchema>;
 /** The agent harness an account drives. */
 export const HarnessKindSchema = z.enum(['claude', 'codex']);
 export type HarnessKind = z.infer<typeof HarnessKindSchema>;
+
+/** The harness a wire or plugin key names: the plugin id `claude-code` is the CLI `claude`. */
+export const harnessKindOfKey = (key: HarnessKey): HarnessKind => (key === 'claude-code' ? 'claude' : key);
+
+/** The wire and plugin key of a harness: the CLI `claude` is the plugin `claude-code`. */
+export const harnessKeyOfKind = (kind: HarnessKind): HarnessKey => (kind === 'claude' ? 'claude-code' : kind);
 
 /**
  * The lane an account runs in. Declared, never derived from a name: an account whose wrapper is
@@ -225,9 +233,7 @@ export type FleetManifestAccount = z.infer<typeof FleetManifestAccountSchema>;
  * One published RUNTIME (docs/design/account-model.md §5.4): a credential plus a profile, launched
  * under its name.
  *
- * Published beside `accounts` rather than instead of them, so the manifest stays readable by every
- * consumer of version 1 while version 2 lands (§13.3 "Old and new coexist"). The id is the same opaque
- * join key an account's is — a migrated runtime keeps its route's UUID (R6) — and, as for an account,
+ * Published beside `accounts`. The id is the same opaque join key an account's is and, as for an account,
  * `wrapper` is the generated executable's absolute path; {@link wrapperNameOf} recovers its name.
  *
  * `models` uses the published model shape, so a model this runtime's credential cannot use is carried
@@ -296,15 +302,13 @@ export const FleetManifestSchema = z
     generatedAt: z.iso.datetime(),
     accounts: z.array(FleetManifestAccountSchema).readonly(),
     /**
-     * The published runtimes. ABSENT on a manifest written before version 2 of the configuration,
-     * which is not the same as an empty list and is why it is optional rather than defaulted: a reader
-     * asks {@link manifestRuntimes} and never has to tell the two apart.
+     * The published runtimes.
      */
-    runtimes: z.array(FleetManifestRuntimeSchema).readonly().optional(),
+    runtimes: z.array(FleetManifestRuntimeSchema).readonly(),
   })
   .check(ctx => {
     const { accounts } = ctx.value;
-    const runtimes = ctx.value.runtimes ?? [];
+    const { runtimes } = ctx.value;
 
     for (const [field, message] of [
       ['id', 'runtime id'],
@@ -342,8 +346,7 @@ export type FleetManifest = z.infer<typeof FleetManifestSchema>;
 export interface FleetManifestInput {
   readonly generatedAt: string;
   readonly accounts: readonly unknown[];
-  /** Omitted by a writer that publishes no runtimes yet; see {@link FleetManifestSchema}. */
-  readonly runtimes?: readonly unknown[];
+  readonly runtimes: readonly unknown[];
 }
 
 /**
@@ -355,13 +358,8 @@ export function buildFleetManifest(input: FleetManifestInput): FleetManifest {
     version: MANIFEST_VERSION,
     generatedAt: input.generatedAt,
     accounts: input.accounts,
-    ...(input.runtimes === undefined ? {} : { runtimes: input.runtimes }),
+    runtimes: input.runtimes,
   });
-}
-
-/** The runtimes a manifest publishes; none for a manifest written before they existed. */
-export function manifestRuntimes(manifest: FleetManifest): readonly FleetManifestRuntime[] {
-  return manifest.runtimes ?? [];
 }
 
 /**

@@ -3,8 +3,9 @@
  * share: reading a bundle as a model, where a renamed document lands, and what a path is.
  */
 import { isAbsolute, normalize, relative } from 'node:path';
-import type { FleetCloneBundle, FleetCloneCredential } from '@ferretry/protocol';
+import type { CloneBundle, CloneCredential } from '../../../contract/index.ts';
 import { canonicalAssetReference, expandAssetPath } from '../paths.ts';
+import { harnessKindOfKey } from '../manifest.ts';
 import { freeName } from './import.ts';
 import { type AccountModel, type ComponentKind, type Credential, parseAccountModel } from './schema.ts';
 
@@ -60,14 +61,14 @@ export const countComponents = (components: AccountModel['components'], kinds: r
   kinds.reduce((total, kind) => total + Object.keys(components[kind]).length, 0);
 
 /** The bundle as a model of its own, so a damaged one is refused before anything is renamed. */
-export function bundleModel(bundle: FleetCloneBundle, sourceName: string): AccountModel {
+export function bundleModel(bundle: CloneBundle, sourceName: string): AccountModel {
   const credentials: Record<string, Credential> = {};
   for (const credential of bundle.credentials) {
     // An environment login keeps its halves, so a runtime on its Codex half still reads as one.
     credentials[credential.id] =
       credential.store === 'environment'
         ? (environmentCredential(credential) as Credential)
-        : { harness: credential.harness, store: 'ferretry' };
+        : { harness: harnessKindOfKey(credential.harness), store: 'ferretry' };
   }
   try {
     return parseAccountModel({
@@ -172,9 +173,9 @@ export function referencedFiles(model: AccountModel): Set<string> {
 }
 
 /** An environment login on the target, from its descriptor. The model's own parse checks every field. */
-export function environmentCredential(descriptor: FleetCloneCredential): Record<string, unknown> {
+export function environmentCredential(descriptor: CloneCredential): Record<string, unknown> {
   return {
-    harness: descriptor.harness,
+    harness: harnessKindOfKey(descriptor.harness),
     store: 'environment',
     ...(descriptor.label === undefined ? {} : { label: descriptor.label }),
     ...(descriptor.env === undefined ? {} : { env: { ...descriptor.env } }),

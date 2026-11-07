@@ -21,7 +21,7 @@
  *
  * Pure throughout: no filesystem, no environment, no clock, no store.
  */
-import { SECRET_REFERENCE_SOURCE, type SecretName, secretReferencesIn } from '@ferretry/protocol';
+import { SECRET_REFERENCE_SOURCE, type SecretName, secretReferencesIn } from '@ferretry/core-vault/contract';
 import type { AccountModel } from './account/schema.ts';
 import type { EnvMap } from './config.ts';
 

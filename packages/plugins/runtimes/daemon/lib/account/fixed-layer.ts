@@ -65,7 +65,7 @@
  * Pure and total: the machine setting, the launch folder and what the installed Claude accepts are
  * all parameters, read at launch by the caller, so a change applies to new sessions only (F5).
  */
-import { AGENDA_SHAPE_LINE, type LaunchInstructionSectionId, type SessionLaunchInstructions } from '@ferretry/protocol';
+import { AGENDA_SHAPE_LINE, type LaunchInstructionSectionId, type SessionLaunchInstructions } from '../foreign.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { deepMergeSettings, type SettingsObject } from '../settings.ts';
 import {

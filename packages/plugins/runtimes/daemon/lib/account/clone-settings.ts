@@ -25,15 +25,10 @@ import {
   type CloneReviewSettings,
   type CloneSettingsDecisions,
   type CloneSettingsDoc,
-  classifyConfigPath,
-  configSchemaModeline,
-  sha256Hex,
-} from '@ferretry/protocol';
+} from '../../../contract/index.ts';
+import { sha256Hex } from '../foreign.ts';
 import { z } from 'zod';
-import { checkConfigFile } from '../config-files/check.ts';
-import { configLoosening } from '../config-files/kinds.ts';
-import { findRawSecrets } from '../config-files/secrets.ts';
-import { editConfigText, readConfigText } from '../config-files/yaml-text.ts';
+import type { ConfigText } from '../ports.ts';
 import { CloneRefusal } from './clone-parts.ts';
 import { AgentPermissionsSchema, type Machine, RuntimeNameSchema } from './schema.ts';
 
@@ -188,6 +183,7 @@ function display(value: unknown): string {
 
 /** What a document says, key by key; the sentence it is refused with when it cannot be read. */
 function read(
+  config: ConfigText,
   path: CloneSettingsDoc,
   text: string,
   whose: string,
@@ -206,7 +202,7 @@ function read(
       );
     }
   } else {
-    const parsed = readConfigText(text);
+    const parsed = config.read(text);
     if (!parsed.ok) {
       throw new CloneRefusal(`${whose} ${path} could not be read: ${parsed.errors[0]?.message ?? 'not valid YAML'}.`);
     }
@@ -259,6 +255,8 @@ export interface CloneSettingsAnalysis {
   readonly files: readonly FileAnalysis[];
   /** Binds the review to the texts it was made from and the record it was compared with. */
   readonly fingerprint: string;
+  /** The config layer the review was made through; the plan writes through the same one. */
+  readonly config: ConfigText;
 }
 
 const DEFAULT_CHOICE: Readonly<Partial<Record<CloneOutcome, CloneKeyChoice>>> = {
@@ -307,10 +305,9 @@ function outcomeOf(
 }
 
 /** The sentences a text's value would loosen against what is in effect, or `undefined` when it cannot be judged. */
-function looseningOf(path: FileDoc, effective: unknown, text: string): ReadonlySet<string> | undefined {
-  const checked = checkConfigFile(path, text);
-  if (!checked.ok) return undefined;
-  return new Set(configLoosening(FILE_KINDS[path], effective as never, checked.value as never));
+function looseningOf(config: ConfigText, path: FileDoc, effective: unknown, text: string): ReadonlySet<string> | undefined {
+  const sentences = config.loosening(path, effective, text);
+  return sentences === undefined ? undefined : new Set(sentences);
 }
 
 /** What taking this controls key would loosen, in the words `machine.yaml`'s rules use. */
@@ -375,29 +372,31 @@ function merge(
 
 /** The file's text after the taken keys are written into this machine's: its comments and order survive. */
 function mergedText(
+  config: ConfigText,
   path: FileDoc,
   input: CloneSettingsInput,
   root: Readonly<Record<string, unknown>>,
   taken: ReadonlyMap<string, { readonly value: unknown; readonly present: boolean }>,
 ): string {
-  const address = classifyConfigPath(path);
-  const modeline = address === undefined ? '' : configSchemaModeline(address);
-  return editConfigText(input.mineExists ? input.mine : undefined, merge(root, taken), root, modeline);
+  return config.edit(input.mineExists ? input.mine : undefined, merge(root, taken), root, config.modeline(path));
 }
 
 /** The most differing keys whose loosening is judged one by one; a document with more is flagged as a whole. */
 const LOOSENING_JUDGED_LIMIT = 256;
 
-function analyseFile(input: CloneSettingsInput, known: Readonly<Record<string, string>> | undefined): FileAnalysis {
+function analyseFile(
+  config: ConfigText,
+  input: CloneSettingsInput,
+  known: Readonly<Record<string, string>> | undefined): FileAnalysis {
   let theirs: ReturnType<typeof read>;
   try {
-    theirs = read(input.path, input.theirs, 'The');
+    theirs = read(config, input.path, input.theirs, 'The');
   } catch (error) {
     // `read` refuses with a sentence; anything else is still a document this machine cannot take, never a crash.
     const refused = error instanceof CloneRefusal ? error.message : `The ${input.path} could not be read.`;
     return { input, rows: [], refused, theirsDigests: {}, root: {} };
   }
-  if (isFileDoc(input.path) && findRawSecrets(theirs.root).length > 0) {
+  if (isFileDoc(input.path) && config.hasRawSecret(theirs.root)) {
     return {
       input,
       rows: [],
@@ -409,11 +408,11 @@ function analyseFile(input: CloneSettingsInput, known: Readonly<Record<string, s
   }
   const own =
     input.mineExists || input.path === 'controls'
-      ? read(input.path, input.mine, 'Your')
+      ? read(config, input.path, input.mine, 'Your')
       : { values: new Map<string, unknown>(), root: {} };
   // The same refusal for this machine's own file: a value pasted into it by hand must never reach a review row,
   // a digest or a log. Nothing about it is returned but the sentence.
-  if (isFileDoc(input.path) && findRawSecrets(own.root).length > 0) {
+  if (isFileDoc(input.path) && config.hasRawSecret(own.root)) {
     return {
       input,
       rows: [],
@@ -462,11 +461,12 @@ function analyseFile(input: CloneSettingsInput, known: Readonly<Record<string, s
       root: {},
     };
   }
-  return { input, rows: withLoosening(input, own.root, source, rows), theirsDigests, root: own.root };
+  return { input, rows: withLoosening(config, input, own.root, source, rows), theirsDigests, root: own.root };
 }
 
 /** Each row flagged when taking it alone would loosen what this machine may spend or what its agents may do. */
 function withLoosening(
+  config: ConfigText,
   input: CloneSettingsInput,
   root: Readonly<Record<string, unknown>>,
   theirs: ReadonlyMap<string, unknown>,
@@ -479,11 +479,11 @@ function withLoosening(
   if (input.effective === undefined) return rows;
   if (rows.length > LOOSENING_JUDGED_LIMIT) return rows.map(row => ({ ...row, loosens: true }));
   // What this machine's own file already loosens (a held edit) is not charged to the key being taken.
-  const already = looseningOf(path, input.effective, input.mineExists ? input.mine : '') ?? new Set<string>();
+  const already = looseningOf(config, path, input.effective, input.mineExists ? input.mine : '') ?? new Set<string>();
   return rows.map(row => {
     if (!KEY_CHOICES[row.outcome].includes('take')) return row;
     const taken = new Map([[row.key, { value: theirs.get(row.key), present: theirs.has(row.key) }]]);
-    const sentences = looseningOf(path, input.effective, mergedText(path, input, root, taken));
+    const sentences = looseningOf(config, path, input.effective, mergedText(config, path, input, root, taken));
     return sentences === undefined ? row : { ...row, loosens: [...sentences].some(sentence => !already.has(sentence)) };
   });
 }
@@ -496,13 +496,14 @@ function withLoosening(
 export function analyseCloneSettings(
   inputs: readonly CloneSettingsInput[],
   base: Readonly<Partial<Record<CloneSettingsDoc, Readonly<Record<string, string>>>>> | undefined,
+  config: ConfigText,
 ): CloneSettingsAnalysis {
   const seen = new Set<string>();
   for (const input of inputs) {
     if (seen.has(input.path)) throw new CloneRefusal(`${input.path} was sent twice. Send each settings document once.`);
     seen.add(input.path);
   }
-  const files = inputs.map(input => analyseFile(input, base?.[input.path]));
+  const files = inputs.map(input => analyseFile(config, input, base?.[input.path]));
   const fingerprint = sha256Hex(
     JSON.stringify(
       files.map(file => [
@@ -515,7 +516,7 @@ export function analyseCloneSettings(
       ]),
     ),
   );
-  return { files, fingerprint };
+  return { files, fingerprint, config };
 }
 
 /** The review's rows: every key that differs and why, what is chosen for it, and what taking it would loosen. */
@@ -647,6 +648,7 @@ export function planCloneSettings(
     const text = everyKeyOfNewFile
       ? file.input.theirs
       : mergedText(
+          analysis.config,
           path,
           file.input,
           file.root,

@@ -31,7 +31,9 @@
  *
  * Pure: bodies are read by the caller, an id is minted by an injected function, the clock is a string.
  */
-import { type CompactAt, secretReferencesIn } from '@ferretry/protocol';
+import { secretReferencesIn } from '@ferretry/core-vault/contract';
+import type { z } from 'zod';
+import type { CompactAtSchema } from '../../../contract/index.ts';
 import { HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, harnessAsset } from '../assets.ts';
 import {
   buildFleetManifest,
@@ -52,7 +54,7 @@ import { expandAssetPath, expandHomePath, joinPath } from '../paths.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation, MaterialisedRecord } from '../provisioning.ts';
 import { type SettingsObject, serializeSettings } from '../settings.ts';
 import { sharedHistoryPoolDirectory, sharedHistoryPoolRequests } from '../shared-history.ts';
-import { CREDENTIAL_ENV } from '../usage.ts';
+import { CREDENTIAL_ENV } from '../foreign.ts';
 import {
   MANAGED_MARKER,
   RUNTIME_NAME_ENV,
@@ -192,7 +194,7 @@ interface PlannedRuntime {
   readonly codexCatalog?: number;
   readonly defaultModel: string | null;
   /** The runtime's own `compactAt`, else its profile's. Absent is `auto`. */
-  readonly compactAt?: CompactAt;
+  readonly compactAt?: z.infer<typeof CompactAtSchema>;
   readonly secretEnv: Readonly<Record<string, string>>;
   /** Why it cannot launch, when it cannot. */
   readonly blocked?: string;

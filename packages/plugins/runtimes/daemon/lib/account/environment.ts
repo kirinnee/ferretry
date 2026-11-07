@@ -14,7 +14,7 @@
  *
  * Pure: strings in, strings out.
  */
-import { isLoopbackHost } from '@ferretry/protocol';
+import { isLoopbackHost } from '../foreign.ts';
 import { z } from 'zod';
 import { EnvNameSchema } from '../config.ts';
 

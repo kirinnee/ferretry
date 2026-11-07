@@ -13,7 +13,7 @@
  *
  * Pure.
  */
-import { secretReference, secretReferencesIn } from '@ferretry/protocol';
+import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { parseCloudCredential } from '../account/environment.ts';
 import type { Credential } from '../account/schema.ts';
 import type { HarnessKind } from '../manifest.ts';

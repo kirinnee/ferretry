@@ -17,7 +17,8 @@
  * not in the review. A secret's value does not reach this module at all — it is handed names and instants.
  * A name that cannot be copied (a sign-in's) is not an outcome: it is left out, so no review ever names one.
  */
-import { type CloneReviewKey, CloneableSecretNameSchema } from '@ferretry/protocol';
+import type { Instant } from '@ferretry/std';
+import { type CloneReviewKey, CloneableSecretNameSchema } from '../../../contract/index.ts';
 import { type CloneBase, CloneSourceIdSchema } from './clone-base.ts';
 
 /** A secret as its list shows it: a name and when it last changed. Never a value. */
@@ -73,8 +74,8 @@ export function classifyCloneKeys(input: CloneKeyInputs): CloneReviewKey[] {
 /** One key's pair of instants, as the record holds it. */
 export interface RecordedKey {
   readonly name: string;
-  readonly sourceUpdatedAt: string;
-  readonly targetUpdatedAt: string;
+  readonly sourceUpdatedAt: Instant;
+  readonly targetUpdatedAt: Instant;
 }
 
 /**
@@ -87,9 +88,9 @@ export function recordCloneKeys(previous: CloneBase, sourceId: string, recorded:
   if (!CloneSourceIdSchema.safeParse(sourceId).success || !Object.hasOwn(previous.sources, sourceId)) return previous;
   const source = previous.sources[sourceId];
   if (source === undefined || recorded.length === 0) return previous;
-  const keys: Record<string, { sourceUpdatedAt: string; targetUpdatedAt: string }> = Object.create(null) as Record<
+  const keys: Record<string, { sourceUpdatedAt: Instant; targetUpdatedAt: Instant }> = Object.create(null) as Record<
     string,
-    { sourceUpdatedAt: string; targetUpdatedAt: string }
+    { sourceUpdatedAt: Instant; targetUpdatedAt: Instant }
   >;
   for (const [name, at] of Object.entries(source.keys ?? {})) keys[name] = at;
   for (const key of recorded) {
