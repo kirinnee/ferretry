@@ -3,7 +3,6 @@ import { definePlugin, route, verb } from '@ferretry/kernel/manifest';
 import {
   AdminTokenFile,
   AdmissionPort,
-  AUDIT_KINDS,
   AuditLogFile,
   AuditRecordSchema,
   Bearers,
@@ -91,7 +90,9 @@ export default definePlugin({
         caller: 'person',
         capability: cap('pairing', 'configure'),
         noStore: true,
-        audit: { record: AUDIT_KINDS['security.changed'] },
+        // The service journals `security.changed` itself, with each field's old and new value and the
+        // `security.loosened-with=passkey` line (G115), which a status-only record could not carry.
+        audit: { skip: 'SecuritySettingsService records security.changed with the change lines itself' },
         guard: { none: 'six security settings and their source; no secret' },
       }),
     ],

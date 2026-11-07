@@ -100,3 +100,35 @@ export function withinAuditBounds(entry: AuditDraft): AuditDraft {
   if (subjectFits) return detail === undefined ? entry : { ...entry, detail };
   return { ...entry, subject: AUDIT_INVALID_TEXT, detail: { ...detail, subjectLength: entry.subject?.length ?? 0 } };
 }
+
+/**
+ * The record one admitted call leaves when its descriptor says `audit: { record }` (today's audited-route decorator,
+ * `lib/audit/routes.ts`, reduced to what a descriptor declares): the kind, who acted from the credential admission
+ * derived, how it ended from the status, the one path parameter as the subject, and — for a ferret's own token — which
+ * ferret. WHAT IT MAY READ IS THE GUARANTEE: never the request body and never the response, so no code, token, key or
+ * command line can reach the log. A refusal at admission never reaches a handler and is not recorded here.
+ */
+export function routeAuditDraft(
+  event: AuditDraft['event'],
+  call: {
+    readonly credential?: AuthenticatedCredential;
+    readonly params: ReadonlyMap<string, string>;
+    readonly request: { readonly arrival: { readonly kind: 'local' | 'carried'; readonly carrier?: string } };
+  },
+  status: number | undefined,
+): AuditDraft {
+  const params = [...call.params.values()];
+  const subject = params.length === 1 ? params[0] : undefined;
+  const carrier = call.request.arrival.kind === 'carried' ? call.request.arrival.carrier : undefined;
+  const detail: AuditDetail = {
+    ...agentAuditDetail(call.credential),
+    ...(carrier === undefined ? {} : { carrier }),
+  };
+  return {
+    event,
+    actor: auditActorOf(call.credential),
+    ...(subject === undefined || subject === '' ? {} : { subject }),
+    outcome: auditOutcomeOf(status),
+    ...(Object.keys(detail).length === 0 ? {} : { detail }),
+  };
+}

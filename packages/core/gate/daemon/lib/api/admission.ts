@@ -8,6 +8,7 @@ import {
   arrivedLocal,
   arrivedOnHost,
   arrivedPrivileged,
+  type CallContext,
   type CallStanding,
   errorResponse,
   headerValue,
@@ -55,6 +56,7 @@ import {
   type WardenRemedyDecision,
   type WardenRemedyGrant,
 } from '../../../contract/index.ts';
+import { routeAuditDraft } from '../audit/policy.ts';
 import type { StepUpRegistry, StepUpSubject } from '../step-up/registry.ts';
 import { resolveApiActor } from './actor.ts';
 import { type Authentication, authenticate, bearerToken, type FerretTokenRefusal, type GateTokens } from './authentication.ts';
@@ -90,6 +92,8 @@ export interface GateAdmissionDeps {
   readonly now: () => Instant;
   /** Told about a refused ferret token (`ferret.credential-refused`). Never throws into the call. */
   readonly refused: (draft: AuditDraft) => void;
+  /** Where a descriptor-declared record of an admitted call goes (`recorded`). */
+  readonly recorded?: (draft: AuditDraft) => void;
   /** The binary's name, for refusal sentences that name a command. */
   readonly clientName: string;
 }
@@ -163,6 +167,22 @@ export class GateAdmission implements Admission {
     return this.#authorize(descriptor, request, new Map()).outcome === 'admitted';
   }
 
+  /**
+   * Told by the dispatcher after each handler of a route whose descriptor says `audit: { record }` (lead decision:
+   * an optional `Admission.recorded`, added by the kernel fill-in). Writes one record from the descriptor, the
+   * standing admission gave and the status — never the body. AN AUDIT WRITE NEVER DECIDES AN OUTCOME: it is fired and
+   * forgotten, and its failure is the audit log's to report.
+   */
+  recorded(descriptor: ScopedRoute, call: CallContext, status: number | undefined): void {
+    const declared = descriptor.audit;
+    if (!('record' in declared)) return;
+    try {
+      this.deps.recorded?.(routeAuditDraft(declared.record, call, status));
+    } catch {
+      // The audit log reports its own failures; the answer is already decided.
+    }
+  }
+
   admitMember(input: AdmissionInput & { readonly table: 'member' }): AdmissionDecision<MemberStanding> {
     const principal = input.request.principal;
     if (principal?.kind !== 'member') return forbidden(input.request);
@@ -178,17 +198,14 @@ export class GateAdmission implements Admission {
     if (descriptor.member === 'unlocked') {
       const until = standing.unlockedUntil;
       if (until === undefined || until <= this.deps.now())
-        return refused(
-          errorResponse(
-            401,
-            'this catalog asks you to confirm it is you with a passkey before it shows anything',
-            UNLOCK_REQUIRED_CODE,
-          ),
-        );
+        // R617: a locked member is 403 member_locked (a gone key was 401 above).
+        return refused(errorResponse(403, "unlock this catalog with your passkey first", "member_locked"));
     }
     if (descriptor.catalog === 'path') {
       const catalog = input.params.get('catalogId') ?? input.params.get('catalog');
-      if (catalog === undefined || !standing.catalogs.includes(catalog)) return forbidden(input.request);
+      // R617: a catalog this member was not given reads as absent.
+      if (catalog === undefined || !standing.catalogs.includes(catalog))
+        return refused(errorResponse(404, 'there is no such catalog', 'not_found'));
     }
     return {
       outcome: 'admitted',

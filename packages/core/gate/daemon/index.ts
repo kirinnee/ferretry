@@ -106,6 +106,9 @@ export default implementDaemon(manifest, {
       refused: draft => {
         void record(draft);
       },
+      recorded: draft => {
+        void record(draft);
+      },
       clientName: CLIENT_NAME,
     });
 

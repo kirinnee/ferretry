@@ -144,7 +144,7 @@ export class SecuritySettingsService {
     await this.deps.audit({
       event: AUDIT_KINDS['security.changed'],
       actor: { kind: caller.hostLocal ? 'host' : 'device' },
-      subject: 'security',
+      subject: 'security-settings',
       outcome: 'succeeded',
       detail: Object.fromEntries(changes.slice(0, 12).map((change, index) => [`change${index}`, change.slice(0, 160)])),
     });
