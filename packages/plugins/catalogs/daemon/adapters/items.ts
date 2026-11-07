@@ -1,5 +1,6 @@
 import { ApiError } from '@ferretry/kernel/contract';
-import type { HookInvoker } from '@ferretry/kernel/manifest';
+import type { HookInvoker, UsesHandle } from '@ferretry/kernel/manifest';
+import type { ProjectsApi } from '@ferretry/plugin-projects/contract';
 import {
   CatalogItems,
   type CatalogItemProvider,
@@ -12,7 +13,7 @@ import type { ProjectSkillFiles, RuntimeSkillAssets } from '../lib/catalog-insta
 import type { McpProjectFiles } from '../lib/project-mcp.ts';
 
 /** Resolve on each call: an owning plugin that is off or damaged can never leave a usable cached writer. */
-export function itemProviders(hooks: HookInvoker) {
+export function itemProviders(hooks: HookInvoker, projects: UsesHandle<ProjectsApi>) {
   function available(kind: 'skill' | 'mcp'): CatalogItemProvider | undefined {
     const provider = hooks.provider(CatalogItems, kind);
     return provider === 'unavailable' || provider.kind !== kind ? undefined : provider;
@@ -90,7 +91,10 @@ export function itemProviders(hooks: HookInvoker) {
       );
       if (providers.length === 0)
         throw new ApiError(503, 'No item provider can read project targets.', 'catalog_kind_unavailable');
-      return [...new Set((await Promise.all(providers.map(async provider => await provider.projectRoots()))).flat())];
+      const named = (await Promise.all(providers.map(async provider => await provider.projectRoots()))).flat();
+      // Projects off: the roots the providers name, as before; on: every registered project too.
+      const registered = (await projects.current()?.list())?.map(project => project.path) ?? [];
+      return [...new Set([...named, ...registered])];
     },
   };
 }

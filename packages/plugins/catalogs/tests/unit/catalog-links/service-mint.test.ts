@@ -176,6 +176,16 @@ describe('CatalogLinkService mint', () => {
     for (const text of r.documents.writes) should(text).not.containEql(seed.key);
   });
 
+  it('should refuse a mint that has no app origin before it seals, writes or uploads anything', async () => {
+    const r = await linkRig({ appOrigin: '' });
+    const refused_ = await refusal(() => mintOneTime(r));
+    should(refused_.refusal).equal('link_store_unavailable');
+    should(r.client.uploads).deepEqual([]);
+    should(r.vault.puts).deepEqual([]);
+    should(r.documents.writes).deepEqual([]);
+    should(r.documents.document.links).deepEqual([]);
+  });
+
   it('S158 should never write a one-time link key anywhere', async () => {
     const r = await linkRig();
     const made = await mintOneTime(r);

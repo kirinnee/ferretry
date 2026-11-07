@@ -44,6 +44,7 @@ import {
 import type { CapabilityGrants, CredentialProvider } from '@ferretry/core-gate/contract';
 import { FULL_DEVICE_GRANTS } from '@ferretry/core-gate/contract';
 import type { Instant } from '@ferretry/std';
+import type { SealedDocumentsApi } from '@ferretry/core-vault/contract';
 import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
 import { fakeAccess } from '@ferretry/plugin-access/contract/testing';
 import type { PasskeyVerifier } from '@ferretry/plugin-access/contract';
@@ -212,6 +213,8 @@ export interface CatalogsFixtureOptions {
   readonly fetch?: (url: URL, init?: RequestInit) => Response | Promise<Response>;
   /** MCP servers the MCP item provider lists; absent = MCP is off. */
   readonly mcp?: McpSourceServer[];
+  /** The sealed-documents port Catalogs is given; absent = Vault's fake. */
+  readonly sealed?: SealedDocumentsApi;
 }
 
 /**
@@ -262,6 +265,8 @@ export const LOOPBACK_ADVERTISEMENT: ConnectionAdvertisement = {
   advertisement: { kind: 'local-only', url: LOOPBACK_URL },
   discoveredRelayUrl: DISCOVERED_RELAY,
   port: 4141,
+  appOrigin: HOSTED_APP_ORIGIN,
+  allowedOrigins: [HOSTED_APP_ORIGIN],
 };
 
 export interface CatalogsFixture {
@@ -348,7 +353,7 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
   };
   const host = await testHost({
     plugins: [...(options.mcp === undefined ? [] : [mcpItems(options.mcp) as never]), composed as never],
-    fakes: { access, gate, vault, sealed: new FakeSealedDocuments() },
+    fakes: { access, gate, vault, sealed: options.sealed ?? new FakeSealedDocuments() },
     uses: { connections },
     gate: admission,
     clock,

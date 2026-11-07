@@ -25,7 +25,7 @@ import { PublishedCarriersSchema } from './foreign.ts';
 import { InstantSchema } from './foreign.ts';
 import { DaemonIdSchema, DaemonNameSchema, isDialableLinkAddress, readLinkFragmentFields } from './foreign.ts';
 import { CatalogLabelSchema, HIDDEN_IN_LINE, SharedCatalogIdSchema } from './shared-catalog.ts';
-import { PasskeyAssertionSchema as StepUpAssertionSchema } from '@ferretry/core-gate/contract';
+import { StepUpAssertionSchema } from './member-passkeys.ts';
 import {
   CATALOG_SHARES_LISTED_MAX,
   CatalogMemberIdSchema,

@@ -310,6 +310,10 @@ export class CatalogLinkService {
 
   mint(request: CreateCatalogLinkRequest): Promise<CreatedCatalogLink> {
     return this.#serially(async () => {
+      // A link nobody can open is worse than none: with no app origin to point at, refuse before anything is sealed,
+      // written or uploaded.
+      if (this.deps.appOrigin === '')
+        throw new CatalogLinkRefusal('link_store_unavailable', 'This machine has no app address to point a link at.');
       const site = await this.deps.locator.locate();
       if (site.kind === 'unavailable') throw new CatalogLinkRefusal('link_store_unavailable', site.reason);
       const identity = await this.#identity();

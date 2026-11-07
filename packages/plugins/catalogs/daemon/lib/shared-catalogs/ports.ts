@@ -7,8 +7,7 @@ import type { CatalogsDocument } from './document.ts';
 import type { McpSourceServer } from './mcp-source.ts';
 
 /**
- * What `state/catalogs/catalogs.json` holds. A version 1 or 2 file arrives with its exact text, because the
- * backup written before the upgrade is those bytes and no re-spelling of them.
+ * What `state/catalogs/catalogs.json` holds.
  */
 export interface CatalogDocumentStore {
   read(): Promise<CatalogsDocument | undefined>;

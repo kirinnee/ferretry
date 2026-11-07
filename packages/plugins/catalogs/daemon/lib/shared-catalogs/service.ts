@@ -11,13 +11,6 @@
  * ## Writes are one at a time
  *
  * The document is read, changed and written whole, so two writes at once would lose one. They queue.
- *
- * ## The upgrade from version 1
- *
- * The first call that finds a version 1 document upgrades it (`migrate.ts`) INSIDE that queue, so two first
- * calls upgrade once, and every write starts from a version 2 document. The upgrade is repeatable step by step:
- * the shared copies, then the backup of the old file, then the new file. A failure leaves the old file as it
- * was, and the next call tries again.
  */
 
 import { basename, dirname } from 'node:path';
@@ -1196,8 +1189,7 @@ export class SharedCatalogService {
   }
 
   /**
-   * The document for a read. A version 1 or 2 file is upgraded first, and only inside the queue: whoever gets
-   * there first does it, the rest find version 3.
+   * The document for a read: what the file holds, or the empty document when nobody has written one.
    */
   async #document(): Promise<CatalogsDocument> {
     return (await this.deps.documents.read()) ?? EMPTY_CATALOGS_DOCUMENT;

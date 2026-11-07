@@ -684,6 +684,7 @@ describe('catalog member sessions on the kernel session layer', () => {
     for (const answer of [versions, frozen, malformed]) {
       expect(answer.status).toBe(404);
       expect(answer.body.code).toBe('item_unknown');
+      expect(answer.body.error).toBe('this catalog does not offer that');
     }
     expect(new Set([versions, frozen, malformed].map(answer => JSON.stringify(answer.body))).size).toBe(1);
   });

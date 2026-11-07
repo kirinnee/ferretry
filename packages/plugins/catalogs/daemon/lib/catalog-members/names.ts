@@ -1,7 +1,6 @@
 /**
  * A member's name is their user ID on this machine (docs/catalogs.md § Members): two members never share one,
- * compared by `memberNameKey`. This file is the pure part of that rule: finding a free name, and the one-time
- * upgrade of a file written before names were IDs.
+ * compared by `memberNameKey`. This file is the pure part of that rule: finding a free name.
  */
 import { memberNameKey } from '../boundary.ts';
 

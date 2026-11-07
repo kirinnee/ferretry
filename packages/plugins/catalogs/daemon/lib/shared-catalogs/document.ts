@@ -51,12 +51,10 @@ import { NORMALISED_CATALOG_ID, NORMALISED_ITEM_ID } from './freeze.ts';
 import { CatalogRefusal } from './refusal.ts';
 
 /**
- * The file's version. 3 is the same shape as 2 (3c-1 and 3d-1 wrote 2), raised only so that a build which does not know
- * `joinedAtMax` or retirement fails closed on the file instead of reading it and writing it back without them.
+ * The file's version. A build that does not know `joinedAtMax` or retirement fails closed on a file it cannot read
+ * instead of reading it and writing it back without them.
  */
 export const CATALOGS_SCHEMA_VERSION = 1;
-
-/** The version 3c-1 and 3d-1 wrote: the same shape, read once to be upgraded and never written. */
 
 const BindingSchema = z.strictObject({
   /** The digest the catalog's signed manifest lists: it covers the item's catalog, id and version number. */
@@ -232,7 +230,7 @@ const documentSchemaFor = <V extends number>(version: V) =>
 export const CatalogsDocumentSchema = documentSchemaFor(CATALOGS_SCHEMA_VERSION);
 export type CatalogsDocument = z.infer<typeof CatalogsDocumentSchema>;
 
-/** A version 2 file, read only to be upgraded to this one (`upgradeCatalogsV2`). */
+/** What a machine that has shared nothing holds: no items and no catalogs. */
 export const EMPTY_CATALOGS_DOCUMENT: CatalogsDocument = {
   schemaVersion: CATALOGS_SCHEMA_VERSION,
   items: [],

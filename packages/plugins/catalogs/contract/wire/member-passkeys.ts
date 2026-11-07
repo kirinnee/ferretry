@@ -1,7 +1,6 @@
 /** TODO(Access contract): byte-copied member ceremony wire from protocol/step-up.ts. */
 import { z } from 'zod';
 import { InstantSchema } from './foreign.ts';
-export type { PasskeyAssertion as StepUpAssertion } from '@ferretry/core-gate/contract';
 export const PASSKEY_CHALLENGE_TTL_SECONDS = 120 as const;
 
 export const MAX_PASSKEYS_PER_DEVICE = 8 as const;
@@ -64,6 +63,7 @@ export const StepUpAssertionSchema = z.strictObject({
   signature: Base64UrlSchema(1_366),
   rotation: DeviceKeyRotationSchema.optional(),
 });
+export type StepUpAssertion = z.infer<typeof StepUpAssertionSchema>;
 
 export const PasskeyRegistrationOptionsSchema = z.strictObject({
   challenge: Base64UrlSchema(128),

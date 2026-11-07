@@ -17,13 +17,7 @@ import {
   installsDamage,
 } from './adapters/state.ts';
 import { itemProviders } from './adapters/items.ts';
-import {
-  ALLOWED_ORIGINS,
-  APP_ORIGIN,
-  DIRECTORY_ORIGIN,
-  connectionFacts,
-  type CatalogKernel,
-} from './adapters/host-facts.ts';
+import { APP_ORIGIN, DIRECTORY_ORIGIN, connectionFacts, type CatalogKernel } from './adapters/host-facts.ts';
 import { WebCryptoSessionCrypto, toBase64Url } from './adapters/relay.ts';
 import { StatePasskeyStore } from './adapters/member-passkey-store.ts';
 import { StateUnlockLedger } from './adapters/member-unlocks.ts';
@@ -67,7 +61,7 @@ export default implementDaemon(manifest, {
     const now = () => kernel.clock.nowMs();
     const crypto = new WebCryptoSessionCrypto();
     const facts = connectionFacts(ctx.uses.connections);
-    const providers = itemProviders(ctx.hooks);
+    const providers = itemProviders(ctx.hooks, ctx.uses.projects);
     const file = (name: string) => {
       const declared = manifest.data.state.find(state => state.name === name);
       if (declared === undefined) throw new TypeError(`Catalogs did not declare ${name}.`);
@@ -159,7 +153,7 @@ export default implementDaemon(manifest, {
       unlocks: new StateUnlockLedger(kernel.state, file('member-unlocks'), () => currentIdentity().daemonId),
       members,
       catalogNames: async () => new Map((await catalogs.list()).catalogs.map(catalog => [catalog.id, catalog.name])),
-      allowedOrigins: () => (facts() === undefined ? [] : ALLOWED_ORIGINS),
+      allowedOrigins: () => facts()?.allowedOrigins ?? [],
       relyingPartyName: 'Ferretry',
       daemonName: () => currentIdentity().daemonName,
       unlockDays,
@@ -173,7 +167,7 @@ export default implementDaemon(manifest, {
         verifier,
         random,
         clock,
-        allowedOrigins: () => (facts() === undefined ? [] : ALLOWED_ORIGINS),
+        allowedOrigins: () => facts()?.allowedOrigins ?? [],
       }),
       publisher,
       audit,
@@ -211,9 +205,7 @@ export default implementDaemon(manifest, {
       identity,
       crypto,
       now,
-      get appOrigin() {
-        return facts() === undefined ? '' : APP_ORIGIN;
-      },
+      appOrigin: APP_ORIGIN,
       random: () => {
         const bytes = crypto.randomBytes(4);
         return new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0) / 0x1_0000_0000;

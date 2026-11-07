@@ -6,6 +6,7 @@ import { defineState, SessionModes } from '@ferretry/kernel/contract';
 import { definePlugin, memberRoute, route, screen, verb } from '@ferretry/kernel/manifest';
 import { AccessPort } from '@ferretry/plugin-access/contract';
 import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
+import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import {
   AUDIT,
   CATALOGS_WORDS,
@@ -44,7 +45,8 @@ export default definePlugin({
   // existing link's remembered origin) need rebuild/port-kernel's ResolverEntry. Until then `kernel.fetch` refuses
   // every link-store host, so making, refreshing or deleting a download link fails closed.
   needs: { access: AccessPort, gate: GatePort, vault: VaultPort, sealed: SealedDocumentsPort },
-  uses: { connections: ConnectionsPort },
+  /** Projects is optional: off, an install can only target the project folders the item providers name. */
+  uses: { connections: ConnectionsPort, projects: ProjectsPort },
   provides: { catalogs: CatalogsPort },
 
   actions: {

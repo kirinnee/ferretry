@@ -24,6 +24,7 @@
     "@ferretry/core-vault": "workspace:*",
     "@ferretry/plugin-access": "workspace:*",
     "@ferretry/plugin-connections": "workspace:*",
+    "@ferretry/plugin-projects": "workspace:*",
     "qrcode-generator": "^2.0.4"
   },
   "sideEffects": false

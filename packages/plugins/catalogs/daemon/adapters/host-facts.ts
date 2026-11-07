@@ -18,8 +18,7 @@ export function connectionFacts(handle: UsesHandle<ConnectionsApi>) {
   return (): ConnectionAdvertisement | undefined => handle.current()?.advertisement();
 }
 
-/** The hosted app is where every catalog and share link points and the only origin a member ceremony may run on. */
+/** The hosted app is where every catalog and share link points: a constant, so a link is never made without an origin. */
 export const APP_ORIGIN = HOSTED_APP_ORIGIN;
-export const ALLOWED_ORIGINS: readonly string[] = [HOSTED_APP_ORIGIN];
 /** The shared directory a link store is discovered from when the owner names none. */
 export const DIRECTORY_ORIGIN = HOSTED_RELAY_DIRECTORY_ORIGIN;
