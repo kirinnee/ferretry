@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  type FerretsApi,
   FerretRecordSchema,
   limitsLoosen,
   LimitsFileSchema,
+  type PackId,
   parseLimitSize,
   StartDecideInputSchema,
 } from '../../contract/index.ts';
@@ -16,6 +18,7 @@ import {
   fenced,
   ferretId,
   harnessConformance,
+  loginEnvRefusals,
   loginKindConformance,
   mayTouchConformance,
   runnerConformance,
@@ -43,7 +46,27 @@ harnessConformance('FakeHarness', () => {
   };
 });
 
-loginKindConformance('FakeLoginKind', () => new FakeLoginKind());
+loginKindConformance('FakeLoginKind', () => new FakeLoginKind(), { credentialEnv: ['ANTHROPIC_API_KEY'] });
+
+describe('login conformance refuses a leaking login', () => {
+  const fixture = { credentialEnv: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'], plainEnv: ['ANTHROPIC_BASE_URL'] };
+  test('a literal credential beside a ${secret:NAME} reference is refused (mixed mutant)', () => {
+    const mixed = { ANTHROPIC_API_KEY: '${secret:LOGIN_WORK}', ANTHROPIC_AUTH_TOKEN: 'synthetic-literal-not-a-ref' };
+    expect(loginEnvRefusals(mixed, fixture)).toEqual([
+      'ANTHROPIC_AUTH_TOKEN carries a credential that is not a ${secret:NAME} reference',
+    ]);
+  });
+  test('literal material around a reference, and an undeclared entry, are refused', () => {
+    expect(loginEnvRefusals({ ANTHROPIC_API_KEY: 'x${secret:LOGIN_WORK}' }, fixture)).toHaveLength(1);
+    expect(loginEnvRefusals({ SOMETHING_ELSE: 'synthetic' }, fixture)).toEqual([
+      'SOMETHING_ELSE is not a declared environment entry',
+    ]);
+  });
+  test('whole references and declared plain entries pass', () => {
+    const env = { ANTHROPIC_API_KEY: '${secret:LOGIN_WORK}', ANTHROPIC_BASE_URL: 'https://example.invalid' };
+    expect(loginEnvRefusals(env, fixture)).toEqual([]);
+  });
+});
 
 mayTouchConformance('FakeFerrets', () => {
   const ferrets = new FakeFerrets();
@@ -92,6 +115,15 @@ describe('ferret records', () => {
     expect((await ferrets.attach(ferretId('f1'), '%3' as never)).ok).toBe(true);
     expect((await ferrets.get(ferretId('f1')))?.state).toBe('working');
   });
+  test('the fake Ferrets port lists by pack as the port says', async () => {
+    const fake = new FakeFerrets();
+    fake.add({ id: ferretId('f1'), pack: 'pack-one' as PackId });
+    fake.add({ id: ferretId('f2'), pack: 'pack-two' as PackId });
+    fake.add({ id: ferretId('f3') });
+    const ferrets: FerretsApi = fake;
+    expect((await ferrets.list({ pack: 'pack-one' as PackId })).map(f => f.id)).toEqual([ferretId('f1')]);
+    expect(await ferrets.list()).toHaveLength(3);
+  });
   test('a harness start goes through the runner with an opaque environment', async () => {
     const runner = new FakeRunner();
     const started = await new FakeHarness('codex').start(sampleLaunchSpec('codex'), runner, emptyChildEnvironment());
@@ -111,9 +143,39 @@ describe('limits.yaml', () => {
   test('raising a cap or turning limits off loosens; lowering does not', () => {
     expect(limitsLoosen({ perFerret: { memoryMax: '8G' } }, { perFerret: { memoryMax: '4G' } })).toEqual([]);
     expect(limitsLoosen({ perFerret: { memoryMax: '4G' } }, { perFerret: { memoryMax: '8G' } })).toEqual([
-      'perFerret.memoryMax raised',
+      'the hard memory limit of each ferret was raised',
     ]);
-    expect(limitsLoosen({}, { enabled: false })).toEqual(['limits turned off']);
-    expect(limitsLoosen({ fleet: { tasksMax: 100 } }, { fleet: {} })).toEqual(['fleet.tasksMax removed']);
+    expect(limitsLoosen({}, { enabled: false })).toEqual([
+      'ferret limits are switched off, so ferrets may take all of the machine',
+    ]);
+    expect(limitsLoosen({ fleet: { tasksMax: 100 } }, { fleet: {} })).toEqual([
+      'the processes all ferrets together may run was raised',
+    ]);
+  });
+  test('removing the computed default ceiling (infinity where nothing was written) loosens', () => {
+    const after = LimitsFileSchema.parse({ perFerret: { memoryMax: 'infinity' } });
+    expect(limitsLoosen({}, after)).toEqual(['the hard memory limit of each ferret was raised']);
+    expect(limitsLoosen(undefined, after)).toEqual(['the hard memory limit of each ferret was raised']);
+  });
+  test('raising a CPU weight loosens', () => {
+    expect(limitsLoosen({ fleet: { cpuWeight: 50 } }, { fleet: { cpuWeight: 10_000 } })).toEqual([
+      'the CPU weight of all ferrets together was raised',
+    ]);
+    expect(limitsLoosen({}, { perFerret: { interactiveCpuWeight: 300 } })).toEqual([
+      'the CPU weight of a ferret you started was raised',
+    ]);
+  });
+  test('raising a fractional CPU percentage loosens', () => {
+    expect(limitsLoosen({ fleet: { cpuPercent: 10.5 } }, { fleet: { cpuPercent: 99.5 } })).toEqual([
+      'the CPU share all ferrets together may use was raised',
+    ]);
+    expect(limitsLoosen({ fleet: { cpuPercent: 99.5 } }, { fleet: { cpuPercent: 10.5 } })).toEqual([]);
+  });
+  test('a change of unit cannot be proved tighter without the host budget, so it is held', () => {
+    expect(limitsLoosen({ perFerret: { memoryMax: '25%' } }, { perFerret: { memoryMax: '64G' } })).toEqual([
+      'the hard memory limit of each ferret was raised',
+    ]);
+    // A percent under the default's own percent is provably tighter, so it applies at once.
+    expect(limitsLoosen({}, { perFerret: { memoryMax: '20%' } })).toEqual([]);
   });
 });
