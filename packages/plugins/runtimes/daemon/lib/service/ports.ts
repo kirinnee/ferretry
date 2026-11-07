@@ -10,6 +10,7 @@
  *  - {@link LoginsReader}: the sign-in surface is Logins' (GAP(logins)). Runtimes may not import another plugin's
  *    contract, so what it needs from a login (its status word, its sign-out words) is the shape below.
  */
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { cap, type CallerGovernance } from '@ferretry/core-gate/contract';
 import type { FleetDocumentWrite } from '../provisioning.ts';
 import type { CredentialStatusWord, CredentialView } from '../../../contract/index.ts';
@@ -99,6 +100,10 @@ export function configFileWriteRefusal(
 /** What a runtime change reads about one login. GAP(logins): the rest of a login's view is Logins' own. */
 export interface LoginFacts {
   readonly id: string;
+  /** The harness it drives. A login that drives both is listed once per harness by Logins; Runtimes reads the first. */
+  readonly harness: HarnessKey;
+  /** Switched off: a start on any runtime of this login refuses. */
+  readonly disabled?: { readonly reason?: string; readonly until?: string };
   readonly email?: string;
   readonly status: { readonly word: CredentialStatusWord };
   readonly signOut: {
