@@ -6,28 +6,23 @@
  * (here or from another device) clears the prompt without a reload.
  */
 
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { readFleetRuntimes } from '../features/fleet/catalog-api.ts';
-import type { FleetClientFactory } from '../features/fleet/fleet-client.ts';
-import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { useConfigChangeEffect } from '../lib/store.tsx';
+import { RuntimesChanged, RuntimesDefaultChanged } from '../../contract/index.ts';
+import { readNeedsRuntime } from '../lib/runtimes-api.ts';
 
-export function useNeedsRuntime(connection: DaemonConnection, createClient: FleetClientFactory | undefined): boolean {
+export function useNeedsRuntime(client: Pick<PluginClient, 'call' | 'subscribe'> | undefined): boolean {
   const [needs, setNeeds] = useState(false);
   const live = useRef(true);
-  const current = useRef(connection.daemonId);
-  current.current = connection.daemonId;
+  const current = useRef(client);
+  current.current = client;
 
   const read = useCallback(() => {
-    if (createClient === undefined) return;
-    const asked = connection.daemonId;
-    void createClient(connection)
-      .then(async client => await readFleetRuntimes(client))
-      .then(catalog => {
-        if (live.current && current.current === asked) setNeeds(catalog.runtimes.length === 0);
-      })
-      .catch(() => undefined);
-  }, [connection, createClient]);
+    if (client === undefined) return;
+    void readNeedsRuntime(client).then(answer => {
+      if (live.current && current.current === client && answer !== undefined) setNeeds(answer);
+    });
+  }, [client]);
 
   useEffect(() => {
     live.current = true;
@@ -38,6 +33,12 @@ export function useNeedsRuntime(connection: DaemonConnection, createClient: Flee
     };
   }, [read]);
 
-  useConfigChangeEffect(connection.daemonId, ['machine', 'runtimes'], read);
+  useEffect(() => {
+    if (client === undefined) return;
+    const stops = [client.subscribe(RuntimesChanged, read), client.subscribe(RuntimesDefaultChanged, read)];
+    return () => {
+      for (const stop of stops) stop();
+    };
+  }, [client, read]);
   return needs;
 }

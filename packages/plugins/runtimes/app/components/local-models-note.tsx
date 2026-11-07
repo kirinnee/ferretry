@@ -5,8 +5,8 @@
  * "installed here".
  */
 
-import type { LocalModels } from '@ferretry/protocol';
-import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../../../onboarding/app/copy-button.tsx';
+import type { LocalModels } from '../../contract/index.ts';
+import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../ui.ts';
 import { localNote } from '../lib/local-models.ts';
 
 export interface LocalModelsNoteProps {

@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { FleetMachineView, FleetRunningSession, IFyApiClient } from '@ferretry/protocol';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import { RuntimesTab } from '../../../../../src/features/fleet/runtimes/runtimes-tab.tsx';
+import type { MachineView, RunningSession } from '../../../../../../contract/index.ts';
+import type { MoveConversation } from '../../../../../../app/features/fleet/runtimes/runtime-actions-model.ts';
+// GAP(ferrets): the Runtimes tab (and the apply-change panel under it) was never assigned to an app half; it lands
+// at this path in the runtimes app, taking `client` and `moveFerret` where it took `connection` and `createClient`.
+import { RuntimesTab } from '../../../../../../app/features/fleet/runtimes/runtimes-tab.tsx';
 import { interact, type Mounted, mount as mountView, must, pressKey } from '../../../../support/dom.ts';
-import { chooseRuntimeAction, menuButton, openRuntimeMenu } from './runtime-menu-support.ts';
+import { chooseRuntimeAction, menuButton, openRuntimeMenu } from './runtime-menu-support.tsx';
 import {
   type Call,
   CHANGE_ID,
@@ -11,13 +13,12 @@ import {
   machineWith,
   READS,
   type Route,
-  STUDIO,
   scripted,
   stagedFrom,
 } from '../account-support.ts';
 
-const PROPOSE = 'POST /v1/fleet/proposals';
-const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
+const PROPOSE = 'POST /v1/runtimes/proposals';
+const APPLY = `POST /v1/runtimes/proposals/${CHANGE_ID}/apply`;
 const COMMITTED = {
   outcome: 'applied',
   apply: {
@@ -72,16 +73,16 @@ const text = (container: ParentNode, selector: string): string =>
   must(container.querySelector(selector), selector).textContent ?? '';
 
 const proposed = (calls: readonly Call[]): unknown[] =>
-  calls.filter(call => call.path === '/v1/fleet/proposals').map(call => (call.body as { change: unknown }).change);
+  calls.filter(call => call.route === 'POST /v1/runtimes/proposals').map(call => (call.body as { change: unknown }).change);
 
-const FERRETS: readonly FleetRunningSession[] = [
-  { id: 's-1', name: 'Fisher', harness: 'claude' },
-  { id: 's-2', name: 'Otter', harness: 'claude' },
+const FERRETS: readonly RunningSession[] = [
+  { id: 's-1', name: 'Fisher', harness: 'claude-code' },
+  { id: 's-2', name: 'Otter', harness: 'claude-code' },
 ];
 
 /** A dry run of a removal that lists the ferrets on it, and its own consequence sentence. */
 const removalStaged =
-  (running: readonly FleetRunningSession[] = FERRETS) =>
+  (running: readonly RunningSession[] = FERRETS) =>
   (call: Call) => ({
     ...stagedFrom(call),
     summary: 'Remove runtime',
@@ -99,43 +100,39 @@ const removalStaged =
     },
   });
 
-type MigrateCall = Parameters<IFyApiClient['migrate']>;
+type MoveCall = [sessionId: string, runtime: string, conversation: MoveConversation];
 
 interface TabOptions {
   readonly routes?: Record<string, Route>;
-  readonly machine?: FleetMachineView | null;
+  readonly machine?: MachineView | null;
   readonly calls?: Call[];
-  /** Offer `migrate` on the client, answering with this (an Error refuses). */
-  readonly migrate?: (call: MigrateCall) => unknown;
-  readonly migrations?: MigrateCall[];
+  /** Offer the move of a ferret, answering with this (an Error refuses). */
+  readonly move?: (call: MoveCall) => unknown;
+  readonly moves?: MoveCall[];
   readonly refreshes?: string[];
 }
 
 const open = async (options: TabOptions = {}) => {
-  const scriptedClient = scripted({ ...READS(), ...options.routes }, options.calls);
-  const migrate = options.migrate;
-  const client: FleetClient =
-    migrate === undefined
-      ? scriptedClient
-      : {
-          ...scriptedClient,
-          migrate: async (...call: MigrateCall) => {
-            options.migrations?.push(call);
-            const answer = migrate(call);
-            if (answer instanceof Error) throw answer;
-            return answer as never;
-          },
+  const client = scripted({ ...READS(), ...options.routes }, options.calls);
+  const move = options.move;
+  const moveFerret =
+    move === undefined
+      ? undefined
+      : async (...call: MoveCall): Promise<void> => {
+          options.moves?.push(call);
+          const answer = move(call);
+          if (answer instanceof Error) throw answer;
         };
   const view = await mount(
     <RuntimesTab
-      connection={STUDIO}
+      client={client}
+      moveFerret={moveFerret}
       machineName="studio-mac"
       machine={options.machine === undefined ? machine() : options.machine}
       online
       checking={false}
       onRetry={() => options.refreshes?.push('retry')}
       onRefresh={() => options.refreshes?.push('refresh')}
-      createClient={async () => client}
       pollMs={5}
     />,
   );
@@ -210,7 +207,7 @@ describe('Runtime actions: the buttons', () => {
 
   it('disables both, with the reason, when this device may not change the fleet', async () => {
     // Arrange
-    const refused = { 'GET /v1/fleet/machine': machineWith({ mayApply: false, applyRefusal: 'not-granted' }) };
+    const refused = { 'GET /v1/runtimes/machine': machineWith({ mayApply: false, applyRefusal: 'not-granted' }) };
 
     // Act + Assert — the list first: the page below moves the location every mounted tab follows.
     const list = await open({ routes: refused });
@@ -278,7 +275,7 @@ describe('Runtime actions: Rename', () => {
 
     // Assert
     expect(proposed(calls)).toEqual([{ kind: 'runtime.rename', name: 'codex-default', to: 'codex-work' }]);
-    expect(calls.some(call => call.path === `/v1/fleet/proposals/${CHANGE_ID}/apply`)).toBe(true);
+    expect(calls.some(call => call.route === APPLY)).toBe(true);
     expect(view.container.querySelector('[data-runtime-dialog]')).toBeNull();
     expect(window.location.hash).toBe('#machines/studio-mac/runtimes/codex-work');
   });
@@ -341,7 +338,7 @@ describe('Runtime actions: Remove', () => {
     expect(text(view.container, '[data-runtime-move-plan]')).toBe('They keep running until they end.');
     expect(submit(view.container).textContent).toBe('Remove codex-default');
     expect(submit(view.container).getAttribute('data-variant')).toBe('danger');
-    expect(calls.some(call => call.path.endsWith('/apply'))).toBe(false);
+    expect(calls.some(call => call.route.endsWith('/apply'))).toBe(false);
   });
 
   it('removes exactly the change it previewed', async () => {
@@ -356,7 +353,7 @@ describe('Runtime actions: Remove', () => {
 
     // Assert
     expect(proposed(calls)).toHaveLength(1);
-    expect(calls.filter(call => call.path === `/v1/fleet/proposals/${CHANGE_ID}/apply`)).toHaveLength(1);
+    expect(calls.filter(call => call.route === APPLY)).toHaveLength(1);
     expect(view.container.querySelector('[data-runtime-dialog]')).toBeNull();
   });
 
@@ -386,11 +383,11 @@ describe('Runtime actions: Remove', () => {
   it('moves every ferret to the picked runtime, carrying each conversation, before it removes', async () => {
     // Arrange
     const calls: Call[] = [];
-    const migrations: MigrateCall[] = [];
+    const moves: MoveCall[] = [];
     const view = await open({
       calls,
-      migrations,
-      migrate: () => ({}),
+      moves,
+      move: () => ({}),
       routes: { [PROPOSE]: removalStaged(), [APPLY]: COMMITTED },
     });
     await chooseRuntimeAction(view.container, 'claude-work', 'remove');
@@ -413,7 +410,7 @@ describe('Runtime actions: Remove', () => {
     await settle();
 
     // Assert
-    expect(migrations.map(([id, agent, , , , , conversation]) => [id, agent, conversation])).toEqual([
+    expect(moves.map(([id, runtime, conversation]) => [id, runtime, conversation])).toEqual([
       ['s-1', 'codex-default', 'convert'],
       ['s-2', 'codex-default', 'convert'],
     ]);
@@ -426,11 +423,11 @@ describe('Runtime actions: Remove', () => {
 
   it('resumes a ferret moved to a runtime on the same CLI', async () => {
     // Arrange
-    const migrations: MigrateCall[] = [];
+    const moves: MoveCall[] = [];
     const view = await open({
-      migrations,
-      migrate: () => ({}),
-      routes: { [PROPOSE]: removalStaged([FERRETS[0] as FleetRunningSession]), [APPLY]: COMMITTED },
+      moves,
+      move: () => ({}),
+      routes: { [PROPOSE]: removalStaged([FERRETS[0] as RunningSession]), [APPLY]: COMMITTED },
     });
     await chooseRuntimeAction(view.container, 'claude-work', 'remove');
 
@@ -444,7 +441,7 @@ describe('Runtime actions: Remove', () => {
     await settle();
 
     // Assert
-    expect(migrations.map(call => call[6])).toEqual(['resume']);
+    expect(moves.map(call => call[2])).toEqual(['resume']);
   });
 
   it('removes nothing while a ferret it was asked to move is still on it', async () => {
@@ -452,7 +449,7 @@ describe('Runtime actions: Remove', () => {
     const calls: Call[] = [];
     const view = await open({
       calls,
-      migrate: ([id]) => (id === 's-2' ? new Error('The session is mid-turn.') : {}),
+      move: ([id]) => (id === 's-2' ? new Error('The session is mid-turn.') : {}),
       routes: { [PROPOSE]: removalStaged(), [APPLY]: COMMITTED },
     });
     await chooseRuntimeAction(view.container, 'claude-work', 'remove');
@@ -466,7 +463,7 @@ describe('Runtime actions: Remove', () => {
     await settle();
 
     // Assert
-    expect(calls.some(call => call.path.endsWith('/apply'))).toBe(false);
+    expect(calls.some(call => call.route.endsWith('/apply'))).toBe(false);
     expect(text(view.container, '[data-runtime-move-failed]')).toContain(
       'One ferret could not be moved, so claude-work was not removed.',
     );
@@ -517,9 +514,9 @@ describe('Runtime actions: Remove', () => {
             ? removalStaged([])(call)
             : stagedFrom(call),
         [APPLY]: COMMITTED,
-        'GET /v1/fleet/runtimes': {
+        'GET /v1/runtimes': {
           format: 'version-2',
-          runtimes: [...(READS()['GET /v1/fleet/runtimes'] as { runtimes: unknown[] }).runtimes].map(entry => ({
+          runtimes: [...(READS()['GET /v1/runtimes'] as { runtimes: unknown[] }).runtimes].map(entry => ({
             ...(entry as object),
             agent: true,
           })),
@@ -551,36 +548,6 @@ describe('Runtime actions: Remove', () => {
     expect(text(view.container, '[data-runtime-remove-impact]')).toBe(
       'Nothing is running on it. Its past sessions stay in history.',
     );
-  });
-
-  it('says why, and offers no move, when the machine cannot be reached once the dialog opens', async () => {
-    // Arrange
-    let reachable = true;
-    const client = scripted(READS());
-    const view = await mount(
-      <RuntimesTab
-        connection={STUDIO}
-        machineName="studio-mac"
-        machine={machine()}
-        online
-        checking={false}
-        onRetry={() => undefined}
-        createClient={async () => {
-          if (!reachable) throw new Error('the machine went to sleep');
-          return client;
-        }}
-        pollMs={60_000}
-      />,
-    );
-    await settle();
-    reachable = false;
-
-    // Act
-    await chooseRuntimeAction(view.container, 'codex-default', 'remove');
-
-    // Assert
-    expect(view.container.querySelector('[data-runtime-remove-refused]')).not.toBeNull();
-    expect(view.container.querySelector('[data-runtime-move-target]')).toBeNull();
   });
 
   it('says why when the dry run itself is refused', async () => {

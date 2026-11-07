@@ -151,3 +151,13 @@ export const stagedFrom = (call: { readonly body: unknown }) => ({
 });
 
 export const APPLIED = { outcome: 'executed', executor: 'setup', summary: 'Done.' };
+
+/**
+ * The reads a Runtimes tab opens with and an open authority: a machine that answers everything and asks for nothing.
+ * GAP(ferrets): the profiles, components and logins reads (`GET /v1/runtimes/profiles`, `/components`, Logins' list)
+ * join this when the tabs that read them are ported.
+ */
+export const READS = (): Record<string, unknown> => ({
+  'GET /v1/runtimes': RUNTIMES,
+  'GET /v1/runtimes/machine': machine(),
+});

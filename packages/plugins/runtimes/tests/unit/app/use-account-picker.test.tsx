@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import { useAccountPickerSlice, useMachineRosters } from '../../../app/hooks/use-account-picker.ts';
 import type { AccountPickerCatalog, AccountPickerHealthCatalog } from '../../src/lib/account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { interact, mount } from '../support/dom.ts';
-import { configChangeHarness } from './config-change-support.tsx';
 
 const laptop = daemonConnection({
   daemonId: 'daemon/laptop',
@@ -41,8 +41,30 @@ const settle = async (): Promise<void> => {
   });
 };
 
-function Status({ store, daemon }: { readonly store: DaemonAccountPickerStore; readonly daemon: typeof laptop }) {
-  const slice = useAccountPickerSlice(store, daemon);
+/** A client that only carries events: a test fires `runtimes.changed` the way the daemon would. */
+const events = () => {
+  const listeners = new Set<(payload: { runtimes: string[] }) => void>();
+  return {
+    client: {
+      subscribe: (_event: unknown, listener: (payload: { runtimes: string[] }) => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    } as unknown as Pick<PluginClient, 'subscribe'>,
+    changed: (runtimes: string[]) => interact(async () => void [...listeners].forEach(listener => listener({ runtimes }))),
+  };
+};
+
+function Status({
+  store,
+  daemon,
+  client = events().client,
+}: {
+  readonly store: DaemonAccountPickerStore;
+  readonly daemon: typeof laptop;
+  readonly client?: Pick<PluginClient, 'subscribe'>;
+}) {
+  const slice = useAccountPickerSlice(store, daemon, client);
   return <output>{`${slice.status}:${slice.catalog?.accounts[0]?.wrapper ?? slice.error ?? '—'}`}</output>;
 }
 
@@ -145,29 +167,26 @@ describe('useAccountPickerSlice', () => {
       health: async () => noHealth,
       checkHealth: async () => noHealth,
     });
-    const harness = configChangeHarness(laptop.daemonId);
-    const mounted = await mount(harness.wrap(<Status store={store} daemon={laptop} />));
+    const bus = events();
+    const mounted = await mount(<Status store={store} daemon={laptop} client={bus.client} />);
     expect(mounted.container.textContent).toBe('ready:claude-auto-before');
     expect(reads).toBe(1);
 
-    // Act + Assert — a change to something the picker does not show reads nothing
-    await harness.move(['profiles']);
+    // Act + Assert — a change to something the picker does not show (a profile names no runtime) reads nothing
+    await bus.changed([]);
     await settle();
     expect(reads).toBe(1);
 
     // Act — `fy` adds a runtime on the machine
     roster = 'codex-auto-added';
-    await harness.move(['runtimes']);
+    await bus.changed(['codex-auto-added']);
     await settle();
 
     // Assert
     expect(mounted.container.textContent).toBe('ready:codex-auto-added');
     expect(reads).toBe(2);
 
-    // Act — a login moved, which changes each runtime's health
-    await harness.move(['credentials']);
-    await settle();
-    expect(reads).toBe(3);
+    // GAP(logins): a login moving changes each runtime's health, but Logins' contract has no change event to hear yet.
     await mounted.unmount();
   });
 });

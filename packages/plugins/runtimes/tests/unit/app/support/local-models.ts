@@ -3,6 +3,7 @@
  * a wire change fails here first. `localModelsFixture('found')` is a machine with two models pulled.
  */
 
+import { InstantSchema } from '@ferretry/std';
 import { type LocalModels, LocalModelsSchema } from '../../../../contract/index.ts';
 
 export type LocalModel = LocalModels['models'][number];
@@ -17,7 +18,7 @@ export const GPT_OSS: LocalModel = {
   parameterSize: '20.9B',
   quantization: 'MXFP4',
   family: 'gptoss',
-  modifiedAt: '2026-10-18T09:00:00.000Z',
+  modifiedAt: InstantSchema.parse('2026-10-18T09:00:00.000Z'),
 };
 
 export const QWEN: LocalModel = { id: 'qwen3-coder:30b', label: 'qwen3-coder:30b', sizeBytes: 18_600_000_000 };

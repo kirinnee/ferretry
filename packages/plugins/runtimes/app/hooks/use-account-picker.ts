@@ -1,18 +1,17 @@
 /** Hydrate and read exactly one daemon's pickable account catalog. */
 
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { RuntimesChanged, RuntimesDefaultChanged } from '../../contract/index.ts';
 import type { PickerAccount } from '../lib/account-picker-catalog.ts';
 import type { DaemonAccountPickerSlice, DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
-import { useConfigChangeEffect } from '../lib/store.tsx';
 import { pairingKey } from './use-machines-poll.ts';
-
-/** The roster is the machine's runtimes; its health is each login's state. */
-const PICKER_KINDS = ['credentials', 'runtimes'] as const;
 
 export const useAccountPickerSlice = (
   store: DaemonAccountPickerStore,
   daemon: DaemonConnection,
+  client: Pick<PluginClient, 'subscribe'>,
 ): DaemonAccountPickerSlice => {
   const getSnapshot = useCallback(() => store.sliceFor(daemon), [store, daemon]);
   useEffect(() => {
@@ -20,7 +19,21 @@ export const useAccountPickerSlice = (
   }, [store, daemon]);
   // The roster was read once per pairing, so a runtime added anywhere else never reached the picker
   // until the app was reloaded. It is read again the moment the machine says it moved.
-  useConfigChangeEffect(daemon.daemonId, PICKER_KINDS, () => store.reread(daemon));
+  // The roster is the machine's runtimes; the default moving is a roster change too.
+  // GAP(logins): the health half (each login's state) moves with Logins' own change event, which is not in its contract.
+  useEffect(() => {
+    const reread = (): void => void store.reread(daemon);
+    // A profile or model-set change names no runtime, so it shows nothing in the picker.
+    const stops = [
+      client.subscribe(RuntimesChanged, changed => {
+        if (changed.runtimes.length > 0) reread();
+      }),
+      client.subscribe(RuntimesDefaultChanged, reread),
+    ];
+    return () => {
+      for (const stop of stops) stop();
+    };
+  }, [store, daemon, client]);
   return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
 };
 

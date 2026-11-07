@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { useState } from 'react';
 import { ModelSelect } from '../../../app/components/model-select.tsx';
-import type { PickerModel } from '../../src/lib/account-picker-catalog.ts';
+import type { PickerModel } from '../../../app/lib/picker-model.ts';
 import { interact, mount, must } from '../support/dom.ts';
 import { localModelsFixture, PULL } from './support/local-models.ts';
 

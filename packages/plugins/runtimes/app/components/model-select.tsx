@@ -7,10 +7,10 @@
  * The live session pickers (the composer's chip and Info › Runtime) are menus instead, because choosing
  * there is an action sent to a running harness; they group by the same tiers (`../lib/model-tiers.ts`).
  */
-import type { LocalModels } from '@ferretry/protocol';
+import type { LocalModels } from '../../contract/index.ts';
 import { useId, useState } from 'react';
-import type { ClipboardWriter } from '../../../onboarding/app/copy-button.tsx';
-import type { PickerModel } from '../lib/account-picker-catalog.ts';
+import type { ClipboardWriter } from '../ui.ts';
+import type { PickerModel } from '../lib/picker-model.ts';
 import { localNote } from '../lib/local-models.ts';
 import { CUSTOM_MODEL_ID, contextWords, groupByTier } from '../lib/model-tiers.ts';
 import { LocalModelsNote } from './local-models-note.tsx';

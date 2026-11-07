@@ -23,15 +23,16 @@
  * "quota —" or "never checked", because on a phone chip those would be noise claiming nothing.
  */
 
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import { Check } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo } from 'react';
 import { useAccountPickerSlice } from '../hooks/use-account-picker.ts';
 import { accountHealthView } from '../lib/account-health-view.ts';
 import type { PickerAccount } from '../lib/account-picker-catalog.ts';
 import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
-import { cn } from '../lib/class-names.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { QuotaReadout } from '../shell/quota-readout.tsx';
+import { cn } from '../ui.ts';
 import {
   type AccountPickerOption,
   type AccountUsageRow,
@@ -66,6 +67,10 @@ export interface RuntimeButtonsProps {
   readonly store: DaemonAccountPickerStore;
   /** The one daemon whose runtimes this may ever offer. */
   readonly connection: DaemonConnection;
+  /** The client bound to that daemon: the roster is read again when its runtimes move. */
+  readonly client: Pick<PluginClient, 'subscribe'>;
+  /** The instant the quota readouts are judged against, in epoch milliseconds: the shell's clock, never this file's. */
+  readonly now: number;
   /** The daemon's CACHED quota rows, joined by wrapper. Rows, not a store: the app already polls them. */
   readonly usage: readonly AccountUsageRow[];
   /** Why the cached quota feed is missing, if it is. Never fails the roster. */
@@ -166,6 +171,8 @@ function RuntimeButton({
 export function RuntimeButtons({
   store,
   connection,
+  client,
+  now,
   usage,
   usageError,
   value,
@@ -177,7 +184,7 @@ export function RuntimeButtons({
   labelId,
   fallbackPlaceholder,
 }: RuntimeButtonsProps): ReactNode {
-  const slice = useAccountPickerSlice(store, connection);
+  const slice = useAccountPickerSlice(store, connection, client);
   const published = slice.catalog?.accounts ?? null;
   const health = slice.health;
   // Only an agent runtime can run a session; the person's own CLI is published too and is refused.
@@ -227,7 +234,6 @@ export function RuntimeButtons({
   }
   if (offered.length === 0) return noAccounts;
 
-  const now = Date.now();
   return (
     <div className="grid gap-xs">
       {/* `relative` is load-bearing: each radio is `sr-only`, which is absolutely positioned, and

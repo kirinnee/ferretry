@@ -10,7 +10,8 @@ import {
   runningOnRuntime,
   runtimeActionRefusal,
 } from '../../../../../../app/features/fleet/runtimes/runtime-actions-model.ts';
-import { machine, RUNTIMES, runtime } from '../account-support.ts';
+import { AccountChangeViewSchema } from '../../../../../../contract/index.ts';
+import { CHANGE_ID, machine, RUNTIMES, runtime } from '../account-support.ts';
 
 const ALL = RUNTIMES.runtimes;
 const CODEX = ALL.find(entry => entry.name === 'codex-default') ?? runtime({ name: 'codex-default' });
@@ -70,7 +71,7 @@ describe('moving the ferrets', () => {
 
   it('should read the ferrets from an apply preview, and none from any other', () => {
     const base = {
-      id: 'p',
+      id: CHANGE_ID,
       revision: 'r',
       change: { kind: 'runtime.remove', name: 'x' },
       summary: 's',
@@ -78,18 +79,18 @@ describe('moving the ferrets', () => {
       expiresAt: '2026-10-13T08:15:00.000Z',
       state: 'pending',
     } as const;
+    const staged = (preview: unknown) => AccountChangeViewSchema.parse({ ...base, preview });
     const ferret = { id: 's-1', name: 'Fisher', harness: 'claude-code' } as const;
     expect(
-      runningOnRuntime({
-        ...base,
-        preview: { kind: 'apply', operations: [], documents: [], runtimes: [], runningSessions: [ferret] },
-      }),
+      runningOnRuntime(
+        staged({ kind: 'apply', operations: [], documents: [], runtimes: [], runningSessions: [ferret] }),
+      ),
     ).toEqual([ferret]);
     expect(
-      runningOnRuntime({ ...base, preview: { kind: 'apply', operations: [], documents: [], runtimes: [] } }),
+      runningOnRuntime(staged({ kind: 'apply', operations: [], documents: [], runtimes: [] })),
     ).toEqual([]);
     expect(
-      runningOnRuntime({ ...base, preview: { kind: 'executor', executor: 'setup', description: 'Import' } }),
+      runningOnRuntime(staged({ kind: 'executor', executor: 'setup', description: 'Import' })),
     ).toEqual([]);
   });
 

@@ -1,14 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
 import {
   CLAUDE_EFFORT_LEVELS,
   ClaudeEffortChoices,
   claudeEffortLevels,
   codexPickerFallbackNeeded,
   effortDisplayName,
-  isEffortActionUnsupported,
   isPromptKnownBusy,
-  isRuntimeEndpointUnavailable,
   type RuntimeControlCommand,
   RuntimeChoiceMenu,
   RuntimeEffortControls,
@@ -16,25 +13,23 @@ import {
   RuntimeModelChoices,
   RuntimeModelControls,
   RuntimeReasoningChoices,
-  runtimeControlUnavailableMessage,
 } from '../../../app/components/runtime-controls.tsx';
-import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { RuntimeModelCatalog } from '../../../app/lib/runtime-models.ts';
+import type { RuntimeSessionView } from '../../../app/lib/session-view.ts';
 import { interact, mount, must, pressKey } from '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
 
-const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'token-a' });
-const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceId: 'token-b' });
+interface ViewOverrides {
+  readonly config?: Partial<RuntimeSessionView['config']>;
+  readonly state?: Partial<RuntimeSessionView['state']>;
+}
 
-const view = (overrides: Parameters<typeof sessionView>[1] = {}): SessionView =>
-  sessionView('s-1', {
-    ...overrides,
-    config: { harness: 'claude', ...overrides.config },
-    state: { status: 'running', promptReady: true, ...overrides.state },
-  });
+const view = (overrides: ViewOverrides = {}): RuntimeSessionView => ({
+  config: { id: 's-1', harness: 'claude-code', ...overrides.config },
+  state: { status: 'running', promptReady: true, ...overrides.state },
+});
 
 const claudeCatalog: RuntimeModelCatalog = {
-  harness: 'claude',
+  harness: 'claude-code',
   source: 'wrapper-inventory',
   choices: [
     { value: 'claude-opus-5', label: 'Opus 5', description: 'The big one', isDefault: true, reasoningEfforts: [] },
@@ -55,9 +50,9 @@ const codexCatalog: RuntimeModelCatalog = {
   ],
 };
 
-/** A catalog source whose answer the test controls, one scope at a time. */
-const source = (answer: (daemon: DaemonConnection) => Promise<RuntimeModelCatalog>): RuntimeModelCatalogSource => ({
-  load: daemon => answer(daemon),
+/** A catalog source whose answer the test controls, one session at a time. */
+const source = (answer: (sessionId: string) => Promise<RuntimeModelCatalog>): RuntimeModelCatalogSource => ({
+  load: sessionId => answer(sessionId),
 });
 
 const resolved = (catalog: RuntimeModelCatalog): RuntimeModelCatalogSource => source(() => Promise.resolve(catalog));
@@ -65,7 +60,6 @@ const rejected = (reason: unknown): RuntimeModelCatalogSource => source(() => Pr
 const never = (): RuntimeModelCatalogSource => source(() => new Promise<RuntimeModelCatalog>(() => undefined));
 
 interface Sent {
-  readonly daemon: DaemonConnection;
   readonly sessionId: string;
   readonly command: RuntimeControlCommand;
   readonly requestId: string;
@@ -76,13 +70,8 @@ const recorder = (fail?: unknown) => {
   return {
     sent,
     api: {
-      runtime: async (
-        daemon: DaemonConnection,
-        sessionId: string,
-        command: RuntimeControlCommand,
-        requestId: string,
-      ) => {
-        sent.push({ daemon, sessionId, command, requestId });
+      runtime: async (sessionId: string, command: RuntimeControlCommand, requestId: string) => {
+        sent.push({ sessionId, command, requestId });
         if (fail !== undefined) throw fail;
       },
     },
@@ -105,26 +94,6 @@ const byText = (container: HTMLElement, text: string): HTMLButtonElement =>
   );
 const click = (button: HTMLButtonElement) =>
   interact(() => button.dispatchEvent(new Event('click', { bubbles: true })));
-
-describe('runtime failure classification', () => {
-  test('separates version skew from an ordinary failure', () => {
-    expect(isRuntimeEndpointUnavailable({ status: 404, code: 'unknown_route' })).toBe(true);
-    expect(isRuntimeEndpointUnavailable({ status: 404, code: 'no_session' })).toBe(false);
-    expect(isRuntimeEndpointUnavailable('nope')).toBe(false);
-    expect(isRuntimeEndpointUnavailable(null)).toBe(false);
-  });
-
-  test('treats a rejected effort action as a daemon that has not learned the verb', () => {
-    expect(isEffortActionUnsupported({ status: 400, message: 'unsupported runtime action' })).toBe(true);
-    expect(isEffortActionUnsupported({ status: 400, message: 'busy pane' })).toBe(false);
-    expect(isEffortActionUnsupported(undefined)).toBe(false);
-  });
-
-  test('the skew message names the control and refuses to promise a restart helps', () => {
-    expect(runtimeControlUnavailableMessage('model')).toContain('in-session model switching');
-    expect(runtimeControlUnavailableMessage('effort')).toContain('restarting the same build will not help');
-  });
-});
 
 describe('isPromptKnownBusy', () => {
   test('answers only for an explicit false, so an unreported prompt stays unknown', () => {
@@ -310,7 +279,6 @@ describe('RuntimeModelControls', () => {
     api: recorder().api,
     canControl: true,
     catalogs: resolved(claudeCatalog),
-    daemon: alpha,
     newRequestId: nextRequestId,
     onClose: () => undefined,
     open: true,
@@ -376,7 +344,7 @@ describe('RuntimeModelControls', () => {
     await screen.unmount();
   });
 
-  test('sends a Claude switch to the daemon it was handed, with a fresh request id', async () => {
+  test('sends a Claude switch through the host adapter, with a fresh request id', async () => {
     const submitted: string[] = [];
     const { api, sent } = recorder();
     const screen = await mount(
@@ -386,7 +354,6 @@ describe('RuntimeModelControls', () => {
 
     expect(submitted).toEqual(['pending']);
     expect(sent).toHaveLength(1);
-    expect(sent[0]!.daemon).toBe(alpha);
     expect(sent[0]!.sessionId).toBe('s-1');
     expect(sent[0]!.command).toEqual({ action: 'model', model: 'claude-opus-5' });
     expect(sent[0]!.requestId).toMatch(/^req-\d+$/);
@@ -403,16 +370,6 @@ describe('RuntimeModelControls', () => {
     await click(byText(screen.container, 'Opus 5'));
     expect(failed).toEqual(['rolled back']);
     expect(must(screen.container.querySelector('[role="alert"]'), 'the failure').textContent).toContain('pane is gone');
-    await screen.unmount();
-  });
-
-  test('turns a missing runtime route into an update-the-daemon notice, not a red error', async () => {
-    const { api } = recorder({ status: 404, code: 'unknown_route' });
-    const screen = await mount(<RuntimeModelControls {...props({ api })} />);
-    await click(byText(screen.container, 'Opus 5'));
-    expect(must(screen.container.querySelector('[role="alert"]'), 'the skew notice').textContent).toContain(
-      'older than this web UI',
-    );
     await screen.unmount();
   });
 
@@ -532,24 +489,21 @@ describe('RuntimeModelControls', () => {
     await screen.unmount();
   });
 
-  test('a daemon switch discards the previous daemon’s catalog and notice', async () => {
+  test('a session switch discards the previous session’s catalog and notice', async () => {
     const seen: string[] = [];
-    const catalogs = source(daemon => {
-      seen.push(daemon.daemonId);
-      return Promise.resolve(daemon === alpha ? claudeCatalog : { ...claudeCatalog, choices: [] });
+    const catalogs = source(sessionId => {
+      seen.push(sessionId);
+      return Promise.resolve(sessionId === 's-1' ? claudeCatalog : { ...claudeCatalog, choices: [] });
     });
     const first = props({ catalogs });
     const screen = await mount(<RuntimeModelControls {...first} />);
     await click(byText(screen.container, 'Opus 5'));
     expect(screen.container.textContent).toContain('Model command sent');
 
-    await screen.render(<RuntimeModelControls {...first} daemon={beta} />);
-    expect(seen).toEqual(['alpha', 'beta']);
+    await screen.render(<RuntimeModelControls {...first} view={view({ config: { id: 's-2' } })} />);
+    expect(seen).toEqual(['s-1', 's-2']);
     expect(screen.container.textContent).not.toContain('Model command sent');
     expect(screen.container.textContent).toContain('does not advertise any in-place model choices');
-    expect(
-      must(screen.container.querySelector('[data-daemon-id]'), 'the scope marker').getAttribute('data-daemon-id'),
-    ).toBe('beta');
     await screen.unmount();
   });
 
@@ -573,7 +527,6 @@ describe('RuntimeEffortControls', () => {
     api: recorder().api,
     canControl: true,
     catalogs: resolved(codexCatalog),
-    daemon: alpha,
     newRequestId: nextRequestId,
     onClose: () => undefined,
     view: view(),
@@ -643,19 +596,8 @@ describe('RuntimeEffortControls', () => {
     );
     await click(byLabel(screen.container, 'Set reasoning effort to high'));
     expect(sent[0]!.command).toEqual({ action: 'effort', effort: 'high' });
-    expect(sent[0]!.daemon).toBe(alpha);
     expect(persisted).toEqual(['high']);
     expect(screen.container.textContent).toContain('Effort set to high');
-    await screen.unmount();
-  });
-
-  test('treats a rejected effort verb as version skew rather than a red error', async () => {
-    const { api } = recorder({ status: 400, message: 'unknown runtime action' });
-    const screen = await mount(<RuntimeEffortControls {...props({ api })} />);
-    await click(byLabel(screen.container, 'Set reasoning effort to low'));
-    expect(must(screen.container.querySelector('[role="alert"]'), 'the skew notice').textContent).toContain(
-      'older than this web UI',
-    );
     await screen.unmount();
   });
 
@@ -708,17 +650,6 @@ describe('RuntimeEffortControls', () => {
     await click(byLabel(screen.container, 'Set GPT-5.6 reasoning to Medium'));
     expect(failed).toEqual(['rolled back']);
     expect(screen.container.textContent).toContain('app-server down');
-    await screen.unmount();
-  });
-
-  test('turns a missing route into version skew during a Codex switch', async () => {
-    const { api } = recorder({ status: 404, code: 'unknown_route' });
-    const codex = view({ config: { harness: 'codex' }, state: { observedModel: 'gpt-5.6' } });
-    const screen = await mount(<RuntimeEffortControls {...props({ api, view: codex })} />);
-    await click(byLabel(screen.container, 'Set GPT-5.6 reasoning to Medium'));
-    expect(must(screen.container.querySelector('[role="alert"]'), 'the skew notice').textContent).toContain(
-      'older than this web UI',
-    );
     await screen.unmount();
   });
 
@@ -787,7 +718,7 @@ describe('RuntimeEffortControls', () => {
     await screen.unmount();
   });
 
-  test('reports a failed fallback, and version skew separately', async () => {
+  test('reports a failed fallback', async () => {
     const codex = view({ config: { harness: 'codex' } });
     const catalogs = rejected(new Error('no app-server'));
     const failing = await mount(
@@ -796,15 +727,6 @@ describe('RuntimeEffortControls', () => {
     await click(byText(failing.container, 'Use native picker in Terminal'));
     expect(failing.container.textContent).toContain('picker refused');
     await failing.unmount();
-
-    const skewed = await mount(
-      <RuntimeEffortControls
-        {...props({ api: recorder({ status: 404, code: 'unknown_route' }).api, catalogs, view: codex })}
-      />,
-    );
-    await click(byText(skewed.container, 'Use native picker in Terminal'));
-    expect(skewed.container.textContent).toContain('older than this web UI');
-    await skewed.unmount();
   });
 
   test('mints its own request id when the host does not supply one', async () => {
@@ -815,14 +737,14 @@ describe('RuntimeEffortControls', () => {
     await screen.unmount();
   });
 
-  test('a daemon switch clears the notice that belonged to the previous daemon', async () => {
+  test('a session switch clears the notice that belonged to the previous session', async () => {
     const { api } = recorder();
     const base = props({ api });
     const screen = await mount(<RuntimeEffortControls {...base} />);
     await click(byLabel(screen.container, 'Set reasoning effort to high'));
     expect(screen.container.textContent).toContain('Effort set to high');
 
-    await screen.render(<RuntimeEffortControls {...base} daemon={beta} />);
+    await screen.render(<RuntimeEffortControls {...base} view={view({ config: { id: 's-2' } })} />);
     expect(screen.container.textContent).not.toContain('Effort set to high');
     await screen.unmount();
   });
@@ -922,7 +844,6 @@ describe('popover presentation', () => {
     api: recorder().api,
     canControl: true,
     catalogs: resolved(claudeCatalog),
-    daemon: alpha,
     newRequestId: nextRequestId,
     onClose: () => undefined,
     presentation: 'popover' as const,
@@ -991,7 +912,7 @@ describe('popover presentation', () => {
 
 /** A GLM login's catalog (docs/model-catalog.md): tiers, a context window, efforts per model, no custom ids. */
 const glmCatalog: RuntimeModelCatalog = {
-  harness: 'claude',
+  harness: 'claude-code',
   source: 'wrapper-inventory',
   catalog: { id: 'zai', label: 'GLM / Z.ai', customIds: false },
   choices: [
@@ -1025,11 +946,10 @@ describe('pickers on a login with a model catalog', () => {
     api: recorder().api,
     canControl: true,
     catalogs: resolved(glmCatalog),
-    daemon: alpha,
     newRequestId: nextRequestId,
     onClose: () => undefined,
     open: true,
-    view: view({ config: { harness: 'claude', model: 'glm-5.3' } }),
+    view: view({ config: { harness: 'claude-code', model: 'glm-5.3' } }),
     ...overrides,
   });
 
@@ -1064,7 +984,6 @@ describe('pickers on a login with a model catalog', () => {
     api: recorder().api,
     canControl: true,
     catalogs: resolved(glmCatalog),
-    daemon: alpha,
     newRequestId: nextRequestId,
     onClose: () => undefined,
     view: view(),
@@ -1075,7 +994,7 @@ describe('pickers on a login with a model catalog', () => {
     const { api, sent } = recorder();
     const screen = await mount(
       <RuntimeEffortControls
-        {...effortProps({ api, view: view({ config: { harness: 'claude', model: 'glm-5.3' } }) })}
+        {...effortProps({ api, view: view({ config: { harness: 'claude-code', model: 'glm-5.3' } }) })}
       />,
     );
     await interact(() => undefined);
@@ -1092,7 +1011,7 @@ describe('pickers on a login with a model catalog', () => {
   test('says a model that takes no effort has nothing to set', async () => {
     const screen = await mount(
       <RuntimeEffortControls
-        {...effortProps({ view: view({ config: { harness: 'claude', model: 'glm-5.3-flash' } }) })}
+        {...effortProps({ view: view({ config: { harness: 'claude-code', model: 'glm-5.3-flash' } }) })}
       />,
     );
     await interact(() => undefined);

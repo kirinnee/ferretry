@@ -1,0 +1,19 @@
+app/ui.ts | the shell's shared UI under one name, `@ferretry/app/ui`: Badge, Button, ContextMenu + MenuAnchor, CopyButton + ClipboardWriter + browserClipboardWriter, cn, TERMINAL_STATUSES, useDialogFocus (today's pwa primitives, unchanged)
+app/lib/shell-ports.ts | no React; small local copies of Access' grantGuidance sentences, the fleet apply-change types and runtimeNameProblem/HARNESS_NAMES (unplaced fleet UI); drop when those files land and are exported
+app/hooks/use-needs-runtime.ts | react; the shell hands `client` (PluginClient) to the caller
+app/hooks/use-account-picker.ts | react; Accounts' DaemonAccountPickerStore, account-picker-catalog, the shell's DaemonConnection/DaemonId and use-machines-poll (none in this package)
+app/components/local-models-note.tsx | react; ui.ts (CopyButton)
+app/components/model-select.tsx | react; ui.ts (ClipboardWriter)
+app/components/runtime-buttons.tsx | react, lucide-react; Accounts' account-health-view/account-picker-catalog/account-picker-store, daemon-picker-model.ts (unplaced), Usage's quota-readout.tsx, the shell's DaemonConnection
+app/components/runtime-controls.tsx | react, lucide-react; ui.ts (cn, TERMINAL_STATUSES)
+app/features/fleet/credentials/local-models-panel.tsx | react; ui.ts (Button, ClipboardWriter)
+app/features/fleet/runtimes/runtime-actions.tsx | react, lucide-react; ui.ts; UNPLACED fleet UI at the same relative paths: ../machine/settings-tab.tsx (machineSettings), ../shell/apply-change-panel.tsx (AccountChanges, ChangeApplyPanel), ../shell/apply-change.ts (changeRefusalSentence)
+app/features/settings/engine-catalog-list.tsx | MISPLACED: this is Voice's engine list (Settings > Voice > Engine), not Runtimes'; needs react, ui.ts, hooks/use-on-device-install.ts, lib/stt/*, ./voice-engine-choice.tsx and uses Date.now/setTimeout (banned-globals); move to the voice plugin
+app/shell/mode-badge.tsx | react, lucide-react; ui.ts (Badge, cn); the session mode type belongs to Ferrets
+app/views/pending-settings.tsx | react; the three Settings tabs (runtimes, profiles, model-sets) say "not built yet": their screens (runtimes-tab, profiles-tab, components-tab, add-runtime, apply-change*, machine-data ...) were never assigned to an app half
+app/views/runtimes-settings.tsx | react (re-exports pending-settings)
+app/views/profiles-settings.tsx | react (re-exports pending-settings)
+app/views/model-sets-settings.tsx | react (re-exports pending-settings)
+app/views/runtime-picker.tsx | react; the composer's `composer.tools` panel; talks to Ferrets' routes GET /v1/ferrets/:sessionId, /runtime, /runtime-models (not in Ferrets' manifest yet)
+tests/unit/app/*.test.tsx and tests/unit/app/features/**/*.test.tsx | happy-dom, react-test-renderer, tests/unit/support/dom.ts and react.ts (the DOM harness is not in this workspace); not run
+tests/unit/app/features/fleet/runtimes/runtime-menu-support.tsx | DOM helpers for runtime-actions.test.tsx

@@ -16,26 +16,23 @@
  */
 
 import type {
-  FleetAccountChange,
-  FleetAccountChangeView,
-  FleetMachineView,
-  FleetRunningSession,
-  FleetRuntimeView,
-} from '@ferretry/protocol';
+  AccountChange,
+  AccountChangeView,
+  MachineView,
+  RunningSession,
+  RuntimeView,
+} from '../../../../contract/index.ts';
 import { MoreHorizontal, Pencil, Star, Trash2 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
-import { useDialogFocus } from '../../../hooks/use-dialog-focus.ts';
-import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { ContextMenu, type MenuAnchor } from '../../../shell/context-menu.tsx';
-import { Button } from '../../../shell/primitives.tsx';
-import { HARNESS_NAMES } from '../components/component-model.ts';
-import type { FleetClientFactory } from '../fleet-client.ts';
+import { HARNESS_NAMES } from '../../../lib/shell-ports.ts';
+import { Button, ContextMenu, type MenuAnchor, useDialogFocus } from '../../../ui.ts';
 import { machineSettings } from '../machine/settings-tab.tsx';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import {
   blocksAsDefault,
   defaultCandidates,
+  type MoveConversation,
   moveConversation,
   movePlanSentence,
   moveTargets,
@@ -48,7 +45,7 @@ import {
 // ── The buttons ──────────────────────────────────────────────────────────────────────────────────
 
 export interface RuntimeActionButtonsProps {
-  readonly runtime: FleetRuntimeView;
+  readonly runtime: RuntimeView;
   /** Why this browser may not change runtimes here, or `null` when it may. */
   readonly refusal: string | null;
   readonly onRename: () => void;
@@ -219,8 +216,8 @@ export function RuntimeDialog({ title, name, busy, onClose, children }: RuntimeD
 // ── Rename ───────────────────────────────────────────────────────────────────────────────────────
 
 export interface RenameRuntimeDialogProps {
-  readonly runtime: FleetRuntimeView;
-  readonly runtimes: readonly FleetRuntimeView[];
+  readonly runtime: RuntimeView;
+  readonly runtimes: readonly RuntimeView[];
   readonly machineName: string;
   readonly changes: AccountChanges;
   readonly onClose: () => void;
@@ -318,29 +315,36 @@ export function RenameRuntimeDialog({
 // ── Remove ───────────────────────────────────────────────────────────────────────────────────────
 
 export interface RemoveRuntimeDialogProps {
-  readonly runtime: FleetRuntimeView;
-  readonly runtimes: readonly FleetRuntimeView[];
-  readonly machine: FleetMachineView | null;
+  readonly runtime: RuntimeView;
+  readonly runtimes: readonly RuntimeView[];
+  readonly machine: MachineView | null;
   readonly machineName: string;
   readonly changes: AccountChanges;
-  readonly connection: DaemonConnection;
-  readonly createClient: FleetClientFactory;
+  /**
+   * Moves one ferret onto another runtime, restarting it there with its conversation. The Ferrets app half
+   * provides it; without it the dialog offers no move and a ferret simply keeps running until it ends.
+   */
+  readonly moveFerret?: MoveFerret;
   readonly onClose: () => void;
   readonly onRemoved: () => void;
   /** The machine's settings changed here (a new default runtime): read the machine again. */
   readonly onMachineChanged: () => void;
 }
 
+/** The Ferrets app half's move of one ferret to `runtime`, resumed on the same CLI or converted across to the other. */
+// GAP(ferrets): the move route is Ferrets' (R-0355) and its app half is not built; this is the seam it will fill.
+export type MoveFerret = (sessionId: string, runtime: string, conversation: MoveConversation) => Promise<void>;
+
 /** A ferret that could not be moved, and why. */
 interface MoveFailure {
-  readonly session: FleetRunningSession;
+  readonly session: RunningSession;
   readonly sentence: string;
 }
 
 type RemovePhase =
   | { readonly kind: 'reading' }
   | { readonly kind: 'refused'; readonly sentence: string }
-  | { readonly kind: 'staged'; readonly staged: FleetAccountChangeView };
+  | { readonly kind: 'staged'; readonly staged: AccountChangeView };
 
 export function RemoveRuntimeDialog({
   runtime,
@@ -348,8 +352,7 @@ export function RemoveRuntimeDialog({
   machine,
   machineName,
   changes,
-  connection,
-  createClient,
+  moveFerret,
   onClose,
   onRemoved,
   onMachineChanged,
@@ -357,7 +360,6 @@ export function RemoveRuntimeDialog({
   const [defaultMoved, setDefaultMoved] = useState(false);
   const blocked = blocksAsDefault(runtime, machine) && !defaultMoved;
   const [phase, setPhase] = useState<RemovePhase>({ kind: 'reading' });
-  const [canMove, setCanMove] = useState(false);
   const [target, setTarget] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const [failures, setFailures] = useState<readonly MoveFailure[]>([]);
@@ -365,7 +367,7 @@ export function RemoveRuntimeDialog({
   // so it runs once per runtime rather than once per render.
   const latest = useRef(changes);
   latest.current = changes;
-  const change: FleetAccountChange = { kind: 'runtime.remove', name: runtime.name };
+  const change: AccountChange = { kind: 'runtime.remove', name: runtime.name };
 
   // The dry run: what removing it would do, and who is running on it — read before anything is asked.
   useEffect(() => {
@@ -381,40 +383,17 @@ export function RemoveRuntimeDialog({
     };
   }, [blocked, runtime.name]);
 
-  useEffect(() => {
-    let live = true;
-    void createClient(connection)
-      .then(client => typeof client.migrate === 'function')
-      .catch(() => false)
-      .then(offered => {
-        if (live) setCanMove(offered);
-      });
-    return () => {
-      live = false;
-    };
-  }, [connection, createClient]);
-
   const running = phase.kind === 'staged' ? runningOnRuntime(phase.staged) : [];
   const targets = moveTargets(runtime, runtimes);
   const chosen = targets.find(candidate => candidate.name === target) ?? null;
   const busy = changes.busy || moving;
 
   /** Move every ferret on it to `destination`, one at a time. Answers the ones that did not move. */
-  const moveAll = async (destination: FleetRuntimeView): Promise<readonly MoveFailure[]> => {
-    const client = await createClient(connection);
+  const moveAll = async (destination: RuntimeView): Promise<readonly MoveFailure[]> => {
     const missed: MoveFailure[] = [];
     for (const session of running) {
       try {
-        if (client.migrate === undefined) throw new Error('This app cannot move a ferret on this machine.');
-        await client.migrate(
-          session.id,
-          destination.name,
-          undefined,
-          false,
-          undefined,
-          false,
-          moveConversation(session, destination),
-        );
+        await moveFerret?.(session.id, destination.name, moveConversation(session, destination));
       } catch (error) {
         missed.push({ session, sentence: changeRefusalSentence(error) });
       }
@@ -486,7 +465,7 @@ export function RemoveRuntimeDialog({
           {running.length === 0 ? null : (
             <RunningFerrets
               running={running}
-              targets={canMove ? targets : []}
+              targets={moveFerret === undefined ? [] : targets}
               target={target}
               disabled={busy}
               onTarget={value => {
@@ -547,8 +526,8 @@ function RunningFerrets({
   disabled,
   onTarget,
 }: {
-  readonly running: readonly FleetRunningSession[];
-  readonly targets: readonly FleetRuntimeView[];
+  readonly running: readonly RunningSession[];
+  readonly targets: readonly RuntimeView[];
   readonly target: string | null;
   readonly disabled: boolean;
   readonly onTarget: (target: string | null) => void;
@@ -606,9 +585,9 @@ function DefaultPicker({
   onClose,
   onPicked,
 }: {
-  readonly runtime: FleetRuntimeView;
-  readonly runtimes: readonly FleetRuntimeView[];
-  readonly machine: FleetMachineView | null;
+  readonly runtime: RuntimeView;
+  readonly runtimes: readonly RuntimeView[];
+  readonly machine: MachineView | null;
   readonly machineName: string;
   readonly changes: AccountChanges;
   readonly onClose: () => void;

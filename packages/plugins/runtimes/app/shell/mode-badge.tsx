@@ -16,10 +16,11 @@
  * for auto (the common case). No banners.
  */
 
-import type { InteractionMode } from '@ferretry/protocol';
 import { Cpu, User } from 'lucide-react';
-import { cn } from '../lib/class-names.ts';
-import { Badge } from './primitives.tsx';
+import { Badge, cn } from '../ui.ts';
+
+// GAP(ferrets): `InteractionMode` is the session document's, which Ferrets' contract does not carry yet.
+export type InteractionMode = 'interactive' | 'auto';
 
 export const MODE_HINT: Record<InteractionMode, string> = {
   interactive: 'interactive — human-driven; never auto-nudged, auto-killed or flagged',

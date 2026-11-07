@@ -7,8 +7,8 @@
 import { useId } from 'react';
 import { LocalModelsNote } from '../../../components/local-models-note.tsx';
 import { LOCAL_TONE_CLASS, type LocalModelsRead, modelDetailWords, tileWords } from '../../../lib/local-models.ts';
-import { Button } from '../../../shell/primitives.tsx';
-import type { ClipboardWriter } from '../../../../../onboarding/app/copy-button.tsx';
+import { Button } from '../../../ui.ts';
+import type { ClipboardWriter } from '../../../ui.ts';
 
 export interface LocalModelsPanelProps {
   readonly machineName: string;

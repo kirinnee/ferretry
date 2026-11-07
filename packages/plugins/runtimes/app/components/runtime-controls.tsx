@@ -28,29 +28,28 @@
  * branch is unreachable here and is deliberately absent rather than kept as dead
  * markup the coverage ledger could never execute.
  *
- * DAEMON SCOPE. kteam fetched the catalog with `fetchRuntimeModelCatalog(sessionId)`
- * against one implicit daemon. Here every request is bound to an explicit
- * `DaemonConnection`, the catalog is read through the `(daemonId, sessionId)`
- * scoped store from `lib/runtime-models.ts`, and the reset effect keys on the
- * daemon id as well as the session id — so a same-named session on a second
- * daemon can neither receive this command nor be shown the first daemon's
- * choices.
+ * DAEMON SCOPE. The host adapters (`api`, `catalogs`) are each bound to ONE daemon by the shell's per-daemon client, so
+ * a same-named session on a second daemon can neither receive this command nor be shown the first daemon's choices:
+ * the catalog is read through the store of the daemon the picker is mounted for (`lib/runtime-models.ts`).
  */
 
-import type { SessionView } from '@ferretry/protocol';
 import { Check, LoaderCircle, Terminal } from 'lucide-react';
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react';
-import { cn } from '../lib/class-names.ts';
-import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { type DaemonSessionScope, daemonSessionScope } from '../lib/daemon-scope.ts';
 import {
   type RuntimeModelCatalog,
   type RuntimeModelChoice,
   runtimeModelCatalogErrorMessage,
 } from '../lib/runtime-models.ts';
 import { CUSTOM_MODEL_ID, contextWords, groupByTier } from '../lib/model-tiers.ts';
-import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
-import { launchedModel, type RuntimeSwitchLifecycle } from './composer-runtime.tsx';
+import { callFailure } from '../lib/client.ts';
+import type { RuntimeControlApi, RuntimeControlCommand } from '../lib/runtime-switch.ts';
+import {
+  launchedModel,
+  type RuntimePickerPresentation,
+  type RuntimeSessionView,
+  type RuntimeSwitchLifecycle,
+} from '../lib/session-view.ts';
+import { cn, TERMINAL_STATUSES } from '../ui.ts';
 
 /**
  * The four persistable levels the installed Claude CLI accepts. `auto` (reset to
@@ -73,59 +72,13 @@ export const claudeEffortLevels = (
   return choice === undefined ? CLAUDE_EFFORT_LEVELS : choice.reasoningEfforts.map(effort => effort.value);
 };
 
-/** What the component asks a daemon to do. The host adapter turns this into the
- *  protocol request; keeping it structural is what lets the same body drive both
- *  the details sheet and the composer bar without either owning a transport. */
-export type RuntimeControlCommand =
-  | { readonly action: 'model'; readonly model?: string; readonly effort?: string }
-  | { readonly action: 'effort'; readonly effort: string }
-  | { readonly action: 'fast'; readonly fast: boolean };
+export type { RuntimeControlApi, RuntimeControlCommand };
 
-export interface RuntimeControlApi {
-  /** The host must send this to the exact paired daemon it is handed. The request
-   *  id is fresh per click, so the daemon applies it once and a retry is a new
-   *  user decision rather than a replay. */
-  runtime(
-    daemon: DaemonConnection,
-    sessionId: string,
-    command: RuntimeControlCommand,
-    requestId: string,
-  ): Promise<void>;
-}
-
-/** The daemon-scoped catalog reader. `DaemonRuntimeModelCatalogStore` satisfies
- *  it; tests and the harness can supply anything with the same shape. */
+/** The catalog reader of one daemon. `DaemonRuntimeModelCatalogStore` (bound to that daemon's client) satisfies it;
+ *  tests and the harness can supply anything with the same shape. */
 export interface RuntimeModelCatalogSource {
-  load(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<RuntimeModelCatalog>;
+  load(sessionId: string): Promise<RuntimeModelCatalog>;
 }
-
-type RuntimeFailure = { readonly code?: unknown; readonly message?: unknown; readonly status?: unknown };
-
-const failureFields = (failure: unknown): RuntimeFailure | null =>
-  typeof failure === 'object' && failure !== null ? (failure as RuntimeFailure) : null;
-
-/**
- * A missing runtime route is daemon/UI version skew; an ordinary 404 can still be
- * a missing session and must keep its normal error treatment.
- */
-export const isRuntimeEndpointUnavailable = (failure: unknown): boolean => {
-  const fields = failureFields(failure);
-  return fields?.status === 404 && fields.code === 'unknown_route';
-};
-
-/**
- * A daemon that predates the effort action rejects it with the 400 it raises for
- * any unknown action. That is version skew — the account CAN tune effort, the
- * running daemon just has not learned the verb — so it earns the same "update the
- * daemon" treatment as a missing route, not a red error.
- */
-export const isEffortActionUnsupported = (failure: unknown): boolean => {
-  const fields = failureFields(failure);
-  return fields?.status === 400 && /runtime action/i.test(String(fields.message));
-};
-
-export const runtimeControlUnavailableMessage = (control: 'model' | 'effort'): string =>
-  `The running daemon is older than this web UI and does not provide in-session ${control} switching. Update the daemon build to enable it; restarting the same build will not help.`;
 
 /**
  * WHETHER THE PROMPT IS KNOWN TO BE BUSY — never whether it is known to be idle.
@@ -157,18 +110,18 @@ export const runtimeControlUnavailableMessage = (control: 'model' | 'effort'): s
  * `promptReady` alone. Read on its own, the stored `false` therefore outlived its
  * turn: after the first message of a session both chips stayed disabled forever,
  * and on a phone, where a disabled button's reason is only a tooltip, tapping
- * "claude-opus-5-5 ⌃" or "default ⌃" did nothing at all. A daemon with the
- * watcher says `your-turn` the moment the harness is back at its prompt, which
- * is the one state a runtime command can land in; `working` and `needs-input`
- * (a dialog on screen) are both known-busy. Only a daemon that predates the
- * watcher falls back to the stored `promptReady`.
+ * "claude-opus-5-5 ⌃" or "default ⌃" did nothing at all. The watcher says
+ * `your-turn` the moment the harness is back at its prompt, which is the one
+ * state a runtime command can land in; `working` and `needs-input` (a dialog
+ * on screen) are both known-busy. Only a session the watcher has not yet
+ * spoken for falls back to the stored `promptReady`.
  */
-export const isPromptKnownBusy = (state: SessionView['state']): boolean =>
+export const isPromptKnownBusy = (state: RuntimeSessionView['state']): boolean =>
   state.turnState === undefined ? state.promptReady === false : state.turnState !== 'your-turn';
 
 const failureMessage = (failure: unknown): string => {
   if (failure instanceof Error) return failure.message;
-  const fields = failureFields(failure);
+  const fields = callFailure(failure);
   return typeof fields?.message === 'string' ? fields.message : String(failure);
 };
 
@@ -206,8 +159,7 @@ interface RuntimeSwitchCallbacks extends Partial<Omit<RuntimeSwitchLifecycle, 'o
 interface RuntimeControlBase extends RuntimeSwitchCallbacks {
   readonly api: RuntimeControlApi;
   readonly catalogs: RuntimeModelCatalogSource;
-  readonly daemon: DaemonConnection;
-  readonly view: SessionView;
+  readonly view: RuntimeSessionView;
   /** A token-less origin is read-only and cannot send a runtime command. */
   readonly canControl: boolean;
   /** Codex's native picker lives in the Terminal view. Returns whether the host
@@ -224,25 +176,24 @@ const defaultRequestId = (): string => crypto.randomUUID();
  * before it has said anything — the one the session was LAUNCHED on. The chip
  * reads the same fallback, so the chip and the checked choice always agree.
  */
-export const runtimeModelInForce = (view: SessionView): string | undefined =>
+export const runtimeModelInForce = (view: RuntimeSessionView): string | undefined =>
   view.state.observedModel?.trim() || launchedModel(view.config);
 
 /**
- * Reads one session's catalog from the daemon-scoped store, and reports nothing
- * until the answer belongs to the scope currently on screen. The request key
- * carries the daemon id, so a daemon switch discards the previous daemon's
+ * Reads one session's catalog from the daemon's store, and reports nothing
+ * until the answer belongs to the session currently on screen. The request key
+ * carries the session id, so a session switch discards the previous session's
  * catalog rather than rendering it under the new one.
  */
 function useRuntimeModelCatalog(
   catalogs: RuntimeModelCatalogSource,
-  daemon: DaemonConnection,
   sessionId: string,
   enabled: boolean,
   expectedHarness: RuntimeModelCatalog['harness'],
 ): { catalog: RuntimeModelCatalog | null; error: unknown } {
   const [catalog, setCatalog] = useState<RuntimeModelCatalog | null>(null);
   const [error, setError] = useState<unknown>(null);
-  const requestKey = `${daemon.daemonId}\0${sessionId}\0${expectedHarness}`;
+  const requestKey = `${sessionId}\0${expectedHarness}`;
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
   useEffect(() => {
     if (!enabled) return;
@@ -251,7 +202,7 @@ function useRuntimeModelCatalog(
     setError(null);
     setLoadedFor(null);
     void catalogs
-      .load(daemon, daemonSessionScope(daemon, sessionId))
+      .load(sessionId)
       .then(value => {
         if (cancelled) return;
         if (value.harness !== expectedHarness)
@@ -267,7 +218,7 @@ function useRuntimeModelCatalog(
     return () => {
       cancelled = true;
     };
-  }, [catalogs, daemon, enabled, expectedHarness, requestKey, sessionId]);
+  }, [catalogs, enabled, expectedHarness, requestKey, sessionId]);
   return loadedFor === requestKey ? { catalog, error } : { catalog: null, error: null };
 }
 
@@ -286,7 +237,6 @@ export function RuntimeModelControls({
   api,
   canControl,
   catalogs,
-  daemon,
   newRequestId = defaultRequestId,
   onClose,
   onSwitchFailed,
@@ -302,7 +252,6 @@ export function RuntimeModelControls({
   const promptRefused = isPromptKnownBusy(state);
   const { catalog, error: catalogError } = useRuntimeModelCatalog(
     catalogs,
-    daemon,
     config.id,
     open && canControl && !terminal,
     config.harness,
@@ -311,23 +260,20 @@ export function RuntimeModelControls({
   const [submittingTarget, setSubmittingTarget] = useState<{ model: string; effort?: string } | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [runtimeControlUnavailable, setRuntimeControlUnavailable] = useState(false);
   const submitting = submittingTarget !== null;
 
-  // The scope identity is the trigger: a daemon switch must discard a notice or a
-  // half-finished Codex step that belonged to the previous daemon's session.
+  // The session identity is the trigger: a session switch must discard a notice or a
+  // half-finished Codex step that belonged to the previous session.
   // biome-ignore lint/correctness/useExhaustiveDependencies: scope reset trigger, see above
   useEffect(() => {
-    setRuntimeControlUnavailable(false);
     setFailure(null);
     setNotice(null);
     setSelectedCodexModel(null);
     setSubmittingTarget(null);
-  }, [daemon.daemonId, config.id]);
+  }, [config.id]);
 
   useEffect(() => {
     if (open) return;
-    setRuntimeControlUnavailable(false);
     setSelectedCodexModel(null);
   }, [open]);
 
@@ -335,7 +281,7 @@ export function RuntimeModelControls({
     config.harness === 'codex' && codexPickerFallbackNeeded(catalog, catalogError, selectedCodexModel ?? undefined);
 
   async function runModelCommand(model?: string, effort?: string) {
-    if (!canControl || terminal || promptRefused || submitting || runtimeControlUnavailable) return;
+    if (!canControl || terminal || promptRefused || submitting) return;
     const targeted = Boolean(model);
     setSubmittingTarget({ model: model ?? 'native-picker', ...(effort ? { effort } : {}) });
     setFailure(null);
@@ -343,7 +289,6 @@ export function RuntimeModelControls({
     if (targeted) onSwitchSubmitted?.();
     try {
       await api.runtime(
-        daemon,
         config.id,
         { action: 'model', ...(model ? { model } : {}), ...(effort ? { effort } : {}) },
         newRequestId(),
@@ -366,10 +311,6 @@ export function RuntimeModelControls({
       }
     } catch (cause) {
       if (targeted) onSwitchFailed?.();
-      if (isRuntimeEndpointUnavailable(cause)) {
-        setRuntimeControlUnavailable(true);
-        return;
-      }
       setFailure(failureMessage(cause));
     } finally {
       setSubmittingTarget(null);
@@ -379,7 +320,7 @@ export function RuntimeModelControls({
   const title = 'Switch model in place';
   if (terminal) {
     return (
-      <div className="border-border-soft border-t pt-3" data-daemon-id={daemon.daemonId}>
+      <div className="border-border-soft border-t pt-3">
         <h3 className="m-0 font-semibold text-fg text-ui">{title}</h3>
         <p className="mt-1 text-meta text-muted leading-base">
           In-session model switching requires a running session. Resume or relaunch this session before changing its
@@ -390,17 +331,17 @@ export function RuntimeModelControls({
   }
   if (!canControl) {
     return (
-      <div className="border-border-soft border-t pt-3" data-daemon-id={daemon.daemonId}>
+      <div className="border-border-soft border-t pt-3">
         <h3 className="m-0 font-semibold text-fg text-ui">{title}</h3>
         <p className="mt-1 text-meta text-muted leading-base">
-          This paired daemon is read-only, so it cannot send a native model command to the running session.
+          This daemon is read-only, so it cannot send a native model command to the running session.
         </p>
       </div>
     );
   }
 
   return (
-    <div className={popover ? undefined : 'border-border-soft border-t pt-3'} data-daemon-id={daemon.daemonId}>
+    <div className={popover ? undefined : 'border-border-soft border-t pt-3'}>
       {popover ? null : (
         <>
           <h3 className="m-0 font-semibold text-fg text-ui">{title}</h3>
@@ -417,11 +358,7 @@ export function RuntimeModelControls({
         </p>
       ) : null}
 
-      {runtimeControlUnavailable ? (
-        <p className="mt-2 rounded-control border border-warn-border bg-surface-2 p-3 text-ui text-warn" role="alert">
-          {runtimeControlUnavailableMessage('model')}
-        </p>
-      ) : selectedCodexModel ? (
+      {selectedCodexModel ? (
         <RuntimeReasoningStep
           backDisabled={submitting}
           currentEffort={state.observedModel === selectedCodexModel.value ? state.observedReasoningEffort : undefined}
@@ -446,7 +383,7 @@ export function RuntimeModelControls({
             else void runModelCommand(choice.value);
           }}
           onCustom={
-            config.harness === 'claude' && catalog?.catalog?.customIds === true
+            config.harness === 'claude-code' && catalog?.catalog?.customIds === true
               ? model => void runModelCommand(model)
               : undefined
           }
@@ -455,7 +392,7 @@ export function RuntimeModelControls({
         />
       )}
 
-      {codexPickerFallback && !runtimeControlUnavailable ? (
+      {codexPickerFallback ? (
         <NativePickerButton
           disabled={submitting || promptRefused}
           onClick={() => void runModelCommand()}
@@ -525,7 +462,7 @@ function RuntimeOutcome({ failure, notice }: { readonly failure: string | null; 
  * popover's own title says what it is — and keep every warning, refusal, notice
  * and failure, because those are the facts a switch is honest about.
  */
-export type RuntimePickerPresentation = 'sheet' | 'popover';
+export type { RuntimePickerPresentation };
 
 /** One choice in a runtime picker: what it reads as, and what choosing it does. */
 export interface RuntimeChoiceItem {
@@ -690,7 +627,7 @@ export function RuntimeChoiceMenu({ ariaLabel, items, disabled, presentation = '
 }
 
 export interface RuntimeModelChoicesProps {
-  readonly harness: 'claude' | 'codex';
+  readonly harness: RuntimeSessionView['config']['harness'];
   readonly choices: readonly RuntimeModelChoice[] | null;
   readonly error: unknown;
   readonly currentModel?: string;
@@ -1017,7 +954,6 @@ export function RuntimeEffortControls({
   canControl,
   catalogs,
   claudeEffort,
-  daemon,
   newRequestId = defaultRequestId,
   onClaudeEffortSent,
   onClose,
@@ -1035,24 +971,21 @@ export function RuntimeEffortControls({
   const [codexSubmittingEffort, setCodexSubmittingEffort] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [runtimeControlUnavailable, setRuntimeControlUnavailable] = useState(false);
   const { catalog, error: catalogError } = useRuntimeModelCatalog(
     catalogs,
-    daemon,
     config.id,
     canControl && !terminal,
     config.harness,
   );
 
-  // Same scope-identity reset as the model sheet: a daemon switch clears any
-  // result that belonged to the previous daemon's session.
+  // Same session-identity reset as the model sheet: a session switch clears any
+  // result that belonged to the previous session.
   // biome-ignore lint/correctness/useExhaustiveDependencies: scope reset trigger, see above
   useEffect(() => {
-    setRuntimeControlUnavailable(false);
     setFailure(null);
     setNotice(null);
     setCodexSubmittingEffort(null);
-  }, [daemon.daemonId, config.id]);
+  }, [config.id]);
 
   const runningModel = runtimeModelInForce(view);
   const currentCodexModel = catalog?.choices.find(choice => choice.value === runningModel);
@@ -1061,13 +994,13 @@ export function RuntimeEffortControls({
     config.harness === 'codex' && codexPickerFallbackNeeded(catalog, catalogError, currentCodexModel, true);
 
   async function runEffortCommand(level: string) {
-    if (!canControl || terminal || promptRefused || submitting || runtimeControlUnavailable) return;
+    if (!canControl || terminal || promptRefused || submitting) return;
     setSubmitting(true);
     setCodexSubmittingEffort(null);
     setFailure(null);
     setNotice(null);
     try {
-      await api.runtime(daemon, config.id, { action: 'effort', effort: level }, newRequestId());
+      await api.runtime(config.id, { action: 'effort', effort: level }, newRequestId());
       onClaudeEffortSent?.(level);
       setNotice(
         level === 'max'
@@ -1075,10 +1008,6 @@ export function RuntimeEffortControls({
           : `Effort set to ${level}. Saved as this account’s default for new sessions, and the next turn uses it.`,
       );
     } catch (cause) {
-      if (isRuntimeEndpointUnavailable(cause) || isEffortActionUnsupported(cause)) {
-        setRuntimeControlUnavailable(true);
-        return;
-      }
       setFailure(failureMessage(cause));
     } finally {
       setCodexSubmittingEffort(null);
@@ -1087,21 +1016,17 @@ export function RuntimeEffortControls({
   }
 
   async function runCodexEffort(model: RuntimeModelChoice, effort: string) {
-    if (!canControl || terminal || promptRefused || submitting || runtimeControlUnavailable) return;
+    if (!canControl || terminal || promptRefused || submitting) return;
     setSubmitting(true);
     setCodexSubmittingEffort(effort);
     setFailure(null);
     setNotice(null);
     onSwitchSubmitted?.();
     try {
-      await api.runtime(daemon, config.id, { action: 'model', model: model.value, effort }, newRequestId());
+      await api.runtime(config.id, { action: 'model', model: model.value, effort }, newRequestId());
       setNotice(`Codex confirmed ${model.value} · ${effort} from its runtime settings.`);
     } catch (cause) {
       onSwitchFailed?.();
-      if (isRuntimeEndpointUnavailable(cause)) {
-        setRuntimeControlUnavailable(true);
-        return;
-      }
       setFailure(failureMessage(cause));
     } finally {
       setCodexSubmittingEffort(null);
@@ -1110,23 +1035,19 @@ export function RuntimeEffortControls({
   }
 
   async function openCodexPickerFallback() {
-    if (!canControl || terminal || promptRefused || submitting || runtimeControlUnavailable) return;
+    if (!canControl || terminal || promptRefused || submitting) return;
     setSubmitting(true);
     setCodexSubmittingEffort(null);
     setFailure(null);
     setNotice(null);
     try {
-      await api.runtime(daemon, config.id, { action: 'model' }, newRequestId());
+      await api.runtime(config.id, { action: 'model' }, newRequestId());
       if (onOpenTerminal?.()) {
         onClose();
         return;
       }
       setNotice('Codex opened its native picker in Terminal. No switch is claimed until Codex reports one.');
     } catch (cause) {
-      if (isRuntimeEndpointUnavailable(cause)) {
-        setRuntimeControlUnavailable(true);
-        return;
-      }
       setFailure(failureMessage(cause));
     } finally {
       setSubmitting(false);
@@ -1136,7 +1057,7 @@ export function RuntimeEffortControls({
   const title = 'Reasoning effort';
   if (terminal) {
     return (
-      <div className="mt-4 border-border-soft border-t pt-3" data-daemon-id={daemon.daemonId}>
+      <div className="mt-4 border-border-soft border-t pt-3">
         <h3 className="m-0 font-semibold text-fg text-ui">{title}</h3>
         <p className="mt-1 text-meta text-muted leading-base">
           Changing the reasoning level requires a running session. Resume or relaunch this session first.
@@ -1146,17 +1067,17 @@ export function RuntimeEffortControls({
   }
   if (!canControl) {
     return (
-      <div className="mt-4 border-border-soft border-t pt-3" data-daemon-id={daemon.daemonId}>
+      <div className="mt-4 border-border-soft border-t pt-3">
         <h3 className="m-0 font-semibold text-fg text-ui">{title}</h3>
         <p className="mt-1 text-meta text-muted leading-base">
-          This paired daemon is read-only, so it cannot change the running session’s reasoning level.
+          This daemon is read-only, so it cannot change the running session’s reasoning level.
         </p>
       </div>
     );
   }
 
   return (
-    <div className={popover ? undefined : 'mt-4 border-border-soft border-t pt-3'} data-daemon-id={daemon.daemonId}>
+    <div className={popover ? undefined : 'mt-4 border-border-soft border-t pt-3'}>
       {popover ? null : <h3 className="m-0 font-semibold text-fg text-ui">{title}</h3>}
       {promptRefused ? (
         <p className="mt-2 text-meta text-warn leading-base">
@@ -1165,11 +1086,7 @@ export function RuntimeEffortControls({
         </p>
       ) : null}
 
-      {runtimeControlUnavailable ? (
-        <p className="mt-2 rounded-control border border-warn-border bg-surface-2 p-3 text-ui text-warn" role="alert">
-          {runtimeControlUnavailableMessage('effort')}
-        </p>
-      ) : config.harness === 'claude' ? (
+      {config.harness === 'claude-code' ? (
         <ClaudeEffortChoices
           current={claudeEffort}
           disabled={submitting || promptRefused}
@@ -1207,7 +1124,7 @@ export function RuntimeEffortControls({
               the session or use the native Terminal picker.
             </p>
           )}
-          {codexPickerFallback && !runtimeControlUnavailable ? (
+          {codexPickerFallback ? (
             <NativePickerButton
               disabled={submitting || promptRefused}
               onClick={() => void openCodexPickerFallback()}

@@ -21,7 +21,7 @@
 import { Check, CircleSlash2, Download, FlaskConical, Mic, Radio, ShieldCheck, Trash2, X } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { useOnDeviceInstall } from '../../hooks/use-on-device-install.ts';
-import { cn } from '../../lib/class-names.ts';
+import { Button, cn } from '../../ui.ts';
 import {
   type BrowserRecognitionProvider,
   BrowserRecognitionSession,
@@ -52,7 +52,6 @@ import type {
 import type { OnDeviceVoices } from '../../lib/stt/on-device-voices.ts';
 import { DEFAULT_ON_DEVICE_ENGINE, type DeviceClass } from '../../lib/stt/engine-defaults.ts';
 import { type DictationEngineId, isOnDeviceEngine } from '../../lib/stt/stt-settings.ts';
-import { Button } from '../../shell/primitives.tsx';
 import {
   BROWSER_ACTIVE_NOTE,
   BROWSER_ENGINE_DISCLOSURE,
