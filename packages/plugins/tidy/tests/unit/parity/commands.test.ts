@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import type { CliHalf, PluginClient, TerminalIo, VerbInvocation } from '@ferretry/kernel/manifest';
-import cli from '../../cli/index.ts';
-import { renderDryRun, renderScratchPlan, renderScratchSweep } from '../../cli/lib/render.ts';
-import type { TidyPlan } from '../../contract/index.ts';
-import manifest from '../../manifest.ts';
+import cli from '../../../cli/index.ts';
+import { renderDryRun, renderScratchPlan, renderScratchSweep } from '../../../cli/lib/render.ts';
+import type { TidyPlan } from '../../../contract/index.ts';
+import manifest from '../../../manifest.ts';
 
 interface Call {
   readonly route: string;

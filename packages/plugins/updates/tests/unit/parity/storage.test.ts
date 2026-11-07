@@ -1,15 +1,15 @@
 /** Parity rows F-0017, F-0087, F-0352, F-0353, F-0369, F-0400, F-0418 (docs/design/rebuild-parity.tsv). */
 import { describe, expect, test } from 'bun:test';
 import type { Log, StatePort } from '@ferretry/kernel/contract';
-import { StateUpdateDocuments } from '../../daemon/adapters/documents.ts';
+import { StateUpdateDocuments } from '../../../daemon/adapters/documents.ts';
 import {
   UPDATES_CONFIG,
   UPDATES_LATEST,
   UPDATES_LOG,
   UPDATES_REPORT,
   UpdatesConfigSchema,
-} from '../../contract/index.ts';
-import manifest from '../../manifest.ts';
+} from '../../../contract/index.ts';
+import manifest from '../../../manifest.ts';
 
 const quiet: Log = { debug() {}, info() {}, warn() {}, error() {}, child: () => quiet };
 
