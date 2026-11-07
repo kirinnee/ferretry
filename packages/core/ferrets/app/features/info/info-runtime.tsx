@@ -22,7 +22,7 @@ export interface InfoRuntimeProps {
   /** Whether a Restart would relaunch it on different settings. Absent: no Settings row. */
   readonly relaunch?: InfoRelaunchRead;
   /** The Restart the Settings row offers when it is behind. */
-  readonly onRestart?: () => Promise<void>;
+  readonly onRestart?: () => Promise<boolean>;
 }
 
 export function InfoRuntime({ ferret, controls, relaunch, onRestart }: InfoRuntimeProps) {

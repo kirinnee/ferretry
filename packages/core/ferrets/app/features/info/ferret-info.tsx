@@ -12,12 +12,14 @@ import { type ReactNode, useCallback, useId } from 'react';
 import { displayCallsign } from '../../lib/callsign.ts';
 import type { FerretsClient } from '../../lib/client.ts';
 import { BottomSheet, browserClipboardWriter, type ClipboardWriter, useLayoutMode } from '../../ui.ts';
+import { newRestartRequestId, restartWithResume } from '../header/ferret-operations.ts';
+import { useRestartRefusal } from '../header/restart-refusal.tsx';
 import { InfoNote } from './info-parts.tsx';
 import { InfoOverview } from './info-overview.tsx';
 import { InfoPanel } from './info-panel.tsx';
 import type { InfoRelaunchRead } from './info-relaunch.tsx';
 import { InfoRuntime } from './info-runtime.tsx';
-import { readFerret, readFerrets, readRelaunchSettings, readWorktrees, restartFerret } from './info-wire.ts';
+import { readFerret, readFerrets, readRelaunchSettings, readWorktrees } from './info-wire.ts';
 import { type InfoRead, useInfoRead } from './use-info-read.ts';
 import { useInfoPlacement } from './use-info-placement.ts';
 
@@ -62,13 +64,27 @@ export function FerretInfo({
   const worktrees = useInfoRead(() => readWorktrees(client), tab === 'overview');
   const ferrets = useInfoRead(() => readFerrets(client), tab === 'overview');
   const relaunch = useInfoRead(() => readRelaunchSettings(client, ferretId), tab === 'runtime');
-  const restart = useCallback(async (): Promise<void> => {
-    await restartFerret(client, ferretId);
+  const record = ferret.read.kind === 'ready' ? ferret.read.value : null;
+  // The same Restart as Actions: a paused one (in-flight work, a smaller window, an unresumable conversation) is held
+  // by the panel below with its deliberate "Restart anyway", and is never claimed as done.
+  const refusal = useRestartRefusal(() => {
     ferret.reload();
     relaunch.reload();
-  }, [client, ferretId, ferret.reload, relaunch.reload]);
+  }, ferretId);
+  const restart = useCallback(async (): Promise<boolean> => {
+    if (record === null) return false;
+    try {
+      await restartWithResume(client, record, newRestartRequestId());
+    } catch (reason) {
+      if (refusal.capture(reason)) return false;
+      throw reason;
+    }
+    ferret.reload();
+    relaunch.reload();
+    return true;
+  }, [client, record, refusal.capture, ferret.reload, relaunch.reload]);
 
-  if (ferret.read.kind !== 'ready')
+  if (record === null)
     return (
       <div className="fy-info" data-info-panel="">
         <div className="fy-info__head">
@@ -95,7 +111,6 @@ export function FerretInfo({
       </div>
     );
 
-  const record = ferret.read.value;
   const name = displayCallsign(record.name) || record.id;
   return (
     <InfoPanel
@@ -109,25 +124,31 @@ export function FerretInfo({
         : {})}
       render={{
         overview: () => (
-          <InfoOverview
-            about={{ onRestart: restart }}
-            ferret={record}
-            name={name}
-            now={now()}
-            worktrees={worktrees.read.kind === 'ready' ? worktrees.read.value : null}
-            write={write}
-            {...(ferrets.read.kind === 'ready' ? { ferrets: ferrets.read.value } : {})}
-            {...(onRename === undefined ? {} : { onRename })}
-            {...(onOpenFerret === undefined ? {} : { onOpenFerret })}
-          />
+          <>
+            <InfoOverview
+              about={{ onRestart: restart }}
+              ferret={record}
+              name={name}
+              now={now()}
+              worktrees={worktrees.read.kind === 'ready' ? worktrees.read.value : null}
+              write={write}
+              {...(ferrets.read.kind === 'ready' ? { ferrets: ferrets.read.value } : {})}
+              {...(onRename === undefined ? {} : { onRename })}
+              {...(onOpenFerret === undefined ? {} : { onOpenFerret })}
+            />
+            {refusal.panel}
+          </>
         ),
         runtime: () => (
-          <InfoRuntime
-            ferret={record}
-            relaunch={relaunchRead(relaunch.read)}
-            onRestart={restart}
-            {...(runtimeControls === undefined ? {} : { controls: runtimeControls })}
-          />
+          <>
+            <InfoRuntime
+              ferret={record}
+              relaunch={relaunchRead(relaunch.read)}
+              onRestart={restart}
+              {...(runtimeControls === undefined ? {} : { controls: runtimeControls })}
+            />
+            {refusal.panel}
+          </>
         ),
       }}
     />

@@ -39,15 +39,18 @@ export function InfoRelaunchRow({
   onRestart,
 }: {
   readonly read: InfoRelaunchRead;
-  /** The same Restart as Actions › Restart CLI. Absent when this viewer may not restart it. */
-  readonly onRestart?: () => Promise<void>;
+  /**
+   * The same Restart as Actions › Restart CLI: true once the CLI restarted, false when the daemon paused it (the panel
+   * beside the row holds the pause, and nothing is claimed as done). Absent when this viewer may not restart it.
+   */
+  readonly onRestart?: () => Promise<boolean>;
 }) {
   const [restart, setRestart] = useState<RestartState>({ kind: 'idle' });
   const run = (): void => {
     if (onRestart === undefined) return;
     setRestart({ kind: 'busy' });
     onRestart().then(
-      () => setRestart({ kind: 'done' }),
+      restarted => setRestart(restarted ? { kind: 'done' } : { kind: 'idle' }),
       (error: unknown) =>
         setRestart({ kind: 'failed', reason: error instanceof Error ? error.message : String(error) }),
     );

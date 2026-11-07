@@ -137,6 +137,9 @@ interface RestartConsent {
   readonly conversation?: MoveConversation;
 }
 
+/** A fresh request id for one Restart press: the daemon remembers an id with the body it first saw. */
+export const newRestartRequestId = (): string => `ferret-restart-${globalThis.crypto.randomUUID()}`;
+
 /** The runtime a restart relaunches on: the one the ferret already has. */
 export const restartTarget = (ferret: Pick<FerretSummary, 'runtime'>): string | undefined => ferret.runtime;
 

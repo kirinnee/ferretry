@@ -131,8 +131,8 @@ describe('InfoOverview — About this ferret', () => {
     const root = await show({
       about: {
         onRestart: () =>
-          new Promise<void>(resolve => {
-            finish = resolve;
+          new Promise<boolean>(resolve => {
+            finish = () => resolve(true);
           }),
       },
     });

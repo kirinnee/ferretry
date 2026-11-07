@@ -5,7 +5,6 @@ import {
   readFerrets,
   readRelaunchSettings,
   readWorktrees,
-  restartFerret,
 } from '../../../../app/features/info/info-wire.ts';
 import { type Call, scripted } from '../support/client.ts';
 import { ferretOf } from './fixtures.ts';
@@ -51,34 +50,5 @@ describe('the Info reads', () => {
     const refusal = Object.assign(new Error('no ferret f9'), { status: 404, code: 'not-found' });
     const error = await rejection(readFerret(scripted({ 'GET /v1/ferrets/:ferretId': refusal }), 'f9'));
     expect(error).toMatchObject({ message: 'no ferret f9', status: 404, code: 'not-found' });
-  });
-});
-
-describe('restartFerret', () => {
-  const answer = (patch: Record<string, unknown>) => ({ restarted: [], queued: [], skipped: [], failed: [], ...patch });
-
-  it('asks for this one ferret by id, and says it restarted', async () => {
-    const calls: Call[] = [];
-    const client = scripted({ 'POST /v1/restarts': answer({ restarted: [{ id: 'f1' }] }) }, calls);
-    expect(await restartFerret(client, 'f1')).toEqual({ kind: 'restarted' });
-    expect(calls[0]).toMatchObject({ route: 'POST /v1/restarts', body: { scope: 'ids', ids: ['f1'] } });
-  });
-
-  it('says a busy ferret is queued, with the daemon’s detail when it gave one', async () => {
-    const queued = scripted({ 'POST /v1/restarts': answer({ queued: [{ id: 'f1', reason: 'mid-turn' }] }) });
-    expect(await restartFerret(queued, 'f1')).toMatchObject({ kind: 'queued' });
-    const detail = scripted({
-      'POST /v1/restarts': answer({ queued: [{ id: 'f1', reason: 'in-flight', detail: 'a build is running' }] }),
-    });
-    expect(await restartFerret(detail, 'f1')).toEqual({ kind: 'queued', sentence: 'a build is running' });
-  });
-
-  it('throws the daemon’s reason for a failure, a skip, and a refusal', async () => {
-    const failed = scripted({ 'POST /v1/restarts': answer({ failed: [{ id: 'f1', reason: 'the pane is gone' }] }) });
-    expect((await rejection(restartFerret(failed, 'f1'))).message).toBe('the pane is gone');
-    const skipped = scripted({ 'POST /v1/restarts': answer({ skipped: [{ id: 'f1', reason: 'not-running' }] }) });
-    expect((await rejection(restartFerret(skipped, 'f1'))).message).toContain('not running');
-    const refused = Object.assign(new Error('owner only'), { status: 403 });
-    expect((await rejection(restartFerret(scripted({ 'POST /v1/restarts': refused }), 'f1'))).status).toBe(403);
   });
 });

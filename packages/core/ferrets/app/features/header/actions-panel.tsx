@@ -10,7 +10,6 @@
 import { useOptionalRouter } from '@ferretry/app';
 import { Play } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
-import type { FerretSummary } from '../../../contract/index.ts';
 import { displayCallsign } from '../../lib/callsign.ts';
 import type { LiveFerretsClient } from '../../lib/client.ts';
 import { useFerret } from '../../lib/ferret-read.ts';
@@ -19,6 +18,7 @@ import { ActionToast } from './action-toast.tsx';
 import { ActionsMenu } from './actions-menu.tsx';
 import { CORE_FERRET_ACTIONS, type CoreActionContext } from './core-actions.ts';
 import {
+  newRestartRequestId,
   renameFerret,
   restartOnEarlierConversation,
   restartWithResume,
@@ -40,8 +40,6 @@ export interface ActionsPanelProps {
   readonly canControl?: boolean;
   /** More actions, from features that add them (same shape as the core ones). */
   readonly contributions?: readonly FerretActionContribution<CoreActionContext>[];
-  /** Opens "Move to Codex… / Move to Claude…", when the host offers it. */
-  readonly openConvert?: (ferret: FerretSummary) => void;
 }
 
 interface Alert {
@@ -49,15 +47,7 @@ interface Alert {
   readonly detail?: string;
 }
 
-const requestId = (): string => `ferret-restart-${globalThis.crypto.randomUUID()}`;
-
-export function ActionsPanel({
-  client,
-  subject,
-  canControl = true,
-  contributions = [],
-  openConvert,
-}: ActionsPanelProps) {
+export function ActionsPanel({ client, subject, canControl = true, contributions = [] }: ActionsPanelProps) {
   const { read, reload } = useFerret(client, subject);
   const compact = useLayoutMode() === 'drawer';
   const router = useOptionalRouter();
@@ -103,10 +93,15 @@ export function ActionsPanel({
       if (router === null || daemon === undefined) fail('This page has no daemon to move the ferret on.');
       else router.navigate(movePath(daemon, ferret.id));
     },
-    ...(openConvert === undefined ? {} : { openConvert: () => openConvert(ferret) }),
-    restart: async () => await restart(async () => await restartWithResume(client, ferret, requestId())),
+    // "Move to Codex… / Move to Claude…" is the move page opened on its CLI switch. It is offered for every ferret: the
+    // page says in its own words when the machine has no account of the other CLI to carry the conversation to.
+    openConvert: () => {
+      if (router === null || daemon === undefined) fail('This page has no daemon to move the ferret on.');
+      else router.navigate(movePath(daemon, ferret.id, true));
+    },
+    restart: async () => await restart(async () => await restartWithResume(client, ferret, newRestartRequestId())),
     restartOnEarlierConversation: async () =>
-      await restart(async () => await restartOnEarlierConversation(client, ferret, requestId())),
+      await restart(async () => await restartOnEarlierConversation(client, ferret, newRestartRequestId())),
     setPinned: async pinned => await act(async () => await setFerretPinned(client, ferret.id, pinned)),
     stop: async () => await act(async () => await stopFerret(client, ferret.id)),
     resume: async () => await act(async () => await resumeFerret(client, ferret.id)),

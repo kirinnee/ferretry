@@ -19,8 +19,8 @@ export interface InfoAboutProps {
   readonly onOpenFerret?: (ferretId: string) => void;
   /** The board card this ferret was started on, as its id. Absent: it has none. */
   readonly card?: string;
-  /** The same Restart as Actions › Restart CLI. Absent: this reader may not restart it. */
-  readonly onRestart?: () => Promise<void>;
+  /** The same Restart as Actions › Restart CLI; true once it restarted, false when it was paused. Absent: this reader may not restart it. */
+  readonly onRestart?: () => Promise<boolean>;
 }
 
 function RestartRow({ onRestart }: Pick<InfoAboutProps, 'onRestart'>) {

@@ -59,7 +59,7 @@ describe('InfoRuntime', () => {
     mounted = await mount(
       <InfoRuntime
         ferret={ferretOf('f1')}
-        onRestart={async () => {}}
+        onRestart={async () => true}
         relaunch={{ kind: 'ready', settings: { current: false, reasons: ['settings'] } }}
       />,
     );
@@ -70,7 +70,7 @@ describe('InfoRuntime', () => {
 
 const STALE: InfoRelaunchRead = { kind: 'ready', settings: { current: false, reasons: ['arguments', 'settings'] } };
 
-const showRow = async (read: InfoRelaunchRead, onRestart?: () => Promise<void>) => {
+const showRow = async (read: InfoRelaunchRead, onRestart?: () => Promise<boolean>) => {
   mounted = await mount(
     <dl>
       <InfoRelaunchRow read={read} {...(onRestart === undefined ? {} : { onRestart })} />
@@ -88,7 +88,7 @@ describe('InfoRelaunchRow', () => {
   });
 
   it('marks a CLI on current settings as current and offers nothing', async () => {
-    const root = await showRow({ kind: 'ready', settings: { current: true, reasons: [] } }, async () => {});
+    const root = await showRow({ kind: 'ready', settings: { current: true, reasons: [] } }, async () => true);
     expect(root.querySelector('[data-info-settings="current"]')?.textContent).toBe('Current');
     expect(root.querySelector('[data-info-restart]')).toBeNull();
   });
@@ -98,8 +98,8 @@ describe('InfoRelaunchRow', () => {
     const root = await showRow(
       STALE,
       () =>
-        new Promise<void>(resolve => {
-          finish = resolve;
+        new Promise<boolean>(resolve => {
+          finish = () => resolve(true);
         }),
     );
     expect(root.textContent).toContain('Running with older settings — Restart to apply');
@@ -111,6 +111,14 @@ describe('InfoRelaunchRow', () => {
     expect(button.disabled).toBe(true);
     await interact(() => finish());
     expect(root.querySelector('[data-info-settings="restarted"]')?.textContent).toContain('Restarted');
+  });
+
+  it('does not claim a restart the daemon paused, and offers the Restart again', async () => {
+    const root = await showRow(STALE, async () => false);
+    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-info-restart]'), 'restart').click());
+    expect(root.querySelector('[data-info-settings="restarted"]')).toBeNull();
+    expect(root.textContent).not.toContain('Restarted');
+    expect(must(root.querySelector<HTMLButtonElement>('[data-info-restart]'), 'restart').disabled).toBe(false);
   });
 
   it('says why a restart failed and lets it be tried again', async () => {
