@@ -6,7 +6,7 @@ import { captureLog, HOME, loginsDef, manualClock, updatesDef } from './support.
 /**
  * `ConfigPort.remove(def, name, { refuseIfHeld: true })`: a removal that would be held is refused `would_hold`
  * instead — file untouched, nothing held — decided by the SAME one judgement the removal asks (asked once, so a
- * judge that claims a one-shot proof claims it at most once, and only when the removal then happens).
+ * judge that claims a one-shot proof claims it at most once).
  */
 function judged(verdict: boolean) {
   const fs = createMemoryHostFs();
