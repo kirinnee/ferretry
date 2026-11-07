@@ -169,7 +169,7 @@ G159	kept	gate	-	behaviour as written	grants	G159
 G160	kept	gate	-	`GET /v1/grants/audit`, `fy daemon config history`	grants	G160
 G161	kept	gate	-	behaviour as written	grants	G161
 G162	kept	conversation	claude-code,codex	behaviour as written	grants	G162
-G163	kept	kernel	vault	behaviour as written	grants	G163
+G163	kept	conversation	kernel,vault	`readerRoutes.logPage` (`plugins/conversation/daemon/reader/routes.ts`)	grants	G163
 G164	kept	conversation	kernel,vault	behaviour as written	grants	G164
 G165	kept	access	gate	behaviour as written	grants	G165
 G166	kept	access	-	behaviour as written	grants	G166
@@ -335,7 +335,7 @@ I10	kept	vault	-	`InputDeliverBodySchema`	input-requests	I10
 I11	kept	vault	asks	behaviour as written	input-requests	I11
 I12	kept	vault	asks	behaviour as written	input-requests	I12
 I13	kept	vault	asks	`INPUT_PROMPT_MARKER`	input-requests	I13
-I14	kept	vault	asks	400 `use_input_form`	input-requests	I14
+I14	kept	asks	vault	400 `use_input_form`	input-requests	I14
 I15	kept	vault	-	`InputRaiseSchema`	input-requests	I15
 I16	kept	vault	-	`InputDeliverBodySchema`	input-requests	I16
 I17	kept	vault	-	`InputAgentViewSchema`	input-requests	I17
@@ -407,7 +407,7 @@ I82	kept	vault	terminals	`surface.input_quarantined`, `surface.input_quarantine_
 I83	kept	vault	terminals	behaviour as written	input-requests	I83
 I84	kept	vault	terminals	behaviour as written	input-requests	I84
 I85	kept	vault	terminals	behaviour as written	input-requests	I85
-I86	kept	vault	-	`lock.ts`, `InputLockSchema`, `lockSeconds`	input-requests	I86
+I86	kept	vault	-	`lock.ts`, `InputHoldSchema`, `lockSeconds`	input-requests	I86
 I87	kept	vault	-	`hidden-terminal`	input-requests	I87
 I88	kept	vault	-	`proven-field`, `probed-field`	input-requests	I88
 I89	kept	vault	-	`INPUT_LOCK_WORDS`	input-requests	I89
@@ -439,10 +439,10 @@ I114	kept	browsers	vault	`covered`	input-requests	I114
 I115	kept	browsers	vault	`inputType`, `Input.insertText`	input-requests	I115
 I116	kept	vault	browsers	`INPUT_QUARANTINE_SECONDS`	input-requests	I116
 I117	kept	vault	browsers	behaviour as written	input-requests	I117
-I118	kept	vault	browsers	behaviour as written	input-requests	I118
-I119	kept	vault	browsers	behaviour as written	input-requests	I119
-I120	kept	vault	browsers	behaviour as written	input-requests	I120
-I121	kept	vault	browsers	behaviour as written	input-requests	I121
+I118	kept	browsers	vault	behaviour as written	input-requests	I118
+I119	kept	browsers	vault	behaviour as written	input-requests	I119
+I120	kept	browsers	vault	behaviour as written	input-requests	I120
+I121	kept	browsers	vault	behaviour as written	input-requests	I121
 I122	kept	browsers	vault	behaviour as written	input-requests	I122
 I123	kept	browsers	vault	`WebAuthn.addVirtualAuthenticator`, `setResponseOverrideBits({ isBadUP: true })`	input-requests	I123
 I124	kept	browsers	vault	`recogniseBrowserChallenge`, `challenge`	input-requests	I124
