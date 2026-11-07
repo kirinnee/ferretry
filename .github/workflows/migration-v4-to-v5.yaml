@@ -139,5 +139,7 @@ jobs:
             ${{ env.FIXTURE_OUT }}/fake-claude.log
             ${{ env.FIXTURE_OUT }}/boot/fyd.stderr
             ${{ env.FIXTURE_OUT }}/boot/fyd.log
+            ${{ env.FIXTURE_OUT }}/boot/baseline/fyd.stderr
+            ${{ env.FIXTURE_OUT }}/boot/baseline/fyd.log
           if-no-files-found: ignore
           retention-days: 3
