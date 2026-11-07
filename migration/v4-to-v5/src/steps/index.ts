@@ -9,6 +9,7 @@
 import type { V4Paths } from '../v4/layout.ts';
 import type { V5Writer } from '../v5/write.ts';
 import type { NotCarried, StepReport } from '../report.ts';
+import { accessStep } from './access.ts';
 import { identityStep, vaultStep } from './secrets.ts';
 
 export interface StepContext {
@@ -262,18 +263,5 @@ export const STEPS: readonly Step[] = [
     },
     'the Accounts state schema and its sealed-document declaration',
   ),
-  pending(
-    {
-      id: 'access',
-      title: 'Paired devices and passkeys (public keys, grants, unlock settings)',
-      owner: ['plugin-access', 'kernel'],
-      reads: ['state/devices.json', 'state/passkeys.json', 'state/security.json', 'config/daemon.json (grants key)'],
-      sealed: ['state/push-vapid.json', 'state/push.json'],
-      notCarried: [
-        { what: 'pairing codes', why: 'single-use and two minutes long; none survives a stop' },
-        { what: 'live unlocks', why: 'each device unlocks again with its passkey' },
-      ],
-    },
-    'the Access state schema and the Kernel identity key path',
-  ),
+  accessStep,
 ];
