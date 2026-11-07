@@ -1,5 +1,32 @@
-import { Carriers, DoctorChecks, PluginsChanged, SessionModes } from './contract/index.ts';
+import { z } from 'zod';
+import { Carriers, DoctorChecks, defineConfig, PluginsChanged, SessionModes } from './contract/index.ts';
 import { definePlugin, route } from './manifest/index.ts';
+
+/** `config/plugins.yaml` (§3.6): on or off per plugin. Core is always on whatever it says. */
+export const PluginsYamlSchema = z.strictObject({
+  plugins: z.record(z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/), z.enum(['on', 'off'])).default({}),
+});
+export type PluginsYaml = z.infer<typeof PluginsYamlSchema>;
+
+/**
+ * Person-only and passkey-checked (§7.2): turning a plugin ON can widen what ferrets may do (a tool, an item), so it
+ * is a loosening edit; turning one off only tightens.
+ */
+export const PluginsConfig = defineConfig({
+  file: 'plugins.yaml',
+  schema: PluginsYamlSchema,
+  axis: 'configure',
+  personOnly: true,
+  loosens: (before, after) =>
+    Object.entries(after.plugins)
+      .filter(([id, state]) => state === 'on' && before?.plugins[id] === 'off')
+      .map(([id]) => `turns ${id} on`)
+      .concat(
+        Object.keys(before?.plugins ?? {})
+          .filter(id => before?.plugins[id] === 'off' && after.plugins[id] === undefined)
+          .map(id => `turns ${id} on (its off line was removed)`),
+      ),
+});
 
 /**
  * The Kernel's own declaration (§2.2). Exported as `@ferretry/kernel/plugin` rather than `./manifest`, because
@@ -54,7 +81,7 @@ export default definePlugin({
       }),
     ],
   },
-  data: { publishes: [PluginsChanged] },
+  data: { publishes: [PluginsChanged], config: [PluginsConfig] },
   hooks: {
     offers: [{ hook: Carriers }, { hook: SessionModes }, { hook: DoctorChecks }],
   },

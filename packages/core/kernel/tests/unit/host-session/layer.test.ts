@@ -692,7 +692,7 @@ describe('the session layer: streams', () => {
     expect(client.last('stream-close')).toBeUndefined();
   });
 
-  test('a stream frame whose permit changed (§7.3) is dropped unsent and the session ends', async () => {
+  test('I75 a stream frame whose permit changed (§7.3) is dropped unsent and the session ends', async () => {
     const fx = await fixture();
     const { handler } = streamFixture(fx);
     const client = await streaming(fx);

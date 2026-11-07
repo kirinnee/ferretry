@@ -21,7 +21,7 @@ import { KERNEL_REFUSALS } from '../contract/refusals.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { DaemonContext, DaemonHalf, DaemonImplementation, ToolHandler, ToolResult } from '../manifest/implement.ts';
 import type { Manifest, ToolDecl } from '../manifest/types.ts';
-import kernelManifest from '../plugin.ts';
+import kernelManifest, { PluginsConfig, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import { runInCall } from './call-scope.ts';
@@ -182,8 +182,10 @@ function deadlineFrom(clock: Clock): Deadline {
 
 /**
  * Boots the daemon in the order of §7.6 and records each step in `trace` (the boot-trace test asserts it):
- * check → home → identity → state:<id> → build:<id> → bind → snapshot → mount → listen → jobs. Nothing is served and
- * no job runs before `bind`; a core piece failing to build stops the boot.
+ * home → identity → config → check → state:<id> → build:<id> → bind → snapshot → mount → listen → jobs. The home is
+ * decided first because nothing may be read from an undecided folder, and the enabled graph is checked after
+ * `config/plugins.yaml` is read, since that file is what says which plugins are on. Nothing is served and no job runs
+ * before `bind`; a core piece failing to build stops the boot.
  */
 export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const { adapters, home } = options;
@@ -192,13 +194,32 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const clock = adapters.clock;
   const deadline = deadlineFrom(clock);
 
-  // 1. Check the enabled graph.
-  trace.push('check');
+  // 2. Home and fence, identity (before anything is read from the home).
+  trace.push('home');
+  const opened = await openHome(adapters.fs, home, `fyd ${options.version}`, clock.now() as Instant);
+  if (opened.kind === 'refused') return { kind: 'refused', sentence: opened.decision.sentence, trace };
+  trace.push('identity');
+  const identityOutcome = await loadIdentity(adapters.fs, home);
+  if (identityOutcome.kind === 'damaged') return { kind: 'refused', sentence: identityOutcome.sentence, trace };
+  const identity = identityOutcome.identity;
+
   const implementations = new Map<string, DaemonImplementation>();
   for (const implementation of options.implementations)
     if (implementation.manifest.id !== 'kernel') implementations.set(implementation.manifest.id, implementation);
   const manifests: Manifest[] = [kernelManifest, ...[...implementations.values()].map(impl => impl.manifest)];
-  const enabled = (id: string): boolean => isCore(id) || (options.enabled?.(id) ?? true);
+  // Config: every declared file of every known plugin, so a plugin turned on later finds its file checked.
+  trace.push('config');
+  const config = adapters.config(
+    manifests.flatMap(manifest => (manifest.data?.config ?? []).map(def => ({ plugin: manifest.id, def }))),
+  );
+  await config.reload();
+  const stopWatching = config.startWatching?.();
+  const pluginsYaml = readPluginsYaml(config.port('kernel'));
+
+  // 1. Check the enabled graph.
+  trace.push('check');
+  const enabled = (id: string): boolean =>
+    isCore(id) || (options.enabled?.(id) ?? pluginsYaml?.plugins[id] !== 'off');
   const enabledManifests = manifests.filter(manifest => enabled(manifest.id));
   const planned = HookEngine.plan(enabledManifests, log, deadline);
   const hookRefused = new Set(planned.refusals.flatMap(refusal => refusal.plugins));
@@ -226,14 +247,6 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const order = graph.order;
   const { engine: hooks } = HookEngine.plan(order, log, deadline);
 
-  // 2. Home and fence.
-  trace.push('home');
-  const opened = await openHome(adapters.fs, home, `fyd ${options.version}`, clock.now() as Instant);
-  if (opened.kind === 'refused') return { kind: 'refused', sentence: opened.decision.sentence, trace };
-  trace.push('identity');
-  const identityOutcome = await loadIdentity(adapters.fs, home);
-  if (identityOutcome.kind === 'damaged') return { kind: 'refused', sentence: identityOutcome.sentence, trace };
-  const identity = identityOutcome.identity;
   const data = await loadDataPlugins(adapters.fs, home, new Set(manifests.map(manifest => manifest.id)));
 
   const records = new Map<string, PluginRecord>();
@@ -257,13 +270,6 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     record.state = state;
     record.damage = await state.open();
   }
-
-  trace.push('config');
-  const config = adapters.config(
-    order.flatMap(manifest => (manifest.data?.config ?? []).map(def => ({ plugin: manifest.id, def }))),
-  );
-  await config.reload();
-  const stopWatching = config.startWatching?.();
 
   // Shared kernel machinery.
   const events = new EventBus(log);
@@ -609,6 +615,15 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     return stopping;
   };
   return { kind: 'running', host: running };
+}
+
+/** `config/plugins.yaml` (§3.6), or undefined when it is missing or broken (its last good version is then in effect). */
+function readPluginsYaml(port: ConfigPort): PluginsYaml | undefined {
+  try {
+    return port.file(PluginsConfig);
+  } catch {
+    return undefined;
+  }
 }
 
 function refusalText(response: ApiResponse): string {

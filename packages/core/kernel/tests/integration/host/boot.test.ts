@@ -122,14 +122,14 @@ describe('boot (§7.6)', () => {
     const host = await boot(await freshHome());
     await host.stop();
     expect(host.trace).toEqual([
-      'check',
       'home',
       'identity',
+      'config',
+      'check',
       'state:gate',
       'state:board',
       'state:agenda',
       'state:voice',
-      'config',
       'build:gate',
       'build:board',
       'build:agenda',
@@ -264,5 +264,25 @@ describe('GET /v1/plugins is projected by Gate (§9.6)', () => {
     const other = await boot(await freshHome(), broken as never);
     const core = body(await other.dispatch(request('GET', '/v1/plugins'))) as { plugins: { id: string }[] };
     expect(core.plugins.map(plugin => plugin.id)).toEqual(['kernel', 'gate']);
+  });
+});
+
+describe('config/plugins.yaml (§3.6)', () => {
+  test('a plugin turned off in plugins.yaml is not mounted; core cannot be turned off', async () => {
+    const home = await freshHome();
+    await (await boot(home)).stop();
+    running.splice(0);
+    await writeFile(`${home}/config/plugins.yaml`, '# owner notes\nplugins:\n  voice: off\n  gate: off\n');
+    const host = await boot(home);
+    expect(host.plugins.get('voice')?.status).toBe('off');
+    expect((await host.dispatch(request('GET', '/v1/voice'))).status).toBe(404);
+    expect(host.plugins.get('gate')?.status).toBe('serving');
+  });
+
+  test('turning a plugin on is a loosening edit; turning it off is not', async () => {
+    const { PluginsConfig } = await import('../../../plugin.ts');
+    expect(PluginsConfig.loosens({ plugins: { voice: 'off' } }, { plugins: { voice: 'on' } })).toEqual(['turns voice on']);
+    expect(PluginsConfig.loosens({ plugins: { voice: 'off' } }, { plugins: {} })).toEqual(['turns voice on (its off line was removed)']);
+    expect(PluginsConfig.loosens({ plugins: {} }, { plugins: { voice: 'off' } })).toEqual([]);
   });
 });
