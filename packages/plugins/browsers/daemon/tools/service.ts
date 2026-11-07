@@ -479,6 +479,7 @@ export class BrowserTools {
    * moment a person takes the page over. A dialog that opens ends it too, since it blocks the page: the result says so.
    * Each slice is one `wait` act, so a hold that begins mid-wait refuses the next slice.
    */
+  // read-scoped: none — it answers matched or not, as today; every word of the page it shows (a dialog) comes back through readAct's Redaction.read
   private async waitFor(
     caller: ToolCaller,
     call: Extract<BrowserToolCall, { readonly tool: 'browser.wait_for' }>,
@@ -1013,6 +1014,7 @@ function notesOf(answer: BrowserActionResult, pageId: string, read: PageReading)
 }
 
 /** The one thing a `browser.wait_for` waits for. The call schema already holds it to exactly one. */
+// read-scoped: none — it builds the condition from the call and reads nothing
 function waitConditionOf(call: Extract<BrowserToolCall, { readonly tool: 'browser.wait_for' }>): BrowserWaitCondition {
   const target = browserTargetOf(call);
   if (target !== undefined && target.kind !== 'point')

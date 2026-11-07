@@ -542,6 +542,7 @@ export class NodeBrowserLoginRuntime implements BrowserLoginRuntime {
    * than to a window: a viewer that connects a moment early sees the screen the window then appears
    * on, and a Chrome that failed to start is reported as the launch failure it is.
    */
+  // read-scoped: none — it waits for the sign-in window's Chrome to start and shows no page text
   async waitForChrome(profile: string, child: BrowserLoginChild): Promise<void> {
     await awaitReady({
       what: 'Chrome',
@@ -559,6 +560,7 @@ export class NodeBrowserLoginRuntime implements BrowserLoginRuntime {
    * that person is shown and types their password into. A listener that is not x11vnc's refuses at once, naming
    * the port. Only a host that cannot prove (macOS) falls back to asking whether anything accepts there.
    */
+  // read-scoped: none — it waits for the sign-in window's VNC port and shows no page text
   async waitForVnc(port: number, child: BrowserLoginChild): Promise<void> {
     await awaitReady({
       what: 'the VNC server',

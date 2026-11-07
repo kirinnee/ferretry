@@ -434,6 +434,7 @@ async function freePort(): Promise<number> {
  * listener that is not Chrome's refuses at once: Chrome cannot bind a port somebody holds, so waiting longer
  * would only report a timeout instead of the squatter. A host that cannot prove (macOS) asks as it always did.
  */
+// read-scoped: none — it waits for Chrome's DevTools port and shows no page text
 async function waitForCdp(
   endpoint: string,
   port: number,

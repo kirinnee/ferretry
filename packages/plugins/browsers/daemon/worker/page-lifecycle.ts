@@ -394,6 +394,7 @@ const isTimeout = (error: unknown): boolean => error instanceof Error && error.n
  * Whether a condition held within `timeoutMs`. A timeout is an answer (`false`), never an error; a bad
  * selector or a closed page is still an error.
  */
+// read-scoped: none — it runs in the browser worker thread, which holds no secret; the daemon masks what it answers
 export async function waitForCondition(
   page: WaitablePage,
   condition: BrowserWaitCondition,
