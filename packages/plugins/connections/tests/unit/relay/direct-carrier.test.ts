@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import type { ApiRequest, SessionLayer, SocketDownstream } from '@ferretry/kernel/contract';
+import type { ApiRequest, CarrierKey, SessionLayer, SocketDownstream } from '@ferretry/kernel/contract';
 import { DirectSession } from '../../../daemon/lib/relay/direct-carrier.ts';
 import { directCarrierSocketRoute } from '../../../daemon/lib/runtime/mounts/direct-carrier.ts';
-import { decodeFrame, encodeFrame, FRAME_KINDS, sessionIdFromBytes } from '@ferretry/kernel/wire';
+import { decodeFrame, encodeFrame, FRAME_KINDS, HEARTBEAT_REQUEST, sessionIdFromBytes } from '@ferretry/kernel/wire';
 import { decodeControlMessage, encodeControlMessage, RELAY_LIMITS } from '../../../daemon/lib/relay/control.ts';
 import { FakeSessions } from '../../support/sessions.ts';
 
@@ -49,17 +49,17 @@ function harness() {
     },
     bufferedBytes: () => 0,
   };
-  const make = () => new DirectSession(deps, '198.51.100.2', downstream, () => released++);
+  const make = () => new DirectSession(deps, 'direct' as CarrierKey, '198.51.100.2', downstream, () => released++);
   return { layer, sent, closes, proofs, timers, deps, downstream, make, released: () => released };
 }
-function call(daemonId: string, peer = '198.51.100.2') {
+function call(daemonId: string, peer = '198.51.100.2', carrier = 'direct') {
   const request: ApiRequest = {
     method: 'GET',
     path: `/v1/rendezvous/${daemonId}/client`,
     query: new Map(),
     headers: new Map(),
     clientAddress: peer,
-    arrival: { kind: 'carried', carrier: 'direct' as never },
+    arrival: { kind: 'carried', carrier: carrier as never },
     text: async () => '',
   };
   return { request, params: new Map([['daemonId', daemonId]]) };
@@ -206,5 +206,47 @@ describe('direct carrier', () => {
     h.proofs[0]!();
     r.stop();
     expect(h.layer.links[0]?.closedWith).toBeDefined();
+  });
+  test('G118 a session opens on the carrier its ARRIVAL names: a tunnel socket is a tunnel session, never a direct one', async () => {
+    const h = harness(),
+      r = directCarrierSocketRoute(h.deps);
+    const viaTunnel = await (await r.accept(call(h.deps.identity.daemonId, '203.0.113.9', 'tunnel')))(h.downstream);
+    await viaTunnel.open();
+    const viaNetwork = await (await r.accept(call(h.deps.identity.daemonId, '198.51.100.9')))(h.downstream);
+    await viaNetwork.open();
+    expect(h.layer.carriers.map(String)).toEqual(['tunnel', 'direct']);
+    viaTunnel.close();
+    viaNetwork.close();
+  });
+  test('G118 only a tunnel session is logged: one open line and one close line with counts, no address or key', async () => {
+    const h = harness();
+    const lines: string[] = [];
+    const ends: unknown[] = [];
+    const deps = {
+      ...h.deps,
+      sessionLog: {
+        opened: () => void lines.push('opened'),
+        closed: (end: unknown) => {
+          lines.push('closed');
+          ends.push(end);
+        },
+      },
+    };
+    const r = directCarrierSocketRoute(deps);
+    const viaNetwork = await (await r.accept(call(deps.identity.daemonId, '198.51.100.9')))(h.downstream);
+    await viaNetwork.open();
+    viaNetwork.close();
+    expect(lines).toEqual([]);
+
+    const viaTunnel = await (await r.accept(call(deps.identity.daemonId, '203.0.113.9', 'tunnel')))(h.downstream);
+    await viaTunnel.open();
+    viaTunnel.fromClient(HEARTBEAT_REQUEST);
+    viaTunnel.close({ code: 1001, reason: 'a page left' });
+
+    expect(lines).toEqual(['opened', 'closed']);
+    expect(ends[0]).toMatchObject({ by: 'peer', code: 1001, reason: 'a page left', proved: false });
+    expect((ends[0] as { bytesIn: number }).bytesIn).toBe(HEARTBEAT_REQUEST.length);
+    expect((ends[0] as { bytesOut: number }).bytesOut).toBeGreaterThan(0);
+    expect(JSON.stringify(ends[0])).not.toContain('203.0.113.9');
   });
 });

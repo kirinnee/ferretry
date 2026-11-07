@@ -13,7 +13,7 @@ G11	kept	gate	-	`caller` declaration	grants	G11
 G12	kept	gate	-	`parent_mismatch`	grants	G12
 G13	kept	gate	-	behaviour as written	grants	G13
 G14	kept	kernel	-	`ApiRequest.loopback`	grants	G14
-G15	kept	kernel	-	`tunnelApiRequest`	grants	G15
+G15	kept	kernel	-	`carrierListenerPort`	grants	G15
 G16	kept	connections	-	tunnel listener	grants	G16
 G17	kept	gate	-	`packages/daemon/tests/unit/grants/policy.test.ts`	grants	G17
 G18	kept	gate	-	`arrivedOnHost` (`packages/daemon/src/lib/api/http.ts`)	grants	G18
