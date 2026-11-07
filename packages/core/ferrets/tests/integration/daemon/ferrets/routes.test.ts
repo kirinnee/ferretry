@@ -1,0 +1,254 @@
+import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
+import { FakeAsks } from '@ferretry/core-asks/contract/testing';
+
+import { FakeGate, ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
+import { FakeVault } from '@ferretry/core-vault/contract/testing';
+import type { ApiRequest, CallStanding } from '@ferretry/kernel/contract';
+import { definePlugin } from '@ferretry/kernel/manifest';
+import { implementDaemon } from '@ferretry/kernel/manifest';
+import { type TestHost, testHost } from '@ferretry/kernel/testing';
+import {
+  FerretFiles,
+  type FerretId,
+  type FerretRecord,
+  FerretsPort,
+  FerretTokensFile,
+  Harnesses,
+  Runners,
+} from '../../../../contract/index.ts';
+import { FakeHarness, FakeRunner, ferretId, T0 } from '../../../../contract/testing/index.ts';
+import ferrets from '../../../../daemon/index.ts';
+
+/** Who calls: the `x-test-caller` header names a ferret (`ferret:<id>`), else the owner at the machine. */
+const callerHeader = 'x-test-caller';
+const standingFor = (request: ApiRequest): CallStanding => {
+  const raw = request.headers.get(callerHeader);
+  return raw?.startsWith('ferret:') === true ? ferretStanding(raw.slice(7) as FerretId) : ownerStanding();
+};
+const as = (ferret: string) => ({ headers: { [callerHeader]: `ferret:${ferret}` } });
+
+const record = (id: string, parent?: string, folder = `/work/${id}`): FerretRecord => ({
+  format: 1,
+  id: ferretId(id),
+  name: id,
+  ...(parent === undefined ? {} : { parent: ferretId(parent) }),
+  role: parent === undefined ? 'lead' : 'helper',
+  harness: 'claude-code',
+  runner: 'tmux',
+  folder,
+  state: 'working',
+  createdAt: T0,
+  stateAt: T0,
+});
+
+/** The two plugins on the security path that take Ferrets' provide hooks, as fakes with their real ids. */
+const harnessPlugin = (harness: FakeHarness) =>
+  implementDaemon(
+    definePlugin({
+      id: 'claude-code',
+      title: 'Claude Code (fake)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: Harnesses, key: 'claude-code' }] },
+    }),
+    { build: () => ({ hooks: { 'harnesses:claude-code': harness } }) },
+  );
+const runnerPlugin = (runner: FakeRunner) =>
+  implementDaemon(
+    definePlugin({
+      id: 'terminals',
+      title: 'Terminals (fake)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: Runners, key: 'tmux' }] },
+    }),
+    { build: () => ({ hooks: { 'runners:tmux': runner } }) },
+  );
+
+async function host(
+  records: readonly FerretRecord[] = [],
+  extra: { readonly harness?: FakeHarness; readonly runner?: FakeRunner } = {},
+): Promise<TestHost> {
+  const plugins = [
+    ferrets,
+    ...(extra.harness === undefined ? [] : [harnessPlugin(extra.harness)]),
+    ...(extra.runner === undefined ? [] : [runnerPlugin(extra.runner)]),
+  ];
+  const first = await testHost({
+    plugins,
+    gate: new StandInAdmission(standingFor),
+    fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
+  });
+  if (records.length === 0) return first;
+  for (const each of records) first.state('ferrets').plant(FerretFiles, JSON.stringify(each), each.id);
+  return await first.restart();
+}
+
+describe('the fleet read', () => {
+  test('R501 GET /v1/ferrets is conditional: its etag is a digest of the exact JSON served', async () => {
+    const h = await host([record('lead'), record('helper', 'lead')]);
+    const first = await h.request('GET', '/v1/ferrets');
+    expect(first.status).toBe(200);
+    expect(first.headers.get('etag')).toBe(`"${createHash('sha256').update(first.body).digest('base64url')}"`);
+    // Same creation time: by id.
+    expect(first.json<readonly { id: string }[]>().map(ferret => ferret.id)).toEqual(['helper', 'lead']);
+  });
+
+  test('R501 the tag moves when any field of any ferret moves', async () => {
+    const h = await host([record('lead'), record('helper', 'lead')]);
+    const before = (await h.request('GET', '/v1/ferrets')).headers.get('etag');
+    const renamed = await h.request('POST', '/v1/ferrets/helper/rename', { body: { name: 'piper' } });
+    expect(renamed.status).toBe(200);
+    const after = await h.request('GET', '/v1/ferrets', { headers: { 'if-none-match': before as string } });
+    expect(after.status).toBe(200);
+    expect(after.headers.get('etag')).not.toBe(before);
+    expect(after.body).toContain('"name":"piper"');
+  });
+
+  test('R503 two reads with nothing changed give a 304 on the second, and the tag ignores read time', async () => {
+    const h = await host([record('lead')]);
+    const first = await h.request('GET', '/v1/ferrets');
+    const etag = first.headers.get('etag') as string;
+    h.clock.advance?.(60_000);
+    const second = await h.request('GET', '/v1/ferrets', { headers: { 'if-none-match': etag } });
+    expect(second.status).toBe(304);
+    expect(second.body).toBe('');
+    expect(second.headers.get('etag')).toBe(etag);
+  });
+
+  test('R503 the tag is deterministic, not a version counter: a restarted daemon serves the same tag', async () => {
+    const h = await host([record('lead'), record('other')]);
+    const before = (await h.request('GET', '/v1/ferrets')).headers.get('etag');
+    const again = await h.restart();
+    const after = await again.request('GET', '/v1/ferrets', { headers: { 'if-none-match': before as string } });
+    expect(after.status).toBe(304);
+  });
+});
+
+describe('reading a ferret’s files', () => {
+  test('S47 an agent is refused another ferret’s files', async () => {
+    const h = await host([record('lead'), record('stranger')]);
+    h.putRoot('work', 'notes.md', 'hello');
+    const refused = await h.request('GET', '/v1/ferrets/stranger/fs/file', {
+      ...as('lead'),
+      query: { path: 'notes.md' },
+    });
+    expect(refused.status).toBe(403);
+    expect(refused.json<{ code: string }>().code).toBe('not_own_session');
+  });
+
+  test('S47 an agent reads its own ferret’s and its helpers’ files', async () => {
+    const h = await host([record('lead'), record('helper', 'lead'), record('grand', 'helper')]);
+    h.putRoot('work', 'notes.md', 'hello');
+    for (const target of ['lead', 'helper', 'grand']) {
+      const read = await h.request('GET', `/v1/ferrets/${target}/fs/file`, {
+        ...as('lead'),
+        query: { path: 'notes.md' },
+      });
+      expect(read.status).toBe(200);
+      expect(read.json<{ content: string }>().content).toBe('hello');
+    }
+    const up = await h.request('GET', '/v1/ferrets/lead/fs/file', { ...as('helper'), query: { path: 'notes.md' } });
+    expect(up.status).toBe(403);
+  });
+
+  test('S47 a path out of the folder and a secret file are refused; a person is unaffected by the lineage rule', async () => {
+    const h = await host([record('lead'), record('other')]);
+    h.putRoot('work', 'notes.md', 'hello');
+    const climb = await h.request('GET', '/v1/ferrets/lead/fs/file', { ...as('lead'), query: { path: '../x' } });
+    expect(climb.status).toBeGreaterThanOrEqual(400);
+    const secret = await h.request('GET', '/v1/ferrets/lead/fs/file', { ...as('lead'), query: { path: '.env' } });
+    expect(secret.status).toBe(403);
+    const person = await h.request('GET', '/v1/ferrets/other/fs/file', { query: { path: 'notes.md' } });
+    expect(person.status).toBe(200);
+  });
+});
+
+describe('lineage', () => {
+  test('G43 a ferret may touch only its own; a lead also its helpers’ (Ferrets’ side of the fixture)', async () => {
+    const h = await host([
+      record('lead'),
+      record('helper', 'lead'),
+      record('grand', 'helper'),
+      record('sibling', 'lead'),
+      record('stranger'),
+    ]);
+    const api = h.provided(FerretsPort);
+    await api.list();
+    expect(api.mayTouch(ferretId('lead'), ferretId('grand'))).toBe(true);
+    expect(api.mayTouch(ferretId('helper'), ferretId('lead'))).toBe(false);
+    expect(api.mayTouch(ferretId('helper'), ferretId('sibling'))).toBe(false);
+    expect(api.mayTouch(ferretId('stranger'), ferretId('helper'))).toBe(false);
+    expect(api.children(ferretId('lead'))).toEqual([ferretId('helper'), ferretId('sibling')]);
+  });
+
+  test('a ferret may stop only itself and its helpers', async () => {
+    const h = await host([record('lead'), record('helper', 'lead')]);
+    const refused = await h.request('POST', '/v1/ferrets/lead/stop', as('helper'));
+    expect(refused.status).toBe(403);
+    const stopped = await h.request('POST', '/v1/ferrets/helper/stop', as('lead'));
+    expect(stopped.json<{ state: string }>().state).toBe('stopped');
+  });
+});
+
+describe('starting, tokens and attach', () => {
+  test('a start issues a fys_ token, stores only its digest, and Gate finds the ferret by that digest', async () => {
+    const harness = new FakeHarness();
+    const runner = new FakeRunner();
+    const h = await host([], { harness, runner });
+    const started = await h.request('POST', '/v1/ferrets', { body: { name: 'aniya', folder: '/work/a' } });
+    expect(started.status).toBe(201);
+    const id = started.json<{ id: FerretId }>().id;
+    const stored = h.state('ferrets').raw(FerretTokensFile) as string;
+    expect(stored).not.toContain('fys_');
+    const digest = (JSON.parse(stored) as { tokens: { digest: string; ferret: string }[] }).tokens[0];
+    expect(digest?.ferret).toBe(id);
+    const view = (await h.request('GET', `/v1/ferrets/${id}`)).json<{ state: string; name: string }>();
+    expect(view).toMatchObject({ state: 'working', name: 'aniya' });
+    expect(runner.starts).toBe(1);
+  });
+
+  test('a ferret’s start is its own helper: the parent comes from its token, never the body', async () => {
+    const h = await host([record('lead')], { harness: new FakeHarness(), runner: new FakeRunner() });
+    const started = await h.request('POST', '/v1/ferrets', { ...as('lead'), body: { folder: '/work/b' } });
+    expect(started.status).toBe(201);
+    const id = started.json<{ id: string }>().id;
+    expect((await h.request('GET', `/v1/ferrets/${id}`)).json<{ parent: string; role: string }>()).toMatchObject({
+      parent: 'lead',
+      role: 'helper',
+    });
+    const forged = await h.request('POST', '/v1/ferrets', { body: { folder: '/work/c', parent: 'lead' } });
+    expect(forged.status).toBe(400);
+  });
+
+  test('revoke-credential is a person’s act and the bearer stops naming the ferret', async () => {
+    const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
+    const id = (await h.request('POST', '/v1/ferrets', { body: { folder: '/work/a' } })).json<{ id: string }>().id;
+    const byFerret = await h.request('POST', `/v1/ferrets/${id}/revoke-credential`, as(id));
+    expect(byFerret.status).toBe(403);
+    const revoked = await h.request('POST', `/v1/ferrets/${id}/revoke-credential`);
+    expect(revoked.json<{ revoked: boolean }>().revoked).toBe(true);
+    const tokens = JSON.parse(h.state('ferrets').raw(FerretTokensFile) as string) as {
+      tokens: { revoked?: true }[];
+    };
+    expect(tokens.tokens.every(entry => entry.revoked === true)).toBe(true);
+  });
+
+  test('D15 attach adopts a live pane by its handle without starting anything', async () => {
+    const runner = new FakeRunner();
+    const h = await host([{ ...record('lead'), state: 'stopped' }], { harness: new FakeHarness(), runner });
+    const handle = runner.adoptable(ferretId('lead'));
+    const attached = await h.provided(FerretsPort).attach(ferretId('lead'), handle);
+    expect(attached.ok).toBe(true);
+    expect(runner.starts).toBe(0);
+    expect((await h.provided(FerretsPort).get(ferretId('lead')))?.state).toBe('working');
+    const gone = await h.provided(FerretsPort).attach(ferretId('lead'), '%99' as never);
+    expect(gone.ok).toBe(false);
+  });
+});
+

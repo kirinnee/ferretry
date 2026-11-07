@@ -1,4 +1,4 @@
-import { MAX_SESSION_FILE_INDEX_FILES } from '@ferretry/protocol';
+
 
 /**
  * The frozen vocabulary of the session working-tree viewer.
@@ -49,7 +49,7 @@ export const BINARY_SNIFF_BYTES = 8 * 1024;
  * NON-repository walk, which is the only path that opens one descriptor per directory; a Git worktree
  * asks Git once whatever its depth. The byte cap bounds that answer's size.
  */
-export const MAX_INDEX_FILES = MAX_SESSION_FILE_INDEX_FILES;
+export const MAX_INDEX_FILES = 20_000;
 export const MAX_INDEX_CANDIDATES = 40_000;
 export const MAX_INDEX_DIRECTORIES = 4_000;
 export const MAX_INDEX_LIST_BYTES = 8 * 1024 * 1024;
