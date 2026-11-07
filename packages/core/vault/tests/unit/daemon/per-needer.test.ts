@@ -15,6 +15,7 @@ import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { z } from 'zod';
 import {
   ChildEnvironmentPort,
+  type CredentialPlacement,
   type OutboundHttpRequest,
   type SecretName,
   SecretUseRequestSchema,
@@ -352,9 +353,10 @@ describe('the two callers that named a login’s secret themselves are refused w
 });
 
 /**
- * The write reach of a non-core plugin through the Vault (lead ruling): `put` and `remove` cover only the secrets it may
- * use and the names it MINTS (a pattern its manifest declares); `names()` lists only those, except for the one plugin
- * whose manifest declares the secret-name picker. A core caller keeps the whole store.
+ * The write reach of a non-core plugin through the Vault (lead ruling, §3.7; no Appendix D row covers it): `put` and
+ * `remove` cover only the names it MINTS (a pattern its manifest declares), never one it merely uses; `names()` and
+ * `has()` list what it may use or mints, except for the one plugin whose manifest declares the secret-name picker. A
+ * core caller keeps the whole store.
  */
 const GITHUB: SecretName = 'GITHUB_TOKEN';
 const MINTED = 'MCP_WORK_0123456789ABCDEF_ACCESS' as SecretName;
@@ -367,7 +369,7 @@ const MINTING: Permissions = {
 const reference = (name: string): string => '${secret:' + name + '}';
 
 describe('the write reach of a non-core plugin is its allowed and minted secrets and nothing else', () => {
-  test('S12 a plugin that mints sign-in tokens cannot overwrite or delete GITHUB_TOKEN, and can put and remove its own', async () => {
+  test('§3.7 a plugin that mints sign-in tokens cannot overwrite or delete GITHUB_TOKEN, and can put and remove its own', async () => {
     const { core, of } = await world({ mcp: MINTING });
     await core.put(GITHUB, 'ghp-original');
     const api = of('mcp');
@@ -384,7 +386,20 @@ describe('the write reach of a non-core plugin is its allowed and minted secrets
       await expect(api.put(other as SecretName, 'v')).rejects.toThrow(/may not write/u);
   });
 
-  test('S12 the minted pattern is the sign-in names MCP files today, byte for byte', () => {
+  test('§3.7 a name an owner’s MCP entry uses (GITHUB_TOKEN) is listed to MCP but is not its to put or remove', async () => {
+    const { core, of } = await world({ mcp: MINTING }, { config: { 'mcp/records.yaml': { key: reference(GITHUB) } } });
+    await core.put(GITHUB, 'ghp-original');
+    const api = of('mcp');
+    // The entry makes the name usable and listed (the read reach is unchanged)...
+    expect((await api.names()).map(secret => secret.name)).toContain(GITHUB);
+    expect(await api.has(GITHUB)).toBe(true);
+    // ...but MCP mints no such name, so it can neither replace nor delete it.
+    await expect(api.put(GITHUB, 'ghp-attacker')).rejects.toThrow(/mcp may not write the secret GITHUB_TOKEN/u);
+    await expect(api.remove(GITHUB)).rejects.toThrow(/mcp may not remove the secret GITHUB_TOKEN/u);
+    expect(await core.has(GITHUB)).toBe(true);
+  });
+
+  test('§3.7 the minted pattern is the sign-in names MCP files today, byte for byte', () => {
     const mcp = { id: 'mcp', permissions: MINTING, ownedSecretReferences: () => new Set<string>() };
     expect(isMintedSecret(mcp, MINTED)).toBe(true);
     expect(isMintedSecret(mcp, 'MCP_0123456789ABCDEF_ACCESS')).toBe(true);
@@ -392,7 +407,7 @@ describe('the write reach of a non-core plugin is its allowed and minted secrets
     expect(isMintedSecret({ ...mcp, permissions: {} }, MINTED)).toBe(false);
   });
 
-  test('S12 a plugin with a secret-name picker and no minted names (Catalogs) is listed every name and can put or remove nothing', async () => {
+  test('§3.7 a plugin with a secret-name picker and no minted names (Catalogs) is listed every name and can put or remove nothing', async () => {
     const { core, of } = await world({ catalogs: { network: [], spawn: [], secrets: [], secretNamePicker: true } });
     const api = of('catalogs');
     const everything = (await core.names()).map(secret => secret.name).sort();
@@ -406,7 +421,7 @@ describe('the write reach of a non-core plugin is its allowed and minted secrets
     expect(await core.has(OTHER)).toBe(true);
   });
 
-  test('S12 another non-core plugin is listed only the names it may use or mints, never the owner’s other secrets', async () => {
+  test('§3.7 another non-core plugin is listed only the names it may use or mints, never the owner’s other secrets', async () => {
     const { core, of } = await world(
       { mcp: { ...MINTING, secrets: [GROQ] } },
       { config: { 'mcp/records.yaml': { key: reference(OWNED) } } },
@@ -419,7 +434,7 @@ describe('the write reach of a non-core plugin is its allowed and minted secrets
     expect(await of('mcp').has(GROQ)).toBe(true);
   });
 
-  test('S12 a core caller keeps the whole store: any name listed, written and removed', async () => {
+  test('§3.7 a core caller keeps the whole store: any name listed, written and removed', async () => {
     const { core } = await world({});
     await core.put(GITHUB, 'ghp');
     expect((await core.names()).map(secret => secret.name)).toContain(GITHUB);
@@ -536,6 +551,45 @@ describe('a caller cannot change what it passed after the check (check-then-use)
     } as unknown as OutboundHttpRequest;
     await core.authorizeFetch(GROQ, ['api.groq.test'], swapped);
     expect(reached).not.toContain('evil.test');
+  });
+
+  test('S162 a url that is an object whose toString changes after the check is refused, never dialled (non-core and core)', async () => {
+    const { core, of, reached } = await world({ tenant: TENANT });
+    const swapped = (): OutboundHttpRequest =>
+      ({
+        method: 'GET',
+        url: { toString: flip('https://api.groq.test/v1', 'https://evil.test/steal') },
+        headers: {},
+        timeoutMs: 1_000,
+        maxResponseBytes: 4_096,
+      }) as unknown as OutboundHttpRequest;
+    expect(await of('tenant').authorizeFetch(GROQ, ['api.groq.test'], swapped())).toEqual({ kind: 'refused' });
+    expect(await core.authorizeFetch(GROQ, ['api.groq.test'], swapped())).toEqual({ kind: 'refused' });
+    expect(reached).toEqual([]);
+  });
+
+  test('S162 a url, header, number or placement that is not plain data is refused before anything is dialled', async () => {
+    const { core, of, reached } = await world({ tenant: TENANT });
+    const good = request('https://api.groq.test/v1');
+    const odd: readonly unknown[] = [
+      { ...good, url: 42 },
+      { ...good, url: new URL('https://api.groq.test/v1') },
+      { ...good, headers: { accept: { toString: () => 'x' } } },
+      { ...good, timeoutMs: '1000' },
+      { ...good, extra: true },
+    ];
+    for (const asked of odd) {
+      expect(await of('tenant').authorizeFetch(GROQ, ['api.groq.test'], asked as OutboundHttpRequest)).toEqual({
+        kind: 'refused',
+      });
+      expect(await core.authorizeFetch(GROQ, ['api.groq.test'], asked as OutboundHttpRequest)).toEqual({
+        kind: 'refused',
+      });
+    }
+    const placement = { header: { toString: () => 'authorization' } } as unknown as CredentialPlacement;
+    expect(await of('tenant').authorizeFetch(GROQ, ['api.groq.test'], good, placement)).toEqual({ kind: 'refused' });
+    expect(await core.authorizeFetch(GROQ, ['api.groq.test'], good, placement)).toEqual({ kind: 'refused' });
+    expect(reached).toEqual([]);
   });
 
   test('S62 an environment whose reference is declared on the first read and another after resolves only what was checked', async () => {

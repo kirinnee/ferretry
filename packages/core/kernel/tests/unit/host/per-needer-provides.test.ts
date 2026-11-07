@@ -251,8 +251,12 @@ test('per-needer: a real boot hands one needer the same built value however ofte
 });
 
 test('per-needer: the test host keeps a fake, a uses entry and the loaded provider’s own value in separate slots', async () => {
-  const fake: Gadget = { for: 'fake', network: [], spawn: [], secrets: [] };
-  const viaUses: Gadget = { for: 'uses', network: [], spawn: [], secrets: [] };
+  // Both are FACTORIES that answer a distinct object per build: a plain value is never cached, so only a factory can
+  // show whether two sources share a slot (a shared slot would hand the second source the first one's object).
+  const answers = (source: string) =>
+    perNeeder<Gadget>(who => ({ for: `${source}:${who.id}`, network: [], spawn: [], secrets: [] }));
+  const fake = answers('fake');
+  const viaUses = answers('uses');
   let ctx: { needs: { gadget: Gadget }; uses: { again: { current(): Gadget | undefined } } } | undefined;
   const host = await testHost({
     plugins: [
@@ -267,8 +271,13 @@ test('per-needer: the test host keeps a fake, a uses entry and the loaded provid
     uses: { again: viaUses },
   });
   // Same token, same needer, two roads: the first one built did not take the shared slot.
-  expect(ctx?.needs.gadget).toBe(fake);
-  expect(ctx?.uses.again.current()).toBe(viaUses);
-  expect(ctx?.needs.gadget).toBe(fake);
+  const needed = ctx?.needs.gadget;
+  const used = ctx?.uses.again.current();
+  expect(needed?.for).toBe('fake:gamma');
+  expect(used?.for).toBe('uses:gamma');
+  expect(used).not.toBe(needed);
+  // Each slot still memoises: asking again answers the object built the first time.
+  expect(ctx?.uses.again.current()).toBe(used as Gadget);
+  expect(ctx?.needs.gadget).toBe(needed as Gadget);
   await host.stop();
 });

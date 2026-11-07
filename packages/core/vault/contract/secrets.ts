@@ -128,6 +128,27 @@ export interface CredentialPlacement {
 }
 
 /**
+ * The request as DATA (S162). A boundary that checks a request and then sends it parses it ONCE with this schema and
+ * checks and sends only the parsed copy: every field is a plain string, number or record of strings, so neither a getter
+ * nor an object whose `toString` changes between the check and the use can show one host to the check and another to the
+ * send. Bounds are today's callers' (positive whole numbers, string headers).
+ */
+export const OutboundHttpRequestSchema = z.strictObject({
+  method: z.enum(['GET', 'POST']),
+  url: z.string(),
+  headers: z.record(z.string(), z.string()),
+  body: z.string().optional(),
+  timeoutMs: z.number().int().positive(),
+  maxResponseBytes: z.number().int().positive(),
+});
+
+/** {@link CredentialPlacement} as data, parsed once like {@link OutboundHttpRequestSchema}. */
+export const CredentialPlacementSchema = z.strictObject({
+  header: z.string().min(1),
+  scheme: z.string().optional(),
+});
+
+/**
  * What came back (today's `AuthorizedOutcome`). No branch carries the request it built; a reply that echoes the value
  * is `unreadable`.
  */

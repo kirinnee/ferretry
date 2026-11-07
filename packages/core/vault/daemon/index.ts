@@ -6,7 +6,9 @@ import manifest from '../manifest.ts';
 import {
   type AuthorizedOutcome,
   type CredentialPlacement,
+  CredentialPlacementSchema,
   type OutboundHttpRequest,
+  OutboundHttpRequestSchema,
   HoldsChanged,
   RedactionSources,
   SecretsChanged,
@@ -36,6 +38,7 @@ import { secretRouteHandlers } from './lib/runtime/mounts/secrets.ts';
 import { OutboundProviderAuthorizer } from './lib/secrets/authorizer.ts';
 import {
   isCoreNeeder,
+  isMintedSecret,
   mayRunProgram,
   mayTouchSecret,
   mayUseSecret,
@@ -228,8 +231,9 @@ export default implementDaemon(manifest, {
       if (isCoreNeeder(needer)) return full;
       return {
         ...full,
-        // WRITE and LIST reach: only the secrets this needer may use or mints itself, so a plugin cannot overwrite, delete
-        // or even see the owner's other secrets (credential substitution, S12).
+        // LIST reach: the secrets this needer may use or mints itself. WRITE reach is narrower: only the names it MINTS, so a
+        // plugin cannot overwrite or delete a secret it merely uses (an owner's GITHUB_TOKEN named in its records), nor see
+        // the owner's others (credential substitution, S12).
         names: async () =>
           namesAreNarrowed(needer)
             ? (await full.names()).filter(secret => mayTouchSecret(needer, secret.name))
@@ -237,12 +241,12 @@ export default implementDaemon(manifest, {
         has: async name => mayTouchSecret(needer, String(name)) && (await full.has(name)),
         put: async (name, value) => {
           const secret = String(name);
-          if (!mayTouchSecret(needer, secret)) throw new UndeclaredSecretError(needer, secret, 'write');
+          if (!isMintedSecret(needer, secret)) throw new UndeclaredSecretError(needer, secret, 'write');
           await full.put(secret as SecretName, value);
         },
         remove: async name => {
           const secret = String(name);
-          if (!mayTouchSecret(needer, secret)) throw new UndeclaredSecretError(needer, secret, 'remove');
+          if (!isMintedSecret(needer, secret)) throw new UndeclaredSecretError(needer, secret, 'remove');
           return await full.remove(secret as SecretName);
         },
         // Every narrowed call reads what the caller passed ONCE, into plain data of its own, checks that copy and uses
@@ -258,10 +262,17 @@ export default implementDaemon(manifest, {
         authorizeFetch: async (name, hostAllowlist, request, placement) => {
           const secret = String(name);
           const hosts = [...hostAllowlist].map(String);
-          const copy = { ...request, headers: { ...request.headers } };
-          const placed = placement === undefined ? undefined : { ...placement };
+          // The request and the placement are PARSED once into plain data; only that copy is checked and sent (S162).
+          const copy = OutboundHttpRequestSchema.safeParse(request);
+          const placed = placement === undefined ? undefined : CredentialPlacementSchema.safeParse(placement);
+          if (!copy.success || (placed !== undefined && !placed.success)) return { kind: 'refused' };
           if (!mayUseSecret(needer, secret)) return { kind: 'refused' };
-          return await full.authorizeFetch(secret as SecretName, reachableHosts(needer, hosts), copy, placed);
+          return await full.authorizeFetch(
+            secret as SecretName,
+            reachableHosts(needer, hosts),
+            copy.data,
+            placed?.data,
+          );
         },
         childEnvironment: async (ferret, asked) => {
           const env = SecretUseRequestSchema.shape.env.parse({ ...asked });

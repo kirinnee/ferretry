@@ -8,6 +8,7 @@
  */
 import { implementDaemon, type Needer, neederMayReach, perNeeder } from '@ferretry/kernel/manifest';
 import { type Instant, milliseconds } from '@ferretry/std';
+import { CredentialPlacementSchema, OutboundHttpRequestSchema } from '@ferretry/core-vault/contract';
 import manifest from '../manifest.ts';
 import {
   type LoginId,
@@ -234,8 +235,10 @@ export function buildLoginsDaemon() {
           const id = String(loginId);
           const key = String(variable);
           const named = [...hostAllowlist].map(String);
-          const asked = { ...request, headers: { ...request.headers } };
-          const placed = placement === undefined ? undefined : { ...placement };
+          // Parsed ONCE into plain data (S162): the request the Vault is handed is this copy, never the caller's object.
+          const asked = OutboundHttpRequestSchema.safeParse(request);
+          const placed = placement === undefined ? undefined : CredentialPlacementSchema.safeParse(placement);
+          if (!asked.success || (placed !== undefined && !placed.success)) return { kind: 'refused' };
           const login = (await credentials.list()).logins.find(candidate => candidate.id === id);
           const name = spendSecretOf(login, key);
           if (name === undefined) return { kind: 'refused' };
@@ -243,7 +246,7 @@ export function buildLoginsDaemon() {
             neederMayReach(needer, hostname),
           );
           if (hosts.length === 0) return { kind: 'refused' };
-          return await needs.vault.authorizeFetch(name, hosts, asked, placed);
+          return await needs.vault.authorizeFetch(name, hosts, asked.data, placed?.data);
         },
       });
 

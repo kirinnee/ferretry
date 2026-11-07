@@ -42,8 +42,9 @@ export const isMintedSecret = (needer: Needer, name: string): boolean =>
   (needer.permissions.mintedSecrets ?? []).some(source => new RegExp(`^(?:${source})$`, 'u').test(name));
 
 /**
- * Whether `needer` may put, remove, list or ask for the secret `name`: one it may use ({@link allowedSecretNames}) or one
- * it mints ({@link isMintedSecret}). The write reach of a non-core needer is exactly this and no more.
+ * Whether `needer` may list or ask for the secret `name`: one it may use ({@link allowedSecretNames}) or one it mints
+ * ({@link isMintedSecret}). The READ reach of a non-core needer is exactly this; its WRITE reach (put, remove) is only the
+ * names it mints, because no plugin writes a secret it merely uses.
  */
 export const mayTouchSecret = (needer: Needer, name: string): boolean =>
   mayUseSecret(needer, name) || isMintedSecret(needer, name);
@@ -84,7 +85,7 @@ function hostnameOf(entry: string): string {
 /** The refusal for a secret a non-core needer may neither write nor remove: the Vault's own sentence for it. */
 export class UndeclaredSecretError extends Error {
   constructor(needer: Needer, name: string, verb: 'write' | 'remove') {
-    super(`${needer.id} may not ${verb} the secret ${name}: its manifest does not declare it.`);
+    super(`${needer.id} may not ${verb} the secret ${name}: its manifest does not declare it as one it mints.`);
     this.name = 'PermissionError';
   }
 }

@@ -190,7 +190,7 @@ describe('Logins puts a login’s key only where that login sends it and only wh
     expect(asked).toEqual([]);
   });
 
-  test('S3 S162 a host list that changes after the first read is never what the Vault is asked', async () => {
+  test('S162 a url that changes after the first read is never what the Vault is asked', async () => {
     const { asked, of } = await world();
     let reads = 0;
     const swapped = {
@@ -204,5 +204,24 @@ describe('Logins puts a login’s key only where that login sends it and only wh
     } as unknown as OutboundHttpRequest;
     await of('usage').authorizeFetch(GLM, KEY, ['api.z.ai'], swapped);
     expect(asked.map(call => call.url)).toEqual(['https://api.z.ai/api/monitor/usage/quota/limit']);
+  });
+
+  test('S162 a url that is an object whose toString changes after the check is refused and never reaches the Vault', async () => {
+    const { asked, of } = await world();
+    let reads = 0;
+    const swapped = {
+      method: 'GET',
+      url: {
+        toString: () => (reads++ === 0 ? 'https://api.z.ai/api/monitor/usage/quota/limit' : 'https://evil.test/steal'),
+      },
+      headers: {},
+      timeoutMs: 1_000,
+      maxResponseBytes: 4_096,
+    } as unknown as OutboundHttpRequest;
+    expect(await of('usage').authorizeFetch(GLM, KEY, ['api.z.ai'], swapped)).toEqual({ kind: 'refused' });
+    expect(asked).toEqual([]);
+    // what the Vault is finally handed is plain data: a string url, whatever the caller's object was
+    await of('usage').authorizeFetch(GLM, KEY, ['api.z.ai'], asking('https://api.z.ai/api/monitor/usage/quota/limit'));
+    expect(asked.map(call => typeof call.url)).toEqual(['string']);
   });
 });
