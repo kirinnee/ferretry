@@ -7,6 +7,8 @@ import type { TerminalIo } from '@ferretry/kernel/manifest';
 import type { DaemonTransport, InventoryCache } from './client.ts';
 import type { Environment } from './credential.ts';
 import type { CommandRegistry } from './registry.ts';
+import type { DaemonUpdateOptions } from './update/updater.ts';
+import type { IDaemonUpdateViewPort } from './update/ports.ts';
 
 export interface Identity {
   /** The binary name, single-sourced from `packages/cli/package.json` `bin`. */
@@ -40,6 +42,8 @@ export interface CliWorld {
   connect(options: { readonly asOwner: boolean }): Promise<Connection>;
   /** Starts the daemon now (`fy daemon start`). */
   launch(): Promise<LaunchResult>;
+  /** The shell's local update transaction. Never depends on an enabled plugin. */
+  update?(options: DaemonUpdateOptions, view: IDaemonUpdateViewPort): Promise<number>;
 }
 
 export type { PluginInventory };
