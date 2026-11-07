@@ -40,16 +40,18 @@ import {
   type WardenFile,
   WardenFileSchema,
 } from '../../contract/index.ts';
+import { CardRefSchema } from '@ferretry/plugin-board/contract';
 import {
-  InstantSchema,
   nextSystemCallsignSequence,
   SYSTEM_CALLSIGN_MAX_SEQUENCE,
   type SessionStatus,
   SessionStatusSchema,
   systemCallsignName,
   systemCallsignSequence,
-  TaskRefSchema,
 } from './foreign.ts';
+
+/** An instant as the sweep's own computing shapes carry it: an ISO date-time with an offset (not the branded wire type). */
+export const InstantSchema = z.iso.datetime({ offset: true });
 
 const NonNegativeIntegerSchema = z.number().int().nonnegative();
 const PositiveIntegerSchema = z.number().int().positive();
@@ -176,7 +178,7 @@ export const WardenAnomalySchema = z.object({
   assignedWarden: z.boolean().optional(),
   ledger: LivenessLedgerSchema.optional(),
   subject: z.string().min(1).optional(),
-  task: TaskRefSchema.optional(),
+  task: CardRefSchema.optional(),
 });
 export type WardenAnomaly = z.infer<typeof WardenAnomalySchema>;
 export const WardenStuckInputFlagSchema = WardenAnomalySchema.extend({ kind: z.literal('input_stuck') });

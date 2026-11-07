@@ -32,6 +32,7 @@ function warden(options: { readonly config?: unknown } = {}) {
     conversation,
     asks,
     usage: () => undefined,
+    board: () => undefined,
   });
   return { ...fake, ferrets, conversation, asks, subsystem, routes: wardenRoutes(subsystem) };
 }
@@ -78,7 +79,9 @@ describe('the warden over the ports it is handed', () => {
     const status = json(await world.routes['GET /v1/warden/status'](call('GET', '/v1/warden/status')));
 
     // Assert
-    should(run.flags.map((flag: { kind: string; ferret: string }) => [flag.kind, flag.ferret])).eql([['unattended_question', 'f1']]);
+    should(run.flags.map((flag: { kind: string; ferret: string }) => [flag.kind, flag.ferret])).eql([
+      ['unattended_question', 'f1'],
+    ]);
     for (const flag of run.flags) should(WardenFlagSchema.safeParse(flag).success).equal(true);
     should(status.flags.length).equal(1);
     should(JSON.stringify(status)).not.containEql('sessionId');
@@ -172,7 +175,9 @@ describe('the warden over the ports it is handed', () => {
     await world.routes['POST /v1/warden/run'](call('POST', '/v1/warden/run'));
 
     // Act
-    const left = await world.routes['POST /v1/warden/leave'](call('POST', '/v1/warden/leave', { ferret: 'f1', duration: '1h' }));
+    const left = await world.routes['POST /v1/warden/leave'](
+      call('POST', '/v1/warden/leave', { ferret: 'f1', duration: '1h' }),
+    );
     const status = json(await world.routes['GET /v1/warden/status'](call('GET', '/v1/warden/status')));
 
     // Assert

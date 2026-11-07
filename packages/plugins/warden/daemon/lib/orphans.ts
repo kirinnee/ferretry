@@ -24,37 +24,38 @@
  *
  * Pure: the board, the fleet and the memory arrive through the arguments.
  */
+import { type CardId, type CardRef, type CardView, formatCardRef, type LaneSet } from '@ferretry/plugin-board/contract';
 import {
   AGENDA_PUSH_BODY_LENGTH,
   AGENDA_PUSH_TITLE_LENGTH,
-  type BoardTaskId,
-  type BoardTaskView,
   clipAtWord,
-  formatTaskRef,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_REASON_LENGTH,
-  type TaskRef,
 } from './protocol.ts';
-import { effectiveAssignee } from './foreign.ts';
-import type { LaneSets } from './foreign.ts';
 import { inWardenLineage, type WardenAnomaly } from './detect.ts';
 import { wardenTeammateToken } from './prompt.ts';
 import { instantMs } from './time.ts';
 import { isTerminalStatus, type WardenSessionView } from './types.ts';
 
+/** Every board's lanes, by project id. */
+export type LaneSets = ReadonlyMap<string, LaneSet>;
+
 /** Every card as the board derives it, with every board's lanes: one read per sweep. */
 export interface WardenBoardRead {
-  readonly views: readonly BoardTaskView[];
+  readonly views: readonly CardView[];
   readonly laneSets: LaneSets;
 }
 
+/** The card's working ferret: the assignee, else the owner (Board's rule: a `null` assignee reads as the owner). */
+const effectiveAssignee = (card: Pick<CardView, 'owner' | 'assignee'>): string => card.assignee ?? card.owner;
+
 /** The anomaly identity of an orphaned card: about the card, so two cards one ferret left are two flags. */
-export const orphanFleetKey = (id: BoardTaskId): string => `card:${id}`;
+export const orphanFleetKey = (id: CardId): string => `card:${id}`;
 
 /** The source reference of a card's orphan notice: its dedupe key on the board it is raised on. */
-export const orphanNoticeSourceRef = (id: BoardTaskId): string => `warden-orphan:${id}`;
+export const orphanNoticeSourceRef = (id: CardId): string => `warden-orphan:${id}`;
 
-const laneName = (board: WardenBoardRead, view: BoardTaskView): string =>
+const laneName = (board: WardenBoardRead, view: CardView): string =>
   board.laneSets.get(view.projectId)?.lanes.find(lane => lane.id === view.laneId)?.name ?? view.laneId;
 
 /** A ferret as a reference a reader's client can prove and link: its callsign, else its bare id. */
@@ -99,7 +100,7 @@ export function detectOrphanedCards(
       ...(session?.config.label === undefined ? {} : { label: session.config.label }),
       // A ferret gone from this machine has no status left to report; `stopped` is the honest nearest.
       status: session?.state.status ?? 'stopped',
-      detail: `${formatTaskRef(view)} “${view.title}” is in ${laneName(board, view)}, but its ferret ${ferretRef(assignee, fleet)} is ${endedAs(assignee, fleet)} and nothing under it is alive`,
+      detail: `${formatCardRef(view)} “${view.title}” is in ${laneName(board, view)}, but its ferret ${ferretRef(assignee, fleet)} is ${endedAs(assignee, fleet)} and nothing under it is alive`,
       since,
       ...(idleMinutes === undefined ? {} : { idleMinutes }),
       subject: `${orphanFleetKey(view.id)}|assignee:${assignee}`,
@@ -126,7 +127,7 @@ export type OrphanMemory = Readonly<Record<string, OrphanTold>>;
 /** A plain notice to the owner, tied to a card. */
 export interface WardenCardNotice {
   readonly sourceRef: string;
-  readonly task: TaskRef;
+  readonly task: CardRef;
   readonly title: string;
   readonly subject: string;
   readonly why: string;
@@ -139,7 +140,7 @@ export interface WardenCardNotice {
 export type OrphanTell =
   | {
       readonly kind: 'message';
-      readonly taskId: BoardTaskId;
+      readonly taskId: CardId;
       readonly assignee: string;
       readonly sessionId: string;
       readonly message: string;
@@ -152,7 +153,7 @@ export type OrphanTell =
     }
   | {
       readonly kind: 'notice';
-      readonly taskId: BoardTaskId;
+      readonly taskId: CardId;
       readonly assignee: string;
       readonly sessionId: string;
       readonly notice: WardenCardNotice;
@@ -160,7 +161,7 @@ export type OrphanTell =
 
 /** A notice whose card is no longer orphaned in the episode it was about. */
 export interface OrphanResolution {
-  readonly taskId: BoardTaskId;
+  readonly taskId: CardId;
   readonly sessionId: string;
   readonly sourceRef: string;
   readonly note: string;
@@ -170,7 +171,7 @@ export interface OrphanPlan {
   readonly tell: readonly OrphanTell[];
   readonly resolve: readonly OrphanResolution[];
   /** Orphaned cards nobody can be told about: no board on this machine to hold a notice. */
-  readonly unreported: readonly BoardTaskId[];
+  readonly unreported: readonly CardId[];
   /** The memory to keep, before any tell is recorded as landed. */
   readonly memory: OrphanMemory;
 }
@@ -197,7 +198,7 @@ const clamp = (value: string, maximum: number): string =>
   value.length <= maximum ? value : `${value.slice(0, Math.max(0, maximum - 1)).trimEnd()}…`;
 
 /** The ways out of an orphaned card, as commands. */
-const remedies = (view: BoardTaskView, assignee: string, cli: string): string =>
+const remedies = (view: CardView, assignee: string, cli: string): string =>
   `Resume its ferret (\`${cli} resume ${assignee}\`), hand the card to another ferret (\`${cli} task assign ${view.id} <ferret>\`), or drop it (\`${cli} task drop ${view.id} --reason "<why>"\`).`;
 
 /** What became of a ferret, for a reader who is not an engineer: it finished, failed, or is gone. */
@@ -215,8 +216,8 @@ const CARD_LINE_TAIL = (lane: string): string =>
  * notice's subject and the machine list's row say, so it has to fit a push body: a long title gives way, never
  * the ending.
  */
-export function orphanCardLine(view: BoardTaskView, board: WardenBoardRead): string {
-  const ref = formatTaskRef(view);
+export function orphanCardLine(view: CardView, board: WardenBoardRead): string {
+  const ref = formatCardRef(view);
   const tail = CARD_LINE_TAIL(laneName(board, view));
   const room = Math.max(24, AGENDA_PUSH_BODY_LENGTH - ref.length - 1 - tail.length);
   return flatten(`${ref} ${clipAtWord(flatten(view.title), room)}${tail}`);
@@ -224,14 +225,14 @@ export function orphanCardLine(view: BoardTaskView, board: WardenBoardRead): str
 
 /** The queued message to the card's owner ferret. */
 export function orphanOwnerMessage(
-  view: BoardTaskView,
+  view: CardView,
   board: WardenBoardRead,
   fleet: ReadonlyMap<string, WardenSessionView>,
   cli: string,
 ): string {
   const assignee = effectiveAssignee(view);
   return (
-    `Your card ${formatTaskRef(view)} "${flatten(view.title)}" has no ferret working on it. It is waiting in ${laneName(board, view)}, ` +
+    `Your card ${formatCardRef(view)} "${flatten(view.title)}" has no ferret working on it. It is waiting in ${laneName(board, view)}, ` +
     `but its ferret ${ferretRef(assignee, fleet)} ${endedWords(assignee, fleet)}, so nothing will happen to it. ` +
     `You own the card, so pick it up: ${remedies(view, assignee, cli)}`
   );
@@ -243,13 +244,13 @@ export const orphanTitle = (count: number): string =>
 
 /** The notice to the owner, when no ferret that owns the card is alive to be told. */
 export function orphanNotice(
-  view: BoardTaskView,
+  view: CardView,
   board: WardenBoardRead,
   fleet: ReadonlyMap<string, WardenSessionView>,
   input: Pick<OrphanPlanInput, 'clientName' | 'machine'>,
   since: string,
 ): WardenCardNotice {
-  const ref = formatTaskRef(view);
+  const ref = formatCardRef(view);
   const assignee = effectiveAssignee(view);
   const lane = laneName(board, view);
   const where = input.machine === undefined ? '' : ` on ${input.machine}`;
@@ -294,9 +295,9 @@ export function planOrphanEscalations(input: OrphanPlanInput): OrphanPlan {
   };
   const tell: OrphanTell[] = [];
   const resolve: OrphanResolution[] = [];
-  const unreported: BoardTaskId[] = [];
+  const unreported: CardId[] = [];
   const memory: Record<string, OrphanTold> = {};
-  const clear = (taskId: BoardTaskId, told: OrphanTold, note: string): void => {
+  const clear = (taskId: CardId, told: OrphanTold, note: string): void => {
     if (told.via === 'notice')
       resolve.push({ taskId, sessionId: told.to, sourceRef: orphanNoticeSourceRef(taskId), note });
   };

@@ -1,4 +1,5 @@
-import type { BoardTask, BoardTaskView } from '../../daemon/lib/protocol.ts';
+import type { Card, CardView } from '@ferretry/plugin-board/contract';
+import type { Instant } from '@ferretry/std';
 import type { WardenBoardRead } from '../../daemon/lib/index.ts';
 import { card, lanes, PROJECT } from '../support/board.ts';
 
@@ -6,7 +7,7 @@ import { card, lanes, PROJECT } from '../support/board.ts';
 const LANE_SETS = new Map([[PROJECT, lanes(PROJECT)]]);
 
 /** A card as the board derives it: `F1` by `lead`, in Implement, idle, unless told otherwise. */
-export const cardView = (stored: Partial<BoardTask> = {}, derived: Partial<BoardTaskView> = {}): BoardTaskView => ({
+export const cardView = (stored: Partial<Card> = {}, derived: Partial<CardView> = {}): CardView => ({
   ...card({ laneId: 'implement', ...stored }),
   lastTouchedAt: null,
   touchedBy: null,
@@ -18,7 +19,6 @@ export const cardView = (stored: Partial<BoardTask> = {}, derived: Partial<Board
     lastTouchedAt: null,
   },
   suggestedLane: null,
-  waitingOnOwner: [],
   openAsks: [],
   blockedBy: [],
   blocks: [],
@@ -27,7 +27,7 @@ export const cardView = (stored: Partial<BoardTask> = {}, derived: Partial<Board
 });
 
 /** A card the board calls orphaned: `F1` owned by `lead`, assigned to `worker`, last touched at `touched`. */
-export const orphanView = (stored: Partial<BoardTask> = {}, touched = '2026-07-31T11:00:00.000Z'): BoardTaskView =>
-  cardView({ assignee: 'worker', ...stored }, { activity: 'orphaned', lastTouchedAt: touched });
+export const orphanView = (stored: Partial<Card> = {}, touched = '2026-07-31T11:00:00.000Z'): CardView =>
+  cardView({ assignee: 'worker', ...stored }, { activity: 'orphaned', lastTouchedAt: touched as Instant });
 
-export const boardOf = (...views: BoardTaskView[]): WardenBoardRead => ({ views, laneSets: LANE_SETS });
+export const boardOf = (...views: CardView[]): WardenBoardRead => ({ views, laneSets: LANE_SETS });

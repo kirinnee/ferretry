@@ -3,10 +3,12 @@ import { milliseconds } from '@ferretry/std';
 import type { AsksApi } from '@ferretry/core-asks/contract';
 import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
 import type { KernelPorts } from '@ferretry/kernel/contract';
+import type { BoardApi } from '@ferretry/plugin-board/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import type { UsageHeadroomApi } from '../contract/others.ts';
 import { WardenActed, WardenFlagged } from '../contract/index.ts';
 import { AsksWardenAgenda, NoticeEntries } from './asks.ts';
+import { boardReader } from './board.ts';
 import {
   ConfigWardenConfigStore,
   FileWardenArtifacts,
@@ -41,13 +43,15 @@ import { isoFromMs } from './lib/time.ts';
 /** The reports folder inside the warden's own state; a report's path is `reports/<stamp>.md`. */
 export const REPORTS_DIRECTORY = 'reports';
 
-/** What the warden needs of the rest of the daemon: ports it was handed, and the optional Usage. */
+/** What the warden needs of the rest of the daemon: ports it was handed, and the optional Usage and Board. */
 export interface WardenHost {
   readonly kernel: KernelPorts;
   readonly ferrets: FerretsApi;
   readonly conversation: ConversationApi;
   readonly asks: AsksApi;
   readonly usage: () => UsageHeadroomApi | undefined;
+  /** Board, when it is on: read at each sweep, never during build. */
+  readonly board: () => BoardApi | undefined;
 }
 
 /** What the routes serve (today's `WardenSubsystem`, in the contract's words where they differ). */
@@ -170,6 +174,11 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       journal: { record: (type, data) => kernel.log.info(type, scalars(data)) },
       jevChecks: new StateWardenJevCheckLog(kernel.state, nowMs),
       revive,
+      // Board off (or not loaded): no port, so no card is reported orphaned and none is cleared.
+      board: () => {
+        const board = host.board();
+        return board === undefined ? undefined : boardReader(board);
+      },
       // The send ledgers, for DETECTION only: a sub-ferret overdue on a report its parent asked for is flagged
       // `report_overdue`, and nobody is typed to (`nudgesOverdue: false` below).
       exchanges: { sends: async ferret => await exchangeSends(conversation, ferret as FerretId) },

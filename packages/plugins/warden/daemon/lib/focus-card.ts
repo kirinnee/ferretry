@@ -9,11 +9,17 @@
  *
  * Pure: the card arrives already read (`WardenBoardPort.focusCard`).
  */
-import { type BoardTaskView, describeBoardEvent, formatTaskRef, type LaneSet, type PrLink } from './protocol.ts';
+import {
+  type CardView,
+  describeCardEvent,
+  formatCardRef,
+  type LaneSet,
+  type PrLink,
+} from '@ferretry/plugin-board/contract';
 
 /** A ferret's focus card, with the lanes of its board so the lane reads by name. */
 export interface WardenFocusCard {
-  readonly task: BoardTaskView;
+  readonly task: CardView;
   readonly laneSet: LaneSet | null;
   /** The ferret was started by another ferret: it may not move cards, so the brief does not tell it to. */
   readonly subFerret?: boolean;
@@ -30,7 +36,7 @@ const prLine = (pr: PrLink): string => `PR #${String(pr.number)} ${pr.url} (${pr
 /** The card, as the block a resumed ferret reads. Session ids stay ids: the Warden holds no directory. */
 export function focusCardBrief(card: WardenFocusCard): string {
   const { task, laneSet } = card;
-  const ref = formatTaskRef(task);
+  const ref = formatCardRef(task);
   const lines = [
     `Your card: ${ref} — ${task.title}`,
     `Lane: ${laneName(laneSet, task.laneId)}`,
@@ -53,7 +59,7 @@ export function focusCardBrief(card: WardenFocusCard): string {
     'Last on the card:',
     ...recent.map(
       event =>
-        `- ${event.at}  ${describeBoardEvent(
+        `- ${event.at}  ${describeCardEvent(
           event,
           id => laneName(laneSet, id),
           id => id,

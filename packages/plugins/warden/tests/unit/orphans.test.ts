@@ -48,7 +48,7 @@ describe('detectOrphanedCards', () => {
   it('should read only the board’s own verdict: a card in any other state is not orphaned', () => {
     // Arrange
     const board = boardOf(
-      ...(['active', 'idle', 'stale', 'waiting'] as const).map((activity, index) =>
+      ...(['active', 'idle', 'stale'] as const).map((activity, index) =>
         cardView({ id: `F${index + 2}`, assignee: 'worker' }, { activity }),
       ),
     );

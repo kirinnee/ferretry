@@ -397,7 +397,7 @@ export function harness(
     journal: { record: (type, data) => void journal.push({ type, data: { ...data } }) },
     ...(options.revive === undefined ? {} : { revive: options.revive }),
     ...(options.autoMove === undefined ? {} : { autoMove: options.autoMove }),
-    ...(options.board === undefined ? {} : { board: options.board }),
+    ...(options.board === undefined ? {} : { board: () => options.board }),
     ...(options.exchanges === undefined ? {} : { exchanges: options.exchanges }),
     ...(options.stuckInput === undefined ? {} : { stuckInput: options.stuckInput }),
     ...(options.stuckInbox === undefined ? {} : { stuckInbox: options.stuckInbox }),

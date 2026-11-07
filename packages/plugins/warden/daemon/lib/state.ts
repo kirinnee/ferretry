@@ -19,9 +19,9 @@
  * Pure: no IO, no clock, no globals.
  */
 
+import { CardRefSchema } from '@ferretry/plugin-board/contract';
 import {
   SessionStatusSchema,
-  TaskRefSchema,
   WARDEN_INVESTIGATOR_MAX_SEQUENCE,
   type WardenAction,
   WardenActionSchema,
@@ -110,7 +110,7 @@ const AnomalySchema = z.object({
   assignedWarden: z.boolean().optional(),
   ledger: LedgerSchema.optional(),
   subject: z.string().min(1).optional(),
-  task: TaskRefSchema.optional(),
+  task: CardRefSchema.optional(),
 }) satisfies z.ZodType<unknown, WardenAnomaly>;
 
 const BackoffSchema = z.object({

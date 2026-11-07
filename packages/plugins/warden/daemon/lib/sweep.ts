@@ -580,8 +580,11 @@ export interface WardenSweepPorts {
   readonly revive?: WardenReviveService;
   /** Moving a ferret whose login hit a limit to another login (`auto-move-service.ts`). Absent: nothing is moved. */
   readonly autoMove?: WardenAutoMoveService;
-  /** The project boards. Absent: no card is reported orphaned, and a resumed ferret is told no card. */
-  readonly board?: WardenBoardPort;
+  /**
+   * The project boards, looked up each time they are read: Board is an optional plugin, so it can be off or not loaded.
+   * Absent, or answering `undefined`: no card is reported orphaned, and a resumed ferret is told no card.
+   */
+  readonly board?: () => WardenBoardPort | undefined;
   /** The send ledgers. Absent: no sub-ferret is reported overdue. */
   readonly exchanges?: WardenExchangeReader;
   /** Ferrets stuck on an unsent message of ours. Absent: none is looked for. */
@@ -2622,13 +2625,15 @@ export class WardenSweepService {
 
   /** A ferret's focus card, or `undefined` when there is no board, no card, or it cannot be read. */
   private async focusCard(sessionId: string): Promise<WardenFocusCard | undefined> {
-    return await this.ports.board?.focusCard(sessionId).catch(() => undefined);
+    const port = this.ports.board?.();
+    return await port?.focusCard(sessionId).catch(() => undefined);
   }
 
   /** The board, once per sweep; `undefined` without one, or when it cannot be read — which is said out loud. */
   private async readBoard(): Promise<WardenBoardRead | undefined> {
-    if (this.ports.board === undefined) return undefined;
-    const board = await this.ports.board.read().catch(() => undefined);
+    const port = this.ports.board?.();
+    if (port === undefined) return undefined;
+    const board = await port.read().catch(() => undefined);
     if (board === undefined)
       this.ports.journal.record('fleet.warden_board_blind', {
         reason: 'the board could not be read, so no card was reported orphaned or cleared this sweep',

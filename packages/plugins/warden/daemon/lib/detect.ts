@@ -4,7 +4,7 @@
  * set. No I/O, no clock, no globals — everything arrives through the arguments.
  */
 
-import type { TaskRef } from './protocol.ts';
+import type { CardRef } from '@ferretry/plugin-board/contract';
 import { susFindings } from './sus.ts';
 import { firstInstantMs, instantMs, isoFromMs, latestInstantMs } from './time.ts';
 import {
@@ -68,7 +68,7 @@ export interface WardenAnomaly {
    */
   readonly subject?: string;
   /** The board card the anomaly is about, for a kind about a card (`orphaned_card`). */
-  readonly task?: TaskRef;
+  readonly task?: CardRef;
 }
 
 /**

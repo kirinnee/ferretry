@@ -24,8 +24,11 @@ import { createWardenSubsystem } from './subsystem.ts';
  *   still run in the sweep).
  * - A nudge is sent as the owner until Conversation has a `warden` caller; a standing notice cannot be refreshed in
  *   place (Asks has no update); unattended is the ferret's own start mode, as today.
- * - The board and the stuck-input/inbox acts are absent, so their flags do not occur; the machine lists and the
- *   declared-wait watcher of today are not part of this port.
+ * - Board is an optional use: on, a card Board calls orphaned is flagged `orphaned_card` (read through Board's
+ *   contract); off, that flag does not run. Board's contract has no lane-set or focus read, so a lane reads as its id
+ *   and a resumed ferret is told no card (`daemon/board.ts`).
+ * - The stuck-input/inbox acts are absent, so their flags do not occur; the machine lists and the declared-wait
+ *   watcher of today are not part of this port.
  */
 export default implementDaemon(manifest, {
   build(ctx) {
@@ -37,6 +40,7 @@ export default implementDaemon(manifest, {
       conversation,
       asks,
       usage: () => ctx.uses.usage.current(),
+      board: () => ctx.uses.board.current(),
     });
 
     // Arming reads the interval from `warden.yaml` and starts the timer: after `build`, in a job (§7.6 step 4).

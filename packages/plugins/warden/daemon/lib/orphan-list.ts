@@ -1,6 +1,6 @@
+import { CardIdSchema } from '@ferretry/plugin-board/contract';
 import {
   AGENDA_PUSH_TITLE_LENGTH,
-  type BoardTaskId,
   clipAtWord,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_SUBJECT_LENGTH,
@@ -83,7 +83,7 @@ export class OrphanList {
         notice: true,
         ...(quiet ? {} : { ping: true as const }),
         kind: 'info',
-        cards: listed.map(id => ({ task: { id: id as BoardTaskId }, line: held[id]?.[1] ?? id })),
+        cards: listed.map(id => ({ task: { id: CardIdSchema.parse(id) }, line: held[id]?.[1] ?? id })),
       },
       ids,
     );

@@ -27,7 +27,8 @@
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "@ferretry/core-gate": "workspace:*"
+    "@ferretry/core-gate": "workspace:*",
+    "@ferretry/plugin-board": "workspace:*"
   },
   "sideEffects": false,
   "devDependencies": {

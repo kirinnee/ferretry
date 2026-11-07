@@ -544,6 +544,7 @@
         "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-board": "workspace:*",
         "@ferretry/plugin-conversation": "workspace:*",
         "@ferretry/std": "workspace:*",
         "lucide-react": "^0.468.0",

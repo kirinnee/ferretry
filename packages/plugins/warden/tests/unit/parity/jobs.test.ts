@@ -66,6 +66,7 @@ describe('job parity', () => {
       conversation: fakeConversation(),
       asks: new FakeAsks(),
       usage: () => undefined,
+      board: () => undefined,
     });
     const disarm = subsystem.arm();
     const swept = async (): Promise<string | undefined> => (await subsystem.status()).lastSweepAt;

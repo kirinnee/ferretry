@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import type { BoardTaskEvent, PrLink } from '../../daemon/lib/protocol.ts';
+import type { CardEvent, PrLink } from '@ferretry/plugin-board/contract';
+import type { Instant } from '@ferretry/std';
 import should from 'should';
 import {
   FOCUS_HISTORY_LINES,
@@ -20,14 +21,14 @@ const pr = (overrides: Partial<PrLink> = {}): PrLink => ({
   mergedAt: null,
   mergeSha: null,
   releasedIn: null,
-  polledAt: '2026-10-30T10:00:00.000Z',
+  polledAt: '2026-10-30T10:00:00.000Z' as Instant,
   ...overrides,
 });
 
-const note = (seq: number, text: string): BoardTaskEvent => ({
+const note = (seq: number, text: string): CardEvent => ({
   seq,
-  at: `2026-10-30T10:0${seq}:00.000Z`,
-  actor: { kind: 'ferret', sessionId: 'worker' },
+  at: `2026-10-30T10:0${seq}:00.000Z` as Instant,
+  actor: { kind: 'ferret', name: 'worker', ferret: 'worker' },
   type: 'note',
   text,
 });
@@ -143,10 +144,10 @@ describe('focusCardBrief', () => {
   it('should name a ferret in its history by its session id', () => {
     // Arrange
     const base = cardView();
-    const assigned: BoardTaskEvent = {
+    const assigned: CardEvent = {
       seq: 2,
-      at: '2026-10-30T10:02:00.000Z',
-      actor: { kind: 'ferret', sessionId: 'lead' },
+      at: '2026-10-30T10:02:00.000Z' as Instant,
+      actor: { kind: 'ferret', name: 'lead', ferret: 'lead' },
       type: 'assigned',
       from: 'lead',
       to: 'worker',

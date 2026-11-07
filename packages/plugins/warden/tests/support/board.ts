@@ -1,12 +1,15 @@
-/** The board fixtures the warden's tests build cards from: the classic lanes and a stored card (the Board's own are not imported). */
-import type { BoardTask, LaneSet } from '../../daemon/lib/foreign.ts';
+/** The board fixtures the warden's tests build cards from: the classic lanes and a stored card, in Board's own types. */
+import type { Card, LaneSet } from '@ferretry/plugin-board/contract';
+import type { Instant } from '@ferretry/std';
 
 export const PROJECT = '11111111-1111-4111-8111-111111111111';
-const NOW = '2026-07-31T12:00:00.000Z';
+const NOW = '2026-07-31T12:00:00.000Z' as Instant;
 
 export const lanes = (projectId: string = PROJECT): LaneSet => ({
   projectId,
   version: 1,
+  confirmedBy: null,
+  proposedBy: 'daemon',
   lanes: [
     { id: 'todo', name: 'Todo', category: 'backlog' },
     { id: 'plan', name: 'Plan/Design', category: 'active' },
@@ -17,16 +20,19 @@ export const lanes = (projectId: string = PROJECT): LaneSet => ({
     { id: 'tested', name: 'To test', category: 'verify' },
     { id: 'closed', name: 'Closed', category: 'closed' },
   ],
+  variants: {},
+  doneLane: 'closed',
+  notGoodLane: 'implement',
 });
 
-const ferret = (sessionId: string) => ({ kind: 'ferret' as const, sessionId });
+const ferret = (id: string) => ({ kind: 'ferret' as const, name: id, ferret: id });
 
 /** A stored card: `F1` by ferret `lead`, in Todo, unless told otherwise. */
-export const card = (overrides: Partial<BoardTask> = {}): BoardTask => {
+export const card = (overrides: Partial<Card> = {}): Card => {
   const id = overrides.id ?? 'F1';
   const laneId = overrides.laneId ?? 'todo';
   return {
-    v: 1,
+    format: 1,
     id,
     machineId: 'machine-1',
     projectId: PROJECT,

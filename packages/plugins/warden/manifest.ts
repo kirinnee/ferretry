@@ -1,3 +1,4 @@
+import { BoardPort } from '@ferretry/plugin-board/contract';
 import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
 import { appAction, definePlugin, panel, route, screen, settingsTab } from '@ferretry/kernel/manifest';
 import { AsksPort } from '@ferretry/core-asks/contract';
@@ -49,7 +50,7 @@ export default definePlugin({
   ],
 
   needs: { ferrets: FerretsPort, conversation: ConversationPort, asks: AsksPort },
-  uses: { usage: UsagePort },
+  uses: { usage: UsagePort, board: BoardPort },
   provides: { warden: WardenPort },
 
   actions: {
