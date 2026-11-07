@@ -5,10 +5,10 @@
  * `packages/daemon/src/lib/board/sweep.ts` (sweep), `packages/daemon/src/lib/board-projects/board-switch.ts` (switch).
  * Inventory: `docs/migration/v4-formats.md` §C.iii "1.".
  *
- * Each reader declares the fields the conversion maps. Members v4 itself stores as deep, rarely read records (history
- * events, clarifications, terms, links, lane options, a pending lane proposal) are read loose and carried whole,
- * because the v5 contract declares them as loose records too. A top-level card field this reader does not know is
- * reported by NAME (never its value) so nothing is dropped silently.
+ * Each reader declares the fields the conversion maps. Deep members (history events, clarifications, terms, links,
+ * lane options, a pending lane proposal) are read loose here: the step maps them and v5's STRICT Board schemas check
+ * every one of them before anything is written. A top-level card field, or a history event field, this reader does not
+ * know is reported by NAME (never its value) so nothing is dropped silently.
  */
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -213,3 +213,51 @@ export function v4BoardPaths(home: string) {
     lanes: join(root, 'lanes'),
   };
 }
+
+/**
+ * Every history event type v4.291.5 writes (`BoardTaskEventSchema`, a closed union). v5's `CardEventSchema` has each of
+ * them under the same name except `migrated`, which the step rewrites as a `note`.
+ */
+export const V4_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'created',
+  'moved',
+  'reopened',
+  'note',
+  'clarified',
+  'linked',
+  'assigned',
+  'depended',
+  'undepended',
+  'blocked',
+  'unblocked',
+  'field-edited',
+  'file-claimed',
+  'file-released',
+  'ordered',
+  'snoozed',
+  'refiled',
+  'reparented',
+  'dropped',
+  'migrated',
+]);
+
+/** v4 `LegacyTaskRefSchema`: the `<session>:<old id>` a `migrated` event and a card's `legacyRef` name. */
+export const V4LegacyRef = z.string().regex(/^[^\s:]+:[BFIC][1-9][0-9]{0,8}$/u);
+
+/** The board fields of a v4 session `config.json` (`SessionConfigSchema`): its name, callsign and focus. */
+export const V4FerretBoardConfig = z.looseObject({
+  id: SessionId,
+  name: z.string().min(1),
+  teammate: z.string().optional(),
+});
+/** `focusTask` / `focusAnchor`: a card ref. */
+export const V4FocusRef = V4TaskRef;
+/** `boardSkip`: v4 `BoardSkipSchema`. */
+export const V4BoardSkip = z.strictObject({
+  reason: z
+    .string()
+    .trim()
+    .min(1)
+    .max(2 * 1024),
+  at: Instant,
+});

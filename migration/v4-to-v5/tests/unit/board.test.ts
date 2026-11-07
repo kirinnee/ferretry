@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { BoardFileSchema, CardSchema, CountersFileSchema, SweepFileSchema } from '@ferretry/plugin-board/contract';
+import {
+  BoardFileSchema,
+  CardSchema,
+  CountersFileSchema,
+  FocusFileSchema,
+  SweepFileSchema,
+} from '@ferretry/plugin-board/contract';
 import { readdir, readFile, stat, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { boardStep } from '../../src/steps/board.ts';
@@ -75,7 +81,7 @@ const card = async (id: string) => CardSchema.parse(await output(`state/board/ca
 const plain = (value: unknown): unknown => value;
 const exists = async (path: string) => (await stat(join(f.to, path)).catch(() => undefined)) !== undefined;
 
-test('keeps the card id and every mapped field; renames v4 names to v5 ones', async () => {
+test('keeps the card id, the ask with its source and every mapped field; renames status to progress', async () => {
   await f.session('lead', { name: 'fake-lead' });
   const history = [
     { seq: 1, at: AT, actor: { kind: 'ferret', sessionId: 'lead' }, type: 'created', laneId: 'todo' },
@@ -120,11 +126,11 @@ test('keeps the card id and every mapped field; renames v4 names to v5 ones', as
   expect(kept).toMatchObject({
     format: 1,
     id: 'F1792',
-    machine: MACHINE,
-    project: PROJECT,
-    lane: 'in-progress',
+    machineId: MACHINE,
+    projectId: PROJECT,
+    laneId: 'in-progress',
     kind: 'feature',
-    ask: 'Fake owner words',
+    ask: { text: 'Fake owner words', source: 'fake chat' },
     progress: { now: 'fake now', doneSoFar: 'fake done', next: 'fake next' },
     owner: 'lead',
     assignee: 'helper',
@@ -134,7 +140,7 @@ test('keeps the card id and every mapped field; renames v4 names to v5 ones', as
     howToTest: '1. fake step',
     files: ['src/fake.ts'],
     order: 4,
-    snoozed: { until: LATER, lane: 'in-progress' },
+    snoozed: { until: LATER, laneId: 'in-progress' },
     askedBy: 'person',
     visibility: 'public',
     visibilitySource: 'default',
@@ -149,8 +155,7 @@ test('keeps the card id and every mapped field; renames v4 names to v5 ones', as
   ]);
   expect(kept.terms).toEqual([{ term: 'Fake', meaning: 'a fake term' }]);
   const raw = (await output('state/board/cards/F1792.json')) as Record<string, unknown>;
-  for (const v4Only of ['v', 'machineId', 'projectId', 'laneId', 'status', 'legacyRef', 'createdByVia'])
-    expect(raw[v4Only]).toBeUndefined();
+  for (const v4Only of ['v', 'status', 'legacyRef', 'createdByVia']) expect(raw[v4Only]).toBeUndefined();
 });
 
 test('keeps parent, dependency and PR links, and the approval link to the ferret’s ask', async () => {
@@ -192,13 +197,13 @@ test('keeps parent, dependency and PR links, and the approval link to the ferret
   expect(report.status).toBe('converted');
   const kept = await card('B3');
   expect(kept.parent).toEqual({ id: 'F2' });
-  expect(kept.dependsOn).toEqual([
-    { task: { machine: OTHER_MACHINE, id: 'F9' }, until: 'released', override },
+  expect(plain(kept.dependsOn)).toEqual([
+    { task: { machineId: OTHER_MACHINE, id: 'F9' }, until: 'released', override },
     { task: { id: 'F2' }, until: 'shipped' },
   ]);
-  expect(kept.links).toEqual(links);
+  expect(plain(kept.links)).toEqual(links);
   expect(plain(kept.blocked)).toEqual({ on: 'external', reason: 'fake wait', since: AT });
-  expect(plain(kept.approval)).toEqual({ ferret: 'lead', ask: 'A41' });
+  expect(plain(kept.approval)).toEqual({ ferret: 'lead', id: 'A41' });
   expect(report.kept).toContainEqual({ what: 'card approvals linked to their ferret’s ask', count: 1 });
 });
 
@@ -211,7 +216,7 @@ test('dropped cards and cards in a closed lane are kept', async () => {
   const report = await boardStep.run(f.ctx());
   expect(report.status).toBe('converted');
   expect(plain((await card('C1')).dropped)).toEqual({ reason: 'fake superseded', at: LATER });
-  expect((await card('I4')).lane).toBe('closed');
+  expect((await card('I4')).laneId).toBe('closed');
   expect(report.kept).toContainEqual({ what: 'cards (ids unchanged; dropped and closed cards included)', count: 2 });
   expect(report.kept).toContainEqual({ what: 'dropped cards', count: 1 });
 });
@@ -253,11 +258,12 @@ test('owner and daemon creators: via kept on the owner, the session they acted f
   // A ferret whose session folder is gone is named by its id, and the report counts it.
   expect(plain((await card('F3')).createdBy)).toEqual({ kind: 'ferret', name: 'gone', ferret: 'gone' });
   expect(report.kept).toContainEqual({ what: 'ferret actors named by id (no v4 config left)', count: 4 });
-  expect(report.notCarried.map(item => item.what)).toContain('card ask.source (where the owner said the words)');
+  expect(report.notCarried.map(item => item.what).join()).not.toContain('ask.source');
+  expect(plain((await card('F1')).ask)).toEqual({ text: 'Fake owner words', source: 'fake chat' });
 });
 
 test('lane sets and the switch become one board file per project', async () => {
-  const unfiledLanes = lanes('unfiled', { confirmedBy: null, doneLane: 'closed', notGoodLane: 'todo' });
+  const unfiledLanes = lanes('unfiled', { confirmedBy: null, doneLane: 'closed', notGoodLane: 'in-progress' });
   const pending = {
     version: 4,
     baseVersion: 3,
@@ -282,6 +288,7 @@ test('lane sets and the switch become one board file per project', async () => {
     },
   });
   const report = await boardStep.run(f.ctx());
+  expect(report.note).toBeUndefined();
   expect(report.status).toBe('converted');
   const project = BoardFileSchema.parse(await output(`state/board/boards/${PROJECT}.json`));
   expect(plain(project.switch)).toEqual({ projectId: PROJECT, on: true, setBy: 'owner', setAt: LATER });
@@ -307,10 +314,15 @@ test('a lane file naming another project fails, naming the file only', async () 
   expect(report.note).toBe(`board/lanes/${PROJECT}.json names another project`);
 });
 
-test('the sweep keeps when it last ran; a damaged one is a fresh start, as in v4', async () => {
+test('the sweep keeps its whole memory; a damaged one is a fresh start, as in v4', async () => {
   await f.put('state/board/sweep.json', { v: 1, sweptAt: LATER, nudged: { F1: AT }, seen: { F1: { blockedBy: [] } } });
   expect((await boardStep.run(f.ctx())).status).toBe('converted');
-  expect(plain(SweepFileSchema.parse(await output('state/board/sweep.json')))).toEqual({ format: 1, lastRunAt: LATER });
+  expect(plain(SweepFileSchema.parse(await output('state/board/sweep.json')))).toEqual({
+    format: 1,
+    sweptAt: LATER,
+    nudged: { F1: AT },
+    seen: { F1: { blockedBy: [] } },
+  });
   await f.clean();
   f = await fixture();
   await f.put('state/board/sweep.json', { v: 9, fake: 'FAKE-SECRET-SWEEP' });
@@ -389,6 +401,7 @@ test('a daemon move a person reported keeps who reported it, in the v5 actor sha
       backward: false,
       reason: null,
       auto: true,
+      trigger: 'pr.review_approved',
       reportedBy: { kind: 'owner' },
       reportedVia: 'admin-token',
     },
@@ -411,4 +424,172 @@ test('a history event with an unreadable actor fails the step, naming the card o
   expect(report.status).toBe('failed');
   expect(JSON.stringify(report)).not.toContain('SECRET-FAKE');
   expect(await exists('state/board/cards/F1.json')).toBe(false);
+});
+
+test('a ferret actor is named by its v4 callsign, else a valid title, else its id', async () => {
+  await f.session('lead', { name: 'Fake title: not a name!', teammate: 'arleen' });
+  await f.session('helper', { name: 'Fake title: not a name!' });
+  const history = [
+    { seq: 1, at: AT, actor: { kind: 'ferret', sessionId: 'lead' }, type: 'created', laneId: 'todo' },
+    { seq: 2, at: LATER, actor: { kind: 'ferret', sessionId: 'helper' }, type: 'note', text: 'fake note' },
+  ];
+  await f.put('state/board/tasks/F1.json', v4Card('F1', { history }));
+  expect((await boardStep.run(f.ctx())).status).toBe('converted');
+  const kept = await card('F1');
+  expect(plain(kept.createdBy)).toEqual({ kind: 'ferret', name: 'arleen', ferret: 'lead' });
+  expect(plain(kept.history[1]?.actor)).toEqual({ kind: 'ferret', name: 'helper', ferret: 'helper' });
+});
+
+test('every v4 history event type maps: migrated becomes a note, a status edit a progress edit', async () => {
+  const lead = { kind: 'ferret', sessionId: 'lead' };
+  const owner = { kind: 'owner', sessionId: 'lead' };
+  const history = [
+    { seq: 1, at: AT, actor: lead, type: 'created', laneId: 'todo' },
+    { seq: 2, at: AT, actor: lead, type: 'migrated', legacyRef: 'lead:F3' },
+    { seq: 3, at: AT, actor: lead, type: 'field-edited', field: 'status' },
+    { seq: 4, at: AT, actor: lead, type: 'moved', from: 'todo', to: 'in-progress', backward: false, reason: null },
+    {
+      seq: 5,
+      at: AT,
+      actor: owner,
+      actorVia: 'admin-token',
+      type: 'reopened',
+      from: 'in-progress',
+      to: 'todo',
+      reason: 'fake reason',
+      ask: { text: 'fake words', source: 'fake chat' },
+    },
+    { seq: 6, at: AT, actor: lead, type: 'note', text: 'fake note' },
+    { seq: 7, at: AT, actor: owner, type: 'clarified', text: 'fake more', source: 'fake chat' },
+    { seq: 8, at: AT, actor: lead, type: 'linked', field: 'branch', value: 'fake/branch' },
+    { seq: 9, at: AT, actor: lead, type: 'assigned', from: null, to: 'helper', handedDown: true },
+    { seq: 10, at: AT, actor: lead, type: 'depended', task: { id: 'F2' }, until: 'shipped' },
+    { seq: 11, at: AT, actor: lead, type: 'undepended', task: { id: 'F2' }, reason: 'fake reason' },
+    { seq: 12, at: AT, actor: lead, type: 'blocked', reason: 'fake wait' },
+    { seq: 13, at: AT, actor: lead, type: 'unblocked', reason: null },
+    { seq: 14, at: AT, actor: lead, type: 'file-claimed', path: 'src/fake.ts' },
+    { seq: 15, at: AT, actor: lead, type: 'file-released', path: 'src/fake.ts', reason: null },
+    { seq: 16, at: AT, actor: owner, type: 'ordered', from: null, to: 2 },
+    { seq: 17, at: AT, actor: owner, type: 'snoozed', until: null },
+    {
+      seq: 18,
+      at: AT,
+      actor: owner,
+      type: 'refiled',
+      fromProject: 'unfiled',
+      toProject: PROJECT,
+      toLane: 'todo',
+      reason: null,
+    },
+    { seq: 19, at: AT, actor: lead, type: 'reparented', from: null, to: { id: 'F2' }, reason: null },
+    { seq: 20, at: AT, actor: { kind: 'daemon' }, type: 'dropped', reason: 'fake superseded' },
+  ];
+  await f.put('state/board/tasks/F1.json', v4Card('F1', { history, legacyRef: 'lead:F3' }));
+  const report = await boardStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  const kept = await card('F1');
+  expect(plain(kept.history.map(event => event.type))).toEqual([
+    'created',
+    'note',
+    'field-edited',
+    ...history.slice(3).map(event => event.type),
+  ]);
+  expect(plain(kept.history[1])).toEqual({
+    seq: 2,
+    at: AT,
+    actor: { kind: 'ferret', name: 'lead', ferret: 'lead' },
+    type: 'note',
+    text: 'migrated from the v4 task list as lead:F3',
+  });
+  expect(plain(kept.history[2])).toMatchObject({ type: 'field-edited', field: 'progress' });
+  expect(plain(kept.history[4]?.actor)).toEqual({ kind: 'owner', via: 'admin-token' });
+  expect(report.kept).toContainEqual({
+    what: 'v4 `migrated` history events kept as notes naming the legacy ref',
+    count: 1,
+  });
+});
+
+test('a history event type v4 does not have fails the step, naming the card and the type', async () => {
+  const history = [
+    { seq: 1, at: AT, actor: { kind: 'ferret', sessionId: 'lead' }, type: 'created', laneId: 'todo' },
+    { seq: 2, at: AT, actor: { kind: 'ferret', sessionId: 'lead' }, type: 'teleported', where: 'FAKE-SECRET-PLACE' },
+  ];
+  await f.put('state/board/tasks/F1.json', v4Card('F1', { history }));
+  await f.put('state/board/tasks/F2.json', v4Card('F2'));
+  const report = await boardStep.run(f.ctx());
+  expect(report.status).toBe('failed');
+  expect(report.note).toBe("card F1 has a history event of a type v4 does not have: 'teleported'");
+  expect(JSON.stringify(report)).not.toContain('FAKE-SECRET');
+  expect(await exists('state/board/cards/F2.json')).toBe(false);
+});
+
+test('a history event or clarification field v4 does not declare is named in notCarried, never valued', async () => {
+  const history = [
+    {
+      seq: 1,
+      at: AT,
+      actor: { kind: 'ferret', sessionId: 'lead' },
+      type: 'created',
+      laneId: 'todo',
+      retiredEventField: 'FAKE-SECRET-EVENT',
+    },
+  ];
+  const clarifications = [
+    { text: 'fake more', source: 'fake chat', at: AT, by: { kind: 'owner' }, byName: 'FAKE-SECRET-NAME' },
+  ];
+  await f.put('state/board/tasks/F1.json', v4Card('F1', { history, clarifications }));
+  const report = await boardStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  const whats = report.notCarried.map(item => item.what);
+  expect(whats).toContain('history event fields v4.291.5 does not declare: retiredEventField');
+  expect(whats).toContain('clarification fields v4.291.5 does not declare: byName');
+  expect(JSON.stringify(report)).not.toContain('FAKE-SECRET');
+  expect(JSON.stringify(await output('state/board/cards/F1.json'))).not.toContain('FAKE-SECRET');
+});
+
+test('a gate that reopens with an agenda conversation reopens with an ask in v5', async () => {
+  const verify = {
+    id: 'to-test',
+    name: 'To test',
+    category: 'verify',
+    stage: {
+      kind: 'gate',
+      options: [
+        { id: 'done', label: 'Done', outcome: { kind: 'close' } },
+        { id: 'not-good', label: 'Not good', outcome: { kind: 'reopen-with-agenda' } },
+      ],
+    },
+  };
+  const base = lanes(PROJECT);
+  const withVerify = [...base.lanes.slice(0, 2), verify, base.lanes[2]];
+  await f.put(
+    `board/lanes/${PROJECT}.json`,
+    lanes(PROJECT, { lanes: withVerify, variants: { quick: ['todo', 'in-progress', 'to-test', 'closed'] } }),
+  );
+  expect((await boardStep.run(f.ctx())).status).toBe('converted');
+  const board = BoardFileSchema.parse(await output(`state/board/boards/${PROJECT}.json`));
+  const gate = board.laneSet?.lanes.find(lane => lane.id === 'to-test')?.stage;
+  expect(plain(gate)).toEqual({
+    kind: 'gate',
+    options: [
+      { id: 'done', label: 'Done', outcome: { kind: 'close' } },
+      { id: 'not-good', label: 'Not good', outcome: { kind: 'reopen-with-ask' } },
+    ],
+  });
+});
+
+test('each ferret’s focus, anchor and skip move from its session config to the board’s focus file', async () => {
+  await f.session('lead', { focusTask: { id: 'F1' }, focusAnchor: { machineId: OTHER_MACHINE, id: 'F9' } });
+  await f.session('helper', { boardSkip: { reason: 'fake chit-chat', at: AT } });
+  await f.session('idle');
+  const report = await boardStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect(plain(FocusFileSchema.parse(await output('state/board/focus.json')))).toEqual({
+    format: 1,
+    ferrets: {
+      lead: { card: { id: 'F1' }, anchor: { machineId: OTHER_MACHINE, id: 'F9' }, skip: null },
+      helper: { card: null, anchor: null, skip: { reason: 'fake chit-chat', at: AT } },
+    },
+  });
+  expect(report.kept).toContainEqual({ what: 'ferrets with a board focus, anchor or skip', count: 2 });
 });
