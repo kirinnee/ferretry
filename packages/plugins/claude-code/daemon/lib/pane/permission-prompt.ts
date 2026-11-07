@@ -3,7 +3,7 @@ import type {
   PermissionOption,
   PermissionOptionKind,
   PermissionRequest,
-} from '../../contract/index.ts';
+} from '../../../contract/index.ts';
 
 /**
  * THE TOOL-PERMISSION PROMPT A HARNESS IS PARKED ON, read off its visible pane as data.

@@ -1,4 +1,4 @@
-import type { HarnessDialog, HarnessDialogKind, HarnessDialogOption } from '../../contract/index.ts';
+import type { HarnessDialog, HarnessDialogKind, HarnessDialogOption } from '../../../contract/index.ts';
 import { parsePermissionPrompt, promptDigest } from './permission-prompt.ts';
 
 /**

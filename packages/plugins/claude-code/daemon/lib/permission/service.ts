@@ -1,4 +1,4 @@
-import type { PermissionAnswerRequest, PermissionAnswerResult, PermissionRequest } from '../../contract/index.ts';
+import type { PermissionAnswerRequest, PermissionAnswerResult, PermissionRequest } from '../../../contract/index.ts';
 import { parsePermissionPrompt, permissionAnswerKeys } from '../pane/permission-prompt.ts';
 
 /**

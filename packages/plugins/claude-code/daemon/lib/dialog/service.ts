@@ -1,4 +1,4 @@
-import type { HarnessDialog, HarnessDialogAnswerRequest, HarnessDialogAnswerResult } from '../../contract/index.ts';
+import type { HarnessDialog, HarnessDialogAnswerRequest, HarnessDialogAnswerResult } from '../../../contract/index.ts';
 import { DIALOG_KEYS, dialogCursorMoves, parseHarnessDialog } from '../pane/harness-dialog.ts';
 import type { FerretPane } from '../permission/service.ts';
 
