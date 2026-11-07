@@ -147,14 +147,14 @@ describe('a log search cannot tell whether a secret appears (the probe of review
   };
   const reads = () => new TranscriptReadService(source, source, CODEC, hiding(), source, source);
 
-  test('a guessed secret answers exactly what a word nobody wrote answers: no matches, not truncated', async () => {
+  test('G164 a log search for a guessed secret answers exactly what a word nobody wrote answers', async () => {
     const guessed = await reads().logSearch('f1', { q: HIDDEN, limit: 1 });
     const absent = await reads().logSearch('f1', { q: 'zzznotthere', limit: 1 });
     expect({ matches: guessed.matches, truncated: guessed.truncated }).toEqual({ matches: [], truncated: false });
     expect({ matches: absent.matches, truncated: absent.truncated }).toEqual({ matches: [], truncated: false });
   });
 
-  test('the limit and truncated count masked matches, and a snippet is cut from the masked text', async () => {
+  test('G164 a log search counts masked matches and cuts its snippet from the masked text', async () => {
     const answer = await reads().logSearch('f1', { q: 'key was', limit: 1 });
     expect(answer.matches).toHaveLength(1);
     expect(answer.truncated).toBe(true);

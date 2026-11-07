@@ -162,7 +162,7 @@ G160	kept	gate	-	`GET /v1/grants/audit`, `fy daemon config history`	grants	G160
 G161	kept	gate	-	behaviour as written	grants	G161
 G162	kept	conversation	claude-code,codex	behaviour as written	grants	G162
 G163	kept	kernel	vault	behaviour as written	grants	G163
-G164	kept	kernel	vault	behaviour as written	grants	G164
+G164	kept	conversation	kernel,vault	behaviour as written	grants	G164
 G165	kept	access	gate	behaviour as written	grants	G165
 G166	kept	access	-	behaviour as written	grants	G166
 G167	kept	agenda	access,gate	behaviour as written	grants	G167
