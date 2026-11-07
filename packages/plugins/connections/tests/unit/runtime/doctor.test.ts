@@ -40,7 +40,7 @@ async function boot(relay?: unknown, advertisement: unknown = { version: 1, rela
     await state.open();
     await state.port.write(
       acceptedConfigFile,
-      { etag: createHash('sha256').update(text).digest('hex'), text },
+      { etag: createHash('sha256').update(text).digest('hex'), text, plugin: manifest.id },
       acceptedName('connections.yaml'),
     );
     await state.close();

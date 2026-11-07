@@ -15,7 +15,9 @@
  * ## The accepted record
  *
  * What is in effect is remembered in `state/kernel/accepted-config/`, file by file, with its text, so the last good
- * version of a file survives a restart and a loosening confirmed once is not asked about again.
+ * version of a file survives a restart and a loosening confirmed once is not asked about again. A record belongs to
+ * the plugin it was accepted for (its id is stored with it): another plugin that claims the path does not inherit it,
+ * and a record that names no plugin is accepted for nobody.
  *
  * ## Writing
  *
@@ -327,21 +329,27 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     return { declaration, path: `${def.collection}/${name}${CONFIG_EXTENSION}`, name };
   };
 
-  const readAccepted = async (path: string): Promise<AcceptedConfig | undefined> => {
+  /** The stored record for a path, whoever it was accepted for; `undefined` when there is none or it cannot be read. */
+  const readStored = async (path: string) => {
     const read = await state.read(acceptedConfigFile, acceptedName(path));
     return read.ok ? read.value : undefined;
   };
 
-  const writeAccepted = async (path: string, accepted: AcceptedConfig | undefined): Promise<void> => {
+  /** What was accepted for THIS plugin at this path: a record of another plugin, or of none, is nothing. */
+  const acceptedFor = (plugin: string, stored: Awaited<ReturnType<typeof readStored>>): AcceptedConfig | undefined =>
+    stored?.plugin === plugin ? { etag: stored.etag, text: stored.text } : undefined;
+
+  const writeAccepted = async (plugin: string, path: string, accepted: AcceptedConfig | undefined): Promise<void> => {
     const name = acceptedName(path);
     if (accepted === undefined) return await state.remove(acceptedConfigFile, name);
+    const record = { etag: accepted.etag, text: accepted.text, plugin };
     try {
-      await state.write(acceptedConfigFile, accepted, name);
+      await state.write(acceptedConfigFile, record, name);
     } catch (error) {
       if (!(error instanceof StoreDamagedError)) throw error;
       // The record is the daemon's own; one that cannot be read means nothing accepted, so it is replaced.
       await state.remove(acceptedConfigFile, name);
-      await state.write(acceptedConfigFile, accepted, name);
+      await state.write(acceptedConfigFile, record, name);
     }
   };
 
@@ -461,8 +469,10 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     const next = new Map<string, Settled>();
     for (const slot of slots) {
       const disk = await readDisk(slot.path);
-      const stored = await readAccepted(slot.path);
-      let accepted = stored;
+      const plugin = slot.declaration.plugin;
+      const stored = await readStored(slot.path);
+      const mine = acceptedFor(plugin, stored);
+      let accepted = mine;
       const ack = acknowledged.get(slot.path);
       if (ack !== undefined) {
         if (disk.kind === 'text' && digest(disk.text) === ack.etag) {
@@ -485,8 +495,9 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         digest,
         binary,
       });
-      if (JSON.stringify(evaluated.accepted) !== JSON.stringify(stored))
-        await writeAccepted(slot.path, evaluated.accepted);
+      // Compared with this plugin's own record, so another plugin's record is never removed by a load that accepts nothing.
+      if (JSON.stringify(evaluated.accepted) !== JSON.stringify(mine))
+        await writeAccepted(plugin, slot.path, evaluated.accepted);
       const diskText = disk.kind === 'text' ? disk.text : undefined;
       next.set(slot.path, {
         slot,
@@ -758,7 +769,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         (writeOptions.confirmedLoosening === true || (loosens.length > 0 && askJudge(writeOptions, loosens, false)));
       if (loosens.length === 0 || confirmed) {
         // In effect at once; the held edit, changed, stays in the file and is judged against the new record.
-        await writeAccepted(slot.path, { etag: digest(effectiveText), text: effectiveText });
+        await writeAccepted(plugin, slot.path, { etag: digest(effectiveText), text: effectiveText });
         if (heldText !== undefined) await fs.writeAtomic(absolute, heldText, PRIVATE_FILE_MODE);
         await load();
         const still = settled.get(slot.path)?.evaluated.held;
@@ -851,6 +862,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       if (held === undefined) return false;
       const found = settled.get(held.path);
       await writeAccepted(
+        held.plugin,
         held.path,
         found?.diskText === undefined ? undefined : { etag: found.diskEtag, text: found.diskText },
       );
