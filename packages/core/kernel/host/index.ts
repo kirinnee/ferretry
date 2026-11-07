@@ -1,5 +1,29 @@
 /**
- * `@ferretry/kernel/host` — the daemon host: boot, loader, hooks engine, store, config, jobs, roots and fence,
- * listener, session layer, act runner (§7.4–§7.6). Owned by spine slice 1 (Kernel host); empty until it lands.
+ * `@ferretry/kernel/host` — the daemon host (§7.4–§7.7): boot in the §7.6 order, the plugin graph and data-plugin
+ * loader, the hooks engine, the dispatcher with admission before every handler, the act runner, jobs, events, roots
+ * and the fence, the home and identity, the local listener, and the kernel's own routes.
  */
-export {};
+export * from './act.ts';
+export { systemClock } from './adapters/clock.ts';
+export { type HostFs, nodeFs } from './adapters/node-fs.ts';
+export { bunSpawn, bunWorkers, globalFetch } from './adapters/process.ts';
+export { currentActor, DEFAULT_ACTOR, runInCall } from './call-scope.ts';
+export * from './data-plugins.ts';
+export * from './dispatch.ts';
+export * from './events.ts';
+export * from './graph.ts';
+export * from './home.ts';
+export * from './hooks.ts';
+export * from './host.ts';
+export * from './identity.ts';
+export * from './jobs.ts';
+export * from './kernel-half.ts';
+export * from './lifecycle.ts';
+export * from './listener.ts';
+export * from './log.ts';
+export * from './permissions.ts';
+export * from './responses.ts';
+export * from './roots.ts';
+export * from './router.ts';
+export * from './snapshot.ts';
+export * from './wiring.ts';
