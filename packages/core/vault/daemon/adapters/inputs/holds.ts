@@ -97,7 +97,7 @@ export class InputHoldsOverService implements BoundInputHolds {
 
   constructor(
     private readonly service: Pick<InputRequestService, 'openSessions' | 'pendingOn' | 'pageHeld' | 'pageDocument'>,
-    private readonly quarantine: Pick<QuarantineRegistry, 'sessions' | 'until'>,
+    private readonly quarantine: Pick<QuarantineRegistry, 'sessions' | 'until' | 'replayUntil'>,
     private readonly nowMs: () => number,
     private readonly acts?: HeardActs,
   ) {}
@@ -125,6 +125,11 @@ export class InputHoldsOverService implements BoundInputHolds {
     const writes = effects.includes('writes');
     const pictures = effects.includes('pictures');
     const ferret = actor === 'ferret' || actor === 'warden';
+    // Replay must close readers even when the session list is still empty (I82).
+    if ((reads || pictures) && this.quarantine.replayUntil() !== undefined) {
+      if (target.kind === 'terminal' && !this.revealed(actor, target, reveal)) return { refused: 'quarantined' };
+      if (target.kind === 'page') return { refused: 'held' };
+    }
     let answer: Answer = 'allow';
     for (const session of this.sessions()) {
       if (ferret && writes) {

@@ -23,7 +23,7 @@ afterEach(async () => {
   for (const host of hosts.splice(0)) await host.stop();
 });
 
-async function setup() {
+async function setup(beforeRestore?: (host: TestHost) => void) {
   const target = new FakeInputTarget('terminal', 'dev');
   const built = Promise.withResolvers<void>();
   const send = Promise.withResolvers<void>();
@@ -78,6 +78,7 @@ async function setup() {
   });
   hosts.push(host);
   guard = host.provided(OutputGuardPort);
+  beforeRestore?.(host);
   await host.runJob('inputs-restore');
   const api = host.provided(VaultPort);
   const raised = await api.raiseInput(FERRET, {
@@ -105,6 +106,14 @@ async function setup() {
 }
 
 describe('the composed Vault input half', () => {
+  test('I82 the composed Vault locks reads before exposing inputHolds, until restore completes', async () => {
+    const { host } = await setup(before => {
+      const holds = before.provided(InputHoldsPort);
+      expect(holds.decide(TERMINAL, 'read', 'ferret')).toEqual({ refused: 'quarantined' });
+      expect(holds.decide({ kind: 'page' as TargetKind, key: 'login' }, 'read', 'ferret')).toEqual({ refused: 'held' });
+    });
+    expect(host.provided(InputHoldsPort).decide(TERMINAL, 'read', 'ferret')).toBe('allow');
+  });
   test('I102 S20 a value typed through an input is masked in a Redaction read afterwards', async () => {
     const { host, api, id, target, deliver } = await setup();
     expect((await deliver()).status).toBe(200);

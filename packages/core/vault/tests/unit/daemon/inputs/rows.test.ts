@@ -165,6 +165,18 @@ const noCards = {
 };
 
 describe('InputHolds, as the act runner asks it', () => {
+  it('I82 should enforce the replay lock with no loaded sessions for every terminal and page reader', () => {
+    const quarantine = new QuarantineRegistry({ now: () => NOW });
+    quarantine.lock();
+    const holds = new InputHoldsOverService(noCards, quarantine, () => NOW);
+    for (const actor of ['ferret', 'warden', 'owner-tools', 'owner-viewer'] as const) {
+      should(holds.decide(DEV, 'read', actor)).deepEqual({ refused: 'quarantined' });
+      should(holds.decide({ kind: 'page' as TargetKind, key: 'login' }, 'read', actor)).deepEqual({ refused: 'held' });
+    }
+    should(holds.decide(DEV, 'type', 'owner-input')).equal('allow');
+    quarantine.unlock();
+    should(holds.decide(DEV, 'read', 'ferret')).equal('allow');
+  });
   it('I72 should refuse every read of a quarantined terminal to the ferret and the owner’s tools, and let the ferret send keys', () => {
     const quarantine = new QuarantineRegistry({ now: () => NOW });
     quarantine.begin(SESSION, ['dev'], 'host');
@@ -255,7 +267,7 @@ function heldPage(now: string | undefined, documentsOnly = false) {
       pageHeld: (_session, names) => (names.includes('page-1') ? held : undefined),
       pageDocument: async () => now,
     },
-    { sessions: () => [], until: () => undefined },
+    { sessions: () => [], until: () => undefined, replayUntil: () => undefined },
     () => NOW,
   );
 }
@@ -305,7 +317,7 @@ describe('InputHolds.observed, the acts the sign-in lock hears', () => {
     const observer = observerAt();
     const sessions: string[] = [];
     const acts = new HeardActs(observer, () => sessions);
-    const holds = new InputHoldsOverService(noCards, { sessions: () => [], until: () => undefined }, () => NOW, acts);
+    const holds = new InputHoldsOverService(noCards, { sessions: () => [], until: () => undefined, replayUntil: () => undefined }, () => NOW, acts);
     const steer = acts.view(observer);
 
     // A script before the ferret holds anything: no session to file it under, so the page itself is kept.

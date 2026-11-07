@@ -76,6 +76,8 @@ export default implementDaemon(manifest, {
     const quarantine = quarantineOverOutputGuard(inputClock, holds, event =>
       kernel.events.publish(HoldsChanged, event),
     );
+    // As today: close every surface before exposing readers, until durable holds have been replayed (I82).
+    quarantine.lock();
     const maskSources = combinedValues(vault);
     const masks = new EphemeralAwareRedactor(new SecretRedactor(maskSources), values);
     const redaction = new VaultRedaction(maskSources, scrub => masks.scope(scrub));

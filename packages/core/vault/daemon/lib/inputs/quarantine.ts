@@ -125,6 +125,13 @@ export class QuarantineRegistry {
     this.changed([EVERY_TERMINAL]);
   }
 
+  /** The replay-wide hold exists even before any session has been loaded. */
+  replayUntil(): number | undefined {
+    this.purge();
+    const now = this.clock.now();
+    return this.locked === true || (this.locked !== undefined && this.locked > now) ? now + this.window : undefined;
+  }
+
   /** Every terminal of one session is held for a window from now: its journal could not be replayed. */
   lockSession(sessionId: string): void {
     this.add(sessionId, [EVERY_TERMINAL], this.clock.now() + this.window);
