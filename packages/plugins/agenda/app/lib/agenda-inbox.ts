@@ -39,7 +39,7 @@ import { clockWords } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
 import { type DaemonId, daemonId as toDaemonId } from '../shell.ts';
 import { BOARD_READ_FAILURE_WORDS, type BoardReadFailure } from './inbox-board-reads.ts';
-import { daemonSessionPath } from '../shell.ts';
+import { daemonHomePath, daemonSessionPath } from '../shell.ts';
 import { rootViews } from '../shell.ts';
 
 /** One machine's session list, as the inbox reads it. `sessions` is `null` before the first read. */
@@ -263,9 +263,9 @@ export interface InboxTarget {
   readonly id: AgendaId;
 }
 
-/** Where a tap on a buzz lands: the ask's own page (`/agenda/:ferret/:ask`). */
-export const inboxTargetPath = (_daemonId: DaemonId, sessionId: string, id: AgendaId): string =>
-  agendaAskPath(sessionId, id);
+/** Where a tap on a buzz lands: the ask's own page (`/d/<daemon>/agenda/:ferret/:ask`). */
+export const inboxTargetPath = (daemonId: DaemonId, sessionId: string, id: AgendaId): string =>
+  `${daemonHomePath(daemonId)}${agendaAskPath(sessionId, id)}`;
 
 /** The item an Inbox link names, or `null` when it names none (or a malformed one). */
 export const inboxTargetFromSearch = (search: string): InboxTarget | null => {

@@ -280,8 +280,8 @@ export default definePlugin({
 
   ui: {
     screens: [
-      screen('chat', { path: '/ferrets/:ferret/chat' }),
-      screen('links', { path: '/links', nav: { label: 'Conversations', icon: 'messages', order: 25 } }),
+      screen('chat', { path: 'ferrets/:ferret/chat' }),
+      screen('links', { path: 'links', nav: { label: 'Conversations', icon: 'messages', order: 25 } }),
     ],
     panels: [
       panel('composer.tools', { id: 'attachments', order: 10 }),
