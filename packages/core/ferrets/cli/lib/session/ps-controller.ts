@@ -29,7 +29,8 @@ export class ListSessionsController {
       return;
     }
     // The table paints its own cells, so it goes out unpainted; the empty sentence keeps the success paint.
-    if (selection.emptyMessage === undefined) this.presenter.report(renderSessionTable(selection.sessions, this.colour));
+    if (selection.emptyMessage === undefined)
+      this.presenter.report(renderSessionTable(selection.sessions, this.colour));
     else this.presenter.lines([selection.emptyMessage]);
   }
 }

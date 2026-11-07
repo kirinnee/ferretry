@@ -105,7 +105,12 @@ export interface QuotaReadoutProps {
  * the column exists either way, so an explicit em-dash is the honest fill; in
  * the chat header an absent readout should simply take no space.
  */
-export function QuotaReadout({ quota, className = '', showUnknown = false, now = browserClock.now().getTime() }: QuotaReadoutProps) {
+export function QuotaReadout({
+  quota,
+  className = '',
+  showUnknown = false,
+  now = browserClock.now().getTime(),
+}: QuotaReadoutProps) {
   if (!quota) return showUnknown ? <Unknown className={className} /> : null;
 
   if (quota.authOk === false) {

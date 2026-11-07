@@ -1,5 +1,5 @@
-import { WebCryptoSessionCrypto } from '../../../worker/kernel-wire/index.ts';
-import type { DaemonIdentity, SessionCrypto } from '../../../worker/lib/index.ts';
+import { WebCryptoSessionCrypto } from '../../../worker/src/kernel-wire/index.ts';
+import type { DaemonIdentity, SessionCrypto } from '../../../worker/src/lib/index.ts';
 
 /** One adapter for every test, because the protocol is only ever proved against real primitives. */
 export const relayCrypto = new WebCryptoSessionCrypto();

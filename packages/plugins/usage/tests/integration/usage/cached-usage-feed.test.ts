@@ -258,5 +258,4 @@ describe('CachedUsageFeed', () => {
     should(accounts).deepEqual([{ agent: 'fresh' }]);
     should(feed.snapshotAt()).equal(1_000);
   });
-
 });

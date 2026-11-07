@@ -4,4 +4,3 @@ export * from './binary.ts';
 export * from './constants.ts';
 export * from './crypto.ts';
 export * from './identity.ts';
-export * from './web-crypto.ts';

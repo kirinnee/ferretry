@@ -330,11 +330,7 @@ export function BoardPage({
             </button>
           ))}
         </nav>
-        {phone ? null : (
-          <div className="fy-board__tools">
-            {scopeToggle}
-          </div>
-        )}
+        {phone ? null : <div className="fy-board__tools">{scopeToggle}</div>}
       </header>
       {phone ? (
         <div className="fy-board__phone-bar">

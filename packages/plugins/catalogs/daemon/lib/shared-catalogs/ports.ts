@@ -2,7 +2,7 @@
  * What the publisher side needs from the machine. Each is a port: the pure code in this folder never
  * reads a file, asks the inventory, or holds a key (docs/standards/three-layer-architecture).
  */
-import type { CatalogSigningIdentity } from '../../adapters/relay.ts';
+import type { CatalogSigningIdentity } from '../relay-wire/index.ts';
 import type { CatalogsDocument } from './document.ts';
 import type { McpSourceServer } from './mcp-source.ts';
 

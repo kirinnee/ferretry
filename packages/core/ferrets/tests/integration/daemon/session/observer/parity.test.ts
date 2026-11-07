@@ -235,9 +235,7 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
   });
 
   // THE PRE-3a PATH.
-  const watcher = testTurnWatcher(
-    unwiredTurnPorts(),
-  );
+  const watcher = testTurnWatcher(unwiredTurnPorts());
   const referenceSerial = new KeyedSerialExecutor();
   const referenceProject = async (session: SessionId): Promise<void> => {
     const storage = reference.storage;
@@ -278,11 +276,13 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
 
   // THE HOST UNDER TEST: the inline host, or the worker host over it with a real session-worker thread.
   const hostPanes = unwiredTurnPorts();
-  const applier = new SessionObservationApplier(host.storage, host.ledger, new KeyedSerialExecutor(), UNWIRED_QUESTIONS);
-  const fold = new SessionObserver(
-    text => createHash('sha256').update(text, 'utf8').digest('hex'),
+  const applier = new SessionObservationApplier(
+    host.storage,
+    host.ledger,
+    new KeyedSerialExecutor(),
     UNWIRED_QUESTIONS,
   );
+  const fold = new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex'), UNWIRED_QUESTIONS);
   const answerSerial = new KeyedSerialExecutor();
   const inline = new InlineObserverHost(
     {

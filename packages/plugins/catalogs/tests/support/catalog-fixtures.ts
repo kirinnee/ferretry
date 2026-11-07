@@ -7,7 +7,7 @@ import {
   SharedCatalogManifestSchema,
   type SignedCatalogManifest,
 } from '../../daemon/lib/boundary.ts';
-import { WebCryptoSessionCrypto } from '../../worker/kernel-wire/index.ts';
+import { WebCryptoSessionCrypto } from '../../worker/src/kernel-wire/index.ts';
 import {
   catalogItemDigest,
   type DaemonIdentity,

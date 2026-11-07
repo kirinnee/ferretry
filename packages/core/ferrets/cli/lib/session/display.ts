@@ -29,11 +29,7 @@ function headline(view: FerretSummary): string {
 
 /** The single-ferret detail block printed by `status`, `start`, `resume` and `rename --json`-less answers. */
 export function renderFerret(view: FerretSummary): string[] {
-  return [
-    headline(view),
-    `  ${view.folder}`,
-    `  ${view.state} since ${view.stateAt}; started ${view.createdAt}`,
-  ];
+  return [headline(view), `  ${view.folder}`, `  ${view.state} since ${view.stateAt}; started ${view.createdAt}`];
 }
 
 const TABLE_HEADER = ['TEAMMATE', 'ID', 'STATE', 'HARNESS', 'RUNTIME', 'ROLE', 'PACK', 'PARENT'] as const;

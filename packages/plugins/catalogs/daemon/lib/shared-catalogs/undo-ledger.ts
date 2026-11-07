@@ -11,7 +11,7 @@
  *   across a restart: every revision from before one counts as signed because none can be retracted at all.
  */
 import { QUICK_ADD_UNDO_SECONDS } from '../boundary.ts';
-import type { RelayCrypto } from '../../adapters/relay.ts';
+import type { RelayCrypto } from '../relay-wire/index.ts';
 
 /** What Undo needs to take one add back. */
 export interface UndoRecord {

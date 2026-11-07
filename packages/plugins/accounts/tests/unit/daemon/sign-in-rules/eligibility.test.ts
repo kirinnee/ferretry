@@ -53,4 +53,3 @@ describe('who may have a rule at all', () => {
     should(ineligibleBecause(signIn({ method: { kind: 'passkey' } } as never))).equal('not-password');
   });
 });
-

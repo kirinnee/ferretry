@@ -35,7 +35,6 @@ const NOW = Date.parse('2026-08-03T12:01:00.000Z');
 const connection = (id = DAEMON_ID) =>
   daemonConnection({ daemonId: id, baseUrl: 'https://workstation.example.test', deviceId: `token-${id}` });
 
-
 const code = {
   pairingId: PAIRING_ID,
   code: '7F3K-Q2ND',

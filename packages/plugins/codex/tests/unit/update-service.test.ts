@@ -22,7 +22,10 @@ const NPM_CODEX = `${NPM_PREFIX}/bin/codex`;
 const BREW_CODEX = '/opt/homebrew/bin/codex';
 const T0 = Date.parse('2026-10-20T09:00:00.000Z');
 const NPM_PACKAGE = '@openai/codex';
-const RELEASE = (version: string) => ({ version, url: `https://github.com/openai/codex/releases/tag/rust-v${version}` });
+const RELEASE = (version: string) => ({
+  version,
+  url: `https://github.com/openai/codex/releases/tag/rust-v${version}`,
+});
 
 const located = (path: string): HarnessLocation => ({
   outcome: 'located',
@@ -167,10 +170,19 @@ describe('the Codex update view', () => {
     });
     world.location = { outcome: 'absent', searched: ['/opt/bin'] };
     const absent = await world.service().view();
-    should(absent).containDeep({ location: { state: 'absent', searched: ['/opt/bin'] }, installed: null, method: null });
+    should(absent).containDeep({
+      location: { state: 'absent', searched: ['/opt/bin'] },
+      installed: null,
+      method: null,
+    });
     should(absent.plan).be.null();
     should(absent.available).be.false();
-    world.location = { outcome: 'override-absent', path: '/nope/codex', declaredBy: 'harness-codex.yaml', reason: 'it is not there' };
+    world.location = {
+      outcome: 'override-absent',
+      path: '/nope/codex',
+      declaredBy: 'harness-codex.yaml',
+      reason: 'it is not there',
+    };
     should((await world.service().view()).location).eql({
       state: 'override-absent',
       path: '/nope/codex',
@@ -226,7 +238,10 @@ describe('the Codex update view', () => {
     });
     should(once.available).be.true();
     world.now += HARNESS_CHECK_REUSE_MS;
-    should((await service.view()).check).containDeep({ state: 'failed', lastKnown: { latest: { version: '0.145.0' } } });
+    should((await service.view()).check).containDeep({
+      state: 'failed',
+      lastKnown: { latest: { version: '0.145.0' } },
+    });
   });
 
   it('reads an unreadable version as no version, and treats any known version as newer than it', async () => {
@@ -455,7 +470,8 @@ describe('when an update goes wrong', () => {
     await service.start({ target: '0.145.0' });
     should(await report(service)).containDeep({
       outcome: 'rolled-back',
-      message: 'After the update it runs 0.141.0, older than the 0.145.0 asked for. 0.140.0 was put back, and it starts.',
+      message:
+        'After the update it runs 0.141.0, older than the 0.145.0 asked for. 0.140.0 was put back, and it starts.',
     });
   });
 
@@ -474,7 +490,9 @@ describe('when an update goes wrong', () => {
     const done = await report(service);
     should(done.outcome).equal('failed');
     should(done.message).match(/Putting 0\.140\.0 back did not work either/u);
-    should(done.message).match(new RegExp(`run \`npm install -g --prefix ${NPM_PREFIX} ${NPM_PACKAGE}@0.140.0\` yourself`, 'u'));
+    should(done.message).match(
+      new RegExp(`run \`npm install -g --prefix ${NPM_PREFIX} ${NPM_PACKAGE}@0.140.0\` yourself`, 'u'),
+    );
   });
 
   it('says Homebrew keeps no previous version, so a broken upgrade cannot be put back', async () => {

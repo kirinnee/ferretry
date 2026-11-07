@@ -1,3 +1,4 @@
+import { state } from '@ferretry/kernel/host';
 import { CORE_IDS, PROTOCOL, type PluginInventory } from '@ferretry/kernel/contract';
 import {
   definePlugin,
@@ -22,7 +23,8 @@ import {
 } from '../../src/lib/client.ts';
 import type { DaemonRequest } from '../../src/lib/request.ts';
 import type { AnyCliImplementation, CommandRegistry, KernelEntry, RegistryEntry } from '../../src/lib/registry.ts';
-import type { CliWorld, Connection, LaunchResult, Probe } from '../../src/lib/world.ts';
+import { createPluginHost } from '../../src/adapters/plugin-host.ts';
+import type { CliWorld, Connection, LaunchResult, PluginHost, Probe } from '../../src/lib/world.ts';
 
 export interface CapturedIo extends TerminalIo {
   readonly stdout: () => string;
@@ -210,6 +212,8 @@ export interface FakeWorldOptions {
   readonly inventory?: PluginInventory;
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly launch?: LaunchResult;
+  /** What every half is handed beyond its client; by default the real adapter over a throwaway in-memory home. */
+  readonly host?: PluginHost;
   readonly transport?: RecordingTransport;
   /** Reads the inventory through the connection, instead of answering `inventory`. */
   readonly readInventory?: () => Promise<PluginInventory>;
@@ -231,6 +235,7 @@ export function fakeWorld(options: FakeWorldOptions = {}): {
     health: { protocol: PROTOCOL, version: '5.0.0' },
   };
   const world: CliWorld = {
+    host: options.host ?? createPluginHost({ home: '/fake-home', fs: state.createMemoryHostFs() }),
     io,
     environment: options.environment ?? {},
     identity: { binary: 'fy', version: '5.0.0' },

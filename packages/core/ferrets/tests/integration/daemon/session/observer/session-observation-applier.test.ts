@@ -68,11 +68,14 @@ const patchFor = (
   events: readonly TranscriptEvent[],
   answers = new Map(),
 ): QuestionPatch => {
-  const patch = stepQuestion({
-    state: { id: ID, status: 'running', turn: 1, ...state } as SessionState,
-    events,
-    answers,
-  }, UNWIRED_QUESTIONS);
+  const patch = stepQuestion(
+    {
+      state: { id: ID, status: 'running', turn: 1, ...state } as SessionState,
+      events,
+      answers,
+    },
+    UNWIRED_QUESTIONS,
+  );
   if (patch === undefined) throw new Error('the look implied nothing');
   return patch;
 };

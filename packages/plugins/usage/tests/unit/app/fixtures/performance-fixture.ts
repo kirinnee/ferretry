@@ -129,32 +129,32 @@ const HARNESS_PERFORMANCE_REPORT: PerformanceReport = {
 
 /** A profile that runs for `windowMs` of real time, then reads back the fixture report. */
 export const harnessPerformanceClient = (windowMs = 1_500): PerformanceClient => {
-    let startedAt = 0;
-    return {
-      call: (async (route: string) => {
-        if (route.startsWith('POST ')) {
-          startedAt = Date.now();
-          const view: PerformanceProfileView = {
-            state: 'running',
-            id: 'harness-profile',
-            startedAt: new Date(startedAt).toISOString(),
-            endsAt: new Date(startedAt + windowMs).toISOString(),
-          };
-          return view;
-        }
-        const view: PerformanceProfileView =
-          Date.now() - startedAt < windowMs
-            ? {
-                state: 'running',
-                id: 'harness-profile',
-                startedAt: new Date(startedAt).toISOString(),
-                endsAt: new Date(startedAt + windowMs).toISOString(),
-              }
-            : { state: 'finished', id: 'harness-profile', report: HARNESS_PERFORMANCE_REPORT };
+  let startedAt = 0;
+  return {
+    call: (async (route: string) => {
+      if (route.startsWith('POST ')) {
+        startedAt = Date.now();
+        const view: PerformanceProfileView = {
+          state: 'running',
+          id: 'harness-profile',
+          startedAt: new Date(startedAt).toISOString(),
+          endsAt: new Date(startedAt + windowMs).toISOString(),
+        };
         return view;
-      }) as PerformanceClient['call'],
-    };
+      }
+      const view: PerformanceProfileView =
+        Date.now() - startedAt < windowMs
+          ? {
+              state: 'running',
+              id: 'harness-profile',
+              startedAt: new Date(startedAt).toISOString(),
+              endsAt: new Date(startedAt + windowMs).toISOString(),
+            }
+          : { state: 'finished', id: 'harness-profile', report: HARNESS_PERFORMANCE_REPORT };
+      return view;
+    }) as PerformanceClient['call'],
   };
+};
 
 /** This browser's recorder, with a minute of an idle fleet page's reads already on it. */
 export const harnessRecorder = (): PerformanceRecorder => {

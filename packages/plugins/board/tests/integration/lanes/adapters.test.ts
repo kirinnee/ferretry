@@ -69,12 +69,16 @@ describe('GitRepositoryProbe (git asked for absolute paths, through the spawn po
   it('should answer null outside a repository, when git fails or is missing, or answers a relative path', async () => {
     should(await new GitRepositoryProbe(spawnOf(() => ({ exitCode: 128 }))).commonDirectory('/tmp')).equal(null);
     should(await new GitRepositoryProbe(spawnOf(() => ({ stdout: '' }))).commonDirectory('/tmp')).equal(null);
-    should(await new GitRepositoryProbe(spawnOf(() => new Error('git is not installed'))).commonDirectory('/tmp')).equal(null);
+    should(
+      await new GitRepositoryProbe(spawnOf(() => new Error('git is not installed'))).commonDirectory('/tmp'),
+    ).equal(null);
     should(await new GitRepositoryProbe(spawnOf(() => ({ stdout: '.git\n' }))).commonDirectory('/tmp')).equal(null);
   });
 
   it('should name a repository by the folder holding its common .git, so a linked worktree names its checkout', async () => {
-    const probe = new GitRepositoryProbe(spawnOf(() => ({ stdout: '/work/ferretry/.git\n/work/ferretry-wt/feature\n' })));
+    const probe = new GitRepositoryProbe(
+      spawnOf(() => ({ stdout: '/work/ferretry/.git\n/work/ferretry-wt/feature\n' })),
+    );
 
     should(await probe.locate('/work/ferretry-wt/feature')).eql({
       commonDirectory: '/work/ferretry/.git',
@@ -97,7 +101,11 @@ describe('GitRepositoryProbe (git asked for absolute paths, through the spawn po
 describe('GitProjectFacts', () => {
   const facts = (tags: string, repository = true) =>
     new GitProjectFacts(
-      spawnOf(call => (call.args.includes('tag') ? { stdout: tags } : { stdout: repository ? '/w/.git\n' : '', exitCode: repository ? 0 : 128 })),
+      spawnOf(call =>
+        call.args.includes('tag')
+          ? { stdout: tags }
+          : { stdout: repository ? '/w/.git\n' : '', exitCode: repository ? 0 : 128 },
+      ),
     );
 
   it('should say a folder outside a repository has none', async () => {
@@ -127,7 +135,10 @@ const ferretsOf = (known: Record<string, { folder: string; parent?: string }>): 
 describe('FerretsProjectFacts', () => {
   it('should read a ferret’s folder and parent from Ferrets, and the board it was moved onto', async () => {
     const stamps = new FerretProjectStamps();
-    const facts = new FerretsProjectFacts(ferretsOf({ koen: { folder: '/work/a', parent: 'lead' }, lead: { folder: '/work' } }), stamps);
+    const facts = new FerretsProjectFacts(
+      ferretsOf({ koen: { folder: '/work/a', parent: 'lead' }, lead: { folder: '/work' } }),
+      stamps,
+    );
 
     should(await facts.read('koen')).eql({ folder: '/work/a', parent: 'lead' });
     await stamps.stamp('koen', FERRETRY_ID);
@@ -213,7 +224,10 @@ class FakeAsks implements Pick<AsksApi, 'raise' | 'open' | 'close'> {
 
   async open(filter: AskFilter): Promise<readonly AskSummary[]> {
     return this.open_.filter(
-      ask => ask.state === 'open' && ask.source === filter.source && (filter.entry === undefined || ask.entry === filter.entry),
+      ask =>
+        ask.state === 'open' &&
+        ask.source === filter.source &&
+        (filter.entry === undefined || ask.entry === filter.entry),
     );
   }
 
@@ -250,7 +264,11 @@ describe('lane proposals through Asks, over the stored board file', () => {
   it('should raise one choice ask for the proposing ferret, keyed by project and version', async () => {
     const { asks, service } = board();
 
-    const change = await service.apply(FERRETRY_ID, { action: 'propose', template: 'quick', renames: {} }, { kind: 'ferret', name: 'koen', ferretId: 'koen' });
+    const change = await service.apply(
+      FERRETRY_ID,
+      { action: 'propose', template: 'quick', renames: {} },
+      { kind: 'ferret', name: 'koen', ferretId: 'koen' },
+    );
 
     should(change.ok && change.value.ask).equal('raised');
     should(asks.raised).have.length(1);
@@ -266,7 +284,17 @@ describe('lane proposals through Asks, over the stored board file', () => {
   it('should raise the same proposal once however often it is asked', async () => {
     const { asks } = board();
     const raise = new AsksLaneProposals(asks);
-    const card = { subject: 's', title: 't', kind: 'choice' as const, options: [{ label: 'Edit', description: 'e' }, { label: 'Accept', description: 'a' }], why: 'w', howToResolve: 'h' };
+    const card = {
+      subject: 's',
+      title: 't',
+      kind: 'choice' as const,
+      options: [
+        { label: 'Edit', description: 'e' },
+        { label: 'Accept', description: 'a' },
+      ],
+      why: 'w',
+      howToResolve: 'h',
+    };
 
     await raise.raise('koen', laneProposalReference(FERRETRY_ID, 1), card);
     await raise.raise('koen', laneProposalReference(FERRETRY_ID, 1), card);
@@ -281,7 +309,10 @@ describe('lane proposals through Asks, over the stored board file', () => {
       subject: 's',
       title: 't',
       kind: 'choice',
-      options: [{ label: 'Edit', description: 'e' }, { label: 'Accept', description: 'a' }],
+      options: [
+        { label: 'Edit', description: 'e' },
+        { label: 'Accept', description: 'a' },
+      ],
       why: 'w',
       recommendation: { decision: 'Edit', why: 'read it first' },
       howToResolve: 'h',
@@ -292,7 +323,11 @@ describe('lane proposals through Asks, over the stored board file', () => {
 
   it('should confirm the lanes when the owner’s Accept comes back, and not before', async () => {
     const { service, asks, files } = board();
-    await service.apply(FERRETRY_ID, { action: 'propose', template: 'quick', renames: {} }, { kind: 'ferret', name: 'koen', ferretId: 'koen' });
+    await service.apply(
+      FERRETRY_ID,
+      { action: 'propose', template: 'quick', renames: {} },
+      { kind: 'ferret', name: 'koen', ferretId: 'koen' },
+    );
     const acceptance = new LaneProposalAcceptance(service);
     const lanes = new LaneSetFiles(files);
     should((await lanes.read(FERRETRY_ID))?.confirmedBy).equal(null);
@@ -312,7 +347,14 @@ describe('lane proposals through Asks, over the stored board file', () => {
     });
 
     should((await lanes.read(FERRETRY_ID))?.confirmedBy).equal('owner');
-    should(acceptedProposal({ source: LANE_PROPOSAL_SOURCE, entry: asks.raised[0]?.entry ?? '', effect: 'choose', choice: 'Accept' })).eql({
+    should(
+      acceptedProposal({
+        source: LANE_PROPOSAL_SOURCE,
+        entry: asks.raised[0]?.entry ?? '',
+        effect: 'choose',
+        choice: 'Accept',
+      }),
+    ).eql({
       projectId: FERRETRY_ID,
       version: 1,
     });
@@ -320,20 +362,38 @@ describe('lane proposals through Asks, over the stored board file', () => {
 
   it('should close the ask of a proposal the owner replaced by editing the lanes', async () => {
     const { service, asks } = board();
-    await service.apply(FERRETRY_ID, { action: 'propose', template: 'quick', renames: {} }, { kind: 'ferret', name: 'koen', ferretId: 'koen' });
+    await service.apply(
+      FERRETRY_ID,
+      { action: 'propose', template: 'quick', renames: {} },
+      { kind: 'ferret', name: 'koen', ferretId: 'koen' },
+    );
     // The owner confirms the live set; a ferret then waits behind it with a change, which the owner replaces.
     await service.apply(FERRETRY_ID, { action: 'confirm', version: 1 }, OWNER);
     const ferret = { kind: 'ferret', name: 'koen', ferretId: 'koen' } as const;
     const stored = (await service.laneSet(FERRETRY_ID))!;
     await service.apply(
       FERRETRY_ID,
-      { action: 'edit', version: stored.version, layout: { lanes: stored.lanes.map(lane => ({ ...lane, name: `${lane.name}!` })), variants: stored.variants }, relocate: {} } as never,
+      {
+        action: 'edit',
+        version: stored.version,
+        layout: { lanes: stored.lanes.map(lane => ({ ...lane, name: `${lane.name}!` })), variants: stored.variants },
+        relocate: {},
+      } as never,
       ferret,
     );
     const waiting = (await service.laneSet(FERRETRY_ID))?.pending;
     should(waiting).not.be.undefined();
 
-    await service.apply(FERRETRY_ID, { action: 'edit', version: stored.version, layout: { lanes: stored.lanes, variants: stored.variants }, relocate: {} } as never, OWNER);
+    await service.apply(
+      FERRETRY_ID,
+      {
+        action: 'edit',
+        version: stored.version,
+        layout: { lanes: stored.lanes, variants: stored.variants },
+        relocate: {},
+      } as never,
+      OWNER,
+    );
 
     should(asks.closed.map(([, reason]) => reason)).containEql('withdrawn');
     should(LANE_ASK_WITHDRAWN.dropped).containEql('proposal is gone');

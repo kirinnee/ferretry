@@ -4,7 +4,11 @@ import should from 'should';
 import { BrowserControlError } from '../../../../daemon/worker/control/policy.ts';
 import { type BrowserLoginStatus } from '../../../../contract/index.ts';
 import { type BrowserProfileLease, type BrowserProfilePort } from '../../../../daemon/worker/control/profile.ts';
-import { BrowserLoginWindowService, type BrowserLoginChild, type BrowserLoginRuntime } from '../../../../daemon/worker/control/adapters/login-window.ts';
+import {
+  BrowserLoginWindowService,
+  type BrowserLoginChild,
+  type BrowserLoginRuntime,
+} from '../../../../daemon/worker/control/adapters/login-window.ts';
 
 /**
  * Every status the daemon emits must satisfy the wire contract the reader parses

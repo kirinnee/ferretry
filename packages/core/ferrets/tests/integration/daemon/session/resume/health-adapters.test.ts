@@ -5,7 +5,10 @@ import { FerretHistoryFiles } from '../../../../../contract/index.ts';
 import { FileSelfRestartStampStore } from '../../../../../daemon/adapters/session/resume/file-self-restart-stamp-store.ts';
 import { FileSessionHealthEventSink } from '../../../../../daemon/adapters/session/resume/file-health-event-sink.ts';
 import { StorageConsistencyPass } from '../../../../../daemon/adapters/session/resume/storage-consistency-pass.ts';
-import { StorageSessionHealthInventory, type SupervisionCapabilities } from '../../../../../daemon/adapters/session/resume/storage-health-inventory.ts';
+import {
+  StorageSessionHealthInventory,
+  type SupervisionCapabilities,
+} from '../../../../../daemon/adapters/session/resume/storage-health-inventory.ts';
 import { SystemMonotonicClock } from '../../../../../daemon/adapters/session/resume/system-monotonic-clock.ts';
 import { UnmountedSupervisionRepair } from '../../../../../daemon/adapters/session/resume/unmounted-repair.ts';
 import { createSessionPaths } from '../../../../../daemon/lib/paths.ts';
@@ -385,7 +388,10 @@ describe('storage consistency pass', () => {
     // Arrange — without the finish stamp there is nothing to compare the journal's last write against.
     const opened = await openStorage();
     const id = parseSessionId('torn-state');
-    await opened.storage.writeState(id, sessionState('torn-state', { status: 'stopped', finishedAt: TEN_MINUTES_BEFORE }));
+    await opened.storage.writeState(
+      id,
+      sessionState('torn-state', { status: 'stopped', finishedAt: TEN_MINUTES_BEFORE }),
+    );
     await opened.storage.append(id, 'session.late_write', { note: 'still working' });
     opened.folder.plant(SessionStateFiles, '{"id": "torn-state"', id);
     const pass = new StorageConsistencyPass(opened.storage, SETTINGS);

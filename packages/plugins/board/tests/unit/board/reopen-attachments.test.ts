@@ -1,5 +1,10 @@
 import { describe, it } from 'bun:test';
-import { type BoardAttachment, type Card, type CardActionRequestInput, CardActionRequestSchema } from '../../../contract/index.ts';
+import {
+  type BoardAttachment,
+  type Card,
+  type CardActionRequestInput,
+  CardActionRequestSchema,
+} from '../../../contract/index.ts';
 import should from 'should';
 import {
   type BoardAttachmentSource,

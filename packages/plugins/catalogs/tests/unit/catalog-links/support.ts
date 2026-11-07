@@ -1,5 +1,5 @@
 import { parseLinkFragment } from '../../../daemon/lib/boundary.ts';
-import type { LinkStatus } from '../../../daemon/adapters/relay.ts';
+import type { LinkStatus } from '../../../daemon/lib/relay-wire/index.ts';
 import {
   EMPTY_LINKS_DOCUMENT,
   type LinksDocument,

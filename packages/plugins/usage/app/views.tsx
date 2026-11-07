@@ -83,4 +83,3 @@ export function PerformanceTab({
   const connection = useDaemonConnection();
   return createElement(PerformanceSettings, { connection, client, recorder });
 }
-

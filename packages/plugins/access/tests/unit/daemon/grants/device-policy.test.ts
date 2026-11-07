@@ -194,7 +194,10 @@ describe('effective = daemon-wide AND device, for a governed caller', () => {
         axis => decideCapability(demandOf(capability, axis), governed({ device: FULL_DEVICE_GRANTS })).allowed,
       ),
     );
-    const unconfirmed = decideCapability(demandOf('terminal', 'use'), governed({ device: FULL_DEVICE_GRANTS, stepUp: false }));
+    const unconfirmed = decideCapability(
+      demandOf('terminal', 'use'),
+      governed({ device: FULL_DEVICE_GRANTS, stepUp: false }),
+    );
 
     // Assert
     should(FULL_DEVICE_GRANTS).deepEqual(DEFAULT_CAPABILITY_GRANTS);
@@ -226,10 +229,7 @@ describe('effective = daemon-wide AND device, for a governed caller', () => {
 
   it('should refuse the secrets routes to a device without the grant, and need a step-up to run one', () => {
     // Act
-    const unGranted = decideCapability(
-      demandOf('secrets', 'use'),
-      governed({ device: LIMITED_DEVICE_GRANTS }),
-    );
+    const unGranted = decideCapability(demandOf('secrets', 'use'), governed({ device: LIMITED_DEVICE_GRANTS }));
     const unconfirmed = decideCapability(demandOf('secrets', 'use'), governed({ stepUp: false }));
     const setting = decideCapability(
       demandOf('secrets', 'configure'),

@@ -18,7 +18,10 @@ class SlowMembers implements MachineMembersStore {
 
 /** One notice per cause, replaced on every raise, as the Asks binding keeps it. */
 class NoticeBoard implements MachineAgendaPort {
-  readonly items = new Map<string, { readonly request: MachineRaise; readonly members: readonly string[] | undefined }>();
+  readonly items = new Map<
+    string,
+    { readonly request: MachineRaise; readonly members: readonly string[] | undefined }
+  >();
   async raiseOrUpdate(ref: string, request: MachineRaise, members?: readonly string[]): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, 5));
     this.items.set(ref, { request, members });

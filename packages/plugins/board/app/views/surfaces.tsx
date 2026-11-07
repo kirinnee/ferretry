@@ -6,7 +6,14 @@
  */
 
 import { RouteLink, useLayoutMode, useNow } from '@ferretry/app/ui';
-import type { AppComponent, PanelProps, PluginClient, RendererProps, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
+import type {
+  AppComponent,
+  PanelProps,
+  PluginClient,
+  RendererProps,
+  ScreenProps,
+  SettingsProps,
+} from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { CARD_ID_PATTERN, type CardAskRef, formatCardRef, writtenProgressParts } from '../../contract/index.ts';
 import { useBoardCard } from '../hooks/use-board.ts';
@@ -177,7 +184,8 @@ const cardProgress = (runtime: BoardRuntime): AppComponent<PanelProps> =>
   function CardProgress({ subject }: PanelProps): ReactNode {
     const id = (subject ?? '').toUpperCase();
     const state = useBoardCard(runtime.store, THIS_MACHINE, id);
-    if (state.task === null) return state.missing ? <p role="status">No card {id}.</p> : <p role="status">Reading {id}…</p>;
+    if (state.task === null)
+      return state.missing ? <p role="status">No card {id}.</p> : <p role="status">Reading {id}…</p>;
     const parts = writtenProgressParts(state.task.progress);
     if (parts.length === 0) return <p role="status">{formatCardRef({ id })} has no progress yet.</p>;
     return (
@@ -237,7 +245,9 @@ const cardAskRenderer = (runtime: BoardRuntime): AppComponent<RendererProps> =>
 /** `reference:&` — a `&F12` written anywhere: a link when the card exists on this machine, plain text when not. */
 const cardReferenceRenderer = (runtime: BoardRuntime): AppComponent<RendererProps> =>
   function CardReference({ value }: RendererProps): ReactNode {
-    const written = String(typeof value === 'string' ? value : ((value as { id?: unknown } | null)?.id ?? '')).replace(/^&/u, '').toUpperCase();
+    const written = String(typeof value === 'string' ? value : ((value as { id?: unknown } | null)?.id ?? ''))
+      .replace(/^&/u, '')
+      .toUpperCase();
     const known = CARD_ID_PATTERN.test(written);
     const state = useBoardCard(runtime.store, THIS_MACHINE, known ? written : 'F1', { beat: false });
     if (!known) return <>{`&${written}`}</>;

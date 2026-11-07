@@ -40,7 +40,11 @@ function log() {
   return { audit, journal, failures, advance: (by: number) => (ms += by) };
 }
 
-const refused = { event: AUDIT_KINDS['pairing.refused'], actor: { kind: 'anonymous' as const }, outcome: 'refused' as const };
+const refused = {
+  event: AUDIT_KINDS['pairing.refused'],
+  actor: { kind: 'anonymous' as const },
+  outcome: 'refused' as const,
+};
 const paired = (actor: 'host' | 'device') => ({
   event: AUDIT_KINDS['device.paired'],
   actor: actor === 'host' ? { kind: 'host' as const } : { kind: 'device' as const, deviceId: 'd1' },

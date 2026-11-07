@@ -15,7 +15,16 @@ const governed = { grants: DEFAULT_CAPABILITY_GRANTS, governed: true, hostLocal:
 
 describe('the grant decision', () => {
   test('G98 a governed caller steps up for every configure and the use of terminal, browser, pairing, secrets, sharing', () => {
-    for (const name of ['fleet', 'terminal', 'browser', 'filesystem', 'warden', 'pairing', 'secrets', 'sharing'] as const)
+    for (const name of [
+      'fleet',
+      'terminal',
+      'browser',
+      'filesystem',
+      'warden',
+      'pairing',
+      'secrets',
+      'sharing',
+    ] as const)
       expect(demandNeedsStepUp(cap(name, 'configure'))).toBe(true);
     const use = Object.fromEntries(
       (['fleet', 'terminal', 'browser', 'filesystem', 'warden', 'pairing', 'secrets', 'sharing'] as const).map(name => [
@@ -73,7 +82,9 @@ describe('the grant decision', () => {
 
 describe('authentication', () => {
   test('a blank configured token authenticates nothing', () => {
-    expect(authenticate({ admin: '' }, undefined, { bearer: '', privilegedLocal: true })).toEqual({ kind: 'anonymous' });
+    expect(authenticate({ admin: '' }, undefined, { bearer: '', privilegedLocal: true })).toEqual({
+      kind: 'anonymous',
+    });
   });
 
   test('secrets compare in full and bearer reads only the Bearer scheme', () => {

@@ -7,12 +7,7 @@
  * service are interfaces the host supplies.
  */
 import type { SessionId } from '../../session-id.ts';
-import type {
-  ObservedHumanInput,
-  TranscriptTarget,
-  TranscriptWindow,
-  TranscriptWindowStart,
-} from './transcript.ts';
+import type { ObservedHumanInput, TranscriptTarget, TranscriptWindow, TranscriptWindowStart } from './transcript.ts';
 
 // ── today's send/tracker.ts ─────────────────────────────────────────────────────────────────────
 

@@ -2,7 +2,11 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { defaultStartWaitPolicy, SessionPlanner } from './planner-fixture.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
-import { type RecordedLaunch, type SessionLaunchPorts, SessionLaunchService } from '../../../../../daemon/lib/session/launch/service.ts';
+import {
+  type RecordedLaunch,
+  type SessionLaunchPorts,
+  SessionLaunchService,
+} from '../../../../../daemon/lib/session/launch/service.ts';
 import { launchAccount, launchConfig, launchState } from './support.ts';
 
 const WRAPPER = '/fleet/bin/claude-auto-boot';
