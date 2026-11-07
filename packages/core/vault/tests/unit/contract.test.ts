@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import type { StatePort } from '@ferretry/kernel/contract';
 import {
   allowedDestination,
+  defineSealedDocument,
   InputRaiseSchema,
   InputTargetFactsSchema,
   isVaultKeyText,
@@ -15,6 +17,7 @@ import {
   FakeInputHolds,
   FakeOutputGuard,
   FakeRedaction,
+  FakeSealedDocuments,
   FakeVault,
   fakeChildEnvironmentValues,
   goneTargetAdapter,
@@ -22,6 +25,7 @@ import {
   inputTargetConformance,
   outputGuardConformance,
   redactionConformance,
+  sealedDocumentsConformance,
   vaultConformance,
 } from '../../contract/testing/index.ts';
 
@@ -34,6 +38,12 @@ redactionConformance('FakeRedaction', () => {
 });
 vaultConformance('FakeVault', () => ({
   vault: new FakeVault((_, env) => ({ stdout: env.API_KEY ?? '', stderr: '' })),
+}));
+sealedDocumentsConformance('FakeSealedDocuments', () => ({
+  port: new FakeSealedDocuments(),
+  mine: {} as StatePort,
+  theirs: {} as StatePort,
+  document: defineSealedDocument({ name: 'oauth-secrets', path: 'oauth-secrets.json' }),
 }));
 inputTargetConformance('goneTargetAdapter (terminal)', () => ({
   adapter: goneTargetAdapter,
