@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { requireMayApply } from '../../../../cli/lib/fleet/account-authority.ts';
 import { confirmStep, runChange } from '../../../../cli/lib/fleet/account-change.ts';
-import { authorityOf, CHANGE_ID, changeView, credential, fakeWorld, machine } from './account-fakes.ts';
+import { authorityOf, CHANGE_ID, changeView, fakeWorld, machine } from './account-fakes.ts';
 
 const removeRuntime = { kind: 'runtime.remove', name: 'old' } as const;
 
@@ -162,7 +162,7 @@ describe('runChange', () => {
           changeView(change, {
             preview: { kind: 'sign-out', credential: 'claude-you', runtimesAffected: 2, signsOutTerminal: true },
           }),
-        apply: () => ({ outcome: 'sign-out-failed', reason: 'logout exited 1', credential: credential() }),
+        apply: () => ({ outcome: 'sign-out-failed', reason: 'logout exited 1', credential: { id: 'claude-you' } }),
       },
     });
     await runChange(signOut.deps, {

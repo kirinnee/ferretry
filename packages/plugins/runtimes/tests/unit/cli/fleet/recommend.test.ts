@@ -1,68 +1,67 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { RecommendController } from '../../../../cli/lib/fleet/recommend.ts';
-import { CapturingOutput, RecordingRecommendationGateway } from './fixtures.ts';
+import { renderRecommendation } from '../../../../cli/lib/fleet/render.ts';
+import { fakeWorld, recommendation, runVerb } from './account-fakes.ts';
 
-function controller(binaryName = 'fy') {
-  const recommendations = new RecordingRecommendationGateway();
-  const out = new CapturingOutput();
-  return { subject: new RecommendController({ recommendations, out, binaryName }), recommendations, out };
-}
-
-describe('recommending a team', () => {
+describe('recommend', () => {
   it('should join the task from the words given and probe quota by default', async () => {
     // Arrange
-    const { subject, recommendations, out } = controller();
+    const world = fakeWorld();
 
     // Act
-    await subject.recommend(['port', 'the', 'CLI', 'groups'], {});
+    await runVerb(world, 'recommend', ['port', 'the', 'CLI', 'groups']);
 
     // Assert
-    should(recommendations.requests).eql([{ task: 'port the CLI groups', usage: true }]);
-    should(out.text).containEql('pick  sol');
+    should(world.gateway.called('recommend')[0]?.args[0]).eql({ task: 'port the CLI groups', usage: true });
+    should(world.out.text('success')).containEql('pick  codex');
   });
 
   it('should collapse the whitespace a shell leaves behind', async () => {
-    // Arrange
-    const { subject, recommendations } = controller();
-
-    // Act
-    await subject.recommend(['  port ', ' the  CLI '], {});
-
-    // Assert
-    should(recommendations.requests[0]?.task).equal('port the CLI');
+    const world = fakeWorld();
+    await runVerb(world, 'recommend', ['  port ', ' the  CLI ']);
+    should(world.gateway.called('recommend')[0]?.args[0]).match({ task: 'port the CLI' });
   });
 
   it('should skip the probe under --no-usage', async () => {
-    // Arrange
-    const { subject, recommendations } = controller();
-
-    // Act
-    await subject.recommend(['anything'], { usage: false });
-
-    // Assert
-    should(recommendations.requests[0]?.usage).be.false();
+    const world = fakeWorld();
+    await runVerb(world, 'recommend', ['anything'], { usage: false });
+    should(world.gateway.called('recommend')[0]?.args[0]).match({ usage: false });
   });
 
   it('should refuse an empty task rather than asking the daemon to guess', async () => {
-    // Arrange
-    const { subject, recommendations } = controller('foo');
-
-    // Act + Assert — the example names the binary it was given, so a rename never strands it.
-    await should(subject.recommend(['   '], {})).be.rejectedWith(
-      'describe the task: foo fleet recommend "<what needs doing>"',
+    const world = fakeWorld();
+    await should(runVerb(world, 'recommend', ['   '])).be.rejectedWith(
+      'describe the task: fz recommend "<what needs doing>"',
     );
-    should(recommendations.requests).be.empty();
+    should(world.gateway.called('recommend')).be.empty();
   });
 
   it('should emit the recommendation under --json', async () => {
-    // Arrange
-    const { subject, out } = controller();
+    const world = fakeWorld();
+    await runVerb(world, 'recommend', ['anything'], { json: true });
+    should(JSON.parse(world.out.text('success'))).have.property('roles');
+  });
+});
 
-    // Act
-    await subject.recommend(['anything'], { json: true });
+describe('renderRecommendation', () => {
+  it('should print every alternative, what was skipped and every warning beside the pick', () => {
+    const text = renderRecommendation(
+      recommendation({
+        exclusions: [{ accountId: 'codex-spare', agent: 'codex', reason: 'out of quota' }],
+        warnings: ['quota inputs were not read'],
+      }),
+    );
+    should(text)
+      .match(/implementer: the work is mostly writing modules with tests/)
+      .and.match(/pick {2}codex \(gpt-5\.6, account claude-you\): expensive, but holds the whole unit/)
+      .and.match(/or {4}claude-code \(opus, account claude-you\): cheaper, shorter context/)
+      .and.match(/not considered:\n {4}codex \(codex-spare\): out of quota/)
+      .and.match(/! quota inputs were not read/);
+  });
 
-    // Assert
-    should(JSON.parse(out.text)).have.property('roles');
+  it('should show a classification that is not a sentence as its JSON', () => {
+    should(renderRecommendation(recommendation({ classification: { shape: 'build' } }))).match(
+      /\{"shape":"build"\} — /,
+    );
   });
 });

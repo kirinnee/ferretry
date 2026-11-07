@@ -7,7 +7,7 @@ import {
   renderChangeOutcome,
   renderChangeView,
 } from '../../../../cli/lib/fleet/account-render.ts';
-import { changeView, credential } from './account-fakes.ts';
+import { changeView } from './account-fakes.ts';
 
 const result = { accountCount: 1, operationCount: 1, manifestPath: '/m.json', prunedWrappers: [], sharedHistory: [] };
 
@@ -44,7 +44,7 @@ describe('account-model words', () => {
             operations: [],
             documents: [],
             runtimes: [],
-            runningSessions: [{ id: 's-1', name: 'Fisher', harness: 'claude' }],
+            runningSessions: [{ id: 's-1', name: 'Fisher', harness: 'claude-code' }],
           },
         },
       ),
@@ -116,7 +116,7 @@ describe('renderChangeOutcome', () => {
       outcome: 'applied',
       apply: {
         outcome: 'committed-with-history-failure',
-        failedHarness: 'claude',
+        failedHarness: 'claude-code',
         reason: 'busy',
         committed: {
           ...result,
@@ -162,7 +162,7 @@ describe('renderChangeOutcome', () => {
   });
 
   it('should report a sign-out', () => {
-    should(renderChangeOutcome({ outcome: 'signed-out', credential: credential() })).eql({
+    should(renderChangeOutcome({ outcome: 'signed-out', credential: { id: 'claude-you' } })).eql({
       ok: true,
       text: 'Signed out claude-you.',
     });

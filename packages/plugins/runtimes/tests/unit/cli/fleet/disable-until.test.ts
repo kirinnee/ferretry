@@ -46,3 +46,14 @@ describe('parseReason', () => {
     should(() => parseReason('   ')).throw(AccountCommandError, { message: /Say why/ });
   });
 });
+
+describe('parseUntil with no clock', () => {
+  it('should still read an absolute date or time, and leave "already passed" to the daemon', () => {
+    should(parseUntil('2026-11-01', undefined)).equal('2026-11-01T00:00:00.000Z');
+    should(parseUntil('2020-01-01T00:00:00Z', undefined)).equal('2020-01-01T00:00:00.000Z');
+  });
+
+  it('should refuse a wait in words, since a wait counts from now', () => {
+    should(() => parseUntil('3d', undefined)).throw(AccountCommandError, { message: /no clock.*date.*time/ });
+  });
+});

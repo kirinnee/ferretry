@@ -72,12 +72,9 @@ export function modelSetInput(invocation: VerbInvocation, current: ComponentView
   const was = current?.detail.kind === KIND ? current.detail : undefined;
   const given = flagList(invocation.options, 'model');
   const models = given.length > 0 ? given : was === undefined ? [] : [...was.models];
-  const parsed = ComponentInputSchema.safeParse({
-    kind: KIND,
-    models,
-    default: flagText(invocation.options, 'default') ?? was?.default ?? models[0],
-  });
-  if (!parsed.success) {
+  const startsWith = flagText(invocation.options, 'default') ?? was?.default ?? models[0];
+  const parsed = ComponentInputSchema.safeParse({ kind: KIND, models, default: startsWith });
+  if (!parsed.success || !models.includes(startsWith as string)) {
     throw new AccountCommandError('A model set needs at least one --model <id>, and --default must be one of them.');
   }
   return parsed.data;

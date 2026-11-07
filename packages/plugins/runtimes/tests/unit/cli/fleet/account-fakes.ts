@@ -1,31 +1,23 @@
+import type { VerbInvocation } from '@ferretry/kernel/manifest';
 import type {
-  FleetAccountChange,
-  FleetAccountChangeOutcome,
-  FleetAccountChangeView,
-  FleetCloneBundle,
-  FleetCloneReview,
-  FleetCloneReviewRequest,
-  FleetComponentCatalog,
-  FleetComponentView,
-  FleetCredentialList,
-  FleetCredentialTestResult,
-  FleetCredentialView,
-  FleetLayeredProfileCatalog,
-  FleetLayeredProfileView,
-  FleetMachineAuthority,
-  FleetMachineView,
-  FleetProviderPresetCatalog,
-  FleetRuntimeCatalog,
-  FleetRuntimeView,
-  FleetSetupScan,
-  FleetStackView,
-  FleetToolInstallResult,
-  HarnessLoginCodexMethod,
-  HarnessLoginFlow,
-  HarnessLoginSubmission,
-} from '@ferretry/protocol';
-import { Command } from 'commander';
-import type { AccountCommandDeps, AccountHarness, IAccountGateway } from '../../../../cli/lib/fleet/account-ports.ts';
+  AccountChange,
+  AccountChangeOutcome,
+  AccountChangeView,
+  ComponentCatalog,
+  ComponentView,
+  LayeredProfileCatalog,
+  LayeredProfileView,
+  MachineAuthority,
+  MachineView,
+  Recommendation,
+  RecommendationRequest,
+  RuntimeCatalog,
+  RuntimeView,
+  SetupScan,
+  StackView,
+} from '../../../../contract/index.ts';
+import type { AccountCommandDeps, IRuntimesGateway } from '../../../../cli/lib/fleet/account-ports.ts';
+import { VERB_BODIES } from '../../../../cli/lib/verbs.ts';
 
 /** One call the fake gateway saw. */
 interface GatewayCall {
@@ -37,21 +29,29 @@ export const CHANGE_ID = 'fy_fprop_AAAAAAAAAAAAAAAAAAAAAA';
 const AT = '2026-10-13T00:00:00.000Z';
 export const LATER = '2026-10-13T00:10:00.000Z';
 
-export const authorityOf = (overrides: Partial<FleetMachineAuthority> = {}): FleetMachineAuthority => ({
+export const authorityOf = (overrides: Partial<MachineAuthority> = {}): MachineAuthority => ({
   mayApply: true,
   applyRefusal: 'granted',
   ...overrides,
 });
 
-export const machine = (overrides: Partial<FleetMachineView> = {}): FleetMachineView => ({
+export const machine = (overrides: Partial<MachineView> = {}): MachineView => ({
   name: 'studio',
-  format: 'version-2',
+  format: 'present',
   setUp: true,
   agentPermissions: 'auto',
   defaultRuntime: 'claude-default',
   agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
+  browserMode: 'headless',
+  browserProxy: null,
+  browserPorts: 'random',
+  browserFirewallFailure: 'warn',
+  autoResume: true,
+  agendaMode: false,
+  publicUsageFeed: false,
+  lastAutoResume: null,
   tools: [
-    { harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/bin/claude' },
+    { harness: 'claude-code', label: 'Claude Code', installed: true, command: '/usr/bin/claude' },
     { harness: 'codex', label: 'Codex', installed: false },
   ],
   runtimeCount: 2,
@@ -60,58 +60,35 @@ export const machine = (overrides: Partial<FleetMachineView> = {}): FleetMachine
   ...overrides,
 });
 
-export const changeView = (
-  change: FleetAccountChange,
-  overrides: Partial<FleetAccountChangeView> = {},
-): FleetAccountChangeView => ({
-  id: CHANGE_ID,
-  revision: 'r1',
-  change,
-  summary: 'Add runtime claude-work',
-  consequences: ['claude-work uses claude-you'],
-  expiresAt: LATER,
-  state: 'pending',
-  preview: {
-    kind: 'apply',
-    operations: [{ kind: 'directory', path: '/fy/fleet/homes/x' }],
-    documents: [{ path: 'config.yaml', bytes: 120 }],
-    runtimes: [{ name: 'claude-work', harness: 'claude', agent: true, launch: { available: true } }],
-  },
-  ...overrides,
-});
+export const changeView = (change: AccountChange, overrides: Partial<AccountChangeView> = {}): AccountChangeView =>
+  ({
+    id: CHANGE_ID,
+    revision: 'r1',
+    change,
+    summary: 'Add runtime claude-work',
+    consequences: ['claude-work uses claude-you'],
+    expiresAt: LATER,
+    state: 'pending',
+    preview: {
+      kind: 'apply',
+      operations: [{ kind: 'directory', path: '/fy/fleet/homes/x' }],
+      documents: [{ path: 'config.yaml', bytes: 120 }],
+      runtimes: [{ name: 'claude-work', harness: 'claude-code', agent: true, launch: { available: true } }],
+    },
+    ...overrides,
+  }) as AccountChangeView;
 
-export const committed = (): FleetAccountChangeOutcome => ({
-  outcome: 'applied',
-  apply: {
-    outcome: 'committed',
-    result: { accountCount: 1, operationCount: 3, manifestPath: '/fy/m.json', prunedWrappers: [], sharedHistory: [] },
-  },
-});
+export const committed = (): AccountChangeOutcome =>
+  ({
+    outcome: 'applied',
+    apply: {
+      outcome: 'committed',
+      result: { accountCount: 1, operationCount: 3, manifestPath: '/fy/m.json', prunedWrappers: [], sharedHistory: [] },
+    },
+  }) as AccountChangeOutcome;
 
-export const credential = (overrides: Partial<FleetCredentialView> = {}): FleetCredentialView => ({
-  id: 'claude-you',
-  harness: 'claude',
-  store: 'host',
-  email: 'you@example.com',
-  needsLabel: false,
-  sharedWithTerminal: true,
-  status: {
-    word: 'ready',
-    label: 'Ready',
-    reason: 'provider_accepted',
-    explanation: 'The provider accepted this login.',
-    lastCheckInconclusive: false,
-  },
-  usage: { fiveHour: { usedPercent: 12.4 }, weekly: {} },
-  usedBy: ['claude-default'],
-  signIn: { available: true },
-  checkNow: { available: true },
-  signOut: { available: true, sentence: 'Sign out?', runtimesAffected: 1, signsOutTerminal: true },
-  ...overrides,
-});
-
-export const stack = (overrides: Partial<FleetStackView> = {}): FleetStackView => ({
-  harness: 'claude',
+export const stack = (overrides: Partial<StackView> = {}): StackView => ({
+  harness: 'claude-code',
   available: { available: true },
   applied: ['instructions/main'],
   skipped: [],
@@ -120,11 +97,11 @@ export const stack = (overrides: Partial<FleetStackView> = {}): FleetStackView =
   ...overrides,
 });
 
-export const runtime = (overrides: Partial<FleetRuntimeView> = {}): FleetRuntimeView => ({
-  id: '00000000-0000-4000-8000-0000000000a1',
+export const runtime = (overrides: Partial<RuntimeView> = {}): RuntimeView => ({
+  id: 'claude-default',
   name: 'claude-default',
   wrapper: 'claude-default',
-  harness: 'claude',
+  harness: 'claude-code',
   credential: { id: 'claude-you', store: 'host', status: 'needs_sign_in' },
   profile: 'default',
   agent: false,
@@ -135,7 +112,7 @@ export const runtime = (overrides: Partial<FleetRuntimeView> = {}): FleetRuntime
   ...overrides,
 });
 
-export const profile = (overrides: Partial<FleetLayeredProfileView> = {}): FleetLayeredProfileView => ({
+export const profile = (overrides: Partial<LayeredProfileView> = {}): LayeredProfileView => ({
   name: 'default',
   layers: ['instructions/main'],
   usedBy: ['claude-default'],
@@ -147,7 +124,7 @@ export const profile = (overrides: Partial<FleetLayeredProfileView> = {}): Fleet
   ...overrides,
 });
 
-export const component = (overrides: Partial<FleetComponentView> = {}): FleetComponentView => ({
+export const component = (overrides: Partial<ComponentView> = {}): ComponentView => ({
   reference: 'instructions/main',
   kind: 'instructions',
   name: 'main',
@@ -161,11 +138,23 @@ export const component = (overrides: Partial<FleetComponentView> = {}): FleetCom
   ...overrides,
 });
 
-export const scan = (overrides: Partial<FleetSetupScan> = {}): FleetSetupScan => ({
+/** A model set as the catalogue reports it. */
+export const modelSet = (overrides: Partial<ComponentView> = {}): ComponentView =>
+  component({
+    reference: 'modelSets/heavy',
+    kind: 'modelSets',
+    name: 'heavy',
+    detail: { kind: 'modelSets', models: ['opus', 'sonnet'], default: 'opus' },
+    usedBy: { profiles: ['default'], runtimes: ['claude-default'] },
+    editNote: 'Editing this changes 1 profile and 1 runtime.',
+    ...overrides,
+  });
+
+export const scan = (overrides: Partial<SetupScan> = {}): SetupScan => ({
   machine: 'studio',
   format: 'none',
   tools: [
-    { harness: 'claude', label: 'Claude Code', installed: true },
+    { harness: 'claude-code', label: 'Claude Code', installed: true },
     {
       harness: 'codex',
       label: 'Codex',
@@ -175,7 +164,7 @@ export const scan = (overrides: Partial<FleetSetupScan> = {}): FleetSetupScan =>
   ],
   harnesses: [
     {
-      harness: 'claude',
+      harness: 'claude-code',
       installed: true,
       account: { state: 'signed-in', email: 'you@example.com' },
       mcpServers: [],
@@ -195,7 +184,7 @@ export const scan = (overrides: Partial<FleetSetupScan> = {}): FleetSetupScan =>
       problems: [],
     },
   ],
-  runtimes: [{ harness: 'claude', name: 'claude-default', profile: 'default' }],
+  runtimes: [{ harness: 'claude-code', name: 'claude-default', profile: 'default' }],
   updates: [],
   duplicates: [],
   notes: [],
@@ -203,105 +192,67 @@ export const scan = (overrides: Partial<FleetSetupScan> = {}): FleetSetupScan =>
   ...overrides,
 });
 
-export const bundle = (): FleetCloneBundle => ({
-  format: 'ferretry-clone',
-  version: 1,
-  machine: 'laptop',
-  exportedAt: AT,
-  credentials: [],
-  components: {},
-  profiles: {},
-  runtimes: {},
-  files: [],
-  notCopied: [],
-});
+export const ACCOUNT_ID = 'claude-you';
 
-/** The review a first copy gets: nothing compared yet, so nothing listed. Override what a test needs. */
-export const cloneReview = (overrides: Partial<FleetCloneReview> = {}): FleetCloneReview => ({
-  mode: 'first',
-  source: { name: 'laptop', verified: 'self' },
-  items: [],
-  settings: [],
-  logins: [],
-  keys: [],
-  same: { count: 0, probable: 0 },
-  fingerprint: 'fp-1',
-  ...overrides,
-});
-
-export const flow = (overrides: Record<string, unknown> = {}): HarnessLoginFlow =>
-  ({
-    harness: 'claude',
-    flowId: 'flow-1',
-    credentialId: 'claude-you',
-    identity: 'claude:you',
-    startedAt: AT,
-    expiresAt: LATER,
-    state: 'starting',
+export function recommendation(overrides: Partial<Recommendation> = {}): Recommendation {
+  return {
+    task: 'port the remaining CLI command groups',
+    classification: 'implementation',
+    reasoning: 'a long, many-checkpoint port benefits from a high-context implementer',
+    roles: [
+      {
+        role: 'implementer',
+        why: 'the work is mostly writing modules with tests',
+        primary: {
+          agent: 'codex',
+          accountId: ACCOUNT_ID,
+          model: 'gpt-5.6',
+          tradeoff: 'expensive, but holds the whole unit',
+          score: 0.91,
+        },
+        alternatives: [
+          {
+            agent: 'claude-code',
+            accountId: ACCOUNT_ID,
+            model: 'opus',
+            tradeoff: 'cheaper, shorter context',
+            score: 0.7,
+          },
+        ],
+      },
+    ],
+    exclusions: [],
+    warnings: [],
     ...overrides,
-  }) as HarnessLoginFlow;
+  };
+}
 
 /** Answers for every gateway call, each overridable per test; every call is recorded. */
 export interface FakeAnswers {
-  machine: () => FleetMachineView;
-  components: () => FleetComponentCatalog;
-  profiles: () => FleetLayeredProfileCatalog;
-  runtimes: () => FleetRuntimeCatalog;
-  credentials: () => FleetCredentialList;
-  check: () => FleetCredentialView;
-  test: () => FleetCredentialTestResult;
-  presets: () => FleetProviderPresetCatalog;
-  secretNames: () => ReadonlySet<string>;
-  putSecret: () => void;
-  stage: (change: FleetAccountChange) => FleetAccountChangeView;
-  apply: () => FleetAccountChangeOutcome;
-  scan: () => FleetSetupScan;
-  installTools: () => FleetToolInstallResult;
-  exportBundle: () => FleetCloneBundle;
-  reviewClone: (request: FleetCloneReviewRequest) => FleetCloneReview;
-  forgetCloneSource: (source: string) => boolean;
-  startSignIn: () => HarnessLoginFlow;
-  signInStatus: () => HarnessLoginFlow;
-  submitSignInCode: () => HarnessLoginSubmission;
-  recheckSignIn: () => HarnessLoginSubmission;
-  cancelSignIn: () => HarnessLoginFlow;
+  machine: () => MachineView;
+  components: () => ComponentCatalog;
+  profiles: () => LayeredProfileCatalog;
+  runtimes: () => RuntimeCatalog;
+  stage: (change: AccountChange) => AccountChangeView;
+  apply: () => AccountChangeOutcome;
+  scan: () => SetupScan;
+  recommend: (request: RecommendationRequest) => Recommendation;
 }
 
-class FakeGateway implements IAccountGateway {
+class FakeGateway implements IRuntimesGateway {
   readonly calls: GatewayCall[] = [];
   readonly answers: FakeAnswers;
 
   constructor(overrides: Partial<FakeAnswers> = {}) {
     this.answers = {
       machine: () => machine(),
-      components: () => ({ format: 'version-2', kinds: [] }),
-      profiles: () => ({ format: 'version-2', profiles: [] }),
-      runtimes: () => ({ format: 'version-2', runtimes: [] }),
-      credentials: () => ({ format: 2, machine: 'studio', credentials: [] }),
-      check: () => credential(),
-      test: () => ({
-        credentialId: 'glm',
-        ok: true,
-        code: 'ok',
-        message: 'The provider accepted this login.',
-        spent: 'nothing',
-        at: LATER,
-      }),
-      presets: () => ({ presets: [] }),
-      secretNames: () => new Set<string>(),
-      putSecret: () => undefined,
+      components: () => ({ format: 'present', kinds: [] }),
+      profiles: () => ({ format: 'present', profiles: [] }),
+      runtimes: () => ({ format: 'present', runtimes: [] }),
       stage: change => changeView(change),
       apply: () => committed(),
       scan: () => scan(),
-      installTools: () => ({ outcomes: [] }),
-      exportBundle: () => bundle(),
-      reviewClone: () => cloneReview(),
-      forgetCloneSource: () => true,
-      startSignIn: () => flow({ state: 'complete' }),
-      signInStatus: () => flow({ state: 'complete' }),
-      submitSignInCode: () => ({ outcome: 'accepted', flow: flow({ state: 'complete' }) }),
-      recheckSignIn: () => ({ outcome: 'accepted', flow: flow({ state: 'complete' }) }),
-      cancelSignIn: () => flow({ state: 'failed', reason: 'cancelled', remedy: 'retry' }),
+      recommend: () => recommendation(),
       ...overrides,
     };
   }
@@ -331,25 +282,7 @@ class FakeGateway implements IAccountGateway {
   runtimes() {
     return this.#record('runtimes', [], this.answers.runtimes);
   }
-  credentials() {
-    return this.#record('credentials', [], this.answers.credentials);
-  }
-  check(id: string) {
-    return this.#record('check', [id], this.answers.check);
-  }
-  test(id: string, allowInference: boolean) {
-    return this.#record('test', [id, allowInference], this.answers.test);
-  }
-  presets() {
-    return this.#record('presets', [], this.answers.presets);
-  }
-  secretNames() {
-    return this.#record('secretNames', [], this.answers.secretNames);
-  }
-  putSecret(name: string, value: string) {
-    return this.#record('putSecret', [name, value], this.answers.putSecret);
-  }
-  stage(change: FleetAccountChange) {
+  stage(change: AccountChange) {
     return this.#record('stage', [change], () => this.answers.stage(change));
   }
   apply(id: string) {
@@ -358,36 +291,8 @@ class FakeGateway implements IAccountGateway {
   scan() {
     return this.#record('scan', [], this.answers.scan);
   }
-  installTools(harnesses: readonly AccountHarness[]) {
-    return this.#record('installTools', [harnesses], this.answers.installTools);
-  }
-  exportBundle() {
-    return this.#record('exportBundle', [], this.answers.exportBundle);
-  }
-  reviewClone(request: FleetCloneReviewRequest) {
-    return this.#record('reviewClone', [request], () => this.answers.reviewClone(request));
-  }
-  forgetCloneSource(source: string) {
-    return this.#record('forgetCloneSource', [source], () => this.answers.forgetCloneSource(source));
-  }
-  startSignIn(id: string, method?: HarnessLoginCodexMethod, restart?: boolean) {
-    return this.#record(
-      'startSignIn',
-      [id, ...(method === undefined ? [] : [method]), ...(restart === true ? ['restart'] : [])],
-      this.answers.startSignIn,
-    );
-  }
-  signInStatus(id: string) {
-    return this.#record('signInStatus', [id], this.answers.signInStatus);
-  }
-  submitSignInCode(id: string, code: string) {
-    return this.#record('submitSignInCode', [id, code], this.answers.submitSignInCode);
-  }
-  recheckSignIn(id: string) {
-    return this.#record('recheckSignIn', [id], this.answers.recheckSignIn);
-  }
-  cancelSignIn(id: string) {
-    return this.#record('cancelSignIn', [id], this.answers.cancelSignIn);
+  recommend(request: RecommendationRequest) {
+    return this.#record('recommend', [request], () => this.answers.recommend(request));
   }
 }
 
@@ -420,24 +325,15 @@ class FakeOutput {
   }
 }
 
-/** Scripted answers, in order; every question is recorded — visible and hidden ones separately. */
+/** Scripted answers, in order; every question is recorded. */
 class FakePrompt {
   readonly questions: string[] = [];
-  readonly hiddenQuestions: string[] = [];
 
-  constructor(
-    private readonly answers: string[] = [],
-    private readonly hiddenAnswers: string[] = [],
-  ) {}
+  constructor(private readonly answers: string[] = []) {}
 
   async ask(message: string): Promise<string> {
     this.questions.push(message);
     return this.answers.shift() ?? '';
-  }
-
-  async askHidden(message: string): Promise<string> {
-    this.hiddenQuestions.push(message);
-    return this.hiddenAnswers.shift() ?? '';
   }
 }
 
@@ -446,63 +342,33 @@ export interface FakeWorld {
   readonly gateway: FakeGateway;
   readonly out: FakeOutput;
   readonly prompt: FakePrompt;
-  readonly files: Map<string, string>;
-  readonly slept: number[];
 }
 
-/** A whole set of collaborators, every one a recording fake. */
+/** A whole set of collaborators, every one a recording fake. `interactive: false` leaves nobody to ask. */
 export function fakeWorld(
-  options: {
-    gateway?: Partial<FakeAnswers>;
-    answers?: string[];
-    hiddenAnswers?: string[];
-    interactive?: boolean;
-    files?: Record<string, string>;
-    now?: () => number;
-    /** `fy login add --from-env` reads this (docs/provider-presets.md). Default: nothing set. */
-    env?: Record<string, string | undefined>;
-    /** What a one-click add reads off stdin when exactly one secret is missing off a terminal. */
-    secretValue?: string;
-  } = {},
+  options: { gateway?: Partial<FakeAnswers>; answers?: string[]; interactive?: boolean; now?: () => number } = {},
 ): FakeWorld {
   const gateway = new FakeGateway(options.gateway);
   const out = new FakeOutput();
-  const prompt = new FakePrompt(options.answers, options.hiddenAnswers);
-  const files = new Map(Object.entries(options.files ?? {}));
-  const slept: number[] = [];
+  const prompt = new FakePrompt(options.answers);
   const deps: AccountCommandDeps = {
     gateway,
     out,
-    prompt,
-    interactive: options.interactive ?? true,
+    ...(options.interactive === false ? {} : { prompt }),
     binaryName: 'fz',
-    readText: async path => {
-      const text = files.get(path);
-      if (text === undefined) throw new Error(`ENOENT ${path}`);
-      return text;
-    },
-    sleep: async milliseconds => {
-      slept.push(milliseconds);
-    },
     now: options.now ?? (() => Date.parse(AT)),
-    env: options.env ?? {},
-    readSecretValue: async () => {
-      if (options.secretValue === undefined) throw new Error('no secret value is on stdin for this test');
-      return options.secretValue;
-    },
   };
-  return { deps, gateway, out, prompt, files, slept };
+  return { deps, gateway, out, prompt };
 }
 
-/** Run argv against a program with one register function mounted. */
-export async function runCommand(
-  register: (program: Command, deps: AccountCommandDeps) => void,
+type Verb = keyof typeof VERB_BODIES;
+
+/** Run one verb the way the shell calls it: positionals first, then the parsed options. */
+export async function runVerb(
   world: FakeWorld,
-  argv: readonly string[],
-  prepare?: (program: Command) => void,
+  verb: Verb,
+  args: readonly string[] = [],
+  options: VerbInvocation['options'] = {},
 ): Promise<void> {
-  const program = new Command().name('fz').exitOverride();
-  prepare?.(program);
-  register(program, world.deps);
-  await program.parseAsync(['node', 'fz', ...argv]);
+  await VERB_BODIES[verb](world.deps, { args, options });
 }

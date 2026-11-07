@@ -1,11 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { registerProfileCommands, renderProfile, renderProfileList } from '../../../../cli/lib/profile/commands.ts';
-import { fakeWorld, profile, runCommand, stack } from '../fleet/account-fakes.ts';
+import { renderProfile, renderProfileList } from '../../../../cli/lib/profile/commands.ts';
+import { fakeWorld, profile, runVerb, stack } from '../fleet/account-fakes.ts';
 
 const layered = profile({
   name: 'agent-work',
-  scope: { kind: 'scoped', scope: 'claude' },
+  scope: { kind: 'scoped', scope: 'claude-code' },
   layers: ['profile/default', 'settings/agent'],
   usedBy: [],
   baseFor: ['later'],
@@ -13,7 +13,7 @@ const layered = profile({
     stack({
       conflicts: [
         {
-          harness: 'claude',
+          harness: 'claude-code',
           field: 'env',
           key: 'X',
           sentence: 'X: 2 overrides 1',
@@ -28,7 +28,7 @@ const layered = profile({
 
 describe('profile renderings', () => {
   it('should list profiles with their layer and override counts', () => {
-    const text = renderProfileList({ format: 'version-2', profiles: [profile(), layered] }, 'fz');
+    const text = renderProfileList({ format: 'present', profiles: [profile(), layered] }, 'fz');
     should(text).match(/^default {2}Generic · 1 layer\n {2}Used by: claude-default/);
     should(text).match(/agent-work {2}Claude only · 2 layers · 1 override\n {2}Used by: no runtime/);
   });
@@ -37,7 +37,7 @@ describe('profile renderings', () => {
     const sentence =
       "Profile default can't be both Claude only and Codex only: settings a is Claude only and settings b is Codex only.";
     const mixed = profile({ scope: { kind: 'mixed', sentence } });
-    should(renderProfileList({ format: 'version-2', profiles: [mixed] }, 'fz')).match(
+    should(renderProfileList({ format: 'present', profiles: [mixed] }, 'fz')).match(
       /^default {2}Mixed · 1 layer\n {2}Used by: claude-default\n {2}Profile default can't/,
     );
     should(renderProfile(mixed)).match(/^default {2}\(Mixed\)\n {2}Profile default can't/);
@@ -45,7 +45,7 @@ describe('profile renderings', () => {
   });
 
   it('should say how to build the first profile', () => {
-    should(renderProfileList({ format: 'version-2', profiles: [] }, 'fz')).match(/fz profile build/);
+    should(renderProfileList({ format: 'present', profiles: [] }, 'fz')).match(/fz profile build/);
   });
 
   it('should show layers, each tool, where it is used and why it cannot be deleted', () => {
@@ -60,56 +60,41 @@ describe('profile renderings', () => {
   });
 });
 
-describe('registerProfileCommands', () => {
+describe('profile verbs', () => {
   it('should list and show profiles, as words or JSON', async () => {
-    const world = fakeWorld({ gateway: { profiles: () => ({ format: 'version-2', profiles: [profile()] }) } });
-    await runCommand(registerProfileCommands, world, ['profiles']);
-    await runCommand(registerProfileCommands, world, ['profiles', '--json']);
-    await runCommand(registerProfileCommands, world, ['profile', 'show', 'default']);
-    await runCommand(registerProfileCommands, world, ['profile', 'show', 'default', '--json']);
-    await runCommand(registerProfileCommands, world, ['profile', 'ls']);
-    await runCommand(registerProfileCommands, world, ['profile', 'list', '--json']);
-    should(world.out.lines.map(line => line.text.slice(0, 7))).eql([
-      'default',
-      '{\n  "fo',
-      'default',
-      '{\n  "na',
-      'default',
-      '{\n  "fo',
-    ]);
-    should(world.out.lines[4]?.text).match(/^default {2}Generic · 1 layer/);
-    await should(runCommand(registerProfileCommands, world, ['profile', 'show', 'nope'])).be.rejectedWith(
-      /fz profiles/,
-    );
+    const world = fakeWorld({ gateway: { profiles: () => ({ format: 'present', profiles: [profile()] }) } });
+    await runVerb(world, 'profile ls');
+    await runVerb(world, 'profile ls', [], { json: true });
+    await runVerb(world, 'profile show', ['default']);
+    await runVerb(world, 'profile show', ['default'], { json: true });
+    should(world.out.lines.map(line => line.text.slice(0, 7))).eql(['default', '{\n  "fo', 'default', '{\n  "na']);
+    should(world.out.lines[0]?.text).match(/^default {2}Generic · 1 layer/);
+    await should(runVerb(world, 'profile show', ['nope'])).be.rejectedWith(/fz profile ls/);
   });
 
   it('should build a profile from its layers in order', async () => {
     const world = fakeWorld();
-    await runCommand(registerProfileCommands, world, [
-      'profile',
-      'build',
-      'agent',
-      '--layer',
-      'profile/default',
-      '--layer',
-      'settings/agent',
-    ]);
+    await runVerb(world, 'profile build', ['agent'], { layer: ['profile/default', 'settings/agent'] });
     should(world.gateway.called('stage')[0]?.args[0]).eql({
       kind: 'profile.put',
       name: 'agent',
       layers: ['profile/default', 'settings/agent'],
       create: true,
     });
-    await should(runCommand(registerProfileCommands, world, ['profile', 'build', 'empty'])).be.rejectedWith(
-      /at least one layer/,
-    );
+    await should(runVerb(world, 'profile build', ['empty'])).be.rejectedWith(/at least one layer/);
+  });
+
+  it('should take a single --layer as a one-layer list', async () => {
+    const world = fakeWorld();
+    await runVerb(world, 'profile build', ['solo'], { layer: 'instructions/main' });
+    should(world.gateway.called('stage')[0]?.args[0]).match({ layers: ['instructions/main'] });
   });
 
   it('should edit and delete only after a yes', async () => {
     const world = fakeWorld({ answers: ['yes', 'y'] });
-    await runCommand(registerProfileCommands, world, ['profile', 'edit', 'agent', '--layer', 'settings/agent']);
-    await runCommand(registerProfileCommands, world, ['profile', 'rm', 'agent', '--switch-runtimes-to', 'default']);
-    await runCommand(registerProfileCommands, world, ['profile', 'rm', 'other', '--yes']);
+    await runVerb(world, 'profile edit', ['agent'], { layer: 'settings/agent' });
+    await runVerb(world, 'profile rm', ['agent'], { 'switch-runtimes-to': 'default' });
+    await runVerb(world, 'profile rm', ['other'], { yes: true });
     should(world.gateway.called('stage').map(call => call.args[0])).eql([
       { kind: 'profile.put', name: 'agent', layers: ['settings/agent'], create: false },
       { kind: 'profile.remove', name: 'agent', switchRuntimesTo: 'default' },
