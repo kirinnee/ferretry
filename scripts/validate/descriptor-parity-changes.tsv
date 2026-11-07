@@ -121,3 +121,13 @@ route	POST /v1/skills/installs/local/runtime	added	moved to the owning plugin's 
 route	GET /v1/skills/installs/local	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/skills/installs/local/project/:installId	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/skills/installs/local/runtime/:installId	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+member	DELETE /v1/shared/me/keys/self	changed	R619: member answers are no-store; today the member dispatcher stamped it on every answer, 5.0 declares it (noStore: true)
+member	GET /v1/shared/me	changed	R619: member answers are no-store; today the member dispatcher stamped it on every answer, 5.0 declares it (noStore: true)
+member	POST /v1/shared/passkeys	changed	R619: member answers are no-store; today the member dispatcher stamped it on every answer, 5.0 declares it (noStore: true)
+member	POST /v1/shared/passkeys/options	changed	R619: member answers are no-store; today the member dispatcher stamped it on every answer, 5.0 declares it (noStore: true)
+member	POST /v1/shared/redeem	changed	R619: member answers are no-store; today the member dispatcher stamped it on every answer, 5.0 declares it (noStore: true)
+member	POST /v1/shared/unlock	changed	R619: member answers are no-store; today the member dispatcher stamped it on every answer, 5.0 declares it (noStore: true)
+member	POST /v1/shared/unlock/options	changed	R619: member answers are no-store; today the member dispatcher stamped it on every answer, 5.0 declares it (noStore: true)
+member	GET /v1/shared/catalogs/:catalogId/items/:itemId/:version	changed	R617 + R619: every member request re-reads the grant for the catalog in the path (catalog: path) and is no-store; today the handler did both, 5.0 declares them
+member	GET /v1/shared/catalogs/:catalogId/items/:itemId/versions	changed	R617 + R619: every member request re-reads the grant for the catalog in the path (catalog: path) and is no-store; today the handler did both, 5.0 declares them
+member	GET /v1/shared/catalogs/:catalogId/manifest	changed	R617 + R619: every member request re-reads the grant for the catalog in the path (catalog: path) and is no-store; today the handler did both, 5.0 declares them

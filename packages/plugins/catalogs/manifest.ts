@@ -1,7 +1,7 @@
 import { Credentials, StepUp } from '@ferretry/core-gate/contract';
 import { defineState, SessionModes } from '@ferretry/kernel/contract';
 import { definePlugin, memberRoute, route, screen, verb } from '@ferretry/kernel/manifest';
-import { AccessPort } from './contract/others.ts';
+import { AccessPort } from '@ferretry/plugin-access/contract';
 import {
   AUDIT,
   CATALOGS_WORDS,
