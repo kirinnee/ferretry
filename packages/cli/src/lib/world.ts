@@ -3,7 +3,8 @@
  * `process`, the network or the disk). `bin/fy.ts` builds the real one from the adapters; tests build fakes.
  */
 import type { Health, PluginInventory } from '@ferretry/kernel/contract';
-import type { TerminalIo } from '@ferretry/kernel/manifest';
+import type { CliContext, Manifest, TerminalIo } from '@ferretry/kernel/manifest';
+import type { Duration } from '@ferretry/std';
 import type { DaemonTransport, InventoryCache } from './client.ts';
 import type { Environment } from './credential.ts';
 import type { CommandRegistry } from './registry.ts';
@@ -34,7 +35,22 @@ export type LaunchResult =
   | { readonly started: true; readonly baseUrl: string }
   | { readonly started: false; readonly why: string };
 
+/**
+ * What every plugin's `cli` half is handed beyond its client and the terminal (`CliContext`: `clock`, `sleep`,
+ * `readText`, `ownState`). `env` is not here: it is the allowed part of {@link CliWorld.environment}.
+ */
+export interface PluginHost {
+  readonly clock: NonNullable<CliContext<Manifest>['clock']>;
+  /** Waits, and ends early (rejecting with the signal's reason) when the signal aborts. */
+  sleep(delay: Duration, signal?: AbortSignal): Promise<void>;
+  /** As today's `readRecipe`: UTF-8 text from a path relative to the working directory; `-` reads standard input. No size cap. */
+  readText(path: string): Promise<string>;
+  /** The kernel's state port over ONLY this plugin's own declared opaque files; any other file is refused. */
+  ownState(manifest: Manifest): NonNullable<CliContext<Manifest>['ownState']>;
+}
+
 export interface CliWorld {
+  readonly host: PluginHost;
   readonly io: TerminalIo;
   readonly environment: Environment;
   readonly identity: Identity;

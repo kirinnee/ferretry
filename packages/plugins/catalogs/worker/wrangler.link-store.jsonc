@@ -10,7 +10,7 @@
   // See docs/cloudflare-relay-self-hosting.md — "Your own link store" — for what you are taking on.
   "$schema": "../../../../node_modules/wrangler/config-schema.json",
   "name": "ferretry-link-store",
-  "main": "adapters/link-store-worker.ts",
+  "main": "src/adapters/link-store-worker.ts",
   "compatibility_date": "2026-07-01",
 
   // The fingerprints this deployment stores links for, separated by spaces or commas. A fingerprint

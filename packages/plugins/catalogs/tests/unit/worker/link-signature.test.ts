@@ -11,7 +11,7 @@ import {
   verifyLinkBundle,
   verifySignedCatalogItemVersions,
   verifySignedCatalogManifest,
-} from '../../../worker/lib/index.ts';
+} from '../../../worker/src/lib/index.ts';
 import {
   catalogCanonicalText,
   catalogLinkSignedBytes,
