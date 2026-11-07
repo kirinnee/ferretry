@@ -153,19 +153,36 @@ export function runnerConformance(name: string, make: () => RunnerSubject | Prom
 
 // ─── harness ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** A harness that writes one file in the home, starts through the runner it is given and delivers idempotently. */
+/**
+ * A harness that names one home per ferret under its own `homes` folder (a fixture path, never a real one), writes
+ * one file there, starts through the runner it is given and delivers idempotently.
+ */
 export class FakeHarness implements Harness {
   readonly accepts: readonly LoginKindKey[] = ['anthropic', 'api-key'];
   readonly delivered: OutboundMessage[] = [];
   /** Every launch spec this harness was handed (start and resume), so a test sees what reached it. */
   readonly launched: LaunchSpec[] = [];
+  /** Every launch spec `prepareHome` was handed, in order. */
+  readonly prepared: LaunchSpec[] = [];
   readonly #seen = new Set<string>();
-  constructor(readonly key: HarnessKey = 'claude-code') {}
+  constructor(
+    readonly key: HarnessKey = 'claude-code',
+    /** This harness's own `agent-homes` folder: `homeFor` answers `<homes>/<ferret>`. */
+    readonly homes: string = '/home/agent-homes',
+  ) {}
 
   async discover() {
     return { found: true as const, binary: '/usr/bin/fake-harness', version: '1.0.0' };
   }
+  async homeFor(ferret: FerretId): Promise<FencedPath> {
+    if (ferret === '' || ferret.includes('/') || ferret === '.' || ferret === '..')
+      throw new Error('the ferret id must be one plain name');
+    return fenced(`${this.homes}/${ferret}`);
+  }
   async prepareHome(spec: LaunchSpec) {
+    if (spec.home !== (await this.homeFor(spec.ferret)))
+      throw new Error('the launch home is not this harness’s home for the ferret');
+    this.prepared.push(spec);
     return { files: [fenced(`${spec.home}/INSTRUCTIONS.md`)], args: [] };
   }
   async start(spec: LaunchSpec, runner: Runner, env: ChildEnvironment): Promise<Result<Started, StartRefusal>> {
@@ -231,6 +248,17 @@ export function harnessConformance(name: string, make: () => HarnessSubject | Pr
       const { harness, spec } = await make();
       const plan = await harness.prepareHome(spec);
       for (const file of plan.files) expect(file.startsWith(`${spec.home}/`)).toBe(true);
+    });
+    test('S42 homeFor names one absolute home per ferret, and prepareHome refuses any other home', async () => {
+      const { harness, spec } = await make();
+      if (harness.homeFor === undefined) throw new Error('a harness names its own ferret home (homeFor)');
+      const own = await harness.homeFor(spec.ferret);
+      const other = await harness.homeFor(ferretId(`${spec.ferret}-other`));
+      expect(own).toBe(spec.home);
+      expect(own.startsWith('/')).toBe(true);
+      expect(other).not.toBe(own);
+      expect(other.startsWith(`${own}/`) || own.startsWith(`${other}/`)).toBe(false);
+      await expect(harness.prepareHome({ ...spec, home: other })).rejects.toBeDefined();
     });
     test('start runs through the runner it is given and stop ends it', async () => {
       const { harness, runner, spec } = await make();
