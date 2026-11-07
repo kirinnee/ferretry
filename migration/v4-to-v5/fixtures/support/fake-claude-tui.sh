@@ -86,6 +86,18 @@ last=""
 while IFS= read -r line; do
   n=$((n + 1))
   record user "u${n}-${sid}" "${last}" "${line}"
+  # FIXTURE-RUN <out> <command>: added for the v4 fixture builder (not in the 4.291.5 original). A real ferret runs
+  # shell commands in its own environment; this stand-in does the same for exactly one marked line, so the builder can
+  # make the daemon see a call that carries the ferret's own session credential without ever reading it. Fixture-only.
+  case "${line}" in
+  *FIXTURE-RUN\ *)
+    run="${line#*FIXTURE-RUN }"
+    run_out="${run%% *}"
+    run_cmd="${run#* }"
+    sh -c "${run_cmd}" >"${run_out}" 2>&1 </dev/null
+    echo $? >"${run_out}.code"
+    ;;
+  esac
   if [ -f "${reply_file}" ]; then
     if [ -d "${media_source}" ] && [ -n "${FY_MEDIA_DIR:-}" ]; then
       mkdir -p "${FY_MEDIA_DIR}" && cp "${media_source}"/* "${FY_MEDIA_DIR}/"
