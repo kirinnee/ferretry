@@ -17,6 +17,7 @@ import type {
   SettingsProps,
 } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
+import { ChatWidthPanel } from './chat-width-control.tsx';
 import { ConversationClientProvider } from './client.ts';
 import { ComposerAttachPanel } from './composer/composer-attach.tsx';
 import { ConversationSettings } from './composer/conversation-settings.tsx';
@@ -67,7 +68,7 @@ export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
     queue: scoped<PanelProps>(client, QueuePanel),
     'compact-at': scoped<PanelProps>(client, CompactAtPanel),
     hypermedia: scoped<PanelProps>(client, HypermediaPanel),
-    'chat-width': scoped<PanelProps>(client, Pending),
+    'chat-width': scoped<PanelProps>(client, ChatWidthPanel),
   },
   settings: { conversation: scoped<SettingsProps>(client, ConversationSettings) },
   renderers: { 'ask:question': scoped<RendererProps>(client, QuestionRenderer) },

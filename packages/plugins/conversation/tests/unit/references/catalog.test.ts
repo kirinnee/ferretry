@@ -26,7 +26,10 @@ const answerOf = async (
   providers: Partial<Record<ReferenceCatalogPrefix, ReferenceCatalogProvider | 'unavailable'>>,
   query: Record<string, string>,
 ) => {
-  const response = await referenceCatalogRoute(prefix => providers[prefix])(call(FERRET, query));
+  const response = await referenceCatalogRoute({
+    providerOf: prefix => providers[prefix],
+    ferrets: { get: async id => (id === FERRET ? ({ id } as never) : undefined) },
+  })(call(FERRET, query));
   if (response.body === undefined || typeof response.body !== 'string') throw new Error('no JSON body');
   return ReferenceCatalogAnswerSchema.parse(JSON.parse(response.body));
 };
@@ -55,7 +58,7 @@ describe('reference.catalog route', () => {
       provided: true,
       entries: [{ token: 'F12', label: 'Fix the composer', detail: 'Build' }],
     });
-    expect(seen).toEqual([{ ferret: FERRET, query: 'fix' }]);
+    expect(seen).toEqual([{ ferret: FERRET, query: 'fix', caller: {} }]);
   });
 
   it('accepts every prefix of the reference grammar, the skill slash included', async () => {

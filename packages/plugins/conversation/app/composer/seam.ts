@@ -6,7 +6,7 @@
  *
  *   - DaemonId / DaemonConnection / daemonConnection ...... identity only: the half's client is already one daemon
  *     (`useConversationDaemon()`), so a connection is the id the shell recorded for that client.
- *   - DaemonFerretScope / daemonFerretScope / daemonFerretKey .. today's `lib/daemon-scope.ts`, renamed to the words.
+ *   - DaemonFerretScope / daemonFerretScope / daemonFerretKey .. re-exports of `@ferretry/app` (`compose/ferret-scope.ts`).
  *   - ConversationCaller / callRefusal ...................... the plugin client's `call` (§9.6), replacing today's
  *     `DaemonFetch` / `browserFetch` / `daemonRequest`; a refusal is `DaemonCallError` (status, code, sentence).
  *   - carrierDelivery ....................................... GAP(app-shell): today's `relay-carrier.ts` walk; the 5.0
@@ -22,10 +22,13 @@
  *   - canSubmitComposer ..................................... copy of today's `session-screens.ts` one-liner (C3's split).
  */
 
-import { DaemonCallError } from '@ferretry/app';
+import { type ComposerDaemonId, DaemonCallError } from '@ferretry/app';
 
 export {
   clearForegroundPinScope,
+  type DaemonFerretScope,
+  daemonFerretKey,
+  daemonFerretScope,
   type DevicePreference,
   devicePreference,
   getForegroundPinScope,
@@ -36,43 +39,14 @@ import type { WorkSearchQuery, WorkSearchResponse } from '../../contract/index.t
 
 // ─── the daemon this half talks to ────────────────────────────────────────────────────────────────────────────────
 
-export type DaemonId = string & { readonly daemonId: unique symbol };
+export type DaemonId = ComposerDaemonId;
 
 /** Which daemon a value belongs to. The shell's per-daemon client already is one daemon: this is an identity only. */
 export interface DaemonConnection {
   readonly daemonId: DaemonId;
 }
 
-export const daemonConnection = (daemonId: string): DaemonConnection => ({ daemonId: daemonId as DaemonId });
-
-/** The required `(daemonId, ferretId)` identity for composer state; `item` names an Agenda item's own draft slot. */
-export interface DaemonFerretScope {
-  readonly daemonId: DaemonId;
-  readonly ferretId: string;
-  /** The DRAFT SLOT inside the ferret: the agenda item whose own composer this is. Absent is the ferret's chat. */
-  readonly item?: string;
-}
-
-const requireFerretId = (value: string): string => {
-  if (value.trim() === '') throw new Error('ferretId must not be empty');
-  return value;
-};
-
-export const daemonFerretScope = (
-  daemon: Pick<DaemonConnection, 'daemonId'>,
-  ferretId: string,
-  item?: string,
-): DaemonFerretScope => ({
-  daemonId: daemon.daemonId,
-  ferretId: requireFerretId(ferretId),
-  ...(item === undefined ? {} : { item }),
-});
-
-/** A collision-safe key for persisted or in-memory ferret state; an item slot adds a third part. */
-export const daemonFerretKey = (scope: DaemonFerretScope): string =>
-  JSON.stringify(
-    scope.item === undefined ? [scope.daemonId, scope.ferretId] : [scope.daemonId, scope.ferretId, scope.item],
-  );
+export const daemonConnection = (daemonId: string): DaemonConnection => ({ daemonId });
 
 // ─── the plugin client ────────────────────────────────────────────────────────────────────────────────────────────
 

@@ -249,6 +249,14 @@ describe('composer files provider', () => {
     expect(options.calls).toHaveLength(1);
   });
 
+  it('says so when a directory fills the 2,000-file bound, and not before', async () => {
+    const files = (count: number) => Array.from({ length: count }, (_, i) => entry(`f${i}.ts`));
+    const full = await createFilesProvider(optionsOf({ '@': files(2_000) })).candidates(context('@', ''));
+    expect(full.notice).toContain('2,000 entries shown — enter a directory or refine this segment.');
+    const part = await createFilesProvider(optionsOf({ '@': files(200) })).candidates(context('@', ''));
+    expect(part.notice ?? '').not.toContain('entries shown');
+  });
+
   it('a ferret whose files nobody provides offers no rows and no error', async () => {
     const result = await createFilesProvider(optionsOf({})).candidates(context('@', ''));
     expect(result.candidates).toEqual([]);
