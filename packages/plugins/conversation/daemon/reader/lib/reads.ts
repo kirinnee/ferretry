@@ -23,13 +23,14 @@
 
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type { Instant, JsonValue } from '@ferretry/std';
-import type {
-  LogPage,
-  LogSearch,
-  TranscriptEvent as TranscriptEventView,
-  TranscriptEventTail,
-  TranscriptMessage,
-  TranscriptPage,
+import {
+  formatTranscriptImageMarker,
+  type LogPage,
+  type LogSearch,
+  type TranscriptEvent as TranscriptEventView,
+  type TranscriptEventTail,
+  type TranscriptMessage,
+  type TranscriptPage,
 } from '../../../contract/index.ts';
 import {
   type ConversationMessagePoint,
@@ -37,7 +38,6 @@ import {
   ExactConversationMessagePointSchema,
   formatPoint,
 } from './session/protocol.ts';
-import { formatTranscriptImageMarker } from './transcript/image-handle.ts';
 import { markerMediaType, numberRecordImages, type RecordImage } from './transcript/images.ts';
 import { isOwnerMessage } from './transcript/owner.ts';
 import { snippetAround } from './transcript/search.ts';

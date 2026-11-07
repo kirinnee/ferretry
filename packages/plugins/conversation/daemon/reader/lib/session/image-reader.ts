@@ -26,10 +26,10 @@ import { createHash } from 'node:crypto';
 import {
   formatTranscriptImageHandle,
   parseTranscriptImageHandle,
+  type TranscriptImageDownload,
   type TranscriptImageHandle,
   type TranscriptImageMediaType,
-} from '../transcript/image-handle.ts';
-import type { TranscriptImageDownload } from '../../../../contract/index.ts';
+} from '../../../../contract/index.ts';
 import { inspectImageBase64 } from '../transcript/image-bytes.ts';
 import { recordImages } from '../transcript/images.ts';
 import type { SlicedTranscriptInput } from '../transcript/sliced.ts';

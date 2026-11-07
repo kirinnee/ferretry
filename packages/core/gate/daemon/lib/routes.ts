@@ -54,12 +54,19 @@ export async function parseBody<S extends z.ZodType>(call: CallContext, schema: 
   return parsed.data;
 }
 
-/** Who is asking: where they arrived and whether they proved a passkey for this change — the boundary's facts only. */
-export const securityCallerOf = (call: CallContext): SecurityCaller => ({
-  hostLocal: arrivedOnHost(call.request, call.credential?.tokenClass === 'admin'),
-  actor: call.actor ?? 'unknown',
-  freshPasskey: call.presentation?.freshStepUp === true,
-});
+/**
+ * Who is asking: where they arrived and how they may TAKE a passkey proof for this change — the boundary's facts only.
+ * The proof is passed as a claim, never as the admission snapshot's `freshStepUp`, so the service takes it inside its
+ * queue and before its write.
+ */
+export const securityCallerOf = (call: CallContext): SecurityCaller => {
+  const claim = call.claimFreshStepUp;
+  return {
+    hostLocal: arrivedOnHost(call.request, call.credential?.tokenClass === 'admin'),
+    actor: call.actor ?? 'unknown',
+    ...(claim === undefined ? {} : { claimFreshPasskey: () => claim() === true }),
+  };
+};
 
 export interface GateRouteDeps {
   readonly audit: { recent(limit: number, keptOffset: number): Promise<AuditReading> };
@@ -95,13 +102,11 @@ export function gateRoutes(deps: GateRouteDeps) {
       const patch = await parseBody(call, SecuritySettingsPatchSchema);
       const caller = securityCallerOf(call);
       const outcome = await deps.security.patch(patch, caller);
-      if (outcome.ok) {
-        if (outcome.spentPasskey) call.spendFreshStepUp?.();
+      if (outcome.ok)
         return jsonResponse({
           view: SecuritySettingsViewSchema.parse(outcome.change.view),
           devicesExpiring: outcome.change.devicesExpiring,
         });
-      }
       if (outcome.refusal === 'unavailable')
         throw new ApiError(
           503,

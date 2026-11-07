@@ -5,8 +5,13 @@
  *
  * Returns the refusal as a sentence, or `null` when the save is fine. It reads strings and nothing else.
  */
-import { LONE_SURROGATE, parseFyRenderHeaders, validateHtml, validateSvg } from './fy-render.ts';
-import type { RenderSaveRequest } from '../../../contract/index.ts';
+import {
+  LONE_SURROGATE,
+  parseFyRenderHeaders,
+  type RenderSaveRequest,
+  validateHtml,
+  validateSvg,
+} from '../../../contract/index.ts';
 
 export function renderSaveRefusal(request: Pick<RenderSaveRequest, 'kind' | 'alt' | 'payload'>): string | null {
   // The alt goes through the header parser the fence uses (non-empty, no control character, at most the alt

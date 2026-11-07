@@ -87,7 +87,15 @@
       "The 5.0 ferret record carries no turn state, model, effort, limits or context, so the status panel and Info draw only what the record has",
       "canControl is always true on the Actions panel: the daemon refuses an act this device may not do, but the menu does not yet hide the rows from a viewer who may not",
       "POST /v1/ferrets requires a folder, so the new-ferret page cannot start a ferret without one",
-      "The fast switch needs Runtimes' account picker to fill the new optional `fast` on each ChosenFerretAccount model (from runtime-models.ts); until it does, no model is known to lack fast mode and the daemon is the one that refuses it"
+      "GAP(kernel): fy wait --until-marker tests \"exists\" by reading the file, because CliContext has no exists(path) probe yet (kernel item, sent to the kernel owner): a marker that is a directory, or a file that exists but cannot be read, never counts as present, and each poll reads the whole file; `-` is refused as a marker meanwhile"
+    ],
+    "conversation": [
+      "conversation app half: C1 landed (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app); the composer, chat and transcript, and the queue, questions, search and links bodies are still the one-line Pending surface until C2-C4 land",
+      "GAP(app-shell): the fy-render sandbox shell and library bundles are built by packages/app/scripts/build-fy-render-libs.ts and served from the app origin; the browser tests that exercise them need playwright and the Vite harness (tests/integration/app, NEEDS-APP-SHELL.txt)",
+      "GAP(board): a card or board fence draws each card through the Board reference:& renderer; the mini board and the lane view of today are Board views",
+      "GAP(browsers): ExternalLink and useLinkBehaviour keep the default (open in the reader's browser); the \"Open links in\" policy is the Browsers plugin's",
+      "GAP(ferrets): StatusMark reads a structural view; SessionView is not in Ferrets' contract yet (plan Q0, C3 adds it)",
+      "live updates run on the polling fallback until the kernel serves /v1/bus and /v1/events (plan Q12)"
     ]
   },
   "pendingHalves": {
@@ -100,7 +108,7 @@
     {
       "plugin": "conversation",
       "path": "packages/plugins/conversation/app",
-      "reason": "skeleton app half; the queue, stuck messages and links views port with item M"
+      "reason": "surfaces, client context, fy-render and the prose kit have landed; the composer, chat, transcript, queue, questions, search and links bodies are in flight (C2-C4)"
     },
     {
       "plugin": "agenda",
