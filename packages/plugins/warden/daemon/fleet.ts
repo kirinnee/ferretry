@@ -1,7 +1,7 @@
 import { type AskSummary, type AsksApi, SourceKeySchema } from '@ferretry/core-asks/contract';
 import type { FerretId, FerretsApi, FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
-import type { WardenFleetSession, WardenSessionStatus } from './lib/index.ts';
+import { type ExchangeSend, type WardenFleetSession, type WardenSessionStatus, withBatchMembers } from './lib/index.ts';
 
 const HARNESS_OF: Readonly<Record<string, 'claude' | 'codex'>> = { 'claude-code': 'claude', codex: 'codex' };
 
@@ -157,4 +157,32 @@ async function openQuestions(asks: AsksApi): Promise<ReadonlyMap<string, string>
     // Asks unreadable: no ferret is thought to be waiting, which is the quiet reading.
   }
   return since;
+}
+
+/** At most this many pages of one ferret's send ledger are read in one look (a ledger is bounded; a loop is a bug). */
+const SEND_PAGES = 64;
+
+/**
+ * Every send one ferret was sent, the latest line of each, as the overdue-report check reads it (today's
+ * `exchanges.sends`: the send ledger with the batch members its queue says rode one turn). Throws when Conversation
+ * cannot be read: the sweep treats an unreadable ledger as proving nothing this sweep.
+ */
+export async function exchangeSends(conversation: ConversationApi, ferret: FerretId): Promise<readonly ExchangeSend[]> {
+  const sends: ExchangeSend[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < SEND_PAGES; page++) {
+    const listed = await conversation.sends(ferret, cursor);
+    for (const send of listed.sends)
+      sends.push({
+        sendId: send.sendId,
+        from: send.from,
+        acceptedAt: send.acceptedAt,
+        turn: send.turn,
+        replyExpected: send.replyExpected,
+        fate: send.fate,
+      });
+    if (listed.nextCursor === undefined || listed.nextCursor === null) break;
+    cursor = listed.nextCursor;
+  }
+  return withBatchMembers(sends, (await conversation.queue(ferret)).messages);
 }

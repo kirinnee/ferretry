@@ -15,7 +15,7 @@ import {
   StateWardenStateStore,
   WardenReportReader,
 } from './adapters/index.ts';
-import { readFleet, TurnOrdinals } from './fleet.ts';
+import { exchangeSends, readFleet, TurnOrdinals } from './fleet.ts';
 import { createWardenRemedies } from './remedies.ts';
 import {
   type WardenAgentInventory,
@@ -169,6 +169,8 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       journal: { record: (type, data) => kernel.log.info(type, scalars(data)) },
       jevChecks: new StateWardenJevCheckLog(kernel.state, nowMs),
       revive,
+      // The send ledgers, for a sub-ferret overdue on a report its parent asked for (a flag and a notice, no act).
+      exchanges: { sends: async ferret => await exchangeSends(conversation, ferret as FerretId) },
       nowMs,
       capabilities: () => `${crypto.randomUUID()}${crypto.randomUUID().replaceAll('-', '')}`,
     },
