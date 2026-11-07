@@ -261,11 +261,25 @@ export default implementCli(manifest, {
       if (clock === undefined || sleep === undefined)
         throw new SessionCommandError('wait needs the shell’s clock, which this fy does not give a verb yet', 1);
       if (marker !== undefined && readText === undefined)
-        throw new SessionCommandError('--until-marker needs the shell’s file reader, which this fy does not give a verb yet', 1);
+        throw new SessionCommandError(
+          '--until-marker needs the shell’s file reader, which this fy does not give a verb yet',
+          1,
+        );
       const controller = new WaitController(
         {
-          get: async reference => await api.get(reference),
-          markerExists: async path => await (readText?.(path).then(() => true) ?? Promise.resolve(false)).catch(() => false),
+          get: async (reference, signal) => await api.get(reference, signal),
+          // The deadline is the shell's cancellable sleep: its signal aborts when the time is up, and a finished wait drops it.
+          startDeadline: milliseconds => {
+            const timer = new AbortController();
+            const passed = new AbortController();
+            void sleep(milliseconds as never, timer.signal).then(
+              () => passed.abort(),
+              () => undefined,
+            );
+            return { signal: passed.signal, cancel: () => timer.abort() };
+          },
+          markerExists: async path =>
+            await (readText?.(path).then(() => true) ?? Promise.resolve(false)).catch(() => false),
           nowMs: () => clock.nowMs(),
           sleep: async milliseconds => await sleep(milliseconds as never),
           transport: transportFailure,

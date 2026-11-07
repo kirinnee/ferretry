@@ -52,15 +52,11 @@ import { lookupStartRequest, StartRequestsFile, withStartRequest } from './lib/f
 import { sessionFilesystemRoutes } from './lib/runtime/mounts/session-filesystem.ts';
 import { SessionFilesystem } from './lib/session/filesystem/index.ts';
 import { KernelGitRunner } from './adapters/git/runner.ts';
-import {
-  KernelDiffScratch,
-  KernelSessionRootPinner,
-  RunnerSessionGit,
-} from './adapters/session/filesystem/index.ts';
+import { KernelDiffScratch, KernelSessionRootPinner, RunnerSessionGit } from './adapters/session/filesystem/index.ts';
 import { StateAgentPinRepository } from './adapters/agent-pins/index.ts';
 import { RegistryPinSessionDirectory, StatePinRepository } from './adapters/pins/index.ts';
 import { KeyedSerialExecutor } from './adapters/storage/keyed-serial-executor.ts';
-import { stateHomeLaunchRefusal } from './lib/route-security/state-home.ts';
+import { type StateHomeLaunchReach, stateHomeLaunchRefusal } from './lib/route-security/state-home.ts';
 import { terminalLaunchRefusal } from './lib/route-security/launch.ts';
 import { confirmRestore } from './lib/route-security/restore.ts';
 import { AgentPinService, AgentPinSubsystem, withPinned } from './lib/agent-pins/index.ts';
@@ -310,6 +306,14 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     throw new ApiError(404, `no ferret ${raw}`, 'not-found');
   };
 
+  /**
+   * The kernel gives a plugin no state-home fence yet (no identity or link-hop reach into the home from a plugin), and
+   * the pin a work root hands out only refuses a root BASE inside the home, never a descendant of an ancestor of it.
+   * Until it does, everything that needs the fence fails closed for an agent with today's 503 `state_home_unresolved`
+   * (the launch refusal and every file-browser read), and never with a lexical stand-in.
+   */
+  const stateHomeReach: StateHomeLaunchReach | undefined = undefined;
+
   /** S47: an agent reaches only its own ferret and its helpers'; a person is unaffected. */
   const agentMayReach = (call: CallContext, target: FerretId): void => {
     if (!callerIsAgent(call)) return;
@@ -336,8 +340,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
 
   // The file browser (today's session-filesystem mount) over the kernel: each ferret's `work` root pins its folder and
-  // walks beneath it by descriptor, Git runs in the held object, and the kernel's fence keeps every read out of the
-  // state home (S47). The service is stateless, so one is made for the ferret a request names.
+  // walks beneath it by descriptor and Git runs in the held object. An agent's read also needs the state-home fence
+  // (S47), which no plugin can compute yet, so `reach` refuses an agent. The service is stateless, so one is made for the ferret a request names.
   const sessionGit = new RunnerSessionGit(
     new KernelGitRunner({
       // A string folder is one this module already fenced (a scratch folder); a held directory is the kernel's pin.
@@ -361,6 +365,9 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       agentMayReach(call, id);
       const folder = registry.get(id)?.folder;
       if (folder === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
+      // S47, today's `agentFence`: an agent's read sits behind the state-home fence, and an agent whose fence cannot be
+      // computed is refused with 503 `state_home_unresolved`. A person is ungoverned by it.
+      await stateHomeLaunchRefusal(callerIsAgent(call), stateHomeReach, folder);
       return { id, cwd: folder };
     },
   });
@@ -395,7 +402,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       const { waiting: _before, creditSeconds: _credit, ...kept } = await parkedFile(ferret);
       await kernel.state.write(
         FerretWaitFiles,
-        { ...kept, ...(waiting === undefined ? {} : { waiting }), ...(creditSeconds === undefined ? {} : { creditSeconds }) },
+        {
+          ...kept,
+          ...(waiting === undefined ? {} : { waiting }),
+          ...(creditSeconds === undefined ? {} : { creditSeconds }),
+        },
         ferret,
       );
       registry.putWaiting(ferret, waiting);
@@ -593,7 +604,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
             'owner_only',
           );
         // No identity/link-hop state-home reach is available in this kernel yet. Never replace it with a lexical fence.
-        await stateHomeLaunchRefusal(callerIsAgent(call), undefined, parsed.folder);
+        await stateHomeLaunchRefusal(callerIsAgent(call), stateHomeReach, parsed.folder);
         // Project catalogs and the managed-root launch seam are unbound; a governed start fails closed without them.
         await terminalLaunchRefusal(call, parsed, undefined);
         let startedFerret: FerretId | undefined;

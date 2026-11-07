@@ -8,9 +8,14 @@ import { sessionView } from '../session/session-fixtures.ts';
 
 const fresh = { missingMarker: false, declaredWait: false };
 const at = (overrides: Partial<FerretSummary>) => sessionView({ id: 'lead', ...overrides });
-const decide = (ferret: FerretSummary, extra: { marker?: { path: string; present: boolean }; expired?: boolean } = {}) =>
-  decideWait({ ferret, expired: extra.expired ?? false, ...(extra.marker === undefined ? {} : { marker: extra.marker }) }, fresh)
-    .outcome;
+const decide = (
+  ferret: FerretSummary,
+  extra: { marker?: { path: string; present: boolean }; expired?: boolean } = {},
+) =>
+  decideWait(
+    { ferret, expired: extra.expired ?? false, ...(extra.marker === undefined ? {} : { marker: extra.marker }) },
+    fresh,
+  ).outcome;
 const FINISHED = '2026-11-06T09:00:00.000Z' as FerretSummary['finishedAt'];
 
 describe('what a poll decides', () => {
@@ -67,6 +72,7 @@ function world(script: readonly (FerretSummary | Error)[], present = false) {
       return next as FerretSummary;
     },
     markerExists: async () => present,
+    startDeadline: () => ({ signal: new AbortController().signal, cancel: () => undefined }),
     nowMs: () => time,
     sleep: async ms => {
       slept.push(ms);
@@ -74,13 +80,24 @@ function world(script: readonly (FerretSummary | Error)[], present = false) {
     },
     transport: error => ((error as { lost?: boolean }).lost === true ? 'unavailable' : undefined),
   };
-  const controller = new WaitController(ports, { success: t => out.push(t), error: t => err.push(t), setExitCode: c => (code = c) }, 'fy');
+  const controller = new WaitController(
+    ports,
+    { success: t => out.push(t), error: t => err.push(t), setExitCode: c => (code = c) },
+    'fy',
+  );
   return { controller, slept, out, err, code: () => code };
 }
 
 describe('the wait loop', () => {
   test('V-wait finishing exits 0 and prints the state; the sleeps start soon and slow to every 5 s', async () => {
-    const w = world([at({ state: 'working' }), at({ state: 'working' }), at({ state: 'working' }), at({ state: 'working' }), at({ state: 'working' }), at({ state: 'stopped', finishedAt: FINISHED })]);
+    const w = world([
+      at({ state: 'working' }),
+      at({ state: 'working' }),
+      at({ state: 'working' }),
+      at({ state: 'working' }),
+      at({ state: 'working' }),
+      at({ state: 'stopped', finishedAt: FINISHED }),
+    ]);
     await w.controller.wait('lead', {});
     expect(w.code()).toBe(0);
     expect(w.slept).toEqual([1_000, 2_000, 3_000, 5_000, 5_000]);
@@ -125,7 +142,47 @@ describe('the wait loop', () => {
     const w = world([at({ state: 'stopped', finishedAt: FINISHED })]);
     await w.controller.wait('lead', { json: true });
     expect(JSON.parse(w.out[0] as string)).toMatchObject({ id: 'lead', state: 'stopped' });
-    await expect(world([]).controller.wait('lead', { timeout: 0 })).rejects.toThrow('--timeout must be a positive integer');
-    await expect(world([]).controller.wait('lead', { interval: 1.5 })).rejects.toThrow('--interval must be a positive integer');
+    await expect(world([]).controller.wait('lead', { timeout: 0 })).rejects.toThrow(
+      '--timeout must be a positive integer',
+    );
+    await expect(world([]).controller.wait('lead', { interval: 1.5 })).rejects.toThrow(
+      '--interval must be a positive integer',
+    );
+  });
+});
+
+describe('the deadline bounds a read in flight', () => {
+  test('V-wait --timeout ends 124 at the deadline when the daemon never answers the read, and the read was handed the deadline signal', async () => {
+    const deadline = new AbortController();
+    let cancelled = false;
+    let handed: AbortSignal | undefined;
+    let code = 0;
+    const err: string[] = [];
+    const ports: WaitPorts = {
+      // A hung daemon: the read settles only when its signal aborts, as the client's read does.
+      get: async (_reference, signal) => {
+        handed = signal;
+        queueMicrotask(() => deadline.abort());
+        return await new Promise<FerretSummary>((_resolve, reject) =>
+          signal?.addEventListener('abort', () =>
+            reject(Object.assign(new Error('abandoned'), { name: 'AbortError' })),
+          ),
+        );
+      },
+      markerExists: async () => false,
+      startDeadline: () => ({ signal: deadline.signal, cancel: () => (cancelled = true) }),
+      nowMs: () => 0,
+      sleep: async () => undefined,
+      transport: () => 'unresponsive',
+    };
+    const controller = new WaitController(
+      ports,
+      { success: () => undefined, error: t => err.push(t), setExitCode: c => (code = c) },
+      'fy',
+    );
+    await controller.wait('lead', { timeout: 5 });
+    expect(handed).toBe(deadline.signal);
+    expect(code).toBe(124);
+    expect(cancelled).toBe(true);
   });
 });

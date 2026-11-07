@@ -67,6 +67,28 @@ function lostStartAnswer(error: unknown): boolean {
   return 'cause' in error && error.cause !== error && lostStartAnswer(error.cause);
 }
 
+/** The call's answer, or an `AbortError` as soon as `signal` aborts; the call's own late outcome is dropped. */
+function abandonOnAbort<T>(call: Promise<T>, signal: AbortSignal): Promise<T> {
+  call.catch(() => undefined);
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(abortError());
+    signal.addEventListener('abort', onAbort, { once: true });
+    call.then(
+      value => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      error => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+const abortError = (): Error =>
+  Object.assign(new Error('the read was abandoned at the deadline'), { name: 'AbortError' });
+
 /**
  * The ferret verbs' daemon side, over the shell's guarded client. Every method is one route and a parse of its answer
  * against the contract's schema where the contract has one; the decisions live in the controllers.
@@ -98,8 +120,13 @@ export class ClientSessionApi
     return ListedSchema.parse(await this.client.call<unknown>(FERRET_ROUTES.list));
   }
 
-  async get(reference: string): Promise<FerretSummary> {
-    return FerretSummarySchema.parse(await this.client.call<unknown>(FERRET_ROUTES.get, at(reference)));
+  /**
+   * `signal` ends the wait for the answer when it aborts (a `--timeout` deadline, today's gateway.get): the client
+   * call takes no signal, so a read still in flight is abandoned and its late answer or failure is dropped.
+   */
+  async get(reference: string, signal?: AbortSignal): Promise<FerretSummary> {
+    const call = this.client.call<unknown>(FERRET_ROUTES.get, at(reference));
+    return FerretSummarySchema.parse(signal === undefined ? await call : await abandonOnAbort(call, signal));
   }
 
   async subtree(reference: string): Promise<SubtreeView> {

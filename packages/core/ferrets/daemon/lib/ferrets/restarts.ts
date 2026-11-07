@@ -24,7 +24,12 @@ import { type RestartPorts, RestartService, type RestartSubject } from '../sessi
 export interface FerretRestartHost {
   ready(): Promise<void>;
   /** Every ferret the registry holds. */
-  ferrets(): readonly { readonly id: FerretId; readonly name: string; readonly state: FerretState; readonly stateAt: string }[];
+  ferrets(): readonly {
+    readonly id: FerretId;
+    readonly name: string;
+    readonly state: FerretState;
+    readonly stateAt: string;
+  }[];
   waitingOf(ferret: FerretId): FerretWaiting | undefined;
   stop(ferret: FerretId, reason: string): Promise<void>;
   resume(ferret: FerretId): Promise<Result<FerretId, StartFailure>>;
@@ -102,16 +107,27 @@ export class FerretRestarts implements SessionRestartSubsystem {
     // its credential names, never the one the body claims.
     if (request.scope !== 'ids')
       throw new ApiError(403, 'a ferret restarts only itself and its helpers, not every ferret', 'forbidden');
+    // One resolution for both the check and the service: each reference must name exactly one ferret (a name two hold on
+    // one footing names none), and the service is handed the resolved ids, never the raw words, so it cannot pick a
+    // different holder than the one the caller was cleared for.
+    const resolved: FerretId[] = [];
     for (const reference of request.ids ?? []) {
       const target = this.authority.resolve(reference);
-      if (target !== undefined && !this.authority.mayTouch(caller, target))
+      if (target === undefined)
+        throw new ApiError(
+          403,
+          `a ferret restarts only itself and its helpers, and ${reference} is not exactly one ferret`,
+          'forbidden',
+        );
+      if (!this.authority.mayTouch(caller, target))
         throw new ApiError(
           403,
           `a ferret restarts only itself and its helpers, and ${reference} is neither`,
           'forbidden',
         );
+      resolved.push(target);
     }
-    return await this.service.restart({ ...request, caller }, requestId, requestedBy);
+    return await this.service.restart({ ...request, ids: resolved, caller }, requestId, requestedBy);
   }
 
   async status(): Promise<RestartStatus> {

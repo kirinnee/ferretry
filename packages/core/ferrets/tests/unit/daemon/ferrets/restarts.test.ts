@@ -122,6 +122,19 @@ describe('restarting ferrets', () => {
     await h.stop();
   });
 
+  test('R-0128 GET /v1/restarts answers the waiting restarts: empty at first, then the queued ferret with its reason', async () => {
+    const { h, start } = await running();
+    const empty = await h.request('GET', '/v1/restarts');
+    expect(empty.status).toBe(200);
+    expect(empty.json<RestartStatus>().queued).toEqual([]);
+    const id = await start('aniya');
+    await ask(h, { scope: 'ids', ids: [id] });
+    const waiting = await h.request('GET', '/v1/restarts');
+    expect(waiting.status).toBe(200);
+    expect(waiting.json<RestartStatus>().queued).toMatchObject([{ id, name: 'aniya', reason: 'mid-turn' }]);
+    await h.stop();
+  });
+
   test('R-0023 the owner clears the queue and is told how many were waiting', async () => {
     const { h, start } = await running();
     const id = await start('aniya');
@@ -146,6 +159,30 @@ describe('who may restart', () => {
     expect(fleet.status).toBe(403);
     const stranger = await ask(h, { scope: 'ids', ids: [other] }, id);
     expect(stranger.status).toBe(403);
+    await h.stop();
+  });
+
+  test('G43 R-0323 a name two running ferrets hold restarts neither: a ferret caller is refused and no restart is made', async () => {
+    const { h, runner, start } = await running();
+    const first = await start('aniya');
+    await h.request('POST', `/v1/ferrets/${first}/stop`, { body: {} });
+    const second = await start('aniya');
+    // A stopped ferret may be resumed under a name another now holds, so two are running on one footing.
+    expect((await h.request('POST', `/v1/ferrets/${first}/resume`)).status).toBe(200);
+    const starts = runner.starts;
+    const named = await ask(h, { scope: 'ids', ids: ['aniya'] }, second);
+    expect(named.status).toBe(403);
+    expect(runner.starts).toBe(starts);
+    expect((await h.request('GET', '/v1/restarts')).json<RestartStatus>().queued).toEqual([]);
+    await h.stop();
+  });
+
+  test('G43 R-0323 a ferret naming itself by its one name is cleared and the service is handed its resolved id', async () => {
+    const { h, start } = await running();
+    const id = await start('aniya');
+    const answer = await ask(h, { scope: 'ids', ids: ['aniya'] }, id);
+    expect(answer.status).toBe(200);
+    expect(answer.json<RestartResult>().queued).toEqual([{ id, name: 'aniya', reason: 'own-session' }]);
     await h.stop();
   });
 

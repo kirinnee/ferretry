@@ -12,13 +12,21 @@ export interface WaitOptions {
 
 /** What the loop reads of the world; injected so a poll loop is testable without real time passing. */
 export interface WaitPorts {
-  get(reference: string): Promise<FerretSummary>;
+  /** `signal` is the `--timeout` deadline: a read still in flight when it fires is abandoned, not waited for. */
+  get(reference: string, signal?: AbortSignal): Promise<FerretSummary>;
+  /** A deadline `milliseconds` away: its signal aborts when it passes; `cancel` drops it once the wait has ended. */
+  startDeadline(milliseconds: number): WaitDeadline;
   /** Whether the deliverable named by `--until-marker` exists yet. */
   markerExists(path: string): Promise<boolean>;
   nowMs(): number;
   sleep(milliseconds: number): Promise<void>;
   /** Classifies a failed read: a lost daemon ends the wait with its own exit code; anything else is the caller's. */
   transport(error: unknown): 'unavailable' | 'unresponsive' | undefined;
+}
+
+export interface WaitDeadline {
+  readonly signal: AbortSignal;
+  cancel(): void;
 }
 
 export interface WaitOutput {
@@ -69,21 +77,44 @@ export class WaitController {
     const fixedSeconds = positive(options.interval, '--interval');
     const fixedMs = fixedSeconds === undefined ? undefined : fixedSeconds * 1_000;
     const deadlineMs = timeout === undefined ? undefined : this.ports.nowMs() + timeout * 1_000;
-    const passed = (): boolean => deadlineMs !== undefined && this.ports.nowMs() >= deadlineMs;
+    const deadline = timeout === undefined ? undefined : this.ports.startDeadline(timeout * 1_000);
+    const passed = (): boolean =>
+      deadline?.signal.aborted === true || (deadlineMs !== undefined && this.ports.nowMs() >= deadlineMs);
+    try {
+      await this.#loop(reference, options, fixedMs, deadlineMs, deadline, passed);
+    } finally {
+      deadline?.cancel();
+    }
+  }
+
+  async #loop(
+    reference: string,
+    options: WaitOptions,
+    fixedMs: number | undefined,
+    deadlineMs: number | undefined,
+    deadline: WaitDeadline | undefined,
+    passed: () => boolean,
+  ): Promise<void> {
     let rung = 0;
     let notices: WaitNotices = { missingMarker: false, declaredWait: false };
     let last: FerretSummary | undefined;
     for (;;) {
       if (passed()) {
-        this.finish(reference, options, last, { kind: 'timed-out', ...(last === undefined ? {} : { state: last.state }) });
+        this.finish(reference, options, last, {
+          kind: 'timed-out',
+          ...(last === undefined ? {} : { state: last.state }),
+        });
         return;
       }
       let ferret: FerretSummary;
       try {
-        ferret = await this.ports.get(reference);
+        ferret = await this.ports.get(reference, deadline?.signal);
       } catch (error) {
         if (passed()) {
-          this.finish(reference, options, last, { kind: 'timed-out', ...(last === undefined ? {} : { state: last.state }) });
+          this.finish(reference, options, last, {
+            kind: 'timed-out',
+            ...(last === undefined ? {} : { state: last.state }),
+          });
           return;
         }
         const failure = this.ports.transport(error);
@@ -115,7 +146,9 @@ export class WaitController {
       if (decision.outcome.note !== undefined) this.out.error(`${this.binaryName} wait: ${decision.outcome.note}`);
       const intervalMs = fixedMs ?? pollDelayMs(rung);
       rung += 1;
-      await this.ports.sleep(Math.min(intervalMs, deadlineMs === undefined ? intervalMs : Math.max(0, deadlineMs - this.ports.nowMs())));
+      await this.ports.sleep(
+        Math.min(intervalMs, deadlineMs === undefined ? intervalMs : Math.max(0, deadlineMs - this.ports.nowMs())),
+      );
     }
   }
 }

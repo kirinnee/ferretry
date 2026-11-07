@@ -14,12 +14,18 @@ test('S47 R-0151 fs/file serves no bytes where the root cannot be held open: a p
   // The file is present in the root, where the old RootHandle reader would have served it: stat cannot prove a single
   // link or the home's identity.
   h.putRoot('work', 'hard-link.txt', 'state content');
-  for (const headers of [{}, as('lead').headers]) {
-    const answer = await h.request('GET', '/v1/ferrets/helper/fs/file', { headers, query: { path: 'hard-link.txt' } });
-    expect(answer.status).toBe(501);
-    expect(answer.json<{ code: string }>().code).toBe('unsupported');
-    expect(answer.body).not.toContain('state content');
-  }
+  const person = await h.request('GET', '/v1/ferrets/helper/fs/file', { query: { path: 'hard-link.txt' } });
+  expect(person.status).toBe(501);
+  expect(person.json<{ code: string }>().code).toBe('unsupported');
+  expect(person.body).not.toContain('state content');
+  // An agent never gets as far: its fence cannot be computed (S47).
+  const agent = await h.request('GET', '/v1/ferrets/helper/fs/file', {
+    ...as('lead'),
+    query: { path: 'hard-link.txt' },
+  });
+  expect(agent.status).toBe(503);
+  expect(agent.json<{ code: string }>().code).toBe('state_home_unresolved');
+  expect(agent.body).not.toContain('state content');
   expect(
     (
       await h.request('GET', '/v1/ferrets/stranger/fs/file', {
