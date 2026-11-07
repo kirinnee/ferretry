@@ -106,6 +106,17 @@ test('keeps revoked token hashes revoked and leaves undiscovered conversations u
   expect(JSON.parse(await readFile(join(f.to, 'state/ferrets/tokens.json'), 'utf8')).tokens[0].revoked).toBe(true);
 });
 
+test('a ferret a person cut off stays cut off, even though v4 dropped its hash', async () => {
+  // v4's cut-off drops the hash and sets credentialRevoked; v5 needs a cutOff row or it would relaunch the ferret.
+  await f.session('cut', { credentialRevoked: true });
+  expect((await ferretsStep.run(f.ctx())).status).toBe('converted');
+  const tokens = FerretTokensSchema.parse(JSON.parse(await readFile(join(f.to, 'state/ferrets/tokens.json'), 'utf8')));
+  const row = tokens.tokens.find(token => token.ferret === 'cut');
+  expect(row?.cutOff).toBe(true);
+  expect(row?.revoked).toBe(true);
+  expect(row?.digest).toBe('0'.repeat(64));
+});
+
 test('resolves former runtime names to the current runtime name without writing a names document', async () => {
   await f.put('fleet/ids.json', {
     version: 1,

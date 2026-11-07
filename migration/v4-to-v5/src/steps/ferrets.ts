@@ -22,10 +22,6 @@ export const ferretsStep: Step = {
     { what: 'v4 session-version markers', why: 'v5 files carry their own format' },
     { what: 'per-ferret environment.json', why: 'plaintext credential; never opened; the hash alone is carried' },
     {
-      what: 'config.credentialRevoked as a prohibition on future launches',
-      why: 'FerretRecordSchema has no such field; only an existing hash row can retain revoked: true in FerretTokensSchema',
-    },
-    {
       what: 'summary.md and compaction-history.json as additional history entries',
       why: 'FerretHistoryEventSchema describes journal events only; no approved event type/sequence for these separate artifacts',
     },
@@ -79,7 +75,7 @@ export const ferretsStep: Step = {
       const ids = await runtimeIds(ctx.v4.fleet);
       const sourceRecords = await configs(ctx.v4.sessions);
       const ledgers = await prepareLedgers(ctx, sourceRecords);
-      const tokens: { ferret: string; digest: string; issuedAt: string; revoked?: true }[] = [];
+      const tokens: { ferret: string; digest: string; issuedAt: string; revoked?: true; cutOff?: true }[] = [];
       for (const config of sourceRecords) {
         const state = await json(join(ctx.v4.sessions, config.id, 'state.json'), State);
         if (state !== undefined && state.id !== config.id) throw new Error('identity mismatch');
@@ -124,13 +120,20 @@ export const ferretsStep: Step = {
         records.push(record);
         // M4: v4 hashes the full fys_ bearer with SHA-256, exactly the v5 token contract.
         // v4 has no issuance timestamp; creation is the known lower bound, not conversion time.
-        if (config.sessionCapabilityHash !== undefined)
+        // A person's cut-off (v4 `credentialRevoked`) is v5's `cutOff`. v4 drops the hash when it cuts a ferret off,
+        // so there is often no hash to mark: write the same placeholder row v5's own `cutOff()` writes
+        // (packages/core/ferrets/daemon/lib/tokens/tokens.ts), so the ferret is never relaunched until a person
+        // resumes it. Dropping the mark would silently lift the cut-off.
+        if (config.credentialRevoked === true)
           tokens.push({
             ferret: config.id,
-            digest: config.sessionCapabilityHash,
+            digest: config.sessionCapabilityHash ?? '0'.repeat(64),
             issuedAt: config.createdAt,
-            ...(config.credentialRevoked === true ? { revoked: true as const } : {}),
+            revoked: true as const,
+            cutOff: true as const,
           });
+        else if (config.sessionCapabilityHash !== undefined)
+          tokens.push({ ferret: config.id, digest: config.sessionCapabilityHash, issuedAt: config.createdAt });
       }
       const tokenDocument = FerretTokensSchema.parse({ format: 1, tokens });
       for (const record of records)
