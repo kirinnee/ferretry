@@ -79,3 +79,12 @@ describe('conversation manifest', () => {
     expect(manifest.actions.agentTools.map(item => item.name)).toEqual(['search_work']);
   });
 });
+
+describe('G161 the reads a live frame must not widen past', () => {
+  // Ferrets' own test pins that `GET /v1/events` asks the `operator` minimum; this is the other half of "no wider than
+  // the logs read" (a package reaches another only through its contract, so the two halves are pinned where declared).
+  test('G161 the transcript log read, whose data the live frames repeat, is at the operator minimum', () => {
+    const logs = manifest.actions.routes.find(entry => entry.key === 'GET /v1/ferrets/:ferretId/logs');
+    expect(logs?.minimum).toBe('operator');
+  });
+});

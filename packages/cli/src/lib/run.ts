@@ -3,13 +3,14 @@
  * against the manifests' declarations, opens the guarded client, and hands the plugin's own `cli` half the call.
  */
 import { type Cancel, skeletonSentence } from '@ferretry/kernel/contract';
-import type { VerbHandler } from '@ferretry/kernel/manifest';
+import type { PluginSocket, VerbHandler } from '@ferretry/kernel/manifest';
 import { parseArgs } from './argv.ts';
 import {
   type ClientDeps,
   type FollowingClient,
   pluginClient,
   routeFactsBeforeContact,
+  socketFactsBeforeContact,
   toolFactsBeforeContact,
   type Surfaces,
   surfacesOf,
@@ -41,6 +42,7 @@ import { updateVerb } from './commands/update.ts';
 import { EXIT, errorText, ShellError } from './errors.ts';
 import { pluginEnvironment } from './plugin-env.ts';
 import { buildPluginGraph } from './plugin-graph.ts';
+import { buildRequest } from './request.ts';
 import type { ShellContext, ShellVerb } from './shell-context.ts';
 import { buildVerbTable, expandAlias, renderHelp, resolveVerb, type VerbEntry } from './verbs.ts';
 import type { CliWorld } from './world.ts';
@@ -275,5 +277,34 @@ function lazyClient(deps: () => Promise<ClientDeps>, id: string, surfaces: Surfa
     },
     subscribe: (event, listener) => follow(event, listener, () => undefined),
     follow,
+    socket: (key, params, listeners, query) => {
+      // Declared and person-only checks come first and throw here, before the connection exists (S59).
+      socketFactsBeforeContact(surfaces, paned, key);
+      // A missing, unused or unsafe parameter fails the caller here, before the daemon is contacted, not through onClose.
+      buildRequest(key, { params, ...(query === undefined ? {} : { query }) });
+      let socket: PluginSocket | undefined;
+      let closed = false;
+      // The connection opens now, like a call; a refusal to connect ends the stream with its words.
+      void deps().then(
+        opened => {
+          if (closed) return;
+          try {
+            socket = pluginClient(opened, id).socket(key, params, listeners, query);
+          } catch (error) {
+            listeners.onClose(errorText(error));
+          }
+        },
+        (error: unknown) => {
+          if (!closed) listeners.onClose(errorText(error));
+        },
+      );
+      return {
+        send: frame => socket?.send(frame),
+        close: (code, reason) => {
+          closed = true;
+          socket?.close(code, reason);
+        },
+      };
+    },
   };
 }

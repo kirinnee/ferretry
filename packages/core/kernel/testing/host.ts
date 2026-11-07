@@ -178,7 +178,15 @@ export interface TestHost {
   }[];
   request(method: string, path: string, init?: RequestInit2): Promise<TestResponse>;
   tool(name: string, input: unknown, init?: { readonly as?: TestCaller }): Promise<ToolResult>;
-  socket(path: string, init?: { readonly as?: TestCaller; readonly method?: string }): Promise<OpenSocket>;
+  socket(
+    path: string,
+    init?: {
+      readonly as?: TestCaller;
+      readonly method?: string;
+      /** The query the upgrade request carries, as `request` takes it. */
+      readonly query?: RequestInit2['query'];
+    },
+  ): Promise<OpenSocket>;
   /** Delivers an event to every loaded subscriber (a wake-up from a fake). */
   emit<Payload>(event: EventDef<string, Payload>, payload: Payload): void;
   /** Waits until every delivery and hook call started so far has finished. */
@@ -1163,7 +1171,10 @@ async function start(world: World): Promise<TestHost> {
       return actorScope.run({ actor: actorOf(caller), standing: decision.standing }, () => handler(call, input));
     },
     async socket(path, init = {}) {
-      const request = makeRequest(init.method ?? 'GET', path, { as: init.as ?? owner() });
+      const request = makeRequest(init.method ?? 'GET', path, {
+        as: init.as ?? owner(),
+        ...(init.query === undefined ? {} : { query: init.query }),
+      });
       const found = socketTable.lookup(request.method, path);
       const result: {
         response?: TestResponse;
@@ -1283,4 +1294,3 @@ async function start(world: World): Promise<TestHost> {
   };
   return host;
 }
-

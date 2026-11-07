@@ -1,3 +1,4 @@
+import type { PluginSocket, PluginSocketListeners } from '@ferretry/kernel/manifest';
 import type { DaemonReply, DaemonTransport, SendOptions } from '../../lib/client.ts';
 import { isLocalDaemonUrl } from '../../lib/address.ts';
 import { SESSION_BEARER_PREFIX } from '../../lib/credential.ts';
@@ -59,5 +60,9 @@ export class SessionCredentialGateway implements DaemonTransport {
     onClose: Parameters<HttpTransport['events']>[1],
   ): () => void {
     return this.#inner.events(listener, onClose);
+  }
+
+  socket(path: string, listeners: PluginSocketListeners): PluginSocket {
+    return this.#inner.socket(path, listeners);
   }
 }
