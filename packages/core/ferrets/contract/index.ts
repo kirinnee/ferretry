@@ -13,4 +13,6 @@ export * from './hooks.ts';
 export * from './ids.ts';
 export * from './kinds.ts';
 export * from './port.ts';
+export * from './records.ts';
 export * from './state.ts';
+export * from './transfer.ts';

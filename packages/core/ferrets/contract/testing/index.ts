@@ -10,6 +10,8 @@ import { err, type Instant, instantFromEpochMs, ok, type Result } from '@ferretr
 import type { FerretState, FerretSummary, HarnessKey, LoginKindKey, PackId } from '../ids.ts';
 import type {
   AttachRefusal,
+  DeliveryOutcome,
+  RunnerDelivery,
   Delivery,
   Harness,
   LaunchSpec,
@@ -38,6 +40,8 @@ export const emptyChildEnvironment = (): ChildEnvironment =>
 export class FakeRunner implements Runner {
   readonly key = 'tmux' as const;
   starts = 0;
+  /** Every delivery made, with the handle it went to. */
+  readonly deliveries: { readonly handle: RunnerHandle; readonly delivery: RunnerDelivery }[] = [];
   readonly #live = new Map<string, RunningFerret & { readonly ferret: FerretId }>();
   #next = 0;
 
@@ -71,6 +75,12 @@ export class FakeRunner implements Runner {
     return this.#live.has(handle);
   }
   async signal(): Promise<void> {}
+  async deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome> {
+    if (!this.#live.has(handle)) throw new Error(`no pane ${handle}`);
+    await delivery.beforeWrite?.();
+    this.deliveries.push({ handle, delivery });
+    return delivery.text.startsWith('/') ? 'handled-local' : 'turn-started';
+  }
 }
 
 export interface RunnerSubject {
@@ -110,6 +120,27 @@ export function runnerConformance(name: string, make: () => RunnerSubject | Prom
       expect(attached.ok).toBe(false);
       expect(subject.starts()).toBe(before);
     });
+    test('a delivery to a live ferret lands after its beforeWrite step and answers an outcome', async () => {
+      const subject = await make();
+      const started = await subject.runner.start(subject.spec);
+      if (!started.ok) throw new Error('start refused');
+      const steps: string[] = [];
+      const outcome = await subject.runner.deliver(started.value.handle, {
+        text: 'hello',
+        beforeWrite: async () => {
+          steps.push('before');
+        },
+      });
+      expect(['turn-started', 'handled-local']).toContain(outcome);
+      expect(steps).toEqual(['before']);
+      await subject.runner.stop(started.value.handle, 'now');
+    });
+    test('a delivery to a handle with nothing behind it rejects and starts nothing', async () => {
+      const subject = await make();
+      const before = subject.starts();
+      await expect(subject.runner.deliver('%99999' as RunnerHandle, { text: 'hello' })).rejects.toThrow();
+      expect(subject.starts()).toBe(before);
+    });
     test('attach after stop is refused', async () => {
       const subject = await make();
       const handle = await subject.adoptable();
@@ -125,6 +156,8 @@ export function runnerConformance(name: string, make: () => RunnerSubject | Prom
 export class FakeHarness implements Harness {
   readonly accepts: readonly LoginKindKey[] = ['anthropic', 'api-key'];
   readonly delivered: OutboundMessage[] = [];
+  /** Every launch spec this harness was handed (start and resume), so a test sees what reached it. */
+  readonly launched: LaunchSpec[] = [];
   readonly #seen = new Set<string>();
   constructor(readonly key: HarnessKey = 'claude-code') {}
 
@@ -135,10 +168,12 @@ export class FakeHarness implements Harness {
     return { files: [fenced(`${spec.home}/INSTRUCTIONS.md`)], args: [] };
   }
   async start(spec: LaunchSpec, runner: Runner, env: ChildEnvironment): Promise<Result<Started, StartRefusal>> {
+    this.launched.push(spec);
     const running = await runner.start({ ferret: spec.ferret, command: ['fake-harness'], cwd: spec.folder, env });
     return running.ok ? ok({ running: running.value, harnessConversation: `conv-${spec.ferret}` }) : running;
   }
   async resume(spec: LaunchSpec, runner: Runner, env: ChildEnvironment, conversation: string) {
+    this.launched.push(spec);
     const running = await runner.resume(
       { ferret: spec.ferret, command: ['fake-harness', '--resume'], cwd: spec.folder, env },
       conversation,
@@ -289,6 +324,10 @@ export function loginKindConformance(
 /** An in-memory Ferrets port: lineage, `mayTouch`, start through nothing (records only). */
 export class FakeFerrets implements FerretsApi {
   readonly #ferrets = new Map<FerretId, FerretSummary>();
+  /** Every start request, stop and resume, in order, so a test can assert what reached the port. */
+  readonly starts: StartRequest[] = [];
+  readonly stops: { readonly ferret: FerretId; readonly how: 'polite' | 'now'; readonly reason?: string }[] = [];
+  readonly resumes: { readonly ferret: FerretId; readonly message?: string }[] = [];
   #next = 0;
 
   add(summary: Partial<FerretSummary> & { readonly id: FerretId }): FerretSummary {
@@ -333,29 +372,45 @@ export class FakeFerrets implements FerretsApi {
     return [...this.#ferrets.values()].filter(f => f.parent === ferret).map(f => f.id);
   }
   async start(request: StartRequest): Promise<Result<FerretId, StartFailure>> {
+    this.starts.push(request);
     this.#next += 1;
     const id = ferretId(`f${this.#next}`);
+    const { model, card, title } = request.options ?? {};
     this.add({
       id,
       name: request.name ?? id,
       folder: request.folder,
       state: 'starting',
       ...(request.parent === undefined ? {} : { parent: request.parent }),
+      ...(model === undefined ? {} : { model }),
+      ...(card === undefined ? {} : { card }),
+      ...(title === undefined ? {} : { title }),
     });
     return ok(id);
   }
-  async stop(ferret: FerretId) {
+  async stop(ferret: FerretId, how: 'polite' | 'now' = 'polite', reason?: string) {
+    this.stops.push({ ferret, how, ...(reason === undefined ? {} : { reason }) });
     this.setState(ferret, 'stopped');
   }
-  async resume(ferret: FerretId): Promise<Result<FerretId, StartFailure>> {
+  async resume(ferret: FerretId, message?: string): Promise<Result<FerretId, StartFailure>> {
     if (!this.#ferrets.has(ferret)) return err({ code: 'failed', reason: 'no such ferret' });
+    this.resumes.push({ ferret, ...(message === undefined ? {} : { message }) });
     this.setState(ferret, 'starting');
     return ok(ferret);
   }
-  async attach(ferret: FerretId, _handle: RunnerHandle): Promise<Result<FerretId, StartFailure>> {
+  async workFolder(ferret: FerretId): Promise<{ readonly folder: string } | undefined> {
+    const summary = this.#ferrets.get(ferret);
+    return summary === undefined ? undefined : { folder: summary.folder };
+  }
+  readonly #handles = new Map<FerretId, RunnerHandle>();
+  async attach(ferret: FerretId, handle: RunnerHandle): Promise<Result<FerretId, StartFailure>> {
     if (!this.#ferrets.has(ferret)) return err({ code: 'failed', reason: 'no such ferret' });
     this.setState(ferret, 'working');
+    this.#handles.set(ferret, handle);
     return ok(ferret);
+  }
+  async handle(ferret: FerretId): Promise<RunnerHandle | undefined> {
+    return this.#ferrets.get(ferret)?.state === 'stopped' ? undefined : this.#handles.get(ferret);
   }
   async sitrep(ferret: FerretId): Promise<Sitrep | undefined> {
     const summary = this.#ferrets.get(ferret);
