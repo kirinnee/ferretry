@@ -75,6 +75,9 @@
     "packages/core/kernel": {
       "name": "@ferretry/kernel",
       "version": "5.0.0",
+      "bin": {
+        "fyd": "host/fyd.ts",
+      },
       "dependencies": {
         "@ferretry/std": "workspace:*",
         "yaml": "2.9.0",

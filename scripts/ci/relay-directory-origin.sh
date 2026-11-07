@@ -28,7 +28,12 @@ set -euo pipefail
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
 
-source_module="packages/relay/src/lib/hosted-directory-default.ts"
+# The one module that exports the constant (Ferretry 5.0: the Connections plugin owns relay discovery). It
+# is found rather than named, so the port can place it where its layout wants; two exporters are refused.
+mapfile -t owners < <(rg -l --glob '*.ts' --glob '!**/tests/**' --glob '!**/node_modules/**' "^export const HOSTED_RELAY_DIRECTORY_ORIGIN = " packages || true)
+[[ ${#owners[@]} -eq 1 ]] ||
+  { echo "❌ exactly one module under packages/ must export HOSTED_RELAY_DIRECTORY_ORIGIN; found ${#owners[@]}" >&2 && exit 1; }
+source_module="${owners[0]}"
 
 fail() {
   echo "❌ $1" >&2

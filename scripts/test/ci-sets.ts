@@ -1,6 +1,6 @@
 // Workflow-event and exact-head gate contracts. No integration tests, browsers or API writes.
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { slowestTest } from '../ci/unit-timings.ts';
@@ -19,7 +19,7 @@ type Workflow = {
 };
 const load = (name: string) => Bun.YAML.parse(readFileSync(`.github/workflows/${name}.yaml`, 'utf8')) as Workflow;
 const ci = load('ci');
-// The E2E harness typechecks this file under noUncheckedIndexedAccess. A job or field a fixture names must exist:
+// The root typecheck covers this file under noUncheckedIndexedAccess. A job or field a fixture names must exist:
 // a missing one fails the fixture here, saying which, instead of being asserted away.
 const need = <T>(value: T | undefined, what: string): T => {
   if (value === undefined) throw new Error(`ci fixture: ${what} is missing`);
@@ -34,7 +34,9 @@ const runsOnExpression = (name: string) => {
   if (typeof runsOn !== 'string') throw new Error(`ci fixture: 'runs-on' of job '${name}' is not an expression`);
   return runsOn;
 };
-const other = [load('realworld'), load('e2e-slow')];
+// Other workflows that share CI's pull-request label and concurrency rules. Realworld no longer runs on a pull
+// request or a push at all (nightly and dispatch only), so it has none of those rules to hold.
+const other: Workflow[] = [];
 assert.deepEqual(
   slowestTest(
     '<testcase name="fast" time="0.1" file="a.ts" classname="one" /><testcase name="slow &amp; bounded" time="3.6" file="b.ts" classname="two" />',
@@ -218,31 +220,6 @@ for (const name of needsOf('full')) {
     assert.notEqual(judge({ ...successful, [name]: { result } }), 0, `gate accepted ${name} ${result}`);
   }
 }
-const e2eSkipped = {
-  ...successful,
-  relevance: { result: 'success', outputs: { run: 'false' } },
-  journeys: { result: 'skipped' },
-};
-assert.equal(judge(e2eSkipped), 0);
-assert.notEqual(judge({ ...e2eSkipped, relevance: { result: 'failure', outputs: { run: 'false' } } }), 0);
-// `pwa-screenshot` may be skipped only when PWA Relevance succeeded and said `run == false`.
-const pwaSkipped = {
-  ...successful,
-  'pwa-relevance': { result: 'success', outputs: { run: 'false' } },
-  'pwa-screenshot': { result: 'skipped' },
-};
-assert.equal(judge(pwaSkipped), 0, 'a skipped PWA gate after run=false is the documented skip');
-assert.notEqual(
-  judge({ ...pwaSkipped, 'pwa-relevance': { result: 'failure', outputs: {} } }),
-  0,
-  'a failed relevance job cannot excuse a skipped PWA gate',
-);
-assert.notEqual(
-  judge({ ...pwaSkipped, 'pwa-relevance': { result: 'success', outputs: { run: 'true' } } }),
-  0,
-  'a skipped PWA gate when relevance said run=true is not proof',
-);
-assert.notEqual(judge({ ...pwaSkipped, 'pwa-screenshot': { result: 'failure' } }), 0);
 const darwinSkipped = { ...successful, 'smoke-darwin': { result: 'skipped' } };
 assert.equal(judge(darwinSkipped, 'skip'), 0);
 assert.equal(judge(darwinSkipped, 'SKIP'), 0);
@@ -264,60 +241,6 @@ try {
       quickPart.includes(`"\${snapshot}/node_modules/.bin/${tool}"`),
       `Quick's format snapshot must link node_modules/.bin/${tool}, which nix/fmt.nix runs`,
     );
-
-  // `E2E Journeys`: no shard leaving a result fails it; failing journeys and a partial set stay advisory.
-  const summarize = (shards: number[], env: Record<string, string> = {}, override: object = {}, tag = '') => {
-    const evidence = join(temporary, `e2e-evidence-${shards.join('-')}-${Object.keys(env).join('-')}${tag}`);
-    for (const shard of shards) {
-      const dir = join(evidence, `e2e-result-${shard}-1`);
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(
-        join(dir, 'result.json'),
-        JSON.stringify({
-          shard,
-          tier: 'fast',
-          passed: 1,
-          failed: shard === 2 ? 1 : 0,
-          status: 0,
-          seconds: 5,
-          failures: [],
-          ...override,
-        }),
-      );
-    }
-    mkdirSync(evidence, { recursive: true });
-    const result = Bun.spawnSync(['./scripts/ci/e2e-summary.sh', evidence, '3'], {
-      env: { ...process.env, SHARDS: 'success', GITHUB_STEP_SUMMARY: '/dev/null', ...env },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    return { code: result.exitCode, stderr: result.stderr.toString() };
-  };
-  const nothingRan = summarize([]);
-  assert.equal(nothingRan.code, 1, 'green shards with no results must fail E2E Journeys');
-  assert.ok(nothingRan.stderr.includes('E2E harness produced no results: the journeys did not run'));
-  assert.equal(
-    summarize([], { RUN: 'false', RELEVANCE: 'success' }).code,
-    0,
-    'a skipped tier has no results by design',
-  );
-  // A harness that died before its tally leaves `passed: null, failed: null`: no journey ran, whatever the shard job said.
-  const died = { passed: null, failed: null, status: 1 };
-  const nullResults = summarize([1, 2, 3], {}, died, '-null');
-  assert.equal(nullResults.code, 1, 'null tallies across every shard must fail like "no results"');
-  assert.ok(nullResults.stderr.includes('E2E harness produced no results: the journeys did not run'));
-  assert.equal(
-    summarize([1, 2, 3], {}, { passed: 0, failed: 0, status: 1 }, '-zero').code,
-    1,
-    'a 0-total set with a non-zero exit status ran nothing',
-  );
-  assert.equal(
-    summarize([1, 2, 3], {}, { passed: 0, failed: 0, status: 0 }, '-empty').code,
-    0,
-    'an empty plan is fine',
-  );
-  assert.equal(summarize([1]).code, 0, 'a partial set stays advisory');
-  assert.equal(summarize([1, 2, 3]).code, 0, 'a failing journey stays advisory');
 
   // Exercise the actual side-effect decisions against a fake GitHub CLI; never write to GitHub.
   const gh = join(temporary, 'gh');
@@ -415,7 +338,7 @@ esac
     Bun.spawnSync(['bun', 'scripts/ci/gate-hooks.ts', mode], { stdout: 'pipe' }).stdout.toString().trim().split('\n');
   const quickHooks = hooks('quick');
   const fullHooks = hooks('full');
-  assert.deepEqual(fullHooks.sort(), ['a-deadcode', 'a-deadcode-production', 'a-route-agreement'].sort());
+  assert.deepEqual(fullHooks.sort(), ['a-deadcode', 'a-deadcode-production'].sort());
   const expectedHooks = configured.repos
     .flatMap(repo => repo.hooks)
     .filter(hook => hook.id !== 'treefmt' && (hook.stages === undefined || hook.stages.includes('pre-commit')))

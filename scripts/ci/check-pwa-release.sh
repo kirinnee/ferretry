@@ -16,11 +16,11 @@
 #   - `sequence` is the workflow run number and `commit` is the commit this run is for;
 #   - `worker` is `sw.verified.js`;
 #   - `nextKey` is the key in <next-public-key> (default: the checkout's
-#     packages/pwa/release-signing-key.next.pub), and absent when that file is;
+#     packages/app/release-signing-key.next.pub), and absent when that file is;
 #   - every path is a plain relative path, and none is Pages configuration or server code (a first
 #     segment starting with `_`, or `functions/`);
 #   - the list names exactly the files in <dist>, each with its real SHA-256;
-#   - <dist>/_headers and <dist>/_redirects are byte-for-byte the checkout's packages/pwa/public ones.
+#   - <dist>/_headers and <dist>/_redirects are byte-for-byte the checkout's packages/app/public ones.
 #
 # openssl, coreutils and jq only (all preinstalled on the runner), so the `sign` job installs nothing.
 set -euo pipefail
@@ -29,8 +29,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository="${script_dir}/../.."
 sequence=""
 commit=""
-next_public_key="${repository}/packages/pwa/release-signing-key.next.pub"
-public_dir="${repository}/packages/pwa/public"
+next_public_key="${repository}/packages/app/release-signing-key.next.pub"
+public_dir="${repository}/packages/app/public"
 dist=""
 while [[ $# -gt 0 ]]; do
   case "$1" in

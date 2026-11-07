@@ -20,30 +20,6 @@
 #
 # Lowering a count is always welcome. Raising one, or adding a file, needs the same reasoning in review.
 
-# --- daemon -------------------------------------------------------------------------------------------------
-4 packages/daemon/bin/fyd.ts  # cli: fyd config / fyd --check / fyd secret print to stdout and stderr
-2 packages/daemon/bin/fyd.ts  # boot: canonical state home for the test launch guard; the bundle's own folder
-1 packages/daemon/bin/fyd.ts  # boot: the secrets source program runs once, before the first launch
-2 packages/daemon/bin/fyd.ts  # gap: harness discovery `runnable` (boot, doctor AND the account form) is a sync port
-1 packages/daemon/bin/fyd.ts  # gap: the browser worker locator is handed `existsSync`, run when a browser starts
-1 packages/daemon/bin/browser-worker.ts  # pipe: the CDP pipe to the browser, in the browser worker process
-2 packages/daemon/src/adapters/browser/runtime/session-browser-launcher.ts  # pipe: the parent's ends of the CDP pipes
-1 packages/daemon/src/adapters/browser/runtime/session-browser-launcher.ts  # gap: the default `exists` check for a browser binary, when a browser starts
-1 packages/daemon/src/adapters/browser/control/login-runtime.ts  # gap: which browser binary exists, on a login launch
-1 packages/daemon/src/adapters/budget/ports.ts  # boot: the last published budget holds, before the first publish
-2 packages/daemon/src/adapters/runtime/ordered-log-writer.ts  # boot: the log is synchronous until the daemon serves, and on exit
-2 packages/daemon/src/adapters/file-events/node-stamps.ts  # gap: a watched folder's identity, once per watch open
-7 packages/daemon/src/adapters/runtime/performance-instruments.ts  # wrapper: the profiler replaces Bun.spawnSync and passes each call through
-9 packages/daemon/src/adapters/session/filesystem/posix-session-root-pinner.ts  # bracket: pins a session root by descriptor
-3 packages/daemon/src/adapters/session/observer/worker-children.ts  # worker: a session worker replaces its own Bun.spawnSync to count children
-1 packages/daemon/src/adapters/storage/index-writer-program.ts  # worker: the index writer thread's own file check
-2 packages/daemon/src/adapters/tunnel/cloudflared-locator.ts  # gap: is cloudflared runnable, when the tunnel starts
-2 packages/daemon/src/adapters/update/update-files.ts  # gap: the update child's log file, when an update is applied
-
-# --- fleet (runs inside the daemon) -------------------------------------------------------------------------
-18 packages/fleet/src/adapters/descriptor-calls.ts  # bracket: macOS fchdir steps; nothing may run between them
-7 packages/fleet/src/adapters/destination-folders.ts  # gap: guarded reads of a skills tree, on seal and rollback
-10 packages/fleet/src/adapters/file-provisioner.ts  # gap: guarded state-home reads and writes, on provisioning
-2 packages/fleet/src/adapters/mutation-journal.ts  # gap: the journal folder listing, on a fleet mutation
-7 packages/fleet/src/adapters/node-guard-disk.ts  # gap: the state-home guard's descriptor opens and writes
-2 packages/fleet/src/adapters/working-directory.ts  # bracket: the descriptor of / the bracket falls back to
+# Ferretry 5.0 starts with no blocking call in any daemon half or the kernel host. A port that carries one over
+# from 4.x (packages/daemon/bin/fyd.ts, the browser and tunnel adapters, the fleet descriptor brackets) adds its
+# line here, under its new path, with the same reasoning.
