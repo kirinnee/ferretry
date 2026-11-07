@@ -73,7 +73,7 @@ function liveLines(worktree: ManagedWorktreeView): readonly string[] {
 }
 
 /** One worktree as a list row. */
-export function renderWorktreeRow(worktree: ManagedWorktreeView): string {
+function renderWorktreeRow(worktree: ManagedWorktreeView): string {
   const lines = [
     `  ${worktree.path}`,
     `${INDENT}branch ${worktree.branch}${worktree.branchPreexisted ? ' (pre-existing)' : ''} · created ${worktree.createdAt}`,

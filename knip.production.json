@@ -32,7 +32,20 @@
     },
     "packages/core/ferrets": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "daemon/lib/session/auto-resume/**",
+        "daemon/adapters/session/auto-resume/**",
+        "daemon/lib/protocol/auto-resume.ts",
+        "daemon/lib/session/provenance/lineage.ts",
+        "daemon/lib/session/provenance/recorder.ts",
+        "daemon/lib/session/provenance/stamper.ts",
+        "daemon/adapters/session/provenance/storage-session-provenance-store.ts",
+        "daemon/adapters/session/effects/file-session-effect-ledger.ts",
+        "daemon/adapters/session/resume/in-memory-launch-gate.ts",
+        "daemon/adapters/session/resume/tmux-resume-launcher.ts",
+        "daemon/adapters/names/file-system-callsign-counters.ts"
+      ]
     },
     "packages/plugins/agenda": {
       "entry": ["app/views/*.tsx"],

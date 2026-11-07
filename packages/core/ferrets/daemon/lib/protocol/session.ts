@@ -14,14 +14,10 @@ import { FerretViewSchema, type SessionConfig } from '../../../contract/view/fer
  * daemon's bodies read it by the names they were written against.
  */
 export {
-  type AccountAvailability,
   AccountAvailabilitySchema,
-  type AccountUnavailableReason,
   AccountUnavailableReasonSchema,
   AccountUsageSchema,
-  type ConversationConversion,
   ConversationConversionSchema,
-  type FerretContext as SessionContext,
   FerretContextSchema as SessionContextSchema,
   type FerretView as SessionView,
   FerretViewConfigSchema as SessionViewConfigSchema,
@@ -32,8 +28,6 @@ export {
   type LaunchInstructionSectionId,
   LaunchInstructionSectionIdSchema,
   LaunchInstructionSectionSchema,
-  type PendingQuestion,
-  type PendingQuestionOption,
   PendingQuestionOptionSchema,
   PendingQuestionSchema,
   type SessionConfig,
@@ -42,24 +36,21 @@ export {
   SessionHealthSchema,
   type SessionLaunchInstructions,
   SessionLaunchInstructionsSchema,
-  type SessionOutdated,
   SessionOutdatedSchema,
   type SessionRevive,
   SessionReviveSchema,
   type SessionState,
   SessionStateSchema,
-  type SessionTurnState,
   SessionTurnStateSchema,
 } from '../../../contract/view/ferret-view.ts';
 
-export type { Harness } from './session-base.ts';
 export { HarnessSchema } from './session-base.ts';
 /**
  * Re-exported here rather than added to the package barrel separately, because the stamp is a FIELD
  * of the session config below: a reader that has `SessionConfig` should reach its provenance shape
  * through the same module, not hunt for a second import path.
  */
-export type { SessionProvenance, SessionSpawnOrigin, WardenLineageSource } from './session-provenance.ts';
+export type { SessionProvenance } from './session-provenance.ts';
 export { SessionProvenanceSchema, SessionSpawnOriginSchema, WardenLineageSourceSchema } from './session-provenance.ts';
 
 /**
@@ -76,10 +67,8 @@ export { SessionProvenanceSchema, SessionSpawnOriginSchema, WardenLineageSourceS
  *                    that did to the agent's screen, because only some of it can be undone there.
  */
 export const SendFateSchema = z.enum(['accepted', 'queued', 'delivered', 'unaccounted', 'timed_out', 'cancelled']);
-export type SendFate = z.infer<typeof SendFateSchema>;
 
 export const SendPathSchema = z.enum(['direct', 'turn-file', 'native-inline', 'native-file', 'revive', 'revive-queue']);
-export type SendPath = z.infer<typeof SendPathSchema>;
 
 /** Why a send settled without proof of delivery. */
 export const SendUnaccountedReasonSchema = z.enum([
@@ -113,11 +102,9 @@ export const SendUnaccountedReasonSchema = z.enum([
   /** Proven absent after every attempt. */
   'not_delivered',
 ]);
-export type SendUnaccountedReason = z.infer<typeof SendUnaccountedReasonSchema>;
 
 /** Who asked for the message: a person, another agent, or the daemon itself (a failure notice). */
 export const SendSenderKindSchema = z.enum(['human', 'agent', 'daemon']);
-export type SendSenderKind = z.infer<typeof SendSenderKindSchema>;
 
 /**
  * WHO A MESSAGE IS FROM, AS DATA. The owner (2026-10-30): "there should not be any append or prepend on any
@@ -140,7 +127,6 @@ export type QueueAuthor = z.infer<typeof QueueAuthorSchema>;
 
 /** How a `queued` fate was proven. */
 export const SendQueueProofSchema = z.enum(['transcript', 'pane']);
-export type SendQueueProof = z.infer<typeof SendQueueProofSchema>;
 
 export const SendEvidenceSchema = z.object({
   key: z.string().min(1),
@@ -158,7 +144,6 @@ export const SendEvidenceSchema = z.object({
    */
   tier: z.enum(['queue-file-id', 'turn-instruction', 'exact-text', 'merged-text']),
 });
-export type SendEvidence = z.infer<typeof SendEvidenceSchema>;
 
 /**
  * What cancelling a send did on the agent's screen.
@@ -171,7 +156,6 @@ export type SendEvidence = z.infer<typeof SendEvidenceSchema>;
  *                        it was left alone rather than erasing somebody's draft.
  */
 export const SendCancelEffectSchema = z.enum(['cleared', 'not_in_pane', 'left_in_queue', 'left_in_composer']);
-export type SendCancelEffect = z.infer<typeof SendCancelEffectSchema>;
 
 /** Public send-ledger row. Private payload paths never cross the API boundary. */
 export const SendRecordSchema = z.object({
@@ -223,7 +207,6 @@ export const SendRecordSchema = z.object({
   hardDeadline: InstantSchema.optional(),
   timeoutFrozenAt: InstantSchema.optional(),
 });
-export type SendRecord = z.infer<typeof SendRecordSchema>;
 
 /**
  * One page of a session's sends, newest first: without a cursor, the newest ones and every open one however old.
@@ -234,7 +217,6 @@ export const SendListResponseSchema = z.object({
   sends: z.array(SendRecordSchema),
   nextCursor: z.string().nullable().optional(),
 });
-export type SendListResponse = z.infer<typeof SendListResponseSchema>;
 
 /**
  * Re-attempting one send under its ORIGINAL id.
@@ -243,21 +225,18 @@ export type SendListResponse = z.infer<typeof SendListResponseSchema>;
  * without it the daemon only re-attempts a send it has proven absent.
  */
 export const SendRetryRequestSchema = z.strictObject({ force: z.boolean().optional() });
-export type SendRetryRequest = z.infer<typeof SendRetryRequestSchema>;
 
 /**
  * Taking back one send that was not proven delivered: the record leaves the open queue, and a copy
  * sitting typed in the agent's composer is erased. Nothing else is accepted, so a body is refused.
  */
 export const SendCancelRequestSchema = z.strictObject({});
-export type SendCancelRequest = z.infer<typeof SendCancelRequestSchema>;
 
 /**
  * Pressing Enter ONCE for a send that is sitting typed in the agent's composer. Refused unless the
  * composer holds exactly that message, so it can never submit somebody else's draft.
  */
 export const SendSubmitRequestSchema = z.strictObject({});
-export type SendSubmitRequest = z.infer<typeof SendSubmitRequestSchema>;
 
 /**
  * The code a send answers with when the agent's composer already holds a PERSON's unsent text.
@@ -269,7 +248,7 @@ export type SendSubmitRequest = z.infer<typeof SendSubmitRequestSchema>;
 export const COMPOSER_OCCUPIED_CODE = 'composer_occupied';
 
 /** Longest draft the composer routes will act on; a composer holding more is not a draft to tap away. */
-export const COMPOSER_DRAFT_MAX_CHARS = 20_000;
+const COMPOSER_DRAFT_MAX_CHARS = 20_000;
 
 const ComposerOccupiedBodySchema = z.object({
   code: z.literal(COMPOSER_OCCUPIED_CODE),
@@ -316,7 +295,6 @@ export const ComposerDraftRequestSchema = z.strictObject({
   action: z.enum(['submit', 'clear']),
   draft: z.string().min(1).max(COMPOSER_DRAFT_MAX_CHARS),
 });
-export type ComposerDraftRequest = z.infer<typeof ComposerDraftRequestSchema>;
 
 /**
  * What acting on the draft did. `submitted` and `cleared` free the composer; `holding` is an Enter the
@@ -324,25 +302,21 @@ export type ComposerDraftRequest = z.infer<typeof ComposerDraftRequestSchema>;
  * longer holds exactly that draft, so nothing was pressed; `stuck` is an erase that stopped responding.
  */
 export const ComposerDraftOutcomeSchema = z.enum(['submitted', 'holding', 'cleared', 'absent', 'changed', 'stuck']);
-export type ComposerDraftOutcome = z.infer<typeof ComposerDraftOutcomeSchema>;
 
 export const ComposerDraftResultSchema = z.object({
   action: z.enum(['submit', 'clear']),
   outcome: ComposerDraftOutcomeSchema,
 });
-export type ComposerDraftResult = z.infer<typeof ComposerDraftResultSchema>;
 
 export const RuntimeModelOptionSchema = z.object({
   value: z.string().min(1),
   label: z.string().min(1),
 });
-export type RuntimeModelOption = z.infer<typeof RuntimeModelOptionSchema>;
 
 export const RuntimeReasoningChoiceSchema = z.object({
   value: z.string().min(1),
   description: z.string().optional(),
 });
-export type RuntimeReasoningChoice = z.infer<typeof RuntimeReasoningChoiceSchema>;
 
 export const RuntimeModelChoiceSchema = RuntimeModelOptionSchema.extend({
   description: z.string().optional(),
@@ -399,7 +373,6 @@ export { type SessionStatus, SessionStatusSchema } from './session-base.ts';
 
 /** How a transcript was identified and where it lives: the contract owns both (`contract/records.ts`). */
 export {
-  type TranscriptIdentity,
   TranscriptIdentitySchema,
   type TranscriptProvenance,
   TranscriptProvenanceSchema,
@@ -483,13 +456,11 @@ export const SESSION_CONSOLE_INPUT_MAX = 4_096;
 export const SessionConsoleInputRequestSchema = z.strictObject({
   data: z.string().min(1).max(SESSION_CONSOLE_INPUT_MAX),
 });
-export type SessionConsoleInputRequest = z.infer<typeof SessionConsoleInputRequestSchema>;
 
 /** How many bytes reached the pane: the UTF-8 length of `data`, never the bytes themselves. */
 export const SessionConsoleInputResultSchema = z.strictObject({
   written: PositiveIntegerSchema,
 });
-export type SessionConsoleInputResult = z.infer<typeof SessionConsoleInputResultSchema>;
 
 export const NameSuggestionsSchema = z.array(z.string().min(1));
 
@@ -519,7 +490,6 @@ export const FyEventSchema = z.object({
 export type FyEvent = z.infer<typeof FyEventSchema>;
 
 export const FyEventListSchema = z.array(FyEventSchema);
-export type FyEventList = z.infer<typeof FyEventListSchema>;
 
 /** Proof that a live event socket is quiet rather than broken. */
 export const FyEventStreamIdleScopeSchema = z.discriminatedUnion('kind', [
@@ -535,7 +505,6 @@ export const FyEventStreamIdleScopeSchema = z.discriminatedUnion('kind', [
     followedSessions: NonNegativeIntegerSchema,
   }),
 ]);
-export type FyEventStreamIdleScope = z.infer<typeof FyEventStreamIdleScopeSchema>;
 
 /**
  * One frame on `/v1/events`.
@@ -563,7 +532,6 @@ export const FyEventStreamFrameSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('transcript'), transcript: SessionTranscriptMovedSchema }),
 ]);
 export type FyEventStreamFrame = z.infer<typeof FyEventStreamFrameSchema>;
-export type FyEventStreamIdle = Extract<FyEventStreamFrame, { readonly kind: 'idle' }>;
 
 /**
  * The most free-form harness flags one start may carry, and the longest one may be.
@@ -643,7 +611,6 @@ const StartSessionRequestShapeSchema = z.discriminatedUnion('mode', [
 ]);
 
 export const StartSessionRequestSchema = StartSessionRequestShapeSchema;
-export type StartSessionRequestInput = z.input<typeof StartSessionRequestShapeSchema>;
 
 /** Client-authored fields only; actor identity and idempotency come from headers. */
 /** How soon a ferret's message is delivered: `blocker` at once, `action` combined, `fyi` held (`fy send --kind`). */
@@ -662,7 +629,6 @@ export const SendRequestSchema = z.strictObject({
   /** What this send takes out of the owner's shared draft once it is accepted (`shared-draft.ts`). */
   sharedDraft: SharedDraftSentSchema.optional(),
 });
-export type SendRequest = z.infer<typeof SendRequestSchema>;
 
 /**
  * One answer in an ordered structured-question set.
@@ -683,7 +649,6 @@ export const StructuredQuestionAnswerSchema = z.discriminatedUnion('kind', [
     text: z.string().trim().min(1),
   }),
 ]);
-export type StructuredQuestionAnswer = z.infer<typeof StructuredQuestionAnswerSchema>;
 
 export const AnswerSessionRequestSchema = z.strictObject({
   toolUseId: z.string().min(1),
@@ -693,20 +658,16 @@ export const AnswerSessionRequestSchema = z.strictObject({
   /** Lossless ordered answers, beside the flat fields. */
   answers: z.array(StructuredQuestionAnswerSchema).min(1).optional(),
 });
-export type AnswerSessionRequest = z.infer<typeof AnswerSessionRequestSchema>;
 
 export const InterruptSessionRequestSchema = z.strictObject({ toolUseId: z.string().min(1).optional() });
-export type InterruptSessionRequest = z.infer<typeof InterruptSessionRequestSchema>;
 
 export const StopSessionRequestSchema = z.strictObject({
   reason: z.string().min(1).optional(),
 });
-export type StopSessionRequest = z.infer<typeof StopSessionRequestSchema>;
 
 export const ResumeSessionRequestSchema = z.strictObject({
   message: z.string().min(1).optional(),
 });
-export type ResumeSessionRequest = z.infer<typeof ResumeSessionRequestSchema>;
 
 /**
  * An agent's first name as a caller may type it: `Hadi`, `marin`, `mary-jane`.
@@ -717,7 +678,7 @@ export type ResumeSessionRequest = z.infer<typeof ResumeSessionRequestSchema>;
  * daemon stores it lowercase and every surface title-cases it for display, so `Hadi` and `hadi` are
  * one name and cannot belong to two agents.
  */
-export const AGENT_NAME_MAX_LENGTH = 32;
+const AGENT_NAME_MAX_LENGTH = 32;
 export const AgentNameSchema = z
   .string()
   .trim()
@@ -747,11 +708,9 @@ export const SessionCredentialRevokedSchema = z.strictObject({
   sessionId: z.string().min(1),
   status: SessionStatusSchema,
 });
-export type SessionCredentialRevoked = z.infer<typeof SessionCredentialRevokedSchema>;
 
 /** `PATCH /v1/sessions/:sessionId/hypermedia` — switch whether one ferret is told to use hypermedia. */
 export const SessionHypermediaPatchSchema = z.strictObject({ enabled: z.boolean() });
-export type SessionHypermediaPatch = z.infer<typeof SessionHypermediaPatchSchema>;
 
 /**
  * What switching it did. Nothing is sent to the ferret: its instructions were fixed at launch, so a
@@ -762,14 +721,12 @@ export const SessionHypermediaPatchResultSchema = z.strictObject({
   restartRequired: z.boolean(),
   note: z.string().min(1),
 });
-export type SessionHypermediaPatchResult = z.infer<typeof SessionHypermediaPatchResultSchema>;
 
 /**
  * What the transport did, said at the moment the send returns. `sent` is a busy pane that took the
  * keys without yet proving the harness is holding them: the ledger fate (`fate`) says where it is.
  */
 export const SendDispositionSchema = z.enum(['delivered', 'queued', 'sent', 'revived', 'queued-for-revive']);
-export type SendDisposition = z.infer<typeof SendDispositionSchema>;
 
 export const SendResultSchema = FerretViewSchema.extend({
   disposition: SendDispositionSchema,
@@ -795,21 +752,17 @@ export const SendResultSchema = FerretViewSchema.extend({
    */
   heldUntil: InstantSchema.optional(),
 });
-export type SendResult = z.infer<typeof SendResultSchema>;
 
 export const SignalKindSchema = z.enum(['done', 'help', 'waiting', 'working']);
-export type SignalKind = z.infer<typeof SignalKindSchema>;
 
 export const SignalOptionsSchema = z.strictObject({
   until: z.string().min(1).optional(),
   condition: z.string().min(1).optional(),
   peer: z.string().min(1).optional(),
 });
-export type SignalOptions = z.infer<typeof SignalOptionsSchema>;
 
 /** How much of a live pane a snapshot read returns: the whole scrollback, or only the visible frame. */
 export const SnapshotScopeSchema = z.enum(['history', 'screen']);
-export type SnapshotScope = z.infer<typeof SnapshotScopeSchema>;
 
 export const SignalSessionRequestSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('done'), message: z.string().min(1).optional() }),

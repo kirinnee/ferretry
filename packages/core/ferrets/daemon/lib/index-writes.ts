@@ -67,7 +67,7 @@ function merged(previous: SessionWrite, next: SessionWrite): SessionWrite {
  * them, so the queue holds at most one write per session for every `replace-all` in it — however many
  * times a busy session was written while the disk was slow.
  */
-export function coalesceIndexWrites(pending: readonly IndexWrite[], next: IndexWrite): readonly IndexWrite[] {
+function coalesceIndexWrites(pending: readonly IndexWrite[], next: IndexWrite): readonly IndexWrite[] {
   if (next.kind === 'replace-all') return [next];
   const id = sessionOf(next);
   for (let position = pending.length - 1; position >= 0; position -= 1) {
@@ -78,9 +78,4 @@ export function coalesceIndexWrites(pending: readonly IndexWrite[], next: IndexW
     return [...pending.slice(0, position), ...pending.slice(position + 1), merged(previous, next)];
   }
   return [...pending, next];
-}
-
-/** `writes` folded one by one into `pending`: a failed batch put back in front of what queued behind it. */
-export function coalesceAll(pending: readonly IndexWrite[], writes: readonly IndexWrite[]): readonly IndexWrite[] {
-  return writes.reduce<readonly IndexWrite[]>(coalesceIndexWrites, pending);
 }

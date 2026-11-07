@@ -13,7 +13,6 @@ import { LaunchInstructionSectionIdSchema } from './session.ts';
 
 /** Who a restart is for: the ferrets that are outdated, every running ferret, or the ones named. */
 export const RestartScopeSchema = z.enum(['outdated', 'all', 'ids']);
-export type RestartScope = z.infer<typeof RestartScopeSchema>;
 
 /**
  * `POST /v1/restarts`. `ids` is required for `ids` and refused for the other scopes. `caller` is the
@@ -46,7 +45,6 @@ export type RestartQueueReason = z.infer<typeof RestartQueueReasonSchema>;
 
 /** Why a ferret was left alone by a restart that named it or matched it. */
 export const RestartSkipReasonSchema = z.enum(['not-running', 'not-outdated', 'not-found']);
-export type RestartSkipReason = z.infer<typeof RestartSkipReasonSchema>;
 
 const NamedSchema = { id: z.string().min(1), name: z.string().min(1).optional() };
 

@@ -1,8 +1,6 @@
-import type { Pin, PinBlockKind, PinBy, PinSnapshot } from '../protocol/pins.ts';
+import type { Pin, PinSnapshot } from '../protocol/pins.ts';
 
 export const MAX_AGENT_PINS_PER_SESSION = 10;
-
-export type { Pin, PinBlockKind, PinBy, PinSnapshot };
 
 export interface PinActor {
   readonly sessionId?: string | null;
@@ -47,13 +45,13 @@ export class PinError extends Error {
   }
 }
 
-export interface AddNotePin {
+interface AddNotePin {
   readonly kind: 'note';
   readonly text: unknown;
   readonly source?: { readonly blockId: string } | null;
 }
 
-export interface AddMessagePin {
+interface AddMessagePin {
   readonly kind: 'message';
   readonly blockId: unknown;
   readonly blockKind: unknown;

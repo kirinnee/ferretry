@@ -152,7 +152,7 @@ export interface ManagedWorktreeOperations {
 }
 
 /** The intent a plan describes, which is everything about the checkout except the directory Git makes. */
-export function managedWorktreeIntent(
+function managedWorktreeIntent(
   plan: ManagedWorktreePlan,
   declaredAt: string,
   ownerSessionId: string | undefined,

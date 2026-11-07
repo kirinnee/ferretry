@@ -48,7 +48,7 @@ export type AgentAddressResolution =
  * Statuses in which a session is not running an agent at all. Everything else — including a parked,
  * stalled or rate-limited one — is an agent that can be talked to.
  */
-export const DORMANT_AGENT_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'stopped', 'kill_failed']);
+const DORMANT_AGENT_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'stopped', 'kill_failed']);
 
 /** Whether a candidate is running an agent now. */
 export const isLiveAgentCandidate = (candidate: AgentAddressCandidate): boolean =>

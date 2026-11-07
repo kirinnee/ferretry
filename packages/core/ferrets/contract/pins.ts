@@ -12,11 +12,7 @@ const InstantSchema = z.iso.datetime({ offset: true });
 export const MAX_PIN_NOTE_LENGTH = 500;
 export const MAX_PIN_PREVIEW_LENGTH = 200;
 
-const PinBySchema = z.enum(['human', 'agent']);
-export type PinBy = z.infer<typeof PinBySchema>;
-
 export const PinBlockKindSchema = z.enum(['user', 'assistant', 'thinking', 'tools', 'system', 'notice']);
-export type PinBlockKind = z.infer<typeof PinBlockKindSchema>;
 
 export const PinPreviewSchema = z
   .string()

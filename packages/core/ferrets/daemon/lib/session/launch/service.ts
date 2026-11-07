@@ -41,7 +41,7 @@ export interface LaunchSubject {
 }
 
 /** A published account and the wrapper that launches it. */
-export interface LaunchAccount {
+interface LaunchAccount {
   readonly account: CoreAccount;
   readonly executable: string;
 }

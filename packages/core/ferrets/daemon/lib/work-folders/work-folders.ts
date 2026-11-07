@@ -11,7 +11,7 @@ import type { FerretRegistry } from '../registry/registry.ts';
  */
 
 /** `/a/./b/../c` → `/a/c`; `undefined` when `..` climbs past the root. Paths use `/`. */
-export function normalizeAbsolute(path: string): string | undefined {
+function normalizeAbsolute(path: string): string | undefined {
   const parts: string[] = [];
   for (const segment of path.split('/')) {
     if (segment === '' || segment === '.') continue;
@@ -26,7 +26,7 @@ export function normalizeAbsolute(path: string): string | undefined {
 }
 
 /** Whether `path` is `folder` or inside it. Both normalized absolute paths. */
-export function withinFolder(folder: string, path: string): boolean {
+function withinFolder(folder: string, path: string): boolean {
   const base = folder === '/' ? '' : folder;
   return path === folder || path.startsWith(`${base}/`);
 }

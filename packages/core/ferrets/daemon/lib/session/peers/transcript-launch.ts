@@ -6,7 +6,7 @@
  * Ferrets is core and cannot import a plugin's code (§2.1); this is the part the session code reads, injected by the
  * host.
  */
-import type { Harness } from '../../protocol/session-base.ts';
+
 import type { HarnessKind } from './fleet.ts';
 
 // --- session/send/handoff.ts ------------------------------------------------------------------------------------
@@ -31,7 +31,7 @@ export function claudeSessionArguments(harnessSessionId: string): readonly strin
 // --- session/transcript/codex-rollout.ts ------------------------------------------------------------------------
 
 /** The root a Codex correlation token is declared under. Nobody creates it, so the proof costs no access. */
-export const CODEX_CORRELATION_ROOT = 'codex-correlation';
+const CODEX_CORRELATION_ROOT = 'codex-correlation';
 
 /** The declared root's own name, under {@link CODEX_CORRELATION_ROOT}. */
 const CODEX_CORRELATION_LEAF = 'unreachable';
@@ -76,71 +76,3 @@ export function relaunchCommand(command: readonly string[], harnessSessionStarte
 }
 
 // --- session/transcript/wrapper-home.ts -------------------------------------------------------------------------
-
-/** The variable each harness reads its private home from. */
-const HOME_VARIABLE: Readonly<Record<Harness, string>> = {
-  claude: 'CLAUDE_CONFIG_DIR',
-  codex: 'CODEX_HOME',
-};
-
-/**
- * `export NAME=value`, `export NAME="value"`, `NAME=value` — the three forms a generated wrapper
- * writes. An unquoted value stops at whitespace or a comment, so neither becomes part of the path.
- */
-function assignedValue(source: string, variable: string): string | undefined {
-  const pattern = new RegExp(
-    String.raw`^[ \t]*(?:export[ \t]+)?${variable}=(?:"([^"\n]*)"|'([^'\n]*)'|([^\s"'#]+))`,
-    'mu',
-  );
-  const match = pattern.exec(source);
-  if (match === null) return undefined;
-  const value = match[1] ?? match[2] ?? match[3] ?? '';
-  return value === '' ? undefined : value;
-}
-
-/** `$NAME` and `${NAME}` references, in the order they appear. */
-const REFERENCE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/gu;
-
-/**
- * The value with every variable reference replaced by what the environment holds.
- *
- * `~` is expanded only in leading position, which is the only place a shell would have expanded it.
- */
-function expand(value: string, environment: Readonly<Record<string, string | undefined>>): string | undefined {
-  const home = environment.HOME ?? '';
-  const tilde = value === '~' || value.startsWith('~/');
-  // A `~` with no HOME behind it is the unresolvable case below, reached before the substitution
-  // rather than after it.
-  if (tilde && home === '') return undefined;
-  let unresolved = false;
-  const expanded = (tilde ? `${home}${value.slice(1)}` : value).replaceAll(
-    REFERENCE,
-    (_match, braced?: string, bare?: string) => {
-      const resolved = environment[braced ?? bare ?? ''] ?? '';
-      if (resolved === '') unresolved = true;
-      return resolved;
-    },
-  );
-  if (unresolved) return undefined;
-  // A relative home would be resolved against whatever directory the harness started in, so it
-  // names no durable location and is refused for the same reason an unresolved variable is.
-  return expanded.startsWith('/') ? expanded : undefined;
-}
-
-/**
- * The harness home a wrapper script exports, or `undefined` when the script declares none this
- * daemon can resolve into an absolute path. EVERY EXPANSION IS FAIL-CLOSED.
- */
-export function harnessHomeFromWrapper(
-  source: string,
-  harness: Harness,
-  environment: Readonly<Record<string, string | undefined>>,
-): string | undefined {
-  const declared = assignedValue(source, HOME_VARIABLE[harness]);
-  return declared === undefined ? undefined : expand(declared, environment);
-}
-
-/** Reads the text of a launched wrapper. Absent when this host has no readable script there. */
-export interface HarnessWrapperSource {
-  read(executable: string): Promise<string | undefined>;
-}

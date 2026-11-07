@@ -15,10 +15,10 @@ import type { InjectionOutcome } from './tmux-lifecycle.ts';
 
 /** Marks the durable quarantine so input gates can recognise this specific cause
  *  and refuse with an instruction that fits it. */
-export const CODEX_PICKER_QUARANTINE_KIND = 'codex_picker_cleanup';
+const CODEX_PICKER_QUARANTINE_KIND = 'codex_picker_cleanup';
 
 /** The durable state a quarantine writes, plus the evidence for the event. */
-export interface PickerQuarantine {
+interface PickerQuarantine {
   readonly needsHumanKind: typeof CODEX_PICKER_QUARANTINE_KIND;
   readonly reason: string;
   /** The instruction a human sees on the session. */
@@ -29,34 +29,14 @@ export interface PickerQuarantine {
   };
 }
 
-/** A failure's message, whatever it was thrown as. */
-export function failureMessage(failure: unknown): string {
-  return failure instanceof Error ? failure.message : String(failure);
-}
-
-/** True when a session is holding the picker quarantine and must accept no
- *  input. Read from durable state, so it survives a daemon restart. */
-export function isPickerQuarantined(state: { readonly needsHumanKind?: string }): boolean {
-  return state.needsHumanKind === CODEX_PICKER_QUARANTINE_KIND;
-}
-
-/** Why a send or a runtime control was refused on a quarantined session. */
-export function pickerInputRefusal(binaryName: string): string {
-  return (
-    'input is blocked because Codex picker cleanup was not confirmed; ' +
-    `run \`${binaryName} resume <session>\` or \`${binaryName} stop <session>\` ` +
-    'before sending or retrying runtime control'
-  );
-}
-
 // --- harness/runtime-switch.ts ----------------------------------------------------------------------------------
 
-export interface CodexReasoningChoice {
+interface CodexReasoningChoice {
   readonly value: string;
 }
 
 /** One model as the live Codex account advertises it. */
-export interface CodexModelChoice {
+interface CodexModelChoice {
   readonly value: string;
   /** The name Codex's own picker renders the model under — its `displayName`, which is not its id. */
   readonly label?: string;
@@ -66,12 +46,12 @@ export interface CodexModelChoice {
   readonly defaultReasoningEffort?: string;
 }
 
-export interface CodexModelCatalog {
+interface CodexModelCatalog {
   readonly choices: readonly CodexModelChoice[];
 }
 
 /** What the picker driver has to reach. */
-export interface CodexPickerTarget {
+interface CodexPickerTarget {
   readonly model: string;
   /** The name the picker's row carries when it is not the id (a catalog's "DeepSeek V4 Pro"). */
   readonly rowName?: string;
@@ -95,7 +75,7 @@ export interface HarnessRuntimeSwitchRequest {
 }
 
 /** What the planner needs to know about fast mode for the model a session is running. */
-export interface FastModeFacts {
+interface FastModeFacts {
   /** Whether that model offers fast mode. Absent when nothing can say, which plans as "try it". */
   readonly supported?: boolean;
   /** What the refusal calls the model: its label, else its id. */
@@ -119,7 +99,7 @@ export interface HarnessRuntimeSwitchContext {
   readonly fast?: FastModeFacts;
 }
 
-export type RuntimeSwitchPlan =
+type RuntimeSwitchPlan =
   /**
    * Type one native command into the session. `claimsOutcome` is false for a
    * bare picker open, where the choice is a human's and the daemon must make no
@@ -142,16 +122,10 @@ export type RuntimeSwitchPlan =
 
 // --- harness/picker-screen.ts -----------------------------------------------------------------------------------
 
-export type CodexPickerKind =
-  | 'quick-models'
-  | 'all-models'
-  | 'reasoning'
-  | 'advanced-reasoning'
-  | 'plan-scope'
-  | 'none';
+type CodexPickerKind = 'quick-models' | 'all-models' | 'reasoning' | 'advanced-reasoning' | 'plan-scope' | 'none';
 
 /** One selectable row: the digit that chooses it and the name it shows. */
-export interface CodexPickerRow {
+interface CodexPickerRow {
   readonly number: number;
   readonly name: string;
 }
@@ -159,7 +133,7 @@ export interface CodexPickerRow {
 // --- harness/picker-drive.ts ------------------------------------------------------------------------------------
 
 /** One frame of the pane the picker is on. */
-export interface CodexPickerFrame {
+interface CodexPickerFrame {
   readonly alive: boolean;
   readonly dead: boolean;
   readonly promptReady: boolean;
@@ -167,14 +141,14 @@ export interface CodexPickerFrame {
 }
 
 /** The exact row a queued keystroke is aimed at, re-verified by the transport before it is sent. */
-export interface CodexPickerKeyExpectation {
+interface CodexPickerKeyExpectation {
   readonly kind: CodexPickerKind;
   readonly title?: string;
   readonly row: CodexPickerRow;
 }
 
 /** The IO seam the driver needs, so the decisions above never learn what a terminal is. */
-export interface CodexPickerDrivePort {
+interface CodexPickerDrivePort {
   /** Type the picker-opening command. `turn-started` means Codex read it as a message instead. */
   openPicker(): Promise<InjectionOutcome>;
   readPane(): Promise<CodexPickerFrame>;
@@ -183,7 +157,7 @@ export interface CodexPickerDrivePort {
 }
 
 /** Sleeping is a capability, not a decision. */
-export interface PickerSleeper {
+interface PickerSleeper {
   sleep(milliseconds: number): Promise<void>;
 }
 
@@ -191,14 +165,14 @@ export interface PickerSleeper {
  * INJECTED: today's `CodexModelPickerDriver` class. Reach the target, or throw with the stage that was not reached;
  * success means the picker positively returned to a parsed idle prompt.
  */
-export interface CodexModelPickerDriver {
+interface CodexModelPickerDriver {
   drive(target: CodexPickerTarget): Promise<void>;
 }
 
 // --- harness/service.ts (INJECTED) ------------------------------------------------------------------------------
 
 /** What the daemon must do after a picker drive failed. */
-export type PickerRecovery =
+type PickerRecovery =
   /** Cleanup confirmed the pane is idle. The switch failed; the session is fine. */
   | { readonly kind: 'recovered' }
   /**

@@ -1,24 +1,8 @@
 import type { QueueAuthor } from '../../protocol/session.ts';
-import { type SessionLaunchInstructions, type SessionStatus, SessionStatusSchema } from '../../protocol/session.ts';
+import { type SessionLaunchInstructions, type SessionStatus } from '../../protocol/session.ts';
 import { z } from 'zod';
 import type { SessionId } from '../../session-id.ts';
 
-/**
- * Which statuses a resume can act on: EVERY status the protocol's state document may hold.
- *
- * It used to be the LIFECYCLE's own six plus `retrying`, and that was a defect the moment the route
- * was mounted. The status this parses comes off `state.json`, which `SessionStateSchema` governs, and
- * that schema has sixteen — so a session sitting in `stalled`, `rate_limited`, `awaiting_question`,
- * `thinking`, `tool_running`, `interrupted`, `waiting` or `completed` failed to parse here, the
- * repository answered "no target", and `POST /v1/sessions/:id/resume` told the operator
- * `session not found` about a session `GET /v1/sessions` was listing at that same moment.
- *
- * Those are not obscure states: `stalled` and `rate_limited` are the two an operator revives FROM,
- * and they are also the two a move onto another account exists for. Reading the document with
- * its own schema is what makes the answer honest — a status the resume policy has no special opinion
- * about is simply a non-terminal one, which is what it was.
- */
-export const ResumableSessionStatusSchema = SessionStatusSchema;
 export type ResumableSessionStatus = SessionStatus;
 
 /**

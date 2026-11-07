@@ -18,7 +18,7 @@ import { type FerretDetails } from '../../../contract/index.ts';
  */
 
 /** Deepest lineage the ancestor walk follows; a longer chain is treated as not an ancestor (today's value). */
-export const MAX_LINEAGE_DEPTH = 16;
+const MAX_LINEAGE_DEPTH = 16;
 
 export interface FerretFilter {
   readonly state?: FerretState;
@@ -30,7 +30,7 @@ export interface FerretFilter {
  * What other subsystems and the app read: the record without its format stamp and runner handle, with the model and
  * card it was started with and its title from `details.json`. The pin instant is the reader's to add.
  */
-export function summaryOf(
+function summaryOf(
   record: FerretRecord,
   details?: FerretDetails,
   waiting?: FerretWaiting,

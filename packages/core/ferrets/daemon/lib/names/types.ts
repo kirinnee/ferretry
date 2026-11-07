@@ -1,5 +1,5 @@
 export const CALLSIGN_WINDOW_MS = 5 * 24 * 60 * 60 * 1_000;
-export { MAX_CALLSIGN_LENGTH } from '../../../contract/state.ts';
+
 export const MAX_SESSION_TITLE_LENGTH = 120;
 
 export interface NameClaim {
@@ -37,7 +37,7 @@ export interface NameAllocationRequest {
   readonly windowMs?: number;
 }
 
-export type NameAllocationSource = 'automatic' | 'requested' | 'fallback';
+type NameAllocationSource = 'automatic' | 'requested' | 'fallback';
 
 export type NameAllocationErrorCode =
   | 'invalid_callsign'

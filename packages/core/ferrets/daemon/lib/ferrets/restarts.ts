@@ -40,7 +40,7 @@ export interface FerretRestartHost {
 }
 
 /** The ports of today's restart domain, over the host. */
-export function restartPorts(host: FerretRestartHost): RestartPorts {
+function restartPorts(host: FerretRestartHost): RestartPorts {
   const subjectOf = (ferret: ReturnType<FerretRestartHost['ferrets']>[number]): RestartSubject => ({
     id: ferret.id,
     name: ferret.name,

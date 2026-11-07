@@ -21,7 +21,7 @@ import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
 const Text = z.string().min(1);
 
 /** What `git status` says about a checkout's content, as independent facts rather than one flag. */
-export const WorktreeStatusSummarySchema = z.object({
+const WorktreeStatusSummarySchema = z.object({
   staged: z.boolean(),
   unstaged: z.boolean(),
   untracked: z.boolean(),
@@ -40,11 +40,11 @@ export type WorktreeStatusSummaryView = z.infer<typeof WorktreeStatusSummarySche
  * the caller never saw — "another session is working here" among them — so each override names
  * exactly one thing that will be destroyed.
  */
-export const WorktreeRemovalOverrideSchema = z.enum(['discard_worktree_changes', 'accept_unpushed_commits']);
+const WorktreeRemovalOverrideSchema = z.enum(['discard_worktree_changes', 'accept_unpushed_commits']);
 export type WorktreeRemovalOverride = z.infer<typeof WorktreeRemovalOverrideSchema>;
 
 /** Every reason a removal can be refused. Closed, so a renamed code fails loudly at the client. */
-export const WorktreeRemovalBlockerCodeSchema = z.enum([
+const WorktreeRemovalBlockerCodeSchema = z.enum([
   'active_session',
   'current_checkout',
   'main_checkout',
@@ -78,7 +78,7 @@ export const WorktreeRemovalBlockerCodeSchema = z.enum([
 ]);
 export type WorktreeRemovalBlockerCode = z.infer<typeof WorktreeRemovalBlockerCodeSchema>;
 
-export const WorktreeRemovalBlockerSchema = z.object({
+const WorktreeRemovalBlockerSchema = z.object({
   code: WorktreeRemovalBlockerCodeSchema,
   message: Text,
   /** The override that clears this blocker. ABSENT MEANS NOTHING CLEARS IT. */
@@ -87,14 +87,14 @@ export const WorktreeRemovalBlockerSchema = z.object({
 export type WorktreeRemovalBlocker = z.infer<typeof WorktreeRemovalBlockerSchema>;
 
 /** The confirmations that authorize deleting a branch, one per reason deletion would lose work. */
-export const BranchDeletionConfirmationSchema = z.enum([
+const BranchDeletionConfirmationSchema = z.enum([
   'delete_preexisting_branch',
   'delete_unpushed_branch',
   'delete_unmerged_branch',
 ]);
 export type BranchDeletionConfirmation = z.infer<typeof BranchDeletionConfirmationSchema>;
 
-export const BranchDeletionBlockerCodeSchema = z.enum([
+const BranchDeletionBlockerCodeSchema = z.enum([
   'protected_branch',
   'branch_checked_out',
   'active_checkout',
@@ -105,9 +105,8 @@ export const BranchDeletionBlockerCodeSchema = z.enum([
   /** The checkout was removed, but Git refused or failed while deleting its branch. */
   'git_error',
 ]);
-export type BranchDeletionBlockerCode = z.infer<typeof BranchDeletionBlockerCodeSchema>;
 
-export const BranchDeletionBlockerSchema = z.object({
+const BranchDeletionBlockerSchema = z.object({
   code: BranchDeletionBlockerCodeSchema,
   message: Text,
   /** The confirmation that clears it. ABSENT MEANS NOTHING DOES. */
@@ -115,7 +114,7 @@ export const BranchDeletionBlockerSchema = z.object({
 });
 export type BranchDeletionBlocker = z.infer<typeof BranchDeletionBlockerSchema>;
 
-export const BranchDeletionDecisionSchema = z.object({
+const BranchDeletionDecisionSchema = z.object({
   deletable: z.boolean(),
   blockers: z.array(BranchDeletionBlockerSchema),
 });
@@ -147,7 +146,7 @@ export type WorktreeRemovalDecision = z.infer<typeof WorktreeRemovalDecisionSche
  * for a branch whose upstream Git could not resolve would be inventing agreement, so the number is
  * absent and `undetermined` says why in words a human can act on.
  */
-export const WorktreeLiveStateSchema = z.object({
+const WorktreeLiveStateSchema = z.object({
   /** The commit the checkout is on now — NOT the commit it was created at. */
   head: Text.optional(),
   /** The branch the checkout is on now. Absent when detached or unreadable. */
@@ -169,7 +168,7 @@ export const WorktreeLiveStateSchema = z.object({
 export type WorktreeLiveState = z.infer<typeof WorktreeLiveStateSchema>;
 
 /** One worktree the daemon created and still owns. */
-export const ManagedWorktreeViewSchema = z.object({
+const ManagedWorktreeViewSchema = z.object({
   path: Text,
   branch: Text,
   repositoryRoot: Text,
@@ -257,7 +256,7 @@ export type WorktreeRemovalRequest = z.infer<typeof WorktreeRemovalRequestSchema
  * is resolved from LOCAL Git data only — there is no fetch here, so a repository with no
  * `origin/HEAD` is told so rather than guessed at.
  */
-export const WorktreeBaseSchema = z.discriminatedUnion('kind', [
+const WorktreeBaseSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('auto') }),
   z.strictObject({ kind: z.literal('head') }),
   z.strictObject({ kind: z.literal('default-branch') }),
@@ -272,7 +271,7 @@ export type WorktreeBase = z.infer<typeof WorktreeBaseSchema>;
  * agree before either resolves anything. POSIX roots, drive-qualified Windows paths and UNC shares
  * are absolute; drive-relative `C:repo` and ordinary relative names are not.
  */
-export function isProtocolAbsolutePath(value: string): boolean {
+function isProtocolAbsolutePath(value: string): boolean {
   return value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value) || /^\\\\[^\\]+\\[^\\]+/u.test(value);
 }
 

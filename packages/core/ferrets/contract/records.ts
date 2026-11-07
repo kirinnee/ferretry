@@ -247,8 +247,8 @@ export type FerretProjectId = z.infer<typeof FerretProjectIdSchema>;
 export type SessionSpawnOrigin = z.infer<typeof SessionSpawnOriginSchema>;
 export type WardenLineageSource = z.infer<typeof WardenLineageSourceSchema>;
 export type SessionProvenance = z.infer<typeof SessionProvenanceSchema>;
-export type TranscriptIdentity = z.infer<typeof TranscriptIdentitySchema>;
+
 export type TranscriptProvenance = z.infer<typeof TranscriptProvenanceSchema>;
 export type ConversationMessagePoint = z.infer<typeof ConversationMessagePointSchema>;
-export type ExactConversationMessagePoint = z.infer<typeof ExactConversationMessagePointSchema>;
+
 export type SessionTransferEdge = z.infer<typeof SessionTransferEdgeSchema>;

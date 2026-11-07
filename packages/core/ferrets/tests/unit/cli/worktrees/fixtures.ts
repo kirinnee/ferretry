@@ -38,7 +38,7 @@ export class CapturingOutput implements IWorktreeOutput {
   }
 }
 
-export function live(overrides: Partial<WorktreeLiveState> = {}): WorktreeLiveState {
+function live(overrides: Partial<WorktreeLiveState> = {}): WorktreeLiveState {
   return {
     head: 'b'.repeat(40),
     branch: 'port/cli-remaining',

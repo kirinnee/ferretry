@@ -20,10 +20,10 @@ const sequenceOf = (callsign: string | undefined): number | undefined => {
 };
 
 /** Whether Ferretry named this ferret itself (`warden-00002a`): an identifier, not a first name. */
-export const isSystemCallsign = (callsign: string | undefined): boolean => sequenceOf(callsign) !== undefined;
+const isSystemCallsign = (callsign: string | undefined): boolean => sequenceOf(callsign) !== undefined;
 
 /** `warden-00002a` → `warden-00002A`: the prefix as stored, the hex digits uppercase. Any other name unchanged. */
-export const displaySystemCallsign = (callsign: string): string => {
+const displaySystemCallsign = (callsign: string): string => {
   const match = SYSTEM_CALLSIGN_PATTERN.exec(callsign.trim());
   const sequence = sequenceOf(callsign);
   if (match?.[1] === undefined || sequence === undefined) return callsign;

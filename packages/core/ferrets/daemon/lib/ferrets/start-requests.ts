@@ -15,9 +15,9 @@ import { type FerretId, FerretIdSchema } from '../../../contract/index.ts';
  *
  * Private to Ferrets (`state/ferrets/start-requests.json`), bounded to the newest {@link MAX_START_REQUESTS}.
  */
-export const MAX_START_REQUESTS = 1_000;
+const MAX_START_REQUESTS = 1_000;
 
-export const StartRequestEntrySchema = z.strictObject({
+const StartRequestEntrySchema = z.strictObject({
   requestId: z.string().min(1).max(256),
   digest: z.string().regex(/^[0-9a-f]{64}$/u),
   ferret: FerretIdSchema,
@@ -25,7 +25,7 @@ export const StartRequestEntrySchema = z.strictObject({
 });
 export type StartRequestEntry = z.infer<typeof StartRequestEntrySchema>;
 
-export const StartRequestsSchema = z.strictObject({
+const StartRequestsSchema = z.strictObject({
   requests: z.array(StartRequestEntrySchema).max(MAX_START_REQUESTS),
 });
 export type StartRequests = z.infer<typeof StartRequestsSchema>;

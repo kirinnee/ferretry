@@ -66,7 +66,7 @@ export const FerretTokensFile = defineState({
 // ─── names.json (today's callsign claim ledger, `adapters/names/file-name-claim-store.ts`) ────────────────────────
 
 /** The longest callsign (today's `lib/names/types.ts`). */
-export const MAX_CALLSIGN_LENGTH = 32;
+const MAX_CALLSIGN_LENGTH = 32;
 const CALLSIGN_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 /** A callsign in its one stored spelling: trimmed, lowercase, a letter then letters, digits or hyphens; else `null`. */
