@@ -152,7 +152,6 @@ export default definePlugin({
       }),
       verb('login enable', { summary: 'switch a disabled login back on' }),
       verb('login label', { summary: 'give a login a label, or take it away with --clear' }),
-      verb('login budget', { summary: 'set or clear a login’s daily and weekly spend budget' }),
       verb('login rm', { summary: 'remove a login (refused while a runtime uses it)' }),
       verb('login models list', {
         summary: 'every model catalog in effect, where it came from, and its models by tier',
