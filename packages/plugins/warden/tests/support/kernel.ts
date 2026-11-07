@@ -53,13 +53,20 @@ export function wardenState(folder = new MemoryStateFolder()): StatePort & { rea
   };
 }
 
-/** A config port holding one `warden.yaml` document the test sets; no write door unless asked for. */
+/**
+ * A config port holding one `warden.yaml` document the test sets, in effect and never held; it cannot write unless
+ * the test adds `write` and `remove` itself.
+ */
 export function wardenConfig(initial: unknown = undefined): ConfigPort & { set(value: unknown): void } {
   let current = initial;
   const listeners = new Set<() => void>();
-  const port: Omit<ConfigPort, 'fileState' | 'write' | 'remove'> & { set(value: unknown): void } = {
+  const port: Omit<ConfigPort, 'write' | 'remove'> & { set(value: unknown): void } = {
     file: (_def: ConfigFileDef<unknown>) => current as never,
     collection: (_def: ConfigCollectionDef<unknown>) => new Map() as never,
+    fileState: () =>
+      current === undefined
+        ? { state: 'absent', inEffect: false, sentences: [] }
+        : { state: 'valid', inEffect: true, sentences: [] },
     watch: (_def, listener): Cancel => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -69,7 +76,7 @@ export function wardenConfig(initial: unknown = undefined): ConfigPort & { set(v
       for (const listener of listeners) listener();
     },
   };
-  // Reads only: a test that needs the write door adds `write` and `remove` itself.
+  // Reads only: a test that needs the kernel config write adds `write` and `remove` itself.
   return port as ConfigPort & { set(value: unknown): void };
 }
 
