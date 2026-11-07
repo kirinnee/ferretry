@@ -356,16 +356,9 @@ export class InputRequestService {
     return this.held.get(requestId)?.request.state;
   }
 
-  /** A ferret may withdraw its own pending request; this never borrows an owner's authority. */
-  async cancelForFerret(sessionId: string, requestId: string): Promise<void> {
-    await this.sweep();
-    const held = this.held.get(requestId);
-    if (held === undefined || held.request.sessionId !== sessionId)
-      throw new InputRequestError('not_found', 'no such input request');
-    if (isFinal(held.request)) return;
-    if (held.request.state === 'delivering')
-      throw new InputRequestError('conflict', 'the value is being typed now', INPUT_ERROR_CODES.alreadyDelivered);
-    await this.finish(held, 'cancelled', 'agent_cancelled', undefined, { closeCard: true, tellAgent: false });
+  /** Cancelling a card is owner-only, before even sweeping or looking up the request (I240, I44). */
+  async cancelForFerret(_sessionId: string, _requestId: string): Promise<void> {
+    throw new InputRequestError('forbidden', 'only the owner may cancel an input request');
   }
 
   /** The agent raises. Nothing in `raise` was observed; everything in the answer and the card was. */

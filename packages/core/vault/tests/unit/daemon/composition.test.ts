@@ -143,13 +143,15 @@ describe('the composed Vault input half', () => {
     expect((await host.request('GET', '/v1/input-test/read')).status).toBe(200);
   });
 
-  test('the Vault facade keeps request ids separate from card ids and cancels only its own pending input', async () => {
+  test('I240 I44 the Vault facade refuses ferret cancellation before mutating its own pending input', async () => {
     const { host, api, id, request } = await setup();
     expect(id).toBe(request.id);
     expect(id).toMatch(/^[0-9a-f]{32}$/u);
     expect(await api.inputState(id)).toBe('pending');
-    await expect(api.cancelInput('another-ferret' as FerretId, id)).rejects.toMatchObject({ code: 'not_found' });
-    await api.cancelInput(FERRET, id);
+    await expect(api.cancelInput('another-ferret' as FerretId, id)).rejects.toMatchObject({ code: 'forbidden' });
+    await expect(api.cancelInput(FERRET, id)).rejects.toMatchObject({ code: 'forbidden' });
+    expect(await api.inputState(id)).toBe('pending');
+    expect((await host.request('POST', `/v1/ferrets/${FERRET}/input-requests/${id}/cancel`)).status).toBe(200);
     expect(await api.inputState(id)).toBe('cancelled');
     expect(
       await host.tool('input_wait', { id: request.agendaItemId, timeoutMs: 100 }, { as: ferret(FERRET) }),
