@@ -20,6 +20,7 @@ import { MCP_OAUTH_CHANNEL } from '../../../app/lib/sign-in-model.ts';
 const publicDir = join(import.meta.dir, '../../../../../app/public');
 const script = readFileSync(join(publicDir, 'oauth/mcp-callback.js'), 'utf8');
 const page = readFileSync(join(publicDir, 'oauth/mcp-callback.html'), 'utf8');
+const redirects = readFileSync(join(publicDir, '_redirects'), 'utf8');
 
 const ORIGIN = 'https://ferretry.pages.dev';
 
@@ -255,5 +256,10 @@ describe('the MCP callback page — how it is served', () => {
     expect(scripts[0]?.[1]).toBe(` src="${MCP_OAUTH_CALLBACK_PATH}.js"`);
     expect(scripts[0]?.[2]).toBe('');
     expect(script).not.toContain('innerHTML');
+  });
+
+  it('is what Pages answers MCP’s callback path with: the shell’s redirects are pinned to the contract’s path', () => {
+    // If the contract's path moves, this fails, rather than every provider redirect landing on the app's fallback.
+    expect(redirects.split('\n')).toContain(`${MCP_OAUTH_CALLBACK_PATH}/* ${MCP_OAUTH_CALLBACK_PATH}.html 200`);
   });
 });
