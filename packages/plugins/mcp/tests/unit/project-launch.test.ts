@@ -54,15 +54,29 @@ interface RootTrace {
   readonly reads: string[];
 }
 
+/** How the fake disk differs from plain files: what the kernel refuses, and which names are links. */
+interface Disk {
+  /** Paths every operation on which the kernel's scoped root refuses (a link leaving the root): as `RootError`. */
+  readonly refused: ReadonlySet<string>;
+  /** Paths that are a LINK to a file inside the same root (the kernel follows it; `lstat` says `symlink`). */
+  readonly links: ReadonlySet<string>;
+  /** Root folders that are a link to another folder (their real path is not their name). */
+  readonly linkedRoots: ReadonlySet<string>;
+}
+
+const MODIFIED = '2026-11-07T09:00:00.000Z' as Instant;
+const missing = (what: string) => async (): Promise<never> => {
+  throw new Error(`a launch does not ${what}`);
+};
+
 /**
  * `${base}/<relative>` files, served through a `work` root per ferret folder and an `imports` root per named folder, as
- * the kernel scopes them. A path in `refused` is what the kernel's scoped root refuses (a link that leaves the root,
- * a substituted base): every operation on it throws, as `RootError` does.
+ * the kernel scopes them, with the {@link Disk}'s refusals and links.
  */
 function kernelRoots(
   folders: ReadonlyMap<FerretId, string>,
   files: ReadonlyMap<string, string>,
-  refused: ReadonlySet<string>,
+  disk: Disk,
   trace: RootTrace,
 ) {
   return {
@@ -71,32 +85,46 @@ function kernelRoots(
         name === 'imports' ? (scope?.subfolder ?? '/nowhere') : (folders.get(scope?.ferret as FerretId) ?? '/nowhere');
       trace.opened.push(`${name}:${base}`);
       const at = (path: FencedPath) => {
-        if (refused.has(path)) throw Object.assign(new Error('root refused: link_escape'), { refusal: 'link_escape' });
+        if (disk.refused.has(path))
+          throw Object.assign(new Error('root refused: link_escape'), { refusal: 'link_escape' });
         return files.get(path);
       };
       return {
         name: name as RootHandle['name'],
-        resolve: relative => ok(`${base}/${relative}` as FencedPath),
+        resolve: relative => ok((relative === '' ? base : `${base}/${relative}`) as FencedPath),
         stat: async path => {
           const text = at(path);
           return text === undefined
             ? undefined
-            : { kind: 'file', size: text.length, modified: '2026-11-07T09:00:00.000Z' as Instant };
+            : { kind: 'file', size: text.length, modified: MODIFIED, mode: 0o644, links: 1 };
         },
+        lstat: async path => {
+          const text = at(path);
+          if (text === undefined) return undefined;
+          return {
+            kind: disk.links.has(path) ? 'symlink' : 'file',
+            size: text.length,
+            modified: MODIFIED,
+            mode: 0o644,
+            links: 1,
+          };
+        },
+        realPath: async path => (disk.linkedRoots.has(path) ? (`/elsewhere${path}` as FencedPath) : path),
         readText: async path => {
           trace.reads.push(`${name}:${path}`);
           return at(path) ?? '';
         },
-        readBytes: async () => new Uint8Array(),
-        writeText: async () => {
-          throw new Error('a launch writes no file');
-        },
-        list: async () => {
-          throw new Error('a launch lists no folder');
-        },
-        remove: async () => {
-          throw new Error('a launch removes no file');
-        },
+        readBytes: missing('read bytes'),
+        readTail: missing('read a tail'),
+        writeText: missing('write a file'),
+        writeBytes: missing('write a file'),
+        copyTree: missing('copy a folder'),
+        ensurePrivateDirectory: missing('make a folder'),
+        makeDirectory: missing('make a folder'),
+        list: missing('list a folder'),
+        entries: missing('list a folder'),
+        pin: missing('hold a folder'),
+        remove: missing('remove a file'),
       };
     },
   };
@@ -124,6 +152,10 @@ interface SetupOptions {
   readonly more?: readonly (readonly [FerretId, string])[];
   /** Paths the kernel's scoped root refuses. */
   readonly refused?: readonly string[];
+  /** Paths that are links inside their root. */
+  readonly links?: readonly string[];
+  /** Root folders that are links. */
+  readonly linkedRoots?: readonly string[];
 }
 
 /**
@@ -192,7 +224,16 @@ async function setup(
           return await w.provider.handle(new Request(url, init));
         },
       },
-      roots: kernelRoots(folders, files, new Set(options.refused ?? []), trace),
+      roots: kernelRoots(
+        folders,
+        files,
+        {
+          refused: new Set(options.refused ?? []),
+          links: new Set(options.links ?? []),
+          linkedRoots: new Set(options.linkedRoots ?? []),
+        },
+        trace,
+      ),
     } as unknown as DaemonContext<typeof manifest>['kernel'],
   } as unknown as DaemonContext<typeof manifest>);
   const hooks = half?.hooks as Record<string, () => readonly { id: string; item: LaunchPartSource }[]> | undefined;
@@ -448,6 +489,22 @@ describe('the .mcp.json at a known root, read through the kernel (lead ruling (B
       { claudeCode: approving(), projects: await registered() },
       { leadAtRoot: false, refused: [`${REPO}/.mcp.json`] },
     );
+
+    // Act
+    const parts = await s.launch.parts(spec(SUBFOLDER));
+
+    // Assert
+    expect(s.fetched).toEqual([]);
+    expect(envOf(parts)).toEqual({});
+    expect(s.trace.reads).toEqual([]);
+  });
+
+  test.each<[string, SetupOptions]>([
+    ['a .mcp.json that is a link (even to a file inside the root)', { links: [`${REPO}/.mcp.json`] }],
+    ['a project root that is a link', { linkedRoots: [REPO] }],
+  ])('%s is refused: nothing is read, renewed or bound', async (_what, disk) => {
+    // Arrange
+    const s = await setup({ claudeCode: approving(), projects: await registered() }, { leadAtRoot: false, ...disk });
 
     // Act
     const parts = await s.launch.parts(spec(SUBFOLDER));

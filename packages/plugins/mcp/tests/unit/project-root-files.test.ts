@@ -7,45 +7,82 @@ import { McpDocumentUnreadable } from '../../daemon/lib/inventory/service.ts';
 
 /**
  * Lead ruling (B): at a registered project root (or a live managed worktree) MCP reads `.mcp.json` and nothing else —
- * read-only, no listing — through the kernel's `imports` root scoped to that folder. Fake handles in memory; no disk.
+ * read-only, no listing, never through a link — through the kernel's `imports` root scoped to that folder. Fake
+ * handles in memory; no disk.
  */
 
 const REPO = '/work/repo';
+const MODIFIED = '2026-11-07T09:00:00.000Z' as Instant;
+
+interface FakeDisk {
+  /** Names at the root that are links (the kernel follows a link that stays inside; `lstat` says `symlink`). */
+  readonly links?: readonly string[];
+  /** The root folder's real path, when it is a link. */
+  readonly realRoot?: string;
+  /** Every operation on these names is what the kernel refuses (a link out of the root): as `RootError`. */
+  readonly refused?: readonly string[];
+}
 
 /** A kernel root handle over `files`, recording every call made on it. */
-function kernelRoot(base: string, files: Readonly<Record<string, string>>, calls: string[]): RootHandle {
-  const at = (path: FencedPath) => files[path.slice(base.length + 1)];
+function kernelRoot(
+  base: string,
+  files: Readonly<Record<string, string>>,
+  calls: string[],
+  disk: FakeDisk = {},
+): RootHandle {
+  const name = (path: FencedPath) => path.slice(base.length + 1);
+  const at = (path: FencedPath) => {
+    if ((disk.refused ?? []).includes(name(path)))
+      throw Object.assign(new Error('root refused: link_escape'), { refusal: 'link_escape' });
+    return files[name(path)];
+  };
+  const record =
+    (call: string) =>
+    async (path: FencedPath): Promise<never> => {
+      calls.push(`${call}:${path}`);
+      throw new Error(`the fixture has no ${call}`);
+    };
   return {
     name: 'imports',
     resolve: relative => {
       calls.push(`resolve:${relative}`);
-      return ok(`${base}/${relative}` as FencedPath);
+      return ok((relative === '' ? base : `${base}/${relative}`) as FencedPath);
     },
     stat: async path => {
       calls.push(`stat:${path}`);
       const text = at(path);
       return text === undefined
         ? undefined
-        : { kind: 'file', size: text.length, modified: '2026-11-07T09:00:00.000Z' as Instant };
+        : { kind: 'file', size: text.length, modified: MODIFIED, mode: 0o644, links: 1 };
+    },
+    lstat: async path => {
+      calls.push(`lstat:${path}`);
+      const text = at(path);
+      if (text === undefined) return undefined;
+      const kind = (disk.links ?? []).includes(name(path)) ? 'symlink' : 'file';
+      return { kind, size: text.length, modified: MODIFIED, mode: 0o644, links: 1 };
+    },
+    realPath: async path => {
+      calls.push(`realPath:${path}`);
+      return (path === base && disk.realRoot !== undefined ? disk.realRoot : path) as FencedPath;
     },
     readText: async path => {
       calls.push(`read:${path}`);
       return at(path) ?? '';
     },
-    readBytes: async path => {
-      calls.push(`bytes:${path}`);
-      return new Uint8Array();
+    readBytes: record('bytes'),
+    readTail: record('tail'),
+    writeText: record('write'),
+    writeBytes: record('writeBytes'),
+    copyTree: async () => {
+      calls.push('copyTree');
     },
-    writeText: async path => {
-      calls.push(`write:${path}`);
-    },
-    list: async path => {
-      calls.push(`list:${path}`);
-      return Object.keys(files);
-    },
-    remove: async path => {
-      calls.push(`remove:${path}`);
-    },
+    ensurePrivateDirectory: record('ensurePrivateDirectory'),
+    makeDirectory: record('makeDirectory'),
+    list: record('list'),
+    entries: record('entries'),
+    pin: record('pin'),
+    remove: record('remove'),
   };
 }
 
@@ -53,6 +90,17 @@ const FILES = {
   '.mcp.json': JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://docs.example.invalid/mcp' } } }),
   'secret.json': JSON.stringify({ token: 'fake-not-a-real-value' }),
 };
+
+/** The documents reader as the daemon half wires it for a known root: anything else is refused. */
+const documentsOver = (root: RootHandle) =>
+  new RootMcpHarnessDocuments(
+    async path =>
+      projectRootMcpFile(() => root)(path, [REPO]) ??
+      Promise.reject(
+        new McpDocumentUnreadable(`${path} is outside every ferret folder, so Ferretry will not read it.`),
+      ),
+    text => JSON.parse(text) as unknown,
+  );
 
 describe('mcpFileOnly: a kernel root narrowed to the one .mcp.json', () => {
   test('answers .mcp.json, and refuses every other name before the kernel is asked', async () => {
@@ -66,13 +114,19 @@ describe('mcpFileOnly: a kernel root narrowed to the one .mcp.json', () => {
       root.resolve(name),
     );
 
-    // Assert
+    // Assert — the read checks the leaf and the root's real path first, then reads that one file.
     expect(allowed.ok && (await root.readText(allowed.value))).toBe(FILES['.mcp.json']);
     expect(others.every(result => !result.ok)).toBe(true);
-    expect(calls).toEqual(['resolve:.mcp.json', `read:${REPO}/.mcp.json`]);
+    expect(calls).toEqual([
+      'resolve:.mcp.json',
+      `lstat:${REPO}/.mcp.json`,
+      'resolve:',
+      `realPath:${REPO}`,
+      `read:${REPO}/.mcp.json`,
+    ]);
   });
 
-  test('a path it did not answer (a forged FencedPath) is refused for read, bytes and stat', async () => {
+  test('a path it did not answer (a forged FencedPath) is refused for read, bytes, tail, stat and lstat', async () => {
     // Arrange
     const calls: string[] = [];
     const root = mcpFileOnly(kernelRoot(REPO, FILES, calls));
@@ -82,20 +136,30 @@ describe('mcpFileOnly: a kernel root narrowed to the one .mcp.json', () => {
     // Act / Assert
     await expect(root.readText(forged)).rejects.toThrow(/reads only \.mcp\.json/u);
     await expect(root.readBytes(forged)).rejects.toThrow(/reads only \.mcp\.json/u);
+    await expect(root.readTail(forged, 10)).rejects.toThrow(/reads only \.mcp\.json/u);
     await expect(root.stat(forged)).rejects.toThrow(/reads only \.mcp\.json/u);
+    await expect(root.lstat(forged)).rejects.toThrow(/reads only \.mcp\.json/u);
     expect(calls).toEqual(['resolve:.mcp.json']);
   });
 
-  test('lists, writes and removes nothing, not even .mcp.json', async () => {
+  test('lists, writes, copies, makes, pins and removes nothing, not even .mcp.json', async () => {
     // Arrange
     const calls: string[] = [];
-    const root = mcpFileOnly(kernelRoot(REPO, FILES, calls));
+    const source = kernelRoot(REPO, FILES, calls);
+    const root = mcpFileOnly(source);
     const file = root.resolve('.mcp.json');
     if (!file.ok) throw new Error('setup');
 
     // Act / Assert
     await expect(root.list(file.value)).rejects.toThrow(/does not list/u);
+    await expect(root.entries(file.value)).rejects.toThrow(/does not list/u);
     await expect(root.writeText(file.value, '{}')).rejects.toThrow(/does not write/u);
+    await expect(root.writeBytes(file.value, new Uint8Array())).rejects.toThrow(/does not write/u);
+    await expect(root.copyTree(source, file.value, file.value)).rejects.toThrow(/does not copy/u);
+    await expect(root.makeDirectory(file.value)).rejects.toThrow(/does not make a folder/u);
+    await expect(root.ensurePrivateDirectory(file.value)).rejects.toThrow(/does not make a folder/u);
+    await expect(root.pin(file.value)).rejects.toThrow(/does not hold a folder open/u);
+    await expect(root.realPath(file.value)).rejects.toThrow(/does not resolve a path/u);
     await expect(root.remove(file.value)).rejects.toThrow(/does not remove/u);
     expect(calls).toEqual(['resolve:.mcp.json']);
   });
@@ -130,15 +194,7 @@ describe('projectRootMcpFile: which reads go to a known root', () => {
   test('through the documents reader: the root’s .mcp.json reads; any other file under the root is refused', async () => {
     // Arrange — no ferret folder holds REPO, so anything not handed a project root is refused.
     const calls: string[] = [];
-    const pick = projectRootMcpFile(folder => kernelRoot(folder, FILES, calls));
-    const documents = new RootMcpHarnessDocuments(
-      async path =>
-        pick(path, [REPO]) ??
-        Promise.reject(
-          new McpDocumentUnreadable(`${path} is outside every ferret folder, so Ferretry will not read it.`),
-        ),
-      text => JSON.parse(text) as unknown,
-    );
+    const documents = documentsOver(kernelRoot(REPO, FILES, calls));
 
     // Act
     const declared = await documents.read(`${REPO}/.mcp.json`, 'json');
@@ -150,18 +206,24 @@ describe('projectRootMcpFile: which reads go to a known root', () => {
     expect(calls.filter(call => call.includes('secret'))).toEqual([]);
   });
 
-  test('a root the kernel refuses (a .mcp.json linked out of the root) is unreadable, quoting nothing', async () => {
+  test('a missing .mcp.json is no document, read from nowhere', async () => {
     // Arrange
-    const refusing: RootHandle = {
-      ...kernelRoot(REPO, FILES, []),
-      stat: async () => {
-        throw Object.assign(new Error('root refused: link_escape'), { refusal: 'link_escape' });
-      },
-    };
-    const documents = new RootMcpHarnessDocuments(
-      async path => projectRootMcpFile(() => refusing)(path, [REPO]) ?? Promise.reject(new Error('unexpected')),
-      text => JSON.parse(text) as unknown,
-    );
+    const calls: string[] = [];
+    const documents = documentsOver(kernelRoot(REPO, {}, calls));
+
+    // Act / Assert
+    expect(await documents.read(`${REPO}/.mcp.json`, 'json')).toBeNull();
+    expect(calls.filter(call => call.startsWith('read:'))).toEqual([]);
+  });
+
+  test.each<[string, FakeDisk]>([
+    ['a .mcp.json the kernel refuses (a link out of the root)', { refused: ['.mcp.json'] }],
+    ['a .mcp.json that is a link to a file inside the root', { links: ['.mcp.json'] }],
+    ['a project root that is a link to another folder', { realRoot: '/elsewhere/repo' }],
+  ])('%s is unreadable: never read, and nothing quoted', async (_what, disk) => {
+    // Arrange
+    const calls: string[] = [];
+    const documents = documentsOver(kernelRoot(REPO, FILES, calls, disk));
 
     // Act
     const read = documents.read(`${REPO}/.mcp.json`, 'json');
@@ -169,5 +231,6 @@ describe('projectRootMcpFile: which reads go to a known root', () => {
     // Assert
     await expect(read).rejects.toBeInstanceOf(McpDocumentUnreadable);
     await expect(read).rejects.not.toThrow(/docs\.example/u);
+    expect(calls.filter(call => call.startsWith('read:'))).toEqual([]);
   });
 });

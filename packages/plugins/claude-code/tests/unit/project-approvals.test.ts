@@ -29,6 +29,8 @@ function home(files: Readonly<Record<string, Entry>>, refused: readonly string[]
         kind: entry === DIRECTORY ? 'directory' : 'file',
         size: typeof entry === 'string' ? entry.length : 1,
         modified: '2026-11-07T09:00:00.000Z' as Instant,
+        mode: 0o600,
+        links: 1,
       };
     },
     readText: async path => {
@@ -44,6 +46,15 @@ function home(files: Readonly<Record<string, Entry>>, refused: readonly string[]
     remove: async () => {
       throw new Error('the approval read never removes');
     },
+    readTail: () => Promise.reject(new Error('the approval read never reads a tail')),
+    writeBytes: () => Promise.reject(new Error('the approval read never writes')),
+    copyTree: () => Promise.reject(new Error('the approval read never copies')),
+    ensurePrivateDirectory: () => Promise.reject(new Error('the approval read never makes a folder')),
+    entries: () => Promise.reject(new Error('the approval read never lists')),
+    lstat: () => Promise.reject(new Error('the approval read never asks lstat')),
+    makeDirectory: () => Promise.reject(new Error('the approval read never makes a folder')),
+    realPath: () => Promise.reject(new Error('the approval read never resolves')),
+    pin: () => Promise.reject(new Error('the approval read never pins')),
   };
 }
 

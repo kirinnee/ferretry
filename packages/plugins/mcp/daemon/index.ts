@@ -45,7 +45,7 @@ const NOT_YET = (what: string): never => {
  *   the repository it was forked from, and every other folder is its own project. The `.mcp.json` at each of those
  *   known roots — that one file, read-only — is read through the kernel's `imports` root scoped to the root
  *   (`adapters/project-root-files.ts`), so a ferret in a subfolder reads it with no ferret in the project root. A
- *   link inside the project root is followed (kernel item N GAP, said there); one that leaves it is refused.
+ *   `.mcp.json` that is a link, and a root that is (or sits under) a link, are refused.
  * - The Vault has no value getter (use, never read). Sign-in writes the ACCESS token by name through `VaultApi.put`;
  *   the refresh token and a registered client secret (the "internal" store) rest in MCP's own sealed document,
  *   `state/mcp/oauth-secrets.json` (today's `mcp-oauth-secrets.json`), opened through the Vault's sealed-document
