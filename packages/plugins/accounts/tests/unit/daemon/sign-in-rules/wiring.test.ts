@@ -1,153 +1,157 @@
 import { describe, it } from 'bun:test';
-import type { AccountId, SignInRuleStageId } from '../../../../contract/routes/index.ts';
+import { DevicesChanged } from '@ferretry/plugin-access/contract';
 import should from 'should';
-import { connectSignInRules, SignInRuleDevicePurge, SignInRuleService } from '../../../../daemon/lib/sign-in-rules/index.ts';
-import { PasskeysChangedSignal } from '../../../../daemon/lib/local-ports.ts';
-import { MemoryLoginIndex } from '../runtime/mounts/support.ts';
-import { CountingSealed, daemonOver } from '../secrets/accounts-fixtures.ts';
+import type { SignInRuleStageId } from '../../../../contract/routes/index.ts';
+import type { PasskeysChangedListener } from '../../../../daemon/lib/local-ports.ts';
 import {
-  CREDENTIAL,
-  DEVICE,
-  deviceOwner,
-  evidenceFor,
-  FakeProofs,
-  HOST_OWNER,
-  MemoryRuleStore,
-  NOW,
-} from './support.ts';
+  connectSignInRules,
+  onDevicesChanged,
+  type RuleListing,
+  SignInRuleDevicePurge,
+} from '../../../../daemon/lib/sign-in-rules/index.ts';
+import { approved, CREDENTIAL, DEVICE, GITHUB, HOST_OWNER, listing, OTHER_DEVICE, world } from './support.ts';
 
 /**
  * THE THREE HOOKS THAT KEEP THE RULES TOLD (secrev-1274b L4): every committed account change, every passkey change and
- * every device revocation reaches the rule service through {@link connectSignInRules}, and the daemon makes that one
- * call. Each is proved here over the real directory and the real signal, and the composition root is read to prove it
- * connects all three, so deleting any one fails a test.
+ * every device revocation reaches the rule service through {@link connectSignInRules}. In 5.0 a revoked or idle-expired
+ * device arrives as Access's `DevicesChanged` (lead decision), handled by {@link onDevicesChanged}.
  */
 
-async function world() {
-  const directory = daemonOver(new MemoryLoginIndex(), new CountingSealed()).directory;
-  await directory.putAccount('GITHUB' as AccountId, { label: 'GitHub', username: 'kirinnee', password: 'pw-UNIQUE-1' });
-  const github = await directory.addSignIn('GITHUB' as AccountId, {
-    place: { kind: 'site', domains: ['github.com'], match: [] },
-  });
-  for (let tap = 0; tap < 2; tap += 1)
-    await directory.observeSignIn(github.id, {
-      at: 'github.com',
-      surface: 'page',
-      identity: '0123456789abcdef',
-      masked: true,
-      navigatedAway: true,
-      tapped: true,
-    });
-  const proofs = new FakeProofs();
-  let ids = 0;
-  const rules = new SignInRuleService({
-    store: new MemoryRuleStore(),
-    accounts: { listing: async () => await directory.keyedList() },
-    proofs,
-    passkeys: { any: async () => true, of: async () => true },
-    audit: { record: async () => undefined },
-    clock: { now: () => NOW },
-    ids: {
-      ruleId: () => `sr_${(++ids).toString(16).padStart(24, '0')}`,
-      stageId: () => `srs_${(++ids).toString(16).padStart(24, '0')}` as SignInRuleStageId,
+const status = async (w: Awaited<ReturnType<typeof world>>): Promise<string | undefined> => {
+  const [rule] = (await w.service.list(HOST_OWNER)).rules;
+  return rule?.suspended?.because ?? rule?.status;
+};
+
+function hooks() {
+  let follow: ((after: RuleListing) => Promise<void>) | undefined;
+  const listeners: PasskeysChangedListener[] = [];
+  return {
+    accounts: { followRulesWith: (next: (after: RuleListing) => Promise<void>) => void (follow = next) },
+    passkeys: {
+      subscribe: (listener: PasskeysChangedListener) => {
+        listeners.push(listener);
+        return () => undefined;
+      },
     },
-    warn: () => undefined,
-  });
-  await rules.load();
-  const passkeys = new PasskeysChangedSignal();
-  const devices = new SignInRuleDevicePurge();
-  const approve = async () => {
-    const staged = await rules.stage(deviceOwner(), { signIn: github.id, fields: ['username', 'password'] });
-    const challenge = rules.challengeOf(staged.stage, DEVICE) ?? new Uint8Array();
-    await rules.commit(deviceOwner(), staged.stage, () => evidenceFor(challenge));
+    devices: new SignInRuleDevicePurge(),
+    commit: async (after: RuleListing) => await follow?.(after),
+    emit: async (change: Parameters<PasskeysChangedListener>[0]) => {
+      for (const listener of listeners) await listener(change);
+    },
   };
-  const status = async () => {
-    const [rule] = (await rules.list(HOST_OWNER)).rules;
-    return rule?.suspended?.because ?? rule?.status;
-  };
-  return { directory, rules, proofs, passkeys, devices, approve, status, signIn: github.id };
 }
+
+const moved = (): RuleListing => {
+  const base = listing();
+  return {
+    ...base,
+    signIns: base.signIns.map(each =>
+      each.id === GITHUB ? { ...each, place: { kind: 'site', domains: ['gh.io'], match: [] } } : each,
+    ),
+  } as never;
+};
 
 describe('connectSignInRules', () => {
   it('should follow every committed account change', async () => {
     const w = await world();
-    connectSignInRules(w.rules, { accounts: w.directory, passkeys: w.passkeys, devices: w.devices });
-    await w.approve();
-    await w.directory.putSignIn(w.signIn, { recipe: 'Open github.com/login' });
-    should(await w.status()).equal('recipe-changed');
+    const h = hooks();
+    connectSignInRules(w.service, h);
+    await approved(w);
+    await h.commit(moved());
+    should(await status(w)).equal('place-changed');
   });
 
-  it('should hear the passkeys-changed signal and check every proof again', async () => {
+  it('S119 should hear the passkeys-changed signal and check every proof again', async () => {
     const w = await world();
-    connectSignInRules(w.rules, { accounts: w.directory, passkeys: w.passkeys, devices: w.devices });
-    await w.approve();
+    const h = hooks();
+    connectSignInRules(w.service, h);
+    await approved(w);
     w.proofs.held.delete(`${DEVICE}:${CREDENTIAL}`);
-    await w.passkeys.emit({ cause: 'device-forgotten', deviceId: DEVICE });
-    should(await w.status()).equal('passkey-removed');
+    await h.emit({ cause: 'device-forgotten', deviceId: DEVICE });
+    should(await status(w)).equal('passkey-removed');
   });
 
-  it('should take pairing’s device purge, which does nothing before it is connected', async () => {
+  it('should take the device purge, which does nothing before it is connected', async () => {
     const w = await world();
-    await w.devices.forgetDevice(DEVICE);
-    connectSignInRules(w.rules, { accounts: w.directory, passkeys: w.passkeys, devices: w.devices });
-    await w.approve();
-    await w.devices.forgetDevice(DEVICE);
-    should(await w.status()).equal('passkey-removed');
+    const h = hooks();
+    await h.devices.forgetDevice(DEVICE);
+    connectSignInRules(w.service, h);
+    await approved(w);
+    await h.devices.forgetDevice(DEVICE);
+    should(await status(w)).equal('passkey-removed');
   });
 
   it('should leave the rules untold when it is not called', async () => {
     const w = await world();
-    await w.approve();
-    await w.directory.putSignIn(w.signIn, { recipe: 'Open github.com/login' });
-    await w.passkeys.emit({ cause: 'device-forgotten', deviceId: DEVICE });
-    await w.devices.forgetDevice(DEVICE);
-    should(await w.status()).equal('active');
+    const h = hooks();
+    await approved(w);
+    await h.commit(moved());
+    await h.emit({ cause: 'device-forgotten', deviceId: DEVICE });
+    await h.devices.forgetDevice(DEVICE);
+    should(await status(w)).equal('active');
   });
 });
 
-describe('the composition root makes every connection', () => {
-  it('should connect the rules, put them in pairing’s device purge, and flush them at shutdown', async () => {
-    const source = await Bun.file(new URL('../../../bin/fyd.ts', import.meta.url)).text();
-    const flat = source.replaceAll(/\s+/gu, ' ');
-    should(flat).containEql(
-      'connectSignInRules(signInRules, { accounts: accountDirectory, passkeys: passkeysChanged, devices: signInRuleDevices, });',
-    );
-    should(flat).containEql('deviceState: [push, stepUp, signInRuleDevices],');
-    should(flat).containEql('cleanups.push(async () => await subsystems.signInRules.flush());');
-    should(flat).containEql(
-      'setInterval(() => void signInRules.sweepRules().catch(() => undefined), INPUT_REQUEST_SWEEP_MS)',
-    );
-  });
-});
+describe('Access DevicesChanged suspends the rules a gone device approved', () => {
+  const payload = (change: 'paired' | 'revoked' | 'expired' | 'grants', device = DEVICE) =>
+    DevicesChanged.schema.parse({ device, change });
 
-// secrev-1301 / lizzette (a), on since !A226: the terminal gate is the protocol's compile-time list, read nowhere else.
-describe('terminal standing rules are switched by the build alone', () => {
-  it('should read sign-in-rules-terminal.1 only through terminalRulesOffered(daemonFeatureList()), for the rule service, the suggestions and the fills', async () => {
-    const fyd = await Bun.file(new URL('../../../bin/fyd.ts', import.meta.url)).text();
-    const reads = fyd
-      .split('\n')
-      .filter(line => line.includes('signInRulesTerminal') || line.includes('terminalRulesOffered('));
-    // One decision (C29): both names, page and terminal, the same way in every program.
-    should(reads.map(line => line.trim())).eql([
-      'terminalRules: () => terminalRulesOffered(daemonFeatureList()),',
-      'terminalRules: () => terminalRulesOffered(daemonFeatureList()),',
-      'terminal: () => terminalRulesOffered(daemonFeatureList()),',
-    ]);
-    // No daemon code (comments aside) holds the feature's name, which a config, env or file value could match.
-    const glob = new Bun.Glob('**/*.ts');
-    const code = (source: string): string => source.replaceAll(/\/\*[\s\S]*?\*\//gu, '').replaceAll(/\/\/.*$/gmu, '');
-    const holding: string[] = [];
-    for await (const file of glob.scan(new URL('../../../', import.meta.url).pathname))
-      if (!file.includes('tests/') && !file.includes('node_modules/'))
-        if (
-          code(await Bun.file(new URL(`../../../${file}`, import.meta.url)).text()).includes('sign-in-rules-terminal')
-        )
-          holding.push(file);
-    should(holding).eql([]);
-    const features = await Bun.file(
-      new URL('../../../../protocol/src/lib/daemon-features/index.ts', import.meta.url),
-    ).text();
-    // Reported by this build (owner decision !A226): the name is no longer held back.
-    should(features).not.match(/const NOT_YET_REPORTED[^;]*DAEMON_FEATURES\.signInRulesTerminal[^;]*;/u);
+  for (const change of ['revoked', 'expired'] as const)
+    it(`P124 should suspend every rule a ${change} device approved, as passkey-removed`, async () => {
+      const w = await world();
+      await approved(w);
+      await onDevicesChanged(w.service)(payload(change));
+      should(await status(w)).equal('passkey-removed');
+    });
+
+  for (const change of ['paired', 'grants'] as const)
+    it(`P124 should leave the rules alone when a device is ${change}`, async () => {
+      const w = await world();
+      await approved(w);
+      await onDevicesChanged(w.service)(payload(change));
+      should(await status(w)).equal('active');
+    });
+
+  it('P124 should leave another device’s rules standing', async () => {
+    const w = await world();
+    await approved(w);
+    await onDevicesChanged(w.service)(payload('revoked', OTHER_DEVICE));
+    should(await status(w)).equal('active');
+  });
+
+  it('S119 P124 should attempt every purge even when an earlier one fails, and never throw into the revocation', async () => {
+    const calls: string[] = [];
+    const failed: unknown[] = [];
+    const rules = {
+      forgetDevice: async () => {
+        calls.push('forget');
+        throw new Error('the rules file cannot be written');
+      },
+      passkeysChanged: async () => {
+        calls.push('recheck');
+      },
+    };
+    await onDevicesChanged(rules, error => void failed.push(error))(payload('revoked'));
+    should(calls).eql(['forget', 'recheck']);
+    should(failed).have.length(1);
+  });
+
+  it('S119 should suspend a revoked device’s rule even when the passkey recheck that follows fails', async () => {
+    const w = await world();
+    await approved(w);
+    w.proofs.broken = true;
+    await onDevicesChanged(w.service)(payload('revoked'));
+    should(await status(w)).equal('passkey-removed');
+  });
+
+  it('P124 should find no challenge for a stage the revoked device had waiting', async () => {
+    const w = await world();
+    const staged = await w.service.stage({ kind: 'owner', actor: { kind: 'device', deviceId: DEVICE } }, {
+      signIn: GITHUB,
+      fields: ['password'],
+    });
+    should(w.service.challengeOf(staged.stage as SignInRuleStageId, DEVICE)).not.be.undefined();
+    await onDevicesChanged(w.service)(payload('revoked'));
+    should(w.service.challengeOf(staged.stage as SignInRuleStageId, DEVICE)).be.undefined();
   });
 });

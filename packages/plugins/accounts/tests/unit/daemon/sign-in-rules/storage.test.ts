@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { AccountKey, SignInRuleStageId } from '../../../../contract/routes/index.ts';
 import should from 'should';
+import { MemoryDocument } from '../support/memory-document.ts';
 import { FileSignInRuleStore } from '../../../../daemon/adapters/sign-in-rules/index.ts';
 import { PasteRuleService } from '../../../../daemon/lib/secure-copy/rules.ts';
 import { SignInRuleService } from '../../../../daemon/lib/sign-in-rules/index.ts';
@@ -24,26 +25,19 @@ import {
  * sign-in line, raised, staged and committed, writes no file at all.
  */
 
-const DIRECTORY = '/state/accounts';
-
-/** Every write the filesystem is asked for, by path. */
-class SpyFiles {
-  readonly files = new Map<string, string>();
-  readonly written: string[] = [];
-  async readText(path: string): Promise<string | undefined> {
-    return this.files.get(path);
+/** The one state file, with every write counted. */
+class SpyDocument extends MemoryDocument {
+  writes = 0;
+  override async write(body: unknown): Promise<void> {
+    this.writes += 1;
+    await super.write(body);
   }
-  async writeTextAtomic(path: string, text: string): Promise<void> {
-    this.written.push(path);
-    this.files.set(path, text);
-  }
-  async ensureDirectory(): Promise<void> {}
 }
 
-function rulesOver(files: SpyFiles) {
+function rulesOver(files: SpyDocument) {
   let ids = 0;
   return new SignInRuleService({
-    store: new FileSignInRuleStore(DIRECTORY, files),
+    store: new FileSignInRuleStore(files),
     accounts: { listing: async () => listing() },
     proofs: new FakeProofs(),
     passkeys: { any: async () => true, of: async () => true },
@@ -60,7 +54,7 @@ function rulesOver(files: SpyFiles) {
 describe('a standing rule is on disk, in one file', () => {
   it('should write only sign-in-rules.json for a commit, and find the rule again after a restart', async () => {
     // Arrange
-    const files = new SpyFiles();
+    const files = new SpyDocument();
     const rules = rulesOver(files);
     await rules.load();
 
@@ -72,7 +66,7 @@ describe('a standing rule is on disk, in one file', () => {
     await restarted.load();
 
     // Assert
-    should(files.written).eql([`${DIRECTORY}/sign-in-rules.json`]);
+    should(files.writes).equal(1);
     should((await restarted.list(HOST_OWNER)).rules.map(rule => rule.id)).eql([view.id]);
     should(restarted.verified(view.id, 1)).be.true();
   });

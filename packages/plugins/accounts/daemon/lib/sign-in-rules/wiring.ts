@@ -69,3 +69,10 @@ export function onDevicesChanged(
     await rules.passkeysChanged({ cause: 'device-forgotten', deviceId: device }).catch(failed);
   };
 }
+
+/**
+ * Owner decision !A226: this build offers standing rules for sudo, su and doas (today's `sign-in-rules-terminal.1`
+ * feature beside `sign-in-rules.1`). There is no feature list in 5.0, so the composition root passes
+ * `terminalRules: () => TERMINAL_RULES_OFFERED` to the rule service, the suggestions and the fills.
+ */
+export const TERMINAL_RULES_OFFERED = true;

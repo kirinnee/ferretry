@@ -3,30 +3,13 @@ import type { SignInRulesDocument } from '../../../../contract/routes/index.ts';
 import should from 'should';
 import { FileSignInRuleStore } from '../../../../daemon/adapters/sign-in-rules/index.ts';
 import { SignInRuleService } from '../../../../daemon/lib/sign-in-rules/index.ts';
+import { MemoryDocument } from '../support/memory-document.ts';
 import { approved, FakeProofs, HOST_OWNER, NOW, world } from './support.ts';
 
 /**
  * THE RULES FILE IS STRICT AND FAILS CLOSED (r3c-plan §5, invariant 8): anything that does not parse is zero rules,
  * audited, and the owner's next write moves the damaged file aside, never deleting it.
  */
-
-const DIRECTORY = '/state/accounts';
-const FILE = `${DIRECTORY}/sign-in-rules.json`;
-
-/** The three calls the store makes, over a map of paths. */
-class MemoryFiles {
-  readonly files = new Map<string, string>();
-  readonly directories: [string, number][] = [];
-  async readText(path: string): Promise<string | undefined> {
-    return this.files.get(path);
-  }
-  async writeTextAtomic(path: string, text: string): Promise<void> {
-    this.files.set(path, text);
-  }
-  async ensureDirectory(path: string, mode: number): Promise<void> {
-    this.directories.push([path, mode]);
-  }
-}
 
 /** A real document with one approved rule, as the service writes it. */
 async function oneRule(): Promise<SignInRulesDocument> {
@@ -57,24 +40,22 @@ const damages = async (): Promise<readonly [string, string][]> => {
 };
 
 describe('the standing rules file', () => {
-  it('should write the document atomically in a private directory and read it back', async () => {
-    const files = new MemoryFiles();
-    const store = new FileSignInRuleStore(DIRECTORY, files);
+  it('should write the document through its state file and read it back', async () => {
+    const file = new MemoryDocument();
+    const store = new FileSignInRuleStore(file);
     const document = await oneRule();
     await store.write(document);
-    should(files.directories).eql([[DIRECTORY, 0o700]]);
     should(await store.read()).eql(document);
-    should(await new FileSignInRuleStore('/state/none', files).read()).be.undefined();
+    should(await new FileSignInRuleStore(new MemoryDocument()).read()).be.undefined();
   });
 
   it('should refuse every damaged document whole: zero rules, damaged, audited, never a default', async () => {
     for (const [name, text] of await damages()) {
       // Arrange
-      const files = new MemoryFiles();
-      files.files.set(FILE, text);
+      const file = new MemoryDocument(text);
       const audits: unknown[] = [];
       const service = new SignInRuleService({
-        store: new FileSignInRuleStore(DIRECTORY, files),
+        store: new FileSignInRuleStore(file),
         accounts: { listing: async () => ({ accounts: [], signIns: [], keys: new Map() }) },
         proofs: new FakeProofs(),
         passkeys: { any: async () => true, of: async () => true },
@@ -84,7 +65,7 @@ describe('the standing rules file', () => {
       });
 
       // Act
-      const read = await new FileSignInRuleStore(DIRECTORY, files).read().then(
+      const read = await new FileSignInRuleStore(file).read().then(
         () => 'parsed',
         () => 'refused',
       );
@@ -97,18 +78,17 @@ describe('the standing rules file', () => {
     }
   });
 
-  it('should move a damaged file aside before the next write, keeping its text', async () => {
+  it('should set a damaged file aside before the next write, keeping its text', async () => {
     // Arrange
-    const files = new MemoryFiles();
-    files.files.set(FILE, '{"v":1,"rules":[');
-    const store = new FileSignInRuleStore(DIRECTORY, files);
+    const file = new MemoryDocument('{"v":1,"rules":[');
+    const store = new FileSignInRuleStore(file);
 
     // Act
-    await store.setAside('2026-11-01T12-00-00-000Z');
+    await store.setAside('2026-11-01T12:00:00.000Z');
     await store.write({ v: 1, rules: [] });
 
     // Assert
-    should(files.files.get(`${FILE}.damaged-2026-11-01T12-00-00-000Z`)).equal('{"v":1,"rules":[');
-    should(JSON.parse(files.files.get(FILE) ?? '')).eql({ v: 1, rules: [] });
+    should(file.asides.get('damaged-2026-11-01T12-00-00-000Z')).equal('{"v":1,"rules":[');
+    should(JSON.parse(file.text ?? '')).eql({ v: 1, rules: [] });
   });
 });

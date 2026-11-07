@@ -1,7 +1,5 @@
 import { describe, it } from 'bun:test';
 import {
-  DAEMON_FEATURES,
-  daemonFeatureList,
   SIGN_IN_RULE_CLOCK_SKEW_SECONDS,
   SIGN_IN_RULE_DEFAULT_SECONDS,
   SIGN_IN_RULE_INELIGIBLE_WORDS,
@@ -13,6 +11,7 @@ import {
   type SignInRuleStageId,
 } from '../../../../contract/routes/index.ts';
 import should from 'should';
+import { TERMINAL_RULES_OFFERED } from '../../../../daemon/lib/sign-in-rules/wiring.ts';
 import { SignInRuleError, SignInRuleProofMissing } from '../../../../daemon/lib/sign-in-rules/index.ts';
 import {
   AGENT,
@@ -870,7 +869,7 @@ describe('a terminal rule: sudo, su or doas, the password only, root (invariants
 
 // Owner decision !A226: this build reports `sign-in-rules-terminal.1`, so sudo, su and doas can have a rule.
 describe('terminal rules as this build reports them', () => {
-  const built = daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal);
+  const built = TERMINAL_RULES_OFFERED;
 
   it('should stage sudo, su and doas as root rules, and still refuse ssh, with this build’s features', async () => {
     // Arrange — sudo, su and doas on this machine and ssh to another, each with the owner's terminal taps

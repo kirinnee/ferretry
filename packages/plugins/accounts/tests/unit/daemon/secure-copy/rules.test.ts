@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { COPY_MAX_RULES, type PasteRule, PasteRuleListSchema, type PasteRuleSettings } from '../../../../contract/routes/index.ts';
 import should from 'should';
 import { type PasteRuleCaller, PasteRuleService, routeOf, SecureCopyError } from '../../../../daemon/lib/index.ts';
-import { FACTS } from '../input-requests/support.ts';
+import { FACTS } from '../support/facts.ts';
 import { type InputTargetFacts } from '@ferretry/core-vault/contract';
 
 const OWNER: PasteRuleCaller = { kind: 'owner', actor: { kind: 'host' } };

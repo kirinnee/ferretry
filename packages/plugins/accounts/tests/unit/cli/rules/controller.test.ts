@@ -1,6 +1,5 @@
 import { describe, it } from 'bun:test';
 import {
-  DAEMON_FEATURES,
   type DaemonId,
   SIGN_IN_RULE_AUTO_RECIPE_WARNING,
   SIGN_IN_RULE_HONEST_LIMIT,
@@ -18,12 +17,21 @@ import {
   type SignInRuleView,
   signInRuleSuspensionWords,
 } from '../../../../contract/routes/index.ts';
-import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
-import { DaemonFeaturesUnreadable, daemonNeedsUpdate } from '../../../src/lib/daemon/features';
-import { OWNER_COMMAND_REFUSAL } from '../../../src/lib/daemon/owner-only';
+import { OWNER_COMMAND_REFUSAL } from '../../../../cli/lib/shared.ts';
 import { PASTE_RULE_POINTER, RulesController, ruleWarnings } from '../../../../cli/lib/rules/controller';
 import type { IRulesGateway, RulesPorts } from '../../../../cli/lib/rules/ports';
+
+/** A refusal as the shell's client throws it (`DaemonRefusal`): words, the HTTP status and the code. */
+class FyHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string,
+  ) {
+    super(message);
+  }
+}
 
 const STAGE = `srs_${'a'.repeat(24)}`;
 const RULE = `sr_${'b'.repeat(24)}`;
@@ -95,7 +103,6 @@ class SpyGateway implements IRulesGateway {
   health: 'ok' | 'damaged' = 'ok';
   staged: SignInRuleStaged = stagedOf();
   views: (SignInRuleStageState | 'gone')[] = ['waiting', 'approved'];
-  reported: string[] = [DAEMON_FEATURES.signInRules, DAEMON_FEATURES.signInRulesTerminal];
 
   async list() {
     this.calls.push('list');
@@ -136,10 +143,6 @@ class SpyGateway implements IRulesGateway {
   async eligibility() {
     this.calls.push('eligibility');
     return this.eligible;
-  }
-  async features() {
-    this.calls.push('features');
-    return this.reported;
   }
 }
 
@@ -252,49 +255,13 @@ describe('fy rules (controller)', () => {
     ]);
   });
 
-  it('should drop a terminal stage and stage nothing while the daemon does not report terminal rules', async () => {
-    const { controller, gateway } = rig();
-    gateway.reported = [DAEMON_FEATURES.signInRules];
-    gateway.staged = stagedOf({ root: true, place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' } });
-    await controller.add(SIGN_IN, {}).then(
-      () => should.fail('', '', 'a terminal rule was offered'),
-      (error: unknown) => should((error as Error).message).containEql('terminal rules'),
-    );
-    should(gateway.calls).containEql('drop').and.not.containEql('confirmInApp');
-  });
-
-  it('should stage nothing while the daemon does not report sign-in rules, and say it needs an update', async () => {
-    const { controller, gateway } = rig();
-    gateway.reported = [];
-    await controller.add(SIGN_IN, {}).then(
-      () => should.fail('', '', 'staged'),
-      (error: unknown) => should((error as Error).message).equal(daemonNeedsUpdate('standing sign-in rules')),
-    );
-    should(gateway.calls).not.containEql('stage');
-  });
-
-  it('should tell a health read that failed apart from an old daemon, and stage nothing', async () => {
-    const { controller, gateway } = rig();
-    gateway.features = async () => {
-      throw new DaemonFeaturesUnreadable(new Error('down'));
-    };
-    await controller.add(SIGN_IN, {}).then(
-      () => should.fail('', '', 'staged'),
-      (error: unknown) => {
-        should(error).be.instanceOf(DaemonFeaturesUnreadable);
-        should((error as Error).message).not.containEql('too old');
-      },
-    );
-    should(gateway.calls).not.containEql('stage');
-  });
-
   it('should stage, print the app link, wait and report Approved, never committing', async () => {
     const { controller, gateway, said, slept } = rig();
     await controller.add(SIGN_IN, { scope: 'any', expires: '7d', uses: '5' });
     should(gateway.drafts).eql([
       { signIn: SIGN_IN, fields: ['password'], scope: { kind: 'any' }, lifetimeSeconds: 7 * 86_400, uses: 5 },
     ]);
-    should(gateway.calls).eql(['features', 'eligibility', 'stage', 'confirmInApp', 'view', 'view']);
+    should(gateway.calls).eql(['eligibility', 'stage', 'confirmInApp', 'view', 'view']);
     should(said.join('\n')).containEql(`https://app.example/#rules/${STAGE}`);
     should(said[said.length - 1]).startWith('Approved.');
     should(slept).eql([1_000]);
@@ -752,7 +719,7 @@ describe('fy rules widen', () => {
         replaces: RULE,
       },
     ]);
-    should(gateway.calls).eql(['list', 'features', 'eligibility', 'stage', 'confirmInApp', 'view', 'view']);
+    should(gateway.calls).eql(['list', 'eligibility', 'stage', 'confirmInApp', 'view', 'view']);
     should(said[0]).equal('Widening sr_bbbbbbbb: the username. Everything else stays as it is.');
     should(said[said.length - 1]).startWith('Approved.');
   });

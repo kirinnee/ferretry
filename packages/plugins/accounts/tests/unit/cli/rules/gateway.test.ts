@@ -1,9 +1,7 @@
 import { describe, it } from 'bun:test';
-import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
-import { DaemonFeaturesUnreadable, daemonNeedsUpdate } from '../../../src/lib/daemon/features';
 import { ProtocolRulesGateway } from '../../../../cli/lib/rules/gateway';
-import type { RulesApiClient } from '../../../../cli/lib/rules/ports';
+import manifest from '../../../../manifest.ts';
 
 const STAGE = `srs_${'a'.repeat(24)}`;
 const SIGN_IN = `si_${'1'.repeat(16)}`;
@@ -51,33 +49,42 @@ const RULE_VIEW = {
   approvedWith: { deviceId: `fy_device_id_${'1'.repeat(22)}` },
 };
 
-const headerNames = (init: RequestInit | undefined): string[] =>
-  Object.keys((init?.headers ?? {}) as object).map(name => name.toLowerCase());
+type Init = { readonly params?: Record<string, string>; readonly query?: Record<string, string>; readonly body?: unknown };
 
 function rig(reply: unknown) {
-  const calls: { path: string; init: RequestInit | undefined }[] = [];
-  const client: RulesApiClient = {
-    request: async (path, schema, init) => {
-      calls.push({ path, init });
-      return schema.parse(reply);
+  const calls: { route: string; init: Init | undefined }[] = [];
+  const client = {
+    call: async <Answer>(route: string, init?: Init): Promise<Answer> => {
+      calls.push({ route, init });
+      return reply as Answer;
     },
   };
   return { calls, gateway: new ProtocolRulesGateway(client) };
 }
 
+const declared = new Set(manifest.actions.routes.map(route => route.key as string));
+
 describe('ProtocolRulesGateway', () => {
-  it('should offer no commit call and no way to name the commit route', () => {
+  it('S132 should offer no commit call and no way to name the commit route', () => {
     const names = Object.getOwnPropertyNames(ProtocolRulesGateway.prototype);
     should(names.filter(name => /commit|approve/iu.test(name))).eql([]);
   });
 
-  it('should list, view and confirm on the stage routes, with the client header and no session header', async () => {
+  it('should call only routes the manifest declares, by key, through the plugin client', async () => {
     const { calls, gateway } = rig({ health: 'ok', rules: [], stages: [] });
     await gateway.list();
-    should(calls[0]?.path).equal('/v1/sign-in-rules');
-    should(Object.keys((calls[0]?.init?.headers ?? {}) as object).map(name => name.toLowerCase())).not.containEql(
-      'x-fy-session',
-    );
+    await gateway.view(STAGE).catch(() => undefined);
+    await gateway.confirmInApp(STAGE).catch(() => undefined);
+    await gateway.drop(STAGE).catch(() => undefined);
+    await gateway.revoke(RULE).catch(() => undefined);
+    await gateway.revokeAccount('GITHUB_WORK').catch(() => undefined);
+    await gateway.eligibility(SIGN_IN).catch(() => undefined);
+    await gateway.narrow(RULE, { dropTotp: true }).catch(() => undefined);
+    await gateway.stage({ signIn: SIGN_IN, fields: ['password'] }).catch(() => undefined);
+    should(calls.map(call => call.route).filter(route => !declared.has(route))).eql([]);
+    should(calls.map(call => call.route)).not.containEql('POST /v1/sign-in-rules/stages/:stage/commit');
+    should(calls[1]?.init?.params).eql({ stage: STAGE });
+    should(calls[6]?.init?.query).eql({ signIn: SIGN_IN });
   });
 
   it('should refuse a draft the protocol would refuse, before sending it', async () => {
@@ -89,57 +96,18 @@ describe('ProtocolRulesGateway', () => {
     should(calls).eql([]);
   });
 
-  it('should delete a stage and revoke a rule on their own routes', async () => {
-    const dropped = rig({ stage: STAGE, dropped: true });
-    await dropped.gateway.drop(STAGE);
-    should(dropped.calls[0]).containEql({ path: `/v1/sign-in-rules/stages/${STAGE}` });
-    should(dropped.calls[0]?.init?.method).equal('DELETE');
-    const revoked = rig({ id: 'sr_x', revoked: true });
-    await revoked.gateway.revoke('sr_x');
-    should(revoked.calls[0]?.path).equal('/v1/sign-in-rules/sr_x');
-  });
-
-  it('should end every rule of an account on its own route, and read eligibility on its query', async () => {
-    const ended = rig({ account: 'GITHUB_WORK', revoked: 3 });
-    should(await ended.gateway.revokeAccount('GITHUB_WORK')).equal(3);
-    should(ended.calls[0]?.path).equal('/v1/accounts/GITHUB_WORK/sign-in-rules/revoke');
-    should(ended.calls[0]?.init?.method).equal('POST');
-    should(headerNames(ended.calls[0]?.init)).not.containEql('x-fy-session');
-
-    const asked = rig({ signIn: SIGN_IN, eligible: false, because: 'no-history' });
-    const answer = await asked.gateway.eligibility(SIGN_IN);
-    should(asked.calls[0]?.path).equal(`/v1/sign-in-rules/eligibility?signIn=${SIGN_IN}`);
-    should(answer.eligible).equal(false);
-  });
-
-  it('should confirm a stage in the app and read its state on the stage routes', async () => {
-    const confirmed = rig(STAGED);
-    should((await confirmed.gateway.confirmInApp(STAGE)).stage).equal(STAGE);
-    should(confirmed.calls[0]?.path).equal(`/v1/sign-in-rules/stages/${STAGE}/confirm-in-app`);
-    should(confirmed.calls[0]?.init?.method).equal('POST');
-    should(headerNames(confirmed.calls[0]?.init)).not.containEql('x-fy-session');
-
-    const viewed = rig({ ...STAGED, state: 'denied' });
-    should((await viewed.gateway.view(STAGE)).state).equal('denied');
-    should(viewed.calls[0]?.path).equal(`/v1/sign-in-rules/stages/${STAGE}`);
-    should(viewed.calls[0]?.init?.method).equal(undefined);
-  });
-
-  it('should send a staged draft as JSON on the stages route', async () => {
+  it('should stage the parsed draft and parse what comes back', async () => {
     const { calls, gateway } = rig(STAGED);
-    await gateway.stage({ signIn: SIGN_IN, fields: ['password'], uses: 2 });
-    should(calls[0]?.path).equal('/v1/sign-in-rules/stages');
-    should(calls[0]?.init?.method).equal('POST');
-    should(JSON.parse(String(calls[0]?.init?.body))).eql({ signIn: SIGN_IN, fields: ['password'], uses: 2 });
-    should(headerNames(calls[0]?.init)).containEql('content-type');
+    should(await gateway.stage({ signIn: SIGN_IN, fields: ['password'] })).match({ stage: STAGE, rule: RULE });
+    should(calls[0]).match({ route: 'POST /v1/sign-in-rules/stages', init: { body: { signIn: SIGN_IN } } });
+    await should(rig({ stage: 'nope' }).gateway.stage({ signIn: SIGN_IN, fields: ['password'] })).be.rejected();
   });
 
-  it('should narrow a rule on its own route, and refuse an empty narrowing before sending it', async () => {
+  it('should narrow by rule id and refuse an empty narrowing before sending it', async () => {
     const { calls, gateway } = rig(RULE_VIEW);
-    should((await gateway.narrow(RULE, { dropTotp: true })).id).equal(RULE);
-    should(calls[0]?.path).equal(`/v1/sign-in-rules/${RULE}/narrow`);
-    should(calls[0]?.init?.method).equal('POST');
-    should(JSON.parse(String(calls[0]?.init?.body))).eql({ dropTotp: true });
+    await gateway.narrow(RULE, { dropTotp: true });
+    should(calls[0]).match({ route: 'POST /v1/sign-in-rules/:id/narrow', init: { params: { id: RULE } } });
+    should(calls[0]?.init?.body).eql({ dropTotp: true });
     await gateway.narrow(RULE, {}).then(
       () => should.fail('', '', 'sent an empty narrowing'),
       () => undefined,
@@ -147,43 +115,8 @@ describe('ProtocolRulesGateway', () => {
     should(calls).have.length(1);
   });
 
-  it('should read the daemon features from its health, and say so when it cannot be read', async () => {
-    const reported: RulesApiClient = { request: async () => ({ features: ['sign-in-rules'] }) as never };
-    should(await new ProtocolRulesGateway(reported).features()).eql(['sign-in-rules']);
-    const unreadable: RulesApiClient = {
-      request: async () => {
-        throw new Error('down');
-      },
-    };
-    await should(new ProtocolRulesGateway(unreadable).features()).be.rejectedWith(DaemonFeaturesUnreadable);
-  });
-
-  it('should say an older daemon with no rule routes needs an update, on every route, and pass other errors on', async () => {
-    const old: RulesApiClient = {
-      request: async () => {
-        throw new FyHttpError('no such route', 404, 'unknown_route');
-      },
-    };
-    const gateway = new ProtocolRulesGateway(old);
-    const sentence = daemonNeedsUpdate('standing sign-in rules');
-    for (const call of [
-      async () => await gateway.list(),
-      async () => await gateway.narrow(RULE, { dropTotp: true }),
-      async () => await gateway.revoke(RULE),
-      async () => await gateway.revokeAccount('GITHUB_WORK'),
-      async () => await gateway.stage({ signIn: SIGN_IN, fields: ['password'] }),
-      async () => await gateway.eligibility(SIGN_IN),
-    ])
-      await should(call()).be.rejectedWith(sentence);
-
-    const gone: RulesApiClient = {
-      request: async () => {
-        throw new FyHttpError('no such stage', 404, 'stage_not_found');
-      },
-    };
-    await new ProtocolRulesGateway(gone).view(STAGE).then(
-      () => should.fail('', '', 'a missing stage was answered'),
-      (error: unknown) => should((error as FyHttpError).code).equal('stage_not_found'),
-    );
+  it('should answer how many rules an account revoke ended', async () => {
+    const { gateway } = rig({ account: 'GITHUB_WORK', revoked: 3 });
+    should(await gateway.revokeAccount('GITHUB_WORK')).equal(3);
   });
 });

@@ -17,8 +17,9 @@ import {
   taskPlanApprovalSubject,
 } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { namesOnCard } from '../../support/names-on-card.ts';
-import { type AgendaLedger, AgendaService } from '../../../../daemon/lib/agenda/index.ts';
+import { namesOnCard } from '../support/names-on-card.ts';
+import type { AskDraft } from '@ferretry/core-asks/contract';
+import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type { AuditEntry } from '../../../../daemon/lib/local-ports.ts';
 import {
   boundSelection,
@@ -26,13 +27,14 @@ import {
   PasteRuleService,
   SecureCopyError,
   TASK_PLAN_HONEST_LIMIT,
-  TaskPlanAgendaAdapter,
+  SignInApprovalAsks,
+  TaskPlanAsksAdapter,
   type TaskPlanCard,
   TaskPlanError,
   TaskPlanProofMissing,
   TaskPlanService,
 } from '../../../../daemon/lib/index.ts';
-import { FACTS } from '../input-requests/support.ts';
+import { FACTS } from '../support/facts.ts';
 
 const NOW = Date.parse('2026-11-01T12:00:00.000Z');
 const SESSION = 's1';
@@ -1159,27 +1161,22 @@ describe('TaskPlanService: secrev-1261', () => {
 });
 
 describe('TaskPlanService: the card names no account (secrev-1261 L4)', () => {
-  it('should leave every account label and username out of the agenda card a terminal-only device or the ferret reads', async () => {
-    const ledgers = new Map<string, AgendaLedger>();
-    const agenda = new AgendaService(
-      {
-        read: async sessionId => ledgers.get(sessionId) ?? null,
-        transact: async (sessionId, apply) => {
-          const mutation = apply(ledgers.get(sessionId) ?? null);
-          if (mutation.ok && mutation.changed) ledgers.set(sessionId, mutation.ledger);
-          return mutation;
-        },
-      },
-      { now: () => '2026-11-01T12:00:00Z' },
-      { has: async sessionId => sessionId === SESSION },
-      { raised: async () => undefined },
-    );
+  it('should leave every account label and username out of the sign-in-approval ask a terminal-only device or the ferret reads', async () => {
+    const raised: AskDraft[] = [];
+    const asks = new (class extends FakeAsks {
+      override async raise(draft: AskDraft) {
+        raised.push(draft);
+        return await super.raise(draft);
+      }
+    })();
     const w = world();
     await w.rules.load();
-    const service = new TaskPlanService({ ...w.ports, agenda: new TaskPlanAgendaAdapter(agenda) });
+    const service = new TaskPlanService({ ...w.ports, agenda: new TaskPlanAsksAdapter(new SignInApprovalAsks(asks)) });
 
     await service.propose(SESSION, { lines: [WORK_LINE, SITE_LINE, SUDO_LINE, PASTE] });
-    const card = JSON.stringify(ledgers.get(SESSION));
+    should(raised).have.length(1);
+    should(raised[0]).match({ source: 'sign-in-approval', raisedBy: { kind: 'daemon' }, ferret: SESSION });
+    const card = JSON.stringify(raised);
 
     for (const name of ['GitHub work', 'GitHub home', 'kirin-work', 'kirinnee', 'GITHUB_WORK', 'GITHUB_HOME', 'KIRIN'])
       should(card).not.containEql(name);

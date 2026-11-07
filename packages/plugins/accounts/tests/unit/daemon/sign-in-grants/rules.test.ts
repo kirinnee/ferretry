@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import { type AccountKey, DAEMON_FEATURES, daemonFeatureList, type SignInRuleId } from '../../../../contract/routes/index.ts';
+import { type AccountKey, type SignInRuleId } from '../../../../contract/routes/index.ts';
+import { TERMINAL_RULES_OFFERED } from '../../../../daemon/lib/sign-in-rules/wiring.ts';
 import should from 'should';
 import { SignInGrantLedger } from '../../../../daemon/lib/sign-in-grants/ledger.ts';
 import { RuleSignInGrants, stampedProjectOf } from '../../../../daemon/lib/sign-in-grants/rules.ts';
@@ -527,7 +528,7 @@ describe('RuleSignInGrants: terminal rules only while sign-in-rules-terminal.1 i
     const w = await world();
     await approved(w, { signIn: SUDO, fields: ['password'] });
     await approved(w);
-    const built = grants(w, { terminal: daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal) }).source;
+    const built = grants(w, { terminal: TERMINAL_RULES_OFFERED }).source;
 
     // Act
     const offered = built.of(SESSION);
