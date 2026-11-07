@@ -15,7 +15,6 @@
     "accounts",
     "conversation",
     "agenda",
-    "projects",
     "board",
     "packs",
     "usage",
@@ -33,9 +32,15 @@
   "pendingHalves": {
     "agenda": ["app"],
     "browsers": ["app"],
+    "conversation": ["app"],
     "terminals": ["app"]
   },
   "pendingAppPorts": [
+    {
+      "plugin": "conversation",
+      "path": "packages/plugins/conversation/app",
+      "reason": "skeleton app half; the queue, stuck messages and links views port with item M"
+    },
     {
       "plugin": "agenda",
       "path": "packages/plugins/agenda/app",

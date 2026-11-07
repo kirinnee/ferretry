@@ -67,7 +67,7 @@ import type { ClearJob, ClearOutcome } from '../../../contract/index.ts';
 import { clearJobOf } from './borrowed-grants.ts';
 import type { GrantReservation } from './borrowed-grants.ts';
 import { type GrantMatch, type GrantSighting, matchSignInGrant, type SignInGrant } from './borrowed-grants.ts';
-import type { SignInGrantSource } from './borrowed-grants.ts';
+import type { ScriptedOriginsView, SignInGrantSource } from './borrowed-grants.ts';
 import { GRANT_MISS_CONTEXT_LINE, grantStops } from './borrowed-grants.ts';
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
@@ -292,6 +292,11 @@ export interface InputRequestServiceDependencies {
    * after every check holds again. Absent, or not `enabled()`: every sign-in waits for the owner.
    */
   readonly grants?: SignInGrantSource;
+  /**
+   * Where page scripts ran across the machine, as Browsers tells Vault (`VaultApi.scriptedOn`, `MachineScripts`): read
+   * by a page card's lock beside the grants' own view, either one making the card `scripted` (I98).
+   */
+  readonly scripts?: { scriptedOrigins(): ScriptedOriginsView };
   /**
    * Asks the phone's buzz to look at the session's board again, with no edit to it: a card raised quiet that a standing
    * rule did not fill after all must buzz like any raise, while its words stay byte-identical to a card no rule was
@@ -2340,14 +2345,14 @@ export class InputRequestService {
     if (facts.kind !== 'page') return undefined;
     const host = placeOf(facts, undefined);
     const site = host === undefined ? undefined : siteOf(host);
-    const machine = this.deps.grants?.scriptedOrigins();
-    if (
-      machine !== undefined &&
-      (machine.running === true ||
-        machine.everywhere !== undefined ||
-        (site === undefined ? machine.hosts.size > 0 : [...machine.hosts.keys()].some(each => siteOf(each) === site)))
-    )
-      return 'scripted';
+    for (const machine of [this.deps.grants?.scriptedOrigins(), this.deps.scripts?.scriptedOrigins()])
+      if (
+        machine !== undefined &&
+        (machine.running === true ||
+          machine.everywhere !== undefined ||
+          (site === undefined ? machine.hosts.size > 0 : [...machine.hosts.keys()].some(each => siteOf(each) === site)))
+      )
+        return 'scripted';
     const observer = this.deps.observer;
     if (observer === undefined) return 'unknown';
     // An observer that keeps no pages answers for the whole session: stricter, never looser.

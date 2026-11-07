@@ -4,7 +4,7 @@ import type { RelayPairingOutcome, SessionDeviceClaim } from '../session/session
 import type { CarrierDial } from '../session/session-transport.ts';
 import type { SocketLike } from '../session/direct-dial.ts';
 import type { WebCryptoRelayCrypto } from '../session/webcrypto.ts';
-import type { PrivateKeyHandle, RelayCrypto } from '../session/wire/index.ts';
+import type { OwnerPayload, PrivateKeyHandle, RelayCrypto } from '../session/wire/index.ts';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
 
 /**
@@ -37,6 +37,8 @@ export interface PairingKey {
   /** The Ed25519 SubjectPublicKeyInfo, base64url. */
   readonly publicKey: string;
   readonly key: PrivateKeyHandle;
+  /** P28: validate Access's answer and persist this key only after the shell receives sealed `paired`. */
+  readonly save: (response: OwnerPayload) => Promise<void>;
 }
 
 /**
@@ -47,7 +49,7 @@ export interface PairingKey {
 export interface DeviceClaims {
   /** The `device` claim for this daemon, or `undefined` when this device holds no key for it (it cannot reach yet). */
   claim(daemon: PairedDaemon): Promise<SessionDeviceClaim | undefined>;
-  /** A fresh key for a `pair` session with this daemon; Access keeps it pending until the pairing answers. */
+  /** A fresh, memory-only key; the shell calls its `save` only after the pairing answers `paired`. */
   pairingKey(daemonId: string): Promise<PairingKey>;
   /** The pairing was removed: the key that proved it goes with it. */
   forget(daemonId: string): Promise<void>;

@@ -97,7 +97,7 @@ describe('tidy on the test host', () => {
       kind: 'chore',
       title: 'Throwaway',
       summary: '',
-      ask: 'x',
+      ask: { text: 'x', source: 'test' },
       premise: '',
       context: '',
       terms: [],

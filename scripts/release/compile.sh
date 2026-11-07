@@ -4,7 +4,9 @@ set -euo pipefail
 # Cross-compile every standalone executable from EVERY .bin entry of each shipped package for every
 # supported target. Every entry, not the first: a package may declare a helper beside its own executable,
 # and a 4.x release that compiled only the first entry shipped a daemon whose browser worker could never
-# start. The shipped packages are the CLI (`fy`, packages/cli) and the daemon host (`fyd`, packages/core/kernel).
+# start. The shipped packages are the CLI (`fy`, packages/cli), the daemon host (`fyd`, packages/core/kernel)
+# and the browser worker the daemon runs beside it (`fyd-browser-worker`, packages/plugins/browsers: the
+# kernel never points into a plugin, so the worker's bin entry is the Browsers package's own).
 #
 # `COMPILE_TARGETS` narrows that to the named artifact suffixes (space-separated, e.g. `linux-x64-baseline`)
 # for a caller that runs only some of them (a local check of its own host's binary: compiling every
@@ -12,6 +14,37 @@ set -euo pipefail
 # TARGET (a whitespace-only value counts as unset): the release path (publish.sh, the `compile` job) never
 # sets it, and an unknown name fails
 # rather than silently compiling less.
+#
+# `compile.sh --list` prints what one target compiles (package<TAB>entry<TAB>name per executable) and
+# exits before installing or building anything: the release contracts read it to prove no compile omits
+# an executable a release channel ships (scripts/validate/cli-contracts.sh release-helpers).
+CLI_PKG="packages/cli"
+DAEMON_PKG="packages/core/kernel"
+# The daemon's helper executables that live in a plugin package and ship beside it.
+BROWSERS_PKG="packages/plugins/browsers"
+
+# The FIRST bin key is the package's own executable name (the two-name model reads
+# `.bin | to_entries[0].key`); the remaining entries are helpers that ship beside it.
+package_bins() {
+  local package="$1" prefix
+  prefix="$(jq -r '.bin | to_entries[0].key' "${package}/package.json")"
+  [ -z "${prefix}" ] || [ "${prefix}" = "null" ] && echo "❌ no .bin entry in ${package}/package.json" >&2 && exit 1
+  jq -r --arg package "${package}" '.bin | to_entries[] | [$package, .value, .key] | @tsv' "${package}/package.json"
+}
+
+# Every executable one target compiles, in order.
+shipped_bins() {
+  package_bins "${CLI_PKG}"
+  package_bins "${DAEMON_PKG}"
+  package_bins "${BROWSERS_PKG}"
+}
+
+if [ "${1:-}" = "--list" ]; then
+  shipped_bins
+  exit 0
+fi
+[ "$#" -gt 0 ] && echo "❌ usage: compile.sh [--list]" >&2 && exit 2
+
 ./scripts/ci/setup.sh
 
 # bunTarget<TAB>artifactSuffix<TAB>os<TAB>cpu — x64 uses the -baseline build (no AVX2) so it runs under QEMU too.
@@ -49,18 +82,6 @@ bun install --frozen-lockfile "${install_os[@]}" "${install_cpu[@]}"
 # The hosts import the git-ignored generated registries (the install above also runs it as postinstall).
 ./scripts/local/gen.sh
 
-CLI_PKG="packages/cli"
-DAEMON_PKG="packages/core/kernel"
-
-# The FIRST bin key is the package's own executable name (the two-name model reads
-# `.bin | to_entries[0].key`); the remaining entries are helpers that ship beside it.
-package_bins() {
-  local package="$1" prefix
-  prefix="$(jq -r '.bin | to_entries[0].key' "${package}/package.json")"
-  [ -z "${prefix}" ] || [ "${prefix}" = "null" ] && echo "❌ no .bin entry in ${package}/package.json" >&2 && exit 1
-  jq -r --arg package "${package}" '.bin | to_entries[] | [$package, .value, .key] | @tsv' "${package}/package.json"
-}
-
 OUTDIR="${COMPILE_OUTDIR:-dist/bin}"
 mkdir -p "${OUTDIR}"
 
@@ -76,10 +97,7 @@ while IFS=$'\t' read -r target suffix _ _; do
     bun ./scripts/release/compile-executable.ts --entry "./${package}/${entry}" --target "${target}" \
       --outfile "${OUTDIR}/${artifact}"
     count=$((count + 1))
-  done < <(
-    package_bins "${CLI_PKG}"
-    package_bins "${DAEMON_PKG}"
-  )
+  done < <(shipped_bins)
 done <<<"${targets}"
 
 [ "${count}" -eq 0 ] && echo "❌ nothing was compiled: COMPILE_TARGETS names no target" >&2 && exit 1

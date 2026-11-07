@@ -313,7 +313,7 @@ describe('source scans', () => {
     return join(f.root, name);
   };
 
-  test('banned-globals exempts only the explicit standalone Worker trees and native WebRTC engine', async () => {
+  test('banned-globals exempts only the explicit standalone Worker trees, the browser worker process and native WebRTC engine', async () => {
     const f = ws([
       {
         id: 'connections',
@@ -325,11 +325,20 @@ describe('source scans', () => {
         },
       },
       { id: 'catalogs', files: { 'worker/src/worker.ts': 'await fetch("https://fixture.invalid");' } },
+      {
+        id: 'browsers',
+        files: {
+          'daemon/worker/adapters/main.ts': 'const endpoint = process.argv[2]; setTimeout(() => {}, 1);',
+          'daemon/worker/launcher.ts': 'await fetch("http://127.0.0.1:9222/json/version");',
+        },
+      },
       { id: 'other', files: { 'worker/src/worker.ts': 'await fetch("https://fixture.invalid");' } },
     ]);
     const found = await run(bannedGlobals, f);
-    expect(found).toHaveLength(3);
+    expect(found).toHaveLength(4);
     expect(messages(found)).toContain('connections/daemon/worker.ts');
+    expect(messages(found)).toContain('browsers/daemon/worker/launcher.ts');
+    expect(messages(found)).not.toContain('browsers/daemon/worker/adapters/');
     expect(messages(found)).toContain('connections/adapters/webrtc/other.ts');
     expect(messages(found)).toContain('other/worker/src/worker.ts');
   });
