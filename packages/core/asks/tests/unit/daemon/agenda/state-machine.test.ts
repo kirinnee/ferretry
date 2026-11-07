@@ -9,6 +9,7 @@ import type {
 import { AGENDA_SHAPE_ERRORS } from '../../../../daemon/lib/protocol/agenda-shape.ts';
 import {
   AGENDA_URGENT_WAKE_MS,
+  AgendaActionRequestSchema,
   AgendaItemSchema,
   AgendaSnapshotSchema,
   agendaBadgeCount,
@@ -3256,7 +3257,7 @@ describe('Agenda state machine — an input card never keeps free text from the 
   };
 
   for (const action of ['resolve', 'dismiss'] as const) {
-    it(`should drop the note a human sends with ${action}, since the composer may hold a password`, () => {
+    it(`I109 should drop the note a human sends with ${action}, since the composer may hold a password`, () => {
       // Arrange
       const created = inputCard();
 
@@ -3270,6 +3271,46 @@ describe('Agenda state machine — an input card never keeps free text from the 
       should(closed.snapshot.resolved[0]?.resolutionNote ?? null).be.null();
     });
   }
+
+  it('I14 refuses the generic answer on an input card with use_input_form, and leaves the card open', () => {
+    // Arrange
+    const created = inputCard();
+
+    // Act
+    const answered = failed(
+      applyAgendaCommand(created.ledger, {
+        action: 'answer',
+        actor: HUMAN,
+        id: 'A1',
+        response: { kind: 'open-question', answer: 'hunter2-PASSWORD' },
+        at: SECOND,
+      }),
+    );
+
+    // Assert
+    should(answered.error.code).equal('use_input_form');
+    should(activeEntry(created.ledger).item.kind).equal('input');
+  });
+
+  it('I14 refuses kind input on the generic add: only an input request raises an input card', () => {
+    // Arrange
+    const add = {
+      action: 'add',
+      subject: 'Type the password?',
+      why: 'the sign-in needs it',
+      howToResolve: 'Type it in the form',
+      kind: 'input',
+    };
+
+    // Act
+    const parsed = AgendaActionRequestSchema.safeParse(add);
+
+    // Assert
+    should(parsed.success).be.false();
+    should(parsed.error?.issues.map(issue => issue.message)).containEql(
+      'an input card is raised by an input request (terminal_request_input), never by an agenda add',
+    );
+  });
 
   it('should keep the daemon’s own status words on the card', () => {
     // Arrange
