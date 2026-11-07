@@ -15,30 +15,43 @@ import type {
   WardenEscalationRaise,
 } from './lib/index.ts';
 import type { AgendaSource } from './lib/protocol.ts';
+import { parseWardenEscalationSourceRef } from './lib/escalation.ts';
 
 const DAEMON = 'daemon' as SourceKey;
 const ONE_LINE = /[\r\n]+/gu;
 
 const oneLine = (text: string, max: number): string => text.replaceAll(ONE_LINE, ' ').trim().slice(0, max) || '-';
 
+/** A per-ferret entry: `f.<ferret>.<sourceRef>`. A ferret id has no `.` and a notice's ref starts `warden:`. */
+const PER_FERRET = /^f\.([A-Za-z0-9_-]+)\.(warden:.+)$/u;
+
+/** Whether a notice is about the machine (one for every ferret the fault names), not about one ferret. */
+export const isFleetNotice = (sourceRef: string): boolean =>
+  parseWardenEscalationSourceRef(sourceRef)?.scope === 'fleet';
+
 /**
- * A warden notice's own identity (`warden:ask:…`) as an Asks entry. Asks takes `[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}`; a
- * ref that is already one is used as it is, so the same notice finds itself again after a restart. A longer or odder
- * one is hashed, and remembered for the life of this process so the board can name it back.
+ * A warden notice's own identity (`warden:ask:…`) as an Asks entry. Asks is idempotent by `(source, entry)` across
+ * EVERY ferret, while today each board was one ferret's own, so a notice about one ferret carries that ferret in its
+ * entry (`f.<ferret>.<sourceRef>`): two ferrets stuck the same way are two asks. A machine-wide (`fleet`) notice is
+ * one ask whatever board it lands on, so its ref is the entry as it is. Asks takes
+ * `[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}`; an entry that fits is used as it is, so the same notice finds itself again after
+ * a restart and `refOf` reads the ref back out of it. A longer or odder one is hashed, and remembered for the life of
+ * this process so the board can name it back.
  */
 export class NoticeEntries {
   private readonly originals = new Map<string, string>();
 
-  entryOf(sourceRef: string): EntryId {
-    const direct = EntryIdSchema.safeParse(sourceRef);
+  entryOf(sourceRef: string, ferret: string): EntryId {
+    const key = isFleetNotice(sourceRef) ? sourceRef : `f.${ferret}.${sourceRef}`;
+    const direct = EntryIdSchema.safeParse(key);
     if (direct.success) return direct.data;
-    const hashed = EntryIdSchema.parse(`w-${createHash('sha256').update(sourceRef).digest('hex').slice(0, 40)}`);
+    const hashed = EntryIdSchema.parse(`w-${createHash('sha256').update(key).digest('hex').slice(0, 40)}`);
     this.originals.set(hashed, sourceRef);
     return hashed;
   }
 
   refOf(entry: string): string {
-    return this.originals.get(entry) ?? entry;
+    return PER_FERRET.exec(entry)?.[2] ?? this.originals.get(entry) ?? entry;
   }
 }
 
@@ -103,8 +116,10 @@ export class AsksWardenAgenda implements WardenAgendaPort {
 
   async raise(sessionId: string, request: WardenEscalationRaise): Promise<WardenAgendaWrite> {
     try {
-      const entry = this.entries.entryOf(request.sourceRef);
-      const standing = (await this.asks.open({ source: DAEMON, entry, state: 'open' })).length > 0;
+      const entry = this.entries.entryOf(request.sourceRef, sessionId);
+      // A ferret's notice stands only on that ferret's board; a machine-wide one stands wherever it was raised.
+      const scope = isFleetNotice(request.sourceRef) ? {} : { ferret: sessionId as FerretId };
+      const standing = (await this.asks.open({ source: DAEMON, entry, ...scope, state: 'open' })).length > 0;
       if (standing) return 'unchanged';
       await this.asks.notify({
         source: DAEMON,
@@ -126,7 +141,7 @@ export class AsksWardenAgenda implements WardenAgendaPort {
   async resolveSource(sessionId: string, source: AgendaSource, sourceRef: string, _note: string): Promise<boolean> {
     if (source !== 'agent-raised') return false;
     try {
-      const entry = this.entries.entryOf(sourceRef);
+      const entry = this.entries.entryOf(sourceRef, sessionId);
       const standing = await this.asks.open({ source: DAEMON, entry, ferret: sessionId as FerretId, state: 'open' });
       for (const ask of standing) await this.asks.close({ ferret: sessionId, id: ask.id }, 'source-gone');
       return standing.length > 0;
