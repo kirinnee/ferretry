@@ -1,0 +1,95 @@
+import { describe, expect, test } from 'bun:test';
+import { WorkSearchService, WORK_SEARCH_SWEEP_MS } from '../../../daemon/search/lib/service.ts';
+import { askWork, cardWork, FakeRedaction, FakeSource, NOW_MS, query } from '../../support/work.ts';
+
+const build = (
+  sources: readonly FakeSource[],
+  options: { redaction?: FakeRedaction; clock?: { ms: number } } = {},
+) => {
+  const warnings: string[] = [];
+  const clock = options.clock ?? { ms: NOW_MS };
+  const service = new WorkSearchService({
+    sources,
+    redaction: options.redaction ?? new FakeRedaction(),
+    now: () => clock.ms,
+    warn: message => warnings.push(message),
+  });
+  return { service, warnings, clock };
+};
+
+describe('the work search service', () => {
+  test('the first search builds from every source and answers with what it indexed', async () => {
+    const cards = new FakeSource('cards', [cardWork({ id: 'F1', title: 'Relay carrier' })], true);
+    const asks = new FakeSource('asks', [askWork({ id: 'A1', title: 'Relay question' })]);
+    const { service } = build([cards, asks]);
+    const answer = await service.search(query('relay'));
+    expect(answer.hits.map(hit => hit.id).sort()).toEqual(['A1', 'F1']);
+    expect(answer.indexed).toEqual({ cards: 1, asks: 1 });
+  });
+
+  test('a cheap source is read on every search, another only when it says it changed', async () => {
+    const cards = new FakeSource('cards', [cardWork({ id: 'F1', title: 'Relay carrier' })], true);
+    const asks = new FakeSource('asks', [askWork({ id: 'A1', title: 'Relay question' })]);
+    const { service } = build([cards, asks]);
+    await service.search(query('relay'));
+    cards.works.set('card:F2', cardWork({ id: 'F2', title: 'Relay pairing' }));
+    asks.works.set('ask:A2', askWork({ id: 'A2', title: 'Relay second' }));
+    const seen = (await service.search(query('relay'))).hits.map(hit => hit.id);
+    expect(seen).toContain('F2');
+    expect(seen).not.toContain('A2');
+    await service.changed('asks');
+    expect((await service.search(query('relay'))).hits.map(hit => hit.id)).toContain('A2');
+  });
+
+  test('a sweep finds a change nobody announced', async () => {
+    const asks = new FakeSource('asks', [askWork({ id: 'A1', title: 'Relay question' })]);
+    const { service, clock } = build([asks]);
+    await service.search(query('relay'));
+    asks.works.set('ask:A2', askWork({ id: 'A2', title: 'Relay second' }));
+    clock.ms += WORK_SEARCH_SWEEP_MS + 1;
+    await service.search(query('relay'));
+    await service.settled();
+    expect((await service.search(query('relay'))).hits.map(hit => hit.id)).toContain('A2');
+  });
+
+  test('a piece of work that went away leaves the index', async () => {
+    const cards = new FakeSource('cards', [cardWork({ id: 'F1', title: 'Relay carrier' })], true);
+    const { service } = build([cards]);
+    expect((await service.search(query('relay'))).total).toBe(1);
+    cards.works.clear();
+    expect((await service.search(query('relay'))).total).toBe(0);
+  });
+
+  test('a secret is never indexed, and a changed epoch rebuilds before the next answer', async () => {
+    const redaction = new FakeRedaction();
+    redaction.values = ['hunter2'];
+    const cards = new FakeSource('cards', [
+      cardWork({ id: 'F1', title: 'Login', fields: { summary: 'the password is hunter2' } }),
+    ]);
+    const { service } = build([cards], { redaction });
+    expect((await service.search(query('hunter2'))).total).toBe(0);
+    redaction.values = ['password'];
+    redaction.generation += 1;
+    const answer = await service.search(query('hunter2'));
+    expect(answer.total).toBe(1);
+    expect(answer.hits[0]?.match.line).toBe('the [redacted] is hunter2');
+  });
+
+  test('an unreadable source keeps what it gave and is named once in a warning', async () => {
+    const asks = new FakeSource('asks', [askWork({ id: 'A1', title: 'Relay question' })]);
+    const { service, warnings } = build([asks]);
+    await service.search(query('relay'));
+    asks.failing = true;
+    await service.changed('asks');
+    expect((await service.search(query('relay'))).total).toBe(1);
+    expect(warnings.some(line => line.includes('asks'))).toBe(true);
+  });
+
+  test('the related check answers with strength and masks what it quotes', async () => {
+    const cards = new FakeSource('cards', [cardWork({ id: 'F1', title: 'Agenda focus view' })], true);
+    const { service } = build([cards]);
+    const answer = await service.related({ kind: 'card', title: 'Agenda focus view' });
+    expect(answer.matches[0]?.strength).toBe('strong');
+    expect(answer.matches[0]?.hit.id).toBe('F1');
+  });
+});
