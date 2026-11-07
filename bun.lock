@@ -153,6 +153,9 @@
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
       },
+      "devDependencies": {
+        "happy-dom": "20.14.6",
+      },
     },
     "packages/plugins/catalogs": {
       "name": "@ferretry/plugin-catalogs",
