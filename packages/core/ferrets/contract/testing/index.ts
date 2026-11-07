@@ -10,6 +10,8 @@ import { err, type Instant, instantFromEpochMs, ok, type Result } from '@ferretr
 import type { FerretState, FerretSummary, HarnessKey, LoginKindKey } from '../ids.ts';
 import type {
   AttachRefusal,
+  DeliveryOutcome,
+  RunnerDelivery,
   Delivery,
   Harness,
   LaunchSpec,
@@ -38,6 +40,8 @@ export const emptyChildEnvironment = (): ChildEnvironment =>
 export class FakeRunner implements Runner {
   readonly key = 'tmux' as const;
   starts = 0;
+  /** Every delivery made, with the handle it went to. */
+  readonly deliveries: { readonly handle: RunnerHandle; readonly delivery: RunnerDelivery }[] = [];
   readonly #live = new Map<string, RunningFerret & { readonly ferret: FerretId }>();
   #next = 0;
 
@@ -71,6 +75,12 @@ export class FakeRunner implements Runner {
     return this.#live.has(handle);
   }
   async signal(): Promise<void> {}
+  async deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome> {
+    if (!this.#live.has(handle)) throw new Error(`no pane ${handle}`);
+    await delivery.beforeWrite?.();
+    this.deliveries.push({ handle, delivery });
+    return delivery.text.startsWith('/') ? 'handled-local' : 'turn-started';
+  }
 }
 
 export interface RunnerSubject {
@@ -108,6 +118,27 @@ export function runnerConformance(name: string, make: () => RunnerSubject | Prom
       const before = subject.starts();
       const attached = await subject.runner.attach('%99999' as RunnerHandle);
       expect(attached.ok).toBe(false);
+      expect(subject.starts()).toBe(before);
+    });
+    test('a delivery to a live ferret lands after its beforeWrite step and answers an outcome', async () => {
+      const subject = await make();
+      const started = await subject.runner.start(subject.spec);
+      if (!started.ok) throw new Error('start refused');
+      const steps: string[] = [];
+      const outcome = await subject.runner.deliver(started.value.handle, {
+        text: 'hello',
+        beforeWrite: async () => {
+          steps.push('before');
+        },
+      });
+      expect(['turn-started', 'handled-local']).toContain(outcome);
+      expect(steps).toEqual(['before']);
+      await subject.runner.stop(started.value.handle, 'now');
+    });
+    test('a delivery to a handle with nothing behind it rejects and starts nothing', async () => {
+      const subject = await make();
+      const before = subject.starts();
+      await expect(subject.runner.deliver('%99999' as RunnerHandle, { text: 'hello' })).rejects.toThrow();
       expect(subject.starts()).toBe(before);
     });
     test('attach after stop is refused', async () => {

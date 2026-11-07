@@ -78,6 +78,20 @@ export interface RunningFerret {
 }
 
 export type StartRefusal = 'unavailable' | 'failed' | 'limits';
+
+/**
+ * One message for a running ferret's pane (today's `TmuxPaneDelivery.deliver`): the text pasted and submitted, the
+ * answer to Claude Code's large-session resume gate (`full`, the default, keeps fidelity; `summary` saves quota;
+ * option 3 is never chosen), and an optional step run immediately before the write lands.
+ */
+export interface RunnerDelivery {
+  readonly text: string;
+  readonly resumeMenuChoice?: 'full' | 'summary';
+  readonly beforeWrite?: () => Promise<void>;
+}
+
+/** Today's `InjectionOutcome`: the text started a turn, or the harness handled it locally (a slash command). */
+export type DeliveryOutcome = 'turn-started' | 'handled-local';
 /** Why `attach` would not adopt a handle: nothing there, not a ferret of ours, or not the ferret named. */
 export type AttachRefusal = 'gone' | 'not-a-ferret' | 'mismatch' | 'unsupported';
 
@@ -93,6 +107,11 @@ export interface Runner {
   attach(handle: RunnerHandle): Promise<Result<RunningFerret, AttachRefusal>>;
   alive(handle: RunnerHandle): Promise<boolean>;
   signal(handle: RunnerHandle, signal: 'interrupt' | 'terminate'): Promise<void>;
+  /**
+   * Delivers one message into the ferret's pane (today's tmux paste-and-keys delivery, which Conversation and the
+   * harnesses call). A handle with nothing behind it rejects; it never starts anything.
+   */
+  deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome>;
 }
 
 // ─── harness (§4.3) ───────────────────────────────────────────────────────────────────────────────────────────────
