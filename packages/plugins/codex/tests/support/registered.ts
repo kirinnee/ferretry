@@ -13,6 +13,8 @@ export function registeredCodex() {
   process.env.FY_HOME = home;
   const files = new Map<string, string>();
   const reads: string[] = [];
+  /** Every bounded read: `offset`/`length` windows only. */
+  const windows: { path: string; offset: number; length: number }[] = [];
   const state = new Map<string, unknown>();
   const rootsUsed: { name: string; subfolder?: string }[] = [];
   const commands: RunSpec[] = [];
@@ -60,8 +62,12 @@ export function registeredCodex() {
         if (text === undefined) throw new Error('missing');
         return text;
       },
-      readBytes: async () => {
-        throw new Error('not used');
+      readBytes: async (path, limit) => {
+        if (typeof limit !== 'object') throw new Error('discovery reads only windows');
+        windows.push({ path, ...limit });
+        const text = files.get(path);
+        if (text === undefined) throw new Error('missing');
+        return new TextEncoder().encode(text).slice(limit.offset, limit.offset + limit.length);
       },
       writeText: async (path, text) => {
         files.set(path, text);
@@ -154,6 +160,7 @@ export function registeredCodex() {
     build,
     files,
     reads,
+    windows,
     rootsUsed,
     commands,
     runner,

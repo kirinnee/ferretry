@@ -121,6 +121,30 @@ describe('the registered Codex harness', () => {
     expect(await harness.transcript.read(spec.ferret)).toEqual([]);
   });
 
+  test('discovery reads only head and tail windows; only the owned rollout is read whole', async () => {
+    const box = fixture();
+    const harness = box.build();
+    const spec = box.spec();
+    await harness.start(spec, box.runner, ENV);
+    const filler = message('x'.repeat(1_000)).repeat(400);
+    // A compacted rollout: its header names no correlation path, its tail re-states it.
+    const owned = `${spec.home}/sessions/compacted.jsonl`;
+    box.files.set(
+      owned,
+      line('session_meta', { id: 'native-compacted', cwd: '/work/project' }) +
+        filler +
+        message(`brief in ${spec.home}/codex-correlation/unreachable`) +
+        message('right ferret'),
+    );
+    const stranger = `${spec.home}/sessions/stranger.jsonl`;
+    box.files.set(stranger, header('stranger', '/somebody-else') + filler);
+    expect((await harness.transcript.read(spec.ferret)).at(-1)?.text).toBe('right ferret');
+    expect(box.reads.filter(path => path.endsWith('.jsonl'))).toEqual([owned]);
+    expect(box.windows.every(read => read.length <= 256 * 1024)).toBe(true);
+    expect(box.windows.some(read => read.path === stranger && read.offset > 0)).toBe(true);
+    expect(await harness.conversations.list(undefined)).toEqual([]);
+  });
+
   test('follows complete appended records once and stops when aborted', async () => {
     const box = fixture();
     const harness = box.build();

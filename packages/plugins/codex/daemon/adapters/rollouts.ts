@@ -14,12 +14,42 @@ import { selectCodexRollout } from '../lib/transcript/rollout.ts';
 
 const MAX_ROLLOUTS = 4_000;
 const MAX_DIRECTORIES = 8_000;
+/**
+ * Today's rollout index windows: EVERY discovery read is bounded, because a rollout grows without bound while its
+ * agent works. The header (`session_meta`) is in the head by construction; the correlation path is named by the
+ * opening turn, and a tail window covers a compacted rollout that re-states its brief later. Only the one rollout
+ * found to be the ferret's is read whole.
+ */
+const HEAD_BYTES = 32 * 1024;
+const TAIL_BYTES = 256 * 1024;
+const decoder = new TextDecoder();
+
 interface Rollout {
   readonly id: string;
   readonly file: FencedPath;
-  readonly text: string;
   readonly folder: string;
   readonly modified: Instant;
+  readonly size: number;
+}
+
+interface OwnedRollout extends Rollout {
+  readonly text: string;
+}
+
+/** `length` bytes from `offset`, or nothing when the file is gone or refused. */
+async function window(root: RootHandle, file: FencedPath, offset: number, length: number): Promise<string | undefined> {
+  return await root
+    .readBytes(file, { offset, length })
+    .then(bytes => decoder.decode(bytes))
+    .catch(() => undefined);
+}
+
+/** Whether the rollout's head or tail window contains `needle` (today's `contains`). */
+async function contains(root: RootHandle, rollout: Rollout, needle: string): Promise<boolean> {
+  if ((await window(root, rollout.file, 0, HEAD_BYTES))?.includes(needle) === true) return true;
+  if (rollout.size <= HEAD_BYTES) return false;
+  const tail = await window(root, rollout.file, Math.max(HEAD_BYTES, rollout.size - TAIL_BYTES), TAIL_BYTES);
+  return tail?.includes(needle) === true;
 }
 
 type Ports = Pick<KernelPorts, 'roots' | 'clock' | 'redaction' | 'state'>;
@@ -64,10 +94,10 @@ async function rollouts(root: RootHandle, directory: string): Promise<readonly R
       if (entry.kind !== 'file' || !name.endsWith('.jsonl')) continue;
       const child = root.resolve(childRelative);
       if (!child.ok) continue;
-      const text = await root.readText(child.value).catch(() => undefined);
-      const meta = text === undefined ? undefined : metadata(text);
-      if (meta !== undefined && text !== undefined) {
-        found.push({ id: meta.id, folder: meta.cwd, file: child.value, text, modified: entry.modified });
+      const head = await window(root, child.value, 0, HEAD_BYTES);
+      const meta = head === undefined ? undefined : metadata(head);
+      if (meta !== undefined) {
+        found.push({ id: meta.id, folder: meta.cwd, file: child.value, modified: entry.modified, size: entry.size });
         if (found.length >= MAX_ROLLOUTS) break;
       }
     }
@@ -113,28 +143,31 @@ export class CodexRollouts {
     );
   }
 
-  private async owned(ferret: FerretId): Promise<Rollout | undefined> {
+  private async owned(ferret: FerretId): Promise<OwnedRollout | undefined> {
     const binding = await this.binding(ferret);
     if (binding === undefined) return undefined;
     const ownHome = this.owner(ferret).resolve('');
     if (!ownHome.ok || ownHome.value !== binding.home) return undefined;
-    const candidates = await rollouts(this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` }), '');
+    const root = this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` });
+    const candidates = await rollouts(root, '');
+    let chosen: Rollout | undefined;
     if (binding.native !== undefined) {
       const matches = candidates.filter(candidate => candidate.id === binding.native);
-      return matches.length === 1 ? matches[0] : undefined;
+      chosen = matches.length === 1 ? matches[0] : undefined;
+    } else {
+      const needle = `${binding.home}/codex-correlation/unreachable`;
+      const evidence = [];
+      for (const candidate of candidates)
+        evidence.push({ id: candidate.id, file: candidate.file, correlated: await contains(root, candidate, needle) });
+      const selected = selectCodexRollout(evidence, { baseline: binding.baseline });
+      chosen = selected === undefined ? undefined : candidates.find(candidate => candidate.file === selected.file);
     }
-    const selected = selectCodexRollout(
-      candidates.map(candidate => ({
-        id: candidate.id,
-        file: candidate.file,
-        correlated: candidate.text.includes(`${binding.home}/codex-correlation/unreachable`),
-      })),
-      { baseline: binding.baseline },
-    );
-    return selected === undefined ? undefined : candidates.find(candidate => candidate.file === selected.file);
+    if (chosen === undefined) return undefined;
+    const text = await root.readText(chosen.file).catch(() => undefined);
+    return text === undefined ? undefined : { ...chosen, text };
   }
 
-  private events(rollout: Rollout) {
+  private events(rollout: OwnedRollout) {
     // Ignore only the unflushed suffix, so a partially appended record is seen once it is complete.
     const lines = rollout.text.split('\n');
     lines.pop();

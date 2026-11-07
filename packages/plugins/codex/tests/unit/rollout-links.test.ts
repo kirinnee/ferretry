@@ -98,6 +98,13 @@ describe('Codex rollout walk never follows a link to a sign-in document', () => 
         if (node?.kind !== 'file') throw new Error('missing');
         return node.text;
       },
+      readBytes: async (path: string, limit: { offset: number; length: number }) => {
+        const target = follow(path);
+        opened.push(`${AGENT}/${target}`);
+        const node = tree.get(target);
+        if (node?.kind !== 'file') throw new Error('missing');
+        return new TextEncoder().encode(node.text).slice(limit.offset, limit.offset + limit.length);
+      },
     } as unknown as RootHandle;
     const rollouts = new CodexRollouts(
       ports({
@@ -111,7 +118,7 @@ describe('Codex rollout walk never follows a link to a sign-in document', () => 
     expect(read.transcript.map(entry => entry.text)).toEqual(['right ferret']);
     expect(JSON.stringify(read)).not.toContain(SIGN_IN);
     neverSignIn(opened);
-    expect(opened).toEqual([`${AGENT}/owned.jsonl`, `${AGENT}/owned.jsonl`]);
+    expect(new Set(opened)).toEqual(new Set([`${AGENT}/owned.jsonl`]));
   });
 
   test('kernel roots: sessions -> . with rollout-alias.jsonl -> auth.json opens nothing at all', async () => {
