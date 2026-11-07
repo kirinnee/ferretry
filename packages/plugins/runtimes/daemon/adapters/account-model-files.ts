@@ -119,7 +119,9 @@ export async function readDeclaredAccountModel(
  * The component-source fence over this daemon's own directories, as configured: no component may read, copy
  * or link a document inside them, the fleet's asset tree excepted (docs/secrets.md#what-the-state-home-fence-refuses).
  */
-export const componentSourceFence = (paths: Pick<FleetHomePaths, 'home' | 'state' | 'config' | 'fleet'>): SourceFence => ({
+export const componentSourceFence = (
+  paths: Pick<FleetHomePaths, 'home' | 'state' | 'config' | 'fleet'>,
+): SourceFence => ({
   homes: [paths.home, paths.state, paths.config],
   open: [join(paths.fleet, 'assets')],
 });
@@ -280,18 +282,16 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
     });
   return {
     document: async fresh =>
-      await readConfigAccountDocument(
-        options.config,
-        { configDirectory: options.configDirectory },
-        fresh,
-      ),
+      await readConfigAccountDocument(options.config, { configDirectory: options.configDirectory }, fresh),
     readAsset: async path => await readComponentText(host.provisioner.kernel, path, sourceFence),
     documentRevision: async path => await documentRevision(host.files, path),
     ids,
     locate: options.locate,
     commandExists: command => host.commands.which(command) !== undefined,
     wrappersCurrent: async plan =>
-      await options.publication.reading(async () => await wrappersCurrent(host.files, layout.binDirectory, plan.operations)),
+      await options.publication.reading(
+        async () => await wrappersCurrent(host.files, layout.binDirectory, plan.operations),
+      ),
     sessionStatuses: async () => await options.sessionStatuses(),
     ...(records === undefined
       ? {}

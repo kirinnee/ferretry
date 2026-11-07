@@ -89,12 +89,7 @@ const isSingleComponent = (name: string): boolean =>
  * account's own folder, which its harness can write, so a `chmod` by path could be redirected by a link swapped in
  * there — onto a file in the state home. A link there now is refused (`ELOOP`) instead.
  */
-async function chmodStaged(
-  disk: ProvisionerDisk,
-  folder: GuardedFolder,
-  staged: string,
-  mode: number,
-): Promise<void> {
+async function chmodStaged(disk: ProvisionerDisk, folder: GuardedFolder, staged: string, mode: number): Promise<void> {
   const descriptor = await folder.openFile(staged, 'read');
   try {
     disk.fchmod(descriptor, mode);
@@ -666,7 +661,9 @@ export class FileFleetProvisioner implements FleetProvisioner {
     operations: readonly FleetWriteOperation[],
     sharedHistory: FleetApplyPreview['sharedHistory'],
   ): Promise<readonly FleetWriteOperation[]> {
-    const refusedHomes = sharedHistory.flatMap(preview => preview.refusals.map((refusal: HistoryRefusal) => refusal.home));
+    const refusedHomes = sharedHistory.flatMap(preview =>
+      preview.refusals.map((refusal: HistoryRefusal) => refusal.home),
+    );
     // An unresolvable state home, or an asset opening that reaches a protected one, refuses the plan here
     // as it does at apply — even when no operation reads a source.
     await this.resolvedSourceFence();
@@ -936,11 +933,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
    * Removal goes through the journal like every other destructive step, so a later failure in the same
    * batch puts each swept entry back exactly where it was.
    */
-  private async pruneDirectory(
-    directory: string,
-    keep: ReadonlySet<string>,
-    journal: MutationJournal,
-  ): Promise<void> {
+  private async pruneDirectory(directory: string, keep: ReadonlySet<string>, journal: MutationJournal): Promise<void> {
     // Opened through the guard and swept through that one handle. A container a harness swapped for a link
     // (into the state home, say) is refused here — or, swapped after this opened it, is never the folder the
     // entries are listed in and moved aside in — so nothing outside the container is moved, and so nothing

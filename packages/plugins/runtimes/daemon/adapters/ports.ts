@@ -15,12 +15,7 @@ import type { KernelPorts } from '@ferretry/kernel/contract';
 import type { StoredCredentialResolution } from '../lib/account/credentials.ts';
 import type { CredentialMaterial } from '../lib/identity.ts';
 import type { RuntimeRename } from '../lib/service/foreign.ts';
-import type {
-  DisplacedState,
-  FleetApplyPlan,
-  FleetApplyPreview,
-  UnrestoredPath,
-} from '../lib/provisioning.ts';
+import type { DisplacedState, FleetApplyPlan, FleetApplyPreview, UnrestoredPath } from '../lib/provisioning.ts';
 
 // ─── host files (read side) ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -257,7 +252,10 @@ export interface MutationJournal {
   withBackup<T>(target: string, read: (folder: GuardedFolder, backup: string) => Promise<T>): Promise<T | undefined>;
   capture(target: string, folder?: GuardedFolder): Promise<boolean>;
   captureDirectory(target: string, mode?: number): Promise<void>;
-  rollback(): Promise<{ readonly unrestored: readonly UnrestoredPath[]; readonly displaced: readonly DisplacedState[] }>;
+  rollback(): Promise<{
+    readonly unrestored: readonly UnrestoredPath[];
+    readonly displaced: readonly DisplacedState[];
+  }>;
   discard(): Promise<readonly string[]>;
   displace(target: string, isOwnWork: (moved: string) => Promise<boolean>): Promise<void>;
 }
@@ -398,7 +396,7 @@ export const refusedProvisionerDisk: ProvisionerDisk = {
   close: refusedFiles,
 };
 
-const refusedHelpers = refuse("the checked-folder, journal and apply-claim helpers");
+const refusedHelpers = refuse('the checked-folder, journal and apply-claim helpers');
 
 /** A {@link ProvisionerKernel} that refuses every call: applying a fleet plan needs the kernel's descriptor helpers. */
 export const refusedProvisionerKernel: ProvisionerKernel = {
