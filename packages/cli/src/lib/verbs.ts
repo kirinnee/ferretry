@@ -36,6 +36,15 @@ const SHELL_VERB_LINES = [
     verb: 'update',
     summary: 'update this machine, restart its daemon, and roll back if the new version does not serve',
   },
+  {
+    verb: 'snapshot',
+    summary: "snapshot <id>: capture the ferret's live screen (a dead pane is refused, never served as blank)",
+  },
+  {
+    verb: 'events',
+    summary: 'events <id>: read the durable events the daemon recorded for a ferret (--after, --limit, --json)',
+  },
+  { verb: 'view', summary: 'view <id>: the same as events' },
   { verb: 'ask', summary: 'list the asks waiting for an answer, and answer one' },
 ] as const satisfies readonly { readonly verb: string; readonly summary: string }[];
 
