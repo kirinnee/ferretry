@@ -1,8 +1,8 @@
 /**
  * `contract-graph` (§2.4, §7.9): the contract import graph has a cycle, a core contract imports a plugin contract, or
  * a plugin contract imports another plugin's contract outside the allowed edges (Usage → Logins for `LoginId`, Packs →
- * Runtimes for `RuntimeId`, Access → Connections for the published carriers a pairing answer carries; any other edge
- * needs the lead).
+ * Runtimes for `RuntimeId`, Access → Connections for the published carriers a pairing answer carries, Board, Agenda and
+ * Terminals → Conversation as reference.catalog providers (optional use); any other edge needs the lead).
  */
 import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
 import { isCore } from '../gen/lib/graph.ts';
@@ -17,6 +17,9 @@ export const ALLOWED_PLUGIN_EDGES: ReadonlySet<string> = new Set([
   // Warden settings read the runtime list and whether the Jev key is set (britnee, optional uses).
   'warden→runtimes', // read-only fact for Warden settings (britnee, optional uses)
   'warden→voice', // read-only fact for Warden settings (britnee, optional uses)
+  'board→conversation', // reference.catalog provider (lead ruling 2026-11-07: providers take Conversation as optional uses)
+  'agenda→conversation', // reference.catalog provider (lead ruling 2026-11-07: providers take Conversation as optional uses)
+  'terminals→conversation', // reference.catalog provider (lead ruling 2026-11-07: providers take Conversation as optional uses)
 ]);
 
 export function contractEdges(edges: readonly ImportEdge[]): Map<string, Set<string>> {

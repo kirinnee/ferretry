@@ -65,3 +65,4 @@ export * from './metric-chart.tsx';
 export * from './model-select.tsx';
 export * from './model-tiers.ts';
 export * from './local-models-note.tsx';
+export * from './jump-to-latest.tsx';

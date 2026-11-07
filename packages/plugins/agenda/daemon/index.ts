@@ -25,10 +25,13 @@ import {
 import { BuzzService } from './lib/buzz-service.ts';
 import { AgendaAgentClearer } from './lib/clear-agents.ts';
 import { MachineAgendaView } from './lib/machine-agenda.ts';
+import { AgendaReferenceMenu } from './lib/reference-menu.ts';
 import { AgendaRollup } from './lib/rollup.ts';
 import { markSeen } from './lib/seen.ts';
 import { buzzBody, buzzTitle } from './lib/words.ts';
 import { agendaRoutes } from './routes.ts';
+
+const REFERENCE_MENU_HOOK = 'reference.catalog:!' as const;
 
 /** The agenda's own defaults when `config/agenda.yaml` is absent: every switch on. */
 const DEFAULT_CONFIG: AgendaConfig = { agendaMode: true, agendaNudge: true, deadlineWarnHours: 3 };
@@ -175,6 +178,8 @@ export default implementDaemon(manifest, {
         },
       },
       hooks: {
+        // The composer's `!` menu (reference.catalog): the ferret's open asks. Asked only while Conversation is on.
+        [REFERENCE_MENU_HOOK]: new AgendaReferenceMenu(asks),
         'ferret.changed': ({ ferret, state: now, previous, change }) => {
           const work =
             change === 'started'

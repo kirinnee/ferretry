@@ -1,4 +1,4 @@
-import type { HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
+import type { ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import type { Instant } from '@ferretry/std';
 import { decideHome } from '../contract/home.ts';
 import { milliseconds } from '@ferretry/std';
@@ -199,8 +199,8 @@ export interface HostOptions {
   readonly adapters: HostAdapters;
   /** `config/plugins.yaml`: on/off per plugin. Core is always on. Default: on. */
   readonly enabled?: (id: string) => boolean;
-  /** The generated effective contract hash per package (§9.6). */
-  readonly contractHash?: (id: string) => string;
+  /** The generated contract hash per package (§9.6): the effective hash, or with `'member'` the member-surface hash. */
+  readonly contractHash?: (id: string, surface?: ContractSurface) => string;
   readonly instructionText?: (plugin: string, path: string) => string | undefined;
   /** The local listener (Unix socket + loopback port); started at step 7. */
   readonly listen?: (host: RunningHost) => Promise<Listening>;
@@ -643,7 +643,13 @@ async function bootLocked(
       },
     },
     lifecycle,
-    contract: { hash: () => options.contractHash?.(manifest.id) ?? 'unhashed' },
+    contract: {
+      hash: surface => {
+        if (surface === 'member' && (manifest.actions?.memberRoutes ?? []).length === 0)
+          throw new TypeError(`${manifest.id} declares no member routes, so it has no member-surface hash`);
+        return options.contractHash?.(manifest.id, surface) ?? 'unhashed';
+      },
+    },
   });
 
   // 4. Build in start order.

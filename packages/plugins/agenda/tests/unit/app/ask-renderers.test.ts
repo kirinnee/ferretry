@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { AskOnScreenSchema } from '../../../contract/wire.ts';
+import { AskOnScreenSchema } from '@ferretry/core-asks/contract';
 import { askRendererFor } from '../../../app/features/agenda/ask-renderers.tsx';
 import { agendaItem } from '../../support/app/agenda-inbox.tsx';
 

@@ -117,6 +117,7 @@ export {
   TYPE_TOKENS,
   themeProperties,
 } from './theme/tokens.ts';
+export { CODE_FACE_URLS } from './theme/fonts.ts';
 export {
   DEFAULT_THEME_PREFERENCE,
   THEME_FAMILIES,
@@ -304,3 +305,7 @@ export {
 } from './scroll/scroll-memory.ts';
 export { useRouteScrollMemory } from './scroll/use-route-scroll-memory.ts';
 export { useChatScrollSlot } from './scroll/chat-scroll.ts';
+/** Follow-the-tail for a scroller whose content grows at the end (the chat transcript, a terminal capture). */
+export * from './scroll/transcript-follow.ts';
+export * from './scroll/use-stick-to-bottom.ts';
+export { RECONNECTING_GRACE_MS } from './shared/reconnecting-grace.ts';

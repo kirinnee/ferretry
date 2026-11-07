@@ -73,8 +73,7 @@
       "GAP(shell): today's link-behaviour facility (open a link in the in-app browser or the real one) is not in @ferretry/app, so the in-app link sheet and workspace host are ported but nothing in the shell mounts them yet",
       "GAP(app): the human sign-in window (Real window login) is ported as a client and a model; the panel does not offer the button until the shell can open an external window",
       "GAP(tests): today's visual tests browser-mode.visual, browser-proxy.visual and browser-tab.visual (tests/integration/features), with browser-pane-jumpy.visual and browser-tab-bars.visual, are not moved: plugin app halves have no visual harness yet",
-      "GAP(shell): Settings › Browser has no authority line: today's ChangeApplyPanel (\"{machine} will ask you to confirm with your passkey when you save\", the grant-refused explanation, the disabled Save button) is being ported into @ferretry/app/ui by the Logins fixer (fix/logins-r1, 7d06c97bd3, not pushed yet); the daemon still enforces step-up and a held change says so, so only the up-front sentence and the disabled button are missing. Wire BrowserModeSection and BrowserProxySection to it (useChangeAuthority + ChangeApplyPanel) once it lands; Browsers then declares GET /v1/grants",
-      "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\""
+      "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" (and \"This machine will ask you to confirm with your passkey\") where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\""
     ],
     "ferrets": [
       "Fork into a new ferret (the chat's fork action and the new-ferret page's fork seed) is not ported: it needs Conversation's transcript rows to offer it and the new-ferret page to take the seed",
@@ -128,25 +127,8 @@
       "GAP(answer-files), GAP(sign-in-rule-sweep), GAP(push-delivery), GAP(notification-open), GAP(item-opened): answer uploads, the sign-in rule sweep and push delivery/open run through ports Conversation, Accounts and Access must bind (Access's agendaItemOpenedHandler is an app function its contract does not expose, so opening an ask does not yet close this device's own buzz lines); the notification filter's sentence says the switch is that machine's own, as the rows are Access's now; app/NEEDS-APP-SHELL.txt lists every open gap"
     ]
   },
-  "pendingHalves": {
-    "terminals": ["app"]
-  },
+  "pendingHalves": {},
   "pendingAppPorts": [
-    {
-      "plugin": "terminals",
-      "path": "packages/plugins/terminals/app",
-      "reason": "shell daemon-client, grants and browser-link facilities"
-    },
-    {
-      "plugin": "terminals",
-      "path": "packages/plugins/terminals/tests/unit/app",
-      "reason": "shell daemon-client, grants and browser-link facilities"
-    },
-    {
-      "plugin": "terminals",
-      "path": "packages/plugins/terminals/tests/support/app",
-      "reason": "shell daemon-client, grants and browser-link facilities"
-    },
     {
       "plugin": "packs",
       "path": "packages/plugins/packs/app/components/pack-call.tsx",

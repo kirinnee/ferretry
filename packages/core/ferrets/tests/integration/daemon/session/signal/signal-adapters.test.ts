@@ -2,6 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
 import {
   FileSignalArtifacts,
@@ -9,6 +10,7 @@ import {
   StorageSignalRepository,
 } from '../../../../../daemon/adapters/session/signal/index.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import { FerretConfigFile, FerretStateFile } from '../../../../../contract/index.ts';
 import { memoryStorage, sessionConfig } from '../../../../support/daemon/storage.ts';
 
 /**
@@ -24,8 +26,21 @@ const ID = parseSessionId('session-1');
 const PEER = parseSessionId('session-2');
 
 async function openStorage(instant = NOW) {
-  const { storage } = await memoryStorage({ clock: { now: () => instant } });
-  return { opened: { storage } };
+  const { storage, folder } = await memoryStorage({ clock: { now: () => instant } });
+  return { opened: { storage, folder } };
+}
+
+/**
+ * A document the declared schema refuses, laid on disk as a damaged or foreign file would be: the storage's own
+ * write refuses it, so a test about reading one plants it straight into the state folder.
+ */
+function plantDocument(
+  folder: MemoryStateFolder,
+  file: typeof FerretConfigFile | typeof FerretStateFile,
+  id: SessionId,
+  document: Record<string, unknown>,
+): void {
+  folder.plant(file, JSON.stringify({ format: 1, ...document }), id);
 }
 
 function config(overrides: Record<string, unknown> = {}) {
@@ -146,18 +161,24 @@ describe('the storage signal repository', () => {
     await opened.storage.close();
   });
 
-  it('should fall back to the configuration turn and drop a wait with no start instant', async () => {
-    // A wait whose `since` is missing cannot be credited or expired, so it is not a wait at all.
+  it('should read no target from a wait with no start instant, which the state schema refuses', async () => {
+    // A wait whose `since` is missing cannot be credited or expired, and the declared state schema no longer lets one
+    // be stored: a document that carries one is refused on read, so no target is guessed from it.
     // Arrange
     const { opened } = await openStorage();
     await opened.storage.writeConfig(ID, config());
-    await opened.storage.writeState(ID, { id: 'session-1', status: 'running', waiting: { condition: 'CI' } });
+    plantDocument(opened.folder, FerretStateFile, ID, {
+      id: 'session-1',
+      status: 'running',
+      turn: 0,
+      waiting: { condition: 'CI' },
+    });
 
     // Act
     const actual = await new StorageSignalRepository(opened.storage, clock).read(ID);
 
     // Assert
-    should(actual).deepEqual({ id: ID, status: 'running', mode: 'auto', turn: 3 });
+    should(actual).be.undefined();
     await opened.storage.close();
   });
 
@@ -165,8 +186,8 @@ describe('the storage signal repository', () => {
     // Arrange
     const { opened } = await openStorage();
     const subject = new StorageSignalRepository(opened.storage, clock);
-    await opened.storage.writeConfig(PEER, config({ id: 'session-2', mode: 'batch' }));
-    await opened.storage.writeState(PEER, { id: 'session-2', status: 'running' });
+    plantDocument(opened.folder, FerretConfigFile, PEER, config({ id: 'session-2', mode: 'batch' }));
+    await opened.storage.writeState(PEER, { id: 'session-2', turn: 0, status: 'running' });
 
     // Act
     const absent = await subject.read(ID);
@@ -183,7 +204,7 @@ describe('the storage signal repository', () => {
     // Arrange
     const { opened } = await openStorage();
     await opened.storage.writeConfig(ID, config());
-    await opened.storage.writeState(ID, { id: 'session-1', status: 'finished' });
+    plantDocument(opened.folder, FerretStateFile, ID, { id: 'session-1', turn: 0, status: 'finished' });
 
     // Act
     const actual = await new StorageSignalRepository(opened.storage, clock).read(ID);
@@ -229,7 +250,12 @@ describe('the storage signal repository', () => {
     // Arrange
     const { opened } = await openStorage();
     await opened.storage.writeConfig(ID, config());
-    await opened.storage.writeState(ID, { id: 'session-1', status: 'running', nudgedAt: '2026-08-01T09:00:00.000Z' });
+    await opened.storage.writeState(ID, {
+      id: 'session-1',
+      turn: 0,
+      status: 'running',
+      nudgedAt: '2026-08-01T09:00:00.000Z',
+    });
     const subject = new StorageSignalRepository(opened.storage, clock);
 
     // Act
@@ -271,7 +297,7 @@ describe('the storage signal repository', () => {
     // Arrange
     const { opened } = await openStorage();
     await opened.storage.writeConfig(ID, config());
-    await opened.storage.writeState(ID, { id: 'session-1', status: 'running' });
+    await opened.storage.writeState(ID, { id: 'session-1', turn: 0, status: 'running' });
 
     // Act
     await new StorageSignalRepository(opened.storage, clock).transition(ID, {
@@ -289,8 +315,8 @@ describe('the storage signal repository', () => {
     // guessed target would report a session state nothing on disk supports.
     // Arrange
     const { opened } = await openStorage();
-    await opened.storage.writeConfig(ID, config({ mode: 'batch' }));
-    await opened.storage.writeState(ID, { id: 'session-1', status: 'running' });
+    plantDocument(opened.folder, FerretConfigFile, ID, config({ mode: 'batch' }));
+    await opened.storage.writeState(ID, { id: 'session-1', turn: 0, status: 'running' });
 
     // Act
     const failure = await new StorageSignalRepository(opened.storage, clock)
@@ -309,7 +335,7 @@ describe('resolving the peer a wait names', () => {
     // Arrange
     const { opened } = await openStorage();
     await opened.storage.writeConfig(PEER, config({ id: 'session-2', teammate: 'iris' }));
-    await opened.storage.writeState(PEER, { id: 'session-2', status: 'running' });
+    await opened.storage.writeState(PEER, { id: 'session-2', turn: 0, status: 'running' });
 
     // Act
     const actual = await new StorageSignalRepository(opened.storage, clock).resolvePeer('session-2');
@@ -324,7 +350,7 @@ describe('resolving the peer a wait names', () => {
     // Arrange
     const { opened } = await openStorage();
     await opened.storage.writeConfig(PEER, config({ id: 'session-2', teammate: 'iris' }));
-    await opened.storage.writeState(PEER, { id: 'session-2', status: 'running' });
+    await opened.storage.writeState(PEER, { id: 'session-2', turn: 0, status: 'running' });
 
     // Act
     const actual = await new StorageSignalRepository(opened.storage, clock).resolvePeer('  IRIS ');
@@ -338,7 +364,7 @@ describe('resolving the peer a wait names', () => {
     // Arrange
     const { opened } = await openStorage();
     await opened.storage.writeConfig(PEER, config({ id: 'session-2', teammate: 'iris' }));
-    await opened.storage.writeState(PEER, { id: 'session-2', status: 'running' });
+    await opened.storage.writeState(PEER, { id: 'session-2', turn: 0, status: 'running' });
 
     // Act
     const typo = await new StorageSignalRepository(opened.storage, clock).resolvePeer('irs');
@@ -352,7 +378,7 @@ describe('resolving the peer a wait names', () => {
     // Arrange
     const { opened } = await openStorage();
     await opened.storage.writeConfig(PEER, config({ id: 'session-2' }));
-    await opened.storage.writeState(PEER, { id: 'session-2', status: 'running' });
+    await opened.storage.writeState(PEER, { id: 'session-2', turn: 0, status: 'running' });
 
     // Act
     const traversal = await new StorageSignalRepository(opened.storage, clock).resolvePeer('../etc/passwd');
@@ -367,9 +393,9 @@ describe('resolving the peer a wait names', () => {
     // wait names — and it must not stop the ones that can from being found.
     // Arrange
     const { opened } = await openStorage();
-    await opened.storage.writeState(ID, { id: 'session-1', status: 'running' });
+    await opened.storage.writeState(ID, { id: 'session-1', turn: 0, status: 'running' });
     await opened.storage.writeConfig(PEER, config({ id: 'session-2', teammate: 'iris' }));
-    await opened.storage.writeState(PEER, { id: 'session-2', status: 'running' });
+    await opened.storage.writeState(PEER, { id: 'session-2', turn: 0, status: 'running' });
 
     // Act
     const actual = await new StorageSignalRepository(opened.storage, clock).resolvePeer('iris');
@@ -386,14 +412,14 @@ describe('resolving the peer a wait names', () => {
     // Arrange
     const { opened } = await openStorage();
     await opened.storage.writeConfig(ID, config({ id: 'session-1', teammate: 'iris' }));
-    await opened.storage.writeState(ID, { id: 'session-1', status: 'stopped' });
+    await opened.storage.writeState(ID, { id: 'session-1', turn: 0, status: 'stopped' });
     await opened.storage.writeConfig(PEER, config({ id: 'session-2', teammate: 'iris' }));
-    await opened.storage.writeState(PEER, { id: 'session-2', status: 'running' });
+    await opened.storage.writeState(PEER, { id: 'session-2', turn: 0, status: 'running' });
     const subject = new StorageSignalRepository(opened.storage, clock);
 
     // Act
     const live = await subject.resolvePeer('iris');
-    await opened.storage.writeState(ID, { id: 'session-1', status: 'running' });
+    await opened.storage.writeState(ID, { id: 'session-1', turn: 0, status: 'running' });
     const tie = await subject.resolvePeer('iris');
     const byId = await subject.resolvePeer('session-1');
 
