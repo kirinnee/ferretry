@@ -7,11 +7,10 @@ import {
   FileAgendaLedgerRepository,
 } from '../../../../daemon/adapters/agenda/file-agenda-ledger-repository.ts';
 import { AGENDA_ARCHIVE_FILE, type AgendaArchiveRecord } from '../../../../daemon/lib/agenda/archive.ts';
-import { AGENDA_FILES, emptyAgendaLedger } from '../../../../daemon/lib/agenda/index.ts';
+import { AGENDA_FILES, emptyAgendaLedger, NO_AGENDA_VERSIONS } from '../../../../daemon/lib/agenda/index.ts';
 import { AgendaService } from '../../../../daemon/lib/agenda/service.ts';
 import type { AgendaVersionDraft, AgendaVersionStore } from '../../../../daemon/lib/agenda/versions.ts';
 import {
-  AGENDA_LEDGER_VERSION,
   type AgendaLedger,
   type AgendaMutation,
   agendaLedgerDocument,
@@ -27,6 +26,9 @@ import {
  */
 
 const NOW = '2026-10-31T10:00:00.000Z';
+let uniqueIds = 0;
+const nextUniqueId = (): string => `id-${String((uniqueIds += 1))}`;
+const TEST_RUNTIME = { now: () => Date.parse(NOW), warn: () => undefined };
 const SESSION = 'session-1';
 const current = AGENDA_FILES.ledger;
 
@@ -178,7 +180,7 @@ const request = {
 
 const subject = (versions?: MemoryVersions) => {
   const files = new MemoryFiles();
-  const repository = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files, versions);
+  const repository = new FileAgendaLedgerRepository(files, nextUniqueId, versions, TEST_RUNTIME);
   const service = new AgendaService(
     repository,
     { now: () => NOW },
@@ -453,15 +455,19 @@ describe('the private agenda archive', () => {
     const { files, repository } = subject();
     const first = { id: 'A1', entry: { at: NOW, kind: 'replied', note: 'first committed owner record' } };
     const second = { kind: 'owner-history', id: 'A1', entry: { at: NOW, kind: 'replied', note: 'second 雪 record' } };
-    files.put(SESSION, current, JSON.stringify({ ...emptyAgendaLedger(SESSION, NOW), ownerHistory: [first] }));
-    ok(await repository.transact(SESSION, unchanged));
+    const archiving = (record: AgendaArchiveRecord) => (ledger: AgendaLedger | null): AgendaMutation => {
+      const board = ledger ?? emptyAgendaLedger(SESSION, NOW);
+      const next = { ...board, archivePending: [record] };
+      return { ok: true, changed: true, change: 'refreshed', ledger: next, snapshot: agendaSnapshot(board) };
+    };
+    ok(await repository.transact(SESSION, archiving({ kind: 'owner-history', ...first } as AgendaArchiveRecord)));
     const committed = files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text ?? '';
     should(files.files.has(MARK)).be.false();
     const text = `${JSON.stringify(second)}\n`;
     // A crash tore the append of `second`: its mark is down, its bytes only partly, its ledger write never ran.
     files.put(SESSION, AGENDA_ARCHIVE_FILE, committed + text.slice(0, 15));
     files.put(SESSION, `${AGENDA_ARCHIVE_FILE}.pending`, JSON.stringify({ bytes: Buffer.byteLength(committed) }));
-    const restarted = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files);
+    const restarted = new FileAgendaLedgerRepository(files, nextUniqueId, NO_AGENDA_VERSIONS, TEST_RUNTIME);
     ok(await restarted.transact(SESSION, unchanged));
     should(await restarted.readArchive(SESSION)).deepEqual([{ kind: 'owner-history', ...first }]);
     should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).equal(committed + text.slice(0, 15));
@@ -476,34 +482,6 @@ describe('the private agenda archive', () => {
 
     should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).equal(committed + text);
     should(await restarted.readArchive(SESSION)).deepEqual([{ kind: 'owner-history', ...first }, second]);
-    should(files.files.has(MARK)).be.false();
-  });
-
-  it('should move the history of a ledger written before the cursor existed exactly once, however often its commit fails', async () => {
-    const { files, repository } = subject();
-    const records = ['ONE', 'TWO'].map(note => ({ id: 'A1', entry: { at: NOW, kind: 'replied', note } }));
-    // The file as a daemon before this one left it: no version, no cursor, owner history still inside.
-    files.put(
-      SESSION,
-      current,
-      JSON.stringify({ sessionId: SESSION, nextId: 2, entries: [], updatedAt: NOW, ownerHistory: records }),
-    );
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      files.failLedgerWrite = true;
-      await should(repository.transact(SESSION, unchanged)).be.rejectedWith('ledger commit failed');
-      should(await repository.readArchive(SESSION)).deepEqual([]);
-    }
-    should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text.split('\n').filter(Boolean)).have.length(2);
-
-    const restarted = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files);
-    const migrated = ok(await restarted.transact(SESSION, unchanged));
-
-    should(migrated.ledger.archive?.count).equal(2);
-    should(await restarted.readArchive(SESSION)).deepEqual(
-      records.map(record => ({ kind: 'owner-history', ...record })),
-    );
-    should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text.split('\n').filter(Boolean)).have.length(2);
-    should(files.files.get(`${SESSION}/${current}`)?.text).not.containEql('ownerHistory');
     should(files.files.has(MARK)).be.false();
   });
 
@@ -579,149 +557,12 @@ describe('the private agenda archive', () => {
       await should(repository.readArchive(SESSION)).be.rejectedWith('incomplete agenda history');
     });
 
-    /** What an older daemon's next write leaves: the fields it knows, none of the cursor or the version. */
-    const rewrittenByOlderDaemon = (files: ReturnType<typeof subject>['files'], keep: readonly string[] = []) => {
-      const document = JSON.parse(files.files.get(`${SESSION}/${current}`)?.text ?? '{}') as Record<string, unknown>;
-      for (const key of ['archive', 'version']) if (!keep.includes(key)) delete document[key];
-      files.put(SESSION, current, JSON.stringify(document));
-      return new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files);
-    };
-
-    it('should keep the committed history across a downgrade and an upgrade, serving it at once and through the next prune', async () => {
-      const { files, repository } = await saturated();
-      ok(await repository.transact(SESSION, command(resolveA1('OWNER_WORDS'))));
-      const before = files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text ?? '';
-      const upgraded = rewrittenByOlderDaemon(files);
-      should(JSON.parse(files.files.get(`${SESSION}/${current}`)?.text ?? '{}')).not.have.property('archive');
-
-      should(await words(upgraded)).containEql('OWNER_WORDS');
-
-      const raised = ok(await upgraded.transact(SESSION, command({ action: 'raise', actor: agent, at: NOW, request })));
-      ok(
-        await upgraded.transact(
-          SESSION,
-          command({ action: 'resolve', actor: human, at: NOW, id: raised.item?.id ?? 'missing', note: 'NEXT_WORDS' }),
-        ),
-      );
-      const history = await words(upgraded);
-      should(history).containEql('OWNER_WORDS');
-      should(history).containEql('NEXT_WORDS');
-      should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).startWith(before);
-    });
-
-    it('should adopt the history of a rewrite by an older daemon when the next write has nothing to add to it', async () => {
-      const { files, repository } = await saturated();
-      ok(await repository.transact(SESSION, command(resolveA1('OWNER_WORDS'))));
-      const upgraded = rewrittenByOlderDaemon(files);
-      const unchanged = ok(
-        await upgraded.transact(SESSION, ledger => ({
-          ok: true as const,
-          changed: true,
-          change: 'refreshed' as const,
-          ledger: ledger ?? emptyAgendaLedger(SESSION, NOW),
-          snapshot: agendaSnapshot(ledger ?? emptyAgendaLedger(SESSION, NOW)),
-        })),
-      );
-      should(unchanged.ledger.archive?.count).equal(1);
-      should(JSON.parse(files.files.get(`${SESSION}/${current}`)?.text ?? '{}').archive.count).equal(1);
-    });
-
-    it('should still cut an uncommitted tail when a ledger names its cursor, whatever version it is', async () => {
-      const { files, repository } = await saturated();
-      ok(await repository.transact(SESSION, command(resolveA1('COMMITTED'))));
-      const raised = ok(
-        await repository.transact(SESSION, command({ action: 'raise', actor: agent, at: NOW, request })),
-      );
-      files.failLedgerWrite = true;
-      await should(
-        repository.transact(
-          SESSION,
-          command({ action: 'resolve', actor: human, at: NOW, id: raised.item?.id ?? 'missing', note: 'PHANTOM' }),
-        ),
-      ).be.rejectedWith('ledger commit failed');
-      should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).containEql('PHANTOM');
-
-      const versionless = rewrittenByOlderDaemon(files, ['archive']);
-      const history = await words(versionless);
-      should(history).containEql('COMMITTED');
-      should(history).not.containEql('PHANTOM');
-    });
-
-    const sidecar = (files: ReturnType<typeof subject>['files']) =>
-      files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text ?? '';
-    const resolve = (id: string, note: string) =>
-      command({ action: 'resolve', actor: human, at: NOW, id, note } as Parameters<typeof applyAgendaCommand>[1]);
-    const dismiss = (id: string, note: string) =>
-      command({ action: 'dismiss', actor: human, at: NOW, id, note } as Parameters<typeof applyAgendaCommand>[1]);
-    /** A saturated board as a daemon before the cursor wrote it, optionally with history an upgrade adopted. */
-    const preCursor = async (withHistory: boolean) => {
-      const harness = await saturated();
-      let next = 'A1';
-      if (withHistory) {
-        ok(await harness.repository.transact(SESSION, command(resolveA1('OWNER_WORDS'))));
-        const raised = ok(
-          await harness.repository.transact(SESSION, command({ action: 'raise', actor: agent, at: NOW, request })),
-        );
-        next = raised.item?.id ?? 'missing';
-      }
-      return { ...harness, next, before: sidecar(harness.files), repository: rewrittenByOlderDaemon(harness.files) };
-    };
-
-    for (const withHistory of [false, true]) {
-      const board = withHistory ? 'a board an upgrade adopted history for' : 'a board from before the cursor';
-      it(`should not serve the first prune of ${board} when its ledger write fails`, async () => {
-        const { files, repository, next, before } = await preCursor(withHistory);
-        files.failLedgerWrite = true;
-        await should(repository.transact(SESSION, resolve(next, 'PHANTOM_FIRST'))).be.rejectedWith(
-          'ledger commit failed',
-        );
-        should(sidecar(files)).containEql('PHANTOM_FIRST');
-
-        const history = await words(repository);
-        const restarted = await words(new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files));
-
-        should(history).not.containEql('PHANTOM_FIRST');
-        should(restarted).not.containEql('PHANTOM_FIRST');
-        should(history.includes('OWNER_WORDS')).equal(withHistory);
-        should(sidecar(files)).startWith(before);
-      });
-
-      it(`should write a retried first prune of ${board} exactly once`, async () => {
-        const { files, repository, next, before } = await preCursor(withHistory);
-        files.failLedgerWrite = true;
-        await should(repository.transact(SESSION, resolve(next, 'SAME_COMMAND'))).be.rejected();
-        const appended = sidecar(files);
-
-        ok(await repository.transact(SESSION, resolve(next, 'SAME_COMMAND')));
-
-        should(sidecar(files)).equal(appended);
-        should(sidecar(files)).startWith(before);
-        should(await recordsWith(repository, 'SAME_COMMAND')).equal(1);
-        should(files.files.has(MARK)).be.false();
-      });
-
-      it(`should cut the failed first prune of ${board} when a different command commits`, async () => {
-        const { files, repository, next, before } = await preCursor(withHistory);
-        files.failLedgerWrite = true;
-        await should(repository.transact(SESSION, resolve(next, 'PHANTOM_FIRST'))).be.rejected();
-
-        ok(await repository.transact(SESSION, dismiss(next, 'REAL_DISMISS')));
-
-        const history = await words(repository);
-        should(history).containEql('REAL_DISMISS');
-        should(history).not.containEql('PHANTOM_FIRST');
-        should(history.includes('OWNER_WORDS')).equal(withHistory);
-        should(sidecar(files)).startWith(before);
-        should(sidecar(files)).not.containEql('PHANTOM_FIRST');
-      });
-    }
-
     it('should go by the cursor, not a mark a crash left after the commit landed, and drop the mark on the next write', async () => {
       const { files, repository } = await saturated();
       ok(await repository.transact(SESSION, command(resolveA1('COMMITTED'))));
       // The crash came between the ledger commit and the removal of the mark the append put down at byte 0.
       files.put(SESSION, `${AGENDA_ARCHIVE_FILE}.pending`, JSON.stringify({ bytes: 0 }));
-      const restarted = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files);
+      const restarted = new FileAgendaLedgerRepository(files, nextUniqueId, NO_AGENDA_VERSIONS, TEST_RUNTIME);
 
       should(await words(restarted)).containEql('COMMITTED');
       ok(await restarted.transact(SESSION, command({ action: 'raise', actor: agent, at: NOW, request })));
@@ -729,112 +570,6 @@ describe('the private agenda archive', () => {
       should(files.files.has(MARK)).be.false();
       should(await words(restarted)).containEql('COMMITTED');
     });
-
-    it('should not adopt across a downgrade an append whose mark is still down', async () => {
-      const { files, repository } = await saturated();
-      ok(await repository.transact(SESSION, command(resolveA1('COMMITTED'))));
-      const raised = ok(
-        await repository.transact(SESSION, command({ action: 'raise', actor: agent, at: NOW, request })),
-      );
-      files.failLedgerWrite = true;
-      await should(repository.transact(SESSION, resolve(raised.item?.id ?? 'missing', 'PHANTOM'))).be.rejected();
-
-      const history = await words(rewrittenByOlderDaemon(files));
-
-      should(history).containEql('COMMITTED');
-      should(history).not.containEql('PHANTOM');
-    });
-
-    it('should adopt across a downgrade a failed append a later commit outlived (the declared limit)', async () => {
-      const { files, repository } = await saturated();
-      ok(await repository.transact(SESSION, command(resolveA1('COMMITTED'))));
-      const raised = ok(
-        await repository.transact(SESSION, command({ action: 'raise', actor: agent, at: NOW, request })),
-      );
-      files.failLedgerWrite = true;
-      await should(repository.transact(SESSION, resolve(raised.item?.id ?? 'missing', 'PHANTOM'))).be.rejected();
-      should(await words(repository)).not.containEql('PHANTOM');
-      // A commit that appends nothing lands and lifts the mark; only the cursor it wrote still excludes the tail.
-      const other = { ...request, subject: 'Choose a second region' };
-      ok(await repository.transact(SESSION, command({ action: 'raise', actor: agent, at: NOW, request: other })));
-      should(files.files.has(MARK)).be.false();
-      should(await words(repository)).not.containEql('PHANTOM');
-
-      const history = await words(rewrittenByOlderDaemon(files));
-
-      should(history).containEql('COMMITTED');
-      should(history).containEql('PHANTOM');
-    });
-
-    it('should leave out a torn last line of an adopted sidecar and cut it at the next prune, keeping the rest', async () => {
-      const { files, repository } = await saturated();
-      ok(await repository.transact(SESSION, command(resolveA1('OWNER_WORDS'))));
-      const before = sidecar(files);
-      files.put(SESSION, AGENDA_ARCHIVE_FILE, `${before}{"kind":"owner-history","torn`);
-      const upgraded = rewrittenByOlderDaemon(files);
-      should(await words(upgraded)).containEql('OWNER_WORDS');
-      const raised = ok(await upgraded.transact(SESSION, command({ action: 'raise', actor: agent, at: NOW, request })));
-
-      ok(await upgraded.transact(SESSION, resolve(raised.item?.id ?? 'missing', 'NEXT_WORDS')));
-
-      const history = await words(upgraded);
-      should(history).containEql('OWNER_WORDS');
-      should(history).containEql('NEXT_WORDS');
-      should(sidecar(files)).startWith(before);
-      should(sidecar(files)).not.containEql('torn');
-    });
-
-    for (const withVersions of [false, true])
-      it(`should seed an upgraded board's conversation from the history it adopts, once, never from an uncommitted append${withVersions ? ' (with a version store)' : ''}`, async () => {
-        // Arrange — a board as a daemon before the cursor and the conversation left it: no version, cursor or thread.
-        const versions = withVersions ? new MemoryVersions() : undefined;
-        const { files, repository } = subject(versions);
-        const raised = ok(
-          await repository.transact(SESSION, command({ action: 'raise', actor: agent, at: NOW, request })),
-        );
-        const document = JSON.parse(agendaLedgerDocument(raised.ledger)) as Record<string, unknown> & {
-          entries: { item: Record<string, unknown> }[];
-        };
-        for (const key of ['version', 'archive', 'conversations', 'carriedEntries']) delete document[key];
-        for (const entry of document.entries) {
-          delete entry.item.conversation;
-          delete entry.item.conversationCount;
-        }
-        files.put(SESSION, current, JSON.stringify(document));
-        const record = (note: string) =>
-          `${JSON.stringify({ kind: 'owner-history', id: 'A1', entry: { at: '2026-10-31T10:05:00.000Z', kind: 'replied', note } })}\n`;
-        const committed = record('ADOPTED_WORDS');
-        // The second record's append never committed: its mark is still down where it began.
-        files.put(SESSION, AGENDA_ARCHIVE_FILE, committed + record('UNCOMMITTED_WORDS'));
-        files.put(SESSION, `${AGENDA_ARCHIVE_FILE}.pending`, JSON.stringify({ bytes: Buffer.byteLength(committed) }));
-        const upgraded = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files, versions);
-
-        // Act
-        const read = await upgraded.read(SESSION);
-        ok(
-          await upgraded.transact(SESSION, ledger => {
-            if (ledger === null) throw new Error('no board');
-            return { ok: true, changed: true, change: 'refreshed', ledger, snapshot: agendaSnapshot(ledger) };
-          }),
-        );
-        const askedBefore = versions?.reads ?? 0;
-        const reread = await new FileAgendaLedgerRepository(
-          id => `/state/sessions/${id}`,
-          undefined,
-          files,
-          versions,
-        ).read(SESSION);
-
-        // Assert — one adoption feeds the one migration; the persisted version-4 board never reads the sidecar again,
-        // nor does it ask the version store to seed it a second time.
-        should(versions?.reads ?? 0).equal(askedBefore);
-        should(read?.archive).deepEqual({ bytes: Buffer.byteLength(committed), count: 1 });
-        should(read?.conversations?.A1?.map(entry => entry.text)).deepEqual(['ADOPTED_WORDS']);
-        should(reread?.version).equal(AGENDA_LEDGER_VERSION);
-        should(reread?.archive).deepEqual(read?.archive);
-        should(reread?.conversations?.A1?.map(entry => entry.text)).deepEqual(['ADOPTED_WORDS']);
-        should(JSON.stringify(await upgraded.readArchive(SESSION))).not.containEql('UNCOMMITTED_WORDS');
-      });
 
     describe('a cold thread whose snapshot only the history file holds', () => {
       /** A board whose only thread belongs to an item no longer on it, with no version kept anywhere but the sidecar. */
@@ -860,7 +595,7 @@ describe('the private agenda archive', () => {
         files.put(SESSION, current, JSON.stringify(document));
         files.put(SESSION, AGENDA_ARCHIVE_FILE, line);
         versions.kept.clear();
-        const reopened = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files, versions);
+        const reopened = new FileAgendaLedgerRepository(files, nextUniqueId, versions, TEST_RUNTIME);
         return { reopened, versions };
       };
       const refresh = (ledger: AgendaLedger | null): AgendaMutation => {
@@ -886,12 +621,6 @@ describe('the private agenda archive', () => {
       });
     });
 
-    it('should serve no history from a rewrite by an older daemon when there is no sidecar', async () => {
-      const { files, repository } = subject();
-      files.put(SESSION, current, JSON.stringify({ sessionId: SESSION, nextId: 1, entries: [], updatedAt: NOW }));
-      should(await repository.readArchive(SESSION)).deepEqual([]);
-    });
-
     it('should serve no history for a session with no ledger, whatever the sidecar holds', async () => {
       const { files, repository } = subject();
       files.put(SESSION, AGENDA_ARCHIVE_FILE, '{"stray":true}\n');
@@ -899,22 +628,4 @@ describe('the private agenda archive', () => {
     });
   });
 
-  it('should migrate in-ledger owner history once and replay an append whose cursor commit failed', async () => {
-    const { files, repository } = subject();
-    const record = { id: 'A1', entry: { at: NOW, kind: 'replied', note: 'Owner 雪 words' } };
-    files.put(SESSION, current, JSON.stringify({ ...emptyAgendaLedger(SESSION, NOW), ownerHistory: [record] }));
-    should(await repository.readArchive(SESSION)).deepEqual([]);
-    files.failLedgerWrite = true;
-    await should(repository.transact(SESSION, unchanged)).be.rejectedWith('ledger commit failed');
-    const appended = files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text;
-    const restarted = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, files);
-    const migrated = ok(await restarted.transact(SESSION, unchanged));
-    should(migrated.ledger.archivePending).be.undefined();
-    should(migrated.ledger.archive?.count).equal(1);
-    should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).equal(appended);
-    should(await restarted.readArchive(SESSION)).deepEqual([{ kind: 'owner-history', ...record }]);
-    should(files.files.get(`${SESSION}/${current}`)?.text).not.containEql('ownerHistory');
-    await restarted.transact(SESSION, unchanged);
-    should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).equal(appended);
-  });
 });
