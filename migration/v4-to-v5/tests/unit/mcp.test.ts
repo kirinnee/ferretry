@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { McpOAuthStateFileSchema } from '@ferretry/plugin-mcp/contract';
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { mcpStep, V5_MCP_OAUTH } from '../../src/steps/mcp.ts';
+import { SealedDocumentSchema } from '@ferretry/core-vault/contract';
+import { STEPS } from '../../src/steps/index.ts';
+import { mcpStep, V5_MCP_OAUTH, V5_MCP_OAUTH_SECRETS } from '../../src/steps/mcp.ts';
+import { V5_VAULT_FILE, V5_VAULT_KEY_FILE, vaultStep } from '../../src/steps/secrets.ts';
 import { AT, fixture } from './ferret-fixture.ts';
 
 let f: Awaited<ReturnType<typeof fixture>>;
@@ -39,14 +42,6 @@ const connection = {
   renewable: true,
 };
 
-async function everything(root: string): Promise<string> {
-  const names = await readdir(root, { recursive: true }).catch(() => []);
-  const texts = await Promise.all(
-    names.map(async name => ((await stat(join(root, name))).isFile() ? readFile(join(root, name), 'utf8') : '')),
-  );
-  return texts.join('\n');
-}
-
 test('the sign-in state keeps every record and component name; only the envelope changes', async () => {
   await f.put('state/mcp-oauth.json', {
     v: 1,
@@ -69,22 +64,94 @@ test('the sign-in state keeps every record and component name; only the envelope
   expect((await stat(join(f.to, V5_MCP_OAUTH))).mode & 0o777).toBe(0o600);
 });
 
-test('the sealed refresh tokens are left unopened in v4, byte for byte, and appear nowhere in v5 or the report', async () => {
+// ── the sealed half (lead decision 2026-11-07): moved with the vault key, still opened by it ─────────────────────────
+
+/** v4's sealing (`WebCryptoSecretCipher`): AES-256-GCM, a 96-bit IV, the entry name as the AAD. FAKE values only. */
+async function seal(key: CryptoKey, name: string, value: string) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(name) },
+      key,
+      new TextEncoder().encode(value),
+    ),
+  );
+  return {
+    iv: Buffer.from(iv).toString('base64'),
+    ciphertext: Buffer.from(ciphertext).toString('base64'),
+    createdAt: AT,
+    updatedAt: AT,
+  };
+}
+async function open(key: CryptoKey, name: string, entry: { iv: string; ciphertext: string }) {
+  const plain = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: Buffer.from(entry.iv, 'base64'), additionalData: new TextEncoder().encode(name) },
+    key,
+    Buffer.from(entry.ciphertext, 'base64'),
+  );
+  return new TextDecoder().decode(plain);
+}
+const importKey = async (base64: string) =>
+  await crypto.subtle.importKey('raw', Buffer.from(base64.trim(), 'base64'), 'AES-GCM', false, ['encrypt', 'decrypt']);
+
+test('MCP refresh tokens move with the vault key: the moved key opens both moved documents', async () => {
+  const keyText = `${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64')}\n`;
+  const v4Key = await importKey(keyText);
+  await mkdir(join(f.from, 'state'), { recursive: true, mode: 0o700 });
+  await writeFile(join(f.from, 'state/secrets.key'), keyText, { mode: 0o600 });
+  await writeFile(
+    join(f.from, 'state/secrets.json'),
+    JSON.stringify({
+      v: 1,
+      cipher: 'AES-256-GCM',
+      entries: { FAKE_TOKEN: await seal(v4Key, 'FAKE_TOKEN', 'FAKE-VAULT-VALUE') },
+    }),
+    { mode: 0o600 },
+  );
+  await writeFile(
+    join(f.from, 'state/mcp-oauth-secrets.json'),
+    JSON.stringify({
+      v: 1,
+      cipher: 'AES-256-GCM',
+      entries: { MCP_FAKE_REFRESH: await seal(v4Key, 'MCP_FAKE_REFRESH', 'FAKE-REFRESH-VALUE') },
+    }),
+    { mode: 0o600 },
+  );
   await f.put('state/mcp-oauth.json', { v: 1, registrations: {}, connections: { linear: connection } });
-  const sealed = join(f.from, 'state/mcp-oauth-secrets.json');
-  await writeFile(sealed, FAKE_SEALED, { mode: 0o600 });
-  const before = await readFile(sealed);
+  const before = await readFile(join(f.from, 'state/mcp-oauth-secrets.json'));
+
+  // The step table's order: the vault step moves the key once, then MCP moves its sealed document.
+  const names = STEPS.map(step => step.id);
+  expect(names.indexOf('vault')).toBeLessThan(names.indexOf('mcp'));
+  expect((await vaultStep.run(f.ctx())).status).toBe('converted');
   const report = await mcpStep.run(f.ctx());
   expect(report.status).toBe('converted');
-  expect(report.note).toBe(
-    'state/mcp-oauth-secrets.json left unopened in the v4 backup (no v5 file declared for it yet)',
-  );
-  expect(report.notCarried[0]?.what).toContain('state/mcp-oauth-secrets.json');
-  expect(report.sealed).toEqual([]);
-  expect((await readFile(sealed)).equals(before)).toBe(true);
-  const output = `${await everything(f.to)}\n${JSON.stringify(report)}`;
-  for (const fake of ['FAKE-SEALED-CIPHERTEXT', 'FAKE-IV', 'MCP_FAKE_REFRESH']) expect(output).not.toContain(fake);
-  expect((await readdir(join(f.to, 'state/mcp'))).sort()).toEqual(['oauth.json']);
+
+  const v5Key = await importKey(await readFile(join(f.to, V5_VAULT_KEY_FILE), 'utf8'));
+  const vault = JSON.parse(await readFile(join(f.to, V5_VAULT_FILE), 'utf8'));
+  const oauth = SealedDocumentSchema.parse(JSON.parse(await readFile(join(f.to, V5_MCP_OAUTH_SECRETS), 'utf8')));
+  expect(await open(v5Key, 'FAKE_TOKEN', vault.entries.FAKE_TOKEN)).toBe('FAKE-VAULT-VALUE');
+  expect(await open(v5Key, 'MCP_FAKE_REFRESH', oauth.entries.MCP_FAKE_REFRESH!)).toBe('FAKE-REFRESH-VALUE');
+  expect(oauth.format).toBe(1);
+  expect((await stat(join(f.to, V5_MCP_OAUTH_SECRETS))).mode & 0o777).toBe(0o600);
+  expect((await stat(join(f.to, V5_VAULT_KEY_FILE))).mode & 0o777).toBe(0o600);
+  expect(report.sealed).toEqual([
+    { file: V5_MCP_OAUTH_SECRETS, bytes: (await stat(join(f.to, V5_MCP_OAUTH_SECRETS))).size },
+  ]);
+  // The v4 backup is untouched, and no value or ciphertext reaches the report.
+  expect((await readFile(join(f.from, 'state/mcp-oauth-secrets.json'))).equals(before)).toBe(true);
+  const shown = JSON.stringify(report);
+  for (const value of ['FAKE-REFRESH-VALUE', oauth.entries.MCP_FAKE_REFRESH!.ciphertext])
+    expect(shown).not.toContain(value);
+});
+
+test('a sealed MCP document with no vault key to open it fails, naming the files only', async () => {
+  await mkdir(join(f.from, 'state'), { recursive: true, mode: 0o700 });
+  await writeFile(join(f.from, 'state/mcp-oauth-secrets.json'), FAKE_SEALED, { mode: 0o600 });
+  const report = await mcpStep.run(f.ctx());
+  expect(report.status).toBe('failed');
+  expect(report.note).toContain('state/secrets.key');
+  for (const fake of ['FAKE-SEALED-CIPHERTEXT', 'FAKE-IV']) expect(JSON.stringify(report)).not.toContain(fake);
 });
 
 test('a damaged document fails naming the file, never its content (v4 raised on it too)', async () => {

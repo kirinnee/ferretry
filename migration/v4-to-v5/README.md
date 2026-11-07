@@ -143,8 +143,10 @@ holds a runtime uuid; the analytics index that does is a cache.
 
 MCP (`src/steps/mcp.ts`): `mcp-oauth.json` → `state/mcp/oauth.json`, envelope only (`v` → `format`); the records are
 the same in both. The access tokens are vault secrets kept by name (the Vault step). The sealed
-`mcp-oauth-secrets.json` (refresh tokens, client secrets) is not carried and never opened, because MCP declares no
-`store: 'secret'` document yet: until it does, an OAuth MCP server must be signed in to again when its token expires.
+`mcp-oauth-secrets.json` (refresh tokens, client secrets) → `state/mcp/oauth-secrets.json`: sealed under the vault
+key, which the Vault step moves once, BEFORE this step; every entry moves as the same strings and only the envelope's
+`v` → `format` changes (outside the AAD). A test seals fake entries the v4 way and opens both moved documents with the
+moved key. Nothing is decrypted by the tool.
 
 Gate (`src/steps/gate.ts`): `api-token` and `api-warden-token` (home root) move byte for byte to
 `state/gate/admin-token` and `warden-token` (`0600`; v5's CLI reads the same raw text). All six audit files — the
