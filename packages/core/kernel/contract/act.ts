@@ -196,50 +196,100 @@ export interface MintedIds {
   get(id: unknown): OpaqueId;
 }
 
-function isPlainDataObject(value: unknown): value is Readonly<Record<string, unknown>> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value) as unknown;
-  if (prototype !== Object.prototype && prototype !== null) return false;
+const isPrimitive = (value: unknown): boolean =>
+  value === null || (typeof value !== 'object' && typeof value !== 'function');
+
+/**
+ * The own data values of a plain array of primitives, read from its property descriptors (never through `[[Get]]` or
+ * its iterator), or undefined when it is anything else. A hole reads as `undefined`, which no registry minted.
+ */
+function primitiveElements(value: unknown): readonly unknown[] | undefined {
+  if (!Array.isArray(value) || Reflect.getPrototypeOf(value) !== Array.prototype) return undefined;
+  const length = Reflect.getOwnPropertyDescriptor(value, 'length');
+  if (length === undefined || !('value' in length) || typeof length.value !== 'number') return undefined;
+  const elements: unknown[] = [];
   for (const key of Reflect.ownKeys(value)) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (descriptor === undefined || !('value' in descriptor)) return false; // a getter or setter
+    if (key === 'length') continue;
+    const index = typeof key === 'string' ? Number(key) : Number.NaN;
+    if (!Number.isInteger(index) || index < 0 || String(index) !== key) return undefined;
+    const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !('value' in descriptor) || !isPrimitive(descriptor.value)) return undefined;
+    elements[index] = descriptor.value;
   }
-  return true;
+  return Array.from({ length: length.value }, (_, i) => elements[i]);
+}
+
+/** The three fields `closeAck` keeps, read once each from own data descriptors. */
+interface AckFields {
+  readonly status: unknown;
+  readonly code: unknown;
+  readonly ids: readonly unknown[] | undefined;
 }
 
 /**
- * The runtime first layer for a write-only act (review r11): reads three own data properties by name, never spreads,
- * never keeps or returns `raw`, and returns a fresh, frozen, strictly parsed Ack.
+ * Reads a write-only result's fields without running any getter or `get` trap, or answers undefined when it is not
+ * plain data: anything but an object whose prototype is `Object.prototype` or null, an accessor anywhere, any field
+ * but `ids` holding an object or function, an `ids` that is not a plain array of primitives, or a Proxy (§4.7). Every
+ * value comes from a property descriptor, so a field is read exactly once. The Proxy test is `structuredClone`, which
+ * the engine refuses for a Proxy (the result's or its `ids`') before any trap runs; the checks before it leave a
+ * non-Proxy nothing a clone could run (no accessor, no nested object but the checked array). A Proxy still answers the
+ * descriptor reads above with its other traps; they run inside `closeAck`'s boundary, and their answers are thrown
+ * away when the clone refuses it.
+ */
+function plainAckFields(raw: unknown): AckFields | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
+  const prototype = Reflect.getPrototypeOf(raw);
+  if (prototype !== Object.prototype && prototype !== null) return undefined;
+  let status: unknown;
+  let code: unknown;
+  let ids: readonly unknown[] | undefined = [];
+  for (const key of Reflect.ownKeys(raw)) {
+    const descriptor = Reflect.getOwnPropertyDescriptor(raw, key);
+    if (descriptor === undefined || !('value' in descriptor)) return undefined; // a getter or setter
+    const value: unknown = descriptor.value;
+    if (key === 'ids') {
+      ids = value === undefined ? [] : primitiveElements(value);
+      if (ids === undefined) return undefined;
+    } else if (!isPrimitive(value)) return undefined;
+    else if (key === 'status') status = value;
+    else if (key === 'code') code = value;
+  }
+  structuredClone(raw); // throws for a Proxy, without a trap
+  return { status, code, ids };
+}
+
+const malformed = (): Ack => Object.freeze({ status: 'refused', code: 'malformed_result' });
+
+/**
+ * The runtime first layer for a write-only act (review r11): reads three own data properties by name from their
+ * descriptors (never a getter, never a Proxy, never spread), never keeps or returns `raw`, and returns a fresh,
+ * frozen, strictly parsed Ack. Everything from the first look at `raw` to the parse is inside one boundary: whatever
+ * throws in it answers `malformed_result`.
  */
 export function closeAck(raw: unknown, mintedIds: MintedIds): Ack {
-  let plain: boolean;
   try {
-    plain = isPlainDataObject(raw); // a Proxy's traps may throw
+    const fields = plainAckFields(raw);
+    if (fields === undefined) return malformed();
+    const status = fields.status === 'done' || fields.status === 'refused' ? fields.status : undefined;
+    const rawCode = fields.code;
+    const code =
+      rawCode === undefined || (typeof rawCode === 'string' && REFUSAL_CODE_SET.has(rawCode))
+        ? (rawCode as RefusalCode | undefined)
+        : undefined;
+    const ids = fields.ids;
+    if (status === undefined || (rawCode !== undefined && code === undefined) || ids === undefined) return malformed();
+    if (!ids.every(id => mintedIds.has(id))) return Object.freeze({ status: 'refused', code: 'unminted_id' });
+    const fresh: { status: Ack['status']; code?: RefusalCode; ids?: OpaqueId[] } = { status };
+    if (code !== undefined) fresh.code = code;
+    if (ids.length > 0) fresh.ids = ids.map(id => mintedIds.get(id));
+    const parsed = AckSchema.strict().parse(fresh);
+    const out: { status: Ack['status']; code?: RefusalCode; ids?: readonly OpaqueId[] } = { status: parsed.status };
+    if (parsed.code !== undefined) out.code = parsed.code;
+    if (fresh.ids !== undefined) out.ids = Object.freeze([...fresh.ids]);
+    return Object.freeze(out);
   } catch {
-    plain = false;
+    return malformed();
   }
-  if (!plain) return Object.freeze({ status: 'refused', code: 'malformed_result' });
-  const record = raw as Readonly<Record<string, unknown>>;
-  const status = record.status === 'done' || record.status === 'refused' ? record.status : undefined;
-  const rawCode = record.code;
-  const code =
-    rawCode === undefined || (typeof rawCode === 'string' && REFUSAL_CODE_SET.has(rawCode))
-      ? (rawCode as RefusalCode | undefined)
-      : undefined;
-  const rawIds = record.ids;
-  const ids: readonly unknown[] | undefined =
-    rawIds === undefined ? [] : Array.isArray(rawIds) ? [...(rawIds as unknown[])] : undefined;
-  if (status === undefined || (rawCode !== undefined && code === undefined) || ids === undefined)
-    return Object.freeze({ status: 'refused', code: 'malformed_result' });
-  if (!ids.every(id => mintedIds.has(id))) return Object.freeze({ status: 'refused', code: 'unminted_id' });
-  const fresh: { status: Ack['status']; code?: RefusalCode; ids?: OpaqueId[] } = { status };
-  if (code !== undefined) fresh.code = code;
-  if (ids.length > 0) fresh.ids = ids.map(id => mintedIds.get(id));
-  const parsed = AckSchema.strict().parse(fresh);
-  const out: { status: Ack['status']; code?: RefusalCode; ids?: readonly OpaqueId[] } = { status: parsed.status };
-  if (parsed.code !== undefined) out.code = parsed.code;
-  if (fresh.ids !== undefined) out.ids = Object.freeze([...fresh.ids]);
-  return Object.freeze(out);
 }
 
 /** Whether an op's result may show anything (reads or pictures). Looked up from the runtime value. */

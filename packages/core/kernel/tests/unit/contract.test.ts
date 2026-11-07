@@ -41,6 +41,73 @@ describe('closeAck (§4.7 runtime layer)', () => {
   test('the answer is frozen', () => {
     expect(Object.isFrozen(closeAck({ status: 'done' }, minted([])))).toBe(true);
   });
+  test('a transparent Proxy is malformed, and its get trap never runs', () => {
+    const gets: PropertyKey[] = [];
+    const watched = new Proxy(
+      { status: 'done' },
+      {
+        get: (target, key, receiver) => {
+          gets.push(key);
+          return Reflect.get(target, key, receiver);
+        },
+      },
+    );
+    for (const raw of [new Proxy({ status: 'done' }, {}), new Proxy(Object.create(null), {}), watched])
+      expect(closeAck(raw, minted([]))).toEqual({ status: 'refused', code: 'malformed_result' });
+    expect(gets).toEqual([]);
+  });
+  test('a Proxy whose traps throw is malformed; the throw never escapes', () => {
+    const boom = (): never => {
+      throw new Error('SYNTHETIC_TARGET_TEXT');
+    };
+    const throwing = new Proxy(
+      { status: 'done' },
+      { get: boom, getPrototypeOf: boom, ownKeys: boom, getOwnPropertyDescriptor: boom, has: boom },
+    );
+    const throwingGet = new Proxy({ status: 'done' }, { get: boom });
+    for (const raw of [throwing, throwingGet]) expect(() => closeAck(raw, minted([]))).not.toThrow();
+    expect(closeAck(throwing, minted([]))).toEqual({ status: 'refused', code: 'malformed_result' });
+    expect(closeAck(throwingGet, minted([]))).toEqual({ status: 'refused', code: 'malformed_result' });
+  });
+  test('a Proxy or a getter inside ids is malformed, and no getter runs', () => {
+    let called = 0;
+    const getterElement = Object.defineProperty(['p1'], 0, {
+      get: () => {
+        called += 1;
+        return 'p1';
+      },
+      enumerable: true,
+    });
+    const nestedGetter = {
+      status: 'done',
+      page: Object.defineProperty({}, 'url', {
+        get: () => {
+          called += 1;
+          return 'https://example.test/';
+        },
+        enumerable: true,
+      }),
+    };
+    for (const raw of [
+      { status: 'done', ids: new Proxy(['p1'], {}) },
+      { status: 'done', ids: getterElement },
+      { status: 'done', ids: 'p1' },
+      { status: 'done', ids: [{ id: 'p1' }] },
+      nestedGetter,
+    ])
+      expect(closeAck(raw, minted(['p1']))).toEqual({ status: 'refused', code: 'malformed_result' });
+    expect(called).toBe(0);
+  });
+  test('a write-only result is read once per field, from its data descriptors', () => {
+    expect(closeAck(Object.assign(Object.create(null), { status: 'done', ids: ['p1'] }), minted(['p1']))).toEqual({
+      status: 'done',
+      ids: ['p1' as OpaqueId],
+    });
+    expect(closeAck({ status: 'refused', code: 'malformed_result', note: 'x' }, minted([]))).toEqual({
+      status: 'refused',
+      code: 'malformed_result',
+    });
+  });
 });
 
 describe('decideHome (§9.3)', () => {
