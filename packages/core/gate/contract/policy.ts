@@ -188,8 +188,8 @@ export const AUDIT_KIND_NAMES = [
   'input.rebound',
   'input.expired',
   'input.cancelled',
-  'input.quarantine_ended',
-  'input.quarantine_revealed',
+  'input.hold-ended', // today's input.quarantine_ended (§1: hold)
+  'input.hold-revealed', // today's input.quarantine_revealed
   'link.opened',
   'ferret.credential-refused',
   'ferret.credential-revoked',

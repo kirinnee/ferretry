@@ -53,7 +53,7 @@ export type AuditDetail = z.infer<typeof AuditDetailSchema>;
 
 const AuditKindSchema = z
   .string()
-  .regex(/^[a-z][a-z0-9]*(?:[-.:_][a-z0-9]+)*$/u)
+  .regex(/^[a-z][a-z0-9]*(?:[-.:][a-z0-9]+)*$/u)
   .max(64)
   .transform(name => name as PolicyRef<'audit'>);
 
