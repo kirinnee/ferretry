@@ -5,7 +5,10 @@ import { CAPABILITIES, isFerretCall } from '../../../contract/index.ts';
 /** The file whose own capability is `warden`; every other config file is the fleet's (today's `configFileCapability`). */
 const WARDEN_FILE = 'warden.yaml';
 
-/** The calls whose one fresh proof a loosening already spent: a second loosening in the same call holds. */
+/**
+ * The proofs a loosening already spent, keyed by the standing AND its claim function: a second loosening on the same
+ * call holds, whichever object (the standing, or a `{ ...standing }` copy sharing its one claim) carries it.
+ */
 const spent = new WeakSet<object>();
 
 /**
@@ -34,8 +37,10 @@ export function judgeLooseningWrite(input: ConfigWriteJudgement): 'apply' | 'hol
   if (!governance.decide({ capability, axis: 'configure' }).allowed) return 'hold';
   if (!governance.decide({ capability: CAPABILITIES.fleet, axis: 'use' }).allowed) return 'hold';
   if (!governance.governed) return 'apply';
-  if (spent.has(standing)) return 'hold';
+  if (spent.has(standing) || (standing.claimFreshStepUp !== undefined && spent.has(standing.claimFreshStepUp)))
+    return 'hold';
   if (!proofClaimed(standing.claimFreshStepUp) && standing.claimFreshStepUp?.() !== true) return 'hold';
   spent.add(standing);
+  if (standing.claimFreshStepUp !== undefined) spent.add(standing.claimFreshStepUp);
   return 'apply';
 }

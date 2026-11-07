@@ -28,10 +28,13 @@ export interface OwnerOnlyCall {
  * - A ferret is refused outright (`403 forbidden`, "a ferret cannot <act>; the owner does").
  * - A governed caller without a FRESH passkey proof is answered `403 grant_step_up_required` with the demand
  *   `{ fleet, configure }`.
- * - Otherwise (`undefined`) the act may go on. The acts themselves go through {@link claimOwnerOnly}, which also TAKES a
- *   governed caller's fresh proof before the act runs.
+ * - Otherwise (`undefined`) the act may go on.
+ *
+ * MODULE-PRIVATE on purpose: it reads the admission SNAPSHOT of the proof and neither claims nor spends it, so an act
+ * gated by it alone would let one proof carry any number of acts. {@link claimOwnerOnly} is the only way in, and uses
+ * this as its pre-filter.
  */
-export function ownerOnly(call: OwnerOnlyCall, act: string): PlainApiResponse | undefined {
+function ownerOnly(call: OwnerOnlyCall, act: string): PlainApiResponse | undefined {
   if (isFerretCall(call)) throw new ApiError(403, `a ferret cannot ${act}; the owner does`, 'forbidden');
   if (call.governance?.governed !== true || call.presentation?.freshStepUp === true) return undefined;
   return stepUpDemand(act);
