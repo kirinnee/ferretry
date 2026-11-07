@@ -177,7 +177,7 @@ function renderPatch(proposal: Proposal): LessonsPatchResponse {
     ...(anchor === undefined ? [] : [`Apply under: ${anchor}`, '']),
     proposal.ruleText.trim(),
     '',
-    `Evidence: ${proposal.occurrences} ferret(s) across ${proposal.crossRepoCount} repo(s), ${proposal.firstSeen} to ${proposal.lastSeen}.`,
+    `Evidence: ${proposal.occurrences} session(s) across ${proposal.crossRepoCount} repo(s), ${proposal.firstSeen} to ${proposal.lastSeen}.`,
     '',
   ];
   return { path: proposal.target.path, contents: lines.join('\n') };
@@ -343,7 +343,7 @@ function applyRefusal(call: CallContext, capability: 'fleet' | 'filesystem'): Ap
       403,
     );
   const decision = governance.decide({ capability: capabilityRef(capability), axis: 'configure' });
-  const where = capability === 'fleet' ? 'the global lessons' : "a project's instruction file";
+  const where = capability === 'fleet' ? 'the global instructions' : "a project's instruction file";
   if (!decision.allowed) {
     if (decision.refusal === 'step-up-required')
       return stepUpRefusal(`writing a lesson into ${where} from this device needs a passkey confirmation`, capability);
