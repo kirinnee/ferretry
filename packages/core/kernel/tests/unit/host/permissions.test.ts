@@ -168,3 +168,48 @@ describe('BB wildcard reach: core only', () => {
     ).rejects.toThrow(PermissionError);
   });
 });
+
+describe('CC a { resolver } network entry: the plugin half answers its own hosts, with no request data', () => {
+  const reached: string[] = [];
+  const fetchPort: FetchPort = {
+    request: async url => {
+      reached.push(String(url));
+      return new Response('');
+    },
+  };
+
+  test('an answered host (or host:port) passes; any other host, or a wildcard answer, is refused', async () => {
+    const port = restrictFetch('connections', [{ resolver: 'relay' }], fetchPort, undefined, name =>
+      name === 'relay' ? () => ['relay.example.test', 'self.example.test:8443', '*.workers.dev'] : undefined,
+    );
+    await port.request('https://relay.example.test/v1/rendezvous');
+    await port.request('https://self.example.test:8443/x');
+    await expect(port.request('https://self.example.test/x')).rejects.toThrow(PermissionError);
+    await expect(port.request('https://evil.test/')).rejects.toThrow(PermissionError);
+    await expect(port.request('https://a.workers.dev/')).rejects.toThrow(PermissionError);
+    expect(reached).toEqual(['https://relay.example.test/v1/rendezvous', 'https://self.example.test:8443/x']);
+  });
+
+  test('a throwing or missing resolver refuses; the resolver is called with no arguments', async () => {
+    const seen: unknown[][] = [];
+    const throwing = restrictFetch('connections', [{ resolver: 'relay' }], fetchPort, undefined, () => () => {
+      throw new Error('config unreadable');
+    });
+    await expect(throwing.request('https://relay.example.test/')).rejects.toThrow(PermissionError);
+    const missing = restrictFetch('connections', [{ resolver: 'relay' }], fetchPort);
+    await expect(missing.request('https://relay.example.test/')).rejects.toThrow(PermissionError);
+    const spying = restrictWebSocket(
+      'connections',
+      [{ resolver: 'relay' }],
+      { connect: () => ({ binaryType: 'arraybuffer' }) as unknown as WebSocketClient },
+      undefined,
+      () =>
+        (...args: unknown[]) => {
+          seen.push(args);
+          return ['relay.example.test'];
+        },
+    );
+    spying.connect('wss://relay.example.test/v1/rendezvous/abc/daemon?token=x');
+    expect(seen).toEqual([[]]);
+  });
+});

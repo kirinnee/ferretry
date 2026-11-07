@@ -16,9 +16,49 @@ export type ItemReachOf = (kind: ItemKind) => ItemReach;
 
 export const NO_ITEMS: ItemReachOf = () => ({ programs: [], hosts: [] });
 
-/** The declared strings plus what each `{ items }` entry's installed items name now. */
+/** The declared strings plus what each `{ items }` entry's installed items name now (a resolver is asked apart). */
 function expand(declared: readonly PermissionEntry[], items: ItemReachOf, pick: keyof ItemReach): readonly string[] {
-  return declared.flatMap(entry => (typeof entry === 'string' ? [entry] : items(entry.items)[pick]));
+  return declared.flatMap(entry =>
+    typeof entry === 'string' ? [entry] : 'items' in entry ? items(entry.items)[pick] : [],
+  );
+}
+
+/** A plugin's declared network resolvers by name (its daemon half's `resolvers` section), asked at each call. */
+export type ResolverOf = (name: string) => (() => readonly string[]) | undefined;
+
+export const NO_RESOLVERS: ResolverOf = () => undefined;
+
+/**
+ * Whether a `{ resolver }` entry allows this address: the resolver is called with NOTHING about the request, and
+ * one of its answers must equal the host or `host:port` exactly. A wildcard answer allows nothing; a missing or
+ * throwing resolver refuses.
+ */
+function resolverAllows(
+  declared: readonly PermissionEntry[],
+  resolve: ResolverOf,
+  hostname: string,
+  host: string,
+): boolean {
+  const lowerName = hostname.toLowerCase();
+  const lowerHost = host.toLowerCase();
+  for (const entry of declared) {
+    if (typeof entry !== 'object' || !('resolver' in entry)) continue;
+    const resolver = resolve(entry.resolver);
+    if (resolver === undefined) continue;
+    let answers: readonly string[];
+    try {
+      answers = resolver();
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(answers)) continue;
+    for (const answer of answers) {
+      if (typeof answer !== 'string' || answer.includes('*')) continue;
+      const wanted = answer.toLowerCase();
+      if (wanted === lowerName || wanted === lowerHost) return true;
+    }
+  }
+  return false;
 }
 import { resolveEnv } from './adapters/process.ts';
 
@@ -45,9 +85,15 @@ export function spawnPermitted(declared: readonly PermissionEntry[], items: Item
 }
 
 /** Whether `hostname` is declared, directly or by an installed item of a declared `{ items }` kind. */
-export function hostPermitted(declared: readonly PermissionEntry[], items: ItemReachOf, hostname: string): boolean {
+export function hostPermitted(
+  declared: readonly PermissionEntry[],
+  items: ItemReachOf,
+  hostname: string,
+  resolve: ResolverOf = NO_RESOLVERS,
+  host: string = hostname,
+): boolean {
   const named = expand(declared, items, 'hosts');
-  return named.includes(WILDCARD) || hostAllowed(hostname, named);
+  return named.includes(WILDCARD) || hostAllowed(hostname, named) || resolverAllows(declared, resolve, hostname, host);
 }
 
 /** `'*'` in `permissions.spawn` / `network`: any program or host. A core piece's alone (plugin-graph refuses it). */
@@ -101,6 +147,7 @@ export function restrictFetch(
   declared: readonly PermissionEntry[],
   base: FetchPort,
   items: ItemReachOf = NO_ITEMS,
+  resolve: ResolverOf = NO_RESOLVERS,
 ): FetchPort {
   return {
     request: async (url, init) => {
@@ -112,7 +159,7 @@ export function restrictFetch(
       }
       if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')
         throw new PermissionError(`${plugin} may only make HTTP requests.`);
-      if (!hostPermitted(declared, items, parsed.hostname))
+      if (!hostPermitted(declared, items, parsed.hostname, resolve, parsed.host))
         throw new PermissionError(`${plugin} may not reach ${parsed.hostname}: its manifest does not declare it.`);
       // Redirects are not followed blindly: a declared host could bounce the request anywhere.
       return await base.request(parsed, { ...init, redirect: 'manual' });
@@ -176,6 +223,7 @@ export function restrictWebSocket(
   declared: readonly PermissionEntry[],
   base: WebSocketPort,
   items: ItemReachOf = NO_ITEMS,
+  resolve: ResolverOf = NO_RESOLVERS,
 ): WebSocketPort {
   return {
     connect: url => {
@@ -187,7 +235,7 @@ export function restrictWebSocket(
       }
       if (parsed.protocol !== 'wss:' && parsed.protocol !== 'ws:')
         throw new PermissionError(`${plugin} may only open WebSocket connections.`);
-      if (!hostPermitted(declared, items, parsed.hostname))
+      if (!hostPermitted(declared, items, parsed.hostname, resolve, parsed.host))
         throw new PermissionError(`${plugin} may not reach ${parsed.hostname}: its manifest does not declare it.`);
       return base.connect(parsed);
     },

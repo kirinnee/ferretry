@@ -21,6 +21,9 @@ export function expectedSections(manifest: Manifest, half: HalfName): Record<str
       ),
       subscribers: (manifest.data?.subscribes ?? []).map(event => event.name),
       doctor: [...(manifest.doctor ?? [])],
+      resolvers: (manifest.permissions?.network ?? []).flatMap(entry =>
+        typeof entry === 'object' && 'resolver' in entry ? [entry.resolver] : [],
+      ),
     };
   if (half === 'app')
     return {

@@ -663,6 +663,13 @@ async function start(world: World): Promise<TestHost> {
               effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
               options.items ?? NO_ITEMS,
               parsed.hostname,
+              name =>
+                (
+                  built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
+                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
+                    | undefined
+                )?.[name],
+              parsed.host,
             )
           )
             throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
@@ -681,6 +688,13 @@ async function start(world: World): Promise<TestHost> {
               effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
               options.items ?? NO_ITEMS,
               parsed.hostname,
+              name =>
+                (
+                  built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
+                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
+                    | undefined
+                )?.[name],
+              parsed.host,
             )
           )
             throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);

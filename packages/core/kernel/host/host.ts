@@ -68,6 +68,7 @@ import {
   openChildEnvironments,
   restrictFetch,
   restrictSpawn,
+  type ResolverOf,
   restrictWebSocket,
   workersFor,
 } from './permissions.ts';
@@ -392,6 +393,13 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   };
 
   const pins = new PinRegistry(() => adapters.pinner ?? NO_PINNER);
+  /** A plugin's own `resolvers` section, read at each call (unset during build: nothing resolves yet). */
+  const resolversOf =
+    (id: string): ResolverOf =>
+    name =>
+      (
+        records.get(id)?.half?.resolvers as Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
+      )?.[name];
   const portsFor = (manifest: Manifest, lifecycle: PluginLifecycle): KernelPorts => ({
     clock,
     log: scopedLog(adapters.logSink, manifest.id),
@@ -423,12 +431,14 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
       adapters.fetch,
       items,
+      resolversOf(manifest.id),
     ),
     websocket: restrictWebSocket(
       manifest.id,
       effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
       websockets,
       items,
+      resolversOf(manifest.id),
     ),
     identity: identityPort,
     signer: signerFor(manifest.id, sessionSigner),

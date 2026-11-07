@@ -21,3 +21,28 @@ describe('manifest-match: doctor checks', () => {
     ]);
   });
 });
+
+describe('manifest-match: network resolvers', () => {
+  const withResolver = {
+    id: 'relayish',
+    title: 'R',
+    version: '5.0.0',
+    api: 5,
+    permissions: { network: ['a.test', { resolver: 'relay' }] },
+  } as unknown as Manifest;
+  const findings = (half: object): string[] =>
+    halfFindings(
+      'packages/plugins/relayish/daemon',
+      withResolver,
+      'daemon',
+      { half: 'daemon', manifest: withResolver, build: () => half } as unknown as AnyImplementation,
+      false,
+    ).map(f => f.message);
+  test('a declared resolver needs its function; an undeclared one is refused', () => {
+    expect(findings({ resolvers: { relay: () => [] } })).toEqual([]);
+    expect(findings({})).toEqual(['daemon half misses resolvers "relay"']);
+    expect(findings({ resolvers: { relay: () => [], other: () => [] } })).toEqual([
+      'daemon half implements undeclared resolvers "other"',
+    ]);
+  });
+});
