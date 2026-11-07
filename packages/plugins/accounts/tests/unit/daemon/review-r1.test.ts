@@ -3,7 +3,7 @@ import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeRedaction, FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
 import { type AuditDraft, STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 import { deviceStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
-import type { Admission } from '@ferretry/kernel/contract';
+import type { Admission, CallStanding } from '@ferretry/kernel/contract';
 import type { ConfigFileDef, StateFileDef } from '@ferretry/kernel/contract';
 import { ferret, fixedClock, testHost, type TestHost } from '@ferretry/kernel/testing';
 import { DevicesChanged } from '@ferretry/plugin-access/contract';
@@ -251,17 +251,17 @@ function oneFreshProof() {
 }
 
 /** A governed device the admission snapshot says is FRESH, sharing `proof` with every other call built on it. */
-function freshDevice(proof: ReturnType<typeof oneFreshProof>) {
+function freshDevice(proof: ReturnType<typeof oneFreshProof>): CallStanding {
   const base = deviceStanding(DEVICE);
   return {
     ...base,
     presentation: { ...base.presentation, stepUp: true, freshStepUp: true },
     governance: { governed: true, decide: () => ({ allowed: true as const, refusal: 'granted' as const }) },
     claimFreshStepUp: proof.claim,
-  };
+  } as CallStanding;
 }
 
-async function defaultsHost(standing: () => ReturnType<typeof freshDevice> | ReturnType<typeof ownerStanding>) {
+async function defaultsHost(standing: () => CallStanding) {
   const gate = Object.assign(new StandInAdmission(standing), { judgeConfigWrite: () => 'apply' as const });
   const h = await host([], security, gate);
   await signIn(h);
