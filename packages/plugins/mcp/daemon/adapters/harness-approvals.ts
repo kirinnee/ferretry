@@ -5,12 +5,14 @@
  *
  * FAIL CLOSED: a harness that is off, still a skeleton, without the read, or that throws gives NO answer (`undefined`),
  * and the launch then binds no project server. A harness key with no reader here takes no project server at all, as
- * today (only Claude's runtimes were handed one).
+ * today (only Claude's runtimes were handed one): it answers `not-taken`, so nothing is renewed for it either. Codex
+ * is deliberately given no reader. Its answer never depends on its daemon half, and asking a Codex port that is still
+ * a skeleton gave `undefined`, which renewed the project's sign-in for a launch that is never handed it.
  */
 import type { FerretId } from '@ferretry/kernel/contract';
 import type { McpProjectApprovals, McpProjectApprovalsRequest } from '../lib/inventory/project-sign-in.ts';
 
-/** The read both harness contracts offer (`ClaudeCodeApi`, `CodexApi`), as MCP needs it. */
+/** The read a harness contract offers (`ClaudeCodeApi.approvedProjectServers`), as MCP needs it. */
 export interface HarnessApprovalsReader {
   approvedProjectServers?(query: {
     readonly ferret: FerretId;

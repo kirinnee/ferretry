@@ -205,20 +205,28 @@ export class ProjectMcpLaunch {
     const held = named.length === 0 ? new Set<SecretName>() : await this.deps.secrets.held();
     // FAIL CLOSED: the harness's answer decides every binding; no answer (off, unreadable) binds nothing.
     const decided = approvals?.state === 'read' ? approvals.servers : undefined;
-    const servers: Record<string, LocalScopeServer> = {};
-    const env: Record<string, string> = {};
+    // Built from entries, never by assignment: a server may be named `__proto__`, and `servers['__proto__'] = …`
+    // would set the object's prototype instead of adding the entry.
+    const servers: [string, LocalScopeServer][] = [];
+    const env: [string, string][] = [];
     for (const { declaration, names } of named) {
       if (decided === undefined || !held.has(names.access)) continue;
-      const approval = decided[declaration.name];
-      // A runtime that DISABLED it said no there; a server the harness did not answer for is not assumed approved.
-      if (approval === undefined || approval === 'disabled') continue;
-      servers[declaration.name] = {
-        type: declaration.transport,
-        url: declaration.url,
-        headers: { ...declaration.headers, Authorization: `Bearer \${${names.variable}}` },
-      };
-      env[names.variable] = optionalSecretReference(names.access);
+      // The harness's OWN answer for this name only: a plain lookup of `constructor` or `__proto__` reads
+      // `Object.prototype`, which is neither undefined nor 'disabled'.
+      const approval = Object.hasOwn(decided, declaration.name) ? decided[declaration.name] : undefined;
+      // An allow-list: a runtime that DISABLED it said no there, and a server the harness did not answer for (or
+      // answered anything else for) is not assumed approved.
+      if (approval !== 'approved' && approval !== 'pending') continue;
+      servers.push([
+        declaration.name,
+        {
+          type: declaration.transport,
+          url: declaration.url,
+          headers: { ...declaration.headers, Authorization: `Bearer \${${names.variable}}` },
+        },
+      ]);
+      env.push([names.variable, optionalSecretReference(names.access)]);
     }
-    return { root, servers, env };
+    return { root, servers: Object.fromEntries(servers), env: Object.fromEntries(env) };
   }
 }

@@ -92,6 +92,36 @@ export class KnownAndFerretFolders implements McpProjectFolders {
   }
 }
 
+/** One row of the managed worktree registry, as Ferrets' `managedWorktrees()` answers it (the fields read here). */
+export interface ManagedWorktreeRow {
+  readonly path: string;
+  readonly repositoryRoot: string;
+  readonly commonDirectory: string;
+  readonly removedAt?: string;
+}
+
+/**
+ * The registry's rows in {@link mcpInventoryFolders}' shape, each with the `projectId` today's worktree list carried:
+ * the project registered for its common directory (today's `projectForWorktree`, copied). Ferrets is core and cannot
+ * read Projects, so the join is made here.
+ */
+export const managedWorktreeRows = (
+  worktrees: readonly ManagedWorktreeRow[],
+  projects: readonly { readonly id: string; readonly git?: { readonly commonDirectory: string } }[],
+) =>
+  worktrees.map(worktree => {
+    const project =
+      worktree.commonDirectory.length === 0
+        ? undefined
+        : projects.find(candidate => candidate.git?.commonDirectory === worktree.commonDirectory);
+    return {
+      path: worktree.path,
+      repositoryRoot: worktree.repositoryRoot,
+      ...(worktree.removedAt === undefined ? {} : { removedAt: worktree.removedAt }),
+      ...(project === undefined ? {} : { projectId: project.id }),
+    };
+  });
+
 /**
  * The folders a ferret may work in, each joined to its project: registered projects, then live managed
  * worktrees — a worktree belongs to the project registered for its common directory (`projectId`), else

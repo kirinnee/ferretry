@@ -12,8 +12,14 @@ import { sealedMcpOAuthSecrets } from './adapters/oauth-sealed-secrets.ts';
 import { StateMcpOAuthStateStore } from './adapters/oauth-state-store.ts';
 import { TransportMcpProbe } from './adapters/probe.ts';
 import { type FerretRoot, RootMcpProjectFiles } from './adapters/project-files.ts';
+import { PROJECT_MCP_FILE, projectRootMcpFile } from './adapters/project-root-files.ts';
 import { McpCheckService } from './lib/inventory/check.ts';
-import { KnownAndFerretFolders, type McpInventoryFolder, mcpInventoryFolders } from './lib/inventory/folders.ts';
+import {
+  KnownAndFerretFolders,
+  type McpInventoryFolder,
+  managedWorktreeRows,
+  mcpInventoryFolders,
+} from './lib/inventory/folders.ts';
 import { McpDocumentUnreadable, McpInventoryService } from './lib/inventory/service.ts';
 import { ProjectMcpLaunch } from './lib/inventory/project-sign-in.ts';
 import { McpLaunchParts } from './lib/launch-parts.ts';
@@ -33,29 +39,31 @@ const NOT_YET = (what: string): never => {
  * - Runtimes (accounts, profiles, the login scope's write) and Catalogs belong to neighbours whose contracts MCP may
  *   not import yet. The inventory lists the user, project and local servers a ferret's own folder holds; a login add
  *   answers `mcp_runtime_unknown`.
- * - Projects (an optional `uses`) gives the registered roots, so a subfolder of a registered project — a worktree
- *   kept inside it included — is that project, under its root's subject digest, as today. A MANAGED worktree outside
- *   the project (`<home>-worktrees`) is not: Ferrets keeps that registry and its contract has no read of it, so such
- *   a worktree is its own project until one exists. Projects off: every folder is its own project. The project
- *   root's `.mcp.json` is still read only through a ferret folder that holds it (`workRootFor`, MCP's one read
- *   root): from a subfolder, while no ferret works in the project root, nothing is read and nothing renews.
+ * - Projects (an optional `uses`) gives the registered roots and Ferrets' `managedWorktrees()` the managed worktrees
+ *   (`<home>-worktrees`), so a subfolder of a registered project, a worktree kept inside it, and a managed worktree
+ *   of it are that project, under its root's subject digest, as today. Projects off: a managed worktree belongs to
+ *   the repository it was forked from, and every other folder is its own project. The `.mcp.json` at each of those
+ *   known roots — that one file, read-only — is read through the kernel's `imports` root scoped to the root
+ *   (`adapters/project-root-files.ts`), so a ferret in a subfolder reads it with no ferret in the project root. A
+ *   link inside the project root is followed (kernel item N GAP, said there); one that leaves it is refused.
  * - The Vault has no value getter (use, never read). Sign-in writes the ACCESS token by name through `VaultApi.put`;
  *   the refresh token and a registered client secret (the "internal" store) rest in MCP's own sealed document,
  *   `state/mcp/oauth-secrets.json` (today's `mcp-oauth-secrets.json`), opened through the Vault's sealed-document
  *   port and handed to the sign-in service alone. Reading a held ACCESS token back (revoke it at sign-out, a check's
  *   bearer) needs a Vault operation that spends a named secret for this plugin; until that contract change it is not
  *   sent (sign-out revokes with the held refresh token, and answers `revoked: false` when there is none).
- * - Whether a runtime DISABLED a project server is the HARNESS's answer (`approvedProjectServers`, optional `uses`
- *   of Claude Code and Codex), read by the harness plugin from its own home: MCP has no root there. A harness that is
- *   off or does not answer binds nothing (fail closed, `ProjectMcpLaunch`); its sign-ins are still renewed. Both
- *   harness daemon halves are still skeletons, which provide nothing, so until they are ported a launch binds no
- *   project server — the read itself is written and tested in each harness plugin.
+ * - Whether a runtime DISABLED a project server is the HARNESS's answer (`approvedProjectServers`, the optional
+ *   `uses` of Claude Code), read by the harness plugin from its own home: MCP has no root there. A harness that is
+ *   off or does not answer binds nothing (fail closed, `ProjectMcpLaunch`); its sign-ins are still renewed. The
+ *   Claude Code daemon half is still a skeleton, which provides nothing, so until it is ported a launch binds no
+ *   project server — the read itself is written and tested in the harness plugin. A Codex launch is handed no project
+ *   server and renews none (`not-taken`, as today), answered by MCP whatever state Codex's daemon half is in.
  */
 export default implementDaemon(manifest, {
   build(ctx) {
     const { kernel } = ctx;
     const { ferrets, vault, sealed } = ctx.needs;
-    const { claudeCode, codex, projects } = ctx.uses;
+    const { claudeCode, projects } = ctx.uses;
 
     // ── what a ferret's folder is: these folders are inventory read roots, never project registrations ────────────
     const owners = new Map<string, FerretId>();
@@ -100,18 +108,32 @@ export default implementDaemon(manifest, {
     });
 
     // ── what a ferret's folder holds: one source for the inventory and the launch ──────────────────────────────────
-    // Registered projects are the known roots (today's `mcpInventoryFolders`); no managed-worktree read exists here.
+    // The known roots, as today's `mcpInventoryFolders`: registered projects (Projects), then live managed worktrees
+    // (Ferrets' registry), each joined to the project registered for its common directory, else its repository.
     const known = async (): Promise<readonly McpInventoryFolder[]> => {
-      const registered = projects.current();
-      if (registered === undefined) return [];
+      const registered = (await projects.current()?.list()) ?? [];
+      const managed = (await ferrets.managedWorktrees?.()) ?? [];
       return await mcpInventoryFolders(
-        { projects: async () => await registered.list() },
-        { list: async () => ({ worktrees: [] }) },
+        { projects: async () => registered },
+        { list: async () => ({ worktrees: managedWorktreeRows(managed, registered) }) },
       )();
     };
     const folders = new KnownAndFerretFolders(known, refreshOwners);
+    // A known root's `.mcp.json` — and nothing else there — is read through the kernel's `imports` root scoped to that
+    // folder (lead ruling (B)), so a ferret in a subfolder reads it with no ferret in the project root. Every other
+    // document is read through the ferret folder that holds it, as before.
+    const projectFile = projectRootMcpFile(root => kernel.roots.root('imports', { subfolder: root }));
     const documents = new RootMcpHarnessDocuments(
-      path => workRootFor(path),
+      async path => {
+        if (path.endsWith(`/${PROJECT_MCP_FILE}`)) {
+          const held = projectFile(
+            path,
+            (await known()).map(folder => folder.root),
+          );
+          if (held !== undefined) return held;
+        }
+        return workRootFor(path);
+      },
       (text, format) => {
         if (format === 'json') return JSON.parse(text) as unknown;
         return NOT_YET('Reading a Codex config.toml');
@@ -135,11 +157,7 @@ export default implementDaemon(manifest, {
           accounts: async () => [{ runtime: agent, wrapper: agent, harness: spec.harness, home: spec.home }],
           folders,
           documents,
-          approvals: harnessProjectApprovals(
-            { 'claude-code': () => claudeCode.current(), codex: () => codex.current() },
-            spec.harness,
-            spec.ferret,
-          ),
+          approvals: harnessProjectApprovals({ 'claude-code': () => claudeCode.current() }, spec.harness, spec.ferret),
           secrets: { held },
           renewal: oauth,
         }).share(agent, spec.folder);

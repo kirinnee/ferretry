@@ -1014,3 +1014,75 @@ describe('host evidence this daemon could not establish', () => {
     should(actual.worktrees[0]?.ownerActive).be.false();
   });
 });
+
+describe("the registry's durable facts (Ferrets' managedWorktrees(), for MCP's known roots)", () => {
+  it('should answer every record and tombstone with its durable facts, inspecting nothing with Git', async () => {
+    // Arrange
+    const { subject, operations } = build({
+      entries: [record(), record({ path: '/managed/repo/old', removedAt: '2026-08-04T02:00:00.000Z' })],
+      sessions: [session()],
+    });
+
+    // Act
+    const actual = await subject.records();
+
+    // Assert — the same facts list() projects, no live evidence, owner or occupancy, and no Git inspection.
+    should(operations.examined).be.empty();
+    should(actual).deepEqual([
+      {
+        path: '/managed/repo/feat-one',
+        branch: 'feat/one',
+        repositoryRoot: '/work/ferretry',
+        commonDirectory: '/work/ferretry/.git',
+        relativeCwd: 'packages/cli',
+        createdAt: '2026-08-04T00:00:00.000Z',
+        initialHead: 'a'.repeat(40),
+        branchPreexisted: false,
+      },
+      {
+        path: '/managed/repo/old',
+        branch: 'feat/one',
+        repositoryRoot: '/work/ferretry',
+        commonDirectory: '/work/ferretry/.git',
+        relativeCwd: 'packages/cli',
+        createdAt: '2026-08-04T00:00:00.000Z',
+        initialHead: 'a'.repeat(40),
+        branchPreexisted: false,
+        removedAt: '2026-08-04T02:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('should settle the registry first, and report an interrupted creation it cannot prove as unresolved', async () => {
+    // Arrange
+    const operations = new RecordingOperations({ adoption: { kind: 'unverified', reason: 'not ours' } });
+    const { subject } = build({
+      intents: [
+        {
+          version: 1,
+          path: '/managed/repo/half',
+          branch: 'feat/half',
+          repositoryRoot: '/work/ferretry',
+          commonDir: '/work/ferretry/.git',
+          ownershipToken: 'ownership-token-0002',
+          declaredAt: '2026-08-04T00:00:00.000Z',
+          initialHead: 'a'.repeat(40),
+          branchPreexisted: false,
+          sourceCwd: '/work/ferretry',
+          relativeCwd: '',
+        },
+      ],
+      operations,
+    });
+
+    // Act
+    const actual = await subject.records();
+
+    // Assert
+    should(operations.adopted).have.length(1);
+    should(actual).have.length(1);
+    should(actual[0]).match({ path: '/managed/repo/half', commonDirectory: '/work/ferretry/.git' });
+    should(actual[0]?.unresolved).match(/never finished/u);
+    should(actual[0]?.removedAt).be.undefined();
+  });
+});

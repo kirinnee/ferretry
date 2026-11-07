@@ -31,20 +31,21 @@ export function unreadableDocument(path: string, error: unknown): McpDocumentUnr
 export type DocumentParser = (text: string, format: 'json' | 'toml') => unknown;
 
 export class RootMcpHarnessDocuments implements McpHarnessDocuments {
-  /** `open(path)` is the ferret root that holds the document, or throws when no ferret folder does. */
+  /** `open(path)` is the root that holds the document, or throws (or rejects) when none may. */
   constructor(
-    private readonly open: (path: string) => FerretRoot,
+    private readonly open: (path: string) => FerretRoot | Promise<FerretRoot>,
     private readonly parse: DocumentParser,
   ) {}
 
   async read(path: string, format: 'json' | 'toml'): Promise<unknown> {
     let text: string;
     try {
-      const held = this.open(path);
+      const held = await this.open(path);
       const root = held.root;
       const base = held.base.replace(/\/+$/u, '');
       const given = path.startsWith(`${base}/`) ? root.resolve(path.slice(base.length + 1)) : undefined;
-      if (given === undefined || !given.ok) throw new McpDocumentUnreadable(`${path} is outside what Ferretry may read.`);
+      if (given === undefined || !given.ok)
+        throw new McpDocumentUnreadable(`${path} is outside what Ferretry may read.`);
       const resolved = given.value;
       const info = await root.stat(resolved);
       if (info === undefined) return null;

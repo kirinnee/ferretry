@@ -279,7 +279,6 @@ describe('MCP launch renewal through the daemon half', () => {
       needs: { ferrets, vault, sealed },
       uses: {
         claudeCode: { current: () => undefined },
-        codex: { current: () => undefined },
         projects: { current: () => undefined },
       },
       hooks: {} as never,

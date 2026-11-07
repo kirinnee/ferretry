@@ -15,7 +15,6 @@ test('G177 the daemon refuses project preview and add without a registered-proje
     needs: { ferrets, vault: new FakeVault(), sealed: new FakeSealedDocuments() },
     uses: {
       claudeCode: { current: () => undefined },
-      codex: { current: () => undefined },
       projects: { current: () => undefined },
     },
     hooks: {} as never,

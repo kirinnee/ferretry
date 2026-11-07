@@ -12,8 +12,10 @@ import {
   combinedMcpOAuthServers,
   type McpInventoryFolder,
   McpInventoryService,
+  managedWorktreeRows,
   mcpFolderFor,
   mcpFolderSubject,
+  mcpInventoryFolders,
   mcpProjectKey,
   ProjectMcpLaunch,
   ProjectMcpOAuthServers,
@@ -53,6 +55,45 @@ describe('mcpFolderFor', () => {
     should(mcpFolderFor(`${LONE}//./`, FOLDERS)).deepEqual({ root: LONE, project: LONE });
     // A lexical compare: a sibling sharing a prefix is not inside the project.
     should(mcpFolderFor(`${PROJECT}-old`, FOLDERS)).deepEqual({ root: `${PROJECT}-old`, project: `${PROJECT}-old` });
+  });
+});
+
+describe('managed worktrees (Ferrets’ managedWorktrees(), lead ruling (B))', () => {
+  const COMMON = `${PROJECT}/.git`;
+  const managed = (path: string, repositoryRoot: string, commonDirectory: string, removedAt?: string) => ({
+    path,
+    repositoryRoot,
+    commonDirectory,
+    ...(removedAt === undefined ? {} : { removedAt }),
+  });
+
+  it('should map a live managed worktree to the project registered for its common directory, as today', async () => {
+    // Arrange — forked from another checkout, so only the common directory names the project.
+    const projects = [{ id: 'p1', name: 'repo', path: PROJECT, git: { commonDirectory: COMMON } }];
+    const rows = managedWorktreeRows(
+      [
+        managed('/fy-home-worktrees/feature', '/elsewhere/checkout', COMMON),
+        managed('/fy-home-worktrees/stranger', '/srv/stranger', '/srv/stranger/.git'),
+        managed('/fy-home-worktrees/gone', '/elsewhere/checkout', COMMON, '2026-11-07T10:00:00.000Z'),
+        managed('/fy-home-worktrees/blank', PROJECT, ''),
+      ],
+      projects,
+    );
+
+    // Act
+    const folders = await mcpInventoryFolders(
+      { projects: async () => projects },
+      { list: async () => ({ worktrees: rows }) },
+    )();
+
+    // Assert — the joined one is the project; an unjoined one is its repository; a removed one is no folder.
+    should(folders).deepEqual([
+      { root: PROJECT, project: PROJECT, name: 'repo' },
+      { root: '/fy-home-worktrees/feature', project: PROJECT, name: 'repo' },
+      { root: '/fy-home-worktrees/stranger', project: '/srv/stranger' },
+      { root: '/fy-home-worktrees/blank', project: PROJECT },
+    ]);
+    should(mcpFolderFor('/fy-home-worktrees/feature/src', folders)).deepEqual(folders[1]);
   });
 });
 

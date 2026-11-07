@@ -73,6 +73,36 @@ describe('Claude Code project server approvals', () => {
     });
   });
 
+  test.each(['__proto__', 'constructor', 'toString'])(
+    'a server named %s gets a decision of its own: disabled, pending or approved',
+    async name => {
+      // Arrange — one home per answer; the name is listed exactly as the others are.
+      const answer = async (project: Record<string, unknown>) => {
+        const result = await ask(new ClaudeProjectApprovals(() => home({ '.claude.json': claudeJson(project) })), [
+          name,
+        ]);
+        if (result.state !== 'read') throw new Error('the home was readable');
+        return result.servers;
+      };
+
+      // Act
+      const disabled = await answer({ hasTrustDialogAccepted: true, disabledMcpjsonServers: [name] });
+      const pending = await answer({});
+      const approved = await answer({ hasTrustDialogAccepted: true, enabledMcpjsonServers: [name] });
+
+      // Assert — an OWN key each time (a plain `servers[name] = …` loses `__proto__`), never the prototype's.
+      for (const [servers, expected] of [
+        [disabled, 'disabled'],
+        [pending, 'pending'],
+        [approved, 'approved'],
+      ] as const) {
+        expect(Object.hasOwn(servers, name)).toBe(true);
+        expect(servers[name]).toBe(expected);
+        expect(Object.keys(servers)).toEqual([name]);
+      }
+    },
+  );
+
   test('a deny in settings.json wins over an allow in the project, and enableAll approves the rest', async () => {
     // Arrange
     const approvals = new ClaudeProjectApprovals(() =>

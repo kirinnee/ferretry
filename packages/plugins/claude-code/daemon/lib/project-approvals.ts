@@ -119,8 +119,11 @@ export class ClaudeProjectApprovals {
     const root = query.root.replace(/(?<=.)\/+$/u, '');
     const entry = claudeProjectEntry(claudeJson.value, root);
     const keys = claudeApprovalKeys(settings.value);
-    const servers: Record<string, ProjectServerApproval> = {};
-    for (const name of query.servers) servers[name] = claudeApproval(name, entry, [keys]);
+    // Built from entries, never by assignment: `servers['__proto__'] = 'disabled'` is a no-op on a plain object, so a
+    // server named `__proto__` would have no decision of its own.
+    const servers: Record<string, ProjectServerApproval> = Object.fromEntries(
+      query.servers.map(name => [name, claudeApproval(name, entry, [keys])]),
+    );
     return { state: 'read', servers };
   }
 }

@@ -301,7 +301,6 @@
         "@ferretry/core-vault": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/plugin-claude-code": "workspace:*",
-        "@ferretry/plugin-codex": "workspace:*",
         "@ferretry/plugin-projects": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",

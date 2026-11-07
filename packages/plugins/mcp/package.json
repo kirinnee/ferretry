@@ -24,7 +24,6 @@
     "@ferretry/core-ferrets": "workspace:*",
     "@ferretry/core-vault": "workspace:*",
     "@ferretry/plugin-claude-code": "workspace:*",
-    "@ferretry/plugin-codex": "workspace:*",
     "@ferretry/plugin-projects": "workspace:*"
   },
   "sideEffects": false
