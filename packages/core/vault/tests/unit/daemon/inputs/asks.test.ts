@@ -6,9 +6,8 @@ import {
   InputAsksAdapter,
   inputTellSendId,
 } from '../../../../daemon/adapters/inputs/asks.ts';
-import type { InputCard } from '../../../../daemon/lib/inputs/ports.ts';
+import type { InputCaller, InputCard } from '../../../../daemon/lib/inputs/ports.ts';
 import type { AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
-import type { InputCaller } from '../../../../daemon/lib/inputs/wire.ts';
 import { inputRequestService, RAISE, SESSION } from './support.ts';
 
 const card = (requestId: string): InputCard => ({
@@ -48,8 +47,16 @@ describe('InputAgentNotifierAdapter', () => {
   it('tells the ferret through Asks under a send id derived from its card, so a card is told once', async () => {
     const asks = new FakeAsks();
     const notifier = new InputAgentNotifierAdapter(asks);
-    await notifier.tell(SESSION_ID, 'A3' as AgendaId, 'A3 was answered and typed into %terminal:dev. Read the terminal to continue.');
-    await notifier.tell(SESSION_ID, 'A3' as AgendaId, 'A3 was answered and typed into %terminal:dev. Read the terminal to continue.');
+    await notifier.tell(
+      SESSION_ID,
+      'A3' as AgendaId,
+      'A3 was answered and typed into %terminal:dev. Read the terminal to continue.',
+    );
+    await notifier.tell(
+      SESSION_ID,
+      'A3' as AgendaId,
+      'A3 was answered and typed into %terminal:dev. Read the terminal to continue.',
+    );
     await notifier.tell(SESSION_ID, 'A4' as AgendaId, 'A4 ended without a value (expired).');
     expect(asks.told).toEqual([
       {
