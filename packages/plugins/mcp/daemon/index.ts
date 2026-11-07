@@ -7,6 +7,7 @@ import { ConfigMcpServers } from './adapters/config-servers.ts';
 import { RootMcpHarnessDocuments } from './adapters/harness-documents.ts';
 import { FetchMcpOAuthHttp } from './adapters/oauth-http.ts';
 import { webCryptoMcpOAuth } from './adapters/oauth-crypto.ts';
+import { sealedMcpOAuthSecrets } from './adapters/oauth-sealed-secrets.ts';
 import { StateMcpOAuthStateStore } from './adapters/oauth-state-store.ts';
 import { TransportMcpProbe } from './adapters/probe.ts';
 import { type FerretRoot, RootMcpProjectFiles } from './adapters/project-files.ts';
@@ -30,15 +31,17 @@ const NOT_YET = (what: string): never => {
  * - Runtimes (accounts, profiles, the login scope's write), Projects (registered roots) and Catalogs belong to
  *   neighbours whose contracts MCP may not import yet. The inventory lists the user, project and local servers a
  *   ferret's own folder holds; a login add answers `mcp_runtime_unknown`.
- * - The Vault has no value getter and no sealed-document API (use, never read). Sign-in therefore writes the ACCESS
- *   token by name through `VaultApi.put`, but the refresh token and a registered client secret (the "internal" store),
- *   and reading a held token back to send to the provider (revoke, renew, a check's bearer), need a Vault operation
- *   that spends a named secret for this plugin. Until that contract change they refuse in words.
+ * - The Vault has no value getter (use, never read). Sign-in writes the ACCESS token by name through `VaultApi.put`;
+ *   the refresh token and a registered client secret (the "internal" store) rest in MCP's own sealed document,
+ *   `state/mcp/oauth-secrets.json` (today's `mcp-oauth-secrets.json`), opened through the Vault's sealed-document
+ *   port and handed to the sign-in service alone. Reading a held ACCESS token back (revoke it at sign-out, a check's
+ *   bearer) needs a Vault operation that spends a named secret for this plugin; until that contract change it is not
+ *   sent (sign-out revokes with the held refresh token, and answers `revoked: false` when there is none).
  */
 export default implementDaemon(manifest, {
   build(ctx) {
     const { kernel } = ctx;
-    const { ferrets, vault } = ctx.needs;
+    const { ferrets, vault, sealed } = ctx.needs;
 
     // ── what a ferret's folder is: these folders are inventory read roots, never project registrations ────────────
     const owners = new Map<string, FerretId>();
@@ -70,12 +73,6 @@ export default implementDaemon(manifest, {
       },
       remove: async (name: SecretName): Promise<boolean> => await vault.remove(name),
     };
-    const sealed = {
-      list: async (): Promise<readonly SecretSummary[]> => [],
-      put: async (): Promise<SecretSummary> => NOT_YET('Keeping a refresh token or a client secret'),
-      remove: async (): Promise<boolean> => false,
-      values: async (): Promise<ReadonlyMap<SecretName, string>> => new Map(),
-    };
     const oauth = new McpOAuthService({
       servers: new ConfigMcpServers(items),
       http: new FetchMcpOAuthHttp(kernel.fetch),
@@ -84,7 +81,8 @@ export default implementDaemon(manifest, {
       state: new StateMcpOAuthStateStore(kernel.state),
       secrets,
       values: { values: async () => new Map() },
-      internal: sealed,
+      // Refresh tokens and client secrets: MCP's own sealed document, held by nothing but this service (S8, S174).
+      internal: sealedMcpOAuthSecrets(sealed, kernel.state),
     });
 
     // ── inventory and check ────────────────────────────────────────────────────────────────────────────────────────

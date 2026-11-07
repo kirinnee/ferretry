@@ -83,6 +83,10 @@ class MemorySecrets implements McpOAuthSecretWriter, McpOAuthSecretValues {
   async values(): Promise<ReadonlyMap<SecretName, string>> {
     return new Map(this.entries);
   }
+
+  async value(name: SecretName): Promise<string | undefined> {
+    return this.entries.get(name);
+  }
 }
 
 export const testCrypto: McpOAuthCrypto = {
