@@ -34,7 +34,7 @@ export interface IMachineGateway {
 }
 
 /** The slice of the terminal these verbs print through. */
-export interface IMachineOutput {
+interface IMachineOutput {
   /** Something worked. */
   success(message: string): void;
   /** stdout exactly as given: a report, or JSON for a script. */
@@ -45,7 +45,7 @@ export interface IMachineOutput {
 }
 
 /** Asking a person something. Never used off a terminal. */
-export interface IMachinePrompt {
+interface IMachinePrompt {
   ask(message: string): Promise<string>;
 }
 

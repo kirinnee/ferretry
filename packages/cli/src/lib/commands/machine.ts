@@ -81,7 +81,7 @@ function autoResumeLines(machine: MachineView): string[] {
 }
 
 /** How installing one tool ended, in words. */
-export function renderInstallOutcome(outcome: ToolInstallOutcome): string {
+function renderInstallOutcome(outcome: ToolInstallOutcome): string {
   const label = HARNESS_LABEL[outcome.harness];
   if (outcome.outcome === 'already-installed') return `${label} was already installed.`;
   if (outcome.outcome === 'installed') return `${label} is installed.`;
