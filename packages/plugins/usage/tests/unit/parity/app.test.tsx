@@ -17,11 +17,11 @@ import { MOVE_TRIGGERS } from '../../../app/lib/move-triggers.ts';
 import { daemonInsightsPath, daemonInsightsQueryPath } from '../../../app/shell.ts';
 import manifest from '../../../manifest.ts';
 import { fullReport, minimalReport } from '../contract/performance-report-fixtures.ts';
-import { fakeClient, type RecordedCall } from './support/client.ts';
+import { fakeClient, type RecordedCall } from '../app/support/client.ts';
 import { interact, mount, must } from '@ferretry/app/testing';
-import { aggregateResponse, group } from './support/analytics-query-fixtures.ts';
-import { rawResponse, rawRow } from './support/analytics-rows.ts';
-import { daemonConnection } from './support/shell.ts';
+import { aggregateResponse, group } from '../app/support/analytics-query-fixtures.ts';
+import { rawResponse, rawRow } from '../app/support/analytics-rows.ts';
+import { daemonConnection } from '../app/support/shell.ts';
 
 const INSIGHTS = 'GET /v1/usage/insights';
 const daemonA = daemonConnection({ daemonId: 'daemon-a' });

@@ -355,6 +355,8 @@ export default implementDaemon(manifest, {
       after: ['usage-restore'],
       run: async () => await budget.tick(),
     });
+    // A budget edit applies now, not at the next minute: the config loading is the trigger today too.
+    kernel.config.watch(USAGE_CONFIG, () => kernel.jobs.kick('usage-budget'));
     kernel.jobs.add({
       id: 'usage-ingest',
       schedule: { every: INGEST_BACKSTOP },
