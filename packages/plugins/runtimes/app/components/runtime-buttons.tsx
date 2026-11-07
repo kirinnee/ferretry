@@ -29,9 +29,8 @@ import { type ReactNode, useEffect, useMemo } from 'react';
 import { useAccountPickerSlice } from '../hooks/use-account-picker.ts';
 import { accountHealthView } from '../lib/account-health-view.ts';
 import type { PickerAccount } from '../lib/account-picker-catalog.ts';
-import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
-import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { QuotaReadout } from '../shell/quota-readout.tsx';
+import type { AccountPickerStore } from '../lib/account-picker-store.ts';
+import { QuotaReadout } from './quota-readout.tsx';
 import { cn } from '../ui.ts';
 import {
   type AccountPickerOption,
@@ -42,10 +41,10 @@ import {
   fleetHarnessLabel,
   hintedAccountOption,
   sessionCapableAccountOptions,
-} from './daemon-picker-model.ts';
+} from '../lib/daemon-picker-model.ts';
 
 /** The harnesses a runtime can drive, in the order their groups are drawn. */
-const HARNESS_ORDER = ['claude', 'codex'] as const satisfies readonly PickerAccount['kind'][];
+const HARNESS_ORDER = ['claude-code', 'codex'] as const satisfies readonly PickerAccount['kind'][];
 
 /** The one `name` that makes every button, in either group, a single choice. */
 const RADIO_NAME = 'fy-new-session-runtime';
@@ -57,16 +56,14 @@ const HEALTH_TONE = {
   muted: 'text-faint',
 } as const;
 
-/** A runtime the form chose, and the pairing it was chosen on. Never one without the other. */
+/** A runtime the form chose. The client the store reads through belongs to one daemon, so it names no pairing. */
 export interface ChosenRuntime {
-  readonly connection: DaemonConnection;
   readonly account: AccountPickerOption;
 }
 
 export interface RuntimeButtonsProps {
-  readonly store: DaemonAccountPickerStore;
-  /** The one daemon whose runtimes this may ever offer. */
-  readonly connection: DaemonConnection;
+  /** The roster of the one daemon whose runtimes this may ever offer (the store is made over its client). */
+  readonly store: AccountPickerStore;
   /** The client bound to that daemon: the roster is read again when its runtimes move. */
   readonly client: Pick<PluginClient, 'subscribe'>;
   /** The instant the quota readouts are judged against, in epoch milliseconds: the shell's clock, never this file's. */
@@ -170,7 +167,6 @@ function RuntimeButton({
  */
 export function RuntimeButtons({
   store,
-  connection,
   client,
   now,
   usage,
@@ -184,7 +180,7 @@ export function RuntimeButtons({
   labelId,
   fallbackPlaceholder,
 }: RuntimeButtonsProps): ReactNode {
-  const slice = useAccountPickerSlice(store, connection, client);
+  const slice = useAccountPickerSlice(store, client);
   const published = slice.catalog?.accounts ?? null;
   const health = slice.health;
   // Only an agent runtime can run a session; the person's own CLI is published too and is refused.
@@ -206,8 +202,8 @@ export function RuntimeButtons({
   }, [offered, selected, suggested, value, onValueChange]);
 
   useEffect(() => {
-    onChosen(selected === null ? null : { connection, account: selected });
-  }, [selected, connection, onChosen]);
+    onChosen(selected === null ? null : { account: selected });
+  }, [selected, onChosen]);
 
   if (offered === null) {
     if (slice.status !== 'error') {

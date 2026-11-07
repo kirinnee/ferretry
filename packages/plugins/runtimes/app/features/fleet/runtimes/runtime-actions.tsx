@@ -26,7 +26,7 @@ import { MoreHorizontal, Pencil, Star, Trash2 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { HARNESS_NAMES } from '../../../lib/shell-ports.ts';
 import { Button, ContextMenu, type MenuAnchor, useDialogFocus } from '../../../ui.ts';
-import { machineSettings } from '../machine/settings-tab.tsx';
+import { machineSettings } from '../machine/machine-settings.ts';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import {
