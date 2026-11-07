@@ -2,15 +2,23 @@
  * The one generated-style client every `fy` verb and agent tool talks through (§9.6). Per plugin it:
  *
  * 1. refuses a person-only route from a ferret's pane BEFORE any contact with the daemon (S59, S61);
- * 2. reads the plugin inventory once (the safe bootstrap read) and blocks the call, unsent, unless the owning
- *    plugin is present, on and has this fy's contract hash. A block re-reads once, so a daemon that restarted on a
- *    new build is not judged by its old inventory;
+ * 2. reads the plugin inventory (the safe bootstrap read) and blocks the call, unsent, unless every core package and
+ *    the owning plugin are present, on and carry this fy's contract hashes. A block re-reads once, so a daemon that
+ *    restarted on a new build is not judged by its old inventory. The held inventory is dropped when the daemon
+ *    restarts (its run record names another process), when `kernel.plugins-changed` is heard, and before a request
+ *    is sent again after the daemon was away. A guarded resend therefore waits for a fresh inventory check; that
+ *    read, like every attempt of every request, goes through the transport's own per-attempt address check;
  * 3. sends, and turns an HTTP refusal into a final `DaemonRefusal` (S54).
+ *
+ * What holds for the credential (S57) is the transport's, not this client's: the HTTP transport reads the daemon's
+ * address again on EVERY attempt, a resend after a restart included, and asks its locality and own-listener check
+ * about exactly that address before the request (and its credential) goes out. A refusal there is final. The
+ * remaining window is the moment between that check and the connect, which no user-space client can close.
  */
-import type { PluginInventory } from '@ferretry/kernel/contract';
+import { type PluginInventory, PluginsChanged } from '@ferretry/kernel/contract';
 import type { Manifest, PluginClient } from '@ferretry/kernel/manifest';
 import { DaemonRefusal, EXIT, ShellError } from './errors.ts';
-import { type CompiledContracts, judgePlugin, PluginPausedError, pausedSentence } from './guard.ts';
+import { type CompiledContracts, judgeCall, PluginPausedError, pausedSentence } from './guard.ts';
 import { PERSON_ONLY_REFUSAL } from './credential.ts';
 import type { CommandRegistry } from './registry.ts';
 import { buildRequest, type CallInit, type DaemonRequest, isRepeatable, refusalText } from './request.ts';
@@ -20,25 +28,57 @@ export interface DaemonReply {
   readonly body: unknown;
 }
 
-/** Sends one request, with whatever credential the connection chose. Never throws for an HTTP status. */
-export interface DaemonTransport {
-  send(request: DaemonRequest, options: { readonly repeatable: boolean }): Promise<DaemonReply>;
+export interface SendOptions {
+  readonly repeatable: boolean;
+  /**
+   * Asked before the request is sent AGAIN after the daemon was away (a restart): the guard's fresh check. It throws
+   * to stop the resend. The first attempt does not ask it; the caller checked before sending.
+   */
+  readonly recheck?: () => Promise<void>;
 }
 
-/** The inventory, read once and re-read on demand. */
+/** Sends one request, with whatever credential the connection chose. Never throws for an HTTP status. */
+export interface DaemonTransport {
+  send(request: DaemonRequest, options: SendOptions): Promise<DaemonReply>;
+}
+
+/**
+ * The inventory, read once per daemon process and re-read on demand. `instance` names the daemon process now
+ * recorded (its run record's pid), or `undefined` where none is known: a different answer drops the held inventory.
+ */
 export class InventoryCache {
   #held: Promise<PluginInventory> | undefined;
+  #heldFor: string | undefined;
 
-  constructor(private readonly read: () => Promise<PluginInventory>) {}
+  constructor(
+    private readonly read: () => Promise<PluginInventory>,
+    private readonly instance: () => Promise<string | undefined> = async () => undefined,
+  ) {}
 
-  current(): Promise<PluginInventory> {
-    this.#held ??= this.#fresh();
-    return this.#held;
+  async current(): Promise<PluginInventory> {
+    const now = await this.instance();
+    if (this.#held !== undefined && now !== this.#heldFor) this.#held = undefined;
+    if (this.#held === undefined) {
+      this.#heldFor = now;
+      this.#held = this.#fresh();
+    }
+    return await this.#held;
   }
 
-  refresh(): Promise<PluginInventory> {
+  async refresh(): Promise<PluginInventory> {
+    this.#heldFor = await this.instance();
     this.#held = this.#fresh();
-    return this.#held;
+    return await this.#held;
+  }
+
+  /** Forgets the held answer: the next check reads the inventory again. */
+  invalidate(): void {
+    this.#held = undefined;
+  }
+
+  /** An event this connection heard. `kernel.plugins-changed` (a plugin turned on or off, a new build) drops the inventory. */
+  heard(eventName: string): void {
+    if (eventName === PluginsChanged.name) this.invalidate();
   }
 
   #fresh(): Promise<PluginInventory> {
@@ -70,7 +110,7 @@ export function surfacesOf(registry: CommandRegistry): Surfaces {
   const tools = new Map<string, RouteFacts>();
   const titles: Record<string, string> = {};
   const compiled: Record<string, string> = {};
-  for (const plugin of registry.plugins) {
+  for (const plugin of [{ id: registry.kernel.manifest.id, ...registry.kernel }, ...registry.plugins]) {
     titles[plugin.id] = plugin.manifest.title;
     compiled[plugin.id] = plugin.contract;
     for (const route of plugin.manifest.actions?.routes ?? [])
@@ -79,6 +119,17 @@ export function surfacesOf(registry: CommandRegistry): Surfaces {
       tools.set(toolKey(plugin.id, tool.name), { owner: plugin.id, caller: tool.caller });
   }
   return { routes, tools, titles, compiled };
+}
+
+/**
+ * What a route call must pass before anything is opened (S59, S61): the route is declared, and a person-only route is
+ * not called from a ferret's pane. Asked before the connection exists, so a refusal never contacts or starts a daemon.
+ */
+export function routeFactsBeforeContact(surfaces: Surfaces, inPane: boolean, route: string): RouteFacts {
+  const facts = surfaces.routes.get(route);
+  if (facts === undefined) throw new ShellError(`no plugin declares the route ${route}`, EXIT.failure);
+  if (inPane && facts.caller === 'person') throw new ShellError(PERSON_ONLY_REFUSAL, EXIT.failure);
+  return facts;
 }
 
 export interface ClientDeps {
@@ -93,14 +144,35 @@ export interface ClientDeps {
 /** Throws `PluginPausedError` when the plugin may not be called. Re-reads the inventory once before blocking. */
 export async function ensureAllowed(deps: ClientDeps, id: string): Promise<void> {
   const { inventory, surfaces, binary } = deps;
-  let verdict = judgePlugin(await inventory.current(), surfaces.compiled, id);
-  if (!verdict.ok) verdict = judgePlugin(await inventory.refresh(), surfaces.compiled, id);
+  let verdict = judgeCall(await inventory.current(), surfaces.compiled, id);
+  if (!verdict.ok) verdict = judgeCall(await inventory.refresh(), surfaces.compiled, id);
   if (verdict.ok) return;
-  throw new PluginPausedError(id, verdict.reason, pausedSentence(verdict, surfaces.titles[id] ?? id, id, binary));
+  const named = verdict.reason === 'core' ? verdict.core : id;
+  throw new PluginPausedError(
+    named,
+    verdict.reason,
+    pausedSentence(verdict, surfaces.titles[named] ?? named, named, binary),
+  );
 }
 
-export async function sendChecked(deps: ClientDeps, request: DaemonRequest): Promise<unknown> {
-  const reply = await deps.transport.send(request, { repeatable: isRepeatable(request.method) });
+/** The guard for every package one request needs; also what is asked again before a resend after a restart. */
+async function ensureAllAllowed(deps: ClientDeps, ids: readonly string[]): Promise<void> {
+  for (const id of new Set(ids)) await ensureAllowed(deps, id);
+}
+
+/**
+ * Sends `request`, already guarded for `ids`. If the daemon was away and the request is to be sent again, the held
+ * inventory is dropped and `ids` are checked afresh first: a daemon that came back on another build or with a plugin
+ * off is judged by what it says now.
+ */
+export async function sendChecked(deps: ClientDeps, request: DaemonRequest, ids: readonly string[]): Promise<unknown> {
+  const reply = await deps.transport.send(request, {
+    repeatable: isRepeatable(request.method),
+    recheck: async () => {
+      deps.inventory.invalidate();
+      await ensureAllAllowed(deps, ids);
+    },
+  });
   if (reply.status >= 400) {
     const refusal = refusalText(reply.status, reply.body);
     throw new DaemonRefusal(refusal.message, reply.status, refusal.code);
@@ -112,13 +184,11 @@ export async function sendChecked(deps: ClientDeps, request: DaemonRequest): Pro
 export function pluginClient(deps: ClientDeps, caller: Manifest['id']): PluginClient {
   return {
     async call<Answer = unknown>(route: string, init?: CallInit): Promise<Answer> {
-      const facts = deps.surfaces.routes.get(route);
-      if (facts === undefined) throw new ShellError(`no plugin declares the route ${route}`, EXIT.failure);
-      if (deps.inPane && facts.caller === 'person') throw new ShellError(PERSON_ONLY_REFUSAL, EXIT.failure);
+      const facts = routeFactsBeforeContact(deps.surfaces, deps.inPane, route);
       const request = buildRequest(route, init);
-      await ensureAllowed(deps, caller);
-      if (facts.owner !== caller) await ensureAllowed(deps, facts.owner);
-      return (await sendChecked(deps, request)) as Answer;
+      const ids = [caller, facts.owner];
+      await ensureAllAllowed(deps, ids);
+      return (await sendChecked(deps, request, ids)) as Answer;
     },
     subscribe() {
       throw new ShellError(`${deps.binary} does not subscribe to events in this build`, EXIT.unavailable);

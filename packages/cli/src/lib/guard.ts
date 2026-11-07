@@ -1,19 +1,28 @@
 /**
- * The client guard (§9.6): before every route call, tool call and subscription, the owning plugin's inventory entry
- * must be present, on, and carry the same effective contract hash this `fy` was compiled with. Otherwise the call is
- * blocked WITHOUT being sent and fails `plugin_paused`. Pure: the inventory is passed in.
+ * The client guard (§9.6): before every route call, tool call and subscription, every core package (`CORE_IDS`) and the
+ * owning plugin must be present, on, and carry the same effective contract hash this `fy` was compiled with. A core
+ * piece that differs blocks everything, whatever a plugin itself needs. Otherwise the call is blocked WITHOUT being
+ * sent and fails `plugin_paused`. Pure: the inventory is passed in.
  */
-import { KERNEL_REFUSALS, PROTOCOL, type PluginInventory } from '@ferretry/kernel/contract';
+import { CORE_IDS, KERNEL_REFUSALS, PROTOCOL, type PluginInventory } from '@ferretry/kernel/contract';
 import { EXIT, ShellError } from './errors.ts';
 
-export type GuardVerdict =
+type EntryReason = 'missing' | 'off' | 'different';
+
+/** One package's own standing on the daemon. */
+export type PluginVerdict =
   | { readonly ok: true }
-  | { readonly ok: false; readonly reason: 'daemon-older' | 'daemon-newer' | 'missing' | 'off' | 'different' };
+  | { readonly ok: false; readonly reason: 'daemon-older' | 'daemon-newer' | EntryReason };
+
+export type GuardVerdict =
+  | PluginVerdict
+  /** A core package is not as this `fy` was built: nothing may be sent. `core` names it, `why` says how. */
+  | { readonly ok: false; readonly reason: 'core'; readonly core: string; readonly why: EntryReason };
 
 /** The compiled-in contract hash of each plugin of this `fy`. */
 export type CompiledContracts = Readonly<Record<string, string>>;
 
-export function judgePlugin(inventory: PluginInventory, compiled: CompiledContracts, id: string): GuardVerdict {
+export function judgePlugin(inventory: PluginInventory, compiled: CompiledContracts, id: string): PluginVerdict {
   if (inventory.protocol < PROTOCOL) return { ok: false, reason: 'daemon-older' };
   if (inventory.protocol > PROTOCOL) return { ok: false, reason: 'daemon-newer' };
   const entry = inventory.plugins.find(candidate => candidate.id === id);
@@ -24,7 +33,21 @@ export function judgePlugin(inventory: PluginInventory, compiled: CompiledContra
   return { ok: true };
 }
 
-/** What to say, in the owner's words, with the command that fixes it. */
+/**
+ * The verdict for one call owned by `id`: the protocol, then EVERY core package, then `id` itself. A core package this
+ * `fy` has no compiled hash for counts as different: guessing wrong in that direction sends to a daemon nobody checked.
+ */
+export function judgeCall(inventory: PluginInventory, compiled: CompiledContracts, id: string): GuardVerdict {
+  for (const core of CORE_IDS) {
+    const verdict = judgePlugin(inventory, compiled, core);
+    if (verdict.ok) continue;
+    if (verdict.reason === 'daemon-older' || verdict.reason === 'daemon-newer') return verdict;
+    return { ok: false, reason: 'core', core, why: verdict.reason };
+  }
+  return judgePlugin(inventory, compiled, id);
+}
+
+/** What to say, in the owner's words, with the command that fixes it. For `core`, `title` and `id` name the core package. */
 export function pausedSentence(
   verdict: Extract<GuardVerdict, { ok: false }>,
   title: string,
@@ -42,6 +65,10 @@ export function pausedSentence(
       return `${title} is turned off: turn it on with \`${binary} plugin on ${id}\`.`;
     case 'different':
       return `${title} differs between ${binary} and the daemon: restart the daemon with \`${binary} daemon restart\`.`;
+    case 'core':
+      return verdict.why === 'missing'
+        ? `This daemon does not have ${title}, which everything needs, so ${binary} sends nothing to it: update the daemon, then try again (\`${binary} daemon restart\`).`
+        : `${title}, which everything needs, ${verdict.why === 'off' ? 'is not running on this daemon' : `differs between ${binary} and the daemon`}, so ${binary} sends nothing to it: restart the daemon with \`${binary} daemon restart\`, or update ${binary}.`;
   }
 }
 

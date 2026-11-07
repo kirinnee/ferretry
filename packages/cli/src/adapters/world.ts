@@ -2,19 +2,19 @@
 import { existsSync } from 'node:fs';
 import { PluginInventorySchema } from '@ferretry/kernel/contract';
 import type { TerminalIo } from '@ferretry/kernel/manifest';
-import { isLocalDaemonUrl, resolveDaemonUrl } from '../lib/address.ts';
+import { isLocalDaemonUrl, parseDaemonRun, resolveDaemonUrl } from '../lib/address.ts';
 import { InventoryCache } from '../lib/client.ts';
 import { AS_OWNER_NOTE, credentialPlan, type Environment, ownFerretId } from '../lib/credential.ts';
 import { DaemonRefusal, ShellError } from '../lib/errors.ts';
-import { adminTokenPath, daemonConfigPath, resolveHome } from '../lib/home.ts';
+import { adminTokenPath, daemonRunPath, resolveHome } from '../lib/home.ts';
 import type { CommandRegistry } from '../lib/registry.ts';
 import type { CliWorld, Connection, Identity } from '../lib/world.ts';
 import { SessionCredentialGateway } from './agent-tools/session-credential-gateway.ts';
-import { readDaemonConfigDocument } from './daemon/config-file.ts';
-import { HttpTransport, type RestartWaiting } from './daemon/http-transport.ts';
+import { type Fetcher, HttpTransport, type RestartWaiting } from './daemon/http-transport.ts';
 import { DAEMON_BINARY, type LaunchPorts, launchDaemon } from './daemon/launcher.ts';
 import { assertOwnLoopbackListener } from './daemon/listener-guard.ts';
 import { probeHealth } from './daemon/probe.ts';
+import { readDaemonRunDocument } from './daemon/run-file.ts';
 import { readAdminToken } from './daemon/token-file.ts';
 import { buildUpdateMachine } from './update/machine.ts';
 import { DaemonUpdater } from '../lib/update/updater.ts';
@@ -31,16 +31,30 @@ export interface WorldInputs {
   readonly selfPath: string;
   /** The process ports the daemon launcher uses. Production leaves this out; tests must pass fakes so no test starts a real daemon. */
   readonly process?: Partial<Pick<LaunchPorts, 'exists' | 'which' | 'spawnDetached'>>;
+  /** The network. Production leaves this out (the global `fetch`); tests pass a fake so no test reaches a socket. */
+  readonly fetcher?: Fetcher;
 }
+
+/** Said when a local credential would go to an address that is not this machine (S57). */
+const remoteRefusal = (address: string): string =>
+  `FY_TOKEN is required when the daemon is not on this machine (${address}); local daemon credentials are never sent remotely. Set FY_TOKEN to that daemon's own token.`;
 
 export function createWorld(inputs: WorldInputs): CliWorld {
   const { io, environment, identity, registry } = inputs;
   const home = resolveHome(inputs.userHome, environment.FY_HOME, inputs.product);
   const pinned = (environment.FY_URL?.trim() ?? '') !== '';
-  /** Read each time: a daemon that has just started decides its own port and records it. */
+  const fetcher: Fetcher = inputs.fetcher ?? ((url, init) => fetch(url, init));
+  /** The kernel's run record, read each time: a daemon that has just started decides its own port and records it. */
+  const run = async () => parseDaemonRun(await readDaemonRunDocument(daemonRunPath(home)));
   const baseUrl = async (): Promise<string> =>
-    resolveDaemonUrl(environment.FY_URL ?? '', await readDaemonConfigDocument(daemonConfigPath(home)));
-  const probe = async () => probeHealth(await baseUrl());
+    resolveDaemonUrl(environment.FY_URL ?? '', pinned ? undefined : await run());
+  /** Which daemon process answers: a new pid in the run record is a restart, and drops the held inventory (§9.6). */
+  const instance = async (): Promise<string | undefined> => {
+    if (pinned) return undefined;
+    const recorded = await run();
+    return recorded === undefined ? undefined : String(recorded.pid);
+  };
+  const probe = async () => probeHealth(await baseUrl(), fetcher);
   const launch = async () =>
     launchDaemon({
       selfPath: inputs.selfPath,
@@ -104,10 +118,7 @@ export function createWorld(inputs: WorldInputs): CliWorld {
       const plan = credentialPlan(environment, { asOwner });
       if (plan.kind === 'admin' && plan.why === 'as-owner') io.err(`${identity.binary}: ${AS_OWNER_NOTE}\n`);
       const address = await baseUrl();
-      if (plan.kind !== 'explicit' && !isLocalDaemonUrl(address))
-        throw new ShellError(
-          `FY_TOKEN is required when the daemon is not on this machine (${address}); local daemon credentials are never sent remotely. Set FY_TOKEN to that daemon's own token.`,
-        );
+      if (plan.kind !== 'explicit' && !isLocalDaemonUrl(address)) throw new ShellError(remoteRefusal(address));
       // The daemon starts itself on the first command of a person's shell. A ferret never starts one: it exists because one ran.
       if (plan.kind !== 'ferret' && !pinned && isLocalDaemonUrl(address) && (await probe()).state === 'down') {
         const launched = await launch();
@@ -120,15 +131,24 @@ export function createWorld(inputs: WorldInputs): CliWorld {
               bearer: plan.bearer,
               ...(ferretId === undefined ? {} : { ferretId }),
               restart,
+              fetcher,
             })
           : new HttpTransport({
               baseUrl,
               headers: clientHeaders,
+              fetcher,
               authorization: async () =>
                 `Bearer ${plan.kind === 'explicit' ? plan.token : await readAdminToken(adminTokenPath(home))}`,
               ...(plan.kind === 'explicit'
                 ? {}
-                : { beforeSend: (base: string) => assertOwnLoopbackListener(base, 'the daemon admin token') }),
+                : {
+                    // The address is read again for every request, so it is judged again for every request, BEFORE the
+                    // token is read (S57): one checked at connect time says nothing about where the next request goes.
+                    beforeSend: async (base: string) => {
+                      if (!isLocalDaemonUrl(base)) throw new ShellError(remoteRefusal(base));
+                      await assertOwnLoopbackListener(base, 'the daemon admin token');
+                    },
+                  }),
             });
       const inventory = new InventoryCache(async () => {
         const reply = await transport.send({ method: 'GET', path: '/v1/plugins' }, { repeatable: true });
@@ -143,7 +163,7 @@ export function createWorld(inputs: WorldInputs): CliWorld {
         if (!parsed.success)
           throw new ShellError('the daemon’s plugin list was not in a shape this fy reads; update fy or the daemon');
         return parsed.data;
-      });
+      }, instance);
       return { baseUrl: address, transport, inventory };
     },
   };

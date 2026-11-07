@@ -43,6 +43,19 @@ test.each([1, 2])(
     await mkdir(dirname(binary), { recursive: true });
     await writeFile(binary, 'fixture; never executed\n');
     await chmod(binary, 0o700);
+    // The kernel's run record names the listener; a wildcard bind is dialled on loopback.
+    await mkdir(join(home, 'run'), { recursive: true });
+    await writeFile(
+      join(home, 'run', 'daemon.json'),
+      JSON.stringify({
+        format: 1,
+        socket: join(home, 'run', 'fyd.sock'),
+        host: '0.0.0.0',
+        port: 17458,
+        pid: 4321,
+        version: '5.0.0',
+      }),
+    );
     await writeFile(
       join(home, 'home.json'),
       JSON.stringify({ format, createdBy: '5.0.0', createdAt: '2026-11-07T00:00:00.000Z' }),
@@ -92,7 +105,7 @@ test.each([1, 2])(
         async (input: Parameters<typeof fetch>[0]) => {
           const url = String(input);
           requests.push(url);
-          if (url === 'http://127.0.0.1:7431/healthz')
+          if (url === 'http://127.0.0.1:17458/healthz')
             return health === undefined ? new Response(null, { status: 503 }) : Response.json(health);
           if (url === 'http://127.0.0.1:17431/v1/plugins') return Response.json(off);
           throw new Error(`unexpected fetch: ${url}`);
@@ -144,7 +157,7 @@ test.each([1, 2])(
       expect(checkedLocks.length).toBeGreaterThan(0);
       expect(checkedLocks.every(path => path === join(home, 'run', 'daemon.lock'))).toBe(true);
       expect(commands).toContainEqual(['brew', 'upgrade', '--cask', 'ferretry']);
-      expect(requests).toContain('http://127.0.0.1:7431/healthz');
+      expect(requests).toContain('http://127.0.0.1:17458/healthz');
       expect(requests).toContain('http://127.0.0.1:17431/v1/plugins');
       expect(requests.some(url => url.endsWith('/v1/daemon/update'))).toBe(false);
       expect(await readdir(runtime)).toEqual([]);
