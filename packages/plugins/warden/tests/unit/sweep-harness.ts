@@ -358,14 +358,13 @@ export function harness(
     usage: { accounts: async () => await (options.usage?.() ?? Promise.resolve([])) },
     verdicts: { recent: async () => await (options.verdicts?.() ?? Promise.resolve([])) },
     orphans: {
-      add: async notice => {
-        if (options.noticeWrite === 'rejected') throw new Error('the machine agenda refused');
-        if (!notices.some(each => each.notice.task.id === notice.task.id))
-          notices.push({ sessionId: 'machine', notice });
+      add: async (sessionId, notice) => {
+        if (options.noticeWrite === 'rejected') throw new Error('the Agenda refused');
+        if (!notices.some(each => each.notice.task.id === notice.task.id)) notices.push({ sessionId, notice });
       },
-      remove: async taskId => {
-        if (options.removeFails === true) throw new Error('the machine agenda refused');
-        resolved.push({ sessionId: 'machine', sourceRef: `warden-orphan:${taskId}`, note: 'orphan cleared' });
+      remove: async resolution => {
+        if (options.removeFails === true) throw new Error('the Agenda refused');
+        resolved.push({ sessionId: resolution.sessionId, sourceRef: resolution.sourceRef, note: resolution.note });
       },
     },
     attention: {

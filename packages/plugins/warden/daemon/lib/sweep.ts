@@ -181,6 +181,7 @@ import { REFLEX_NUDGE_MESSAGE } from './liveness.ts';
 import type { ReflexEvent } from './liveness-monitor.ts';
 import {
   detectOrphanedCards,
+  type OrphanResolution,
   type OrphanTold,
   planOrphanEscalations,
   type WardenBoardRead,
@@ -547,10 +548,10 @@ export interface WardenFeedReader {
   board(sessionId: string): Promise<AgendaBoardInput | undefined>;
 }
 
-/** The machine item that lists every card with nobody working on it (`orphan-list.ts`). Throws when the item cannot be written. */
+/** Where an orphaned card's notice stands: on one ferret's board. Throws when the Agenda refuses it. */
 export interface WardenOrphanList {
-  add(notice: WardenCardNotice): Promise<void>;
-  remove(taskId: string): Promise<void>;
+  add(sessionId: string, notice: WardenCardNotice): Promise<void>;
+  remove(resolution: OrphanResolution): Promise<void>;
 }
 
 export interface WardenSweepPorts {
@@ -2666,7 +2667,7 @@ export class WardenSweepService {
       ...(machine === undefined || machine === '' ? {} : { machine }),
     });
     for (const resolution of plan.resolve) {
-      const cleared = await this.ports.orphans.remove(resolution.taskId).then(
+      const cleared = await this.ports.orphans.remove(resolution).then(
         () => true,
         () => false,
       );
@@ -2682,8 +2683,8 @@ export class WardenSweepService {
         reason: 'neither the card’s owner nor its ferret is on this machine, so no board can hold a notice',
       });
     const memory: Record<string, OrphanTold> = { ...plan.memory };
-    const posted = async (notice: WardenCardNotice): Promise<boolean> =>
-      await this.ports.orphans.add(notice).then(
+    const posted = async (sessionId: string, notice: WardenCardNotice): Promise<boolean> =>
+      await this.ports.orphans.add(sessionId, notice).then(
         () => true,
         () => false,
       );
@@ -2695,7 +2696,7 @@ export class WardenSweepService {
           () => true,
           () => false,
         ));
-      const landed = typed || (await posted(tell.kind === 'message' ? tell.fallback : tell.notice));
+      const landed = typed || (await posted(tell.sessionId, tell.kind === 'message' ? tell.fallback : tell.notice));
       if (!landed) {
         this.ports.journal.record('fleet.warden_orphan_failed', {
           taskId: tell.taskId,

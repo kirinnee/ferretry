@@ -28,7 +28,7 @@ import { createWardenSubsystem } from './subsystem.ts';
  *   contract); off, that flag does not run. Board's contract has no lane-set or focus read, so a lane reads as its id
  *   and a resumed ferret is told no card (`daemon/board.ts`).
  * - The stuck-input/inbox acts are absent, so their flags do not occur; the machine lists and the declared-wait
- *   watcher of today are not part of this port.
+ *   watcher of today are not part of this port (an orphaned card is told by a notice on one ferret's board instead).
  */
 export default implementDaemon(manifest, {
   build(ctx) {

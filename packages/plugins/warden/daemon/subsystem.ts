@@ -82,6 +82,9 @@ const NO_VAULT: OutboundAuthorizerPort = { send: async () => ({ kind: 'secret_mi
 /** A turn's wall-clock is the kernel's: monotonic time for the guard's latency. */
 const stopwatch = { monotonicMs: (): number => performance.now() };
 
+/** The binary's name, for sentences that name a command a ferret types; the other halves quote it the same way. */
+const BINARY = 'fy';
+
 const refuse = (what: string): never => {
   throw new Error(`${what} is not available on this machine yet.`);
 };
@@ -153,7 +156,23 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
 
   const service = new WardenSweepService(
     {
-      orphans: { add: async () => undefined, remove: async () => undefined },
+      orphans: {
+        // An orphaned card's notice stands on one ferret's board as an ask, exactly as the revive breaker's does. An
+        // Agenda that refuses it makes the sweep journal `fleet.warden_orphan_failed` and try again, nothing remembered.
+        add: async (sessionId, notice) => {
+          const written = await agenda.notice(sessionId, {
+            sourceRef: notice.sourceRef,
+            subject: notice.subject,
+            why: notice.why,
+            context: `${notice.premise}\n${notice.context}`,
+            howToResolve: notice.howToResolve,
+          });
+          if (written === 'rejected') throw new Error('the Agenda refused the orphaned-card notice');
+        },
+        remove: async resolution => {
+          await agenda.resolveSource(resolution.sessionId, 'agent-raised', resolution.sourceRef, resolution.note);
+        },
+      },
       guard: () => new JevTriageGuard(NO_VAULT, stopwatch),
       evidence: { evidence: async () => ({ recentTurns: [] }) },
       redactor: { batch: async work => await kernel.redaction.read(scope => work({ text: text => scope.text(text) })) },
@@ -186,7 +205,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       capabilities: () => `${crypto.randomUUID()}${crypto.randomUUID().replaceAll('-', '')}`,
     },
     {
-      clientName: 'Ferretry',
+      clientName: BINARY,
       wardenCwd: '',
       supervisesMonitors: true,
       // GAP(ferrets): today nudged an overdue sub-ferret, then told its parent, but skipped one that had declared a
