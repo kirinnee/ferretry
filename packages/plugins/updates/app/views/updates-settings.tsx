@@ -94,11 +94,7 @@ export const createSettings = (client: PluginClient): AppComponent<SettingsProps
           </div>
         ) : null}
         <label>
-          <input
-            type="checkbox"
-            checked={view.autoInstall}
-            onChange={event => void setAutoInstall(event.currentTarget.checked)}
-          />{' '}
+          <input type="checkbox" checked={view.autoInstall} onChange={() => void setAutoInstall(!view.autoInstall)} />{' '}
           Install updates automatically when no ferret is mid-turn
         </label>
         {view.job?.state === 'finished' ? <p>{view.job.report.message}</p> : null}

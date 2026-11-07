@@ -333,9 +333,19 @@
       "name": "@ferretry/plugin-tidy",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-asks": "workspace:*",
+        "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-board": "workspace:*",
         "@ferretry/std": "workspace:*",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
         "zod": "4.4.3",
+      },
+      "devDependencies": {
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
       },
     },
     "packages/plugins/updates": {
@@ -346,7 +356,11 @@
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
+        "react": "^19.0.0",
         "zod": "4.4.3",
+      },
+      "devDependencies": {
+        "@types/react": "^19.0.0",
       },
     },
     "packages/plugins/usage": {
