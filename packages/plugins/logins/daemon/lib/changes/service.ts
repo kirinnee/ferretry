@@ -10,6 +10,7 @@
  */
 import type { ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
+import { z } from 'zod';
 import {
   type LoginChange,
   LoginChangeError,
@@ -21,7 +22,13 @@ import {
 } from '../../../contract/index.ts';
 import type { LoginSignOutOutcome } from '../credentials/credentials-service.ts';
 import type { ProviderPreset } from '../presets/schema.ts';
-import { deriveLoginChange, type LoginEdit, LoginChangeRefusal } from './derive.ts';
+import {
+  deriveLoginChange,
+  inUseSentence,
+  type LoginEdit,
+  LoginChangeRefusal,
+  USERS_UNKNOWN_SENTENCE,
+} from './derive.ts';
 import { type HeldChange, LoginChangeHoldRefusal, LoginChangeStore } from './store.ts';
 
 /** The refusal class lives in the contract, so a plugin that stages through the port can tell it apart. */
@@ -48,14 +55,31 @@ type Held = HeldChange<{
   readonly consequences: readonly string[];
   readonly orphanedSecrets: readonly string[];
   readonly run: Payload;
+  /**
+   * Runtimes the caller said it moves off the login first (a removal through Runtimes); not counted as users AT STAGE.
+   * Never at apply: by then the move has landed, so the hook is asked plainly. A change that carries any is applied
+   * only through the port.
+   */
+  readonly movedFirst: readonly string[];
 }>;
+
+/** What the hook may answer: names. Anything else is not an answer. */
+const UsersAnswerSchema = z.array(z.string());
+
+/** Which door applies a held change: the route (a person's), or the port (Runtimes', right after its own move). */
+export type LoginChangeDoor = 'route' | 'port';
+
+/** What only an in-process caller can say (the port); a route never carries it. */
+export interface StageOptions {
+  readonly usersMovedFirst?: readonly string[];
+}
 
 export interface LoginChangeServiceDeps {
   readonly files: () => ReadonlyMap<string, LoginFile>;
   readonly presets: () => Promise<readonly ProviderPreset[]>;
   readonly machineName: () => string;
-  /** The runtimes on a login, by name, when known. */
-  readonly usedBy?: (id: string) => readonly string[];
+  /** The runtimes on a login, by name (`logins.used-by`). Throws when that cannot be known: a removal then fails closed. */
+  readonly usedBy: (id: string) => Promise<readonly string[]>;
   /** One login as the list shows it, for a sign-out's sentence. */
   readonly view: (id: string) => Promise<LoginView | undefined>;
   readonly signOut: (id: string) => Promise<LoginSignOutOutcome>;
@@ -92,10 +116,10 @@ export class LoginChangeService {
     this.#held = new LoginChangeStore({ now: deps.now, mintId: deps.mintId });
   }
 
-  async stage(change: LoginChange): Promise<LoginChangeView> {
+  async stage(change: LoginChange, options: StageOptions = {}): Promise<LoginChangeView> {
     const files = this.deps.files();
     try {
-      const staged = await this.#derive(files, change);
+      const staged = await this.#derive(files, change, options.usersMovedFirst ?? []);
       const held = this.#holdOf(() => this.#held.open({ revision: fingerprint(files), payload: staged }));
       return this.#view(held);
     } catch (error) {
@@ -107,9 +131,21 @@ export class LoginChangeService {
     return this.#view(this.#holdOf(() => this.#held.require(id)));
   }
 
-  async apply(id: string): Promise<LoginChangeOutcome> {
+  /** Forget a change that is still waiting (Runtimes, when what it moved first is done and the removal cannot follow). */
+  discard(id: string): void {
+    this.#held.discard(id);
+  }
+
+  async apply(id: string, door: LoginChangeDoor = 'route'): Promise<LoginChangeOutcome> {
     const held = this.#holdOf(() => this.#held.consume(id));
     try {
+      // A change that waits on runtimes moving off the login is valid only through the port, right after that move.
+      if (door === 'route' && held.payload.movedFirst.length > 0) {
+        throw new LoginChangeError(
+          'login_change_refused',
+          'this removal waits for runtimes to be moved off the login first; finish it from the change that staged it',
+        );
+      }
       if (held.revision !== fingerprint(this.deps.files())) {
         throw new LoginChangeError(
           'login_change_stale',
@@ -124,7 +160,11 @@ export class LoginChangeService {
     }
   }
 
-  async #derive(files: ReadonlyMap<string, LoginFile>, change: LoginChange): Promise<Held['payload']> {
+  async #derive(
+    files: ReadonlyMap<string, LoginFile>,
+    change: LoginChange,
+    movedFirst: readonly string[],
+  ): Promise<Held['payload']> {
     if (change.kind === 'login.signout') {
       const login = await this.deps.view(change.id);
       if (login === undefined) throw new LoginChangeRefusal(`no login ${change.id} exists on this machine`);
@@ -135,12 +175,20 @@ export class LoginChangeService {
         consequences: [login.signOut.sentence],
         orphanedSecrets: [],
         run: { kind: 'sign-out', id: change.id },
+        movedFirst: [],
       };
     }
+    // A removal needs the users to be KNOWN (it fails closed); a variables change only names them when they are.
+    const users =
+      change.kind === 'login.remove'
+        ? await this.#usersOf(change.id, movedFirst)
+        : change.kind === 'login.env'
+          ? await this.#usersOf(change.id, []).catch(() => [])
+          : [];
     const edit = deriveLoginChange(files, change, {
       machineName: this.deps.machineName(),
       presets: change.kind === 'login.add' || change.kind === 'login.env' ? await this.deps.presets() : [],
-      usedBy: id => this.deps.usedBy?.(id) ?? [],
+      usedBy: () => users,
     });
     return {
       change,
@@ -148,7 +196,24 @@ export class LoginChangeService {
       consequences: edit.consequences,
       orphanedSecrets: edit.orphanedSecrets,
       run: { kind: 'edit', change, edit },
+      movedFirst: change.kind === 'login.remove' ? movedFirst : [],
     };
+  }
+
+  /**
+   * The runtimes on a login, less the ones the caller moves first. A provider that cannot answer, or answers with
+   * anything but names, refuses the change in the one fixed sentence (what it threw or said is never repeated).
+   */
+  async #usersOf(id: string, movedFirst: readonly string[]): Promise<readonly string[]> {
+    let users: readonly string[];
+    try {
+      const answer = UsersAnswerSchema.safeParse(await this.deps.usedBy(id));
+      if (!answer.success) throw new Error('not a list of names');
+      users = answer.data;
+    } catch {
+      throw new LoginChangeRefusal(USERS_UNKNOWN_SENTENCE);
+    }
+    return users.filter(name => !movedFirst.includes(name));
   }
 
   async #run(run: Payload): Promise<LoginChangeOutcome> {
@@ -158,6 +223,13 @@ export class LoginChangeService {
       return result.outcome === 'signed-out'
         ? { outcome: 'signed-out', login: result.credential }
         : { outcome: 'sign-out-failed', reason: result.reason, login: result.credential };
+    }
+    // The runtimes may have moved onto the login since the review: a removal asks again at the last moment, plainly.
+    // What a caller said it would move first is NOT excluded: that move has landed, so the hook tells the truth now.
+    if (run.change.kind === 'login.remove') {
+      const users = await this.#usersOf(run.change.id, []).catch(() => undefined);
+      if (users === undefined) throw new LoginChangeError('login_change_refused', USERS_UNKNOWN_SENTENCE);
+      if (users.length > 0) throw new LoginChangeError('login_change_refused', inUseSentence(users));
     }
     const held: string[] = [];
     for (const write of run.edit.writes) {

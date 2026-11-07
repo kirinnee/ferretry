@@ -10,6 +10,13 @@ const CONFIG_GET = 'GET /v1/config/file';
 const CONFIG_PUT = 'PUT /v1/config/file';
 const STATE = 'GET /v1/browser/state';
 const PROXY_TEST = 'POST /v1/browser/proxy/test';
+const GRANTS = 'GET /v1/grants';
+
+/** What Gate answers about the `fleet` capability for this caller: the one row the panel decides on. */
+const grants = (configure: boolean, configureRefusal: string) => ({
+  capabilities: [{ capability: 'fleet', configure, configureRefusal }],
+});
+const OPEN = grants(true, 'granted');
 
 const settle = async (): Promise<void> => {
   await interact(async () => {
@@ -41,6 +48,7 @@ interface Script {
   readonly state?: unknown;
   readonly put?: unknown;
   readonly test?: unknown;
+  readonly grants?: unknown;
 }
 
 const tab = async (script: Script = {}) => {
@@ -49,6 +57,7 @@ const tab = async (script: Script = {}) => {
     if (route === CONFIG_GET) return file(text);
     if (route === CONFIG_PUT) return script.put ?? applied();
     if (route === STATE) return script.state ?? { state: 'stopped' };
+    if (route === GRANTS) return script.grants ?? OPEN;
     if (route === 'GET /v1/secrets') return { secrets: [] };
     if (route === PROXY_TEST) return script.test ?? new Error('no test scripted');
     return new Error(`no route ${route}`);
@@ -66,7 +75,7 @@ const text = (container: HTMLElement, selector: string): string => container.que
 describe('the Browser tab', () => {
   it('reads browsers.yaml and the browser state through its own client, by route key', async () => {
     const { calls, view } = await tab({ state: { state: 'running' } });
-    expect(calls.map(call => call.route).sort()).toEqual([CONFIG_GET, STATE, 'GET /v1/secrets'].sort());
+    expect(calls.map(call => call.route).sort()).toEqual([CONFIG_GET, STATE, GRANTS, 'GET /v1/secrets'].sort());
     expect(calls.find(call => call.route === CONFIG_GET)?.init?.query).toEqual({ path: 'browsers.yaml' });
     expect(text(view.container, '[data-browser-state]')).toBe('Running · direct, no proxy.');
     expect(text(view.container, '[data-browser-user-agent]')).toBe(BROWSER_USER_AGENT_WORDS);
@@ -89,7 +98,7 @@ describe('the Browser tab', () => {
     expect(text(view.container, '[data-browser-state]')).toBe(
       'Running · via proxy http://proxy.example.test:8080 · signs in.',
     );
-    expect(view.container.querySelector('[data-browser-mode-save]')).toBeNull();
+    expect(view.container.querySelector('[data-browser-mode-save-panel] [data-change-submit]')).toBeNull();
     expect(text(view.container, '[data-browser-user-agent]')).toBe(BROWSER_USER_AGENT_WORDS);
     await view.unmount();
   });
@@ -106,9 +115,12 @@ describe('the Browser tab', () => {
 
   it('saves a changed mode against the digest it was read at, keeping the file’s comments', async () => {
     const { calls, view } = await tab({ text: '# the shared browser\nmode: headless\n' });
-    expect(view.container.querySelector('[data-browser-mode-save]')).toBeNull();
+    expect(view.container.querySelector('[data-browser-mode-save-panel] [data-change-submit]')).toBeNull();
     await click(view.container.querySelector('input[type="radio"]:not(:checked)'), 'the Real window choice');
-    await click(view.container.querySelector('[data-browser-mode-save]'), 'Save browser mode');
+    await click(
+      view.container.querySelector('[data-browser-mode-save-panel] [data-change-submit]'),
+      'Save browser mode',
+    );
     const sent = body(calls, CONFIG_PUT) as { path: string; text: string; etag: string };
     expect(sent.path).toBe('browsers.yaml');
     expect(sent.etag).toBe('etag-1');
@@ -122,16 +134,22 @@ describe('the Browser tab', () => {
   it('puts the daemon’s refusal of a save in front of the person instead of pretending it took', async () => {
     const { view } = await tab({ put: new Error('browsers.yaml changed since you read it') });
     await click(view.container.querySelector('input[type="radio"]:not(:checked)'), 'the Real window choice');
-    await click(view.container.querySelector('[data-browser-mode-save]'), 'Save browser mode');
+    await click(
+      view.container.querySelector('[data-browser-mode-save-panel] [data-change-submit]'),
+      'Save browser mode',
+    );
     expect(view.container.textContent).toContain('browsers.yaml changed since you read it');
-    expect(view.container.querySelector('[data-browser-mode-save]')).not.toBeNull();
+    expect(view.container.querySelector('[data-browser-mode-save-panel] [data-change-submit]')).not.toBeNull();
     await view.unmount();
   });
 
   it('SF2 says a held mode change is saved but not in effect until the owner confirms it', async () => {
     const { view } = await tab({ put: { path: 'browsers.yaml', etag: 'etag-2', outcome: 'pending' } });
     await click(view.container.querySelector('input[type="radio"]:not(:checked)'), 'the Real window choice');
-    await click(view.container.querySelector('[data-browser-mode-save]'), 'Save browser mode');
+    await click(
+      view.container.querySelector('[data-browser-mode-save-panel] [data-change-submit]'),
+      'Save browser mode',
+    );
     expect(text(view.container, '[data-setup-note="browser-mode-held"]')).toBe(
       'Saved, but not in effect until you confirm it.',
     );
@@ -142,7 +160,7 @@ describe('the Browser tab', () => {
   it('SF2 says a held proxy change is not in effect, and does not test a proxy that is not saved yet', async () => {
     const { calls, view } = await tab({ put: { path: 'browsers.yaml', etag: 'etag-2', outcome: 'pending' } });
     await typeInto(view.container.querySelector('[data-browser-proxy-url]'), 'http://proxy.example.test:8080');
-    await click(view.container.querySelector('[data-browser-proxy-save]'), 'Save and test');
+    await click(view.container.querySelector('[data-browser-proxy-save-panel] [data-change-submit]'), 'Save and test');
     expect(text(view.container, '[data-setup-note="browser-proxy-held"]')).toBe(
       'Saved, but not in effect until you confirm it.',
     );
@@ -161,7 +179,7 @@ describe('the Browser tab', () => {
       },
     });
     await typeInto(view.container.querySelector('[data-browser-proxy-url]'), 'http://proxy.example.test:8080');
-    await click(view.container.querySelector('[data-browser-proxy-save]'), 'Save and test');
+    await click(view.container.querySelector('[data-browser-proxy-save-panel] [data-change-submit]'), 'Save and test');
     const sent = body(calls, CONFIG_PUT) as { text: string };
     expect(sent.text).toContain('url: http://proxy.example.test:8080');
     expect(body(calls, PROXY_TEST)).toEqual({});
@@ -185,6 +203,61 @@ describe('the Browser tab', () => {
     expect(calls.some(call => call.route === CONFIG_PUT)).toBe(false);
     expect(view.container.textContent).toContain(PROXY_ERROR_WORDS.auth);
     expect(text(view.container, '[data-browser-proxy-test-tested]')).toContain('It is not saved');
+    await view.unmount();
+  });
+
+  it('tells a device that needs its passkey so, before the save, and still lets it save', async () => {
+    const { view } = await tab({ grants: grants(false, 'step-up-required') });
+    await click(view.container.querySelector('input[type="radio"]:not(:checked)'), 'the Real window choice');
+    expect(text(view.container, '[data-change-step-up]')).toBe(
+      'This machine will ask you to confirm with your passkey when you save.',
+    );
+    const save = view.container.querySelector(
+      '[data-browser-mode-save-panel] [data-change-submit]',
+    ) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    await typeInto(view.container.querySelector('[data-browser-proxy-url]'), 'http://proxy.example.test:8080');
+    expect(view.container.querySelectorAll('[data-change-step-up]')).toHaveLength(2);
+    expect(view.container.querySelector('[data-change-grant-refused]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('explains a refused grant and disables Save, for the mode and for the proxy', async () => {
+    const { calls, view } = await tab({ grants: grants(false, 'not-granted') });
+    await click(view.container.querySelector('input[type="radio"]:not(:checked)'), 'the Real window choice');
+    await typeInto(view.container.querySelector('[data-browser-proxy-url]'), 'http://proxy.example.test:8080');
+    const explanations = [...view.container.querySelectorAll('[data-change-grant-refused]')].map(
+      node => node.textContent,
+    );
+    expect(explanations).toEqual([
+      'The operator of this machine switched off the agent fleet for paired devices, this browser included. It is turned back on at the machine with \`fy\`.',
+      'The operator of this machine switched off the agent fleet for paired devices, this browser included. It is turned back on at the machine with \`fy\`.',
+    ]);
+    for (const selector of [
+      '[data-browser-mode-save-panel] [data-change-submit]',
+      '[data-browser-proxy-save-panel] [data-change-submit]',
+    ]) {
+      const save = must(view.container.querySelector(selector) as HTMLButtonElement | null, selector);
+      expect(save.disabled).toBe(true);
+      await click(save, selector);
+    }
+    expect(calls.some(call => call.route === CONFIG_PUT)).toBe(false);
+    expect(view.container.querySelector('[data-change-step-up]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('says nothing extra for the owner on the host, whose Save is open', async () => {
+    const { view } = await tab();
+    await click(view.container.querySelector('input[type="radio"]:not(:checked)'), 'the Real window choice');
+    await typeInto(view.container.querySelector('[data-browser-proxy-url]'), 'http://proxy.example.test:8080');
+    expect(view.container.querySelector('[data-change-step-up]')).toBeNull();
+    expect(view.container.querySelector('[data-change-grant-refused]')).toBeNull();
+    for (const selector of [
+      '[data-browser-mode-save-panel] [data-change-submit]',
+      '[data-browser-proxy-save-panel] [data-change-submit]',
+    ]) {
+      expect(must(view.container.querySelector(selector) as HTMLButtonElement | null, selector).disabled).toBe(false);
+    }
     await view.unmount();
   });
 

@@ -1,20 +1,17 @@
 import { implementApp } from '@ferretry/kernel/manifest';
 import { createElement } from 'react';
 import manifest from '../manifest.ts';
-import {
-  browserTerminalDeckHost,
-  SessionTerminalDeck,
-  type SessionTerminalDeckProps,
-} from './components/session-terminal-deck.tsx';
+import { browserTerminalDeckHost, SessionTerminalDeck } from './components/session-terminal-deck.tsx';
 import { TerminalSlotsSettings } from './features/settings/terminal-slots-settings.tsx';
 import { pluginTerminalDeckDependencies, pluginTerminalSlotsClient } from './lib/plugin-client.ts';
+import { daemonConnection, daemonSessionScope } from './shell.ts';
 
 /**
  * The daemon a half's views speak to. The shell builds one half per daemon (§9.6) and hands it that daemon's own
  * client, so the views' `connection` only names "this half's daemon": it keys their state and is handed back to the
  * dependencies, which ignore it and ride the client.
  */
-const THIS_DAEMON = { daemonId: 'this-daemon' } as unknown as SessionTerminalDeckProps['connection'];
+const THIS_DAEMON = daemonConnection('this-daemon');
 
 /**
  * The Terminals app half (§2.3): the terminal deck in a ferret's side pane (today's `session-terminal-deck.tsx`),
@@ -32,7 +29,7 @@ export default implementApp(manifest, {
             ? null
             : createElement(SessionTerminalDeck, {
                 connection: THIS_DAEMON,
-                scope: { daemonId: THIS_DAEMON.daemonId, sessionId: subject },
+                scope: daemonSessionScope(THIS_DAEMON, subject),
                 dependencies,
               }),
       },
