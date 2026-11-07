@@ -35,10 +35,6 @@ export interface WardenRemedies {
   readonly resume: (ferret: string, message?: string) => Promise<WardenResumeOutcome>;
 }
 
-const refuse = (what: string): never => {
-  throw new Error(`${what} is not available on this machine yet.`);
-};
-
 export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
   const { ferrets, conversation, asks, acted } = host;
 
@@ -69,7 +65,8 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
   };
 
   const resumeOrThrow = async (ferret: string, message: string | undefined, what: string): Promise<void> => {
-    const resumed = await ferrets.resume(ferret as FerretId, message);
+    // Every resume the Warden makes is automated recovery, not a person asking: Ferrets records it as such.
+    const resumed = await ferrets.resume(ferret as FerretId, message, { automatic: true });
     if (!resumed.ok) throw new Error(`${what} refused: ${resumed.error.reason}`);
     if (message !== undefined) await say(ferret, message);
   };
@@ -83,8 +80,8 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
       }),
     // A restart replaces a process that only looks alive: stop it for real, then resume the conversation. Today this
     // was ONE resume that replaced the live pane under the automatic policy (`replaceLiveTerminal`); Ferrets has no
-    // such resume yet (GAP(ferrets): an additive automatic resume that replaces a live pane), so today's refusals are
-    // checked first, before the stop.
+    // such resume (GAP(ferrets): `ResumeOptions` has only `automatic`; a live pane is replaced only by a move, whose
+    // in-flight gate a stuck process must not meet), so today's refusals are checked first, before the stop.
     restart: async (ferret, message) =>
       await act(ferret, 'restart', async () => {
         await authorize(ferret);
@@ -93,8 +90,15 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
       }),
     stop: async (ferret, reason) =>
       await act(ferret, 'stop', async () => await ferrets.stop(ferret as FerretId, 'polite', reason)),
-    // GAP(ferrets): moving a ferret to another login needs Ferrets' additive `move`; until then a failover refuses.
-    failover: async () => refuse('Moving a ferret to another account'),
+    // Today's failover: the same ferret relaunched on another login with its conversation, through Ferrets' move (the
+    // moves module's flow and its refusals, by the Warden's own actor so the turn is drawn as the Warden's). A move
+    // Ferrets refuses throws with its reason, which the sweep records as a failed act.
+    failover: async (ferret, agent) =>
+      await act(ferret, 'failover', async () => {
+        if (ferrets.move === undefined) throw new Error('Moving a ferret to another account is not available here.');
+        const moved = await ferrets.move(ferret as FerretId, agent, { actor: 'warden', movedBy: 'warden' });
+        if (!moved.ok) throw new Error(`the move was refused: ${moved.error.reason}`);
+      }),
     // Today's remedy, through Browsers: the pane's tree is read again at this moment (through Terminals), nothing is
     // closed while a tool command runs, and only a top-level browser under THAT pane that Terminals re-proves just
     // before its signal is closed — never the ferret; every other one is left alone and reported.

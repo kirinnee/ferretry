@@ -14,14 +14,15 @@ import { createWardenSubsystem } from './subsystem.ts';
  *   `liveness` look at each ferret's own pane and Conversation's transcript tail every 30 s while Terminals (an
  *   optional use) is on; off, `dead_monitor`, `sus_*` and `agent_frozen` do not run. A browser left under a pane is
  *   closed through Browsers' `closeLeftoverBrowsers` (an optional use) behind today's `mayActAlone.closeLeftovers`;
- *   off, that check does not run. Ferrets stores each ferret's declared wait and its own nudge and frozen times, but
- *   `FerretSummary` does not carry them, so none reads as waiting and the reflex keeps its defaults: it therefore only
- *   DETECTS (`reflexNudges` off) — `agent_frozen`, `sus_*` and `dead_monitor` fire, and no quiet ferret is nudged.
- * - A sub-ferret overdue on a report is flagged only: today nudged it and told its parent, skipping one that declared a
- *   wait or signalled done, and `FerretSummary` carries neither, so nothing is typed to anyone until Ferrets does.
- * - Investigator wardens, failover and auto-move need a folder Ferrets can start a warden in and read reports back from,
- *   and a "move to another login" in the Ferrets contract: they refuse, so nothing is spent and nothing is moved.
- *   Auto-revive is wired through `FerretsApi.resume` but revives nothing until Ferrets reports a death cause.
+ *   off, that check does not run. A quiet ferret is nudged once by the reflex, never one that declared a wait, each
+ *   timed by its own nudge and frozen times (`FerretSummary.waiting`, `nudgeAfterSeconds`, `killAfterSeconds`).
+ * - A sub-ferret overdue on a report is nudged and its parent told, skipping one that declared a wait or said
+ *   `signal done` (`FerretSummary.waiting` / `finishedAt`).
+ * - Auto-revive resumes a ferret Ferrets reports as having died (`FerretSummary.cause`) through `FerretsApi.resume`
+ *   (automatic). A failover act is a move through `FerretsApi.move`, but nothing reaches it yet: the sweep routes every
+ *   failover through the auto-move service, which is not built (it needs fleet facts, the owner hold and the ferret's
+ *   background jobs, none of which Ferrets offers). Investigator wardens refuse: Ferrets takes a work folder, but the
+ *   Warden has no folder of its own to give it, so nothing is spent.
  * - The Jev guard is the real one, but its key waits on the kernel's `secrets.resolve`: it answers `not_set` and no
  *   request leaves the machine (NO UNATTENDED SPEND BY SURPRISE holds trivially; the caps, pacing and per-day rules
  *   still run in the sweep).

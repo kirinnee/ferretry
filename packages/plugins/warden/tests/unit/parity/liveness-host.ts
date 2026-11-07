@@ -1,5 +1,5 @@
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
-import type { FerretState } from '@ferretry/core-ferrets/contract';
+import type { FerretState, FerretSummary } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { type FakeBrowsers, fakeBrowsers } from '@ferretry/plugin-browsers/contract/testing';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
@@ -26,8 +26,8 @@ export interface LivenessHostOptions {
   readonly browsers?: FakeBrowsers | 'off';
   /** `warden.yaml`, as the owner wrote it. */
   readonly config?: unknown;
-  /** Let the reflex nudge (today's act). Absent: the 5.0 subsystem's own setting, detection only. */
-  readonly reflexNudges?: boolean;
+  /** What else Ferrets' summary of the ferret says: a declared wait, its own nudge and frozen times. */
+  readonly ferret?: Partial<FerretSummary>;
 }
 
 const settle = async (): Promise<void> => await new Promise(resolve => setTimeout(resolve, 15));
@@ -46,6 +46,7 @@ export function livenessHost(options: LivenessHostOptions = {}) {
     mode: 'auto',
     createdAt: START,
     stateAt: START,
+    ...options.ferret,
   } as never);
   const base = fakeConversation();
   const conversation =
@@ -81,7 +82,6 @@ export function livenessHost(options: LivenessHostOptions = {}) {
     board: () => undefined,
     terminals: () => (options.terminalsOff === true ? undefined : terminals),
     browsers: () => browsers,
-    ...(options.reflexNudges === undefined ? {} : { reflexNudges: options.reflexNudges }),
   });
   return {
     subsystem,

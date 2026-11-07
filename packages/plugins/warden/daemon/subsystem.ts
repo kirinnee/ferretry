@@ -19,7 +19,15 @@ import {
   StateWardenStateStore,
   WardenReportReader,
 } from './adapters/index.ts';
-import { exchangeSends, livenessTargets, readFleet, TurnOrdinals, transcriptDigest, withLiveness } from './fleet.ts';
+import {
+  exchangeSends,
+  livenessTargets,
+  readFleet,
+  reviveEventsOf,
+  TurnOrdinals,
+  transcriptDigest,
+  withLiveness,
+} from './fleet.ts';
 import { createWardenRemedies } from './remedies.ts';
 import {
   type LivenessSample,
@@ -60,12 +68,6 @@ export interface WardenHost {
   readonly terminals?: () => TerminalsApi | undefined;
   /** Browsers, when it is on: it closes the browsers left under a ferret's pane. Off, that check does not run. */
   readonly browsers?: () => BrowsersApi | undefined;
-  /**
-   * Whether the liveness reflex may nudge a quiet ferret (today's act), as well as detect. Absent: detection only
-   * (`WardenSweepSettings.reflexNudges`), which is how the daemon runs it until `FerretSummary` carries each
-   * ferret's declared wait and its own nudge and frozen times. Tests set it to pin today's act.
-   */
-  readonly reflexNudges?: boolean;
 }
 
 /** What the routes serve (today's `WardenSubsystem`, in the contract's words where they differ). */
@@ -128,7 +130,6 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   const terminals = (): TerminalsApi | undefined => host.terminals?.();
   const browsers = (): BrowsersApi | undefined => host.browsers?.();
   const { remedies, resume: automaticResume } = createWardenRemedies({ ferrets, conversation, asks, acted, browsers });
-  const reflexNudges = host.reflexNudges === true;
   const fleetNow = async () => await readFleet(ferrets, conversation, asks, turns, ferret => `ferrets/${ferret}`);
 
   // ── the liveness monitor: what the Warden SEES of each working ferret between sweeps (today's) ────────────────────
@@ -164,13 +165,12 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   };
 
   // ── auto-revive: today's default-on revive, resuming through Ferrets under today's automatic refusals ─────────────
-  // It revives only a ferret that DIED (status `failed`, its journal ending in an abnormal exit: `classifyEnd`).
-  // GAP(ferrets): 5.0's `FerretSummary` carries no death cause (four states, no exit status or signal), so no ferret
-  // reads as failed and nothing is revived until Ferrets adds one. The breaker, the per-day caps and the owner's
-  // `mayActAlone.resume` still govern it when it can act.
+  // It revives only a ferret that DIED (status `failed`, its last terminal event an abnormal exit: `classifyEnd`). What
+  // the session journal said is now Ferrets' own `FerretSummary.cause`, read back as that one event (`reviveEventsOf`).
+  // The breaker, the per-day caps and the owner's `mayActAlone.resume` govern it as before.
   const revive = new WardenReviveService({
     events: {
-      read: async () => [],
+      read: async ferret => reviveEventsOf(await ferrets.get(ferret as FerretId)),
       emit: async (ferret, type, data) => kernel.log.info(type, { ferret, ...scalars(data) }),
     },
     resume: automaticResume,
@@ -195,8 +195,9 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   });
 
   // ── investigators ────────────────────────────────────────────────────────────────────────────────────────────────────
-  // A report is a file the investigating ferret writes; it needs a folder Ferrets may start it in AND the daemon can read
-  // back, and the host gives the warden none yet. Without one, no investigator starts and nothing is spent (GAP).
+  // GAP(warden folder): Ferrets now starts a ferret in a `workFolder` and hands back what it wrote with
+  // `summary(ferret)`, but the Warden has no folder of its own to pass: its manifest declares no root and the kernel
+  // offers no path to its state. Without one, no investigator starts and nothing is spent.
   const spawner: WardenSpawner = {
     spawn: async request => {
       if (request.cwd === '') {
@@ -269,8 +270,8 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
               isHelper: async ferret => (await ferrets.get(ferret as FerretId))?.parent !== undefined,
             });
       },
-      // The send ledgers, for DETECTION only: a sub-ferret overdue on a report its parent asked for is flagged
-      // `report_overdue`, and nobody is typed to (`nudgesOverdue: false` below).
+      // The send ledgers: a sub-ferret overdue on a report its parent asked for is flagged `report_overdue`, nudged
+      // once, and its parent told (a ferret that declared a wait or said `signal done` is skipped).
       exchanges: { sends: async ferret => await exchangeSends(conversation, ferret as FerretId) },
       nowMs,
       capabilities: () => `${crypto.randomUUID()}${crypto.randomUUID().replaceAll('-', '')}`,
@@ -279,15 +280,12 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       clientName: BINARY,
       wardenCwd: '',
       supervisesMonitors: true,
-      // GAP(ferrets): today nudged an overdue sub-ferret, then told its parent, but skipped one that had declared a
-      // wait or signalled done. `FerretSummary` carries neither (and the signal route answers 503), so the act would
-      // nudge a helper legitimately waiting: no unattended act until Ferrets exposes waiting/done.
-      nudgesOverdue: false,
-      // GAP(ferrets): today never nudged a ferret that declared a wait (`fy signal waiting`), and timed each ferret by
-      // its own `--nudge-after` / `--kill-after`. Ferrets stores both (the start request, the session config and the
-      // signal repository), but `FerretSummary` does not carry them, so every ferret would be nudged after the
-      // default five minutes: the reflex DETECTS only until it does (frozen, sus_* and dead_monitor still fire).
-      reflexNudges,
+      // Today's act: nudge an overdue sub-ferret, then tell its parent, skipping one that declared a wait or said
+      // `signal done` (`FerretSummary.waiting` / `finishedAt`, read in `fleet.ts`).
+      nudgesOverdue: true,
+      // Today's reflex: a quiet ferret is nudged once, never one that declared a wait, and each is timed by its own
+      // `--nudge-after` / `--kill-after` (`FerretSummary.nudgeAfterSeconds` / `killAfterSeconds`).
+      reflexNudges: true,
       mayAct: false,
       machineName: () => undefined,
     },
@@ -354,8 +352,8 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       let disarm: (() => void) | undefined;
       let stopped = false;
       // The liveness monitor's own tick (today's): one at a time — a slow tick is skipped over, never stacked. A quiet
-      // ferret is nudged only when this subsystem may nudge at all (`reflexNudges`; not on 5.0's daemon), the Warden is on
-      // and the owner lets it nudge alone (`reflex`), inside the sweep chain; a ferret that froze brings the next sweep forward. Terminals off: the tick looks at nothing.
+      // ferret is nudged only while the Warden is on and the owner lets it nudge alone, inside the sweep chain; a ferret
+      // that froze brings the next sweep forward. Terminals off: the tick looks at nothing.
       syncLiveness();
       let looking = false;
       const look = async (): Promise<void> => {
@@ -365,7 +363,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
           if (!syncLiveness()) return;
           const config = await service.currentConfig();
           // Not allowed to nudge: a frozen verdict does not wait for a nudge that will never come (`reflexAssess`).
-          const nudgeAllowed = reflexNudges && config.enabled && config.mayActAlone.nudge;
+          const nudgeAllowed = config.enabled && config.mayActAlone.nudge;
           const events = await liveness.tick({ nudgeAllowed });
           const result = await loop.exclusive(async () => await service.reflex(events));
           if (result.frozen) loop.trigger();

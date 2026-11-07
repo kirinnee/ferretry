@@ -97,6 +97,12 @@ export interface WardenSessionConfig {
    */
   readonly modelHint?: string;
   readonly intervalSeconds?: number;
+  /**
+   * The supervision times the ferret was started with: the liveness reflex nudges it after this long quiet and reads
+   * `killAfterSeconds` as its frozen time. Absent (or `0`) means the machine's default (`reflexSettingsFor`).
+   */
+  readonly nudgeAfterSeconds?: number;
+  readonly killAfterSeconds?: number;
 }
 
 /** The observed state fields the warden reads. */

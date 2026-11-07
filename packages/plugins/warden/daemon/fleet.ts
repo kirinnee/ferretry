@@ -1,10 +1,11 @@
 import { type AskSummary, type AsksApi, SourceKeySchema } from '@ferretry/core-asks/contract';
-import type { FerretId, FerretsApi, FerretSummary } from '@ferretry/core-ferrets/contract';
+import type { FerretEndCause, FerretId, FerretsApi, FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import {
   type ExchangeSend,
   type LivenessTarget,
   textFingerprint,
+  type ReviveEvent,
   WARDEN_LABEL,
   type WardenFleetSession,
   type WardenLivenessMonitor,
@@ -48,7 +49,24 @@ export class TurnOrdinals {
   }
 }
 
+/**
+ * Whether a stopped ferret's end is one the Warden counts as a failure (today's session status `failed`): the terminal
+ * vanished, a signal killed the agent, it exited non-zero, or it never started. A stop, a `signal done` and a clean
+ * exit are somebody's decision (or a plain finish), and a stopped ferret that records no cause is read as stopped.
+ */
+const FAILED_ENDS: ReadonlySet<FerretEndCause['kind']> = new Set([
+  'tmux_crashed',
+  'terminal_gone',
+  'signal',
+  'agent_crashed',
+  'start_failed',
+]);
+
 const statusOf = (ferret: FerretSummary): WardenSessionStatus => {
+  if (ferret.state === 'stopped' && ferret.cause !== undefined) {
+    if (FAILED_ENDS.has(ferret.cause.kind)) return 'failed';
+    if (ferret.cause.kind === 'completed') return 'completed';
+  }
   switch (ferret.state) {
     case 'starting':
       return 'starting';
@@ -59,6 +77,36 @@ const statusOf = (ferret: FerretSummary): WardenSessionStatus => {
       return 'stopped';
   }
 };
+
+/**
+ * The one terminal event a stopped ferret's end is, in the shape today's session journal gave the revive
+ * (`classifyEnd` reads only the LAST one): Ferrets records WHY it ended (`FerretSummary.cause`), so the journal the
+ * revive used to read is rebuilt from that single fact. A ferret that has not ended, or records no cause, has none.
+ * Ferrets tells a vanished terminal from a crashed tmux server; the revive planner makes that call itself from a
+ * fleet-wide death, as today, so both read as the pane gone.
+ */
+export function reviveEventsOf(ferret: FerretSummary | undefined): readonly ReviveEvent[] {
+  if (ferret === undefined || ferret.state !== 'stopped' || ferret.cause === undefined) return [];
+  const time = ferret.stateAt;
+  const cause = ferret.cause;
+  switch (cause.kind) {
+    case 'tmux_crashed':
+    case 'terminal_gone':
+      return [{ type: 'session.exited', time, data: { status: 'failed', pane: 'gone' } }];
+    case 'signal':
+      return [{ type: 'session.exited', time, data: { status: 'failed', signal: cause.signal } }];
+    case 'agent_crashed':
+      return [{ type: 'session.exited', time, data: { status: 'failed', exitCode: cause.exitCode } }];
+    case 'clean_exit':
+      return [{ type: 'session.exited', time, data: { status: 'stopped', exitCode: 0 } }];
+    case 'stopped':
+      return [{ type: 'session.stopped', time, data: {} }];
+    case 'completed':
+      return [{ type: 'session.completed', time, data: {} }];
+    case 'start_failed':
+      return [{ type: 'session.failed', time, data: {} }];
+  }
+}
 
 /**
  * One ferret as the sweep reads it. Ferrets knows who it is and which of four states it is in; the finer facts today's
@@ -91,6 +139,9 @@ export function wardenFleetSession(
       agent: ferret.runtime ?? ferret.harness,
       ...(HARNESS_OF[ferret.harness] === undefined ? {} : { harness: HARNESS_OF[ferret.harness] }),
       ...(ferret.model === undefined ? {} : { model: ferret.model }),
+      // The supervision times it was started with: the liveness reflex times each ferret by its own.
+      ...(ferret.nudgeAfterSeconds === undefined ? {} : { nudgeAfterSeconds: ferret.nudgeAfterSeconds }),
+      ...(ferret.killAfterSeconds === undefined ? {} : { killAfterSeconds: ferret.killAfterSeconds }),
     },
     state: {
       // A ferret with a question open on its board is waiting on someone (`unattended_question` measures how long).
@@ -101,6 +152,8 @@ export function wardenFleetSession(
         ? { turnState: 'needs-input' as const, turnStateAt: questionSince }
         : {}),
       turn,
+      // A wait the ferret declared (`fy signal waiting`): it is parked, not stuck, so nothing nudges it for silence.
+      ...(ferret.waiting === undefined || ferret.state === 'stopped' ? {} : { waiting: { ...ferret.waiting } }),
       ...(questionSince === undefined && ferret.state === 'working'
         ? { turnState: 'working' as const, turnStateAt: ferret.stateAt }
         : {}),
@@ -115,6 +168,8 @@ export function wardenFleetSession(
     // so `dead_monitor` does not run. With it, {@link withLiveness} says whether the monitor is really watching.
     hasLiveMonitor: ferret.state !== 'stopped',
     observedSince: ferret.stateAt,
+    // It said `signal done`: finished, never resumable wreckage and never overdue on a report.
+    ...(ferret.finishedAt === undefined ? {} : { hasDoneMarker: true }),
   };
 }
 
@@ -233,9 +288,8 @@ export function withLiveness(
 
 /**
  * The ferrets the liveness monitor may look at (today's `targets`): every ferret the sweep reads, wardens excluded.
- * Ferrets stores each ferret's declared wait and its own nudge and frozen times, but `FerretSummary` does not carry
- * them, so none reads as waiting and the reflex uses its defaults. That is why the reflex only DETECTS on 5.0
- * (`WardenSweepSettings.reflexNudges` false; declared GAP in `ports-pending.json`).
+ * A ferret that declared a wait is parked, and each is timed by its own `nudgeAfterSeconds` / `killAfterSeconds`, both
+ * read from Ferrets' summary (the defaults apply where it names none).
  */
 export function livenessTargets(fleet: readonly WardenFleetSession[]): readonly LivenessTarget[] {
   return fleet
@@ -245,8 +299,12 @@ export function livenessTargets(fleet: readonly WardenFleetSession[]): readonly 
       status: session.state.status,
       turn: session.turn ?? 0,
       mode: session.config.mode,
-      waiting: false,
+      waiting: session.state.waiting !== undefined,
       ...(session.state.turnState === undefined ? {} : { turnState: session.state.turnState }),
+      ...(session.config.nudgeAfterSeconds === undefined
+        ? {}
+        : { nudgeAfterSeconds: session.config.nudgeAfterSeconds }),
+      ...(session.config.killAfterSeconds === undefined ? {} : { killAfterSeconds: session.config.killAfterSeconds }),
     }));
 }
 
