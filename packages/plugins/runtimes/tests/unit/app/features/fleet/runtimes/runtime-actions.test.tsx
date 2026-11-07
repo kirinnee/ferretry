@@ -73,7 +73,9 @@ const text = (container: ParentNode, selector: string): string =>
   must(container.querySelector(selector), selector).textContent ?? '';
 
 const proposed = (calls: readonly Call[]): unknown[] =>
-  calls.filter(call => call.route === 'POST /v1/runtimes/proposals').map(call => (call.body as { change: unknown }).change);
+  calls
+    .filter(call => call.route === 'POST /v1/runtimes/proposals')
+    .map(call => (call.body as { change: unknown }).change);
 
 const FERRETS: readonly RunningSession[] = [
   { id: 's-1', name: 'Fisher', harness: 'claude-code' },

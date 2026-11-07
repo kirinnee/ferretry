@@ -5,11 +5,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { CLONE_FALLBACK_RUNTIME } from '../../../contract/index.ts';
-import {
-  type CloneAgentRuntime,
-  cloneAgentRuntimes,
-  suggestCloneDefault,
-} from '../../../daemon/lib/clone-default.ts';
+import { type CloneAgentRuntime, cloneAgentRuntimes, suggestCloneDefault } from '../../../daemon/lib/clone-default.ts';
 import type { CloneBundle } from '../../../contract/index.ts';
 import { INSTANT } from './fixtures.ts';
 

@@ -162,23 +162,25 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('runtime ls', { summary: 'the runtimes on this machine: a login plus a profile' }),
+      verb('runtime ls', { summary: 'the runtimes on this machine: a sign-in plus a profile' }),
       verb('runtime add', {
-        summary: 'add a runtime: which login, which profile, and whether Ferretry launches it as an agent',
+        summary: 'add a runtime: which sign-in, which profile, and whether Ferretry launches it as an agent',
       }),
       verb('runtime show', { summary: 'one runtime: its stack, models and fixed layer' }),
-      verb('runtime set', { summary: 'change which login or profile a runtime uses, or whether it is an agent' }),
+      verb('runtime set', { summary: 'change which sign-in or profile a runtime uses, or whether it is an agent' }),
       verb('runtime disable', {
         summary: 'switch a runtime off without deleting it: nothing new starts on it; running ferrets keep going',
       }),
       verb('runtime enable', { summary: 'switch a disabled runtime back on' }),
       verb('runtime rename', { summary: 'give a runtime a new name; nothing restarts' }),
       verb('runtime rm', { summary: 'remove a runtime' }),
-      verb('runtime import', { summary: "import one harness's own login and setup, with no questions (for scripts)" }),
+      verb('runtime import', {
+        summary: "import one harness's own sign-in and setup, with no questions (for scripts)",
+      }),
       verb('runtime scan', {
         summary: 'what the first run would find: each harness, its sign-in, instructions, settings, servers and skills',
       }),
-      verb('recommend', { summary: 'which login and model should take one task, and why' }),
+      verb('recommend', { summary: 'which sign-in and model should take one task, and why' }),
       verb('profile ls', { summary: 'the profiles on this machine, each with its scope' }),
       verb('profile show', { summary: 'one profile: its layers, overrides and where it is used' }),
       verb('profile build', { summary: 'build a new profile from layers' }),

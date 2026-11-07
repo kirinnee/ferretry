@@ -51,7 +51,8 @@ const events = () => {
         return () => listeners.delete(listener);
       },
     } as unknown as Pick<PluginClient, 'subscribe'>,
-    changed: (runtimes: string[]) => interact(async () => void [...listeners].forEach(listener => listener({ runtimes }))),
+    changed: (runtimes: string[]) =>
+      interact(async () => void [...listeners].forEach(listener => listener({ runtimes }))),
   };
 };
 

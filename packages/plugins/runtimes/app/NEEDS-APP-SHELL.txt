@@ -8,7 +8,6 @@ app/components/runtime-buttons.tsx | react, lucide-react; Accounts' account-heal
 app/components/runtime-controls.tsx | react, lucide-react; ui.ts (cn, TERMINAL_STATUSES)
 app/features/fleet/credentials/local-models-panel.tsx | react; ui.ts (Button, ClipboardWriter)
 app/features/fleet/runtimes/runtime-actions.tsx | react, lucide-react; ui.ts; UNPLACED fleet UI at the same relative paths: ../machine/settings-tab.tsx (machineSettings), ../shell/apply-change-panel.tsx (AccountChanges, ChangeApplyPanel), ../shell/apply-change.ts (changeRefusalSentence)
-app/features/settings/engine-catalog-list.tsx | MISPLACED: this is Voice's engine list (Settings > Voice > Engine), not Runtimes'; needs react, ui.ts, hooks/use-on-device-install.ts, lib/stt/*, ./voice-engine-choice.tsx and uses Date.now/setTimeout (banned-globals); move to the voice plugin
 app/shell/mode-badge.tsx | react, lucide-react; ui.ts (Badge, cn); the session mode type belongs to Ferrets
 app/views/pending-settings.tsx | react; the three Settings tabs (runtimes, profiles, model-sets) say "not built yet": their screens (runtimes-tab, profiles-tab, components-tab, add-runtime, apply-change*, machine-data ...) were never assigned to an app half
 app/views/runtimes-settings.tsx | react (re-exports pending-settings)

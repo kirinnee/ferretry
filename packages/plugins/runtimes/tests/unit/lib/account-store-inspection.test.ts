@@ -6,7 +6,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   type CredentialStoreCheck,
-  storeInspectionWords,
+  describeStoreInspection,
   usableCredentialReading,
 } from '../../../daemon/lib/account/store-inspection.ts';
 import type { CredentialReading } from '../../../daemon/lib/identity.ts';
@@ -15,7 +15,7 @@ const ITEM = 'the keychain item "Claude Code-credentials" (account "sam")';
 const FILE = 'the file /Users/sam/.claude/.credentials.json';
 
 const words = (reading: CredentialReading, ...checked: CredentialStoreCheck[]): string =>
-  storeInspectionWords({ reading, checked });
+  describeStoreInspection({ reading, checked });
 
 describe('usableCredentialReading', () => {
   it('should count a valid or refreshable login, and nothing else', () => {
@@ -26,7 +26,7 @@ describe('usableCredentialReading', () => {
   });
 });
 
-describe('storeInspectionWords', () => {
+describe('describeStoreInspection', () => {
   it('should say a usable login is stored', () => {
     should(words({ state: 'valid' }, { location: ITEM, found: 'present' })).equal(
       'A usable login is stored for this credential.',

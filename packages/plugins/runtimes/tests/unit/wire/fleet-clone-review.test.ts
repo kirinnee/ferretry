@@ -15,10 +15,7 @@ import {
 } from '../../../daemon/lib/clone-review.ts';
 import { INSTANT } from './fixtures.ts';
 
-const bundleWith = (
-  components: CloneBundle['components'],
-  files: CloneBundle['files'] = [],
-): CloneBundle => ({
+const bundleWith = (components: CloneBundle['components'], files: CloneBundle['files'] = []): CloneBundle => ({
   format: 'ferretry-clone',
   version: 1,
   machine: 'studio-mac',

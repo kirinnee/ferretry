@@ -51,7 +51,9 @@ describe('readRuntimeSessionView', () => {
     expect(() => parseRuntimeSessionView({ config: { id: 's', harness: 'claude' }, state: { status: 'x' } })).toThrow(
       'invalid ferret',
     );
-    expect(() => parseRuntimeSessionView({ config: { id: 's', harness: 'codex' }, state: {} })).toThrow('invalid ferret');
+    expect(() => parseRuntimeSessionView({ config: { id: 's', harness: 'codex' }, state: {} })).toThrow(
+      'invalid ferret',
+    );
   });
 });
 

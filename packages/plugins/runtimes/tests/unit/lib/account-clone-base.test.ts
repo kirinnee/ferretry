@@ -775,9 +775,9 @@ describe('serializeCloneBase: a record that always reads back', () => {
 
   it('should give a source whose verified id is __proto__ no identity at all', () => {
     // Act + Assert
-    should(
-      cloneSourceIdentity({ ...bundleOf(), daemon: '__proto__' } as CloneBundle, undefined, undefined)?.id,
-    ).equal(`${SELF_REPORTED_PREFIX}__proto__`);
+    should(cloneSourceIdentity({ ...bundleOf(), daemon: '__proto__' } as CloneBundle, undefined, undefined)?.id).equal(
+      `${SELF_REPORTED_PREFIX}__proto__`,
+    );
   });
 });
 

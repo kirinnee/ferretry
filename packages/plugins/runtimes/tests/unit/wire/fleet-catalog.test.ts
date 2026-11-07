@@ -6,12 +6,7 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type {
-  AccountChangeView,
-  ComponentView,
-  LayeredProfileView,
-  RuntimeView,
-} from '../../../contract/index.ts';
+import type { AccountChangeView, ComponentView, LayeredProfileView, RuntimeView } from '../../../contract/index.ts';
 import * as catalog from '../../../contract/wire/catalog.ts';
 import { INSTANT } from './fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
@@ -465,7 +460,11 @@ describe('the account-model catalogue wire contract', () => {
       { kind: 'credential.signout', id: 'codex-work' },
       { ...MACHINE_SETTINGS, defaultRuntime: 'claude-default' },
       { ...MACHINE_SETTINGS, browserPorts: { cdp: 9222, relay: 9223, vnc: 5901 } },
-      { ...MACHINE_SETTINGS, browserProxy: { url: 'http://proxy.example.test:3128', bypass: [] }, browserMode: 'window' },
+      {
+        ...MACHINE_SETTINGS,
+        browserProxy: { url: 'http://proxy.example.test:3128', bypass: [] },
+        browserMode: 'window',
+      },
       { kind: 'setup.import', acceptedUpdates: ['instructions/main'], addDuplicates: true },
       { kind: 'clone.import', mode: 'alongside', bundle: { version: 1 } },
       {

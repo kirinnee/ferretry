@@ -109,7 +109,10 @@ describe('the fleet manifest reader', () => {
   it('should read a manifest', async () => {
     // Arrange
     const file = path.join(await temp(), 'manifest.json');
-    await put(file, JSON.stringify({ version: 1, generatedAt: '2026-11-07T00:00:00.000Z', accounts: [], runtimes: [] }));
+    await put(
+      file,
+      JSON.stringify({ version: 1, generatedAt: '2026-11-07T00:00:00.000Z', accounts: [], runtimes: [] }),
+    );
 
     // Act
     const found = await readFleetManifest(nodeHostFiles, file);
@@ -252,14 +255,17 @@ describe('reading folders as text', () => {
   it('should take no more files than the limit and name the rest', async () => {
     // Arrange
     const root = await temp();
-    for (let index = 0; index < MAX_FOLDER_FILES + 1; index += 1) await put(path.join(root, `f${String(index).padStart(4, '0')}`), 'x');
+    for (let index = 0; index < MAX_FOLDER_FILES + 1; index += 1)
+      await put(path.join(root, `f${String(index).padStart(4, '0')}`), 'x');
 
     // Act
     const reading = await readTextFolder(nodeHostFiles, root);
 
     // Assert
     should(reading.files.length).equal(MAX_FOLDER_FILES);
-    should(reading.skipped).deepEqual([{ path: `f${String(MAX_FOLDER_FILES).padStart(4, '0')}`, reason: 'the folder has too many files' }]);
+    should(reading.skipped).deepEqual([
+      { path: `f${String(MAX_FOLDER_FILES).padStart(4, '0')}`, reason: 'the folder has too many files' },
+    ]);
   });
 
   it('should list a skills store as its item folders, sorted, hidden ones left out', async () => {
@@ -319,7 +325,11 @@ describe('the account model files', () => {
       inEffect: async () => load,
       load: async () => load,
       editsFor: (_load, next, moved) => [
-        { path: 'runtimes/new.yaml', content: `marker: ${next.marker}\n`, expect: `moved:${[...moved.values()].join(',')}` },
+        {
+          path: 'runtimes/new.yaml',
+          content: `marker: ${next.marker}\n`,
+          expect: `moved:${[...moved.values()].join(',')}`,
+        },
         { path: 'runtimes/gone.yaml', content: undefined, expect: 'etag-2' },
       ],
       mentionsRenamed: (_load, rename) => [{ path: 'warden.yaml', content: `to: ${rename.to}\n`, expect: 'etag-3' }],
@@ -349,7 +359,12 @@ describe('the account model files', () => {
 
     // Assert
     should(documents).deepEqual([
-      { path: '/h/config/runtimes/new.yaml', content: 'marker: next\n', mode: 0o600, expect: 'moved:runtimes/old.yaml' },
+      {
+        path: '/h/config/runtimes/new.yaml',
+        content: 'marker: next\n',
+        mode: 0o600,
+        expect: 'moved:runtimes/old.yaml',
+      },
       { path: '/h/config/runtimes/gone.yaml', content: '', mode: 0o600, expect: 'etag-2', remove: true },
       { path: '/h/config/warden.yaml', content: 'to: new\n', mode: 0o600, expect: 'etag-3' },
     ]);

@@ -32,6 +32,8 @@ import {
 import { isSignInSecretName, SIGN_IN_NOT_COPIED } from '../lib/service/foreign.ts';
 import { FleetSetupRefusal, type FleetSetupService } from '../lib/service/setup-service.ts';
 import { parseBody } from './body.ts';
+import { UNAVAILABLE } from '../lib/service/assembly.ts';
+import { CONFIG_WRITE_UNAVAILABLE } from '../lib/service/ports.ts';
 
 /** First-run scan, tool install, the clone export and the clone review. */
 export type FleetSetupSubsystem = Pick<
@@ -41,6 +43,8 @@ export type FleetSetupSubsystem = Pick<
 
 /** `403` for a caller the grants refuse; `409` for every other refusal, as the fleet's own answer. */
 function refusal(error: FleetSetupRefusal): ApiError {
+  if (error.message === UNAVAILABLE || error.message === CONFIG_WRITE_UNAVAILABLE)
+    return new ApiError(503, error.message, 'plugin_unavailable');
   return new ApiError(error.code === 'fleet_setup_unauthorized' ? 403 : 409, error.message, error.code);
 }
 

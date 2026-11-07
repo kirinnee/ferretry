@@ -3,7 +3,11 @@ import { secretReference } from '@ferretry/core-vault/contract';
 import should from 'should';
 import { CredentialSchema } from '../../../daemon/lib/account/schema.ts';
 import { config } from '@ferretry/kernel/host';
-import { BuiltInPresetError, parsePresetText as parseText, presetCatalog } from '../../../daemon/lib/presets/catalog.ts';
+import {
+  BuiltInPresetError,
+  parsePresetText as parseText,
+  presetCatalog,
+} from '../../../daemon/lib/presets/catalog.ts';
 import { credentialFromPreset, presetDefaultEnv, presetLoginRefusal } from '../../../daemon/lib/presets/login.ts';
 import {
   PresetVariableSchema,

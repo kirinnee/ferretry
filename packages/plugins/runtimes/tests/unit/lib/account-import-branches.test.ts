@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type HostDocumentRead, type HostHarnessScan, mergeImport, planImport } from '../../../daemon/lib/account/import.ts';
+import {
+  type HostDocumentRead,
+  type HostHarnessScan,
+  mergeImport,
+  planImport,
+} from '../../../daemon/lib/account/import.ts';
 
 const digest = (text: string): string => String(Bun.hash(text));
 

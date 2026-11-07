@@ -116,7 +116,6 @@ describe('runtime model catalog parsing', () => {
     should(requireRuntimeModelCatalogHarness(catalog('Codex'), 'codex')).deepEqual(catalog('Codex'));
   });
 
-
   it('should say what went wrong, whatever was thrown', () => {
     should(runtimeModelCatalogErrorMessage(new Error('other'))).equal('other');
     should(runtimeModelCatalogErrorMessage('other')).equal('other');

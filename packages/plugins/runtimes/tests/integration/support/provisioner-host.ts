@@ -25,8 +25,9 @@ export const testHost: ProvisionerHost = { disk: nodeProvisionerDisk, kernel: re
 type AfterHost<T extends readonly unknown[]> = T extends readonly [unknown, ...infer Rest] ? Rest : never;
 
 /** A provisioner over {@link testHost}; the arguments after `host` are today's. */
-export const newProvisioner = (...args: AfterHost<ConstructorParameters<typeof FileFleetProvisioner>>): FileFleetProvisioner =>
-  new FileFleetProvisioner(testHost, ...args);
+export const newProvisioner = (
+  ...args: AfterHost<ConstructorParameters<typeof FileFleetProvisioner>>
+): FileFleetProvisioner => new FileFleetProvisioner(testHost, ...args);
 
 const unavailable = (what: string) =>
   class {

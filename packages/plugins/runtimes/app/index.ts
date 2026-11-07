@@ -17,9 +17,9 @@ const settingsView = (name: ViewName): AppComponent<SettingsProps> =>
 
 const pickerView = (client: RuntimesClient): AppComponent<PanelProps> =>
   lazyComponent<PanelProps>(async () =>
-    (
-      (await loadView('runtime-picker')).createRuntimePicker as (client: RuntimesClient) => AppComponent<PanelProps>
-    )(client),
+    ((await loadView('runtime-picker')).createRuntimePicker as (client: RuntimesClient) => AppComponent<PanelProps>)(
+      client,
+    ),
   );
 
 /**

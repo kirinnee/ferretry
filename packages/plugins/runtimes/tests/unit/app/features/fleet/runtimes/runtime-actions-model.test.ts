@@ -86,12 +86,8 @@ describe('moving the ferrets', () => {
         staged({ kind: 'apply', operations: [], documents: [], runtimes: [], runningSessions: [ferret] }),
       ),
     ).toEqual([ferret]);
-    expect(
-      runningOnRuntime(staged({ kind: 'apply', operations: [], documents: [], runtimes: [] })),
-    ).toEqual([]);
-    expect(
-      runningOnRuntime(staged({ kind: 'executor', executor: 'setup', description: 'Import' })),
-    ).toEqual([]);
+    expect(runningOnRuntime(staged({ kind: 'apply', operations: [], documents: [], runtimes: [] }))).toEqual([]);
+    expect(runningOnRuntime(staged({ kind: 'executor', executor: 'setup', description: 'Import' }))).toEqual([]);
   });
 
   it('should say exactly what the confirm button does', () => {

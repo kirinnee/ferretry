@@ -17,7 +17,10 @@ export const DEFAULT_WARDEN_CONFIG = {
 const record = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
-const LAYER_WORDS: Readonly<Record<string, string>> = { jev: 'Jev may now spend', llm: 'the LLM investigation may now spend' };
+const LAYER_WORDS: Readonly<Record<string, string>> = {
+  jev: 'Jev may now spend',
+  llm: 'the LLM investigation may now spend',
+};
 const CAP_WORDS: Readonly<Record<string, string>> = {
   jevUsdPerDay: 'the daily Jev cap in dollars',
   investigationUsdPerDay: 'the daily investigation cap in dollars',
@@ -39,7 +42,12 @@ function wardenLoosening(effective: typeof DEFAULT_WARDEN_CONFIG, written: Recor
   }
   const interval = written.intervalMinutes;
   if (typeof interval === 'number' && interval < effective.intervalMinutes) {
-    sentences.push('the minutes between Warden sweeps goes down from ' + String(effective.intervalMinutes) + ' to ' + String(interval));
+    sentences.push(
+      'the minutes between Warden sweeps goes down from ' +
+        String(effective.intervalMinutes) +
+        ' to ' +
+        String(interval),
+    );
   }
   return sentences;
 }

@@ -201,17 +201,10 @@ suite('FileFleetProvisioner', () => {
       `${JSON.stringify({ owner: 999_999, token: 'left-behind', at: 0 })}\n`,
     );
     let entered = false;
-    const subject = newProvisioner(
-      [root],
-      undefined,
-      { waitMs: 20, pollMs: 5 },
-      undefined,
-      undefined,
-      async mutate => {
-        entered = true;
-        return await mutate();
-      },
-    );
+    const subject = newProvisioner([root], undefined, { waitMs: 20, pollMs: 5 }, undefined, undefined, async mutate => {
+      entered = true;
+      return await mutate();
+    });
 
     // Act
     const refused = await subject

@@ -8,7 +8,12 @@
  */
 
 import type { AccountChangeView, MachineView, RunningSession, RuntimeView } from '../../../../contract/index.ts';
-import { type FleetApplyAuthority, fleetRefusalExplanation, type NameProblem, runtimeNameProblem } from '../../../lib/shell-ports.ts';
+import {
+  type FleetApplyAuthority,
+  fleetRefusalExplanation,
+  type NameProblem,
+  runtimeNameProblem,
+} from '../../../lib/shell-ports.ts';
 
 /** How a moved ferret keeps its conversation: resumed on the same CLI, converted across to the other. */
 // GAP(ferrets): the move wire (`MoveConversation`) is not in Ferrets' contract yet.
@@ -44,19 +49,14 @@ export const blocksAsDefault = (runtime: RuntimeView, machine: MachineView | nul
   machine?.defaultRuntime === runtime.name;
 
 /** The agent runtimes that could become the default instead of this one. */
-export const defaultCandidates = (
-  runtime: RuntimeView,
-  runtimes: readonly RuntimeView[],
-): readonly RuntimeView[] => runtimes.filter(other => other.name !== runtime.name && other.agent);
+export const defaultCandidates = (runtime: RuntimeView, runtimes: readonly RuntimeView[]): readonly RuntimeView[] =>
+  runtimes.filter(other => other.name !== runtime.name && other.agent);
 
 /**
  * The runtimes the ferrets on this one could move to: every other runtime that can launch, the ones on
  * the same CLI first, because those carry the conversation as it is.
  */
-export const moveTargets = (
-  runtime: RuntimeView,
-  runtimes: readonly RuntimeView[],
-): readonly RuntimeView[] => {
+export const moveTargets = (runtime: RuntimeView, runtimes: readonly RuntimeView[]): readonly RuntimeView[] => {
   const others = runtimes.filter(other => other.name !== runtime.name && other.launch.available);
   return [
     ...others.filter(other => other.harness === runtime.harness),

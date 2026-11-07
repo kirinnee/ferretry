@@ -5,11 +5,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { CLONE_PROVENANCE_FIELDS, type CloneFile } from '../../../contract/index.ts';
-import {
-  type CloneDigestItem,
-  type CloneIdentityOf,
-  cloneItemDigest,
-} from '../../../daemon/lib/clone-digest.ts';
+import { type CloneDigestItem, type CloneIdentityOf, cloneItemDigest } from '../../../daemon/lib/clone-digest.ts';
 
 const NONE: readonly CloneFile[] = [];
 
@@ -166,10 +162,7 @@ describe('cloneItemDigest', () => {
       should(cloneItemDigest(skills({ items: ['review'], clonedFrom: 'studio' }), store)).equal(digest);
       should(cloneItemDigest(skills({ items: ['review'] }), [store[0] as CloneFile])).not.equal(digest);
       should(
-        cloneItemDigest(skills({ items: ['review'] }), [
-          store[0] as CloneFile,
-          file('skills/review/run.sh', 'three'),
-        ]),
+        cloneItemDigest(skills({ items: ['review'] }), [store[0] as CloneFile, file('skills/review/run.sh', 'three')]),
       ).not.equal(digest);
       should(cloneItemDigest(skills({ items: ['review', 'other'] }), store)).not.equal(digest);
     });

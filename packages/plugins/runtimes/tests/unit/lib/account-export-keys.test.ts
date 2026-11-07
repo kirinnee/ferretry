@@ -2,7 +2,12 @@
  * Origin keys: minted once, remembered, kept through a rename, never taken from a file that cannot be read.
  */
 import { describe, it } from 'bun:test';
-import { CLONE_SKILLS_DIRECTORY, type CloneBundle, CloneBundleSchema, ORIGIN_KEY_PATTERN } from '../../../contract/index.ts';
+import {
+  CLONE_SKILLS_DIRECTORY,
+  type CloneBundle,
+  CloneBundleSchema,
+  ORIGIN_KEY_PATTERN,
+} from '../../../contract/index.ts';
 import { cloneItemDigest } from '../../../daemon/lib/clone-digest.ts';
 import should from 'should';
 import { SKILLS_STORE_DIRECTORY } from '../../../daemon/lib/account/adapt.ts';

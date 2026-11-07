@@ -1,10 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  ApplyOutcomeSchema,
-  ManifestSummarySchema,
-  ProposalApplyRequestSchema,
-} from '../../../contract/index.ts';
+import { ApplyOutcomeSchema, ManifestSummarySchema, ProposalApplyRequestSchema } from '../../../contract/index.ts';
 
 const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001';
 const SECOND_ID = '00000000-0000-4000-8000-000000000002';

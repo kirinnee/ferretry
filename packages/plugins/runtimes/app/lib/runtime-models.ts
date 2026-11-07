@@ -123,7 +123,6 @@ export const requireRuntimeModelCatalogHarness = (
   return catalog;
 };
 
-
 export const runtimeModelCatalogErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 

@@ -19,10 +19,10 @@ describe('runtimes contract', () => {
     expect(result.ok).toBe(true);
   });
 
-  test('the manifest declares fifteen routes under /v1/runtimes and the Ferrets need', () => {
+  test('the manifest declares fifteen routes: fourteen under /v1/runtimes and today\'s /v1/recommend', () => {
     const keys = manifest.actions.routes.map(route => route.key);
     expect(keys).toHaveLength(15);
-    expect(keys.every(key => key.includes(' /v1/runtimes'))).toBe(true);
+    expect(keys.filter(key => !key.includes(' /v1/runtimes'))).toEqual(['POST /v1/recommend']);
     expect(Object.keys(manifest.needs)).toEqual(['ferrets']);
   });
 
@@ -43,9 +43,7 @@ describe('runtimes contract', () => {
     expect(axis('POST /v1/runtimes/proposals')).toBe('configure');
     expect(axis('GET /v1/runtimes/setup/scan')).toBe('configure');
     expect(axis('GET /v1/runtimes/export')).toBe('configure');
-    expect(
-      manifest.actions.routes.find(route => route.key === 'POST /v1/recommend')?.capability,
-    ).toBeUndefined();
+    expect(manifest.actions.routes.find(route => route.key === 'POST /v1/recommend')?.capability).toBeUndefined();
   });
 
   test('no two verbs are the same and none is a bare setup or import', () => {
@@ -121,5 +119,15 @@ describe('runtimes contract', () => {
     };
     expect(CloneBundleSchema.safeParse(bundle).success).toBe(true);
     expect(CloneBundleSchema.safeParse({ ...bundle, version: 2 }).success).toBe(false);
+  });
+});
+
+describe('runtime file shell (Q18)', () => {
+  test('a runtime file may name a shell item, and the field is optional', async () => {
+    const { RuntimeFileSchema } = await import('../../contract/index.ts');
+    expect(RuntimeFileSchema.safeParse({ login: 'claude-main', profile: 'default' }).success).toBe(true);
+    const named = RuntimeFileSchema.parse({ login: 'claude-main', profile: 'default', shell: 'nix-dev' });
+    expect(named.shell).toBe('nix-dev');
+    expect(RuntimeFileSchema.safeParse({ login: 'claude-main', profile: 'default', shell: 'a/b' }).success).toBe(false);
   });
 });

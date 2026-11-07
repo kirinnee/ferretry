@@ -18,9 +18,20 @@ import path from 'node:path';
 import should from 'should';
 
 import type { FleetManifest } from '../../daemon/lib/manifest.ts';
-import { FleetApplyFailureError, type FleetApplyPlan, type FleetWriteOperation } from '../../daemon/lib/provisioning.ts';
+import {
+  FleetApplyFailureError,
+  type FleetApplyPlan,
+  type FleetWriteOperation,
+} from '../../daemon/lib/provisioning.ts';
 import type { FolderDisk, GuardedFolder } from '../../daemon/adapters/ports.ts';
-import { DestinationFolders, FileMutationJournal, NodeGuardDisk, newProvisioner, resolveStateHomes, suite } from './support/provisioner-host.ts';
+import {
+  DestinationFolders,
+  FileMutationJournal,
+  NodeGuardDisk,
+  newProvisioner,
+  resolveStateHomes,
+  suite,
+} from './support/provisioner-host.ts';
 
 /**
  * The provisioner's destination side (docs/agent-tools.md#component-destinations): a runtime's
@@ -182,7 +193,10 @@ suite('FileFleetProvisioner destination side', () => {
     const aside = path.join(runtime, 'skills-moved-away');
     const original = FileMutationJournal.prototype.capture;
     let swapped = false;
-    FileMutationJournal.prototype.capture = async function (this: FileMutationJournal, ...args: [string, ...unknown[]]) {
+    FileMutationJournal.prototype.capture = async function (
+      this: FileMutationJournal,
+      ...args: [string, ...unknown[]]
+    ) {
       const [target] = args;
       if (!swapped && path.dirname(path.resolve(target)) === skills) {
         swapped = true;

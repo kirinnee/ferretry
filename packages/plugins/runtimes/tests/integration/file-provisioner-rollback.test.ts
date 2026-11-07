@@ -1348,7 +1348,9 @@ suite('FileFleetProvisioner rollback', () => {
     };
 
     // Act
-    const actual = await newProvisioner([root], sharedHistory).apply(plan).catch((error: unknown) => error);
+    const actual = await newProvisioner([root], sharedHistory)
+      .apply(plan)
+      .catch((error: unknown) => error);
 
     // Assert
     should(actual).be.instanceOf(Error);

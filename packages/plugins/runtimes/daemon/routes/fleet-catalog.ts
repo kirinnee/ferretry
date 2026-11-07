@@ -47,6 +47,8 @@ import {
   type FleetCatalogService,
 } from '../lib/service/catalog-service.ts';
 import { parseBody, parseOptionalBody } from './body.ts';
+import { UNAVAILABLE } from '../lib/service/assembly.ts';
+import { CONFIG_WRITE_UNAVAILABLE } from '../lib/service/ports.ts';
 
 /** The machine, its components, profiles and runtimes, and every change to them. */
 export type FleetCatalogSubsystem = Pick<
@@ -59,6 +61,8 @@ const MAX_CHANGE_BODY_BYTES = 512 * 1024;
 
 /** `404` for a change that does not exist; `409` for every other refusal, as the fleet's own answer. */
 function refusal(error: FleetCatalogRefusal): ApiError {
+  if (error.message === UNAVAILABLE || error.message === CONFIG_WRITE_UNAVAILABLE)
+    return new ApiError(503, error.message, 'plugin_unavailable');
   return new ApiError(error.code === 'fleet_change_unknown' ? 404 : 409, error.message, error.code);
 }
 
