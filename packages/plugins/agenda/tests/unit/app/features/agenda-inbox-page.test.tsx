@@ -431,7 +431,7 @@ describe('AgendaInboxPage rows', () => {
     expect(lines).toEqual([withItem.key, notice.key]);
     const line = must(group.querySelector('[data-agenda-notice]'), 'the notice');
     expect(line.textContent).toContain('The build finished');
-    expect(line.querySelector('a')?.getAttribute('href')).toBe('/d/laptop/agenda/sess-5/N1');
+    expect(line.querySelector('a')?.getAttribute('href')).toBe('/d/workshop/agenda/sess-5/N1');
     expect(line.querySelector('[data-agenda-clear]')?.textContent).toBe('Clear');
     await mounted.unmount();
   });
@@ -455,7 +455,7 @@ describe('AgendaInboxPage rows', () => {
     const mounted = await mount(page(fake, [notice], {}, navigated));
     const link = must(mounted.container.querySelector<HTMLAnchorElement>('[data-agenda-notice] a'), 'the notice');
     await interact(() => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
-    expect(navigated).toEqual(['/d/laptop/agenda/sess-5/N1']);
+    expect(navigated).toEqual(['/d/workshop/agenda/sess-5/N1']);
     await advance(fake, 6_000);
     expect(fake.commits.map(commit => commit.card.item.id)).toEqual(['N1']);
     await mounted.unmount();
