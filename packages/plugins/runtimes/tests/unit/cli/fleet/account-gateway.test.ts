@@ -90,7 +90,7 @@ describe('ClientRuntimesGateway', () => {
     const actual = await new ClientRuntimesGateway(fake).recommend({ task: 'port the CLI groups', usage: true });
 
     // Assert
-    should(sent[0]?.route).equal('POST /v1/runtimes/recommend');
+    should(sent[0]?.route).equal('POST /v1/recommend');
     should(sent[0]?.init?.body).eql({ task: 'port the CLI groups', usage: true });
     should(actual.roles[0]?.primary.agent).equal('codex');
   });

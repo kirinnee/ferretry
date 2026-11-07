@@ -33,7 +33,7 @@ export const ROUTES = {
   propose: 'POST /v1/runtimes/proposals',
   apply: 'POST /v1/runtimes/proposals/:proposalId/apply',
   scan: 'GET /v1/runtimes/setup/scan',
-  recommend: 'POST /v1/runtimes/recommend',
+  recommend: 'POST /v1/recommend',
 } as const;
 
 /**
