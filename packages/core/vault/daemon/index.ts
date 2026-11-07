@@ -26,6 +26,7 @@ import { WebCryptoCloneCrypto } from './adapters/secrets/webcrypto-clone-crypto.
 import { FileSecretKey, WebCryptoSecretCipher } from './adapters/secrets/webcrypto-secret-cipher.ts';
 import { quarantineOverOutputGuard } from './adapters/inputs/output-guard.ts';
 import { buildInputs } from './inputs.ts';
+import type { AccountId, TwoFactorId } from './lib/inputs/borrowed.ts';
 import { INPUT_ASK_SOURCE } from './adapters/inputs/asks.ts';
 import type { AgendaId } from './lib/inputs/wire.ts';
 import { EphemeralAwareRedactor } from './lib/inputs/ephemeral-redactor.ts';
@@ -187,6 +188,14 @@ export default implementDaemon(manifest, {
       pageActed: (ferret, script) => inputs.observer?.acted(ferret, 'browser', script) ?? { placed: () => undefined },
       scriptRunning: () => inputs.scripts.running(),
       scriptedOn: host => inputs.scripts.scriptedOn(host),
+      // The input card a 2FA seed is set up from (Accounts, I173): where the daemon saw its target, and "use it now".
+      cardTarget: requestId => inputs.service.cardTarget(requestId),
+      useNow: async (requestId, use) =>
+        await inputs.service.useNow(requestId, {
+          ...use,
+          account: use.account as AccountId,
+          factor: use.factor as TwoFactorId,
+        }),
     };
 
     return {
