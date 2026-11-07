@@ -198,6 +198,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     history: appendHistory,
     limits: () => kernel.config.file(LimitsConfigFile),
     pinnedAt: async () => await agentPins.pinnedAt(),
+    // GAP: nothing writes `summary.md` on this base — `signal` is not built and `FileSignalArtifacts` is not wired —
+    // so this read answers nothing in a real daemon until the signal writer lands (Packs' result and Clean up wait on it).
     summaryText: async ferret => {
       const read = await kernel.state.read(FerretSummaryFiles, ferret);
       return read.ok && read.value !== undefined ? new TextDecoder().decode(read.value) : undefined;

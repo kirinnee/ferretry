@@ -160,7 +160,8 @@ export interface FerretsApi {
   sitrep(ferret: FerretId): Promise<Sitrep | undefined>;
   /**
    * What a finished ferret handed back with `signal done`: its `summary.md` as it wrote it (today's session
-   * `summary.md`), or `undefined` when there is no such ferret or it wrote none. NOT masked: a reader that shows it
+   * `summary.md`), or `undefined` when there is no such ferret, it has not finished (is not `stopped`), or it wrote
+   * none. NOT masked: a reader that shows it
    * masks it inside one `Redaction.read`. Read only.
    */
   summary(ferret: FerretId): Promise<string | undefined>;

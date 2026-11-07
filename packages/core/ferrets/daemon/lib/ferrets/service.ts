@@ -149,10 +149,13 @@ export class FerretsService implements FerretsApi {
     return folder === undefined || folder !== record.folder ? undefined : { folder };
   }
 
-  /** Today's `pack.result` read of `summary.md` (fyd.ts): a ferret this daemon does not know has none. */
+  /**
+   * Today's `pack.result` read of `summary.md` (fyd.ts): a ferret this daemon does not know has none, and neither has
+   * one that has not finished — a revived ferret's previous `summary.md` is not its report while it works on.
+   */
   async summary(ferret: FerretId): Promise<string | undefined> {
     await this.ports.ready?.();
-    if (this.registry.get(ferret) === undefined || this.ports.summaryText === undefined) return undefined;
+    if (this.registry.get(ferret)?.state !== 'stopped' || this.ports.summaryText === undefined) return undefined;
     return await this.ports.summaryText(ferret);
   }
 
