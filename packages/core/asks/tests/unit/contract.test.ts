@@ -61,6 +61,7 @@ describe('the envelope', () => {
   test('only the owner answers: a ferret is not an answerer', () => {
     const answer = {
       id: 'an_0123456789abcdef01234567',
+      ferret: 'f1',
       ask: 'A1',
       source: 'card',
       entry: 'e1',
