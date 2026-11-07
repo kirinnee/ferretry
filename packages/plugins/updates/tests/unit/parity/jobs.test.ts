@@ -3,10 +3,10 @@ import { describe, expect, test } from 'bun:test';
 import type { JobSpec, KernelPorts } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
-import daemon from '../../daemon/index.ts';
-import { UPDATE_BACKSTOP_INTERVAL_MS } from '../../daemon/lib/service.ts';
-import manifest from '../../manifest.ts';
-import { fakeHost } from '../unit/host.ts';
+import daemon from '../../../daemon/index.ts';
+import { UPDATE_BACKSTOP_INTERVAL_MS } from '../../../daemon/lib/service.ts';
+import manifest from '../../../manifest.ts';
+import { fakeHost } from '../host.ts';
 
 const RELEASE = {
   tag_name: 'v4.29.0',

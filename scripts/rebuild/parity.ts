@@ -271,7 +271,7 @@ function add(kind: Kind, what: string, file: string, line: number, descriptor = 
       ? 'packages/cli/tests/unit/update/shell.test.ts'
       : kind === 'R'
         ? 'descriptor-parity'
-        : `${packagePath(actualOwner)}/tests/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+        : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
   rows.push({
     id: '',
     kind,
