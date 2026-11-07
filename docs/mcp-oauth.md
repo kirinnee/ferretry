@@ -286,7 +286,7 @@ The address carries an authorization code, so it is treated like the Codex link
 
 | Name                        | Store                                                        | Holds                                                                               |
 | --------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| `MCP_<NAME>_<HASH>_ACCESS`  | the secret store (`state/secrets.json`)                      | the access token                                                                    |
+| `MCP_<NAME>_<HASH>_ACCESS`  | the secret store (`state/vault/vault.json`)                  | the access token                                                                    |
 | `MCP_<NAME>_<HASH>_REFRESH` | internal (`store: 'secret'`, `state/mcp/oauth-secrets.json`) | the refresh token, when the provider issued one                                     |
 | `MCP_CLIENT_<HASH>`         | internal                                                     | a client secret, when registration returned one                                     |
 | the name you chose          | the secret store                                             | a [hand-registered client](#a-client-registered-by-hand)'s secret, by `${secret:…}` |
@@ -294,12 +294,12 @@ The address carries an authorization code, so it is treated like the Codex link
 `<NAME>` is the component name upper-cased with every other character turned into `_` (at most 16
 characters). `<HASH>` is 16 hex digits of SHA-256 over the component's exact name **and the server's
 canonical address**, so `my-server` and `my_server` never share a token, and neither does one component
-at two addresses. The derivation has one owner, `mcpOAuthSecretNames` in `@ferretry/protocol`, which
+at two addresses. The derivation has one owner, `mcpOAuthSecretNames` in `packages/plugins/mcp/contract/rules.ts`, which
 the fleet's materialiser and the daemon both call. The access token is an ordinary secret: it appears by
 name in **Settings → Secrets**, it is redacted from transcripts, and no route returns it.
 
 What is not secret — the issuer, the endpoints, the client id, the scope, the expiry — is kept in
-`state/mcp-oauth.json`, which never holds a value from either store.
+`state/mcp/oauth.json`, which never holds a value from either store.
 
 ## How an agent uses the token
 
