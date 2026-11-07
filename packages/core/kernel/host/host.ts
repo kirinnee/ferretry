@@ -886,11 +886,17 @@ async function bootLocked(
     bus: {
       subscribe: listener => events.onAny(listener),
       publisher: name => eventPublishers.get(name),
-      // The same projection `GET /v1/plugins` answers with: what the caller may discover, core only without one.
+      // The projection `GET /v1/plugins` answers with: what the caller may discover. With no Gate bound that is the core
+      // pieces only; when Gate IS bound and its projection throws (an undetermined device, a provider error) the answer
+      // is no frame at all: a live feed fails closed, where the plugin list falls back to core.
       admits: (request, plugin) => {
-        const entries = inventory();
-        const shown = project(request, entries) ?? entries.filter(entry => isCore(entry.id));
-        return shown.some(entry => entry.id === plugin);
+        const admission = bound.admission;
+        if (admission === undefined) return isCore(plugin);
+        try {
+          return admission.inventory(request, inventory(), surfaces).some(entry => entry.id === plugin);
+        } catch {
+          return false;
+        }
       },
     },
     snapshot: () => frozen as PostBuildSnapshot,

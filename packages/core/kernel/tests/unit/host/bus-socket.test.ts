@@ -177,3 +177,27 @@ test('the feed is server-only and a reader that falls behind is closed', async (
     await host.stop();
   }
 });
+
+test('V-0452 when Gate is bound and its projection throws, the bus sends no frame (a live feed fails closed)', async () => {
+  const admission: Admission = {
+    ...recordingAdmission(),
+    inventory: () => {
+      throw new Error('an undetermined device');
+    },
+  };
+  const { host, published } = await boot(admission);
+  try {
+    const decision = await host.dispatcher.upgrade(request('GET', '/v1/bus'));
+    if (decision.outcome !== 'accepted') throw new Error('upgrade');
+    const feed = downstream();
+    const handler = await decision.attach(feed.port);
+    await handler.open();
+    published['board']?.(Moved, { card: 'F1' });
+    published['voice']?.(Secret, { text: 'never shown' });
+    await flush();
+    expect(feed.sent).toEqual([]);
+    handler.close();
+  } finally {
+    await host.stop();
+  }
+});
