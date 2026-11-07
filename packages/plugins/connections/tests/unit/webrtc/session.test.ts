@@ -45,6 +45,10 @@ function harness() {
         },
       };
     },
+    connection: () => {
+      throw new Error('the fixture carries no connection');
+    },
+    signer: undefined as never,
   };
   const downstream: SocketDownstream = {
     send: frame => {

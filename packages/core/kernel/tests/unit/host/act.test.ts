@@ -112,3 +112,96 @@ describe('kernel.act (§4.7)', () => {
     expect(log).toEqual(['hold:keys', 'keys:start', 'keys:end', 'hold:read', 'read']);
   });
 });
+
+describe('kernel.act: observed and the fresh read before decide (lead H, I)', () => {
+  test('Y an allowed act that completes reaches observed once with its target, op and actor', async () => {
+    const observed: string[] = [];
+    const holds: InputHolds = {
+      decide: () => 'allow',
+      observed: (t, op, actor) => observed.push(`${t.key}:${op}:${actor}`),
+    };
+    const act = createActRunner(() => holds, new MintedIdRegistry(() => 'x'));
+    await runInCall({ actor: 'owner-tools' }, () =>
+      act(target, 'fill', async () => ({ status: 'done' }) satisfies Ack),
+    );
+    expect(observed).toEqual(['p1:fill:owner-tools']);
+  });
+
+  test('Y a refused act, a throwing fn and a refused Ack never reach observed; a throwing observer is swallowed', async () => {
+    const observed: string[] = [];
+    let answer: ReturnType<InputHolds['decide']> = { refused: 'held' };
+    const holds: InputHolds = {
+      decide: () => answer,
+      observed: (_t, op) => {
+        observed.push(op);
+        throw new Error('observer broke');
+      },
+    };
+    const act = createActRunner(() => holds, new MintedIdRegistry(() => 'x'));
+    expect(await act(target, 'press', async () => ({ status: 'done' }))).toEqual({
+      ok: false,
+      error: { refused: 'held' },
+    });
+    answer = 'allow';
+    await expect(
+      act(target, 'press', async () => {
+        throw new Error('the page went away');
+      }),
+    ).rejects.toThrow('the page went away');
+    await act(target, 'press', async () => ({ status: 'refused', code: 'target_gone' }));
+    expect(observed).toEqual([]);
+    expect(await act(target, 'press', async () => ({ status: 'done' }))).toEqual({
+      ok: true,
+      value: { status: 'done' },
+    });
+    expect(observed).toEqual(['press']);
+  });
+
+  test('Z decide sees the document a queued act changed: prepare is awaited inside the queue, right before decide', async () => {
+    let document = 'login-page';
+    let fresh = '';
+    const decided: string[] = [];
+    const holds: InputHolds = {
+      prepare: async () => {
+        await Promise.resolve();
+        fresh = document;
+      },
+      decide: (_t, op) => {
+        decided.push(`${op}@${fresh}`);
+        return 'allow';
+      },
+    };
+    const act = createActRunner(() => holds, new MintedIdRegistry(() => 'x'));
+    const navigate = act(target, 'navigate', async () => {
+      await Promise.resolve();
+      document = 'inbox';
+      return { status: 'done' };
+    });
+    const read = act(target, 'read', async () => ({ kind: 'content' }) satisfies Content);
+    await Promise.all([navigate, read]);
+    expect(decided).toEqual(['navigate@login-page', 'read@inbox']);
+  });
+
+  test('Z a prepare that throws fails closed before fn', async () => {
+    let ran = false;
+    const holds: InputHolds = {
+      prepare: async () => {
+        throw new Error('document unreadable');
+      },
+      decide: () => 'allow',
+    };
+    const act = createActRunner(() => holds, new MintedIdRegistry(() => 'x'));
+    expect(await act(target, 'read', async () => ((ran = true), { kind: 'content' }))).toEqual({
+      ok: false,
+      error: { refused: 'holds_unavailable' },
+    });
+    expect(ran).toBe(false);
+  });
+
+  test('a write-only act answers a strict Ack: a password-field bit or any other key is dropped', async () => {
+    const act = createActRunner(() => ({ decide: () => 'allow' }), new MintedIdRegistry(() => 'x'));
+    const result = await act(target, 'type', async () => ({ status: 'done', passwordField: true }) as unknown as Ack);
+    expect(result).toEqual({ ok: true, value: { status: 'done' } });
+    expect(Object.keys(result.ok ? result.value : {})).toEqual(['status']);
+  });
+});

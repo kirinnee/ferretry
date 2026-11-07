@@ -182,6 +182,8 @@ describe('the daemon’s waits on the kernel clock', () => {
     let exit!: (code: number | null) => void;
     const child: ChildHandle = {
       pid: 5000,
+      pipes: [],
+      closePipes: () => undefined,
       stdout: new ReadableStream<Uint8Array>(),
       stderr: new ReadableStream<Uint8Array>({ start: controller => controller.close() }),
       write: () => undefined,

@@ -18,10 +18,17 @@ export type Protocol = typeof PROTOCOL;
  */
 export interface SessionPrincipal {
   readonly kind: 'device' | 'member';
+  /** For a Catalogs member session: the member KEY id (SessionMember.keyId), for per-key tracking, unlock and revoke. */
   readonly holder: HolderId;
   readonly session: SessionId;
   /** The access lease (15 min from proof, renewed; R241). */
   readonly leaseUntil: Instant;
+  /**
+   * The page-lifetime id the verified credential named (the same value as {@link HolderWatch.appSession}), stamped
+   * ONLY by the session layer from the credential the mode verified. Read it here, never from a body, a header or
+   * SDP (R684). Absent where no session credential named one.
+   */
+  readonly appSession?: string;
 }
 
 declare const localArrivalBrand: unique symbol;
@@ -93,14 +100,124 @@ export interface CarrierLink {
 export interface CarrierPeer {
   /** The peer's own address on a direct socket: the rate-limit identity. Absent: the session id is (R264). */
   readonly address?: string;
+  /**
+   * Called once by the kernel when a session mode accepted the holder's proof over this session's transcript
+   * (a device's or a member's key): the moment the link stops being an unproven one. A direct carrier releases
+   * its unproven slot here (today's direct mount: 16 unproven, 2 per remote peer, the oldest evicted). Never
+   * called for a pairing or join session, nor for a refused proof.
+   */
+  readonly proved?: () => void;
+}
+
+/** A rendezvous challenge to answer (relay protocol §5, R46): the host the carrier dialled and its nonce. */
+export interface RelayClaimRequest {
+  /** The rendezvous host, exactly as the daemon's configured relay URL spells it (the carrier checks the match). */
+  readonly host: string;
+  /** The challenge nonce as it travelled: 32 bytes, unpadded base64url. */
+  readonly nonce: string;
+}
+
+/** A signed claim, in its wire spelling. */
+export interface SignedRelayClaim {
+  readonly daemonId: string;
+  /** The identity's Ed25519 SubjectPublicKeyInfo, base64url. */
+  readonly publicKey: string;
+  /** Ed25519 over the R46 transcript, base64url. */
+  readonly signature: string;
+}
+
+/** A hosted-tunnel provisioning request to sign (relay protocol §15). */
+export interface TunnelSignRequest {
+  readonly action: 'provision' | 'release';
+  /** The hosted service's host, as the daemon's discovered origin spells it. */
+  readonly host: string;
+  /** The service's challenge nonce: 32 bytes, unpadded base64url. */
+  readonly nonce: string;
+  /** The loopback port the tunnel forwards to (a provision); signed either way. */
+  readonly originPort?: number;
+}
+
+/** A signed tunnel request, in its wire spelling. */
+export interface SignedTunnelSignature {
+  readonly daemonId: string;
+  /** The identity's Ed25519 SubjectPublicKeyInfo, base64url. */
+  readonly publicKey: string;
+  /** The nonce signed, base64url. */
+  readonly nonce: string;
+  readonly signature: string;
+}
+
+/** A shared-catalog document to sign (docs/catalogs.md): its kind and its canonical (RFC 8785) JSON bytes. */
+export interface CatalogSignRequest {
+  readonly kind: 'manifest' | 'versions' | 'link';
+  readonly canonical: Uint8Array;
+}
+
+/** A catalog signature, in its wire spelling (today's `spki` / `sig`). */
+export interface SignedCatalogSignature {
+  readonly daemonId: string;
+  /** The identity's Ed25519 SubjectPublicKeyInfo, base64url. */
+  readonly publicKey: string;
+  /** Ed25519 over `label ‖ 0x00 ‖ SHA-256(canonical)`, base64url. */
+  readonly signature: string;
+}
+
+/** A secret-import offer to sign (Vault): the fields the target publishes; the kernel adds its own id and key. */
+export interface SecretOfferSignRequest {
+  readonly v: number;
+  readonly importId: string;
+  /** The import's one-time X25519 public key, base64url. */
+  readonly publicKey: string;
+  readonly expiresAt: string;
+}
+
+/** What the kernel adds to an offer: the daemon id, the identity key (SPKI, base64url) and the signature. */
+export interface SignedSecretOffer {
+  readonly daemonId: string;
+  readonly identityKey: string;
+  readonly signature: string;
+}
+
+/**
+ * The daemon identity as a carrier may use it: two signatures over transcripts the KERNEL builds, and nothing
+ * else. There is no key export and no "sign these bytes": a carrier can only obtain a claim for a rendezvous
+ * challenge or a tunnel request, each with its own label, so neither can be replayed as the other or as a
+ * handshake signature. Refuses (throws `TypeError`) a malformed nonce, an empty host or a bad port.
+ */
+export interface IdentitySigner {
+  /** R46: `ferretry-relay-claim-v1` ‖ LP(protocol) ‖ LP(daemonId) ‖ LP(host) ‖ LP(nonce). */
+  sign(request: RelayClaimRequest): Promise<SignedRelayClaim>;
+  /** `ferretry-tunnel-{provision,release}-v1` ‖ LP(protocol) ‖ LP(daemonId) ‖ LP(host) ‖ LP(nonce) ‖ LP(port|""). */
+  signTunnel(request: TunnelSignRequest): Promise<SignedTunnelSignature>;
+  /** `ferretry-catalog-{manifest,versions,link}-v1` ‖ 0x00 ‖ SHA-256(canonical): today's catalog signatures. */
+  signCatalog(request: CatalogSignRequest): Promise<SignedCatalogSignature>;
+  /** LP(`ferretry-secret-import-offer-v1`) ‖ LP(v) ‖ LP(importId) ‖ LP(daemonId) ‖ LP(identityKey) ‖ LP(publicKey) ‖ LP(expiresAt). */
+  signSecretOffer(request: SecretOfferSignRequest): Promise<SignedSecretOffer>;
+}
+
+/**
+ * One transport connection that carries several sessions (a relay rendezvous socket): the sessions opened on it share
+ * ONE pre-credential bound (six awaiting a credential, today's per-link `MAX_PRE_CREDENTIAL_SESSIONS`), as today's
+ * daemon kept one `RelayLink` per rendezvous connection.
+ */
+export interface CarrierConnection {
+  open(peer?: CarrierPeer): CarrierLink;
 }
 
 /**
  * The kernel side a carrier talks to: open a link per sealed session. A carrier that multiplexes (the relay's
- * rendezvous socket) opens one link per session it announces and routes each session's frames to it.
+ * rendezvous socket) takes one {@link CarrierConnection} per socket and opens one link per session it announces on it.
  */
 export interface SessionLayer {
+  /**
+   * One session on its own connection (a direct socket, a tunnel socket, a data channel): its pre-credential bound is
+   * its own, so unproven peers on different sockets never crowd each other out (the carrier's own admission governs).
+   */
   open(carrier: CarrierKey, peer?: CarrierPeer): CarrierLink;
+  /** A connection that carries many sessions; the six-session pre-credential bound is per connection. */
+  connection(carrier: CarrierKey): CarrierConnection;
+  /** The daemon identity's claim and tunnel signer, shared by every carrier; the key never leaves the kernel. */
+  readonly signer: IdentitySigner;
 }
 
 /**
@@ -146,6 +263,18 @@ export interface HolderWatch {
   /** The holder's grants changed: an open stream is asked again and ends `1008` if no longer allowed. */
   regranted(): void;
 }
+
+/** The member-mode proof body; the signature itself is checked through ModeRedemption.prove. */
+export type MemberRedemptionBody =
+  | {
+      readonly act: 'join';
+      readonly code: string;
+      readonly clientName: string;
+      readonly memberKey: string;
+      readonly boxKey: string;
+      readonly passkey?: unknown;
+    }
+  | { readonly act: 'join-options'; readonly code: string; readonly memberKey: string; readonly origin: string };
 
 /** One redemption of a one-time record (a pairing code, a share code), as the kernel hands it to the mode. */
 export interface ModeRedemption {
