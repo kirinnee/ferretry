@@ -21,7 +21,7 @@ import {
   ZOOM_STEP,
   zoomBy,
   zoomTo,
-} from '../../../../app/render/fy-render-viewport.ts';
+} from '../../../../app/render/fy-render-viewport-model.ts';
 
 const PHONE = 358;
 const SCREEN = 844;

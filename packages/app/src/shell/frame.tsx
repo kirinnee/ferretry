@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_LAYOUT } from '../layout/layout.ts';
 import { CommandBar } from '../ui/command-bar.tsx';
 import { useAppViewport } from '../ui/hooks/use-app-viewport.ts';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../ui/palette-shortcut.ts';
-import { deviceLayoutSource, placeSource } from './command-sources.ts';
+import { buildPluginCommandSources, deviceLayoutSource, placeSource } from './command-sources.ts';
+import { useScreenHref } from '../router/screen-href.ts';
 import { daemonTitle } from '../daemons/daemon-list.ts';
 import type { NavEntry } from '../layout/engine.ts';
 import { daemonHomeHref, DEVICE_SETTINGS_HREF, HOME_HREF, type Route } from '../router/routes.ts';
@@ -179,7 +180,7 @@ function useCommandBarShortcut(open: () => void): void {
   }, [open]);
 }
 
-/** The command bar with the shell's own sources: places, and this device's layout commands. */
+/** The command bar with the shell's own sources (places, this device's layout commands) and the plugins' entries. */
 function ShellCommandBar(props: {
   readonly daemon: string | undefined;
   readonly open: boolean;
@@ -188,19 +189,44 @@ function ShellCommandBar(props: {
 }) {
   const { runtime, views, routes, owner, layouts } = useShell();
   const router = useRouter();
+  // `useScreenHref` answers a fresh function every render with the same answers; the sources read the latest one.
+  const screenHrefOf = useScreenHref();
+  const screenHrefRef = useRef(screenHrefOf);
+  screenHrefRef.current = screenHrefOf;
   const daemons = runtime.daemons.snapshot().daemons;
+  // A plugin source that was waiting on its daemon asks for a new listing by bumping this.
+  const [answers, setAnswers] = useState(0);
+  const changed = useCallback(() => setAnswers(current => current + 1), []);
+  const daemon = props.daemon;
+  // Built once per daemon (a source holds what its daemon last answered), and only while the bar is open.
+  const pluginSources = useMemo(
+    () =>
+      daemon === undefined || !props.open
+        ? []
+        : buildPluginCommandSources({
+            surfaces: runtime.surfaces,
+            daemon,
+            clientOf: plugin => runtime.packageClient(daemon, plugin),
+            navigate: href => router.navigate(href),
+            screenHref: (...address) => screenHrefRef.current(...address),
+            changed,
+          }),
+    [daemon, props.open, runtime, router, changed],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `answers` re-lists when a plugin source's answer arrives.
   const sources = useMemo(
     () => [
       placeSource({
         daemons,
-        daemon: props.daemon,
+        daemon,
         screens: [...views.screens.values()],
         routes,
         navigate: href => router.navigate(href),
       }),
       deviceLayoutSource(owner ?? DEFAULT_LAYOUT, layouts),
+      ...pluginSources,
     ],
-    [daemons, props.daemon, views, routes, router, owner, layouts],
+    [daemons, daemon, views, routes, router, owner, layouts, pluginSources, answers],
   );
   return <CommandBar open={props.open} focusSignal={props.focusSignal} onClose={props.onClose} sources={sources} />;
 }

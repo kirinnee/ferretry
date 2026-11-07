@@ -10,7 +10,7 @@ const { default: L } = await import('leaflet');
 import { ensureDom } from '@ferretry/app/testing';
 
 ensureDom();
-import { type MapSpec, readMap } from '../../../../app/render/fy-render-map.ts';
+import { type MapSpec, readMap } from '../../../../app/render/fy-render-map-model.ts';
 import { MAP_TILE_ORIGIN } from '../../../../app/render/fy-render-map-tiles.ts';
 
 /**

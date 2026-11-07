@@ -1,4 +1,5 @@
 import type { AppImplementation, Manifest } from '@ferretry/kernel/manifest';
+import type { PluginCommandSource } from '../shell/command-sources.ts';
 import type { DaemonList, PairedDaemon } from '../daemons/daemon-list.ts';
 import type { RelayPairingOutcome, SessionDeviceClaim } from '../session/session-client.ts';
 import type { CarrierDial } from '../session/session-transport.ts';
@@ -180,6 +181,11 @@ export interface ShellProvides {
    * (`passkey/passkey.ts`). Built with the runtime, after the session parts: its ceremony rides Access's own client.
    */
   readonly passkey?: (ports: PasskeyPorts) => PasskeyProvision;
+  /**
+   * Any plugin: entries for the command bar, built per daemon over that plugin's own guarded client. Unlike the three
+   * session parts (claims, carriers, pairing) it is NOT built before the bootstrap read: the bar builds it on a daemon.
+   */
+  readonly commands?: PluginCommandSource;
 }
 
 /** An app half with its `shell` section. */

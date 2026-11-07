@@ -121,6 +121,8 @@ export {
 export { FRAME_SLOTS, isFrameSlot, isSlotName, PANEL_SLOTS, SHELL_ITEMS } from './layout/slots.ts';
 /** @public A plugin screen mounts the panels contributed to a slot it offers (§5.2). */
 export { PanelSlot, useSlotHasPanels } from './shell/views.tsx';
+/** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar. */
+export type { PluginCommandContext, PluginCommandSource } from './shell/command-sources.ts';
 export {
   COLOUR_TOKENS,
   SPACING_TOKENS,
@@ -257,3 +259,40 @@ export * from './compose/context-ring.tsx';
 export * from './compose/use-location-share.ts';
 export * from './compose/composer-draft.ts';
 export { type DevicePreference, devicePreference } from './storage/device-preference.ts';
+
+// ─── the chat's chrome: receipts, command rows, the live readout, quoting, the reading position (C3-1 … C3-6) ──────
+export { ReceiptMark, type SendReceiptKind } from './shared/receipt-mark.tsx';
+export { CommandRow, commandOutputIsLong, commandOutputSummary, type SlashCommand } from './shared/command-row.tsx';
+export {
+  LiveStreamIndicator,
+  type LiveStreamIndicatorProps,
+  type LiveStreamState,
+  liveStreamState,
+  type SessionEventStreamStatus,
+} from './shared/live-stream-indicator.tsx';
+export {
+  type CountUpOptions,
+  type LiveCounterOptions,
+  type LiveScheduler,
+  useCountUp,
+  useLiveActivity,
+  useLiveElapsed,
+} from './shared/use-live-counter.ts';
+export { COUNT_UP_MS, countUpValue, msToNextSecond, wholeSecondsSince } from './shared/live-counter-clock.ts';
+export { createLiveActivityHub, type LiveActivityFeed, type LiveActivityHub } from './shared/live-activity-feed.ts';
+export {
+  type QuoteSelectionLike,
+  type QuoteSurfaceHandlers,
+  quotableTranscriptSelectionText,
+  useQuoteMenu,
+} from './shared/quote-menu.tsx';
+export {
+  type ChatScroll,
+  type ChatScrollSlot,
+  chatScrollSlot,
+  restorableTop,
+  ScrollMemory,
+  type ScrollMemoryStorage,
+} from './scroll/scroll-memory.ts';
+export { useRouteScrollMemory } from './scroll/use-route-scroll-memory.ts';
+export { useChatScrollSlot } from './scroll/chat-scroll.ts';

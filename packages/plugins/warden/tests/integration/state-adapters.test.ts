@@ -7,7 +7,8 @@ import { FileWardenArtifacts } from '../../daemon/adapters/artifacts.ts';
 import { StateWardenReportFiles, reportInstantMs } from '../../daemon/adapters/report-files.ts';
 import { WardenReportReader } from '../../daemon/adapters/report-reader.ts';
 import { StateAutoMoveLedger, StateWardenStateStore } from '../../daemon/adapters/state-store.ts';
-import { WARDEN_STATE } from '../../contract/index.ts';
+import { WARDEN_STATE, effectiveWardenConfig } from '../../contract/index.ts';
+import { applyWardenConfigPatch, type WardenConfigPatch } from '../../daemon/lib/index.ts';
 import { wardenConfig, wardenState } from '../support/kernel.ts';
 
 describe('the sweep memory and the move ledger', () => {
@@ -134,7 +135,7 @@ describe('reports as state files', () => {
 
 describe('warden.yaml through the kernel config write port', () => {
   const door = (applied: unknown[], result: unknown) => {
-    return Object.assign(wardenConfig({ caps: { jevDaily: 5 } }), {
+    return Object.assign(wardenConfig({ caps: { jevUsdPerDay: 5 } }), {
       write: async (_def: unknown, _name: unknown, edit: unknown) => {
         applied.push(edit);
         return result as ConfigWriteOutcome;
@@ -155,18 +156,22 @@ describe('warden.yaml through the kernel config write port', () => {
     should(read.caps).be.an.Object();
   });
 
-  it('should merge a nested patch into the file section it changes and say what was held', async () => {
-    // Arrange
+  it('should write the whole settings, the file section it changes merged with the patch, and say what was held', async () => {
+    // Arrange: the save carries the settings as they will be (the ones in effect plus the owner's patch), as the sweep hands it
     const applied: unknown[] = [];
     const store = new ConfigWardenConfigStore(
       door(applied, { kind: 'held', etag: 'e', id: 'warden.yaml@e', sentences: ['a bigger cap waits for you'] }),
     );
+    const patch = { caps: { investigationUsdPerDay: 3 } } as WardenConfigPatch;
+    const next = applyWardenConfigPatch(effectiveWardenConfig({ caps: { jevUsdPerDay: 5 } } as never), patch);
 
     // Act
-    const held = await store.write({} as never, { caps: { llmDaily: 3 } } as never);
+    const held = await store.write(next, patch);
 
-    // Assert
-    should(applied[0]).eql({ patch: { caps: { jevDaily: 5, llmDaily: 3 } } });
+    // Assert: the section keeps what the file said and gains the patch; a key neither states stays out of the file
+    const written = (applied[0] as { patch: Record<string, unknown> }).patch;
+    should(written.caps).eql({ jevUsdPerDay: 5, investigationUsdPerDay: 3 });
+    should(written.enabled).be.undefined();
     should(held).eql(['a bigger cap waits for you']);
   });
 

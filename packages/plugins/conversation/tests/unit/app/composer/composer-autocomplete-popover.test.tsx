@@ -24,7 +24,8 @@ import { Composer, type ComposerProps } from '../../../../app/composer/composer.
 import { daemonConnection } from '../../../../app/composer/seam.ts';
 import { ensureDom, interact, mount, must, render, run, runAsync } from '@ferretry/app/testing';
 import { writeMdComposePref } from '@ferretry/app';
-import { fakeClient, withClient } from '../../../support/app/composer-host.tsx';
+import { fakeClient } from '../../../support/app/fake-client.ts';
+import { withClient } from '../../../support/app/composer-host.tsx';
 
 ensureDom();
 

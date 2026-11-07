@@ -8,7 +8,7 @@ import {
   useComposerReferenceCatalogs,
 } from '../../../../app/composer/composer-reference-catalogs.ts';
 import type { ConversationCaller } from '../../../../app/composer/seam.ts';
-import { type FakeCall, fakeClient } from './fake-client.ts';
+import { type RecordedCall, fakeClient } from '../../../support/app/fake-client.ts';
 
 const ENTRIES: Readonly<Partial<Record<ReferenceCatalogPrefix, readonly { token: string; label: string }[]>>> = {
   '&': [{ token: 'F12', label: 'Ship autocomplete' }],
@@ -18,7 +18,7 @@ const ENTRIES: Readonly<Partial<Record<ReferenceCatalogPrefix, readonly { token:
 };
 
 /** The daemon's answer for one prefix: what its provider supplies, or `provided: false` when nobody does. */
-const answerFor = (call: FakeCall, ferret = call.params.ferretId ?? '') => {
+const answerFor = (call: RecordedCall, ferret = call.params.ferretId ?? '') => {
   const prefix = call.query.prefix as ReferenceCatalogPrefix;
   const entries = ENTRIES[prefix];
   return { ferret, prefix, provided: entries !== undefined, entries: entries ?? [] };
@@ -49,9 +49,9 @@ const flushCatalogs = async (): Promise<void> => {
   });
 };
 
-const readWith = async (answer: (call: FakeCall) => unknown) => {
+const readWith = async (answer: (call: RecordedCall) => unknown) => {
   let latest: ReturnType<typeof useComposerReferenceCatalogs> | undefined;
-  const { client } = fakeClient(answer);
+  const client = fakeClient(answer);
   const view = render(<CatalogProbe client={client} ferretId="ferret-a" onCatalogs={value => (latest = value)} />);
   await flushCatalogs();
   run(() => view.unmount());
@@ -60,12 +60,12 @@ const readWith = async (answer: (call: FakeCall) => unknown) => {
 
 describe('useComposerReferenceCatalogs', () => {
   test('reads each hosted prefix once through the one route, and supports a host without a client', async () => {
-    const { client, calls } = fakeClient(call => answerFor(call));
+    const client = fakeClient(call => answerFor(call));
     const view = render(<CatalogProbe client={client} ferretId="ferret-a" />);
 
     await flushCatalogs();
     expect(output(view)).toBe('1:1:1:1');
-    expect(calls.map(call => [call.route, call.params.ferretId, call.query.prefix])).toEqual(
+    expect(client.calls.map(call => [call.route, call.params.ferretId, call.query.prefix])).toEqual(
       HOSTED_REFERENCE_PREFIXES.map(prefix => ['GET /v1/ferrets/:ferretId/references', 'ferret-a', prefix]),
     );
 
@@ -83,7 +83,7 @@ describe('useComposerReferenceCatalogs', () => {
 
   test('publishes a fast family before slow siblings without issuing a second read', async () => {
     let resolveAgenda: ((value: unknown) => void) | undefined;
-    const { client, calls } = fakeClient(call =>
+    const client = fakeClient(call =>
       call.query.prefix === '!'
         ? new Promise(resolve => {
             resolveAgenda = resolve;
@@ -94,13 +94,13 @@ describe('useComposerReferenceCatalogs', () => {
 
     await flushCatalogs();
     expect(output(view)).toBe('1:-:1:1');
-    expect(calls).toHaveLength(4);
+    expect(client.calls).toHaveLength(4);
 
     if (resolveAgenda === undefined) throw new Error('slow catalog read did not start');
     resolveAgenda(undefined);
     await flushCatalogs();
     expect(output(view)).toBe('1:1:1:1');
-    expect(calls).toHaveLength(4);
+    expect(client.calls).toHaveLength(4);
     run(() => view.unmount());
   });
 
@@ -131,7 +131,7 @@ describe('useComposerReferenceCatalogs', () => {
 
   test('fences a late answer after ferret navigation', async () => {
     const pending: Array<(value: unknown) => void> = [];
-    const { client } = fakeClient(call =>
+    const client = fakeClient(call =>
       new Promise(resolve => {
         pending.push(value => resolve(value));
       }).then(() => answerFor(call, 'ferret-a')),
@@ -147,7 +147,7 @@ describe('useComposerReferenceCatalogs', () => {
 
   test('settled() is the read in flight, and nothing once it is done', async () => {
     let latest: ReturnType<typeof useComposerReferenceCatalogs> | undefined;
-    const { client } = fakeClient(call => answerFor(call));
+    const client = fakeClient(call => answerFor(call));
     const view = render(<CatalogProbe client={client} ferretId="ferret-a" onCatalogs={value => (latest = value)} />);
     const inFlight = latest?.settled();
     expect(inFlight).toBeInstanceOf(Promise);
@@ -158,12 +158,12 @@ describe('useComposerReferenceCatalogs', () => {
 
   test('refresh reads every prefix again', async () => {
     let latest: ReturnType<typeof useComposerReferenceCatalogs> | undefined;
-    const { client, calls } = fakeClient(call => answerFor(call));
+    const client = fakeClient(call => answerFor(call));
     const view = render(<CatalogProbe client={client} ferretId="ferret-a" onCatalogs={value => (latest = value)} />);
     await flushCatalogs();
     run(() => latest?.refresh());
     await flushCatalogs();
-    expect(calls).toHaveLength(HOSTED_REFERENCE_PREFIXES.length * 2);
+    expect(client.calls).toHaveLength(HOSTED_REFERENCE_PREFIXES.length * 2);
     expect(output(view)).toBe('1:1:1:1');
     run(() => view.unmount());
   });
@@ -171,25 +171,25 @@ describe('useComposerReferenceCatalogs', () => {
 
 describe('readReferenceCatalog', () => {
   test('sends the query only when there is one', async () => {
-    const { client, calls } = fakeClient(call => answerFor(call));
+    const client = fakeClient(call => answerFor(call));
     const signal = new AbortController().signal;
     await readReferenceCatalog(client, 'ferret-a', '@', signal, 'src');
     await readReferenceCatalog(client, 'ferret-a', '@', signal, '');
-    expect(calls.map(call => call.query)).toEqual([{ prefix: '@', q: 'src' }, { prefix: '@' }]);
+    expect(client.calls.map(call => call.query)).toEqual([{ prefix: '@', q: 'src' }, { prefix: '@' }]);
   });
 
   test('refuses an answer for another prefix', async () => {
-    const { client } = fakeClient(call => ({ ...answerFor(call), prefix: '&' }));
+    const client = fakeClient(call => ({ ...answerFor(call), prefix: '&' }));
     await expect(readReferenceCatalog(client, 'ferret-a', '!', new AbortController().signal)).rejects.toThrow(
       'the & catalog for !',
     );
   });
 
   test('never asks when the menu already closed', async () => {
-    const { client, calls } = fakeClient(call => answerFor(call));
+    const client = fakeClient(call => answerFor(call));
     const controller = new AbortController();
     controller.abort(new Error('closed'));
     await expect(readReferenceCatalog(client, 'ferret-a', '!', controller.signal)).rejects.toThrow('closed');
-    expect(calls).toEqual([]);
+    expect(client.calls).toEqual([]);
   });
 });

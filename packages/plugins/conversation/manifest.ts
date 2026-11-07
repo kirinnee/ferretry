@@ -281,6 +281,10 @@ export default definePlugin({
 
   ui: {
     screens: [
+      // The chat offers two slots of its own (`contract/slots.ts`): `conversation.row` after each transcript row and
+      // `conversation.row-actions` in a row's actions, each with `{ entry }` (only {id, kind, text, at?, label?}; no
+      // tool calls) and the ferret as subject — Voice's read-aloud draws there. It mounts `ferret.toolbar` and
+      // `ferret.side` with the ferret as subject.
       screen('chat', { path: 'ferrets/:ferret/chat' }),
       screen('links', { path: 'links', nav: { label: 'Conversations', icon: 'messages', order: 25 } }),
     ],
@@ -288,6 +292,8 @@ export default definePlugin({
       panel('composer.tools', { id: 'attachments', order: 10 }),
       panel('ferret.side', { id: 'queue', order: 10 }),
       panel('ferret.toolbar', { id: 'compact-at', order: 30 }),
+      // Lead decision Q2: today's Actions-menu switch, a toolbar panel of its own (listed before Compact memory at, as today).
+      panel('ferret.toolbar', { id: 'hypermedia', order: 25 }),
       // This device's conversation width (lead decision Q11).
       panel('device.settings', { id: 'chat-width', order: 20 }),
     ],
