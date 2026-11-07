@@ -16,6 +16,7 @@ import {
   type SecretRecipes,
 } from '../../../../daemon/lib/secrets/index.ts';
 import { EchoSecretChildRunner, FakeSecretCipher, MemorySecretDocuments } from '../support.ts';
+import { combinedValues, SecretRedactor } from '../../../../daemon/lib/secrets/redaction.ts';
 
 const CLOCK = { now: () => '2026-01-01T00:00:00.000Z' } as unknown as Clock;
 /** The Vault's handle table; the echo runner opens each child's environment with it, as the kernel's spawn does. */
@@ -37,6 +38,37 @@ function request(overrides: Record<string, unknown> = {}) {
 }
 
 describe('use without read', () => {
+  it('S10 I126 shared masks cover cut output and preserve the injected vault snapshot across replacement', async () => {
+    const documents = new MemorySecretDocuments();
+    const cipher = new FakeSecretCipher();
+    const directory = new SecretDirectory(documents, cipher, CLOCK);
+    const vault = new SecretVault(documents, cipher);
+    await directory.put('TOKEN', TOKEN);
+    const masks = new SecretRedactor(
+      combinedValues(vault, {
+        values: async () => new Map([['MASK_ONLY', 'login-fixture-value']]),
+      }),
+    );
+    const runner: SecretChildRunner = {
+      run: async spec => {
+        should(ENVS.open(spec.env)).deepEqual({ TOKEN });
+        await directory.put('TOKEN', 'replacement-vault-value');
+        return {
+          outcome: 'exited',
+          exitCode: 0,
+          stdout: `${TOKEN} login-fixture-value`,
+          stderr: 'before login-fixt',
+          truncated: true,
+        };
+      },
+    };
+    const service = new SecretUseService(vault, runner, ENVS, NO_RECIPES, masks);
+    const result = await service.run(request({ secrets: ['TOKEN'] }));
+    should(result.stdout).equal('[redacted:TOKEN] [redacted:MASK_ONLY]');
+    should(result.stderr).equal('before [redacted:MASK_ONLY]');
+    await should(service.run(request({ secrets: ['MASK_ONLY'] }))).be.rejectedWith(UnknownSecretError);
+  });
+
   it('S3 S5 put the value in the CHILD environment and nowhere else', async () => {
     // Arrange
     const runner = new EchoSecretChildRunner(ENVS, () => 'done');

@@ -19,7 +19,7 @@
  * requests and no state on this object.
  */
 
-import type { SecretName } from '../../../contract/index.ts';
+import { secretMask, type SecretName } from '../../../contract/index.ts';
 import { redactJsonValue, redactSecretValues, secretCoverage, type TextRange } from './policy.ts';
 
 export type { TextRange };
@@ -55,7 +55,7 @@ export function combinedValues(...sources: readonly RedactionValueSource[]): Red
  * synchronous by design — an `await` inside it would end the batch before the scrubbing after it.
  */
 export interface Scrub {
-  text(text: string): string;
+  text(text: string, cut?: boolean): string;
   data(value: unknown): unknown;
   /** WHERE `text` holds a known value: merged ranges of UTF-16 offsets, never the value. For masking by position. */
   cover(text: string): readonly TextRange[];
@@ -108,7 +108,7 @@ export class SecretRedactor implements TextRedactor {
     };
     try {
       return work({
-        text: text => redactSecretValues(text, values()),
+        text: (text, cut = false) => redactOutput(text, values(), cut),
         data: value => redactJsonValue(value, values()),
         cover: text => secretCoverage(text, values()),
       });
@@ -117,4 +117,34 @@ export class SecretRedactor implements TextRedactor {
       opened = undefined;
     }
   }
+}
+
+/** A child's output with every known value masked, including one the output limit cut in half. */
+export function redactOutput(text: string, values: ReadonlyMap<SecretName, string>, cut: boolean): string {
+  const redacted = redactSecretValues(text, values);
+  return cut ? maskCutValue(redacted, values) : redacted;
+}
+
+/**
+ * Masks the BEGINNING of a value that a cut left at the very end of the text.
+ *
+ * A WHOLE-VALUE MATCH CANNOT SEE IT. Output is capped before it reaches redaction — and a timeout
+ * kills the child mid-write — so a value straddling the cut arrives as a prefix that is not the value
+ * and passes straight through, handing the reader that many characters of the credential. The cost of
+ * the fix is that a truncated output whose last characters merely LOOK like the start of a value loses
+ * them to a mask; on output that was already cut short that is the right side to err on.
+ *
+ * A byte cut can split a character, which the decoder writes as U+FFFD, so trailing replacement
+ * characters are set aside before matching — otherwise one would shield the prefix in front of it.
+ */
+function maskCutValue(text: string, values: ReadonlyMap<SecretName, string>): string {
+  const body = text.replace(/\uFFFD+$/u, '');
+  let longest: { readonly name: SecretName; readonly length: number } | undefined;
+  for (const [name, value] of values)
+    for (let length = Math.min(value.length - 1, body.length); length > (longest?.length ?? 0); length--)
+      if (body.endsWith(value.slice(0, length))) {
+        longest = { name, length };
+        break;
+      }
+  return longest === undefined ? text : body.slice(0, body.length - longest.length) + secretMask(longest.name);
 }

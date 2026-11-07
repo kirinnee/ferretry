@@ -32,14 +32,14 @@
 import {
   MAX_SECRET_USE_OUTPUT_BYTES,
   type SecretName,
-  secretMask,
   type SecretUseCommand,
   type SecretUseResult,
 } from '../../../contract/index.ts';
 import { isAbsolute } from 'node:path';
 import type { ChildEnvironments } from './child-environments.ts';
-import { earnedRecipes, redactSecretValues, resolveChildEnvironment } from './policy.ts';
+import { earnedRecipes, resolveChildEnvironment } from './policy.ts';
 import type { SecretChildRunner } from './types.ts';
+import { redactOutput, type TextRedactor } from './redaction.ts';
 import type { SecretVault } from './vault.ts';
 
 /** Why a use was refused before anything ran. */
@@ -79,6 +79,7 @@ export class SecretUseService {
     /** Mints the opaque handle the child's environment travels in (lead decision 9). */
     private readonly environments: ChildEnvironments,
     private readonly recipes: SecretRecipes = NO_RECIPES,
+    private readonly masks?: TextRedactor,
   ) {}
 
   async run(request: SecretUseCommand): Promise<SecretUseResult> {
@@ -101,43 +102,20 @@ export class SecretUseService {
       timeoutMs: request.timeoutMs,
       maxOutputBytes: MAX_SECRET_USE_OUTPUT_BYTES,
     });
+    const masked =
+      this.masks === undefined
+        ? outcome
+        : await this.masks.batch(scrub => ({
+            stdout: scrub.text(outcome.stdout, outcome.truncated),
+            stderr: scrub.text(outcome.stderr, outcome.truncated),
+          }));
     return {
       outcome: outcome.outcome,
       ...(outcome.exitCode === undefined ? {} : { exitCode: outcome.exitCode }),
-      stdout: redactOutput(outcome.stdout, values, outcome.truncated),
-      stderr: redactOutput(outcome.stderr, values, outcome.truncated),
+      stdout: redactOutput(masked.stdout, values, outcome.truncated),
+      stderr: redactOutput(masked.stderr, values, outcome.truncated),
       truncated: outcome.truncated,
       used: named,
     };
   }
-}
-
-/** A child's output with every known value masked, including one the output limit cut in half. */
-function redactOutput(text: string, values: ReadonlyMap<SecretName, string>, cut: boolean): string {
-  const redacted = redactSecretValues(text, values);
-  return cut ? maskCutValue(redacted, values) : redacted;
-}
-
-/**
- * Masks the BEGINNING of a value that a cut left at the very end of the text.
- *
- * A WHOLE-VALUE MATCH CANNOT SEE IT. Output is capped before it reaches redaction — and a timeout
- * kills the child mid-write — so a value straddling the cut arrives as a prefix that is not the value
- * and passes straight through, handing the reader that many characters of the credential. The cost of
- * the fix is that a truncated output whose last characters merely LOOK like the start of a value loses
- * them to a mask; on output that was already cut short that is the right side to err on.
- *
- * A byte cut can split a character, which the decoder writes as U+FFFD, so trailing replacement
- * characters are set aside before matching — otherwise one would shield the prefix in front of it.
- */
-function maskCutValue(text: string, values: ReadonlyMap<SecretName, string>): string {
-  const body = text.replace(/\uFFFD+$/u, '');
-  let longest: { readonly name: SecretName; readonly length: number } | undefined;
-  for (const [name, value] of values)
-    for (let length = Math.min(value.length - 1, body.length); length > (longest?.length ?? 0); length--)
-      if (body.endsWith(value.slice(0, length))) {
-        longest = { name, length };
-        break;
-      }
-  return longest === undefined ? text : body.slice(0, body.length - longest.length) + secretMask(longest.name);
 }

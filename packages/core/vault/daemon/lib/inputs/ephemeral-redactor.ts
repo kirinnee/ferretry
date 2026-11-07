@@ -40,7 +40,10 @@ export class EphemeralAwareRedactor implements TextRedactor {
   /** Compose the same masks into the kernel's read-scoped redactor without opening a second vault. */
   scope(scrub: Scrub): Scrub {
     return {
-      text: text => this.mask(scrub, text),
+      text: (text, cut = false) => {
+        const masked = this.mask(scrub, text);
+        return cut ? scrub.text(masked, true) : masked;
+      },
       data: value => this.maskStrings(scrub, value),
       cover: text => mergeRanges([...scrub.cover(text), ...this.values.coverAll(text)]),
     };
