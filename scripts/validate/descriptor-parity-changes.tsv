@@ -273,6 +273,39 @@ route	POST /v1/board/import	removed	compatibility importer deleted (clean slate,
 route	GET /v1/sessions/:sessionId/tasks	removed	legacy task listing deleted with the compatibility routes (clean slate, owner decision A452)
 route	POST /v1/imports/conversations/adopt	removed	imports are links (design §1.4): adopting a conversation is keeping it, POST /v1/links/conversations/keep; descriptor fields unchanged
 tool	card_progress	added	new in 5.0: writes one card's progress (design §3.3)
+route	GET /v1/learning/config	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/lessons/config	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	PATCH /v1/learning/config	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	PATCH /v1/lessons/config	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/learning/status	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/lessons/status	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/learning/proposals	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/lessons/proposals	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/learning/proposals/:id	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/lessons/proposals/:id	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/learning/proposals/:id/patch	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/lessons/proposals/:id/patch	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/learning/proposals/:id/apply-preview	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/lessons/proposals/:id/apply-preview	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/learning/proposals/:id/apply	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/lessons/proposals/:id/apply	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/learning/run	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/lessons/run	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/learning/sessions	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged; sessions are ferrets (design §1.4)
+route	GET /v1/lessons/ferrets	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged; sessions are ferrets (design §1.4)
+route	PATCH /v1/sessions/:sessionId/learning	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged; session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/…
+route	PATCH /v1/ferrets/:ferretId/lessons	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged; session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/…
+route	POST /v1/learning/scan/estimate	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/lessons/scan/estimate	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/learning/scan	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	GET /v1/lessons/scan	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/learning/scan/cancel	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/lessons/scan/cancel	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/learning/scan	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/lessons/scan	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
+route	POST /v1/agent/lessons	removed	learning is lessons and /v1/agent/… is replaced (agent word, design §1.4): the ferret files a lesson at /v1/lessons/suggest; Gate admits the ferret credential, so minimum none becomes authenticated and the handler still refuses any caller without a ferret credential (403 forbidden)
+route	POST /v1/lessons/suggest	added	learning is lessons and /v1/agent/… is replaced (agent word, design §1.4): the ferret files a lesson at /v1/lessons/suggest; Gate admits the ferret credential, so minimum none becomes authenticated and the handler still refuses any caller without a ferret credential (403 forbidden)
+route	GET /v1/lessons/directory	added	new in 5.0: the ferrets a Lessons view names (id, name, folder); the screens used the sessions list for this, and a half talks only to its own plugin
 route	GET /v1/ferrets/:ferretId/question	added	today the ferret view carried pendingQuestion; Conversation serves the pending question on its own read route so `fy answer` needs no id (lead ruling)
 route	GET /v1/tasks	removed	legacy task listing deleted with the compatibility routes (clean slate, owner decision A452)
 route	GET /v1/analytics	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
@@ -322,6 +355,8 @@ route	GET /v1/ferrets/:id/runtime-models	added	moved from GET /v1/sessions/:sess
 route	POST /v1/ferrets/:id/runtime	added	moved from POST /v1/sessions/:sessionId/runtime; Runtimes owns runtime controls; descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/subtree	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId/subtree	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/lessons/global	added	new in 5.0: the Global lessons document is the plugin's own state, not a file the owner opens in an editor (today <assets>/instructions/lessons.md), so the owner reads it here
+route	PUT /v1/lessons/global	added	new in 5.0: how the owner changes or removes an applied Global lesson (today: edit the file); the whole document against its etag, fleet.configure, a person only
 route	GET /v1/sessions/:sessionId/result	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId/result	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId/pack	added	a lead's pack table (design §1.2), Packs' own route beside Ferrets' GET /v1/ferrets/:ferretId/subtree, which owns today's subtree route; descriptor fields as today's subtree

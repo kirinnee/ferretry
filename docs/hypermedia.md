@@ -40,7 +40,7 @@ argument could not differ per ferret. The wrapper therefore **composes the one v
 (`packages/fleet/src/lib/wrappers.ts`): the person's own appended instruction, then Ferretry's tools,
 settings rules and notify rule (always on), then each per-ferret section whose switch the daemon set to `1` in that ferret's launch
 environment, in this order: hypermedia (`FY_HYPERMEDIA`), Pack mode (`FY_PACK`,
-[pack-mode.md](pack-mode.md)), lessons (`FY_LEARNING_PASSIVE`, [learning.md](learning.md)). A restart,
+[pack-mode.md](pack-mode.md)), lessons (`FY_LEARNING_PASSIVE`, [lessons.md](lessons.md)). A restart,
 migration, resume or revive runs the same wrapper with the same stored environment and the session's
 recorded mode, so it keeps them; a switch the store never recorded is derived from the session's record
 at each launch rather than read as off (`LaunchEnvironmentStore`). A wrapper run by hand, where nothing
