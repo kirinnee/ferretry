@@ -42,7 +42,7 @@ const base64Url = (byteLength: number): z.ZodString =>
     .length(Math.ceil((byteLength * 4) / 3), 'wrong encoded length');
 
 /** Client → daemon. Names the daemon it believes it reached, so a misrouted session fails loudly. */
-export const ClientHelloSchema = z.strictObject({
+const ClientHelloSchema = z.strictObject({
   t: z.literal('hs1'),
   protocol: z.literal(SESSION_PROTOCOL_ID),
   epk: base64Url(X25519_PUBLIC_KEY_BYTES),
@@ -52,7 +52,7 @@ export const ClientHelloSchema = z.strictObject({
 export type ClientHello = z.infer<typeof ClientHelloSchema>;
 
 /** Daemon → client. The signature covers the transcript, not just the key, and not just the nonce. */
-export const DaemonHelloSchema = z.strictObject({
+const DaemonHelloSchema = z.strictObject({
   t: z.literal('hs2'),
   protocol: z.literal(SESSION_PROTOCOL_ID),
   epk: base64Url(X25519_PUBLIC_KEY_BYTES),

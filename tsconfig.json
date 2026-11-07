@@ -99,6 +99,9 @@
     "packages/plugins/onboarding/app/setup-qr.ts",
     "packages/plugins/onboarding/tests/unit/app/get-started-script.test.ts",
     "packages/plugins/onboarding/tests/unit/app/setup-qr.test.ts",
-    "packages/plugins/runtimes/app/hooks"
+    "packages/plugins/runtimes/app/hooks",
+    "packages/plugins/terminals/app",
+    "packages/plugins/terminals/tests/support/app",
+    "packages/plugins/terminals/tests/unit/app"
   ]
 }
