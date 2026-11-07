@@ -130,7 +130,9 @@ Routes (`route.ts`, `socket.ts`) — today's descriptor, field for field, plus `
 Session layer (`session.ts`)
 
 - `PROTOCOL = 1`; `SessionPrincipal { kind, holder, session, leaseUntil }`; `Arrival = LocalArrival | CarriedArrival`.
-- `SealedFrame`, `SealedOutbound.next()` (permit re-asked inside), `CarrierLink`, `SessionLayer.open(carrier)`, `Carrier.start(layer, signal)`, `CarrierStatus`, `ModeProof`, `SessionMode.verify/redeem`.
+- `SealedFrame`, `SealedOutbound.next()` (permit re-asked inside), `CarrierLink`, `SessionLayer.open(carrier)`, `Carrier.start(layer, signal)`, `CarrierStatus`, `ModeProof`.
+- `SessionMode { principalKind, holder?(proof) → ModeHolder { holder, key }, watch?(holder, HolderWatch), seen?(holder), rotateBy?(holder), redeem?(ModeRedemption) → ModeRedeemed | 'refused' }`; `HolderWatch { session, appSession, revoked(), lapsed(), regranted() }` (4403, 4441, `1008` on re-ask); `ModeRedemption { proof, prove(), carrier, peer }`.
+- The KERNEL verifies the transcript signature against the key `holder` returns and stamps the principal (a redemption's key proof is the kernel's `prove()`, run after the mode's own admission); a mode only says whose key it is and ends sessions through `HolderWatch`.
 
 Act runner (`act.ts`, §4.7)
 
