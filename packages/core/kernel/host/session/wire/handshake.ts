@@ -28,7 +28,6 @@ import {
   HANDSHAKE_SIGNATURE_LABEL,
   HANDSHAKE_TRANSCRIPT_LABEL,
   NONCE_BYTES,
-  PREVIOUS_SESSION_PROTOCOL_ID,
   SESSION_PROTOCOL_ID,
   X25519_PUBLIC_KEY_BYTES,
 } from './constants.ts';
@@ -85,23 +84,6 @@ export function decodeClientHello(payload: Uint8Array): ClientHello | null {
 export function decodeDaemonHello(payload: Uint8Array): DaemonHello | null {
   const parsed = DaemonHelloSchema.safeParse(decodeJson(payload));
   return parsed.success ? parsed.data : null;
-}
-
-/**
- * WHETHER AN UNREADABLE HELLO IS A PEER FROM BEFORE THE DEVICE KEY, and nothing more.
- *
- * A hello that fails its schema is normally just a protocol error. The one exception worth naming is a
- * peer still speaking `/1`: that is not an attacker or a bug but a machine or an app nobody updated,
- * and the person reading the failure can only fix it if they are told WHICH side is old. So this reads
- * the `protocol` field alone and answers that one question; it accepts nothing.
- */
-export function speaksPreviousSessionProtocol(payload: Uint8Array): boolean {
-  const value = decodeJson(payload);
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    (value as { readonly protocol?: unknown }).protocol === PREVIOUS_SESSION_PROTOCOL_ID
-  );
 }
 
 /**

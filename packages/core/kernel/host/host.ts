@@ -57,6 +57,8 @@ import { type Deadline, HookEngine } from './hooks.ts';
 import { type InventoryEntry, kernelRoutes } from './kernel-half.ts';
 import { JobRunner } from './jobs.ts';
 import { PluginLifecycle } from './lifecycle.ts';
+import { livePort } from './live-port.ts';
+import { guardedToolResult } from './tool-result.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import { openChildEnvironments, restrictFetch, restrictSpawn } from './permissions.ts';
 import { openHome, probeHome } from './home.ts';
@@ -77,6 +79,9 @@ export interface PluginStateHandle {
   /** Checks every declared file's format (§9.3); answers the damage found. */
   open(): Promise<readonly StateDamage[]>;
   close(): Promise<void>;
+  /** The real state port reports both subsystem damage and a successful repair synchronously. */
+  onDamageChanged?(listener: (damage: readonly StateDamage[]) => void): () => void;
+  narrowed?(): readonly StateDamage[];
 }
 
 /** Everything IO the host is given. `fyd` wires the real ones; the test host wires in-memory ones. */
@@ -232,17 +237,32 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     throw error;
   }
   // Held until stop; released on every boot that does not end running.
+  const cleanup: (() => void | Promise<void>)[] = [];
+  let running = false;
   try {
-    const outcome = await bootLocked(options, trace, lease);
-    if (outcome.kind !== 'running') await lease.release();
+    const outcome = await bootLocked(options, trace, lease, release => cleanup.push(release));
+    running = outcome.kind === 'running';
     return outcome;
-  } catch (error) {
-    await lease.release();
-    throw error;
+  } finally {
+    if (!running) {
+      for (const release of cleanup.reverse()) {
+        try {
+          await release();
+        } catch {
+          /* one failed release must not retain the remaining resources */
+        }
+      }
+      await lease.release();
+    }
   }
 }
 
-async function bootLocked(options: HostOptions, trace: string[], lease: HomeLockLease): Promise<BootOutcome> {
+async function bootLocked(
+  options: HostOptions,
+  trace: string[],
+  lease: HomeLockLease,
+  own: (release: () => void | Promise<void>) => void,
+): Promise<BootOutcome> {
   const { adapters, home } = options;
   const log = scopedLog(adapters.logSink, 'kernel');
   const clock = adapters.clock;
@@ -267,6 +287,7 @@ async function bootLocked(options: HostOptions, trace: string[], lease: HomeLock
   );
   await config.reload();
   const stopWatching = config.startWatching?.();
+  if (stopWatching !== undefined) own(stopWatching);
   const pluginsYaml = readPluginsYaml(config.port('kernel'));
 
   // 1. Check the enabled graph.
@@ -316,6 +337,9 @@ async function bootLocked(options: HostOptions, trace: string[], lease: HomeLock
     });
   }
 
+  let servingChanged = (): void => undefined;
+  const unwatchState: (() => void)[] = [];
+
   // 3. Open state: every declared file's format.
   for (const manifest of order) {
     const record = records.get(manifest.id) as PluginRecord;
@@ -323,12 +347,22 @@ async function bootLocked(options: HostOptions, trace: string[], lease: HomeLock
     trace.push(`state:${manifest.id}`);
     const state = adapters.state(manifest);
     record.state = state;
+    own(() => state.close());
     record.damage = await state.open();
+    const cancel = state.onDamageChanged?.(damage => {
+      record.damage = damage;
+      servingChanged();
+    });
+    if (cancel !== undefined) {
+      unwatchState.push(cancel);
+      own(cancel);
+    }
   }
 
   // Shared kernel machinery.
   const events = new EventBus(log);
-  const jobs = new JobRunner(clock, log);
+  const jobs = new JobRunner(clock, log, plugin => records.get(plugin)?.status === 'serving');
+  own(() => jobs.stop());
   const ids = new MintedIdRegistry(adapters.random);
   const bound: {
     admission?: Admission;
@@ -354,6 +388,11 @@ async function bootLocked(options: HostOptions, trace: string[], lease: HomeLock
     const key = record === undefined ? undefined : provideKey(record.manifest, token);
     return record === undefined || key === undefined ? undefined : { record, key };
   };
+  const liveProvided = (record: PluginRecord, key: string): unknown =>
+    livePort((record.half?.provides as Record<string, unknown> | undefined)?.[key], () => {
+      if (record.status !== 'serving')
+        throw new ApiError(503, `${record.manifest.title} is not running.`, 'plugin_unavailable');
+    });
 
   const portsFor = (manifest: Manifest, lifecycle: PluginLifecycle): KernelPorts => ({
     clock,
@@ -389,12 +428,14 @@ async function bootLocked(options: HostOptions, trace: string[], lease: HomeLock
   });
 
   // 4. Build in start order.
-  const failed = (id: string, why: string): void => {
+  const failed = async (id: string, why: string): Promise<void> => {
     const record = records.get(id) as PluginRecord;
     record.status = 'failed';
     record.failure = why;
     hooks.markFailed(id);
     events.unsubscribeAll(id);
+    await jobs.discard(id);
+    await record.lifecycle.stop(() => log.warn('an onStop handler failed', { plugin: id }));
     for (const dependent of dependentsOf(id, order, graph.providers)) {
       const other = records.get(dependent) as PluginRecord;
       if (other.status === 'serving' || other.status === 'skeleton') {
@@ -402,6 +443,8 @@ async function bootLocked(options: HostOptions, trace: string[], lease: HomeLock
         other.failure = `${other.manifest.title} needs ${record.manifest.title}, which failed.`;
         hooks.markFailed(dependent);
         events.unsubscribeAll(dependent);
+        await jobs.discard(dependent);
+        await other.lifecycle.stop(() => log.warn('an onStop handler failed', { plugin: dependent }));
       }
     }
   };
@@ -423,17 +466,17 @@ async function bootLocked(options: HostOptions, trace: string[], lease: HomeLock
     let missing: string | undefined;
     for (const [key, token] of Object.entries(manifest.needs ?? {})) {
       const provider = providerHalf(token);
-      if (provider === undefined || provider.record.status === 'failed' || provider.record.status === 'refused') {
+      if (provider === undefined || !['serving', 'skeleton'].includes(provider.record.status)) {
         missing = provider?.record.manifest.title ?? token.name;
         break;
       }
       needs[key] =
         provider.record.status === 'skeleton'
           ? unavailablePort(provider.record.manifest.title)
-          : (provider.record.half?.provides as Record<string, unknown> | undefined)?.[provider.key];
+          : liveProvided(provider.record, provider.key);
     }
     if (missing !== undefined) {
-      failed(manifest.id, `${manifest.title} needs ${missing}, which is not running.`);
+      await failed(manifest.id, `${manifest.title} needs ${missing}, which is not running.`);
       continue;
     }
     const uses: Record<string, { current(): unknown }> = {};
@@ -443,7 +486,7 @@ async function bootLocked(options: HostOptions, trace: string[], lease: HomeLock
           if (phase === 'building') throw new TypeError(`${manifest.id}: an optional port is unbound during build`);
           const provider = providerHalf(token);
           if (provider === undefined || provider.record.status !== 'serving') return undefined;
-          return (provider.record.half?.provides as Record<string, unknown> | undefined)?.[provider.key];
+          return liveProvided(provider.record, provider.key);
         },
       };
     const ctx = {
@@ -453,14 +496,20 @@ async function bootLocked(options: HostOptions, trace: string[], lease: HomeLock
       kernel: portsFor(manifest, record.lifecycle),
       hooks: hooks.invokerFor(manifest.id),
     } as unknown as DaemonContext<Manifest>;
+    own(() => record.lifecycle.stop(() => log.warn('an onStop handler failed', { plugin: manifest.id })));
     try {
       const built = implementation.build(ctx);
       if (built === null || typeof built !== 'object' || typeof (built as { then?: unknown }).then === 'function')
         throw new TypeError('build must return the half synchronously');
       record.half = built;
       record.status = record.damage.length > 0 ? 'damaged' : 'serving';
-      hooks.attach(manifest.id, built.hooks as Readonly<Record<string, unknown>> | undefined, 'live');
-      for (const event of manifest.data?.subscribes ?? []) {
+      hooks.attach(
+        manifest.id,
+        built.hooks as Readonly<Record<string, unknown>> | undefined,
+        record.status === 'serving' ? 'live' : 'failed',
+      );
+      if (record.status === 'damaged') jobs.pause(manifest.id);
+      for (const event of record.status === 'serving' ? (manifest.data?.subscribes ?? []) : []) {
         const fn = (built.subscribers as Record<string, (payload: unknown) => void> | undefined)?.[event.name];
         if (fn !== undefined) events.subscribe(manifest.id, event, fn);
       }
@@ -468,7 +517,7 @@ async function bootLocked(options: HostOptions, trace: string[], lease: HomeLock
       const why = `${manifest.title} failed to build: ${error instanceof Error ? error.message.slice(0, 200) : 'unknown error'}`;
       log.error('a plugin failed to build', { plugin: manifest.id });
       if (isCore(manifest.id)) return { kind: 'refused', sentence: why, trace };
-      failed(manifest.id, why);
+      await failed(manifest.id, why);
     }
   }
 
@@ -478,20 +527,16 @@ async function bootLocked(options: HostOptions, trace: string[], lease: HomeLock
     const provider = providerHalf(token as PortToken<unknown>);
     if (provider === undefined || !isCore(provider.record.manifest.id) || provider.record.status !== 'serving')
       return undefined;
-    return (provider.record.half?.provides as Record<string, unknown> | undefined)?.[provider.key] as T | undefined;
+    return liveProvided(provider.record, provider.key) as T | undefined;
   };
-  const admission = boundValue(AdmissionPort);
-  const outputGuard = boundValue(OutputGuardPort);
-  const holds = boundValue(InputHoldsPort);
-  const redactor = boundValue(RedactionPort);
-  const workFolders = boundValue(WorkFoldersPort);
-  const childEnvironments = boundValue(ChildEnvironmentPort);
-  if (childEnvironments !== undefined) bound.childEnvironments = childEnvironments;
-  if (admission !== undefined) bound.admission = admission;
-  if (outputGuard !== undefined) bound.outputGuard = outputGuard;
-  if (holds !== undefined) bound.holds = holds;
-  if (redactor !== undefined) bound.redaction = redactor;
-  if (workFolders !== undefined) bound.workFolders = workFolders;
+  Object.defineProperties(bound, {
+    admission: { get: () => boundValue(AdmissionPort) },
+    outputGuard: { get: () => boundValue(OutputGuardPort) },
+    holds: { get: () => boundValue(InputHoldsPort) },
+    redaction: { get: () => boundValue(RedactionPort) },
+    workFolders: { get: () => boundValue(WorkFoldersPort) },
+    childEnvironments: { get: () => boundValue(ChildEnvironmentPort) },
+  });
   phase = 'bound';
   trace.push('snapshot');
   const started = order.filter(manifest => {
@@ -615,11 +660,15 @@ async function bootLocked(options: HostOptions, trace: string[], lease: HomeLock
       return { text: `The input for ${name} does not fit.`, isError: true };
     const handle = entry.handle;
     const call = { request, params: new Map(), ...decision.standing } as Parameters<ToolHandler>[0];
-    try {
-      return await runInCall({ actor: decision.actor }, () => handle(call, input));
-    } catch (error) {
-      return { text: error instanceof ApiError ? error.message : 'The tool failed.', isError: true };
-    }
+    return await guardedToolResult(
+      entry.decl.guard === 'secrets',
+      bindings.outputGuard(),
+      () => runInCall({ actor: decision.actor }, () => handle(call, input)),
+      () => {
+        const unavailable = notServing(entry.owner);
+        return unavailable === undefined ? undefined : { text: refusalText(unavailable), isError: true };
+      },
+    );
   };
 
   // The session layer: one per daemon; every carrier opens a link per session on it (§4.8).
@@ -637,6 +686,54 @@ async function bootLocked(options: HostOptions, trace: string[], lease: HomeLock
     },
     clock,
   });
+  own(() => sessionLayer.close());
+  let carriersChanged = (): void => undefined;
+  // One live transition owns every serving projection. Repair is observed only when a state read has verified
+  // the restored file; a narrower finding never enters record.damage. Failed builds remain failed.
+  const reconcileServing = (): void => {
+    let changed = false;
+    for (const manifest of order) {
+      const record = records.get(manifest.id) as PluginRecord;
+      if (record.half === undefined || record.lifecycle.stopping()) continue;
+      const missing = Object.values(manifest.needs ?? {}).some(token => {
+        const provider = providerHalf(token);
+        return provider === undefined || !['serving', 'skeleton'].includes(provider.record.status);
+      });
+      const next = record.damage.length > 0 ? 'damaged' : missing ? 'failed' : 'serving';
+      if (record.status === next) continue;
+      record.status = next;
+      changed = true;
+      events.unsubscribeAll(manifest.id);
+      if (next === 'serving') {
+        delete record.failure;
+        hooks.attach(manifest.id, record.half.hooks as Readonly<Record<string, unknown>> | undefined, 'live');
+        for (const event of manifest.data?.subscribes ?? []) {
+          const fn = (record.half.subscribers as Record<string, (payload: unknown) => void> | undefined)?.[event.name];
+          if (fn !== undefined) events.subscribe(manifest.id, event, fn);
+        }
+        jobs.resume(manifest.id);
+      } else {
+        hooks.markFailed(manifest.id);
+        jobs.pause(manifest.id);
+        if (next === 'failed') record.failure = `${manifest.title} needs a provider which is not running.`;
+      }
+    }
+    if (!changed) return;
+    carriersChanged();
+    for (const mode of ['device', 'pair', 'member'] as const)
+      if (hooks.provider(SessionModes, mode) === 'unavailable') sessionLayer.endMode(mode);
+    // Admission and other bound security providers may affect every standing, including in-flight proofs.
+    if (
+      [AdmissionPort, OutputGuardPort, InputHoldsPort, RedactionPort].some(token => {
+        const provider = providerHalf(token as PortToken<unknown>);
+        return provider !== undefined && provider.record.status !== 'serving';
+      })
+    )
+      sessionLayer.close();
+    dispatcher.reauthorizeStreams();
+  };
+  servingChanged = reconcileServing;
+  reconcileServing();
   let stopHost = async (): Promise<void> => undefined;
   const running: RunningHost = {
     dispatcher,
@@ -658,12 +755,34 @@ async function bootLocked(options: HostOptions, trace: string[], lease: HomeLock
   // 7. Listen: the local listener and every carrier.
   trace.push('listen');
   const listening: Listening[] = [];
-  if (options.listen !== undefined) listening.push(await options.listen(running));
-  const carriersAbort = new AbortController();
-  for (const [key, carrier] of hooks.providers(Carriers)) {
-    trace.push(`carrier:${key}`);
-    void carrier.start(sessionLayer, carriersAbort.signal).catch(() => log.warn('a carrier stopped', { carrier: key }));
+  if (options.listen !== undefined) {
+    const listener = await options.listen(running);
+    listening.push(listener);
+    own(() => listener.stop());
   }
+  const carriers = new Map<string, AbortController>();
+  const stopCarriers = (): void => {
+    for (const controller of [...carriers.values()].reverse()) controller.abort();
+    carriers.clear();
+  };
+  own(stopCarriers);
+  carriersChanged = (): void => {
+    const provided = hooks.providers(Carriers);
+    for (const [key, controller] of carriers) {
+      if (provided.has(key as 'direct' | 'relay' | 'tunnel' | 'webrtc')) continue;
+      controller.abort();
+      carriers.delete(key);
+      sessionLayer.close();
+    }
+    for (const [key, carrier] of provided) {
+      if (carriers.has(key)) continue;
+      const controller = new AbortController();
+      carriers.set(key, controller);
+      trace.push(`carrier:${key}`);
+      void carrier.start(sessionLayer, controller.signal).catch(() => log.warn('a carrier stopped', { carrier: key }));
+    }
+  };
+  carriersChanged();
 
   // 8. Start jobs in start order.
   trace.push('jobs');
@@ -676,9 +795,10 @@ async function bootLocked(options: HostOptions, trace: string[], lease: HomeLock
   stopHost = (): Promise<void> => {
     stopping ??= (async () => {
       trace.push('stop:listen');
-      carriersAbort.abort();
+      stopCarriers();
       for (const listener of [...listening].reverse()) await listener.stop().catch(() => undefined);
       sessionLayer.close();
+      for (const cancel of unwatchState) cancel();
       stopWatching?.();
       trace.push('stop:jobs');
       await jobs.stop();
@@ -723,6 +843,8 @@ async function doctorLines(
 ): Promise<readonly DoctorLine[]> {
   const lines: DoctorLine[] = [];
   for (const [id, record] of records) {
+    for (const damage of record.state?.narrowed?.() ?? [])
+      lines.push({ plugin: id, state: 'warn', detail: damage.sentence });
     if (record.status === 'failed' || record.status === 'refused')
       lines.push({ plugin: id, state: 'fail', detail: record.failure ?? `${record.manifest.title} is not running.` });
     if (record.status === 'damaged')
