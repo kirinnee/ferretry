@@ -16,6 +16,7 @@ import {
   type Admission,
   type AdmissionDecision,
   type InventoryEntry,
+  type InventorySurfaces,
   type ScopedRoute,
   type AdmissionInput,
   type ApiRequest,
@@ -174,7 +175,11 @@ class CatalogsAdmission implements Admission {
     return this.#main.readmit();
   }
 
-  inventory(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[] {
+  inventory(
+    request: ApiRequest,
+    entries: readonly InventoryEntry[],
+    _surfaces: InventorySurfaces,
+  ): readonly InventoryEntry[] {
     return this.#main.inventory(request, entries);
   }
 
