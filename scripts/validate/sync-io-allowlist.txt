@@ -28,3 +28,6 @@
 2 packages/core/kernel/host/state/home-lock.ts  # boot: takes the home lock (creates run/, sets its mode) once while the daemon starts, before it serves
 4 packages/core/kernel/host/state/sqlite-store.ts  # boot: opens a plugin's database (directory, mode, existence, removal of a refused file) while plugins start, before the daemon serves; bun:sqlite itself is synchronous
 3 packages/core/ferrets/daemon/adapters/session/observer/worker-children.ts  # worker: a session worker replaces its own Bun.spawnSync to count children
+1 packages/plugins/browsers/daemon/worker/control/adapters/login-runtime.ts  # gap: the sign-in window finds Chrome with existsSync when it opens (today's), on a request; move to an async look
+3 packages/plugins/browsers/daemon/adapters/host.ts  # gap: Chrome's lookup at each launch (existsSync, today's) and the worker program found beside the daemon at build (realpathSync/existsSync, today's boot lookup); move to async looks
+1 packages/plugins/browsers/daemon/worker/adapters/main.ts  # worker: the browser worker is its own process (lead decision, port-browsers r1); closes fd 3 of Chrome's pipe, never the daemon's loop

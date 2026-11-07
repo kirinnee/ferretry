@@ -9,3 +9,4 @@ export {
 export { interact, type Mounted, mount, must, pressKey } from './dom.ts';
 export { render, run, runAsync, runUntil } from './react.ts';
 export { settleUntil } from './settle.ts';
+export { RouterProvider } from './router.tsx';

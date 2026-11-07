@@ -162,12 +162,20 @@
     "packages/plugins/browsers": {
       "name": "@ferretry/plugin-browsers",
       "version": "5.0.0",
+      "bin": {
+        "fyd-browser-worker": "daemon/worker/adapters/main.ts",
+      },
       "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/core-vault": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
+        "playwright-core": "1.62.1",
         "zod": "4.4.3",
+      },
+      "devDependencies": {
+        "happy-dom": "20.14.6",
       },
     },
     "packages/plugins/catalogs": {
@@ -420,9 +428,25 @@
       "name": "@ferretry/plugin-usage",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/app": "workspace:*",
+        "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/core-vault": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-conversation": "workspace:*",
+        "@ferretry/plugin-logins": "workspace:*",
         "@ferretry/std": "workspace:*",
+        "lucide-react": "^0.468.0",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+        "yaml": "2.9.0",
         "zod": "4.4.3",
+      },
+      "devDependencies": {
+        "@happy-dom/global-registrator": "^20.11.1",
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
+        "@types/react-test-renderer": "^19.0.0",
+        "react-test-renderer": "^19.0.0",
       },
     },
     "packages/plugins/voice": {
@@ -1235,7 +1259,7 @@
 
     "pkg-conf": ["pkg-conf@2.1.0", "", { "dependencies": { "find-up": "^2.0.0", "load-json-file": "^4.0.0" } }, "sha512-C+VUP+8jis7EsQZIhDYmS5qlNtjv2yP4SNtjXK9AP1ZcTRlnSfuumaTnRfYZnYgUUYVIKqL0fRvmUGDV2fmp6g=="],
 
-    "playwright-core": ["playwright-core@1.65.0", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-vNSKgH6YqtN7cdT/L334zo0a+YwkrpicyrHJlWWPIm/Q+Nn2SWInil01oT0mbu96U4GgoRtCYQD9CzJQgju+lA=="],
+    "playwright-core": ["playwright-core@1.62.1", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw=="],
 
     "postcss": ["postcss@8.5.32", "", { "dependencies": { "nanoid": "^3.3.20", "picocolors": "^1.1.1", "source-map-js": "^1.2.2" } }, "sha512-LJlKCCAUFKOuZxipUdYw1NzIITEsPcgyOG9LkvRJvuKj/bRzbuRY0ARXvL0pWGpsZvn8jku+LMep2eU0seHp8g=="],
 
@@ -1464,6 +1488,8 @@
     "zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
 
     "@actions/http-client/undici": ["undici@6.28.0", "", {}, "sha512-LIY910g9TI13YS95lrMFrs8Rm/u/irgHeTWoKCoteeJ04CUJ92eEfj0rVn+7VKMPBpUPiUoBKfhNyLI23EE/KA=="],
+
+    "@ferretry/plugin-onboarding/playwright-core": ["playwright-core@1.65.0", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-vNSKgH6YqtN7cdT/L334zo0a+YwkrpicyrHJlWWPIm/Q+Nn2SWInil01oT0mbu96U4GgoRtCYQD9CzJQgju+lA=="],
 
     "@pnpm/network.ca-file/graceful-fs": ["graceful-fs@4.2.10", "", {}, "sha512-9ByhssR2fPVsNZj478qUUbKfmL0+t5BDVyjShtyZZLiK7ZDAArFFfopyOTj0M05wE2tJPisA4iTnnXl2YoPvOA=="],
 
