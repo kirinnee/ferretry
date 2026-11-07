@@ -48,6 +48,7 @@ import { sessionFilesystemRoutes } from './lib/runtime/mounts/session-filesystem
 import { StateAgentPinRepository } from './adapters/agent-pins/index.ts';
 import { RegistryPinSessionDirectory, StatePinRepository } from './adapters/pins/index.ts';
 import { KeyedSerialExecutor } from './adapters/storage/keyed-serial-executor.ts';
+import { stateHomeLaunchRefusal } from './lib/route-security/state-home.ts';
 import { AgentPinService, AgentPinSubsystem, withPinned } from './lib/agent-pins/index.ts';
 import { PinService } from './lib/pins/index.ts';
 import { pinRoutes } from './lib/runtime/mounts/pins.ts';
@@ -75,8 +76,7 @@ function callerIsAgent(call: CallContext): boolean {
 }
 
 /** A random ferret id: base-36 time + 8 hex characters (today's `TimeSessionIdFactory`). */
-const mintId = (nowMs: number): FerretId =>
-  `${nowMs.toString(36)}-${randomBytes(4).toString('hex')}` as FerretId;
+const mintId = (nowMs: number): FerretId => `${nowMs.toString(36)}-${randomBytes(4).toString('hex')}` as FerretId;
 
 function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest> {
   const { kernel, hooks, needs } = ctx;
@@ -101,8 +101,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       else if (!details.ok) log.warn('a ferret details file could not be read', { file: details.error.file });
     }
     const held = await kernel.state.read(FerretTokensFile);
-    if (held.ok && held.value !== undefined)
-      for (const entry of held.value.tokens) tokens.add(entry as TokenEntry);
+    if (held.ok && held.value !== undefined) for (const entry of held.value.tokens) tokens.add(entry as TokenEntry);
   })();
   const ready = async (): Promise<void> => {
     await loaded;
@@ -299,7 +298,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     {
       list: async () => {
         await ready();
-        return registry.list().map(ferret => registry.summary(ferret.id)).filter(summary => summary !== undefined);
+        return registry
+          .list()
+          .map(ferret => registry.summary(ferret.id))
+          .filter(summary => summary !== undefined);
       },
       get: async reference => {
         await ready();
@@ -393,7 +395,13 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         // The Warden's own label marks the Warden's tree (exempt from the helper limits and supervision); only the Warden
         // starts under it, so an agent asking for it is refused, as today.
         if (parsed.options?.label?.trim() === WARDEN_LABEL && callerIsAgent(call))
-          throw new ApiError(403, 'only the Warden starts a ferret under its own label; leave --label out', 'owner_only');
+          throw new ApiError(
+            403,
+            'only the Warden starts a ferret under its own label; leave --label out',
+            'owner_only',
+          );
+        // No identity/link-hop state-home reach is available in this kernel yet. Never replace it with a lexical fence.
+        await stateHomeLaunchRefusal(callerIsAgent(call), undefined, parsed.folder);
         let startedFerret: FerretId | undefined;
         const start = async (): Promise<ApiResponse> => {
           const started = await service.start({
@@ -416,7 +424,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
           const seen = lookupStartRequest(held.ok ? held.value : undefined, requestId, digest);
           if (seen.kind === 'same') return jsonResponse({ id: seen.ferret });
           if (seen.kind === 'conflict')
-            throw new ApiError(409, `request id ${JSON.stringify(requestId)} already started a different ferret`, 'request_id_reused');
+            throw new ApiError(
+              409,
+              `request id ${JSON.stringify(requestId)} already started a different ferret`,
+              'request_id_reused',
+            );
           const answer = await start();
           const ferret = startedFerret;
           if (ferret !== undefined) {
@@ -500,8 +512,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         if (!folder.ok) throw new ApiError(403, `${relative} is outside the ferret's folder`, 'escapes_root');
         const root = kernel.roots.root('work', { ferret: id });
         const resolved = root.resolve(relative);
-        if (!resolved.ok)
-          throw new ApiError(403, `${relative} may not be read (${resolved.error})`, 'escapes_root');
+        if (!resolved.ok) throw new ApiError(403, `${relative} may not be read (${resolved.error})`, 'escapes_root');
         const stat = await root.stat(resolved.value);
         if (stat === undefined) throw new ApiError(404, `${relative} does not exist`, 'not_found');
         if (stat.kind !== 'file') throw new ApiError(400, `${relative} is not a file`, 'not_a_file');
