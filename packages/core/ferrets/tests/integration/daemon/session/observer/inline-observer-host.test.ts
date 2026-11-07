@@ -23,7 +23,8 @@ import type { TranscriptEvent } from '../../../../../daemon/lib/session/peers/tr
 import type { TurnPaneEvidence } from '../../../../../daemon/lib/session/peers/turn.ts';
 import type { LivenessTarget } from '../../../../../daemon/lib/session/peers/warden.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
-import { INERT_PANE_WORK, INERT_QUESTIONS, testTurnWatcher } from '../../../../support/daemon/observer-peers.ts';
+import { INERT_PANE_WORK, testTurnWatcher } from '../../../../support/daemon/observer-peers.ts';
+import { SCRIPTED_QUESTIONS } from '../../../../support/daemon/observer-stand-ins.ts';
 import { FerretStateFile } from '../../../../../contract/index.ts';
 import { memoryStorage } from '../../../../support/daemon/storage.ts';
 import { waitFor } from '../../support/wait-for.ts';
@@ -146,7 +147,7 @@ function host(subject: World, overrides: Partial<InlineObserverPorts> = {}): Inl
       answerSerial: {
         runIfIdle: async (key, work) => (subject.busy === key ? undefined : await serial.runIfIdle(key, work)),
       },
-      applier: new SessionObservationApplier(subject.storage, answers, new KeyedSerialExecutor(), INERT_QUESTIONS),
+      applier: new SessionObservationApplier(subject.storage, answers, new KeyedSerialExecutor(), SCRIPTED_QUESTIONS),
       liveness: {
         screen: async id => {
           subject.looks.push(`screen ${id}`);
@@ -173,7 +174,7 @@ function host(subject: World, overrides: Partial<InlineObserverPorts> = {}): Inl
       turnWatcher: testTurnWatcher,
       ...overrides,
     },
-    new SessionObserver(text => `digest(${text})`, INERT_QUESTIONS),
+    new SessionObserver(text => `digest(${text})`, SCRIPTED_QUESTIONS),
   );
 }
 
@@ -328,7 +329,7 @@ describe('InlineObserverHost — armed', () => {
 });
 
 describe('InlineObserverHost — questions', () => {
-  it.skip('pending port: conversation question policy (projectStructuredQuestion) — should project each live session, hand the loop back between them, and report the one that failed', async () => {
+  it('should project each live session, hand the loop back between them, and report the one that failed', async () => {
     // Arrange
     const subject = await world();
     const observer = host(subject);

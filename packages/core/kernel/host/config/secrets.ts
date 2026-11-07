@@ -20,9 +20,16 @@
  *
  * Pure: no IO.
  */
-/** A located finding: the path to the value inside the document, never the value. */
+/**
+ * A located finding: the path to the value inside the document, never the value.
+ *
+ * A KEY shaped like a token is a finding too (`ghp_…: true`): then `path` is the object that holds it, so no message
+ * built from `path` can repeat the key, and `atKey` is the full path to the key, for the line number only.
+ */
 export interface SecretFinding {
   readonly path: readonly (string | number)[];
+  /** Set when the secret-shaped thing is a key: the path INCLUDING it. Locate with it; never print it. */
+  readonly atKey?: readonly (string | number)[];
 }
 
 /** What a person is told to do instead, in one sentence. */
@@ -31,6 +38,9 @@ export const rawSecretFix = (binary: string): string =>
 
 /** What the finding is, in one sentence that never includes the value. */
 export const RAW_SECRET_MESSAGE = 'this looks like a raw secret (an API key or token)';
+
+/** The same for a NAME: it never includes the name. */
+export const RAW_SECRET_KEY_MESSAGE = 'a name in here looks like a raw secret (an API key or token)';
 
 const KNOWN_SHAPES: readonly RegExp[] = [
   /\bsk-ant-[A-Za-z0-9_-]{8,}/u,
@@ -104,7 +114,12 @@ export function findRawSecrets(document: unknown): readonly SecretFinding[] {
       return;
     }
     if (value !== null && typeof value === 'object') {
-      for (const [key, item] of Object.entries(value)) visit(item, [...path, key]);
+      for (const [key, item] of Object.entries(value)) {
+        // A key shaped like a token is refused like a value, and nothing below it is walked: any path under it
+        // would carry the key into a message.
+        if (looksLikeRawSecret(undefined, key)) findings.push({ path, atKey: [...path, key] });
+        else visit(item, [...path, key]);
+      }
     }
   };
   visit(document, []);

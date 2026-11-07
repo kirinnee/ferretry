@@ -15,6 +15,7 @@ export * from './host/session/wire/crypto.ts';
 export * from './host/session/wire/flow.ts';
 export * from './host/session/wire/frames.ts';
 export * from './host/session/wire/identity.ts';
+export * from './host/session/wire/link-store.ts';
 export * from './host/session/wire/proofs.ts';
 export * from './host/session/wire/secret-offer.ts';
 export * from './host/session/wire/tunnel-request.ts';

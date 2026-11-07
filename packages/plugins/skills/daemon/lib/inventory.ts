@@ -161,6 +161,7 @@ export class SkillsInventoryService {
     return {
       ferretId: ferret.id,
       harness,
+      folder: cwd,
       ...(runtimeHome === undefined ? {} : { runtime: runtimeName }),
       skills: [...fromHome.skills, ...fromProject.skills],
       truncated: fromHome.truncated || fromProject.truncated,

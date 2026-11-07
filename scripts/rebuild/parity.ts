@@ -118,6 +118,8 @@ function ownerOf(file: string, what = ''): string {
     ],
     [/terminal[_.:/ -]|\/terminals|console\/input|tmux|cgroups|processes/, 'terminals'],
     [/browser[_.:/ -]|\/browsers|firewall/, 'browsers'],
+    // Phone approvals ride the input-requests module today but are Accounts' in 5.0 (its manifest declares the routes).
+    [/phone[-_ ]?approval/i, 'accounts'],
     [
       /input[_.-](wait|cancel)|request[_-]input|input-requests|quarantine|\/secret(?:s|\b)|secret[_ -](set|list|rm)|secrets\.(json|key)|redactor/,
       'vault',

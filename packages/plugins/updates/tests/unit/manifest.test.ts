@@ -21,3 +21,13 @@ describe('updates manifest', () => {
     expect(manifest.actions.cli.map(verb => verb.verb)).toEqual(['update check']);
   });
 });
+
+describe('the files the kernel launches the update against', () => {
+  test('declares the state files named report and log: the kernel takes the launch paths from their defs', async () => {
+    const { UPDATES_LOG, UPDATES_REPORT } = await import('../../contract/index.ts');
+    const named = (name: string) => manifest.data?.state?.find(def => def.name === name);
+    expect(named('report')).toBe(UPDATES_REPORT);
+    expect(named('log')).toBe(UPDATES_LOG);
+    expect(manifest.permissions?.updateHost).toBe(true);
+  });
+});

@@ -1,8 +1,8 @@
-import type { Server, ServerWebSocket } from 'bun';
+import type { Server, ServerWebSocket, WebSocketHandler } from 'bun';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { finalised, headersFrom, queryFrom } from '../contract/http.ts';
 import { BodyTooLargeError, MAX_REQUEST_BODY_BYTES } from '../contract/body.ts';
-import type { LocalArrival } from '../contract/session.ts';
+import type { Arrival, LocalArrival } from '../contract/session.ts';
 import { DAEMON_RUN_FILE, DAEMON_SOCKET_FILE, type DaemonRun, recordedBindAddress } from '../contract/run.ts';
 import type { SocketHandler } from '../contract/socket.ts';
 import { SOCKET_CLOSES, SOCKET_MAX_FRAME_BYTES, SOCKET_MAX_PENDING_FRAMES } from '../contract/socket.ts';
@@ -47,7 +47,7 @@ async function boundedText(request: Request, limit: number | undefined): Promise
 }
 
 /** Translates a runtime request. `arrival` is decided HERE from the listener and the socket's real peer (G14). */
-export function toApiRequest(request: Request, arrival: LocalArrival, clientAddress: string | undefined): ApiRequest {
+export function toApiRequest(request: Request, arrival: Arrival, clientAddress: string | undefined): ApiRequest {
   const url = new URL(request.url);
   return {
     method: request.method,
@@ -74,12 +74,67 @@ export function toResponse(response: ApiResponse, acceptsGzip: boolean): Respons
   return new Response(last.status === 304 ? null : last.body, { status: last.status, headers });
 }
 
-interface SocketData {
+export interface SocketData {
   handler?: SocketHandler;
   pending: (string | Uint8Array)[];
   closed: boolean;
   attach: (downstream: import('../contract/socket.ts').SocketDownstream) => Promise<SocketHandler>;
 }
+
+/** The socket writes and frames every kernel listener shares: the per-frame permit, the bounds, the close codes. */
+const downstreamOf = (socket: ServerWebSocket<SocketData>): import('../contract/socket.ts').SocketDownstream => ({
+  // The per-frame permit is asked synchronously, immediately before the socket write (§7.3).
+  send: (frame, permit) => {
+    if (socket.data.closed) return undefined;
+    let showable = true;
+    try {
+      showable = permit === undefined ? true : permit() === true;
+    } catch {
+      showable = false;
+    }
+    if (!showable) {
+      socket.data.closed = true;
+      socket.close(SOCKET_CLOSES.unauthorized.code, SOCKET_CLOSES.unauthorized.reason);
+      return undefined;
+    }
+    return socket.send(frame);
+  },
+  close: (code, reason) => {
+    socket.data.closed = true;
+    socket.close(code, reason);
+  },
+  bufferedBytes: () => socket.getBufferedAmount(),
+});
+export const socketBehaviour: WebSocketHandler<SocketData> = {
+  maxPayloadLength: SOCKET_MAX_FRAME_BYTES,
+  open: socket => {
+    void socket.data
+      .attach(downstreamOf(socket))
+      .then(async handler => {
+        socket.data.handler = handler;
+        await handler.open();
+        for (const frame of socket.data.pending.splice(0)) handler.fromClient(frame);
+      })
+      .catch(() => socket.close(SOCKET_CLOSES.unavailable.code, SOCKET_CLOSES.unavailable.reason));
+  },
+  message: (socket, message) => {
+    const frame = typeof message === 'string' ? message : new Uint8Array(message);
+    if (socket.data.handler !== undefined) {
+      socket.data.handler.fromClient(frame);
+      return;
+    }
+    if (socket.data.pending.length >= SOCKET_MAX_PENDING_FRAMES) {
+      socket.close(SOCKET_CLOSES.handshakeOverflow.code, SOCKET_CLOSES.handshakeOverflow.reason);
+      return;
+    }
+    socket.data.pending.push(frame);
+  },
+  close: (socket, code, reason) => {
+    if (socket.data.closed && socket.data.handler === undefined) return;
+    socket.data.closed = true;
+    socket.data.handler?.close({ code, reason });
+  },
+};
 
 function serve(
   host: RunningHost,
@@ -102,64 +157,12 @@ function serve(
     const response = await host.dispatch(api);
     return toResponse(response, (request.headers.get('accept-encoding') ?? '').includes('gzip'));
   };
-  const downstreamOf = (socket: ServerWebSocket<SocketData>): import('../contract/socket.ts').SocketDownstream => ({
-    // The per-frame permit is asked synchronously, immediately before the socket write (§7.3).
-    send: (frame, permit) => {
-      if (socket.data.closed) return undefined;
-      let showable = true;
-      try {
-        showable = permit === undefined ? true : permit() === true;
-      } catch {
-        showable = false;
-      }
-      if (!showable) {
-        socket.data.closed = true;
-        socket.close(SOCKET_CLOSES.unauthorized.code, SOCKET_CLOSES.unauthorized.reason);
-        return undefined;
-      }
-      return socket.send(frame);
-    },
-    close: (code, reason) => {
-      socket.data.closed = true;
-      socket.close(code, reason);
-    },
-    bufferedBytes: () => socket.getBufferedAmount(),
-  });
   return Bun.serve<SocketData>({
     ...bind,
     // Today's body cap, enforced by the runtime: an oversized body is refused before this heap holds it.
     maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
     fetch,
-    websocket: {
-      maxPayloadLength: SOCKET_MAX_FRAME_BYTES,
-      open: socket => {
-        void socket.data
-          .attach(downstreamOf(socket))
-          .then(async handler => {
-            socket.data.handler = handler;
-            await handler.open();
-            for (const frame of socket.data.pending.splice(0)) handler.fromClient(frame);
-          })
-          .catch(() => socket.close(SOCKET_CLOSES.unavailable.code, SOCKET_CLOSES.unavailable.reason));
-      },
-      message: (socket, message) => {
-        const frame = typeof message === 'string' ? message : new Uint8Array(message);
-        if (socket.data.handler !== undefined) {
-          socket.data.handler.fromClient(frame);
-          return;
-        }
-        if (socket.data.pending.length >= SOCKET_MAX_PENDING_FRAMES) {
-          socket.close(SOCKET_CLOSES.handshakeOverflow.code, SOCKET_CLOSES.handshakeOverflow.reason);
-          return;
-        }
-        socket.data.pending.push(frame);
-      },
-      close: (socket, code, reason) => {
-        if (socket.data.closed && socket.data.handler === undefined) return;
-        socket.data.closed = true;
-        socket.data.handler?.close({ code, reason });
-      },
-    },
+    websocket: socketBehaviour,
   });
 }
 

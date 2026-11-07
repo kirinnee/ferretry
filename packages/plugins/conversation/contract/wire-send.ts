@@ -225,5 +225,12 @@ export type ComposerResult = z.infer<typeof ComposerResultSchema>;
 export const HypermediaRequestSchema = z.strictObject({ enabled: z.boolean() });
 export type HypermediaRequest = z.infer<typeof HypermediaRequestSchema>;
 
+/** What switching it did: nothing is sent to the ferret, so a RUNNING one takes the change at its next launch. */
+export const HypermediaResultSchema = z.strictObject({
+  restartRequired: z.boolean(),
+  note: z.string().min(1),
+});
+export type HypermediaResult = z.infer<typeof HypermediaResultSchema>;
+
 /** The queue-changed wake-up's data (today's `QUEUE_CHANGED_EVENT`, `control.queue_changed`). */
 export const QueueChangeSchema = z.enum(['enqueued', 'edited', 'moved', 'waiting']);

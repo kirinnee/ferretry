@@ -63,6 +63,24 @@ export type FerretState = z.infer<typeof FerretStateSchema>;
 export const FerretRoleSchema = z.enum(['lead', 'helper']);
 export type FerretRole = z.infer<typeof FerretRoleSchema>;
 
+/**
+ * Why a ferret ended, in today's words (the Warden's `ReviveCause` and `ReviveLeaveReason` names, unchanged). The
+ * first four are an END NOBODY CHOSE (the terminal vanished, a signal killed the agent, it exited non-zero); the rest
+ * are an end somebody decided or a launch that never ran: `stopped` (anyone stopped it), `completed` (it said
+ * `signal done`), `start_failed` (it never started, or a launch failed) and `clean_exit` (exit 0).
+ */
+export const FerretEndCauseSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('tmux_crashed') }),
+  z.strictObject({ kind: z.literal('terminal_gone') }),
+  z.strictObject({ kind: z.literal('signal'), signal: z.number().int().positive() }),
+  z.strictObject({ kind: z.literal('agent_crashed'), exitCode: z.number().int() }),
+  z.strictObject({ kind: z.literal('stopped') }),
+  z.strictObject({ kind: z.literal('completed') }),
+  z.strictObject({ kind: z.literal('start_failed') }),
+  z.strictObject({ kind: z.literal('clean_exit') }),
+]);
+export type FerretEndCause = z.infer<typeof FerretEndCauseSchema>;
+
 /** `state/ferrets/<ferret>/ferret.json`: who a ferret is. Turn, usage and transcript facts are other owners'. */
 export const FerretRecordSchema = z.strictObject({
   format: z.literal(1),
@@ -86,6 +104,8 @@ export const FerretRecordSchema = z.strictObject({
   handle: z.string().min(1).max(256).optional(),
   createdAt: InstantSchema,
   stateAt: InstantSchema,
+  /** Why it ended; present only while `state` is `stopped` (a start or resume clears it). */
+  cause: FerretEndCauseSchema.optional(),
   /** Who caused it to exist and whether it descends from a warden (today's `SessionConfig.provenance`). */
   provenance: SessionProvenanceSchema.optional(),
   /** Target-only lineage back to the transfer decision that created this fresh ferret (today's `transferredFrom`). */
@@ -178,5 +198,11 @@ export const FerretSummarySchema = FerretRecordSchema.omit({ format: true, handl
    * say it (the owner stopped it, a launch failed) has none, and a resumed one is no longer finished.
    */
   finishedAt: InstantSchema.optional(),
+  /**
+   * The supervision times it was started with (today's `SessionConfig` fields): nudge a ferret that has been quiet
+   * this long, kill one that has been stalled this long. Absent means the machine's default; `0` turns the reflex off.
+   */
+  nudgeAfterSeconds: z.number().int().nonnegative().optional(),
+  killAfterSeconds: z.number().int().nonnegative().optional(),
 });
 export type FerretSummary = z.infer<typeof FerretSummarySchema>;

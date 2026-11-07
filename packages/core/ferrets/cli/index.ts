@@ -85,7 +85,7 @@ function refuseElsewhere(invocation: VerbInvocation, names: readonly string[], v
  * folder `fy` was run in unless `--cwd` names another.
  */
 export default implementCli(manifest, {
-  build({ client, io: terminal, env, clock, sleep, readText }) {
+  build({ client, io: terminal, env, clock, sleep, exists }) {
     const api = new ClientSessionApi(client);
     const environment: SessionEnvironment = { cwd: process.cwd() };
 
@@ -262,17 +262,12 @@ export default implementCli(manifest, {
       const timeout = count(invocation, 'timeout');
       const interval = count(invocation, 'interval');
       const marker = text(invocation, 'until-marker');
-      // `-` means standard input to the shell's reader, and a poll must never read it: a marker is a file's name.
-      if (marker === '-')
-        throw new SessionCommandError(
-          '--until-marker names a file, and - (standard input) is not one; give the file’s path (./- for a file named -)',
-        );
-      // A wait needs a clock and a way to sleep, and a deliverable gate a way to read: the shell fills them in.
+      // A wait needs a clock and a way to sleep, and a deliverable gate an existence check: the shell fills them in.
       if (clock === undefined || sleep === undefined)
         throw new SessionCommandError('wait needs the shell’s clock, which this fy does not give a verb yet', 1);
-      if (marker !== undefined && readText === undefined)
+      if (marker !== undefined && exists === undefined)
         throw new SessionCommandError(
-          '--until-marker needs the shell’s file reader, which this fy does not give a verb yet',
+          '--until-marker needs the shell’s existence check, which this fy does not give a verb yet',
           1,
         );
       const controller = new WaitController(
@@ -288,8 +283,7 @@ export default implementCli(manifest, {
             );
             return { signal: passed.signal, cancel: () => timer.abort() };
           },
-          markerExists: async path =>
-            await (readText?.(path).then(() => true) ?? Promise.resolve(false)).catch(() => false),
+          markerExists: async path => await (exists?.(path) ?? Promise.resolve(false)).catch(() => false),
           nowMs: () => clock.nowMs(),
           sleep: async milliseconds => await sleep(milliseconds as never),
           transport: transportFailure,

@@ -488,6 +488,8 @@ describe('the image thumbnail', () => {
 
   it('reads a transcript picture outside a provider through the transcript route, by its handle', async () => {
     const restore = withVisibleObserver();
+    const original = URL.createObjectURL;
+    URL.createObjectURL = (() => 'blob:transcript/1') as typeof URL.createObjectURL;
     const client = fakeClient(() => ({
       image: { handle: '4096.2048.0', mediaType: 'image/png', byteLength: 3 },
       base64: btoa('png'),
@@ -509,14 +511,14 @@ describe('the image thumbnail', () => {
           />
         </ConversationClientProvider>,
       );
-      // GAP(C1): the contract's `TranscriptImageDownloadSchema` checks `image.handle` against an opaque-id pattern,
-      // not the dotted handle the route is named by, so the answer is refused and the picture says so; the paint
-      // assertion returns once that schema reads the handle (`4096.2048.0`) the way today's did.
       expect(client.calls.map(call => [call.route, call.params])).toEqual([
         ['GET /v1/ferrets/:ferretId/transcript-images/:handle', { ferretId: 'gallery-session', handle: '4096.2048.0' }],
       ]);
+      // The download schema reads today's dotted handle, so the answer is accepted and the picture is painted.
+      expect(must(view.container.querySelector('img'), 'the picture').getAttribute('src')).toBe('blob:transcript/1');
       await view.unmount();
     } finally {
+      URL.createObjectURL = original;
       restore();
     }
   });

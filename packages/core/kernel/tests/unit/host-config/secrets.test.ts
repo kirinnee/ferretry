@@ -225,6 +225,20 @@ describe('findRawSecrets', () => {
     ]);
   });
 
+  it('should report a token-shaped KEY by the object that holds it, never by a path that contains the key', () => {
+    // Arrange
+    const name = KNOWN_SHAPES[6]?.[1] ?? '';
+    const input = { env: { ok: true, [name]: { nested: RANDOM_LOOKING } }, [name]: 1 };
+
+    // Act
+    const actual = findRawSecrets(input);
+
+    // Assert
+    should(actual.map(finding => finding.path)).deepEqual([['env'], []]);
+    should(actual.map(finding => finding.atKey)).deepEqual([['env', name], [name]]);
+    should(JSON.stringify(actual.map(finding => finding.path))).not.containEql(name);
+  });
+
   it('should name an item of a list by the nearest key above it', () => {
     // Arrange
     const input = {

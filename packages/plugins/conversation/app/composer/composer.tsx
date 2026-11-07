@@ -26,7 +26,15 @@ import {
   useMdComposePref,
   useReferenceSurface,
 } from '@ferretry/app';
-import { escapeCloses, readInputModality, Spinner, useInputModality, useKeyboardOpen } from '@ferretry/app/ui';
+import {
+  escapeCloses,
+  ImageViewer,
+  readInputModality,
+  Spinner,
+  useInputModality,
+  useKeyboardOpen,
+  type ViewerImage,
+} from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { ArrowUp, Plus, Zap } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -54,7 +62,6 @@ import { type ComposerReferenceCatalogs, HOSTED_REFERENCE_PREFIXES } from './com
 import { useSharedComposerItems } from './composer-shared-items.ts';
 import { initialVimState, normalVimState, type VimState, vimReduce } from './composer-vim.ts';
 import { type DaemonDraftStore, documentDraftStore } from './drafts.ts';
-import { ImageViewer, type ViewerImage } from './image-viewer.tsx';
 import { OccupiedComposerNotice } from './occupied-composer-notice.tsx';
 import { draftResolved, draftStuckLine, occupiedDraftOf } from './occupied-draft.ts';
 import { type PendingAttachment, PendingAttachmentStrip } from './pending-attachments.tsx';
@@ -551,7 +558,7 @@ export function Composer({
   // A host that reads the reference catalogs itself (the chat page, which proves the transcript's references from the
   // same arrays) owns those prefixes; a host that does not is a standalone composer whose providers read them.
   const hosted = referenceCatalogs !== undefined;
-  // "Include agent tasks" in the `&` menu: a menu-only choice, off at rest, read live by the providers.
+  // "Include agent cards" in the `&` menu: a menu-only choice, off at rest, read live by the providers.
   const [includeAgentTasks, setIncludeAgentTasks] = useState(false);
   const includeAgentTasksRef = useRef(includeAgentTasks);
   includeAgentTasksRef.current = includeAgentTasks;

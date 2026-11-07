@@ -10,7 +10,7 @@ afterAll(async () => {
 });
 
 describe('XX updateHostFor launch', () => {
-  test('<client beside argv0> daemon update --yes --to <target> --report <state>/report.json, FY_HOME set', async () => {
+  test('<client beside argv0> update --run --to <target> --report <declared report>, FY_HOME set', async () => {
     const home = await mkdtemp(`${tmpdir()}/fy-update-`);
     homes.push(home);
     const calls: { argv: readonly string[]; environment: Record<string, string | undefined>; logFile: string }[] = [];
@@ -27,17 +27,16 @@ describe('XX updateHostFor launch', () => {
       },
       environment: { PATH: '/usr/bin' },
       spawn: (argv, options) => calls.push({ argv, environment: { ...options.environment }, logFile: options.logFile }),
-    })('updates');
+    })('updates', { report: 'update/report.json', log: 'update.log' });
     expect(await port.launchUpdate('v5.1.0')).toEqual({ kind: 'started' });
     expect(calls[0]?.argv).toEqual([
       '/home/owner/.local/bin/fy',
-      'daemon',
       'update',
-      '--yes',
+      '--run',
       '--to',
       'v5.1.0',
       '--report',
-      `${home}/state/updates/report.json`,
+      `${home}/state/updates/update/report.json`,
     ]);
     expect(calls[0]?.environment).toEqual({ PATH: '/usr/bin', FY_HOME: home });
     expect(calls[0]?.logFile).toBe(`${home}/state/updates/update.log`);

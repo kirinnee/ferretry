@@ -23,14 +23,60 @@ import type {
 /** The most extra pipes one child may have (Chrome's DevTools pipe needs two). */
 export const MAX_EXTRA_PIPES = 4;
 
+/**
+ * The NON-secret environment names `git` and `gh` children are given from the daemon's own environment, so a
+ * keyring-backed `gh` (the session bus and runtime directory), its own config folder, an ssh agent for clones and an
+ * operator's proxy keep working. Every other name, and every token (`GH_TOKEN`, `GITHUB_TOKEN`, ...), stays out: a
+ * name is added here only when it can hold no credential of its own (the proxy variables are the one known exception: see docs/secrets.md).
+ */
+export const TOOL_ENVIRONMENT_NAMES: readonly string[] = Object.freeze([
+  'XDG_CONFIG_HOME',
+  'XDG_RUNTIME_DIR',
+  'DBUS_SESSION_BUS_ADDRESS',
+  'GH_CONFIG_DIR',
+  'SSH_AUTH_SOCK',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
+]);
+
+/** The programs that are given {@link TOOL_ENVIRONMENT_NAMES}. */
+const TOOL_PROGRAMS: ReadonlySet<string> = new Set(['git', 'gh']);
+
+/** The allow-listed names that are set in `source`: nothing else of it is copied. */
+export function toolEnvironment(source: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  const picked: Record<string, string> = {};
+  for (const name of TOOL_ENVIRONMENT_NAMES) {
+    const value = source[name];
+    if (typeof value === 'string' && value !== '') picked[name] = value;
+  }
+  return picked;
+}
+
+/**
+ * What a child sees: the host's base, the allow-listed tool environment when the program is `git` or `gh`, then the
+ * caller's own env (which wins). A token the caller hands over is the caller's act; the host adds none.
+ */
+export function childEnvironment(
+  program: string,
+  baseEnv: Readonly<Record<string, string>>,
+  tools: Readonly<Record<string, string>>,
+  extra: Record<string, string>,
+): Record<string, string> {
+  const name = program.slice(program.lastIndexOf('/') + 1);
+  return { ...baseEnv, ...(TOOL_PROGRAMS.has(name) ? tools : {}), ...extra };
+}
+
 export function bunSpawn(
   baseEnv: Readonly<Record<string, string>>,
   opener: () => ChildEnvironmentOpener | undefined = () => undefined,
+  tools: Readonly<Record<string, string>> = {},
 ): SpawnPort {
-  const env = (options?: SpawnOptions): Record<string, string> => ({
-    ...baseEnv,
-    ...resolveEnv(options?.env, opener()),
-  });
+  const env = (program: string, options?: SpawnOptions): Record<string, string> =>
+    childEnvironment(program, baseEnv, tools, resolveEnv(options?.env, opener()));
   const start = (program: string, args: readonly string[], options?: SpawnOptions): ChildHandle => {
     const cwd = options?.cwd;
     // A pin is installed for exactly the one spawn statement, no await inside the bracket, and the child is given
@@ -43,7 +89,7 @@ export function bunSpawn(
     try {
       child = Bun.spawn([program, ...args], {
         ...(cwd === undefined ? {} : { cwd: typeof cwd === 'string' ? cwd : '.' }),
-        env: env(options),
+        env: env(program, options),
         ...(extra === 0
           ? { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }
           : { stdio: ['pipe', 'pipe', 'pipe', ...Array.from({ length: extra }, () => 'pipe' as const)] }),
