@@ -1,12 +1,13 @@
 import { describe, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { implementCli } from '@ferretry/kernel/manifest';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { createWorld } from '../../src/adapters/world.ts';
 import { surfacesOf } from '../../src/lib/client.ts';
 import { runFy } from '../../src/lib/run.ts';
-import { capturedIo, boardEntry, registryOf } from '../unit/fakes.ts';
+import { boardEntry, boardManifest, capturedIo, entry, registryOf } from '../unit/fakes.ts';
 import { HEALTH, standInDaemon } from './support/stand-in-daemon.ts';
 
 /** No test may start a real daemon: the launcher finds nothing and spawns nothing unless a test hands it a fake. */
@@ -30,6 +31,14 @@ async function withHome<T>(use: (home: string, adminTokenPath: string) => Promis
   } finally {
     await rm(home, { recursive: true, force: true });
   }
+}
+
+/** Writes the kernel's run record (`run/daemon.json`, format 1) as a daemon does on listen. */
+async function recordRun(home: string, port: number, host = '127.0.0.1'): Promise<void> {
+  const run = join(home, '.ferretry', 'run');
+  await mkdir(run, { recursive: true });
+  const record = { format: 1, socket: join(run, 'fyd.sock'), host, port, pid: 4242, version: '5.0.0' };
+  await writeFile(join(run, 'daemon.json'), JSON.stringify(record));
 }
 
 const worldFor = (home: string, environment: Record<string, string>) =>
@@ -138,11 +147,10 @@ describe('connecting to the daemon', () => {
     });
   });
 
-  it('should follow the address the daemon recorded in config/daemon.json when FY_URL is unset', async () => {
+  it('should follow the address the daemon recorded in run/daemon.json when FY_URL is unset', async () => {
     await withHome(async home => {
       const { port, seen } = daemon();
-      await mkdir(join(home, '.ferretry', 'config'), { recursive: true });
-      await writeFile(join(home, '.ferretry', 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }));
+      await recordRun(home, port);
       const world = worldFor(home, { FY_TOKEN: 'owner-token' });
       const probe = await world.probe();
       should(probe.state).equal('up');
@@ -155,8 +163,7 @@ describe('connecting to the daemon', () => {
       const dead = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('') });
       const port = dead.port as number;
       await dead.stop(true);
-      await mkdir(join(home, '.ferretry', 'config'), { recursive: true });
-      await writeFile(join(home, '.ferretry', 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }));
+      await recordRun(home, port);
       const world = worldFor(home, {});
       await should(world.connect({ asOwner: false })).be.rejectedWith(/cannot find fyd/u);
     });
@@ -167,8 +174,7 @@ describe('connecting to the daemon', () => {
       const dead = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('') });
       const port = dead.port as number;
       await dead.stop(true);
-      await mkdir(join(home, '.ferretry', 'config'), { recursive: true });
-      await writeFile(join(home, '.ferretry', 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }));
+      await recordRun(home, port);
       const spawned: string[][] = [];
       let started: ReturnType<typeof Bun.serve> | undefined;
       const world = createWorld({
@@ -203,8 +209,7 @@ describe('connecting to the daemon', () => {
       const dead = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('') });
       const port = dead.port as number;
       await dead.stop(true);
-      await mkdir(join(home, '.ferretry', 'config'), { recursive: true });
-      await writeFile(join(home, '.ferretry', 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }));
+      await recordRun(home, port);
       const world = worldFor(home, { FY_SESSION_TOKEN: 'fys_pane-credential' });
       const connection = await world.connect({ asOwner: false });
       should(connection.baseUrl).equal(`http://127.0.0.1:${String(port)}`);
@@ -240,7 +245,98 @@ describe('connecting to the daemon', () => {
       should(await runFy(['plugin', 'list'], world)).equal(0);
       should(io.stdout()).containEql('board');
       should(seen.map(request => request.path)).deepEqual(['/v1/plugins']);
-      should(surfacesOf(world.registry).compiled).deepEqual({ board: 'h-board' });
+      should(surfacesOf(world.registry).compiled).have.properties({ kernel: 'h-kernel', board: 'h-board' });
+    });
+  });
+});
+
+/** A fake network: records every URL asked for and answers like a daemon. No socket is opened. */
+function fakeNetwork(
+  answer: (url: URL) => Response = url =>
+    url.pathname === '/v1/health'
+      ? Response.json(HEALTH)
+      : url.pathname === '/v1/plugins'
+        ? Response.json(PLUGINS)
+        : Response.json({}),
+) {
+  const asked: string[] = [];
+  const fetcher = async (url: string) => {
+    asked.push(url);
+    return answer(new URL(url));
+  };
+  return { asked, fetcher };
+}
+
+describe('where each request goes (S57, S59)', () => {
+  it('S57 an address that turns remote after connecting is refused before the admin token is read or anything is sent', async () => {
+    await withHome(async home => {
+      // Arrange: a person's shell, a loopback daemon recorded in the run record, and no token file (reading it would fail
+      // with another sentence).
+      await recordRun(home, 7457);
+      const network = fakeNetwork();
+      const world = createWorld({
+        io: capturedIo(),
+        environment: {},
+        userHome: home,
+        identity: { binary: 'fy', version: '5.0.0' },
+        product: 'ferretry',
+        registry: registryOf(boardEntry()),
+        selfPath: join(home, 'bin', 'fy'),
+        process: NO_PROCESS,
+        fetcher: network.fetcher,
+      });
+      const connection = await world.connect({ asOwner: false });
+
+      // Act: the run record now names another machine.
+      await recordRun(home, 7457, 'daemon.example');
+      const error = await connection.transport
+        .send({ method: 'GET', path: '/v1/plugins' }, { repeatable: true })
+        .catch((failure: unknown) => failure);
+
+      // Assert
+      should((error as Error).message).containEql(
+        'FY_TOKEN is required when the daemon is not on this machine (http://daemon.example:7457)',
+      );
+      should(network.asked.some(url => url.includes('daemon.example'))).be.false();
+    });
+  });
+
+  it('S59 a person-only verb in a pane is refused with a real world before /v1/health is asked', async () => {
+    await withHome(async home => {
+      // Arrange: a pane with an id and no bearer; nothing recorded, so a connection would probe and try to start one.
+      const network = fakeNetwork();
+      const half = implementCli(boardManifest, {
+        build: ctx => ({
+          verbs: {
+            'card move': async () => {
+              await ctx.client.call('POST /v1/cards/:id/move', { params: { id: 'a' } });
+              return 0;
+            },
+            'card show': async () => 0,
+            board: async () => 0,
+          },
+        }),
+      });
+      const io = capturedIo();
+      const world = createWorld({
+        io,
+        environment: { FY_SESSION_ID: 'pane-3' },
+        userHome: home,
+        identity: { binary: 'fy', version: '5.0.0' },
+        product: 'ferretry',
+        registry: registryOf(entry(boardManifest, 'h-board', half)),
+        selfPath: join(home, 'bin', 'fy'),
+        process: NO_PROCESS,
+        fetcher: network.fetcher,
+      });
+
+      // Act
+      const code = await runFy(['card', 'move', 'a'], world);
+
+      // Assert
+      should(code).equal(1);
+      should(io.stderr()).containEql("this is the owner's command; a ferret's pane can't run it");
+      should(network.asked).deepEqual([]);
     });
   });
 });

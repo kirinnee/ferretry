@@ -3,12 +3,10 @@ set -euo pipefail
 
 # Typecheck every workspace project.
 #
-# The workspace is NOT one program. `packages/app` is browser code and needs the
-# DOM lib; every other package is a Node/Bun program that must NOT be able to
-# reach for `document` by accident. One `tsc --noEmit` over the whole tree would
-# have to hand the DOM to all of them, so the root project excludes the app and
-# the app is checked against its own config instead. Any other package that
-# carries its own `tsconfig.json` is checked against it too, at any depth.
+# The root includes core/plugin app halves and their app tests, with React JSX
+# and the same DOM libraries as packages/app. The shell itself is checked against
+# its own config. Any other package carrying a tsconfig is checked too, at any
+# depth. Pending app ports have explicit, documented exclusions in tsconfig.json.
 #
 # EVERY WORKSPACE PACKAGE IS CHECKED, and that is proved rather than assumed: a
 # package (from the root manifest's `workspaces` globs) with no tsconfig of its own
@@ -131,11 +129,17 @@ mapfile -t workspace_packages < <(
 )
 [ "${#workspace_packages[@]}" -eq 0 ] && echo "❌ no workspace packages found from package.json workspaces" >&2 && exit 1
 root_files="$("${tsc}" -p tsconfig.json --listFilesOnly | sed "s#^${root_dir}/##")"
+# Check every app source, not merely the first source in its workspace package.
+# A checked manifest must never hide an unchecked TSX view in that same package.
+printf '%s\n' "${root_files}" | bun scripts/validate/typecheck-apps.ts
 uncovered=()
 for package in "${workspace_packages[@]}"; do
   [ -f "${package}/tsconfig.json" ] && continue
-  # `sed -n 1p`, not `head -n 1`: head closes the pipe early and `pipefail` turns git's SIGPIPE into exit 141.
-  sources="$(git ls-files -co --exclude-standard -- "${package}/*.ts" "${package}/*.tsx" | sed -n 1p)"
+  # App sources have just been checked individually, including the exact pending-port exceptions.
+  # Use a non-app source for the package-level proof, so an explicitly pending app/index.ts is not
+  # mistaken for an entirely unchecked package. A new unchecked app file fails the check above.
+  sources="$(git ls-files -co --exclude-standard -- "${package}/*.ts" "${package}/*.tsx" |
+    awk '$0 !~ /^packages\/(core|plugins)\/[^/]+\/(app\/|tests\/(unit|support)\/app\/)/' | sed -n 1p)"
   [ -z "${sources}" ] && continue
   grep -qxF -- "${sources}" <<<"${root_files}" || uncovered+=("${package} (${sources})")
 done

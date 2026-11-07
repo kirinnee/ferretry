@@ -9,7 +9,7 @@
  * wordmark carries the accessible name.
  */
 
-import { BrandMark } from '../../shell/brand-mark.tsx';
+import { BrandMark } from '@ferretry/app/ui';
 
 export function OnboardingBrand() {
   return (

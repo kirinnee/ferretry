@@ -1,0 +1,40 @@
+• ack 8: slow five
+
+
+› hello
+
+
+
+› hey?
+
+
+• ack 10: hey?
+
+  03:39
+
+
+› hello
+
+
+• ack 11: hello
+
+  03:40
+
+
+› hihello
+
+
+• ack 13: hihello
+
+  03:40
+
+
+› slow c156
+
+
+◦ Working (3s • esc to interrupt)
+
+
+› hello
+
+  tab to queue message                                                                               100% context left

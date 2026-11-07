@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { MachineView, RunningSession } from '../../../../../../contract/index.ts';
 import type { MoveConversation } from '../../../../../../app/features/fleet/runtimes/runtime-actions-model.ts';
-// GAP(ferrets): the Runtimes tab (and the apply-change panel under it) was never assigned to an app half; it lands
-// at this path in the runtimes app, taking `client` and `moveFerret` where it took `connection` and `createClient`.
-// Load the real tab only when its pending port is ready; skipped cases retain every assertion.
 import { interact, type Mounted, mount as mountView, must, pressKey } from '../../../../support/dom.ts';
 import { chooseRuntimeAction, menuButton, openRuntimeMenu } from './runtime-menu-support.tsx';
 import {
@@ -19,6 +16,8 @@ import {
 
 const PROPOSE = 'POST /v1/runtimes/proposals';
 const APPLY = `POST /v1/runtimes/proposals/${CHANGE_ID}/apply`;
+/** The route key a call is recorded under: the template the half called, its parameter beside it. */
+const APPLY_CALL = 'POST /v1/runtimes/proposals/:proposalId/apply';
 const COMMITTED = {
   outcome: 'applied',
   apply: {
@@ -157,7 +156,7 @@ const submit = (container: ParentNode): HTMLButtonElement =>
     'submit',
   );
 
-describe.skip('Runtime actions: the buttons — pending port: runtimes-tab (ports-pending: runtimes)', () => {
+describe('Runtime actions: the buttons', () => {
   it('puts a ⋯ menu on every runtime row, with Rename and a destructive Remove inside', async () => {
     // Act
     const view = await open();
@@ -228,7 +227,7 @@ describe.skip('Runtime actions: the buttons — pending port: runtimes-tab (port
   });
 });
 
-describe.skip('Runtime actions: Rename — pending port: runtimes-tab (ports-pending: runtimes)', () => {
+describe('Runtime actions: Rename', () => {
   it('opens prefilled with the current name, saying nothing restarts', async () => {
     // Arrange
     const view = await open();
@@ -278,7 +277,7 @@ describe.skip('Runtime actions: Rename — pending port: runtimes-tab (ports-pen
 
     // Assert
     expect(proposed(calls)).toEqual([{ kind: 'runtime.rename', name: 'codex-default', to: 'codex-work' }]);
-    expect(calls.some(call => call.route === APPLY)).toBe(true);
+    expect(calls.some(call => call.route === APPLY_CALL)).toBe(true);
     expect(view.container.querySelector('[data-runtime-dialog]')).toBeNull();
     expect(window.location.hash).toBe('#machines/studio-mac/runtimes/codex-work');
   });
@@ -319,7 +318,7 @@ describe.skip('Runtime actions: Rename — pending port: runtimes-tab (ports-pen
   });
 });
 
-describe.skip('Runtime actions: Remove — pending port: runtimes-tab (ports-pending: runtimes)', () => {
+describe('Runtime actions: Remove', () => {
   it('shows the impact from a dry run first: who is running on it, and that they keep running', async () => {
     // Arrange
     const calls: Call[] = [];
@@ -356,7 +355,7 @@ describe.skip('Runtime actions: Remove — pending port: runtimes-tab (ports-pen
 
     // Assert
     expect(proposed(calls)).toHaveLength(1);
-    expect(calls.filter(call => call.route === APPLY)).toHaveLength(1);
+    expect(calls.filter(call => call.route === APPLY_CALL)).toHaveLength(1);
     expect(view.container.querySelector('[data-runtime-dialog]')).toBeNull();
   });
 
@@ -544,6 +543,13 @@ describe.skip('Runtime actions: Remove — pending port: runtimes-tab (ports-pen
         agentPermissions: 'auto',
         defaultRuntime: 'claude-agent',
         agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
+        browserMode: 'headless',
+        browserProxy: null,
+        browserPorts: 'random',
+        browserFirewallFailure: 'warn',
+        autoResume: true,
+        agendaMode: false,
+        publicUsageFeed: false,
       },
       { kind: 'runtime.remove', name: 'claude-default' },
     ]);

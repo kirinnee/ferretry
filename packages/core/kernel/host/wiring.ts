@@ -5,6 +5,7 @@ import { hostname } from 'node:os';
 import { bunSpawn, bunWebSockets, bunWorkers, globalFetch } from './adapters/process.ts';
 import { createConfigFiles } from './config/index.ts';
 import type { ConfigJudge, HostAdapters, HostConfig, PluginStateHandle } from './host.ts';
+import { acquireHomeLock } from './state/home-lock.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import {
   createNodeHostFs,
@@ -13,7 +14,7 @@ import {
   moveStateAside,
   openPluginState,
 } from './state/index.ts';
-import type { Clock, Log } from '../contract/ports.ts';
+import type { Clock, Log, StateDamage } from '../contract/ports.ts';
 import type { ConfigDef } from '../contract/define.ts';
 
 const random = (): string => crypto.getRandomValues(new Uint32Array(1))[0]?.toString(36) ?? '0';
@@ -35,6 +36,10 @@ export function stateOpener(
 ): (manifest: Manifest) => PluginStateHandle {
   return manifest => {
     const files = manifest.data?.state ?? [];
+    const listeners = new Set<(damage: readonly StateDamage[]) => void>();
+    const changed = (damage: readonly StateDamage[]): void => {
+      for (const listener of listeners) listener(damage);
+    };
     let port = createStatePort({ home, pluginId: manifest.id, files, fs, clock });
     return {
       get port() {
@@ -56,9 +61,38 @@ export function stateOpener(
           log.warn('a plugin folder in an older format was moved aside', { plugin: manifest.id });
           opening = await openPluginState({ home, pluginId: manifest.id, files, fs, clock, kind, liveTargets: true });
         }
-        port = createStatePort({ home, pluginId: manifest.id, files, fs, clock, initialDamage: opening.damaged });
+        for (const damage of opening.narrowed)
+          log.warn('a state file uses its narrower refusal', {
+            plugin: manifest.id,
+            file: damage.file,
+            reason: damage.reason,
+          });
+        port = createStatePort({
+          home,
+          pluginId: manifest.id,
+          files,
+          fs,
+          clock,
+          initialDamage: opening.damaged,
+          initialNarrowed: opening.narrowed,
+          changed,
+          report: ({ damage, policy }) =>
+            log.warn('a state file cannot be read', {
+              plugin: manifest.id,
+              file: damage.file,
+              reason: damage.reason,
+              policy,
+            }),
+        });
         return opening.damaged;
       },
+      onDamageChanged: listener => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+      narrowed: () => port.narrowed(),
       close: async () => undefined,
     };
   };
@@ -108,6 +142,7 @@ export function realAdapters(
     workers: bunWorkers(),
     websocket: bunWebSockets(),
     hostname: () => hostname(),
+    homeLock: async lockedHome => await acquireHomeLock({ home: lockedHome, binary: options.binary }),
   };
 }
 

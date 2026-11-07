@@ -222,7 +222,7 @@ file is refused**, and every write edits only the changed keys so comments survi
 `fleet/config.yaml` is refused by sentence, never converted. The contract is
 [docs/config-files.md](docs/config-files.md).
 
-**Lessons** are rules learned from ferrets ([docs/learning.md](docs/learning.md)). The passive switch only
+**Lessons** are rules learned from ferrets ([docs/lessons.md](docs/lessons.md)). The passive switch only
 decides whether a ferret is **instructed** to file them (`fy lesson suggest "<rule>" --scope global|repo`);
 the daemon attaches the evidence from the session credential, so it cannot be forged. **Accept never
 writes**: **Apply** is a separate act — a diff preview with an etag, then a write of exactly that diff into

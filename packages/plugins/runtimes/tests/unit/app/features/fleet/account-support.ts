@@ -4,7 +4,12 @@
  * runtimes); the logins, profiles and components fixtures go with the plugins that own those views.
  */
 
+import { type LoginList, LoginListSchema, type LoginStatus } from '@ferretry/plugin-logins/contract';
 import {
+  type ComponentCatalog,
+  ComponentCatalogSchema,
+  type LayeredProfileCatalog,
+  LayeredProfileCatalogSchema,
   type LayeredProfileView,
   type MachineView,
   MachineViewSchema,
@@ -12,6 +17,7 @@ import {
   RuntimeCatalogSchema,
   type RuntimeView,
 } from '../../../../../contract/index.ts';
+import type { MachineData } from '../../../../../app/features/fleet/runtimes/machine-data.ts';
 
 export { type Call, type Route, scripted } from '../../support/client.ts';
 
@@ -150,14 +156,225 @@ export const stagedFrom = (call: { readonly body: unknown }) => ({
   preview: { kind: 'apply', operations: [], documents: [], runtimes: [] },
 });
 
+const status = (word: LoginStatus['word']): LoginStatus => {
+  const table = {
+    ready: ['Ready', 'provider_accepted', 'Ready. Checked a few minutes ago.'],
+    refresh_due: [
+      'Refresh due',
+      'access_expired_refreshable',
+      'Refresh due. Ferretry renews it the next time a runtime uses it.',
+    ],
+    needs_sign_in: ['Needs sign-in', 'not_signed_in', 'Needs sign-in. Runtimes that use this login can’t launch.'],
+    checking: ['Checking', 'check_in_flight', 'Checking with the provider…'],
+  } as const;
+  const [label, reason, explanation] = table[word];
+  return { word, label, reason, explanation, lastCheckInconclusive: false };
+};
+
+export const credential = (overrides: Record<string, unknown> & { id: string }): Record<string, unknown> => ({
+  harness: 'claude-code',
+  harnesses: ['claude-code'],
+  store: 'ferretry',
+  email: 'you@example.com',
+  needsLabel: false,
+  sharedWithTerminal: false,
+  status: status('ready'),
+  usage: {
+    fiveHour: { usedPercent: 38, resetsAt: '2026-10-13T10:10:00.000Z' },
+    weekly: { usedPercent: 83, resetsAt: '2026-10-16T08:00:00.000Z' },
+    source: 'anthropic-usage',
+    at: '2026-10-13T07:58:00.000Z',
+  },
+  usedBy: [],
+  signIn: { available: true },
+  checkNow: { available: true },
+  signOut: {
+    available: true,
+    sentence: 'Sign out of you@example.com? No runtime uses it.',
+    runtimesAffected: 0,
+    signsOutTerminal: false,
+  },
+  ...overrides,
+});
+
+export const withStatus = (word: LoginStatus['word']) => ({ status: status(word) });
+
+export const CREDENTIALS: LoginList = LoginListSchema.parse({
+  format: 1,
+  machine: 'studio-mac',
+  logins: [
+    credential({
+      id: 'claude-personal',
+      store: 'host',
+      label: 'personal',
+      sharedWithTerminal: true,
+      usedBy: ['claude-default', 'claude-agent', 'claude-review'],
+      signOut: {
+        available: true,
+        sentence:
+          'Sign out of you@example.com (personal)? This also signs out claude in your terminal on studio-mac. 3 runtimes will need sign-in.',
+        runtimesAffected: 3,
+        signsOutTerminal: true,
+      },
+    }),
+    credential({
+      id: 'codex',
+      harness: 'codex',
+      harnesses: ['codex'],
+      store: 'host',
+      sharedWithTerminal: true,
+      usedBy: ['codex-default'],
+      usage: { fiveHour: {}, weekly: {} },
+    }),
+    credential({ id: 'claude-work', label: 'work', ...withStatus('refresh_due'), usedBy: ['claude-work'] }),
+  ],
+});
+
+export const profile = (overrides: Partial<LayeredProfileView> & { name: string }): LayeredProfileView => ({
+  layers: ['instructions/Main instructions', 'modelSets/Claude models'],
+  usedBy: [],
+  baseFor: [],
+  wouldIncludeItself: [],
+  scope: { kind: 'scoped', scope: 'generic' },
+  harnesses: [stack('claude-code'), stack('codex')],
+  remove: { available: true },
+  ...overrides,
+});
+
+export const PROFILES: LayeredProfileCatalog = LayeredProfileCatalogSchema.parse({
+  format: 'present',
+  profiles: [
+    profile({
+      name: 'Default',
+      layers: [
+        'instructions/Main instructions',
+        'skills/My skills',
+        'settings/Claude settings',
+        'modelSets/Claude models',
+      ],
+      usedBy: ['claude-default', 'codex-default', 'claude-work'],
+      harnesses: [
+        stack('claude-code'),
+        stack('codex', {
+          skipped: [{ reference: 'settings/Claude settings', sentence: 'Claude settings are skipped on Codex.' }],
+          partial: [{ reference: 'skills/My skills', reason: 'release-notes limits which tools it may use.' }],
+        }),
+      ],
+    }),
+    profile({
+      name: 'Claude hooks',
+      layers: ['hooks/Format on save'],
+      harnesses: [
+        stack('claude-code', { applied: ['hooks/Format on save'] }),
+        stack('codex', {
+          available: { available: false, reason: 'Only Claude settings. Nothing here applies on Codex.' },
+          applied: [],
+          skipped: [{ reference: 'hooks/Format on save', sentence: 'Claude hooks are skipped on Codex.' }],
+        }),
+      ],
+    }),
+    profile({ name: 'Agent work', layers: ['profile/Default', 'settings/Agent settings'], usedBy: ['claude-agent'] }),
+    profile({ name: 'Review', layers: ['profile/Default'], usedBy: ['claude-review'] }),
+  ],
+});
+
+const component = (
+  kind: ComponentCatalog['kinds'][number]['kind'],
+  name: string,
+  detail: ComponentCatalog['kinds'][number]['components'][number]['detail'],
+  overrides: Partial<ComponentCatalog['kinds'][number]['components'][number]> = {},
+) => ({
+  reference: `${kind}/${name}`,
+  kind,
+  name,
+  detail,
+  partial: [],
+  warnings: [],
+  usedBy: { profiles: [], runtimes: [] },
+  editNote: 'Saving changes it everywhere.',
+  remove: { available: true },
+  scope: overrides.harness ?? 'generic',
+  ...overrides,
+});
+
+export const COMPONENTS: ComponentCatalog = ComponentCatalogSchema.parse({
+  format: 'present',
+  kinds: [
+    {
+      kind: 'instructions',
+      label: 'Instructions',
+      description: 'What every session reads first.',
+      components: [
+        component('instructions', 'Main instructions', {
+          kind: 'instructions',
+          file: 'components/instructions/main.md',
+        }),
+      ],
+    },
+    {
+      kind: 'skills',
+      label: 'Skills',
+      description: 'Named abilities.',
+      components: [
+        component(
+          'skills',
+          'My skills',
+          { kind: 'skills', items: ['release-notes'] },
+          { partial: [{ harness: 'codex', reason: 'release-notes limits which tools it may use.' }] },
+        ),
+      ],
+    },
+    {
+      kind: 'settings',
+      label: 'Settings',
+      description: 'Flags and environment.',
+      components: [
+        component('settings', 'Claude settings', { kind: 'settings', env: [] }, { harness: 'claude-code' }),
+        component('settings', 'Agent settings', { kind: 'settings', env: [] }, { harness: 'claude-code' }),
+      ],
+    },
+    {
+      kind: 'hooks',
+      label: 'Hooks',
+      description: 'Commands on events.',
+      components: [
+        component(
+          'hooks',
+          'Format on save',
+          { kind: 'hooks', file: 'components/hooks/fmt.json' },
+          { harness: 'claude-code', warnings: ['Command not found: fmt-hook'] },
+        ),
+      ],
+    },
+    {
+      kind: 'modelSets',
+      label: 'Model sets',
+      description: 'Named models and a default.',
+      components: [
+        component('modelSets', 'Claude models', {
+          kind: 'modelSets',
+          models: ['Opus 5.5', 'Sonnet 5.5'],
+          default: 'Sonnet 5.5',
+        }),
+      ],
+    },
+  ],
+});
+
+export const DATA: MachineData = {
+  credentials: CREDENTIALS,
+  runtimes: RUNTIMES,
+  profiles: PROFILES,
+  components: COMPONENTS,
+};
+
 export const APPLIED = { outcome: 'executed', executor: 'setup', summary: 'Done.' };
 
-/**
- * The reads a Runtimes tab opens with and an open authority: a machine that answers everything and asks for nothing.
- * GAP(ferrets): the profiles, components and logins reads (`GET /v1/runtimes/profiles`, `/components`, Logins' list)
- * join this when the tabs that read them are ported.
- */
-export const READS = (): Record<string, unknown> => ({
-  'GET /v1/runtimes': RUNTIMES,
+/** The four reads and an open authority: a machine that answers everything and asks for nothing. */
+export const READS = (data: MachineData = DATA): Record<string, unknown> => ({
+  'GET /v1/logins': data.credentials,
+  'GET /v1/runtimes': data.runtimes,
+  'GET /v1/runtimes/profiles': data.profiles,
+  'GET /v1/runtimes/components': data.components,
   'GET /v1/runtimes/machine': machine(),
 });

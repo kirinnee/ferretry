@@ -1,46 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-let useAccountPickerSlice: typeof import('../../../app/hooks/use-account-picker.ts').useAccountPickerSlice;
-let useMachineRosters: typeof import('../../../app/hooks/use-account-picker.ts').useMachineRosters;
+import { useAccountPickerSlice } from '../../../app/hooks/use-account-picker.ts';
 import type { AccountPickerCatalog, AccountPickerHealthCatalog } from '../../../app/lib/account-picker-catalog.ts';
-type DaemonAccountPickerStore = import('../../../app/lib/account-picker-store.ts').DaemonAccountPickerStore;
-let DaemonAccountPickerStore: typeof import('../../../app/lib/account-picker-store.ts').DaemonAccountPickerStore;
-let daemonConnection: typeof import('../../../app/lib/daemon-connection.ts').daemonConnection;
+import { AccountPickerStore } from '../../../app/lib/account-picker-store.ts';
 import { interact, mount } from '../support/dom.ts';
-
-let laptop: ReturnType<typeof daemonConnection>;
-let workstation: ReturnType<typeof daemonConnection>;
-const loadPendingPicker = async (): Promise<void> => {
-  ({ DaemonAccountPickerStore } = await import('../../../app/lib/account-picker-store.ts'));
-  ({ daemonConnection } = await import('../../../app/lib/daemon-connection.ts'));
-  ({ useAccountPickerSlice, useMachineRosters } = await import('../../../app/hooks/use-account-picker.ts'));
-  laptop = daemonConnection({
-    daemonId: 'daemon/laptop',
-    baseUrl: 'https://laptop.example.test',
-    deviceId: 'token-laptop',
-  });
-  workstation = daemonConnection({
-    daemonId: 'daemon/workstation',
-    baseUrl: 'https://workstation.example.test',
-    deviceId: 'token-workstation',
-  });
-};
+import { pickerAccount } from './support/picker.ts';
 
 const catalog = (wrapper: string): AccountPickerCatalog => ({
-  accounts: [
-    {
-      id: '11111111-1111-4111-8111-111111111111',
-      kind: 'claude',
-      agent: true,
-      credentialId: `login-${wrapper}`,
-      wrapper,
-      displayName: wrapper,
-      defaultModel: 'opus',
-      models: [{ id: 'opus', available: true }],
-      available: true,
-      unavailableReason: null,
-    },
-  ],
+  accounts: [pickerAccount({ wrapper, defaultModel: 'opus', models: [{ id: 'opus', available: true }] })],
 });
 const noHealth: AccountPickerHealthCatalog = { health: new Map(), error: null };
 
@@ -50,136 +17,87 @@ const settle = async (): Promise<void> => {
   });
 };
 
+type Change = { runtimes: string[] };
+
 /** A client that only carries events: a test fires `runtimes.changed` the way the daemon would. */
 const events = () => {
-  const listeners = new Set<(payload: { runtimes: string[] }) => void>();
+  const named = new Map<string, Set<(payload: unknown) => void>>();
   return {
     client: {
-      subscribe: (_event: unknown, listener: (payload: { runtimes: string[] }) => void) => {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
+      subscribe: (event: { name: string }, listener: (payload: unknown) => void) => {
+        const set = named.get(event.name) ?? new Set();
+        set.add(listener);
+        named.set(event.name, set);
+        return () => set.delete(listener);
       },
     } as unknown as Pick<PluginClient, 'subscribe'>,
-    changed: (runtimes: string[]) =>
+    emit: (name: string, payload: unknown) =>
       interact(
         async () =>
-          void [...listeners].forEach(listener => {
-            listener({ runtimes });
+          void [...(named.get(name) ?? [])].forEach(listener => {
+            listener(payload);
           }),
       ),
+    changed: (runtimes: string[]) => {
+      const payload: Change & { profiles: string[]; modelSets: string[] } = { runtimes, profiles: [], modelSets: [] };
+      return interact(
+        async () =>
+          void [...(named.get('runtimes.changed') ?? [])].forEach(listener => {
+            listener(payload);
+          }),
+      );
+    },
   };
 };
 
 function Status({
   store,
-  daemon,
-  client = events().client,
+  client,
 }: {
-  readonly store: DaemonAccountPickerStore;
-  readonly daemon: typeof laptop;
-  readonly client?: Pick<PluginClient, 'subscribe'>;
+  readonly store: AccountPickerStore;
+  readonly client: Pick<PluginClient, 'subscribe'>;
 }) {
-  const slice = useAccountPickerSlice(store, daemon, client);
+  const slice = useAccountPickerSlice(store, client);
   return <output>{`${slice.status}:${slice.catalog?.accounts[0]?.wrapper ?? slice.error ?? '—'}`}</output>;
 }
 
-describe.skip('useAccountPickerSlice — pending port: account picker store + shell hooks (ports-pending: runtimes)', () => {
-  it('hydrates the selected daemon and replaces it without leaking the previous roster', async () => {
-    await loadPendingPicker();
-    const reads: string[] = [];
-    const store = new DaemonAccountPickerStore({
-      catalog: async daemon => {
-        reads.push(daemon.daemonId);
-        return catalog(daemon.daemonId);
-      },
+describe('useAccountPickerSlice', () => {
+  it('hydrates the roster on mount', async () => {
+    const store = new AccountPickerStore({
+      catalog: async () => catalog('claude-auto-a'),
       health: async () => noHealth,
       checkHealth: async () => noHealth,
     });
-    const mounted = await mount(<Status store={store} daemon={laptop} />);
-    expect(mounted.container.textContent).toBe('ready:daemon/laptop');
-
-    await mounted.render(<Status store={store} daemon={workstation} />);
-    expect(mounted.container.textContent).toBe('ready:daemon/workstation');
-    expect(reads).toEqual([laptop.daemonId, workstation.daemonId]);
+    const mounted = await mount(<Status store={store} client={events().client} />);
+    await settle();
+    expect(mounted.container.textContent).toBe('ready:claude-auto-a');
     await mounted.unmount();
   });
 
-  it('renders a failed read as state and does not retry an equivalent connection automatically', async () => {
-    await loadPendingPicker();
+  it('renders a failed read as state and does not retry it automatically', async () => {
     let reads = 0;
-    const store = new DaemonAccountPickerStore({
+    const store = new AccountPickerStore({
       catalog: async () => {
         reads += 1;
-        throw new Error('fleet unavailable');
+        throw new Error('runtimes unavailable');
       },
       health: async () => noHealth,
       checkHealth: async () => noHealth,
     });
-    const mounted = await mount(<Status store={store} daemon={laptop} />);
-    expect(mounted.container.textContent).toBe('error:fleet unavailable');
-
-    await mounted.render(<Status store={store} daemon={{ ...laptop }} />);
-    expect(mounted.container.textContent).toBe('error:fleet unavailable');
+    const bus = events();
+    const mounted = await mount(<Status store={store} client={bus.client} />);
+    await settle();
+    expect(mounted.container.textContent).toBe('error:runtimes unavailable');
+    await mounted.render(<Status store={store} client={bus.client} />);
     expect(reads).toBe(1);
     await mounted.unmount();
   });
 
-  it('never paints a previous roster under a re-paired connection with the same daemon id', async () => {
-    await loadPendingPicker();
-    let release!: (answer: AccountPickerCatalog) => void;
-    const pending = new Promise<AccountPickerCatalog>(resolve => {
-      release = resolve;
-    });
-    let reads = 0;
-    const store = new DaemonAccountPickerStore({
-      catalog: async () => {
-        reads += 1;
-        return reads === 1 ? catalog('first pairing') : await pending;
-      },
-      health: async () => noHealth,
-      checkHealth: async () => noHealth,
-    });
-    const mounted = await mount(<Status store={store} daemon={laptop} />);
-    expect(mounted.container.textContent).toBe('ready:first pairing');
-
-    const rotated = { ...laptop, deviceId: 'rotated-token' };
-    await mounted.render(<Status store={store} daemon={rotated} />);
-    expect(reads).toBe(2);
-    expect(mounted.container.textContent).toBe('loading:—');
-
-    await interact(async () => {
-      release(catalog('replacement pairing'));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(mounted.container.textContent).toBe('ready:replacement pairing');
-    await mounted.unmount();
-  });
-
-  it('reuses a settled roster when a parent rebuilds an equivalent connection object', async () => {
-    await loadPendingPicker();
-    let reads = 0;
-    const store = new DaemonAccountPickerStore({
-      catalog: async () => {
-        reads += 1;
-        return catalog('stable pairing');
-      },
-      health: async () => noHealth,
-      checkHealth: async () => noHealth,
-    });
-    const mounted = await mount(<Status store={store} daemon={laptop} />);
-    await mounted.render(<Status store={store} daemon={{ ...laptop }} />);
-
-    expect(mounted.container.textContent).toBe('ready:stable pairing');
-    expect(reads).toBe(1);
-    await mounted.unmount();
-  });
   it('shows a runtime added on another device without a reload, and ignores unrelated changes', async () => {
-    await loadPendingPicker();
     // Arrange — the roster was read once on mount
     let roster = 'claude-auto-before';
     let reads = 0;
-    const store = new DaemonAccountPickerStore({
+    const store = new AccountPickerStore({
       catalog: async () => {
         reads += 1;
         return catalog(roster);
@@ -188,7 +106,8 @@ describe.skip('useAccountPickerSlice — pending port: account picker store + sh
       checkHealth: async () => noHealth,
     });
     const bus = events();
-    const mounted = await mount(<Status store={store} daemon={laptop} client={bus.client} />);
+    const mounted = await mount(<Status store={store} client={bus.client} />);
+    await settle();
     expect(mounted.container.textContent).toBe('ready:claude-auto-before');
     expect(reads).toBe(1);
 
@@ -201,45 +120,20 @@ describe.skip('useAccountPickerSlice — pending port: account picker store + sh
     roster = 'codex-auto-added';
     await bus.changed(['codex-auto-added']);
     await settle();
-
-    // Assert
     expect(mounted.container.textContent).toBe('ready:codex-auto-added');
     expect(reads).toBe(2);
 
-    // GAP(logins): a login moving changes each runtime's health, but Logins' contract has no change event to hear yet.
-    await mounted.unmount();
-  });
-});
-
-describe.skip('useMachineRosters — pending port: account picker store + shell hooks (ports-pending: runtimes)', () => {
-  function Rosters({
-    store,
-    machines,
-  }: {
-    readonly store: DaemonAccountPickerStore;
-    readonly machines: (typeof laptop)[];
-  }) {
-    const rosters = useMachineRosters(store, machines);
-    return <output>{machines.map(machine => rosters.get(machine.daemonId)?.[0]?.wrapper ?? '—').join(' ')}</output>;
-  }
-
-  it('reads every listed machine’s roster through its own pairing and keeps each under its own id', async () => {
-    await loadPendingPicker();
-    const reads: string[] = [];
-    const store = new DaemonAccountPickerStore({
-      catalog: async daemon => {
-        reads.push(daemon.daemonId);
-        if (daemon.daemonId === workstation.daemonId) throw new Error('no roster here');
-        return catalog(daemon.daemonId);
-      },
-      health: async () => noHealth,
-      checkHealth: async () => noHealth,
-    });
-    const mounted = await mount(<Rosters machines={[laptop, workstation]} store={store} />);
+    // The default moving is a roster change too.
+    roster = 'codex-auto-default';
+    await bus.emit('runtimes.default-changed', { defaultRuntime: 'codex-auto-default' });
     await settle();
-    // The workstation's roster is unread, so its rows name no account — never the laptop's.
-    expect(mounted.container.textContent).toBe('daemon/laptop —');
-    expect([...reads].sort()).toEqual([laptop.daemonId, workstation.daemonId].sort());
+    expect(mounted.container.textContent).toBe('ready:codex-auto-default');
+
+    // A sign-in changing re-reads the roster too: the picker's health rows come from it.
+    roster = 'codex-auto-signed-in';
+    await bus.emit('logins.changed', { loginId: 'codex' });
+    await settle();
+    expect(mounted.container.textContent).toBe('ready:codex-auto-signed-in');
     await mounted.unmount();
   });
 });

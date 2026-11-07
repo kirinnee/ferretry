@@ -1,0 +1,24 @@
+✻ Churned for 8s · done 4:55 AM
+
+❯ Use the AskUserQuestion tool exactly once, right now, with exactly these two
+  questions. Q1 header "Colour", question "Which colour should the banner
+  use?", multiSelect false, options: "Red" / "Warm and loud.", "Blue" / "Calm
+  and quiet.". Q2 header "Extras", question "Which extras should ship with the
+  banner?", multiSelect true, options: "Shadow" / "Adds a drop shadow.",
+  "Border" / "Adds a thin border.", "Icon" / "Adds a leading icon.". After I
+  answer, reply with exactly what I chose and stop.
+────────────────────────────────────────────────────────────────────────────────
+←  ☐ Colour  ☐ Extras  ✔ Submit  →
+
+Which colour should the banner use?
+
+❯ 1. Red
+     Warm and loud.
+  2. Blue
+     Calm and quiet.
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+

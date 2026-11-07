@@ -48,7 +48,9 @@ export class EventBus {
       }
       for (const subscriber of this.subscribers.get(event.name) ?? []) {
         void Promise.resolve()
-          .then(() => subscriber.fn(value))
+          .then(() => {
+            if (this.subscribers.get(event.name)?.includes(subscriber)) return subscriber.fn(value);
+          })
           .catch(() => this.log.warn('a subscriber failed', { event: event.name, plugin: subscriber.plugin }));
       }
     });

@@ -1,5 +1,6 @@
 import type { Clock, StatePort } from '@ferretry/kernel/contract';
 import {
+  MAX_SECRETS_PER_DAEMON,
   SECRET_CIPHER_ALGORITHM,
   SECRET_IV_BYTES,
   type SealedDocument,
@@ -133,6 +134,9 @@ export class KernelSealedDocuments implements SealedDocumentsApi {
         named(name);
         await inTurn(async () => {
           const current = await read();
+          // Today's `SecretDirectory.write`: a NEW name past the daemon's limit is refused before anything is sealed.
+          if (current.entries[name] === undefined && Object.keys(current.entries).length >= MAX_SECRETS_PER_DAEMON)
+            throw new SecretStoreError('full', `this daemon already holds ${MAX_SECRETS_PER_DAEMON} secrets`);
           const iv = owned(this.randomIv());
           const sealed = await crypto.subtle.encrypt(
             { name: 'AES-GCM', iv, additionalData: aad(name) },

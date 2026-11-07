@@ -1,0 +1,62 @@
+"claude-haiku-5-5" isn't described by this version's model catalog; update Claud
+e Code, or map it with behavesAs on a modelPicker row (or modelOverrides, if it
+is a provider id of a model this version knows). Until then auto-compact keeps t
+his session within 200k tokens (the context window it assumes); if the model acc
+epts more, append [1m] to the model name for 1M; CLAUDE_CODE_DISABLE_UNKNOWN_MOD
+EL_WINDOW_ENFORCEMENT=1 restores the previous wait-for-the-API behavior.
+ ▐▛███▛█   Claude Code v2.1.281
+▝▜██████▀  claude-haiku-5-5 · Claude Max
+  ▝▝ ▝▝    /…/3284570e-a16b-47ed-aa17-90ebfb7d068d/scratchpad/qa
+
+
+❯ Use the AskUserQuestion tool exactly once, right now, with exactly these four
+  questions. Copy every question, header, option label and option description
+  verbatim, multiSelect false for all: [{"question":"Thu 5 Nov at the harbour
+  office: Pastry Cart + Autumn Breakfast (09:00), Drop-In Puzzle Corner (10:30)
+  and the 'Little Kitchen Garden' lunch (12:00). These are office socials sent
+  to 120 people. Are you going
+  in?","header":"Socials","options":[{"label":"Decline all
+  3","description":"Working from home on Thu. Declines the breakfast, the
+  puzzle corner and the lunch"},{"label":"Accept all 3","description":"Going
+  into the office on Thu for the morning and lunch"},{"label":"Lunch
+  only","description":"Accept the 12:00 lunch, decline the breakfast and the
+  puzzle corner"}]},{"question":"Thu 5 Nov, 09:30–10:30: Platform & Tools
+  Weekly (40 people, organiser Sam Rivera). The same series repeats every Thurs
+  day.","header":"Weekly","options":[{"label":"Accept","description":"Accept
+  this Thursday only"},{"label":"Decline","description":"Decline this Thursday
+  only"},{"label":"Maybe","description":"Mark as tentative"}]},{"question":"Thu
+  5 Nov: the Morning Meet & Greet has moved to 10:30–10:45 that day only
+  (Alex). Accept the new time?","header":"Meet&Greet","options":[{"label":"Acce
+  pt","description":"Accept the 10:30
+  slot"},{"label":"Decline","description":"Skip it this one
+  day"}]},{"question":"Thu 5 Nov, 18:00–19:00: Infra Sprint Planning (5 people,
+  organiser Jordan Lee).","header":"Sprint
+  plan","options":[{"label":"Accept","description":"Attend sprint
+  planning"},{"label":"Decline","description":"Decline this
+  one"},{"label":"Maybe","description":"Mark as tentative"}]}] After I answer,
+  reply with exactly what I chose, one line per header, and stop.
+
+● User answered Claude's questions:
+  ⎿  · Thu 5 Nov at the harbour office: Pastry Cart + Autumn Breakfast (09:00),
+     Drop-In Puzzle Corner (10:30) and the 'Little Kitchen Garden' lunch
+     (12:00). These are office socials sent to 120 people. Are you going in? →
+     Decline all 3
+     · Thu 5 Nov, 09:30–10:30: Platform & Tools Weekly (40 people, organiser Sam
+     Rivera). The same series repeats every Thursday. → Accept
+     · Thu 5 Nov: the Morning Meet & Greet has moved to 10:30–10:45 that day
+     only (Alex). Accept the new time? → Accept
+     · Thu 5 Nov, 18:00–19:00: Infra Sprint Planning (5 people, organiser Jordan
+     Lee). → Maybe
+
+✶ Vibing… (6s · ↓ 1.2k tokens)
+
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  👤 owner │ 🤖 claude-haiku-5-5 │ 📂 qa
+  ⏱ 1s │ 📊 25% (50k/200k) │ 💰 $0.01
+  ⏳ 5h 7% │ 📅 wk 2%
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+                                                              ● high · /effort
+
+

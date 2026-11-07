@@ -36,7 +36,7 @@ export type BuiltHalf =
 
 const NONE: BuiltHalf = Object.freeze({ kind: 'skeleton' });
 
-export function buildHalf(entry: SurfaceEntry, client: ShellPluginClient): BuiltHalf {
+function buildHalf(entry: SurfaceEntry, client: ShellPluginClient): BuiltHalf {
   const half = entry.app;
   if (half === undefined || half.skeleton === true || half.build === undefined) return NONE;
   let built: AppHalf<Manifest>;
@@ -91,6 +91,7 @@ export class HalfCache {
  * Renderer keys (§5.2): `ask:<source>` and `reference:<prefix>`, each a provide hook of the app. One provider per
  * key; a second plugin offering the same key is a manifest conflict the generator refuses, so the first wins here.
  */
+/** @public The renderer-key owner table the reference and ask renderers look a key up in (§5.2); not drawn by the frame yet. */
 export function rendererOwners(surfaces: readonly SurfaceEntry[]): ReadonlyMap<string, string> {
   const owners = new Map<string, string>();
   for (const entry of surfaces) {

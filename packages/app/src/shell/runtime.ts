@@ -5,6 +5,7 @@ import type { DaemonTransport } from '../client/transport.ts';
 import type { DaemonList, PairedDaemon } from '../daemons/daemon-list.ts';
 import { type BuiltHalf, HalfCache } from '../surfaces/halves.ts';
 import { indexSurfaces, type SurfaceEntry } from '../surfaces/registry.ts';
+import { DaemonLayouts } from '../layout/daemon-layout.ts';
 
 /**
  * THE SHELL'S RUNTIME: one generated client per paired daemon, started on first use; the halves built against it;
@@ -38,6 +39,9 @@ export class ShellRuntime {
   readonly #connect: TransportFactory;
   readonly #connections = new Map<string, Connection>();
   readonly #halves: HalfCache;
+  readonly #packageClients = new Map<string, ShellPluginClient>();
+  /** The owner's layout per daemon (the Layouts plugin), read through each daemon's guarded client. */
+  readonly layouts: DaemonLayouts;
   readonly #listeners = new Set<() => void>();
   #version = 0;
 
@@ -48,6 +52,7 @@ export class ShellRuntime {
     this.daemons = options.daemons;
     this.#connect = options.connect;
     this.#halves = new HalfCache(this.byId, (daemon, id) => this.#clientFor(daemon, id));
+    this.layouts = new DaemonLayouts(this);
     this.daemons.registerCache({ clearDaemon: daemon => this.#drop(daemon) });
     this.daemons.subscribe(() => this.#changed());
   }
@@ -108,6 +113,20 @@ export class ShellRuntime {
     return this.#halves.get(daemon, packageId);
   }
 
+  /**
+   * The guarded client one package talks through on a daemon, only once it is allowed there; the same object for as
+   * long as that connection lives, so a watcher can tell a replaced client from the one it holds.
+   */
+  packageClient(daemon: string, packageId: string): ShellPluginClient | undefined {
+    if (this.standing(daemon, packageId).state !== 'allowed') return undefined;
+    const key = `${daemon}\u0000${packageId}`;
+    const known = this.#packageClients.get(key);
+    if (known !== undefined) return known;
+    const client = this.#clientFor(daemon, packageId);
+    if (client !== undefined) this.#packageClients.set(key, client);
+    return client;
+  }
+
   async #open(paired: PairedDaemon): Promise<void> {
     let transport: DaemonTransport | undefined;
     try {
@@ -140,6 +159,10 @@ export class ShellRuntime {
     if (connection?.kind === 'connected') connection.client.stop();
     this.#connections.delete(daemon);
     this.#halves.clearDaemon(daemon);
+    for (const key of [...this.#packageClients.keys()]) {
+      if (key.startsWith(`${daemon}\u0000`)) this.#packageClients.delete(key);
+    }
+    this.layouts.stop(daemon);
   }
 
   #changed(): void {

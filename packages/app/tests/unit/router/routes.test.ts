@@ -18,6 +18,24 @@ describe('routes', () => {
     expect(table.parse('/d/d1/settings/board')).toEqual({ kind: 'daemon-settings', daemon: 'd1', tab: 'board' });
   });
 
+  test('a settings tab is addressed by its plugin and its own id', () => {
+    expect(table.parse('/d/d1/settings/runtimes/model-sets')).toEqual({
+      kind: 'daemon-settings',
+      daemon: 'd1',
+      tab: 'runtimes',
+      tabId: 'model-sets',
+    });
+    expect(table.parse('/d/d1/settings/runtimes/model%20sets')).toMatchObject({ tabId: 'model sets' });
+    expect(table.parse('/d/d1/settings/runtimes/a/b')).toEqual({
+      kind: 'not-found',
+      path: '/d/d1/settings/runtimes/a/b',
+    });
+    expect(table.parse('/d/d1/settings/%E0%A4%A/x')).toEqual({
+      kind: 'not-found',
+      path: '/d/d1/settings/%E0%A4%A/x',
+    });
+  });
+
   test('a per-daemon screen carries its daemon and decoded params', () => {
     expect(table.parse('/d/d1/board/F%2012')).toEqual({
       kind: 'screen',
@@ -47,5 +65,7 @@ describe('routes', () => {
     expect(table.href(join, {})).toBe('/join');
     expect(() => table.href(card, {}, 'd1')).toThrow('needs "card"');
     expect(daemonSettingsHref('d1', 'board')).toBe('/d/d1/settings/board');
+    expect(daemonSettingsHref('d1', 'runtimes', 'model-sets')).toBe('/d/d1/settings/runtimes/model-sets');
+    expect(daemonSettingsHref('d 1')).toBe('/d/d%201/settings');
   });
 });

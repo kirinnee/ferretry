@@ -11,11 +11,6 @@ const hosted = async (runtime?: FerretRuntimeSubsystem) =>
   await hostRuntimes({
     catalog: {} as RuntimesAssembly['catalog'],
     setup: {} as RuntimesAssembly['setup'],
-    recommend: {
-      recommend: async () => {
-        throw new Error('unused');
-      },
-    },
     runtime,
   });
 

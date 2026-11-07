@@ -9,6 +9,7 @@
  */
 
 import { type ApiResponse, finalised } from '../../../contract/http.ts';
+import { isPublishedResponse } from '../../responses.ts';
 import { encodeDaemonRecord, responseRecords } from './records.ts';
 
 export interface AnswerRecord {
@@ -37,8 +38,19 @@ function snapshot(response: ApiResponse): ApiResponse {
   };
 }
 
+function sameAnswer(left: ApiResponse, right: ApiResponse): boolean {
+  if (left.status !== right.status || left.body !== right.body) return false;
+  // Header order affects the wire envelope. A plain source may own and mutate its backing map.
+  const entries = [...right.headers];
+  return (
+    left.headers.size === entries.length &&
+    [...left.headers].every(([key, value], index) => entries[index]?.[0] === key && entries[index]?.[1] === value)
+  );
+}
+
 export function answerRecords(id: number, response: ApiResponse): readonly AnswerRecord[] {
-  let source = finalised(response);
+  const initial = finalised(response);
+  let source = response.late === undefined || isPublishedResponse(initial) ? initial : snapshot(initial);
   const render = (answer: ApiResponse): readonly Uint8Array[] => responseRecords(id, answer).map(encodeDaemonRecord);
   let encoded = render(snapshot(source));
   return encoded.map((plaintext, index) => ({
@@ -50,11 +62,14 @@ export function answerRecords(id: number, response: ApiResponse): readonly Answe
           permit: (): boolean => {
             try {
               const next = finalised(response);
-              // A late source returns the SAME publication until it changes (R515), so an unchanged answer
-              // costs one identity comparison; any other answer is rendered again and compared byte for byte.
-              if (next !== source) {
-                source = next;
-                encoded = render(snapshot(next));
+              // Only a nominal kernel publication proves immutability. Copy and compare plain sources,
+              // including a source that returns the same object after editing its headers (R515–R517).
+              if (
+                next !== source &&
+                (isPublishedResponse(source) || isPublishedResponse(next) || !sameAnswer(source, next))
+              ) {
+                source = isPublishedResponse(next) ? next : snapshot(next);
+                encoded = render(source);
               }
               const again = encoded[index];
               return again !== undefined && sameBytes(again, plaintext);

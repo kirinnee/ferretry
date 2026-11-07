@@ -1,6 +1,6 @@
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { AskSummarySchema } from '@ferretry/core-asks/contract';
+import { AskItemSchema, AskListSnapshotSchema } from '@ferretry/core-asks/contract';
 import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 /** The id the daemon agenda goes by: the daemon's own ledger for notices that belong to no ferret. */
@@ -38,15 +38,15 @@ export const AgendaOpenQuerySchema = z.strictObject({
 export type AgendaOpenQuery = z.infer<typeof AgendaOpenQuerySchema>;
 
 /** One ferret's asks in the roll-up: every ask still open or parked (snoozed or replied). */
-export const AgendaOpenFerretSchema = z.strictObject({
-  ferret: FerretIdSchema,
-  asks: z.array(AskSummarySchema).min(1),
+export const AgendaOpenSessionSchema = z.strictObject({
+  sessionId: z.string().min(1),
+  items: z.array(AskItemSchema).min(1).max(20),
 });
-export type AgendaOpenFerret = z.infer<typeof AgendaOpenFerretSchema>;
+export type AgendaOpenSession = z.infer<typeof AgendaOpenSessionSchema>;
 
 /** One page, in ferret-id order. A ferret is never split across pages; `next` is the `after` for the following page. */
 export const AgendaOpenPageSchema = z.strictObject({
-  ferrets: z.array(AgendaOpenFerretSchema),
+  sessions: z.array(AgendaOpenSessionSchema),
   next: z.string().min(1).optional(),
 });
 export type AgendaOpenPage = z.infer<typeof AgendaOpenPageSchema>;
@@ -63,17 +63,22 @@ export const AgendaClearAgentsResultSchema = z.strictObject({
 export type AgendaClearAgentsResult = z.infer<typeof AgendaClearAgentsResultSchema>;
 
 // ─── the daemon agenda ───────────────────────────────────────────────────────────────────────────────────────────
-export const DaemonAgendaSchema = z.strictObject({
-  asks: z.array(AskSummarySchema),
-  resolved: z.array(AskSummarySchema),
-});
+export const DaemonAgendaSchema = AskListSnapshotSchema;
 export type DaemonAgenda = z.infer<typeof DaemonAgendaSchema>;
 /** The owner's few verbs on the daemon agenda: dismiss, snooze, unsnooze, resolve. Raising and editing are the daemon's. */
 export const DaemonAgendaActionSchema = z.discriminatedUnion('action', [
-  z.strictObject({ action: z.literal('dismiss'), ask: z.string().min(1) }),
-  z.strictObject({ action: z.literal('snooze'), ask: z.string().min(1), until: InstantSchema }),
-  z.strictObject({ action: z.literal('unsnooze'), ask: z.string().min(1) }),
-  z.strictObject({ action: z.literal('resolve'), ask: z.string().min(1) }),
+  z.strictObject({
+    action: z.literal('dismiss'),
+    id: z.string().regex(/^A[1-9][0-9]*$/u),
+    note: z.string().max(64_000).optional(),
+  }),
+  z.strictObject({ action: z.literal('snooze'), id: z.string().regex(/^A[1-9][0-9]*$/u), until: InstantSchema }),
+  z.strictObject({ action: z.literal('unsnooze'), id: z.string().regex(/^A[1-9][0-9]*$/u) }),
+  z.strictObject({
+    action: z.literal('resolve'),
+    id: z.string().regex(/^A[1-9][0-9]*$/u),
+    note: z.string().max(64_000).optional(),
+  }),
 ]);
 export type DaemonAgendaAction = z.infer<typeof DaemonAgendaActionSchema>;
 
@@ -114,3 +119,50 @@ export const AgendaConfigSchema = z.strictObject({
   deadlineWarnHours: z.number().positive().default(3),
 });
 export type AgendaConfig = z.infer<typeof AgendaConfigSchema>;
+
+// ─── seen: the owner opened an ask ───────────────────────────────────────────────────────────────────────────────
+/** The tag an ask's buzz goes out under: its own, so opening the ask can take down exactly that line on every device. */
+export const agendaAskBuzzTag = (ferret: string, ask: string): string => `agenda-${ferret}:${ask}`;
+/** The tag a stop's buzz goes out under: it is about the ferret, not one ask. */
+export const agendaStopBuzzTag = (ferret: string): string => `agenda-${ferret}`;
+/** Where a buzz opens: the ask's own page in the app (`/agenda/:ferret/:ask`). */
+export const agendaAskPath = (ferret: string, ask: string): string =>
+  `/agenda/${encodeURIComponent(ferret)}/${encodeURIComponent(ask)}`;
+
+/**
+ * `POST /v1/push/seen`: the owner opened an ask in the app, so its buzz comes down on every OTHER device. Names the ask
+ * and nothing more; which device asked is the credential's, never the body's.
+ */
+export const PushSeenRequestSchema = z.strictObject({
+  /** A board's id: a ferret's, or the daemon agenda's. */
+  sessionId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u, 'a board id'),
+  agendaId: z.string().regex(/^A[1-9][0-9]*$/u, 'an ask id is A and a number'),
+});
+export type PushSeenRequest = z.infer<typeof PushSeenRequestSchema>;
+
+/** The most tags one `seen` answers (an ask's own, and the ferret's stop tag). */
+export const PUSH_SEEN_MAX_TAGS = 8;
+const BuzzTagSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .regex(/^[^\p{Cc}\p{Cf}\s]+$/u);
+/** Whether a clear went out, and the tags it named (empty when nothing of that ask's was still up). */
+export const PushSeenResponseSchema = z.strictObject({
+  cleared: z.boolean(),
+  tags: z.array(BuzzTagSchema).max(PUSH_SEEN_MAX_TAGS),
+});
+export type PushSeenResponse = z.infer<typeof PushSeenResponseSchema>;
+
+// ─── the per-ferret switch ───────────────────────────────────────────────────────────────────────────────────────
+/** `state/agenda/modes.json`: each ferret's own recorded agenda mode. A recorded value always wins over the default. */
+export const AGENDA_MODES_FORMAT = 1;
+export const ModesFileSchema = z.strictObject({
+  format: z.literal(AGENDA_MODES_FORMAT),
+  modes: z.record(z.string(), z.strictObject({ enabled: z.boolean(), at: InstantSchema })),
+});
+export type ModesFile = z.infer<typeof ModesFileSchema>;
+
+/** The push text limits (a lock screen shows little): title and body are clipped at a word. */
+export const AGENDA_PUSH_TITLE_LENGTH = 40;
+export const AGENDA_PUSH_BODY_LENGTH = 120;

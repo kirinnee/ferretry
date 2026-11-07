@@ -79,3 +79,16 @@ export const FerretDetailsFiles = defineState({
   mode: 0o600,
   onDamaged: { narrower: 'a damaged details.json reads as no start options and no title' },
 });
+
+/**
+ * What a finished ferret handed back with `signal done`: `state/ferrets/<ferret>/summary.md`, beside its `ferret.json`
+ * (today's session `summary.md`, written by the signal's `FileSignalArtifacts.writeSummary`). Text as the ferret wrote
+ * it, never parsed here: `FerretsApi.summary` hands it to a reader that masks it inside one `Redaction.read`.
+ */
+export const FerretSummaryFiles = defineState<'summary', Uint8Array>({
+  name: 'summary',
+  path: '*/summary.md',
+  store: 'opaque',
+  format: 1,
+  mode: 0o600,
+});

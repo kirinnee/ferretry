@@ -1,0 +1,30 @@
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binarie
+s under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/claude-1000/codexprobe/ch"))
+[2m╭───────────────────────────────────────────────────────────────╮[0m
+[2m│ [0;1m[38;2;99;168;248m✨ Update available![0m [1m0.156.1 -> 0.163.0[0;2m                       │[0m
+[2m│ [0mSee [4m[38;2;99;168;248m]8;;https://github.com/openai/codex\https://github.com/openai/codex[0m]8;;\ for installation options.[2m │[0m
+[2m│                                                               │[0m
+[2m│ [0mSee full release notes:[2m                                       │[0m
+[2m│ [0;4m[38;2;99;168;248m]8;;https://github.com/openai/codex/releases/latest\https://github.com/openai/codex/releases/latest[0;2m]8;;\               │[0m
+[2m╰───────────────────────────────────────────────────────────────╯[0m
+
+[2m╭────────────────────────────────────────────╮[0m
+[2m│ >_ [0;1mOpenAI Codex[0;2m (v0.156.1)                 │[0m
+[2m│                                            │[0m
+[2m│ model:     [0mgpt-5[2m   [0m[38;2;99;168;248m/model[2m[39m to change        │[0m
+[2m│ directory: [0m/work/project[2m │[0m
+[2m╰────────────────────────────────────────────╯[0m
+
+  [1mTip:[0m [3mNew[0m Build faster with Codex.
+
+
+[1m›[0m hello there
+
+  [38;2;246;226;183mgpt-5 default[39m · [38;2;171;223;167m/work/project[39m                          ⚠ [38;2;196;167;103m1 warning[39m · [1mf2[0m to view
+
+
+
+
+
+
+

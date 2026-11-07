@@ -29,7 +29,7 @@ laundered a defect into something every gate was right to pass.
 | Script                    | Runs as                                  | Enforces                                                                                                         |
 | ------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `action-pins.sh`          | `a-action-pins-trusted`, `…-non-trusted` | GitHub Action pinning policy                                                                                     |
-| `cli-contracts.sh`        | `a-cli-contracts`                        | the 14 workspace/CLI/release contracts below                                                                     |
+| `cli-contracts.sh`        | `a-cli-contracts`                        | the 15 workspace/CLI/release contracts below                                                                     |
 | `commit-msg.sh`           | `a-commit-msg` (`commit-msg` stage)      | conventional commit subjects                                                                                     |
 | `conflict-markers.sh`     | `a-conflict-markers`                     | marker shapes occur only in explicitly declared teaching docs                                                    |
 | `contract-registry.sh`    | `a-contract-registry`                    | executable, documented and wired contract inventories agree                                                      |
@@ -70,6 +70,7 @@ key first, so the checks survive a rename ([Architecture](../architecture/index.
 | `installer-timeouts`       | every `curl` in `scripts/release/` carries `--connect-timeout` and `--max-time`                                                                                                                             |
 | `installation-parity`      | the archive naming, the installer, `INSTALLATION.md` and the `/get-started` page describe the same artifacts and commands — docs cannot drift from what is published                                        |
 | `release-daemon`           | every release archive, system package, cask and normal installer carries both independently declared executables                                                                                            |
+| `release-helpers`          | the browser worker is the Browsers package's `bin`, and `compile.sh --list`, the GoReleaser shim, the smoke and the Nix daemon package all ship it beside `fyd`; the smoke refuses a target without it      |
 | `released-version`         | `VERSION`, both shipped package manifests, the bump script and release assets stamp the same released version                                                                                               |
 | `nix-packages`             | the Nix default package and flake check build the joined CLI-and-daemon release bundle                                                                                                                      |
 

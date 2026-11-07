@@ -61,7 +61,8 @@ then deletes every token, client secret and record the sign-in left.
   server gets its own callback address — a path on the PWA, a port on loopback — and `iss` is required whenever the provider advertises
   `authorization_response_iss_parameter_supported` (RFC 9207). See [the callback rules](#the-rules-a-pasted-or-delivered-address-must-pass).
 - **Spending the refresh token from outside.** The refresh token and any client secret are kept in a
-  separate sealed document (`state/mcp-oauth-secrets.json`, same key as the vault). No route lists
+  separate sealed document, MCP's own `store: 'secret'` file `state/mcp/oauth-secrets.json`, sealed under the
+  vault's key and opened only through the vault's sealed-document port. No route lists
   them, `POST /v1/secrets/use` cannot spend them, and `${secret:…}` cannot resolve them. Only the
   sign-in service reads them, and only to send them to the token or revocation endpoint of the
   provider that issued them.
@@ -283,22 +284,22 @@ The address carries an authorization code, so it is treated like the Codex link
 
 ## Where the tokens live
 
-| Name                        | Store                                     | Holds                                                                               |
-| --------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------- |
-| `MCP_<NAME>_<HASH>_ACCESS`  | the secret store (`state/secrets.json`)   | the access token                                                                    |
-| `MCP_<NAME>_<HASH>_REFRESH` | internal (`state/mcp-oauth-secrets.json`) | the refresh token, when the provider issued one                                     |
-| `MCP_CLIENT_<HASH>`         | internal                                  | a client secret, when registration returned one                                     |
-| the name you chose          | the secret store                          | a [hand-registered client](#a-client-registered-by-hand)'s secret, by `${secret:…}` |
+| Name                        | Store                                                        | Holds                                                                               |
+| --------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `MCP_<NAME>_<HASH>_ACCESS`  | the secret store (`state/vault/vault.json`)                  | the access token                                                                    |
+| `MCP_<NAME>_<HASH>_REFRESH` | internal (`store: 'secret'`, `state/mcp/oauth-secrets.json`) | the refresh token, when the provider issued one                                     |
+| `MCP_CLIENT_<HASH>`         | internal                                                     | a client secret, when registration returned one                                     |
+| the name you chose          | the secret store                                             | a [hand-registered client](#a-client-registered-by-hand)'s secret, by `${secret:…}` |
 
 `<NAME>` is the component name upper-cased with every other character turned into `_` (at most 16
 characters). `<HASH>` is 16 hex digits of SHA-256 over the component's exact name **and the server's
 canonical address**, so `my-server` and `my_server` never share a token, and neither does one component
-at two addresses. The derivation has one owner, `mcpOAuthSecretNames` in `@ferretry/protocol`, which
+at two addresses. The derivation has one owner, `mcpOAuthSecretNames` in `packages/plugins/mcp/contract/rules.ts`, which
 the fleet's materialiser and the daemon both call. The access token is an ordinary secret: it appears by
 name in **Settings → Secrets**, it is redacted from transcripts, and no route returns it.
 
 What is not secret — the issuer, the endpoints, the client id, the scope, the expiry — is kept in
-`state/mcp-oauth.json`, which never holds a value from either store.
+`state/mcp/oauth.json`, which never holds a value from either store.
 
 ## How an agent uses the token
 
@@ -321,6 +322,11 @@ Both harness behaviours are INFERRED from their documentation, like the rest of 
 A server marked `auth: oauth` that has never been signed in — or has moved to another address since —
 **refuses the launch** with the missing secret's name, the store's ordinary rule. A blank
 `Authorization` header would fail twenty minutes later with nothing to point at.
+
+The launch names each token by reference, and the store opens the references only as the runtime starts.
+So a **sign-out that races a launch refuses that launch**: the token was there when the launch named it
+and is gone when the store opens it. The refusal names the secret, never its value. The window is short,
+and starting the ferret again works.
 
 ## Refresh: on use only
 

@@ -1,6 +1,5 @@
 import type { VerbInvocation } from '@ferretry/kernel/manifest';
 import type { AccountCommandDeps } from './fleet/account-ports.ts';
-import { runRecommend } from './fleet/recommend.ts';
 import { modelSetAdd, modelSetEdit, modelSetLs, modelSetRm, modelSetShow } from './model-set/commands.ts';
 import { profileBuild, profileEdit, profileLs, profileRm, profileShow } from './profile/commands.ts';
 import {
@@ -13,7 +12,7 @@ import {
   runtimeSet,
   runtimeShow,
 } from './runtime/commands.ts';
-import { runtimeImport, runtimeScan } from './setup/commands.ts';
+import { runtimeLink, runtimeScan } from './setup/commands.ts';
 
 /** One verb: it prints through `deps.out`, sets the exit code there and refuses by throwing an `AccountCommandError`. */
 export type VerbBody = (deps: AccountCommandDeps, invocation: VerbInvocation) => Promise<void>;
@@ -28,9 +27,8 @@ export const VERB_BODIES = {
   'runtime enable': runtimeEnable,
   'runtime rename': runtimeRename,
   'runtime rm': runtimeRm,
-  'runtime import': runtimeImport,
+  'runtime link': runtimeLink,
   'runtime scan': runtimeScan,
-  recommend: runRecommend,
   'profile ls': profileLs,
   'profile show': profileShow,
   'profile build': profileBuild,
