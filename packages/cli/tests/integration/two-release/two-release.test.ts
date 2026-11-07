@@ -28,6 +28,7 @@ import { PluginPausedError } from '../../../src/lib/guard.ts';
 import { runFy } from '../../../src/lib/run.ts';
 import { ToolClient } from '../../../src/lib/tool-client.ts';
 import { capturedIo } from '../../unit/fakes.ts';
+import { expectFyExit, type FyRun } from '../support/fy-run-report.ts';
 import { waitFor } from '../support/wait-for.ts';
 
 const CORE_IDS = ['kernel', 'gate', 'asks', 'vault', 'ferrets', 'access'] as const;
@@ -73,8 +74,11 @@ function gap(id: 'G1' | 'G2' | 'G3', what: string, detail: string): Error {
 interface Session {
   readonly daemon: StartedDaemon;
   readonly proxy: RecordingProxy;
-  /** Runs one `fy` invocation of release A against this daemon. */
-  fy(argv: readonly string[]): Promise<{ readonly code: number; readonly out: string; readonly err: string }>;
+  /**
+   * Runs one `fy` invocation of release A against this daemon. With `expectedCode`, a run that exits otherwise throws
+   * carrying its masked, bounded stderr and stdout (the cause of a red run is otherwise invisible in CI).
+   */
+  fy(argv: readonly string[], expectedCode?: number): Promise<FyRun>;
   /** The guarded client deps a verb or a ferret's tool call stands on. */
   deps(): Promise<ClientDeps>;
   stop(): Promise<void>;
@@ -111,10 +115,11 @@ async function attach(daemon: StartedDaemon, proxy: RecordingProxy): Promise<Ses
   return {
     daemon,
     proxy,
-    fy: async argv => {
+    fy: async (argv, expectedCode) => {
       const io = capturedIo();
       const code = await runFy(argv, worldFor(io));
-      return { code, out: io.stdout(), err: io.stderr() };
+      const run = { code, out: io.stdout(), err: io.stderr() };
+      return expectedCode === undefined ? run : expectFyExit(argv, run, expectedCode, [token]);
     },
     deps: async () => {
       const connection = await worldFor().connect({ asOwner: false });
@@ -210,12 +215,12 @@ describe('(a) nothing changed: fy of this commit against a daemon of this commit
   test('`fy delta show` and `fy alpha show` exit 0 with the plugin’s own answer, after one inventory read', async () => {
     resetCounters();
     session.proxy.reset();
-    const delta = await session.fy(['delta', 'show']);
+    const delta = await session.fy(['delta', 'show'], 0);
     expect(delta.code).toBe(0);
     expect(JSON.parse(delta.out)).toEqual({ plugin: 'delta', item: 'one' });
     expect(session.proxy.paths()).toEqual([INVENTORY_READ, 'GET /v1/delta']);
     expect(hits.delta.route).toBe(1);
-    const alpha = await session.fy(['alpha', 'show']);
+    const alpha = await session.fy(['alpha', 'show'], 0);
     expect(alpha.code).toBe(0);
     expect(JSON.parse(alpha.out)).toEqual({ plugin: 'alpha', item: 'one' });
     expect(hits.alpha.route).toBe(1);
@@ -283,7 +288,7 @@ describe('(b) a provider’s route, tool, event and socket schema changed: daemo
     ] as const) {
       resetCounters();
       session.proxy.reset();
-      const result = await session.fy(argv);
+      const result = await session.fy(argv, EXIT_UNAVAILABLE);
       expect(result.code).toBe(EXIT_UNAVAILABLE);
       expect(result.err).toContain(said[owner] as string);
       // `ensureAllowed` reads the inventory, and once more before it blocks (a daemon that restarted is not judged by its old answer).
@@ -338,7 +343,7 @@ describe('(b) a provider’s route, tool, event and socket schema changed: daemo
 
   test('delta, which consumes nothing that changed, still works after the blocked attempts', async () => {
     resetCounters();
-    const delta = await session.fy(['delta', 'show']);
+    const delta = await session.fy(['delta', 'show'], 0);
     expect(delta.code).toBe(0);
     expect(hits.delta.route).toBe(1);
     expectNoDaemonWork('alpha', 'beta', 'gamma');
@@ -369,10 +374,10 @@ describe('(c) a consumer that only RENDERS the provider’s ask source: daemon B
 
   test('alpha and beta are paused too, and delta works', async () => {
     resetCounters();
-    expect((await session.fy(['alpha', 'show'])).code).toBe(EXIT_UNAVAILABLE);
-    expect((await session.fy(['beta', 'show'])).code).toBe(EXIT_UNAVAILABLE);
+    expect((await session.fy(['alpha', 'show'], EXIT_UNAVAILABLE)).code).toBe(EXIT_UNAVAILABLE);
+    expect((await session.fy(['beta', 'show'], EXIT_UNAVAILABLE)).code).toBe(EXIT_UNAVAILABLE);
     expectNoDaemonWork('alpha', 'beta', 'gamma');
-    expect((await session.fy(['delta', 'show'])).code).toBe(0);
+    expect((await session.fy(['delta', 'show'], 0)).code).toBe(0);
     expect(hits.delta.route).toBe(1);
   });
 });
@@ -391,14 +396,14 @@ describe('(d) a core contract changed: daemon B_d', () => {
   test('every verb is refused, even the unchanged plugin’s; the sentence names the first core piece that differs', async () => {
     resetCounters();
     session.proxy.reset();
-    const delta = await session.fy(['delta', 'show']);
+    const delta = await session.fy(['delta', 'show'], EXIT_UNAVAILABLE);
     expect(delta.code).toBe(EXIT_UNAVAILABLE);
     expect(delta.err).toContain(
       `Asks, which everything needs, differs between fy and the daemon, so fy sends nothing to it: ${UPDATE}, or update fy.`,
     );
     expectOnlyInventoryReads(session, 2);
     expectNoDaemonWork('alpha', 'beta', 'gamma', 'delta');
-    expect((await session.fy(['alpha', 'show'])).code).toBe(EXIT_UNAVAILABLE);
+    expect((await session.fy(['alpha', 'show'], EXIT_UNAVAILABLE)).code).toBe(EXIT_UNAVAILABLE);
     expectNoDaemonWork('alpha', 'beta', 'gamma', 'delta');
   });
 });
