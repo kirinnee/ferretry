@@ -61,7 +61,11 @@
         "app/features/agenda/agenda-line.tsx",
         "app/features/agenda/agenda-nav.tsx",
         "app/features/agenda/agenda-replies-notice.tsx",
-        "app/features/agenda/agenda.tsx"
+        "app/features/agenda/agenda.tsx",
+        "app/features/settings/notification-settings.tsx",
+        "app/features/settings/notification-machines.tsx",
+        "app/lib/machine-notifications.ts",
+        "app/lib/agenda-source-refs.ts"
       ]
     },
     "packages/plugins/board": {
@@ -116,7 +120,10 @@
         "daemon/reader/lib/session/conversation-index.ts",
         "daemon/reader/lib/session/reader.ts",
         "daemon/reader/lib/session/tail-cache.ts",
-        "daemon/reader/lib/session/log-page.ts"
+        "daemon/reader/lib/session/log-page.ts",
+        "app/chat/message-marks-legend.tsx",
+        "app/composer/use-composer-preferences.ts",
+        "daemon/attachments/adapters/raw-deflate.ts"
       ]
     }
   },
