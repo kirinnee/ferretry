@@ -17,9 +17,10 @@ const entry = {
   harness: 'claude-code',
   title: 'Keep this transcript read-only',
   at: '2026-08-01T12:00:00.000Z',
+  turns: 12,
 } as HistoryList['entries'][number];
 
-const history: HistoryList = { entries: [entry] };
+const history: HistoryList = { entries: [entry], skipped: 0 };
 
 const detail: HistoryEntry = {
   entry,
@@ -62,7 +63,8 @@ describe('HistoryPage', () => {
       expect(view.container.textContent).toContain(`Archive · ${DAEMON}`);
       expect(view.container.textContent).toContain('cannot be resumed or sent messages');
       expect(view.container.textContent).toContain('Keep this transcript read-only');
-      expect(view.container.textContent).toContain('Claude Code');
+      expect(view.container.textContent).toContain('Claude Code · 12 recorded turns');
+      expect(view.container.querySelector('[aria-label="Skipped harness transcripts"]')).toBeNull();
       expect(view.container.querySelectorAll('button:not([data-theme-trigger])')).toHaveLength(1);
 
       await interact(() => readButton(view.container).click());
@@ -79,11 +81,41 @@ describe('HistoryPage', () => {
 
   it('calls an empty listing empty rather than broken', async () => {
     const view = await mount(
-      <HistoryPage daemon={DAEMON} readHistory={async () => ({ entries: [] })} readEntry={async () => detail} />,
+      <HistoryPage
+        daemon={DAEMON}
+        readHistory={async () => ({ entries: [], skipped: 0 })}
+        readEntry={async () => detail}
+      />,
     );
     try {
       await settle();
       expect(view.container.textContent).toContain('No readable harness conversations were found on this daemon.');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('says how many transcripts it could not read, and never turns them into empty conversations', async () => {
+    const view = await mount(
+      <HistoryPage
+        daemon={DAEMON}
+        readHistory={async () => ({
+          entries: [
+            { ...entry, turns: 1 },
+            { ...entry, id: 'import-two', turns: 4, turnsAtLeast: true },
+          ],
+          skipped: 3,
+        })}
+        readEntry={async () => detail}
+      />,
+    );
+    try {
+      await settle();
+      const aside = must(view.container.querySelector('[aria-label="Skipped harness transcripts"]'), 'skipped note');
+      expect(aside.textContent).toContain('3 transcripts not read');
+      expect(aside.textContent).toContain('did not replace unreadable history with an empty conversation');
+      expect(view.container.textContent).toContain('Claude Code · 1 recorded turn');
+      expect(view.container.textContent).toContain('Claude Code · at least 4 recorded turns');
     } finally {
       await view.unmount();
     }
@@ -135,7 +167,7 @@ describe('the history reads', () => {
     expect(await readHistory(client)).toEqual(history);
     expect(await readHistoryEntry(client, 'import-one')).toEqual(detail);
     expect(client.callsTo('GET /v1/links/history/:entryId')[0]?.params).toEqual({ entryId: 'import-one' });
-    client.on('GET /v1/links/history', () => ({ entries: [{ id: 'x' }] }));
+    client.on('GET /v1/links/history', () => ({ entries: [{ id: 'x' }], skipped: 0 }));
     await expect(readHistory(client)).rejects.toThrow();
   });
 

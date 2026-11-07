@@ -27,7 +27,7 @@ const daemon = (): FakeClient =>
         harness: call.params.harness,
         messages: [],
       }),
-      'GET /v1/links/history': () => ({ entries: [] }),
+      'GET /v1/links/history': () => ({ entries: [], skipped: 0 }),
       [RESUME]: () => ({}),
       [KEEP]: () => ({
         kept: [{ id: 'new-idea', ferret: 'idea-ferret', name: 'idea', state: 'starting' }],

@@ -16,10 +16,10 @@ import {
 } from '../../../../app/links/continue-model.ts';
 import { conversation, ferret, hoursAgo as at, NOW } from '../../../support/app/links.ts';
 
-// Ferrets' summary says stopped, finished and failed alike as `stopped`, and a ferret's mark is its label, else its name.
+// Ferrets' summary says stopped, finished and failed alike as `stopped`, and a ferret's mark is its callsign, else its label or name.
 const stopped = ferret('s-stopped', {
-  name: 'shop',
-  label: 'Mika',
+  name: 'mika',
+  label: 'Shop clean-up',
   folder: '/work/shop',
   state: 'stopped',
   stateAt: at(3),
@@ -33,7 +33,7 @@ const completed = ferret('s-done', {
   stateAt: at(1),
 });
 const failedOld = ferret('s-old', { name: 'old', state: 'stopped', stateAt: at(24 * 40) });
-const running = ferret('s-run', { name: 'Session s-run', state: 'working' });
+const running = ferret('s-run', { name: 'live', state: 'working' });
 const FERRETS: readonly FerretSummary[] = [stopped, completed, failedOld, running];
 const KEPT = [
   conversation('c-shop', { keptBy: 's-stopped', preview: 'Fix the cart total', latest: 'ship it', daysAgo: 0.1 }),
@@ -151,10 +151,10 @@ describe('the continue list', () => {
     expect(keys(continueEntries(listing('all'), NOW))).toEqual([
       'ferret:Notes',
       'c-shop@Mika',
-      'c-live@Session s-run',
+      'c-live@Live',
       'c-free',
       'c-gone@s-unknown',
-      'ferret:old',
+      'ferret:Old',
     ]);
     expect(ferretActivityAt(running)).toBe(running.stateAt);
   });
@@ -164,7 +164,7 @@ describe('the continue list', () => {
     const ferrets = entries.flatMap(entry => (entry.kind === 'conversation' && entry.ferret ? [entry.ferret] : []));
     expect(ferrets).toEqual([
       { id: 's-stopped', name: 'Mika', status: 'stopped' },
-      { id: 's-run', name: 'Session s-run', status: 'working' },
+      { id: 's-run', name: 'Live', status: 'working' },
       { id: 's-unknown', name: 's-unknown' },
     ]);
     expect(ferretMark(completed)).toEqual({ id: 's-done', name: 'Notes', status: 'stopped' });
@@ -180,31 +180,28 @@ describe('the continue list', () => {
     expect(keys(continueEntries(listing('ferretry', { searched: [] }), NOW))).toEqual([
       'ferret:Notes',
       'c-shop@Mika',
-      'c-live@Session s-run',
+      'c-live@Live',
       'c-gone@s-unknown',
-      'ferret:old',
+      'ferret:Old',
     ]);
     const search = (text: string, date: 'any' | '7d' = 'any') =>
       keys(continueEntries(listing('ferretry', { search: { text, date } }), NOW));
     expect(search('CART ship')).toEqual(['c-shop@Mika']);
     expect(search('mika')).toEqual(['c-shop@Mika']);
-    expect(search('', '7d')).toEqual(['ferret:Notes', 'c-shop@Mika', 'c-live@Session s-run']);
+    expect(search('', '7d')).toEqual(['ferret:Notes', 'c-shop@Mika', 'c-live@Live']);
     expect(search('work/notes')).toEqual(['ferret:Notes']);
     expect(search('nowhere')).toEqual([]);
   });
 
   it('narrows a CLI to its conversations and the stopped ferrets that drive it', () => {
     const codex = KEPT.filter(row => row.harness === 'codex');
-    expect(keys(continueEntries(listing('codex', { searched: codex }), NOW))).toEqual([
-      'ferret:Notes',
-      'c-live@Session s-run',
-    ]);
+    expect(keys(continueEntries(listing('codex', { searched: codex }), NOW))).toEqual(['ferret:Notes', 'c-live@Live']);
     const claude = KEPT.filter(row => row.harness === 'claude-code');
     expect(keys(continueEntries(listing('claude-code', { searched: claude }), NOW))).toEqual([
       'c-shop@Mika',
       'c-free',
       'c-gone@s-unknown',
-      'ferret:old',
+      'ferret:Old',
     ]);
   });
 
@@ -212,7 +209,7 @@ describe('the continue list', () => {
     expect(keys(continueEntries(listing('all', { kept: [], searched: [] }), NOW))).toEqual([
       'ferret:Notes',
       'ferret:Mika',
-      'ferret:old',
+      'ferret:Old',
     ]);
   });
 

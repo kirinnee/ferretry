@@ -5,8 +5,6 @@
  *
  *   - loadTranscriptImageBlob, transcriptImageCacheId, transcriptImageHandleOf, transcriptImageErrorMessage
  *       ....... GAP(C3): copies of today's `lib/transcript-image-source.ts` (C3's `chat/transcript-image-source.ts`)
- *   - isWorkSearchWords, WORK_SEARCH_DEBOUNCE_MS, workProjectLabel
- *       ....... GAP(C4): copies of today's `lib/work-search.ts` helpers (C4's `search/work-search.ts`)
  */
 
 import {
@@ -85,27 +83,6 @@ export const transcriptImageErrorMessage = (error: unknown): string => {
   if (status === 415) return 'not a supported image';
   return 'could not be loaded';
 };
-
-// ─── work search helpers (copies of today's lib/work-search.ts) ───────────────────────────────────────────────────
-
-/** How long a picker waits after the last keystroke before it asks the daemon. */
-export const WORK_SEARCH_DEBOUNCE_MS = 120;
-
-/** The fewest characters worth asking the daemon about; one letter would match half the board. */
-export const WORK_SEARCH_MIN_LENGTH = 2;
-
-/**
- * Whether typed text is WORDS rather than the start of an id (`F3`, `A1`, `f`, `12`). An id prefix keeps the
- * instant local list; words are what only the daemon's body text index can answer.
- */
-export const isWorkSearchWords = (text: string): boolean => {
-  const trimmed = text.trim();
-  return trimmed.length >= WORK_SEARCH_MIN_LENGTH && !/^[a-z]?\d*$/i.test(trimmed);
-};
-
-/** A card's project as a row prints it: its name, "Unfiled", or nothing for a project this device cannot name. */
-export const workProjectLabel = (projectId: string, names: ReadonlyMap<string, string> | undefined): string =>
-  projectId === 'unfiled' ? 'Unfiled' : (names?.get(projectId) ?? '');
 
 // ─── the daemon a scope belongs to ────────────────────────────────────────────────────────────────────────────────
 

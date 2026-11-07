@@ -415,13 +415,12 @@ describe("the ferret's cards", () => {
     }
   });
 
-  test('says the cards are unavailable, and why, when the host has no board', async () => {
+  test('is ready with no cards and no error when the host has no board', async () => {
     const probe = await observe(null);
     try {
-      expect(probe.latest().taskState).toBe('unavailable');
-      expect(probe.latest().taskError).toBe('the board is not on this daemon');
+      expect(probe.latest().taskState).toBe('ready');
+      expect(probe.latest().taskError).toBeNull();
       expect(probe.latest().tasks).toEqual([]);
-      expect(probe.latest().fileState).toBe('ready');
     } finally {
       probe.unmount();
     }

@@ -7,6 +7,7 @@
  * query.
  */
 
+import { FerretSearchQuerySchema } from '@ferretry/core-ferrets/contract';
 import {
   MAX_SESSION_SEARCH_QUERY_LENGTH,
   matchesSessionSearchQuery,
@@ -14,7 +15,6 @@ import {
   type SessionFileIndexEntry,
   SessionFileIndexResponseSchema,
   type SessionFileIndexSkip,
-  SessionSearchQuerySchema,
   sessionSearchFileHaystack,
 } from './ferret-file-index.ts';
 import { LoaderCircle, Search, TriangleAlert } from 'lucide-react';
@@ -67,12 +67,8 @@ export interface FerretCardsRead {
   readonly cards: readonly FerretSearchCard[];
 }
 
-/** No board on this host: the cards half says so rather than pretending to be empty. */
-export const NO_BOARD: FerretCardsRead = {
-  state: 'unavailable',
-  error: 'the board is not on this daemon',
-  cards: [],
-};
+/** No board on this host: an empty, ready slice, never an error (the search simply holds files only). */
+export const NO_BOARD: FerretCardsRead = { state: 'ready', error: null, cards: [] };
 
 /** Which daemon and ferret a search is about. Ferret ids are per daemon, so both are its identity. */
 export interface FerretSearchScope {
@@ -209,7 +205,7 @@ export const filterSessionSearchResults = (
   files: readonly SessionFileIndexEntry[],
   query: string,
 ): readonly SessionSearchResult[] => {
-  if (!SessionSearchQuerySchema.safeParse(query).success) return [];
+  if (!FerretSearchQuerySchema.safeParse(query).success) return [];
   const members: readonly SessionSearchResult[] = [
     ...tasks
       .filter(task => matchesSessionSearchQuery(taskHaystack(task), query))
@@ -586,7 +582,7 @@ export function SessionSearchControl({
 
   const presenting = search.presenting === instanceId;
   const queryPresent = search.query.trim() !== '';
-  const queryValid = SessionSearchQuerySchema.safeParse(search.query).success;
+  const queryValid = FerretSearchQuerySchema.safeParse(search.query).success;
   const results = search.results;
   const activeResult = presenting ? results[search.activeIndex] : undefined;
 

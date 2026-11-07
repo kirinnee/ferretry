@@ -40,8 +40,13 @@ import {
 } from './composer-autocomplete.ts';
 import { type ComposerReferenceCatalogReader, readReferenceCatalog } from './composer-reference-catalogs.ts';
 import { assertClientDaemon } from './seam-attachments.ts';
-import { isWorkSearchWords, WORK_SEARCH_DEBOUNCE_MS, workProjectLabel } from './seam-attachments.ts';
-import { type DaemonConnection, type DaemonFerretScope, daemonFerretKey, type WorkSearchPort } from './seam.ts';
+import {
+  isWorkSearchWords,
+  WORK_SEARCH_DEBOUNCE_MS,
+  type WorkSearchPort,
+  workProjectLabel,
+} from '../search/work-search.ts';
+import { type DaemonConnection, type DaemonFerretScope, daemonFerretKey } from './seam.ts';
 
 export type ComposerHarness = 'claude' | 'codex';
 

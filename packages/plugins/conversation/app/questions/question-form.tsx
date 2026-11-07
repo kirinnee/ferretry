@@ -143,12 +143,11 @@ async function answerRequestId(
 }
 
 /**
- * The refusal's own fields beyond its code and sentence (`detail`, `answered`, `answeredWith`). GAP(app): the shell's
- * `DaemonCallError` keeps only status, code and message today, so these read as absent until it carries the body;
- * every sentence below still has a fallback that needs none of them.
+ * The refusal's own fields beyond its code and sentence (`detail`, `answered`, `answeredWith`), read from the
+ * `DaemonCallError`'s `body`; every sentence below still has a fallback that needs none of them.
  */
 const refusalBody = (cause: unknown): Record<string, unknown> | undefined => {
-  const body = (cause as { readonly body?: unknown } | null)?.body;
+  const body = cause instanceof DaemonCallError ? cause.body : undefined;
   return typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : undefined;
 };
 
