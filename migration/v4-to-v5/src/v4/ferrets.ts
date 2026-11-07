@@ -2,22 +2,15 @@
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
+import {
+  FerretProjectIdSchema,
+  SessionProvenanceSchema,
+  SessionTransferEdgeSchema,
+  TranscriptProvenanceSchema,
+} from '@ferretry/core-ferrets/contract';
 
 export const V4Id = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,127}$/u);
 const Instant = z.iso.datetime({ offset: true });
-const Transcript = z
-  .object({
-    v: z.literal(1),
-    home: z.string().min(1),
-    identity: z.enum(['minted', 'correlated', 'adopted', 'undiscovered']),
-    harnessSessionId: z.string().min(1).optional(),
-    file: z.string().min(1).optional(),
-  })
-  .refine(
-    value =>
-      (value.identity === 'undiscovered') === (value.harnessSessionId === undefined) &&
-      (value.identity === 'undiscovered') === (value.file === undefined),
-  );
 
 export const Config = z.object({
   id: V4Id,
@@ -29,7 +22,10 @@ export const Config = z.object({
   tmuxSession: z.string().min(1).optional(),
   createdAt: Instant,
   updatedAt: Instant,
-  transcript: Transcript.optional(),
+  transcript: TranscriptProvenanceSchema.optional(),
+  provenance: SessionProvenanceSchema.optional(),
+  transferredFrom: SessionTransferEdgeSchema.optional(),
+  projectId: FerretProjectIdSchema.optional(),
   sessionCapabilityHash: z
     .string()
     .regex(/^[0-9a-f]{64}$/u)
