@@ -20,7 +20,12 @@ import {
   type BrowserWaitCondition,
 } from '../pages/wire/page-lifecycle.ts';
 import type { SurfaceOpener } from '../pages/wire/surface.ts';
-import { type BrowserElementTarget, type BrowserTargetFields, browserReadModeOf, browserTargetOf } from '../pages/wire/target.ts';
+import {
+  type BrowserElementTarget,
+  type BrowserTargetFields,
+  browserReadModeOf,
+  browserTargetOf,
+} from '../pages/wire/target.ts';
 import { BrowserTransportError } from '../worker/protocol.ts';
 import type { SurfaceControl } from './control.ts';
 import type { SurfaceControlRequest } from '../../contract/index.ts';
@@ -287,6 +292,78 @@ export class BrowserTools {
     }
   }
 
+  // ── the page tools' host (`../target/tools`, bound by `./page-host.ts`) ──────────────────────────────────────────
+
+  /**
+   * The page `key` names for one of the page tools (`browser_type`, `browser_fill_form`, `browser_request_input`,
+   * `browser_ask_owner`), with the checks {@link call} makes before any page tool: the Browsers switch for a ferret,
+   * the page looked up inside the caller's own session only, a ferret's own page (opened, handed, or a popup of
+   * those), and nobody holding it.
+   */
+  async pageFor(caller: ToolCaller, key: string): Promise<ResolvedSurface> {
+    try {
+      if (caller.kind === 'agent' && !(await this.ports.policy.allows('browser')))
+        throw new BrowserToolError('forbidden', controlRefusal('browser'));
+      const surface = await this.resolve(caller.sessionId, key);
+      if (caller.kind === 'agent') await this.assertAgentMay(caller.sessionId, surface);
+      return surface;
+    } catch (error) {
+      throw translate(error) ?? error;
+    }
+  }
+
+  /**
+   * One page input act (type, fill a form) in the page's own queue, with the takeover check repeated there. The page
+   * tools run it INSIDE `kernel.act` on the page's hold target, so nothing here asks a hold again. What it answers is
+   * what the browser saw the act do, for who the page signs in only: never shown to the caller.
+   */
+  async inputOn(
+    caller: ToolCaller,
+    surface: ResolvedSurface,
+    action: Extract<BrowserPageAction, { readonly action: 'type' | 'fill-form' }>,
+  ): Promise<{
+    readonly passwordField?: true;
+    readonly identifierHost?: string;
+    readonly identifierFields?: readonly { readonly index: number; readonly host: string }[];
+  }> {
+    try {
+      const answer = await this.ports.browser.actOnPage(
+        caller.sessionId,
+        surface.id,
+        action,
+        this.browserGuard(caller, surface),
+      );
+      if (!('result' in answer)) return {};
+      const { passwordField, identifierHost, identifierFields } = answer.result;
+      return {
+        ...(passwordField === true ? { passwordField: true as const } : {}),
+        ...(identifierHost === undefined ? {} : { identifierHost }),
+        ...(identifierFields === undefined ? {} : { identifierFields }),
+      };
+    } catch (error) {
+      throw translate(error) ?? error;
+    }
+  }
+
+  /** Hands a ferret's page to the owner ("Your turn here"); rejects when the owner could not be told. */
+  async askOwner(caller: ToolCaller, surface: ResolvedSurface, message: string | undefined): Promise<void> {
+    try {
+      await this.announce(caller, surface, message ?? true, true);
+    } catch (error) {
+      throw translate(error) ?? error;
+    }
+  }
+
+  /** The driving marker after a ferret's page input act; a courtesy, so a failure is swallowed. */
+  async droveOn(caller: ToolCaller, surface: ResolvedSurface): Promise<void> {
+    if (caller.kind !== 'agent') return;
+    // The marker is a courtesy to the person watching; a record that cannot take it must not fail an
+    // act that already happened.
+    await this.ports.control
+      .drove(caller.sessionId, surface, caller.name === undefined ? {} : { name: caller.name })
+      .catch(() => undefined);
+  }
+
   private async dispatch(caller: ToolCaller, call: BrowserToolCall): Promise<BrowserToolAnswer> {
     const { sessionId } = caller;
     switch (call.tool) {
@@ -506,7 +583,8 @@ export class BrowserTools {
         return { out, reading: dialogOf(out.dialog) };
       });
       waited += slice;
-      if (out.reply.matched === true) return { summary: `The wait on ${reference} is over: it happened.`, matched: true };
+      if (out.reply.matched === true)
+        return { summary: `The wait on ${reference} is over: it happened.`, matched: true };
       if (out.dialog !== undefined)
         return {
           summary: `The wait on ${reference} stopped: the page is blocked by a dialog.${dialogNote(out.dialog, read.dialog)}`,
@@ -551,7 +629,8 @@ export class BrowserTools {
       this.noted(caller, surface, call, answer);
       const at = read.url === undefined ? '' : ` (now at ${read.url})`;
       const check = notesOf(answer, surface.id, read);
-      if (read.text === undefined || call.tool !== 'browser.read') return { summary: `Done on ${reference}${at}.${check}` };
+      if (read.text === undefined || call.tool !== 'browser.read')
+        return { summary: `Done on ${reference}${at}.${check}` };
       const mode = browserReadModeOf(call);
       if (call.find !== undefined && read.text === '')
         return { summary: `Nothing in the snapshot of ${reference} contains that text${at}.${check}`, output: '' };
@@ -566,7 +645,8 @@ export class BrowserTools {
       const picture = acted<'picture'>(
         await this.ports.kernel.act(target, 'picture', async () => {
           answer = await act();
-          const page = 'result' in answer ? (answer.result as { screenshotBase64?: unknown; screenshotFormat?: unknown }) : {};
+          const page =
+            'result' in answer ? (answer.result as { screenshotBase64?: unknown; screenshotFormat?: unknown }) : {};
           const base64 = typeof page.screenshotBase64 === 'string' ? page.screenshotBase64 : '';
           return {
             kind: 'picture' as const,
@@ -730,11 +810,16 @@ export class BrowserTools {
         ? { action: 'download', ...(call.id === undefined ? {} : { downloadId: call.id }) }
         : { action: 'pdf' };
     // A download is a read of the page and a PDF a picture of it (§4.7): the file never leaves the act while held.
-    const { out: answer, read } = await this.readAct(target, call.tool === 'browser.pdf' ? 'picture' : 'read', async () => {
-      const answer = await this.ports.browser.filesOnPage(sessionId, surface.id, action, guard);
-      if (answer.staged === undefined) throw new BrowserToolError('upstream_failed', 'The browser staged no file to save.');
-      return { out: answer, reading: { names: [answer.staged.name] } };
-    });
+    const { out: answer, read } = await this.readAct(
+      target,
+      call.tool === 'browser.pdf' ? 'picture' : 'read',
+      async () => {
+        const answer = await this.ports.browser.filesOnPage(sessionId, surface.id, action, guard);
+        if (answer.staged === undefined)
+          throw new BrowserToolError('upstream_failed', 'The browser staged no file to save.');
+        return { out: answer, reading: { names: [answer.staged.name] } };
+      },
+    );
     const staged = answer.staged;
     if (staged === undefined) throw new BrowserToolError('upstream_failed', 'The browser staged no file to save.');
     const name = read.names?.[0] ?? staged.name;
@@ -764,7 +849,8 @@ export class BrowserTools {
       const done = await work();
       out = done.out;
       read = await this.scrubbed(done.reading);
-      if (op === 'picture') return { kind: 'picture' as const, mime: 'application/pdf' as const, bytes: new Uint8Array() };
+      if (op === 'picture')
+        return { kind: 'picture' as const, mime: 'application/pdf' as const, bytes: new Uint8Array() };
       return { kind: 'content' as const };
     });
     if (!answer.ok) acted(answer);
@@ -947,12 +1033,7 @@ export class BrowserTools {
   }
 
   private async drove(caller: ToolCaller, call: BrowserToolCall, surface: ResolvedSurface): Promise<void> {
-    if (caller.kind !== 'agent' || !DRIVING_TOOLS.has(call.tool)) return;
-    // The marker is a courtesy to the person watching; a record that cannot take it must not fail an
-    // act that already happened.
-    await this.ports.control
-      .drove(caller.sessionId, surface, caller.name === undefined ? {} : { name: caller.name })
-      .catch(() => undefined);
+    if (DRIVING_TOOLS.has(call.tool)) await this.droveOn(caller, surface);
   }
 
   /**
@@ -993,8 +1074,11 @@ const textOf = (text: string | undefined): { readonly text?: string } => (text =
 
 /** What an act's answer says that is the PAGE's words: where it is now, what it read, its dialog, its downloads' names. */
 function readingOf(answer: BrowserActionResult): PageReading {
-  const page: { readonly url?: string; readonly text?: unknown; readonly downloads?: readonly BrowserDownloadNotice[] } =
-    'result' in answer ? answer.result : {};
+  const page: {
+    readonly url?: string;
+    readonly text?: unknown;
+    readonly downloads?: readonly BrowserDownloadNotice[];
+  } = 'result' in answer ? answer.result : {};
   const started = page.downloads ?? [];
   return {
     ...(page.url === undefined ? {} : { url: page.url }),

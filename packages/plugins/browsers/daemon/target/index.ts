@@ -4,7 +4,9 @@
  * half (`../index.ts`) calls {@link pageTarget} once in `build` and spreads what it answers:
  *
  * ```ts
- * const target = pageTarget({ kernel: ctx.kernel, pages: runtime, host: surfaces, vault });
+ * const identities = new TypedIdentities(() => kernel.clock.nowMs());
+ * const runtime = new BrowserSessionService(…, identities);
+ * const target = pageTarget({ kernel, pages: runtime, host: pageToolHost(tools), identities, vault });
  * return {
  *   hooks: { 'input.targets:page': target.adapter, … },
  *   tools: { ...target.tools, … },
@@ -12,9 +14,9 @@
  * };
  * ```
  *
- * `pages` is the agent browser's page queue (`BrowserSubsystem.inputOnPage` today) and `host` its surface control; the
- * runtime tells {@link PageTargetHalf.identities} (a {@link BrowserSignInWatch}) whenever an act may have changed who a
- * page signs in. The browser worker serves the seam with `./lib/worker-serve.ts`, and the daemon reaches it with
+ * `pages` is the agent browser's page queue (`BrowserSubsystem.inputOnPage` today) and `host` its surface control. ONE
+ * {@link TypedIdentities} is shared by the runtime (its {@link BrowserSignInWatch}: it clears who a page signs in whenever
+ * an act may have changed it), the other browser tools and these four; one made here is only for a target built alone. The browser worker serves the seam with `./lib/worker-serve.ts`, and the daemon reaches it with
  * `./lib/worker-port.ts`.
  */
 import type { InputTargetAdapter } from '@ferretry/core-vault/contract';
@@ -47,6 +49,8 @@ export interface PageTargetDeps extends Omit<PageToolDeps, 'kernel' | 'identitie
   readonly kernel: Pick<KernelPorts, 'act' | 'redaction' | 'clock'>;
   /** The agent browser's page queue: every look, picture and write of the input target runs inside it. */
   readonly pages: PageInputHost;
+  /** Who each page signs in: the daemon half's one ledger, which its runtime clears (I155). */
+  readonly identities?: TypedIdentities;
 }
 
 /** What the daemon half spreads into its own. */
@@ -64,7 +68,7 @@ export interface PageTargetHalf {
 }
 
 export function pageTarget(deps: PageTargetDeps): PageTargetHalf {
-  const identities = new TypedIdentities(() => deps.kernel.clock.nowMs());
+  const identities = deps.identities ?? new TypedIdentities(() => deps.kernel.clock.nowMs());
   const adapter = new PageInputTarget(deps.pages);
   const tools = pageInputTools({
     kernel: deps.kernel,

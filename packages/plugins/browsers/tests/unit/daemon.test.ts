@@ -1,7 +1,39 @@
 import { afterEach, describe, it } from 'bun:test';
-import { type TestHost, testHost } from '@ferretry/kernel/testing';
+import { ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
+import type { FerretId } from '@ferretry/kernel/contract';
+import { implementDaemon } from '@ferretry/kernel/manifest';
+import { ferret, type TestCaller, type TestHost, testHost } from '@ferretry/kernel/testing';
 import should from 'should';
-import daemon from '../../daemon/index.ts';
+import daemon, { buildBrowsers } from '../../daemon/index.ts';
+import { TypedIdentities } from '../../daemon/target/sign-in/identities.ts';
+import { Tabs } from '../support/tabs.ts';
+
+/** The ferrets Browsers knows of: a page belongs to one, and a call about any other is refused. */
+const FERRETS = { get: async (id: string) => (id === 'f1' || id === 'f2' ? { name: id } : undefined) };
+
+/**
+ * The daemon half exactly as `build` composes it, over a fake agent browser and a ledger the test can read. Gate's
+ * stand-in admission stamps the standing a real daemon gives: a ferret's own token (the test host's privileged local
+ * arrival, for the ferret `as` last named) or the owner's admin token.
+ */
+let calling = 'f1' as FerretId;
+const as = (id: string): { readonly as: TestCaller } => {
+  calling = id as FerretId;
+  return { as: ferret(id) };
+};
+
+async function built(): Promise<{ host: TestHost; tabs: Tabs; identities: TypedIdentities }> {
+  const tabs = new Tabs();
+  const identities = new TypedIdentities(() => Date.parse('2026-11-07T10:00:00.000Z'));
+  const half = implementDaemon(daemon.manifest, {
+    build: ctx => buildBrowsers(ctx, { launcher: { launch: async () => tabs.automation }, identities }),
+  });
+  const gate = new StandInAdmission(request =>
+    request.arrival.kind === 'local' && request.arrival.privileged ? ferretStanding(calling) : ownerStanding(),
+  );
+  const host = await testHost({ plugins: [half], uses: { ferrets: FERRETS }, gate });
+  return { host, tabs, identities };
+}
 
 /**
  * The daemon half as the kernel builds it: every route, socket and tool the manifest declares has its handler, and
@@ -24,5 +56,55 @@ describe('the browsers daemon half', () => {
     // Assert
     should(state.status).equal(200);
     should(state.json()).containEql({ state: 'stopped' });
+  });
+
+  it('should type into the ferret’s own page through browser_type, as one type act on the page, and answer Done', async () => {
+    // Arrange
+    const world = await built();
+    host = world.host;
+    const opened = await host.tool('browser_open', { name: 'app', url: 'https://example.test/login' }, as('f1'));
+
+    // Act
+    const typed = await host.tool('browser_type', { name: 'app', selector: '#user', text: 'alice' }, as('f1'));
+
+    // Assert
+    should(opened.isError).not.be.true();
+    should(typed).deepEqual({ text: 'Done on %browser:app.' });
+    should(world.tabs.typed).deepEqual([{ pageId: 'p1', text: 'alice' }]);
+    should(host.acts.filter(act => act.op === 'type').map(act => act.target)).deepEqual([{ kind: 'page', key: 'p1' }]);
+  });
+
+  it('should refuse browser_type on a page of another ferret, naming no page of theirs', async () => {
+    // Arrange
+    const world = await built();
+    host = world.host;
+    await host.tool('browser_open', { name: 'app', url: 'https://example.test/login' }, as('f1'));
+
+    // Act
+    const typed = await host.tool('browser_type', { name: 'app', selector: '#user', text: 'alice' }, as('f2'));
+
+    // Assert
+    should(typed.isError).be.true();
+    should(typed.text).containEql('There is no %browser:app in this session');
+    should(world.tabs.typed).deepEqual([]);
+  });
+
+  it('I155 should keep the one ledger: a ferret’s type into an identifier box is kept, and the runtime clears it on a toolbar act', async () => {
+    // Arrange
+    const world = await built();
+    host = world.host;
+    world.tabs.typeAnswer = { identifierHost: 'example.test' };
+    await host.tool('browser_open', { name: 'app', url: 'https://example.test/login' }, as('f1'));
+    await host.tool('browser_type', { name: 'app', selector: '#user', text: 'alice@example.test' }, as('f1'));
+    const kept = world.identities.at('f1', 'p1', 'example.test');
+
+    // Act: the person's toolbar reloads the page this ferret's session is viewing.
+    await host.request('POST', '/v1/sessions/f1/browser', { body: { action: 'activate-page', pageId: 'p1' } });
+    const reloaded = await host.request('POST', '/v1/sessions/f1/browser', { body: { action: 'reload' } });
+
+    // Assert
+    should(kept).equal('alice@example.test');
+    should(reloaded.status).equal(200);
+    should(world.identities.at('f1', 'p1', 'example.test')).be.undefined();
   });
 });
