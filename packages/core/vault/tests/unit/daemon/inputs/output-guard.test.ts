@@ -7,6 +7,27 @@ import { HoldRegistry } from '../../../../daemon/lib/secrets/output-guard.ts';
 const terminal = { kind: 'terminal' as TargetKind, key: 'app' };
 const page = { kind: 'page' as TargetKind, key: 'app' };
 
+test('I74 timed replay-lock expiry invalidates every output stamp exactly once', () => {
+  let now = 0;
+  const guard = new HoldRegistry();
+  const events: HoldsChangedPayload[] = [];
+  const quarantine = quarantineOverOutputGuard({ now: () => now }, guard, event => events.push(event));
+  quarantine.lock(10);
+  const before = guard.stamp([terminal, page]);
+  events.length = 0;
+  now = 11;
+  expect(quarantine.until('f1', ['app'])).toBeUndefined();
+  expect(guard.stillShowable(before)).toBe(false);
+  expect(events.map(event => event.target)).toEqual([
+    { kind: 'terminal' as TargetKind, key: '*' },
+    { kind: 'page' as TargetKind, key: '*' },
+  ]);
+  const after = guard.stamp([terminal, page]);
+  quarantine.purge();
+  expect(guard.stillShowable(after)).toBe(true);
+  expect(events).toHaveLength(2);
+});
+
 test('I74 every hold mutation moves the output guard, including replay, expiry, release and session loss', () => {
   let now = 0;
   const guard = new HoldRegistry();

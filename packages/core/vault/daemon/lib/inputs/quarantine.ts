@@ -199,6 +199,10 @@ export class QuarantineRegistry {
   /** Lets go of every quarantine whose window has ended. */
   purge(): void {
     const now = this.clock.now();
+    if (typeof this.locked === 'number' && this.locked <= now) {
+      this.locked = undefined;
+      this.changed([EVERY_TERMINAL]);
+    }
     for (const [sessionId, entries] of this.held) {
       this.store(
         sessionId,
