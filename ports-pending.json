@@ -34,7 +34,8 @@
       "GAP(kernel): Edit as YAML on a profile is not offered, because the kernel's /v1/config/file is not declared yet (renderFileEditor is never supplied)"
     ],
     "ferrets": [
-      "the new-ferret and move pages mount the offered slots (ferrets.new-ferret-account, ferrets.move-account) when ported; Runtimes already contributes the account picker to both"
+      "the new-ferret and move pages mount the offered slots (ferrets.new-ferret-account, ferrets.move-account) when ported; Runtimes already contributes the account picker to both",
+      "GAP(kernel): fy wait --until-marker tests \"exists\" by reading the file, because CliContext has no exists(path) probe yet (kernel item, sent to the kernel owner): a marker that is a directory, or a file that exists but cannot be read, never counts as present, and each poll reads the whole file; `-` is refused as a marker meanwhile"
     ],
     "warden": [
       "failover and auto-move refuse: needs Ferrets’ additive move(ferret, runtime), today’s migrate (D2 #19)",
