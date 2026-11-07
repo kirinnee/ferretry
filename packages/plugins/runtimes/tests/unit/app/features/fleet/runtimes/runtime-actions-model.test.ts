@@ -63,7 +63,7 @@ describe('moving the ferrets', () => {
   });
 
   it('should resume a conversation on the same CLI and convert it across', () => {
-    const ferret = { id: 's-1', name: 'Fisher', harness: 'claude' } as const;
+    const ferret = { id: 's-1', name: 'Fisher', harness: 'claude-code' } as const;
     expect(moveConversation(ferret, AGENT)).toBe('resume');
     expect(moveConversation(ferret, CODEX)).toBe('convert');
   });
@@ -78,7 +78,7 @@ describe('moving the ferrets', () => {
       expiresAt: '2026-10-13T08:15:00.000Z',
       state: 'pending',
     } as const;
-    const ferret = { id: 's-1', name: 'Fisher', harness: 'claude' } as const;
+    const ferret = { id: 's-1', name: 'Fisher', harness: 'claude-code' } as const;
     expect(
       runningOnRuntime({
         ...base,

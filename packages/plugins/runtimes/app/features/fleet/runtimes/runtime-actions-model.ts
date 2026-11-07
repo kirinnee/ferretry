@@ -7,16 +7,12 @@
  * answers, and what the browser already holds, into the words and choices on screen.
  */
 
-import type {
-  FleetAccountChangeView,
-  FleetMachineView,
-  FleetRunningSession,
-  FleetRuntimeView,
-  MigrationConversation,
-} from '@ferretry/protocol';
-import { grantGuidance } from '../../../lib/grants.ts';
-import type { FleetApplyAuthority } from '../shell/apply-change.ts';
-import { type NameProblem, runtimeNameProblem } from './runtimes-model.ts';
+import type { AccountChangeView, MachineView, RunningSession, RuntimeView } from '../../../../contract/index.ts';
+import { type FleetApplyAuthority, fleetRefusalExplanation, type NameProblem, runtimeNameProblem } from '../../../lib/shell-ports.ts';
+
+/** How a moved ferret keeps its conversation: resumed on the same CLI, converted across to the other. */
+// GAP(ferrets): the move wire (`MoveConversation`) is not in Ferrets' contract yet.
+export type MoveConversation = 'resume' | 'convert';
 
 /** The sentence every rename shows: what it does NOT do. */
 export const RENAME_KEEPS_RUNNING = 'Running ferrets keep working — nothing restarts.';
@@ -24,8 +20,8 @@ export const RENAME_KEEPS_RUNNING = 'Running ferrets keep working — nothing re
 /** Why a new name for `runtime` cannot be used, or `null`. Its own name is not a clash, only a no-op. */
 export const renameProblem = (
   value: string,
-  runtime: FleetRuntimeView,
-  runtimes: readonly FleetRuntimeView[],
+  runtime: RuntimeView,
+  runtimes: readonly RuntimeView[],
   machineName: string,
 ): NameProblem | null => {
   if (value === runtime.name) return { message: `It is already called ${runtime.name}.` };
@@ -41,26 +37,26 @@ export const renameProblem = (
  * cannot tell yet — the daemon refuses an apply it may not make, so an unknown answer is not a "no").
  */
 export const runtimeActionRefusal = (authority: FleetApplyAuthority | null): string | null =>
-  authority?.kind === 'refused' ? grantGuidance(authority.refusal, 'fleet').explanation : null;
+  authority?.kind === 'refused' ? fleetRefusalExplanation(authority.refusal) : null;
 
 /** Whether removing this runtime has to wait for another default runtime for new agents. */
-export const blocksAsDefault = (runtime: FleetRuntimeView, machine: FleetMachineView | null): boolean =>
+export const blocksAsDefault = (runtime: RuntimeView, machine: MachineView | null): boolean =>
   machine?.defaultRuntime === runtime.name;
 
 /** The agent runtimes that could become the default instead of this one. */
 export const defaultCandidates = (
-  runtime: FleetRuntimeView,
-  runtimes: readonly FleetRuntimeView[],
-): readonly FleetRuntimeView[] => runtimes.filter(other => other.name !== runtime.name && other.agent);
+  runtime: RuntimeView,
+  runtimes: readonly RuntimeView[],
+): readonly RuntimeView[] => runtimes.filter(other => other.name !== runtime.name && other.agent);
 
 /**
  * The runtimes the ferrets on this one could move to: every other runtime that can launch, the ones on
  * the same CLI first, because those carry the conversation as it is.
  */
 export const moveTargets = (
-  runtime: FleetRuntimeView,
-  runtimes: readonly FleetRuntimeView[],
-): readonly FleetRuntimeView[] => {
+  runtime: RuntimeView,
+  runtimes: readonly RuntimeView[],
+): readonly RuntimeView[] => {
   const others = runtimes.filter(other => other.name !== runtime.name && other.launch.available);
   return [
     ...others.filter(other => other.harness === runtime.harness),
@@ -68,18 +64,17 @@ export const moveTargets = (
   ];
 };
 
-/** How a moved ferret keeps its conversation: resumed on the same CLI, converted across to the other. */
-export const moveConversation = (session: FleetRunningSession, target: FleetRuntimeView): MigrationConversation =>
+export const moveConversation = (session: RunningSession, target: RuntimeView): MoveConversation =>
   session.harness === target.harness ? 'resume' : 'convert';
 
 /** The ferrets still running on the runtime, from the daemon's dry run of its removal. */
-export const runningOnRuntime = (staged: FleetAccountChangeView): readonly FleetRunningSession[] =>
+export const runningOnRuntime = (staged: AccountChangeView): readonly RunningSession[] =>
   staged.preview.kind === 'apply' ? (staged.preview.runningSessions ?? []) : [];
 
 const ferrets = (count: number): string => `${String(count)} ${count === 1 ? 'ferret' : 'ferrets'}`;
 
 /** The confirm button: exactly what pressing it does. */
-export const removeLabel = (runtime: FleetRuntimeView, moving: number, target: string | null): string =>
+export const removeLabel = (runtime: RuntimeView, moving: number, target: string | null): string =>
   target === null || moving === 0
     ? `Remove ${runtime.name}`
     : `Move ${ferrets(moving)} to ${target} and remove ${runtime.name}`;

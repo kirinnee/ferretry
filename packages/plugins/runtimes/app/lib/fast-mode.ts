@@ -1,5 +1,5 @@
 /**
- * What the PWA says about FAST MODE, decided from the session document alone.
+ * What the app says about FAST MODE, decided from the session document alone.
  *
  * Fast mode is one boolean with three records behind it, in order of trust: what the harness last
  * REPORTED (`state.observedFast`), what the session was LAUNCHED with (`config.launchFast`), and the
@@ -11,7 +11,12 @@
  * may be absent or throw, so a denied store means the note simply shows again — never an error.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+// GAP(ferrets): the session document (`SessionView`) is not in Ferrets' contract yet; these are the only fields read.
+export interface FastModeSession {
+  readonly config: { readonly model?: string | undefined; readonly launchFast?: boolean | undefined };
+  readonly state: { readonly observedModel?: string | undefined; readonly observedFast?: boolean | undefined };
+}
+
 import type { RuntimeModelCatalog } from './runtime-models.ts';
 
 /** The sole browser-storage key for the "fast mode can cost more" note. */
@@ -58,7 +63,7 @@ export const markFastCostNoteSeen = (storage: FastNoteStorage | undefined = brow
 const withoutSelector = (model: string): string => model.replace(/\[[^\]]*\]$/u, '');
 
 /** The model a session is running: what the harness reported, else what it was launched on. */
-const modelOf = (view: SessionView): string | undefined => view.state.observedModel?.trim() || view.config.model;
+const modelOf = (view: FastModeSession): string | undefined => view.state.observedModel?.trim() || view.config.model;
 
 const choiceFor = (catalog: RuntimeModelCatalog | null, model: string | undefined) =>
   catalog === null || model === undefined
@@ -70,7 +75,7 @@ const choiceFor = (catalog: RuntimeModelCatalog | null, model: string | undefine
  * harness's report, else the launch, else whether the model runs fast by default — and never on for a
  * model the catalog says has no fast mode (a login that saved it still runs such a model at standard speed).
  */
-export const fastModeInForce = (view: SessionView, catalog: RuntimeModelCatalog | null = null): boolean => {
+export const fastModeInForce = (view: FastModeSession, catalog: RuntimeModelCatalog | null = null): boolean => {
   const choice = choiceFor(catalog, modelOf(view));
   if (choice?.fast === false) return false;
   return view.state.observedFast ?? view.config.launchFast ?? choice?.fastDefault === true;

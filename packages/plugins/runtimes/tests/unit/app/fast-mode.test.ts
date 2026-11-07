@@ -1,21 +1,21 @@
 import { describe, expect, test } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
 import {
   FAST_COST_NOTE_KEY,
+  type FastModeSession,
   fastCostNoteSeen,
   fastModeInForce,
   fastModeUnsupportedReason,
   markFastCostNoteSeen,
 } from '../../../app/lib/fast-mode.ts';
 import type { RuntimeModelCatalog } from '../../../app/lib/runtime-models.ts';
-import '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
 
-const view = (config: Partial<SessionView['config']> = {}, state: Partial<SessionView['state']> = {}): SessionView =>
-  sessionView('s-1', { config, state });
+const view = (
+  config: Partial<FastModeSession['config']> = {},
+  state: Partial<FastModeSession['state']> = {},
+): FastModeSession => ({ config: { ...config }, state: { ...state } });
 
 const catalog = (fast: boolean | undefined): RuntimeModelCatalog => ({
-  harness: 'claude',
+  harness: 'claude-code',
   source: 'wrapper-inventory',
   choices: [
     { value: 'claude-opus-5-5', label: 'Opus 5.5', reasoningEfforts: [], ...(fast === undefined ? {} : { fast }) },
@@ -127,15 +127,23 @@ describe('the fast cost note', () => {
   });
 
   test('should read the browser storage when none is passed', () => {
-    const before = globalThis.localStorage?.getItem(FAST_COST_NOTE_KEY) ?? null;
-    globalThis.localStorage?.removeItem(FAST_COST_NOTE_KEY);
+    const values = new Map<string, string>();
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => void values.set(key, value),
+      },
+    });
     try {
       expect(fastCostNoteSeen()).toBeFalse();
       markFastCostNoteSeen();
       expect(fastCostNoteSeen()).toBeTrue();
+      expect([...values.keys()]).toEqual([FAST_COST_NOTE_KEY]);
     } finally {
-      if (before === null) globalThis.localStorage?.removeItem(FAST_COST_NOTE_KEY);
-      else globalThis.localStorage?.setItem(FAST_COST_NOTE_KEY, before);
+      if (original === undefined) Reflect.deleteProperty(globalThis, 'localStorage');
+      else Object.defineProperty(globalThis, 'localStorage', original);
     }
   });
 });

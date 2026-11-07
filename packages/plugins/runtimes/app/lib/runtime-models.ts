@@ -1,6 +1,5 @@
-import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
-import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
-import { daemonRequest } from './daemon-transport.ts';
+import { HARNESS_KEYS, type HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { RuntimesClient } from './client.ts';
 import { asModelTier, type ModelTier } from './model-tiers.ts';
 
 interface RuntimeReasoningChoice {
@@ -25,8 +24,10 @@ export interface RuntimeModelChoice {
   readonly fastDefault?: true;
 }
 
+// GAP(ferrets): the per-ferret runtime catalog wire (`RuntimeModelCatalog`) is not in Ferrets' contract yet; this
+// is the app's own parse of it, kept until Ferrets publishes the schema.
 export interface RuntimeModelCatalog {
-  readonly harness: 'claude' | 'codex';
+  readonly harness: HarnessKey;
   readonly source: 'wrapper-inventory' | 'codex-app-server';
   readonly choices: readonly RuntimeModelChoice[];
   /**
@@ -41,37 +42,13 @@ export class DaemonResponseError extends Error {
     readonly status: number,
     message: string,
     readonly code?: string,
-    /** The Ferretry version the answering daemon said it runs (`x-fy-version`), when the caller read it. */
-    readonly daemonVersion?: string,
   ) {
     super(message);
     this.name = 'DaemonResponseError';
   }
 }
 
-export type DaemonFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-
-/**
- * THE ONLY WAY THIS PACKAGE IS ALLOWED TO SPELL "the real network".
- *
- * `fetch` is a WebIDL operation on the global, and WebIDL rejects a call whose
- * receiver is neither the global nor absent. A bare builtin written as a parameter
- * default is therefore a value that works only until somebody stores it and calls
- * it as a member: `this.#network(url, init)` makes the
- * holder the receiver and the browser answers
- * `Failed to execute 'fetch' on 'Window': Illegal invocation`.
- *
- * That is not hypothetical. It shipped twice — once through a transport (PR #223)
- * and once through the carrier router — and both times it presented as every paired
- * daemon being unreachable, because the throw happens before a single byte leaves
- * the tab. An arrow wrapper keeps the builtin in its own realm no matter how the
- * value is stored or invoked afterwards.
- *
- * `scripts/validate/fetch-binding.sh` fails the commit that writes a bare builtin
- * anywhere in this package, so this is the one spelling rather than the preferred
- * one.
- */
-export const browserFetch: DaemonFetch = (input, init) => globalThis.fetch(input, init);
+const isHarness = (value: unknown): value is HarnessKey => (HARNESS_KEYS as readonly unknown[]).includes(value);
 
 const asObject = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
@@ -86,7 +63,7 @@ export const parseRuntimeModelCatalog = (value: unknown): RuntimeModelCatalog =>
   const source = root?.source;
   if (
     !root ||
-    (harness !== 'claude' && harness !== 'codex') ||
+    !isHarness(harness) ||
     (source !== 'wrapper-inventory' && source !== 'codex-app-server') ||
     !Array.isArray(root.choices)
   )
@@ -146,41 +123,19 @@ export const requireRuntimeModelCatalogHarness = (
   return catalog;
 };
 
-export const runtimeModelCatalogErrorMessage = (error: unknown): string => {
-  if (error instanceof DaemonResponseError && error.status === 404 && error.code === 'unknown_route')
-    return 'This daemon does not provide the runtime model catalog endpoint. Restarting an unchanged daemon build will not add the missing route.';
-  return error instanceof Error ? error.message : String(error);
-};
 
-const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
-  if (daemon.daemonId !== scope.daemonId) throw new Error('runtime model scope must belong to the requested daemon');
-};
+export const runtimeModelCatalogErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
 
-/** Fetches one session's advertised model catalog from its explicitly paired daemon. */
+// GAP(ferrets): `GET /v1/ferrets/:sessionId/runtime-models` (parity row R-0171) is not in Ferrets' manifest yet.
+export const RUNTIME_MODELS_ROUTE = 'GET /v1/ferrets/:sessionId/runtime-models' as const;
+
+/** Fetches one session's advertised model catalog from the daemon the client is bound to. */
 export const fetchRuntimeModelCatalog = async (
-  daemon: DaemonConnection,
-  scope: DaemonSessionScope,
-  fetcher: DaemonFetch = browserFetch,
-): Promise<RuntimeModelCatalog> => {
-  assertScopeDaemon(daemon, scope);
-  const request = daemonRequest(daemon, `/v1/sessions/${encodeURIComponent(scope.sessionId)}/runtime-models`);
-  const response = await fetcher(request.url, request.init);
-  if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
-    throw new DaemonResponseError(
-      response.status,
-      typeof body.error === 'string' ? body.error : `HTTP ${response.status}`,
-      typeof body.code === 'string' ? body.code : undefined,
-    );
-  }
-  return parseRuntimeModelCatalog(await response.json());
-};
-
-interface ConnectionBinding {
-  readonly baseUrl: string;
-  readonly deviceId: string;
-  readonly generation: number;
-}
+  client: RuntimesClient,
+  sessionId: string,
+): Promise<RuntimeModelCatalog> =>
+  parseRuntimeModelCatalog(await client.call(RUNTIME_MODELS_ROUTE, { params: { sessionId } }));
 
 interface InFlight {
   readonly generation: number;
@@ -188,89 +143,58 @@ interface InFlight {
 }
 
 /**
- * Session catalog cache. Its public API accepts the full scope, so matching
- * session IDs from different paired daemons can neither share data nor share
+ * Session catalog cache for ONE daemon. The client the shell hands over is already bound to a single pairing, so
+ * matching session ids from different daemons live in different stores and can neither share data nor share
  * in-flight work.
  *
- * Every continuation is fenced by the concrete paired connection: a slow result
- * that completes after `clearDaemon`, an unpair, or a same-id re-pair (rotated
- * base URL or device token) cannot publish into the fresh connection. Each
- * daemon carries its own generation; a connection whose base URL or token
- * differs from the recorded one is treated as a re-pair and resets that daemon.
+ * Every continuation is fenced by the connection generation: a slow result that completes after `clear`, an unpair,
+ * or a re-pair (the shell hands a NEW client when the base URL or device token rotated) cannot publish into the
+ * fresh connection. A load made through a client other than the one the store is bound to is a re-pair and resets it.
  */
 export class DaemonRuntimeModelCatalogStore {
   readonly #catalogs = new Map<string, RuntimeModelCatalog>();
   readonly #inFlight = new Map<string, InFlight>();
-  readonly #bindings = new Map<DaemonId, ConnectionBinding>();
-  readonly #generations = new Map<DaemonId, number>();
+  #bound: RuntimesClient | undefined;
+  #generation = 0;
 
-  get(scope: DaemonSessionScope): RuntimeModelCatalog | undefined {
-    return this.#catalogs.get(daemonSessionKey(scope));
+  get(sessionId: string): RuntimeModelCatalog | undefined {
+    return this.#catalogs.get(sessionId);
   }
 
-  async load(
-    daemon: DaemonConnection,
-    scope: DaemonSessionScope,
-    fetcher: DaemonFetch = browserFetch,
-  ): Promise<RuntimeModelCatalog> {
-    assertScopeDaemon(daemon, scope);
-    const generation = this.#bind(daemon);
-    const key = daemonSessionKey(scope);
-    const cached = this.#catalogs.get(key);
+  async load(client: RuntimesClient, sessionId: string): Promise<RuntimeModelCatalog> {
+    const generation = this.#bind(client);
+    const cached = this.#catalogs.get(sessionId);
     if (cached) return cached;
     // Coalesce only against work started under the same connection generation,
-    // never against a prior token's still-running request.
-    const existing = this.#inFlight.get(key);
+    // never against a prior connection's still-running request.
+    const existing = this.#inFlight.get(sessionId);
     if (existing?.generation === generation) return existing.promise;
 
-    const promise = fetchRuntimeModelCatalog(daemon, scope, fetcher)
+    const promise = fetchRuntimeModelCatalog(client, sessionId)
       .then(catalog => {
-        if (this.#current(daemon, generation)) this.#catalogs.set(key, catalog);
+        if (this.#generation === generation && this.#bound === client) this.#catalogs.set(sessionId, catalog);
         return catalog;
       })
       .finally(() => {
-        if (this.#inFlight.get(key)?.promise === promise) this.#inFlight.delete(key);
+        if (this.#inFlight.get(sessionId)?.promise === promise) this.#inFlight.delete(sessionId);
       });
-    this.#inFlight.set(key, { generation, promise });
+    this.#inFlight.set(sessionId, { generation, promise });
     return promise;
   }
 
-  /** Unpair one daemon without perturbing any other daemon's cache or work. */
-  clearDaemon(daemonId: DaemonId): void {
-    this.#generations.set(daemonId, (this.#generations.get(daemonId) ?? 0) + 1);
-    this.#bindings.delete(daemonId);
-    for (const key of this.#catalogs.keys()) {
-      const [cachedDaemonId] = JSON.parse(key) as [string, string];
-      if (cachedDaemonId === daemonId) this.#catalogs.delete(key);
-    }
-    this.#clearInFlight(daemonId);
+  /** Unpair the daemon: drop every catalog and orphan every request still in flight. */
+  clear(): void {
+    this.#generation += 1;
+    this.#bound = undefined;
+    this.#catalogs.clear();
+    this.#inFlight.clear();
   }
 
-  #bind(daemon: DaemonConnection): number {
-    const existing = this.#bindings.get(daemon.daemonId);
-    if (existing && existing.baseUrl === daemon.baseUrl && existing.deviceId === daemon.deviceId)
-      return existing.generation;
-    // A same-id re-pair (rotated URL or token) invalidates the prior generation.
-    if (existing) this.clearDaemon(daemon.daemonId);
-    const generation = this.#generations.get(daemon.daemonId) ?? 0;
-    this.#bindings.set(daemon.daemonId, { baseUrl: daemon.baseUrl, deviceId: daemon.deviceId, generation });
-    return generation;
-  }
-
-  #current(daemon: DaemonConnection, generation: number): boolean {
-    const binding = this.#bindings.get(daemon.daemonId);
-    return (
-      binding !== undefined &&
-      binding.generation === generation &&
-      binding.baseUrl === daemon.baseUrl &&
-      binding.deviceId === daemon.deviceId
-    );
-  }
-
-  #clearInFlight(daemonId: DaemonId): void {
-    for (const key of this.#inFlight.keys()) {
-      const [cachedDaemonId] = JSON.parse(key) as [string, string];
-      if (cachedDaemonId === daemonId) this.#inFlight.delete(key);
-    }
+  #bind(client: RuntimesClient): number {
+    if (this.#bound === client) return this.#generation;
+    // A different client is a re-pair (rotated URL or token): the prior generation is over.
+    this.clear();
+    this.#bound = client;
+    return this.#generation;
   }
 }

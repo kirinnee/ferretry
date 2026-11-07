@@ -1,9 +1,12 @@
 /**
- * `LocalModels` as the daemon answers `POST /v1/models/local/refresh`, parsed through the real schema so
+ * `LocalModels` as the daemon answers `POST /v1/logins/models/local/refresh`, parsed through the real schema so
  * a wire change fails here first. `localModelsFixture('found')` is a machine with two models pulled.
  */
 
-import { type LocalModel, type LocalModels, LocalModelsSchema, type LocalModelsState } from '@ferretry/protocol';
+import { type LocalModels, LocalModelsSchema } from '../../../../contract/index.ts';
+
+export type LocalModel = LocalModels['models'][number];
+export type LocalModelsState = LocalModels['state'];
 
 export const PULL = 'ollama pull gpt-oss:20b';
 
