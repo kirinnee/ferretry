@@ -524,7 +524,7 @@ describe('observeInputFields', () => {
     should(password?.field).eql({ tag: 'input', type: 'password', autocomplete: 'current-password', name: 'pw' });
   });
 
-  it('asks the handle which node it holds, never the page, and disposes every handle', async () => {
+  it('I110 asks the handle which node it holds, never the page, and disposes every handle', async () => {
     const { world } = loginWorld();
     await observed(world, ['#user', '#pw']);
     const session = world.session('page-target');
@@ -556,7 +556,7 @@ describe('observeInputFields', () => {
       should(world.remembered.get('page-target')).be.undefined();
     };
 
-    it('when the handle cannot say which node it holds', async () => {
+    it('I113 when the handle cannot say which node it holds', async () => {
       const { world, user } = loginWorld();
       user.held = new Error('the handle is gone');
       await refused(world);
@@ -574,7 +574,7 @@ describe('observeInputFields', () => {
       await refused(world);
     });
 
-    it('when the node is not in the session that owns the handle’s frame', async () => {
+    it('I113 when the node is not in the session that owns the handle’s frame', async () => {
       const { world, user } = loginWorld();
       user.held = { backendNodeId: 99, nodeName: 'INPUT', attributes: user.attributes };
       await refused(world);
@@ -588,7 +588,7 @@ describe('observeInputFields', () => {
   });
 
   describe('flags, never refuses, a proved field that is covered or off screen', () => {
-    it('the review combination: a would-be marker redirect AND a same-box overlay on top — the handle’s node, covered', async () => {
+    it('I114 the review combination: a would-be marker redirect AND a same-box overlay on top — the handle’s node, covered', async () => {
       const { world, user, password } = loginWorld();
       password.box = user.box;
       world.session('page-target').onTop = password;
@@ -599,7 +599,7 @@ describe('observeInputFields', () => {
       should(field?.visible).equal(true);
     });
 
-    it('when the hit test finds nothing at all, or DevTools cannot measure the node', async () => {
+    it('I114 when the hit test finds nothing at all, or DevTools cannot measure the node', async () => {
       const { world } = loginWorld();
       const session = world.session('page-target');
       session.failOn = method =>
@@ -640,7 +640,7 @@ describe('observeInputFields', () => {
     ).containEql({ x: 25, y: 25 });
   });
 
-  it('names a field whose element is not on the page, for a stale ref and for a selector alike', async () => {
+  it('I111 names a field whose element is not on the page, for a stale ref and for a selector alike', async () => {
     const { world } = loginWorld();
     const stale = await observeInputFields(world.subject, [
       target('#user'),
@@ -943,7 +943,7 @@ describe('typeInputFields', () => {
     should(session.pageWorld).eql([]);
   });
 
-  it('makes every insert the very next call after the focus proof, and one isolated world per frame', async () => {
+  it('I115 makes every insert the very next call after the focus proof, and one isolated world per frame', async () => {
     const { world, facts } = await ready();
     should(await typeInputFields(world.subject, facts, values, false)).equal('typed');
     const session = world.session('page-target');
@@ -1190,7 +1190,7 @@ describe('typeInputFields', () => {
       should(world.session('page-target').count('Input.dispatchKeyEvent')).equal(0);
     });
 
-  it('writes nothing for a value whose field the owner was not shown', async () => {
+  it('I63 writes nothing for a value whose field the owner was not shown', async () => {
     const { world, facts } = await ready();
     should(await typeInputFields(world.subject, facts, [{ field: 'other', text: 'x' }], false)).equal('target_changed');
     should(insertions(world)).equal(0);
@@ -1211,7 +1211,7 @@ describe('typeInputFields', () => {
     should(world.session('page-target').count('Input.dispatchKeyEvent')).equal(0);
   });
 
-  it('answers uncertain when focus lands elsewhere after a value was typed', async () => {
+  it('I115 answers uncertain when focus lands elsewhere after a value was typed', async () => {
     const { world, facts } = await ready();
     const session = world.session('page-target');
     session.failOn = (method, params) => {
@@ -1232,7 +1232,7 @@ describe('typeInputFields', () => {
     should(insertions(world)).equal(0);
   });
 
-  it('answers uncertain, and never retries, when the first insertion fails', async () => {
+  it('I115 answers uncertain, and never retries, when the first insertion fails', async () => {
     const { world, facts } = await ready();
     const session = world.session('page-target');
     session.failOn = method => (method === 'Input.insertText' ? new Error('detached') : undefined);
@@ -1259,7 +1259,7 @@ describe('typeInputFields', () => {
     should(await typeInputFields(world.subject, facts, values, false)).equal('uncertain');
   });
 
-  it('never carries a value in anything it returns, throws, or logs, even when DevTools errors echo it', async () => {
+  it('I115 never carries a value in anything it returns, throws, or logs, even when DevTools errors echo it', async () => {
     for (const failing of [
       'Page.createIsolatedWorld',
       'DOM.resolveNode',
@@ -1320,7 +1320,7 @@ describe('shootInputFields', () => {
     };
   };
 
-  it('takes the union of the boxes plus the margin, as a png at scale 1', async () => {
+  it('I112 takes the union of the boxes plus the margin, as a png at scale 1', async () => {
     const world = new FakeWorld();
     const session = world.session('page-target');
     const shot = await shootInputFields(
@@ -1431,7 +1431,7 @@ describe('playwrightNodeOf', () => {
     should(seen).eql([{ method: 'DOM.describeNode', params: { objectId: 'obj-1' } }]);
   });
 
-  it('refuses when any part of the way to that session is missing', async () => {
+  it('I113 refuses when any part of the way to that session is missing', async () => {
     const node = { backendNodeId: 11 };
     const missing = [
       null,
@@ -1482,7 +1482,7 @@ describe('review regressions: the write is bound to the target that holds the ha
     should(world.session('frame-target').typed).eql([{ backendNodeId: 7, text: SECRET }]);
   });
 
-  it('refuses a field whose frame’s own session cannot be attached, rather than reading the page’s colliding node', async () => {
+  it('I113 refuses a field whose frame’s own session cannot be attached, rather than reading the page’s colliding node', async () => {
     const { world, oopif } = collidingWorld();
     oopif.failAttach = true;
     world.element('#card', 7, ['type', 'password', 'name', 'pw'], oopif);
@@ -1567,7 +1567,7 @@ describe('refindInputFields (#B100)', () => {
     should(world.described.at(-1)).equal(77);
   });
 
-  it('should still refuse to type into the old node: the write after a re-render is target_changed', async () => {
+  it('I63 should still refuse to type into the old node: the write after a re-render is target_changed', async () => {
     const { world, code } = codeWorld();
     const before = await look(world);
     world.rerender(code, 77);
@@ -1591,7 +1591,7 @@ describe('refindInputFields (#B100)', () => {
     should(again.ok && again.facts.fields[0]?.backendNodeId).equal(21);
   });
 
-  it('should call the search ambiguous when a look-alike cannot be held: the page is changing under it', async () => {
+  it('I56 should call the search ambiguous when a look-alike cannot be held: the page is changing under it', async () => {
     const { world, code } = codeWorld();
     const before = await look(world);
     world.rerender(code, 77);
@@ -1600,7 +1600,7 @@ describe('refindInputFields (#B100)', () => {
     should(await refindInputFields(world.subject, before, [pointer])).eql({ ok: false, ambiguous: 'code' });
   });
 
-  it('should not let the pointer decide a search the page disturbed', async () => {
+  it('I56 should not let the pointer decide a search the page disturbed', async () => {
     const world = new FakeWorld();
     const code = world.element('#otp', 21, ['type', 'text', 'name', 'otp']);
     const selector = { id: 'code', target: { kind: 'selector' as const, selector: '#otp' } };
@@ -1648,7 +1648,7 @@ describe('refindInputFields (#B100)', () => {
     should(await refindInputFields(world.subject, before, [pointer])).eql({ ok: false, ambiguous: 'code' });
   });
 
-  it('should pass over a hidden look-alike and a look-alike in another frame', async () => {
+  it('I56 should pass over a hidden look-alike and a look-alike in another frame', async () => {
     const { world, code } = codeWorld();
     const before = await look(world);
     world.rerender(code, 77);
@@ -1661,7 +1661,7 @@ describe('refindInputFields (#B100)', () => {
     should(again.ok && again.facts.fields[0]?.backendNodeId).equal(77);
   });
 
-  it('should refuse more look-alikes than it will look at', async () => {
+  it('I56 should refuse more look-alikes than it will look at', async () => {
     const { world, code } = codeWorld();
     const before = await look(world);
     world.rerender(code, 77, { visible: false });
@@ -1737,7 +1737,7 @@ describe('probeInputFields', () => {
   const probe = async (world: FakeWorld, facts: BrowserInputFacts, fields: readonly string[] = ['#pw']) =>
     await probeInputFields(world.subject, facts, fields, DUMMY, wait);
 
-  it('types the throwaway value, looks twice, finds it nowhere, empties the field, and answers hidden', async () => {
+  it('I96 types the throwaway value, looks twice, finds it nowhere, empties the field, and answers hidden', async () => {
     const { world, facts } = await ready();
     waited.length = 0;
     should(await probe(world, facts)).equal('hidden');
@@ -1766,7 +1766,7 @@ describe('probeInputFields', () => {
     should(await probeInputFields(world.subject, facts, ['#pw'], DUMMY, later)).equal('shown');
   });
 
-  it('aborts when the page fires a request while it runs, and still empties the field', async () => {
+  it('I96 aborts when the page fires a request while it runs, and still empties the field', async () => {
     const { world, facts } = await ready();
     world.onInput = () => {
       for (const listener of world.listeners) listener();
@@ -1775,7 +1775,7 @@ describe('probeInputFields', () => {
     should(world.session('page-target').values.get(12)).equal('');
   });
 
-  it('aborts when the page opens a socket while it runs, even one it closes again', async () => {
+  it('I96 aborts when the page opens a socket while it runs, even one it closes again', async () => {
     const { world, facts } = await ready();
     world.onInput = () => {
       world.socketsEver += 1;
@@ -1803,7 +1803,7 @@ describe('probeInputFields', () => {
     should(await probe(stuck.world, stuck.facts)).equal('aborted');
   });
 
-  it('never types into a field that already holds something, or where a socket is open', async () => {
+  it('I96 never types into a field that already holds something, or where a socket is open', async () => {
     const full = await ready();
     full.world.session('page-target').values.set(12, 'already there');
     should(await probe(full.world, full.facts)).equal('aborted');
@@ -1814,7 +1814,7 @@ describe('probeInputFields', () => {
     for (const world of [full.world, socket.world]) should(world.session('page-target').typed).eql([]);
   });
 
-  it('aborts, typing nothing, for two fields, an unknown field, a closed page, or a browser that cannot tell', async () => {
+  it('I96 aborts, typing nothing, for two fields, an unknown field, a closed page, or a browser that cannot tell', async () => {
     const worlds: FakeWorld[] = [];
     const two = await ready();
     worlds.push(two.world);
@@ -1868,7 +1868,7 @@ describe('a grant fill arms its pagehide clear, and its fields are checked befor
     fields: [{ frameId, backendNodeId }],
   });
 
-  it('should arm the named password field from the trusted world, typing nothing', async () => {
+  it('I217 should arm the named password field from the trusted world, typing nothing', async () => {
     const { world, facts } = await ready();
     should(await armInputFields(world.subject, facts, ['#pw'])).equal('armed');
     const session = world.session('page-target');
@@ -1877,7 +1877,7 @@ describe('a grant fill arms its pagehide clear, and its fields are checked befor
     should(insertions(world)).equal(0);
   });
 
-  it('should refuse to arm a field that is not a password box, nothing named, another document or a world that fails', async () => {
+  it('I217 should refuse to arm a field that is not a password box, nothing named, another document or a world that fails', async () => {
     const plain = await ready();
     should(await armInputFields(plain.world.subject, plain.facts, ['#user'])).equal('refused');
     should(await armInputFields(plain.world.subject, plain.facts, [])).equal('refused');
@@ -1892,7 +1892,7 @@ describe('a grant fill arms its pagehide clear, and its fields are checked befor
     should(await armInputFields(closed.world.subject, closed.facts, ['#pw'])).equal('refused');
   });
 
-  it('should empty a password field that still holds a value, whatever it holds, and answer cleared', async () => {
+  it('I217 should empty a password field that still holds a value, whatever it holds, and answer cleared', async () => {
     const { world, facts, frame } = await ready();
     await typeInputFields(world.subject, facts, values, false);
     // The ferret appended a character during the hold: the password is still in there, so it is still emptied.
@@ -1915,7 +1915,7 @@ describe('a grant fill arms its pagehide clear, and its fields are checked befor
     should(await clearInputFields(world.subject, jobFor(frame))).equal('moved');
   });
 
-  it('should answer unknown, so the line stops, for any other failure on the same document', async () => {
+  it('I217 should answer unknown, so the line stops, for any other failure on the same document', async () => {
     const thrown = await ready();
     await typeInputFields(thrown.world.subject, thrown.facts, values, false);
     thrown.world.clearThrows = true;

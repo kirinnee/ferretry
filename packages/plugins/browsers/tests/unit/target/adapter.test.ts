@@ -148,7 +148,7 @@ describe('PageInputTarget', () => {
     should(calls).eql(['page:s1:app', 'observe:page-1:password={"kind":"ref","ref":"e3"}']);
   });
 
-  it('should call a field the page lacks, a page that is not the session’s, or a stale page id gone', async () => {
+  it('I111 should call a field the page lacks, a page that is not the session’s, or a stale page id gone', async () => {
     should(await host({ observation: { ok: false, missing: 'password' } }).target.observe(S1, APP, FIELDS)).eql({
       ok: false,
       reason: 'target_gone',
@@ -171,7 +171,7 @@ describe('PageInputTarget', () => {
     should(calls).eql([]);
   });
 
-  it('should type only into the page the card showed, and say what came of it', async () => {
+  it('I63 should type only into the page the card showed, and say what came of it', async () => {
     const same = host();
     const moved = host({ pageId: 'page-2' });
 
@@ -194,7 +194,7 @@ describe('PageInputTarget', () => {
     should(await gone.target.type(S1, APP, [], false, FACTS as InputTargetFacts)).equal('target_gone');
   });
 
-  it("should look for the card's fields again on the same page, by the agent's pointers and the card's facts (#B100)", async () => {
+  it("I56 should look for the card's fields again on the same page, by the agent's pointers and the card's facts (#B100)", async () => {
     const moved = { ...FACTS_PAGE, navigationId: 'loader-3' };
     const { target, calls } = host({ refound: { ok: true, facts: moved } });
 
@@ -229,7 +229,7 @@ describe('PageInputTarget', () => {
     should(calls).eql([]);
   });
 
-  it('should picture the fields and tell the page’s document, and answer nothing when it cannot', async () => {
+  it('I112 should picture the fields and tell the page’s document, and answer nothing when it cannot', async () => {
     const { target } = host();
     const refused = host({ refuse: true });
 
@@ -270,7 +270,7 @@ describe('PageInputTarget pins its looks to the page typed into', () => {
 });
 
 describe('the dummy probe through a page target', () => {
-  it('should probe the page the card was drawn from, in its queue, with a fresh throwaway value', async () => {
+  it('I96 should probe the page the card was drawn from, in its queue, with a fresh throwaway value', async () => {
     const { target, calls } = host();
     should(await target.probe(S1, APP, FACTS_PAGE, ['password'])).equal('hidden');
     should(calls[0]).equal('page:s1:app');
@@ -345,7 +345,7 @@ describe('PageInputTarget: a grant fill’s clear (R3a-4)', () => {
     fields: [{ frameId: 'main', backendNodeId: 9 }],
   };
 
-  it('should arm the pagehide clear on the password fields first, in the same page turn, and only when asked', async () => {
+  it('I217 should arm the pagehide clear on the password fields first, in the same page turn, and only when asked', async () => {
     const armed = host();
     should(await armed.target.type(S1, APP, VALUES, true, FACTS_PAGE, { armClear: true })).equal('typed');
     should(armed.calls).eql(['page:s1:app', 'arm:page-1:password', 'type:page-1:password:true']);
@@ -354,7 +354,7 @@ describe('PageInputTarget: a grant fill’s clear (R3a-4)', () => {
     should(plain.calls).eql(['page:s1:app', 'type:page-1:password:true']);
   });
 
-  it('should type nothing when the browser refuses the arm, cannot arm (this browser cannot) or cannot clear', async () => {
+  it('I217 should type nothing when the browser refuses the arm, cannot arm (this browser cannot) or cannot clear', async () => {
     for (const options of [{ arm: 'refused' as const }, { armless: true }, { clearless: true }]) {
       const { target, calls } = host(options);
       should(await target.type(S1, APP, VALUES, true, FACTS_PAGE, { armClear: true })).equal('target_changed');
@@ -384,7 +384,7 @@ describe('PageInputTarget: a grant fill’s clear (R3a-4)', () => {
     should(second.calls).eql(['page:s1:app', 'arm:page-1:password']);
   });
 
-  it('should check and empty the typed fields in the page’s own queue, and read anything odd as unknown', async () => {
+  it('I217 should check and empty the typed fields in the page’s own queue, and read anything odd as unknown', async () => {
     const { target, calls } = host({ cleared: 'cleared' });
     should(await target.arm(S1, APP, JOB)).equal('cleared');
     should(calls).eql(['page:s1:app', 'clear:page-1:9']);

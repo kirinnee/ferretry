@@ -16,7 +16,7 @@ describe('recogniseBrowserChallenge', () => {
     should(recogniseBrowserChallenge(page({ url: 'not a url', frameUrls: ['also not a url'] }))).be.undefined();
   });
 
-  it('should recognise an interstitial that stands in for the page from its address or title', () => {
+  it('I124 should recognise an interstitial that stands in for the page from its address or title', () => {
     // Act + Assert
     should(
       recogniseBrowserChallenge(page({ url: 'https://shop.example/cdn-cgi/challenge-platform/h/b/orchestrate' })),
@@ -40,7 +40,7 @@ describe('recogniseBrowserChallenge', () => {
     should(recogniseBrowserChallenge(page({ url: 'https://shop.example/sorry/' }))).be.undefined();
   });
 
-  it('should recognise a visible captcha widget from the frames on the page', () => {
+  it('I124 should recognise a visible captcha widget from the frames on the page', () => {
     // Arrange
     const frames: readonly (readonly [string, string])[] = [
       ['https://challenges.cloudflare.com/cdn-cgi/challenge-platform/turnstile', 'cloudflare'],

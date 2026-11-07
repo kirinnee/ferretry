@@ -17,7 +17,7 @@ function store() {
 }
 
 describe('who a page is signing in, as the ferret typed it', () => {
-  it('should answer what was typed on that page and host only', () => {
+  it('I154 should answer what was typed on that page and host only', () => {
     const { identities } = store();
     identities.typed(SESSION, 'page-1', 'Accounts.Google.com', ' ernest@atomi.tech ');
 
@@ -36,7 +36,7 @@ describe('who a page is signing in, as the ferret typed it', () => {
     should(identities.at(SESSION, 'page-1', GOOGLE)).equal('ernest@atomi.tech');
   });
 
-  it('should forget it once the page is seen on another host, but not on its own', () => {
+  it('I154 should forget it once the page is seen on another host, but not on its own', () => {
     const { identities } = store();
     identities.typed(SESSION, 'page-1', GOOGLE, 'ernest@atomi.tech');
     identities.seen(SESSION, 'page-1', GOOGLE);
@@ -46,7 +46,7 @@ describe('who a page is signing in, as the ferret typed it', () => {
     should(identities.at(SESSION, 'page-1', GOOGLE)).be.undefined();
   });
 
-  it('should forget one page when it is cleared, keeping the session’s other pages', () => {
+  it('I155 should forget one page when it is cleared, keeping the session’s other pages', () => {
     const { identities } = store();
     identities.typed(SESSION, 'page-1', GOOGLE, 'ernest@atomi.tech');
     identities.typed(SESSION, 'page-2', GOOGLE, 'kirin@x.com');
@@ -67,7 +67,7 @@ describe('who a page is signing in, as the ferret typed it', () => {
     should(identities.at(SESSION, 'page-1', GOOGLE)).be.undefined();
   });
 
-  it('should stop answering after its time, and when the session ends', () => {
+  it('I155 should stop answering after its time, and when the session ends', () => {
     const { identities, later } = store();
     identities.typed(SESSION, 'page-1', GOOGLE, 'ernest@atomi.tech');
     later(TYPED_IDENTITY_TTL_MS);

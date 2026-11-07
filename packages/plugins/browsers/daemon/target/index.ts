@@ -31,6 +31,9 @@ export type { BrowserSignInWatch, SignInAct } from './sign-in/watch.ts';
 export { NON_TYPING_KEYS, pageActLeavesSignIn, toolbarActLeavesSignIn } from './sign-in/watch.ts';
 export { TYPED_IDENTITY_TTL_MS, TypedIdentities } from './sign-in/identities.ts';
 export type {
+  ActedPage,
+  ActNote,
+  PageActs,
   PageApprovals,
   PageCaller,
   PageInputAction,
@@ -69,6 +72,7 @@ export function pageTarget(deps: PageTargetDeps): PageTargetHalf {
     identities,
     ...(deps.vault === undefined ? {} : { vault: deps.vault }),
     ...(deps.approvals === undefined ? {} : { approvals: deps.approvals }),
+    ...(deps.acts === undefined ? {} : { acts: deps.acts }),
   });
   return { adapter, tools, identities };
 }

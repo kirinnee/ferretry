@@ -77,6 +77,11 @@ export interface PageToolHost {
   askOwner(caller: PageCaller, page: ResolvedPage, message: string | undefined): Promise<void>;
   /** The driving marker; a courtesy, so a failure is swallowed. */
   drove?(caller: PageCaller, page: ResolvedPage): Promise<void>;
+  /**
+   * The page an act touched, as the sign-in lock groups acts: its id, whether it shares storage with others (incognito,
+   * a popup's opener) and the hosts it and its popups are on. `undefined`, or no `hosts`, widens the act (I100).
+   */
+  actedPage?(caller: PageCaller, page: ResolvedPage): Promise<ActedPage | undefined>;
 }
 
 /** Who a page signs in, as the ferret typed it (`../sign-in/identities.ts`). */
@@ -93,6 +98,24 @@ export interface PageApprovals {
   raise(caller: PageCaller, page: ResolvedPage, push: BrowserPushApprovalInput): Promise<{ readonly summary: string }>;
 }
 
+/** The page an act touched (today's `ActedPage`): hosts by `../../holds/site.ts` grouping on the lock's side. */
+export interface ActedPage {
+  readonly id: string;
+  readonly incognito?: true;
+  readonly openerId?: string;
+  readonly hosts?: readonly string[];
+}
+
+/** One act, told before it runs; `placed` says which page once the call is over (`undefined`: every page). */
+export interface ActNote {
+  placed(page: ActedPage | undefined): void;
+}
+
+/** Today's `loginActs`: told each time a ferret drives a page, before the act. `script` is a page script's. */
+export interface PageActs {
+  acted(ferret: FerretId, script: boolean): ActNote | undefined;
+}
+
 /** What the page tools are built from. */
 export interface PageToolDeps {
   readonly kernel: Pick<KernelPorts, 'act' | 'redaction'>;
@@ -101,6 +124,8 @@ export interface PageToolDeps {
   readonly vault?: Pick<VaultApi, 'raiseInput'>;
   readonly identities?: PageIdentities;
   readonly approvals?: PageApprovals;
+  /** Told of every page act a ferret makes, before it runs (the Vault's sign-in lock, I99 and I100). */
+  readonly acts?: PageActs;
 }
 
 /** A page tool's refusal or failure, already worded for whoever called. */
@@ -176,7 +201,29 @@ export function pageInputTools(deps: PageToolDeps): {
   ): Promise<ToolResult> => {
     const caller = callerOf(call);
     const audience: HoldAudience = caller.kind;
-    const page = await host.resolve(caller, key);
+    // Told BEFORE anything runs, for a ferret's act: a sign-in's after-submit facts the ferret could have steered are
+    // not kept. Until the call ends it counts on every page; then it is placed on the page it touched (I100).
+    const note = caller.kind === 'agent' ? deps.acts?.acted(caller.ferret, false) : undefined;
+    let page: ResolvedPage | undefined;
+    try {
+      page = await host.resolve(caller, key);
+      return await typed(caller, audience, page, op, action);
+    } finally {
+      if (note !== undefined) note.placed(page === undefined ? undefined : await placedOn(caller, page));
+    }
+  };
+
+  /** The page an act touched, for the sign-in lock: unknown (every page) when the browser cannot say (I100). */
+  const placedOn = async (caller: PageCaller, page: ResolvedPage): Promise<ActedPage | undefined> =>
+    host.actedPage === undefined ? undefined : await host.actedPage(caller, page).catch(() => undefined);
+
+  const typed = async (
+    caller: PageCaller,
+    audience: HoldAudience,
+    page: ResolvedPage,
+    op: 'type' | 'fill',
+    action: PageInputAction,
+  ): Promise<ToolResult> => {
     const reference = surfaceReference(page);
     let outcome: PageInputOutcome = {};
     try {
