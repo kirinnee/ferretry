@@ -1,0 +1,257 @@
+import { describe, it } from 'bun:test';
+import type { LoginFieldRole, SignInId } from '@ferretry/protocol';
+import should from 'should';
+import {
+  FILLS_PER_HOUR_PER_SESSION,
+  FILLS_PER_HOUR_PER_SIGN_IN,
+  type GrantReservation,
+  type GrantTarget,
+  SignInGrantLedger,
+} from '../../../src/lib/sign-in-grants/ledger.ts';
+
+const NOW = Date.parse('2026-11-01T12:00:00.000Z');
+const SESSION = 'mvv6b4qw-49d0158d';
+const SIGN_IN = 'si_0123456789abcdef01234567' as SignInId;
+const grant = (remaining = 1, id = 'plan:aa:0', signIn = SIGN_IN) => ({ id, signIn, remaining });
+
+const reserved = (outcome: GrantReservation | string): GrantReservation => {
+  if (typeof outcome === 'string') throw new Error(`expected a reservation, got ${outcome}`);
+  return outcome;
+};
+
+/** Reserve a fill of `roles` (its field set is the roles, sorted). */
+const fill = (
+  ledger: SignInGrantLedger,
+  roles: readonly LoginFieldRole[],
+  remaining: number,
+  at: number,
+  over: { id?: string; session?: string; signIn?: SignInId } = {},
+) =>
+  ledger.reserve(
+    grant(remaining, over.id, over.signIn),
+    over.session ?? SESSION,
+    roles,
+    [...roles].sort().join('+'),
+    at,
+  );
+
+describe('SignInGrantLedger: uses are spent synchronously', () => {
+  it('should let only one of two reservations in one tick take a line’s last use', () => {
+    const ledger = new SignInGrantLedger();
+    should(typeof fill(ledger, ['username', 'password'], 1, NOW)).equal('object');
+    should(fill(ledger, ['username', 'password'], 1, NOW)).equal('used-up');
+  });
+
+  it('should give a released reservation back, and count a spent one once', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.release(reserved(fill(ledger, ['password'], 1, NOW)));
+    const again = reserved(fill(ledger, ['password'], 1, NOW));
+    should(ledger.spent(again, 'id1')).be.true();
+    should(ledger.spent(again, 'id1')).be.false();
+  });
+});
+
+describe('SignInGrantLedger: one use is one sign-in attempt, and each role is typed once per use', () => {
+  it('should take username, password and code steps within three minutes as one use', () => {
+    const ledger = new SignInGrantLedger();
+    should(ledger.spent(reserved(fill(ledger, ['username'], 1, NOW)), 'a')).be.true();
+    // No use is left, yet the next steps of the same attempt type roles it has not typed, so they join it.
+    should(ledger.joinable('plan:aa:0', SESSION, NOW + 30_000)).be.true();
+    const pass = reserved(fill(ledger, ['password'], 0, NOW + 30_000));
+    should(pass.opens).be.false();
+    should(ledger.spent(pass, 'b')).be.false();
+    should(reserved(fill(ledger, ['totp'], 0, NOW + 60_000)).opens).be.false();
+  });
+
+  it('should refuse a second password on one use: a confirm-password form is not part of the sign-in', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(fill(ledger, ['username', 'password'], 1, NOW)), 'a');
+    should(fill(ledger, ['password'], 0, NOW + 1_000)).equal('used-up');
+    should(fill(ledger, ['password', 'totp'], 0, NOW + 1_000)).equal('used-up');
+  });
+
+  it('should spend a second use for a password typed twice, even inside the window', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(fill(ledger, ['password'], 2, NOW)), 'a');
+    const second = reserved(fill(ledger, ['password'], 1, NOW + 1_000));
+    should(second.opens).be.true();
+  });
+
+  it('should count a role still being typed by a fill in flight as typed', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(fill(ledger, ['username'], 1, NOW)), 'a');
+    reserved(fill(ledger, ['password'], 0, NOW + 1_000));
+    should(fill(ledger, ['password'], 0, NOW + 1_000)).equal('used-up');
+  });
+
+  it('should keep the attempt window from its first fill: a step that joined does not slide it', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(fill(ledger, ['username'], 1, NOW)), 'a');
+    ledger.spent(reserved(fill(ledger, ['password'], 0, NOW + 100_000)), 'b');
+    // 200 s after the first fill, 100 s after the join: the attempt closed at 180 s, so a code needs a use of its own.
+    should(ledger.joinable('plan:aa:0', SESSION, NOW + 200_000)).be.false();
+    should(fill(ledger, ['totp'], 0, NOW + 200_000)).equal('used-up');
+  });
+
+  it('should open a new attempt after three minutes', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(fill(ledger, ['username'], 2, NOW)), 'a');
+    should(ledger.joinable('plan:aa:0', SESSION, NOW + 181_000)).be.false();
+    should(reserved(fill(ledger, ['password'], 1, NOW + 181_000)).opens).be.true();
+    should(fill(ledger, ['totp'], 0, NOW + 181_000)).equal('used-up');
+  });
+
+  it('should pin each field set to the identity of its first fill, and forget it with the grant', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(fill(ledger, ['password'], 2, NOW)), 'first');
+    ledger.spent(reserved(fill(ledger, ['password'], 1, NOW + 1_000)), 'second');
+    should(ledger.pinned('plan:aa:0').get('password')).equal('first');
+    ledger.retain(() => false);
+    should(ledger.pinned('plan:aa:0').size).equal(0);
+    should(ledger.joinable('plan:aa:0', SESSION, NOW + 2_000)).be.false();
+  });
+});
+
+describe('SignInGrantLedger: the rate limit', () => {
+  it(`should refuse the ${String(FILLS_PER_HOUR_PER_SIGN_IN + 1)}th fill of one sign-in within an hour, across grants`, () => {
+    const ledger = new SignInGrantLedger();
+    for (let index = 0; index < FILLS_PER_HOUR_PER_SIGN_IN; index++)
+      ledger.spent(
+        reserved(
+          fill(ledger, ['password'], 1, NOW + index, { id: `plan:p${String(index)}:0`, session: `s${String(index)}` }),
+        ),
+        'x',
+      );
+    should(fill(ledger, ['password'], 1, NOW + 100, { id: 'plan:fresh:0', session: 'another' })).equal('rate');
+    should(typeof fill(ledger, ['password'], 1, NOW + 3_600_100, { id: 'plan:fresh:0', session: 'another' })).equal(
+      'object',
+    );
+  });
+
+  it(`should refuse a session’s ${String(FILLS_PER_HOUR_PER_SESSION + 1)}th grant fill within an hour`, () => {
+    const ledger = new SignInGrantLedger();
+    for (let index = 0; index < FILLS_PER_HOUR_PER_SESSION; index++)
+      ledger.spent(
+        reserved(
+          fill(ledger, ['password'], 1, NOW + index, {
+            id: `plan:p${String(index)}:0`,
+            signIn: `si_${String(index).padStart(24, '0')}` as SignInId,
+          }),
+        ),
+        'x',
+      );
+    should(
+      fill(ledger, ['password'], 1, NOW + 100, {
+        id: 'plan:fresh:0',
+        signIn: 'si_ffffffffffffffffffffffff' as SignInId,
+      }),
+    ).equal('rate');
+  });
+});
+
+describe('SignInGrantLedger: a standing rule (R3c-4)', () => {
+  const RULE = 'rule:sr_0123456789abcdef01234567:1';
+  const ruleFill = (
+    ledger: SignInGrantLedger,
+    roles: readonly LoginFieldRole[],
+    at: number,
+    session = SESSION,
+    remaining = Number.POSITIVE_INFINITY,
+    over: Partial<GrantTarget> = {},
+  ) =>
+    ledger.reserve(
+      { id: RULE, signIn: SIGN_IN, remaining, codeJoinsPassword: true },
+      session,
+      roles,
+      [...roles].sort().join('+'),
+      at,
+      // The straight flow: the password page in tab p1, then the code page the tab navigated to, the ferret idle.
+      {
+        place: 'github.com',
+        pageId: 'p1',
+        navigationId: roles.includes('totp') ? 'n2' : 'n1',
+        untouchedSince: () => true,
+        ...over,
+      },
+    );
+
+  it('should type a code only as a later step of a sign-in the rule typed the password of', () => {
+    const ledger = new SignInGrantLedger();
+    // No attempt at all: a "confirm with 2FA" form outside a sign-in.
+    should(ruleFill(ledger, ['totp'], NOW)).equal('code-without-sign-in');
+    // An attempt that typed only the username: still no password typed by the rule.
+    ledger.spent(reserved(ruleFill(ledger, ['username'], NOW)), 'u');
+    should(ruleFill(ledger, ['totp'], NOW + 1_000)).equal('code-without-sign-in');
+    ledger.spent(reserved(ruleFill(ledger, ['password'], NOW + 2_000)), 'p');
+    const code = reserved(ruleFill(ledger, ['totp'], NOW + 3_000));
+    should(code.opens).be.false();
+  });
+
+  it('should not let a code join an attempt whose password went to another place, even one the rule pins', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(ruleFill(ledger, ['username', 'password'], NOW)), 'p');
+    should(
+      ruleFill(ledger, ['totp'], NOW + 1_000, SESSION, Number.POSITIVE_INFINITY, { place: 'login.github.com' }),
+    ).equal('code-without-sign-in');
+    should(reserved(ruleFill(ledger, ['totp'], NOW + 2_000)).opens).be.false();
+  });
+
+  it('should let a code join only as the next step of that sign-in: its tab, a new document, the ferret idle (delta F2)', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(ruleFill(ledger, ['username', 'password'], NOW)), 'p');
+    const asked = (over: Partial<GrantTarget>) =>
+      ruleFill(ledger, ['totp'], NOW + 1_000, SESSION, Number.POSITIVE_INFINITY, over);
+    // A lone code box in another tab of the same site: a "confirm with 2FA" form, not this sign-in.
+    should(asked({ pageId: 'p2' })).equal('code-without-sign-in');
+    // The same document: the tab never moved on from the password page.
+    should(asked({ navigationId: 'n1' })).equal('code-without-sign-in');
+    // The ferret clicked, typed, ran a script or navigated since the password.
+    should(asked({ untouchedSince: () => false })).equal('code-without-sign-in');
+    // Nothing known: refused.
+    should(asked({ untouchedSince: undefined })).equal('code-without-sign-in');
+    should(asked({ pageId: undefined })).equal('code-without-sign-in');
+    should(asked({ navigationId: undefined })).equal('code-without-sign-in');
+    should(reserved(asked({})).opens).be.false();
+  });
+
+  it('should read "since" from the moment the rule reserved its password', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(ruleFill(ledger, ['password'], NOW + 5_000)), 'p');
+    const since: number[] = [];
+    reserved(
+      ruleFill(ledger, ['totp'], NOW + 6_000, SESSION, Number.POSITIVE_INFINITY, {
+        untouchedSince: at => {
+          since.push(at);
+          return true;
+        },
+      }),
+    );
+    should(since).deepEqual([NOW + 5_000]);
+  });
+
+  it('should not let a code join once the attempt is over, or twice in one attempt', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(ruleFill(ledger, ['username', 'password'], NOW)), 'p');
+    should(ruleFill(ledger, ['totp'], NOW + 181_000)).equal('code-without-sign-in');
+    ledger.spent(reserved(ruleFill(ledger, ['username', 'password'], NOW + 200_000)), 'p');
+    ledger.spent(reserved(ruleFill(ledger, ['totp'], NOW + 201_000)), 'c');
+    should(ruleFill(ledger, ['totp'], NOW + 202_000)).equal('code-without-sign-in');
+  });
+
+  it('should keep one session’s attempt to itself: another ferret’s code never joins it, its steps never share a use', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(ruleFill(ledger, ['username', 'password'], NOW)), 'p');
+    should(ledger.joinable(RULE, SESSION, NOW + 1_000)).be.true();
+    should(ledger.joinable(RULE, 'mvv6b4qw-49d0158e', NOW + 1_000)).be.false();
+    should(ruleFill(ledger, ['totp'], NOW + 1_000, 'mvv6b4qw-49d0158e')).equal('code-without-sign-in');
+    // The other session's own sign-in opens its own attempt, and spends its own use.
+    should(reserved(ruleFill(ledger, ['username', 'password'], NOW + 1_000, 'mvv6b4qw-49d0158e', 2)).opens).be.true();
+  });
+
+  it('should take a rule with no cap as never used up; a second password in one attempt still opens a new use', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(ruleFill(ledger, ['password'], NOW)), 'p');
+    should(reserved(ruleFill(ledger, ['password'], NOW + 1_000)).opens).be.true();
+    should(ruleFill(ledger, ['password'], NOW + 2_000, SESSION, 0)).equal('used-up');
+  });
+});
