@@ -3,6 +3,7 @@ import type {
   AskDraft,
   AskFilter,
   AskId,
+  AskRef,
   AskSummary,
   AsksApi,
   CloseReason,
@@ -191,9 +192,9 @@ class FakeAsks implements Pick<AsksApi, 'raise' | 'open' | 'close'> {
   readonly closed: Array<readonly [string, CloseReason]> = [];
   private readonly open_: AskSummary[] = [];
 
-  async raise(draft: AskDraft): Promise<AskId> {
+  async raise(draft: AskDraft): Promise<AskRef> {
     const existing = this.open_.find(ask => ask.source === draft.source && ask.entry === draft.entry);
-    if (existing !== undefined) return existing.id;
+    if (existing !== undefined) return { ferret: draft.ferret ?? '', id: existing.id };
     this.raised.push(draft);
     const id = `A${String(this.open_.length + 1)}` as AskId;
     this.open_.push({
@@ -207,7 +208,7 @@ class FakeAsks implements Pick<AsksApi, 'raise' | 'open' | 'close'> {
       state: 'open',
       raisedAt: '2026-11-01T12:00:00.000Z' as never,
     } as unknown as AskSummary);
-    return id;
+    return { ferret: draft.ferret ?? '', id };
   }
 
   async open(filter: AskFilter): Promise<readonly AskSummary[]> {
@@ -216,9 +217,9 @@ class FakeAsks implements Pick<AsksApi, 'raise' | 'open' | 'close'> {
     );
   }
 
-  async close(id: AskId, reason: CloseReason): Promise<void> {
-    this.closed.push([id, reason]);
-    const at = this.open_.findIndex(ask => ask.id === id);
+  async close(ref: AskRef, reason: CloseReason): Promise<void> {
+    this.closed.push([ref.id, reason]);
+    const at = this.open_.findIndex(ask => ask.id === ref.id);
     if (at !== -1) this.open_[at] = { ...(this.open_[at] as AskSummary), state: 'closed' };
   }
 }

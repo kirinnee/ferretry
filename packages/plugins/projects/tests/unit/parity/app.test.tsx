@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import app from '../../app/index.ts';
-import { projectBoardPath, projectPath, projectsPath } from '../../app/lib/paths.ts';
-import manifest from '../../manifest.ts';
+import app from '../../../app/index.ts';
+import { projectBoardPath, projectPath, projectsPath } from '../../../app/lib/paths.ts';
+import manifest from '../../../manifest.ts';
 
 const half = app.build?.({ manifest, client: {} as never });
-const source = async (path: string): Promise<string> => await Bun.file(`${import.meta.dir}/../../app/${path}`).text();
+const source = async (path: string): Promise<string> => await Bun.file(`${import.meta.dir}/../../../app/${path}`).text();
 
 /** The route model of today's PWA is the two screens this plugin declares; the shell binds them to `/d/<daemon>/…`. */
 describe('app parity', () => {

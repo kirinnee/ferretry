@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import manifest from '../../manifest.ts';
+import manifest from '../../../manifest.ts';
 import {
   AT,
   card,
@@ -11,8 +11,8 @@ import {
   otherProject,
   project,
   response,
-} from '../unit/cli/fixtures.ts';
-import { run } from '../integration/cli/harness.ts';
+} from '../cli/fixtures.ts';
+import { run } from '../../integration/cli/harness.ts';
 
 const declared = new Set<string>(manifest.actions?.cli?.map(entry => entry.verb) ?? []);
 

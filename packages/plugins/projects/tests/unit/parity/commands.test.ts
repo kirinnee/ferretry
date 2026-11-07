@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import cli from '../../cli/index.ts';
-import manifest from '../../manifest.ts';
+import cli from '../../../cli/index.ts';
+import manifest from '../../../manifest.ts';
 
 const declared = new Set<string>(manifest.actions?.cli?.map(entry => entry.verb) ?? []);
 

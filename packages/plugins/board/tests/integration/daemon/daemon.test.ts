@@ -1,67 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { FakeAsks, sourceKey } from '@ferretry/core-asks/contract/testing';
-import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
-import type { Admission, ApiRequest } from '@ferretry/kernel/contract';
-import { testHost } from '@ferretry/kernel/testing';
-import daemon from '../../../daemon/index.ts';
+import { sourceKey } from '@ferretry/core-asks/contract/testing';
 import type { AskAnswer } from '@ferretry/core-asks/contract';
-
-/**
- * Board's daemon half over the test host, with the Asks and Ferrets fakes. The host's stand-in admission refuses a
- * ferret on an `operator` route, which Gate does not, so these tests bring a gate of their own: it admits everyone
- * and stands the caller in Gate's own fields (`actor`, `credential`), read from the `x-test-caller` header.
- */
-const gate: Admission = {
-  admit: input => {
-    const header = input.request.headers.get('x-test-caller') ?? (input.table === 'tool' ? 'ferret:f1' : 'owner');
-    const [kind, id = ''] = header.split(':');
-    const standing =
-      kind === 'ferret'
-        ? { actor: `ferret:${id}`, credential: { kind: 'authenticated', tokenClass: 'ferret', ferret: id } }
-        : kind === 'device'
-          ? {
-              actor: `device:${id}`,
-              credential: { kind: 'authenticated', tokenClass: 'device', principal: input.request.principal },
-            }
-          : { actor: 'admin-cli', credential: { kind: 'authenticated', tokenClass: 'admin' } };
-    return { outcome: 'admitted', standing, actor: kind === 'ferret' ? 'ferret' : 'owner-tools' } as never;
-  },
-  admitMember: () => {
-    throw new Error('Board has no member routes');
-  },
-  readmit: (_request: ApiRequest) => true,
-  inventory: (_request, entries) => entries,
-};
-
-const as = (caller: string) => ({ 'x-test-caller': caller });
-
-const boot = async () => {
-  const asks = new FakeAsks();
-  const ferrets = new FakeFerrets();
-  ferrets.add({ id: ferretId('f1') });
-  // The half is captured as it is built, so a test can call the `apply` the card source hands Asks.
-  const taken: { half?: { hooks: Record<string, { apply?: (answer: AskAnswer) => Promise<unknown> }> } } = {};
-  const capturing = {
-    ...daemon,
-    build: (ctx: never) => {
-      const half = (daemon.build as (ctx: never) => unknown)(ctx);
-      taken.half = half as never;
-      return half;
-    },
-  } as typeof daemon;
-  const host = await testHost({ plugins: [capturing], fakes: { asks, ferrets }, gate });
-  const apply = async (answer: AskAnswer) => await taken.half?.hooks['ask.sources:card']?.apply?.(answer);
-  return { asks, ferrets, host, apply };
-};
-
-/** Makes a card as the owner; a refusal fails the test with the daemon's own words. */
-const makeCard = async (host: Awaited<ReturnType<typeof boot>>['host'], extra: Record<string, unknown> = {}) => {
-  const made = await host.request('POST', '/v1/board/cards', { body: { ...NEW_CARD, ...extra }, headers: as('owner') });
-  if (made.status !== 200) throw new Error(`creating a card was refused (${String(made.status)}): ${made.body}`);
-  return made.json<{ card: { id: string; title: string; laneId: string } }>().card;
-};
-
-const NEW_CARD = { kind: 'feature', title: 'Badge colour', assignee: 'f1', ask: { text: 'Make the badge green.', source: 'owner' } };
+import { as, boot, makeCard, NEW_CARD } from './harness.ts';
 
 describe('board daemon half', () => {
   test('the owner makes a card and the board lists it', async () => {

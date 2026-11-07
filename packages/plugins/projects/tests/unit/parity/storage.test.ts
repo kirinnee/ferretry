@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { owner, testHost } from '@ferretry/kernel/testing';
-import { PROJECTS_STATE, type ProjectInfo } from '../../contract/index.ts';
-import { implementProjects } from '../../daemon/index.ts';
-import manifest from '../../manifest.ts';
-import { fakeMachine } from '../unit/daemon/support.ts';
+import { PROJECTS_STATE, type ProjectInfo } from '../../../contract/index.ts';
+import { implementProjects } from '../../../daemon/index.ts';
+import manifest from '../../../manifest.ts';
+import { fakeMachine } from '../daemon/support.ts';
 
 describe('storage parity', () => {
   test('F-0286 the registry is one state file of this plugin, projects.json, format 1 first', async () => {

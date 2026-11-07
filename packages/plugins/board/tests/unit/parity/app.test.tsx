@@ -10,13 +10,13 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import manifest from '../../manifest.ts';
-import app from '../../app/index.ts';
-import { parseBoardFilters, boardFiltersToSearch, NO_BOARD_FILTERS } from '../../app/lib/board-model.ts';
-import { parseWorkName } from '../../app/lib/card-name.ts';
-import { boardCardPath, boardPath, cardPagePath, projectLanesPath } from '../../app/lib/paths.ts';
+import manifest from '../../../manifest.ts';
+import app from '../../../app/index.ts';
+import { parseBoardFilters, boardFiltersToSearch, NO_BOARD_FILTERS } from '../../../app/lib/board-model.ts';
+import { parseWorkName } from '../../../app/lib/card-name.ts';
+import { boardCardPath, boardPath, cardPagePath, projectLanesPath } from '../../../app/lib/paths.ts';
 
-const APP = join(import.meta.dir, '..', '..', 'app');
+const APP = join(import.meta.dir, '..', '..', '..', 'app');
 const source = (file: string): string => readFileSync(join(APP, file), 'utf8');
 const declares = (file: string, name: string): boolean =>
   new RegExp(`(export\\s+)?(function|const)\\s+${name}\\b`, 'u').test(source(file));
