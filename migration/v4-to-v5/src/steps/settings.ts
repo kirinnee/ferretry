@@ -189,7 +189,7 @@ const withoutModeline = (comment: string | null | undefined): string | null => {
   return kept.length === 0 || kept.every(line => line.trim() === '') ? null : kept.join('\n');
 };
 
-function dropModeline(document: Document): void {
+export function dropModeline(document: Document): void {
   document.commentBefore = withoutModeline(document.commentBefore);
   const map = contents(document);
   map.commentBefore = withoutModeline(map.commentBefore);
@@ -317,7 +317,7 @@ function splitMachine(plan: Plan, file: V4ConfigFile, document: Document, resolv
 }
 
 /** The asset document an instructions component points at, when it is a plain file inside `fleet/assets/`. */
-async function instructionsSource(home: string, value: unknown): Promise<string | undefined> {
+export async function instructionsSource(home: string, value: unknown): Promise<string | undefined> {
   if (typeof value !== 'string' || isAbsolute(value) || value.startsWith('~')) return undefined;
   const assets = join(home, 'fleet', 'assets');
   const path = normalize(join(assets, value));
