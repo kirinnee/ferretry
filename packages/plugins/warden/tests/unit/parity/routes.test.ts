@@ -96,7 +96,7 @@ describe('route parity', () => {
 
   test('R-0407 a flagged ferret can be left alone and the blessing shows on status', async () => {
     const { host, ferrets, asks, clock } = await wardenHost();
-    ferrets.add({ id: ferretId('f1'), parent: ferretId('lead'), state: 'idle', stateAt: T0 });
+    ferrets.add({ id: ferretId('f1'), parent: ferretId('lead'), mode: 'auto', state: 'idle', stateAt: T0 });
     await asks.raise({
       source: sourceKey('ferret'),
       entry: entryId('f1-q'),

@@ -1,10 +1,7 @@
 import type { AsksApi } from '@ferretry/core-asks/contract';
 import type { FerretsApi, FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
-import { type WardenFleetSession, WARDEN_LABEL, type WardenSessionStatus } from './lib/index.ts';
-
-/** The name a warden's own ferrets carry (`warden-00002a`): the detector's lineage shield reads it. */
-export const WARDEN_NAME = /^warden-[0-9a-f]{6}$/u;
+import type { WardenFleetSession, WardenSessionStatus } from './lib/index.ts';
 
 const HARNESS_OF: Readonly<Record<string, 'claude' | 'codex'>> = { 'claude-code': 'claude', codex: 'codex' };
 
@@ -65,20 +62,25 @@ export function wardenFleetSession(
   directory: string,
   questionSince?: string,
 ): WardenFleetSession {
-  const isWarden = WARDEN_NAME.test(ferret.name);
   const stoppedAt = ferret.state === 'stopped' ? ferret.stateAt : undefined;
   return {
+    // Today's mapping (`fyd.ts` wardenFleetSession), field for field from what Ferrets records: the start's own mode,
+    // its label (a warden is `label === WARDEN_LABEL`), the spawn stamp's lineage and the model. Nothing is read off
+    // the name, so a ferret the owner called `warden-0000aa` is supervised like any other.
     config: {
       id: ferret.id,
-      // Unattended work is a helper or a pack member; a ferret the owner talks to is never swept for silence.
-      mode: ferret.parent !== undefined || ferret.pack !== undefined || isWarden ? 'auto' : 'interactive',
+      // A record without a mode is read as a person's terminal: never swept for silence, never acted on alone.
+      mode: ferret.mode ?? 'interactive',
       createdAt: ferret.createdAt,
       updatedAt: ferret.stateAt,
       teammate: ferret.name,
-      ...(isWarden ? { label: WARDEN_LABEL, wardenLineage: true } : {}),
+      ...(ferret.label === undefined ? {} : { label: ferret.label }),
       ...(ferret.parent === undefined ? {} : { parent: ferret.parent }),
+      // A projection of the spawn stamp: the detector's lineage shield survives the warden being pruned first.
+      ...(ferret.provenance === undefined ? {} : { wardenLineage: ferret.provenance.wardenLineage }),
       agent: ferret.runtime ?? ferret.harness,
       ...(HARNESS_OF[ferret.harness] === undefined ? {} : { harness: HARNESS_OF[ferret.harness] }),
+      ...(ferret.model === undefined ? {} : { model: ferret.model }),
     },
     state: {
       // A ferret with a question open on its board is waiting on someone (`unattended_question` measures how long).

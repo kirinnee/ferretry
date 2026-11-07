@@ -15,7 +15,13 @@ describe('the words on the wire', () => {
 
   it('should name a flag by its ferret, not its session', () => {
     // Arrange
-    const anomaly = { kind: 'unattended_question', sessionId: 'f1', status: 'awaiting_question', teammate: 'rae', detail: 'x' } as never;
+    const anomaly = {
+      kind: 'unattended_question',
+      sessionId: 'f1',
+      status: 'awaiting_question',
+      teammate: 'rae',
+      detail: 'x',
+    } as never;
 
     // Act
     const flag = toWireFlag(anomaly);
@@ -26,7 +32,12 @@ describe('the words on the wire', () => {
 
   it('should carry the blessing under the ferret', () => {
     // Arrange / Act
-    const blessing = toWireBlessing({ sessionId: 'f1', kinds: ['unattended_question'], expiresAt: '2026-11-06T10:00:00.000Z', by: 'owner' } as never);
+    const blessing = toWireBlessing({
+      sessionId: 'f1',
+      kinds: ['unattended_question'],
+      expiresAt: '2026-11-06T10:00:00.000Z',
+      by: 'owner',
+    } as never);
 
     // Assert
     should(blessing.ferret).equal('f1');
@@ -70,25 +81,88 @@ describe('the words on the wire', () => {
 
 describe('a ferret as the sweep reads it', () => {
   const ferret = (over: Record<string, unknown> = {}) =>
-    ({ id: ferretId('f1'), name: 'rae', role: 'helper', harness: 'claude-code', runner: 'tmux', folder: '/w', state: 'working', createdAt: T0, stateAt: T0, parent: ferretId('lead'), ...over }) as never;
+    ({
+      id: ferretId('f1'),
+      name: 'rae',
+      role: 'helper',
+      harness: 'claude-code',
+      runner: 'tmux',
+      folder: '/w',
+      state: 'working',
+      createdAt: T0,
+      stateAt: T0,
+      parent: ferretId('lead'),
+      ...over,
+    }) as never;
 
-  it('should treat a helper as unattended work and a lead as a person at a terminal', () => {
+  it('should take the mode the ferret was started with, not guess it from its parent', () => {
     // Arrange / Act
-    const helper = wardenFleetSession(ferret(), 1, undefined, 'd');
-    const lead = wardenFleetSession(ferret({ parent: undefined, role: 'lead' }), 1, undefined, 'd');
+    const topLevelAuto = wardenFleetSession(
+      ferret({ parent: undefined, role: 'lead', mode: 'auto' }),
+      1,
+      undefined,
+      'd',
+    );
+    const interactiveHelper = wardenFleetSession(ferret({ mode: 'interactive' }), 1, undefined, 'd');
+    const autoHelper = wardenFleetSession(ferret({ mode: 'auto' }), 1, undefined, 'd');
 
-    // Assert
-    should(helper.config.mode).equal('auto');
-    should(lead.config.mode).equal('interactive');
+    // Assert: a top-level --auto ferret is unattended; an interactive helper is a person's terminal
+    should(topLevelAuto.config.mode).equal('auto');
+    should(interactiveHelper.config.mode).equal('interactive');
+    should(autoHelper.config.mode).equal('auto');
   });
 
-  it('should shield a warden and everything it started from being flagged itself', () => {
+  it('should read a ferret with no recorded mode as a person at a terminal (never acted on alone)', () => {
     // Arrange / Act
-    const warden = wardenFleetSession(ferret({ name: 'warden-00002a' }), 1, undefined, 'd');
+    const unknown = wardenFleetSession(ferret({ mode: undefined }), 1, undefined, 'd');
 
     // Assert
-    should(warden.config.wardenLineage).equal(true);
+    should(unknown.config.mode).equal('interactive');
+  });
+
+  it('should shield a warden by its label, and what a warden started by its lineage stamp', () => {
+    // Arrange / Act
+    const warden = wardenFleetSession(ferret({ label: 'fleet-warden', mode: 'auto' }), 1, undefined, 'd');
+    const child = wardenFleetSession(
+      ferret({ name: 'rae', mode: 'auto', provenance: { v: 1, at: T0, origin: 'warden', wardenLineage: true } }),
+      1,
+      undefined,
+      'd',
+    );
+
+    // Assert
     should(warden.config.label).equal('fleet-warden');
+    should(child.config.wardenLineage).equal(true);
+    should(child.config.label).be.undefined();
+  });
+
+  it('should not shield a ferret just because its name looks like a warden', () => {
+    // Arrange / Act
+    const lookalike = wardenFleetSession(ferret({ name: 'warden-0000aa', mode: 'auto' }), 1, undefined, 'd');
+
+    // Assert
+    should(lookalike.config.label).be.undefined();
+    should(lookalike.config.wardenLineage).be.undefined();
+    should(lookalike.config.mode).equal('auto');
+  });
+
+  it('should carry the label, the stamp of a ferret no warden started, and the model', () => {
+    // Arrange / Act
+    const session = wardenFleetSession(
+      ferret({
+        label: 'pack:alpha',
+        model: 'opus',
+        provenance: { v: 1, at: T0, origin: 'human', wardenLineage: false },
+      }),
+      1,
+      undefined,
+      'd',
+    );
+
+    // Assert
+    should(session.config.label).equal('pack:alpha');
+    should(session.config.wardenLineage).equal(false);
+    should(session.config.model).equal('opus');
   });
 
   it('should read an open question as waiting on someone, from when it was raised', () => {
