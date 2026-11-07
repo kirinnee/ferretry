@@ -43,7 +43,7 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 ## State (Phase B)
 
 The preflight, sealed mover, report and ordered step table (`src/steps/index.ts`) exist. Vault, identity, ferrets,
-terminals, harness-homes, board, asks/agenda, projects, usage, warden, MCP, logins, Gate and settings have real conversions; conversation is partial
+terminals, harness-homes, board, asks/agenda, projects, usage, warden, MCP, logins, Gate, settings and daemon settings have real conversions; conversation is partial
 (below). The other steps remain `pending`, so the default conversion still exits 3. Each step names what it waits for.
 Fixture homes built from the real 4.291.5 release are in
 `fixtures/` (CI-only on shared boxes).
@@ -118,6 +118,15 @@ file is checked by its v5 schema before anything is written. v4 `claude` is v5 `
 A runtime alias in `fleet/ids.json` `formerNames` is rewritten to the current name (M7). Settings and hooks components,
 an instructions document outside `fleet/assets/`, `voice.yaml`, `pack.yaml` and `models-guide.yaml` wait for v5 schemas
 (the step reports `pending`). The full per-key table is `docs/migration/v4-formats.md` §5a.
+
+Daemon settings (`src/steps/daemon-settings.ts`) splits `config/daemon.json` by owner: `grants` → `gate.yaml` with all eight
+capabilities and both axes written explicitly at v4's effective value (`configure` only where `use` is on), plus
+`state/security.json` → `gate.yaml` `security` (a damaged one as v4's strictest reading); the parsed result is compared
+with what v4 enforced and any widening fails the step. Carriers → `connections.yaml` (`direct`, one `relay`, `tunnel`,
+`webrtc`; an owner's `enabled: false` stays false; two relays switched on fail, since v5 dials one). `harness` paths →
+both harness files and the agenda deadline → `agenda.yaml`, added to what Settings wrote there. A catalog link store
+turned off or a shorter member unlock waits for a Catalogs schema (`pending`); `secretEnvironment`, `usage.url`, CORS,
+`publicUrl`, tuning keys and `routing.json` (Packs has no routing schema yet) are listed in `notCarried`, by key only.
 
 The `rebuild/migration-ferrets-b` development branch contains a local merge of the unreviewed
 `rebuild/port-ferrets-a2` schemas. **Do not integrate it before Ferrets lands on `rebuild/5.0`.** Once Ferrets lands,
