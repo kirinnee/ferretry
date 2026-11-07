@@ -37,6 +37,7 @@ export {
   type TestResponse,
   testHost,
 } from './host.ts';
+export { testPluginClient } from './plugin-client.ts';
 export { COMPARED, type DescriptorRow, type ParityResult, type Table, parity, rowsOf } from './parity.ts';
 export { RouteTable, compareRouteSpecificity, orderRoutesBySpecificity } from './router.ts';
 export { MemoryStateFolder, SimulatedCrash, parseDocument } from './state.ts';

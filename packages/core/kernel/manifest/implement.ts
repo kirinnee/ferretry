@@ -169,6 +169,17 @@ export interface PluginCallHeaders {
   readonly 'x-fy-request-id'?: string;
 }
 
+/** `PluginClient.conditional`'s request: the etag the caller holds, and the same allow-listed headers as `call`. */
+export interface PluginConditionalInit {
+  readonly ifNoneMatch?: string;
+  readonly headers?: PluginCallHeaders;
+}
+
+/** A conditional read's answer: the body with its etag, or `304` when the held etag is still current. */
+export type PluginConditionalAnswer =
+  | { readonly status: 200; readonly etag?: string; readonly body: unknown }
+  | { readonly status: 304; readonly etag?: string };
+
 /** The per-daemon generated client a half talks through (§9.6). It checks the plugin's inventory entry first. */
 export interface PluginClient {
   call<Answer = unknown>(
@@ -187,6 +198,15 @@ export interface PluginClient {
    * through the same contract-hash guard as `call`. Optional until the app shell and the CLI fill it in.
    */
   socket?(key: string, params: Readonly<Record<string, string>>, listeners: PluginSocketListeners): PluginSocket;
+  /**
+   * A conditional GET (today's per-connection etag/304 list read, the held fleet list R502): sends `If-None-Match`
+   * and answers `304` without a body when it still matches. Optional until the app shell and the CLI fill it in.
+   */
+  conditional?(
+    key: string,
+    params: Readonly<Record<string, string>>,
+    init?: PluginConditionalInit,
+  ): Promise<PluginConditionalAnswer>;
 }
 
 /** A UI component, framework-neutral here; the app shell narrows it to React. */
