@@ -8,6 +8,7 @@
  *
  * GAP: macOS publishes no such table, so the verdict is `unknown` and the credential is sent as before.
  */
+import { DAEMON_RUN_FILE } from '@ferretry/kernel/contract';
 
 export const PROC_TCP_TABLES = ['/proc/net/tcp', '/proc/net/tcp6'] as const;
 
@@ -99,5 +100,5 @@ export function foreignListenerRefusal(
   verdict: ListenerOwnerVerdict,
 ): string | undefined {
   if (verdict.kind !== 'foreign') return undefined;
-  return `refusing to send ${credential} to ${url}: that port on this machine is held by another user (uid ${verdict.uids.map(String).join(', ')}), not by your daemon. Start your own daemon, or check FY_HOME and its config/daemon.json.`;
+  return `refusing to send ${credential} to ${url}: that port on this machine is held by another user (uid ${verdict.uids.map(String).join(', ')}), not by your daemon. Start your own daemon, or check FY_HOME and its ${DAEMON_RUN_FILE}.`;
 }
