@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { InstantSchema } from '@ferretry/std';
 import should from 'should';
 import * as update from '../../contract/index.ts';
 import {
@@ -366,15 +367,16 @@ describe('latest release', () => {
 
   it('keeps the last good answer through a failed check', () => {
     should(knownLatestRelease({ state: 'never' })).be.undefined();
-    should(knownLatestRelease(view.check)).deepEqual(latest);
-    const failedAt = '2026-10-18T10:00:00.000Z';
+    const check = update.UpdateCheckSchema.parse(view.check);
+    should(knownLatestRelease(check)).deepEqual(latest);
+    const failedAt = InstantSchema.parse('2026-10-18T10:00:00.000Z');
     should(knownLatestRelease({ state: 'failed', checkedAt: failedAt, reason: 'offline' })).be.undefined();
     should(
       knownLatestRelease({
         state: 'failed',
         checkedAt: failedAt,
         reason: 'offline',
-        lastKnown: { checkedAt: view.check.checkedAt, latest },
+        lastKnown: { checkedAt: InstantSchema.parse(view.check.checkedAt), latest },
       }),
     ).deepEqual(latest);
   });

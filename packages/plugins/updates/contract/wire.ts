@@ -6,6 +6,7 @@
 import { InstantSchema, NonNegativeIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { VersionSchema } from './version.ts';
+import { DaemonUpdateViewSchema } from './view.ts';
 
 /** How often the checker asks for a newer release. */
 export const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -61,3 +62,19 @@ export type UpdatesConfig = z.infer<typeof UpdatesConfigSchema>;
 export function updatesLoosens(before: UpdatesConfig | undefined, after: UpdatesConfig): readonly string[] {
   return after.autoInstall && before?.autoInstall !== true ? ['updates install automatically when idle'] : [];
 }
+
+/**
+ * `PATCH /v1/daemon/update/settings` answered `202` when the edit loosens (turns installing on): it waits for the
+ * owner's confirmation and the setting stays as it was until then.
+ */
+export const DaemonUpdateSettingsHeldSchema = z.strictObject({
+  held: z.array(z.string().min(1)).min(1),
+  view: DaemonUpdateViewSchema,
+});
+export type DaemonUpdateSettingsHeld = z.infer<typeof DaemonUpdateSettingsHeldSchema>;
+
+export const UPDATE_HOST_CODES = {
+  hostUnavailable: 'update_host_unavailable',
+  configUnavailable: 'update_config_unavailable',
+  settingRefused: 'update_setting_refused',
+} as const;
