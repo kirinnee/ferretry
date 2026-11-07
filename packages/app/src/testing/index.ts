@@ -17,3 +17,4 @@ export { settleUntil } from './settle.ts';
 /** A fake client a suite hands a half, recorded against a daemon as the shell records the real ones. */
 export { noteClientDaemon } from '../connect/daemon-of.ts';
 export { RouterProvider } from './router.tsx';
+export { manualScheduler } from './live-scheduler.ts';

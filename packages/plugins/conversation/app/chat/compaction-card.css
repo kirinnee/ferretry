@@ -1,0 +1,99 @@
+/* ═══ THE COMPACTION CARD AND ITS DIVIDER (components/compaction-card.tsx) ═════════════════════════
+   Every colour, stroke, corner and shadow is a theme role (the card roles in `themes.css`), so each family restyles it. The bar and figure exist only when the harness
+   reported a percentage; without one the card shows a spinner and the usual duration, never a made-up figure.
+   Reduced motion is the global still in index.css (`transition` is zeroed there), so the fill simply
+   jumps a second at a time instead of gliding. */
+
+.fy-compaction-card {
+  background: var(--surface-2);
+  border: var(--card-stroke) solid var(--border-strong);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  color: var(--fg);
+  display: grid;
+  gap: 6px;
+  margin-block: var(--flow-live);
+  max-width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+}
+.fy-compaction-card__head {
+  align-items: baseline;
+  display: flex;
+  font-size: var(--text-base);
+  gap: 10px;
+  justify-content: space-between;
+}
+.fy-compaction-card__head b {
+  font-weight: var(--weight-strong);
+}
+.fy-compaction-card__percent {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-strong);
+}
+.fy-compaction-card__bar {
+  background: color-mix(in srgb, var(--fg) 14%, transparent);
+  border-radius: var(--radius-badge);
+  height: 8px;
+  overflow: hidden;
+}
+.fy-compaction-card__fill {
+  background: var(--accent);
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  transition: width 1s linear;
+}
+.fy-compaction-card__spinner {
+  flex: none;
+  align-self: center;
+}
+.fy-compaction-card__meta,
+.fy-compaction-card__note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 0;
+}
+.fy-compaction-card__meta {
+  font-variant-numeric: tabular-nums;
+}
+.fy-compaction-card__note {
+  font-size: 11px;
+}
+
+.fy-compaction-strip {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  gap: 10px;
+  margin-block: 6px;
+  min-width: 0;
+}
+.fy-compaction-strip__rule {
+  background: var(--border-strong);
+  flex: 1 1 12px;
+  height: var(--divider-width);
+  min-width: 12px;
+}
+.fy-compaction-strip__text {
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.fy-compaction-strip__text b {
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+}
+
+.fy-compaction-chip {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: var(--stroke) solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: var(--radius-badge);
+  color: var(--fg);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  padding: 3px 8px;
+  white-space: nowrap;
+}

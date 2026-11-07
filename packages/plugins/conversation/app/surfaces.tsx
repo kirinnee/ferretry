@@ -1,13 +1,11 @@
 /**
  * EVERY SURFACE CONVERSATION DRAWS, built once per daemon from the generated client: the chat and links screens, the
- * attachments, queue and compact-at panels, the Conversation Settings tab and the question renderer.
+ * attachments, queue, compact-at, hypermedia and chat-width panels, the Conversation Settings tab and the question
+ * renderer.
  *
- * Each is wrapped in the client context ({@link ConversationClientProvider}) and loaded on first use. The bodies
- * arrive with the composer (C2), the chat and transcript (C3) and the queue, questions, search and links (C4); until a
- * body lands its slot draws ONE quiet line and never throws, so the shell and every other plugin keep working.
+ * Each is wrapped in the client context ({@link ConversationClientProvider}) and loaded on first use.
  */
 
-import { skeletonSentence } from '@ferretry/kernel/contract';
 import type {
   AppComponent,
   PanelProps,
@@ -16,8 +14,10 @@ import type {
   ScreenProps,
   SettingsProps,
 } from '@ferretry/kernel/manifest';
+import { skeletonSentence } from '@ferretry/kernel/contract';
 import type { ReactNode } from 'react';
 import { ChatWidthPanel } from './chat-width-control.tsx';
+import { ChatScreen } from './chat/chat-screen.tsx';
 import { ConversationClientProvider } from './client.ts';
 import { ComposerAttachPanel } from './composer/composer-attach.tsx';
 import { ConversationSettings } from './composer/conversation-settings.tsx';
@@ -29,7 +29,7 @@ import { HypermediaPanel } from './toolbar/hypermedia-panel.tsx';
 
 const TITLE = 'Conversation';
 
-/** The one line a surface shows until its body is brought over. */
+/** The `chat-width` panel until its porter (C2, lead ruling Q11) lands ChatWidthControl. */
 const Pending = (): ReactNode => (
   <p className="fy-shell-line fy-shell-line--info" role="status">
     {skeletonSentence(TITLE)}
@@ -60,7 +60,7 @@ export interface ConversationSurfaces {
 
 export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
   screens: {
-    chat: scoped<ScreenProps>(client, Pending),
+    chat: scoped<ScreenProps>(client, ChatScreen),
     links: scoped<ScreenProps>(client, () => <LinksScreen />),
   },
   panels: {
