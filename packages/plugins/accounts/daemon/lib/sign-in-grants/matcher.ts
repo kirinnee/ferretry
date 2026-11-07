@@ -1,4 +1,20 @@
-import { type AccountId, type AccountKey, automaticKeysInOfferOrder, factorFingerprint, fillRoleFor, type GrantMissReason, type LoginFieldRole, type PlaceKey, placeKeys, type SignInField, type SignInId, type SignInRuleId, type SignInRuleScope, TASK_PLAN_TERMINAL_TOOLS, type TwoFactorId } from '../../../contract/routes/index.ts';
+import {
+  type AccountId,
+  type AccountKey,
+  automaticKeysInOfferOrder,
+  factorFingerprint,
+  fillRoleFor,
+  type GrantMissReason,
+  type LoginFieldRole,
+  type PlaceKey,
+  placeKeys,
+  type SignInField,
+  type SignInId,
+  type SignInRuleId,
+  type SignInRuleScope,
+  TASK_PLAN_TERMINAL_TOOLS,
+  type TwoFactorId,
+} from '../../../contract/routes/index.ts';
 import { terminalHides } from '../vault-inputs.ts';
 import { identityOf } from '../vault-inputs.ts';
 import { codeTargetProblem, type SavedListing } from '../vault-inputs.ts';

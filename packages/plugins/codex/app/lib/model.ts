@@ -158,7 +158,13 @@ export function updateChoices(view: HarnessCliView): readonly UpdateChoice[] {
   const choices: UpdateChoice[] = [];
   const verified = view.verified.version;
   if (newer(verified) && latest !== undefined && compare(latest, verified) === 1)
-    choices.push({ key: 'verified', target: verified, label: `Update to ${verified} (verified)`, unverified: false, primary: true });
+    choices.push({
+      key: 'verified',
+      target: verified,
+      label: `Update to ${verified} (verified)`,
+      unverified: false,
+      primary: true,
+    });
   if (newer(latest)) {
     const unverified = pastVerified(view, latest);
     choices.push({

@@ -1,6 +1,10 @@
 import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { type SessionLaunchInstructions, type SessionStatus, SessionStatusSchema } from '../../../../../daemon/lib/protocol/session.ts';
+import {
+  type SessionLaunchInstructions,
+  type SessionStatus,
+  SessionStatusSchema,
+} from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import type { ClockPort, SerialExecutor } from '../../../../../daemon/lib/ports.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';

@@ -1,6 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SIGN_IN_RULE_HONEST_LIMIT, SIGN_IN_RULE_ROOT_WARNING, SIGN_IN_RULES_SCREEN_PATH } from '../../../../contract/routes/index.ts';
+import {
+  SIGN_IN_RULE_HONEST_LIMIT,
+  SIGN_IN_RULE_ROOT_WARNING,
+  SIGN_IN_RULES_SCREEN_PATH,
+} from '../../../../contract/routes/index.ts';
 import { RULES_HELP, rulesVerbs } from '../../../../cli/lib/rules/commands.ts';
 import type { RulesController } from '../../../../cli/lib/rules/controller.ts';
 import manifest from '../../../../manifest.ts';
@@ -61,7 +65,13 @@ describe('fy rules verbs', () => {
     await verbs['rules renew']({ args: ['sr_a'], options: { uses: '3' } });
     await verbs['rules rm']({ args: [], options: { account: 'GITHUB_WORK', json: true } });
     should(reached.map(entry => entry[0])).eql(['widen', 'renew', 'remove']);
-    should(reached[0]?.[2]).containEql({ username: true, totp: true, iUnderstandOneFactor: true, scope: 'any', uses: '9' });
+    should(reached[0]?.[2]).containEql({
+      username: true,
+      totp: true,
+      iUnderstandOneFactor: true,
+      scope: 'any',
+      uses: '9',
+    });
     should(reached[1]?.[2]).containEql({ uses: '3' });
     should(reached[2]?.[1]).be.undefined();
     should(reached[2]?.[2]).containEql({ account: 'GITHUB_WORK', json: true });
@@ -91,5 +101,4 @@ describe('fy rules verbs', () => {
         '[--totp --i-understand-one-factor]',
       );
   });
-
 });

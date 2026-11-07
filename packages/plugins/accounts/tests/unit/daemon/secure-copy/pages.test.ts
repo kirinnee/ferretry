@@ -1,5 +1,9 @@
 import { describe, it } from 'bun:test';
-import { COPY_AFTER_MASK_SECONDS, COPY_DEFAULT_LIFETIME_SECONDS, type CopyCapture } from '../../../../contract/routes/index.ts';
+import {
+  COPY_AFTER_MASK_SECONDS,
+  COPY_DEFAULT_LIFETIME_SECONDS,
+  type CopyCapture,
+} from '../../../../contract/routes/index.ts';
 import should from 'should';
 import { EphemeralValues } from '../support/masking.ts';
 import type { BrowserCopyRead } from '../../../../daemon/lib/local-ports.ts';

@@ -37,7 +37,8 @@ async function temporaryPaths(): Promise<Paths> {
 /** A kernel SQLite handle over a real file, the way the kernel hands one to the half. */
 function handleOver(database: Database): SqliteHandle {
   return {
-    query: <Row,>(sql: string, params: readonly unknown[] = []) => database.query(sql).all(...(params as never[])) as Row[],
+    query: <Row>(sql: string, params: readonly unknown[] = []) =>
+      database.query(sql).all(...(params as never[])) as Row[],
     run: (sql, params = []) => ({ changes: database.query(sql).run(...(params as never[])).changes }),
     transaction: fn => database.transaction(fn)(),
     close: () => database.close(),

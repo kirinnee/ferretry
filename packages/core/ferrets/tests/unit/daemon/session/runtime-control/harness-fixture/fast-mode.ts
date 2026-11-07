@@ -30,7 +30,11 @@
  * is a declared gap (docs/fast-mode.md).
  */
 
-import type { RuntimeModelCatalog, RuntimeModelChoice, SessionView } from '../../../../../../daemon/lib/protocol/session.ts';
+import type {
+  RuntimeModelCatalog,
+  RuntimeModelChoice,
+  SessionView,
+} from '../../../../../../daemon/lib/protocol/session.ts';
 import type { HarnessKind } from '../../../../../../daemon/lib/session/peers/core.ts';
 import type { FastModeFacts } from './runtime-switch.ts';
 

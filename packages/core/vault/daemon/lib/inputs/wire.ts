@@ -102,8 +102,6 @@ export const inputContextLines = (context: string | null | undefined): string | 
 export const INPUT_PLAIN_VALUE_NOTICE = 'Not secret: the ferret can see this value.';
 export const INPUT_CODE_VISIBLE_NOTICE = 'One-time code: the ferret can see it.';
 
-
-
 /** What the card says about each reason: one fixed, plain sentence, never page or terminal text. */
 export const INPUT_LOCK_WORDS: Readonly<Record<InputLockReason, string>> = {
   'hidden-terminal': 'A local password prompt (sudo, su, doas or passwd) with typing hidden.',
@@ -217,7 +215,6 @@ export function inputRaiseFields(raise: Pick<InputRaise, 'sensitivity' | 'fields
   if (raise.fields !== undefined) return raise.fields;
   return [{ id: INPUT_SINGLE_FIELD_ID, sensitivity: raise.sensitivity ?? 'secret' }];
 }
-
 
 export type InputPaneProof = z.infer<typeof InputPaneProofSchema>;
 

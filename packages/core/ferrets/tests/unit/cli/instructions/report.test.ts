@@ -3,7 +3,13 @@ import { instructionsReport, renderInstructionsReport } from '../../../../cli/li
 
 describe('which sections a ferret launched with', () => {
   test('V-instructions a section is on only when its variable is exactly 1', () => {
-    const report = instructionsReport({ FY_SESSION_ID: 'wren', FY_HYPERMEDIA: '1', FY_PACK: '0', FY_AGENDA: 'yes', FY_SESSION_MODE: 'auto' });
+    const report = instructionsReport({
+      FY_SESSION_ID: 'wren',
+      FY_HYPERMEDIA: '1',
+      FY_PACK: '0',
+      FY_AGENDA: 'yes',
+      FY_SESSION_MODE: 'auto',
+    });
     expect(report).toMatchObject({ inFerret: true, known: true, sessionId: 'wren', mode: 'auto' });
     expect(report.sections.map(s => [s.id, s.on])).toEqual([
       ['hypermedia', true],
@@ -22,7 +28,10 @@ describe('which sections a ferret launched with', () => {
   });
 
   test('V-instructions the rendering lists each section and says the switches are fixed for the run', () => {
-    const text = renderInstructionsReport(instructionsReport({ FY_SESSION_ID: 'wren', FY_HYPERMEDIA: '1', FY_PASSIVE: '' }), 'fy');
+    const text = renderInstructionsReport(
+      instructionsReport({ FY_SESSION_ID: 'wren', FY_HYPERMEDIA: '1', FY_PASSIVE: '' }),
+      'fy',
+    );
     expect(text).toContain('Sections ferret wren launched with:');
     expect(text).toContain('  ✓ Hypermedia: on');
     expect(text).toContain('  ✗ Lessons: off. The owner turns it on');

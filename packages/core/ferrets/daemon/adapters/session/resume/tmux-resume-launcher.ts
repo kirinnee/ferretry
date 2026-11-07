@@ -179,7 +179,9 @@ export class TmuxResumeLauncher implements ResumeLauncher {
     // The process incarnation changed. Hot apply and terminal reap must address this replacement,
     // never the pid the revive just killed.
     await this.register(id, spec.tmuxSession);
-    return this.clientName === undefined || this.describe === undefined ? undefined : this.describe(this.clientName, env);
+    return this.clientName === undefined || this.describe === undefined
+      ? undefined
+      : this.describe(this.clientName, env);
   }
 
   /**

@@ -63,9 +63,13 @@ export class TmuxPane implements FerretPane {
 
   async write(ferretId: string, bytes: Uint8Array): Promise<number> {
     const pane = this.panes.require(ferretId);
-    const result = await this.spawn.run('tmux', ['send-keys', '-t', pane, '-l', '--', new TextDecoder().decode(bytes)], {
-      timeout: milliseconds(TMUX_TIMEOUT_MS),
-    });
+    const result = await this.spawn.run(
+      'tmux',
+      ['send-keys', '-t', pane, '-l', '--', new TextDecoder().decode(bytes)],
+      {
+        timeout: milliseconds(TMUX_TIMEOUT_MS),
+      },
+    );
     if (result.exitCode !== 0)
       throw new Error(
         `ferret ${ferretId}'s pane could not be typed into: ${result.stderr.trim() || `tmux exited ${String(result.exitCode)}`}`,

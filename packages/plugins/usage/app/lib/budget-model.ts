@@ -4,11 +4,7 @@
  * test, so the editor, the meter and the chip cannot word one budget two ways.
  */
 
-import type {
-  LoginBudget,
-  LoginBudgetLevel,
-  LoginBudgetPeriodView,
-} from '@ferretry/plugin-logins/contract';
+import type { LoginBudget, LoginBudgetLevel, LoginBudgetPeriodView } from '@ferretry/plugin-logins/contract';
 import { usdWords } from '../../contract/index.ts';
 
 export { usdWords };

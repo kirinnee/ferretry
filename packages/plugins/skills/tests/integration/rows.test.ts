@@ -61,22 +61,22 @@ describe('copying a skill from this machine', () => {
     expect(
       (await h.request('POST', '/v1/skill-installs/local/project', { body: { previewId }, as: fleetOnly })).status,
     ).toBe(403);
-    expect(
-      (await h.request('DELETE', `/v1/skill-installs/local/project/${installId}`, { as: fleetOnly })).status,
-    ).toBe(403);
+    expect((await h.request('DELETE', `/v1/skill-installs/local/project/${installId}`, { as: fleetOnly })).status).toBe(
+      403,
+    );
     expect(
       (await h.request('POST', '/v1/skill-installs/local/runtime', { body: { previewId }, as: filesOnly })).status,
     ).toBe(403);
-    expect(
-      (await h.request('DELETE', `/v1/skill-installs/local/runtime/${installId}`, { as: filesOnly })).status,
-    ).toBe(403);
+    expect((await h.request('DELETE', `/v1/skill-installs/local/runtime/${installId}`, { as: filesOnly })).status).toBe(
+      403,
+    );
     // The matching capability is admitted (and the unknown preview or copy is the answer).
     expect(
       (await h.request('POST', '/v1/skill-installs/local/project', { body: { previewId }, as: filesOnly })).status,
     ).toBe(404);
-    expect(
-      (await h.request('DELETE', `/v1/skill-installs/local/runtime/${installId}`, { as: fleetOnly })).status,
-    ).toBe(404);
+    expect((await h.request('DELETE', `/v1/skill-installs/local/runtime/${installId}`, { as: fleetOnly })).status).toBe(
+      404,
+    );
   });
 
   test('G174 every route is a person route, so a ferret is refused all of them; a governed apply needs a fresh catalog-install proof', async () => {

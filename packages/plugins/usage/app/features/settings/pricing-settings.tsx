@@ -1476,7 +1476,7 @@ export function PricingSettings({
             </div>
             <CatalogLedger
               rates={state.view.catalog}
-              catalogPriced={(state.view.modelCatalogRates).length > 0}
+              catalogPriced={state.view.modelCatalogRates.length > 0}
               busy={mutationBusy}
               confirmingKey={confirmingKey}
               onEdit={openEdit}

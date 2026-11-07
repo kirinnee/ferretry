@@ -1,7 +1,13 @@
 import { type JsonValue, jsonObject } from '@ferretry/std';
 import { InstantSchema } from '../protocol/common.ts';
 import type { SessionId } from '../session-id.ts';
-import type { EventPointer, IndexedSession, JournalFingerprint, JournalProblem, RebuildPlan } from '../storage-types.ts';
+import type {
+  EventPointer,
+  IndexedSession,
+  JournalFingerprint,
+  JournalProblem,
+  RebuildPlan,
+} from '../storage-types.ts';
 import type { JournalScan } from './journal.ts';
 
 /**

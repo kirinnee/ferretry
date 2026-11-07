@@ -27,7 +27,11 @@
  */
 
 import type { RuntimeModelCatalog, RuntimeModelChoice } from '../../../../../../daemon/lib/protocol/session.ts';
-import { type CoreAccount, type CoreAccountModel, servableModels } from '../../../../../../daemon/lib/session/peers/core.ts';
+import {
+  type CoreAccount,
+  type CoreAccountModel,
+  servableModels,
+} from '../../../../../../daemon/lib/session/peers/core.ts';
 import { claudeFastSupport } from './fast-mode.ts';
 
 /**

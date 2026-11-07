@@ -55,9 +55,7 @@ function neverSettlingBody(onCancel: () => void): ReadableStream<Uint8Array> {
 describe('the bounded analytics pricing feed', () => {
   it('should return a feed parsed by the shared protocol schema', async () => {
     // Arrange
-    const pricing = new HttpAnalyticsPricingFeed({ scheduleTimeout: never,
-      fetcher: async () => Response.json(feed),
-    });
+    const pricing = new HttpAnalyticsPricingFeed({ scheduleTimeout: never, fetcher: async () => Response.json(feed) });
 
     // Act
     const actual = await pricing.read(source);
@@ -159,7 +157,8 @@ describe('the bounded analytics pricing feed', () => {
   it('should classify a redirect-mode fetch rejection as unreachable without throwing it', async () => {
     // Arrange — browsers reject a redirect under `redirect: error`; there is no response status to
     // inspect, so it is the same transport fact as any other unreachable configured endpoint.
-    const pricing = new HttpAnalyticsPricingFeed({ scheduleTimeout: never,
+    const pricing = new HttpAnalyticsPricingFeed({
+      scheduleTimeout: never,
       fetcher: async () => {
         throw new TypeError('fetch failed because redirect mode is set to error');
       },
@@ -175,7 +174,8 @@ describe('the bounded analytics pricing feed', () => {
   it('should refuse a non-2xx response without buffering or awaiting its hostile body', async () => {
     // Arrange
     let cancelled = false;
-    const pricing = new HttpAnalyticsPricingFeed({ scheduleTimeout: never,
+    const pricing = new HttpAnalyticsPricingFeed({
+      scheduleTimeout: never,
       fetcher: async () =>
         new Response(
           neverSettlingBody(() => (cancelled = true)),
@@ -217,7 +217,8 @@ describe('the bounded analytics pricing feed', () => {
   it('should refuse a declared oversized body before trying to read it', async () => {
     // Arrange
     let cancelled = false;
-    const pricing = new HttpAnalyticsPricingFeed({ scheduleTimeout: never,
+    const pricing = new HttpAnalyticsPricingFeed({
+      scheduleTimeout: never,
       maxBytes: 4,
       fetcher: async () =>
         new Response(
@@ -249,7 +250,8 @@ describe('the bounded analytics pricing feed', () => {
         return new Promise<void>(() => undefined);
       },
     });
-    const pricing = new HttpAnalyticsPricingFeed({ scheduleTimeout: never,
+    const pricing = new HttpAnalyticsPricingFeed({
+      scheduleTimeout: never,
       maxBytes: 4,
       fetcher: async () => new Response(body),
     });
@@ -264,10 +266,12 @@ describe('the bounded analytics pricing feed', () => {
 
   it('should return invalid_json for malformed JSON and an absent body', async () => {
     // Arrange
-    const malformed = new HttpAnalyticsPricingFeed({ scheduleTimeout: never,
+    const malformed = new HttpAnalyticsPricingFeed({
+      scheduleTimeout: never,
       fetcher: async () => new Response('{not json'),
     });
-    const absent = new HttpAnalyticsPricingFeed({ scheduleTimeout: never,
+    const absent = new HttpAnalyticsPricingFeed({
+      scheduleTimeout: never,
       fetcher: async () => new Response(null, { status: 200 }),
     });
 
@@ -280,7 +284,8 @@ describe('the bounded analytics pricing feed', () => {
 
   it('should return invalid_json for bytes that are not valid UTF-8 JSON', async () => {
     // Arrange
-    const pricing = new HttpAnalyticsPricingFeed({ scheduleTimeout: never,
+    const pricing = new HttpAnalyticsPricingFeed({
+      scheduleTimeout: never,
       fetcher: async () => new Response(new Uint8Array([0xff])),
     });
 
@@ -293,7 +298,8 @@ describe('the bounded analytics pricing feed', () => {
 
   it('should return invalid_schema when strict shared validation refuses the parsed document', async () => {
     // Arrange — `provider` is provenance a feed is explicitly forbidden to claim.
-    const pricing = new HttpAnalyticsPricingFeed({ scheduleTimeout: never,
+    const pricing = new HttpAnalyticsPricingFeed({
+      scheduleTimeout: never,
       fetcher: async () => Response.json({ entries: [], provider: 'openai' }),
     });
 
@@ -309,9 +315,7 @@ describe('the bounded analytics pricing feed', () => {
     const body = new ReadableStream<Uint8Array>({
       start: controller => controller.error(new Error('connection reset during body')),
     });
-    const pricing = new HttpAnalyticsPricingFeed({ scheduleTimeout: never,
-      fetcher: async () => new Response(body),
-    });
+    const pricing = new HttpAnalyticsPricingFeed({ scheduleTimeout: never, fetcher: async () => new Response(body) });
 
     // Act
     const actual = await pricing.read(source);
@@ -324,9 +328,7 @@ describe('the bounded analytics pricing feed', () => {
     // Arrange
     const response = Response.json(feed);
     const heldReader = response.body?.getReader();
-    const pricing = new HttpAnalyticsPricingFeed({ scheduleTimeout: never,
-      fetcher: async () => response,
-    });
+    const pricing = new HttpAnalyticsPricingFeed({ scheduleTimeout: never, fetcher: async () => response });
 
     // Act
     const actual = await pricing.read(source);

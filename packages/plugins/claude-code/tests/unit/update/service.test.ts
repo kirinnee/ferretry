@@ -6,12 +6,7 @@ import {
   HarnessUpdateRefusal,
   HarnessUpdateService,
 } from '../../../daemon/lib/update/service.ts';
-import type {
-  ClaudeLocation,
-  RunRequest,
-  RunResult,
-  StartupCheck,
-} from '../../../daemon/lib/update/ports.ts';
+import type { ClaudeLocation, RunRequest, RunResult, StartupCheck } from '../../../daemon/lib/update/ports.ts';
 import type { HarnessInstalledVersion } from '../../../daemon/lib/update/recipes.ts';
 
 const HOME = '/home/kirin';
