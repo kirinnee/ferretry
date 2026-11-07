@@ -959,6 +959,65 @@ function rootHandle(setup: HandleSetup): RootHandle {
   return handle;
 }
 
+/** The internal roots whose base is `<home>/state/<plugin>/<name>`: the only bases the kernel makes. */
+const HOME_ROOT_BASES: readonly RootName[] = ['agent-homes', 'downloads', 'credentials'];
+
+/** One declared internal root whose base the kernel would not make or accept, and why. */
+export interface RootBaseRefusal {
+  readonly name: RootName;
+  readonly refusal: RootRefusal;
+}
+
+/**
+ * Makes the base of every internal root a plugin DECLARED under the home (`state/<plugin>/agent-homes`, `downloads`,
+ * `credentials`), `0700`, before the plugin is built, so a fresh `FY_HOME` serves its first use. A root outside the
+ * home (`worktrees`) and an owner's root are never made here. Each missing folder is made through its checked,
+ * no-follow-opened parent ({@link ensureScopedBase}); each folder already there — from the home down to the base —
+ * must be a real folder (never a link), owned by the home's owner, exactly where the home says. One that is not is
+ * refused and left exactly as it is: nothing is followed, replaced or repaired, and every later use of that root is
+ * refused by the base check as before.
+ */
+export async function ensureInternalRootBases(
+  fs: HostFs,
+  layout: Pick<RootLayout, 'home' | 'plugin'>,
+  declared: readonly RootName[],
+): Promise<readonly RootBaseRefusal[]> {
+  const home = absolute(layout.home, 'the home');
+  const refusals: RootBaseRefusal[] = [];
+  for (const name of HOME_ROOT_BASES) {
+    if (!declared.includes(name)) continue;
+    const owner = ROOT_OWNERS[name];
+    if (owner !== undefined && owner !== layout.plugin) continue;
+    try {
+      await ensureHomeRootBase(fs, home, absolute(`${home}/state/${layout.plugin}/${name}`, 'a root'));
+    } catch (error) {
+      if (!(error instanceof RootError)) throw error;
+      refusals.push({ name, refusal: error.refusal });
+    }
+  }
+  return refusals;
+}
+
+async function ensureHomeRootBase(fs: HostFs, home: string, base: string): Promise<void> {
+  if (!within(home, base) || base === home) refuse('outside');
+  const homeEntry = await fs.identity(home);
+  if (homeEntry?.kind !== 'directory') return refuse('outside');
+  // Every folder already there, from the home down: a folder, never a link, the home's owner's.
+  let at = home;
+  for (const segment of relative(home, base).split('/')) {
+    at = join(at, segment);
+    const found = await fs.identity(at);
+    if (found === undefined) break;
+    if (found.kind === 'link') refuse('link_escape');
+    if (found.kind !== 'directory') refuse('not_a_file');
+    if (found.owner !== homeEntry.owner) refuse('outside');
+  }
+  await ensureScopedBase(fs, home, base, home, home);
+  // What is at the base now must be exactly where the home says, whoever made it.
+  const checked = await checkBase(fs, home, base, false, home);
+  if (!checked.ok) refuse(checked.error);
+}
+
 export interface RootsOptions {
   /** A temp file's random suffix. */
   readonly random?: () => string;
