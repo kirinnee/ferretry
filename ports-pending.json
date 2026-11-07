@@ -69,6 +69,14 @@
     "connections": [
       "GAP(kernel): the tunnel carrier cannot run: the kernel offers no port to bind its own loopback listener (serving only the session route, every arrival remote) and none to find cloudflared (FY_CLOUDFLARED, PATH); the daemon half composes the carrier and says so out loud until a port exists",
       "GAP(parity): the J-, S- and V-0245 rows still point at tests/unit/parity files that are not written"
+    ],
+    "conversation": [
+      "conversation app half: C1 landed (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app); the composer, chat and transcript, and the queue, questions, search and links bodies are still the one-line Pending surface until C2-C4 land",
+      "GAP(app-shell): the fy-render sandbox shell and library bundles are built by packages/app/scripts/build-fy-render-libs.ts and served from the app origin; the browser tests that exercise them need playwright and the Vite harness (tests/integration/app, NEEDS-APP-SHELL.txt)",
+      "GAP(board): a card or board fence draws each card through the Board reference:& renderer; the mini board and the lane view of today are Board views",
+      "GAP(browsers): ExternalLink and useLinkBehaviour keep the default (open in the reader's browser); the \"Open links in\" policy is the Browsers plugin's",
+      "GAP(ferrets): StatusMark reads a structural view; SessionView is not in Ferrets' contract yet (plan Q0, C3 adds it)",
+      "live updates run on the polling fallback until the kernel serves /v1/bus and /v1/events (plan Q12)"
     ]
   },
   "pendingHalves": {
@@ -82,7 +90,7 @@
     {
       "plugin": "conversation",
       "path": "packages/plugins/conversation/app",
-      "reason": "skeleton app half; the queue, stuck messages and links views port with item M"
+      "reason": "surfaces, client context, fy-render and the prose kit have landed; the composer, chat, transcript, queue, questions, search and links bodies are in flight (C2-C4)"
     },
     {
       "plugin": "agenda",
