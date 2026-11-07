@@ -17,7 +17,6 @@ export type ProseRenderer = (text: string) => ReactNode;
 const inline = (text: string): ReactNode[] =>
   text.split(INLINE).map((part, index) => {
     if (part === '') return null;
-    // biome-ignore lint/suspicious/noArrayIndexKey: the pieces of one line keep their order
     const key = index;
     if (part.startsWith('`') && part.endsWith('`') && part.length > 2)
       return <code key={key}>{part.slice(1, -1)}</code>;

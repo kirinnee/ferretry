@@ -52,57 +52,56 @@ class FakePage implements ActablePage {
   opensChooser = true;
 
   locator(selector: string): ActableLocator {
-    const page = this;
     const locator: ActableLocator = {
       first: () => locator,
       count: async () => {
-        if (page.countThrows) throw new Error('Invalid ref');
+        if (this.countThrows) throw new Error('Invalid ref');
         const ref = /^aria-ref=(.+)$/u.exec(selector)?.[1];
-        return ref === undefined || page.refs.has(ref) ? 1 : 0;
+        return ref === undefined || this.refs.has(ref) ? 1 : 0;
       },
       click: async options => {
-        page.calls.push(`click ${selector} ${JSON.stringify(options)}`);
+        this.calls.push(`click ${selector} ${JSON.stringify(options)}`);
       },
       fill: async value => {
-        page.calls.push(`fill ${selector} ${JSON.stringify(value)}`);
+        this.calls.push(`fill ${selector} ${JSON.stringify(value)}`);
       },
       pressSequentially: async text => {
-        page.calls.push(`pressSequentially ${selector} ${JSON.stringify(text)}`);
+        this.calls.push(`pressSequentially ${selector} ${JSON.stringify(text)}`);
       },
       press: async key => {
-        page.calls.push(`press ${selector} ${key}`);
+        this.calls.push(`press ${selector} ${key}`);
       },
       getAttribute: async name =>
-        name === 'type' ? (page.types.get(selector) ?? null) : (page.attributes.get(selector)?.[name] ?? null),
+        name === 'type' ? (this.types.get(selector) ?? null) : (this.attributes.get(selector)?.[name] ?? null),
       innerText: async () => {
-        page.calls.push(`innerText ${selector}`);
-        return page.text;
+        this.calls.push(`innerText ${selector}`);
+        return this.text;
       },
       ariaSnapshot: async options => {
-        page.calls.push(`ariaSnapshot ${selector} ${JSON.stringify(options)}`);
-        return page.snapshot;
+        this.calls.push(`ariaSnapshot ${selector} ${JSON.stringify(options)}`);
+        return this.snapshot;
       },
       screenshot: async options => {
-        page.calls.push(`screenshot ${selector} ${options.type}`);
+        this.calls.push(`screenshot ${selector} ${options.type}`);
         return new Uint8Array([1, 2, 3]);
       },
       setInputFiles: async files => {
-        page.calls.push(`setInputFiles ${selector} ${JSON.stringify(files)}`);
+        this.calls.push(`setInputFiles ${selector} ${JSON.stringify(files)}`);
       },
       // The real page function runs, on an element that is a file field or a button.
       evaluate: async (pageFunction, arg) =>
         (pageFunction as (element: unknown, arg: string) => unknown)(
-          page.host !== undefined
-            ? { tagName: 'INPUT', ownerDocument: { location: { host: page.host } } }
-            : page.fileInput
+          this.host !== undefined
+            ? { tagName: 'INPUT', ownerDocument: { location: { host: this.host } } }
+            : this.fileInput
               ? { tagName: 'INPUT', type: 'file' }
               : { tagName: 'BUTTON', type: 'submit' },
           arg,
         ),
       scrollIntoViewIfNeeded: async () => {
-        page.calls.push(`scrollIntoView ${selector}`);
+        this.calls.push(`scrollIntoView ${selector}`);
       },
-      boundingBox: async () => page.box,
+      boundingBox: async () => this.box,
     };
     return locator;
   }

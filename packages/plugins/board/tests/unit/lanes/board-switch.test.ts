@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type BoardSwitch } from '../../../contract/index.ts';
+import type { BoardSwitch } from '../../../contract/index.ts';
 import { BoardSwitchService, type BoardSwitchStore, switchOf } from '../../../daemon/lib/lanes/index.ts';
 import { DOCS_ID, FERRETRY_ID } from './support.ts';
 

@@ -16,7 +16,7 @@
 import { type Conflict, type FlatLayer, type ResolvedProfile, settingsKey } from '../account/layering.ts';
 import { harnessKey } from './foreign.ts';
 import { looksSecret } from '../account/import.ts';
-import { type ResolvedEntry, type ResolvedField, type ResolvedSetter } from '../../../contract/index.ts';
+import type { ResolvedEntry, ResolvedField, ResolvedSetter } from '../../../contract/index.ts';
 
 /** What a hidden value is replaced by. */
 export const RESOLVED_HIDDEN_TEXT = '‹hidden›';
