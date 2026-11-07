@@ -31,6 +31,8 @@ export interface MoveAside {
 export interface PluginStateOpening {
   /** Every declared file that cannot be used; empty when the plugin may start. */
   readonly damaged: readonly StateDamage[];
+  /** Unusable files whose declared refusal is narrower than subsystem damage. */
+  readonly narrowed: readonly StateDamage[];
   /**
    * Set only when EVERY problem found is a lower format, in a plugin (not core) with no live targets (§9.3): the
    * caller moves the plugin's folder aside with {@link moveStateAside} and the plugin starts empty. Nothing is
@@ -49,6 +51,7 @@ export async function openPluginState(options: OpenPluginStateOptions): Promise<
   const sqliteFiles = options.sqliteFiles ?? nodeSqliteFiles;
   const root = pluginStateRoot(home, pluginId);
   const damaged: StateDamage[] = [];
+  const narrowed: StateDamage[] = [];
   for (const def of options.files) {
     const relatives = def.path.includes('*')
       ? (await listCollection(fs, root, def)).map(name => def.path.replace('*', name))
@@ -61,15 +64,16 @@ export async function openPluginState(options: OpenPluginStateOptions): Promise<
         stateLabel(pluginId, relative),
         sqliteFiles,
       );
-      if (damage !== undefined) damaged.push(damage);
+      if (damage !== undefined) (def.onDamaged === 'subsystem' ? damaged : narrowed).push(damage);
     }
   }
   const allLower = damaged.length > 0 && damaged.every(damage => damage.reason === 'lower_format');
-  if (!allLower || options.kind === 'core' || options.liveTargets) return { damaged };
+  if (!allLower || options.kind === 'core' || options.liveTargets || narrowed.length > 0) return { damaged, narrowed };
   const at = new Date(options.clock.now());
   const to = `${home}/state/${beforeFolderName(pluginId, at)}`;
   return {
     damaged,
+    narrowed,
     moveAside: {
       from: root,
       to,

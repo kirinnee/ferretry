@@ -12,6 +12,7 @@ import { daemonRestart, daemonStart, daemonStatus, daemonStop } from './commands
 import { doctorVerb } from './commands/doctor.ts';
 import { pluginInstall, pluginList, pluginOff, pluginOn, pluginShow } from './commands/plugin.ts';
 import { wordsVerb } from './commands/words.ts';
+import { updateVerb } from './commands/update.ts';
 import { EXIT, errorText, ShellError } from './errors.ts';
 import { buildPluginGraph } from './plugin-graph.ts';
 import type { ShellContext, ShellVerb } from './shell-context.ts';
@@ -34,6 +35,7 @@ const SHELL_HANDLERS: Readonly<Record<string, ShellVerb>> = {
   'daemon stop': daemonStop,
   'daemon restart': daemonRestart,
   ask: askVerb,
+  update: updateVerb,
 };
 
 /** Flags before the verb. `--help` and `--version` anywhere in the leading flags answer at once. */

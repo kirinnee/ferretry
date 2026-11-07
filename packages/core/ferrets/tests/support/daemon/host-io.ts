@@ -108,7 +108,9 @@ export class BunGitByteSpawn implements GitByteSpawn {
       child = Bun.spawn([program, ...args], {
         cwd: named ?? '.',
         env: { ...inherited, ...options.env },
-        stdin: options.stdin ? new Blob([options.stdin]) : 'ignore',
+        stdin: options.stdin
+          ? new Blob([typeof options.stdin === 'string' ? options.stdin : new Uint8Array(options.stdin)])
+          : 'ignore',
         stdout: 'pipe',
         stderr: 'pipe',
       });

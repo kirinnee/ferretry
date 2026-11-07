@@ -1,5 +1,5 @@
 /**
- * `POST /v1/runtimes/recommend` (today's `POST /v1/recommend`, the route `fy recommend` speaks): which login and model
+ * `POST /v1/recommend` (today's `POST /v1/recommend`, the route `fy recommend` speaks): which login and model
  * should take one task, and why. The answer is a guide, not an order: every role carries its alternatives, and every
  * login the recommender refused carries the reason. `exclusions` and `warnings` are always present, so a caller can tell
  * "nothing was excluded" from "exclusions were not reported".

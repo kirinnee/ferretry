@@ -1,4 +1,5 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import { LoginsPort } from '@ferretry/plugin-logins/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import {
   FerretsPort,
@@ -19,10 +20,8 @@ import {
  * the Clone export. Route paths follow §3.2 (`/v1/<id>/…`): today's `/v1/fleet/…` and `/v1/recommend` moved under
  * `/v1/runtimes/…`, descriptors copied from `lib/runtime/mounts/{fleet-catalog,fleet-setup,recommend}.ts`.
  *
- * NOT HERE, on purpose: the per-ferret runtime switch (`GET /v1/sessions/:sessionId/runtime-models`,
- * `POST …/runtime`) and revoking a ferret's credential (`POST …/revoke-credential`) are a ferret's own acts and belong
- * to Ferrets; `GET /v1/fleet/credentials`, `/presets`, `/login*` and `/v1/models*` belong to Logins; MCP and skill
- * installs to their plugins.
+ * The per-ferret runtime model/control routes belong here. Ferrets owns its detail GET; Logins owns sign-in.
+ * MCP and skill installs belong to their plugins.
  */
 export default definePlugin({
   id: 'runtimes',
@@ -33,11 +32,25 @@ export default definePlugin({
   kinds: ['runtime', 'command', 'view'],
   words: RUNTIMES_WORDS,
 
-  needs: { ferrets: FerretsPort },
+  needs: { ferrets: FerretsPort, logins: LoginsPort },
   provides: { runtimes: RuntimesPort },
 
   actions: {
     routes: [
+      route('GET /v1/ferrets/:id/runtime-models', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a live catalog read' },
+        guard: { none: 'model choices; no pane text' },
+      }),
+      route('POST /v1/ferrets/:id/runtime', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'the runtime subsystem records the control outcome' },
+        guard: { none: 'runtime control; no pane text' },
+      }),
       // ── the catalogue (fleet-catalog.ts): noStore on all eight, every answer is a statement about now ─────────────
       route('GET /v1/runtimes/machine', {
         minimum: 'operator',
@@ -153,7 +166,7 @@ export default definePlugin({
         guard: { none: 'counts only' },
       }),
       // ── the recommender (recommend.ts): no capability today; it names every login, so `operator` ───────────────────
-      route('POST /v1/runtimes/recommend', {
+      route('POST /v1/recommend', {
         minimum: 'operator',
         caller: 'any',
         noStore: true,
@@ -162,23 +175,25 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('runtime ls', { summary: 'the runtimes on this machine: a login plus a profile' }),
+      verb('runtime ls', { summary: 'the runtimes on this machine: a sign-in plus a profile' }),
       verb('runtime add', {
-        summary: 'add a runtime: which login, which profile, and whether Ferretry launches it as an agent',
+        summary: 'add a runtime: which sign-in, which profile, and whether Ferretry launches it as an agent',
       }),
       verb('runtime show', { summary: 'one runtime: its stack, models and fixed layer' }),
-      verb('runtime set', { summary: 'change which login or profile a runtime uses, or whether it is an agent' }),
+      verb('runtime set', { summary: 'change which sign-in or profile a runtime uses, or whether it is an agent' }),
       verb('runtime disable', {
         summary: 'switch a runtime off without deleting it: nothing new starts on it; running ferrets keep going',
       }),
       verb('runtime enable', { summary: 'switch a disabled runtime back on' }),
       verb('runtime rename', { summary: 'give a runtime a new name; nothing restarts' }),
       verb('runtime rm', { summary: 'remove a runtime' }),
-      verb('runtime import', { summary: "import one harness's own login and setup, with no questions (for scripts)" }),
+      verb('runtime import', {
+        summary: "import one harness's own sign-in and setup, with no questions (for scripts)",
+      }),
       verb('runtime scan', {
         summary: 'what the first run would find: each harness, its sign-in, instructions, settings, servers and skills',
       }),
-      verb('recommend', { summary: 'which login and model should take one task, and why' }),
+      verb('recommend', { summary: 'which sign-in and model should take one task, and why' }),
       verb('profile ls', { summary: 'the profiles on this machine, each with its scope' }),
       verb('profile show', { summary: 'one profile: its layers, overrides and where it is used' }),
       verb('profile build', { summary: 'build a new profile from layers' }),
