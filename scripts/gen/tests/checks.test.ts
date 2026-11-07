@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { contextFor } from '../lib/check.ts';
 import type { Finding } from '../lib/graph.ts';
 import { check as actRunner } from '../../validate/act-runner.ts';
-import { bannedIn } from '../../validate/banned-globals.ts';
+import { bannedIn, check as bannedGlobals } from '../../validate/banned-globals.ts';
 import { check as contextImports } from '../../validate/context-imports.ts';
 import { check as contractConsumes } from '../../validate/contract-consumes.ts';
 import { check as contractGraph } from '../../validate/contract-graph.ts';
@@ -283,6 +283,26 @@ describe('source scans', () => {
     return join(f.root, name);
   };
 
+  test('banned-globals exempts only the explicit standalone Worker trees and native WebRTC engine', async () => {
+    const f = ws([
+      {
+        id: 'connections',
+        files: {
+          'worker/src/worker.ts': 'await fetch("https://fixture.invalid");',
+          'adapters/webrtc/node-datachannel-engine.ts': 'const platform = process.platform;',
+          'daemon/worker.ts': 'await fetch("https://fixture.invalid");',
+          'adapters/webrtc/other.ts': 'const platform = process.platform;',
+        },
+      },
+      { id: 'catalogs', files: { 'worker/src/worker.ts': 'await fetch("https://fixture.invalid");' } },
+      { id: 'other', files: { 'worker/src/worker.ts': 'await fetch("https://fixture.invalid");' } },
+    ]);
+    const found = await run(bannedGlobals, f);
+    expect(found).toHaveLength(3);
+    expect(messages(found)).toContain('connections/daemon/worker.ts');
+    expect(messages(found)).toContain('connections/adapters/webrtc/other.ts');
+    expect(messages(found)).toContain('other/worker/src/worker.ts');
+  });
   test('banned-globals planted: clock, timers, env, fs, network and spawn around the ports', () => {
     const found = messages(
       bannedIn(

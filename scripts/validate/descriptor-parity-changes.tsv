@@ -11,8 +11,6 @@ member	POST /v1/shared/unlock/options	changed	today's member dispatcher wraps ev
 route	DELETE /v1/fleet/login/:flowId	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/fleet/mcp-auth/:component	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/fleet/mcp-auth/flows/:flowId	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	DELETE /v1/skill-installs/local/project/:installId	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	DELETE /v1/skill-installs/local/runtime/:installId	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/fleet/components	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/fleet/credentials	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/fleet/export	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
@@ -30,7 +28,6 @@ route	GET /v1/sessions/:sessionId/mcp	removed	session routes renamed /v1/session
 route	GET /v1/sessions/:sessionId/mcp/servers	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/skills	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/skills/inventory	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	GET /v1/skill-installs/local	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/fleet/clone/forget	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/fleet/clone/keys	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/fleet/clone/review	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
@@ -47,17 +44,12 @@ route	POST /v1/fleet/proposals/:proposalId/apply	removed	moved to the owning plu
 route	POST /v1/harnesses/update	removed	harness update split per harness plugin (fy harness <key> update, design §1.4); descriptor fields unchanged
 route	POST /v1/models/local/refresh	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/models/refresh	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	POST /v1/recommend	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/dialog	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/mcp/login	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/mcp/login/preview	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/mcp/project	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/mcp/project/preview	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/permission	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	POST /v1/skill-installs/local/project	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	POST /v1/skill-installs/local/project/preview	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	POST /v1/skill-installs/local/runtime	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	POST /v1/skill-installs/local/runtime/preview	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/claude-code/update	added	harness update split per harness plugin (fy harness <key> update, design §1.4); descriptor fields unchanged
 route	POST /v1/claude-code/update	added	harness update split per harness plugin (fy harness <key> update, design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/permission	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
@@ -113,7 +105,6 @@ route	GET /v1/runtimes/export	added	moved to the owning plugin's route prefix /v
 route	POST /v1/runtimes/clone/review	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/runtimes/clone/forget	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/runtimes/clone/keys	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	POST /v1/runtimes/recommend	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/shells	added	new in 5.0: no table of today's to copy (design §2.3)
 route	GET /v1/shells/nix	added	new in 5.0: no table of today's to copy (design §2.3)
 route	GET /v1/shells/:name	added	new in 5.0: no table of today's to copy (design §2.3)
@@ -131,3 +122,170 @@ route	POST /v1/skills/installs/local/runtime	added	moved to the owning plugin's 
 route	GET /v1/skills/installs/local	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/skills/installs/local/project/:installId	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/skills/installs/local/runtime/:installId	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/agenda	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/agenda	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/agenda	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/agenda	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/agenda/:id	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/agenda/:id	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/agenda/:id/conversation	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/agenda/:id/conversation	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/agenda/:id/versions	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/agenda/:id/versions	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/agenda/:id/versions/:version	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/agenda/:id/versions/:version	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	PUT /v1/sessions/:sessionId/agenda/:id/seen	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	PUT /v1/ferrets/:ferretId/agenda/:id/seen	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/agenda/replies	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/agenda/replies	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/stop	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/stop	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/resume	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/resume	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/rename	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/rename	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/revoke-credential	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/revoke-credential	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/fs/file	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/fs/file	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/fs	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/fs	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/fs/index	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/fs/index	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/fs/changes	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/fs/changes	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/fs/diff	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/fs/diff	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/by-request/:requestId	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/by-request/:requestId	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/pin	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/pin	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/unpin	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/unpin	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/pins	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/pins	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/pins	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/pins	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/signal	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/signal	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/input-requests	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/input-requests/:requestId/shot	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/input-requests/:requestId/deliver	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/input-quarantines	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/input-quarantines/:key/end	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/input-requests/:requestId/cancel	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/input-requests	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/input-requests/:requestId/shot	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/input-requests/:requestId/deliver	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/input-quarantines	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/input-quarantines/:key/end	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/input-requests/:requestId/cancel	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/agenda-mode	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/agenda-mode	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	PATCH /v1/sessions/:sessionId/agenda-mode	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	PATCH /v1/ferrets/:ferretId/agenda-mode	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/board/tasks	removed	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
+route	GET /v1/board/cards	added	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
+route	POST /v1/board/tasks	removed	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
+route	POST /v1/board/cards	added	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
+route	GET /v1/board/tasks/:taskId	removed	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
+route	GET /v1/board/cards/:cardId	added	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
+route	POST /v1/board/tasks/:taskId	removed	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
+route	POST /v1/board/cards/:cardId	added	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
+route	POST /v1/board/tasks/:taskId/start	removed	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
+route	POST /v1/board/cards/:cardId/start	added	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/plans/:plan	added	new in 5.0: no counterpart in today's table (design §3.3)
+route	POST /v1/ferrets/:ferretId/plans/:plan/approval	added	new in 5.0: no counterpart in today's table (design §3.3)
+route	GET /v1/ferrets/:ferretId/plans/:plan/approval/:stage	added	new in 5.0: no counterpart in today's table (design §3.3)
+route	POST /v1/ferrets/:ferretId/plans/:plan/approval/:stage/commit	added	new in 5.0: no counterpart in today's table (design §3.3)
+route	POST /v1/ferrets/:ferretId/plans/:plan/approval/:stage/confirm-in-app	added	new in 5.0: no counterpart in today's table (design §3.3)
+route	DELETE /v1/ferrets/:ferretId/plans/:plan/approval/:stage	added	new in 5.0: no counterpart in today's table (design §3.3)
+route	POST /v1/ferrets/:ferretId/plans/:plan/revoke	added	new in 5.0: no counterpart in today's table (design §3.3)
+route	POST /v1/sessions/:sessionId/send	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/send	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/interrupt	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/interrupt	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/sends	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/sends	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/queue	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/queue	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	PATCH /v1/sessions/:sessionId/queue/:messageId	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	PATCH /v1/ferrets/:ferretId/queue/:messageId	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	DELETE /v1/sessions/:sessionId/queue/:messageId	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	DELETE /v1/ferrets/:ferretId/queue/:messageId	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/sends/:sendId	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/sends/:sendId	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/handoffs/:name	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/handoffs/:name	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/sends/:sendId/retry	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/sends/:sendId/retry	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/sends/:sendId/cancel	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/sends/:sendId/cancel	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/sends/:sendId/enter	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/sends/:sendId/enter	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/composer	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/composer	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/events	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/events	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/snapshot	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/snapshot	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/logs	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/logs	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/log-page	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/log-page	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/log-search	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/log-search	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/messages	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/messages	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/transcript-images/:handle	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/transcript-images/:handle	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/answer	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/answer	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/compact-at	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/compact-at	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	PATCH /v1/sessions/:sessionId/compact-at	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	PATCH /v1/ferrets/:ferretId/compact-at	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	PATCH /v1/sessions/:sessionId/hypermedia	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	PATCH /v1/ferrets/:ferretId/hypermedia	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/attachments	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/attachments	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/attachments/:attachmentId	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/attachments/:attachmentId	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/attachments/:attachmentId/unlock	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	DELETE /v1/ferrets/:ferretId/attachments/:attachmentId/unlock	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/shared-draft	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/shared-draft	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/shared-draft	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/ferrets/:ferretId/shared-draft	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/imports/conversations	removed	imports are links (design §1.4): /v1/imports/… is /v1/links/…; descriptor fields unchanged
+route	GET /v1/links/conversations	added	imports are links (design §1.4): /v1/imports/… is /v1/links/…; descriptor fields unchanged
+route	GET /v1/imports/conversations/:harness/:conversationId/preview	removed	imports are links (design §1.4): /v1/imports/… is /v1/links/…; descriptor fields unchanged
+route	GET /v1/links/conversations/:harness/:conversationId/preview	added	imports are links (design §1.4): /v1/imports/… is /v1/links/…; descriptor fields unchanged
+route	POST /v1/links/conversations/keep	added	new in 5.0: no counterpart in today's table (design §3.3)
+route	GET /v1/imports/history	removed	imports are links (design §1.4): /v1/imports/… is /v1/links/…; descriptor fields unchanged
+route	GET /v1/links/history	added	imports are links (design §1.4): /v1/imports/… is /v1/links/…; descriptor fields unchanged
+route	GET /v1/imports/history/:importId	removed	imports are links (design §1.4): /v1/imports/… is /v1/links/…; descriptor fields unchanged
+route	GET /v1/links/history/:entryId	added	imports are links (design §1.4): /v1/imports/… is /v1/links/…; descriptor fields unchanged
+socket	GET /v1/sessions/:sessionId/shared-draft/stream	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+socket	GET /v1/ferrets/:ferretId/shared-draft/stream	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	DELETE /v1/projects/:id	added	new in 5.0: no counterpart in today's table (design §3.3)
+route	POST /v1/board/import	removed	compatibility importer deleted (clean slate, owner decision A452)
+route	GET /v1/sessions/:sessionId/tasks	removed	legacy task listing deleted with the compatibility routes (clean slate, owner decision A452)
+route	POST /v1/imports/conversations/adopt	removed	imports are links (design §1.4): adopting a conversation is keeping it, POST /v1/links/conversations/keep; descriptor fields unchanged
+tool	card_plan	added	tasks are cards (design §1.4): today's task_plan; descriptor fields unchanged
+tool	card_progress	added	new in 5.0: writes one card's progress (design §3.3)
+route	GET /v1/plans	added	new in 5.0: the owner's list of staged plans (design §3.3)
+route	GET /v1/sessions/:sessionId/runtime-models	removed	moved to Runtimes GET /v1/ferrets/:id/runtime-models (§1.4); descriptor fields unchanged
+route	POST /v1/sessions/:sessionId/runtime	removed	moved to Runtimes POST /v1/ferrets/:id/runtime (§1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:id/runtime-models	added	moved from GET /v1/sessions/:sessionId/runtime-models; Runtimes owns model discovery; descriptor fields unchanged
+route	POST /v1/ferrets/:id/runtime	added	moved from POST /v1/sessions/:sessionId/runtime; Runtimes owns runtime controls; descriptor fields unchanged
+route	GET /v1/sessions/:sessionId/subtree	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/subtree	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged

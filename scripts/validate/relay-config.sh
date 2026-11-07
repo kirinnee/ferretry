@@ -192,7 +192,7 @@ fi
 # either side leaves the tunnel service advertising `available: false` with nothing failing anywhere,
 # and a value passed as an argument is readable by every process on the runner.
 tunnel_control="${relay_dir}/src/adapters/hosted-tunnel-control.ts"
-tunnel_contract="${relay_dir}/src/lib/tunnel.ts"
+tunnel_contract="packages/plugins/connections/contract/tunnel-service.ts"
 if ((relay_ported)); then
   rg -qF -- 'readonly TUNNEL_ACCOUNTS?: string;' "${tunnel_control}" ||
     fail "${tunnel_control} no longer reads the pool from TUNNEL_ACCOUNTS, the secret ${workflow} installs"

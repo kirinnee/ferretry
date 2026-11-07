@@ -28,5 +28,15 @@
     "packages/cli/src",
     "packages/cli/tests"
   ],
-  "exclude": ["packages/app", "**/node_modules"]
+  "exclude": [
+    "packages/app",
+    "**/node_modules",
+    "packages/plugins/*/app/**/*.tsx",
+    "packages/plugins/*/tests/**/*.tsx",
+    "packages/plugins/runtimes/app/hooks",
+    "packages/plugins/onboarding/app/landing-geometry.ts",
+    "packages/plugins/onboarding/app/setup-qr.ts",
+    "packages/plugins/onboarding/tests/unit/app/get-started-script.test.ts",
+    "packages/plugins/onboarding/tests/unit/app/setup-qr.test.ts"
+  ]
 }
