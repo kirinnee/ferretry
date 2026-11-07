@@ -67,7 +67,7 @@ describe('source-raised answers', () => {
     }
   });
 
-  it('applies the generic source before recording, using the durable answer id', async () => {
+  it('#1552 applies the card source before recording, using the durable answer id', async () => {
     const applied: AskAnswer[] = [];
     let half: Awaited<ReturnType<typeof asksHalf>>;
     half = await asksHalf({

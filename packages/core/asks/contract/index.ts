@@ -1,6 +1,17 @@
 import { defineEvent, defineHook, definePort, defineState, type FerretId } from '@ferretry/kernel/contract';
 import { type Brand, InstantSchema, KEBAB_NAME } from '@ferretry/std';
 import { z } from 'zod';
+import type { AgendaSnapshot } from './snapshot/agenda.ts';
+
+/** Complete boards, including parked items, owner answers, card asks and conversation. */
+export {
+  AgendaItemSchema as AskItemSchema,
+  AgendaSnapshotSchema as AskBoardSnapshotSchema,
+  AgendaListSnapshotSchema as AskListSnapshotSchema,
+  type AgendaItem as AskItem,
+  type AgendaSnapshot as AskBoardSnapshot,
+  type AgendaListSnapshot as AskListSnapshot,
+} from './snapshot/agenda.ts';
 
 /**
  * `@ferretry/core-asks/contract` (§2.2, §7.4): every question for the owner and every answer, with a GENERIC source
@@ -34,6 +45,26 @@ export const AskRefSchema = z.strictObject({
   id: AskIdSchema,
 });
 export type AskRef = z.infer<typeof AskRefSchema>;
+
+/** The owner's machine-board verbs. Snooze keeps today's required future `until`. */
+export const AskOwnerActionSchema = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('dismiss'), ref: AskRefSchema, note: z.string().max(64_000).optional() }),
+  z.strictObject({ action: z.literal('resolve'), ref: AskRefSchema, note: z.string().max(64_000).optional() }),
+  z.strictObject({ action: z.literal('snooze'), ref: AskRefSchema, until: InstantSchema }),
+  z.strictObject({ action: z.literal('unsnooze'), ref: AskRefSchema }),
+]);
+export type AskOwnerAction = z.infer<typeof AskOwnerActionSchema>;
+
+/** A refused owner action, with the engine's original reason and words. */
+export class AskOwnerActionError extends Error {
+  override readonly name = 'AskOwnerActionError';
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 /** An answer's own id: each answer is applied once, by this id (§7.4 rule 4). */
 export type AnswerId = Brand<string, 'AnswerId'>;
@@ -234,6 +265,10 @@ export interface AsksApi {
   close(ask: AskRef, reason: CloseReason): Promise<void>;
   open(filter: AskFilter): Promise<readonly AskSummary[]>;
   get(ask: AskRef): Promise<AskSummary | undefined>;
+  /** All boards, or one board (including an empty one); open and parked items are complete. */
+  snapshots(filter?: { readonly ferret?: string }): Promise<readonly AgendaSnapshot[]>;
+  /** Apply a machine-board owner verb with the owner as actor. Ferret-board answers still use Asks' own route. */
+  ownerAction(action: AskOwnerAction): Promise<AgendaSnapshot>;
 }
 
 export const AsksPort = definePort<AsksApi>('asks');
