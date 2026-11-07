@@ -1,11 +1,9 @@
 /**
- * The status ports for a build whose daemon half cannot open a harness's sign-in files.
+ * The fail-closed status ports while the kernel cannot bind Logins' owned credentials root.
  *
- * `credentials/<login>/` is declared `opaque` state (§9.2): Ferretry links and points at a harness's own files and never
- * opens one. Today's status read parsed those files (shape, expiry, account) and made the free provider read with the
- * token inside; neither is available to a plugin, so every port here answers "not readable" and nothing is invented:
- * a status is never "ready" because nothing contradicted it. This is a declared GAP, closed when the kernel offers a
- * store reader or the harness plugins report their own sign-in state (see the port report).
+ * The approved metadata readers live in adapters/credentials/owned-store.ts and accept only that internal root.
+ * Until the root contract is available, default composition grants no access and uses these ports. Host-home reads
+ * remain unavailable. Nothing here invents a status: an unread store is never "ready" because nothing contradicted it.
  */
 import { UNREADABLE_CREDENTIAL_FACTS, type CredentialStatusPorts } from './credential-status.ts';
 import { InMemoryCredentialStatusStore } from './credential-status.ts';

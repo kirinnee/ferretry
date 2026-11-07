@@ -1,5 +1,6 @@
 /**
- * The Appendix D secrets rows Logins co-owns (S167, S175–S178). Each is an integration fixture across Logins and the Vault:
+ * Provider assertions for the Appendix D secrets rows Logins co-owns (S167, S175–S178). Worker guarantees S176/S177
+ * remain skipped until the Usage/Logins worker boundary exists. The executable assertions use Logins and the Vault:
  * the Vault is the scripted holder and the kernel's `restrictFetch` is the real permission check, so what is proved
  * here is that nothing in Logins can put a value in a result, or a token anywhere but its provider.
  */
@@ -126,8 +127,8 @@ describe('S175 a sign-in is read, never copied: the token is sent as one header 
   });
 });
 
-describe('S176 only facts cross back; a failed read is answered with a fixed word, never the caught error', () => {
-  test('S176 a transport failure that quotes the token comes back without it', async () => {
+describe('a failed in-process read is answered with a fixed word, never the caught error', () => {
+  test('a transport failure that quotes the token comes back without it (additional S176 assertion)', async () => {
     const failing: FetchPort = {
       request: async () => {
         throw new Error(`socket closed while sending Bearer ${TOKEN}`);
@@ -142,8 +143,8 @@ describe('S176 only facts cross back; a failed read is answered with a fixed wor
   });
 });
 
-describe('S177 the usage read holds no vault, no store and no redactor', () => {
-  test('S177 no daemon source of Logins imports the Vault’s implementation, only its contract', () => {
+describe('the Logins source imports only the Vault contract', () => {
+  test('no daemon source of Logins imports the Vault’s implementation, only its contract (additional S177 assertion)', () => {
     const offenders: string[] = [];
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir)) {
@@ -163,6 +164,11 @@ describe('S177 the usage read holds no vault, no store and no redactor', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+// Usage is still a skeleton and Logins has no worker protocol or entrypoint. These rows are not proved by the
+// in-process failure assertion or source scan above. Replace these skips at the actual worker boundary when ported.
+test.skip('S176 worker protocol type has no token field — worker boundary unported', () => {});
+test.skip('S177 actual worker bundle excludes Vault, store and redactor — worker boundary unported', () => {});
 
 describe('S178 the token goes only to its provider; any other origin is refused', () => {
   test('S178 the manifest’s network list admits the provider and refuses an origin it does not name', async () => {

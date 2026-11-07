@@ -15,6 +15,10 @@ import { AuthorizedProviderProbe, BoundedTransport } from './adapters/provider-p
 import { deliverCodexCallback } from './adapters/harness-login/callback-delivery.ts';
 import { harnessLoginTimer, spawnHarnessLoginChild } from './adapters/harness-login/login-child.ts';
 import { systemPortHolders } from './adapters/harness-login/port-holders.ts';
+import { OwnedLoginStore, type OwnedLoginRoot } from './adapters/credentials/owned-store.ts';
+import { AnthropicUsageProbe, quotaFetch } from './adapters/credentials/anthropic-usage-probe.ts';
+import { CodexUsageProbe } from './adapters/credentials/codex-usage-probe.ts';
+import { codexTokenRefresh } from './adapters/credentials/token-refresh.ts';
 import { parseModelCatalog } from './lib/catalog/catalog.ts';
 import { suggestedOllamaModel } from './lib/local-models/ollama.ts';
 import { LocalModelsService } from './lib/local-models/service.ts';
@@ -44,178 +48,198 @@ import type { HarnessKind } from './lib/shared/harness.ts';
 /** A harness's wrapper is a program the manifest declared in `permissions.spawn`; the kernel resolves the name. */
 const PROGRAMS: Readonly<Record<HarnessKind, string>> = { claude: 'claude', codex: 'codex' };
 
-export default implementDaemon(manifest, {
-  build({ needs, kernel }) {
-    const { clock, config, events, jobs, lifecycle, log, state } = kernel;
-    const files = () => loginFiles(config);
+/** Composition seam pending the kernel's approved internal credentials root; it grants no host-home access. */
+export function buildLoginsDaemon(ownedRoot?: OwnedLoginRoot) {
+  return implementDaemon(manifest, {
+    build({ needs, kernel }) {
+      const { clock, config, events, jobs, lifecycle, log, state } = kernel;
+      const files = () => loginFiles(config);
 
-    // ── presets and model catalogs: data, with this machine's own files over the built-ins ──────────────────────
-    const machinePresets = async (): Promise<Readonly<Record<string, ProviderPreset>>> =>
-      Object.fromEntries(
-        [...endpointFiles(config).entries()].map(([id, file]) => [
-          id,
-          presetFromFile(id, file as ProviderPresetFile, 'file'),
-        ]),
+      // ── presets and model catalogs: data, with this machine's own files over the built-ins ──────────────────────
+      const machinePresets = async (): Promise<Readonly<Record<string, ProviderPreset>>> =>
+        Object.fromEntries(
+          [...endpointFiles(config).entries()].map(([id, file]) => [
+            id,
+            presetFromFile(id, file as ProviderPresetFile, 'file'),
+          ]),
+        );
+      const presetService: ProviderPresetService = new ProviderPresetService(
+        { presets: machinePresets },
+        undefined,
+        () => catalogs.catalogs(),
       );
-    const presetService: ProviderPresetService = new ProviderPresetService({ presets: machinePresets }, undefined, () =>
-      catalogs.catalogs(),
-    );
-    const catalogs: ModelCatalogService = new ModelCatalogService({
-      files: async () => {
-        const out: Record<string, import('./lib/catalog/schema.ts').ModelCatalog> = {};
-        for (const [id, file] of modelFiles(config)) {
-          const parsed = parseModelCatalog(id, file, 'file');
-          if (parsed.ok) out[id] = parsed.value;
-        }
-        return out;
-      },
-      published: async () => {
-        published.refreshIfDue();
-        return await published.catalogs();
-      },
-      presets: () => presetService.presets(),
-      ollama: () => localModels.snapshot(),
-    });
-
-    const origin = HOSTED_APP_ORIGIN;
-    const published = new PublishedModelCatalogService({
-      fetch: new HostedModelCatalog(origin, kernel.fetch, clock),
-      cache: new StateModelCatalogCache(state),
-      publicKeyPem: HOSTED_APP_RELEASE_KEY,
-      nowMs: () => clock.nowMs(),
-      onUpdated: async () => {
-        events.publish(ModelsChanged, {});
-      },
-    });
-
-    // ── providers: every authorized read goes through the Vault, which holds the key and never returns it ───────
-    const probe = new AuthorizedProviderProbe(needs.vault, new BoundedTransport(kernel.fetch, clock));
-    const localModels = new LocalModelsService({
-      probe,
-      address: undefined,
-      enabled: true,
-      suggested: async () => suggestedOllamaModel(await catalogs.catalogs()),
-      now: () => clock.now(),
-      onChanged: async () => {
-        events.publish(ModelsChanged, {});
-      },
-    });
-    const providerProbe = new ProviderProbeService({
-      probe,
-      clock: { monotonicMs: () => clock.nowMs(), now: () => clock.now() },
-    });
-
-    // ── logins ──────────────────────────────────────────────────────────────────────────────────────────────────────
-    const catalog = new FleetCredentialCatalog({
-      logins: files,
-      paths: undefined,
-      inspect: async () => UNOPENABLE_INSPECTION,
-      ensureDirectory: async () => undefined,
-    });
-    const status = new CredentialStatusService(unreadableStatusPorts(() => clock.nowMs(), 60_000));
-    const credentials = new FleetCredentialsService({
-      catalog,
-      status,
-      email: async () => undefined,
-      machineName: () => 'this machine',
-      locate: harness => PROGRAMS[harness],
-      run: async spec => {
-        const [program, ...args] = spec.command as [string, ...string[]];
-        const env: Record<string, string> = {};
-        for (const [name, value] of Object.entries(spec.environment)) if (value !== undefined) env[name] = value;
-        return (await kernel.spawn.run(program, args, { env })).exitCode ?? 1;
-      },
-      baseEnvironment: () => sanitizeHarnessEnv({}),
-      environment: {
-        catalog: () => presetService.catalog(),
+      const catalogs: ModelCatalogService = new ModelCatalogService({
+        files: async () => {
+          const out: Record<string, import('./lib/catalog/schema.ts').ModelCatalog> = {};
+          for (const [id, file] of modelFiles(config)) {
+            const parsed = parseModelCatalog(id, file, 'file');
+            if (parsed.ok) out[id] = parsed.value;
+          }
+          return out;
+        },
+        published: async () => {
+          published.refreshIfDue();
+          return await published.catalogs();
+        },
         presets: () => presetService.presets(),
-        secretNames: async () => new Set((await needs.vault.names()).map(summary => String(summary.name))),
-        test: (subject, consent) => providerProbe.test(subject, consent),
-      },
-      listCache: { now: () => clock.nowMs(), freshMs: CREDENTIAL_LIST_FRESH_MS },
-    });
+        ollama: () => localModels.snapshot(),
+      });
 
-    const harnessLogin = new HarnessLoginService({
-      credentialTargets: { target: async id => catalog.signInTarget(await catalog.entry(id)) },
-      locate: harness => PROGRAMS[harness],
-      clock: { now: () => clock.nowMs() },
-      mintId: () => String(kernel.ids.mint('signin')),
-      spawn: spawnHarnessLoginChild(kernel.spawn),
-      deliverCallback: deliverCodexCallback(kernel.fetch, clock),
-      environment: sanitizeHarnessEnv({}),
-      timer: harnessLoginTimer(clock),
-      sharedHost: async () => false,
-      portHolders: systemPortHolders(kernel.spawn, clock),
-      clientName: 'ferretry',
-      onSignedIn: loginId => {
-        events.publish(LoginSignedIn, { loginId: loginId as LoginId });
-        events.publish(LoginChanged, { loginId: loginId as LoginId, change: 'status' });
-      },
-    });
-    lifecycle.onStop(async () => {
-      await harnessLogin.shutdown();
-    });
+      const origin = HOSTED_APP_ORIGIN;
+      const published = new PublishedModelCatalogService({
+        fetch: new HostedModelCatalog(origin, kernel.fetch, clock),
+        cache: new StateModelCatalogCache(state),
+        publicKeyPem: HOSTED_APP_RELEASE_KEY,
+        nowMs: () => clock.nowMs(),
+        onUpdated: async () => {
+          events.publish(ModelsChanged, {});
+        },
+      });
 
-    // The models are read once after start (never on a timer): a published catalog and the local server.
-    jobs.add({
-      id: 'logins.models-refresh',
-      schedule: { onceAfterStart: true, delay: milliseconds(1_000) },
-      run: async () => {
-        await published.refresh(false).catch(error => {
-          log.warn('the published model catalog could not be checked', {
-            reason: error instanceof Error ? error.message : 'unknown',
-          });
+      // ── providers: every authorized read goes through the Vault, which holds the key and never returns it ───────
+      const probe = new AuthorizedProviderProbe(needs.vault, new BoundedTransport(kernel.fetch, clock));
+      const localModels = new LocalModelsService({
+        probe,
+        address: undefined,
+        enabled: true,
+        suggested: async () => suggestedOllamaModel(await catalogs.catalogs()),
+        now: () => clock.now(),
+        onChanged: async () => {
+          events.publish(ModelsChanged, {});
+        },
+      });
+      const providerProbe = new ProviderProbeService({
+        probe,
+        clock: { monotonicMs: () => clock.nowMs(), now: () => clock.now() },
+      });
+
+      // ── logins ──────────────────────────────────────────────────────────────────────────────────────────────────────
+      const store = ownedRoot === undefined ? undefined : new OwnedLoginStore(ownedRoot, () => clock.nowMs());
+      const catalog =
+        store?.catalog(files) ??
+        new FleetCredentialCatalog({
+          logins: files,
+          paths: undefined,
+          inspect: async () => UNOPENABLE_INSPECTION,
+          ensureDirectory: async () => undefined,
         });
-        await localModels.refresh();
-      },
-    });
+      const fetch = quotaFetch(kernel.fetch, clock);
+      const status = new CredentialStatusService(
+        store?.statusPorts({
+          anthropic: new AnthropicUsageProbe({ fetch }),
+          codex: new CodexUsageProbe({ fetch, now: () => clock.nowMs() }),
+          refresh: codexTokenRefresh(kernel.spawn, clock),
+          usageIntervalMs: 60_000,
+        }) ?? unreadableStatusPorts(() => clock.nowMs(), 60_000),
+      );
+      const credentials = new FleetCredentialsService({
+        catalog,
+        status,
+        email: async source => await store?.email(source),
+        machineName: () => 'this machine',
+        locate: harness => PROGRAMS[harness],
+        run: async spec => {
+          const [program, ...args] = spec.command as [string, ...string[]];
+          const env: Record<string, string> = {};
+          for (const [name, value] of Object.entries(spec.environment)) if (value !== undefined) env[name] = value;
+          return (await kernel.spawn.run(program, args, { env })).exitCode ?? 1;
+        },
+        baseEnvironment: () => sanitizeHarnessEnv({}),
+        environment: {
+          catalog: () => presetService.catalog(),
+          presets: () => presetService.presets(),
+          secretNames: async () => new Set((await needs.vault.names()).map(summary => String(summary.name))),
+          test: (subject, consent) => providerProbe.test(subject, consent),
+        },
+        listCache: { now: () => clock.nowMs(), freshMs: CREDENTIAL_LIST_FRESH_MS },
+      });
 
-    const publishedState = (held: Awaited<ReturnType<typeof published.status>>): PublishedCatalogState => ({
-      origin,
-      enabled: published.enabled,
-      ...(held.version === undefined ? {} : { version: held.version }),
-      ...(held.fetchedAt === undefined ? {} : { fetchedAt: held.fetchedAt as Instant }),
-      ...(held.checkedAt === undefined ? {} : { checkedAt: held.checkedAt as Instant }),
-      ...(held.last === undefined ? {} : { last: held.last }),
-    });
-    const modelsView = async () =>
-      modelCatalogsView(await catalogs.catalogs(), publishedState(await published.status()));
+      const harnessLogin = new HarnessLoginService({
+        credentialTargets: { target: async id => catalog.signInTarget(await catalog.entry(id)) },
+        locate: harness => PROGRAMS[harness],
+        clock: { now: () => clock.nowMs() },
+        mintId: () => String(kernel.ids.mint('signin')),
+        spawn: spawnHarnessLoginChild(kernel.spawn),
+        deliverCallback: deliverCodexCallback(kernel.fetch, clock),
+        environment: sanitizeHarnessEnv({}),
+        timer: harnessLoginTimer(clock),
+        // ConfigPort exposes only this plugin's files, not machine.browserPorts. Unknown means shared:
+        // refuse the automatic localhost fallback until a person explicitly chooses the link.
+        sharedHost: async () => true,
+        portHolders: systemPortHolders(kernel.spawn, clock),
+        clientName: 'ferretry',
+        onSignedIn: loginId => {
+          events.publish(LoginSignedIn, { loginId: loginId as LoginId });
+          events.publish(LoginChanged, { loginId: loginId as LoginId, change: 'status' });
+        },
+      });
+      lifecycle.onStop(async () => {
+        await harnessLogin.shutdown();
+      });
 
-    const api: LoginsApi = {
-      list: () => credentials.list(),
-      get: async id => (await credentials.list()).logins.find(login => login.id === id),
-      quota: async id => (await credentials.list()).logins.find(login => login.id === id)?.usage,
-      presets: () => credentials.presets(),
-      models: modelsView,
-    };
+      // The models are read once after start (never on a timer): a published catalog and the local server.
+      jobs.add({
+        id: 'logins.models-refresh',
+        schedule: { onceAfterStart: true, delay: milliseconds(1_000) },
+        run: async () => {
+          await published.refresh(false).catch(error => {
+            log.warn('the published model catalog could not be checked', {
+              reason: error instanceof Error ? error.message : 'unknown',
+            });
+          });
+          await localModels.refresh();
+        },
+      });
 
-    const kinds = loginKinds({
-      clock,
-      files,
-      view: id => api.get(id as LoginId),
-      check: id => credentials.check(id, undefined),
-      startSignIn: id => harnessLogin.start({ loginId: id as LoginId }, undefined),
-      signInStatus: flowId => harnessLogin.status(flowId),
-    });
+      const publishedState = (held: Awaited<ReturnType<typeof published.status>>): PublishedCatalogState => ({
+        origin,
+        enabled: published.enabled,
+        ...(held.version === undefined ? {} : { version: held.version }),
+        ...(held.fetchedAt === undefined ? {} : { fetchedAt: held.fetchedAt as Instant }),
+        ...(held.checkedAt === undefined ? {} : { checkedAt: held.checkedAt as Instant }),
+        ...(held.last === undefined ? {} : { last: held.last }),
+      });
+      const modelsView = async () =>
+        modelCatalogsView(await catalogs.catalogs(), publishedState(await published.status()));
 
-    return {
-      routes: {
-        ...signInRoutes(harnessLogin),
-        ...loginRoutes(credentials),
-        ...modelRoutes({
-          view: modelsView,
-          refresh: () => published.refresh(true),
-          refreshLocal: () => localModels.refresh(),
-        }),
-      },
-      provides: { logins: api },
-      hooks: {
-        'logins:anthropic': kinds.anthropic,
-        'logins:openai': kinds.openai,
-        'logins:api-key': kinds['api-key'],
-        'logins:proxy': kinds.proxy,
-        'logins:endpoint': kinds.endpoint,
-      },
-    };
-  },
-});
+      const api: LoginsApi = {
+        list: () => credentials.list(),
+        get: async id => (await credentials.list()).logins.find(login => login.id === id),
+        quota: async id => (await credentials.list()).logins.find(login => login.id === id)?.usage,
+        presets: () => credentials.presets(),
+        models: modelsView,
+      };
+
+      const kinds = loginKinds({
+        clock,
+        files,
+        view: id => api.get(id as LoginId),
+        check: id => credentials.check(id, undefined),
+        startSignIn: id => harnessLogin.start({ loginId: id as LoginId }, undefined),
+        signInStatus: flowId => harnessLogin.status(flowId),
+      });
+
+      return {
+        routes: {
+          ...signInRoutes(harnessLogin),
+          ...loginRoutes(credentials),
+          ...modelRoutes({
+            view: modelsView,
+            refresh: () => published.refresh(true),
+            refreshLocal: () => localModels.refresh(),
+          }),
+        },
+        provides: { logins: api },
+        hooks: {
+          'logins:anthropic': kinds.anthropic,
+          'logins:openai': kinds.openai,
+          'logins:api-key': kinds['api-key'],
+          'logins:proxy': kinds.proxy,
+          'logins:endpoint': kinds.endpoint,
+        },
+      };
+    },
+  });
+}
+
+export default buildLoginsDaemon();

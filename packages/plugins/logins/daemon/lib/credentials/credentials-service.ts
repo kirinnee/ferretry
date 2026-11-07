@@ -135,6 +135,8 @@ export interface FleetCredentialCatalogDeps {
    * keeps its sign-in in a store then reads as unreachable, with the sentence that says so.
    */
   readonly paths: CredentialStorePaths | undefined;
+  /** An owned-root adapter may resolve stores without granting any host-home access. */
+  resolveStore?(id: string, credential: Credential): CredentialStoreResolution;
   /**
    * One store read with its trail — the verdict and every place looked in, never material — so a sign-in
    * that found no usable login can say where it looked and what was there.
@@ -204,13 +206,14 @@ export class FleetCredentialCatalog {
           id,
           credential,
           resolution:
-            this.deps.paths === undefined && credential.store !== 'environment'
+            this.deps.resolveStore?.(id, credential) ??
+            (this.deps.paths === undefined && credential.store !== 'environment'
               ? ({
                   harness: credential.harness,
                   store: credential.store,
                   unavailable: NO_STORE_PATHS,
                 } satisfies UnavailableStoreResolution)
-              : resolveCredentialStore(id, credential, this.deps.paths as CredentialStorePaths),
+              : resolveCredentialStore(id, credential, this.deps.paths as CredentialStorePaths)),
           usedBy: [...(this.deps.usedBy?.(id) ?? [])].sort(),
         };
       });
