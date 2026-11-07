@@ -98,6 +98,8 @@ export type ConfigEdit = string | { readonly patch: Readonly<Record<string, unkn
 export interface ConfigWriteOptions {
   /** Whether the caller may put a loosening into effect in this same act (Gate proved it). Default: no. */
   readonly confirmedLoosening?: boolean;
+  /** Asked only when the edit loosens and `confirmedLoosening` is not set: Gate's judge for a plugin's own write. */
+  readonly judge?: (sentences: readonly string[], removal: boolean) => boolean;
   /** The etag the editor read; a file that moved since is refused `conflict`. */
   readonly ifMatch?: string;
 }
@@ -146,6 +148,16 @@ export interface ConfigFilesOptions {
   readonly binary: string;
   /** The kernel's state port, which must declare {@link acceptedConfigFile}; absent, one is made over `fs`. */
   readonly state?: StatePort;
+  /**
+   * Gate's judge of a plugin's OWN loosening write (`Admission.judgeConfigWrite`, read live, with the call's actor):
+   * true puts it into effect. Absent or throwing: held for the owner.
+   */
+  readonly judge?: (input: {
+    readonly plugin: string;
+    readonly path: string;
+    readonly removal: boolean;
+    readonly sentences: readonly string[];
+  }) => boolean;
 }
 
 export interface ConfigFiles {
@@ -508,14 +520,19 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         const slot = slotFor(declaration, name);
         return statusOf(slot === undefined ? undefined : settled.get(slot.path)?.evaluated);
       },
-      // A plugin's own write takes Gate's path with no confirmation: a loosening is held for the owner.
-      write: async (def, edit, writeOptions = {}): Promise<ConfigWriteOutcome> =>
+      // A plugin's own write takes the one writer; a loosening goes into effect only on Gate's judge, else it is held.
+      write: async (def, name, edit, writeOptions = {}): Promise<ConfigWriteOutcome> =>
         writeOutcome(
-          await write(pluginId, def as ConfigDef, writeOptions.name, edit, {
-            confirmedLoosening: false,
+          await write(pluginId, def as ConfigDef, name, edit, {
+            judge: ownJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
             ...(writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch }),
           }),
         ),
+      remove: async (def, name, writeOptions = {}): Promise<ConfigWriteOutcome> =>
+        await removeOutcome(pluginId, def as ConfigDef, name, {
+          judge: ownJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
+          ...(writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch }),
+        }),
     };
   };
 
@@ -560,6 +577,20 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     return editConfigText(existing, target, current, schemaModeline(def, slot.path));
   };
 
+  const askJudge = (writeOptions: ConfigWriteOptions, sentences: readonly string[], removal: boolean): boolean => {
+    try {
+      return writeOptions.judge?.(sentences, removal) === true;
+    } catch {
+      return false;
+    }
+  };
+
+  /** A plugin's own write: Gate's judge, never a confirmation of its own. */
+  const ownJudge =
+    (plugin: string, path: () => string) =>
+    (sentences: readonly string[], removal: boolean): boolean =>
+      options.judge?.({ plugin, path: path(), removal, sentences }) === true;
+
   const write = async (
     plugin: string,
     def: ConfigDef,
@@ -597,13 +628,15 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       const before = settled.get(slot.path)?.evaluated.value;
       const loosens =
         etag === settled.get(slot.path)?.evaluated.inEffect?.etag ? [] : def.loosens(before, checked.value);
-      if (loosens.length === 0 || writeOptions.confirmedLoosening === true) acknowledge(slot.path, text);
+      const confirmed =
+        writeOptions.confirmedLoosening === true || (loosens.length > 0 && askJudge(writeOptions, loosens, false));
+      if (loosens.length === 0 || confirmed) acknowledge(slot.path, text);
       await fs.writeAtomic(absolute, text, PRIVATE_FILE_MODE);
       await load();
       const held = settled.get(slot.path)?.evaluated.held;
       return held !== undefined && held.etag === etag
         ? { kind: 'held', etag, id: idOf(slot.path, etag), sentences: held.sentences }
-        : { kind: 'applied', etag, text, loosened: writeOptions.confirmedLoosening === true ? loosens : [] };
+        : { kind: 'applied', etag, text, loosened: confirmed ? loosens : [] };
     });
   };
 
@@ -625,15 +658,40 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         current?.evaluated.inEffect === undefined || defaults === undefined
           ? []
           : def.loosens(current.evaluated.value, defaults);
-      if (sentences.length === 0 || writeOptions.confirmedLoosening === true)
-        acknowledgedRemovals.set(slot.path, options.clock.nowMs());
+      const confirmed =
+        writeOptions.confirmedLoosening === true || (sentences.length > 0 && askJudge(writeOptions, sentences, true));
+      if (sentences.length === 0 || confirmed) acknowledgedRemovals.set(slot.path, options.clock.nowMs());
       await fs.remove(`${root}/${slot.path}`);
       await load();
       const held = settled.get(slot.path)?.evaluated.held;
       return held !== undefined && held.etag === ABSENT_CONFIG_ETAG
         ? { kind: 'held', id: idOf(slot.path, held.etag), sentences: held.sentences }
-        : { kind: 'applied', loosened: writeOptions.confirmedLoosening === true ? sentences : [] };
+        : { kind: 'applied', loosened: confirmed ? sentences : [] };
     });
+  };
+
+  /** The file a def and name write, relative to `config/` (the def's own path when the name does not fit). */
+  const pathOf = (plugin: string, def: ConfigDef, name: string | undefined): string => {
+    const declaration = declared(plugin, def);
+    const slot = declaration === undefined ? undefined : slotFor(declaration, name);
+    return slot?.path ?? claimOf(def);
+  };
+
+  const removeOutcome = async (
+    plugin: string,
+    def: ConfigDef,
+    name: string | undefined,
+    writeOptions: ConfigWriteOptions,
+  ): Promise<ConfigWriteOutcome> => {
+    if (writeOptions.ifMatch !== undefined) {
+      const view = await read(plugin, def, name);
+      if (view !== undefined && view.etag !== writeOptions.ifMatch) return { kind: 'conflict' };
+    }
+    const removed = await remove(plugin, def, name, writeOptions);
+    if (removed.kind === 'applied') return { kind: 'written', etag: ABSENT_CONFIG_ETAG, loosened: removed.loosened };
+    if (removed.kind === 'held')
+      return { kind: 'held', etag: ABSENT_CONFIG_ETAG, id: removed.id, sentences: removed.sentences };
+    return { kind: 'refused', reason: removed.reason, issues: [] };
   };
 
   const confirm = async (id: string): Promise<boolean> =>
@@ -761,18 +819,8 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       },
       write: async (target, edit, writeOptions = {}) =>
         writeOutcome(await write(target.plugin, target.def as ConfigDef, target.name, edit, writeOptions)),
-      remove: async (target, writeOptions = {}) => {
-        if (writeOptions.ifMatch !== undefined) {
-          const view = await read(target.plugin, target.def as ConfigDef, target.name);
-          if (view !== undefined && view.etag !== writeOptions.ifMatch) return { kind: 'conflict' };
-        }
-        const removed = await remove(target.plugin, target.def as ConfigDef, target.name, writeOptions);
-        if (removed.kind === 'applied')
-          return { kind: 'written', etag: ABSENT_CONFIG_ETAG, loosened: removed.loosened };
-        if (removed.kind === 'held')
-          return { kind: 'held', etag: ABSENT_CONFIG_ETAG, id: removed.id, sentences: removed.sentences };
-        return { kind: 'refused', reason: removed.reason, issues: [] };
-      },
+      remove: async (target, writeOptions = {}) =>
+        await removeOutcome(target.plugin, target.def as ConfigDef, target.name, writeOptions),
       held: () => heldOf(settled),
       confirm,
       discard,

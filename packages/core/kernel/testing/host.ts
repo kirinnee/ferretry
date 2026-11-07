@@ -390,6 +390,16 @@ async function start(world: World): Promise<TestHost> {
     };
   };
 
+  const judged = (plugin: string, path: string, removal: boolean, sentences: readonly string[]): boolean => {
+    try {
+      return (
+        admission.judgeConfigWrite?.({ plugin, path, removal, sentences, actor: actorScope.getStore() ?? 'ferret' }) ===
+        'apply'
+      );
+    } catch {
+      return false;
+    }
+  };
   const configPort = (manifest: Manifest): ConfigPort => {
     const declared = manifest.data?.config ?? [];
     const keyOf = (def: ConfigFileDef<any> | ConfigCollectionDef<any>): string =>
@@ -434,11 +444,11 @@ async function start(world: World): Promise<TestHost> {
           ? { state: 'valid', inEffect: true, sentences: [] }
           : { state: 'invalid', inEffect: false, sentences: parsed.error.issues.map(issue => issue.message) };
       },
-      // The real writer's outcomes over the in-memory values: own defs only, schema checked, a loosening held.
-      async write(def, edit, writeOptions = {}) {
+      // The real writer's outcomes over the in-memory values: own defs only, schema checked, a loosening held unless
+      // the admission in use (Gate's, when given) judges this call may apply it.
+      async write(def, name, edit, writeOptions = {}) {
         if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
         const key = keyOf(def);
-        const name = writeOptions.name;
         if (def.shape === 'collection' && (name === undefined || !def.name.test(name)))
           return { kind: 'refused', reason: 'bad_name', issues: [] };
         const all = world.config.get(key) as Record<string, unknown> | undefined;
@@ -467,10 +477,35 @@ async function start(world: World): Promise<TestHost> {
           return { kind: 'conflict' };
         const prior = before === undefined ? undefined : def.schema.safeParse(before);
         const sentences = def.loosens(prior?.success === true ? prior.data : undefined, checked.data);
-        if (sentences.length > 0) return { kind: 'held', etag, id: `${key}@held`, sentences };
+        const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
+        if (sentences.length > 0 && !judged(manifest.id, path, false, sentences))
+          return { kind: 'held', etag, id: `${path}@held`, sentences };
         world.config.set(key, def.shape === 'file' ? next : { ...(all ?? {}), [name as string]: next });
         for (const listener of configListeners.get(key) ?? []) listener();
-        return { kind: 'written', etag, loosened: [] };
+        return { kind: 'written', etag, loosened: sentences };
+      },
+      async remove(def, name, writeOptions = {}) {
+        if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
+        const key = keyOf(def);
+        if (def.shape === 'collection' && (name === undefined || !def.name.test(name)))
+          return { kind: 'refused', reason: 'bad_name', issues: [] };
+        const all = world.config.get(key) as Record<string, unknown> | undefined;
+        const before = def.shape === 'file' ? all : all?.[name as string];
+        if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null))
+          return { kind: 'conflict' };
+        const prior = before === undefined ? undefined : def.schema.safeParse(before);
+        const defaults = def.schema.safeParse({});
+        const sentences = prior?.success === true && defaults.success ? def.loosens(prior.data, defaults.data) : [];
+        const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
+        if (sentences.length > 0 && !judged(manifest.id, path, true, sentences))
+          return { kind: 'held', etag: 'absent', id: `${path}@held`, sentences };
+        if (def.shape === 'file') world.config.delete(key);
+        else if (all !== undefined) {
+          const { [name as string]: _gone, ...rest } = all;
+          world.config.set(key, rest);
+        }
+        for (const listener of configListeners.get(key) ?? []) listener();
+        return { kind: 'written', etag: 'absent', loosened: sentences };
       },
     };
   };
