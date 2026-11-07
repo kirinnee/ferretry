@@ -140,3 +140,59 @@ test('R-0332 a harness throwing after runner.start cleans up the created process
   expect(f.tokens.holds(f.id)).toBe(false);
   expect(f.registry.get(f.id)?.state).toBe('stopped');
 });
+
+test('R-0363 owner cutoff survives reload and an unconfirmed port resume cannot restore it', async () => {
+  const f = fixture();
+  await f.service.resume(f.id);
+  await f.service.revokeToken(f.id);
+  await f.service.stop(f.id, 'now');
+  const tokens = new FerretTokenDirectory(f.tokens.snapshot());
+  const service = new FerretsService(f.registry, tokens, f.ports);
+  const answer = await service.resume(f.id);
+  expect(answer.ok).toBe(false);
+  expect(tokens.isCutOff(f.id)).toBe(true);
+  expect(tokens.holds(f.id)).toBe(false);
+  expect(f.runner.starts).toBe(1);
+});
+
+test('R-0363 confirmed restoration is checked before rotation and failed restores re-mark cutoff', async () => {
+  const f = fixture();
+  await f.service.resume(f.id);
+  await f.service.revokeToken(f.id);
+  await f.service.stop(f.id, 'now');
+  let confirmed = 0;
+  f.ports.decide = async () => ({ allow: false, reason: 'admission refused' });
+  const refused = await f.service.resume(f.id, undefined, () => {
+    confirmed++;
+  });
+  expect(refused.ok).toBe(false);
+  expect(confirmed).toBe(1);
+  expect(f.tokens.isCutOff(f.id)).toBe(true);
+  f.ports.decide = async () => ({ allow: true });
+  const resumed = await f.service.resume(f.id, undefined, () => {
+    expect(f.tokens.holds(f.id)).toBe(false);
+    expect(f.tokens.isCutOff(f.id)).toBe(true);
+    confirmed++;
+  });
+  expect(resumed.ok).toBe(true);
+  expect(confirmed).toBe(2);
+  expect(f.tokens.isCutOff(f.id)).toBe(false);
+  expect(f.tokens.holds(f.id)).toBe(true);
+});
+
+test('R-0363 a denied restoration or damaged credential state cannot launch or issue a token', async () => {
+  const f = fixture();
+  await f.service.resume(f.id);
+  await f.service.revokeToken(f.id);
+  await f.service.stop(f.id, 'now');
+  await expect(
+    f.service.resume(f.id, undefined, () => {
+      throw new Error('owner only');
+    }),
+  ).rejects.toThrow('owner only');
+  expect(f.tokens.isCutOff(f.id)).toBe(true);
+  f.tokens.unavailable();
+  await expect(f.service.resume(f.id, undefined, () => {})).rejects.toMatchObject({ status: 503 });
+  expect(f.tokens.holds(f.id)).toBe(false);
+  expect(f.runner.starts).toBe(1);
+});

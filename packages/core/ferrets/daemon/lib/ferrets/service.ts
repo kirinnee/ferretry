@@ -29,6 +29,7 @@ import type {
 import { HARNESS_KEYS } from '../../../contract/index.ts';
 import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
 import type { FerretDetails } from '../state.ts';
+import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import {
   type AgentControl,
   effectiveAgentControl,
@@ -97,6 +98,12 @@ export interface FerretsPorts {
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
   err({ code, reason } as StartFailure);
+
+class ResumeRefusal extends Error {
+  constructor(readonly failure: StartFailure) {
+    super(failure.reason);
+  }
+}
 
 export class FerretsService implements FerretsApi {
   /** Today's lifecycle gate: read the current record only after acquiring its key. */
@@ -238,8 +245,50 @@ export class FerretsService implements FerretsApi {
    * Revives a stopped ferret. A `message` is recorded with today's `session.resumed` event; delivering it into the
    * conversation is the Conversation's (not wired in this build).
    */
-  async resume(ferret: FerretId, message?: string): Promise<Result<FerretId, StartFailure>> {
-    return await this.serial.run(ferret, () => this.resumeHeld(ferret, message));
+  async resume(
+    ferret: FerretId,
+    message?: string,
+    confirmRestore?: () => void,
+  ): Promise<Result<FerretId, StartFailure>> {
+    return await this.serial.run(ferret, async () => {
+      await this.ports.ready?.();
+      this.requireTokens();
+      try {
+        return await resumeUnderCutOff(
+          this.tokens.isCutOff(ferret) ? 'restore' : 'proceed',
+          {
+            confirm: confirmRestore,
+            unconfirmed: () =>
+              new ResumeRefusal({
+                code: 'refused',
+                reason: 'only a confirmed owner resume may restore a cut-off ferret',
+              }),
+            restore: async () => {
+              this.tokens.restore(ferret);
+              try {
+                await this.ports.saveTokens(this.tokens.snapshot());
+              } catch (error) {
+                this.tokens.cutOff(ferret, this.ports.now());
+                await this.ports.saveTokens(this.tokens.snapshot());
+                throw error;
+              }
+            },
+            markAgain: async () => {
+              this.tokens.cutOff(ferret, this.ports.now());
+              await this.ports.saveTokens(this.tokens.snapshot());
+            },
+          },
+          async () => {
+            const result = await this.resumeHeld(ferret, message);
+            if (!result.ok) throw new ResumeRefusal(result.error);
+            return result;
+          },
+        );
+      } catch (error) {
+        if (error instanceof ResumeRefusal) return err(error.failure);
+        throw error;
+      }
+    });
   }
 
   private async resumeHeld(ferret: FerretId, message?: string): Promise<Result<FerretId, StartFailure>> {
@@ -340,9 +389,19 @@ export class FerretsService implements FerretsApi {
 
   /** Revokes a ferret's token (owner only at the route); it can no longer call the daemon until it restarts. */
   async revokeToken(ferret: FerretId): Promise<boolean> {
-    const revoked = this.tokens.revoke(ferret);
-    if (revoked) await this.ports.saveTokens(this.tokens.snapshot());
-    return revoked;
+    return await this.serial.run(ferret, async () => {
+      await this.ports.ready?.();
+      this.requireTokens();
+      const revoked = this.tokens.holds(ferret);
+      this.tokens.cutOff(ferret, this.ports.now());
+      await this.ports.saveTokens(this.tokens.snapshot());
+      return revoked;
+    });
+  }
+
+  private requireTokens(): void {
+    if (!this.tokens.isAvailable())
+      throw new ApiError(503, 'the ferret credential state cannot be read safely', 'credential_state_unavailable');
   }
 
   /** The owner's pins; a pin list that cannot be read is "nothing pinned" (the mark is a preference). */
@@ -414,6 +473,9 @@ export class FerretsService implements FerretsApi {
     conversation: string | undefined,
     runner: Runner,
   ): Promise<Result<FerretId, StartFailure>> {
+    this.requireTokens();
+    if (this.tokens.isCutOff(record.id))
+      return failed('refused', 'the owner cut off this ferret; a confirmed owner resume is required');
     const harness = this.ports.harness(record.harness);
     if (harness === undefined) return failed('harness_unavailable', `${record.harness} is off`);
     const issued = issueToken(record.id, this.ports.now());

@@ -19,6 +19,7 @@ export interface TokenEntry {
   readonly digest: string;
   readonly issuedAt: string;
   readonly revoked?: true;
+  readonly cutOff?: true;
 }
 
 export interface IssuedToken {
@@ -52,12 +53,14 @@ const sameDigest = (left: string, right: string): boolean => {
 export class FerretTokenDirectory implements FerretBearerDirectory {
   private entries: TokenEntry[] = [];
   private moved = 0;
+  private available = true;
 
   constructor(entries: readonly TokenEntry[] = []) {
     this.entries = [...entries];
   }
 
   ferretFor(digest: BearerDigest): FerretId | undefined {
+    if (!this.available) return undefined;
     let found: FerretId | undefined;
     // Every live entry is compared, so the time taken does not say which one matched.
     for (const entry of this.entries)
@@ -85,7 +88,44 @@ export class FerretTokenDirectory implements FerretBearerDirectory {
 
   /** Whether `ferret` holds a live token. */
   holds(ferret: FerretId): boolean {
-    return this.entries.some(entry => entry.ferret === ferret && entry.revoked !== true);
+    return (
+      this.available &&
+      !this.isCutOff(ferret) &&
+      this.entries.some(entry => entry.ferret === ferret && entry.revoked !== true)
+    );
+  }
+
+  /** Damaged credential state cannot prove who was cut off. No rotation or authentication is allowed. */
+  unavailable(): void {
+    this.available = false;
+    this.moved += 1;
+  }
+
+  isAvailable(): boolean {
+    return this.available;
+  }
+
+  isCutOff(ferret: FerretId): boolean {
+    return !this.available || this.entries.some(entry => entry.ferret === ferret && entry.cutOff === true);
+  }
+
+  /** The revocation and durable owner cutoff are one tokens.json write. */
+  cutOff(ferret: FerretId, at: Instant): void {
+    if (!this.entries.some(entry => entry.ferret === ferret))
+      this.entries.push({ ferret, digest: '0'.repeat(64), issuedAt: at, revoked: true, cutOff: true });
+    this.entries = this.entries.map(entry =>
+      entry.ferret === ferret ? { ...entry, revoked: true, cutOff: true } : entry,
+    );
+    this.moved += 1;
+  }
+
+  restore(ferret: FerretId): void {
+    this.entries = this.entries.map(entry => {
+      if (entry.ferret !== ferret) return entry;
+      const { cutOff: _cutOff, ...rest } = entry;
+      return rest;
+    });
+    this.moved += 1;
   }
 
   /** What `tokens.json` stores: digests and dates. */

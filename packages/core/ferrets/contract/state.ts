@@ -51,6 +51,7 @@ export const FerretTokensSchema = z.strictObject({
       digest: z.string().regex(/^[0-9a-f]{64}$/u),
       issuedAt: z.string().min(1),
       revoked: z.literal(true).optional(),
+      cutOff: z.literal(true).optional(),
     }),
   ),
 });
