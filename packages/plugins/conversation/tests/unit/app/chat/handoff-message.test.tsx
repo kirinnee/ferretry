@@ -201,7 +201,7 @@ describe('a message handed to the agent through a file', () => {
 describe('a ferret’s message handed over through a file', () => {
   /** The owner's report: Tanna's turn file, as the older daemon wrote it. */
   const TANNA_TURN = [
-    '[peer message from teammate tomi (session mveq0r0r-ddd75d7b) — not from the human lead]',
+    '[message from ferret tomi (session mveq0r0r-ddd75d7b) — not from the owner]',
     'No reply is required; tomi has carried on. Reply with `fy send tomi "…"` if useful.',
     '',
     'Hello from home-manager-fd (the user asked me to say hi).',

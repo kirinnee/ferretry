@@ -115,9 +115,7 @@ describe('which actions a message offers', () => {
   test('shows only the actions the page wired, and nothing for a bodyless message', async () => {
     expect(await actionKeys(render(<LedgerMessage record={record()} write={async () => {}} />))).toEqual(['copy']);
     expect(await actionKeys(render(<LedgerMessage onCancel={noop} record={record()} />))).toEqual(['cancel', 'copy']);
-    const bodyless = render(
-      <LedgerMessage record={record({ message: '[peer message from teammate nero]\nFYI\n\n' })} />,
-    );
+    const bodyless = render(<LedgerMessage record={record({ message: '[message from ferret nero]\nFYI\n\n' })} />);
     expect(await actionKeys(bodyless)).toEqual([]);
     expect(hasActionsButton(bodyless)).toBe(false);
   });
@@ -423,7 +421,7 @@ describe('Copy text', () => {
     const written: string[] = [];
     const row = render(
       <LedgerMessage
-        record={record({ message: '[peer message from teammate freddie]\nPARKED until 30m\n\nis CI green?' })}
+        record={record({ message: '[message from ferret freddie]\nPARKED until 30m\n\nis CI green?' })}
         write={async text => void written.push(text)}
       />,
     );

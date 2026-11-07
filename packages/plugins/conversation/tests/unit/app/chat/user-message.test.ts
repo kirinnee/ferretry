@@ -11,7 +11,7 @@ import { readUserMessage, unwrapPastedContent } from '../../../../app/chat/user-
 /** The record Aniya's transcript held, verbatim from the owner's report. */
 const OWNER_SAMPLE = [
   '<pasted_content id="1fd4">',
-  '[peer message from teammate torrey (session mvb0sw7d-27f71326) — not from the human lead]',
+  '[message from ferret torrey (session mvb0sw7d-27f71326) — not from the owner]',
   'No reply is required; torrey has carried on. Reply with `fy send torrey "…"` if useful.',
   '',
   "Hey! How's your day going?",

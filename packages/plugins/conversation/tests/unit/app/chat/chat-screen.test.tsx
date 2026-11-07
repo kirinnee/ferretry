@@ -49,9 +49,9 @@ const daemon = (log: () => string) =>
   );
 
 /** Waits on the real clock (the refresh's nudge settles on a timer) until `ready`, at most two seconds. */
-const waitFor = async (ready: () => boolean, what: string): Promise<void> => {
+const waitFor = async (ready: () => boolean, what: string, seen: () => string = () => ''): Promise<void> => {
   for (let waited = 0; !ready(); waited += 10) {
-    if (waited >= 2_000) throw new Error(`waited 2s for ${what}`);
+    if (waited >= 2_000) throw new Error(`waited 2s for ${what}; the screen said: ${seen()}`);
     await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 10)));
   }
 };
@@ -85,6 +85,7 @@ describe('the chat screen', () => {
     await waitFor(
       () => view.container.textContent?.includes('The daemon answered.') === true,
       'the transcript to draw',
+      () => view.container.textContent ?? '',
     );
 
     expect(client.callsTo(VIEW)[0]?.params).toEqual({ ferretId: 'shared' });

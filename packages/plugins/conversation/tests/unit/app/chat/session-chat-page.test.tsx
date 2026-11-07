@@ -64,14 +64,17 @@ describe('SessionChatPage', () => {
     expect(page.root.findByType(Transcript).props.daemonId).toBe('alpha');
     expect(page.root.findByType(Transcript).props.entries[0].text).toBe('The daemon answered.');
     expect(page.root.findAllByType(Composer)).toHaveLength(1);
+    // The ferret screen's own slots, and each row's (an assistant row offers its actions and what other halves add).
     expect(page.root.findAllByType(PanelSlot).map(slot => [slot.props.slot, slot.props.subject])).toEqual([
       ['ferret.toolbar', 'shared'],
+      ['conversation.row-actions', 'shared'],
+      ['conversation.row', 'shared'],
       ['ferret.side', 'shared'],
     ]);
   });
 
   test('reads a message handed over through a file from this ferret, through the half’s client', async () => {
-    const handoff = { v: 1, name: 'turn-008', message: 'look at this', attachments: [] };
+    const handoff = { name: 'turn-008', message: 'look at this', attachments: [] };
     const client = fakeClient({ [HANDOFF]: () => handoff });
     const page = draw({}, client);
     const source = page.root.findByType(HandoffSourceProvider).props.source;

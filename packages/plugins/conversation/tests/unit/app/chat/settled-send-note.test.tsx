@@ -136,7 +136,7 @@ describe('a terminal send in the transcript', () => {
     expect(expanded).toEqual([['send-1', false]]);
 
     // A teammate's cancelled message is not the reader's own bubble, and still folds and dismisses.
-    const peer = record({ message: '[peer message from teammate nero (session x)]\nFYI\n\nhello' });
+    const peer = record({ message: '[message from ferret nero (session x)]\nFYI\n\nhello' });
     await view.render(row('expanded', peer));
     await pick(view, 'dismiss');
     expect(dismissed).toEqual(['send-1']);

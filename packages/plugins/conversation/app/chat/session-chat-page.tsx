@@ -33,7 +33,7 @@ import { ChatSearch, type ChatSearchPort } from '../search/chat-search.tsx';
 import { displayCallsign } from '../transcript/callsign.ts';
 import { sessionTurn, UNREAD_PANE } from '../transcript/session-activity.ts';
 import { readHandoff } from './chat-reads.ts';
-import type { ChatWidth } from './chat-width-control.tsx';
+import type { ChatWidthPreference } from '@ferretry/app';
 import { CompactionChip } from './compaction-card.tsx';
 import { HandoffSourceProvider } from './handoff-message.tsx';
 import type { SendCancel, SendRetry, SendSubmit } from './ledger-message.tsx';
@@ -75,7 +75,7 @@ export interface SessionChatPageProps {
   /** Search within the conversation — the whole transcript — and jump to a match. Absent: no search. */
   readonly conversationSearch?: ChatSearchPort;
   /** The reader's chat measure (this device's `chat-width` setting). */
-  readonly chatWidth?: ChatWidth;
+  readonly chatWidth?: ChatWidthPreference;
   /** A phone's drawer layout: the composer is compact. */
   readonly compact?: boolean;
   readonly onRefresh?: () => void;

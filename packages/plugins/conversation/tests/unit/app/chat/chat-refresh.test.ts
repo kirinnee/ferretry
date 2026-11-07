@@ -764,7 +764,7 @@ describe('transcriptEntriesFromLog · who a user record is from', () => {
   /** Aniya's transcript as the daemon renders it: the paste block Claude wrapped the peer send in. */
   const peerLog = [
     '[10:01:02] user/message: <pasted_content id="1fd4">',
-    '    [peer message from teammate torrey (session mvb0sw7d-27f71326) — not from the human lead]',
+    '    [message from ferret torrey (session mvb0sw7d-27f71326) — not from the owner]',
     '    No reply is required; torrey has carried on. Reply with `fy send torrey "…"` if useful.',
     '    ',
     "    Hey! How's your day going?",

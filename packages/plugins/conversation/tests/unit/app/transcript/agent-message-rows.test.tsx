@@ -1,13 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import type { FerretView } from '@ferretry/core-ferrets/contract';
 import type { ReactTestRenderer } from 'react-test-renderer';
-import { ReferenceSurfaceProvider } from '@ferretry/app';
+import { ReferenceSurfaceProvider, ScreenHrefProvider } from '@ferretry/app';
+import { testHref } from '../../../support/app/client.tsx';
+import type { ReactNode } from 'react';
 import { TranscriptRow } from '../../../../app/chat/transcript-row.tsx';
 import { fleetAgentResolver } from '../../../support/app/agents.ts';
 import type { DaemonId } from '@ferretry/app';
 import { clockOfInstant } from '@ferretry/app';
 import type { TranscriptEntry } from '../../../../app/chat/transcript-entries.ts';
-import { render, run } from '@ferretry/app/testing';
+import { render as draw, run } from '@ferretry/app/testing';
+
+/** Every row here is drawn where screen addresses resolve, as the shell draws it. */
+const render = (node: ReactNode) => draw(<ScreenHrefProvider href={testHref}>{node}</ScreenHrefProvider>);
 
 const textOf = (renderer: ReactTestRenderer): string => {
   const walk = (node: unknown): string => {
@@ -68,9 +73,9 @@ describe('a message from another ferret', () => {
     expect(view.root.findByProps({ className: 'fy-peer-avatar' }).children).toEqual(['T']);
     // The sender is a real reference, through the one renderer, so it opens that ferret's session.
     const [link] = view.root.findAllByType('a');
-    expect(link?.props.href).toBe('/d/d1/session/mvb0sw7d-27f71326');
+    expect(link?.props.href).toBe('/d1/conversation/chat?ferret=mvb0sw7d-27f71326');
     run(() => link?.props.onClick({ preventDefault: () => undefined, button: 0 }));
-    expect(navigated).toEqual(['/d/d1/session/mvb0sw7d-27f71326']);
+    expect(navigated).toEqual(['/d1/conversation/chat?ferret=mvb0sw7d-27f71326']);
     expect(view.root.findAllByType('strong').map(node => node.children)).toEqual([['day']]);
     // Nothing addressed to the receiving agent reaches the reader.
     expect(text).not.toContain('fy send');
@@ -136,14 +141,14 @@ describe('a message from another ferret', () => {
     expect(chevron?.props['aria-hidden']).toBe('true');
     expect(spoken?.props.className).toBe('sr-only');
     expect(spoken?.children.join('')).toBe(' with Torrey');
-    expect(open.props.href).toBe('/d/d1/session/mvb0sw7d-27f71326');
+    expect(open.props.href).toBe('/d1/conversation/chat?ferret=mvb0sw7d-27f71326');
     let prevented = 0;
     run(() => open.props.onClick({ preventDefault: () => (prevented += 1), button: 0, metaKey: true }));
     run(() => open.props.onClick({ preventDefault: () => (prevented += 1), button: 1 }));
     expect(prevented).toBe(0);
     run(() => open.props.onClick({ preventDefault: () => (prevented += 1), button: 0 }));
     expect(prevented).toBe(1);
-    expect(navigated).toEqual(['/d/d1/session/mvb0sw7d-27f71326']);
+    expect(navigated).toEqual(['/d1/conversation/chat?ferret=mvb0sw7d-27f71326']);
   });
 
   test('proves a sender with no session id by its name, and offers nothing to click without a destination', () => {
@@ -153,7 +158,9 @@ describe('a message from another ferret', () => {
         <TranscriptRow entry={{ ...PEER, peer: unnamed }} />
       </ReferenceSurfaceProvider>,
     );
-    expect(byName.root.findByProps({ className: 'fy-peer-open' }).props.href).toBe('/d/d1/session/mvb0sw7d-27f71326');
+    expect(byName.root.findByProps({ className: 'fy-peer-open' }).props.href).toBe(
+      '/d1/conversation/chat?ferret=mvb0sw7d-27f71326',
+    );
     const { onNavigate: _nav, ...nowhere } = proved([]);
     const inert = render(
       <ReferenceSurfaceProvider surface={nowhere}>

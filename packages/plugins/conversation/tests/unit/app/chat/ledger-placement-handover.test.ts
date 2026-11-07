@@ -331,7 +331,7 @@ describe('isOwnSend', () => {
     expect(isOwnSend(send({ from: 'mv-1' }))).toBe(false);
     expect(isOwnSend(send({ fromName: 'torrey' }))).toBe(false);
     expect(isOwnSend(send({ senderKind: 'daemon' }))).toBe(false);
-    expect(isOwnSend(send({ message: '[peer message from teammate nero]\nFYI\n\nthe rail landed' }))).toBe(false);
+    expect(isOwnSend(send({ message: '[message from ferret nero]\nFYI\n\nthe rail landed' }))).toBe(false);
     expect(isOwnSend(send({ by: { kind: 'ferretry', feature: 'Instructions' } }))).toBe(false);
   });
 });

@@ -181,7 +181,7 @@ describe('placeLedgerRows', () => {
     { id: 'a', kind: 'user', text: 'continue' },
     { id: 'b', kind: 'assistant', text: 'done' },
     { id: 'c', kind: 'user', text: 'continue' },
-    { id: 'd', kind: 'user', text: '[peer message from teammate nero]\nFYI\n\nthe rail landed' },
+    { id: 'd', kind: 'user', text: '[message from ferret nero]\nFYI\n\nthe rail landed' },
   ];
   const now = Date.parse('2026-07-31T10:05:00.000Z');
 
@@ -194,7 +194,7 @@ describe('placeLedgerRows', () => {
         record({
           sendId: 'peer',
           fate: 'delivered',
-          message: '[peer message from teammate nero]\nFYI\n\nthe rail landed',
+          message: '[message from ferret nero]\nFYI\n\nthe rail landed',
         }),
         record({ sendId: 'off-page', fate: 'delivered', message: 'scrolled away' }),
       ],
@@ -268,7 +268,7 @@ describe('placeLedgerRows', () => {
 
 describe('peerFrom', () => {
   test('lifts the daemon banner off a peer message and reads whether a reply is expected', () => {
-    const parked = peerFrom('[peer message from teammate freddie (session x)]\nPARKED until 30m\n\nis CI green?');
+    const parked = peerFrom('[question from ferret freddie (session x)]\nPARKED until 30m\n\nis CI green?');
 
     expect(parked.from?.name).toBe('freddie');
     expect(parked.from?.replyExpected).toBe(true);
@@ -376,7 +376,7 @@ describe('LedgerMessage', () => {
     const row = render(
       <LedgerMessage
         record={record({
-          message: '[peer message from teammate freddie]\nPARKED until 30m\n\nis CI green?',
+          message: '[message from ferret freddie]\nPARKED until 30m\n\nis CI green?',
           fate: 'queued',
         })}
       />,
@@ -398,9 +398,7 @@ describe('LedgerMessage', () => {
   test('says a human sent it, marks a boundary row, and drops an empty prose block', () => {
     const human = render(<LedgerMessage record={record()} />);
     const boundary = render(<LedgerMessage placement="before-loaded" record={record()} />);
-    const bodyless = render(
-      <LedgerMessage record={record({ message: '[peer message from teammate nero]\nFYI\n\n' })} />,
-    );
+    const bodyless = render(<LedgerMessage record={record({ message: '[message from ferret nero]\nFYI\n\n' })} />);
 
     expect(textOf(human)).toContain('You said:');
     expect(textOf(human)).toContain('checking that it reached the agent');

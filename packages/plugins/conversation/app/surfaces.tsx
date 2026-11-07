@@ -14,10 +14,10 @@ import type {
   ScreenProps,
   SettingsProps,
 } from '@ferretry/kernel/manifest';
+import { skeletonSentence } from '@ferretry/kernel/contract';
 import type { ReactNode } from 'react';
 import { ChatScreen } from './chat/chat-screen.tsx';
 import { ConversationClientProvider } from './client.ts';
-import { ChatWidthPanel } from './chat/chat-width-panel.tsx';
 import { CompactAtPanel } from './compact-at/compact-at-panel.tsx';
 import { LinksScreen } from './links/links-screen.tsx';
 import { QuestionRenderer } from './questions/question-renderer.tsx';
@@ -25,6 +25,15 @@ import { QueuePanel } from './queue/queue-page.tsx';
 import { HypermediaPanel } from './toolbar/hypermedia-panel.tsx';
 import { ComposerAttachPanel } from './composer/composer-attach.tsx';
 import { ConversationSettings } from './composer/conversation-settings.tsx';
+
+const TITLE = 'Conversation';
+
+/** The `chat-width` panel until its porter (C2, lead ruling Q11) lands ChatWidthControl. */
+const Pending = (): ReactNode => (
+  <p className="fy-shell-line fy-shell-line--info" role="status">
+    {skeletonSentence(TITLE)}
+  </p>
+);
 
 /** A surface body inside the client context. */
 const scoped =
@@ -58,7 +67,7 @@ export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
     queue: scoped<PanelProps>(client, QueuePanel),
     'compact-at': scoped<PanelProps>(client, CompactAtPanel),
     hypermedia: scoped<PanelProps>(client, HypermediaPanel),
-    'chat-width': scoped<PanelProps>(client, ChatWidthPanel),
+    'chat-width': scoped<PanelProps>(client, Pending),
   },
   settings: { conversation: scoped<SettingsProps>(client, ConversationSettings) },
   renderers: { 'ask:question': scoped<RendererProps>(client, QuestionRenderer) },

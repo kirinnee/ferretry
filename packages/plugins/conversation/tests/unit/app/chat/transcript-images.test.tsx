@@ -61,7 +61,7 @@ const observe = (visible: boolean): void => {
   };
 };
 
-type Loader = (daemon: unknown, scope: { sessionId: string; attachmentId: string }) => Promise<Blob>;
+type Loader = (daemon: unknown, scope: { ferretId: string; attachmentId: string }) => Promise<Blob>;
 
 const inChat = (load: Loader, row: TranscriptEntry, urls = countingUrls()) => (
   <AttachmentGalleryProvider urls={urls} load={load as never}>
@@ -122,7 +122,7 @@ describe('a picture in a message', () => {
     const view = await mount(
       inChat(
         async (_daemon, scope) => {
-          asked.push(`${scope.sessionId}/${scope.attachmentId}`);
+          asked.push(`${scope.ferretId}/${scope.attachmentId}`);
           return new Blob(['x'], { type: 'image/png' });
         },
         userImages,

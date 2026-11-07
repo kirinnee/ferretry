@@ -15,7 +15,8 @@
  *     `reference.catalog`); not proved by the chat itself.
  *
  * `%terminal:` / `%browser:` keep the surface resolver with NO listing, which answers nothing either way — the one
- * honest state with no evidence. fy-render blocks draw through Conversation's own fences, and a `card` block asks this
+ * honest state with no evidence. fy-render blocks draw through Conversation's own fences — only where `ChatProse`, the one
+ * opt-in, names the capability; this surface never does, because it is spread into every Markdown in the chat — and a `card` block asks this
  * daemon's board. Every destination is in this daemon, so a reference cannot open another daemon's anything.
  */
 
@@ -33,7 +34,6 @@ export interface ChatReferenceSurfaceOptions {
 export function chatReferenceSurface(options: ChatReferenceSurfaceOptions): ReferenceSurface {
   const { daemonId, ferretId, onNavigate } = options;
   return {
-    enableFyRender: true,
     fences: fyRenderFences({ cardEmbed: { daemon: daemonId } }),
     surfaceReferenceResolver: createSurfaceReferenceResolver({ daemonId, sessionId: ferretId }, undefined, undefined),
     ...(onNavigate === undefined ? {} : { onNavigate }),

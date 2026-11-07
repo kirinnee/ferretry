@@ -16,12 +16,26 @@
  * looks the same — because a re-created frame is precisely the reset the reader sees.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import { Markdown } from '@ferretry/app';
+import { Markdown, ReferenceSurfaceProvider } from '@ferretry/app';
+import type { TranscriptEntry } from '../../../../app/chat/transcript-entries.ts';
+import { chatReferenceSurface } from '../../../../app/chat/reference-surface.ts';
+import { fyRenderFences } from '../../../../app/render/fences.tsx';
 import { transcriptEntriesFromLog } from '../../../../app/chat/chat-refresh.ts';
 import { Transcript } from '../../../../app/chat/transcript.tsx';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 const NOW = Date.UTC(2026, 9, 29, 12, 0, 0);
+
+/** Conversation's own fy-render fences, built once as a host builds them. */
+const FENCES = fyRenderFences();
+
+/** The surface a chat draws its transcript in, which is where its fy-render blocks come from. */
+const SURFACE = chatReferenceSurface({ daemonId: 'd', ferretId: 's' });
+const inChat = (entries: readonly TranscriptEntry[]) => (
+  <ReferenceSurfaceProvider surface={SURFACE}>
+    <Transcript daemonId="d" entries={entries} sessionId="s" />
+  </ReferenceSurfaceProvider>
+);
 
 /** An interactive block with state of its own: a tab strip whose choice lives inside the frame. */
 const HTML_BLOCK = [
@@ -99,12 +113,14 @@ describe('Markdown keeps what it drew across a re-render', () => {
     // Arrange — the session's reference surface is rebuilt whenever a terminal, page or task changes,
     // which hands every message new opener functions.
     const text = ['Here is the agenda:', '', ...HTML_BLOCK].join('\n');
-    const view = await mountTracked(<Markdown enableFyRender onTaskOpen={() => undefined} text={text} />);
+    const view = await mountTracked(
+      <Markdown enableFyRender fences={FENCES} onTaskOpen={() => undefined} text={text} />,
+    );
     const frame = htmlFrame(view);
 
     // Act
     for (let round = 0; round < 5; round++)
-      await view.render(<Markdown enableFyRender onTaskOpen={() => undefined} text={text} />);
+      await view.render(<Markdown enableFyRender fences={FENCES} onTaskOpen={() => undefined} text={text} />);
 
     // Assert — the same element, started once: the page inside it, and its state, were never thrown away.
     expect(htmlFrame(view)).toBe(frame);
@@ -151,12 +167,11 @@ describe('the transcript keeps a settled reply mounted as new messages arrive', 
   test('an interactive block keeps its frame through eight new messages in a sliding window', async () => {
     // Arrange
     const entriesAt = (total: number) => transcriptEntriesFromLog(window(total, 10), NOW);
-    const view = await mountTracked(<Transcript daemonId="d" entries={entriesAt(16)} sessionId="s" />);
+    const view = await mountTracked(inChat(entriesAt(16)));
     const frame = htmlFrame(view);
 
     // Act — messages land one by one; the window drops one from the top for each.
-    for (let total = 17; total <= 24; total++)
-      await view.render(<Transcript daemonId="d" entries={entriesAt(total)} sessionId="s" />);
+    for (let total = 17; total <= 24; total++) await view.render(inChat(entriesAt(total)));
 
     // Assert
     expect(htmlFrame(view)).toBe(frame);

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { FerretView } from '@ferretry/core-ferrets/contract';
-import { ReferenceSurfaceProvider } from '@ferretry/app';
+import { ReferenceSurfaceProvider, ScreenHrefProvider } from '@ferretry/app';
+import { testHref } from '../../../support/app/client.tsx';
 import { TranscriptRow } from '../../../../app/chat/transcript-row.tsx';
 import { fleetAgentResolver } from '../../../support/app/agents.ts';
 import type { DaemonId } from '@ferretry/app';
@@ -32,20 +33,24 @@ const fleet = [
 describe('a message this ferret sent', () => {
   test('is a "Sent to" card naming the proved recipient, with the message and where it got to', async () => {
     const view = await mount(
-      <ReferenceSurfaceProvider
-        surface={{
-          agentReferenceResolver: fleetAgentResolver('d1' as DaemonId, fleet),
-          onNavigate: () => undefined,
-        }}
-      >
-        <TranscriptRow entry={sentRow()} previous={{ id: 'a', kind: 'assistant', text: 'ok' }} />
-      </ReferenceSurfaceProvider>,
+      <ScreenHrefProvider href={testHref}>
+        <ReferenceSurfaceProvider
+          surface={{
+            agentReferenceResolver: fleetAgentResolver('d1' as DaemonId, fleet),
+            onNavigate: () => undefined,
+          }}
+        >
+          <TranscriptRow entry={sentRow()} previous={{ id: 'a', kind: 'assistant', text: 'ok' }} />
+        </ReferenceSurfaceProvider>
+      </ScreenHrefProvider>,
     );
     const card = must(view.container.querySelector<HTMLElement>('.fy-message-sent'), 'the card');
     expect(card.dataset['sentState']).toBe('delivered');
     expect(card.dataset['transcriptDensity']).toBe('message');
     expect(card.textContent).toContain('Sent to');
-    expect(must(card.querySelector('a'), 'the recipient link').getAttribute('href')).toBe('/d/d1/session/mvtanna-1');
+    expect(must(card.querySelector('a'), 'the recipient link').getAttribute('href')).toBe(
+      '/d1/conversation/chat?ferret=mvtanna-1',
+    );
     expect(must(card.querySelector('.fy-sent-body strong'), 'the bold word').textContent).toBe('there');
     expect(words(card.querySelector('.fy-sent-state'))).toBe('Delivered');
     // The separator leads the command, not the state: a wrap never strands it at a line's end.
