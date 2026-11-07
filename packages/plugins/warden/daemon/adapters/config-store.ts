@@ -10,6 +10,23 @@ export class WardenConfigRefused extends Error {
   }
 }
 
+/**
+ * `warden.yaml` already holds an edit waiting for the owner, so this save is refused before anything is written: the
+ * held edit stays held and the settings in effect stay as they are.
+ *
+ * DECLARED GAP: today the owner's own save is made to BOTH versions (the one in effect and the held one), so a
+ * tightening applies at once and a held edit is neither lost nor put into effect (docs/config-files.md rule 3). The
+ * kernel's ConfigPort offers no owner-acknowledged write and Gate's judgeConfigWrite is not on 5.0, so a save over a
+ * held edit would either hold the owner's tightening too or rewrite the section from the version in effect and drop
+ * the held edit without a word. Refusing is the fail-safe until both land.
+ */
+export class WardenConfigHeld extends Error {
+  constructor() {
+    super('warden.yaml has a change waiting for your approval; confirm or discard it first, then save again.');
+    this.name = 'WardenConfigHeld';
+  }
+}
+
 const SECTIONS = [
   'revive',
   'autoMove',
@@ -27,7 +44,8 @@ const SECTIONS = [
 /**
  * The settings, read from `config/warden.yaml` as the kernel has them in effect (the last good version) and written
  * through the kernel's config write port, which checks the schema, refuses a raw secret, keeps the comments and HOLDS a
- * loosening for the owner unless Gate's judge lets this call put it into effect.
+ * loosening for the owner unless Gate's judge lets this call put it into effect. A save while another edit is held is
+ * refused (`WardenConfigHeld`) and writes nothing.
  */
 export class ConfigWardenConfigStore implements WardenConfigStore {
   constructor(private readonly config: ConfigPort) {}
@@ -37,6 +55,7 @@ export class ConfigWardenConfigStore implements WardenConfigStore {
   }
 
   async write(_config: WardenConfig, patch: WardenConfigPatch): Promise<readonly string[]> {
+    if (this.config.fileState(WARDEN_CONFIG).state === 'held') throw new WardenConfigHeld();
     const file = (this.config.file(WARDEN_CONFIG) ?? {}) as WardenFile;
     const keys: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(patch)) {

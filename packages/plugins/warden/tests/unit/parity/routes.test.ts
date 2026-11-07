@@ -95,7 +95,8 @@ describe('route parity', () => {
     expect(text).toContain('enabled: false');
   });
 
-  test('R-0232 on the real kernel writer a loosening is held for the owner: not in effect, and the answer says so', async () => {
+  test('R-0232 GAP (no Gate judgeConfigWrite on 5.0, not parity) the owner switching the warden on is held: the answer shows the settings in effect and journals no change', async () => {
+    // Today the owner's own save is acknowledged and in effect at once; 5.0 holds it only because no judge exists yet.
     const real = realWardenConfig();
     await real.handEdit('enabled: false\n');
     const { host } = await wardenHost({ realConfig: real });
@@ -104,10 +105,70 @@ describe('route parity', () => {
 
     expect(response.status).toBe(200);
     expect(response.json<{ held?: string[] }>().held).toEqual(['the warden is switched on']);
+    expect(response.json<{ config: { enabled: boolean } }>().config.enabled).toBe(false);
     expect(
       (await host.request('GET', '/v1/warden/config', { as: owner() })).json<{ config: { enabled: boolean } }>(),
     ).toMatchObject({ config: { enabled: false } });
     expect(real.port.fileState(WARDEN_CONFIG)).toMatchObject({ state: 'held', inEffect: true });
+    expect(host.logs.some(entry => entry.message === 'fleet.warden_config_changed')).toBe(false);
+  });
+
+  test('R-0232 GAP an owner lowering a cap while switching the warden on is held is refused 409: the old cap stays, the held edit stays held', async () => {
+    const real = realWardenConfig();
+    await real.handEdit('enabled: false\ncaps:\n  investigationUsdPerDay: 2\n');
+    await real.handEdit('enabled: true\ncaps:\n  investigationUsdPerDay: 2\n');
+    expect(real.port.fileState(WARDEN_CONFIG)).toMatchObject({ state: 'held' });
+    const { host } = await wardenHost({ realConfig: real });
+
+    const response = await host.request('PATCH', '/v1/warden/config', {
+      body: { caps: { investigationUsdPerDay: 1 } },
+      as: owner(),
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.json<{ code: string; error: string }>()).toMatchObject({
+      code: 'config_held',
+      error: 'warden.yaml has a change waiting for your approval; confirm or discard it first, then save again.',
+    });
+    const view = (await host.request('GET', '/v1/warden/config', { as: owner() })).json<{
+      config: { enabled: boolean; caps: { investigationUsdPerDay: number } };
+    }>();
+    expect(view.config).toMatchObject({ enabled: false, caps: { investigationUsdPerDay: 2 } });
+    expect(real.port.fileState(WARDEN_CONFIG)).toMatchObject({
+      state: 'held',
+      sentences: ['the warden is switched on'],
+    });
+    expect(await real.text()).toBe('enabled: true\ncaps:\n  investigationUsdPerDay: 2\n');
+    expect(host.logs.some(entry => entry.message === 'fleet.warden_config_changed')).toBe(false);
+  });
+
+  test('R-0232 GAP an owner saving another cap while a raised jevUsdPerDay is held is refused 409, and the held edit is NOT discarded', async () => {
+    const real = realWardenConfig();
+    await real.handEdit('caps:\n  jevUsdPerDay: 0.5\n');
+    await real.handEdit('caps:\n  jevUsdPerDay: 5\n');
+    expect(real.port.fileState(WARDEN_CONFIG)).toMatchObject({ state: 'held' });
+    const { host } = await wardenHost({ realConfig: real });
+
+    const response = await host.request('PATCH', '/v1/warden/config', {
+      body: { caps: { investigationUsdPerDay: 1 } },
+      as: owner(),
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.json<{ code: string }>().code).toBe('config_held');
+    expect(await real.text()).toBe('caps:\n  jevUsdPerDay: 5\n');
+    expect(real.port.fileState(WARDEN_CONFIG)).toMatchObject({ state: 'held', inEffect: true });
+  });
+
+  test('R-0232 a ferret cannot change the warden settings: 403 and warden.yaml unchanged', async () => {
+    const real = realWardenConfig();
+    await real.handEdit('enabled: true\n');
+    const { host } = await wardenHost({ realConfig: real });
+
+    const response = await host.request('PATCH', '/v1/warden/config', { body: { enabled: false }, as: ferret('f1') });
+
+    expect(response.status).toBe(403);
+    expect(await real.text()).toBe('enabled: true\n');
   });
 
   test('R-0406 investigating a ferret nobody has is refused, and R-0407 leaving a clean one alone is refused', async () => {
