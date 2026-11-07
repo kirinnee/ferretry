@@ -147,6 +147,8 @@ export type FerretQuota = z.infer<typeof FerretQuotaSchema>;
  * without its launch-time `baseline`.
  */
 export const FerretSummarySchema = FerretRecordSchema.omit({ format: true, handle: true }).extend({
+  /** The ownership label given to start, independent of pack membership. */
+  label: z.string().min(1).optional(),
   transcript: TranscriptViewSchema.optional(),
   model: z.string().min(1).optional(),
   card: FerretCardIdSchema.optional(),

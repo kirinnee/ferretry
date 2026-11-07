@@ -5,7 +5,7 @@ export interface SessionSeed {
   readonly id: string;
   readonly name?: string;
   readonly parent?: string;
-  /** A ferret's label is its pack. */
+  /** The ownership label given to start. */
   readonly label?: string;
   readonly status?: FerretState;
 }
@@ -16,7 +16,7 @@ export function session(seed: SessionSeed): FerretSummary {
     id: ferretId(seed.id),
     name: seed.name ?? seed.id,
     ...(seed.parent === undefined ? {} : { parent: ferretId(seed.parent) }),
-    ...(seed.label === undefined ? {} : { pack: seed.label as FerretSummary['pack'] & string }),
+    ...(seed.label === undefined ? {} : { label: seed.label }),
     role: seed.parent === undefined ? 'lead' : 'helper',
     harness: 'claude-code',
     runner: 'tmux',

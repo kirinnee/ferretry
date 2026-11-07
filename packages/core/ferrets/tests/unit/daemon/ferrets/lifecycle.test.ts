@@ -12,6 +12,7 @@ import {
 import { FerretsService, type FerretsPorts } from '../../../../daemon/lib/ferrets/service.ts';
 import { FerretRegistry } from '../../../../daemon/lib/registry/registry.ts';
 import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
+import { buildStopPlan } from '../../../../cli/lib/stop/plan.ts';
 
 function fixture() {
   const id = ferretId('fern');
@@ -195,4 +196,22 @@ test('R-0363 a denied restoration or damaged credential state cannot launch or i
   await expect(f.service.resume(f.id, undefined, () => {})).rejects.toMatchObject({ status: 503 });
   expect(f.tokens.holds(f.id)).toBe(false);
   expect(f.runner.starts).toBe(1);
+});
+
+test('V-0450 start label survives summary and stop label selects it independently of pack', async () => {
+  const f = fixture();
+  f.registry.remove(f.id);
+  const started = await f.service.start({
+    name: 'fern',
+    folder: '/work',
+    pack: 'different-pack' as never,
+    by: 'owner',
+    options: { label: 'mine' },
+  });
+  expect(started.ok).toBe(true);
+  const list = await f.service.list();
+  expect(list[0]?.label).toBe('mine');
+  expect(list[0]?.pack as string).toBe('different-pack');
+  expect(buildStopPlan(list, { kind: 'label', label: 'mine' }).targets.map(t => t.id)).toEqual([f.id]);
+  expect(buildStopPlan(list, { kind: 'label', label: 'different-pack' }).targets).toEqual([]);
 });

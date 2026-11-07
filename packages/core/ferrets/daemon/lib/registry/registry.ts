@@ -27,14 +27,18 @@ export function summaryOf(record: FerretRecord, details?: FerretDetails): Ferret
   const { format: _format, handle: _handle, transcript, ...rest } = record;
   // Public reads never carry the launch-time rollout exclusion set (today's session view).
   const summary: FerretSummary =
-    transcript === undefined ? rest : { ...rest, transcript: (({ baseline: _baseline, ...shown }) => shown)(transcript) };
+    transcript === undefined
+      ? rest
+      : { ...rest, transcript: (({ baseline: _baseline, ...shown }) => shown)(transcript) };
   if (details === undefined) return summary;
   const model = details.options?.model;
   const card = details.options?.card;
+  const label = details.options?.label;
   return {
     ...summary,
     ...(model === undefined ? {} : { model }),
     ...(card === undefined ? {} : { card }),
+    ...(label === undefined ? {} : { label }),
     ...(details.title === undefined ? {} : { title: details.title }),
   };
 }

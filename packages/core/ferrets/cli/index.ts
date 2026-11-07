@@ -28,11 +28,11 @@ const BINARY = 'fy';
 
 /** Usage sentences a group verb prints when it is typed bare. */
 const STOP_USAGE = [
-  'stop ferrets, selected by lineage or pack:',
+  'stop ferrets, selected by lineage or ownership label:',
   `  ${BINARY} stop orphan <ferret>     stop one ferret and leave its helpers running`,
   `  ${BINARY} stop cascade <ferret>    stop a ferret and every helper under it`,
   `  ${BINARY} stop children <ferret>   stop every helper under a ferret and keep it running`,
-  `  ${BINARY} stop label <pack>        stop every ferret in a pack, whatever its lineage`,
+  `  ${BINARY} stop label <label>       stop every ferret with that label, whatever its lineage`,
 ];
 const SESSION_USAGE = [
   "act on a ferret's own standing with this daemon:",

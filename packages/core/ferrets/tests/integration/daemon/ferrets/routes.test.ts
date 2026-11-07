@@ -229,13 +229,19 @@ describe('starting, tokens and attach', () => {
       parent: 'lead',
       role: 'helper',
     });
-    const named = await h.request('POST', '/v1/ferrets', { ...as('lead'), body: { folder: '/work/c', parent: 'lead' } });
+    const named = await h.request('POST', '/v1/ferrets', {
+      ...as('lead'),
+      body: { folder: '/work/c', parent: 'lead' },
+    });
     expect(named.status).toBe(201);
   });
 
   test('G12 a ferret naming another parent is refused parent_mismatch; the owner may name any parent', async () => {
     const h = await host([record('lead'), record('other')], { harness: new FakeHarness(), runner: new FakeRunner() });
-    const mismatch = await h.request('POST', '/v1/ferrets', { ...as('lead'), body: { folder: '/work/c', parent: 'other' } });
+    const mismatch = await h.request('POST', '/v1/ferrets', {
+      ...as('lead'),
+      body: { folder: '/work/c', parent: 'other' },
+    });
     expect(mismatch.status).toBe(403);
     expect(mismatch.json<{ code: string }>().code).toBe('parent_mismatch');
     const owners = await h.request('POST', '/v1/ferrets', { body: { folder: '/work/d', parent: 'other' } });
@@ -290,7 +296,6 @@ describe('starting, tokens and attach', () => {
   });
 });
 
-
 describe('managed worktrees and the file browser before the kernel host IO is bound', () => {
   test('the worktree list answers with no managed root, and a create or removal says why it cannot', async () => {
     const h = await host();
@@ -344,9 +349,9 @@ describe('a start retried under its request id, and recovered when both answers 
 
   test('the recovery read answers only a caller that proves the exact body it sent', async () => {
     const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
-    const id = (
-      await h.request('POST', '/v1/ferrets', { body: startBody, headers: withId('req-2') })
-    ).json<{ id: string }>().id;
+    const id = (await h.request('POST', '/v1/ferrets', { body: startBody, headers: withId('req-2') })).json<{
+      id: string;
+    }>().id;
     const proved = await h.request('GET', '/v1/ferrets/by-request/req-2', {
       query: { payload: sha(JSON.stringify(startBody)) },
     });
@@ -379,7 +384,9 @@ describe('pins', () => {
 
   test('a note pinned on a ferret’s board is read back from its own pins.json', async () => {
     const h = await host([record('lead')]);
-    const added = await h.request('POST', '/v1/ferrets/lead/pins', { body: { action: 'add', kind: 'note', text: 'ship it' } });
+    const added = await h.request('POST', '/v1/ferrets/lead/pins', {
+      body: { action: 'add', kind: 'note', text: 'ship it' },
+    });
     expect(added.status).toBe(200);
     const board = await h.request('GET', '/v1/ferrets/lead/pins');
     expect(board.status).toBe(200);
@@ -416,7 +423,7 @@ describe('today’s start fields, the title, and the stop and resume words', () 
     });
     const view = (await h.request('GET', `/v1/ferrets/${id}`)).json<Record<string, unknown>>();
     expect(view).toMatchObject({ model: 'opus', card: 'F21', title: 'Fix the login' });
-    expect(view.label).toBeUndefined();
+    expect(view.label).toBe('mine');
     const details = JSON.parse(h.state('ferrets').raw(FerretDetailsFiles, id) as string);
     expect(details).toEqual({
       format: 1,
@@ -526,11 +533,17 @@ describe('what a ferret may control (limits.yaml agentControl)', () => {
   });
 
   test('limits.yaml’s switches win over the defaults, and a change applies to the very next answer', async () => {
-    const h = await host([record('lead')], { config: { 'limits.yaml': { agentControl: { files: false, pageScripts: true } } } });
+    const h = await host([record('lead')], {
+      config: { 'limits.yaml': { agentControl: { files: false, pageScripts: true } } },
+    });
     const api = h.provided(FerretsPort);
     expect(await api.agentControl(ferretId('lead'))).toMatchObject({ files: false, pageScripts: true, browsers: true });
     h.setConfig('limits.yaml', { agentControl: { browsers: false } });
-    expect(await api.agentControl(ferretId('lead'))).toMatchObject({ files: true, pageScripts: false, browsers: false });
+    expect(await api.agentControl(ferretId('lead'))).toMatchObject({
+      files: true,
+      pageScripts: false,
+      browsers: false,
+    });
   });
 });
 

@@ -51,8 +51,7 @@ function targetFrom(
 ): StopTarget {
   const id = view.id.trim();
   const parent = parentOf(view);
-  // A ferret's label is its pack: the one grouping a 5.0 ferret carries.
-  const label = view.pack?.trim();
+  const label = view.label?.trim();
   return {
     id,
     name: view.name || id,
@@ -107,7 +106,7 @@ export function buildStopPlan(
     if (!label) throw new StopSelectorError('label must not be empty');
     for (const view of byId.values()) {
       // Both sides are trimmed: a stored label with stray whitespace used to match nothing at all.
-      if (view.pack?.trim() !== label || !isStoppable(view)) continue;
+      if (view.label?.trim() !== label || !isStoppable(view)) continue;
       selected.push(targetFrom(view, lineageDepth(byId, view.id.trim()), options.callerId, ancestors));
     }
   } else {
