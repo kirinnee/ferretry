@@ -79,6 +79,11 @@ export interface TextRedactor {
   redactData(value: unknown): Promise<unknown>;
   /** Many strings under ONE vault open. A vault that cannot be opened rejects before `work` runs. */
   batch<T>(work: (scrub: Scrub) => T): Promise<T>;
+  /**
+   * ONE open held across ASYNC work (a child run): the values are opened first, so a source that cannot open rejects
+   * before `work` starts, and are revoked when `work` settles. The plaintext lives for that one run and no longer.
+   */
+  scoped<T>(work: (scrub: Scrub) => Promise<T>): Promise<T>;
 }
 
 /** The scrub of a daemon with nothing to hide. */
@@ -90,6 +95,7 @@ export const NO_REDACTION: TextRedactor = {
   redact: async text => text,
   redactData: async value => value,
   batch: async work => work(IDENTITY_SCRUB),
+  scoped: async work => await work(IDENTITY_SCRUB),
 };
 
 /** Masks every known value. See `policy.redactSecretValues` for exactly what that does and does not
@@ -106,17 +112,36 @@ export class SecretRedactor implements TextRedactor {
   }
 
   async batch<T>(work: (scrub: Scrub) => T): Promise<T> {
+    const { scrub, release } = await this.lease();
+    try {
+      return work(scrub);
+    } finally {
+      release();
+    }
+  }
+
+  async scoped<T>(work: (scrub: Scrub) => Promise<T>): Promise<T> {
+    const { scrub, release } = await this.lease();
+    try {
+      return await work(scrub);
+    } finally {
+      release();
+    }
+  }
+
+  /** One open of the values, and the way to revoke it, so a scrub that escaped its work holds nothing. */
+  private async lease(): Promise<{ readonly scrub: Scrub; readonly release: () => void }> {
     let opened: ReadonlyMap<SecretName, string> | undefined = await this.vault.values();
     const values = (): ReadonlyMap<SecretName, string> => {
       if (opened === undefined) throw new Error('a scrub was used after the batch that opened its values ended');
       return opened;
     };
-    try {
-      return work(scrubValues(values));
-    } finally {
-      // Revoked, so a scrub that escaped its work holds nothing.
-      opened = undefined;
-    }
+    return {
+      scrub: scrubValues(values),
+      release: () => {
+        opened = undefined;
+      },
+    };
   }
 }
 

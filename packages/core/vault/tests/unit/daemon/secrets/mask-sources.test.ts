@@ -14,7 +14,7 @@ import {
   VaultPort,
 } from '../../../../contract/index.ts';
 import vault from '../../../../daemon/index.ts';
-import { RetainedMaskSource } from '../../../../daemon/lib/secrets/mask-source.ts';
+import { DeclaredMaskSource, MaskSourceUnavailableError } from '../../../../daemon/lib/secrets/mask-source.ts';
 import { combinedValues, SecretRedactor } from '../../../../daemon/lib/secrets/redaction.ts';
 import { VaultRedaction } from '../../../../daemon/lib/secrets/read-scope.ts';
 
@@ -144,16 +144,23 @@ test('S10 I126 provided login and staged 2FA values are masked in Redaction.read
 });
 
 for (const state of ['throwing', 'removed'] as const) {
-  test(`S10 I126 a ${state} provider keeps the last masks for reads and output until a successful replacement`, async () => {
+  test(`S20 I126 a ${state} declared provider refuses reads and runs after an earlier success, and keeps nothing`, async () => {
     const fixture = await setup();
-    await fixture.redaction.read(scope => scope.text(LOGIN));
+    expect(await fixture.redaction.read(scope => scope.text(LOGIN))).toBe('[redacted:login:test:password]');
+    expect(await fixture.run()).toMatchObject({ ok: true });
+    const spawned = fixture.environments.length;
     if (state === 'throwing') fixture.fail();
     else fixture.remove();
-    expect(await fixture.redaction.read(scope => scope.text(LOGIN))).toBe('[redacted:login:test:password]');
-    const result = await fixture.run();
-    expect(JSON.stringify(result)).not.toContain(LOGIN);
-    expect(JSON.stringify(result)).not.toContain(SEED);
-    expect(result.ok).toBe(true);
+    let called = false;
+    await expect(
+      fixture.redaction.read(scope => {
+        called = true;
+        return scope.text(LOGIN);
+      }),
+    ).rejects.toThrow('mask source unavailable');
+    expect(called).toBe(false);
+    expect(await fixture.run()).toEqual({ ok: false, error: 'masks_unavailable' });
+    expect(fixture.environments.length).toBe(spawned);
     fixture.replace(new Map([['login:new:password', 'replacement-value']]));
     expect(await fixture.redaction.read(scope => scope.text(`${LOGIN} replacement-value`))).toBe(
       `${LOGIN} [redacted:login:new:password]`,
@@ -162,6 +169,35 @@ for (const state of ['throwing', 'removed'] as const) {
     expect(await fixture.redaction.read(scope => scope.text('replacement-value'))).toBe('replacement-value');
   });
 }
+
+test('S20 I126 nothing is cached between reads: every read and run asks the provider again', async () => {
+  const fixture = await setup();
+  expect(await fixture.redaction.read(scope => scope.text(LOGIN))).toBe('[redacted:login:test:password]');
+  fixture.replace(new Map([['login:other:password', 'other-value']]));
+  expect(await fixture.redaction.read(scope => scope.text(`${LOGIN} other-value`))).toBe(
+    `${LOGIN} [redacted:login:other:password]`,
+  );
+  fixture.output(`${LOGIN} other-value`);
+  const result = await fixture.run();
+  expect(result.ok && result.value.stdout).toBe(`${LOGIN} [redacted:login:other:password]`);
+});
+
+test('S19 I126 a declared unavailable provider refuses secrets/use with a typed refusal and never spawns', async () => {
+  const fixture = await setup();
+  fixture.fail();
+  expect(await fixture.run()).toEqual({ ok: false, error: 'masks_unavailable' });
+  expect(fixture.environments).toEqual([]);
+  const response = await fixture.host.request('POST', '/v1/secrets/use', {
+    body: { command: ['fixture'], cwd: '/tmp' },
+  });
+  expect(response.status).toBe(503);
+  expect(response.body).toContain('masks_unavailable');
+  expect(response.body).not.toContain(LOGIN);
+  expect(fixture.environments).toEqual([]);
+  fixture.replace(new Map([[LABEL, LOGIN]]));
+  expect(await fixture.run()).toMatchObject({ ok: true });
+  expect(fixture.environments.length).toBe(1);
+});
 
 test('S6 S7 S10 I2 I126 mask values never become names, usable secrets, child environments or route answers', async () => {
   const { host, api, redaction, environments } = await setup();
@@ -222,7 +258,7 @@ test('S10 I126 an initial provider failure refuses the read without exposing its
     fixture.redaction.read(() => {
       called = true;
     }),
-  ).rejects.toThrow('mask source unavailable before its first successful read');
+  ).rejects.toThrow('mask source unavailable');
   expect(called).toBe(false);
 });
 
@@ -253,14 +289,14 @@ for (const state of ['failed', 'skeleton'] as const) {
     }));
     expect(refusals).toEqual([]);
     if (state === 'failed') engine.markFailed('accounts');
-    const retained = new RetainedMaskSource(() => engine.invokerFor('vault').provider(RedactionSources, 'source'));
+    const accountMasks = new DeclaredMaskSource(() => engine.invokerFor('vault').provider(RedactionSources, 'source'));
     let called = false;
     await expect(
-      new SecretRedactor(retained).batch(scrub => {
+      new SecretRedactor(accountMasks).batch(scrub => {
         called = true;
         return scrub.text(LOGIN);
       }),
-    ).rejects.toThrow('mask source unavailable before its first successful read');
+    ).rejects.toThrow('mask source unavailable');
     expect(called).toBe(false);
   });
 }
@@ -270,7 +306,7 @@ test('S10 I126 only an undeclared provider masks nothing and does not affect the
   expect(await fixture.redaction.read(scope => scope.text('ordinary text'))).toBe('ordinary text');
   const source = combinedValues(
     { values: async () => new Map([['KEY', 'vault-fixture-value']]) },
-    new RetainedMaskSource(() => 'absent'),
+    new DeclaredMaskSource(() => 'absent'),
   );
   expect(await new VaultRedaction(source).read(scope => scope.text('vault-fixture-value'))).toBe('[redacted:KEY]');
 });
@@ -283,58 +319,78 @@ test('S19 I126 a declared provider missing its handler refuses a composed read b
     fixture.redaction.read(() => {
       called = true;
     }),
-  ).rejects.toThrow('mask source unavailable before its first successful read');
+  ).rejects.toThrow('mask source unavailable');
   expect(called).toBe(false);
 });
 
 test('S19 I126 missing declaration metadata refuses a composed read', async () => {
   const fixture = await setup(true, false);
-  await expect(fixture.redaction.read(scope => scope.text(LOGIN))).rejects.toThrow(
-    'mask source unavailable before its first successful read',
-  );
+  await expect(fixture.redaction.read(scope => scope.text(LOGIN))).rejects.toThrow('mask source unavailable');
 });
 
-test('S19 I126 absence is not a snapshot; only a successful empty read permits later unavailability', async () => {
+test('S20 I126 absence masks nothing, and an unavailable declared source refuses every time with no memory of success', async () => {
   let provider: MaskSource | 'unavailable' | 'absent' = 'absent';
-  const source = new RetainedMaskSource(() => provider);
+  const source = new DeclaredMaskSource(() => provider);
   expect(await source.values()).toEqual(new Map());
   provider = 'unavailable';
-  await expect(source.values()).rejects.toThrow('mask source unavailable before its first successful read');
+  await expect(source.values()).rejects.toThrow('mask source unavailable');
   provider = { values: async () => new Map() };
   expect(await source.values()).toEqual(new Map());
   provider = 'unavailable';
-  expect(await source.values()).toEqual(new Map());
+  await expect(source.values()).rejects.toThrow('mask source unavailable');
 });
 
-test('S10 I126 retained snapshots cannot be mutated by the provider or a reader', async () => {
+test('S20 I126 a provider that throws refuses without exposing its error, even after a success', async () => {
+  let throws = false;
+  const source = new DeclaredMaskSource(() => ({
+    values: async () => {
+      if (throws) throw new Error(`failed opening ${LOGIN}`);
+      return new Map([[LABEL, LOGIN]]);
+    },
+  }));
+  expect(await source.values()).toEqual(new Map([[LABEL, LOGIN]]));
+  throws = true;
+  const error = await source.values().then(
+    () => undefined,
+    (caught: unknown) => caught,
+  );
+  expect(error).toBeInstanceOf(MaskSourceUnavailableError);
+  expect(String((error as Error).message)).not.toContain(LOGIN);
+  const thrown = new DeclaredMaskSource(() => {
+    throw new Error(LOGIN);
+  });
+  await expect(thrown.values()).rejects.toThrow('mask source unavailable');
+});
+
+test('S20 I126 a returned snapshot is a copy, and the next read opens the provider fresh', async () => {
   const entries = new Map([[LABEL, LOGIN]]);
   let provider: MaskSource | 'unavailable' = { values: async () => entries };
-  const retained = new RetainedMaskSource(() => provider);
-  const read = await retained.values();
+  const source = new DeclaredMaskSource(() => provider);
+  const read = await source.values();
   entries.clear();
-  (read as Map<string, string>).clear();
+  (read as Map<string, string>).set('login:mutated:password', 'mutated');
+  expect(await source.values()).toEqual(new Map());
   provider = 'unavailable';
-  expect(await new SecretRedactor(retained).redact(LOGIN)).toBe('[redacted:login:test:password]');
+  await expect(new SecretRedactor(source).redact(LOGIN)).rejects.toThrow('mask source unavailable');
 });
 
 test('S10 I126 contributed masks cover truncated child output prefixes with the same policy', async () => {
-  const retained = new RetainedMaskSource(() => ({ values: async () => new Map([[LABEL, LOGIN]]) }));
-  const redactor = new SecretRedactor(combinedValues(retained));
+  const accountMasks = new DeclaredMaskSource(() => ({ values: async () => new Map([[LABEL, LOGIN]]) }));
+  const redactor = new SecretRedactor(combinedValues(accountMasks));
   expect(await redactor.batch(scrub => scrub.text(`before ${LOGIN.slice(0, 7)}\uFFFD`, true))).toBe(
     'before [redacted:login:test:password]',
   );
 });
 
-test('S19 vault failures still refuse reads even with retained Accounts masks', async () => {
-  const retained = new RetainedMaskSource(() => ({ values: async () => new Map([[LABEL, LOGIN]]) }));
-  await retained.values();
+test('S19 vault failures still refuse reads even with Accounts masks available', async () => {
+  const accountMasks = new DeclaredMaskSource(() => ({ values: async () => new Map([[LABEL, LOGIN]]) }));
   const source = combinedValues(
     {
       values: async () => {
         throw new Error('vault unavailable');
       },
     },
-    retained,
+    accountMasks,
   );
   await expect(new VaultRedaction(source).read(scope => scope.text(LOGIN))).rejects.toThrow('vault unavailable');
 });

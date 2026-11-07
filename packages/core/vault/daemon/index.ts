@@ -38,7 +38,7 @@ import { type SecretCloneIdentitySource, SecretExportService, SecretImportServic
 import { HoldRegistry } from './lib/secrets/output-guard.ts';
 import { expandSecretReferences } from './lib/secrets/policy.ts';
 import { VaultRedaction } from './lib/secrets/read-scope.ts';
-import { RetainedMaskSource } from './lib/secrets/mask-source.ts';
+import { DeclaredMaskSource } from './lib/secrets/mask-source.ts';
 import { combinedValues, SecretRedactor } from './lib/secrets/redaction.ts';
 import { UnknownSecretError } from './lib/secrets/types.ts';
 import { NO_RECIPES, SecretUseError, SecretUseService } from './lib/secrets/use.ts';
@@ -88,7 +88,7 @@ export default implementDaemon(manifest, {
     const hooks = ctx.hooks as typeof ctx.hooks & {
       declaredProvider?: (hook: typeof RedactionSources, key: 'source') => string | undefined;
     };
-    const contributedMasks = new RetainedMaskSource(() => {
+    const contributedMasks = new DeclaredMaskSource(() => {
       if (hooks.declaredProvider === undefined) return 'unavailable';
       if (hooks.declaredProvider(RedactionSources, 'source') === undefined) return 'absent';
       return hooks.provider(RedactionSources, 'source');

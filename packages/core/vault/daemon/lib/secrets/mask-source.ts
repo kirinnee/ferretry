@@ -1,30 +1,38 @@
 import type { MaskSource } from '../../../contract/index.ts';
 
-/**
- * The last successful snapshot survives an unavailable or throwing hook provider. Only masking
- * holds this source; nothing that resolves a named secret receives it. Reads are serialized so an
- * older in-flight read cannot replace a newer snapshot. Maps are copied before being retained.
- * Only an undeclared source is absent. A declared source must first prove its values, even if empty.
- */
-export class RetainedMaskSource implements MaskSource {
-  #last: ReadonlyMap<string, string> | undefined;
-  #pending: Promise<unknown> = Promise.resolve();
+/** A declared mask provider could not open its values; the caller refuses rather than serve unmasked text. */
+export class MaskSourceUnavailableError extends Error {
+  constructor() {
+    super('mask source unavailable');
+    this.name = 'MaskSourceUnavailableError';
+  }
+}
 
+/**
+ * The hook provider's values, asked fresh on EVERY call and kept by nothing — as today, which opened the login vault
+ * and the 2FA seeds on every read. The snapshot lives only as long as the one read or one run that took it (S20),
+ * like `SecretRedactor.batch`. Only masking holds this source; nothing that resolves a named secret receives it.
+ *
+ * A DECLARED provider that is unavailable, throws or has lost its handler REFUSES (fails closed, S19): the daemon
+ * cannot know what to hide, and serving text it cannot scrub would be the leak. Its error is never exposed — it may
+ * quote one of the values it was opening. Only an UNDECLARED provider (`absent`) masks nothing.
+ */
+export class DeclaredMaskSource implements MaskSource {
   constructor(private readonly provider: () => MaskSource | 'unavailable' | 'absent') {}
 
-  values(): Promise<ReadonlyMap<string, string>> {
-    const read = this.#pending.then(async () => {
-      try {
-        const source = this.provider();
-        if (source === 'absent') return new Map(this.#last);
-        if (source !== 'unavailable') this.#last = new Map(await source.values());
-      } catch {
-        // Never expose a provider error: it may quote one of the values it was trying to open.
-      }
-      if (this.#last === undefined) throw new Error('mask source unavailable before its first successful read');
-      return new Map(this.#last);
-    });
-    this.#pending = read.catch(() => undefined);
-    return read;
+  async values(): Promise<ReadonlyMap<string, string>> {
+    let source: MaskSource | 'unavailable' | 'absent';
+    try {
+      source = this.provider();
+    } catch {
+      throw new MaskSourceUnavailableError();
+    }
+    if (source === 'absent') return new Map();
+    if (source === 'unavailable') throw new MaskSourceUnavailableError();
+    try {
+      return new Map(await source.values());
+    } catch {
+      throw new MaskSourceUnavailableError();
+    }
   }
 }

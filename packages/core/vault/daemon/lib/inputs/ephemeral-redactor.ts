@@ -24,6 +24,10 @@ export class EphemeralAwareRedactor implements TextRedactor {
     return await this.inner.batch(scrub => work(this.scope(scrub)));
   }
 
+  async scoped<T>(work: (scrub: Scrub) => Promise<T>): Promise<T> {
+    return await this.inner.scoped(scrub => work(this.scope(scrub)));
+  }
+
   /** Compose into a kernel read without opening a second vault or retaining plaintext in a scope. */
   scope(scrub: Scrub): Scrub {
     return this.values.compose(scrub);

@@ -39,7 +39,8 @@ import { isAbsolute } from 'node:path';
 import type { ChildEnvironments } from './child-environments.ts';
 import { earnedRecipes, resolveChildEnvironment } from './policy.ts';
 import type { SecretChildRunner } from './types.ts';
-import { namedMasks, NO_REDACTION, type TextRedactor } from './redaction.ts';
+import { MaskSourceUnavailableError } from './mask-source.ts';
+import { namedMasks, NO_REDACTION, type Scrub, type TextRedactor } from './redaction.ts';
 import type { SecretVault } from './vault.ts';
 
 /** Why a use was refused before anything ran. */
@@ -82,6 +83,17 @@ export class SecretUseService {
     private readonly masks?: TextRedactor,
   ) {}
 
+  /** Opens the masks for one run; an unavailable declared source is a typed refusal, not a raw failure. */
+  private async openMasks<T>(work: (scrub: Scrub) => Promise<T>): Promise<T> {
+    try {
+      return await (this.masks ?? NO_REDACTION).scoped(work);
+    } catch (error) {
+      if (error instanceof MaskSourceUnavailableError)
+        throw new SecretUseError('masks_unavailable', 'the values to mask could not be opened, so nothing was run');
+      throw error;
+    }
+  }
+
   async run(request: SecretUseCommand): Promise<SecretUseResult> {
     // A relative directory would run the child wherever this daemon happens to be, which is its own
     // state home. Refused rather than resolved: guessing here means running the caller's command
@@ -94,21 +106,32 @@ export class SecretUseService {
       { ...earnedRecipes(await this.recipes.read(), named), ...request.env },
       values,
     );
-    const outcome = await this.runner.run({
-      command: request.command,
-      cwd: request.cwd,
-      env: this.environments.mint(environment),
-      ...(environment.PATH === undefined ? {} : { path: environment.PATH }),
-      timeoutMs: request.timeoutMs,
-      maxOutputBytes: MAX_SECRET_USE_OUTPUT_BYTES,
-    });
     // Keep the injected snapshot even if the vault rotates during the child. It joins current,
     // contributed and typed values BEFORE any of them can rewrite the original output.
     const injected = namedMasks(values);
-    const masked = await (this.masks ?? NO_REDACTION).batch(scrub => ({
-      stdout: scrub.text(outcome.stdout, outcome.truncated, injected),
-      stderr: scrub.text(outcome.stderr, outcome.truncated, injected),
-    }));
+    // The masks open BEFORE anything spawns, and this one snapshot masks the output afterwards. A declared mask
+    // provider that cannot open refuses here (S19) — after a spawn the command's side effects would be done and its
+    // output lost, and every retry would run it again.
+    const { outcome, masked } = await this.openMasks(async scrub => {
+      const outcome = await this.runner.run({
+        command: request.command,
+        cwd: request.cwd,
+        env: this.environments.mint(environment),
+        ...(environment.PATH === undefined ? {} : { path: environment.PATH }),
+        timeoutMs: request.timeoutMs,
+        maxOutputBytes: MAX_SECRET_USE_OUTPUT_BYTES,
+      });
+      // A value the vault rotated DURING the child is not in the snapshot taken before it, so the vault's own current
+      // values join the injected ones; the contributed and typed values come from the snapshot, never a second open.
+      const during = [...injected, ...namedMasks(await this.vault.values())];
+      return {
+        outcome,
+        masked: {
+          stdout: scrub.text(outcome.stdout, outcome.truncated, during),
+          stderr: scrub.text(outcome.stderr, outcome.truncated, during),
+        },
+      };
+    });
     return {
       outcome: outcome.outcome,
       ...(outcome.exitCode === undefined ? {} : { exitCode: outcome.exitCode }),

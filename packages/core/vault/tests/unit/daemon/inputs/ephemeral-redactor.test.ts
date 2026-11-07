@@ -87,6 +87,7 @@ describe('EphemeralAwareRedactor', () => {
       redact: async () => Promise.reject(new Error('vault locked')),
       redactData: async () => Promise.reject(new Error('vault locked')),
       batch: async () => Promise.reject(new Error('vault locked')),
+      scoped: async () => Promise.reject(new Error('vault locked')),
     };
     const redactor = new EphemeralAwareRedactor(broken, values);
 

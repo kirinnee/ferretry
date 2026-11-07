@@ -89,7 +89,8 @@ export const SecretUseResultSchema = z.strictObject({
 });
 export type SecretUseResult = z.infer<typeof SecretUseResultSchema>;
 
-export type SecretUseRefusal = 'invalid_cwd' | 'unknown_secret';
+/** `masks_unavailable`: a declared mask provider could not open, so nothing was run (a child must never spawn unmaskable). */
+export type SecretUseRefusal = 'invalid_cwd' | 'unknown_secret' | 'masks_unavailable';
 
 // ─── authorized fetch ─────────────────────────────────────────────────────────────────────────────────────────────
 

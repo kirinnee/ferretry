@@ -16,6 +16,7 @@ import {
   type SecretRecipes,
 } from '../../../../daemon/lib/secrets/index.ts';
 import { EchoSecretChildRunner, FakeSecretCipher, MemorySecretDocuments } from '../support.ts';
+import { MaskSourceUnavailableError } from '../../../../daemon/lib/secrets/mask-source.ts';
 import { combinedValues, SecretRedactor } from '../../../../daemon/lib/secrets/redaction.ts';
 import { EphemeralAwareRedactor } from '../../../../daemon/lib/inputs/ephemeral-redactor.ts';
 import { EphemeralValues } from '../../../../daemon/lib/inputs/ephemeral-values.ts';
@@ -57,6 +58,44 @@ describe('use without read', () => {
     const result = await new SecretUseService(vault, runner, ENVS, NO_RECIPES, masks).run(request());
     should(result.stdout).equal('[redacted]');
     should(result.stderr).equal('[redacted]');
+  });
+
+  it('S19 I126 refuses before spawning when the masks cannot open, and one snapshot masks the output', async () => {
+    const vault = await vaultHolding({ TOKEN });
+    let spawned = 0;
+    const runner: SecretChildRunner = {
+      run: async () => {
+        spawned += 1;
+        return { outcome: 'exited', exitCode: 0, stdout: `ok ${TOKEN}`, stderr: '', truncated: false };
+      },
+    };
+    let available = false;
+    let opens = 0;
+    const masks = new SecretRedactor({
+      values: async () => {
+        opens += 1;
+        if (!available) throw new MaskSourceUnavailableError();
+        return new Map([['login:test:password', 'saved-login-value']]);
+      },
+    });
+    const service = new SecretUseService(vault, runner, ENVS, NO_RECIPES, masks);
+
+    await service.run(request({ secrets: ['TOKEN'] })).then(
+      () => should.fail('', '', 'unavailable masks must refuse'),
+      (error: unknown) => {
+        should(error).be.instanceof(SecretUseError);
+        should((error as SecretUseError).refusal).equal('masks_unavailable');
+        should(String((error as Error).message)).not.containEql(TOKEN);
+      },
+    );
+    should(spawned).equal(0);
+
+    available = true;
+    opens = 0;
+    const result = await service.run(request({ secrets: ['TOKEN'] }));
+    should(result.stdout).equal('ok [redacted:TOKEN]');
+    should(spawned).equal(1);
+    should(opens).equal(1);
   });
 
   it('S10 I126 masks a rotated injected value before a contributed substring rewrites it', async () => {
