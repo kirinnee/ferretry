@@ -13,7 +13,7 @@
  *   - DaemonId / DaemonConnection  pwa/src/lib/daemon-connection.ts ...... nowhere (re-exported from shell-pairing.ts)
  *   - daemonConnection ........... pwa/src/lib/daemon-connection.ts ...... nowhere (re-exported from shell-pairing.ts)
  *   - useDaemonClient ............ pwa/src/lib/store.tsx ................. nowhere (stand-in: no store)
- *   - useStepUpRequest ........... pwa/src/lib/store.tsx ................. nowhere (stand-in: no store)
+ *   - useStepUpRequest ........... pwa/src/lib/store.tsx ................. `@ferretry/app` `usePasskeyAsk` (REPLACED)
  *   - Button ..................... pwa/src/shell/primitives.tsx .......... `@ferretry/app/ui` (REPLACED)
  *   - SettingRow / SettingDisclosureRow  pwa/src/features/settings/setting-row.tsx  nowhere (stand-in)
  *   - settingDefinition .......... pwa/src/features/settings/settings-catalog.ts  nowhere (stand-in, one entry)
@@ -34,7 +34,8 @@ import {
   type SecuritySwitchField,
   type UnlockGrantedSchema,
 } from '@ferretry/core-gate/contract';
-import { createElement, type ReactNode, useCallback, useId, useState } from 'react';
+import { usePasskeyAsk } from '@ferretry/app';
+import { createElement, type ReactNode, useCallback, useId, useMemo, useState } from 'react';
 import { z } from 'zod';
 import type { DaemonConnection } from './shell-pairing.ts';
 
@@ -85,11 +86,20 @@ export function useDaemonClient(): (daemon: DaemonConnection) => Promise<IFyApiC
 }
 
 /**
- * The app's ONE passkey prompt, as a function a screen can call before a press. STAND-IN: outside the store
- * there is no prompt, so the answer is `undefined` and a screen offers no step-up control.
+ * The app's ONE passkey prompt, as a function a screen can call before a press (today's `useStepUpRequest`): the
+ * shell's `usePasskeyAsk`, which raises Access's own step-up gate (`step-up-shell.tsx`). Outside a shell there is no
+ * prompt, so the answer is `undefined` and a screen offers no step-up control.
  */
 export function useStepUpRequest(): ((daemon: DaemonConnection, act?: string) => Promise<boolean>) | undefined {
-  return undefined;
+  const ask = usePasskeyAsk();
+  return useMemo(
+    () =>
+      ask === undefined
+        ? undefined
+        : async (daemon: DaemonConnection, act?: string) =>
+            await ask(daemon.daemonId, act === undefined ? {} : { act }),
+    [ask],
+  );
 }
 
 // ─── settings rows (stand-ins for pwa/src/features/settings/setting-row.tsx and settings-catalog.ts) ─────────────

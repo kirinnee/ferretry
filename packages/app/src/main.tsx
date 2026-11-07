@@ -14,7 +14,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { connector, type DirectDial, pairOverCarriers, pairOverDirect } from './connect/connector.ts';
 import { directoryFetch } from './connect/directory.ts';
-import { registeredConnect } from './connect/provides.ts';
+import { registeredConnect, registeredPasskey } from './connect/provides.ts';
 import { DaemonList } from './daemons/daemon-list.ts';
 import { generated } from './generated/surfaces.ts';
 import { DeviceLayoutStore } from './layout/device-layout.ts';
@@ -97,11 +97,25 @@ const registered = registeredConnect(generated.surfaces, {
 for (const failure of registered.failures)
   console.warn(`${failure.plugin} could not set up its connect part: ${failure.reason}`);
 
+// The one passkey prompt (Access's): its ceremony rides Access's own guarded client, read from the runtime per call.
+const passkey = registeredPasskey(generated.surfaces, {
+  client: daemon => runtime.packageClient(daemon, 'access'),
+  daemons,
+  origin: window.location.origin,
+  credentials: {
+    create: options => navigator.credentials.create(options),
+    get: options => navigator.credentials.get(options),
+  },
+});
+for (const failure of passkey.failures)
+  console.warn(`${failure.plugin} could not set up its passkey prompt: ${failure.reason}`);
+
 const runtime = new ShellRuntime({
   appVersion: generated.appVersion,
   surfaces: generated.surfaces,
   daemons,
   connect: connector({ crypto, claims: registered.claims, carriers: registered.carriers, direct }),
+  passkey: () => passkey.passkey,
 });
 
 const themes = new ThemePreferenceStore(storage);
