@@ -1,4 +1,4 @@
-import { FsError, type PinOptions, type RootHandle } from '@ferretry/kernel/contract';
+import { FsError, type HeldRoot, type PinOptions, type RootHandle } from '@ferretry/kernel/contract';
 import type { PinnedRoot, SessionRootPinner } from '../../../lib/session/filesystem/ports.ts';
 
 /**
@@ -82,11 +82,12 @@ function walkRefusal(error: unknown): unknown {
   }
 }
 
-/** The held root, with the kernel's per-walk refusals said in the viewer's own vocabulary. */
-function sayingRefusals(held: PinnedRoot): PinnedRoot {
+/** The held root, with the kernel's per-walk refusals said in the viewer's own vocabulary, and its name verdict. */
+function sayingRefusals(held: HeldRoot): PinnedRoot {
   return {
     rootReal: held.rootReal,
     policyCwd: held.policyCwd,
+    fenced: rels => held.fenced(rels),
     open: async (rel, openOptions) => {
       try {
         return await held.open(rel, openOptions);

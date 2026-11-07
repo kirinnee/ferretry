@@ -50,7 +50,7 @@ import { FY_REQUEST_ID_HEADER } from './lib/protocol/headers.ts';
 import { WARDEN_LABEL } from './lib/session/peers/warden-lifecycle.ts';
 import { lookupStartRequest, StartRequestsFile, withStartRequest } from './lib/ferrets/start-requests.ts';
 import { sessionFilesystemRoutes } from './lib/runtime/mounts/session-filesystem.ts';
-import { SessionFilesystem } from './lib/session/filesystem/index.ts';
+import { AGENT_READ_FENCE, SessionFilesystem } from './lib/session/filesystem/index.ts';
 import { KernelGitRunner } from './adapters/git/runner.ts';
 import { KernelDiffScratch, KernelSessionRootPinner, RunnerSessionGit } from './adapters/session/filesystem/index.ts';
 import { StateAgentPinRepository } from './adapters/agent-pins/index.ts';
@@ -344,8 +344,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
 
   // The file browser (today's session-filesystem mount) over the kernel: each ferret's `work` root pins its folder and
-  // walks beneath it by descriptor and Git runs in the held object. The pin refuses (`denied`, 403) every path inside
-  // the state home, for an agent and a person alike (S47). The service is stateless, so one is made for the ferret a request names.
+  // walks beneath it by descriptor and Git runs in the held object. For an AGENT the pin refuses (`denied`, 403) every
+  // path inside the state home and every hard link, and the service asks the pin's name verdict wherever a name never
+  // passes through the walk (Git's change list, a HEAD read, a badge); a PERSON is unfenced, as today (S47). The
+  // service is stateless, so one is made for the ferret a request names.
   const sessionGit = new RunnerSessionGit(
     new KernelGitRunner({
       // A string folder is one this module already fenced (a scratch folder); a held directory is the kernel's pin.
@@ -369,9 +371,9 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       agentMayReach(call, id);
       const folder = registry.get(id)?.folder;
       if (folder === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
-      // S47, today's `agentFence`: an agent reads only its own ferret's and its helpers' files (above); a path inside the
-      // state home is refused by the pin itself, `denied` (403), whoever asks.
-      return { id, cwd: folder };
+      // S47, today's `agentFence`: an agent reads only its own ferret's and its helpers' files (above), behind the
+      // state-home fence; a person reads unfenced.
+      return { id, cwd: folder, ...(callerIsAgent(call) ? { fence: AGENT_READ_FENCE } : {}) };
     },
   });
 

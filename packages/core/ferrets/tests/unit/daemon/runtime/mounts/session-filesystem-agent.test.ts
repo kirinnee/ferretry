@@ -6,11 +6,15 @@ import {
   type FileBrowserRouteKey,
   sessionFilesystemRoutes,
 } from '../../../../../daemon/lib/runtime/mounts/session-filesystem.ts';
-import type { StateHomes } from '../../../../../daemon/lib/session/filesystem/home-fence.ts';
-import { SessionFilesystem, type SessionReadFence } from '../../../../../daemon/lib/session/filesystem/index.ts';
+import {
+  AGENT_READ_FENCE,
+  SessionFilesystem,
+  type SessionReadFence,
+} from '../../../../../daemon/lib/session/filesystem/index.ts';
 import { type RequestOf, jsonOf, requestOf } from '../../support/requests.ts';
 import {
   directory,
+  type FakeFence,
   type FakeRootOptions,
   FakeRootPinner,
   FakeSessionGit,
@@ -30,18 +34,16 @@ import {
 const HOME = '/home/me/.ferretry';
 const USER_HOME = '/home/me';
 
-/** Today's `homesPinned` from the mount support: each home its own directory on device 1, inodes from 1. */
-const homesPinned = (
-  homes: readonly string[],
-  pinned: readonly { readonly device: bigint; readonly inode: bigint; readonly place: string }[],
-): StateHomes =>
-  ({
-    homes: homes.map((named, index) => ({ named, real: named, device: 1n, inode: BigInt(index + 1) })),
-    openings: [],
-    pinned,
-  }) as unknown as StateHomes;
+/**
+ * The fake world's state home, standing in for the kernel's fence (today's `homesPinned`): each home its own directory
+ * on device 1, inodes from 1.
+ */
+const HOME_FENCE: FakeFence = {
+  homes: [HOME, `${HOME}/state`, `${HOME}/config`],
+  identities: [1n, 2n, 3n].map(ino => ({ dev: 1n, ino })),
+};
 
-const FENCE: SessionReadFence = { homes: homesPinned([HOME, `${HOME}/state`, `${HOME}/config`], []), opening: [] };
+const FENCE: SessionReadFence = AGENT_READ_FENCE;
 
 const LIST = 'GET /v1/ferrets/:ferretId/fs';
 const INDEX = 'GET /v1/ferrets/:ferretId/fs/index';
@@ -65,7 +67,7 @@ const userHomeTree = () =>
 type Ask = Omit<RequestOf, 'method' | 'path' | 'params'>;
 
 function fixture(root: FakeRootOptions = { tree: treeOf(['a.ts', textFile('body\n')]) }, git: SessionGitScript = {}) {
-  const pinner = new FakeRootPinner(root);
+  const pinner = new FakeRootPinner({ fence: HOME_FENCE, ...root });
   const filesystem = new SessionFilesystem(pinner, new FakeSessionGit(git));
   const routesFor = (fence?: SessionReadFence) => {
     const reach: FileBrowserDeps['reach'] = async () => ({

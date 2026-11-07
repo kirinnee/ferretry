@@ -237,6 +237,13 @@ export interface PinnedRoot {
   open(rel: string, options?: PinnedOpenOptions): Promise<PinnedTarget>;
   /** A batch of regular-file questions sharing one walk. Closing the root does not close it. */
   probe(): PinnedFileProbe;
+  /**
+   * The kernel's NAME verdict (`HeldRoot.fenced`, S47): for each root-relative name, whether it is inside the state
+   * home or one of its pinned key paths, by name and, where it exists, by identity. Asked for an agent's read
+   * wherever a name never passes through {@link open} (Git's output, a `HEAD` blob, a badge). A root without one
+   * fences every name for an agent.
+   */
+  fenced?(rels: readonly string[]): Promise<readonly boolean[]>;
   close(): Promise<void>;
 }
 
