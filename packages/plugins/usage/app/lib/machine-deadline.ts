@@ -11,13 +11,12 @@
  * cancelled here; only the waiting stops.
  */
 
+import { browserClock } from '../shell.ts';
+
 /** The timer, injected so no suite waits on a real clock. Returns how to cancel the run. */
 export type DeadlineSchedule = (run: () => void, delayMs: number) => () => void;
 
-export const realSchedule: DeadlineSchedule = (run, delayMs) => {
-  const handle = setTimeout(run, delayMs);
-  return () => clearTimeout(handle);
-};
+export const realSchedule: DeadlineSchedule = (run, delayMs) => browserClock.after(run, delayMs);
 
 /** A machine-wide default: long enough for a cold relay dial, short enough that nobody waits on a corpse. */
 export const MACHINE_READ_DEADLINE_MS = 20_000;

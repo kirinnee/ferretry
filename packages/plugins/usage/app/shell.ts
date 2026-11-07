@@ -83,3 +83,26 @@ export const daemonSessionScope = (daemon: DaemonConnection, sessionId: string):
   if (sessionId.trim() === '') throw new Error('sessionId must not be empty');
   return { daemonId: daemon.daemonId, sessionId };
 };
+
+// ── The clock ───────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ASSUMED: the shell offers a half no clock, and the kernel's `clock` port is the daemon's, so the browser's own time
+ * is read here and nowhere else. Every default (`now`, a poll, a deadline) comes from this one object; a view takes
+ * it as a prop with this as its default, so a suite drives time by hand. This is the one place to change when the
+ * shell hands a half a clock.
+ */
+export const browserClock = {
+  /** The wall-clock time now. */
+  now: (): Date => new Date(globalThis.performance.timeOrigin + globalThis.performance.now()),
+  /** `run` once after `milliseconds`; the answer cancels it. */
+  after: (run: () => void, milliseconds: number): (() => void) => {
+    const handle = globalThis.setTimeout(run, milliseconds);
+    return () => globalThis.clearTimeout(handle);
+  },
+  /** `run` every `milliseconds`; the answer stops it. */
+  every: (run: () => void, milliseconds: number): (() => void) => {
+    const handle = globalThis.setInterval(run, milliseconds);
+    return () => globalThis.clearInterval(handle);
+  },
+} as const;

@@ -17,6 +17,7 @@ import { type ComponentType, useEffect, useMemo, useState } from 'react';
 
 import { useInsightsTimeZone } from '../../lib/insights-time-zone.ts';
 import {
+  browserClock,
   type DaemonConnection,
   daemonInsightsPath,
   daemonInsightsQueryPath,
@@ -148,7 +149,7 @@ export function GlobalAnalyticsPage({
               key={machineKey}
               machines={machines}
               requestAnalytics={requestAnalytics}
-              now={now ?? (() => new Date())}
+              now={now ?? browserClock.now}
               timeZone={zone}
             />
           </div>

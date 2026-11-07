@@ -402,7 +402,7 @@ describe('PricingSettings', () => {
 
     press(renderer, 'data-pricing-edit', syncedRate().pricingKey);
     expect(text(renderer)).toContain('will become a manual override');
-    expect(text(renderer)).toContain('can reprice rows during later analytics reingestion');
+    expect(text(renderer)).toContain('can reprice rows during later insights reingestion');
     expect(text(renderer)).toContain('Create a new effective window');
     change(renderer, 'data-pricing-rate-field', 'input', '9.5');
     submitPricingForm(renderer);

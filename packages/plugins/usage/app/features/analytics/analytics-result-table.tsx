@@ -16,6 +16,7 @@ import {
 import { ArrowDown, ArrowDownUp, ArrowUp } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { cn } from '@ferretry/app/ui';
+import { browserClock } from '../../shell.ts';
 import {
   type AnalyticsCostGaps,
   costGapEntries,
@@ -575,7 +576,7 @@ export function AnalyticsResultTable({
   response,
   caption = 'Analytics aggregate result',
   metric,
-  today = new Date().toISOString().slice(0, 10),
+  today = browserClock.now().toISOString().slice(0, 10),
 }: AnalyticsResultTableProps) {
   const [sort, setSort] = useState<{ key: AnalyticsSortKey; direction: AnalyticsSortDirection } | null>(null);
   const columns = analyticsColumnsFor(response.aggregation, metric);

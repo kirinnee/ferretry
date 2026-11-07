@@ -10,9 +10,9 @@ import type { AnalyticsRawSession } from '../../contract/index.ts';
 import { fetchAnalytics } from '../features/analytics/analytics-api.ts';
 import { utcDay } from '../features/analytics/analytics-overview.ts';
 import { readAnalyticsWindow } from '../features/analytics/analytics-overview-load.ts';
-import type { DaemonConnection, DaemonId, UsageClient } from '../shell.ts';
+import { browserClock, type DaemonConnection, type DaemonId, type UsageClient } from '../shell.ts';
 
-const realNow = (): Date => new Date();
+const realNow = browserClock.now;
 
 /** How often the figure is read again while the page stays open. */
 const SPEND_REFRESH_MS = 5 * 60 * 1000;
@@ -46,10 +46,10 @@ export const useSpendToday = (
       }
     };
     void read();
-    const timer = setInterval(() => void read(), SPEND_REFRESH_MS);
+    const stop = browserClock.every(() => void read(), SPEND_REFRESH_MS);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      stop();
     };
   }, [connection, client, now]);
   return held.daemonId === connection.daemonId ? held.usd : null;

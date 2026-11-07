@@ -21,6 +21,7 @@
 
 import type { ProviderQuotaBalance } from '@ferretry/plugin-logins/contract';
 import { cn } from '@ferretry/app/ui';
+import { browserClock } from '../shell.ts';
 
 /**
  * The daemon's per-wrapper quota record, as it rides on session state — plus, for an environment
@@ -104,7 +105,7 @@ export interface QuotaReadoutProps {
  * the column exists either way, so an explicit em-dash is the honest fill; in
  * the chat header an absent readout should simply take no space.
  */
-export function QuotaReadout({ quota, className = '', showUnknown = false, now = Date.now() }: QuotaReadoutProps) {
+export function QuotaReadout({ quota, className = '', showUnknown = false, now = browserClock.now().getTime() }: QuotaReadoutProps) {
   if (!quota) return showUnknown ? <Unknown className={className} /> : null;
 
   if (quota.authOk === false) {

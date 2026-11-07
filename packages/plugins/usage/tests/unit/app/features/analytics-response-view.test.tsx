@@ -63,7 +63,6 @@ const raw = (overrides: Partial<Extract<AnalyticsResponse, { kind: 'raw' }>> = {
         contextEndPercent: null,
         stalled: false,
         failed: false,
-        migrated: false,
         completed: false,
       },
     ],

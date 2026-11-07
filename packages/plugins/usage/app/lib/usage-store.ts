@@ -37,7 +37,7 @@
  */
 
 import type { UsageFeedView } from '../../contract/index.ts';
-import type { DaemonConnection, DaemonId, UsageClient } from '../shell.ts';
+import { browserClock, type DaemonConnection, type DaemonId, type UsageClient } from '../shell.ts';
 import { DaemonUsageIndex, type QuotaSubject, type ResolvedQuota } from './usage.ts';
 
 /**
@@ -103,7 +103,8 @@ interface UsageEntry {
 interface UsageWatch {
   count: number;
   daemon: DaemonConnection;
-  readonly timer: ReturnType<typeof setInterval>;
+  /** Stops the shared poll. */
+  readonly stop: () => void;
 }
 
 export class DaemonUsageStore {
@@ -194,12 +195,12 @@ export class DaemonUsageStore {
       existing.count += 1;
       existing.daemon = daemon;
     } else {
-      const timer = setInterval(() => {
+      const stop = browserClock.every(() => {
         if (this.#isHidden()) return;
         const current = this.#watches.get(id);
         if (current !== undefined) void this.refresh(current.daemon);
       }, this.#pollMs);
-      this.#watches.set(id, { count: 1, daemon, timer });
+      this.#watches.set(id, { count: 1, daemon, stop });
     }
     let released = false;
     return () => {
@@ -223,7 +224,7 @@ export class DaemonUsageStore {
     if (watch === undefined) return;
     watch.count -= 1;
     if (watch.count > 0) return;
-    clearInterval(watch.timer);
+    watch.stop();
     this.#watches.delete(daemonId);
   }
 

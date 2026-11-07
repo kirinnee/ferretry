@@ -32,7 +32,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { PerformanceRecorder } from '../../lib/performance/recorder.ts';
 import { renderPwaPerformanceReport } from '../../lib/performance/report-text.ts';
-import type { DaemonConnection } from '../../shell.ts';
+import { browserClock, type DaemonConnection } from '../../shell.ts';
 import { type PerformanceClient, readDaemonProfile, startDaemonProfile } from './performance-api.ts';
 import {
   brokenBudgets,
@@ -81,10 +81,7 @@ export const downloadText: SaveText = (fileName, text) => {
 /** A one-shot timer, answering how to cancel it; injected so a suite drives the window by hand. */
 export type PerformanceTimer = (callback: () => void, milliseconds: number) => () => void;
 
-const browserTimer: PerformanceTimer = (callback, milliseconds) => {
-  const handle = setTimeout(callback, milliseconds);
-  return () => clearTimeout(handle);
-};
+const browserTimer: PerformanceTimer = (callback, milliseconds) => browserClock.after(callback, milliseconds);
 
 /** How often the countdown moves, and how often a report not yet written is asked for again. */
 const TICK_MS = 1_000;

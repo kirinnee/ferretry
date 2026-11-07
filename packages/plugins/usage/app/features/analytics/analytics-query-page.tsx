@@ -15,7 +15,7 @@ import { Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { Button } from '@ferretry/app/ui';
-import { type DaemonConnection, daemonFerretPath, type UsageClient } from '../../shell.ts';
+import { browserClock, type DaemonConnection, daemonFerretPath, type UsageClient } from '../../shell.ts';
 import { INSIGHTS_COLUMN_CLASS } from '../../shell/insights-frame.tsx';
 import { Segmented } from '../../shell/segmented.tsx';
 import { fetchAnalytics } from './analytics-api.ts';
@@ -105,7 +105,7 @@ export function AnalyticsQueryPage({
         requestAnalytics={requestAnalytics}
         requestRun={requestRun}
         timeZone={timeZone}
-        now={now ?? (() => new Date())}
+        now={now ?? browserClock.now}
         initialQuery={initialQuery ?? null}
         onQueryChange={onQueryChange}
         savedStorage={savedStorage}
