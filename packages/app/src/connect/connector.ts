@@ -109,7 +109,17 @@ export function connector(options: ConnectorOptions): (daemon: PairedDaemon) => 
     if (device === undefined) return undefined;
     const chosen = chooseCarrier(daemon, options.carriers, options.direct);
     if (chosen === undefined) return undefined;
-    const main = new SessionTransport({ crypto: options.crypto, daemonId: daemon.daemon, device, dial: chosen.dial });
+    const claims = options.claims;
+    // Every session reads the claim again (today's `#claim`), so the key a rotation promoted is the next session's key
+    // on both lanes, and the rotation rides with it (R248, R252).
+    const keyed = {
+      crypto: options.crypto,
+      daemonId: daemon.daemon,
+      device,
+      claim: () => claims.claim(daemon),
+      ...(claims.rotation === undefined ? {} : { rotation: claims.rotation }),
+    };
+    const main = new SessionTransport({ ...keyed, dial: chosen.dial });
     const control = chosen.carrier?.control;
     if (control === undefined || control.paths.length === 0) return main;
     return new ControlLaneTransport(main, new Set(control.paths), () => {
@@ -119,9 +129,7 @@ export function connector(options: ConnectorOptions): (daemon: PairedDaemon) => 
       } catch {
         dial = undefined;
       }
-      return dial === undefined
-        ? undefined
-        : new SessionTransport({ crypto: options.crypto, daemonId: daemon.daemon, device, dial });
+      return dial === undefined ? undefined : new SessionTransport({ ...keyed, dial });
     });
   };
 }

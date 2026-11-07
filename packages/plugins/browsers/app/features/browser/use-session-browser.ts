@@ -86,15 +86,15 @@ export function useSessionBrowser(
   const epoch = useRef(0);
 
   const read = useCallback(
-    (mine: number): void => {
+    (mine: number): Promise<void> =>
+      // Returned, so the feed-aware poll skips a tick while this read is parked (behind a locked machine's unlock).
       fetchRemoteBrowserStatus(daemon, scope)
         .then(next => {
           if (epoch.current === mine) setStatus(next);
         })
         .catch(() => {
           // Unread proves nothing: the list says it cannot see the pages, and no reference is proved.
-        });
-    },
+        }),
     [daemon, scope],
   );
 
@@ -122,7 +122,7 @@ export function useSessionBrowser(
         return result.status;
       } catch {
         // The page closed under the click, or the daemon refused: the next read says which.
-        read(mine);
+        void read(mine);
         return null;
       }
     },

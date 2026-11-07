@@ -226,9 +226,11 @@ describe('useSessionBrowser', () => {
     const { renderer } = mount(daemon, { pollEnvironment: hand.environment });
     await settle();
 
-    // Act + Assert — no feed: a read every ten seconds.
-    hand.advance(PAGE_POLL_MS * 3);
-    await settle();
+    // Act + Assert — no feed: a read every ten seconds (each settles before the next tick: a tick skips an in-flight read).
+    for (let tick = 0; tick < 3; tick += 1) {
+      hand.advance(PAGE_POLL_MS);
+      await settle();
+    }
     expect(calls.length).toBe(4);
 
     // The feed goes live: the next timer, once re-armed, waits two minutes.
@@ -249,6 +251,41 @@ describe('useSessionBrowser', () => {
     run(() => hand.show());
     await settle();
     expect(calls.length).toBe(live + 2);
+    renderer.unmount();
+  });
+});
+
+describe('useSessionBrowser behind a locked machine', () => {
+  test('G95 a read parked behind the unlock prompt is not piled on by the next ticks, and the poll resumes once it settles', async () => {
+    // Arrange — the daemon's answer waits for the unlock, as a locked machine's does.
+    const hand = handPoll();
+    let release: () => void = () => undefined;
+    const unlocked = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let parked = true;
+    const { daemon, calls } = fakeDaemon(async () => {
+      if (parked) await unlocked;
+      return running([page('PAGE1')]);
+    });
+    const { renderer } = mount(daemon, { pollEnvironment: hand.environment });
+    await settle();
+    expect(calls.length).toBe(1);
+
+    // Act — several ticks arrive while the first read is still parked.
+    for (let tick = 0; tick < 4; tick += 1) {
+      hand.advance(PAGE_POLL_MS);
+      await settle();
+    }
+
+    // Assert — still one call: nothing piled up to be released as a burst on confirm.
+    expect(calls.length).toBe(1);
+    parked = false;
+    release();
+    await settle();
+    hand.advance(PAGE_POLL_MS);
+    await settle();
+    expect(calls.length).toBe(2);
     renderer.unmount();
   });
 });
