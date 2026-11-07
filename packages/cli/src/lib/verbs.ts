@@ -7,10 +7,6 @@ import type { CommandRegistry, RegistryEntry } from './registry.ts';
 
 /** The shell owns exactly these verb lines (§1.4). A plugin may add others under the same first word. */
 const SHELL_VERB_LINES = [
-  {
-    verb: 'update',
-    summary: 'update this machine, restart its daemon, and roll back if the new version does not serve',
-  },
   { verb: 'plugin list', summary: 'every plugin: on or off, version, what it adds and what needs it' },
   { verb: 'plugin show', summary: 'one plugin in words: actions, screens, hooks, permissions' },
   { verb: 'plugin on', summary: 'turn a plugin on' },
@@ -24,6 +20,10 @@ const SHELL_VERB_LINES = [
   { verb: 'daemon start', summary: 'start the daemon now (any other command starts it by itself)' },
   { verb: 'daemon stop', summary: 'stop the daemon' },
   { verb: 'daemon restart', summary: 'restart the daemon; ferrets keep running' },
+  {
+    verb: 'update',
+    summary: 'update this machine, restart its daemon, and roll back if the new version does not serve',
+  },
   { verb: 'ask', summary: 'list the asks waiting for an answer, and answer one' },
 ] as const satisfies readonly { readonly verb: string; readonly summary: string }[];
 
