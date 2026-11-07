@@ -1,10 +1,5 @@
 import type { FerretSummary } from '@ferretry/core-ferrets/contract';
-import {
-  type ApiResponse,
-  errorResponse,
-  jsonResponse,
-  textResponse,
-} from '@ferretry/kernel/contract';
+import { type ApiResponse, errorResponse, jsonResponse, textResponse } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { instantFromEpochMs, milliseconds } from '@ferretry/std';
 import { platform } from 'node:os';
@@ -55,7 +50,7 @@ import {
 } from './lib/usage/index.ts';
 import { performanceHandlers } from './routes/performance.ts';
 import { pricingHandlers } from './routes/pricing.ts';
-import { insightsAnswer } from './routes/insights.ts';
+import { insightsAnswer, insightsForPort } from './routes/insights.ts';
 
 const PROMETHEUS_CONTENT_TYPE = 'text/plain; version=0.0.4; charset=utf-8';
 
@@ -131,8 +126,7 @@ export default implementDaemon(manifest, {
       parent: ferret.parent ?? null,
       createdAt: ferret.createdAt,
       finishedAt: ferret.state === 'stopped' ? ferret.stateAt : null,
-      status:
-        ferret.state === 'stopped' ? STATUS_OF_OUTCOME[outcomes.get(ferret.id) ?? 'interrupted'] : 'running',
+      status: ferret.state === 'stopped' ? STATUS_OF_OUTCOME[outcomes.get(ferret.id) ?? 'interrupted'] : 'running',
     });
     let ingestSoon: (() => void) | undefined;
     const ingestion = new AnalyticsIngestionService({
@@ -188,7 +182,8 @@ export default implementDaemon(manifest, {
           if (published[login]?.level !== pause.level)
             kernel.events.publish(LoginPaused, { login, level: pause.level, period: pause.period });
         }
-        for (const login of Object.keys(published)) if (holds[login] === undefined) kernel.events.publish(LoginResumed, { login });
+        for (const login of Object.keys(published))
+          if (holds[login] === undefined) kernel.events.publish(LoginResumed, { login });
         published = holds;
       },
       liveSessions: async logins => await sessions.live(logins),
@@ -197,11 +192,17 @@ export default implementDaemon(manifest, {
       alternative: async (login, holds) => {
         const list = await needs.logins.list().catch(() => undefined);
         const current = list?.logins.find(candidate => candidate.id === login);
-        const usable = list?.logins.filter(candidate => candidate.disabled === undefined && candidate.harness === current?.harness);
+        const usable = list?.logins.filter(
+          candidate => candidate.disabled === undefined && candidate.harness === current?.harness,
+        );
         return budgetAlternative(usable?.map(candidate => candidate.id) ?? [], login, nowMs(), holds);
       },
       notify: async (notice: BudgetNotice) => {
-        const text = budgetNoticeText(notice, 'fy', (await needs.logins.list().catch(() => undefined))?.machine ?? 'this machine');
+        const text = budgetNoticeText(
+          notice,
+          'fy',
+          (await needs.logins.list().catch(() => undefined))?.machine ?? 'this machine',
+        );
         kernel.events.publish(BudgetReached, {
           ref: text.ref,
           login: notice.login,
@@ -329,7 +330,9 @@ export default implementDaemon(manifest, {
         const standing = budget.view(name);
         const pause = pauseOf(name);
         const login = LoginIdSchema.safeParse(name);
-        return standing === undefined || !login.success ? [] : [{ login: login.data, budget: standing, ...(pause === undefined ? {} : { pause }) }];
+        return standing === undefined || !login.success
+          ? []
+          : [{ login: login.data, budget: standing, ...(pause === undefined ? {} : { pause }) }];
       }),
     });
 
@@ -410,16 +413,12 @@ export default implementDaemon(manifest, {
             const stored = await kernel.state.read(QUOTAS_STATE, login);
             return stored.ok ? stored.value?.reading : undefined;
           },
-          insights: async request => {
-            const { queryAnalyticsRecords } = await import('./lib/analytics/results.ts');
-            const read = ingestion.read();
-            return queryAnalyticsRecords(read.rows, request.query, {
-              index: read.status,
-              now: read.now,
-              machine: (await needs.logins.list().catch(() => undefined))?.machine ?? null,
-              ...(request.timeZone === undefined ? {} : { timeZone: request.timeZone }),
-            });
-          },
+          insights: async request =>
+            insightsForPort(
+              { index: () => ingestion.read() },
+              request,
+              (await needs.logins.list().catch(() => undefined))?.machine ?? null,
+            ),
           pricing: async () => await pricing.view(),
           patchPricing: async patch => await pricing.patch(patch),
           previewPricing: async request => await pricing.preview(request),
@@ -454,4 +453,3 @@ export default implementDaemon(manifest, {
     };
   },
 });
-
