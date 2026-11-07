@@ -18,7 +18,6 @@ import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
  * reader shows "—" for a missing one rather than counting up from a zero nobody measured.
  */
 export const SessionLiveTokensSourceSchema = z.enum(['pane', 'transcript']);
-/** @pending ferrets: Info tabs Agenda, Tasks, Usage, Context, Surfaces and Warden are not ported */
 export type SessionLiveTokensSource = z.infer<typeof SessionLiveTokensSourceSchema>;
 
 /**
@@ -39,7 +38,6 @@ export type SessionLiveTokensSource = z.infer<typeof SessionLiveTokensSourceSche
  * is optional because a harness only states the post-compaction context on its NEXT model call.
  */
 export const SessionCompactionBasisSchema = z.enum(['history', 'typical']);
-/** @pending ferrets: Info tabs Agenda, Tasks, Usage, Context, Surfaces and Warden are not ported */
 export type SessionCompactionBasis = z.infer<typeof SessionCompactionBasisSchema>;
 
 export const FerretCompactionRunningSchema = z.strictObject({
@@ -75,7 +73,6 @@ export const SessionCompactionSchema = z.discriminatedUnion('phase', [
   FerretCompactionRunningSchema,
   FerretCompactionDoneSchema,
 ]);
-/** @pending ferrets: Info tabs Agenda, Tasks, Usage, Context, Surfaces and Warden are not ported */
 export type SessionCompactionState = z.infer<typeof SessionCompactionSchema>;
 
 /** Tokens a finished compaction freed, when both ends are known and the context did shrink. */

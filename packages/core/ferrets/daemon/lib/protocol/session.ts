@@ -28,6 +28,7 @@ export {
   type LaunchInstructionSectionId,
   LaunchInstructionSectionIdSchema,
   LaunchInstructionSectionSchema,
+  type PendingQuestion,
   PendingQuestionOptionSchema,
   PendingQuestionSchema,
   type SessionConfig,
@@ -41,9 +42,9 @@ export {
   SessionReviveSchema,
   type SessionState,
   SessionStateSchema,
+  type SessionTurnState,
   SessionTurnStateSchema,
 } from '../../../contract/view/ferret-view.ts';
-
 export { HarnessSchema } from './session-base.ts';
 /**
  * Re-exported here rather than added to the package barrel separately, because the stamp is a FIELD
@@ -505,6 +506,7 @@ export const FyEventStreamIdleScopeSchema = z.discriminatedUnion('kind', [
     followedSessions: NonNegativeIntegerSchema,
   }),
 ]);
+export type FyEventStreamIdleScope = z.infer<typeof FyEventStreamIdleScopeSchema>;
 
 /**
  * One frame on `/v1/events`.

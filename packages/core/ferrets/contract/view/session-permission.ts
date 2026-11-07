@@ -60,3 +60,4 @@ export const PermissionRequestSchema = z
     message: 'options are numbered 1..n in order',
   })
   .refine(request => request.selected <= request.options.length, { message: 'the selection is one of the options' });
+export type PermissionRequest = z.infer<typeof PermissionRequestSchema>;

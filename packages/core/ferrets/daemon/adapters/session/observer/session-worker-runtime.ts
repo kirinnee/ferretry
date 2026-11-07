@@ -1,0 +1,591 @@
+import type { ClockPort } from '../../../lib/ports.ts';
+import type { ObserverFacts } from '../../../lib/session/observer/facts.ts';
+import {
+  INITIAL_OBSERVER_STATE,
+  type ObserverPatch,
+  type ObserverState,
+  type SessionObserver,
+} from '../../../lib/session/observer/observer.ts';
+import { turnPaneEvidenceOf } from '../../../lib/session/observer/pane.ts';
+import type {
+  FromSessionWorker,
+  SessionBinding,
+  ToSessionWorker,
+  WorkerAnswers,
+  WorkerAsk,
+  WorkerChild,
+} from '../../../lib/session/observer/protocol.ts';
+import { QUESTION_TAIL_EVENTS } from '../../../lib/session/observer/question.ts';
+import { TURN_TAIL_EVENTS } from '../../../lib/session/observer/turn.ts';
+import type { AnswerOperationRecord, AskedQuestion } from '../../../lib/session/peers/question.ts';
+import type { TranscriptSendEvidence, TranscriptSendEvidenceFactory } from '../../../lib/session/peers/send.ts';
+import { type PaneParsers, parsePaneWatch, type TmuxCommandPort } from '../../../lib/session/peers/tmux.ts';
+import type {
+  IncrementalTranscriptTail,
+  IncrementalTranscriptTailFactory,
+  TranscriptEvent,
+  TranscriptSource,
+} from '../../../lib/session/peers/transcript.ts';
+import { isTurnStatus, type PaneFrames, type PaneFramesFactory } from '../../../lib/session/peers/turn.ts';
+
+/** One session's attached tmux client, as a worker holds it. */
+export interface WorkerTmuxClient {
+  readonly port: TmuxCommandPort;
+  /** Whether its control connection is up, so pane notices are arriving. */
+  readonly connected: boolean;
+  /** Subscribe to the session's panes' death and activity; answers whether a connection took it. */
+  watch(): Promise<boolean>;
+  /** Every value of that subscription, as tmux reports it changing. */
+  onPaneWatch(listener: (value: string) => void): () => void;
+  /** Disconnect, and settle once the client's process has EXITED — killed if it would not go. */
+  stop(): Promise<unknown>;
+}
+
+/** How a worker paces its looks. */
+export interface SessionWorkerPacing {
+  /** After a pane drew or the transcript changed, how long to let it settle before looking. */
+  readonly settleMs: number;
+  /** The least time between two looks at one session: a pane that draws continuously costs no more. */
+  readonly throttleMs: number;
+  /** When a look saw an unconfirmed turn end, how soon to look again to confirm it. */
+  readonly confirmMs: number;
+  /** The longest a session goes unlooked at, whatever happens: a missed event delays, never loses. */
+  readonly backstopMs: number;
+  /** How often to look while the client is not connected, so no notices can arrive. */
+  readonly pollMs: number;
+}
+
+export const DEFAULT_SESSION_WORKER_PACING: SessionWorkerPacing = {
+  settleMs: 150,
+  throttleMs: 2_000,
+  confirmMs: 2_000,
+  backstopMs: 30_000,
+  pollMs: 2_000,
+};
+
+/** What a session worker reads through. Nothing here can write: no storage, no file write, no `send-keys`. */
+export interface SessionWorkerDeps {
+  readonly post: (message: FromSessionWorker) => void;
+  /** The session's own attached observe-only control client (`bin/session.worker.ts` builds it). */
+  readonly tmux: (binding: SessionBinding['tmux']) => WorkerTmuxClient;
+  readonly transcripts: Readonly<Record<'claude' | 'codex', TranscriptSource>>;
+  readonly stat: (file: string) => Promise<{ readonly size: number; readonly mtimeMs: number } | undefined>;
+  /**
+   * The question Claude's hook recorded in `file` for `transcript` (`readAskedQuestion`). Total: an absent,
+   * unreadable or foreign file answers `undefined`, never a rejection. Absent, the worker reads none.
+   */
+  readonly asked?: (file: string, transcript: string | undefined) => Promise<AskedQuestion | undefined>;
+  readonly clock: ClockPort;
+  readonly nowMs: () => number;
+  /** Runs `run` after `delayMs`; answers how to cancel it. */
+  readonly schedule: (delayMs: number, run: () => void) => () => void;
+  /** The children this worker started since the last report. */
+  readonly children: () => readonly WorkerChild[];
+  readonly observer: SessionObserver;
+  /**
+   * What a worker reads through that Ferrets does not own, handed in by the host: the frames of a pane read
+   * through its client (`new PaneFrames(new TmuxController(port), clock)` today), the incremental transcript tail
+   * (`new IncrementalTranscriptTail(…)`), the send tracker's transcript evidence (`new TranscriptSendEvidence(…)`)
+   * and the terminals plugin's pane parsers a frame is read as turn evidence by.
+   */
+  readonly frames: PaneFramesFactory;
+  readonly tail: IncrementalTranscriptTailFactory;
+  readonly sendEvidence: TranscriptSendEvidenceFactory;
+  readonly paneParsers: PaneParsers;
+  readonly pacing?: SessionWorkerPacing;
+}
+
+interface CachedTail {
+  readonly file: string;
+  readonly size: number;
+  readonly mtimeMs: number;
+  readonly events: readonly TranscriptEvent[];
+  /** The tail kept current by reading only what the agent appended since. */
+  readonly cursor: IncrementalTranscriptTail;
+}
+
+/** One hosted session. Mutable on purpose: this is the worker's own per-session record. */
+interface Hosted {
+  readonly session: string;
+  readonly generation: number;
+  facts: ObserverFacts;
+  /** Bumped by every facts message: a question patch posted before it may be posted again after it. */
+  factsSeen: number;
+  answers: ReadonlyMap<string, AnswerOperationRecord>;
+  state: ObserverState;
+  binding: SessionBinding;
+  tmux: WorkerTmuxClient;
+  stopWatching: () => void;
+  frames: PaneFrames;
+  tail: CachedTail | undefined;
+  /** The question Claude's hook last said it was asking, read beside the tail. */
+  asked: AskedQuestion | undefined;
+  /** The transcript changed since it was last read (the hub said so). */
+  transcriptDirty: boolean;
+  lastLookAt: number;
+  look: { readonly at: number; readonly cancel: () => void } | undefined;
+  backstop: (() => void) | undefined;
+  looking: Promise<void> | undefined;
+  lookAgain: boolean;
+  questionPosted: { readonly key: string; readonly factsSeen: number } | undefined;
+  exited: boolean;
+  /** Consecutive looks made with the client down, when no `#{pane_dead}` notice could arrive. */
+  unwatchedLooks: number;
+  /** The liveness look last pushed, so an unchanged one is not pushed again. */
+  livenessPosted: { readonly screen: string | undefined; readonly transcript: string | undefined } | undefined;
+  sendEvidence: TranscriptSendEvidence | undefined;
+}
+
+const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+const sameTmux = (a: SessionBinding['tmux'], b: SessionBinding['tmux']): boolean =>
+  a.executable === b.executable && a.socket === b.socket && a.target === b.target;
+
+/**
+ * How many looks in a row with the client down before the worker stops vouching for the pane: the first
+ * look at attach comes before the client connects, so one is not enough; a session tmux no longer has
+ * never connects again.
+ */
+const UNWATCHED_LOOKS_BEFORE_EXITED = 3;
+
+/** How many transcript events the liveness fingerprint covers: enough that a new one always changes it. */
+const LIVENESS_EVENTS = 20;
+
+/**
+ * A SESSION WORKER'S PROGRAM: the session observer, for the sessions this thread hosts, looking only when
+ * something happened (stage 3c of `docs/design/session-workers.md`).
+ *
+ * WHEN IT LOOKS. The session's own attached observe-only tmux client is subscribed to its panes'
+ * `#{pane_dead} #{window_activity}` — tmux reports a change at most once a second and streams no pane bytes
+ * at all — and the main thread forwards the file-event hub's notice when the transcript changes. Either
+ * arms a look after a short settle, never sooner than the throttle after the last one, so a pane drawing
+ * continuously costs what the old 2 s tick cost and an idle one costs nothing. A look that saw an
+ * unconfirmed turn end looks again to confirm it; a slow backstop looks regardless, so a lost event delays
+ * a transition, never loses it; and while the client is down it looks on the old 2 s cadence.
+ *
+ * WHAT A LOOK DOES. The question part runs before the turn part (#689) and both are posted, in that order,
+ * as patches for the one writer on the main thread. The question part also re-runs, with no read at all,
+ * when the main thread says the facts or the answer receipts changed. Messages for a generation that is
+ * not the session's current one are ignored.
+ *
+ * `bin/session.worker.ts` is wiring only; this is the program, testable without a thread.
+ */
+export class SessionWorkerRuntime {
+  private readonly hosted = new Map<string, Hosted>();
+  /** Every client this worker let go whose process may not have exited yet: what {@link stop} waits out. */
+  private readonly ending = new Set<Promise<unknown>>();
+  private readonly pacing: SessionWorkerPacing;
+
+  constructor(private readonly deps: SessionWorkerDeps) {
+    this.pacing = deps.pacing ?? DEFAULT_SESSION_WORKER_PACING;
+  }
+
+  /** How many sessions this worker hosts right now. */
+  get size(): number {
+    return this.hosted.size;
+  }
+
+  async handle(input: ToSessionWorker): Promise<void> {
+    if ('probe' in input) {
+      this.deps.post({ probe: true });
+      return;
+    }
+    switch (input.kind) {
+      case 'attach':
+        this.attach(input.session, input.generation, input.facts, input.binding);
+        return;
+      case 'facts': {
+        const hosted = this.current(input.session, input.generation);
+        if (hosted === undefined) return;
+        hosted.facts = input.facts;
+        hosted.factsSeen += 1;
+        this.questionAgain(hosted);
+        return;
+      }
+      case 'answers': {
+        const hosted = this.current(input.session, input.generation);
+        if (hosted === undefined) return;
+        hosted.answers = new Map(input.rows.map(row => [row.requestId, row]));
+        this.questionAgain(hosted);
+        return;
+      }
+      case 'bind': {
+        const hosted = this.current(input.session, input.generation);
+        if (hosted === undefined) return;
+        if (!sameTmux(hosted.binding.tmux, input.binding.tmux)) {
+          hosted.stopWatching();
+          this.end(hosted.tmux);
+          Object.assign(
+            hosted,
+            this.open(input.binding.tmux, value => this.paneDrew(hosted, value)),
+          );
+        }
+        if (hosted.binding.transcript?.file !== input.binding.transcript?.file) {
+          hosted.tail = undefined;
+          hosted.asked = undefined;
+          hosted.sendEvidence = undefined;
+        }
+        hosted.binding = input.binding;
+        this.wake(hosted);
+        return;
+      }
+      case 'file': {
+        const hosted = this.current(input.session, input.generation);
+        if (hosted === undefined) return;
+        hosted.transcriptDirty = true;
+        this.wake(hosted);
+        return;
+      }
+      case 'request':
+        await this.request(input.session, input.generation, input.request, input.ask);
+        return;
+      case 'detach':
+        if (this.current(input.session, input.generation) !== undefined) this.drop(input.session);
+        return;
+      case 'stop':
+        await this.stop();
+        this.deps.post({ kind: 'stopped' });
+        return;
+    }
+  }
+
+  /** Ends every attached client and timer: the thread is going away. */
+  close(): void {
+    for (const session of [...this.hosted.keys()]) this.drop(session);
+  }
+
+  /**
+   * {@link close}, and settle only once every client this worker started has EXITED — what a stopping
+   * daemon waits for before it ends the thread. A thread that is merely terminated leaves its clients to
+   * notice the daemon's exit, still detaching from the server for a moment after it has gone; a
+   * `kill-server` in that moment keeps the server AND the client running for good (measured on 3.6a for
+   * the daemon's shared client, and found by CI's tmux sweep on 3.7b for a worker's — see
+   * `ControlModeTmuxProcess.stop`).
+   */
+  async stop(): Promise<void> {
+    this.close();
+    await Promise.all([...this.ending]);
+  }
+
+  /** Let a client go: it is ended now and forgotten once its process has exited. */
+  private end(client: WorkerTmuxClient): void {
+    const ended: Promise<unknown> = client
+      .stop()
+      .catch(() => undefined)
+      .finally(() => this.ending.delete(ended));
+    this.ending.add(ended);
+  }
+
+  private attach(session: string, generation: number, facts: ObserverFacts, binding: SessionBinding): void {
+    this.drop(session);
+    const hosted: Hosted = {
+      session,
+      generation,
+      facts,
+      factsSeen: 0,
+      answers: new Map(),
+      state: INITIAL_OBSERVER_STATE,
+      binding,
+      ...this.open(binding.tmux, value => this.paneDrew(hosted, value)),
+      tail: undefined,
+      asked: undefined,
+      transcriptDirty: false,
+      lastLookAt: Number.NEGATIVE_INFINITY,
+      look: undefined,
+      backstop: undefined,
+      looking: undefined,
+      lookAgain: false,
+      questionPosted: undefined,
+      exited: false,
+      unwatchedLooks: 0,
+      livenessPosted: undefined,
+      sendEvidence: undefined,
+    };
+    this.hosted.set(session, hosted);
+    // The first look is at once: a full question projection, posted before any turn patch.
+    this.lookAt(hosted, this.deps.nowMs());
+  }
+
+  /** The session's own client, subscribed to its panes, and the frames read through it. */
+  private open(
+    binding: SessionBinding['tmux'],
+    drew: (value: string) => void,
+  ): Pick<Hosted, 'tmux' | 'frames' | 'stopWatching'> {
+    const tmux = this.deps.tmux(binding);
+    const stopWatching = tmux.onPaneWatch(drew);
+    void tmux.watch().catch(() => false);
+    return { tmux, frames: this.deps.frames(tmux.port, this.deps.clock), stopWatching };
+  }
+
+  private paneDrew(hosted: Hosted, value: string): void {
+    if (this.hosted.get(hosted.session) !== hosted) return;
+    const watched = parsePaneWatch(value);
+    if (watched?.dead === true) this.exited(hosted);
+    this.wake(hosted);
+  }
+
+  /** The main thread settles the exit from here: once per hosting, however often the pane says so. */
+  private exited(hosted: Hosted): void {
+    if (hosted.exited) return;
+    hosted.exited = true;
+    this.deps.post({ kind: 'exited', session: hosted.session, generation: hosted.generation });
+  }
+
+  /** Something happened: look after the settle, but never sooner than the throttle allows. */
+  private wake(hosted: Hosted): void {
+    const now = this.deps.nowMs();
+    this.lookAt(hosted, Math.max(now + this.pacing.settleMs, hosted.lastLookAt + this.pacing.throttleMs));
+  }
+
+  /** Arms the next look at `at`, unless one is already armed sooner. */
+  private lookAt(hosted: Hosted, at: number): void {
+    if (hosted.look !== undefined && hosted.look.at <= at) return;
+    hosted.look?.cancel();
+    const cancel = this.deps.schedule(Math.max(0, at - this.deps.nowMs()), () => {
+      if (hosted.look?.cancel === cancel) hosted.look = undefined;
+      void this.look(hosted, false);
+    });
+    hosted.look = { at, cancel };
+  }
+
+  /** One look at a time per session: a look asked for while one runs runs once more after it. */
+  private async look(hosted: Hosted, fresh: boolean): Promise<void> {
+    if (hosted.looking !== undefined) {
+      hosted.lookAgain = true;
+      await hosted.looking;
+      return;
+    }
+    hosted.looking = this.lookOnce(hosted, fresh).finally(() => {
+      hosted.looking = undefined;
+    });
+    await hosted.looking;
+    if (hosted.lookAgain && this.hosted.get(hosted.session) === hosted) {
+      hosted.lookAgain = false;
+      this.wake(hosted);
+    }
+  }
+
+  private async lookOnce(hosted: Hosted, fresh: boolean): Promise<void> {
+    const started = this.deps.nowMs();
+    const facts = hosted.facts;
+    const live = isTurnStatus(facts.status);
+    const [events, frame, asked] = await Promise.all([
+      this.transcript(hosted, fresh),
+      live ? hosted.frames.state(hosted.binding.tmux.target).catch(() => undefined) : Promise.resolve(undefined),
+      this.askedOf(hosted.binding),
+    ]).catch(() => [undefined, undefined, undefined] as const);
+    const pane = frame === undefined ? undefined : turnPaneEvidenceOf(frame, this.deps.paneParsers);
+    // Detached or re-attached while it looked: what it found belongs to nobody.
+    if (this.hosted.get(hosted.session) !== hosted) return;
+    hosted.lastLookAt = this.deps.nowMs();
+    hosted.asked = asked;
+    const patches: ObserverPatch[] = [...this.question(hosted, events)];
+    const step = this.deps.observer.step(hosted.state, {
+      kind: 'look',
+      facts,
+      turn: { look: live ? { transcript: events?.slice(-TURN_TAIL_EVENTS), pane } : undefined },
+    });
+    hosted.state = step.state;
+    patches.push(...step.patches);
+    const tail = hosted.tail;
+    this.deps.post({
+      kind: 'observed',
+      session: hosted.session,
+      generation: hosted.generation,
+      patches,
+      ...(events === undefined || tail === undefined ? {} : { transcript: { size: tail.size, mtimeMs: tail.mtimeMs } }),
+      lookMs: this.deps.nowMs() - started,
+      metrics: { children: this.deps.children() },
+    });
+    if (live) this.livenessChanged(hosted, frame?.visible, events);
+    // An end seen on one frame only is confirmed by a second look, whether or not anything draws.
+    const observation = step.state.turn;
+    if (observation !== undefined && !observation.confirmed && observation.state !== facts.turnState)
+      this.lookAt(hosted, hosted.lastLookAt + this.pacing.confirmMs);
+    // Without a connection no notice can arrive: look on the old cadence, and try to subscribe again.
+    // And a pane it cannot watch is one it cannot say is alive: the main thread proves it either way.
+    if (!hosted.tmux.connected) {
+      hosted.unwatchedLooks += 1;
+      if (hosted.unwatchedLooks >= UNWATCHED_LOOKS_BEFORE_EXITED) this.exited(hosted);
+      void hosted.tmux.watch().catch(() => false);
+      this.lookAt(hosted, hosted.lastLookAt + this.pacing.pollMs);
+    } else hosted.unwatchedLooks = 0;
+    hosted.backstop?.();
+    hosted.backstop = this.deps.schedule(this.pacing.backstopMs, () => {
+      hosted.backstop = undefined;
+      if (this.hosted.get(hosted.session) === hosted) void this.look(hosted, true);
+    });
+  }
+
+  /**
+   * The Warden's liveness look, pushed when it changed rather than asked for every 30 s: the main thread
+   * keeps the last one, and an unchanged screen and tail is exactly what "nothing moved" means to its fold.
+   */
+  private livenessChanged(
+    hosted: Hosted,
+    screen: string | undefined,
+    events: readonly TranscriptEvent[] | undefined,
+  ): void {
+    const transcript = events === undefined ? undefined : JSON.stringify(events.slice(-LIVENESS_EVENTS));
+    const posted = hosted.livenessPosted;
+    if (posted !== undefined && posted.screen === screen && posted.transcript === transcript) return;
+    hosted.livenessPosted = { screen, transcript };
+    this.deps.post({
+      kind: 'liveness',
+      session: hosted.session,
+      generation: hosted.generation,
+      liveness: {
+        ...(screen === undefined ? {} : { screen }),
+        ...(transcript === undefined ? {} : { transcript }),
+      },
+    });
+  }
+
+  /** The question part over `events`; posted only when it says something not already posted. */
+  private question(hosted: Hosted, events: readonly TranscriptEvent[] | undefined): readonly ObserverPatch[] {
+    // A transcript that cannot be proved belongs to this session is not a benign empty one: nothing is said.
+    if (events === undefined) return [];
+    const step = this.deps.observer.step(hosted.state, {
+      kind: 'look',
+      question: { state: hosted.facts, events, answers: hosted.answers, asked: hosted.asked },
+    });
+    const patch = step.patches[0];
+    if (patch === undefined) return [];
+    const key = JSON.stringify(patch);
+    if (hosted.questionPosted?.key === key && hosted.questionPosted.factsSeen === hosted.factsSeen) return [];
+    hosted.questionPosted = { key, factsSeen: hosted.factsSeen };
+    return [patch];
+  }
+
+  /** What Claude's question hook last recorded for this binding's transcript; nothing for Codex. */
+  private async askedOf(binding: SessionBinding): Promise<AskedQuestion | undefined> {
+    const transcript = binding.transcript;
+    if (binding.questionAsked === undefined || transcript?.harness !== 'claude') return undefined;
+    return await this.deps.asked?.(binding.questionAsked, transcript.file);
+  }
+
+  /** The facts or the receipts changed: decide the question again from the tail already parsed. */
+  private questionAgain(hosted: Hosted): void {
+    const patches = this.question(hosted, hosted.tail?.events);
+    if (patches.length === 0) return;
+    this.deps.post({
+      kind: 'observed',
+      session: hosted.session,
+      generation: hosted.generation,
+      patches,
+      lookMs: 0,
+      metrics: { children: this.deps.children() },
+    });
+  }
+
+  /**
+   * The transcript's tail. Re-read only when the hub said it changed, or `fresh` asks (a backstop, a
+   * barrier) — and then only when a `stat` says its bytes did — so an idle session reads nothing. And then
+   * only what was appended: an agent that is writing grows its transcript before almost every look, and
+   * re-parsing the whole tail window each time was most of a look's cost (see {@link IncrementalTranscriptTail}).
+   */
+  private async transcript(hosted: Hosted, fresh: boolean): Promise<readonly TranscriptEvent[] | undefined> {
+    const bound = hosted.binding.transcript;
+    if (bound === undefined) return undefined;
+    const cached = hosted.tail;
+    if (cached?.file === bound.file && !fresh && !hosted.transcriptDirty) return cached.events;
+    hosted.transcriptDirty = false;
+    const stats = await this.deps.stat(bound.file).catch(() => undefined);
+    if (stats === undefined) return undefined;
+    if (cached?.file === bound.file && cached.size === stats.size && cached.mtimeMs === stats.mtimeMs)
+      return cached.events;
+    const cursor =
+      cached?.file === bound.file
+        ? cached.cursor
+        : this.deps.tail(this.deps.transcripts[bound.harness], bound.file, hosted.session, QUESTION_TAIL_EVENTS);
+    const events = await cursor.read().catch(() => undefined);
+    if (events === undefined) return undefined;
+    hosted.tail = { file: bound.file, size: stats.size, mtimeMs: stats.mtimeMs, events, cursor };
+    return events;
+  }
+
+  private async request(session: string, generation: number, request: number, ask: WorkerAsk): Promise<void> {
+    const hosted = this.current(session, generation);
+    const answer = (fields: { readonly value?: unknown; readonly failure?: string }) =>
+      this.deps.post({
+        kind: 'answered',
+        session,
+        generation,
+        request,
+        ...fields,
+        metrics: { children: this.deps.children() },
+      });
+    if (hosted === undefined) {
+      answer({ failure: `this worker does not host ${session} at generation ${String(generation)}` });
+      return;
+    }
+    try {
+      answer({ value: await this.answer(hosted, ask) });
+    } catch (error) {
+      answer({ failure: message(error) });
+    }
+  }
+
+  private async answer(hosted: Hosted, ask: WorkerAsk): Promise<WorkerAnswers[WorkerAsk['kind']]> {
+    switch (ask.kind) {
+      case 'observe':
+        // A barrier: everything posted before this answer is what the transcript says now — so a look
+        // already running (perhaps without re-reading it) is waited out and followed by a fresh one.
+        while (hosted.looking !== undefined) await hosted.looking;
+        await this.look(hosted, true);
+        return null;
+      case 'pane':
+        return (await hosted.frames.state(hosted.binding.tmux.target)) ?? null;
+      case 'liveness': {
+        const [pane, events] = await Promise.all([
+          hosted.frames.state(hosted.binding.tmux.target),
+          this.transcript(hosted, false),
+        ]);
+        return {
+          ...(pane === undefined ? {} : { screen: pane.visible }),
+          // A fingerprint of the tail, not its text: the Warden keeps only whether it changed.
+          ...(events === undefined ? {} : { transcript: JSON.stringify(events.slice(-LIVENESS_EVENTS)) }),
+        };
+      }
+      case 'send-evidence':
+        return await this.sendEvidence(hosted).read(hosted.session, ask.since);
+    }
+  }
+
+  /** The send tracker's evidence over this session's own transcript, read here instead of on the main thread. */
+  private sendEvidence(hosted: Hosted): TranscriptSendEvidence {
+    if (hosted.sendEvidence !== undefined) return hosted.sendEvidence;
+    const evidence = this.deps.sendEvidence(
+      async sessionId => {
+        const bound = hosted.binding.transcript;
+        return bound === undefined ? undefined : { sessionId, harness: bound.harness };
+      },
+      {
+        file: async () => hosted.binding.transcript?.file,
+        window: async (target, start) => {
+          const bound = hosted.binding.transcript;
+          if (bound === undefined) return undefined;
+          return this.deps.transcripts[bound.harness].window(bound.file, { sessionId: target.sessionId, start });
+        },
+      },
+    );
+    hosted.sendEvidence = evidence;
+    return evidence;
+  }
+
+  private current(session: string, generation: number): Hosted | undefined {
+    const hosted = this.hosted.get(session);
+    return hosted?.generation === generation ? hosted : undefined;
+  }
+
+  private drop(session: string): void {
+    const hosted = this.hosted.get(session);
+    if (hosted === undefined) return;
+    this.hosted.delete(session);
+    hosted.look?.cancel();
+    hosted.backstop?.();
+    hosted.stopWatching();
+    this.end(hosted.tmux);
+    hosted.frames.forget(hosted.binding.tmux.target);
+  }
+}

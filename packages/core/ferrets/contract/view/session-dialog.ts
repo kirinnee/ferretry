@@ -78,3 +78,4 @@ export const HarnessDialogSchema = z
   .refine(dialog => dialog.options.length > 0 || dialog.escape !== undefined, {
     message: 'a dialog offers a way out: an option or Esc',
   });
+export type HarnessDialog = z.infer<typeof HarnessDialogSchema>;

@@ -93,6 +93,7 @@ import {
 import { decideTerminalOpener } from './lib/terminal/ownership.ts';
 import type { TerminalRuntimePort } from './lib/terminal/contracts.ts';
 import type { TmuxCommandPort } from './lib/tmux/contracts.ts';
+import { TerminalsReferenceMenu } from './lib/reference-menu.ts';
 import { buildProcesses, type ProcessHostReads, type RunnerPane } from './processes.ts';
 import { processIncarnationFor } from './adapters/session/processes/process-incarnation.ts';
 
@@ -578,7 +579,12 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       terminal_request_input: tool('terminal_request_input'),
     },
     provides: { terminals: provided },
-    hooks: { 'input.targets:terminal': inputTarget, 'runners:tmux': runner },
+    hooks: {
+      'input.targets:terminal': inputTarget,
+      'runners:tmux': runner,
+      // The composer's `%terminal` menu (reference.catalog): the ferret's terminals. Asked only while Conversation is on.
+      'reference.catalog:%terminal': new TerminalsReferenceMenu(provided),
+    },
     subscribers: {
       'vault.holds-changed': (payload: {
         readonly target: { readonly kind: string; readonly key: string };

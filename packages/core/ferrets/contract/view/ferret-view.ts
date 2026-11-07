@@ -35,6 +35,7 @@ export type InteractionMode = z.infer<typeof InteractionModeSchema>;
  * predates the watcher.
  */
 export const SessionTurnStateSchema = z.enum(['working', 'your-turn', 'needs-input']);
+export type SessionTurnState = z.infer<typeof SessionTurnStateSchema>;
 
 export const PendingQuestionOptionSchema = z.object({
   label: z.string().min(1),
@@ -59,7 +60,6 @@ export const PendingQuestionSchema = z.object({
   lastSeenAt: InstantSchema.optional(),
   missingSince: InstantSchema.optional(),
 });
-/** @pending ferrets: The 5.0 ferret record carries no turn state, model, effort, limits or context */
 export type PendingQuestion = z.infer<typeof PendingQuestionSchema>;
 
 const RetryPolicySchema = z.object({

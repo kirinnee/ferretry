@@ -29,6 +29,26 @@ interface PickerQuarantine {
   };
 }
 
+/** A failure's message, whatever it was thrown as. */
+export function failureMessage(failure: unknown): string {
+  return failure instanceof Error ? failure.message : String(failure);
+}
+
+/** True when a session is holding the picker quarantine and must accept no
+ *  input. Read from durable state, so it survives a daemon restart. */
+export function isPickerQuarantined(state: { readonly needsHumanKind?: string }): boolean {
+  return state.needsHumanKind === CODEX_PICKER_QUARANTINE_KIND;
+}
+
+/** Why a send or a runtime control was refused on a quarantined session. */
+export function pickerInputRefusal(binaryName: string): string {
+  return (
+    'input is blocked because Codex picker cleanup was not confirmed; ' +
+    `run \`${binaryName} resume <session>\` or \`${binaryName} stop <session>\` ` +
+    'before sending or retrying runtime control'
+  );
+}
+
 // --- harness/runtime-switch.ts ----------------------------------------------------------------------------------
 
 interface CodexReasoningChoice {
@@ -99,7 +119,7 @@ export interface HarnessRuntimeSwitchContext {
   readonly fast?: FastModeFacts;
 }
 
-type RuntimeSwitchPlan =
+export type RuntimeSwitchPlan =
   /**
    * Type one native command into the session. `claimsOutcome` is false for a
    * bare picker open, where the choice is a human's and the daemon must make no
@@ -148,7 +168,7 @@ interface CodexPickerKeyExpectation {
 }
 
 /** The IO seam the driver needs, so the decisions above never learn what a terminal is. */
-interface CodexPickerDrivePort {
+export interface CodexPickerDrivePort {
   /** Type the picker-opening command. `turn-started` means Codex read it as a message instead. */
   openPicker(): Promise<InjectionOutcome>;
   readPane(): Promise<CodexPickerFrame>;
@@ -157,7 +177,7 @@ interface CodexPickerDrivePort {
 }
 
 /** Sleeping is a capability, not a decision. */
-interface PickerSleeper {
+export interface PickerSleeper {
   sleep(milliseconds: number): Promise<void>;
 }
 

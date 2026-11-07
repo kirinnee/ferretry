@@ -71,8 +71,7 @@
       "GAP(shell): today's link-behaviour facility (open a link in the in-app browser or the real one) is not in @ferretry/app, so the in-app link sheet and workspace host are ported but nothing in the shell mounts them yet",
       "GAP(app): the human sign-in window (Real window login) is ported as a client and a model; the panel does not offer the button until the shell can open an external window",
       "GAP(tests): today's visual tests browser-mode.visual, browser-proxy.visual and browser-tab.visual (tests/integration/features), with browser-pane-jumpy.visual and browser-tab-bars.visual, are not moved: plugin app halves have no visual harness yet",
-      "GAP(shell): Settings › Browser has no authority line: today's ChangeApplyPanel (\"{machine} will ask you to confirm with your passkey when you save\", the grant-refused explanation, the disabled Save button) is being ported into @ferretry/app/ui by the Logins fixer (fix/logins-r1, 7d06c97bd3, not pushed yet); the daemon still enforces step-up and a held change says so, so only the up-front sentence and the disabled button are missing. Wire BrowserModeSection and BrowserProxySection to it (useChangeAuthority + ChangeApplyPanel) once it lands; Browsers then declares GET /v1/grants",
-      "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\""
+      "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" (and \"This machine will ask you to confirm with your passkey\") where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\""
     ],
     "ferrets": [
       "Fork into a new ferret (the chat's fork action and the new-ferret page's fork seed) is not ported: it needs Conversation's transcript rows to offer it and the new-ferret page to take the seed",
@@ -88,7 +87,16 @@
       "POST /v1/ferrets requires a folder, so the new-ferret page cannot start a ferret without one",
       "GAP(kernel): fy wait --until-marker tests \"exists\" by reading the file, because CliContext has no exists(path) probe yet (kernel item, sent to the kernel owner): a marker that is a directory, or a file that exists but cannot be read, never counts as present, and each poll reads the whole file; `-` is refused as a marker meanwhile",
       "Auto-resume (resuming a ferret that died on a usage limit) is ported but not mounted: no 5.0 route or tick runs it, so auto-resume.json is declared and never written (daemon/lib/session/auto-resume/**, daemon/adapters/session/auto-resume/**, daemon/lib/protocol/auto-resume.ts)",
-      "Session adapters ported but not yet built by any 5.0 route: the warden-shield provenance recorder, stamper and lineage with their store, the session effect ledger, the in-memory launch gate, the tmux resume launcher and the system callsign counters; only tests construct them until the Ferrets daemon half wires them (daemon/lib/session/provenance/lineage.ts, daemon/lib/session/provenance/recorder.ts, daemon/lib/session/provenance/stamper.ts, daemon/adapters/session/provenance/storage-session-provenance-store.ts, daemon/adapters/session/effects/file-session-effect-ledger.ts, daemon/adapters/session/resume/in-memory-launch-gate.ts, daemon/adapters/session/resume/tmux-resume-launcher.ts, daemon/adapters/names/file-system-callsign-counters.ts)"
+      "Session adapters ported but not yet built by any 5.0 route: the warden-shield provenance recorder, stamper and lineage with their store, the session effect ledger, the in-memory launch gate, the tmux resume launcher and the system callsign counters; only tests construct them until the Ferrets daemon half wires them (daemon/lib/session/provenance/lineage.ts, daemon/lib/session/provenance/recorder.ts, daemon/lib/session/provenance/stamper.ts, daemon/adapters/session/provenance/storage-session-provenance-store.ts, daemon/adapters/session/effects/file-session-effect-ledger.ts, daemon/adapters/session/resume/in-memory-launch-gate.ts, daemon/adapters/session/resume/tmux-resume-launcher.ts, daemon/adapters/names/file-system-callsign-counters.ts)",
+      "GAP(kernel): GET /v1/events serving (rebuild/fix-kernel-small) wires the fleet event stream and the peer reads; ported but not mounted until it lands (daemon/lib/session/events/index.ts, daemon/lib/session/events/service.ts, daemon/lib/session/events/shared-backlog.ts, daemon/lib/session/peers/reads.ts)",
+      "The session observer (turn state, liveness, the pending question and the Claude Code permission and dialog panels: Warden liveness, the death-cause recorder, fy wait, FY_QUESTION_FILE) is ported but not mounted: no 5.0 route starts the observer or its workers until the Ferrets daemon half wires it, and rebuild/fix-int-red-core is wiring its integration tests (daemon/lib/session/observer/index.ts, daemon/lib/session/observer/facts.ts, daemon/lib/session/observer/host.ts, daemon/lib/session/observer/liveness.ts, daemon/lib/session/observer/observer.ts, daemon/lib/session/observer/pane.ts, daemon/lib/session/observer/plan.ts, daemon/lib/session/observer/protocol.ts, daemon/lib/session/observer/question.ts, daemon/lib/session/observer/restart.ts, daemon/lib/session/observer/send-evidence.ts, daemon/lib/session/observer/turn.ts, daemon/adapters/session/observer/index.ts, daemon/adapters/session/observer/inline-observer-host.ts, daemon/adapters/session/observer/session-observation-applier.ts, daemon/adapters/session/observer/session-worker-runtime.ts, daemon/adapters/session/observer/worker-children.ts, daemon/adapters/session/observer/worker-observer-host.ts, daemon/adapters/session/observer/worker-supervisor.ts, daemon/workers/session.worker.ts, daemon/workers/session-index.worker.ts, daemon/lib/session/peers/turn.ts, daemon/lib/session/peers/transcript.ts, daemon/lib/session/peers/question.ts, daemon/lib/session/peers/harness-observation.ts, daemon/lib/session/peers/send.ts, daemon/lib/session/peers/send-lifecycle.ts, daemon/lib/session/peers/tmux.ts, daemon/lib/session/peers/move.ts)",
+      "The prompt-state read behind the Claude Code permission and dialog panels is ported but not read by any 5.0 route until the observer is mounted (daemon/lib/protocol/session-dialog.ts, daemon/lib/protocol/session-permission.ts)",
+      "Restart scope 'outdated' (restart only the ferrets whose launch instructions are out of date) is ported but not mounted: the 5.0 restart route does not take the scope yet (daemon/lib/session/restart/index.ts, daemon/lib/session/restart/outdated-view.ts)",
+      "Live activity and compaction history are ported but not mounted: no 5.0 route or tick runs them until the Ferrets daemon half wires the session-live view (daemon/lib/session/live/index.ts, daemon/lib/session/live/compaction.ts, daemon/lib/session/live/policy.ts, daemon/adapters/session/live/index.ts, daemon/adapters/session/live/file-compaction-history.ts, daemon/adapters/session/live/file-transcript-changes.ts, daemon/adapters/session/live/storage-live-activity.ts)",
+      "The session archive (docs/session-archive.md) and the directory and address candidates it reads are ported but not mounted: no 5.0 route archives or lists archived sessions yet (daemon/adapters/session/archive/index.ts, daemon/adapters/session/archive/session-archive.ts, daemon/adapters/session/archive/storage-archive-sessions.ts, daemon/lib/session/directory/index.ts, daemon/lib/session/directory/session-directory.ts, daemon/adapters/session/session-address-candidates.ts)",
+      "The session monitor (signal waiting until, condition and peer resolution, and the idle nudges) is ported but not ticked by any 5.0 route; it reads waits through the signal repository, so the signal barrel and adapters stay with it until the Ferrets daemon half wires them (daemon/lib/session/monitor/index.ts, daemon/lib/session/monitor/policy.ts, daemon/lib/session/monitor/service.ts, daemon/lib/session/monitor/settings.ts, daemon/lib/session/monitor/types.ts, daemon/adapters/session/monitor/index.ts, daemon/adapters/session/monitor/atomic-json.ts, daemon/adapters/session/monitor/file-wait-heartbeat.ts, daemon/adapters/session/monitor/monitor-tick-runner.ts, daemon/adapters/session/monitor/send-monitor-nudge.ts, daemon/adapters/session/monitor/storage-monitor-waits.ts, daemon/adapters/session/signal/index.ts, daemon/adapters/session/signal/file-signal-artifacts.ts, daemon/adapters/session/signal/launcher-signal-terminal.ts, daemon/adapters/session/signal/storage-signal-repository.ts, daemon/lib/session/signal/index.ts)",
+      "Live model switch (runtime control) is ported but not mounted: no 5.0 route accepts a model or effort change for a running ferret yet (daemon/lib/session/runtime-control/index.ts, daemon/lib/session/runtime-control/ledger.ts, daemon/lib/session/runtime-control/policy.ts, daemon/lib/session/runtime-control/service.ts)",
+      "Launch settings file (the relaunch 'launch' need of the moves module) is ported but not built by any 5.0 route until the Ferrets daemon half wires relaunch (daemon/adapters/session/launch/index.ts, daemon/adapters/session/launch/file-launch-settings.ts)"
     ],
     "conversation": [
       "conversation app half: all four ports have landed — C1 (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app), C2 (the composer, its menus over reference.catalog, attachments, drafts, the send outbox, Conversation Settings, the attachments panel and the chat-width panel), C3 (the chat screen and transcript) and C4 (the queue, compact-at and hypermedia panels, the question renderer, work search in the command bar, the Conversations screen)",
@@ -129,25 +137,9 @@
     ]
   },
   "pendingHalves": {
-    "terminals": ["app"],
     "warden": ["app"]
   },
   "pendingAppPorts": [
-    {
-      "plugin": "terminals",
-      "path": "packages/plugins/terminals/app",
-      "reason": "shell daemon-client, grants and browser-link facilities"
-    },
-    {
-      "plugin": "terminals",
-      "path": "packages/plugins/terminals/tests/unit/app",
-      "reason": "shell daemon-client, grants and browser-link facilities"
-    },
-    {
-      "plugin": "terminals",
-      "path": "packages/plugins/terminals/tests/support/app",
-      "reason": "shell daemon-client, grants and browser-link facilities"
-    },
     {
       "plugin": "warden",
       "path": "packages/plugins/warden/app",

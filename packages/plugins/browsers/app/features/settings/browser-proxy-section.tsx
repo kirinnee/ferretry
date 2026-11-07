@@ -1,4 +1,4 @@
-import { Button, SetupNote, SetupSection } from '@ferretry/app/ui';
+import { Button, type ChangeAuthority, ChangeApplyPanel, SetupNote, SetupSection } from '@ferretry/app/ui';
 import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { BrowserProxySetting } from '../../../contract/index.ts';
@@ -23,10 +23,16 @@ const DEFAULT_PASSWORD = 'PROXY_PASSWORD';
 
 export function BrowserProxySection({
   client,
+  machineName,
+  authority,
   saved,
   save,
 }: {
   readonly client: CallClient;
+  /** What this machine is called in the sentence that says it will ask for a passkey. */
+  readonly machineName: string;
+  /** What this browser may change here; `null` while it is being read. */
+  readonly authority: ChangeAuthority | null;
   /** The saved proxy; none means the browser goes direct. */
   readonly saved: BrowserProxySetting | null;
   readonly save: (proxy: BrowserProxySetting | null) => Promise<SaveOutcome>;
@@ -338,16 +344,14 @@ export function BrowserProxySection({
               {saveOutcome.sentence}
             </SetupNote>
           ) : null}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="primary"
-              data-browser-proxy-save=""
-              disabled={saving}
-              onClick={() => saveAndTest(wanted.setting)}
-            >
-              {wanted.setting === null ? 'Turn the browser proxy off' : 'Save and test'}
-            </Button>
+          <ChangeApplyPanel
+            machineName={machineName}
+            authority={authority}
+            busy={saving}
+            refusal={null}
+            submitLabel={wanted.setting === null ? 'Turn the browser proxy off' : 'Save and test'}
+            onSubmit={() => saveAndTest(wanted.setting)}
+          >
             <Button
               type="button"
               data-browser-proxy-undo=""
@@ -360,7 +364,7 @@ export function BrowserProxySection({
             >
               Keep what is saved
             </Button>
-          </div>
+          </ChangeApplyPanel>
         </div>
       ) : null}
       <p className="m-0 text-meta leading-base text-muted" data-browser-proxy-hint="">

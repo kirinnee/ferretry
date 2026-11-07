@@ -7,7 +7,6 @@
  * Ferrets is core and cannot import a plugin's code (§2.1); this is the part the session code reads, injected by the
  * host.
  */
-
 import type { SessionLaunchInstructions } from '../../protocol/session.ts';
 
 // --- packages/fleet/src/lib/manifest.ts -------------------------------------------------------------------------
@@ -31,6 +30,12 @@ export const SESSION_MODE_ENV = 'FY_SESSION_MODE';
 export const HYPERMEDIA_ENV = 'FY_HYPERMEDIA';
 
 // --- packages/fleet/src/lib/account/materialise.ts --------------------------------------------------------------
+
+/** Ferretry's own corner of a runtime's config directory: its record and the fixed-layer overlay. */
+export const RUNTIME_STATE_DIRECTORY = '.fy';
+
+/** The `--settings` overlay a Claude agent runtime launches with when the fixed layer needs one. */
+export const FIXED_SETTINGS_FILE = 'fixed.json';
 
 // --- packages/fleet/src/lib/account/fixed-layer.ts --------------------------------------------------------------
 

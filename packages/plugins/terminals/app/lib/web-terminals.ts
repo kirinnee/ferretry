@@ -1,3 +1,5 @@
+import { DaemonCallError, FY_REQUEST_ID_HEADER } from '@ferretry/app';
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
   type CloseTerminalResponse,
   CloseTerminalResponseSchema,
@@ -10,171 +12,150 @@ import {
   type TerminalView,
   TerminalViewSchema,
 } from '../../contract/index.ts';
-import { FY_REQUEST_ID_HEADER } from '@ferretry/app';
+import { assertScopeDaemon, type DaemonConnection, type DaemonSessionScope } from '../shell.ts';
 import { type InputQuarantineList, InputQuarantineListSchema } from './protocol/holds.ts';
 import {
   SESSION_CONSOLE_INPUT_MAX,
   SessionConsoleInputRequestSchema,
   SessionConsoleInputResultSchema,
 } from './protocol/session-processes.ts';
-import type { DaemonConnection } from '../../../../core/ferrets/app/lib/daemon-connection.ts';
-import type { DaemonSessionScope } from '../../../../core/ferrets/app/lib/daemon-scope.ts';
-import { daemonRequest } from '../../../connections/app/lib/daemon-transport.ts';
-import type { RelayStreamRequest } from '../../../connections/app/lib/relay-carrier.ts';
-import {
-  type RelayClientSession,
-  type RelayStreamFrame,
-  RelayStreamRefusedError,
-} from '../../../connections/app/lib/relay-session.ts';
-import { browserFetch, type DaemonFetch, DaemonResponseError } from '../../../runtimes/app/lib/runtime-models.ts';
 
-const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
-  if (daemon.daemonId !== scope.daemonId) throw new Error('terminal scope must belong to the requested daemon');
-};
+/** What every terminal call needs of the shell's per-daemon client: a route by its manifest key. */
+export type TerminalCalls = Pick<PluginClient, 'call'>;
 
-const terminalsPath = (scope: DaemonSessionScope): string =>
-  `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/terminals`;
+/** The routes the deck calls, by manifest key. The quarantine pair is Vault's (the holds it keeps on a pane). */
+export const TERMINAL_ROUTES = {
+  holders: 'GET /v1/terminals',
+  closeFinished: 'POST /v1/terminals/close-finished',
+  list: 'GET /v1/ferrets/:ferretId/terminals',
+  create: 'POST /v1/ferrets/:ferretId/terminals',
+  rename: 'PATCH /v1/ferrets/:ferretId/terminals/:terminalId',
+  close: 'DELETE /v1/ferrets/:ferretId/terminals/:terminalId',
+  stream: 'GET /v1/ferrets/:ferretId/terminals/:terminalId/stream',
+  consoleInput: 'POST /v1/ferrets/:ferretId/console/input',
+  quarantines: 'GET /v1/ferrets/:ferretId/input-quarantines',
+  endQuarantine: 'POST /v1/ferrets/:ferretId/input-quarantines/:key/end',
+} as const;
+
+/** A mutation carries its own idempotency id, as every mutation here always has. */
+const mutation = (): { readonly headers: { readonly 'x-fy-request-id': string } } => ({
+  headers: { [FY_REQUEST_ID_HEADER]: crypto.randomUUID() } as { readonly 'x-fy-request-id': string },
+});
+
+const mismatch = (message: string): DaemonCallError => new DaemonCallError(502, 'daemon_mismatch', message);
 
 /**
  * Terminal identity is daemon-issued and lands in a URL path, so it is parsed
  * before use rather than trusted from whichever view supplied it.
  */
-const terminalPath = (scope: DaemonSessionScope, terminalId: string): string =>
-  `${terminalsPath(scope)}/${encodeURIComponent(TerminalIdSchema.parse(terminalId))}`;
-
-const responseError = async (response: Response): Promise<DaemonResponseError> => {
-  const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
-  return new DaemonResponseError(
-    response.status,
-    typeof body.error === 'string' ? body.error : `HTTP ${response.status}`,
-    typeof body.code === 'string' ? body.code : undefined,
-  );
-};
-
-/**
- * Every terminal call is addressed to exactly one paired daemon. There is no
- * page-relative overload: a session ID reused across two daemons must never
- * resolve to whichever daemon happens to be current.
- */
-const terminalJson = async (
-  daemon: DaemonConnection,
-  scope: DaemonSessionScope,
-  path: string,
-  init: RequestInit,
-  fetcher: DaemonFetch,
-): Promise<unknown> => {
-  assertScopeDaemon(daemon, scope);
-  const mutation = (init.method ?? 'GET').toUpperCase() !== 'GET';
-  const request = daemonRequest(daemon, path, {
-    ...init,
-    headers: {
-      ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
-      ...(mutation ? { [FY_REQUEST_ID_HEADER]: crypto.randomUUID() } : {}),
-    },
-  });
-  const response = await fetcher(request.url, request.init);
-  if (!response.ok) throw await responseError(response);
-  return await response.json();
-};
+const terminalParams = (scope: DaemonSessionScope, terminalId: string): Record<string, string> => ({
+  ferretId: scope.sessionId,
+  terminalId: TerminalIdSchema.parse(terminalId),
+});
 
 const parseTerminal = (scope: DaemonSessionScope, body: unknown): TerminalView => {
   const view = TerminalViewSchema.parse(body);
-  if (view.sessionId !== scope.sessionId) throw new DaemonResponseError(502, 'daemon returned another session');
+  if (view.sessionId !== scope.sessionId) throw mismatch('daemon returned another session');
   return view;
 };
 
+/*
+ * Every terminal call is addressed to exactly one paired daemon: the client is already that daemon's, and a scope
+ * that names another one is refused before anything is sent. A session ID reused across two daemons must never
+ * resolve to whichever daemon happens to be current.
+ */
+
 /** Lists the terminals the paired daemon owns for one of its sessions. */
 export const listSessionTerminals = async (
+  client: TerminalCalls,
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch = browserFetch,
 ): Promise<TerminalListView> => {
-  const body = await terminalJson(daemon, scope, terminalsPath(scope), {}, fetcher);
-  const list = TerminalListViewSchema.parse(body);
-  if (list.sessionId !== scope.sessionId) throw new DaemonResponseError(502, 'daemon listed another session');
+  assertScopeDaemon(daemon, scope);
+  const list = TerminalListViewSchema.parse(
+    await client.call(TERMINAL_ROUTES.list, { params: { ferretId: scope.sessionId } }),
+  );
+  if (list.sessionId !== scope.sessionId) throw mismatch('daemon listed another session');
   return list;
 };
 
 /** Opens a terminal, letting the daemon choose any size the caller omits. */
 export const createSessionTerminal = async (
+  client: TerminalCalls,
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   request: CreateTerminalRequest = {},
-  fetcher: DaemonFetch = browserFetch,
 ): Promise<TerminalView> => {
-  const body = await terminalJson(
-    daemon,
+  assertScopeDaemon(daemon, scope);
+  return parseTerminal(
     scope,
-    terminalsPath(scope),
-    { method: 'POST', body: JSON.stringify(CreateTerminalRequestSchema.parse(request)) },
-    fetcher,
+    await client.call(TERMINAL_ROUTES.create, {
+      params: { ferretId: scope.sessionId },
+      body: CreateTerminalRequestSchema.parse(request),
+      ...mutation(),
+    }),
   );
-  return parseTerminal(scope, body);
 };
 
 /** Retitles one terminal on the daemon that owns it. */
 export const renameSessionTerminal = async (
+  client: TerminalCalls,
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   terminalId: string,
   title: string,
-  fetcher: DaemonFetch = browserFetch,
 ): Promise<TerminalView> => {
-  const body = await terminalJson(
-    daemon,
+  assertScopeDaemon(daemon, scope);
+  return parseTerminal(
     scope,
-    terminalPath(scope, terminalId),
-    { method: 'PATCH', body: JSON.stringify(RenameTerminalRequestSchema.parse({ title })) },
-    fetcher,
+    await client.call(TERMINAL_ROUTES.rename, {
+      params: terminalParams(scope, terminalId),
+      body: RenameTerminalRequestSchema.parse({ title }),
+      ...mutation(),
+    }),
   );
-  return parseTerminal(scope, body);
 };
 
 /** Closes one terminal, confirming the daemon closed the one that was asked for. */
 export const closeSessionTerminal = async (
+  client: TerminalCalls,
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   terminalId: string,
-  fetcher: DaemonFetch = browserFetch,
 ): Promise<CloseTerminalResponse> => {
-  const body = await terminalJson(daemon, scope, terminalPath(scope, terminalId), { method: 'DELETE' }, fetcher);
-  const closed = CloseTerminalResponseSchema.parse(body);
-  if (closed.id !== terminalId) throw new DaemonResponseError(502, 'daemon closed another terminal');
+  assertScopeDaemon(daemon, scope);
+  const closed = CloseTerminalResponseSchema.parse(
+    await client.call(TERMINAL_ROUTES.close, { params: terminalParams(scope, terminalId), ...mutation() }),
+  );
+  if (closed.id !== terminalId) throw mismatch('daemon closed another terminal');
   return closed;
 };
 
 /** Lists the terminals of a session that were just handed a secret and are hidden from the agent. */
 export const listSessionQuarantines = async (
+  client: TerminalCalls,
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch = browserFetch,
-): Promise<InputQuarantineList> =>
-  InputQuarantineListSchema.parse(
-    await terminalJson(
-      daemon,
-      scope,
-      `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/input-quarantines`,
-      { method: 'GET' },
-      fetcher,
-    ),
+): Promise<InputQuarantineList> => {
+  assertScopeDaemon(daemon, scope);
+  return InputQuarantineListSchema.parse(
+    await client.call(TERMINAL_ROUTES.quarantines, { params: { ferretId: scope.sessionId } }),
   );
+};
 
 /** Ends one quarantine early, by the terminal's key or id; the daemon audits who ended it. */
 export const endSessionQuarantine = async (
+  client: TerminalCalls,
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   key: string,
-  fetcher: DaemonFetch = browserFetch,
 ): Promise<void> => {
-  const body = await terminalJson(
-    daemon,
-    scope,
-    `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/input-quarantines/${encodeURIComponent(key)}/end`,
-    { method: 'POST' },
-    fetcher,
-  );
-  if ((body as { ended?: unknown } | null)?.ended !== true)
-    throw new DaemonResponseError(502, 'daemon did not end the quarantine');
+  assertScopeDaemon(daemon, scope);
+  const body = await client.call<{ ended?: unknown } | null>(TERMINAL_ROUTES.endQuarantine, {
+    params: { ferretId: scope.sessionId, key },
+    ...mutation(),
+  });
+  if (body?.ended !== true) throw mismatch('daemon did not end the quarantine');
 };
 
 /**
@@ -203,20 +184,19 @@ export const consoleInputChunks = (data: string, max = SESSION_CONSOLE_INPUT_MAX
  * ordered writes, each one awaited, so the pane receives it in the order it was typed.
  */
 export const typeIntoSessionConsole = async (
+  client: TerminalCalls,
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   data: string,
-  fetcher: DaemonFetch = browserFetch,
 ): Promise<number> => {
+  assertScopeDaemon(daemon, scope);
   let written = 0;
   for (const chunk of consoleInputChunks(data)) {
-    const body = await terminalJson(
-      daemon,
-      scope,
-      `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/console/input`,
-      { method: 'POST', body: JSON.stringify(SessionConsoleInputRequestSchema.parse({ data: chunk })) },
-      fetcher,
-    );
+    const body = await client.call(TERMINAL_ROUTES.consoleInput, {
+      params: { ferretId: scope.sessionId },
+      body: SessionConsoleInputRequestSchema.parse({ data: chunk }),
+      ...mutation(),
+    });
     written += SessionConsoleInputResultSchema.parse(body).written;
   }
   return written;
@@ -270,86 +250,6 @@ export type TerminalStreamAttach = (
 export interface TerminalAttachOptions {
   readonly reveal?: boolean;
 }
-
-/** Opens one §14 stream session on whichever carrier reaches the daemon. */
-export type TerminalStreamOpener = (
-  daemon: DaemonConnection,
-  request: RelayStreamRequest,
-) => Promise<RelayClientSession>;
-
-/**
- * One terminal as one §14 stream session: no ticket, and the client's own splitting.
- *
- * NO TICKET EXISTS any more. A paired device opens its streams inside its own session, where the
- * credential is the device's signed proof, and the daemon sells no device a ticket.
- *
- * WRITES ARE SPLIT AND NOTHING IS REASSEMBLED. §14: "a `bytes` record carries a run of an ordered
- * byte stream, delivered to the stream the moment it arrives … a terminal neither knows nor cares
- * whether a paste arrived as one write or three — so there is no reassembly, no fragment marker, and
- * no buffer waiting for a frame to complete." `sendStream` does the splitting at the shared derived
- * budget; a resize goes as one complete text frame and is never split.
- */
-const relayTerminalStream = (session: RelayClientSession, handlers: TerminalStreamHandlers): TerminalStream => {
-  session.onStreamClosed(closed => handlers.onClosed(closed.code, closed.reason));
-  handlers.onOpen();
-  return {
-    write: bytes => session.sendStream({ kind: 'bytes', bytes }),
-    control: text => session.sendStream({ kind: 'text', text }),
-    close: (code, reason) => session.closeStream(code, reason),
-  };
-};
-
-/**
- * Attach to one terminal over whichever carrier reaches this daemon.
- *
- * The router opens the stream on the carrier a request has already measured, or walks the set itself
- * — direct first, then each rendezvous — when none has. Either way the attach is a stream session the
- * device key opened, so there is no second, ticketed path for a direct viewer any more.
- */
-export const browserTerminalStreamAttach =
-  (openStream: TerminalStreamOpener): TerminalStreamAttach =>
-  async (daemon, scope, terminalId, handlers, options = {}) => {
-    assertScopeDaemon(daemon, scope);
-    // COMPOSED AT THE CALL, credential-free, so the route-agreement gate sees this dial: it recognises a request by the path written in the call's own arguments, and behind a
-    // helper it would report the terminal stream as reached by no client at all.
-    const session = await openStream(daemon, {
-      path: `${terminalPath(scope, terminalId)}/stream`,
-      ...(options.reveal === true ? { query: [['reveal', '1']] as const } : {}),
-      onData: frame => onStreamFrame(frame, handlers),
-    }).catch(relayAttachFailure(handlers));
-    return relayTerminalStream(session, handlers);
-  };
-
-/**
- * A terminal's frames, as the two shapes §14 gives them.
- *
- * Bytes are the shell's output. TEXT ON THIS ROUTE IS THE DAEMON SPEAKING A SHAPE THIS STREAM DOES
- * NOT HAVE — the terminal's text direction is client-to-daemon, for the resize control — so it is
- * dropped rather than written into the emulator, because writing it would put the daemon's own JSON
- * on the reader's screen as if the shell had printed it.
- */
-const onStreamFrame = (frame: RelayStreamFrame, handlers: TerminalStreamHandlers): void => {
-  if (frame.kind === 'bytes') handlers.onBytes(frame.bytes);
-};
-
-/**
- * An attach that did not open, told apart into the two answers a viewer acts on differently.
- *
- * A `stream-refused` is the DAEMON's verdict and is final for this attempt, so the viewer is told
- * through `onRefused` and then this throws `TerminalStreamRefused` — which the deck recognises and
- * does NOT retry. Anything else is a carrier that did not work, and is rethrown unchanged so the
- * deck's ordinary retry takes it.
- *
- * EVERY PATH THROWS, which is why the return type says so. There is no session to hand back either
- * way: a refusal never opened one, and a transport failure never reached one.
- */
-const relayAttachFailure =
-  (handlers: TerminalStreamHandlers) =>
-  (reason: unknown): never => {
-    if (!(reason instanceof RelayStreamRefusedError)) throw reason;
-    handlers.onRefused(reason.status, reason.body);
-    throw new TerminalStreamRefused(reason.status, reason.body);
-  };
 
 /** Marks an attach the daemon refused, so the deck reports it instead of retrying it forever. */
 export class TerminalStreamRefused extends Error {

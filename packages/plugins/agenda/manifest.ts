@@ -15,6 +15,7 @@ import {
 import { AskAnswered, AsksChanged, AsksPort } from '@ferretry/core-asks/contract';
 import { FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { AccessPort } from './contract/others.ts';
+import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
 
 /**
  * Agenda (§2.3): your list of asks and notices, grouped, with buzzes to your phone. The asks themselves are Asks'
@@ -42,7 +43,8 @@ export default definePlugin({
   ],
 
   needs: { asks: AsksPort, ferrets: FerretsPort },
-  uses: { access: AccessPort },
+  // Conversation (optional; lead ruling 2026-11-07): Off, nothing asks Agenda for the composer's `!` menu.
+  uses: { access: AccessPort, conversation: ConversationPort },
   provides: { agenda: AgendaPort },
 
   actions: {
@@ -144,7 +146,8 @@ export default definePlugin({
   },
 
   // A ferret that goes idle with asks waiting is stopped on the owner: one buzz for the stop.
-  hooks: { takes: [{ hook: FerretChanged }] },
+  // The composer's `!` menu is this plugin's: the ferret's open asks (reference.catalog).
+  hooks: { takes: [{ hook: FerretChanged }, { hook: ReferenceCatalog, key: '!' }] },
 
   instructions: [{ id: 'notify', text: 'instructions/notify.md', when: { role: 'any' } }],
   doctor: ['agenda-buzz'],
