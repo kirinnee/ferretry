@@ -8,6 +8,7 @@ import {
   type CredentialPlacement,
   type OutboundHttpRequest,
   HoldsChanged,
+  RedactionSources,
   SecretsChanged,
   type SecretName,
   type SecretUseCommand,
@@ -25,6 +26,7 @@ import { WebCryptoCloneCrypto } from './adapters/secrets/webcrypto-clone-crypto.
 import { FileSecretKey, WebCryptoSecretCipher } from './adapters/secrets/webcrypto-secret-cipher.ts';
 import { quarantineOverOutputGuard } from './adapters/inputs/output-guard.ts';
 import { buildInputs } from './inputs.ts';
+import type { AccountId, TwoFactorId } from './lib/inputs/borrowed.ts';
 import { INPUT_ASK_SOURCE } from './adapters/inputs/asks.ts';
 import type { AgendaId } from './lib/inputs/wire.ts';
 import { EphemeralAwareRedactor } from './lib/inputs/ephemeral-redactor.ts';
@@ -37,6 +39,7 @@ import { type SecretCloneIdentitySource, SecretExportService, SecretImportServic
 import { HoldRegistry } from './lib/secrets/output-guard.ts';
 import { expandSecretReferences } from './lib/secrets/policy.ts';
 import { VaultRedaction } from './lib/secrets/read-scope.ts';
+import { DeclaredMaskSource } from './lib/secrets/mask-source.ts';
 import { combinedValues, SecretRedactor } from './lib/secrets/redaction.ts';
 import { UnknownSecretError } from './lib/secrets/types.ts';
 import { NO_RECIPES, SecretUseError, SecretUseService } from './lib/secrets/use.ts';
@@ -81,7 +84,13 @@ export default implementDaemon(manifest, {
     );
     // As today: close every surface before exposing readers, until durable holds have been replayed (I82).
     quarantine.lock();
-    const maskSources = combinedValues(vault);
+    // Declaration metadata names even a failed or stopped provider, so only an undeclared source masks nothing; a
+    // declared one that is not live is unavailable and refuses (S19).
+    const contributedMasks = new DeclaredMaskSource(() => {
+      if (ctx.hooks.declaredProvider(RedactionSources, 'source') === undefined) return 'absent';
+      return ctx.hooks.provider(RedactionSources, 'source');
+    });
+    const maskSources = combinedValues(vault, contributedMasks);
     const masks = new EphemeralAwareRedactor(new SecretRedactor(maskSources), values);
     const redaction = new VaultRedaction(maskSources, scrub => masks.scope(scrub));
     const redact = async (text: string): Promise<string> => await masks.redact(text);
@@ -102,6 +111,7 @@ export default implementDaemon(manifest, {
       new KernelSecretChildRunner(kernel.spawn, kernel.clock),
       environments,
       NO_RECIPES,
+      masks,
     );
     const authorizer = new OutboundProviderAuthorizer(vault, new KernelOutboundTransport(kernel.fetch, kernel.clock));
     const crypto = new WebCryptoCloneCrypto();
@@ -173,6 +183,19 @@ export default implementDaemon(manifest, {
       },
       cancelInput: async (ferret, id) => await inputs.service.cancelForFerret(ferret, id),
       inputState: async id => await inputs.service.requestState(id),
+      // What a ferret did to a page and where page scripts ran, told by Browsers (lead DECISIONS-2 #5, I98–I100):
+      // the login observer's act notes and the machine-wide script taint a page card's lock reads.
+      pageActed: (ferret, script) => inputs.observer?.acted(ferret, 'browser', script) ?? { placed: () => undefined },
+      scriptRunning: () => inputs.scripts.running(),
+      scriptedOn: host => inputs.scripts.scriptedOn(host),
+      // The input card a 2FA seed is set up from (Accounts, I173): where the daemon saw its target, and "use it now".
+      cardTarget: requestId => inputs.service.cardTarget(requestId),
+      useNow: async (requestId, use) =>
+        await inputs.service.useNow(requestId, {
+          ...use,
+          account: use.account as AccountId,
+          factor: use.factor as TwoFactorId,
+        }),
     };
 
     return {

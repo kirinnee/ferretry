@@ -32,7 +32,10 @@ const made: Fixture[] = [];
 afterAll(() => {
   for (const f of made) f.dispose();
 });
-const ws = (packages: readonly FixturePackage[], options?: { pending?: readonly string[] }): Fixture => {
+const ws = (
+  packages: readonly FixturePackage[],
+  options?: { pending?: readonly string[]; pendingReasons?: Readonly<Record<string, readonly string[]>> },
+): Fixture => {
   const f = fixture(packages, options);
   made.push(f);
   return f;
@@ -97,6 +100,35 @@ describe('ports-pending', () => {
     expect(found).toContain('beta was added; the list may only shrink');
     expect(found).toContain('ghost is not a subsystem');
     expect(found).toContain('alpha has no skeleton half left');
+  });
+  test('a fully ported plugin stays listed only while it states what is still open', async () => {
+    const ported = `import { implementApp, implementCli } from '${SDK}';`;
+    const alpha = {
+      id: 'alpha',
+      daemon: `import { implementDaemon } from '${SDK}';\nimport manifest from '../manifest.ts';\nexport default implementDaemon(manifest, { build: () => ({}) });\n`,
+      app: `${ported}\nimport manifest from '../manifest.ts';\nexport default implementApp(manifest, { build: () => ({}) });\n`,
+      cli: `${ported}\nimport manifest from '../manifest.ts';\nexport default implementCli(manifest, { build: () => ({}) });\n`,
+    };
+    const base = JSON.stringify({ format: 1, pending: ['alpha'] });
+
+    const stated = ws([alpha], {
+      pending: ['alpha'],
+      pendingReasons: { alpha: ['Edit as YAML waits for the kernel'] },
+    });
+    stated.write('base.json', base);
+    expect(messages(await run(portsPending, stated, { base: `file:${join(stated.root, 'base.json')}` }))).toBe('');
+
+    const unstated = ws([alpha], { pending: ['alpha'], pendingReasons: { alpha: [] } });
+    unstated.write('base.json', base);
+    expect(messages(await run(portsPending, unstated, { base: `file:${join(unstated.root, 'base.json')}` }))).toContain(
+      'alpha has no skeleton half left',
+    );
+
+    const stray = ws([{ id: 'beta' }], { pending: ['beta'], pendingReasons: { alpha: ['a reason for nobody'] } });
+    stray.write('base.json', JSON.stringify({ format: 1, pending: ['beta'] }));
+    expect(messages(await run(portsPending, stray, { base: `file:${join(stray.root, 'base.json')}` }))).toContain(
+      'alpha has reasons but is not listed in "pending"',
+    );
   });
   test('a shrinking list of skeletons passes', async () => {
     const f = ws([{ id: 'beta' }], { pending: ['beta'] });
@@ -313,7 +345,7 @@ describe('source scans', () => {
     return join(f.root, name);
   };
 
-  test('banned-globals exempts only the explicit standalone Worker trees and native WebRTC engine', async () => {
+  test('banned-globals exempts only the explicit standalone Worker trees, the browser worker process and native WebRTC engine', async () => {
     const f = ws([
       {
         id: 'connections',
@@ -325,11 +357,20 @@ describe('source scans', () => {
         },
       },
       { id: 'catalogs', files: { 'worker/src/worker.ts': 'await fetch("https://fixture.invalid");' } },
+      {
+        id: 'browsers',
+        files: {
+          'daemon/worker/adapters/main.ts': 'const endpoint = process.argv[2]; setTimeout(() => {}, 1);',
+          'daemon/worker/launcher.ts': 'await fetch("http://127.0.0.1:9222/json/version");',
+        },
+      },
       { id: 'other', files: { 'worker/src/worker.ts': 'await fetch("https://fixture.invalid");' } },
     ]);
     const found = await run(bannedGlobals, f);
-    expect(found).toHaveLength(3);
+    expect(found).toHaveLength(4);
     expect(messages(found)).toContain('connections/daemon/worker.ts');
+    expect(messages(found)).toContain('browsers/daemon/worker/launcher.ts');
+    expect(messages(found)).not.toContain('browsers/daemon/worker/adapters/');
     expect(messages(found)).toContain('connections/adapters/webrtc/other.ts');
     expect(messages(found)).toContain('other/worker/src/worker.ts');
   });
@@ -396,6 +437,25 @@ describe('source scans', () => {
     expect(own.length).toBe(2);
     expect(own.every(finding => finding.where.endsWith(':2'))).toBe(true);
     expect(compatIn(source, 'packages/plugins/access/daemon/lib/document.ts').length).toBe(4);
+  });
+
+  test('no-compat allows only the two exact native Codex notice literals in their declared constant', () => {
+    const path = 'packages/plugins/codex/daemon/lib/fixed-layer.ts';
+    const source = file(
+      'codex-notices.ts',
+      [
+        'const CODEX_HIDDEN_NOTICES = [',
+        '  "hide_gpt5_1_migration_prompt",',
+        '  "hide_gpt-5.1-codex-max_migration_prompt",',
+        '  "hide_gpt5_2_migration_prompt",',
+        '  "prefix_hide_gpt5_1_migration_prompt",',
+        '];',
+        'const OTHER = "hide_gpt5_1_migration_prompt";',
+      ].join('\n'),
+    );
+    const found = compatIn(source, path);
+    expect(found.map(item => item.where)).toEqual([path + ':4', path + ':5', path + ':7']);
+    expect(compatIn(source, 'another-file.ts')).toHaveLength(5);
   });
 
   test('one-format planted: two numbers, a range, a union schema; a validity guard stays', () => {

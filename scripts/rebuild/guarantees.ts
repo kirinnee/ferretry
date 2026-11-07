@@ -159,6 +159,21 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
   R633: { owner: 'connections', reason: 'enforced by the Connections relay client (browser carrier walk)' },
   P28: { owner: 'app-shell', reason: 'enforced by the app shell device store' },
   R575: { owner: 'app-shell', reason: 'enforced by the app shell device store' },
+  I98: {
+    owner: 'vault',
+    reason:
+      'enforced by the Vault sign-in lock (`LoginObserver.pageSteer`, `steerOf`); Browsers tells it what a page did',
+  },
+  G33: {
+    owner: 'conversation',
+    reason:
+      "the composer action is Conversation's (design D2 #7, lead ruling port-conversation r1 #5): it acts on the draft Conversation holds; Terminals types it and Gate checks terminal/use, so both stay co-owners",
+  },
+  G164: {
+    owner: 'conversation',
+    reason:
+      "the log and work searches are Conversation's (lead ruling, port-conversation r2 #8): it matches on scrubbed text and cuts every snippet from it; the Kernel logs and the Vault redaction stay co-owners",
+  },
   G167: {
     owner: 'agenda',
     reason: 'POST /v1/push/seen moved to Agenda (DECISIONS-1 #4); Agenda computes the seen outcome',

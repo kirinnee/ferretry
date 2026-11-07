@@ -20,6 +20,7 @@ cli_contracts=(
   installer-timeouts
   installation-parity
   release-daemon
+  release-helpers
   released-version
   nix-packages
 )
@@ -40,9 +41,11 @@ name="$(jq -r '.bin | to_entries[0].key' "${cli_pkg}/package.json")"
 daemon_pkg="packages/core/kernel"
 daemon_name="$(jq -r '.bin | to_entries[0].key' "${daemon_pkg}/package.json")"
 [ -z "${daemon_name}" ] || [ "${daemon_name}" = "null" ] && echo "❌ no .bin entry in ${daemon_pkg}/package.json" >&2 && exit 1
-# EVERY executable the daemon package declares — its own and any helper that runs beside it. Each one
-# must reach every release channel, or the daemon ships without it.
-daemon_bins="$(jq -c '.bin | keys_unsorted' "${daemon_pkg}/package.json")"
+# The daemon's browser worker is the Browsers package's bin (the kernel never points into a plugin).
+browsers_pkg="packages/plugins/browsers"
+# EVERY executable the daemon ships with — its own, any helper its package declares beside it, and the
+# Browsers package's worker. Each one must reach every release channel, or the daemon ships without it.
+daemon_bins="$(jq -sc 'map(.bin | keys_unsorted) | add' "${daemon_pkg}/package.json" "${browsers_pkg}/package.json")"
 product="$(jq -r '.name' package.json)"
 [ -z "${product}" ] || [ "${product}" = "null" ] && echo "❌ no name in root package.json" >&2 && exit 1
 # Every workspace package, from the root manifest's own `workspaces` globs (a new package is in scope the
@@ -246,6 +249,56 @@ release-daemon)
   # executable files stops a CLI-only archive from being reported as a complete normal install.
   rg -qF 'for artifact in "${contents}"/*; do' scripts/release/install.sh
   rg -qF '[ "${#installed[@]}" -ge 2 ]' scripts/release/install.sh
+  ;;
+release-helpers)
+  # The daemon's browser worker ships beside it on every channel (round 2 of the Browsers port: no build
+  # produced it, so every installed daemon refused to start a browser). The Browsers package declares it,
+  # the compile step builds it, the GoReleaser shim swaps it in, the smoke refuses a target without it,
+  # and the Nix daemon package compiles every Browsers bin entry.
+  browsers_bins="$(jq -c '.bin // {} | keys_unsorted' "${browsers_pkg}/package.json")"
+  [ "${browsers_bins}" = "[]" ] && echo "❌ ${browsers_pkg}/package.json declares no browser worker bin entry" >&2 && exit 1
+  while IFS=$'\t' read -r entry; do
+    [ ! -f "${browsers_pkg}/${entry}" ] && echo "❌ browser worker entry is missing: ${browsers_pkg}/${entry}" >&2 && exit 1
+  done < <(jq -r '.bin | to_entries[] | .value' "${browsers_pkg}/package.json")
+
+  # compile.sh builds exactly the CLI's, the daemon's and the Browsers package's executables.
+  compiled="$(./scripts/release/compile.sh --list)"
+  compiled_names="$(cut -f3 <<<"${compiled}" | jq -Rsc 'split("\n") | map(select(length > 0)) | sort')"
+  expected_names="$(jq -sc 'map(.bin | keys_unsorted) | add | sort' "${cli_pkg}/package.json" "${daemon_pkg}/package.json" "${browsers_pkg}/package.json")"
+  [ "${compiled_names}" != "${expected_names}" ] &&
+    echo "❌ compile.sh builds ${compiled_names}, but the shipped packages declare ${expected_names}" >&2 && exit 1
+  while IFS=$'\t' read -r package entry _; do
+    [ ! -f "${package}/${entry}" ] && echo "❌ compile.sh would compile a missing entry: ${package}/${entry}" >&2 && exit 1
+  done <<<"${compiled}"
+
+  helpers_tmp="$(mktemp -d)"
+  trap 'rm -rf "${helpers_tmp}"' EXIT
+  mkdir -p "${helpers_tmp}/prebuilt" "${helpers_tmp}/dist" "${helpers_tmp}/stub"
+  # The shim swaps every compiled executable, the worker included, over GoReleaser's stub.
+  while IFS= read -r executable_name; do
+    printf '#!/bin/sh\necho %s\n' "${executable_name}" >"${helpers_tmp}/prebuilt/${executable_name}-linux-x64-baseline"
+    PREBUILT_DIR="${helpers_tmp}/prebuilt" ./scripts/release/goreleaser-shim.sh "${helpers_tmp}/stub/${executable_name}" linux amd64 >/dev/null
+    # sha256sum, not cmp: the hook's validator PATH has coreutils and no diffutils.
+    [ "$(sha256sum <"${helpers_tmp}/prebuilt/${executable_name}-linux-x64-baseline")" = "$(sha256sum <"${helpers_tmp}/stub/${executable_name}" 2>/dev/null)" ] ||
+      { echo "❌ goreleaser-shim.sh did not swap in ${executable_name}" >&2 && exit 1; }
+    cp "${helpers_tmp}/prebuilt/${executable_name}-linux-x64-baseline" "${helpers_tmp}/dist/"
+  done < <(jq -r '.[]' <<<"${expected_names}")
+  # The smoke passes with every executable present, and refuses a target whose browser worker is missing.
+  ./scripts/release/smoke.sh "${helpers_tmp}/dist/${name}-linux-x64-baseline" >/dev/null
+  while IFS= read -r worker; do
+    mv "${helpers_tmp}/dist/${worker}-linux-x64-baseline" "${helpers_tmp}/${worker}.aside"
+    if ./scripts/release/smoke.sh "${helpers_tmp}/dist/${name}-linux-x64-baseline" >/dev/null 2>&1; then
+      echo "❌ smoke.sh passed a target with no ${worker}" >&2
+      exit 1
+    fi
+    mv "${helpers_tmp}/${worker}.aside" "${helpers_tmp}/dist/${worker}-linux-x64-baseline"
+  done < <(jq -r '.[]' <<<"${browsers_bins}")
+
+  # The Nix daemon package compiles every Browsers bin entry beside fyd.
+  rg -qF "(lib.importJSON \"\${src}/${browsers_pkg}/package.json\").bin" nix/ferretry.nix || {
+    echo "❌ nix/ferretry.nix does not compile the ${browsers_pkg} bin entries beside the daemon" >&2
+    exit 1
+  }
   ;;
 released-version)
   # Both shipped executables stamp their own manifest version into what they report — the CLI's

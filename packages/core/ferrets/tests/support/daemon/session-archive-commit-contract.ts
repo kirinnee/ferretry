@@ -64,6 +64,19 @@ function documentsPort(docs: Map<string, Doc>, beforePersist: () => void | Promi
     sqlite: () => {
       throw new Error('the fixture injects its index');
     },
+    version: async () => undefined,
+    records: async () => ({ records: [], unreadable: 0 }),
+    tail: async () => ({ records: [], unreadable: 0 }),
+    stat: async () => undefined,
+    removeEmptyDirectory: async () => {
+      throw new Error('the fixture holds no folders');
+    },
+    createPrivateDirectory: async () => {
+      throw new Error('the fixture holds no folders');
+    },
+    pathOf: () => {
+      throw new Error('the fixture holds no paths');
+    },
     damaged: () => [],
   };
 }

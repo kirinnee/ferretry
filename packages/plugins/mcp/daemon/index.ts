@@ -7,13 +7,15 @@ import { ConfigMcpServers } from './adapters/config-servers.ts';
 import { RootMcpHarnessDocuments } from './adapters/harness-documents.ts';
 import { FetchMcpOAuthHttp } from './adapters/oauth-http.ts';
 import { webCryptoMcpOAuth } from './adapters/oauth-crypto.ts';
+import { sealedMcpOAuthSecrets } from './adapters/oauth-sealed-secrets.ts';
 import { StateMcpOAuthStateStore } from './adapters/oauth-state-store.ts';
 import { TransportMcpProbe } from './adapters/probe.ts';
 import { type FerretRoot, RootMcpProjectFiles } from './adapters/project-files.ts';
 import { McpCheckService } from './lib/inventory/check.ts';
 import { KnownAndFerretFolders } from './lib/inventory/folders.ts';
 import { McpDocumentUnreadable, McpInventoryService } from './lib/inventory/service.ts';
-import { mcpParts } from './lib/launch-parts.ts';
+import { ProjectMcpLaunch } from './lib/inventory/project-sign-in.ts';
+import { McpLaunchParts } from './lib/launch-parts.ts';
 import { McpOAuthService } from './lib/oauth/service.ts';
 import { SessionMcpService } from './lib/session/service.ts';
 import { inventoryRoutes, oauthRoutes, sessionRoutes } from './routes.ts';
@@ -30,15 +32,23 @@ const NOT_YET = (what: string): never => {
  * - Runtimes (accounts, profiles, the login scope's write), Projects (registered roots) and Catalogs belong to
  *   neighbours whose contracts MCP may not import yet. The inventory lists the user, project and local servers a
  *   ferret's own folder holds; a login add answers `mcp_runtime_unknown`.
- * - The Vault has no value getter and no sealed-document API (use, never read). Sign-in therefore writes the ACCESS
- *   token by name through `VaultApi.put`, but the refresh token and a registered client secret (the "internal" store),
- *   and reading a held token back to send to the provider (revoke, renew, a check's bearer), need a Vault operation
- *   that spends a named secret for this plugin. Until that contract change they refuse in words.
+ * - The Vault has no value getter (use, never read). Sign-in writes the ACCESS token by name through `VaultApi.put`;
+ *   the refresh token and a registered client secret (the "internal" store) rest in MCP's own sealed document,
+ *   `state/mcp/oauth-secrets.json` (today's `mcp-oauth-secrets.json`), opened through the Vault's sealed-document
+ *   port and handed to the sign-in service alone. Reading a held ACCESS token back (revoke it at sign-out, a check's
+ *   bearer) needs a Vault operation that spends a named secret for this plugin; until that contract change it is not
+ *   sent (sign-out revokes with the held refresh token, and answers `revoked: false` when there is none).
+ * - The Claude Code harness's home is not a root MCP may read, so whether a runtime DISABLED a project server
+ *   (today's `disabledMcpjsonServers` in its `.claude.json`, or its `settings.json`) cannot be seen. A launch fails
+ *   closed on that (`ProjectMcpLaunch`): project servers bind nothing until MCP may read the harness home's
+ *   approvals — no env variable, so the Vault opens no project token into the child, and no local-scope entry. Their
+ *   sign-ins are still renewed at launch. Reading the harness home needs a root MCP may open (a kernel/Ferrets
+ *   decision), not a change here.
  */
 export default implementDaemon(manifest, {
   build(ctx) {
     const { kernel } = ctx;
-    const { ferrets, vault } = ctx.needs;
+    const { ferrets, vault, sealed } = ctx.needs;
 
     // ── what a ferret's folder is: these folders are inventory read roots, never project registrations ────────────
     const owners = new Map<string, FerretId>();
@@ -70,12 +80,6 @@ export default implementDaemon(manifest, {
       },
       remove: async (name: SecretName): Promise<boolean> => await vault.remove(name),
     };
-    const sealed = {
-      list: async (): Promise<readonly SecretSummary[]> => [],
-      put: async (): Promise<SecretSummary> => NOT_YET('Keeping a refresh token or a client secret'),
-      remove: async (): Promise<boolean> => false,
-      values: async (): Promise<ReadonlyMap<SecretName, string>> => new Map(),
-    };
     const oauth = new McpOAuthService({
       servers: new ConfigMcpServers(items),
       http: new FetchMcpOAuthHttp(kernel.fetch),
@@ -84,7 +88,41 @@ export default implementDaemon(manifest, {
       state: new StateMcpOAuthStateStore(kernel.state),
       secrets,
       values: { values: async () => new Map() },
-      internal: sealed,
+      // Refresh tokens and client secrets: MCP's own sealed document, held by nothing but this service (S8, S174).
+      internal: sealedMcpOAuthSecrets(sealed, kernel.state),
+    });
+
+    // ── what a ferret's folder holds: one source for the inventory and the launch ──────────────────────────────────
+    const folders = new KnownAndFerretFolders(async () => [], refreshOwners);
+    const documents = new RootMcpHarnessDocuments(
+      path => workRootFor(path),
+      (text, format) => {
+        if (format === 'json') return JSON.parse(text) as unknown;
+        return NOT_YET('Reading a Codex config.toml');
+      },
+    );
+    const held = async (): Promise<ReadonlySet<SecretName>> =>
+      new Set((await vault.names()).map(summary => summary.name));
+
+    // ── every launch: renew the sign-ins it uses, then name them (today's launch environment, `modules/mcp.ts`) ──
+    const launch = new McpLaunchParts({
+      items,
+      held,
+      renewal: oauth,
+      project: async spec => {
+        // The ferret folders are the read roots, so they are read fresh before the launch's own folder is.
+        await refreshOwners();
+        // The launch is its own account: 5.0 carries the runtime, harness and home on the spec (no Runtimes import).
+        // The home is outside every ferret folder, so its approvals read as unreadable and nothing is bound (GAP above).
+        const agent = spec.runtime ?? spec.ferret;
+        return await new ProjectMcpLaunch({
+          accounts: async () => [{ runtime: agent, wrapper: agent, harness: spec.harness, home: spec.home }],
+          folders,
+          documents,
+          secrets: { held },
+          renewal: oauth,
+        }).share(agent, spec.folder);
+      },
     });
 
     // ── inventory and check ────────────────────────────────────────────────────────────────────────────────────────
@@ -96,15 +134,9 @@ export default implementDaemon(manifest, {
           runtimes: [],
           ...(item.auth === undefined ? {} : { auth: item.auth }),
         })),
-      folders: new KnownAndFerretFolders(async () => [], refreshOwners),
+      folders,
       connections: async () => await oauth.connections(),
-      documents: new RootMcpHarnessDocuments(
-        path => workRootFor(path),
-        (text, format) => {
-          if (format === 'json') return JSON.parse(text) as unknown;
-          return NOT_YET('Reading a Codex config.toml');
-        },
-      ),
+      documents,
       ferrets: {
         get: async id => {
           const ferret = await ferrets.get(id as FerretId);
@@ -219,7 +251,7 @@ export default implementDaemon(manifest, {
       },
       provides: { mcp: api },
       hooks: {
-        'launch.parts': () => [{ id: 'mcp', item: { parts: async spec => mcpParts(items(), spec.harness) } }],
+        'launch.parts': () => [{ id: 'mcp', item: launch }],
       },
     };
   },

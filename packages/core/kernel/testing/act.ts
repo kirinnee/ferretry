@@ -60,6 +60,7 @@ export function testActRunner(options: {
       let answer: ReturnType<InputHolds['decide']>;
       try {
         if (holds === undefined) throw new Error('no InputHolds bound');
+        if (holds.prepare !== undefined) await holds.prepare(target, op, actor);
         answer = holds.decide(target, op, actor);
       } catch {
         answer = { refused: 'holds_unavailable' };
@@ -70,7 +71,15 @@ export function testActRunner(options: {
       }
       options.record?.({ target, op, actor, outcome: 'ran' });
       const raw = await fn({ answer, actor });
-      return ok(showsSomething(op) ? raw : closeAck(raw, options.minted));
+      const result = showsSomething(op) ? raw : closeAck(raw, options.minted);
+      if (showsSomething(op) || (result as { status: string }).status === 'done') {
+        try {
+          holds?.observed?.(target, op, actor);
+        } catch {
+          // as the kernel: the act already happened
+        }
+      }
+      return ok(result);
     };
     const queued = (queues.get(key) ?? Promise.resolve()).then(run, run);
     queues.set(

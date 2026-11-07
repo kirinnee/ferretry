@@ -9,8 +9,6 @@ import type {
   LayeredProfileView,
   MachineAuthority,
   MachineView,
-  Recommendation,
-  RecommendationRequest,
   RuntimeCatalog,
   RuntimeView,
   SetupScan,
@@ -194,39 +192,6 @@ export const scan = (overrides: Partial<SetupScan> = {}): SetupScan => ({
 
 export const ACCOUNT_ID = 'claude-you';
 
-export function recommendation(overrides: Partial<Recommendation> = {}): Recommendation {
-  return {
-    task: 'port the remaining CLI command groups',
-    classification: 'implementation',
-    reasoning: 'a long, many-checkpoint port benefits from a high-context implementer',
-    roles: [
-      {
-        role: 'implementer',
-        why: 'the work is mostly writing modules with tests',
-        primary: {
-          agent: 'codex',
-          accountId: ACCOUNT_ID,
-          model: 'gpt-5.6',
-          tradeoff: 'expensive, but holds the whole unit',
-          score: 0.91,
-        },
-        alternatives: [
-          {
-            agent: 'claude-code',
-            accountId: ACCOUNT_ID,
-            model: 'opus',
-            tradeoff: 'cheaper, shorter context',
-            score: 0.7,
-          },
-        ],
-      },
-    ],
-    exclusions: [],
-    warnings: [],
-    ...overrides,
-  };
-}
-
 /** Answers for every gateway call, each overridable per test; every call is recorded. */
 export interface FakeAnswers {
   machine: () => MachineView;
@@ -236,7 +201,6 @@ export interface FakeAnswers {
   stage: (change: AccountChange) => AccountChangeView;
   apply: () => AccountChangeOutcome;
   scan: () => SetupScan;
-  recommend: (request: RecommendationRequest) => Recommendation;
 }
 
 class FakeGateway implements IRuntimesGateway {
@@ -252,7 +216,6 @@ class FakeGateway implements IRuntimesGateway {
       stage: change => changeView(change),
       apply: () => committed(),
       scan: () => scan(),
-      recommend: () => recommendation(),
       ...overrides,
     };
   }
@@ -290,9 +253,6 @@ class FakeGateway implements IRuntimesGateway {
   }
   scan() {
     return this.#record('scan', [], this.answers.scan);
-  }
-  recommend(request: RecommendationRequest) {
-    return this.#record('recommend', [request], () => this.answers.recommend(request));
   }
 }
 

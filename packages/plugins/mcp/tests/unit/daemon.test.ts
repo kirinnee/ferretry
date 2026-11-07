@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import type { ApiRequest, CallContext } from '@ferretry/kernel/contract';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
-import { FakeVault } from '@ferretry/core-vault/contract/testing';
+import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
 import daemon from '../../daemon/index.ts';
 import manifest from '../../manifest.ts';
 
@@ -12,7 +12,7 @@ test('G177 the daemon refuses project preview and add without a registered-proje
   let opened = 0;
   const half = daemon.build?.({
     manifest,
-    needs: { ferrets, vault: new FakeVault() },
+    needs: { ferrets, vault: new FakeVault(), sealed: new FakeSealedDocuments() },
     uses: {},
     hooks: {} as never,
     kernel: {

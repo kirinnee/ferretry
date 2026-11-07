@@ -4,10 +4,7 @@
  */
 
 import { describe, it } from 'bun:test';
-import {
-  RELAY_SESSION_CONCLUDED_CLOSE_CODE,
-  RELAY_SESSION_CONCLUDED_CLOSE_REASON,
-} from '../../../src/session/wire/index.ts';
+import { RELAY_SESSION_CONCLUDED_CLOSE_CODE, RELAY_SESSION_CONCLUDED_CLOSE_REASON } from '@ferretry/kernel/session';
 import { RELAY_CLOSE_CODES, SESSION_PROTOCOL_ID } from '../../../src/session/wire/index.ts';
 import should from 'should';
 import {

@@ -10,6 +10,7 @@
 import { SignInRuleStageIdSchema, TaskPlanStageIdSchema, TwoFactorStageIdSchema } from '@ferretry/core-gate/contract';
 import { SecretNameSchema } from '@ferretry/core-vault/contract';
 import { z } from 'zod';
+import { LoginRecipeProposalIdSchema } from './routes/login-recipes.ts';
 
 export { SignInRuleStageIdSchema, TaskPlanStageIdSchema, TwoFactorStageIdSchema };
 
@@ -141,7 +142,7 @@ export const CopyHandleSchema = z
 /**
  * What a sign-in approval card names, from today's agenda refs: a task plan or copy plan (answered by the plan's
  * own routes, with a passkey), a ferret's rule suggestion (opens the create sheet with NOTHING ticked), a suspended
- * rule, or an approve-on-phone push. Each names an id only, never an account or a value; Asks' generic answer
+ * rule, an approve-on-phone push, or a staged 2FA seed. Each names an id only, never an account or a value; Asks' generic answer
  * creates nothing. Only the daemon raises one.
  */
 export const SignInApprovalRefSchema = z.discriminatedUnion('kind', [
@@ -150,6 +151,9 @@ export const SignInApprovalRefSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('rule-suggestion'), suggestion: SignInRuleSuggestionIdSchema }),
   z.strictObject({ kind: z.literal('rule-suspended'), rule: SignInRuleIdSchema }),
   z.strictObject({ kind: z.literal('phone-approval'), id: PhoneApprovalIdSchema }),
+  z.strictObject({ kind: z.literal('recipe-proposal'), signIn: SignInIdSchema, proposal: LoginRecipeProposalIdSchema }),
+  /** A staged 2FA seed waiting for the owner's passkey (S101): the stage alone, never the account. */
+  z.strictObject({ kind: z.literal('two-factor-seed'), stage: TwoFactorStageIdSchema }),
 ]);
 export type SignInApprovalRef = z.infer<typeof SignInApprovalRefSchema>;
 

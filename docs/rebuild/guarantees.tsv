@@ -31,7 +31,7 @@ G29	kept	terminals	-	attach proof	grants	G29
 G30	kept	terminals	gate	behaviour as written	grants	G30
 G31	kept	claude-code	codex,gate	behaviour as written	grants	G31
 G32	kept	claude-code	codex,gate	behaviour as written	grants	G32
-G33	kept	terminals	gate	behaviour as written	grants	G33
+G33	kept	conversation	terminals,gate	behaviour as written	grants	G33
 G34	kept	terminals	gate	behaviour as written	grants	G34
 G35	kept	gate	-	behaviour as written	grants	G35
 G36	kept	gate	-	`tests/unit/runtime/mounts/shared-drafts.test.ts`	grants	G36
@@ -162,7 +162,7 @@ G160	kept	gate	-	`GET /v1/grants/audit`, `fy daemon config history`	grants	G160
 G161	kept	gate	-	behaviour as written	grants	G161
 G162	kept	conversation	claude-code,codex	behaviour as written	grants	G162
 G163	kept	kernel	vault	behaviour as written	grants	G163
-G164	kept	kernel	vault	behaviour as written	grants	G164
+G164	kept	conversation	kernel,vault	behaviour as written	grants	G164
 G165	kept	access	gate	behaviour as written	grants	G165
 G166	kept	access	-	behaviour as written	grants	G166
 G167	kept	agenda	access,gate	behaviour as written	grants	G167
@@ -411,7 +411,7 @@ I94	kept	vault	-	`until-moved-on`	input-requests	I94
 I95	kept	vault	-	behaviour as written	input-requests	I95
 I96	kept	browsers	vault	dummy probe, `aborted`	input-requests	I96
 I97	kept	browsers	vault	`siteOf`	input-requests	I97
-I98	kept	browsers	vault	`LoginObserver.pageSteer`, `steerOf`	input-requests	I98
+I98	kept	vault	browsers	`LoginObserver.pageSteer`, `steerOf`	input-requests	I98
 I99	kept	browsers	vault	behaviour as written	input-requests	I99
 I100	kept	browsers	vault	behaviour as written	input-requests	I100
 I101	kept	vault	-	`[redacted:input !A7]`	input-requests	I101

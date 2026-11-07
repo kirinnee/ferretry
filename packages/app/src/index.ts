@@ -10,15 +10,26 @@ export {
   CARRIER_TAKERS,
   CLAIM_TAKERS,
   type CarrierDialer,
+  type CarrierControl,
   type ConnectPorts,
   type DeviceClaims,
+  type DirectoryFetch,
+  type PairedOver,
+  type PairingAttempt,
+  type PairingCarriers,
+  type PairingLeg,
   type PairDirectInput,
   type PairingKey,
   provideToShell,
   type ShellAppImplementation,
   type ShellProvides,
 } from './connect/provides.ts';
-export type { DirectDial } from './connect/connector.ts';
+export {
+  CONTROL_UNREACHABLE,
+  type DirectDial,
+  PairingOutcomeUnknownError,
+} from './connect/connector.ts';
+export { daemonOfClient } from './connect/daemon-of.ts';
 export { directDial, type DirectDialOptions, directSessionUrl, type SocketLike } from './session/direct-dial.ts';
 export {
   PAIRING_REFUSED_REASON,
@@ -38,10 +49,14 @@ export {
 export { RelayKeyHandleError } from './session/webcrypto.ts';
 export {
   DaemonIdSchema,
+  HEARTBEAT_GRACE_SECONDS,
+  HEARTBEAT_REQUEST,
+  HEARTBEAT_RESPONSE,
   type OwnerPayload,
   OwnerPayloadSchema,
   type PrivateKeyHandle,
   type RelayCrypto,
+  RELAY_CLOSE_CODES,
 } from './session/wire/index.ts';
 
 // ─── the paired daemons ────────────────────────────────────────────────────────────────────────────────────────────
@@ -84,6 +99,8 @@ export {
   setDeviceOverride,
 } from './layout/layout.ts';
 export { FRAME_SLOTS, isFrameSlot, isSlotName, PANEL_SLOTS, SHELL_ITEMS } from './layout/slots.ts';
+/** @public A plugin screen mounts the panels contributed to a slot it offers (§5.2). */
+export { PanelSlot } from './shell/views.tsx';
 export {
   COLOUR_TOKENS,
   SPACING_TOKENS,

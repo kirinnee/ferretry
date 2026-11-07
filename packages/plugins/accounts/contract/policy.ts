@@ -43,6 +43,10 @@ export const SKIP_UNRECORDED = { skip: 'not kept in the audit log today' } as co
 export const SKIP_BY_SERVICE = {
   skip: 'the service records security.changed itself when a rule or plan really changes',
 } as const satisfies AuditDeclaration;
+/** A 2FA key route keeps its own `secrets.changed` record (account id, action, key or stage id, proof) through Gate. */
+export const SKIP_BY_ROUTE = {
+  skip: 'the route records secrets.changed itself, with the account, the action and the key or stage id',
+} as const satisfies AuditDeclaration;
 export const GUARD_NONE = {
   none: 'account names, places, ids and rule state only; every saved value stays sealed in the Vault',
 } as const satisfies GuardDeclaration;

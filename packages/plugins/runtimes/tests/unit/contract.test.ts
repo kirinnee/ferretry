@@ -28,13 +28,12 @@ describe('runtimes contract', () => {
     expect(result.ok).toBe(true);
   });
 
-  test('the manifest owns seventeen routes and requires Logins', () => {
+  test('the manifest owns sixteen routes and requires Logins', () => {
     const keys = manifest.actions.routes.map(route => route.key);
-    expect(keys).toHaveLength(17);
+    expect(keys).toHaveLength(16);
     expect(keys.filter(key => !key.includes(' /v1/runtimes'))).toEqual([
       'GET /v1/ferrets/:id/runtime-models',
       'POST /v1/ferrets/:id/runtime',
-      'POST /v1/recommend',
     ]);
     expect(Object.keys(manifest.needs)).toEqual(['ferrets', 'logins']);
   });
@@ -56,15 +55,15 @@ describe('runtimes contract', () => {
     expect(axis('POST /v1/runtimes/proposals')).toBe('configure');
     expect(axis('GET /v1/runtimes/setup/scan')).toBe('configure');
     expect(axis('GET /v1/runtimes/export')).toBe('configure');
-    expect(manifest.actions.routes.find(route => route.key === 'POST /v1/recommend')?.capability).toBeUndefined();
   });
 
-  test('no two verbs are the same and none is a bare setup or import', () => {
+  test('no two verbs are the same and none is a bare setup or import, and a harness is linked', () => {
     const verbs = manifest.actions.cli.map(entry => entry.verb);
     expect(new Set(verbs).size).toBe(verbs.length);
     expect(verbs).not.toContain('setup');
     expect(verbs).not.toContain('import');
-    expect(verbs).toContain('runtime import');
+    expect(verbs).not.toContain('runtime import');
+    expect(verbs).toContain('runtime link');
   });
 
   test('a runtime id is a name', () => {

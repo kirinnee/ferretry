@@ -14,6 +14,7 @@ function subject() {
       const stdout = program === 'lsof' ? '424242\n' : program === 'ps' ? '424242 ttys001\n' : 'UserShell: /bin/zsh\n';
       return { exitCode: 0, signal: null, stdout, stderr: '' };
     },
+    runBytes: () => Promise.reject(new Error('the fixture runs no bytes')),
     start: () => {
       throw new Error('no child should be started');
     },

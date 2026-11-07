@@ -1,0 +1,251 @@
+import { describe, it } from 'bun:test';
+import { type AccountIndexDocument, type LoginRecipeProposal, type Place } from '../../../contract/routes/index.ts';
+import should from 'should';
+import { AccountDirectory, LoginDirectory, SecretStoreError } from './lib.ts';
+import { FakeSecretCipher, MemoryLoginIndex, plantSeed } from './support.ts';
+import { CLOCK, CountingSealed, daemonOver, SEED } from './support.ts';
+
+/**
+ * The account store's refusals, limits and owner answers, one per rule: every way a change is refused leaves the store
+ * as it was, and every way it is answered says which thing for the person to do.
+ */
+
+const site = (...domains: string[]): Place => ({ kind: 'site', domains, match: domains });
+const keyOf = (n: number) => `L${n.toString(16).toUpperCase().padStart(24, '0')}`;
+
+function world(options: { readonly seals?: boolean } = {}) {
+  const index = new MemoryLoginIndex();
+  const sealed = new CountingSealed();
+  let key = 0;
+  let signIn = 0;
+  const ids = {
+    newKey: () => keyOf(++key),
+    newSignInId: () => `si_${(++signIn).toString(16).padStart(16, '0')}`,
+  };
+  const daemon = daemonOver(index, sealed, ids);
+  const directory =
+    options.seals === false
+      ? new AccountDirectory(index, sealed, new FakeSecretCipher(), CLOCK, ids)
+      : daemon.directory;
+  const logins = new LoginDirectory(index, sealed, new FakeSecretCipher(), CLOCK, ids);
+  return { index, sealed, vault: daemon.vault, directory, logins };
+}
+
+const failure = async (work: Promise<unknown>) =>
+  (await work.catch((error: unknown) => error)) as Error & { refusal?: string; failure?: string };
+
+const proposal = (id: string, recipe: string, base?: string): LoginRecipeProposal => ({
+  id,
+  recipe,
+  ...(base === undefined ? {} : { base }),
+  why: 'the button moved',
+  sessionId: 'session-1',
+  proposedAt: '2026-10-31T10:00:00.000Z',
+});
+
+describe('a change the store rules refuse', () => {
+  it('should refuse a record its schema refuses, writing nothing', async () => {
+    const w = world();
+    const refused = await failure(w.directory.putAccount('LONG', { label: 'x'.repeat(200) }));
+    should(refused.refusal).equal('invalid_change');
+    should(w.index.document).be.undefined();
+  });
+
+  it('should refuse a recipe that is not one a recipe may be, from a caller that skipped the route', async () => {
+    const w = world();
+    await w.directory.putAccount('SITE', { label: 'Site' });
+    const refused = await failure(w.directory.addSignIn('SITE', { place: site('site.example'), recipe: 'a​b' }));
+    should(refused.refusal).equal('invalid_change');
+  });
+
+  it('should refuse a seventeenth sign-in of one account as full', async () => {
+    const w = world();
+    await w.directory.putAccount('MANY', { label: 'Many' });
+    for (let n = 0; n < 16; n += 1) await w.directory.addSignIn('MANY', { place: site(`s${String(n)}.example`) });
+    const refused = await failure(w.directory.addSignIn('MANY', { place: site('one-more.example') }));
+    should(refused).be.instanceOf(SecretStoreError);
+    should(refused.failure).equal('full');
+  });
+
+  it('should refuse a sign-in past the store limit as full', async () => {
+    const w = world();
+    const accounts: AccountIndexDocument['accounts'] = {};
+    const signIns: AccountIndexDocument['signIns'] = {};
+    for (let a = 0; a < 32; a += 1) {
+      accounts[`A${String(a)}`] = {
+        key: keyOf(1000 + a),
+        label: `a${String(a)}`,
+        seals: {},
+        createdAt: 't',
+        updatedAt: 't',
+      };
+      for (let s = 0; s < 16; s += 1)
+        signIns[`si_${(a * 16 + s + 1).toString(16).padStart(16, '0')}`] = {
+          account: keyOf(1000 + a),
+          place: site(`h${String(s)}.example`),
+          createdAt: 't',
+          updatedAt: 't',
+        };
+    }
+    w.index.document = { format: 1, accounts, signIns };
+    await w.directory.putAccount('ROOM', { label: 'Room' });
+    const refused = await failure(w.directory.addSignIn('ROOM', { place: site('room.example') }));
+    should(refused.failure).equal('full');
+  });
+
+  it('should refuse a merge that would give an account more sign-ins than one may have', async () => {
+    const w = world();
+    await w.directory.putAccount('KEEP', { label: 'Keep' });
+    await w.directory.putAccount('FROM', { label: 'From' });
+    for (let n = 0; n < 9; n += 1) {
+      await w.directory.addSignIn('KEEP', { place: site(`k${String(n)}.example`) });
+      await w.directory.addSignIn('FROM', { place: site(`f${String(n)}.example`) });
+    }
+    should((await failure(w.directory.merge('KEEP', 'FROM'))).failure).equal('full');
+  });
+
+  it('S87 I187 should refuse a merge that would give an account more 2FA keys than one may have', async () => {
+    const w = world();
+    const factor = (n: number, label: string) => ({
+      id: `tf_${n.toString(16).padStart(12, '0')}`,
+      kind: 'sms' as const,
+      label,
+      addedAt: 't',
+      addedBy: 'owner' as const,
+    });
+    w.index.document = {
+      format: 1,
+      accounts: {
+        KEEP: {
+          key: keyOf(1),
+          label: 'Keep',
+          seals: {},
+          factors: [1, 2, 3, 4, 5].map(n => factor(n, `keep ${String(n)}`)),
+          createdAt: 't',
+          updatedAt: 't',
+        },
+        FROM: {
+          key: keyOf(2),
+          label: 'From',
+          seals: {},
+          // One label KEEP already has: that key is not moved (it holds no value).
+          factors: [factor(6, 'KEEP 1'), ...[7, 8, 9, 10].map(n => factor(n, `from ${String(n)}`))],
+          createdAt: 't',
+          updatedAt: 't',
+        },
+      },
+      signIns: {},
+    };
+    should((await failure(w.directory.merge('KEEP', 'FROM'))).refusal).equal('invalid_change');
+  });
+});
+
+describe('a merge, the rest of its rules', () => {
+  it('S83 should refuse a merge that would leave a sign-in going via its own account', async () => {
+    const w = world();
+    await w.directory.putAccount('KEEP', { label: 'Keep' });
+    await w.directory.putAccount('FROM', { label: 'From' });
+    await w.directory.addSignIn('FROM', { place: site('from.example') });
+    await w.directory.addSignIn('KEEP', { place: site('keep.example'), method: { kind: 'google', via: 'FROM' } });
+    const refused = await failure(w.directory.merge('KEEP', 'FROM'));
+    should(refused.refusal).equal('merge_refused');
+    should(refused.message).containEql('via itself');
+  });
+
+  it('should drop the same seed from FROM, keep keys with no value by label, and carry "keep apart" over', async () => {
+    const w = world();
+    await w.directory.putAccount('KEEP', { label: 'Keep' });
+    await w.directory.putAccount('FROM', { label: 'From' });
+    await w.directory.putAccount('OTHER', { label: 'Other' });
+    for (const id of ['KEEP', 'FROM']) await plantSeed(w.logins.accounts, id, SEED);
+    const from = w.index.accounts.accounts.FROM as NonNullable<AccountIndexDocument['accounts']['FROM']>;
+    w.index.document = {
+      ...w.index.accounts,
+      accounts: {
+        ...w.index.accounts.accounts,
+        FROM: {
+          ...from,
+          factors: [
+            ...(from.factors ?? []),
+            { id: 'tf_0000000000f1', kind: 'sms', label: 'Phone', endsWith: '42', addedAt: 't', addedBy: 'owner' },
+          ],
+        },
+      },
+    };
+    await w.directory.apart('FROM', 'OTHER');
+
+    const merged = await w.directory.merge('KEEP', 'FROM');
+
+    should(merged.factors.map(key => [key.kind, key.label, key.automatic])).deepEqual([
+      ['totp', 'Authenticator app', true],
+      ['sms', 'Phone', false],
+    ]);
+    const keep = w.index.accounts.accounts.KEEP;
+    should(keep?.apartFrom).deepEqual([w.index.accounts.accounts.OTHER?.key]);
+    should(w.index.accounts.accounts.OTHER?.apartFrom).be.undefined();
+  });
+
+  it('S83 should refuse to merge where nothing can compare or move a sealed value', async () => {
+    const w = world({ seals: false });
+    await w.directory.putAccount('KEEP', { label: 'Keep', password: 'one-UNIQUE-pw-1' });
+    await w.directory.putAccount('FROM', { label: 'From', password: 'one-UNIQUE-pw-1' });
+    should((await failure(w.directory.merge('KEEP', 'FROM'))).message).containEql('cannot compare');
+    await w.directory.putAccount('KEEP', { password: null });
+    should((await failure(w.directory.merge('KEEP', 'FROM'))).message).containEql('cannot move');
+  });
+
+  it('should drop a deleted account from every "keep apart" list', async () => {
+    const w = world();
+    await w.directory.putAccount('ONE', { label: 'One' });
+    await w.directory.putAccount('TWO', { label: 'Two' });
+    await w.directory.putAccount('THREE', { label: 'Three' });
+    await w.directory.apart('ONE', 'TWO');
+    await w.directory.apart('ONE', 'THREE');
+    await w.directory.removeAccount('TWO');
+    should(w.index.accounts.accounts.ONE?.apartFrom).deepEqual([w.index.accounts.accounts.THREE?.key]);
+    await w.directory.removeAccount('THREE');
+    should(w.index.accounts.accounts.ONE).not.have.property('apartFrom');
+  });
+
+  it('should refuse to keep an account apart from itself', async () => {
+    const w = world();
+    await w.directory.putAccount('ONE', { label: 'One' });
+    should((await failure(w.directory.apart('ONE', 'ONE'))).refusal).equal('invalid_change');
+  });
+});
+
+describe('a recipe proposal on one sign-in', () => {
+  it('should file, card, approve and decline by sign-in, and refuse one that is gone', async () => {
+    const w = world();
+    await w.directory.putAccount('SITE', { label: 'Site' });
+    const { id } = await w.directory.addSignIn('SITE', { place: site('site.example'), recipe: 'old' });
+
+    should((await w.directory.proposeSignIn(id, proposal('rp_0000000000000001', 'new', 'old'))).applied).be.false();
+    await w.directory.proposalCardSignIn(id, 'rp_0000000000000001', 'A1');
+    should((await w.directory.list()).signIns[0]?.proposals?.[0]?.agendaItemId).equal('A1');
+    const approved = await w.directory.decideSignIn(id, 'rp_0000000000000001', 'approve');
+    should(approved.signIn.recipe).equal('new');
+    should(approved.signIn.recipeVersion).equal(2);
+    should((await failure(w.directory.decideSignIn(id, 'rp_0000000000000001', 'decline'))).refusal).equal(
+      'unknown_proposal',
+    );
+    should(
+      (await failure(w.directory.proposeSignIn('si_00000000000000ff', proposal('rp_0000000000000002', 'x')))).refusal,
+    ).equal('unknown_sign_in');
+  });
+});
+
+describe('an older client over the account store, the rest of its refusals', () => {});
+
+describe('the boot step when reading the index fails for another reason', () => {
+  it('S70 should raise, not call it damaged: only a store error is one', async () => {
+    const sealed = new CountingSealed();
+    const broken = new MemoryLoginIndex();
+    broken.read = async () => {
+      throw new Error('the disk went away');
+    };
+    const refused = await failure(daemonOver(broken, sealed).directory.prepare());
+    should(refused.message).equal('the disk went away');
+    should(sealed.writes).equal(0);
+  });
+});

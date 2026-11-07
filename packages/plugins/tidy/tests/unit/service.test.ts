@@ -35,7 +35,7 @@ async function setup(boardApi: BoardApi | undefined = board()) {
       kind: 'feature',
       title,
       summary: '',
-      ask: 'do it',
+      ask: { text: 'do it', source: 'test' },
       premise: '',
       context: '',
       terms: [],
