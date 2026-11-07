@@ -32,6 +32,8 @@ cd "${root_dir}"
 declare -A call_allowlist=(
   ['packages/app/src/connect/directory.ts']='the one public, credential-free GET of the hosted relay directory advertisement (R580), pinned to the build-time directory origin and refusing every other address and method; it never builds a daemon request'
   ['packages/app/src/worker/service-worker.ts']='the service worker fetches this site'"'"'s own signed release files (FetchReleaseNetwork, pinned to its own origin and refusing a cross-origin answer) and passes an unanswered same-origin request through unchanged; it never builds a daemon request'
+  ['packages/plugins/conversation/app/render/fy-render-media.tsx']='the read of one credential-free cors https image a message links to, from a stranger'"'"'s server with credentials omitted and no referrer; it never builds a daemon request'
+  ['packages/plugins/conversation/app/render/fy-render-sandbox.tsx']='the parent'"'"'s fetch of one pinned library bundle from the app'"'"'s own origin (the sandbox frame may request nothing itself), credentials omitted and redirects refused; it never builds a daemon request'
   ['packages/plugins/voice/app/shell-voice.ts']='defines browserFetch, the one wrapper around the builtin; speech-model downloads and speed-up provider calls never talk to a daemon (every daemon request goes through the plugin client: useDaemonFetch refuses rather than fall back to it)'
 )
 
@@ -39,7 +41,7 @@ scan_files=()
 while IFS= read -r -d '' path; do
   [ -f "${path}" ] || continue
   scan_files+=("${path}")
-done < <(git ls-files -z -co --exclude-standard -- 'packages/app/src' 'packages/core/*/app/*' 'packages/plugins/*/app/*' |
+done < <(git ls-files -z -co --exclude-standard -- 'packages/app/src' ':(glob)packages/core/*/app/**' ':(glob)packages/plugins/*/app/**' |
   { grep -zE '\.(ts|tsx|mts|cts|js|jsx)$' || true; })
 
 if [ "${#scan_files[@]}" -eq 0 ]; then

@@ -44,6 +44,11 @@ export interface ShellModel {
 
 const ShellContext = createContext<ShellModel | null>(null);
 
+/** The shell model, or `null` outside a shell (a harness, a test): a reader there follows the plain href. */
+export function useOptionalShell(): ShellModel | null {
+  return useContext(ShellContext);
+}
+
 export function useShell(): ShellModel {
   const model = useContext(ShellContext);
   if (model === null) throw new Error('useShell must be rendered inside ShellProvider');

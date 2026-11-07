@@ -1,7 +1,8 @@
 /**
  * The app's production bundle and dev server. Copied from today's PWA `vite.config.ts`, narrowed to the shell: the
- * speech workers, Leaflet's and the markdown decoder's Trusted Types transforms and the fy-render libraries belong to
- * the plugins that use them (Voice, Conversation) and come with their app halves.
+ * speech workers belong to the plugin that uses them (Voice) and come with its app half. Leaflet's and the markdown
+ * decoder's Trusted Types transforms (`scripts/trusted-types-plugins.ts`) and the fy-render sandbox shell and library
+ * bundles (`scripts/build-fy-render-libs.ts`, run before every dev server and build) serve Conversation's blocks.
  *
  * `outDir`, `assetsDir` and `base` are the Pages deployment's contract: `public/_headers` gives `/assets/*` an
  * immutable year, the landing page owns `/` and the app document is `/app/`, and every chunk stays root-absolute so
@@ -17,6 +18,7 @@ import tailwindcss from 'tailwindcss';
 import { defineConfig } from 'vite';
 import tailwindConfig from './tailwind.config.ts';
 import { textScalePostcss } from './scripts/text-scale-postcss.ts';
+import { entityDecoderTrustedTypes, leafletTrustedTypes } from './scripts/trusted-types-plugins.ts';
 import { HOSTED_RELAY_DIRECTORY_ORIGIN } from '../plugins/connections/contract/hosted-directory.ts';
 
 /** The release version this app is built from (`release.json`, §10.6), stamped into the HTML. */
@@ -39,6 +41,8 @@ export default defineConfig({
     ),
   },
   plugins: [
+    leafletTrustedTypes,
+    entityDecoderTrustedTypes,
     {
       name: 'fy-release-version',
       transformIndexHtml: {
