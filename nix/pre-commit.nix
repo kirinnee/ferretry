@@ -213,6 +213,18 @@ pre-commit-lib.run {
     # conflict-markers gate does — the opener reaches `main` through the file nobody was looking at.
     # The two files that must SHOW the syntax to teach it are exempt by exact path; see
     # scripts/validate/no-fy-render-in-docs.sh and docs/fy-render.md.
+    # The one-time v4 -> v5 converter stays outside the product: no workspace glob or root tsconfig include reaches
+    # `migration/`, no file outside it, docs and this wiring names it, and it is private with no bin. Runs on every
+    # commit and scans the whole tree, because a leak arrives through the file nobody was looking at; its own
+    # planted-violation self-test runs first. See scripts/validate/migration-isolated.sh.
+    a-migration-isolated = {
+      enable = true;
+      name = "v4 to v5 converter stays outside the product";
+      entry = validator "scripts/validate/migration-isolated.sh";
+      pass_filenames = false;
+      language = "system";
+    };
+
     # Test code never kills by pattern. Suites run from inside live agents' panes, and `pkill -f`
     # matches a regular expression against every command line on the machine — the live tmux server's
     # included. Teardowns kill by pid or by an exact `-S <own temp socket>` argv; see
