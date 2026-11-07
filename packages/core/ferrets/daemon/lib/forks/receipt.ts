@@ -29,7 +29,7 @@
  * start.
  */
 
-import { InstantSchema } from '@ferretry/protocol';
+import { InstantSchema } from '../protocol/common.ts';
 import { type SessionTransferPlan, SessionTransferPlanSchema } from '../protocol/session-transfer.ts';
 import { z } from 'zod';
 import { deriveTransferPlanId } from '../transfer/prepare.ts';

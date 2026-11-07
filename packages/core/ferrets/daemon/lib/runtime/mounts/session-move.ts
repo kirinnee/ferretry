@@ -1,4 +1,4 @@
-import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
+import { FY_REQUEST_ID_HEADER } from '../../protocol/common.ts';
 import { type SessionRelaunchSettings, type SessionView } from '../../protocol/session.ts';
 import {
   AskToStopJobsRequestSchema,

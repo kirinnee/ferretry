@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
+import { FY_REQUEST_ID_HEADER } from '../../../../../daemon/lib/protocol/common.ts';
 import {
   type ForkSessionFailure,
   type ForkSessionOutcome,

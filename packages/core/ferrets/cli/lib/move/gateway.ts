@@ -6,10 +6,8 @@ import {
   type MoveConversation,
   MoveSessionRequestSchema,
 } from '../../../daemon/lib/protocol/move.ts';
+import { FY_REQUEST_ID_HEADER as REQUEST_ID_HEADER } from '../../../daemon/lib/protocol/common.ts';
 import type { IMoveGateway } from './ports.ts';
-
-/** Today's request-id header (`FY_REQUEST_ID_HEADER` in the 4.x protocol client). */
-export const REQUEST_ID_HEADER = 'x-fy-request-id';
 
 /**
  * The plugin client a CLI half talks through, plus the ONE thing a move needs that `PluginClient.call` does not carry
