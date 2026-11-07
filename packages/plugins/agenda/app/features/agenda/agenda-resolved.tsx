@@ -6,7 +6,7 @@
  * Inbox's "Resolved" filter draws {@link ResolvedRow} across every conversation.
  */
 
-import type { AgendaListRecord } from '../../wire/index.ts';
+import type { AgendaListRecord } from '@ferretry/core-asks/contract';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '../../shell.ts';
 import { RouteLink } from '../../shell.ts';

@@ -31,12 +31,6 @@
   "exclude": [
     "packages/app",
     "**/node_modules",
-    // pending app port: agenda separate app port in flight
-    "packages/plugins/agenda/app",
-    // pending app port: agenda app-shell-fill React runtime and app test harness
-    "packages/plugins/agenda/tests/unit/app",
-    // pending app port: agenda app-shell-fill React runtime and app test harness
-    "packages/plugins/agenda/tests/support/app",
     // Agenda browser fixtures await app-shell-fill; preserve the port's integration-test exclusion.
     "packages/plugins/agenda/tests/integration/app",
     // Conversation's fy-render browser tests need playwright-core, the Vite harness and the built sandbox shell, which the

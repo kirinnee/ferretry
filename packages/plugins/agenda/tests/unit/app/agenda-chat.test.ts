@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgendaId, AgendaItem } from '../../../app/wire/index.ts';
+import type { AgendaId, AgendaItem } from '@ferretry/core-asks/contract';
 import { agendaCounts, agendaItems, agendaSegments } from '../../../app/lib/agenda-chat.ts';
 
 const item = (id: string, extra: Record<string, unknown> = {}): AgendaItem =>

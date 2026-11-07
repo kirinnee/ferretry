@@ -10,8 +10,7 @@
  *   still leads with the ask on purpose: it is where a push lands, so it reads whole on its own.)
  */
 
-import type { AgendaItem } from '../wire/index.ts';
-import { agendaTitle, hasOwnTitle, singleAgendaQuestion } from '../wire/index.ts';
+import { type AgendaItem, agendaTitle, hasOwnTitle, singleAgendaQuestion } from '@ferretry/core-asks/contract';
 import { visibleWhy } from './agenda-inbox.ts';
 
 export interface AgendaCardHead {

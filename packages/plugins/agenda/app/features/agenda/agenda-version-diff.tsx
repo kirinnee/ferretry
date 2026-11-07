@@ -6,7 +6,7 @@
  * change fold away under one line. The comparison itself is `agenda-diff.ts`'s; this only reads and draws.
  */
 
-import type { AgendaItem, AgendaViewTab } from '../../wire/index.ts';
+import type { AgendaItem, AgendaViewTab } from '@ferretry/core-asks/contract';
 import { ChevronRight } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 import {

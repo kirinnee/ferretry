@@ -6,7 +6,7 @@
  * cannot close twice.
  */
 
-import type { TaskRef } from '../../wire/index.ts';
+import type { TaskRef } from '@ferretry/core-asks/contract';
 import { useEffect, useRef, useState } from 'react';
 import {
   type DoneCloseCard,

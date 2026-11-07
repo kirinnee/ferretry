@@ -36,9 +36,9 @@ import type { AccountsClient as InputClient } from './accounts-api.ts';
 import { methodOfDraft, parseDomains, passwordProblem, type SignInDraft, signInProblem } from '../../lib/login-form.ts';
 import { AutomaticCodesPanel } from '../two-factor/automatic-codes.tsx';
 import { type AccountOps, INPUT, Refusal, Tabs } from './accounts-parts.tsx';
-import { AccountRulesRevoke } from './sign-in-rules-slot.tsx';
+import { AccountRulesRevoke } from './account-rules.tsx';
 import { MethodFields } from './method-fields.tsx';
-import type { RulesBinding } from './sign-in-rules-slot.tsx';
+import type { RulesBinding } from './use-sign-in-rules.ts';
 
 export type AccountTab = 'details' | 'keys' | 'sites';
 

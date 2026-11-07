@@ -6,7 +6,7 @@
  *   ?open=1             the reader opened the first Machine row: its detail, with what to do
  */
 
-import type { AgendaSnapshot } from '../../../../app/wire/index.ts';
+import type { AgendaSnapshot } from '@ferretry/core-asks/contract';
 import { createRoot } from 'react-dom/client';
 import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import { machineSessionView } from '../../../../app/lib/machine-agenda.ts';

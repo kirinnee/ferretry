@@ -165,6 +165,20 @@ export {
 export { Badge, Button, cn, FullscreenToggle, useDocumentVisible, useFullscreen } from './ui/index.ts';
 export { describeSurfaceOwnership, type SurfaceOwnership, type SurfaceOwnershipLabel } from './references/ownership.ts';
 export { FY_REQUEST_ID_HEADER } from './client/request-id.ts';
+export {
+  type DeadlineSchedule,
+  MACHINE_READ_DEADLINE_MS,
+  MachineDeadlineError,
+  realSchedule,
+  untilAborted,
+  withDeadline,
+} from './client/machine-deadline.ts';
+export {
+  browserListRefreshEnvironment,
+  LIST_REFRESH_MIN_MS,
+  ListRefresh,
+  type ListRefreshEnvironment,
+} from './client/list-refresh.ts';
 
 // ─── prose: Markdown and the kit around it (conversation-app plan C1-1 … C1-10) ───────────────────────────────────
 export {

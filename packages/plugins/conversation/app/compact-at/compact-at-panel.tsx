@@ -16,10 +16,20 @@ import { useConversationClient } from '../client.ts';
 import { getFerretCompactAt, patchFerretCompactAt } from './compact-at-api.ts';
 import { CompactAtForm, type CompactAtFormHost } from './compact-at-form.tsx';
 
-/** The panel for one ferret; nothing without one (a toolbar drawn with no subject). */
-export function CompactAtPanel({ subject }: { readonly subject?: string }) {
+/**
+ * The panel for one ferret; nothing without one (a toolbar drawn with no subject), and nothing for a connection that
+ * cannot control it (today's `if (!context.canControl) return null`). GAP(app-shell): the kernel's `PanelProps` carries
+ * only `subject`, so the shell passes no `canControl` and it stays true; the daemon still refuses at `operator`.
+ */
+export function CompactAtPanel({
+  subject,
+  canControl = true,
+}: {
+  readonly subject?: string;
+  readonly canControl?: boolean;
+}) {
   const client = useConversationClient();
-  return subject === undefined ? null : <CompactAtControl client={client} ferretId={subject} />;
+  return subject === undefined || !canControl ? null : <CompactAtControl client={client} ferretId={subject} />;
 }
 
 export function CompactAtControl({

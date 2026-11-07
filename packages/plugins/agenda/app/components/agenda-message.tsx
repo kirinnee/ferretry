@@ -20,15 +20,15 @@
  */
 
 import {
+  agendaChatReply,
+  type AgendaItem,
+  type AgendaListRecord,
+  type AgendaListSnapshot,
   type AgendaMessageKind,
   type AgendaMessagePart,
-  type AgendaItem,
-  type AgendaListSnapshot,
   agendaTitle,
   parseAgendaMessage,
-  type AgendaListRecord,
-  agendaChatReply,
-} from '../wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import { Check } from 'lucide-react';
 import { createContext, type ReactNode, useContext, useId, useMemo, useState } from 'react';
 import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../shell.ts';

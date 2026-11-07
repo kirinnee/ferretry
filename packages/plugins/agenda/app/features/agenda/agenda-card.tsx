@@ -20,14 +20,14 @@
  * most, for a pane that is the card's whole page; the answer bar stays pinned at the bottom of that pane.
  */
 
-import type { AgendaItem, AgendaRevisableField } from '../../wire/index.ts';
+import type { AgendaItem, AgendaRevisableField } from '@ferretry/core-asks/contract';
 import { ArrowRight } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
 import { answerAction, CLEAR_ACTION, kindWord, optionAction } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { DISMISS_ACTION, historyLine, type InboxAction, updatedSinceAsked } from '../../lib/agenda-inbox.ts';
 import { decidedSummary, type RevisionHighlight, revisionHighlight } from '../../lib/agenda-revisions.ts';
-import { RouteLink, shellClock } from '../../shell.ts';
+import { RouteLink } from '../../shell.ts';
 import { AgendaActions } from './agenda-actions.tsx';
 import { agendaAge, agendaKindMeta } from './agenda-board.tsx';
 import { AgendaBriefSections, cardLede } from './agenda-brief.tsx';
@@ -66,11 +66,6 @@ export interface AgendaCardProps {
   /** How the ask's context is drawn — the conversation renders references; the inbox, prose. */
   readonly renderProse?: (text: string) => ReactNode;
   readonly onAct: (action: InboxAction) => void;
-  /**
-   * @deprecated The steps are read in `AgendaDetail`, which ticks them. Accepted only so a host that has
-   * not moved over yet still compiles; the card draws no steps and ignores it.
-   */
-  readonly onProgress?: (step: number, done: boolean) => Promise<void>;
   /** Pinned above the composer: no origin. */
   readonly pinned?: boolean;
   /** A control at the end of the header, after the age — the pinned card's fold button. */
@@ -108,7 +103,7 @@ export function AgendaCard({
   error = null,
   swipeHints = false,
   highlighted = false,
-  now = shellClock.nowMs(),
+  now = Date.now(),
   renderProse = markdownProse,
   onAct,
   id,

@@ -8,7 +8,7 @@
  * - which tabs changed since this device last looked (else in the last edit) — the dot and the word "Changed".
  */
 
-import { type AgendaItem, type AgendaViewTab, agendaTabs } from '../wire/index.ts';
+import { type AgendaItem, agendaTabs, type AgendaViewTab } from '@ferretry/core-asks/contract';
 import { lastRevision } from './agenda-revisions.ts';
 
 /** The tabs the item view draws, in order. */

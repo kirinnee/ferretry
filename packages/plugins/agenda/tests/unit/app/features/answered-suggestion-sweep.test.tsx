@@ -6,14 +6,13 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import type { AgendaItem } from '../../../../app/wire/index.ts';
-import { useAnsweredSuggestionSweep } from '../../../../app/shell.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
+import { type RuleClient, useAnsweredSuggestionSweep } from '../../../../app/hooks/use-answered-suggestion-sweep.ts';
 import type { InboxCard } from '../../../../app/lib/agenda-inbox.ts';
 import { AnsweredSuggestions } from '../../../../app/lib/answered-suggestions.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../../../../app/shell.ts';
-import type { RuleClient } from '../../../../app/shell.ts';
 import { agendaItem, inboxCard } from '../../../support/app/agenda-inbox.tsx';
-import { mount } from '../../../support/app/dom.ts';
+import { mount } from '@ferretry/app/testing';
 import { settle } from '../../../support/app/dom-form.ts';
 import { refused } from '../../../support/app/sign-in-rule-client.ts';
 import { suggestion } from '../../../support/app/sign-in-rule-fixtures.ts';
@@ -26,8 +25,8 @@ const ANSWERED = 'srg_0000000000000002';
 const ELSEWHERE = 'srg_0000000000000003';
 
 const connections = new Map<string, DaemonConnection>([
-  [STUDIO, daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example', deviceId: 'phone-1' })],
-  [LAPTOP, daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example', deviceId: 'phone-1' })],
+  [STUDIO, daemonConnection({ daemonId: 'studio' })],
+  [LAPTOP, daemonConnection({ daemonId: 'laptop' })],
 ]);
 const connectionFor = (id: string): DaemonConnection | undefined => connections.get(id);
 

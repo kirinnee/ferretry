@@ -7,6 +7,7 @@ import {
   PasskeyViewSchema,
   SharedCatalogIdSchema,
   SharedCatalogItemIdSchema,
+  SharedContractSchema,
   SharedMeSchema,
   SharedRedeemRequestSchema,
   SharedRedeemResponseSchema,
@@ -55,6 +56,8 @@ export interface SharedRouteDeps {
   readonly sessions: Pick<LiveMemberSessions, 'spare'>;
   readonly catalogs: SharedCatalogReader;
   readonly publisher: () => SharedPublisher;
+  /** This plugin's own effective contract hash (`kernel.contract.hash`); never another package's. */
+  readonly contractHash: () => string;
   readonly audit: MemberAuditSink;
   readonly now: () => number;
 }
@@ -220,6 +223,12 @@ export function sharedRoutes(deps: SharedRouteDeps): readonly SharedRoute[] {
         const outcome = await deps.passkeys.unlock(caller(context), body);
         return answer(outcome.ok ? { ok: true, value: UnlockGrantedSchema.parse(outcome.value) } : outcome);
       },
+    },
+    {
+      method: 'GET',
+      path: '/v1/shared/contract',
+      needs: 'unlocked',
+      handle: async () => jsonResponse(SharedContractSchema.parse({ contract: deps.contractHash() })),
     },
     {
       method: 'GET',

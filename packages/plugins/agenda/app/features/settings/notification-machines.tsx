@@ -12,7 +12,7 @@ import {
   machinesOffEverywhere,
   offEverywhereSentence,
   turnOnAllTargets,
-} from '../../shell.ts';
+} from '../../lib/machine-notifications.ts';
 import { Button } from '../../shell.ts';
 
 export interface MachineNotificationListProps {
@@ -32,6 +32,7 @@ const STATUS_TONE: Readonly<Record<MachineNotificationRow['status'], string>> = 
   on: 'text-ok',
   off: 'text-muted',
   offline: 'text-warn',
+  'needs-update': 'text-warn',
 };
 
 function MachineRow({

@@ -2,17 +2,18 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { ClientBoardGateway, ClientLaneGateway } from '../../../cli/lib/gateway.ts';
 import manifest from '../../../manifest.ts';
-import { card, cardResponse, listing, response } from '../../unit/cli/fixtures.ts';
-import { laneSet } from '../../unit/cli/lane-fixtures.ts';
+import { card, cardResponse, response } from '../../unit/cli/fixtures.ts';
+import { FERRETRY_ID, laneSet, listing as projectListing, project } from '../../unit/cli/lane-fixtures.ts';
 
-const recording = (answer: unknown) => {
+/** A stand-in daemon: one answer for every route, or a function that answers each route the way the contract says. */
+const recording = (answer: unknown | ((route: string) => unknown)) => {
   const calls: { route: string; init: unknown }[] = [];
   return {
     calls,
     client: {
       call: async (route: string, init?: unknown) => {
         calls.push({ route, init });
-        return answer;
+        return typeof answer === 'function' ? (answer as (route: string) => unknown)(route) : answer;
       },
       subscribe: () => () => {},
     } as never,
@@ -20,6 +21,8 @@ const recording = (answer: unknown) => {
 };
 
 const initOf = (call: { init: unknown } | undefined) => (call?.init ?? {}) as { query?: unknown; body?: unknown };
+const PR = 'https://github.com/o/r/pull/1';
+const switchAnswer = { projectId: FERRETRY_ID, on: false, setBy: 'default', setAt: null };
 const declared = new Set<string>(manifest.actions?.routes?.map(route => route.key) ?? []);
 
 describe('the board gateway', () => {
@@ -84,12 +87,9 @@ describe('the board gateway', () => {
   });
 
   it('should ask for the merge gate of one PR', async () => {
-    const { client, calls } = recording({ pr: 'u', unit: [], waits: [], unreadable: [] });
-    await new ClientBoardGateway(client).mergeGate('https://github.com/o/r/pull/1');
-    should(calls[0]).eql({
-      route: 'GET /v1/board/merge-gate',
-      init: { query: { pr: 'https://github.com/o/r/pull/1' } },
-    });
+    const { client, calls } = recording({ pr: PR, unit: [], waits: [], unreadable: [] });
+    await new ClientBoardGateway(client).mergeGate(PR);
+    should(calls[0]).eql({ route: 'GET /v1/board/merge-gate', init: { query: { pr: PR } } });
   });
 
   it('should list ferrets as an id and a name, from a bare list or one under `ferrets`', async () => {
@@ -112,42 +112,56 @@ describe('the board gateway', () => {
   });
 
   it('should only call board routes the Board manifest declares (the other plugins’ are Ferrets’ and Conversation’s)', async () => {
-    const { client, calls } = recording(listing());
+    const answers: Record<string, unknown> = {
+      'GET /v1/board/projects': projectListing(),
+      'GET /v1/board/merge-gate': { pr: PR, unit: [], waits: [], unreadable: [] },
+      'POST /v1/board/skip': { ferret: 'f', skip: { reason: 'x', at: '2026-10-30T10:00:00.000Z' } },
+      'GET /v1/board/projects/:projectId/lanes': project(),
+      'POST /v1/board/projects/:projectId/lanes': { laneSet: laneSet(), ask: 'raised' },
+      'GET /v1/board/projects/:projectId/switch': switchAnswer,
+      'PUT /v1/board/projects/:projectId/switch': switchAnswer,
+    };
+    const { client, calls } = recording((route: string) => answers[route]);
     const gateway = new ClientBoardGateway(client);
     const lanes = new ClientLaneGateway(client);
     await gateway.projects();
-    await gateway.mergeGate('u');
+    await gateway.mergeGate(PR);
     await gateway.skip({ reason: 'x' });
-    await lanes.project('p' as never);
-    await lanes.change('p' as never, { action: 'propose', template: 'pr' } as never);
-    await lanes.switchOf('p' as never);
-    await lanes.setSwitch('p' as never, true);
+    await lanes.project(FERRETRY_ID as never);
+    await lanes.change(FERRETRY_ID as never, { action: 'propose', template: 'pr' } as never);
+    await lanes.switchOf(FERRETRY_ID as never);
+    await lanes.setSwitch(FERRETRY_ID as never, true);
     const own = calls.map(call => call.route);
+    should(own).have.length(Object.keys(answers).length);
     should(own.filter(route => !declared.has(route))).eql([]);
   });
 });
 
 describe('the lane gateway', () => {
   it('should read the lanes and the switch of one project', async () => {
-    const { client, calls } = recording({ id: 'p', name: 'P', path: null, laneSet: laneSet() });
-    await new ClientLaneGateway(client).project('p' as never);
-    await new ClientLaneGateway(client).switchOf('p' as never);
+    const { client, calls } = recording((route: string) =>
+      route.endsWith('/switch') ? switchAnswer : project({ path: null }),
+    );
+    await new ClientLaneGateway(client).project(FERRETRY_ID as never);
+    await new ClientLaneGateway(client).switchOf(FERRETRY_ID as never);
     should(calls.map(call => [call.route, call.init])).eql([
-      ['GET /v1/board/projects/:projectId/lanes', { params: { projectId: 'p' } }],
-      ['GET /v1/board/projects/:projectId/switch', { params: { projectId: 'p' } }],
+      ['GET /v1/board/projects/:projectId/lanes', { params: { projectId: FERRETRY_ID } }],
+      ['GET /v1/board/projects/:projectId/switch', { params: { projectId: FERRETRY_ID } }],
     ]);
   });
 
   it('should post a lane change and put the switch', async () => {
-    const { client, calls } = recording({});
-    await new ClientLaneGateway(client).change('p' as never, { action: 'propose', template: 'pr' } as never);
-    await new ClientLaneGateway(client).setSwitch('p' as never, false);
+    const { client, calls } = recording((route: string) =>
+      route.startsWith('PUT') ? switchAnswer : { laneSet: laneSet(), ask: 'raised' },
+    );
+    await new ClientLaneGateway(client).change(FERRETRY_ID as never, { action: 'propose', template: 'pr' } as never);
+    await new ClientLaneGateway(client).setSwitch(FERRETRY_ID as never, false);
     should(calls.map(call => [call.route, call.init])).eql([
       [
         'POST /v1/board/projects/:projectId/lanes',
-        { params: { projectId: 'p' }, body: { action: 'propose', template: 'pr' } },
+        { params: { projectId: FERRETRY_ID }, body: { action: 'propose', template: 'pr' } },
       ],
-      ['PUT /v1/board/projects/:projectId/switch', { params: { projectId: 'p' }, body: { on: false } }],
+      ['PUT /v1/board/projects/:projectId/switch', { params: { projectId: FERRETRY_ID }, body: { on: false } }],
     ]);
   });
 });

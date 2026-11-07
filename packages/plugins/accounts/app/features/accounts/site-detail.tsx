@@ -30,8 +30,8 @@ import {
 import { methodOfDraft, type SignInDraft, signInProblem } from '../../lib/login-form.ts';
 import { type AccountOps, INPUT, Refusal, Tabs } from './accounts-parts.tsx';
 import { MethodFields } from './method-fields.tsx';
-import { RuleEditWarning, SignInRulePanel } from './sign-in-rules-slot.tsx';
-import type { RulesBinding } from './sign-in-rules-slot.tsx';
+import { RuleEditWarning, SignInRulePanel } from './sign-in-rule-panel.tsx';
+import type { RulesBinding } from './use-sign-in-rules.ts';
 
 export type SiteTab = 'method' | 'recipe' | 'seen' | 'defaults' | 'rule';
 

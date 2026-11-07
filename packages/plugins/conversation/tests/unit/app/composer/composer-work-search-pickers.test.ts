@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import type { ReferenceCatalogEntry, WorkHit, WorkSearchQuery } from '../../../../contract/index.ts';
+import type { ReferenceCatalogEntry, WorkHit } from '../../../../contract/index.ts';
 import type { ComposerProviderContext, ComposerTrigger } from '../../../../app/composer/composer-autocomplete.ts';
 import { createReferencesProvider } from '../../../../app/composer/composer-autocomplete-providers.ts';
-import { daemonConnection, daemonFerretScope, type WorkSearchPort } from '../../../../app/composer/seam.ts';
+import { daemonConnection, daemonFerretScope } from '../../../../app/composer/seam.ts';
+import type { WorkSearchPort, WorkSearchRequest } from '../../../../app/search/work-search.ts';
 
 const RELAY_PROJECT = '6f1c2f0e-3a4b-4c55-9d1e-0a7b8c9d1e2f';
 
@@ -53,7 +54,7 @@ const askHit = (id: string, patch: Partial<Extract<WorkHit, { kind: 'ask' }>> = 
   }) as WorkHit;
 
 const fakePort = (hits: readonly WorkHit[]) => {
-  const asked: WorkSearchQuery[] = [];
+  const asked: WorkSearchRequest[] = [];
   const port: WorkSearchPort = {
     search: async request => {
       asked.push(request);

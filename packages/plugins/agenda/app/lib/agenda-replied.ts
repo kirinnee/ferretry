@@ -20,7 +20,7 @@
  * holds the entries and the two ports it needs to take things back.
  */
 
-import type { AgendaItem } from '../wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { browserDeferredTimers, type DeferredTimers, type InboxCard, UNDO_WINDOW_MS } from './agenda-inbox.ts';
 import { isGateItem } from './gate-items.ts';
 

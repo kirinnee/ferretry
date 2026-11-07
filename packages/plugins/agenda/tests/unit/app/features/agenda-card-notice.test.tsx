@@ -3,7 +3,7 @@ import { AgendaCard } from '../../../../app/features/agenda/agenda-card.tsx';
 import type { InboxAction } from '../../../../app/lib/agenda-answers.ts';
 import { cardModel } from '../../../../app/lib/agenda-card-model.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, mount, must } from '../../../support/app/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 
 const notice = agendaItem('N1', {
   notice: true,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { TaskRef } from '../../../app/wire/index.ts';
+import type { TaskRef } from '@ferretry/core-asks/contract';
 import {
   closeCards,
   closePlan,
@@ -47,6 +47,14 @@ describe('the lane a Done moves a card into', () => {
 
   it('has nothing to do for a card that is already closed', () => {
     expect(closePlan({ laneId: 'closed', dropped: false, laneSet: lanes })).toEqual({ kind: 'closed' });
+  });
+
+  it('refuses a closed card on a board with no lane to reopen it into', () => {
+    const onlyClosed = { lanes: [{ id: 'closed', category: 'closed' }], doneLane: 'closed' };
+    expect(closePlan({ laneId: 'closed', dropped: false, laneSet: onlyClosed })).toEqual({
+      kind: 'refused',
+      message: 'the board has no Done for this card',
+    });
   });
 
   it('refuses a card it cannot read, a dropped one and one on a board with no lanes', () => {

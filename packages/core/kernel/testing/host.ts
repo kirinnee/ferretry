@@ -131,6 +131,8 @@ export interface TestHostOptions {
   readonly timings?: DaemonTimings;
   /** The Vault stand-in for `kernel.secrets.resolve`: name to value. Absent, every declared and configured name is `unknown`. */
   readonly vault?: Readonly<Record<string, string>>;
+  /** The effective contract hash per package, as `kernel.contract.hash()` answers its own plugin. Default: `unhashed`. */
+  readonly contractHash?: (id: string) => string;
 }
 
 export interface TestResponse {
@@ -864,6 +866,7 @@ async function start(world: World): Promise<TestHost> {
         stopping: () => stopController.signal.aborted,
         signal: stopController.signal,
       },
+      contract: { hash: () => options.contractHash?.(manifest.id) ?? 'unhashed' },
     };
   };
 

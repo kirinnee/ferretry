@@ -102,3 +102,38 @@ export const X = icon(
     <path d="m6 6 12 12" />
   </>,
 );
+
+// ─── the passkey words ────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What a bound passkey shows for a staged change, as STRUCTURE: the daemon's one plain line, its label/value rows, the
+ * red warnings its structured flags give, and the amber cautions apart from them (today's `StepUpWords`). Nothing here
+ * is split out of text, so a row can never land in the warnings (secrev-1320 L1). The passkey ceremony itself is
+ * Access's and is not on this base: no half here is handed an ask, so a change that widens something is refused
+ * with today's no-passkey sentence and nothing is approved (the same path as a device that cannot run a passkey).
+ */
+export interface PasskeyWords {
+  readonly does: string;
+  readonly rows: readonly { readonly label: string; readonly value: string }[];
+  readonly warnings: readonly string[];
+  readonly cautions?: readonly string[];
+}
+export const Smartphone = icon(
+  <>
+    <rect height="20" rx="2" ry="2" width="14" x="5" y="2" />
+    <path d="M12 18h.01" />
+  </>,
+);
+export const TriangleAlert = icon(
+  <>
+    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
+    <path d="M12 9v4" />
+    <path d="M12 17h.01" />
+  </>,
+);
+export const ShieldCheck = icon(
+  <>
+    <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+    <path d="m9 12 2 2 4-4" />
+  </>,
+);

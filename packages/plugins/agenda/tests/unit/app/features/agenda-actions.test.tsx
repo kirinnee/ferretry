@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import { AgendaActions, type AgendaActionsProps } from '../../../../app/features/agenda/agenda-actions.tsx';
-import { interact, mount, must, pressKey } from '../../../support/app/dom.ts';
+import { interact, mount, must, pressKey } from '@ferretry/app/testing';
 
 const props = (overrides: Partial<AgendaActionsProps>): AgendaActionsProps => ({
   answers: [],

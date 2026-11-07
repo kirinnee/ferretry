@@ -1,6 +1,6 @@
 import { KERNEL_REFUSALS, PluginsChanged, parseRouteKey } from '@ferretry/kernel/contract';
 import type { EventDef } from '@ferretry/kernel/contract';
-import type { PluginClient } from '@ferretry/kernel/manifest';
+import type { PluginCallHeaders, PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
 import type { PairedDaemon } from '../daemons/daemon-list.ts';
 import { type PasskeyHandler, type PasskeyNeed, type PromptOrigin, requestOrigin } from '../passkey/passkey.ts';
@@ -37,6 +37,25 @@ const HealthEnvelopeSchema = z.object({ protocol: z.number().int(), version: z.s
 
 export const INVENTORY_ROUTE = 'GET /v1/plugins';
 export const HEALTH_ROUTE = 'GET /v1/health';
+
+/** The agenda channel header and the one value it may carry (the Asks contract's `AGENDA_CHANNEL_HEADER` / `AGENDA_CHANNEL_VERSION`). */
+const AGENDA_CHANNEL_HEADER = 'x-fy-agenda-channel';
+const AGENDA_CHANNEL_VERSIONS: ReadonlySet<string> = new Set(['2']);
+
+/**
+ * The CLOSED list of headers a half may set (`PluginCallHeaders`): `x-fy-request-id` and `x-fy-agenda-channel` with
+ * today's value. Any other key a half passes is dropped, and so is a channel value outside the list; nothing else
+ * (credentials, the contract hash) is ever a half's to send.
+ */
+const allowedHeaders = (given: PluginCallHeaders | undefined): Record<string, string> | undefined => {
+  if (given === undefined) return undefined;
+  const sent: Record<string, string> = {};
+  const requestId = given['x-fy-request-id'];
+  if (requestId !== undefined) sent['x-fy-request-id'] = requestId;
+  const channel = given[AGENDA_CHANNEL_HEADER];
+  if (channel !== undefined && AGENDA_CHANNEL_VERSIONS.has(channel)) sent[AGENDA_CHANNEL_HEADER] = channel;
+  return Object.keys(sent).length === 0 ? undefined : sent;
+};
 
 export interface DaemonClientOptions {
   readonly transport: DaemonTransport;
@@ -239,14 +258,14 @@ export class DaemonClient {
     if (owner === undefined) throw new TypeError(`${caller} called ${route}, which no compiled manifest declares`);
     await this.#admit(caller, owner);
     const { method, path } = parseRouteKey(route);
-    // Only the allow-listed header crosses (`PluginCallHeaders`: `x-fy-request-id`); any other key a half passes is dropped.
-    const requestId = init.headers?.['x-fy-request-id'];
+    // Only the allow-listed headers cross (`allowedHeaders`); any other key a half passes is dropped.
+    const headers = allowedHeaders(init.headers);
     const request = {
       method,
       path: fillPath(path, init.params),
       ...(init.query === undefined ? {} : { query: init.query }),
       ...(init.body === undefined ? {} : { body: init.body }),
-      ...(requestId === undefined ? {} : { headers: { 'x-fy-request-id': requestId } }),
+      ...(headers === undefined ? {} : { headers }),
     };
     // A resend is the same request, its request id included: the daemon sees one act asked twice, never two acts.
     const answer = await this.#confirmed(method, await this.#transport.request(request), async () => {

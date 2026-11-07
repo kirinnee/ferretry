@@ -11,7 +11,7 @@
  * lane a card is in — so a row is never mistaken for work that is waiting on you now.
  */
 
-import type { AgendaItem } from '../wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import type { InboxCard, InboxResolved } from './agenda-inbox.ts';
 import {
   filterInboxCards,

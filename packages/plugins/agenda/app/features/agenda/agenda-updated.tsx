@@ -5,8 +5,7 @@
  * Nothing here edits anything.
  */
 
-import { shellClock } from '../../shell.ts';
-import type { AgendaItem } from '../../wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { ChevronDown, History } from 'lucide-react';
 import { type KeyboardEvent, useId, useRef, useState } from 'react';
 import { decidedSummary, revisionAuthor, revisionList, revisionStamp, updatedAgo } from '../../lib/agenda-revisions.ts';
@@ -78,7 +77,7 @@ export function AgendaUpdated({
   /** Drawn as a quiet link on a chat message rather than on a card. */
   readonly compact?: boolean;
 }) {
-  const [drawnAt] = useState(() => shellClock.nowMs());
+  const [drawnAt] = useState(() => Date.now());
   const [open, setOpen] = useState(false);
   const listId = useId();
   const button = useRef<HTMLButtonElement>(null);

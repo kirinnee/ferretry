@@ -22,10 +22,9 @@
  * item view, "no size limit").
  */
 
-import { type AgendaItem, type AgendaMessagePart, parseAgendaMessage } from '../wire/index.ts';
+import { type TranscriptEntry, type LedgerSendRecord } from './transcript.ts';
+import { type AgendaItem, type AgendaMessagePart, parseAgendaMessage } from '@ferretry/core-asks/contract';
 import { bulletPoints, describePrevious, FIELD_LABEL, itemAtVersion, POINT_FIELDS } from './agenda-revisions.ts';
-import type { TranscriptEntry } from '../shell.ts';
-import type { LedgerSendRecord } from '../shell.ts';
 
 /**
  * HOW FAR THE OWNER'S WORDS GOT, as far as the item view can PROVE it — never further:

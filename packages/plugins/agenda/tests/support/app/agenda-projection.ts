@@ -1,9 +1,9 @@
 import {
-  AgendaSnapshotSchema,
-  ResolvedAgendaItemSchema,
   type AgendaSnapshot,
+  AgendaSnapshotSchema,
   type ResolvedAgendaItem,
-} from '../../../app/wire/index.ts';
+  ResolvedAgendaItemSchema,
+} from '@ferretry/core-asks/contract';
 
 const AGENDA_PROJECTION_AT = '2026-10-26T09:00:00.000Z';
 

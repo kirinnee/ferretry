@@ -19,6 +19,9 @@ import {
   type AddSignInRequest,
   AddSignInRequestSchema,
   type AddTwoFactorKeyRequest,
+  type PhoneApproval,
+  type PhoneApprovalList,
+  PhoneApprovalListSchema,
   AddTwoFactorKeyRequestSchema,
   type PutAccountDefaultRequest,
   PutAccountDefaultRequestSchema,
@@ -207,5 +210,23 @@ export async function readSeedStage(
     });
   return await ask(client, 'GET /v1/accounts/:id/factors/seed/:stage', TwoFactorSeedStageViewSchema, {
     params: { id: account, stage },
+  });
+}
+
+// ─── the approve-on-phone card (today's `lib/input-api.ts`) ──────────────────────────────────────────────────────
+
+/** The approve-on-phone cards still waiting (owner only). Nothing is cached: the daemon is the only source of a number. */
+export async function listPhoneApprovals(client: AccountsClient): Promise<PhoneApprovalList> {
+  return await ask(client, 'GET /v1/phone-approvals', PhoneApprovalListSchema);
+}
+
+/** "Not me — stop": the only answer a card gives. There is no route that says the owner approved. */
+export async function refusePhoneApproval(
+  client: AccountsClient,
+  approval: Pick<PhoneApproval, 'id' | 'sessionId'>,
+): Promise<void> {
+  await ask(client, 'POST /v1/ferrets/:ferretId/phone-approvals/:approvalId/refuse', z.unknown(), {
+    params: { ferretId: approval.sessionId, approvalId: approval.id },
+    body: {},
   });
 }

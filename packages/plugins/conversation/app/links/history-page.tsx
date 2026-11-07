@@ -83,7 +83,10 @@ export function HistoryPage({ daemon, readHistory: read, readEntry }: HistoryPag
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="font-medium text-fg">{entry.title ?? entry.id}</p>
-                      <p className="mt-1 text-xs text-muted">{harnessName(entry.harness)}</p>
+                      <p className="mt-1 text-xs text-muted">
+                        {harnessName(entry.harness)} · {entry.turnsAtLeast === true ? 'at least ' : ''}
+                        {entry.turns} recorded {entry.turns === 1 && entry.turnsAtLeast !== true ? 'turn' : 'turns'}
+                      </p>
                     </div>
                     <span className="shrink-0 rounded border border-border px-2 py-1 text-2xs font-semibold uppercase tracking-wide text-muted">
                       Read-only
@@ -131,6 +134,16 @@ export function HistoryPage({ daemon, readHistory: read, readEntry }: HistoryPag
                 ))}
               </div>
             </section>
+          )}
+          {history.skipped > 0 && (
+            <aside className="mt-8 border-t border-border pt-5" aria-label="Skipped harness transcripts">
+              <h2 className="font-display text-lg font-semibold">
+                {history.skipped} transcript{history.skipped === 1 ? '' : 's'} not read
+              </h2>
+              <p className="mt-1 text-sm text-muted">
+                Ferretry did not replace unreadable history with an empty conversation.
+              </p>
+            </aside>
           )}
         </>
       )}

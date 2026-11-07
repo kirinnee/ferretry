@@ -9,7 +9,7 @@
  * - the same rows, as Info's one agenda list (`agenda-info-list.tsx`): there is no side bar of its own.
  */
 
-import type { AgendaItem } from '../../wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { ChevronUp, LoaderCircle, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { type AgendaCounts, agendaSegments } from '../../lib/agenda-chat.ts';

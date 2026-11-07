@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgendaId } from '../../../app/wire/index.ts';
+import type { AgendaId } from '@ferretry/core-asks/contract';
 import { referencesOf, withReferencePrefix } from '../../../app/lib/answer-chip.ts';
 
 const id = (value: string): AgendaId => value as AgendaId;
