@@ -151,7 +151,7 @@ export const STEPS: readonly Step[] = [
       sealed: [],
       notCarried: [{ what: 'pending agenda change journals', why: 'applied or dropped by v4 before it stopped' }],
     },
-    'the Asks and Agenda state schemas',
+    'the Asks and Agenda state schemas (asks get v5 global ids through one old-to-new map that also rewrites card and agenda links, M6)',
   ),
   pending(
     {
