@@ -464,7 +464,8 @@ async function bootLocked(
   if (coreRefusal !== undefined) return { kind: 'refused', sentence: coreRefusal.sentence, trace };
   // The engine is re-planned over the started set, so a refused plugin's takes do not exist.
   const order = graph.order;
-  const { engine: hooks } = HookEngine.plan(order, log, deadline);
+  // Every installed manifest is declared, so a provider turned off or refused is named, unavailable, never absent.
+  const { engine: hooks } = HookEngine.plan(order, log, deadline, manifests);
 
   const data = await loadDataPlugins(adapters.fs, home, new Set(manifests.map(manifest => manifest.id)));
   const items = await installedItemReach(adapters.fs, home, data.accepted as readonly InstalledItems[]);
