@@ -1,0 +1,286 @@
+/**
+ * The two non-inference paths that make a harness renew its own credential.
+ *
+ * Each harness renews an expired OAuth token as a side effect of being used, so the whole trick is to
+ * use it for something that costs nothing:
+ *
+ * - **Claude** — `claude mcp list`. It loads the account's credential and takes Claude Code's own
+ *   refresh-if-expired path, while invoking no model. Idempotent when the token is fresh.
+ * - **Codex** — `codex app-server` over stdio JSON-RPC: `initialize`, then `getAuthStatus` with
+ *   `refreshToken: true`, which performs the OAuth rotation. The server never exits on its own, so it
+ *   is stopped once the credential has settled.
+ *
+ * Both are **undocumented surfaces of a third-party CLI**, not supported APIs, and this port is where
+ * that dependency is admitted. A harness that renames either path stops renewing anything and says
+ * so; nothing here can mistake that for a healthy account, because this port cannot report health at
+ * all (see {@link FleetTokenRefreshAttempt}).
+ *
+ * ## Both paths were measured, not assumed
+ *
+ * Against a throwaway home holding a deliberately expired credential, `claude mcp list` (2.1.220)
+ * rewrote that credential — which is how it is known to drive the rotation rather than merely read
+ * configuration, and it does so with no MCP server configured at all. **A rejected rotation makes it
+ * clear its own tokens**, so a home whose refresh token was already dead comes back `missing` rather
+ * than `refreshable`; that is a real outcome with a name and a remedy rather than a surprise, and it
+ * costs nothing, because a refresh token the provider refuses was worth nothing.
+ *
+ * `codex app-server` (codex-cli 0.145.0) accepts exactly the two requests below and answers the second
+ * with `authToken: null` — the rotation without the token, which is the whole point of asking for
+ * `includeToken: false`.
+ *
+ * ## Why the raw binary and not the account's wrapper
+ *
+ * A wrapper is for sessions. It prepends the account's configured flags, seeds first-run prompts, and
+ * sources a secrets file — all correct for launching an agent and all wrong for a renewal, where
+ * prepending a session flag to `mcp list` or `app-server` is how a refresh quietly becomes something
+ * else. The only thing that decides *which* credential rotates is the harness home, and the home is
+ * exported here from the manifest's own value rather than inherited or parsed out of a script.
+ *
+ * ## Nothing here can read a token
+ *
+ * Claude's `stdout` and `stderr` are discarded unread. Codex's are SCANNED and never kept: the only
+ * thing taken from them is which of the closed-set refresh-failure words they named
+ * (`refresh_token_expired`, `_reused`, `_invalidated`, `invalid_grant`, a refresh `401`), because
+ * that word is the one way to tell an expired login from a revoked one (account-model §8.2.2). Each
+ * chunk is decoded, searched and dropped; at most a short tail survives between chunks so a word
+ * split across two reads is still found, and no text is ever returned, logged or stored. The Codex
+ * request asks for `includeToken: false` as well, so it should not be offered a token to begin with.
+ * WHERE the harness reports the reason (its JSON-RPC answer or its log on stderr) is INFERRED, which is
+ * why both streams are scanned and why success is still read from the credential, never from here.
+ * The environment handed to the child is sanitized first — every command in this product runs inside
+ * somebody's agent session, and that session exports provider credentials of its own, which is how a
+ * renewal for one account ends up authenticating as another. What the child gets is the caller's
+ * environment with the provider and session variables stripped, plus one variable: its own home.
+ */
+
+import { sanitizeHarnessEnv } from '../../lib/shared/harness-env.ts';
+import { failureMessage } from '../../lib/shared/identity.ts';
+import type {
+  FleetTokenRefreshAttempt,
+  FleetTokenRefreshPort,
+  FleetTokenRefreshSettled,
+  FleetTokenRefreshTarget,
+} from '../../lib/credentials/token-refresh.ts';
+import {
+  type CodexRefreshEvidence,
+  mergeCodexRefreshEvidence,
+  NO_CODEX_REFRESH_EVIDENCE,
+  scanCodexRefreshEvidence,
+} from '../../lib/credentials/token-refresh.ts';
+import { HARNESS_BINARIES, HARNESS_HOME_ENV } from '@@EXT:fleet/src/lib/wrappers.ts@@';
+import type { FleetBinaryLookup } from '@@EXT:fleet/src/adapters/wrapper-source.ts@@';
+
+/** A started renewal. Deliberately offers no way to read what the child printed. */
+export interface FleetTokenRefreshProcess {
+  readonly exited: Promise<number>;
+  /**
+   * The closed-set failure words the child's output has named so far — never the output. Absent on a
+   * process whose output is discarded unread.
+   */
+  evidence?(): CodexRefreshEvidence;
+  write(text: string): Promise<void>;
+  close(): Promise<void>;
+  /** SIGKILL. Both paths are stopped rather than asked, so neither can wedge a fleet command. */
+  kill(): void;
+}
+
+export type FleetTokenRefreshSpawn = (
+  command: readonly string[],
+  environment: Readonly<Record<string, string | undefined>>,
+  /** Scan the child's output for refresh-failure words. Off means its output is discarded unread. */
+  options?: { readonly scanOutput?: boolean },
+) => FleetTokenRefreshProcess;
+
+/** Hard ceiling on one renewal, including the OAuth round trip the harness makes. */
+export const FLEET_TOKEN_REFRESH_TIMEOUT_MS = 30_000;
+/** How often the Codex path asks whether the credential has settled. */
+export const FLEET_TOKEN_REFRESH_POLL_MS = 250;
+
+/**
+ * `app-server` requires a client identity before it will answer anything. The version is not a claim
+ * about this build and nothing reads it back; `includeToken: false` is the load-bearing field — the
+ * rotation is wanted, the token is not.
+ */
+const REFRESH_REQUESTS: readonly Readonly<Record<string, unknown>>[] = [
+  {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: { clientInfo: { name: 'ferretry', title: 'Ferretry', version: '0.0.0' }, capabilities: {} },
+  },
+  { jsonrpc: '2.0', id: 2, method: 'getAuthStatus', params: { includeToken: false, refreshToken: true } },
+];
+
+export interface ProcessFleetTokenRefreshDeps {
+  readonly spawn: FleetTokenRefreshSpawn;
+  /** The caller's environment, sanitized before any of it reaches a child. */
+  readonly environment: Readonly<Record<string, string | undefined>>;
+  readonly which: FleetBinaryLookup;
+  readonly timeoutMs?: number;
+  readonly pollMs?: number;
+  readonly sleep?: (ms: number) => Promise<void>;
+}
+
+const delay = async (ms: number): Promise<void> => {
+  await new Promise(resolve => setTimeout(resolve, ms));
+};
+
+export class ProcessFleetTokenRefreshPort implements FleetTokenRefreshPort {
+  constructor(private readonly deps: ProcessFleetTokenRefreshDeps) {}
+
+  /**
+   * Run the renewal path for one home.
+   *
+   * A host without the harness installed is `unavailable` rather than a failure: nothing is wrong with
+   * the credential, and the remedy is on a different machine. Every other way this can go wrong is
+   * `error` with the failure's own sentence — a renewal must never be able to take down the login it
+   * was trying to make unnecessary.
+   */
+  async refresh(target: FleetTokenRefreshTarget, settled: FleetTokenRefreshSettled): Promise<FleetTokenRefreshAttempt> {
+    const binary = HARNESS_BINARIES[target.kind];
+    const executable = this.deps.which(binary);
+    if (executable === undefined) {
+      return {
+        outcome: 'unavailable',
+        reason: `the "${binary}" CLI is not on this host, so its credential cannot be renewed here — install it, or sign this credential in again from a host that has it`,
+      };
+    }
+    const environment = {
+      ...sanitizeHarnessEnv(this.deps.environment),
+      [HARNESS_HOME_ENV[target.kind]]: target.home,
+    };
+    try {
+      return target.kind === 'claude'
+        ? await this.#claude(executable, environment)
+        : await this.#codex(executable, environment, settled);
+    } catch (error) {
+      return { outcome: 'error', reason: failureMessage(error, 'the renewal could not be run') };
+    }
+  }
+
+  /**
+   * Claude: one connectors call, then wait for it to finish.
+   *
+   * The exit code is read by nobody on purpose. `mcp list` exits non-zero when a configured MCP server
+   * is unreachable, which says nothing about the credential, and exits zero whether or not anything
+   * needed renewing — so both answers would be noise. stdin is closed immediately: this path is not
+   * asked anything.
+   */
+  async #claude(
+    executable: string,
+    environment: Readonly<Record<string, string | undefined>>,
+  ): Promise<FleetTokenRefreshAttempt> {
+    const child = this.deps.spawn([executable, 'mcp', 'list'], environment);
+    const killer = setTimeout(() => child.kill(), this.#timeoutMs());
+    try {
+      await child.close();
+      await child.exited;
+    } finally {
+      clearTimeout(killer);
+    }
+    return { outcome: 'ran' };
+  }
+
+  /**
+   * Codex: drive the app server, then stop it.
+   *
+   * `app-server` is a long-lived server — it does not exit when a request is answered, so waiting for
+   * it would wait forever. It is asked whether the credential has settled instead, which stops the
+   * moment the work is done rather than after a guessed interval, and the timer is the hard backstop
+   * for a rotation that never lands.
+   */
+  async #codex(
+    executable: string,
+    environment: Readonly<Record<string, string | undefined>>,
+    settled: FleetTokenRefreshSettled,
+  ): Promise<FleetTokenRefreshAttempt> {
+    const child = this.deps.spawn([executable, 'app-server'], environment, { scanOutput: true });
+    const killer = setTimeout(() => child.kill(), this.#timeoutMs());
+    try {
+      await child.write(`${REFRESH_REQUESTS.map(request => JSON.stringify(request)).join('\n')}\n`);
+      const pollMs = this.deps.pollMs ?? FLEET_TOKEN_REFRESH_POLL_MS;
+      const polls = Math.max(1, Math.ceil(this.#timeoutMs() / pollMs));
+      for (let poll = 0; poll < polls; poll += 1) {
+        if (await settled()) break;
+        // A refresh that already named its failure will not settle: stop waiting for it.
+        if ((child.evidence?.().codes.length ?? 0) > 0) break;
+        await (this.deps.sleep ?? delay)(pollMs);
+      }
+      await child.close();
+      child.kill();
+      await child.exited;
+    } finally {
+      clearTimeout(killer);
+    }
+    return { outcome: 'ran', evidence: child.evidence?.() ?? NO_CODEX_REFRESH_EVIDENCE };
+  }
+
+  #timeoutMs(): number {
+    return this.deps.timeoutMs ?? FLEET_TOKEN_REFRESH_TIMEOUT_MS;
+  }
+}
+
+/** How much of the previous chunk is kept, so a failure word split across two reads is still seen. */
+const EVIDENCE_TAIL = 64;
+
+/**
+ * Scan a stream for the closed-set refresh-failure words and keep nothing else.
+ *
+ * Exported so a test can feed a stream directly. Resolves when the stream ends; a stream that errors
+ * ends the scan with what was found, because evidence is a bonus and never a reason to fail a renewal.
+ */
+export async function scanRefreshStream(
+  stream: ReadableStream<Uint8Array>,
+  found: (evidence: CodexRefreshEvidence) => void,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let tail = '';
+  try {
+    for await (const chunk of stream) {
+      const text = tail + decoder.decode(chunk, { stream: true });
+      found(scanCodexRefreshEvidence(text));
+      tail = text.slice(-EVIDENCE_TAIL);
+    }
+  } catch {
+    /* the stream died with the child — what was found stands */
+  }
+}
+
+/**
+ * The production process boundary: piped stdin so the Codex path can speak. Claude's output is
+ * **discarded**; Codex's is piped only into {@link scanRefreshStream}, which keeps closed-set words.
+ */
+export const spawnFleetTokenRefreshProcess: FleetTokenRefreshSpawn = (command, environment, options = {}) => {
+  const scanned = options.scanOutput === true;
+  const child = Bun.spawn({
+    cmd: [...command],
+    env: environment,
+    stdin: 'pipe',
+    stdout: scanned ? 'pipe' : 'ignore',
+    stderr: scanned ? 'pipe' : 'ignore',
+  });
+  let evidence = NO_CODEX_REFRESH_EVIDENCE;
+  const record = (found: CodexRefreshEvidence): void => {
+    evidence = mergeCodexRefreshEvidence(evidence, found);
+  };
+  if (child.stdout instanceof ReadableStream) void scanRefreshStream(child.stdout, record);
+  if (child.stderr instanceof ReadableStream) void scanRefreshStream(child.stderr, record);
+  return {
+    exited: child.exited,
+    evidence: () => evidence,
+    async write(text) {
+      child.stdin.write(text);
+      await child.stdin.flush();
+    },
+    async close() {
+      try {
+        await child.stdin.end();
+      } catch {
+        /* already closed — a renewal is never failed over its own cleanup */
+      }
+    },
+    kill() {
+      child.kill('SIGKILL');
+    },
+  };
+};
