@@ -19,7 +19,6 @@
     "skills",
     "shells",
     "layouts",
-    "tidy",
     "runtimes",
     "onboarding"
   ],
@@ -160,6 +159,15 @@
     "gate": [
       "GAP(kernel): a background read parked behind the unlock prompt is never released when its caller stops waiting: PluginClient.call takes no abort signal, so today's untilAborted (rebuild-ref relay-carrier.ts:1752) has no equivalent; it resolves only on focus and confirm, or dismiss. Feed-aware polls skip a tick while their read is in flight (G95): startFeedAwarePoll skips only when `read` returns its promise, and both Browsers page polls (useSessionBrowser, useBrowserControl) now do, so one parked read per page is all that waits; any other poll must return its promise too",
       "GAP(access): the update dot asks locked machines too: today it skipped them (rebuild-ref App.tsx:1099 useLockedMachines); useLockedDaemons() from @ferretry/app has no consumer yet, so the settings machine rows and the machine switcher (App.tsx:1961, :2637) do not mark a locked machine either (G95)"
+    ],
+    "usage": [
+      "S175, S176, S177 and S178 stay skipped (rows.test.ts) until the Logins sign-in usage read, the housekeeping worker and job runner (Ferrets) and the Vault sealed read are ported",
+      "all 61 usage parity rows stay un-flipped until each is proved by name in a usage test"
+    ],
+    "onboarding": [
+      "10 parity rows have no test files: tests/unit/parity/app.test.tsx, commands.test.ts and storage.test.ts do not exist, and R-0092 is not proved yet",
+      "2 context-imports findings stay open in tests/unit/app/get-started-document.test.ts, which imports another package past its contract",
+      "the app half waits on the shell: about 12 components and 7 app tests are listed in app/NEEDS-APP-SHELL.txt"
     ]
   },
   "pendingHalves": {},
