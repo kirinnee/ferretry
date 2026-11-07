@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { DAEMON_RUN_FILE } from '@ferretry/kernel/contract';
 import should from 'should';
 import {
   daemonUrlPort,
@@ -29,6 +30,16 @@ describe('listener owner (S57)', () => {
     should(foreignListenerRefusal('http://127.0.0.1:7431', 'the session credential', verdict)).containEql(
       'held by another user (uid 1001)',
     );
+  });
+
+  it('S57 the refusal points the owner at the kernel run record the client reads, not a file that no longer exists', () => {
+    const sentence = foreignListenerRefusal('http://127.0.0.1:7431', 'the session credential', {
+      kind: 'foreign',
+      uids: [1001],
+    });
+    should(sentence).containEql(`check FY_HOME and its ${DAEMON_RUN_FILE}`);
+    should(sentence).containEql('run/daemon.json');
+    should(sentence).not.containEql('config/daemon.json');
   });
 
   it('should ignore a listener that is not reachable from loopback, and report absence', () => {

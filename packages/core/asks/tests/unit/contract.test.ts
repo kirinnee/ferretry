@@ -13,6 +13,8 @@ asksConformance('FakeAsks', () => {
       close: asks.close.bind(asks),
       open: asks.open.bind(asks),
       get: asks.get.bind(asks),
+      snapshots: asks.snapshots.bind(asks),
+      ownerAction: asks.ownerAction.bind(asks),
     },
     answer: (id, effect) => asks.answerAs(id, effect),
   };

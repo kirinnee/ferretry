@@ -8,6 +8,8 @@ import {
   type AskFilter,
   type AskId,
   type AskKind,
+  AskOwnerActionSchema,
+  AskOwnerActionError,
   type AskRef,
   type AskSourceSpec,
   type AsksApi,
@@ -21,7 +23,13 @@ import type { AgendaActor, AgendaService, RaiseAgendaRequest } from '../lib/agen
 import { SerialQueue } from '../lib/agenda/serial-queue.ts';
 import { cardAskReference } from '../lib/protocol/agenda-card-asks.ts';
 import { askForKind } from '../lib/protocol/agenda-card.ts';
-import type { AgendaItem, AgendaResponse, AgendaSnapshot, ResolvedAgendaItem } from '../lib/protocol/agenda.ts';
+import {
+  MACHINE_AGENDA_ID,
+  type AgendaItem,
+  type AgendaResponse,
+  type AgendaSnapshot,
+  type ResolvedAgendaItem,
+} from '../lib/protocol/agenda.ts';
 
 /**
  * The Asks port (§7.4) over the engine (lead decision #13): every ask lives on ONE ferret's board, with today's `A<n>`
@@ -213,7 +221,7 @@ export interface AskBoards {
  * `ask.sources` — and its `ref` parses with that source's own schema before anything is written.
  */
 export function asksPort(
-  agenda: Pick<AgendaService, 'list' | 'raise' | 'resolve' | 'dismiss' | 'raisedObligation'>,
+  agenda: Pick<AgendaService, 'list' | 'raise' | 'resolve' | 'dismiss' | 'snooze' | 'unsnooze' | 'raisedObligation'>,
   boards: AskBoards,
   sources: (key: SourceKey) => AskSourceSpec | 'unavailable',
 ): AsksApi {
@@ -268,6 +276,31 @@ export function asksPort(
     return out;
   };
   return {
+    snapshots: async (filter = {}) => {
+      if (filter.ferret !== undefined) {
+        const listed = await agenda.list(filter.ferret);
+        if (!listed.ok) throw new AskOwnerActionError(listed.error.code, listed.error.message);
+        return [listed.value];
+      }
+      return await everyBoard((_ferret, board) => [board]);
+    },
+    ownerAction: async input => {
+      const action = AskOwnerActionSchema.parse(input);
+      const { ferret, id } = action.ref;
+      // Today's owner action mount acts only on the machine ledger; ferret answers stay on Asks' own route.
+      if (ferret !== MACHINE_AGENDA_ID)
+        throw new AskOwnerActionError('forbidden', 'these owner actions belong to the machine agenda');
+      const actor: AgendaActor = { kind: 'human' };
+      const mutation = await (action.action === 'dismiss'
+        ? agenda.dismiss(ferret, id, actor, action.note)
+        : action.action === 'snooze'
+          ? agenda.snooze(ferret, id, action.until, actor)
+          : action.action === 'unsnooze'
+            ? agenda.unsnooze(ferret, id, actor)
+            : agenda.resolve(ferret, id, actor, action.note));
+      if (!mutation.ok) throw new AskOwnerActionError(mutation.error.code, mutation.error.message);
+      return mutation.snapshot;
+    },
     raise: async draft => await raises.run(() => raise(draft, false)),
     notify: async notice => await raises.run(() => raise({ ...notice, kind: 'notice' }, true)),
     answers: async (filter, since) =>

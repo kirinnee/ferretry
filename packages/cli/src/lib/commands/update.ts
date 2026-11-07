@@ -1,6 +1,5 @@
 /** Manual updates belong to the shell, so disabling Updates leaves this verb available (§2.2). */
 import { DaemonUpdateViewSchema } from '@ferretry/plugin-updates/contract';
-import { pluginClient } from '../client.ts';
 import { EXIT } from '../errors.ts';
 import type { ShellVerb } from '../shell-context.ts';
 
@@ -30,7 +29,7 @@ export const updateVerb: ShellVerb = async ctx => {
             timer = setTimeout(() => resolve(undefined), 3_000);
           });
           const read = async () =>
-            DaemonUpdateViewSchema.parse(await pluginClient(await ctx.deps(), 'updates').call('GET /v1/daemon/update'));
+            DaemonUpdateViewSchema.parse(await ctx.client('updates').call('GET /v1/daemon/update'));
           return await Promise.race([deadline, read()]);
         } catch {
           return undefined;
