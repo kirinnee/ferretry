@@ -219,3 +219,4 @@ route	POST /v1/board/import	removed	compatibility importer deleted (clean slate,
 route	GET /v1/sessions/:sessionId/tasks	removed	legacy task listing deleted with the compatibility routes (clean slate, owner decision A452)
 route	POST /v1/imports/conversations/adopt	removed	imports are links (design §1.4): adopting a conversation is keeping it, POST /v1/links/conversations/keep; descriptor fields unchanged
 tool	card_progress	added	new in 5.0: writes one card's progress (design §3.3)
+route	GET /v1/tasks	removed	legacy task listing deleted with the compatibility routes (clean slate, owner decision A452)
