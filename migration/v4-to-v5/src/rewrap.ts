@@ -24,6 +24,8 @@ export interface RewrapSpec<Shape> {
 export interface Rewrapped {
   readonly to: string;
   readonly entries: number;
+  /** The entry NAMES moved (a name is not its value), so a step can check them against the index that names them. */
+  readonly names: readonly string[];
 }
 
 export class SealedEnvelopeError extends Error {
@@ -70,5 +72,5 @@ export async function rewrapSealed<Shape>(from: string, to: string, spec: Rewrap
   }
   await mkdir(dirname(to), { recursive: true, mode: 0o700 });
   await writeFile(to, `${JSON.stringify(result.data, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
-  return { to, entries: Object.keys(copied).length };
+  return { to, entries: Object.keys(copied).length, names: Object.keys(copied) };
 }
