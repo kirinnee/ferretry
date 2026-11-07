@@ -83,7 +83,7 @@ describe('the proxy probe, against loopback fakes', () => {
     should(await plain.run({ endpoint: through(port) })).eql({ ok: false, errorClass: 'connect' });
   });
 
-  it('reports timeout when the proxy accepts and says nothing', async () => {
+  it('J-0170 reports timeout when the proxy accepts and says nothing (the probe deadline on the kernel clock)', async () => {
     const port = await listen(createServer());
     should(await plain.run({ endpoint: through(port) })).eql({ ok: false, errorClass: 'timeout' });
   });
