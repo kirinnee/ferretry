@@ -58,3 +58,11 @@ describe('the settings tabs a ported app half links to', () => {
       expect(settingsTabs.has(tab)).toBe(true);
   });
 });
+
+describe('the screens a ported app half links to', () => {
+  test('V-0285 runtimes: Import conversations links to /links, the path Conversation declares for its links screen', () => {
+    const conversation = generated.surfaces.find(entry => entry.id === 'conversation');
+    const screen = (conversation?.manifest.ui?.screens ?? []).find(candidate => candidate.id === 'links');
+    expect(screen?.path).toBe('/links');
+  });
+});
