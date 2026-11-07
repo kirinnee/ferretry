@@ -164,6 +164,12 @@ export interface StatePort {
   list(file: StateFileDef): Promise<readonly string[]>;
   remove(file: StateFileDef, name?: string): Promise<void>;
   sqlite(file: StateFileDef, name?: string): SqliteHandle;
+  /**
+   * The absolute path of one of THIS plugin's own declared `opaque` state files (today's `tmux.sock` under
+   * `state/terminals/`), for a child that makes or opens the file itself. Any other store, or an undeclared file,
+   * throws: a path is never handed out for a file the port reads and writes, nor for another plugin's.
+   */
+  pathOf(file: StateFileDef, name?: string): string;
   /** Whether this subsystem is damaged, and which files. */
   damaged(): readonly StateDamage[];
 }

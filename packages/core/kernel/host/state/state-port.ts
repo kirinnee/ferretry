@@ -275,6 +275,12 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
       });
     },
 
+    pathOf(def: StateFileDef, name?: string): string {
+      const at = locate(def, name);
+      if (def.store !== 'opaque') throw new TypeError(`state ${def.name}: only an opaque file's path is handed out`);
+      return at.path;
+    },
+
     sqlite(def: StateFileDef, name?: string): SqliteHandle {
       const at = locate(def, name);
       if (def.store !== 'sqlite' && def.store !== 'sqlite-cache')

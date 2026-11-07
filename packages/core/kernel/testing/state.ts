@@ -259,6 +259,11 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
       folder.databases.delete(pathOf(file, name));
       folder.landed();
     },
+    pathOf(file, name) {
+      guard(file);
+      if (file.store !== 'opaque') throw new TypeError(`state ${file.name}: only an opaque file's path is handed out`);
+      return `/memory-state/${pathOf(file, name)}`;
+    },
     sqlite(file, name): SqliteHandle {
       guard(file);
       const path = pathOf(file, name);

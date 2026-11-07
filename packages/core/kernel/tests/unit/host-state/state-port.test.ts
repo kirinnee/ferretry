@@ -352,3 +352,14 @@ describe('StatePort: records() and tail() check each line on its own', () => {
     await expect(port.records(counterFile as never)).rejects.toThrow(TypeError);
   });
 });
+
+describe('SS pathOf: the absolute path of an own declared opaque file only', () => {
+  test('an opaque file gets its path under the plugin’s state folder; any other store or an undeclared file throws', () => {
+    const { port, path } = memoryStore();
+    expect(port.pathOf(blobFile)).toBe(path('blob.bin'));
+    expect(() => port.pathOf(keyFile)).toThrow(TypeError);
+    expect(() => port.pathOf(counterFile)).toThrow(TypeError);
+    const theirs = defineState({ name: 'sock', path: 'tmux.sock', store: 'opaque', format: 1 });
+    expect(() => port.pathOf(theirs)).toThrow(UndeclaredStateFileError);
+  });
+});
