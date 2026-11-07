@@ -267,9 +267,11 @@ function add(kind: Kind, what: string, file: string, line: number, descriptor = 
       )
     : renamed(what);
   const check =
-    kind === 'R'
-      ? 'descriptor-parity'
-      : `${packagePath(actualOwner)}/tests/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+    kind === 'V' && what === 'fy daemon update'
+      ? 'packages/cli/tests/unit/update/shell.test.ts'
+      : kind === 'R'
+        ? 'descriptor-parity'
+        : `${packagePath(actualOwner)}/tests/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
   rows.push({
     id: '',
     kind,

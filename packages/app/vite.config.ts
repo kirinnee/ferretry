@@ -10,9 +10,13 @@
  * NO DEV PROXY: the app has no default daemon. Pairing supplies each daemon at run time and every byte to it rides a
  * sealed session (§9.6); a proxy would reintroduce the single-origin coupling pairing removed.
  */
+import autoprefixer from 'autoprefixer';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import tailwindcss from 'tailwindcss';
 import { defineConfig } from 'vite';
+import tailwindConfig from './tailwind.config.ts';
+import { textScalePostcss } from './scripts/text-scale-postcss.ts';
 
 /** The release version this app is built from (`release.json`, §10.6), stamped into the HTML. */
 const release = JSON.parse(readFileSync(fileURLToPath(new URL('../../release.json', import.meta.url)), 'utf8')) as {
@@ -29,6 +33,14 @@ export default defineConfig({
       },
     },
   ],
+  // POSTCSS IS CONFIGURED HERE, not in a sibling `postcss.config.js` (as today): the Tailwind config is a TypeScript
+  // module, so the plugin and `tailwind.config.ts` cannot drift. The text scale runs AFTER Tailwind so its utilities
+  // are covered by the one rule (`scripts/text-scale-postcss.ts`).
+  css: {
+    postcss: {
+      plugins: [tailwindcss(tailwindConfig), textScalePostcss(), autoprefixer()],
+    },
+  },
   base: '/',
   build: {
     outDir: 'dist',

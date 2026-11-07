@@ -28,7 +28,7 @@ export const RELEASE_SIGNATURE_FILE = 'release-manifest.sig';
  * new worker the reader has to reload into a second time. The browser still re-checks this URL byte
  * for byte, so a worker whose code changed is installed, and audited, like any other.
  */
-export const RELEASE_WORKER_RELEASE = 'verified';
+const RELEASE_WORKER_RELEASE = 'verified';
 /** The worker every release lists in `worker` (and in `files`), which is what a page audits against. */
 export const RELEASE_WORKER_FILE = `sw.${RELEASE_WORKER_RELEASE}.js`;
 const WORKER_PATH_PATTERN = /^sw\.[A-Za-z0-9._-]+\.js$/u;
