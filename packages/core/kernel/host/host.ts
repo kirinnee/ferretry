@@ -23,6 +23,7 @@ import type {
   SpawnPort,
   StateDamage,
   StatePort,
+  WebSocketPort,
   WorkersPort,
 } from '../contract/ports.ts';
 import { KERNEL_REFUSALS } from '../contract/refusals.ts';
@@ -57,11 +58,12 @@ import { type InventoryEntry, kernelRoutes } from './kernel-half.ts';
 import { JobRunner } from './jobs.ts';
 import { PluginLifecycle } from './lifecycle.ts';
 import { type LogSink, scopedLog } from './log.ts';
-import { openChildEnvironments, restrictFetch, restrictSpawn } from './permissions.ts';
+import { noWebSockets } from './adapters/process.ts';
+import { openChildEnvironments, restrictFetch, restrictSpawn, restrictWebSocket } from './permissions.ts';
 import { openHome } from './home.ts';
 import { rootsPortFor } from './roots.ts';
 import { buildSnapshot, type DataPluginManifest } from './snapshot.ts';
-import { type DaemonIdentity, loadIdentity } from './identity.ts';
+import { type DaemonIdentity, daemonNameFrom, loadIdentity } from './identity.ts';
 import {
   createSessionLayer,
   type SessionCrypto,
@@ -97,6 +99,10 @@ export interface HostAdapters {
   readonly spawn: SpawnPort;
   readonly fetch: FetchPort;
   readonly workers: WorkersPort;
+  /** Unrestricted WebSocket clients; the host narrows them per plugin. Absent: every dial is refused. */
+  readonly websocket?: WebSocketPort;
+  /** The machine's host name, for the daemon name. Absent: `Ferretry daemon`. */
+  readonly hostname?: () => string;
 }
 
 export interface Listening {
@@ -221,6 +227,11 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const identityOutcome = await loadIdentity(adapters.fs, home);
   if (identityOutcome.kind === 'damaged') return { kind: 'refused', sentence: identityOutcome.sentence, trace };
   const identity = identityOutcome.identity;
+  const identityPort = Object.freeze({
+    daemonId: identity.daemonId,
+    daemonName: daemonNameFrom(adapters.hostname?.() ?? ''),
+  });
+  const websockets = adapters.websocket ?? noWebSockets();
 
   const implementations = new Map<string, DaemonImplementation>();
   for (const implementation of options.implementations)
@@ -341,6 +352,8 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
     ),
     fetch: restrictFetch(manifest.id, manifest.permissions?.network ?? [], adapters.fetch),
+    websocket: restrictWebSocket(manifest.id, manifest.permissions?.network ?? [], websockets),
+    identity: identityPort,
     act,
     ids: { mint: prefix => ids.mint(prefix) },
     redaction,

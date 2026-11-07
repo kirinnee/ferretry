@@ -31,8 +31,16 @@ import type {
   RootName,
   SpawnOptions,
   SpawnResult,
+  IdentityPort,
+  WebSocketClient,
 } from '../contract/ports.ts';
 import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
+
+/** What `kernel.identity` answers in the test host unless a test names one. Not a real fingerprint. */
+export const TEST_IDENTITY: IdentityPort = Object.freeze({
+  daemonId: 'fy_daemon_TESTTESTTESTTESTTESTTESTTESTTESTTESTTESTTES',
+  daemonName: 'test-daemon',
+});
 import type { CallContext, MemberRouteHandler, RouteDescriptor, RouteHandler } from '../contract/route.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
@@ -70,6 +78,10 @@ export interface TestHostOptions {
   ) => SpawnResult | Promise<SpawnResult>;
   /** Answers `kernel.fetch.request` for declared hosts. Without it a fetch fails. */
   readonly fetch?: (url: URL, init?: RequestInit) => Response | Promise<Response>;
+  /** Answers `kernel.websocket.connect` for declared hosts (`ws:`/`wss:`). Without it a dial fails. */
+  readonly websocket?: (url: URL) => WebSocketClient;
+  /** What `kernel.identity` answers. Default: a fixed fake id and `test-daemon`. */
+  readonly identity?: IdentityPort;
   /** Text the stand-in redaction masks (same-width `*`). */
   readonly secrets?: readonly string[];
 }
@@ -492,6 +504,18 @@ async function start(world: World): Promise<TestHost> {
           return options.fetch(parsed, init);
         },
       },
+      websocket: {
+        connect(url) {
+          const parsed = new URL(String(url));
+          if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:')
+            throw new Error(`${manifest.id}: ${parsed.protocol} is not a WebSocket address`);
+          if (!(manifest.permissions?.network ?? []).includes(parsed.host))
+            throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
+          if (options.websocket === undefined) throw new Error(`${manifest.id}: dial ${parsed.host} with no websocket fake`);
+          return options.websocket(parsed);
+        },
+      },
+      identity: options.identity ?? TEST_IDENTITY,
       act: testActRunner({
         holds: () => holds,
         actor: () => actorScope.getStore() ?? 'ferret',
