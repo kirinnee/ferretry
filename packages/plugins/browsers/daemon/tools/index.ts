@@ -2,6 +2,7 @@ import { DEVICE_ACTOR_PREFIX, ferretOf } from '@ferretry/core-gate/contract';
 import { ApiError, type CallContext, jsonResponse, type RouteHandler } from '@ferretry/kernel/contract';
 import type { ToolHandler, ToolResult } from '@ferretry/kernel/manifest';
 import { SurfaceControlRequestSchema } from '../../contract/index.ts';
+import { PageHeld } from '../holds/index.ts';
 import { parseBody, parseValue } from '../pages/body.ts';
 import { sessionIdOf } from '../pages/routes.ts';
 import type { SurfaceOpener } from '../pages/wire/surface.ts';
@@ -18,7 +19,11 @@ export function callerOf(call: CallContext, sessionId?: string): ToolCaller {
   const ferret = ferretOf(call);
   if (ferret !== undefined) return { kind: 'agent', sessionId: ferret };
   if (sessionId === undefined)
-    throw new ApiError(400, 'A person calls the browser tools on one ferret: use the ferret’s browser tools route.', 'bad_request');
+    throw new ApiError(
+      400,
+      'A person calls the browser tools on one ferret: use the ferret’s browser tools route.',
+      'bad_request',
+    );
   const actor = call.actor ?? '';
   const openedBy: SurfaceOpener = actor.startsWith(DEVICE_ACTOR_PREFIX)
     ? { by: 'human', deviceId: actor.slice(DEVICE_ACTOR_PREFIX.length) }
@@ -49,14 +54,21 @@ export function toolResult(answer: BrowserToolAnswer): ToolResult {
   return Object.keys(data).length === 0 ? { text } : { text, data: data as never };
 }
 
-/** One tool handler: parse `{ tool, ...input }`, call, answer; a refusal is an MCP error with its sentence. */
+/**
+ * One tool handler: parse `{ tool, ...input }`, call, answer; a refusal (a domain refusal, or a hold) is an MCP error
+ * with its sentence. Every failure has already passed {@link BrowserTools.call}'s hold answer and redactor (I120).
+ */
 export function toolHandler(tools: BrowserTools, name: string): ToolHandler {
   return async (call, input) => {
-    const parsed = parseValue(BrowserToolCallSchema, { ...(input as object), tool: toolOf(name) }, 'arguments') as BrowserToolCall;
+    const parsed = parseValue(
+      BrowserToolCallSchema,
+      { ...(input as object), tool: toolOf(name) },
+      'arguments',
+    ) as BrowserToolCall;
     try {
       return toolResult(await tools.call(callerOf(call), parsed));
     } catch (error) {
-      if (error instanceof BrowserToolError) return { text: error.message, isError: true };
+      if (error instanceof BrowserToolError || error instanceof PageHeld) return { text: error.message, isError: true };
       throw error;
     }
   };
@@ -99,16 +111,20 @@ export function toolHandlers(tools: BrowserTools): { readonly [K in (typeof PART
 /** Who a person's control act is by: their device, or the box. */
 function controllerOf(call: CallContext): SurfaceController {
   const actor = call.actor ?? '';
-  return (actor.startsWith(DEVICE_ACTOR_PREFIX)
-    ? { by: 'human', deviceId: actor.slice(DEVICE_ACTOR_PREFIX.length) }
-    : { by: 'local' }) as SurfaceController;
+  return (
+    actor.startsWith(DEVICE_ACTOR_PREFIX)
+      ? { by: 'human', deviceId: actor.slice(DEVICE_ACTOR_PREFIX.length) }
+      : { by: 'local' }
+  ) as SurfaceController;
 }
 
+/** A route's refusal as its status; the message already passed the hold answer and the redactor (I120). */
 async function refusing<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
   } catch (error) {
     if (error instanceof BrowserToolError) throw new ApiError(STATUS[error.code], error.message, error.code);
+    if (error instanceof PageHeld) throw new ApiError(409, error.message, error.code);
     throw error;
   }
 }

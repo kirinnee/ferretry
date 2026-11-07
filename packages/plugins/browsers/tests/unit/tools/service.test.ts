@@ -11,7 +11,12 @@ import { heldViewerHost } from '../../../daemon/stream/held-host.ts';
 import { nodeStagedFiles } from '../../../daemon/tools/adapters/staged-files.ts';
 import { SurfaceControl } from '../../../daemon/tools/control.ts';
 import { rootFiles } from '../../../daemon/tools/files.ts';
+import { ApiError, type CallContext } from '@ferretry/kernel/contract';
+import { holdSentence, PageHeld } from '../../../daemon/holds/index.ts';
+import { controlRoutes, toolHandler } from '../../../daemon/tools/index.ts';
 import { BrowserToolError, BrowserTools, type BrowserToolPorts } from '../../../daemon/tools/service.ts';
+import { BrowserTransportError } from '../../../daemon/worker/protocol.ts';
+import { callOf } from '../../support/call.ts';
 import type { ToolCaller } from '../../../daemon/tools/types.ts';
 import { browserKernel } from '../../support/kernel.ts';
 import { workRoots } from '../../support/work-root.ts';
@@ -38,6 +43,8 @@ class FakeBrowser {
   readonly uploads: (readonly string[])[] = [];
   readonly inputs: BrowserInputEvent[] = [];
   readonly acts: string[] = [];
+  /** An act the browser fails, by action: what it throws (a worker's error carries the page's own words). */
+  readonly failOn = new Map<string, () => Error>();
 
   status = async (_sessionId: string) =>
     ({
@@ -90,6 +97,8 @@ class FakeBrowser {
     await guard?.({ document: async () => ({}) } as never);
     const page = this.page(key);
     this.acts.push(action.action);
+    const failure = this.failOn.get(action.action);
+    if (failure !== undefined) throw failure();
     if (action.action === 'read') return this.acted(page, { text: page.text });
     if (action.action === 'screenshot')
       return this.acted(page, { screenshotBase64: Buffer.from(`pixels ${SECRET}`).toString('base64') });
@@ -132,13 +141,33 @@ async function harness(options: { readonly allows?: boolean } = {}) {
   const kernel = browserKernel({ secrets: [SECRET], clock });
   const tools = new BrowserTools({
     browser: browser as unknown as BrowserToolPorts['browser'],
-    control: new SurfaceControl({ publish: async () => undefined, history: async () => [] }, { now: () => clock.nowMs() }),
+    control: new SurfaceControl(
+      { publish: async () => undefined, history: async () => [] },
+      { now: () => clock.nowMs() },
+    ),
     kernel: kernel.kernel,
     policy: { allows: async () => options.allows ?? true },
     files: rootFiles(workRoots(work, join(work, '.fy')), nodeStagedFiles(join(root, 'upload'), clock)),
     binaryName: 'fy',
   });
   return { root, work, browser, kernel, tools };
+}
+
+/** What a call failed with, whatever it is. */
+async function failure(work: Promise<unknown>): Promise<unknown> {
+  try {
+    await work;
+  } catch (error) {
+    return error;
+  }
+  throw new Error('expected the call to fail');
+}
+
+/** The person's tools route for ferret `s1` (`POST /v1/sessions/:sessionId/surfaces/browser/tools`). */
+function personRoute(tools: BrowserTools, body: unknown): Promise<unknown> {
+  const { call } = callOf({ method: 'POST', path: '/v1/sessions/s1/surfaces/browser/tools', body, kind: 'host' });
+  const withSession = { ...call, params: new Map([['sessionId', 's1']]) } as unknown as CallContext;
+  return Promise.resolve(controlRoutes(tools)['POST /v1/sessions/:sessionId/surfaces/browser/tools'](withSession));
 }
 
 async function refusal(work: Promise<unknown>): Promise<BrowserToolError> {
@@ -198,13 +227,77 @@ describe('the browser tools — what a page says is masked (S16)', () => {
 
     // Act
     const pressed = await tools.call(agent, { tool: 'browser.press', name: 'app', keys: ['Tab'] });
-    const read = await refusal(tools.call(agent, { tool: 'browser.read', name: 'app', mode: 'text' }));
+    const read = await failure(tools.call(agent, { tool: 'browser.read', name: 'app', mode: 'text' }));
 
     // Assert
     should(pressed.summary).equal('Done on %browser:app.');
-    should(read.code).equal('conflict');
-    should(read.message).equal('This is held right now because the owner just typed a private value into it.');
+    should(read).be.instanceOf(PageHeld);
+    should((read as PageHeld).message).equal(holdSentence('held', '%browser:app', 'agent'));
     should(browser.acts).deepEqual(['press']);
+  });
+});
+
+describe('the browser tools — a failure leaves masked, and a held page answers with its hold (I120)', () => {
+  it('I120 a navigation whose error echoes a secret in the address answers it masked, by tool and by route', async () => {
+    // Arrange
+    const { browser, tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+    const url = `https://login.example.test/?token=${SECRET}`;
+    browser.failOn.set(
+      'navigate',
+      () =>
+        new BrowserTransportError(
+          'upstream_failed',
+          `browser action failed: page.goto: net::ERR_NAME_NOT_RESOLVED at ${url}`,
+          502,
+        ),
+    );
+    const { call } = callOf({ method: 'POST', path: '/v1/tools/browser_navigate', kind: 'agent' });
+
+    // Act
+    const byFerret = await toolHandler(tools, 'browser_navigate')(call, { name: 'app', url });
+    const byPerson = (await failure(personRoute(tools, { tool: 'browser.navigate', name: 'app', url }))) as ApiError;
+
+    // Assert
+    should(byFerret).deepEqual({
+      text: 'page.goto: net::ERR_NAME_NOT_RESOLVED at https://login.example.test/?token=*******',
+      isError: true,
+    });
+    should(byPerson).be.instanceOf(ApiError);
+    should(byPerson.status).equal(502);
+    should(byPerson.message).equal(
+      'page.goto: net::ERR_NAME_NOT_RESOLVED at https://login.example.test/?token=*******',
+    );
+  });
+
+  it('I120 a read that fails on a page a hold began on answers with the hold, never the page’s error', async () => {
+    // Arrange
+    const { browser, kernel, tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+    const target = pageTarget((browser.pages[0] as FakePage).id);
+    // The owner's value lands while the read is in the page, and the page's error then carries what it shows.
+    browser.failOn.set('read', () => {
+      kernel.hold(target, 'held', ['read', 'picture', 'wait', 'script', 'stream']);
+      return new BrowserTransportError(
+        'upstream_failed',
+        'browser action failed: the field now says Welcome back, ana',
+        502,
+      );
+    });
+    const { call } = callOf({ method: 'POST', path: '/v1/tools/browser_read', kind: 'agent' });
+
+    // Act
+    const byFerret = await toolHandler(tools, 'browser_read')(call, { name: 'app', mode: 'text' });
+    const byPerson = (await failure(
+      personRoute(tools, { tool: 'browser.read', name: 'app', mode: 'text' }),
+    )) as ApiError;
+
+    // Assert
+    should(byFerret).deepEqual({ text: holdSentence('held', '%browser:app', 'agent'), isError: true });
+    should(byPerson).be.instanceOf(ApiError);
+    should(byPerson.status).equal(409);
+    should(byPerson.message).equal(holdSentence('held', '%browser:app', 'person'));
+    should(JSON.stringify([byFerret, byPerson.message])).not.containEql('ana');
   });
 });
 

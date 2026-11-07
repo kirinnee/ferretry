@@ -1,5 +1,6 @@
 import type { KernelPorts, Op, Picture, TargetRef } from '@ferretry/kernel/contract';
 import { ApiError } from '@ferretry/kernel/contract';
+import { heldOrMasked, PageHeld } from '../holds/index.ts';
 import { acted, browserTarget, pageTarget, writeAct } from '../pages/acts.ts';
 import {
   type BrowserActGuard,
@@ -155,6 +156,21 @@ type PageToolName =
   | 'browser.fill_form'
   | 'browser.highlight';
 
+/**
+ * The page tools whose failure under a hold answers with the hold (today's `PAGE_PICTURES` and `PAGE_TEXT`): they hand
+ * back a picture of a page or what it says, and a failure can carry that as well as a result can.
+ */
+const HOLD_ANSWERED_TOOLS: ReadonlySet<BrowserToolCall['tool']> = new Set([
+  'browser.screenshot',
+  'browser.pdf',
+  'browser.highlight',
+  'browser.read',
+  'browser.eval',
+  'browser.console',
+  'browser.network',
+  'browser.wait_for',
+]);
+
 /** The tools that move a file between a page and the session's folder: they need the `files` switch as well as `browser`. */
 const FILE_TOOLS: ReadonlySet<BrowserToolCall['tool']> = new Set(['browser.upload', 'browser.download', 'browser.pdf']);
 
@@ -270,13 +286,17 @@ export class BrowserTools {
         throw new BrowserToolError('forbidden', pageScriptsRefusal(this.ports.binaryName));
       return await this.dispatch(caller, call);
     } catch (error) {
-      throw translate(error) ?? error;
+      throw await this.withheld(caller, call, translate(error) ?? error);
     }
   }
 
   /** Every live driving marker, standing takeover and hand-over of a ferret's pages. */
   async controlView(sessionId: string): Promise<SurfaceControlView> {
-    return await this.alive(sessionId, await this.ports.control.view(sessionId, 'browser'));
+    try {
+      return await this.alive(sessionId, await this.ports.control.view(sessionId, 'browser'));
+    } catch (error) {
+      throw await this.withheld({ kind: 'person', sessionId }, undefined, translate(error) ?? error);
+    }
   }
 
   /** A person takes a page over from the agent, hands it back, or hands it to the agent. */
@@ -288,8 +308,43 @@ export class BrowserTools {
       else await this.ports.control.hand(sessionId, surface, by);
       return await this.controlView(sessionId);
     } catch (error) {
-      throw translate(error) ?? error;
+      throw await this.withheld({ kind: 'person', sessionId }, undefined, translate(error) ?? error);
     }
+  }
+
+  /**
+   * A failed call's error as it may leave the daemon (I120; today's `heldOrMasked`), for the ferret's MCP tools and the
+   * person's routes alike. A failed read or picture of a page under a hold answers with the hold, success or not: an
+   * error can carry the page's words as well as a result can. Every other message passes the same redactor as a read
+   * (a worker's error can echo the page's address, a value just typed), and fails CLOSED to a fixed sentence when the
+   * redactor cannot run. A refusal keeps its code, so the route still answers its status.
+   */
+  private async withheld(caller: ToolCaller, call: BrowserToolCall | undefined, error: unknown): Promise<unknown> {
+    const key = call !== undefined && HOLD_ANSWERED_TOOLS.has(call.tool) && 'name' in call ? call.name : undefined;
+    const page = key === undefined ? undefined : await this.heldPage(caller.sessionId, key);
+    const out = await heldOrMasked(
+      this.ports.kernel,
+      page,
+      page === undefined || call === undefined ? undefined : TOOL_OPS[call.tool],
+      caller.kind,
+      error,
+    );
+    if (out === error || out instanceof PageHeld) return out;
+    if (error instanceof BrowserToolError) return new BrowserToolError(error.code, out.message);
+    if (error instanceof ApiError) return new ApiError(error.status, out.message, error.code);
+    return out;
+  }
+
+  /** The page a failed call named, as its hold target and its reference; nothing when it cannot be found. */
+  private async heldPage(
+    sessionId: string,
+    key: string,
+  ): Promise<{ readonly id: string; readonly reference: string } | undefined> {
+    const found = await this.ports.browser
+      .status(sessionId)
+      .then(status => status.pages.find(page => page.name === key || page.id === key))
+      .catch(() => undefined);
+    return found === undefined ? undefined : { id: found.id, reference: surfaceReference(found.name ?? found.id) };
   }
 
   // ── the page tools' host (`../target/tools`, bound by `./page-host.ts`) ──────────────────────────────────────────
