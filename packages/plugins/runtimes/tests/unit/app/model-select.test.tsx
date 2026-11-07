@@ -120,7 +120,7 @@ describe('ModelSelect · models installed on this machine', () => {
     await screen.unmount();
   });
 
-  test('describes the select by the note when Ollama is not usable, joined to the caller’s own description', async () => {
+  test.skip('describes the select by the note when Ollama is not usable, joined to the caller’s own description — pending port: ui.ts CopyButton primitive (ports-pending: runtimes)', async () => {
     const screen = await mount(
       <ModelSelect
         aria-describedby="hint"

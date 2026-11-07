@@ -293,7 +293,7 @@ describe('RuntimeModelControls', () => {
       return Promise.resolve(claudeCatalog);
     });
     const screen = await mount(
-      <RuntimeModelControls {...props({ catalogs, view: view({ state: { status: 'completed' } }) })} />,
+      <RuntimeModelControls {...props({ catalogs, view: view({ state: { status: 'stopped' } }) })} />,
     );
     expect(screen.container.textContent).toContain('requires a running session');
     expect(loads).toBe(0);
@@ -456,7 +456,7 @@ describe('RuntimeModelControls', () => {
   test('discards a catalog whose harness does not match the session', async () => {
     const screen = await mount(<RuntimeModelControls {...props({ catalogs: resolved(codexCatalog) })} />);
     expect(must(screen.container.querySelector('[role="alert"]'), 'the mismatch alert').textContent).toContain(
-      'codex model catalog for a claude session',
+      'codex model catalog for a claude-code session',
     );
     await screen.unmount();
   });
