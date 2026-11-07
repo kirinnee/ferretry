@@ -139,8 +139,11 @@ export function mcpOAuthSecretNames(component: string, serverUrl: string): McpOA
  * login that is dead on the other machine within the hour (docs/secrets.md).
  */
 export function isSignInSecretName(name: string): boolean {
-  return /^MCP_(?:[A-Z0-9_]+_)?[0-9A-F]{16}_ACCESS$/u.test(name);
+  return new RegExp(`^(?:${SIGN_IN_SECRET_NAME})$`, 'u').test(name);
 }
+
+/** The pattern of {@link isSignInSecretName}, unanchored: what MCP's manifest declares it mints in the Vault. */
+export const SIGN_IN_SECRET_NAME = 'MCP_(?:[A-Z0-9_]+_)?[0-9A-F]{16}_ACCESS';
 
 /**
  * One authorization server's own callback path (OAuth Security BCP §4.4.2, the per-AS redirect mix-up

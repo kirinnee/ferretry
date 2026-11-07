@@ -5,8 +5,8 @@ import type { DaemonStorage } from '../../../../daemon/adapters/storage/session-
 import { StorageTransferSourceReader } from '../../../../daemon/adapters/transfer/storage-transfer-source-reader.ts';
 import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
-import { SessionConfigFiles, SessionStateFiles } from '../../../../daemon/lib/state.ts';
 import { memoryStorage } from '../../../support/daemon/storage.ts';
+import { FerretConfigFile, FerretStateFile } from '../../../../contract/index.ts';
 
 /**
  * The complete source projection, off real session documents.
@@ -24,11 +24,11 @@ const NOW = '2026-08-06T09:00:00.000Z';
  * documents several of these cases need, and a damaged document on disk is precisely what they are about.
  */
 function plantConfig(folder: MemoryStateFolder, id: string, document: unknown): void {
-  folder.plant(SessionConfigFiles, JSON.stringify({ format: 1, ...(document as object) }), id);
+  folder.plant(FerretConfigFile, JSON.stringify({ format: 1, ...(document as object) }), id);
 }
 
 function plantState(folder: MemoryStateFolder, id: string, document: unknown): void {
-  folder.plant(SessionStateFiles, JSON.stringify({ format: 1, ...(document as object) }), id);
+  folder.plant(FerretStateFile, JSON.stringify({ format: 1, ...(document as object) }), id);
 }
 
 const transcript: TranscriptProvenance = {

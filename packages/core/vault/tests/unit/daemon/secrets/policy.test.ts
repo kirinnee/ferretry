@@ -117,7 +117,7 @@ describe('earning a recipe', () => {
 describe('configured references', () => {
   it('S65 name each reference with the entry it came from', () => {
     should(configuredReferences({ AUTH: 'Bearer ${secret:TOKEN}' })).deepEqual([
-      { name: 'TOKEN', origin: 'config/daemon.json → secretEnvironment.AUTH' },
+      { name: 'TOKEN', origin: 'config/vault.yaml → secretEnvironment.AUTH' },
     ]);
   });
 
@@ -126,7 +126,7 @@ describe('configured references', () => {
   });
 
   it('should spell an origin an operator can go and find', () => {
-    should(recipeOrigin('AUTH')).equal('config/daemon.json → secretEnvironment.AUTH');
+    should(recipeOrigin('AUTH')).equal('config/vault.yaml → secretEnvironment.AUTH');
   });
 });
 

@@ -12,9 +12,9 @@ import { SessionProvenanceRecorder } from '../../../../daemon/lib/session/proven
 import { SessionProvenanceStamper } from '../../../../daemon/lib/session/provenance/stamper.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import type { SessionTransferEnvelope } from '../../../../daemon/lib/transfer/types.ts';
-import { SessionConfigFiles } from '../../../../daemon/lib/state.ts';
 import { memoryStorage } from '../../../support/daemon/storage.ts';
 import { AT, SOURCE_ID, TARGET_ID, plan } from './fixtures.ts';
+import { FerretConfigFile } from '../../../../contract/index.ts';
 
 /**
  * The transfer envelope, against real session documents.
@@ -76,7 +76,7 @@ function created(id: string, overrides: Record<string, unknown> = {}): Record<st
  * schema would refuse to write.
  */
 function plantConfig(folder: MemoryStateFolder, id: string, document: unknown): void {
-  folder.plant(SessionConfigFiles, JSON.stringify({ format: 1, ...(document as object) }), id);
+  folder.plant(FerretConfigFile, JSON.stringify({ format: 1, ...(document as object) }), id);
 }
 
 async function refusal(promise: Promise<unknown>): Promise<SessionTransferEnvelopeError> {
@@ -231,7 +231,7 @@ describe('StorageTransferEnvelopeWriter', () => {
     // Arrange: the declared schema cannot hold this stamp, so the state port reads the whole document as damaged.
     const { storage, folder } = await memoryStorage();
     plantConfig(folder, TARGET_ID, created(TARGET_ID, { provenance: { v: 1, wardenLineage: 'yes' } }));
-    const before = folder.raw(SessionConfigFiles, TARGET_ID);
+    const before = folder.raw(FerretConfigFile, TARGET_ID);
 
     // Act
     const failure = await new StorageTransferEnvelopeWriter(storage).apply(TARGET_ID, envelope('/work/x')).then(
@@ -242,7 +242,7 @@ describe('StorageTransferEnvelopeWriter', () => {
     // Assert: a record that cannot be parsed is not the same as no record, and treating it as one
     // would erase whatever wrote it. The refusal is the port's damage, and the bytes are untouched.
     should(failure).be.instanceOf(Error);
-    should(folder.raw(SessionConfigFiles, TARGET_ID)).equal(before);
+    should(folder.raw(FerretConfigFile, TARGET_ID)).equal(before);
   });
 
   it('should drop a label the transfer does not carry', async () => {
@@ -275,7 +275,7 @@ describe('StorageTransferEnvelopeWriter', () => {
 
     // Assert: the envelope is applied to the session the lifecycle reserved, never to a document it made up.
     should(failure).be.instanceOf(Error);
-    should(folder.raw(SessionConfigFiles, TARGET_ID)).be.undefined();
+    should(folder.raw(FerretConfigFile, TARGET_ID)).be.undefined();
   });
 
   it('should refuse a target key that is not a usable session id', async () => {

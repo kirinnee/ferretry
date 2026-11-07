@@ -20,7 +20,7 @@ import { UnknownSecretError } from './types.ts';
 
 /** Where a configured recipe lives, spelled the way an operator would go and find it. */
 export function recipeOrigin(key: string): string {
-  return `config/daemon.json → secretEnvironment.${key}`;
+  return `config/vault.yaml → secretEnvironment.${key}`;
 }
 
 /**

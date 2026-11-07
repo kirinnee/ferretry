@@ -83,7 +83,13 @@ export interface ProviderQuotaLogin {
 
 /** One endpoint read, ready to send through the Vault. */
 export interface ProviderQuotaPlan {
+  /**
+   * The secret the login's key is held under. Read to decide the login HAS one key; never sent to the Vault: Usage names
+   * a login and the variable that carries its key, and Logins resolves the secret from that login's own record.
+   */
   readonly secretName: SecretName;
+  /** The login variable whose whole value is that `${secret:NAME}` reference. */
+  readonly variable: string;
   readonly hosts: readonly string[];
   readonly request: OutboundHttpRequest;
   readonly placement: CredentialPlacement;
@@ -228,7 +234,13 @@ export function planProviderQuota(login: ProviderQuotaLogin): ProviderQuotaPlan 
   const keyVariable = keyVariableOf(login);
   const reference = keyVariable === undefined ? undefined : (env[keyVariable] ?? sameSecretElsewhere(login));
   const whole = reference === undefined ? null : WHOLE_REFERENCE.exec(reference);
-  if (whole === null) {
+  const variable =
+    keyVariable === undefined || reference === undefined
+      ? undefined
+      : env[keyVariable] !== undefined
+        ? keyVariable
+        : Object.entries(env).find(([, value]) => value === reference)?.[0];
+  if (whole === null || variable === undefined) {
     return {
       reason: 'This login’s key is not a single ${secret:NAME}, so Ferretry cannot tell which key to ask with.',
     };
@@ -245,6 +257,7 @@ export function planProviderQuota(login: ProviderQuotaLogin): ProviderQuotaPlan 
   }
   return {
     secretName: whole[1] as SecretName,
+    variable,
     hosts: [host],
     placement: endpoint.placement,
     parse: (payload, nowMs) => endpoint.parse(payload, nowMs, host),

@@ -101,6 +101,8 @@ export const MCP_CONFIG = configDef(
     schema: McpItemSchema,
     axis: 'configure',
     loosens: neverLoosens,
+    // A server entry names the secrets its environment and its hand-registered client are made from.
+    credentialRecords: true,
   }),
 );
 

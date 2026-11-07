@@ -13,7 +13,7 @@ import {
   WardenRunRequestSchema,
 } from '../contract/index.ts';
 import { parseBody, parseOptionalBody } from './lib/body.ts';
-import { WardenConfigHeld, WardenConfigRefused } from './adapters/index.ts';
+import { WardenConfigHeld, WardenConfigMoved, WardenConfigRefused } from './adapters/index.ts';
 import type { WardenSubsystem } from './subsystem.ts';
 import { WardenRequestError, type WardenRequestFailure } from './lib/index.ts';
 import {
@@ -42,6 +42,7 @@ function refuse(error: unknown): never {
   }
   if (error instanceof WardenConfigRefused) throw new ApiError(400, error.message, 'invalid_request');
   if (error instanceof WardenConfigHeld) throw new ApiError(409, error.message, 'config_held');
+  if (error instanceof WardenConfigMoved) throw new ApiError(409, error.message, 'conflict');
   throw error;
 }
 

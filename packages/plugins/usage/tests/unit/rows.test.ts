@@ -1,12 +1,7 @@
 import { describe, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import type {
-  AuthorizedOutcome,
-  CredentialPlacement,
-  OutboundHttpRequest,
-  SecretName,
-} from '@ferretry/core-vault/contract';
+import type { AuthorizedOutcome, CredentialPlacement, OutboundHttpRequest } from '@ferretry/core-vault/contract';
 import { instantFromEpochMs } from '@ferretry/std';
 import should from 'should';
 import {
@@ -15,6 +10,7 @@ import {
   UsageAccountViewSchema,
   UsageFeedViewSchema,
 } from '../../contract/index.ts';
+import manifest from '../../manifest.ts';
 import { usageProbeUrls } from '../../daemon/lib/usage/probe-origin.ts';
 import { ProviderQuotaService } from '../../daemon/lib/usage/provider-quota/service.ts';
 import { NOW_MS, ZAI_QUOTA } from './usage/provider-quota/fixtures.ts';
@@ -33,7 +29,8 @@ const GLM = makeLogin(
 );
 
 interface Sent {
-  readonly secret: SecretName;
+  readonly loginId: string;
+  readonly variable: string;
   readonly hosts: readonly string[];
   readonly request: OutboundHttpRequest;
   readonly placement: CredentialPlacement | undefined;
@@ -46,12 +43,13 @@ class VaultSide {
   /** What the Vault put on the wire: the one place the key is, as the real Vault places it. */
   readonly wire: string[] = [];
   async send(
-    secret: SecretName,
+    loginId: string,
+    variable: string,
     hosts: readonly string[],
     request: OutboundHttpRequest,
     placement?: CredentialPlacement,
   ): Promise<AuthorizedOutcome> {
-    this.sent.push({ secret, hosts, request, placement });
+    this.sent.push({ loginId, variable, hosts, request, placement });
     this.wire.push(`authorization: Bearer ${KEY_VALUE}`);
     return { kind: 'completion', payload: ZAI_QUOTA };
   }
@@ -95,8 +93,11 @@ describe('what Usage proves of secrets today', () => {
 
     await service.watch();
 
-    // Usage named a secret and a host; the key was never in its hands, on the request or in the reading.
-    should(vault.sent.map(call => [call.secret, call.hosts])).deepEqual([['ZAI_API_KEY', ['api.z.ai']]]);
+    // Usage named a LOGIN, the variable that carries its key and a host; no secret name, and the key was never in its
+    // hands, on the request or in the reading.
+    should(vault.sent.map(call => [call.loginId, call.variable, call.hosts])).deepEqual([
+      ['glm', 'ANTHROPIC_AUTH_TOKEN', ['api.z.ai']],
+    ]);
     const sentText = JSON.stringify(vault.sent);
     should(sentText.includes(KEY_VALUE)).be.false();
     // The key WAS placed (so the absence above can fail): it is on the Vault's wire and nowhere Usage looks.
@@ -108,11 +109,15 @@ describe('what Usage proves of secrets today', () => {
     should(JSON.stringify(reading).includes(KEY_VALUE)).be.false();
     should(instantFromEpochMs(NOW_MS)).equal(reading.at);
 
-    // And the only Vault call the daemon half makes is that one.
+    // And the daemon half makes no Vault call at all: its one spend is Logins' `authorizeFetch`.
     const vaultCalls = daemonSources().flatMap(({ file, text }) =>
       [...text.matchAll(/vault\.(\w+)\(/gu)].map(match => `${file}:${match[1]}`),
     );
-    should(vaultCalls).deepEqual(['index.ts:authorizeFetch']);
+    should(vaultCalls).deepEqual([]);
+    const loginsSpends = daemonSources().flatMap(({ file, text }) =>
+      [...text.matchAll(/logins\.(authorizeFetch)\(/gu)].map(match => `${file}:${match[1]}`),
+    );
+    should(loginsSpends).deepEqual(['index.ts:authorizeFetch']);
   });
 
   it('nothing Usage returns carries a token: the wire has no field for one', () => {
@@ -172,5 +177,18 @@ describe('what Usage proves of secrets today', () => {
     ])
       should(usageProbeUrls(origin)).be.undefined();
     should(usageProbeUrls(undefined)).be.undefined();
+  });
+});
+
+describe('Usage cannot name a secret', () => {
+  it('S12 S62 Usage does not need the Vault: it names a login to Logins, which resolves the key from that login’s own record', () => {
+    should(Object.keys(manifest.needs ?? {}).sort()).deepEqual(['conversation', 'ferrets', 'logins']);
+    should(Object.values(manifest.needs ?? {}).map(token => token.name)).not.containEql('vault');
+    // The one spend the daemon half makes is Logins' `authorizeFetch`, which takes a login id and a variable, not a secret.
+    const text = daemonSources()
+      .map(source => source.text)
+      .join('\n');
+    should(text.includes('needs.logins.authorizeFetch(loginId')).be.true();
+    should(/\bauthorizeFetch\(\s*(name|secret)/u.test(text)).be.false();
   });
 });

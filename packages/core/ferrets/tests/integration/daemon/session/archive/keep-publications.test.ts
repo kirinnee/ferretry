@@ -5,8 +5,8 @@ import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keye
 import type { DaemonStorage } from '../../../../../daemon/adapters/storage/session-storage.ts';
 import { AgentPinService } from '../../../../../daemon/lib/agent-pins/service.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
-import { AgentPinsFile } from '../../../../../daemon/lib/state.ts';
 import { memoryStorage, sessionConfig, sessionState } from '../../../../support/daemon/storage.ts';
+import { AgentPinsFile } from '../../../../../contract/index.ts';
 
 /**
  * A pin is a keep: pinning an archived ferret brings it, and the ancestors it was started under, back into the live

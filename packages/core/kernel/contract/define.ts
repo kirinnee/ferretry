@@ -90,8 +90,11 @@ export interface TransformHook<Name extends string = string, Value = unknown> ex
  * One taker per key is THE implementation for it; two takers of one key refuse the build. A security-path provide
  * hook names its allowed takers (`takers`); the build refuses any other (§3.5).
  */
-export interface ProvideHook<Name extends string = string, Key extends string = string, Value = unknown>
-  extends HookBase<Name, 'provide'> {
+export interface ProvideHook<
+  Name extends string = string,
+  Key extends string = string,
+  Value = unknown,
+> extends HookBase<Name, 'provide'> {
   readonly key: z.ZodType<Key>;
   readonly value?: z.ZodType<Value>;
   readonly takers?: readonly string[];
@@ -262,6 +265,12 @@ interface ConfigBase<Shape> {
   loosens(before: Shape | undefined, after: Shape | undefined): readonly string[];
   /** Person-only and passkey-checked (`plugins.yaml`, `gate.yaml`). */
   readonly personOnly?: true;
+  /**
+   * The files of this def are CREDENTIAL RECORDS: each one names the secrets a credential it describes is made from
+   * (Logins' login records). Only the `${secret:NAME}` references in effect in a def marked so count as the owning plugin's
+   * own secrets for a provider that acts for it (the Vault's spend rule); a reference in any other file counts for nothing.
+   */
+  readonly credentialRecords?: true;
 }
 
 /** One path under `config/` (YAML). */
@@ -290,6 +299,7 @@ export function defineConfig<Shape>(spec: {
    */
   loosens(before: Shape | undefined, after: Shape): readonly string[];
   readonly personOnly?: true;
+  readonly credentialRecords?: true;
 }): ConfigFileDef<Shape>;
 export function defineConfig<Shape>(spec: {
   readonly collection: string;
@@ -298,6 +308,7 @@ export function defineConfig<Shape>(spec: {
   readonly axis: CapabilityAxis;
   loosens(before: Shape | undefined, after: Shape): readonly string[];
   readonly personOnly?: true;
+  readonly credentialRecords?: true;
 }): ConfigCollectionDef<Shape>;
 export function defineConfig(spec: Record<string, unknown>): ConfigDef {
   return Object.freeze(

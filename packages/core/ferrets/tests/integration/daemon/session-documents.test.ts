@@ -13,8 +13,8 @@ import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
 import { DaemonStorage, InvalidStateDocumentError } from '../../../daemon/adapters/storage/session-storage.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
-import { SessionConfigFiles, SessionStateFiles } from '../../../daemon/lib/state.ts';
 import { RecordingLog, SESSION_STORE_FILES, sessionConfig, sessionState } from '../../support/daemon/storage.ts';
+import { FerretConfigFile, FerretStateFile } from '../../../contract/index.ts';
 
 const ID = parseSessionId('cached-1');
 
@@ -125,7 +125,7 @@ describe('session documents', () => {
     await storage.readState(ID);
 
     // Act
-    await raw.write(SessionStateFiles, sessionState(ID, { status: 'stopped', turn: 1 }) as never, ID);
+    await raw.write(FerretStateFile, sessionState(ID, { status: 'stopped', turn: 1 }) as never, ID);
     const replaced = (await storage.readState(ID)) as Record<string, unknown>;
 
     // Assert
@@ -135,7 +135,7 @@ describe('session documents', () => {
   it('should refuse a damaged document every time it is read', async () => {
     // Arrange
     const { storage, folder } = await seeded();
-    folder.plant(SessionStateFiles, '{ not json', ID);
+    folder.plant(FerretStateFile, '{ not json', ID);
 
     // Act / Assert
     for (let attempt = 0; attempt < 2; attempt += 1)
@@ -160,7 +160,7 @@ describe('session documents', () => {
     await storage.readConfig(ID);
 
     // Act
-    await raw.remove(SessionConfigFiles, ID);
+    await raw.remove(FerretConfigFile, ID);
 
     // Assert
     should(await storage.readConfig(ID)).be.undefined();
