@@ -72,6 +72,14 @@ export default definePlugin({
         audit: { skip: 'the bootstrap read records nothing' },
         guard: { none: 'plugin ids, on/off and contract hashes only' },
       }),
+      // Today's `GET /v1/doctor` (R-0081): the host diagnosis, now the rows every plugin's declared checks give.
+      route('GET /v1/doctor', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a diagnosis read records nothing' },
+        guard: { none: 'check names and sentences the checks wrote; never a secret' },
+      }),
       // §1.3.
       route('GET /v1/glossary', {
         minimum: 'authenticated',

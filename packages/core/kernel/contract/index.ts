@@ -7,6 +7,7 @@ export * from './act.ts';
 export * from './body.ts';
 export * from './bound.ts';
 export * from './compare.ts';
+export * from './doctor.ts';
 export * from './define.ts';
 export * from './home.ts';
 export * from './http.ts';

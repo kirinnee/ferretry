@@ -4,6 +4,7 @@ import { jsonResponse } from '../contract/http.ts';
 import type { Health, PluginInventory } from '../contract/kernel.ts';
 import { CORE_IDS } from '../contract/ids.ts';
 import { PROTOCOL } from '../contract/session.ts';
+import type { DoctorReport } from '../contract/doctor.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { RouteHandler } from '../contract/route.ts';
 import type kernelManifest from '../plugin.ts';
@@ -18,6 +19,8 @@ export interface KernelHalfSources {
   /** Gate's per-standing projection (§9.6). `undefined` (no Gate, or it threw) = only the five core pieces. */
   project(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[] | undefined;
   snapshot(): PostBuildSnapshot;
+  /** A fresh diagnosis: every plugin's declared checks are run now. */
+  doctor(): Promise<DoctorReport>;
   liveness(): { readonly status: 'starting' | 'ok'; readonly uptimeSeconds: number; readonly pid: number };
 }
 
@@ -42,6 +45,7 @@ export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<Kernel
         plugins: projected.map(entry => ({ id: entry.id, on: entry.on, contract: entry.contract })),
       } satisfies PluginInventory);
     },
+    'GET /v1/doctor': async () => jsonResponse(await sources.doctor()),
     'GET /v1/glossary': async () =>
       jsonResponse({
         words: sources.snapshot().words.map(word => ({

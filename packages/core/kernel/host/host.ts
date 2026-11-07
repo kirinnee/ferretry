@@ -77,6 +77,7 @@ import { NO_HOST_FACTS } from './no-host-facts.ts';
 import { undeclaredHostFacts } from './adapters/host-facts.ts';
 import { type UpdateHostFiles, undeclaredUpdateHost } from './adapters/update-host.ts';
 import { PRODUCT_BINARIES } from './binaries.ts';
+import { doctorReport } from './doctor-report.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
 import { type DaemonTimings, DEFAULT_DAEMON_TIMINGS } from './session/timings.ts';
 import {
@@ -840,6 +841,7 @@ async function bootLocked(
       }
     },
     snapshot: () => frozen as PostBuildSnapshot,
+    doctor: async () => doctorReport([...bootNotes, ...(await doctorLines(records, hooks, jobs, data.refused))]),
     liveness: () => ({
       status: phase === 'started' ? 'ok' : 'starting',
       uptimeSeconds: Math.max(0, Math.round((clock.nowMs() - startedAtMs) / 1000)),
