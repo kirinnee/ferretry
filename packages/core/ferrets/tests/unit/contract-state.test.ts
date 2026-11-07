@@ -34,17 +34,28 @@ const PROVENANCE = {
 };
 
 describe('history.jsonl', () => {
-  const event = { schemaVersion: 1, sequence: 1, sessionId: 'mi4abc-1a2b3c4d', time: AT, type: 'session.stopped', data: { reason: 'done' } };
+  const event = {
+    schemaVersion: 1,
+    sequence: 1,
+    sessionId: 'mi4abc-1a2b3c4d',
+    time: AT,
+    type: 'session.stopped',
+    data: { reason: 'done' },
+  };
 
   test('today’s stored journal events read back, line by line', async () => {
     const state = folder();
-    state.plant(FerretHistoryFiles, `${stamped(event)}\n${stamped({ ...event, sequence: 2, type: 'session.resumed', data: {} })}\n`, 'f1');
+    state.plant(
+      FerretHistoryFiles,
+      `${stamped(event)}\n${stamped({ ...event, sequence: 2, type: 'session.resumed', data: {} })}\n`,
+      'f1',
+    );
     const lines: unknown[] = [];
     for await (const line of port(state).lines(FerretHistoryFiles, 'f1')) lines.push(line);
     expect(lines).toEqual([event, { ...event, sequence: 2, type: 'session.resumed', data: {} }]);
   });
 
-  test('a line that is not today’s event shape is damage', async () => {
+  test('a line that is not today’s event shape is damage: skipped and counted, the rest still read', async () => {
     for (const bad of [
       { ...event, sequence: 0 },
       { ...event, sessionId: 'Upper' },
@@ -52,11 +63,13 @@ describe('history.jsonl', () => {
       { ...event, extra: true },
     ]) {
       const state = folder();
-      state.plant(FerretHistoryFiles, `${stamped(bad)}\n`, 'f1');
-      const read = async () => {
-        for await (const _ of port(state).lines(FerretHistoryFiles, 'f1'));
-      };
-      await expect(read()).rejects.toThrow();
+      state.plant(FerretHistoryFiles, `${stamped(bad)}\n${stamped(event)}\n`, 'f1');
+      const lines: unknown[] = [];
+      for await (const line of port(state).lines(FerretHistoryFiles, 'f1')) lines.push(line);
+      expect(lines).toEqual([event]);
+      const read = await port(state).records(FerretHistoryFiles, 'f1');
+      expect(read.unreadable).toBe(1);
+      expect([...read.records] as unknown[]).toEqual([event]);
     }
   });
 });
@@ -104,7 +117,10 @@ describe('archive.json', () => {
   test('today’s archive registry body reads back; format is the kernel’s, not a version field', async () => {
     const state = folder();
     state.plant(ArchiveFile, stamped({ sessions: { 'mi4abc-1a2b3c4d': entry } }));
-    expect(await port(state).read(ArchiveFile)).toEqual({ ok: true, value: { sessions: { 'mi4abc-1a2b3c4d': entry } } });
+    expect(await port(state).read(ArchiveFile)).toEqual({
+      ok: true,
+      value: { sessions: { 'mi4abc-1a2b3c4d': entry } },
+    });
   });
 
   test('today’s `version: 1`, a torn file and a bad entry are damage', async () => {
@@ -143,7 +159,10 @@ describe('worktrees.json', () => {
   test('today’s managed worktree document reads back', async () => {
     const state = folder();
     state.plant(WorktreesFile, stamped({ worktrees: [record], intents: [intent] }));
-    expect(await port(state).read(WorktreesFile)).toEqual({ ok: true, value: { worktrees: [record], intents: [intent] } } as never);
+    expect(await port(state).read(WorktreesFile)).toEqual({
+      ok: true,
+      value: { worktrees: [record], intents: [intent] },
+    } as never);
   });
 
   test('missing intents, a record of another version and an unknown field are damage', async () => {
@@ -178,7 +197,14 @@ describe('forks/<planId>.json', () => {
       transcriptProvenance: PROVENANCE,
       cutMessagePoint: { v: 1, byteOffset: 512, blockIndex: 0 },
     },
-    target: { accountId: 'account-b', agent: 'account-b', harness: 'codex', model: 'gpt', effort: 'high', contextWindow: 200_000 },
+    target: {
+      accountId: 'account-b',
+      agent: 'account-b',
+      harness: 'codex',
+      model: 'gpt',
+      effort: 'high',
+      contextWindow: 200_000,
+    },
     durable: {
       cwd: '/work/repo',
       mode: 'auto',
@@ -287,7 +313,9 @@ describe('ferret.json: today’s provenance, transfer lineage, project and trans
     expect(summary.projectId).toBe('unfiled');
     expect(summary.provenance?.origin).toBe('session');
     expect(summary.transcript).toEqual(PROVENANCE as never);
-    expect(FerretRecordSchema.safeParse({ ...record, projectId: '6f1c1f9a-8a7e-4a43-9a52-2d0a3c1b5e6f' }).success).toBe(true);
+    expect(FerretRecordSchema.safeParse({ ...record, projectId: '6f1c1f9a-8a7e-4a43-9a52-2d0a3c1b5e6f' }).success).toBe(
+      true,
+    );
   });
 
   test('a half-true provenance stamp, a handover with a cut, an unknown project or an unidentified transcript file is refused', () => {

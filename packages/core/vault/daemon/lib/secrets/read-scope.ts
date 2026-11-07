@@ -22,8 +22,8 @@
  */
 
 import type { CellGrid, Redaction, RedactionScope } from '@ferretry/kernel/contract';
-import { coverageOf, redactJsonValue, redactSecretValues, type TextRange } from './policy.ts';
-import type { RedactionValueSource, Scrub } from './redaction.ts';
+import { coverageOf, type TextRange } from './policy.ts';
+import { scrubValues, type RedactionValueSource, type Scrub } from './redaction.ts';
 
 export class VaultRedaction implements Redaction {
   constructor(
@@ -38,11 +38,7 @@ export class VaultRedaction implements Redaction {
       return opened;
     };
     const needles = (): readonly string[] => [...values().values()].filter(value => value !== '');
-    const scrub = this.compose({
-      text: text => redactSecretValues(text, values()),
-      data: value => redactJsonValue(value, values()),
-      cover: text => coverageOf(text, needles()),
-    });
+    const scrub = this.compose(scrubValues(values));
     try {
       return await fn({
         text: text => {
