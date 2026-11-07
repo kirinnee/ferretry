@@ -38,9 +38,9 @@ describe('board wire schemas', () => {
     expect(CardAskRefSchema.safeParse({ card: 'F12', answer: 'yes' }).success).toBe(false);
   });
   test('a create request defaults to the quick workflow and no parent; old fields are refused', () => {
-    const parsed = CardCreateRequestSchema.parse({ kind: 'bug', title: 't', ask: 'a' });
+    const parsed = CardCreateRequestSchema.parse({ kind: 'bug', title: 't', ask: { text: 'a', source: 's' } });
     expect([parsed.workflow, parsed.parent, parsed.visibility]).toEqual(['quick', null, undefined]);
-    expect(CardCreateRequestSchema.safeParse({ kind: 'bug', title: 't', ask: 'a', legacyRef: 'x:B1' }).success).toBe(
+    expect(CardCreateRequestSchema.safeParse({ kind: 'bug', title: 't', ask: { text: 'a', source: 's' }, legacyRef: 'x:B1' }).success).toBe(
       false,
     );
   });
