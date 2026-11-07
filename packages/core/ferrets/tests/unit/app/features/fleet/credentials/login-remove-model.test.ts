@@ -62,7 +62,7 @@ describe('what a runtime can switch to', () => {
     ]);
   });
 
-  it('defaults to switching where a compatible login exists, and to removing where none does', () => {
+  it('defaults to switching where a matching login exists, and to removing where none does', () => {
     expect(initialChoices(OLD, [ALPHA, BETA], LOGINS)).toEqual({
       alpha: { kind: 'switch', to: 'kirin-work' },
       beta: { kind: 'switch', to: 'kirin-work' },

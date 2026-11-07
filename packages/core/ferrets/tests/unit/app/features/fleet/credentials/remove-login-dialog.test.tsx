@@ -262,7 +262,7 @@ describe('Remove a login · one nobody uses', () => {
 });
 
 describe('Remove a login · used by 2 runtimes', () => {
-  it('lists them and the ferrets, and defaults every runtime to switching to a compatible login', async () => {
+  it('lists them and the ferrets, and defaults every runtime to switching to a matching login', async () => {
     const { view, calls } = await open(HASH, { routes: { [CHANGES]: staged(FERRETS) } });
     await openFor(view.container, 'kirin-old');
     const body = dialog(view.container);
@@ -385,7 +385,7 @@ describe('Remove a login · used by 2 runtimes', () => {
     await view.unmount();
   });
 
-  it('with no compatible login to switch to, offers only removing the runtime', async () => {
+  it('with no matching login to switch to, offers only removing the runtime', async () => {
     const alone = { ...data, credentials: { ...CREDENTIALS, credentials: [OLD, CODEX] } };
     const { view } = await open(HASH, { routes: { ...READS(alone), [CHANGES]: staged() } });
     await openFor(view.container, 'kirin-old');

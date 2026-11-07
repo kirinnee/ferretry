@@ -228,7 +228,7 @@ describe('learningLabel', () => {
 
 describe('agenda mode', () => {
   it('reads a session with no switch as off, and an explicit value as itself', () => {
-    expect(agendaOn(sessionView('legacy', { config: { mode: 'interactive' } }))).toBe(false);
+    expect(agendaOn(sessionView('plain', { config: { mode: 'interactive' } }))).toBe(false);
     expect(agendaOn(sessionView('on', { config: { agenda: true } }))).toBe(true);
     expect(agendaOn(sessionView('off', { config: { agenda: false } }))).toBe(false);
   });
@@ -242,8 +242,8 @@ describe('agenda mode', () => {
 
 describe('hypermedia', () => {
   it('reads a session with no switch as its mode default (on interactive, off auto), and an explicit value as itself', () => {
-    expect(hypermediaOn(sessionView('legacy', { config: { mode: 'interactive' } }))).toBe(true);
-    expect(hypermediaOn(sessionView('legacy-auto', { config: { mode: 'auto' } }))).toBe(false);
+    expect(hypermediaOn(sessionView('plain', { config: { mode: 'interactive' } }))).toBe(true);
+    expect(hypermediaOn(sessionView('plain-auto', { config: { mode: 'auto' } }))).toBe(false);
     expect(hypermediaOn(sessionView('forced', { config: { mode: 'auto', hypermedia: true } }))).toBe(true);
     expect(hypermediaOn(sessionView('on', { config: { hypermedia: true } }))).toBe(true);
     expect(hypermediaOn(sessionView('off', { config: { hypermedia: false } }))).toBe(false);
@@ -258,7 +258,7 @@ describe('hypermedia', () => {
 
 describe('pack', () => {
   it('reads a session from before the switch as on, and only an explicit false as off', () => {
-    expect(packOn(sessionView('legacy'))).toBe(true);
+    expect(packOn(sessionView('plain'))).toBe(true);
     expect(packOn(sessionView('off', { config: { pack: false } }))).toBe(false);
     expect(packLabel(true)).toBe('On · may delegate to sub-ferrets');
     expect(packLabel(false)).toBe('Off · works alone');

@@ -106,18 +106,18 @@ const client = (state: Scripted) => {
 const view = sessionView('a1', { config: { agent: 'nero' } });
 
 describe('forkThroughLatest', () => {
-  it('discards legacy pagination evidence once before choosing the latest message', async () => {
+  it('discards stale pagination evidence once before choosing the latest message', async () => {
     const state = scripted();
     const fake = client(state);
     const cursors: (string | undefined)[] = [];
     fake.messages = async (_id, cursor) => {
       cursors.push(cursor);
-      if (cursors.length === 1) return page([row(99, 'old')], 'legacy');
+      if (cursors.length === 1) return page([row(99, 'old')], 'stale');
       if (cursors.length === 2) throw new FyHttpError('old cursor', 409, 'message_cursor_stale');
       return page([row(2, 'fresh')], null);
     };
     await forkThroughLatest(fake, view, undefined, 'req-1');
-    expect(cursors).toEqual([undefined, 'legacy', undefined]);
+    expect(cursors).toEqual([undefined, 'stale', undefined]);
     expect(state.calls.find(call => call.name === 'fork')?.args[1]).toEqual({
       through: row(2, 'fresh').point,
       selectionBinding: 'bind-2',

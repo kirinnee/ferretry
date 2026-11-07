@@ -590,7 +590,7 @@ const atomi = pickerAccount({
   models: [
     { id: 'gpt-5.6-terra', available: true },
     { id: 'gpt-5.6-sol', available: true },
-    { id: 'gpt-5.5-legacy', available: false },
+    { id: 'gpt-5.5-old', available: false },
   ],
 });
 

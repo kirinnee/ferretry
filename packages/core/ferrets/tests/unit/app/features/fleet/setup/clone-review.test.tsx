@@ -434,7 +434,7 @@ describe('CloneMachine · Update · Changes', () => {
           'settings/shared': 'take',
           'instructions/main': 'keep',
           'runtime/old-codex': 'remove',
-          'profile/legacy': 'keep',
+          'profile/plain': 'keep',
         },
         logins: { 'codex-work': 'codex-main' },
       });
@@ -448,7 +448,7 @@ describe('CloneMachine · Update · Changes', () => {
       expect(outcomes).toContain('mcp/notes, profile/review');
       expect(outcomes).toContain('hooks/guard, settings/shared');
       expect(outcomes).toContain('runtime/old-codex');
-      expect(outcomes).toContain('instructions/main, profile/legacy');
+      expect(outcomes).toContain('instructions/main, profile/plain');
     } finally {
       await screen.view.unmount();
     }

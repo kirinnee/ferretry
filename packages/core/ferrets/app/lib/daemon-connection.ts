@@ -197,7 +197,7 @@ export const daemonCarriers = (daemon: DaemonConnection): readonly ConnectionMet
  * be reached, so a browser that offered it only the direct address it cannot get to would take that
  * working path away and have no way to learn it back: the refresh that would teach it needs a
  * connection it can no longer make, and re-pairing cannot supply one either. That last clause used to
- * read "pairing again is direct-only by construction", which §14 retired — a redemption may now cross
+ * read "pairing again is direct-only by construction", which §14 withdrew — a redemption may now cross
  * a rendezvous. It does not rescue THIS daemon: a relayed redemption is answered by a §14 pairing
  * session, which a daemon too old to publish a carrier set does not serve.
  *

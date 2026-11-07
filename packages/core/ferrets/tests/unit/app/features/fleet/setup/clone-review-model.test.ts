@@ -99,7 +99,7 @@ describe('the choices and the button', () => {
       'hooks/guard': 'take',
       'instructions/main': 'keep',
       'runtime/old-codex': 'keep',
-      'profile/legacy': 'keep',
+      'profile/plain': 'keep',
     });
     expect(decisions['settings/shared']).toBeUndefined();
     expect(unchosenBoth(FULL_REVIEW, {}).map(item => item.ref)).toEqual(['settings/shared']);
@@ -116,7 +116,7 @@ describe('the choices and the button', () => {
     expect(
       updateCount(
         FULL_REVIEW,
-        { 'runtime/old-codex': 'remove', 'profile/legacy': 'add' },
+        { 'runtime/old-codex': 'remove', 'profile/plain': 'add' },
         { 'codex-work': 'codex-main' },
       ),
     ).toBe(5);
@@ -182,7 +182,7 @@ describe('nothing differs, the stale refusal and Done', () => {
       ['added', ['mcp/notes', 'profile/review']],
       ['updated', ['hooks/guard', 'settings/shared']],
       ['removed', ['runtime/old-codex']],
-      ['kept', ['instructions/main', 'profile/legacy']],
+      ['kept', ['instructions/main', 'profile/plain']],
     ]);
   });
 

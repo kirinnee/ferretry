@@ -240,7 +240,7 @@ describe('daemon settings panel list', () => {
   });
 
   it('lands on the list for a panel that does not exist, never on a blank frame', async () => {
-    const view = await mount(frame({ panel: 'retired-panel' }));
+    const view = await mount(frame({ panel: 'gone-panel' }));
     try {
       expect(view.container.querySelector('[data-daemon-panel-open]')).toBeNull();
       expect(view.container.querySelectorAll('[data-daemon-panel]')).toHaveLength(16);
@@ -387,7 +387,7 @@ describe('daemon settings panel group', () => {
         additionalTabs={PRODUCTION_ADDITIONAL_TABS}
         createWardenClient={unavailable}
         onOpenPanel={() => undefined}
-        group={{ label: 'Only lead', panels: ['retired-panel'] }}
+        group={{ label: 'Only lead', panels: ['gone-panel'] }}
         lead={<li data-lead-row="">Only</li>}
       />,
     );
@@ -399,7 +399,7 @@ describe('daemon settings panel group', () => {
   });
 
   it('draws nothing when none of its panels is available', async () => {
-    const view = await mount(grouped({ label: 'Nothing here', panels: ['retired-panel'] }));
+    const view = await mount(grouped({ label: 'Nothing here', panels: ['gone-panel'] }));
     try {
       expect(view.container.querySelector('[data-daemon-panel-group]')).toBeNull();
     } finally {

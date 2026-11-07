@@ -36,7 +36,7 @@ describe('buildLineage', () => {
 
 describe('lineage labels', () => {
   it('keeps callsigns and task text human-readable while retaining raw identity', () => {
-    const view = session('ms0zbxh8-5cce961d', { teammate: 'mary-jane', name: '[Legacy] Repair transcript' });
+    const view = session('ms0zbxh8-5cce961d', { teammate: 'mary-jane', name: '[Old] Repair transcript' });
     expect(lineageLabel(view)).toEqual({
       callsign: 'Mary-Jane',
       task: 'Repair transcript',
@@ -46,7 +46,7 @@ describe('lineage labels', () => {
   });
 
   it('suppresses duplicate identity and falls back to a concise id', () => {
-    expect(lineageLabel(session('redundant-id', { teammate: 'meghan', name: '[Legacy] Meghan' })).text).toBe('Meghan');
+    expect(lineageLabel(session('redundant-id', { teammate: 'meghan', name: '[Old] Meghan' })).text).toBe('Meghan');
     expect(lineageLabel(session('deadbeef0011', { name: '' })).text).toBe('deadbeef…');
   });
 });

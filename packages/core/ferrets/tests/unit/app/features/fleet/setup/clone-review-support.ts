@@ -38,7 +38,7 @@ export const UPDATE_BUNDLE = bundle({
   profiles: {
     default: { layers: ['instructions/default'] },
     review: { layers: ['instructions/default', 'mcp/notes'] },
-    legacy: { layers: ['instructions/main'] },
+    plain: { layers: ['instructions/main'] },
   },
   runtimes: {
     'claude-default': { credential: 'claude-work', profile: 'default' },
@@ -155,8 +155,8 @@ export const ITEMS = {
     files: [],
   },
   removedHere: {
-    ref: 'profile/legacy',
-    sourceRef: 'profile/legacy',
+    ref: 'profile/plain',
+    sourceRef: 'profile/plain',
     kind: 'profile',
     outcome: 'removed-here',
     match: 'key',

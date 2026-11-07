@@ -15,7 +15,7 @@
  * rendered for daemon A cannot resolve a reference into daemon B's session,
  * because it never holds a resolver that could answer with B.
  *
- * WHAT IS DELIBERATELY NOT PORTED. kteam's legacy `#…-agent-mention` href
+ * WHAT IS DELIBERATELY NOT PORTED. kteam's old `#…-agent-mention` href
  * family (`agentMentionHref`, `parseAgentMentionHref`, `agentSessionHref`) existed
  * to keep already-persisted Markdown clickable across its own rename. Ferretry
  * has no such history: a proved reference is encoded by `referenceHref` and

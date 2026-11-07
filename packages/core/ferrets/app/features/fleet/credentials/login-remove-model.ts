@@ -54,7 +54,7 @@ export const switchTargets = (
   ];
 };
 
-/** Switch where a compatible login exists, else the only way left is to remove the runtime. */
+/** Switch where a matching login exists, else the only way left is to remove the runtime. */
 export const initialChoices = (
   removing: FleetCredentialView,
   users: readonly FleetRuntimeView[],

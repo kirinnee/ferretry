@@ -3,7 +3,7 @@
  * this page composes the paired stores and browser lifecycle without creating
  * an ambient daemon, a second grouping projection, or another usage poll.
  * Survey D rows 10/105/246: dashboard, static multi-daemon transport, and
- * the legacy single-daemon state seam this page must not recreate.
+ * the old single-daemon state seam this page must not recreate.
  *
  * Retry now on any machine's status line skips that machine's reconnect backoff and reads its list
  * again — through that machine's own pairing, so it never waits on, or for, any other machine.

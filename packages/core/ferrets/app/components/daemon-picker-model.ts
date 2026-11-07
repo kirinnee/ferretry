@@ -291,7 +291,7 @@ const registeredProjectOption = (project: FleetProject): RegisteredProjectOption
 
 /**
  * The registry protocol does not use a path as Project identity, so damaged or
- * legacy state may publish two records whose paths normalize to the same value.
+ * older state may publish two records whose paths normalize to the same value.
  * A path picker cannot distinguish those rows and submits only the path anyway;
  * keep the daemon's first row and expose that canonical value once.
  */

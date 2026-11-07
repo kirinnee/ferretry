@@ -623,7 +623,7 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
  * Projects the daemon's proved, normalized `logs` tail into the already-ported
  * transcript component. The wire format is deliberately parsed rather than
  * guessed from harness JSON: `OperatorReadService.renderTranscript` is the
- * compatibility contract this first workspace slice consumes. The daemon's
+ * wire contract this first workspace slice consumes. The daemon's
  * paged event route is mounted, but structured history/live-event projection
  * remains an explicit integration gap.
  *

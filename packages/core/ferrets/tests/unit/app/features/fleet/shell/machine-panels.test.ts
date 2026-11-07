@@ -21,7 +21,7 @@ describe('panelTab', () => {
   });
 
   it('names no tab for a word that is not a panel', () => {
-    expect(panelTab('retired-panel')).toBeUndefined();
+    expect(panelTab('gone-panel')).toBeUndefined();
   });
 });
 
