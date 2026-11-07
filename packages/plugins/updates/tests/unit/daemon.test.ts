@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { type ApiRequest, BodyTooLargeError, type CallContext } from '@ferretry/kernel/contract';
-import { device, ferret, testHost } from '@ferretry/kernel/testing';
+import { device, ferret, owner, testHost } from '@ferretry/kernel/testing';
 import { STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 import { deviceStanding, ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
 import { DAEMON_UPDATE_CODES, DaemonUpdateViewSchema, UPDATE_HOST_CODES } from '../../contract/index.ts';
 import daemon from '../../daemon/index.ts';
 import type { ConfigDoor, DoorResult } from '../../daemon/lib/config-door.ts';
+import { updateHostUsable } from '../../daemon/lib/host.ts';
+import { fakeHost } from './host.ts';
 import { updateRoutes } from '../../daemon/lib/routes.ts';
 import { DaemonUpdateService } from '../../daemon/lib/service.ts';
 
@@ -72,6 +74,18 @@ describe('updates on the test host', () => {
     const host = await testHost({ plugins: [daemon], fakes: { ferrets: { list: async () => [] } } });
     const read = await host.request('GET', '/v1/daemon/update', { as: device('phone') });
     expect([read.status, read.json<{ code: string }>().code]).toEqual([503, UPDATE_HOST_CODES.hostUnavailable]);
+    await host.stop();
+  });
+
+  test('with the kernel update host the view is built from its release, and the install facts come from its executable (a start is refused as not self-updatable, not as an unavailable host)', async () => {
+    const { port } = fakeHost({ release: '4.28.0' });
+    const host = await testHost({ plugins: [daemon], updateHost: port, fakes: { ferrets: { list: async () => [] } } });
+    const read = await host.request('GET', '/v1/daemon/update', { as: device('phone') });
+    expect(read.status).toBe(200);
+    expect(read.json<{ current: string }>().current).toBe('4.28.0');
+    const body = { target: '4.29.0', when: 'now' };
+    const start = await host.request('POST', '/v1/daemon/update', { body, as: owner() });
+    expect([start.status, start.json<{ code: string }>().code]).toEqual([409, DAEMON_UPDATE_CODES.notSelfUpdatable]);
     await host.stop();
   });
 
@@ -382,7 +396,19 @@ describe('turning automatic install on is the owner’s act; turning it off is n
   test('G22 a missing door or host is a 503 that has used the claimed proof up', async () => {
     // Lead ruling (claim-first, no restore): the 503 comes after the claim, so the person confirms again.
     const { writes, door } = recordingDoor();
-    const noHost = updateRoutes(undefined, door);
+    // No host is the kernel's undeclared stub: its facts refuse, so the plugin's own readiness answer is "unavailable".
+    const undeclared = {
+      release: '5.0.0',
+      compiled: false,
+      executable: async () => {
+        throw new Error('updates did not declare permissions.updateHost.');
+      },
+      launchUpdate: async () => ({
+        kind: 'failed' as const,
+        reason: 'updates did not declare permissions.updateHost.',
+      }),
+    };
+    const noHost = updateRoutes(serviceWith([]), door, () => updateHostUsable(undeclared));
     const cases = [
       [
         updateRoutes(serviceWith([]), undefined)['PATCH /v1/daemon/update/settings'],
