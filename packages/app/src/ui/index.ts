@@ -61,3 +61,7 @@ export * from './hooks/use-settled-busy.ts';
 export * from './hooks/use-touch-affected.ts';
 export * from './change-apply-panel.tsx';
 export * from './change-authority.ts';
+export * from './metric-chart.tsx';
+export * from './model-select.tsx';
+export * from './model-tiers.ts';
+export * from './local-models-note.tsx';
