@@ -96,7 +96,7 @@ const input: PairDirectInput = {
   address: 'https://laptop.example.test',
   daemonId: 'fy_daemon_one',
   code: 'ABCD-EFGH',
-  key: { deviceName: 'phone', publicKey: 'spki', key: { algorithm: 'Ed25519' } as never },
+  key: { deviceName: 'phone', publicKey: 'spki', key: { algorithm: 'Ed25519' } as never, save: async () => {} },
 };
 
 describe('the pairing port', () => {
