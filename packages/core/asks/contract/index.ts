@@ -1,4 +1,12 @@
-import { defineEvent, defineHook, definePort, defineState, type FerretId } from '@ferretry/kernel/contract';
+import {
+  defineConfig,
+  defineEvent,
+  defineHook,
+  definePort,
+  defineState,
+  neverLoosens,
+  type FerretId,
+} from '@ferretry/kernel/contract';
 import { type Brand, InstantSchema, KEBAB_NAME } from '@ferretry/std';
 import { z } from 'zod';
 import type { AgendaSnapshot } from './snapshot/agenda.ts';
@@ -49,6 +57,22 @@ export {
  *
  * Limits and kinds are today's agenda (`protocol/src/lib/agenda.ts`); the words are §1's (ask, notice, answer).
  */
+
+// ─── configuration ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `config/asks.yaml`: Asks' one setting. Discussions resurface only when configured; snooze waking is always on.
+ *
+ * Today's key is `attention.resurfaceAfterMinutes` in the daemon's `config.json` (integer 1 to 10 080 minutes, ABSENT
+ * by default = off: an ask stays in discussion until its ferret surfaces it). A converter carries that one value to
+ * `resurfaceAfterMinutes` here; there is no default to write.
+ */
+export const AsksConfigFile = defineConfig({
+  file: 'asks.yaml',
+  schema: z.strictObject({ resurfaceAfterMinutes: z.number().int().min(1).max(10_080).optional() }),
+  axis: 'configure',
+  loosens: neverLoosens,
+});
 
 // ─── ids ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 

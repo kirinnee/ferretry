@@ -11,6 +11,8 @@
 import type {
   CatalogSignRequest,
   IdentitySigner,
+  LinkStoreSignRequest,
+  SignedLinkStoreSignature,
   SecretOfferSignRequest,
   SignedSecretOffer,
   RelayClaimRequest,
@@ -24,6 +26,7 @@ import { catalogSignedBytes, isCatalogSignatureKind } from './wire/catalog-signa
 import { encodeClaim, signRendezvousClaim } from './wire/claim.ts';
 import { NONCE_BYTES } from './wire/constants.ts';
 import type { DaemonSigningKey } from './wire/crypto.ts';
+import { linkStoreTranscript, parseLinkStoreRequestBody } from './wire/link-store.ts';
 import { secretOfferSignedBytes } from './wire/secret-offer.ts';
 import { tunnelTranscript } from './wire/tunnel-request.ts';
 
@@ -87,6 +90,18 @@ export function createIdentitySigner(
       const signature = await key.sign(catalogSignedBytes(request.kind, await sha256(request.canonical)));
       return { daemonId: key.daemonId, publicKey: toBase64Url(key.publicKeySpki), signature: toBase64Url(signature) };
     },
+    signLinkStoreRequest: async (request: LinkStoreSignRequest): Promise<SignedLinkStoreSignature> => {
+      if (!(request.nonce instanceof Uint8Array) || request.nonce.length !== NONCE_BYTES)
+        throw new TypeError(`the nonce must be ${NONCE_BYTES} bytes`);
+      if (!(request.canonicalBody instanceof Uint8Array)) throw new TypeError('the request body must be bytes');
+      const body = parseLinkStoreRequestBody(request.canonicalBody);
+      if (body === undefined)
+        throw new TypeError('the link-store request must be exactly an upload, a delete or a status');
+      const signature = await key.sign(
+        linkStoreTranscript({ daemonId: key.daemonId, host: host(request.host), nonce: request.nonce, body }),
+      );
+      return { daemonId: key.daemonId, publicKey: toBase64Url(key.publicKeySpki), signature: toBase64Url(signature) };
+    },
     signSecretOffer: async (request: SecretOfferSignRequest): Promise<SignedSecretOffer> => {
       for (const field of [request.importId, request.publicKey, request.expiresAt])
         if (typeof field !== 'string' || field === '') throw new TypeError('every offer field must be named');
@@ -115,6 +130,7 @@ export const SIGNER_USERS = Object.freeze({
   sign: ['connections'],
   signTunnel: ['connections'],
   signCatalog: ['catalogs'],
+  signLinkStoreRequest: ['catalogs'],
   signSecretOffer: ['vault'],
 } as const satisfies Record<keyof IdentitySigner, readonly string[]>);
 
@@ -128,6 +144,7 @@ export function signerFor(plugin: string, signer: IdentitySigner): IdentitySigne
     sign: async request => (allowed('sign'), await signer.sign(request)),
     signTunnel: async request => (allowed('signTunnel'), await signer.signTunnel(request)),
     signCatalog: async request => (allowed('signCatalog'), await signer.signCatalog(request)),
+    signLinkStoreRequest: async request => (allowed('signLinkStoreRequest'), await signer.signLinkStoreRequest(request)),
     signSecretOffer: async request => (allowed('signSecretOffer'), await signer.signSecretOffer(request)),
   });
 }

@@ -204,8 +204,31 @@ export const eventOwner = (eventName: string): string => {
   return dot === -1 ? eventName : eventName.slice(0, dot);
 };
 
+/**
+ * The agent tool door (`POST /v1/agent/tools`): a declared tool by name, run as the caller this process is. Inside a
+ * ferret's pane the transport presents that ferret's own credential, so the daemon derives the ferret from it and the
+ * call names none (today's unnamed-session case, `agent-tools/client.ts`).
+ */
+export const AGENT_TOOLS_ROUTE = 'POST /v1/agent/tools';
+
+/** The one declared tool of this name, or why there is not exactly one. Asked before anything is contacted. */
+export function toolFactsBeforeContact(surfaces: Surfaces, inPane: boolean, name: string): RouteFacts {
+  const found = [...surfaces.tools].filter(([key]) => key.slice(key.indexOf('/') + 1) === name);
+  if (found.length === 0) throw new ShellError(`no plugin declares the tool ${name}`, EXIT.failure);
+  const [first] = found;
+  if (found.length > 1 || first === undefined)
+    throw new ShellError(`more than one plugin declares the tool ${name}`, EXIT.failure);
+  if (inPane && first[1].caller === 'person') throw new ShellError(PERSON_ONLY_REFUSAL, EXIT.failure);
+  return first[1];
+}
+
 /** A client that can also be told when its feed ends, which a verb that follows events until interrupted needs. */
 export interface FollowingClient extends PluginClient {
+  /**
+   * Runs a declared agent tool: guarded exactly like `call` (the caller and the tool's owner must be present, on and
+   * carry this fy's contract hashes), then `POST /v1/agent/tools`. The answer is the tool's result, text already masked.
+   */
+  tool(name: string, input?: unknown): Promise<unknown>;
   /**
    * Like `subscribe`, and `onEnd` is told why when the feed can no longer deliver: the connection was refused, or the
    * daemon went away. After `onEnd` nothing more is delivered. The returned cancel never calls `onEnd`.
@@ -340,6 +363,13 @@ export function pluginClient(deps: ClientDeps, caller: Manifest['id']): Followin
       const ids = [caller, facts.owner];
       await ensureAllAllowed(deps, ids);
       return (await sendChecked(deps, request, ids)) as Answer;
+    },
+    async tool(name: string, input?: unknown): Promise<unknown> {
+      const facts = toolFactsBeforeContact(deps.surfaces, deps.inPane, name);
+      const request = buildRequest(AGENT_TOOLS_ROUTE, { body: { tool: name, ...(input === undefined ? {} : { input }) } });
+      const ids = [caller, facts.owner];
+      await ensureAllAllowed(deps, ids);
+      return await sendChecked(deps, request, ids);
     },
     subscribe: (event, listener) => follow(event, listener, () => undefined),
     follow,

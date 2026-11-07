@@ -107,14 +107,14 @@ describe('sentences', () => {
     const titleOf = (id: string) => (id === 'board' ? 'Board' : id);
     expect(blockedLine('Board', { state: 'allowed' }, 'reload-app', titleOf)).toBeUndefined();
     expect(blockedLine('Board', { state: 'blocked', reason: 'different' }, 'update-daemon', titleOf)).toBe(
-      'Update this daemon to use Board: `fy daemon update`.',
+      'Update this daemon to use Board: `fy update`.',
     );
     expect(blockedLine('Board', { state: 'blocked', reason: 'different' }, 'reload-app', titleOf)).toBe(
       'Reload the app to use Board.',
     );
     expect(
       blockedLine('Agenda', { state: 'blocked', reason: 'different', via: 'board' }, 'update-daemon', titleOf),
-    ).toBe('Agenda needs Board, which needs an update: `fy daemon update`.');
+    ).toBe('Agenda needs Board, which needs an update: `fy update`.');
     expect(blockedLine('Board', { state: 'blocked', reason: 'core' }, 'reload-app', titleOf)).toBe(
       wholeDaemonSentence('reload-app'),
     );

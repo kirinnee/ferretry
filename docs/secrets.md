@@ -281,6 +281,8 @@ ferret that reads `api-token`, `secrets.key` or the sealed files through its own
 this daemon. That needs keeping ferrets out of the state home, which a later change adds where the agent's
 sandbox can enforce it.
 
+A `git` or `gh` child the daemon starts gets a short allow-list of non-secret names (`XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`, `GH_CONFIG_DIR`, `SSH_AUTH_SOCK` and the proxy variables) and never `GH_TOKEN` or `GITHUB_TOKEN`. The proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, in both cases) pass through unchanged, and a proxy address may carry credentials (`user:pass@host`), so a credential written there reaches those children.
+
 ## References in configuration
 
 One grammar, everywhere: `${secret:NAME}`.

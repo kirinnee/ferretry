@@ -38,8 +38,8 @@ import {
   AgendaRepliesFiles,
   AgendaPendingChangesFiles,
   AgendaPendingVersionsFiles,
-  AsksConfigFile,
 } from '../manifest.ts';
+import { AsksConfigFile } from '../contract/index.ts';
 import { AgendaWaker, WAKE_SWEEP_MS } from './lib/agenda/waker.ts';
 import { AgendaResurfacer, RESURFACE_SWEEP_MS } from './lib/agenda/resurfacer.ts';
 import { AgendaLedgerFiles } from './lib/state.ts';
