@@ -19,9 +19,9 @@ import {
  * Catalogs (§2.3): share your setup — MCP servers, skills, shells, recipes, layouts — with other daemons and people.
  * Off: nothing is shared; your items still work.
  *
- * Routes copied from today's `runtime/mounts/{shared-catalogs,catalog-members,catalog-links,catalog-installs,
- * local-skill-installs}.ts`; member routes from `catalog-members/shared-routes.ts`. `/v1/projects` and `/v1/skills*`
- * (mounted from `catalogs.ts` today) are Projects' and Skills', not declared here — see the slice report.
+ * Routes copied from today's `runtime/mounts/{shared-catalogs,catalog-members,catalog-links,catalog-installs}.ts`;
+ * member routes from `catalog-members/shared-routes.ts`. `/v1/projects` and `/v1/skills*` (mounted from `catalogs.ts`
+ * today) and `local-skill-installs.ts` are Projects' and Skills', not declared here — see the slice report.
  * Every catalog is signed by the publisher's daemon identity; installing shows every file and command in full and
  * asks your yes for anything that runs one; a pin never auto-updates.
  */
@@ -415,62 +415,6 @@ export default definePlugin({
         audit: SKIP_UNRECORDED,
         guard: GUARD_NONE,
       }),
-      route('GET /v1/skill-installs/local', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: USE.fleet,
-        noStore: true,
-        audit: SKIP_READ,
-        guard: GUARD_NONE,
-      }),
-      route('POST /v1/skill-installs/local/project', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: CONFIGURE.filesystem,
-        noStore: true,
-        audit: { record: AUDIT.fleetConfigured },
-        guard: GUARD_NONE,
-      }),
-      route('DELETE /v1/skill-installs/local/project/:installId', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: CONFIGURE.filesystem,
-        noStore: true,
-        audit: { record: AUDIT.fleetConfigured },
-        guard: GUARD_NONE,
-      }),
-      route('POST /v1/skill-installs/local/project/preview', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: USE.filesystem,
-        noStore: true,
-        audit: SKIP_UNRECORDED,
-        guard: GUARD_NONE,
-      }),
-      route('POST /v1/skill-installs/local/runtime', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: CONFIGURE.fleet,
-        noStore: true,
-        audit: { record: AUDIT.fleetConfigured },
-        guard: GUARD_NONE,
-      }),
-      route('DELETE /v1/skill-installs/local/runtime/:installId', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: CONFIGURE.fleet,
-        noStore: true,
-        audit: { record: AUDIT.fleetConfigured },
-        guard: GUARD_NONE,
-      }),
-      route('POST /v1/skill-installs/local/runtime/preview', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: USE.filesystem,
-        noStore: true,
-        audit: SKIP_UNRECORDED,
-        guard: GUARD_NONE,
-      }),
     ],
     memberRoutes: [
       memberRoute('GET /v1/shared/catalogs/:catalogId/items/:itemId/:version', {
@@ -555,11 +499,6 @@ export default definePlugin({
       verb('catalog share', { summary: 'make a link that lets a person read one or more catalogs; shown once' }),
       verb('catalog shares', { summary: 'every share and how it stands; a code is never shown' }),
       verb('catalog unshare', { summary: 'end a share so its code stops working' }),
-      verb('skill install', {
-        summary: 'copy one skill from another account or project on this machine, after you review all of it',
-      }),
-      verb('skill installs', { summary: 'list the skills copied from this machine, and where' }),
-      verb('skill uninstall', { summary: 'remove one copy, and only the files it wrote' }),
       verb('member ls', { summary: 'everyone who has joined, with their catalogs and browsers' }),
       verb('member rename', { summary: "change a person's name" }),
       verb('member revoke', { summary: 'remove a person: their browsers are signed out and their shares end' }),

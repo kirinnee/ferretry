@@ -6,12 +6,13 @@ const members = manifest.actions.memberRoutes;
 
 describe('catalogs manifest', () => {
   test("declares today's catalog, share, member, link and install routes and the ten member routes", () => {
-    expect(routes).toHaveLength(54);
+    expect(routes).toHaveLength(47);
     expect(members).toHaveLength(10);
   });
   test("Projects' and Skills' routes, mounted from catalogs.ts today, are not declared here", () => {
     expect(routes.some(entry => /\/v1\/(projects|skills)\b/u.test(entry.key))).toBe(false);
     expect(routes.some(entry => /\/v1\/sessions\/:sessionId\/skills/u.test(entry.key))).toBe(false);
+    expect(routes.some(entry => entry.key.includes('/v1/skill-installs'))).toBe(false);
   });
   test('joining and unlocking need only a member key; everything else a member reads needs the unlock', () => {
     const keyOnly = members.filter(entry => entry.member === 'key').map(entry => entry.key);
