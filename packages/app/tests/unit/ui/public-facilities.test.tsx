@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test';
-import { Button, describeSurfaceOwnership, FY_REQUEST_ID_HEADER, RECONNECTING_GRACE_MS } from '../../../src/index.ts';
+import {
+  Button,
+  CODE_FACE_URLS,
+  describeSurfaceOwnership,
+  FY_REQUEST_ID_HEADER,
+  RECONNECTING_GRACE_MS,
+} from '../../../src/index.ts';
 import { CopyButton, Button as UiButton } from '../../../src/ui/index.ts';
 
 test('connect-only users of the public testing entry keep their environment without a DOM', () => {
@@ -62,4 +68,9 @@ test('the public test harness retains connect fakes and the render-tree harness'
 
 test('the reconnecting grace is one number the app and its halves share', () => {
   expect(RECONNECTING_GRACE_MS).toBe(1_500);
+});
+
+test('the code face’s two files are offered to a half that loads the face itself', () => {
+  expect(CODE_FACE_URLS.regular).toContain('jetbrains-mono-latin-400-normal');
+  expect(CODE_FACE_URLS.bold).toContain('jetbrains-mono-latin-700-normal');
 });

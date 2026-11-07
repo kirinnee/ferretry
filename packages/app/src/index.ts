@@ -117,6 +117,7 @@ export {
   TYPE_TOKENS,
   themeProperties,
 } from './theme/tokens.ts';
+export { CODE_FACE_URLS } from './theme/fonts.ts';
 export {
   DEFAULT_THEME_PREFERENCE,
   THEME_FAMILIES,
