@@ -54,6 +54,8 @@ export interface KernelPorts {
   readonly redaction: Redaction;
   readonly snapshot: SnapshotPort;
   readonly lifecycle: LifecyclePort;
+  /** This plugin's OWN effective contract hash, and no other package's (§9.6). */
+  readonly contract: ContractPort;
 }
 
 // ids ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -771,4 +773,12 @@ export interface LifecyclePort {
   onStop(fn: () => void | Promise<void>): void;
   stopping(): boolean;
   readonly signal: AbortSignal;
+}
+
+/**
+ * The effective contract hash of the plugin that holds this port: the one value `GET /v1/plugins` shows for it. It takes
+ * no id, so a plugin can read its own hash and never another package's (no inventory leak).
+ */
+export interface ContractPort {
+  hash(): string;
 }
