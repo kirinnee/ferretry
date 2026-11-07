@@ -19,7 +19,7 @@ import { memoryStatePort } from '../../support/state.ts';
 /**
  * The reference menus through Gate's admission and its governance (the stand-in, given the governance a
  * `consultsGrants` route is handed; the real `GateAdmission` is asked about this route in Gate's own suite): a device the operator
- * has not granted filesystem, terminal or browser use is refused the lists those facts' own routes refuse it.
+ * has not granted filesystem, terminal, browser or fleet (cards) use is refused the lists those facts' own routes refuse it.
  * The providers are fakes that declare the demands the real ones will.
  */
 const SECRET = 'sk-live-77aa';
@@ -27,7 +27,7 @@ const F1 = ferretId('f1');
 const OWNER = { as: owner() } as const;
 const PATH = '/v1/ferrets/f1/references';
 
-const withGrants = (name: 'filesystem' | 'terminal' | 'browser') => ({
+const withGrants = (name: 'filesystem' | 'terminal' | 'browser' | 'fleet') => ({
   ...FULL_DEVICE_GRANTS,
   [name]: { use: false, configure: false },
 });
@@ -64,7 +64,8 @@ async function setup(
     '@': provider(cap('filesystem', 'use'), 'src/'),
     '%terminal': provider(cap('terminal', 'use'), 'dev'),
     '%browser': provider(cap('browser', 'use'), 'docs'),
-    '&': provider(undefined, 'F12'),
+    '&': provider(cap('fleet', 'use'), 'F12'),
+    ':': provider(undefined, 'helper'),
   };
   const fixture = definePlugin({
     id: 'reference-fixture',
@@ -165,6 +166,20 @@ describe('GET /v1/ferrets/:ferretId/references keeps the grants of the facts it 
     expect(granted.status).toBe(200);
   });
 
+  test('a governed device WITHOUT fleet use is refused 403 on &, and the provider never ran', async () => {
+    const s = await setup();
+    s.gate.enrol('phone', withGrants('fleet'));
+    const response = await ask(s, '&', 'phone');
+    expect(response.status).toBe(403);
+    expect(response.json<{ code: string }>().code).toBe('grant_device_not_granted');
+    expect(response.body).not.toContain('F12');
+    expect(s.started).toEqual([]);
+    s.gate.enrol('tablet', FULL_DEVICE_GRANTS);
+    const granted = await s.host.request('GET', PATH, { query: { prefix: '&' }, as: device('tablet') });
+    expect(granted.status).toBe(200);
+    expect(s.started).toEqual(['F12']);
+  });
+
   test('a step-up the machine asks for is answered with the step-up body, not entries', async () => {
     const s = await setup({
       policy: { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_GATE_SECURITY, stepUpOnActions: true } },
@@ -179,10 +194,28 @@ describe('GET /v1/ferrets/:ferretId/references keeps the grants of the facts it 
     expect(s.started).toEqual([]);
   });
 
-  test('a provider with no demand (cards) is served to a governed device, and is passed the caller standing', async () => {
+  test('a held step-up is spent at the decision: a second %terminal read after one granted read is refused', async () => {
+    const s = await setup({
+      policy: { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_GATE_SECURITY, stepUpOnActions: true } },
+    });
+    s.gate.enrol('phone', FULL_DEVICE_GRANTS, { stepUp: true });
+    const first = await ask(s, '%terminal', 'phone');
+    expect(first.status).toBe(200);
+    expect(s.gate.spent).toBe(1);
+    const second = await ask(s, '%terminal', 'phone');
+    expect(second.status).toBe(403);
+    expect(second.json()).toMatchObject({
+      code: 'grant_step_up_required',
+      demand: { capability: 'terminal', axis: 'use' },
+    });
+    expect(s.gate.spent).toBe(1);
+    expect(s.started).toEqual(['dev']);
+  });
+
+  test('a provider with no demand (ferrets) is served to a governed device, and is passed the caller standing', async () => {
     const s = await setup();
     s.gate.enrol('phone', withGrants('filesystem'));
-    const response = await ask(s, '&', 'phone');
+    const response = await ask(s, ':', 'phone');
     expect(response.status).toBe(200);
     expect(s.seen[0]?.caller.governance?.governed).toBe(true);
     expect(s.seen[0]?.caller.actor).toBe('device:phone');

@@ -40,8 +40,8 @@ export const REFERENCE_CATALOG_MAX_QUERY = 4_096;
  *     THE DIRECTORY IS CONFINED TO THE FERRET'S ROOT: the route refuses a `q` with a `..` segment, an absolute path
  *     or a NUL before any provider sees it, and a provider still resolves `q` under the ferret's root and answers
  *     nothing outside it (the route's refusal is the first fence, not the only one).
- *   - A provider that reads something the operator governs (files, terminals, pages) DECLARES that demand. The route
- *     asks it of the caller before `entries` runs, and refuses exactly as the direct route for the same thing would.
+ *   - A provider that reads something the operator governs (files, terminals, pages, cards) DECLARES that demand. The
+ *     route asks it of the caller before `entries` runs, and refuses exactly as the direct route for the same thing would.
  *   - `/` and `$` (skills) answer the skill's name; the composer writes the harness's own invocation from it.
  */
 export const ReferenceCatalogEntrySchema = z.strictObject({
@@ -76,9 +76,10 @@ export interface ReferenceCatalogInput {
 /**
  * What a provider supplies: the entries of its prefix for one ferret, as raw text (Conversation masks the answer).
  *
- * `demand` is the operator's question the SAME facts already ask on their own routes (`filesystem` use for `@`,
- * `terminal` use for `%terminal`, `browser` use for `%browser`). It is decided before `entries` runs; a provider
- * whose facts are not governed declares none.
+ * `demand` is the operator's question the SAME facts already ask on their own routes: whatever the provider's own
+ * direct read route declares (`filesystem` use for `@`, `terminal` use for `%terminal`, `browser` use for `%browser`,
+ * `fleet` use for `&`, because the board's own reads ask it). It is decided before `entries` runs; a provider whose
+ * facts are not governed declares none.
  */
 export interface ReferenceCatalogProvider {
   readonly demand?: CapabilityDemand;
