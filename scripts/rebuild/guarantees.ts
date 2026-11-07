@@ -219,6 +219,26 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
     reason:
       "enforced by Ferrets' `GET /v1/events` socket descriptor (`operator` minimum) under Gate's admission; a `live` frame is the same journal envelope the snapshot read serves",
   },
+  I14: {
+    owner: 'asks',
+    reason: 'enforced by the Asks agenda state machine (the agenda refuses an input-form answer: 400 `use_input_form`)',
+  },
+  I118: {
+    owner: 'browsers',
+    reason: "enforced by Browsers' page holds (the page tools refuse while a request is pending)",
+  },
+  I119: {
+    owner: 'browsers',
+    reason: "enforced by Browsers' page queue (the hold decided inside the queue, before the act)",
+  },
+  I120: {
+    owner: 'browsers',
+    reason: "enforced by Browsers' page holds (a failed call under a hold answers with the hold)",
+  },
+  I121: {
+    owner: 'browsers',
+    reason: "enforced by Browsers' page holds (own names, not journalled, interrupted on restart)",
+  },
   R540: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
   R572: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
   P24: { owner: 'connections', reason: 'enforced by the Connections relay client (browser carrier walk)' },
@@ -260,6 +280,11 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
     owner: 'conversation',
     reason:
       "the composer action is Conversation's (design D2 #7, lead ruling port-conversation r1 #5): it acts on the draft Conversation holds; Terminals types it and Gate checks terminal/use, so both stay co-owners",
+  },
+  G163: {
+    owner: 'conversation',
+    reason:
+      "the log page is Conversation's (`GET /v1/ferrets/:ferretId/log-page`, `daemon/reader/routes.ts` `logPage` over `TranscriptReadService.logPage`): it pages a ferret's transcript, not the daemon log, scrubs every line through the read-scoped Redaction before the validator is cut, and keeps `file` an opaque digest; the Kernel (which only writes `logs/fyd.log`, no read route) and the Vault redaction stay co-owners",
   },
   G164: {
     owner: 'conversation',

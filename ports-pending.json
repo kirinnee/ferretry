@@ -2,7 +2,6 @@
   "format": 1,
   "pending": [
     "gate",
-    "vault",
     "ferrets",
     "connections",
     "claude-code",
