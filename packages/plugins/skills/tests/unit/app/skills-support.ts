@@ -29,6 +29,7 @@ export const ferretInventory = (
 ): FerretSkillsInventory => ({
   ferretId: 'f1',
   harness: 'claude-code',
+  folder: '/work/dojo/api',
   runtime: 'claude-default',
   skills: [...skills],
   truncated: false,

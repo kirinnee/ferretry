@@ -5,9 +5,9 @@
  * The rows, chips and sentences only: the daemon owns which skills exist, which one wins a name and what a copy may
  * hold. Nothing here recomputes any of that.
  */
-import { chipsFor, matchesQuery } from '@ferretry/app/ui';
+import { chipsFor, matchesQuery, revealHidden } from '@ferretry/app/ui';
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
-import { DaemonCallError } from '@ferretry/app';
+import { DaemonCallError, parseReferenceToken } from '@ferretry/app';
 import type {
   FerretSkillsInventory,
   LocalSkillInstall,
@@ -157,7 +157,7 @@ export interface MachineSkillRow {
   readonly name: string;
   readonly description: string;
   readonly harness: HarnessKey;
-  /** "claude-default account" or "project dojo". */
+  /** "claude-default account" or "project dojo". `name`, `description` and `from` hold hidden characters as `⟨U+202E⟩` markers (Trojan Source). */
   readonly from: string;
   /** A copy of this skill was already made from here, so the row says Installed. */
   readonly installed: boolean;
@@ -165,10 +165,10 @@ export interface MachineSkillRow {
 
 const rowOf = (entry: SkillEntry, from: string, copied: ReadonlySet<string>): MachineSkillRow => ({
   path: entry.path,
-  name: entry.name,
-  description: entry.description,
+  name: revealHidden(entry.name),
+  description: revealHidden(entry.description),
   harness: entry.harness,
-  from,
+  from: revealHidden(from),
   installed: copied.has(entry.path),
 });
 
@@ -226,6 +226,38 @@ export interface TargetDraft {
   readonly harness?: HarnessKey;
 }
 
+const normalizedPath = (path: string): string => {
+  const trimmed = path.replace(/\/+$/u, '');
+  return trimmed === '' ? path : trimmed;
+};
+
+/** The registered project that holds `folder`, the longest root winning, so a nested project finds its own. */
+export function projectHolding(folder: string, options: TargetOptions): TargetOptions['projects'][number] | undefined {
+  const target = normalizedPath(folder);
+  let best: TargetOptions['projects'][number] | undefined;
+  let bestLength = -1;
+  for (const project of options.projects) {
+    const root = normalizedPath(project.root);
+    if ((target === root || target.startsWith(`${root}/`)) && root.length > bestLength) {
+      best = project;
+      bestLength = root.length;
+    }
+  }
+  return best;
+}
+
+/**
+ * Where Install starts for one ferret: the project holding the folder it works in, and the FERRET'S agent (a Codex ferret
+ * copying a Claude skill must not land it in `.claude/skills`, where it never looks). The person can still change both.
+ */
+export const initialDraft = (
+  ferret: Pick<FerretSkillsInventory, 'folder' | 'harness'>,
+  options: TargetOptions,
+): TargetDraft => {
+  const project = projectHolding(ferret.folder, options);
+  return { harness: ferret.harness, ...(project === undefined ? {} : { projectRoot: project.root }) };
+};
+
 export const NO_PLACE_YET = 'Pick a project.';
 export const NO_AGENT_YET = 'Pick Claude or Codex for this project.';
 
@@ -254,12 +286,13 @@ export const originLine = (origin: LocalSkillOrigin): string =>
 export const skippedLines = (preview: Pick<LocalSkillPreview, 'skipped'>): readonly string[] =>
   preview.skipped.map(problem => `${problem.subject}: ${problem.reason}`);
 
-/** What a copy that landed says about itself: its name. */
-export const copiedLine = (install: Pick<LocalSkillInstall, 'name'>): string => `${install.name} · copied`;
+/** What a copy that landed says about itself: its name, with any hidden character written out (Trojan Source). */
+export const copiedLine = (install: Pick<LocalSkillInstall, 'name'>): string =>
+  `${revealHidden(install.name)} · copied`;
 
-/** An installed copy's row in Settings: its name and where it was put. */
+/** An installed copy's row in Settings: its name and where it was put, hidden characters written out. */
 export const installLine = (install: Pick<LocalSkillInstall, 'name' | 'destination'>): string =>
-  `${install.name} · ${install.destination}`;
+  `${revealHidden(install.name)} · ${revealHidden(install.destination)}`;
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -321,12 +354,10 @@ export function localRefusal(error: unknown): LocalRefusal {
 
 // ── A `/name` or `$name` written anywhere ─────────────────────────────────────────────────────────────────────────
 
-const SKILL_NAME = /^[a-z][a-z0-9-]{0,63}$/u;
-
 /**
- * The skill name in what a reference renderer was handed: the written token (`/summary`, `$summary`, `summary`) or an
- * object with a `name`. `undefined` when it is not a skill name — the grammar's own rule, lowercase only, so `$HOME` is
- * never read as a skill.
+ * The skill name in what a reference renderer was handed: the written token (`/summary`, `$summary`) or an object whose
+ * `name` is one. It is read by the shared reference grammar (`parseReferenceToken`, docs/reference-standard.md), never by a
+ * rule of this half's own, so `$HOME`, `/Summary` and a bare `summary` are not skills.
  */
 export const skillNameOf = (value: unknown): string | undefined => {
   const written =
@@ -335,8 +366,8 @@ export const skillNameOf = (value: unknown): string | undefined => {
       : typeof (value as { name?: unknown } | null)?.name === 'string'
         ? (value as { name: string }).name
         : '';
-  const name = written.replace(/^[/$]/u, '');
-  return SKILL_NAME.test(name) ? name : undefined;
+  const reference = parseReferenceToken(written);
+  return reference?.kind === 'skill' ? reference.name : undefined;
 };
 
 /** The ferret and daemon a reference was written in, when its value says (a plain token says neither). */

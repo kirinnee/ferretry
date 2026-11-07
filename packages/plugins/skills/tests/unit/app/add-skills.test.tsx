@@ -104,8 +104,51 @@ describe('DOM tests: installing one skill from this machine', () => {
     });
   });
 
+  it('G175 starts the install at the ferret’s own project and agent, not the source skill’s agent', async () => {
+    const world = await open({
+      [INVENTORY]: ferretInventory([skill('own')], { harness: 'codex', folder: '/work/dojo/api' }),
+      [PREVIEW]: previewOf(),
+    });
+    await click(q('[data-add-skills-machine-install]'), 'Install');
+    await settle(() => q('[data-skill-project]') !== null, 'the install sheet');
+    expect(q<HTMLSelectElement>('[data-skill-project]')?.value).toBe('/work/dojo');
+    expect(q<HTMLSelectElement>('[data-skill-harness]')?.value).toBe('codex');
+    expect(q('[data-local-choice-problem]')).toBeNull();
+    await review();
+    await settle(() => q('[data-local-confirm]') !== null, 'the review');
+    expect(world.calls.find(entry => entry.route === PREVIEW)?.init).toEqual({
+      body: {
+        source: { path: '/home/me/.claude-work/skills/review/SKILL.md' },
+        target: { scope: 'project', projectRoot: '/work/dojo', harness: 'codex' },
+      },
+    });
+  });
+
+  it('G175 writes a hidden character in a machine skill’s name out as a marker, in the list and in the sheet title', async () => {
+    const machine = machineInventory();
+    await open({
+      [MACHINE]: {
+        ...machine,
+        homes: [
+          {
+            ...machine.homes[0]!,
+            skills: [skill('rev\u202Eiew', { path: '/home/me/.claude-work/skills/review/SKILL.md' })],
+          },
+        ],
+        projects: [],
+      },
+    });
+    expect(pageText()).toContain('rev⟨U+202E⟩iew');
+    expect(pageText()).not.toContain('\u202E');
+    await click(q('[data-add-skills-machine-install]'), 'Install');
+    await settle(() => q('[data-skill-project]') !== null, 'the install sheet');
+    expect(pageText()).toContain('Install rev⟨U+202E⟩iew');
+    expect(pageText()).not.toContain('\u202E');
+  });
+
   it('asks for the place before it will read anything', async () => {
-    const world = await open({});
+    // A ferret that works outside every registered project: nothing to pre-select.
+    const world = await open({ [INVENTORY]: ferretInventory([skill('own')], { folder: '/somewhere/else' }) });
     await click(q('[data-add-skills-machine-install]'), 'Install');
     await settle(() => q('[data-skill-project]') !== null, 'the install sheet');
     expect(q<HTMLButtonElement>('[data-local-preview]')?.disabled).toBe(true);

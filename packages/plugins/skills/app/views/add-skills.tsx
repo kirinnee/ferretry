@@ -13,6 +13,7 @@ import {
   ADD_SKILLS_BACK,
   ADD_SKILLS_TITLE,
   filterMachineRows,
+  initialDraft,
   INSTALL_BUTTON,
   INSTALLED_LABEL,
   MACHINE_NOTE,
@@ -61,7 +62,7 @@ export function AddSkills({
   onBack,
 }: {
   readonly client: Pick<PluginClient, 'call'>;
-  readonly ferret: Pick<FerretSkillsInventory, 'skills'>;
+  readonly ferret: Pick<FerretSkillsInventory, 'skills' | 'folder' | 'harness'>;
   readonly onBack: () => void;
 }) {
   const [machine, setMachine] = useState<Machine>(undefined);
@@ -146,7 +147,13 @@ export function AddSkills({
         ) : null}
       </section>
       {installing === null ? null : (
-        <LocalInstallSheet client={client} row={installing} options={options} onClose={done} />
+        <LocalInstallSheet
+          client={client}
+          row={installing}
+          options={options}
+          initial={initialDraft(ferret, options)}
+          onClose={done}
+        />
       )}
     </div>
   );

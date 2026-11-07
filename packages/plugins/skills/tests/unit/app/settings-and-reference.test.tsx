@@ -98,7 +98,7 @@ describe('DOM tests: a /name or $name reference', () => {
 
   it('is plain text while it is still being asked, and for a name the daemon does not list', async () => {
     const Reference = asView(createSkillReference(proved.client, '$'));
-    await show(<Reference value={{ name: 'nothere', daemon: 'studio' }} />);
+    await show(<Reference value={{ name: '/nothere', daemon: 'studio' }} />);
     await settle(() => proved.calls.length > 0, 'the proof read');
     expect(q('a')).toBeNull();
     expect(pageText()).toBe('$nothere');

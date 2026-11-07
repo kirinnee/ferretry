@@ -109,15 +109,18 @@ export function LocalInstallSheet({
   client,
   row,
   options,
+  initial,
   onClose,
 }: {
   readonly client: Pick<PluginClient, 'call'>;
   readonly row: MachineSkillRow;
   readonly options: TargetOptions;
+  /** Where Install starts: the ferret's project and agent (`initialDraft`). */
+  readonly initial: TargetDraft;
   /** Closes the sheet; the copy that landed, when one did. */
   readonly onClose: (installed: LocalSkillInstall | null) => void;
 }) {
-  const [draft, setDraft] = useState<TargetDraft>({ harness: row.harness });
+  const [draft, setDraft] = useState<TargetDraft>(initial);
   const [preview, setPreview] = useState<LocalSkillPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<LocalRefusal | null>(null);

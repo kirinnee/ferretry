@@ -2,6 +2,9 @@ import { describe, expect, it } from 'bun:test';
 import {
   activeSkillsLine,
   appendSkillInvocation,
+  copiedLine,
+  initialDraft,
+  installLine,
   filterMachineRows,
   loadedSkillCount,
   localRefusal,
@@ -135,6 +138,65 @@ describe('adding a skill from this machine', () => {
   });
 });
 
+describe('Trojan Source in a machine skill’s text', () => {
+  const hidden = machineInventory({
+    homes: [
+      {
+        runtime: 'claude\u200Bwork',
+        harness: 'claude-code',
+        home: '/home/me/.claude-work',
+        skills: [
+          skill('ok\u202Ename', { description: 'does\u2066 it', path: '/home/me/.claude-work/skills/x/SKILL.md' }),
+        ],
+      },
+    ],
+    projects: [],
+  });
+
+  it('G175 shows a hidden character in a name, a description or a place as a marker, not as nothing', () => {
+    const [row] = machineRows(hidden, ferretInventory([]), new Set());
+    expect(row?.name).toBe('ok⟨U+202E⟩name');
+    expect(row?.description).toBe('does⟨U+2066⟩ it');
+    expect(row?.from).toBe('claude⟨U+200B⟩work account');
+  });
+
+  it('G175 marks the name in the line a landed copy and an installed copy print', () => {
+    expect(copiedLine({ name: 'ok\u202Ename' })).toBe('ok⟨U+202E⟩name · copied');
+    expect(installLine({ name: 'ok\u202Ename', destination: '/p/.claude/skills/ok\u202Ename' })).toBe(
+      'ok⟨U+202E⟩name · /p/.claude/skills/ok⟨U+202E⟩name',
+    );
+  });
+});
+
+describe('where Install starts for a ferret', () => {
+  const options = {
+    projects: [
+      { root: '/work', label: 'work' },
+      { root: '/work/dojo', label: 'dojo' },
+      { root: '/other', label: 'other' },
+    ],
+  };
+
+  it('is the project holding the ferret’s folder, the longest root winning, and the ferret’s own agent', () => {
+    expect(initialDraft({ folder: '/work/dojo/api', harness: 'codex' }, options)).toEqual({
+      projectRoot: '/work/dojo',
+      harness: 'codex',
+    });
+    expect(initialDraft({ folder: '/work/dojo/', harness: 'claude-code' }, options)).toEqual({
+      projectRoot: '/work/dojo',
+      harness: 'claude-code',
+    });
+    expect(initialDraft({ folder: '/work/other-thing', harness: 'claude-code' }, options)).toEqual({
+      projectRoot: '/work',
+      harness: 'claude-code',
+    });
+  });
+
+  it('names no project when the folder is in none, and still the ferret’s agent', () => {
+    expect(initialDraft({ folder: '/elsewhere', harness: 'codex' }, options)).toEqual({ harness: 'codex' });
+  });
+});
+
 describe('what a refused copy says', () => {
   it('G174 a passkey that was not confirmed says nothing was installed and to confirm again', () => {
     const said = localRefusal(refusal(403, 'grant_step_up_required', 'step up'));
@@ -169,7 +231,8 @@ describe('a /name or $name written anywhere', () => {
   it('reads a skill name by the grammar’s own rule: lowercase only, either sigil', () => {
     expect(skillNameOf('/summary')).toBe('summary');
     expect(skillNameOf('$summary')).toBe('summary');
-    expect(skillNameOf('summary')).toBe('summary');
+    expect(skillNameOf('summary')).toBeUndefined();
+    expect(skillNameOf('/summary.')).toBeUndefined();
     expect(skillNameOf({ name: '/review-2' })).toBe('review-2');
     expect(skillNameOf('$HOME')).toBeUndefined();
     expect(skillNameOf('/Summary')).toBeUndefined();
