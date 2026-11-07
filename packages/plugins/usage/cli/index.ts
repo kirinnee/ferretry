@@ -47,6 +47,13 @@ interface ConfigPutResult {
   readonly pending?: { readonly changes: readonly string[] };
 }
 
+/** Said when `--out` is given: the shell hands a half no file facility to write the report with. */
+export const UNSUPPORTED_OUT =
+  '--out is not available yet: the CLI shell gives a plugin no way to write a file. Run `fy daemon profile --json > report.json` to keep the full report.';
+/** Said when `--trace-syscalls` is given: the shell hands a half no process facility to run the tracer with. */
+export const UNSUPPORTED_TRACE =
+  '--trace-syscalls is not available yet: the CLI shell gives a plugin no way to start strace or fs_usage and read its output. Run the tracer yourself against the daemon, or profile without it.';
+
 const wantsJson = (invocation: VerbInvocation): boolean => invocation.options.json === true;
 const optionText = (invocation: VerbInvocation, name: string): string | undefined => {
   const value = invocation.options[name];
@@ -113,7 +120,8 @@ export default implementCli(manifest, {
             const file = await client.call<ConfigFileView>('GET /v1/config/file', { query: { path: USAGE_FILE } });
             const text = file.exists ? file.text : '';
             const current = budgetInFile(text, id);
-            if (current === null) throw new BudgetEditError(`${USAGE_FILE} does not check; fix it first (\`fy config check\`).`);
+            if (current === null)
+              throw new BudgetEditError(`${USAGE_FILE} does not check; fix it first (\`fy config check\`).`);
 
             if (!setsLevel && !edit.clear && zone === undefined) {
               const view = await client.call<BudgetsView>('GET /v1/usage/budgets');
@@ -129,7 +137,8 @@ export default implementCli(manifest, {
             const next = editedBudget(current, edit);
             if (next !== undefined) {
               const parsed = BudgetSchema.safeParse(next);
-              if (!parsed.success) throw new BudgetEditError(`That budget is not valid: ${parsed.error.issues[0]?.message ?? ''}.`);
+              if (!parsed.success)
+                throw new BudgetEditError(`That budget is not valid: ${parsed.error.issues[0]?.message ?? ''}.`);
             }
             const dryRun = invocation.options['dry-run'] === true;
             const lines: string[] = [];
@@ -171,8 +180,21 @@ export default implementCli(manifest, {
         },
 
         'daemon profile': async invocation => {
+          // TWO FLAGS THE SHELL CANNOT YET CARRY, REFUSED RATHER THAN IGNORED. A half is handed a daemon client and
+          // the terminal (`CliContext`: `client`, `io`) and nothing else: no way to write a file (`--out`) and none to
+          // start a program and read its output (`--trace-syscalls`: strace, or sudo fs_usage). Both are refused BEFORE a
+          // window opens, so a person never waits thirty seconds for a report that then lacks what they asked for.
+          if (invocation.options.out !== undefined) {
+            io.err(UNSUPPORTED_OUT);
+            return USAGE;
+          }
+          if (invocation.options['trace-syscalls'] !== undefined && invocation.options['trace-syscalls'] !== false) {
+            io.err(UNSUPPORTED_TRACE);
+            return USAGE;
+          }
           const raw = optionText(invocation, 'seconds');
-          const seconds = raw === undefined ? PERFORMANCE_PROFILE_DEFAULT_SECONDS : /^\d+$/u.test(raw.trim()) ? Number(raw) : NaN;
+          const seconds =
+            raw === undefined ? PERFORMANCE_PROFILE_DEFAULT_SECONDS : /^\d+$/u.test(raw.trim()) ? Number(raw) : NaN;
           if (!(seconds >= PERFORMANCE_PROFILE_MIN_SECONDS && seconds <= PERFORMANCE_PROFILE_MAX_SECONDS)) {
             io.err(
               `--seconds must be a whole number from ${String(PERFORMANCE_PROFILE_MIN_SECONDS)} to ${String(PERFORMANCE_PROFILE_MAX_SECONDS)}`,
@@ -188,10 +210,12 @@ export default implementCli(manifest, {
           let report: PerformanceReport | undefined = started.state === 'finished' ? started.report : undefined;
           if (report === undefined && started.state === 'running') {
             // A window is a few seconds long: ask once a second until it has closed, and give up a minute after it should have.
-            for (let waited = 0; waited <= (seconds * 1_000) + GRACE_MS; waited += POLL_MS) {
+            for (let waited = 0; waited <= seconds * 1_000 + GRACE_MS; waited += POLL_MS) {
               await Bun.sleep(POLL_MS);
               const view = PerformanceProfileViewSchema.parse(
-                await client.call<PerformanceProfileView>('GET /v1/diagnostics/profile/:id', { params: { id: started.id } }),
+                await client.call<PerformanceProfileView>('GET /v1/diagnostics/profile/:id', {
+                  params: { id: started.id },
+                }),
               );
               if (view.state === 'finished') {
                 report = view.report;
