@@ -7,11 +7,13 @@ import {
   decodeClaim,
   fromBase64UrlFixed,
   lengthPrefixed,
+  linkStoreTranscript,
   NONCE_BYTES,
   toBase64Url,
   tunnelTranscript,
   utf8Bytes,
   verifyCatalogSignature,
+  verifyLinkStoreRequest,
   verifySecretOfferSignature,
   verifyRendezvousClaim,
   verifyTunnelRequest,
@@ -79,7 +81,7 @@ describe('identity signer: the rendezvous claim', () => {
 
   it('offers no way to read the key: the signer has exactly its fixed-label methods', async () => {
     const signer = createIdentitySigner(await newDaemonIdentity());
-    expect(Object.keys(signer).sort()).toEqual(['sign', 'signCatalog', 'signSecretOffer', 'signTunnel']);
+    expect(Object.keys(signer).sort()).toEqual(['sign', 'signCatalog', 'signLinkStoreRequest', 'signSecretOffer', 'signTunnel']);
     expect(Object.isFrozen(signer)).toBe(true);
   });
 });
@@ -216,7 +218,7 @@ describe('kernel.signer: each signature is offered only to the plugin that needs
   it('Connections may sign claims and tunnel requests; Catalogs may sign catalogs; nobody else signs anything', async () => {
     const signer = createIdentitySigner(await newDaemonIdentity());
     const nonce = nonceText();
-    expect(Object.keys(SIGNER_USERS).sort()).toEqual(['sign', 'signCatalog', 'signSecretOffer', 'signTunnel']);
+    expect(Object.keys(SIGNER_USERS).sort()).toEqual(['sign', 'signCatalog', 'signLinkStoreRequest', 'signSecretOffer', 'signTunnel']);
     const connections = signerFor('connections', signer);
     expect((await connections.sign({ host, nonce })).signature.length).toBeGreaterThan(0);
     await expect(connections.signCatalog({ kind: 'manifest', canonical: utf8Bytes('{}') })).rejects.toThrow(TypeError);
@@ -279,5 +281,149 @@ describe('identity signer: secret-import offers (Vault)', () => {
     await expect(signerFor('connections', signer).signSecretOffer(request)).rejects.toThrow(TypeError);
     expect((await signerFor('vault', signer).signSecretOffer(request)).signature).toBe(signed.signature);
     await expect(signer.signSecretOffer({ ...request, importId: '' })).rejects.toThrow(TypeError);
+  });
+});
+
+describe('identity signer: link-store requests (Catalogs) — R594', () => {
+  const nonce = (): Uint8Array => relayCrypto.randomBytes(NONCE_BYTES);
+  const field = (text: string): Uint8Array => lengthPrefixed(utf8Bytes(text));
+  const json = (value: unknown): Uint8Array => utf8Bytes(JSON.stringify(value));
+  const upload = {
+    request: 'upload',
+    bundleId: 'lnk_abc',
+    action: 'create',
+    kind: 'catalog',
+    sequence: 3,
+    notAfter: '2026-11-08T00:00:00.000Z',
+    fetchVerifier: 'verifier',
+    envelopeSha256: 'digest',
+    envelopeBytes: 512,
+  } as const;
+  const head = (daemonId: string, bytes: Uint8Array): Uint8Array[] => [
+    field('ferretry-link-store/1'),
+    field(daemonId),
+    field(host),
+    lengthPrefixed(bytes),
+  ];
+
+  it('R594 an upload signs today’s exact transcript (label, protocol, daemon, host, nonce, then every field) and verifies', async () => {
+    const identity = await newDaemonIdentity();
+    const bytes = nonce();
+    const expected = concatBytes([
+      utf8Bytes('ferretry-link-store-upload-v1'),
+      ...head(identity.daemonId, bytes),
+      field('lnk_abc'),
+      field('create'),
+      field('catalog'),
+      field('3'),
+      field(''),
+      field('2026-11-08T00:00:00.000Z'),
+      field(''),
+      field(''),
+      field('verifier'),
+      field('digest'),
+      field('512'),
+    ]);
+    const signed = await createIdentitySigner(identity).signLinkStoreRequest({
+      host,
+      nonce: bytes,
+      canonicalBody: json(upload),
+    });
+    expect(signed.daemonId).toBe(identity.daemonId);
+    expect(Object.keys(signed).sort()).toEqual(['daemonId', 'publicKey', 'signature']);
+    expect(
+      await relayCrypto.verifyEd25519(
+        fromBase64UrlFixed(signed.publicKey, 44)!,
+        fromBase64UrlFixed(signed.signature, 64)!,
+        expected,
+      ),
+    ).toBe(true);
+    const context = { daemonId: identity.daemonId, host, nonce: bytes, body: upload };
+    expect(
+      (await verifyLinkStoreRequest(relayCrypto, context, { ...signed, nonce: toBase64Url(bytes) })).ok,
+    ).toBe(true);
+    expect(linkStoreTranscript(context)).toEqual(expected);
+  });
+
+  it('R594 delete and status each have their own label, and a status sorts its ids', async () => {
+    const identity = await newDaemonIdentity();
+    const bytes = nonce();
+    const signer = createIdentitySigner(identity);
+    const del = await signer.signLinkStoreRequest({
+      host,
+      nonce: bytes,
+      canonicalBody: json({ request: 'delete', bundleId: 'lnk_abc' }),
+    });
+    const ctx = { daemonId: identity.daemonId, host, nonce: bytes };
+    const asDelete = { ...ctx, body: { request: 'delete', bundleId: 'lnk_abc' } } as const;
+    expect((await verifyLinkStoreRequest(relayCrypto, asDelete, { ...del, nonce: toBase64Url(bytes) })).ok).toBe(true);
+    expect(linkStoreTranscript(asDelete)).toEqual(
+      concatBytes([utf8Bytes('ferretry-link-store-delete-v1'), ...head(identity.daemonId, bytes), field('lnk_abc')]),
+    );
+    // a delete signature is not a status signature for the same id
+    const asStatus = { ...ctx, body: { request: 'status', bundleIds: ['lnk_abc'] } } as const;
+    expect((await verifyLinkStoreRequest(relayCrypto, asStatus, { ...del, nonce: toBase64Url(bytes) })).ok).toBe(false);
+    const status = await signer.signLinkStoreRequest({
+      host,
+      nonce: bytes,
+      canonicalBody: json({ request: 'status', bundleIds: ['b', 'a'] }),
+    });
+    const sorted = { ...ctx, body: { request: 'status', bundleIds: ['a', 'b'] } } as const;
+    expect((await verifyLinkStoreRequest(relayCrypto, sorted, { ...status, nonce: toBase64Url(bytes) })).ok).toBe(true);
+    expect(linkStoreTranscript(sorted)).toEqual(
+      concatBytes([utf8Bytes('ferretry-link-store-status-v1'), ...head(identity.daemonId, bytes), field('a,b')]),
+    );
+  });
+
+  it('R594 the signature does not verify for another host, another nonce or another daemon', async () => {
+    const identity = await newDaemonIdentity();
+    const bytes = nonce();
+    const signed = await createIdentitySigner(identity).signLinkStoreRequest({
+      host,
+      nonce: bytes,
+      canonicalBody: json({ request: 'delete', bundleId: 'lnk_abc' }),
+    });
+    const base = { daemonId: identity.daemonId, host, nonce: bytes, body: { request: 'delete', bundleId: 'lnk_abc' } } as const;
+    const request = { ...signed, nonce: toBase64Url(bytes) };
+    expect((await verifyLinkStoreRequest(relayCrypto, { ...base, host: 'other.example.test' }, request)).ok).toBe(false);
+    expect((await verifyLinkStoreRequest(relayCrypto, { ...base, nonce: nonce() }, request)).ok).toBe(false);
+    expect((await verifyLinkStoreRequest(relayCrypto, { ...base, body: { request: 'delete', bundleId: 'other' } }, request)).ok).toBe(false);
+  });
+
+  it('refuses a short nonce, an empty host, text that is not exactly a request, and anything signed for the wrong shape — before the key is used', async () => {
+    const identity = await newDaemonIdentity();
+    let signed = 0;
+    const signer = createIdentitySigner({
+      ...identity,
+      sign: async (bytes: Uint8Array) => {
+        signed += 1;
+        return await identity.sign(bytes);
+      },
+    });
+    const good = json({ request: 'delete', bundleId: 'lnk_abc' });
+    await expect(signer.signLinkStoreRequest({ host, nonce: new Uint8Array(8), canonicalBody: good })).rejects.toThrow(TypeError);
+    await expect(signer.signLinkStoreRequest({ host: '', nonce: nonce(), canonicalBody: good })).rejects.toThrow(TypeError);
+    for (const bad of [
+      utf8Bytes('not json'),
+      json({ request: 'delete' }),
+      json({ request: 'delete', bundleId: 'lnk_abc', extra: 1 }),
+      json({ request: 'download', bundleId: 'lnk_abc' }),
+      json({ ...upload, sequence: -1 }),
+      json({ ...upload, action: 'destroy' }),
+      new Uint8Array([0xff, 0xfe]),
+    ])
+      await expect(signer.signLinkStoreRequest({ host, nonce: nonce(), canonicalBody: bad })).rejects.toThrow(TypeError);
+    await expect(
+      signer.signLinkStoreRequest({ host, nonce: nonce(), canonicalBody: '{}' as unknown as Uint8Array }),
+    ).rejects.toThrow(TypeError);
+    expect(signed).toBe(0);
+  });
+
+  it('only Catalogs may ask', async () => {
+    const signer = createIdentitySigner(await newDaemonIdentity());
+    const request = { host, nonce: nonce(), canonicalBody: json({ request: 'delete', bundleId: 'lnk_abc' }) };
+    expect((await signerFor('catalogs', signer).signLinkStoreRequest(request)).signature.length).toBeGreaterThan(0);
+    for (const other of ['connections', 'vault', 'board'])
+      await expect(signerFor(other, signer).signLinkStoreRequest(request)).rejects.toThrow(TypeError);
   });
 });

@@ -44,7 +44,7 @@ export interface KernelPorts {
   readonly secrets: SecretsPort;
   /**
    * The daemon identity's fixed-label signatures (claim, tunnel, catalog), each refused unless this plugin is the
-   * one allowed it (`sign`/`signTunnel`: Connections; `signCatalog`: Catalogs). No key export, no raw signing.
+   * one allowed it (`sign`/`signTunnel`: Connections; `signCatalog`, `signLinkStoreRequest`: Catalogs). No key export, no raw signing.
    */
   readonly signer: IdentitySigner;
   /** The writer over every declared config file: Gate's alone, `undefined` for every other plugin. */

@@ -11,6 +11,9 @@ export const unusedSigner: IdentitySigner = {
   signCatalog: async () => {
     throw new Error('this test signs no catalog');
   },
+  signLinkStoreRequest: async () => {
+    throw new Error('this test signs no link-store request');
+  },
   signSecretOffer: async () => {
     throw new Error('this test signs no secret offer');
   },
