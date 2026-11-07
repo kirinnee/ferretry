@@ -1029,14 +1029,14 @@ R514	kept	kernel	-	behaviour as written	relay-protocol	R514
 R515	kept	kernel	-	`publishResponse`	relay-protocol	R515
 R516	kept	kernel	-	tunnel permits	relay-protocol	R516
 R517	kept	kernel	-	behaviour as written	relay-protocol	R517
-R518	split	kernel	-	-	relay-protocol	R518
+R518	split	ferrets	kernel	`journalSequence` in `session-directory.ts`, the `after` cursor in `fleet-events.ts`	relay-protocol	R518
 R519	kept	kernel	-	`shared-reads.ts`	relay-protocol	R519
-R520	kept	kernel	-	`idle` frame	relay-protocol	R520
-R521	kept	kernel	-	behaviour as written	relay-protocol	R521
-R522	kept	kernel	-	file-event hub	relay-protocol	R522
-R523	split	kernel	-	-	relay-protocol	R523
-R524	kept	kernel	-	behaviour as written	relay-protocol	R524
-R525	kept	kernel	-	`x-fy-version`	relay-protocol	R525
+R520	kept	ferrets	kernel	`idle` frame (`FleetEventStreamService`)	relay-protocol	R520
+R521	kept	ferrets	kernel	`FyEventStreamFrameSchema` (strict)	relay-protocol	R521
+R522	kept	ferrets	kernel	`FileTranscriptChanges` (file-event hub, wiring pending)	relay-protocol	R522
+R523	split	ferrets	kernel	`eventStreamScope` (`transcript_needs_session`)	relay-protocol	R523
+R524	kept	ferrets	kernel	`watchTranscript` (only `scope.transcript`)	relay-protocol	R524
+R525	kept	ferrets	kernel	`eventStreamScope` (`tail`, `tail_needs_fleet`)	relay-protocol	R525
 R526	kept	kernel	-	`partitionTunnelBody` in `@ferretry/protocol`	relay-protocol	R526
 R527	kept	kernel	-	`req-more`, `res-more`	relay-protocol	R527
 R528	kept	kernel	-	behaviour as written	relay-protocol	R528
