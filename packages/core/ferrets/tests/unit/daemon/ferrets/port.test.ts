@@ -25,3 +25,26 @@ test('through the port, automatic still reaches a stopped ferret’s resume, and
   expect(f.history.at(-1)).toMatchObject({ type: 'session.resumed', data: { automatic: true } });
   expect((await port.get(f.id))?.id).toBe(f.id);
 });
+
+test('through the port, stop’s 4th cause argument is ignored: a plugin cannot stamp an end cause', async () => {
+  const f = additivesFixture();
+  await f.service.resume(f.id);
+  const port = ferretsPort(f.service) as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  await port.stop!(f.id, 'now', 'x', { kind: 'completed' });
+  expect(f.registry.get(f.id)?.state).toBe('stopped');
+  expect(f.registry.get(f.id)?.cause).toEqual({ kind: 'stopped' });
+});
+
+test('through the port, the service’s own members are not there: revokeToken, releaseLive, launch, tokens, rename', () => {
+  const f = additivesFixture();
+  const port = ferretsPort(f.service) as unknown as Record<string, unknown>;
+  for (const name of ['revokeToken', 'releaseLive', 'retarget', 'launch', 'tokens', 'ports', 'rename'])
+    expect(port[name]).toBeUndefined();
+  // Exactly the FerretsApi members the service implements are there.
+  expect(Object.keys(port).sort()).toEqual(
+    [
+      'agentControl', 'attach', 'children', 'get', 'handle', 'harness', 'harnesses', 'list', 'managedWorktrees', 'mayTouch',
+      'move', 'resume', 'sitrep', 'start', 'stop', 'summary', 'workFolder',
+    ].sort(),
+  );
+});

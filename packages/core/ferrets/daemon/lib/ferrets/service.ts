@@ -176,6 +176,11 @@ export interface ResumeTarget {
   readonly conversation?: string;
   /** The model the relaunch runs; absent leaves the start options' model as it is. */
   readonly model?: string;
+  /**
+   * The effort the relaunch runs on, as the move recorded it. Absent means none: the target starts on its own login's
+   * setting (effort vocabularies differ between harnesses), never the previous runtime's effort.
+   */
+  readonly effort?: string;
 }
 
 /**
@@ -478,18 +483,12 @@ export class FerretsService implements FerretsApi {
     const record = target === undefined ? settled : (this.retarget(settled, target) as FerretRecord);
     const { cause: _ended, ...revived } = record;
     const starting: FerretRecord = { ...revived, state: 'starting', stateAt: this.ports.now() };
-    // The move's model is a start option, so details own it; what it replaces is kept to put back if the launch fails.
-    const detailsBefore = this.registry.detailsOf(ferret);
-    if (target?.model !== undefined && target.model !== detailsBefore?.options?.model)
-      await this.saveDetails(ferret, {
-        ...detailsBefore,
-        options: { ...detailsBefore?.options, model: target.model },
-      });
+    // The move's model and effort are start options, so details own them (the record keeps the ones it restamped, and the
+    // fast mode is dropped as the move drops it). They are written with the target, and a failed launch leaves them with
+    // it, as the moves module leaves its own document: a plain resume or Restart relaunches on the target.
+    if (target !== undefined) await this.moveOptions(ferret, target);
     await this.write(starting, settled.state, 'state');
     const resumed = await this.launch(starting, undefined, record.harnessConversation);
-    // A launch that failed on a move leaves the ferret as the move found it: the moves module rolls its own document
-    // back, so the record (runtime, harness, login, conversation) and the model go back with it, never half moved.
-    if (!resumed.ok && target !== undefined) await this.restoreMoved(settled, detailsBefore);
     if (resumed.ok) {
       const text = message?.trim();
       await this.ports.history?.(ferret, 'session.resumed', {
@@ -590,11 +589,14 @@ export class FerretsService implements FerretsApi {
   private retarget(record: FerretRecord, target: ResumeTarget): FerretRecord | string {
     const runtime = FerretRecordSchema.shape.runtime.safeParse(target.runtime);
     const conversation = FerretRecordSchema.shape.harnessConversation.safeParse(target.conversation);
-    const model = FerretDetailsSchema.shape.options.unwrap().shape.model.safeParse(target.model);
+    const startOptions = FerretDetailsSchema.shape.options.unwrap().shape;
+    const model = startOptions.model.safeParse(target.model);
+    const effort = startOptions.effort.safeParse(target.effort);
     if (
       !runtime.success ||
       !conversation.success ||
       !model.success ||
+      !effort.success ||
       !(HARNESS_KEYS as readonly string[]).includes(target.harness)
     )
       return 'the runtime this ferret is moving onto is not one Ferrets can record';
@@ -607,24 +609,21 @@ export class FerretsService implements FerretsApi {
     };
   }
 
-  /** Puts a stopped ferret's pre-move runtime, harness, login, conversation and model back after a failed relaunch. */
-  private async restoreMoved(before: FerretRecord, details: FerretDetails | undefined): Promise<void> {
-    const now = this.registry.get(before.id);
-    if (now === undefined) return;
-    const { runtime: _r, login: _l, harnessConversation: _c, ...kept } = now;
-    await this.write(
-      {
-        ...kept,
-        harness: before.harness,
-        ...(before.runtime === undefined ? {} : { runtime: before.runtime }),
-        ...(before.login === undefined ? {} : { login: before.login }),
-        ...(before.harnessConversation === undefined ? {} : { harnessConversation: before.harnessConversation }),
-      },
-      now.state,
-      'state',
-    );
-    if (this.registry.detailsOf(before.id)?.options?.model !== details?.options?.model)
-      await this.saveDetails(before.id, details ?? {});
+  /**
+   * Writes a move's start options into the ferret's details: the target's model (absent leaves the options' model) and
+   * effort together (absent drops the previous runtime's effort), and no fast mode — the move drops it with the effort's
+   * launch record, because the target is another login whose model may have none.
+   */
+  private async moveOptions(ferret: FerretId, target: ResumeTarget): Promise<void> {
+    const before = this.registry.detailsOf(ferret);
+    const { effort: _effort, fast: _fast, ...kept } = before?.options ?? {};
+    const options = {
+      ...kept,
+      ...(target.model === undefined ? {} : { model: target.model }),
+      ...(target.effort === undefined ? {} : { effort: target.effort }),
+    };
+    if (JSON.stringify(options) === JSON.stringify(before?.options ?? {})) return;
+    await this.saveDetails(ferret, { ...before, options });
   }
 
   /**

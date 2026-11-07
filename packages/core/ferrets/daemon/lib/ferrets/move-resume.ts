@@ -18,12 +18,14 @@ const MovedConfigSchema = z.object({
   harness: z.enum(['claude', 'codex']),
   /** The model the move planned on the target. */
   model: z.string().min(1).optional(),
+  /** The reasoning effort the move recorded; gone when the move crosses harnesses (their vocabularies differ). */
+  launchReasoningEffort: z.string().min(1).optional(),
   /** The conversation the relaunch resumes: gone for a fresh start, the converted or earlier one otherwise. */
   transcript: z.looseObject({ harnessSessionId: z.string().min(1).optional() }).optional(),
 });
 
 /**
- * Reads the target a move just recorded: the runtime, harness, model and conversation its relaunch is on (a harness is
+ * Reads the target a move just recorded: the runtime, harness, model, effort and conversation its relaunch is on (a harness is
  * spelled as Ferrets keys it; no conversation means a fresh start). It reads exactly the keys the moves module restamps
  * and no others — it records no login, so none is read. `read` is the moves module's config document.
  */
@@ -34,6 +36,7 @@ export async function movedTarget(read: () => Promise<unknown>): Promise<ResumeT
     runtime: config.data.agent,
     harness: config.data.harness === 'codex' ? 'codex' : 'claude-code',
     ...(config.data.model === undefined ? {} : { model: config.data.model }),
+    ...(config.data.launchReasoningEffort === undefined ? {} : { effort: config.data.launchReasoningEffort }),
     ...(config.data.transcript?.harnessSessionId === undefined
       ? {}
       : { conversation: config.data.transcript.harnessSessionId }),
