@@ -65,6 +65,33 @@ const usageManifest = {
   ui: { screens: [{ id: 'insights', path: 'insights' }] },
 } as unknown as Manifest;
 
+const multiManifest = {
+  id: 'multi',
+  title: 'Multi',
+  version: '5.0.0',
+  api: 5,
+  core: false,
+  kinds: ['view'],
+  ui: {
+    settings: [
+      { id: 'first', label: 'First tab', order: 30 },
+      { id: 'second', label: 'Second tab', order: 31 },
+      { id: 'third', label: 'Third tab', order: 32 },
+    ],
+  },
+} as unknown as Manifest;
+
+const multiApp = implementApp(multiManifest, {
+  build: () => ({
+    screens: {},
+    settings: {
+      first: () => <p data-testid="tab">The first tab</p>,
+      second: () => <p data-testid="tab">The second tab</p>,
+      third: () => <p data-testid="tab">The third tab</p>,
+    },
+  }),
+});
+
 const entry = (manifest: Manifest, app: SurfaceEntry['app'], contract: string): SurfaceEntry => ({
   id: manifest.id,
   title: manifest.title,
@@ -80,6 +107,7 @@ const surfaces: SurfaceEntry[] = [
   entry(boardManifest, boardApp, 'h-board'),
   entry(agendaManifest, skeletonApp(agendaManifest), 'h-agenda'),
   entry(usageManifest, skeletonApp(usageManifest), 'h-usage'),
+  entry(multiManifest, multiApp, 'h-multi'),
 ];
 
 const browser: ShellWindow = {
@@ -208,6 +236,38 @@ describe('the app shell', () => {
     await settle();
     expect(view.container.querySelector('main')?.textContent).toContain('This daemon needs an update');
     await view.unmount();
+  });
+
+  test('a plugin that declares several settings tabs draws each one at its own address', async () => {
+    const drawn: Record<string, string> = {};
+    for (const [path, want] of [
+      ['/d/d1/settings/multi', 'The first tab'],
+      ['/d/d1/settings/multi/first', 'The first tab'],
+      ['/d/d1/settings/multi/second', 'The second tab'],
+      ['/d/d1/settings/multi/third', 'The third tab'],
+    ] as const) {
+      go(path);
+      const { runtime, storage } = setup({});
+      const view = await mount(
+        <App
+          runtime={runtime}
+          themes={new ThemePreferenceStore(storage)}
+          layouts={new DeviceLayoutStore(storage)}
+          browser={browser}
+          scroll={new ScrollMemory(null)}
+        />,
+      );
+      await settle();
+      drawn[path] = view.container.querySelector('[data-testid="tab"]')?.textContent ?? '(nothing)';
+      expect(drawn[path]).toBe(want);
+      const links = [...view.container.querySelectorAll('nav[aria-label="Plugin settings"] a')];
+      expect(links.map(link => link.getAttribute('href'))).toEqual([
+        '/d/d1/settings/multi/first',
+        '/d/d1/settings/multi/second',
+        '/d/d1/settings/multi/third',
+      ]);
+      await view.unmount();
+    }
   });
 
   test('the layout places the nav and publishes the theme on the root', async () => {
