@@ -62,6 +62,7 @@ import { dependentsOf, type GraphRefusal, planGraph } from './graph.ts';
 import { type Deadline, HookEngine } from './hooks.ts';
 import { type InventoryEntry, kernelRoutes } from './kernel-half.ts';
 import { JobRunner } from './jobs.ts';
+import { pluginsYamlLine, readAcceptedPlugins, writeAcceptedPlugins } from './accepted-plugins.ts';
 import { PluginLifecycle } from './lifecycle.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import { noWebSockets } from './adapters/process.ts';
@@ -327,28 +328,75 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
 
   // 1. Check the enabled graph.
   trace.push('check');
-  const enabled = (id: string): boolean => isCore(id) || (options.enabled?.(id) ?? pluginsYaml?.plugins[id] !== 'off');
-  const enabledManifests = manifests.filter(manifest => enabled(manifest.id));
-  const planned = HookEngine.plan(enabledManifests, log, deadline);
-  const hookRefused = new Set(planned.refusals.flatMap(refusal => refusal.plugins));
-  const hookEdges = (manifest: Manifest): readonly string[] =>
-    (manifest.hooks?.takes ?? []).flatMap(take => {
-      const offerer = planned.engine.offererOf(take.hook);
-      return offerer === undefined ? [] : [offerer];
-    });
-  const graph = planGraph(
-    manifests.filter(manifest => !hookRefused.has(manifest.id) || isCore(manifest.id)),
-    enabled,
-    hookEdges,
-  );
-  const refusals: GraphRefusal[] = [
-    ...graph.refused,
-    ...planned.refusals.flatMap(refusal =>
-      refusal.plugins
-        .filter(plugin => !isCore(plugin))
-        .map(plugin => ({ plugin, reason: 'hook' as const, sentence: refusal.sentence })),
-    ),
-  ];
+  const yamlEnabled = (id: string): boolean =>
+    isCore(id) || (options.enabled?.(id) ?? pluginsYaml?.plugins[id] !== 'off');
+  const planWith = (on: (id: string) => boolean) => {
+    const planned = HookEngine.plan(
+      manifests.filter(manifest => on(manifest.id)),
+      log,
+      deadline,
+    );
+    const hookRefused = new Set(planned.refusals.flatMap(refusal => refusal.plugins));
+    const hookEdges = (manifest: Manifest): readonly string[] =>
+      (manifest.hooks?.takes ?? []).flatMap(take => {
+        const offerer = planned.engine.offererOf(take.hook);
+        return offerer === undefined ? [] : [offerer];
+      });
+    const graph = planGraph(
+      manifests.filter(manifest => !hookRefused.has(manifest.id) || isCore(manifest.id)),
+      on,
+      hookEdges,
+    );
+    const refusals: GraphRefusal[] = [
+      ...graph.refused,
+      ...planned.refusals.flatMap(refusal =>
+        refusal.plugins
+          .filter(plugin => !isCore(plugin))
+          .map(plugin => ({ plugin, reason: 'hook' as const, sentence: refusal.sentence })),
+      ),
+    ];
+    // a plugin left without a provider only because the enabled set turned that provider off
+    const stranded = graph.refused.filter(
+      refusal =>
+        (refusal.reason === 'needs-refused' || refusal.reason === 'missing-provider') &&
+        !planGraph(manifests, () => true, hookEdges).refused.some(other => other.plugin === refusal.plugin),
+    );
+    return { planned, graph, refusals, stranded };
+  };
+  let enabled = yamlEnabled;
+  let plan = planWith(enabled);
+  const bootNotes: DoctorLine[] = [];
+  // §2.4: a hand-edited plugins.yaml that strands a plugin is refused; boot keeps the last accepted set. A caller
+  // that names the enabled set itself (a suite) is not second-guessed.
+  if (options.enabled === undefined) {
+    const accepted = await readAcceptedPlugins(adapters.fs, home);
+    if (plan.stranded.length === 0)
+      await writeAcceptedPlugins(
+        adapters.fs,
+        home,
+        plan.graph.order.map(manifest => manifest.id),
+        accepted,
+      ).catch(() => log.warn('the accepted plugin set could not be written'));
+    else if (accepted !== undefined) {
+      const fallback = (id: string): boolean => isCore(id) || accepted.has(id);
+      const kept = planWith(fallback);
+      if (kept.stranded.length === 0) {
+        const turnedOff = manifests.filter(manifest => accepted.has(manifest.id) && !yamlEnabled(manifest.id));
+        for (const manifest of turnedOff) {
+          const line = await pluginsYamlLine(adapters.fs, home, manifest.id);
+          bootNotes.push({
+            plugin: 'kernel',
+            state: 'warn',
+            detail: `config/plugins.yaml${line === undefined ? '' : ` line ${String(line)}`} turns ${manifest.title} off, which ${plan.stranded.map(refusal => manifests.find(item => item.id === refusal.plugin)?.title ?? refusal.plugin).join(', ')} needs, so the daemon started with the last enabled set it accepted.`,
+            fix: `Turn ${manifest.title} back on, or turn off what needs it too (fy plugin off ${manifest.id} --with-dependents).`,
+          });
+        }
+        enabled = fallback;
+        plan = kept;
+      }
+    }
+  }
+  const { planned, graph, refusals } = plan;
   const coreRefusal = [
     ...refusals,
     ...planned.refusals.map(r => ({ plugin: r.plugins[0] ?? '', sentence: r.sentence })),
@@ -787,7 +835,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     ids,
     dispatch: request => dispatcher.dispatch(request),
     callTool,
-    doctor: async () => doctorLines(records, hooks, jobs, data.refused),
+    doctor: async () => [...bootNotes, ...(await doctorLines(records, hooks, jobs, data.refused))],
     stop: () => stopHost(),
   };
 
