@@ -4,6 +4,7 @@ import { FakeRunner, harnessConformance } from '@ferretry/core-ferrets/contract/
 import type { FerretId, SpawnResult } from '@ferretry/kernel/contract';
 import { type Instant, ok } from '@ferretry/std';
 import { ClaudeHarness } from '../../daemon/adapters/claude-harness.ts';
+import { API_KEY_SEED_NAME, API_KEY_SEED_SCRIPT, API_KEY_SEED_SHELL } from '../../daemon/lib/harness/api-key-seed.ts';
 import { PaneDirectory } from '../../daemon/adapters/tmux-pane.ts';
 import { ClaudeProjectApprovals } from '../../daemon/lib/project-approvals.ts';
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
@@ -389,10 +390,36 @@ describe('ClaudeHarness', () => {
 
     expect(result.ok && result.value.harnessConversation).toBe('conv-1');
     expect(started.cwd).toBe('/work');
-    expect(started.command?.slice(0, 3)).toEqual(['env', `CLAUDE_CONFIG_DIR=${HOME}`, '/opt/bin/claude']);
+    expect(started.command?.slice(0, 7)).toEqual([
+      'env',
+      `CLAUDE_CONFIG_DIR=${HOME}`,
+      API_KEY_SEED_SHELL,
+      '-c',
+      API_KEY_SEED_SCRIPT,
+      API_KEY_SEED_NAME,
+      '/opt/bin/claude',
+    ]);
     expect(started.command).toContain('--session-id');
     expect(started.command?.slice(-2)).toEqual(['--model', 'claude-opus-5-5']);
     expect(panes.require(FERRET)).toBe('%7');
+  });
+
+  test('the runner is handed an argv that never carries the API key or its tail', async () => {
+    const { harness } = build();
+    const fakeKey = `sk-ant-fake-${'0'.repeat(28)}`;
+    // The environment is opaque to the harness (Vault opens it in the child); a value placed in it must not surface.
+    const env = { names: ['ANTHROPIC_API_KEY'], ANTHROPIC_API_KEY: fakeKey } as never;
+    for (const run of [
+      async (r: Runner) => await harness.start(spec(), r, env),
+      async (r: Runner) => await harness.resume(spec(), r, env, 'older-conversation'),
+    ]) {
+      const started: { command?: readonly string[] } = {};
+      await run(runner(started));
+      const argv = started.command ?? [];
+      expect(argv.length > 0).toBe(true);
+      expect(argv.some(word => word.includes(fakeKey.slice(-20)))).toBe(false);
+      expect(argv.some(word => word.includes('ANTHROPIC_API_KEY='))).toBe(false);
+    }
   });
 
   test('resume names the harness conversation, not a new one', async () => {

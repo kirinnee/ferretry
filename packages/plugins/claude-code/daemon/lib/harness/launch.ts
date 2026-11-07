@@ -1,5 +1,6 @@
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
 import type { HarnessConfig, HooksItem, SettingsItem } from '../../../contract/index.ts';
+import { seededCommand } from './api-key-seed.ts';
 import { fixedLayer } from './fixed-layer.ts';
 import { deepMergeSettings } from './settings.ts';
 import { startupModelArguments } from './startup.ts';
@@ -95,13 +96,18 @@ export interface CommandInputs {
 
 /**
  * The argv that starts Claude in a home. `env` carries the one variable the home needs, so the Vault-resolved
- * environment the runner starts it with stays whole. The model goes LAST among the flags so the daemon's
- * explicit decision wins; the permission mode is `auto` (ask before anything risky) or `bypassPermissions`.
+ * environment the runner starts it with stays whole; Claude then starts through the child-side API-key seed
+ * (`api-key-seed.ts`), a fixed `sh -c` script that reads the key only from its own environment and `exec`s claude.
+ * The model goes LAST among the flags so the daemon's explicit decision wins; the permission mode is `auto` (ask
+ * before anything risky) or `bypassPermissions`.
  */
 export function launchCommand(inputs: CommandInputs): readonly string[] {
+  return ['env', `CLAUDE_CONFIG_DIR=${inputs.home}`, ...seededCommand(claudeCommand(inputs))];
+}
+
+/** Claude itself and its flags: what the seed `exec`s. */
+function claudeCommand(inputs: CommandInputs): readonly string[] {
   return [
-    'env',
-    `CLAUDE_CONFIG_DIR=${inputs.home}`,
     inputs.binary,
     '--settings',
     `${inputs.home}/${HOME_FILES.overlay}`,
