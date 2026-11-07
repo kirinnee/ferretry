@@ -93,7 +93,7 @@ import {
 import { decideTerminalOpener } from './lib/terminal/ownership.ts';
 import type { TerminalRuntimePort } from './lib/terminal/contracts.ts';
 import type { TmuxCommandPort } from './lib/tmux/contracts.ts';
-import { buildProcesses, type RunnerPane } from './processes.ts';
+import { buildProcesses, type ProcessHostReads, type RunnerPane } from './processes.ts';
 import { processIncarnationFor } from './adapters/session/processes/process-incarnation.ts';
 
 /** Today's idle timeout: a terminal nobody touched for an hour is closed. */
@@ -121,6 +121,8 @@ export interface TerminalsOverrides {
     readonly programs?: CodeProgramPort;
     readonly proofs?: ProgramProofPort;
   };
+  /** The host reads behind the pane proof and the Warden's looks (the daemon: `/proc` or `ps`, per platform). */
+  readonly processHost?: ProcessHostReads;
 }
 
 /**
@@ -286,6 +288,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     ferrets,
     ...(effectiveLimits === undefined ? {} : { limits: effectiveLimits }),
     paneOf: async ferret => await panes.of(ferret),
+    ...(overrides.processHost === undefined ? {} : { host: overrides.processHost }),
     refusedOutputRoots: [socketPath.slice(0, socketPath.lastIndexOf('/state/'))],
     binaryName: BINARY_NAME,
   });

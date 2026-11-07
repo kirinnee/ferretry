@@ -56,7 +56,13 @@ import { type RegisteredTerminalPane, SessionAttachService } from './lib/session
 import { SessionConsoleService } from './lib/session/console/index.ts';
 import { PaneLook } from './lib/session/pane-look.ts';
 import { ProcessHistory } from './lib/session/processes/history.ts';
-import type { ProcessTextRedactor, SessionTranscriptTailPort } from './lib/session/processes/ports.ts';
+import type {
+  ProcessProvenancePort,
+  ProcessTextRedactor,
+  ProcessTreePort,
+  SessionTranscriptTailPort,
+} from './lib/session/processes/ports.ts';
+import type { ProcessIncarnation } from './lib/protocol/process-incarnation.ts';
 import { SessionProcessService } from './lib/session/processes/service.ts';
 import { hasSessionArguments } from './lib/tmux/commands.ts';
 import type { TmuxCommandPort } from './lib/tmux/contracts.ts';
@@ -87,6 +93,15 @@ export interface ProcessesDeps {
   readonly transcript?: SessionTranscriptTailPort;
   /** Who started a ferret, for the Warden's exemption. Absent: its name and parent from Ferrets. */
   readonly spawnFacts?: SessionSpawnFactsPort;
+  /** The host reads behind the pane proof and the looks (tests). Absent: `/proc` or `ps`, per platform. */
+  readonly host?: ProcessHostReads;
+}
+
+/** What the machine is asked about a pane's processes: a pid's start, the tree under a pid, the harness's own. */
+export interface ProcessHostReads {
+  readonly incarnation?: ProcessIncarnation;
+  readonly tree?: ProcessTreePort;
+  readonly provenance?: ProcessProvenancePort;
 }
 
 /** The six routes, by manifest key. */
@@ -127,8 +142,8 @@ export function buildProcesses(deps: ProcessesDeps): Processes {
   const log = kernel.log.child('processes');
   const nowMs = (): number => kernel.clock.nowMs();
   const after = (ms: number, fn: () => void): (() => void) => kernel.clock.after(milliseconds(ms), fn);
-  const incarnation = processIncarnationFor(hostPlatform, kernel.spawn);
-  const tree = processTreeFor(kernel.spawn);
+  const incarnation = deps.host?.incarnation ?? processIncarnationFor(hostPlatform, kernel.spawn);
+  const tree = deps.host?.tree ?? processTreeFor(kernel.spawn);
   const observer = new TmuxPaneObserver(new TmuxController(deps.tmux), incarnation);
   const attach = new SessionAttachService(
     deps.socketPath,
@@ -136,7 +151,7 @@ export function buildProcesses(deps: ProcessesDeps): Processes {
     observer,
   );
   const console = new SessionConsoleService(attach, deps.tmux);
-  const provenance = new HarnessProcessProvenance(deps.binaryName, new ProjectMcpServers());
+  const provenance = deps.host?.provenance ?? new HarnessProcessProvenance(deps.binaryName, new ProjectMcpServers());
   const processes = new SessionProcessService({
     panes: attach,
     tree,
