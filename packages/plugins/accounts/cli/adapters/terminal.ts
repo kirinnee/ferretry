@@ -8,6 +8,7 @@ import type { IAccountPrompt } from '../lib/account-ports.ts';
  * scrollback; the session this CLI runs inside; a clock and a wait for the seed card's poll. Today's `InquirerPrompt`
  * did the same through inquirer, which 5.0 does not carry.
  */
+/** TODO(CliContext port): a prompt with a hidden read. */
 export class TerminalPrompt implements IAccountPrompt {
   async ask(message: string): Promise<string> {
     return await this.#read(message, false);
@@ -40,11 +41,23 @@ export class TerminalPrompt implements IAccountPrompt {
   }
 }
 
-/** `FY_SESSION_ID`: the session this CLI runs inside; absent at the owner's own shell. */
+/** `FY_SESSION_ID`: the session this CLI runs inside; absent at the owner's own shell. TODO(CliContext port): env. */
 export const ownSessionId = (): string | undefined => process.env.FY_SESSION_ID;
 
+/** TODO(CliContext port): a clock. */
 export const nowMs = (): number => Date.now();
 
+/** TODO(CliContext port): a wait. */
 export const sleep = async (ms: number): Promise<void> => {
   await new Promise(resolve => setTimeout(resolve, ms));
 };
+
+/**
+ * Whether this pane holds a ferret's credential (today's `paneCredentialValue` over `FY_SESSION_TOKEN` and
+ * `FY_SESSION_BOARD_CAPABILITY`), as a MARKER only: the owner-command refusal needs to know one is there, never what it
+ * is, so the value is not read into this process's own variables. TODO(CliContext port): env.
+ */
+export const paneCredentialMarker = (): string | undefined =>
+  ['FY_SESSION_TOKEN', 'FY_SESSION_BOARD_CAPABILITY'].some(name => (process.env[name]?.trim() ?? '') !== '')
+    ? 'present'
+    : undefined;

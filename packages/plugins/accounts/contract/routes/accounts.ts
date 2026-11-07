@@ -12,8 +12,7 @@ import {
   type TwoFactorStageId,
   TwoFactorStageIdSchema,
 } from './account-ids.ts';
-import { AskIdSchema as AgendaIdSchema } from '@ferretry/core-asks/contract';
-import { InstantSchema } from './common.ts';
+import { AgendaIdSchema, InstantSchema, PASSKEY_CHALLENGE_TTL_SECONDS, SecretStoreHealthSchema } from './foreign.ts';
 import {
   LOGIN_HINT_PASSKEYS_OFF,
   LOGIN_LABEL_MAX_LENGTH,
@@ -54,7 +53,7 @@ import {
   RECIPE_FENCE_OPEN,
   recipeReferences,
 } from './login-recipes.ts';
-import { PASSKEY_CHALLENGE_TTL_SECONDS, SecretStoreHealthSchema, sha256Hex } from './common.ts';
+import { sha256Hex } from './sha256.ts';
 
 /**
  * ACCOUNTS AND SIGN-INS: the saved login split in two (docs/input-requests.md, "Accounts and sign-ins").

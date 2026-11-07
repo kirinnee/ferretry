@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { SignInIdSchema, TwoFactorIdSchema } from './account-ids.ts';
-import { InstantSchema } from './common.ts';
+import { InstantSchema } from './foreign.ts';
 import {
   LOGIN_OBSERVED_MAX,
   LOGIN_RECIPE_PROPOSALS_MAX,
@@ -16,7 +16,7 @@ import {
   recipeReferences,
 } from './login-recipes.ts';
 import { MIN_SECRET_VALUE_LENGTH, SecretNameSchema } from '@ferretry/core-vault/contract';
-import { SecretStoreHealthSchema } from './common.ts';
+import { SecretStoreHealthSchema } from './foreign.ts';
 
 /**
  * SAVED LOGINS: the password manager the input bridge places values from (docs/input-requests.md, "Saved

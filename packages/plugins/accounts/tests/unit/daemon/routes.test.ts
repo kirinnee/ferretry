@@ -124,7 +124,7 @@ describe('the account routes through the kernel', () => {
     should(removed.json<{ defaults: { sites?: unknown } }>().defaults.sites ?? {}).eql({});
   });
 
-  it('should answer the seed routes 503 while the Vault holds no sealed store, and half b’s routes as not built', async () => {
+  it('should answer the seed routes 503 while the Vault holds no sealed store, and an unported tool as not built', async () => {
     const h = await host();
     await h.request('PUT', '/v1/accounts/GITHUB', { body: { label: 'GitHub' } });
     const seed = await h.request('POST', '/v1/accounts/GITHUB/factors/seed', {
@@ -132,7 +132,10 @@ describe('the account routes through the kernel', () => {
     });
     should(seed.status).equal(503);
     should((await h.request('GET', '/v1/accounts/look-alike')).status).equal(503);
-    should((await h.request('GET', '/v1/copy-rules')).json<{ code: string }>().code).equal('plugin_unavailable');
+    // A declared tool neither half answers yet says so, in the skeleton sentence.
+    const tool = await h.tool('secure_list', {}, { as: ferret('F1') });
+    should(tool.isError).be.true();
+    should(tool.text).containEql('not built yet');
   });
 
   it('S99 should add, relabel and remove a 2FA key with no value and no passkey', async () => {
@@ -197,13 +200,13 @@ async function seedWorld(passkeys = true) {
       params: new Map(Object.entries(params)),
       ...standing,
     } as CallContext);
-  const stage = async (): Promise<string> => {
+  const stage = async (): Promise<`st_${string}`> => {
     const staged = await call('POST /v1/accounts/:id/factors/seed', '', { id: 'GITHUB' }, ownerStanding(), {
       padded: padInputValue(SEED),
       totpAcknowledged: true,
     });
     should(staged.status).equal(201);
-    return (JSON.parse(String(staged.body)) as { stage: string }).stage;
+    return (JSON.parse(String(staged.body)) as { stage: `st_${string}` }).stage;
   };
   return { directory, seeds, call, stage, index };
 }

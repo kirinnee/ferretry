@@ -982,7 +982,7 @@ describe('2FA keys as the owner reads them', () => {
 
   it('S90 should bind an add-2fa-key proof to one account and one staged seed, by the digest Access stamps', () => {
     // Arrange
-    const stage = `st_${'a'.repeat(24)}`;
+    const stage = `st_${'a'.repeat(24)}` as const;
     const expected = createHash('sha256')
       .update(`ferretry.add-2fa-key.v1\0${KEY(1)}\0${stage}`)
       .digest('hex');

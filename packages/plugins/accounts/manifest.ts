@@ -352,7 +352,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
-      route('GET /v1/sessions/:sessionId/copies', {
+      route('GET /v1/ferrets/:ferretId/copies', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -360,7 +360,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
-      route('POST /v1/sessions/:sessionId/copy-plans/:planId/approve', {
+      route('POST /v1/ferrets/:ferretId/copy-plans/:planId/approve', {
         minimum: 'operator',
         caller: 'person',
         capability: CONFIGURE.terminal,
@@ -368,7 +368,7 @@ export default definePlugin({
         audit: { record: AUDIT.securityChanged },
         guard: GUARD_NONE,
       }),
-      route('GET /v1/sessions/:sessionId/phone-approvals/:approvalId', {
+      route('GET /v1/ferrets/:ferretId/phone-approvals/:approvalId', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -376,7 +376,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
-      route('POST /v1/sessions/:sessionId/phone-approvals/:approvalId/refuse', {
+      route('POST /v1/ferrets/:ferretId/phone-approvals/:approvalId/refuse', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -384,7 +384,7 @@ export default definePlugin({
         audit: SKIP_UNRECORDED,
         guard: GUARD_NONE,
       }),
-      route('GET /v1/sessions/:sessionId/task-plans/:planId', {
+      route('GET /v1/ferrets/:ferretId/task-plans/:planId', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -392,7 +392,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
-      route('POST /v1/sessions/:sessionId/task-plans/:planId/approval', {
+      route('POST /v1/ferrets/:ferretId/task-plans/:planId/approval', {
         minimum: 'operator',
         caller: 'person',
         capability: CONFIGURE.terminal,
@@ -400,7 +400,7 @@ export default definePlugin({
         audit: SKIP_BY_SERVICE,
         guard: GUARD_NONE,
       }),
-      route('DELETE /v1/sessions/:sessionId/task-plans/:planId/approval/:stage', {
+      route('DELETE /v1/ferrets/:ferretId/task-plans/:planId/approval/:stage', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -408,7 +408,7 @@ export default definePlugin({
         audit: SKIP_BY_SERVICE,
         guard: GUARD_NONE,
       }),
-      route('GET /v1/sessions/:sessionId/task-plans/:planId/approval/:stage', {
+      route('GET /v1/ferrets/:ferretId/task-plans/:planId/approval/:stage', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -416,7 +416,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
-      route('POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/commit', {
+      route('POST /v1/ferrets/:ferretId/task-plans/:planId/approval/:stage/commit', {
         minimum: 'operator',
         caller: 'person',
         capability: CONFIGURE.terminal,
@@ -424,7 +424,7 @@ export default definePlugin({
         audit: SKIP_BY_SERVICE,
         guard: GUARD_NONE,
       }),
-      route('POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/confirm-in-app', {
+      route('POST /v1/ferrets/:ferretId/task-plans/:planId/approval/:stage/confirm-in-app', {
         minimum: 'operator',
         caller: 'person',
         capability: CONFIGURE.terminal,
@@ -432,7 +432,7 @@ export default definePlugin({
         audit: SKIP_BY_SERVICE,
         guard: GUARD_NONE,
       }),
-      route('POST /v1/sessions/:sessionId/task-plans/:planId/revoke', {
+      route('POST /v1/ferrets/:ferretId/task-plans/:planId/revoke', {
         minimum: 'operator',
         caller: 'person',
         capability: NARROW.terminal,
@@ -670,6 +670,7 @@ export default definePlugin({
     ],
     readModels: ['sign-ins'],
     publishes: [SignInsChanged],
+    /** A revoked or idle-expired device's standing rules are suspended (P124); Access's event, read through its contract. */
     subscribes: [DevicesChanged],
   },
 

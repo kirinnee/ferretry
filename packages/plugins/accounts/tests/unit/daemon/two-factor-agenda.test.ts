@@ -5,7 +5,7 @@ import should from 'should';
 import { SignInApprovalRefSchema } from '../../../contract/index.ts';
 import { TwoFactorSeedAgendaAdapter } from './lib.ts';
 
-const STAGE = `st_${'a'.repeat(24)}`;
+const STAGE = `st_${'a'.repeat(24)}` as const;
 
 /** An Asks port that keeps every draft it was handed, so a test reads the card as raised. */
 class RecordingAsks extends FakeAsks {
