@@ -139,17 +139,14 @@ describe('analytics pricing API contract', () => {
     assertCoversEverySchema(pricingApi, cases);
   });
 
-  it('should read an older daemon that reports no catalog prices, and refuse a typed row posing as one', () => {
-    // Arrange
-    const { modelCatalogRates: _rates, ...older } = view;
-
+  it('should require the catalog prices, and refuse a typed row posing as one', () => {
     // Act
-    const read = AnalyticsPricingViewSchema.parse(older);
+    const read = AnalyticsPricingViewSchema.safeParse((({ modelCatalogRates: _rates, ...rest }) => rest)(view));
     const posing = AnalyticsPricingViewSchema.safeParse({ ...view, modelCatalogRates: [rate] });
     const submitted = ManualAnalyticsPricingRateSchema.safeParse(catalogRate);
 
     // Assert
-    should(read.modelCatalogRates).be.undefined();
+    should(read.success).be.false();
     should(posing.success).be.false();
     should(submitted.success).be.false();
   });

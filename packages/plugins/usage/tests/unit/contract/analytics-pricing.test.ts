@@ -80,7 +80,7 @@ const catalogRate = {
 } as const;
 
 /** The spelling an operator already has on disk: per-million rates, and instants `Date.parse` took. */
-const legacyRate = {
+const perMillionRate = {
   pricingKey: 'operator:model-b:2026-07',
   modelId: 'model-b',
   provider: 'anthropic',
@@ -312,61 +312,11 @@ describe('analytics pricing contract', () => {
     should(actual.success).be.false();
   });
 
-  it('should read the shape already on disk into the canonical one', () => {
-    // Act
-    const actual = AnalyticsPricingRateSchema.parse(legacyRate);
-    const openEnded = AnalyticsPricingRateSchema.parse({
-      ...legacyRate,
-      ratesUsdMicrosPerMillion: { input: 1, cachedRead: 2, cacheWrite: 3, output: 4 },
-      validThrough: undefined,
-    });
-
-    // Assert
-    should(actual).deepEqual({
-      pricingKey: 'operator:model-b:2026-07',
-      modelId: 'model-b',
-      aliases: [],
-      provider: 'anthropic',
-      currency: 'USD',
-      rates: {
-        input: 15_000_000,
-        output: 75_000_000,
-        cachedInput: 1_500_000,
-        cacheWrite: null,
-        cacheWrite5m: 18_750_000,
-        cacheWrite1h: 30_000_000,
-        reasoning: null,
-        image: null,
-        tool: null,
-      },
-      source: { kind: 'manual' },
-      // A date-only instant is what the previous schema accepted, so it is read and canonicalized
-      // rather than refused: refusing it would take a daemon down over a price it already had.
-      validFrom: '2026-07-01T00:00:00.000Z',
-      validThrough: '2026-08-01T00:00:00.000Z',
-      verifiedAt: '2026-07-01T00:00:00.000Z',
-      lastSyncedAt: null,
-    });
-    should(openEnded.rates.cacheWrite).equal(3);
-    should(openEnded.rates.cacheWrite5m).be.null();
-    should(openEnded.validThrough).be.null();
-  });
-
-  it('should refuse a legacy entry whose instant was never a date at all', () => {
+  it('should refuse a rate in the per-million object spelling: one spelling, format 1', () => {
     // Act + Assert
-    assertRejects([
-      {
-        name: 'unparseable',
-        schema: AnalyticsPricingRateSchema,
-        value: { ...legacyRate, verifiedAt: 'whenever' },
-      },
-      {
-        name: 'both spellings at once',
-        schema: AnalyticsPricingRateSchema,
-        value: { ...manualRate, ratesUsdMicrosPerMillion: { input: 1, cachedRead: 1, output: 1 } },
-      },
-    ]);
+    assertRejects([{ name: 'per-million object', schema: AnalyticsPricingRateSchema, value: perMillionRate }]);
   });
+
 
   it('should refuse damaged or ambiguous evidence before anything can be priced with it', () => {
     // A catalog cannot name two prices for the same effective model instant, and an alias must never
