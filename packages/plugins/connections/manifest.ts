@@ -74,6 +74,7 @@ export default definePlugin({
       }),
     ],
     cli: [
+      verb('tunnel', { summary: 'turn this machine’s Cloudflare tunnel on or off, or show it' }),
       verb('tunnel status', { summary: "show whether this machine's Cloudflare tunnel is on, and where it is" }),
       verb('tunnel on', { summary: 'turn the tunnel on for this machine' }),
       verb('tunnel off', { summary: 'turn the tunnel off and release it' }),
