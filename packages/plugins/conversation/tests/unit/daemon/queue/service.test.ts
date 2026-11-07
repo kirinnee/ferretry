@@ -1,13 +1,10 @@
 import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  defaultQueueCoalesceSettings,
-  type QueueEvent,
-  QueueRefused,
-  SessionQueueService,
-  type SessionQueueStore,
-} from '../../../../daemon/seams/index.ts';
+import { defaultQueueCoalesceSettings } from '../../../../daemon/queue/lib/settings.ts';
+import { type QueueEvent } from '../../../../daemon/queue/lib/model.ts';
+import { QueueRefused, SessionQueueService } from '../../../../daemon/queue/lib/service.ts';
+import { type SessionQueueStore } from '../../../../daemon/queue/lib/ports.ts';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
 
 const ID = parseSessionId('session-1');

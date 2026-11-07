@@ -23,12 +23,12 @@ export interface Point {
 }
 
 const MIN_SCALE = 1;
-export const MAX_SCALE = 8;
-export const DOUBLE_TAP_SCALE = 2.5;
+const MAX_SCALE = 8;
+const DOUBLE_TAP_SCALE = 2.5;
 export const IDENTITY: ViewTransform = { scale: 1, x: 0, y: 0 };
 
 /** A horizontal drag this long, at scale 1, moves to the neighbouring picture. */
-export const SWIPE_DISTANCE = 56;
+const SWIPE_DISTANCE = 56;
 
 const clamp = (value: number, low: number, high: number): number => Math.min(Math.max(value, low), high);
 

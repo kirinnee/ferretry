@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import { ReceiptMark } from '@ferretry/app';
-import { MessageMarksLegend } from '../../../../app/chat/message-marks-legend.tsx';
 import type { SendReceiptKind } from '../../../../app/chat/send-receipt-model.ts';
 import { render } from '@ferretry/app/testing';
 
@@ -88,26 +87,5 @@ describe('ReceiptMark', () => {
   test('the double tick is wider than the single so the box holds the offset, at the same height', () => {
     expect(draw('queued').props.width).toBeGreaterThan(draw('saved').props.width);
     expect(draw('queued').props.height).toBe(draw('saved').props.height);
-  });
-});
-
-describe('MessageMarksLegend', () => {
-  test('draws each legend row with the mark the transcript draws, its name and what it means', () => {
-    const legend = render(<MessageMarksLegend />);
-    const rows = legend.root.findAllByType('dt');
-    expect(rows.map(row => row.findByType('svg').props['data-receipt-mark'])).toEqual([
-      'sending',
-      'saved',
-      'queued',
-      'typed',
-      'delivered',
-      'answered',
-      'read',
-      'unconfirmed',
-      'failed',
-      'cancelled',
-    ]);
-    expect(legend.root.findAllByType('dd')).toHaveLength(10);
-    expect(JSON.stringify(legend.toJSON())).toContain('it is on the machine’s queue and waiting to be typed in.');
   });
 });

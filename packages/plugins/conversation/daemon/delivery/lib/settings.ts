@@ -43,7 +43,7 @@ export interface SessionSendSettings {
   readonly clientName: string;
 }
 
-export const SessionSendSettingsSchema = z.object({
+const SessionSendSettingsSchema = z.object({
   controlLaunchWaitMs: z.number().int().positive(),
   nativeQueueInlineMaxChars: z.number().int().positive(),
   directSendMaxChars: z.number().int().nonnegative(),

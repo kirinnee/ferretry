@@ -36,7 +36,7 @@ import type { ClockPort } from './seams/ports.ts';
 import type { SessionView } from './seams/protocol.ts';
 
 /** Said by every route that needs to type into, or read the screen of, a ferret's terminal. */
-export const TERMINAL_PENDING =
+const TERMINAL_PENDING =
   "This needs the ferret's terminal, and Conversation is not connected to it yet. Drive the ferret from its terminal for now.";
 
 const pending = (): never => {

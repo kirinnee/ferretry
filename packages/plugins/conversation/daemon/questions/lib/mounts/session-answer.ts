@@ -15,7 +15,7 @@ import type { MountRoute, RouteContext } from '../../../seams/api.ts';
  * the last attempt reached it. A caller that saw one code would otherwise be told to retry in the
  * one case where retrying is the thing that must not happen.
  */
-export type SessionAnswerFailure =
+type SessionAnswerFailure =
   | 'invalid'
   | 'not_found'
   | 'refused'
@@ -26,7 +26,7 @@ export type SessionAnswerFailure =
   | 'paused'
   | 'failed';
 
-export class SessionAnswerError extends Error {
+class SessionAnswerError extends Error {
   constructor(
     readonly failure: SessionAnswerFailure,
     message: string,

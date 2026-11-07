@@ -5,13 +5,15 @@ import {
   ConversationDigestError,
   digestConversation,
   extendPortableConversationRows,
-  extendSessionTranscriptRawPrefix,
   type PortableConversationCheckpoint,
   portableConversationRows,
   sameConversationMessagePoint,
-  sessionTranscriptRawPrefixStart,
   startPortableConversation,
-} from '../../../daemon/reader/lib/session/index.ts';
+} from '../../../daemon/reader/lib/session/digest.ts';
+import {
+  extendSessionTranscriptRawPrefix,
+  sessionTranscriptRawPrefixStart,
+} from '../../../daemon/reader/lib/session/raw-prefix.ts';
 import type {
   TranscriptBatch,
   TranscriptEvent,

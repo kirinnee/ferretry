@@ -2,7 +2,8 @@ import { describe, it } from 'bun:test';
 import type { Instant } from '@ferretry/std';
 import { RENDER_MAX_PENDING_SAVES, RENDER_QUOTAS, type StoredRenderMeta } from '../../../contract/index.ts';
 import should from 'should';
-import { RenderError, renderDigest, renderIdPrefix } from '../../../daemon/renders/lib/index.ts';
+import { RenderError } from '../../../daemon/renders/lib/types.ts';
+import { renderDigest, renderIdPrefix } from '../../../daemon/renders/lib/digest.ts';
 import { HTML, MemoryRenderRepository, renderService, SVG } from '../../support/renders.ts';
 
 const svg = (alt = 'A circle', payload = SVG) => ({ kind: 'svg' as const, alt, payload });

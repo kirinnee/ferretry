@@ -7,8 +7,6 @@ import { WorkSearchService } from './lib/service.ts';
 import { relatedRoute, searchRoute, searchWorkTool } from './routes.ts';
 
 export * from './lib/index.ts';
-export { asksSource } from './adapters/asks-source.ts';
-export { type RedactionGeneration, unchangingGeneration } from './adapters/redaction.ts';
 
 /** How long after start the work search builds its index: after the boot's own reads, before anyone searches. */
 export const WORK_SEARCH_WARM_DELAY_MS = 5_000;

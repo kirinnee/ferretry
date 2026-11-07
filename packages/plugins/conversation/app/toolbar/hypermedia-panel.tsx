@@ -34,7 +34,7 @@ export function HypermediaPanel({
   return subject === undefined || !canControl ? null : <HypermediaSwitch client={client} ferretId={subject} />;
 }
 
-export function HypermediaSwitch({
+function HypermediaSwitch({
   client,
   ferretId,
 }: {

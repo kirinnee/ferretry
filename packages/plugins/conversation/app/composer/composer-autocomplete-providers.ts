@@ -66,14 +66,14 @@ const COMPOSER_BUILTIN_COMMANDS: readonly ComposerBuiltinCommand[] = [
 ];
 
 /** How a provider waits for a host read already in flight; `undefined` is "nothing unread". */
-export type ComposerProviderWarmup = (
+type ComposerProviderWarmup = (
   daemon: DaemonConnection,
   scope: DaemonFerretScope,
   signal: AbortSignal,
 ) => Promise<void> | undefined;
 
 /** A host that already reads some prefixes (the chat page, for proof): what it holds now, per prefix. */
-export type ComposerCatalogGetter = (prefix: ReferenceCatalogPrefix) => readonly ReferenceCatalogEntry[] | undefined;
+type ComposerCatalogGetter = (prefix: ReferenceCatalogPrefix) => readonly ReferenceCatalogEntry[] | undefined;
 
 export interface ComposerAutocompleteProvidersOptions {
   readonly daemon: DaemonConnection;
@@ -344,7 +344,7 @@ const skillsProviderFor = (
 // ─── files ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** A ferret-root-relative path with `.` and empty segments removed and `..` resolved inside the root. */
-export const normalizeRel = (input: string | null | undefined): string => {
+const normalizeRel = (input: string | null | undefined): string => {
   if (!input) return '';
   const out: string[] = [];
   for (const part of String(input).split(/[/\\]/)) {

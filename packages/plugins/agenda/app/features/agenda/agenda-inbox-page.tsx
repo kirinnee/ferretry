@@ -532,7 +532,7 @@ function CardTools({
  * an answer, and the upload into the item's own conversation (the daemon carries them to the card's ferret). A host
  * that can upload hands these in; absent either, the box is words alone.
  *
- * @pending agenda: GAP(answer-files) — Conversation, Accounts and Access must bind the ports a host hands in
+ * @pending agenda: GAP(answer-files), GAP(sign-in-rule-sweep)
  */
 export interface AnswerFilePorts {
   readonly answerFiles?: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;

@@ -48,7 +48,7 @@ export interface QueueingSendsPorts {
  * message into an empty box is typed within it, and answered as the direct path answered; one held for a
  * draft or a question is answered at once, because the look returns as soon as it says why.
  */
-export const QUEUE_ANSWER_WAIT_MS = 20_000;
+const QUEUE_ANSWER_WAIT_MS = 20_000;
 
 export class QueueingSends {
   constructor(

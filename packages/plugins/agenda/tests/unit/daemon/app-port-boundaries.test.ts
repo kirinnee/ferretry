@@ -53,7 +53,7 @@ test('Agenda app items and snapshots use the identical public Asks schema object
 
 test('production Knip discovers all dynamically loaded Agenda views without test fixtures', async () => {
   const config = await Bun.file(new URL('../../../../../../knip.production.json', import.meta.url)).json();
-  const entries: string[] = config.workspaces['packages/plugins/*'].entry;
+  const entries: string[] = config.workspaces['packages/plugins/agenda'].entry;
   const files = new Set<string>();
   for (const entry of entries) {
     for await (const file of new Bun.Glob(entry).scan(new URL('../../../', import.meta.url).pathname)) files.add(file);

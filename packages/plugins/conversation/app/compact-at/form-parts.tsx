@@ -79,5 +79,3 @@ export function FormFoot({
     </div>
   );
 }
-
-export const failureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));

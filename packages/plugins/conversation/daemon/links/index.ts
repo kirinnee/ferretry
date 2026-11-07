@@ -18,7 +18,6 @@ import {
 import { linkRoutes } from './routes.ts';
 
 export * from './lib/service.ts';
-export { FileConversationDescriber } from './lib/conversation-describer.ts';
 
 export interface LinkNeeds {
   readonly state: StatePort;
