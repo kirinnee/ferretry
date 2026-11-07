@@ -161,7 +161,17 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       const found = hooks.provider(Runners, 'tmux');
       return found === 'unavailable' ? undefined : found;
     },
-    decide: async input => await hooks.decide(StartDecide, input),
+    decide: async input => {
+      // Today's pack.admit is mandatory for an ordinary child. The optional start.decide hook returns allow with
+      // no takers and cannot prove Packs admitted it. Until its definite admission seam is bound, do no launch.
+      if (input.parent !== undefined || input.role === 'helper')
+        throw new ApiError(
+          503,
+          'Packs helper admission is not bound, so no helper is started',
+          'helper_admission_unavailable',
+        );
+      return await hooks.decide(StartDecide, input);
+    },
     launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),
     sitrepSources: () => hooks.contributions(SitrepLines).map(contribution => contribution.item),
     instructions: () => kernel.snapshot.current().instructions,
