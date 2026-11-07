@@ -76,13 +76,13 @@ export class PageTargetThroughHook implements InputTargetPort {
     facts: InputTargetFacts,
     fieldIds: readonly string[],
   ): Promise<'hidden' | 'shown' | 'aborted'> {
-    const probe = this.provider('page')?.probe;
-    return probe === undefined ? 'aborted' : await probe(ferretOf(sessionId), target, facts, fieldIds);
+    const page = this.provider('page');
+    return page?.probe === undefined ? 'aborted' : await page.probe(ferretOf(sessionId), target, facts, fieldIds);
   }
 
   async clear(sessionId: string, target: InputTarget, job: ClearJob): Promise<ClearOutcome> {
-    const arm = this.provider('page')?.arm;
-    return arm === undefined ? 'unknown' : await arm(ferretOf(sessionId), target, job);
+    const page = this.provider('page');
+    return page?.arm === undefined ? 'unknown' : await page.arm(ferretOf(sessionId), target, job);
   }
 }
 
