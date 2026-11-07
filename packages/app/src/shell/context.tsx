@@ -26,6 +26,8 @@ export interface ShellModel {
   readonly views: Views;
   readonly routes: RouteTable;
   readonly layout: LayoutChoice;
+  /** The owner's layout from the selected daemon (Layouts), before this device's overrides; `undefined` without one. */
+  readonly owner: Layout | undefined;
   readonly plan: FramePlan;
   readonly viewport: Viewport;
   readonly themes: ThemePreferenceStore;
@@ -124,8 +126,8 @@ export function ShellProvider({ runtime, themes, layouts, browser, scroll, child
   const plan = useMemo(() => planFrame(resolveLayout(layout.layout, viewport), views), [layout, viewport, views]);
   useAppliedTheme(browser, preference, plan.density);
   const model = useMemo<ShellModel>(
-    () => ({ runtime, views, routes, layout, plan, viewport, themes, layouts, scroll }),
-    [runtime, views, routes, layout, plan, viewport, themes, layouts, scroll],
+    () => ({ runtime, views, routes, layout, owner, plan, viewport, themes, layouts, scroll }),
+    [runtime, views, routes, layout, owner, plan, viewport, themes, layouts, scroll],
   );
   return <ShellContext.Provider value={model}>{children}</ShellContext.Provider>;
 }

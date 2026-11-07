@@ -1,3 +1,8 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { DEFAULT_LAYOUT } from '../layout/layout.ts';
+import { CommandBar } from '../ui/command-bar.tsx';
+import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../ui/palette-shortcut.ts';
+import { deviceLayoutSource, placeSource } from './command-sources.ts';
 import { daemonTitle } from '../daemons/daemon-list.ts';
 import type { NavEntry } from '../layout/engine.ts';
 import { daemonHomeHref, DEVICE_SETTINGS_HREF, HOME_HREF, type Route } from '../router/routes.ts';
@@ -99,15 +104,24 @@ function DaemonPicker({ daemon }: { readonly daemon: string | undefined }) {
   );
 }
 
-function TopBar({ daemon }: { readonly daemon: string | undefined }) {
+function TopBar({ daemon, onSearch }: { readonly daemon: string | undefined; readonly onSearch: () => void }) {
   const { plan } = useShell();
   return (
     <header className="fy-top" data-slot="top">
       {plan.top.map(item => {
         if (item === 'daemon-picker') return <DaemonPicker key={item} daemon={daemon} />;
-        // GAP: search and the command bar (`fy layout set` from the app) are not built in the shell yet.
         if (item === 'search')
-          return <input key={item} className="fy-search" type="search" placeholder="Search" disabled />;
+          return (
+            <button
+              key={item}
+              type="button"
+              className="fy-search"
+              aria-keyshortcuts={PALETTE_KEYSHORTCUTS}
+              onClick={onSearch}
+            >
+              Search <kbd className="mono">{paletteShortcutLabel()}</kbd>
+            </button>
+          );
         return null;
       })}
     </header>
@@ -144,17 +158,60 @@ function Side({ daemon }: { readonly daemon: string | undefined }) {
   );
 }
 
+/** Cmd/Ctrl+K from anywhere opens the bar (or re-focuses its query when it is open). */
+function useCommandBarShortcut(open: () => void): void {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.key.toLowerCase() !== 'k') return;
+      event.preventDefault();
+      open();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
+}
+
+/** The command bar with the shell's own sources: places, and this device's layout commands. */
+function ShellCommandBar(props: {
+  readonly daemon: string | undefined;
+  readonly open: boolean;
+  readonly focusSignal: number;
+  readonly onClose: () => void;
+}) {
+  const { runtime, views, routes, owner, layouts } = useShell();
+  const router = useRouter();
+  const daemons = runtime.daemons.snapshot().daemons;
+  const sources = useMemo(
+    () => [
+      placeSource({
+        daemons,
+        daemon: props.daemon,
+        screens: views.screens.values(),
+        routes,
+        navigate: href => router.navigate(href),
+      }),
+      deviceLayoutSource(owner ?? DEFAULT_LAYOUT, layouts),
+    ],
+    [daemons, props.daemon, views, routes, router, owner, layouts],
+  );
+  return <CommandBar open={props.open} focusSignal={props.focusSignal} onClose={props.onClose} sources={sources} />;
+}
+
 export function Frame() {
   const { runtime, plan, scroll } = useShell();
   useRuntimeVersion(runtime);
   const { route, entryKey } = useRouter();
   const daemon = routeDaemon(route);
   const whole = daemon === undefined ? undefined : runtime.wholeDaemonLine(daemon);
+  const [bar, setBar] = useState({ open: false, signal: 0 });
+  const openBar = useCallback(() => setBar(current => ({ open: true, signal: current.signal + 1 })), []);
+  const closeBar = useCallback(() => setBar(current => ({ ...current, open: false })), []);
+  useCommandBarShortcut(openBar);
   return (
     <div className={`fy-frame fy-frame--nav-${plan.nav.side}`} data-layout={plan.layoutId}>
       <Nav daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
       <div className="fy-body">
-        <TopBar daemon={daemon} />
+        <TopBar daemon={daemon} onSearch={openBar} />
         <div className="fy-columns">
           <main className="fy-main" data-slot="main">
             <PageScrollRegion entryKey={entryKey} memory={scroll}>
@@ -164,6 +221,12 @@ export function Frame() {
           {whole === undefined ? <Side daemon={daemon} /> : null}
         </div>
       </div>
+      <ShellCommandBar
+        daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined}
+        open={bar.open}
+        focusSignal={bar.signal}
+        onClose={closeBar}
+      />
     </div>
   );
 }
