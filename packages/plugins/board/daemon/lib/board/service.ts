@@ -1211,11 +1211,8 @@ export class BoardService {
 
   /** Who asked for the card, or an unavailable board when that cannot be read: a guess here would hide a card for good. */
   private async settledAskedBy(card: Pick<Card, 'createdBy' | 'ask'>, ownerApp: boolean) {
-    // GAP (F-0001): this daemon has no owner-words read yet — today's reads the queue, the send ledger AND who wrote each
-    // turn (`turn-NNN.by.json`), and Conversation's contract offers no read of a turn's author (the additive read it
-    // needs: the owner's words of each turn of a ferret). Until it does, a private choice is judged as every other
-    // request is (the lenient read), never refused as an unavailable board.
-    if (this.ports.ownerWords === undefined) return await this.askedByOf(card, ownerApp, { lenient: true });
+    // Strict (F-0001): the owner's words come from Conversation (the queue, the send ledger and who wrote each turn). A
+    // read that cannot be made, Conversation being off included, is an unavailable board, never a guess.
     try {
       return await this.askedByOf(card, ownerApp, { strict: true });
     } catch (error) {

@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import type { ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import { WardenConfigRefused, ConfigWardenConfigStore } from '../../daemon/adapters/config-store.ts';
 import { StateWardenJevCheckLog } from '../../daemon/adapters/jev-checks.ts';
 import { FileWardenArtifacts } from '../../daemon/adapters/artifacts.ts';
@@ -133,13 +134,13 @@ describe('reports as state files', () => {
 
 describe('warden.yaml through the config door', () => {
   const door = (applied: unknown[], result: unknown) => {
-    const port = wardenConfig({ caps: { jevDaily: 5 } }) as ReturnType<typeof wardenConfig> & Record<string, unknown>;
-    port.write = async (_def: unknown, _name: unknown, edit: unknown) => {
-      applied.push(edit);
-      return result;
-    };
-    port.remove = async () => ({ kind: 'applied' });
-    return port;
+    return Object.assign(wardenConfig({ caps: { jevDaily: 5 } }), {
+      write: async (_def: unknown, _name: unknown, edit: unknown) => {
+        applied.push(edit);
+        return result as ConfigWriteOutcome;
+      },
+      remove: async (): Promise<ConfigWriteOutcome> => ({ kind: 'written', etag: 'fixture', loosened: [] }),
+    });
   };
 
   it('should read the effective settings with the defaults under what the file says', async () => {

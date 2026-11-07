@@ -68,13 +68,13 @@ describe('route parity', () => {
     expect(Array.isArray(view.warnings)).toBe(true);
   });
 
-  test('pending R-0232 (the kernel config write port, D2 #16): a settings change answers 503 plugin_unavailable in words', async () => {
+  test('R-0232 a settings change goes through the kernel config write port and answers the new settings', async () => {
     const { host } = await wardenHost();
 
     const response = await host.request('PATCH', '/v1/warden/config', { body: { enabled: false }, as: owner() });
 
-    expect(response.status).toBe(503);
-    expect(response.json<{ code: string }>().code).toBe('plugin_unavailable');
+    expect(response.status).toBe(200);
+    expect(response.json<{ config: { enabled: boolean } }>().config.enabled).toBe(false);
   });
 
   test('R-0406 investigating a ferret nobody has is refused, and R-0407 leaving a clean one alone is refused', async () => {
