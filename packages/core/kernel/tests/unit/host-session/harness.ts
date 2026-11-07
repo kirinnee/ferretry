@@ -37,6 +37,7 @@ import {
   openRecord,
   SESSION_PROTOCOL_ID,
   type SessionFrame,
+  type SessionCrypto,
   type SessionId,
   type SessionLayerHost,
   sealRecord,
@@ -140,9 +141,7 @@ export interface Fixture {
   modesOff: Set<string>;
 }
 
-export async function fixture(
-  options: { lease?: AccessLeasePolicy; crypto?: typeof relayCrypto } = {},
-): Promise<Fixture> {
+export async function fixture(options: { lease?: AccessLeasePolicy; crypto?: SessionCrypto } = {}): Promise<Fixture> {
   const identity = await newDaemonIdentity();
   const clock = new FakeClock();
   const device = new FakeDeviceMode();

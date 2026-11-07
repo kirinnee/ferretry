@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FetchPort, SpawnPort, WebSocketClient, WebSocketPort } from '../../../contract/ports.ts';
 import { daemonNameFrom } from '../../../host/identity.ts';
 import { installedItemReach } from '../../../host/items.ts';
@@ -10,7 +13,7 @@ import {
   restrictSpawn,
   restrictWebSocket,
 } from '../../../host/permissions.ts';
-import type { HostFs } from '../../../host/adapters/node-fs.ts';
+import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
 
 function recordingSockets(): WebSocketPort & { readonly dialled: string[] } {
   const dialled: string[] = [];
@@ -110,6 +113,56 @@ describe('kernel.spawn / fetch: declared names, absolute paths and installed ite
 });
 
 describe('installedItemReach: what installed data-plugin items name', () => {
+  for (const linkKind of ['parent', 'leaf', 'plugin', 'plugin sibling', 'prefix sibling'] as const) {
+    test(`an installed item's ${linkKind} symlink cannot grant outside spawn or network reach`, async () => {
+      const home = await mkdtemp(join(tmpdir(), 'kernel-item-reach-'));
+      try {
+        const plugins = join(home, 'state/kernel/plugins');
+        const plugin = join(plugins, 'installed');
+        const outside =
+          linkKind === 'prefix sibling' || linkKind === 'plugin sibling' ? `${plugin}-outside` : join(home, 'outside');
+        await mkdir(outside, { recursive: true });
+        await writeFile(join(outside, 'item.yaml'), 'command: /tmp/outside-program\nurl: https://outside.test/\n');
+        if (linkKind === 'plugin' || linkKind === 'plugin sibling') {
+          await mkdir(plugins, { recursive: true });
+          await symlink(outside, plugin);
+        } else {
+          await mkdir(plugin, { recursive: true });
+          await symlink(
+            linkKind === 'leaf' ? join(outside, 'item.yaml') : outside,
+            join(plugin, linkKind === 'leaf' ? 'item.yaml' : 'nested'),
+          );
+        }
+        const fs = nodeFs(() => 'test');
+        const reads: string[] = [];
+        const readText = fs.readText;
+        fs.readText = path => {
+          reads.push(path);
+          return readText(path);
+        };
+        const reach = await installedItemReach(fs, home, [
+          {
+            id: 'installed',
+            items: [
+              {
+                id: 'server',
+                kind: 'mcp',
+                file:
+                  linkKind === 'leaf' || linkKind === 'plugin' || linkKind === 'plugin sibling'
+                    ? 'item.yaml'
+                    : 'nested/item.yaml',
+              },
+            ],
+          },
+        ]);
+        expect(reach('mcp')).toEqual({ programs: [], hosts: [] });
+        expect(reads).toEqual([]);
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    });
+  }
+
   test('reads command and url from each installed item file; a missing or escaping file names nothing', async () => {
     const files = new Map([
       ['/home/fy/state/kernel/plugins/acme/items/files.yaml', 'command: npx\nargs: [-y, files]\n'],
@@ -118,6 +171,7 @@ describe('installedItemReach: what installed data-plugin items name', () => {
       ['/home/fy/state/kernel/plugins/other/items/x.yaml', 'command: rm\n'],
     ]);
     const fs = {
+      realpath: async (file: string) => file,
       lstat: async (file: string) => {
         const text = files.get(file);
         return text === undefined ? undefined : { kind: 'file' as const, size: text.length, mtimeMs: 0 };

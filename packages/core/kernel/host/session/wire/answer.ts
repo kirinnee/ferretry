@@ -9,6 +9,7 @@
  */
 
 import { type ApiResponse, finalised } from '../../../contract/http.ts';
+import { isPublishedResponse } from '../../responses.ts';
 import { encodeDaemonRecord, responseRecords } from './records.ts';
 
 export interface AnswerRecord {
@@ -37,10 +38,21 @@ function snapshot(response: ApiResponse): ApiResponse {
   };
 }
 
+function sameAnswer(left: ApiResponse, right: ApiResponse): boolean {
+  if (left.status !== right.status) return false;
+  // Header order affects the JSON envelope, so equality must preserve it.
+  const entries = [...right.headers];
+  if (left.headers.size !== entries.length) return false;
+  if (![...left.headers].every(([key, value], index) => entries[index]?.[0] === key && entries[index]?.[1] === value))
+    return false;
+  return left.body === right.body;
+}
+
 export function answerRecords(id: number, response: ApiResponse): readonly AnswerRecord[] {
-  let source = finalised(response);
+  const initial = finalised(response);
+  let current = response.late === undefined || isPublishedResponse(initial) ? initial : snapshot(initial);
   const render = (answer: ApiResponse): readonly Uint8Array[] => responseRecords(id, answer).map(encodeDaemonRecord);
-  let encoded = render(snapshot(source));
+  let encoded = render(current);
   return encoded.map((plaintext, index) => ({
     plaintext,
     ...(index === 0 ? {} : { part: true as const }),
@@ -50,11 +62,13 @@ export function answerRecords(id: number, response: ApiResponse): readonly Answe
           permit: (): boolean => {
             try {
               const next = finalised(response);
-              // A late source returns the SAME publication until it changes (R515), so an unchanged answer
-              // costs one identity comparison; any other answer is rendered again and compared byte for byte.
-              if (next !== source) {
-                source = next;
-                encoded = render(snapshot(next));
+              // Only kernel publications are immutable. Plain late sources can edit the same object or map.
+              if (
+                next !== current &&
+                (isPublishedResponse(current) || isPublishedResponse(next) || !sameAnswer(current, next))
+              ) {
+                current = isPublishedResponse(next) ? next : snapshot(next);
+                encoded = render(current);
               }
               const again = encoded[index];
               return again !== undefined && sameBytes(again, plaintext);
