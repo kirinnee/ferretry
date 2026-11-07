@@ -56,6 +56,21 @@ export {
   RELAY_CLOSE_CODES,
 } from './session/wire/index.ts';
 
+// ─── the one passkey prompt: what Access provides, and where every daemon call consults it (G95, G105) ──────────
+export {
+  PASSKEY_TAKERS,
+  type PasskeyAsk,
+  type PasskeyHandler,
+  type PasskeyNeed,
+  type PasskeyPorts,
+  type PasskeyProvision,
+  type PasskeyRefusal,
+  type PasskeyWords,
+  type PromptOrigin,
+  requestOrigin,
+} from './passkey/passkey.ts';
+export { useLockedDaemons, usePasskeyAsk } from './shell/passkey-mount.tsx';
+
 // ─── the paired daemons ────────────────────────────────────────────────────────────────────────────────────────────
 export {
   type DaemonList,

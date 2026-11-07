@@ -2,6 +2,8 @@ import { KERNEL_REFUSALS, PluginsChanged, parseRouteKey } from '@ferretry/kernel
 import type { EventDef } from '@ferretry/kernel/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
+import type { PairedDaemon } from '../daemons/daemon-list.ts';
+import { type PasskeyHandler, type PasskeyNeed, type PromptOrigin, requestOrigin } from '../passkey/passkey.ts';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
 import { eventOwner, type Inventory, parseInventory, type Standing, standings } from './inventory.ts';
 import {
@@ -26,6 +28,9 @@ import {
  * 3. **Re-checked on change.** On reconnect the inventory is re-read before anything resumes; on
  *    `kernel.plugins-changed` it is re-read, the sockets of every package now blocked are closed, and subscriptions of
  *    packages now allowed resume (their listeners simply start hearing again).
+ * 4. **A passkey refusal is a pause, not a failure** (G105). A call the daemon refused for want of an unlock or a
+ *    step-up is shown to Access's passkey handler (`passkey/passkey.ts`); once the person has confirmed it is sent
+ *    again ONCE, through the same guard. Every plugin's call takes this path, so none of them asks for itself.
  */
 
 const HealthEnvelopeSchema = z.object({ protocol: z.number().int(), version: z.string().max(64) });
@@ -36,6 +41,12 @@ export const HEALTH_ROUTE = 'GET /v1/health';
 export interface DaemonClientOptions {
   readonly transport: DaemonTransport;
   readonly surfaces: readonly SurfaceEntry[];
+  /**
+   * The daemon this client reaches and Access's passkey handler (`passkey/passkey.ts`): a refusal for want of an
+   * unlock or a step-up is shown to it, and the call is sent again ONCE when the person confirmed. Absent, nothing can
+   * ask and every refusal is returned as it came.
+   */
+  readonly passkey?: { readonly daemon: PairedDaemon; readonly handler: PasskeyHandler };
 }
 
 /** The shell's widening of the leaf's `PluginClient`: the same guard over sockets. */
@@ -79,6 +90,7 @@ function refusal(answer: TransportAnswer): DaemonCallError {
 export class DaemonClient {
   readonly #transport: DaemonTransport;
   readonly #surfaces: readonly SurfaceEntry[];
+  readonly #passkey: DaemonClientOptions['passkey'];
   /** Which package declares each route and socket key, across every compiled manifest. */
   readonly #routeOwner = new Map<string, string>();
   readonly #socketOwner = new Map<string, string>();
@@ -100,6 +112,7 @@ export class DaemonClient {
   constructor(options: DaemonClientOptions) {
     this.#transport = options.transport;
     this.#surfaces = options.surfaces;
+    this.#passkey = options.passkey;
     for (const entry of options.surfaces) {
       for (const route of entry.manifest.actions?.routes ?? []) this.#routeOwner.set(route.key, entry.id);
       for (const socket of entry.manifest.actions?.sockets ?? []) this.#socketOwner.set(socket.key, entry.id);
@@ -228,15 +241,68 @@ export class DaemonClient {
     const { method, path } = parseRouteKey(route);
     // Only the allow-listed header crosses (`PluginCallHeaders`: `x-fy-request-id`); any other key a half passes is dropped.
     const requestId = init.headers?.['x-fy-request-id'];
-    const answer = await this.#transport.request({
+    const request = {
       method,
       path: fillPath(path, init.params),
       ...(init.query === undefined ? {} : { query: init.query }),
       ...(init.body === undefined ? {} : { body: init.body }),
       ...(requestId === undefined ? {} : { headers: { 'x-fy-request-id': requestId } }),
+    };
+    // A resend is the same request, its request id included: the daemon sees one act asked twice, never two acts.
+    const answer = await this.#confirmed(method, await this.#transport.request(request), async () => {
+      await this.#admit(caller, owner);
+      return await this.#transport.request(request);
     });
     if (answer.status >= 400) throw refusal(answer);
     return answer.body as Answer;
+  }
+
+  /**
+   * ONE REQUEST, SENT AGAIN ONCE AFTER THE PERSON GIVES THE PASSKEY THE DAEMON WANTED (G105) — an unlock on opening,
+   * then a step-up for the act, each at most once. Copied from today's `DaemonCarrierRouter.#confirmed`: PRESENCE COMES
+   * FIRST (while the machine wants an unlock it answers everything `401 unlock_required`, so nothing else it says can
+   * be read yet); a dismissed prompt returns the refusal unchanged, and a second refusal of the same kind is the answer.
+   */
+  async #confirmed(
+    method: string,
+    first: TransportAnswer,
+    resend: () => Promise<TransportAnswer>,
+  ): Promise<TransportAnswer> {
+    const passkey = this.#passkey;
+    if (passkey === undefined || first.status < 400) return first;
+    // G95: a read is the page's own work, so its prompt waits for its machine to be on screen; a press asks at once.
+    const origin = requestOrigin(method);
+    let answer = first;
+    let need = this.#need(answer);
+    if (need?.kind === 'unlock') {
+      if (!(await this.#confirm(need, origin))) return answer;
+      answer = await resend();
+      if (answer.status < 400) return answer;
+      need = this.#need(answer);
+    }
+    if (need?.kind !== 'step-up') return answer;
+    if (!(await this.#confirm(need, origin))) return answer;
+    return await resend();
+  }
+
+  /** The handler's reading of a refusal; a handler that throws reads it as no passkey need at all. */
+  #need(answer: TransportAnswer): PasskeyNeed | undefined {
+    try {
+      return this.#passkey?.handler.need({ status: answer.status, body: answer.body });
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The one prompt; a prompt that fails to open is a prompt not confirmed. */
+  async #confirm(need: PasskeyNeed, origin: PromptOrigin): Promise<boolean> {
+    const passkey = this.#passkey;
+    if (passkey === undefined || this.#stopped) return false;
+    try {
+      return (await passkey.handler.confirm(passkey.daemon, need, origin)) === true;
+    } catch {
+      return false;
+    }
   }
 
   #subscribe<Name extends string, Payload>(

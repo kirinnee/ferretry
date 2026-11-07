@@ -6,6 +6,7 @@ import type { SocketLike } from '../session/direct-dial.ts';
 import type { WebCryptoRelayCrypto } from '../session/webcrypto.ts';
 import type { OwnerPayload, PrivateKeyHandle, RelayCrypto } from '../session/wire/index.ts';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
+import { PASSKEY_TAKERS, type PasskeyPorts, type PasskeyProvision } from '../passkey/passkey.ts';
 
 /**
  * HOW A PLUGIN APP HALF HELPS THE SHELL REACH A DAEMON (§4.8, §4.13).
@@ -174,6 +175,11 @@ export interface ShellProvides {
   readonly carriers?: (ports: ConnectPorts) => readonly CarrierDialer[];
   /** Connections only: the carriers a pairing walks. */
   readonly pairing?: (ports: ConnectPorts) => PairingCarriers;
+  /**
+   * Access only: the passkey handler every daemon call consults on a refusal, and the prompts the shell mounts
+   * (`passkey/passkey.ts`). Built with the runtime, after the session parts: its ceremony rides Access's own client.
+   */
+  readonly passkey?: (ports: PasskeyPorts) => PasskeyProvision;
 }
 
 /** An app half with its `shell` section. */
@@ -244,4 +250,31 @@ export function registeredConnect(surfaces: readonly SurfaceEntry[], ports: Conn
   }
   carriers.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   return { claims, carriers, pairing, failures };
+}
+
+/** The passkey provision the registered halves gave, and the failure to build it (said, never thrown). */
+export interface RegisteredPasskey {
+  readonly passkey: PasskeyProvision | undefined;
+  readonly failures: readonly { readonly plugin: string; readonly reason: string }[];
+}
+
+/**
+ * Builds the ONE passkey provision (G105: one prompt, no second implementation): Access's, from the generated surfaces
+ * registry. A provision from any other plugin is ignored; one that throws is left out, and then a passkey refusal is
+ * simply returned as it came (nothing asks).
+ */
+export function registeredPasskey(surfaces: readonly SurfaceEntry[], ports: PasskeyPorts): RegisteredPasskey {
+  for (const entry of surfaces) {
+    const make = shellProvidesOf(entry)?.passkey;
+    if (make === undefined || !PASSKEY_TAKERS.includes(entry.id)) continue;
+    try {
+      return { passkey: make(ports), failures: [] };
+    } catch (error) {
+      return {
+        passkey: undefined,
+        failures: [{ plugin: entry.id, reason: error instanceof Error ? error.message : String(error) }],
+      };
+    }
+  }
+  return { passkey: undefined, failures: [] };
 }
