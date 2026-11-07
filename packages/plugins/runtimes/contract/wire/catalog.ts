@@ -937,6 +937,16 @@ export const AccountChangeOutcomeSchema = z.discriminatedUnion('outcome', [
     credential: CredentialViewSchema,
   }),
   z.strictObject({
+    /**
+     * A change to one login, made by Logins (every `credential.*` except a sign-out). `held`: the file was written but it
+     * loosens something (a removed budget), so the tighter version stays in effect until the owner confirms;
+     * `sentences` say what widened.
+     */
+    outcome: z.literal('login-changed'),
+    result: z.enum(['applied', 'held']),
+    sentences: z.array(NonEmptyStringSchema).readonly().optional(),
+  }),
+  z.strictObject({
     outcome: z.literal('executed'),
     executor: z.enum(['setup', 'clone']),
     summary: NonEmptyStringSchema,

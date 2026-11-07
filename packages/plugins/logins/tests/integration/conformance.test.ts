@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { testHost } from '@ferretry/kernel/testing';
 import { emptyVault } from '../support/fake-vault.ts';
-import { LoginsPort } from '../../contract/index.ts';
+import { LoginChangeError, LoginsPort } from '../../contract/index.ts';
 import { loginsConformance } from '../../contract/testing/index.ts';
 import daemon from '../../daemon/index.ts';
 
@@ -42,6 +42,32 @@ describe('the real Logins served through the host', () => {
       expect(ghost.status).toBe(409);
       expect(stray.status).toBe(400);
       expect(list.body).not.toMatch(/accessToken|refreshToken|sk-/u);
+    } finally {
+      await host.stop();
+    }
+  });
+});
+
+describe('the Logins port changes through the same service as the routes', () => {
+  test('a change staged through the port is the one the route reads, and a refusal is the same code on both', async () => {
+    const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: files });
+    try {
+      const api = host.provided(LoginsPort);
+      const staged = await api.changes.stage({ kind: 'login.label', id: 'team', label: 'Team' });
+      const read = await host.request('GET', `/v1/logins/changes/${staged.id}`);
+      const viaPort = (await api.changes
+        .stage({ kind: 'login.enable', id: 'ghost' })
+        .catch(caught => caught)) as unknown;
+      const viaRoute = await host.request('POST', '/v1/logins/changes', {
+        body: { kind: 'login.enable', id: 'ghost' },
+      });
+
+      expect(read.status).toBe(200);
+      expect(read.json<{ id: string; summary: string }>()).toMatchObject({ id: staged.id, summary: staged.summary });
+      expect(viaPort).toBeInstanceOf(LoginChangeError);
+      expect((viaPort as LoginChangeError).code).toBe('login_change_refused');
+      expect(viaRoute.status).toBe(409);
+      expect(viaRoute.json<{ code: string }>().code).toBe('login_change_refused');
     } finally {
       await host.stop();
     }

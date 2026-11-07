@@ -31,3 +31,12 @@ export function useConversationClient(): PluginClient {
 export function useConversationDaemon(): string | undefined {
   return daemonOfClient(useConversationClient());
 }
+
+/**
+ * The client of the daemon this view is drawn for, or `null` outside a surface the half built (a component a suite
+ * renders on its own). A view that can still draw without a daemon — the composer, whose suites hand it its calls —
+ * reads this and refuses each call it makes instead of refusing to draw.
+ */
+export function useOptionalConversationClient(): PluginClient | null {
+  return useContext(ConversationClientContext);
+}

@@ -14,7 +14,8 @@ import { TranscriptionLogSettings } from './features/settings/transcription-log-
 import { SpeedupsSurface } from './features/speedups/speedups-surface.tsx';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { createVoiceStore, StoreProvider, useSttSettingsStore, type VoiceStore } from './lib/voice-store.tsx';
-import { daemonConnection, useComposerDraft, VoiceClientProvider } from './shell-voice.ts';
+import { useComposerDraft } from '@ferretry/app';
+import { daemonConnection, VoiceClientProvider } from './shell-voice.ts';
 
 /** The daemon every call goes to is the one the shell's client is for; the connection only carries an identity. */
 const THIS_DAEMON = daemonConnection({
@@ -92,7 +93,7 @@ export function voiceSurfaces(client: PluginClient) {
     readonly subject?: string | undefined;
   }) {
     const { settings } = useSttSettings(sttStore);
-    const sessionId = subject ?? binding.sessionId;
+    const sessionId = subject ?? binding.ferretId;
     return (
       <DictationControl
         daemon={THIS_DAEMON}

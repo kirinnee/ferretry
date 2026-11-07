@@ -347,8 +347,9 @@ function stepUpRefusal(message: string, capability: 'fleet' | 'filesystem'): Api
 
 /**
  * Whether this caller may write where the lesson goes: the Global lessons document (`fleet`), or a project's own
- * AGENTS.md / CLAUDE.md (`filesystem`), on the `configure` axis. A remote device writing into a project also proves a
- * passkey for it. Answers the refusal, or `undefined` when allowed.
+ * AGENTS.md / CLAUDE.md (`filesystem`), on the `configure` axis. A remote device writing into a project also takes a
+ * fresh passkey proof for it, CLAIMED here before anything is written (never read from the admission snapshot and spent
+ * after, so of two applies on one proof exactly one writes). Answers the refusal, or `undefined` when allowed.
  */
 function applyRefusal(call: CallContext, capability: 'fleet' | 'filesystem'): ApiResponse | undefined {
   const governance = call.governance;
@@ -367,7 +368,7 @@ function applyRefusal(call: CallContext, capability: 'fleet' | 'filesystem'): Ap
       403,
     );
   }
-  if (capability === 'filesystem' && governance.governed && call.presentation?.freshStepUp !== true)
+  if (capability === 'filesystem' && governance.governed && call.claimFreshStepUp?.() !== true)
     return stepUpRefusal(`writing a lesson into ${where} from this device needs a passkey confirmation`, capability);
   return undefined;
 }
@@ -386,7 +387,6 @@ async function apply(subsystem: LessonsSubsystem, call: CallContext): Promise<Ap
   const applied = await subsystem.serial
     .run(async () => await subsystem.lessons.apply(id, request.etag))
     .catch(lessonsRefusal);
-  if (capability === 'filesystem' && call.governance?.governed === true) call.spendFreshStepUp?.();
   subsystem.changed();
   const view = proposalView(applied, await subsystem.store.observationsById());
   if (view === undefined)
