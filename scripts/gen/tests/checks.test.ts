@@ -337,6 +337,25 @@ describe('source scans', () => {
     expect(found[0]?.where).toBe('packages/core/kernel/contract/home.ts:2');
   });
 
+  test('no-compat allows only the two exact native Codex notice literals in their declared constant', () => {
+    const path = 'packages/plugins/codex/daemon/lib/fixed-layer.ts';
+    const source = file(
+      'codex-notices.ts',
+      [
+        'const CODEX_HIDDEN_NOTICES = [',
+        '  "hide_gpt5_1_migration_prompt",',
+        '  "hide_gpt-5.1-codex-max_migration_prompt",',
+        '  "hide_gpt5_2_migration_prompt",',
+        '  "prefix_hide_gpt5_1_migration_prompt",',
+        '];',
+        'const OTHER = "hide_gpt5_1_migration_prompt";',
+      ].join('\n'),
+    );
+    const found = compatIn(source, path);
+    expect(found.map(item => item.where)).toEqual([path + ':4', path + ':5', path + ':7']);
+    expect(compatIn(source, 'another-file.ts')).toHaveLength(5);
+  });
+
   test('one-format planted: two numbers, a range, a union schema; a validity guard stays', () => {
     const found = messages(
       formatsIn(
