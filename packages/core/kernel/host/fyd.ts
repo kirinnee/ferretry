@@ -2,7 +2,7 @@
  * `fyd` — the daemon entry (§8: at most 150 lines, names no subsystem; `host-files`). Everything a plugin adds comes
  * from the generated registry; everything IO from the kernel's adapters.
  */
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync } from 'node:fs';
 import { chmod, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import type { DaemonImplementation } from '../manifest/implement.ts';
@@ -34,8 +34,14 @@ async function main(): Promise<number> {
     process.stderr.write(`fyd: --port ${port} is not a port number.\n`);
     return 64;
   }
-  mkdirSync(`${home}/logs`, { recursive: true, mode: 0o700 });
-  const sink = fileLogSink(line => appendFileSync(`${home}/logs/fyd.log`, line, { mode: 0o600 }));
+  // Nothing is written before the home is decided (§9.3): until boot creates `logs/`, a line is dropped.
+  const sink = fileLogSink(line => {
+    try {
+      appendFileSync(`${home}/logs/fyd.log`, line, { mode: 0o600 });
+    } catch {
+      // the home is not decided yet, or was refused
+    }
+  });
   const registry = (await import(REGISTRY)) as GeneratedRegistry;
   const outcome = await bootHost({
     home,

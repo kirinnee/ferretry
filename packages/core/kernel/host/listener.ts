@@ -181,6 +181,9 @@ export async function listenLocal(
   },
 ): Promise<Listening> {
   const socketPath = runSocketPath(options.home);
+  // A Unix socket path longer than the platform limit (104 bytes on macOS, 108 on Linux) binds nothing usable.
+  if (Buffer.byteLength(socketPath) > 103)
+    throw new Error(`The home path is too long for the local socket (${socketPath}); point FY_HOME at a shorter folder.`);
   await options.remove(socketPath);
   const unix = serve(host, () => true, { unix: socketPath });
   await options.chmod(socketPath, 0o600);
