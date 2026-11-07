@@ -1,6 +1,8 @@
 import { describe, it } from 'bun:test';
+import { defineEvent } from '@ferretry/kernel/contract';
 import { definePlugin, implementCli, type PluginClient, verb } from '@ferretry/kernel/manifest';
 import should from 'should';
+import { z } from 'zod';
 import { runFy } from '../../src/lib/run.ts';
 import {
   boardEntry,
@@ -8,6 +10,7 @@ import {
   callsThenOk,
   entry,
   fakeWorld,
+  FeedingTransport,
   inventoryOf,
   registryOf,
   skeletonEntry,
@@ -60,17 +63,28 @@ describe('runFy', () => {
     should(io.stderr()).equal('Board is not built yet in this version of Ferretry.\n');
   });
 
-  it('should refuse a verb that subscribes to events, which this build does not offer', async () => {
+  it('should hand a plugin verb events through the guarded connection, opened when it first listens', async () => {
     // Arrange
     const calls: { client?: PluginClient } = {};
-    const { world } = fakeWorld({ registry: registryOf(boardEntry(calls)) });
+    const transport = new FeedingTransport();
+    const { world, connects } = fakeWorld({
+      registry: registryOf(boardEntry(calls)),
+      inventory: inventoryOf({ id: 'board', contract: 'h-board' }),
+      transport,
+    });
     await runFy(['board'], world);
+    const moved = defineEvent('board.moved', z.strictObject({ id: z.string() }));
+    const heard: string[] = [];
 
     // Act
-    const subscribing = (): unknown => calls.client?.subscribe({} as never, () => undefined);
+    calls.client?.subscribe(moved, payload => heard.push(payload.id));
+    await Bun.sleep(10);
+    transport.push('board.moved', { id: 'c1' });
+    await Bun.sleep(10);
 
     // Assert
-    should(subscribing).throw(/events are not available/u);
+    should(connects.length).equal(1);
+    should(heard).deepEqual(['c1']);
   });
 
   it('should not open a connection for a verb that never calls the daemon', async () => {
