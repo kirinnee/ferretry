@@ -129,6 +129,32 @@ describe('use without read', () => {
     should(result.stderr).equal('[redacted:TOKEN] [redacted:TOKEN]');
   });
 
+  it('S19 I2 a vault that fails after the child keeps its masked output instead of throwing it away', async () => {
+    const documents = new MemorySecretDocuments();
+    const cipher = new FakeSecretCipher();
+    await new SecretDirectory(documents, cipher, CLOCK).put('TOKEN', TOKEN);
+    let broken = false;
+    const vault = new (class extends SecretVault {
+      override async values(): ReturnType<SecretVault['values']> {
+        if (broken) throw new Error('vault unreadable');
+        return super.values();
+      }
+    })(documents, cipher);
+    let spawned = 0;
+    const runner: SecretChildRunner = {
+      run: async () => {
+        spawned += 1;
+        broken = true;
+        return { outcome: 'exited', exitCode: 0, stdout: `out ${TOKEN}`, stderr: '', truncated: false };
+      },
+    };
+    const result = await new SecretUseService(vault, runner, ENVS, NO_RECIPES, new SecretRedactor(vault)).run(
+      request({ secrets: ['TOKEN'] }),
+    );
+    should(spawned).equal(1);
+    should(result.stdout).equal('out [redacted:TOKEN]');
+  });
+
   it('S10 I126 shared masks cover cut output and preserve the injected vault snapshot across replacement', async () => {
     const documents = new MemorySecretDocuments();
     const cipher = new FakeSecretCipher();

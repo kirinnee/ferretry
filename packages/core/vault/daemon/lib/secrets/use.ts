@@ -123,7 +123,13 @@ export class SecretUseService {
       });
       // A value the vault rotated DURING the child is not in the snapshot taken before it, so the vault's own current
       // values join the injected ones; the contributed and typed values come from the snapshot, never a second open.
-      const during = [...injected, ...namedMasks(await this.vault.values())];
+      // That read is best-effort: the child has already run, so a vault that fails now must not throw away its output
+      // (a retry would run it again). The injected snapshot and the open lease still hold every pre-run value.
+      const current = await this.vault.values().then(
+        rotated => namedMasks(rotated),
+        () => [],
+      );
+      const during = [...injected, ...current];
       return {
         outcome,
         masked: {
