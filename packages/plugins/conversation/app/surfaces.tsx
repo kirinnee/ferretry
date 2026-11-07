@@ -17,6 +17,7 @@ import type {
   SettingsProps,
 } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
+import { ChatScreen } from './chat/chat-screen.tsx';
 import { ConversationClientProvider } from './client.ts';
 
 const TITLE = 'Conversation';
@@ -50,7 +51,7 @@ export interface ConversationSurfaces {
 
 export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
   screens: {
-    chat: scoped<ScreenProps>(client, Pending),
+    chat: scoped<ScreenProps>(client, ChatScreen),
     links: scoped<ScreenProps>(client, Pending),
   },
   panels: {
