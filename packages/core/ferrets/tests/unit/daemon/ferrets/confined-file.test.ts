@@ -18,13 +18,13 @@ test('S47 R-0151 fs/file serves no bytes where the root cannot be held open: a p
   expect(person.status).toBe(501);
   expect(person.json<{ code: string }>().code).toBe('unsupported');
   expect(person.body).not.toContain('state content');
-  // An agent never gets as far: its fence cannot be computed (S47).
+  // An agent reads through the same pin (the kernel's fence is the pin's own, S47): the root cannot be held, so nothing is served.
   const agent = await h.request('GET', '/v1/ferrets/helper/fs/file', {
     ...as('lead'),
     query: { path: 'hard-link.txt' },
   });
-  expect(agent.status).toBe(503);
-  expect(agent.json<{ code: string }>().code).toBe('state_home_unresolved');
+  expect(agent.status).toBe(501);
+  expect(agent.json<{ code: string }>().code).toBe('unsupported');
   expect(agent.body).not.toContain('state content');
   expect(
     (
@@ -88,4 +88,29 @@ test('R-0151 file query scope, rev, format and required path are validated inste
   const media = await h.request('GET', '/v1/ferrets/lead/fs/file', { query: { path: 'a.txt', scope: 'media' } });
   expect(media.status).toBe(404);
   expect(media.body).not.toContain('hello');
+});
+
+test('S47 R-0151 fs/file for an agent: refused inside the state home with the viewer’s denied, served beside it; the person as before', async () => {
+  const refused = Object.assign(new Error('root refused: fenced'), { name: 'RootError', refusal: 'fenced' });
+  const pinner = new FakeRootPinner({
+    tree: treeOf(
+      ['', directory([{ name: 'sibling.txt', type: 'file' }])],
+      ['.ferretry/secret.json', { ...textFile('credential-bytes\n'), error: refused }],
+      ['sibling.txt', textFile('sibling-bytes\n')],
+    ),
+  });
+  const git = async () => ({ exitCode: 128, signal: null, stdout: '', stderr: 'fatal: not a git repository' });
+  const h = await host([record('lead')], { pinner, spawn: git });
+  const inside = await h.request('GET', '/v1/ferrets/lead/fs/file', {
+    ...as('lead'),
+    query: { path: '.ferretry/secret.json' },
+  });
+  expect(inside.status).toBe(403);
+  expect(inside.json<{ code: string }>().code).toBe('denied');
+  expect(inside.body).not.toContain('credential-bytes');
+  for (const caller of [as('lead'), {}]) {
+    const beside = await h.request('GET', '/v1/ferrets/lead/fs/file', { ...caller, query: { path: 'sibling.txt' } });
+    expect(beside.status).toBe(200);
+    expect(beside.body).toContain('sibling-bytes');
+  }
 });

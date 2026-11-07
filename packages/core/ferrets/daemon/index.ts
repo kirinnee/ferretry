@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import type { BearerDigest } from '@ferretry/core-gate/contract';
+import { type BearerDigest, ferretOf } from '@ferretry/core-gate/contract';
 import {
   ApiError,
   type ApiResponse,
@@ -81,9 +81,13 @@ import {
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
 
-/** The ferret a ferret token names, from Gate's standing; `undefined` for a person or another agent. */
+/**
+ * The ferret behind a call, from Gate's standing (`ferretOf`, today's `agentSessionOf`): a ferret's own token, or the
+ * admin token with a ferret named in `x-ferretry-session-id` (the call's actor is then that ferret's). `undefined` for a
+ * person (the admin token with no ferret behind it, a device) and for the Warden, which acts as no ferret.
+ */
 export function callerFerret(call: CallContext): FerretId | undefined {
-  return call.credential?.tokenClass === 'ferret' ? call.credential.ferret : undefined;
+  return ferretOf(call);
 }
 
 /** Whether the caller is an agent (a ferret's token, the warden, or the admin token with a ferret behind it). */
@@ -307,10 +311,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
 
   /**
-   * The kernel gives a plugin no state-home fence yet (no identity or link-hop reach into the home from a plugin), and
-   * the pin a work root hands out only refuses a root BASE inside the home, never a descendant of an ancestor of it.
-   * Until it does, everything that needs the fence fails closed for an agent with today's 503 `state_home_unresolved`
-   * (the launch refusal and every file-browser read), and never with a lexical stand-in.
+   * The kernel gives a plugin no state-home identity or link-hop reach yet, so the launch refusal (the folder a ferret
+   * is started in) fails closed for an agent with today's 503 `state_home_unresolved`, and never with a lexical
+   * stand-in. The file browser needs none: the pin a work root hands out judges every walk beneath it against the
+   * kernel's fence itself (S40, S47).
    */
   const stateHomeReach: StateHomeLaunchReach | undefined = undefined;
 
@@ -340,8 +344,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
 
   // The file browser (today's session-filesystem mount) over the kernel: each ferret's `work` root pins its folder and
-  // walks beneath it by descriptor and Git runs in the held object. An agent's read also needs the state-home fence
-  // (S47), which no plugin can compute yet, so `reach` refuses an agent. The service is stateless, so one is made for the ferret a request names.
+  // walks beneath it by descriptor and Git runs in the held object. The pin refuses (`denied`, 403) every path inside
+  // the state home, for an agent and a person alike (S47). The service is stateless, so one is made for the ferret a request names.
   const sessionGit = new RunnerSessionGit(
     new KernelGitRunner({
       // A string folder is one this module already fenced (a scratch folder); a held directory is the kernel's pin.
@@ -365,9 +369,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       agentMayReach(call, id);
       const folder = registry.get(id)?.folder;
       if (folder === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
-      // S47, today's `agentFence`: an agent's read sits behind the state-home fence, and an agent whose fence cannot be
-      // computed is refused with 503 `state_home_unresolved`. A person is ungoverned by it.
-      await stateHomeLaunchRefusal(callerIsAgent(call), stateHomeReach, folder);
+      // S47, today's `agentFence`: an agent reads only its own ferret's and its helpers' files (above); a path inside the
+      // state home is refused by the pin itself, `denied` (403), whoever asks.
       return { id, cwd: folder };
     },
   });

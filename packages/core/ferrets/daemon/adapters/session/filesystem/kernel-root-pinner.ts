@@ -60,6 +60,45 @@ export function pinRefusal(error: unknown, cwd: string): unknown {
   return error;
 }
 
+/**
+ * The viewer's refusal for a walk beneath the held root that the kernel's fence refused (S47, today's `homeRefusal` and
+ * `hardLinkRefusal`): a path inside the state home, or a file with another name that could be. `denied`, 403. Any other
+ * failure of the walk is returned as it is.
+ */
+function walkRefusal(error: unknown): unknown {
+  switch (refusalOf(error)) {
+    case 'fenced':
+      return new FsError(
+        'denied',
+        "that path is inside this daemon's state home, which holds this machine's credentials, so it is not read",
+      );
+    case 'hard_link':
+      return new FsError(
+        'denied',
+        "that file has more than one name, and another of its names could be inside this daemon's state home, so it is not read",
+      );
+    default:
+      return error;
+  }
+}
+
+/** The held root, with the kernel's per-walk refusals said in the viewer's own vocabulary. */
+function sayingRefusals(held: PinnedRoot): PinnedRoot {
+  return {
+    rootReal: held.rootReal,
+    policyCwd: held.policyCwd,
+    open: async (rel, openOptions) => {
+      try {
+        return await held.open(rel, openOptions);
+      } catch (error) {
+        throw walkRefusal(error);
+      }
+    },
+    probe: () => held.probe(),
+    close: () => held.close(),
+  };
+}
+
 export class KernelSessionRootPinner implements SessionRootPinner {
   constructor(private readonly root: PinnableRoot) {}
 
@@ -69,7 +108,7 @@ export class KernelSessionRootPinner implements SessionRootPinner {
     const checked = this.root.resolve('.');
     if (!checked.ok) throw refusalError(checked.error, cwd);
     try {
-      return await this.root.pin(checked.value, options);
+      return sayingRefusals(await this.root.pin(checked.value, options));
     } catch (error) {
       throw pinRefusal(error, cwd);
     }

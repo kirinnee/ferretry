@@ -18,10 +18,10 @@ interface Seen {
   readonly pinned: { path: string; options: PinOptions | undefined }[];
 }
 
-function root(options: {
-  readonly resolve?: FolderRefusal;
-  readonly pin?: Error;
-}): { readonly root: PinnableRoot; readonly seen: Seen } {
+function root(options: { readonly resolve?: FolderRefusal; readonly pin?: Error }): {
+  readonly root: PinnableRoot;
+  readonly seen: Seen;
+} {
   const seen: Seen = { resolved: [], pinned: [] };
   const held = { rootReal: '/work/a', close: async () => undefined } as unknown as HeldRoot;
   return {
@@ -105,6 +105,37 @@ describe('the session root pinner over the ferret’s work root', () => {
   });
 });
 
+describe('a walk beneath the held root that the kernel’s fence refuses', () => {
+  const walking = (failure: Error) => {
+    const held = {
+      rootReal: '/work/a',
+      open: async () => {
+        throw failure;
+      },
+      probe: () => 'the probe',
+      close: async () => undefined,
+    } as unknown as HeldRoot;
+    return new KernelSessionRootPinner({ resolve: () => ok('/work/.' as FencedPath), pin: async () => held });
+  };
+
+  test('S47 a path inside the state home, or a file that could be named in it, is the viewer’s denied (403)', async () => {
+    for (const refusal of ['fenced', 'hard_link']) {
+      const pinned = await walking(rootError(refusal)).pin('/work/a');
+      const error = await pinned.open('.ferretry/secret.json').catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(FsError);
+      expect((error as FsError).code).toBe('denied');
+    }
+  });
+
+  test('S47 any other failure of the walk is raised as it is, and the rest of the held root is handed through', async () => {
+    const broken = new Error('disk on fire');
+    const pinned = await walking(broken).pin('/work/a');
+    expect(await pinned.open('a.txt').catch((e: unknown) => e)).toBe(broken);
+    expect(pinned.rootReal).toBe('/work/a');
+    expect(pinned.probe()).toBe('the probe' as never);
+  });
+});
+
 describe('the diff scratch over the kernel’s scratch folder', () => {
   function scratch() {
     const log: string[] = [];
@@ -112,7 +143,8 @@ describe('the diff scratch over the kernel’s scratch folder', () => {
     const directory: ScratchDirectory = {
       path: '/scratch/1' as FencedPath,
       makeDirectory: async rel => void log.push(`mkdir ${rel}`),
-      writeFile: async (rel, data, mode) => void log.push(`file ${rel} ${String(mode?.toString(8))} ${String(data.length)}`),
+      writeFile: async (rel, data, mode) =>
+        void log.push(`file ${rel} ${String(mode?.toString(8))} ${String(data.length)}`),
       symlink: async (rel, target) => void log.push(`link ${rel} -> ${target}`),
       close: async () => {
         closed = true;

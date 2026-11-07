@@ -19,9 +19,12 @@ test('S47 R-0332 an agent launch fails closed before token issuance while the st
   expect((await h.request('GET', '/v1/ferrets')).json<unknown[]>()).toHaveLength(1);
 });
 
-test('S47 R-0151 an agent’s file-browser read fails closed while the state-home fence is unbound; a state home beneath the work folder is never listed or read for it', async () => {
-  // The ferret works in ~, so its work folder CONTAINS the state home: the work root's own check only refuses a base
-  // inside the home, never a descendant of an ancestor of it.
+/** A refusal as the kernel's fenced pin raises it: named, and carrying the refusal word. */
+const fenced = (): Error => Object.assign(new Error('root refused: fenced'), { name: 'RootError', refusal: 'fenced' });
+
+test('S47 R-0151 an agent’s file-browser read is refused inside the state home beneath its work folder, and served beside it; a person is served beside it too', async () => {
+  // The ferret works in ~, so its work folder CONTAINS the state home. The kernel's pin judges every walk beneath the
+  // root against the fence (kernel `S40 S47` tests); this stands in for its refusal on the home's names.
   const pinner = new FakeRootPinner({
     tree: treeOf(
       [
@@ -31,8 +34,8 @@ test('S47 R-0151 an agent’s file-browser read fails closed while the state-hom
           { name: 'sibling.txt', type: 'file' },
         ]),
       ],
-      ['.ferretry', directory([{ name: 'secret.json', type: 'file' }])],
-      ['.ferretry/secret.json', textFile('credential-bytes\n')],
+      ['.ferretry', { ...directory([{ name: 'secret.json', type: 'file' }]), error: fenced() }],
+      ['.ferretry/secret.json', { ...textFile('credential-bytes\n'), error: fenced() }],
       ['sibling.txt', textFile('sibling-bytes\n')],
     ),
   });
@@ -41,19 +44,19 @@ test('S47 R-0151 an agent’s file-browser read fails closed while the state-hom
   for (const [route, query] of [
     ['/v1/ferrets/lead/fs', { path: '.ferretry' }],
     ['/v1/ferrets/lead/fs/file', { path: '.ferretry/secret.json' }],
-    ['/v1/ferrets/lead/fs/file', { path: 'sibling.txt' }],
-    ['/v1/ferrets/lead/fs/changes', {}],
-    ['/v1/ferrets/lead/fs/diff', { path: 'sibling.txt' }],
   ] as const) {
     const answer = await h.request('GET', route, { ...as('lead'), query });
-    expect(answer.status).toBe(503);
-    expect(answer.json<{ code: string }>().code).toBe('state_home_unresolved');
+    // Today's refusal for a path inside the state home: the viewer's `denied`, 403.
+    expect(answer.status).toBe(403);
+    expect(answer.json<{ code: string }>().code).toBe('denied');
     expect(answer.body).not.toContain('credential-bytes');
-    expect(answer.body).not.toContain('sibling-bytes');
   }
-  // Nothing was pinned for the agent: it was refused before the root was held.
-  expect(pinner.pinnedCwds.length).toBe(0);
-  // A person at the machine is not governed by the agent's fence.
+  const sibling = await h.request('GET', '/v1/ferrets/lead/fs/file', { ...as('lead'), query: { path: 'sibling.txt' } });
+  expect(sibling.status).toBe(200);
+  expect(sibling.body).toContain('sibling-bytes');
+  // Every request closed what it pinned.
+  expect(pinner.roots.every(root => root.closed)).toBe(true);
+  // A person at the machine is served beside the home as before.
   const person = await h.request('GET', '/v1/ferrets/lead/fs/file', { query: { path: 'sibling.txt' } });
   expect(person.status).toBe(200);
   expect(person.body).toContain('sibling-bytes');
