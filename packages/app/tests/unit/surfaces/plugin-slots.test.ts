@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { FERRET_SLOTS } from '../../../../core/ferrets/contract/slots.ts';
+import { FERRET_ACCOUNT_SLOTS, FERRET_SLOTS } from '../../../../core/ferrets/contract/slots.ts';
 import { generated } from '../../../src/generated/surfaces.ts';
 import { viewsOf } from '../../../src/layout/engine.ts';
 import { isSlotName } from '../../../src/layout/slots.ts';
@@ -16,7 +16,7 @@ const entryOf = (id: string) => entries.find(entry => entry.id === id);
 describe('the slots Ferrets offers', () => {
   test('each is a plugin slot name owned by Ferrets, and Runtimes contributes a panel to each', () => {
     const views = viewsOf(entries);
-    for (const slot of FERRET_SLOTS) {
+    for (const slot of FERRET_ACCOUNT_SLOTS) {
       expect(isSlotName(slot)).toBe(true);
       expect(slot.startsWith('ferrets.')).toBe(true);
       const panels = views.panels.get(slot) ?? [];
@@ -31,7 +31,7 @@ describe('the slots Ferrets offers', () => {
     const contributed = entries.flatMap(entry =>
       (entry.manifest.ui?.panels ?? []).map(panel => panel.slot as string).filter(slot => slot.startsWith('ferrets.')),
     );
-    expect(contributed.length).toBe(FERRET_SLOTS.length);
+    expect(contributed.length).toBe(FERRET_ACCOUNT_SLOTS.length);
     for (const slot of contributed) expect(named).toContain(slot);
   });
 

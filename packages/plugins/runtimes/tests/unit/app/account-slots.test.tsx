@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
-  FERRET_SLOTS,
+  FERRET_ACCOUNT_SLOTS,
   MOVE_ACCOUNT_SLOT,
   type ChosenFerretAccount,
   NEW_FERRET_ACCOUNT_SLOT,
@@ -92,10 +92,10 @@ const draw = async (panel: (props: unknown) => unknown, page: Page, extra: Recor
 describe('Ferrets’ account slots and Runtimes’ panels', () => {
   it('every slot Ferrets offers has exactly one Runtimes panel, and the half builds each', () => {
     const slots = (manifest.ui?.panels ?? []).map(panel => panel.slot as string);
-    for (const slot of FERRET_SLOTS) expect(slots.filter(candidate => candidate === slot)).toHaveLength(1);
+    for (const slot of FERRET_ACCOUNT_SLOTS) expect(slots.filter(candidate => candidate === slot)).toHaveLength(1);
     expect(slots).toContain(NEW_FERRET_ACCOUNT_SLOT);
     expect(slots).toContain(MOVE_ACCOUNT_SLOT);
-    for (const slot of FERRET_SLOTS) expect(typeof panelFor(slot, {})).toBe('function');
+    for (const slot of FERRET_ACCOUNT_SLOTS) expect(typeof panelFor(slot, {})).toBe('function');
   });
 });
 

@@ -5,7 +5,7 @@ import type { FerretSummary } from '../../../contract/index.ts';
 import { displayCallsign } from '../../lib/callsign.ts';
 import type { ClipboardWriter } from '../../ui.ts';
 import { InfoAbout, type InfoAboutProps } from './info-about.tsx';
-import { INFO_HINT, lineage, projectFact, relativeTime, STATE_WORD, worktreeFact } from './info-model.ts';
+import { endCauseWord, INFO_HINT, lineage, projectFact, relativeTime, STATE_WORD, worktreeFact } from './info-model.ts';
 import { InfoChip, InfoRow, InfoSection } from './info-parts.tsx';
 import type { ManagedWorktree } from './info-wire.ts';
 
@@ -86,6 +86,11 @@ export function InfoOverview({
           )}
           {ferret.finishedAt === undefined ? null : <InfoChip tone="ok">said it is done</InfoChip>}
         </InfoRow>
+        {ferret.cause === undefined ? null : (
+          <InfoRow hint={INFO_HINT.cause} label="Ended">
+            <span data-info-cause={ferret.cause.kind}>{endCauseWord(ferret.cause)}</span>
+          </InfoRow>
+        )}
         <InfoRow label="Project">
           {project === null ? (
             <span className="fy-info-muted">Not in a project</span>

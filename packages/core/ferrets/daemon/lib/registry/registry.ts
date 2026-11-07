@@ -53,6 +53,8 @@ export function summaryOf(
       : waited;
   if (details === undefined) return waits;
   const model = details.options?.model;
+  const effort = details.options?.effort;
+  const fast = details.options?.fast;
   const card = details.options?.card;
   const label = details.options?.label;
   const nudgeAfterSeconds = details.options?.nudgeAfterSeconds;
@@ -60,6 +62,8 @@ export function summaryOf(
   return {
     ...waits,
     ...(model === undefined ? {} : { model }),
+    ...(effort === undefined ? {} : { effort }),
+    ...(fast === undefined ? {} : { fast }),
     ...(card === undefined ? {} : { card }),
     ...(label === undefined ? {} : { label }),
     ...(nudgeAfterSeconds === undefined ? {} : { nudgeAfterSeconds }),

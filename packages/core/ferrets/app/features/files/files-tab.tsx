@@ -21,8 +21,10 @@
 
 import { ArrowLeft, Code2, GitCompareArrows, ListTree, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { formatCodeReference } from '@ferretry/app';
+import { formatCodeReference, PanelSlot, useOptionalRouter } from '@ferretry/app';
+import { FILES_SEARCH_SLOT, type FilesSearchSlotProps } from '@ferretry/core-ferrets/contract';
 import { useInputModality, useLayoutMode } from '@ferretry/app/ui';
+import { daemonOfRoute } from '../header/header-paths.ts';
 import { FileTree } from './file-tree.tsx';
 import { fsApi, useFsProbe } from './files-api.ts';
 import { baseName, crumbs, isOpenablePath, parseUnifiedDiff, renderableDiffLines } from './files-model.ts';
@@ -79,6 +81,8 @@ export const FilesTab = ({
   onOpenFile,
 }: FilesTabProps) => {
   const probe = useFsProbe(scope);
+  const router = useOptionalRouter();
+  const daemon = router === null ? undefined : daemonOfRoute(router.route);
   const layout = useLayoutMode();
   const key = scopeKey(scope);
   const restored = readFilesTabState(scope);
@@ -284,6 +288,14 @@ export const FilesTab = ({
     // `.kt-fs` owns flex:1 + min-height:0 (files.css) — the pane fills what the
     // page gives it and its scroller, not the page, takes the overflow.
     <div className="kt-fs rounded-md border border-border bg-surface">
+      {/* The search box is Conversation's, mounted through the slot Ferrets offers; nothing is drawn without it. */}
+      {daemon === undefined ? null : (
+        <PanelSlot
+          daemon={daemon}
+          props={{ ferret: scope.ferretId, openFile } satisfies FilesSearchSlotProps}
+          slot={FILES_SEARCH_SLOT}
+        />
+      )}
       <div className="kt-fs-bar">
         {active ? (
           <button

@@ -300,6 +300,32 @@ describe('rich preview containment', () => {
     }
   });
 
+  it('opens a raster picture in the shared full-screen viewer', async () => {
+    previewPayload = { path: 'photo.png', base64: 'iVBORw==' };
+    const create = URL.createObjectURL;
+    const revoke = URL.revokeObjectURL;
+    URL.createObjectURL = (() => 'blob:preview/image') as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL;
+    try {
+      const view = await mount(<RichFilePreview scope={scope} path="photo.png" revision={1} />);
+      try {
+        await interact(async () => {
+          for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+        });
+        expect(view.container.querySelector('dialog')).toBeNull();
+        const open = must(view.container.querySelector<HTMLButtonElement>('[data-rich-file-open-image]'), 'open button');
+        expect(open.getAttribute('aria-label')).toBe('Open photo.png full screen');
+        await interact(async () => open.click());
+        expect(document.querySelector('dialog') ?? view.container.querySelector('dialog')).not.toBeNull();
+      } finally {
+        await view.unmount();
+      }
+    } finally {
+      URL.createObjectURL = create;
+      URL.revokeObjectURL = revoke;
+    }
+  });
+
   /**
    * What is asserted here is the APP's decision, not a decoder's: bytes that
    * are not a valid document still reach the same containment — SVG through an

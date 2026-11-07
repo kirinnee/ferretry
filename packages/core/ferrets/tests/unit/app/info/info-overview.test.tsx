@@ -42,6 +42,16 @@ describe('InfoOverview', () => {
     expect(row(root, 'Started by')).toBe('Started by you');
   });
 
+  it('says why a stopped ferret ended, and nothing for one that is still going', async () => {
+    const ended = await show({
+      ferret: ferretOf('f1', { state: 'stopped', cause: { kind: 'agent_crashed', exitCode: 2 } }),
+    });
+    expect(row(ended, 'Ended')).toBe('The agent exited with code 2');
+    await mounted?.unmount();
+    const going = await show();
+    expect(going.querySelector('[data-info-row="Ended"]')).toBeNull();
+  });
+
   it('does not invent a task or label the record does not carry', async () => {
     const root = await show({ ferret: ferretOf('f1') });
     expect(root.querySelector('[data-info-row="Task"]')).toBeNull();

@@ -38,6 +38,15 @@ describe('InfoRuntime', () => {
     expect(row(root, 'Runner')).toBe('tmux');
   });
 
+  it('draws the effort and fast mode the ferret was launched with, and no row when it has none', async () => {
+    mounted = await mount(<InfoRuntime ferret={ferretOf('f1', { model: 'opus', effort: 'high', fast: true })} />);
+    expect(row(mounted.container, 'Effort')).toContain('high');
+    expect(row(mounted.container, 'Effort')).toContain('fast mode');
+    await mounted.unmount();
+    mounted = await mount(<InfoRuntime ferret={ferretOf('f1')} />);
+    expect(mounted.container.querySelector('[data-info-row="Effort"]')).toBeNull();
+  });
+
   it('says what it does not know instead of inventing it', async () => {
     mounted = await mount(<InfoRuntime ferret={ferretOf('f1')} />);
     const root = mounted.container;

@@ -188,3 +188,7 @@ _none_
 ### Whole files that are compatibility code (0); do not copy
 
 _none found by file name; still strip any `legacy`, `deprecated`, `compat`, `migrat*`, `retired` identifiers, old-format readers, one-shot boot passes and feature flags about an older peer (clean slate A452)_
+
+## Open items
+
+- Learning's ferret action ("Scan this ferret…", today's `learning-session-actions.tsx`) is not contributed yet. Ferrets offers the slot `ferrets.actions-row` (props `{ ferret, name, canControl, offer }`, see `packages/core/ferrets/contract/slots.ts`); Lessons contributes a `panel('ferrets.actions-row', …)` that draws the row and opens its own scan dialog. Lessons is ported and not listed in `ports-pending.json`, so this line is its tracker.
