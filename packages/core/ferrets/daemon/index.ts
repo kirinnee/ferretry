@@ -68,8 +68,16 @@ import { pinRoutes } from './lib/runtime/mounts/pins.ts';
 import { sessionPinRoutes } from './lib/runtime/mounts/session-pin.ts';
 import { type SessionArchiveSubsystem, sessionArchiveRoutes } from './lib/runtime/mounts/session-archive.ts';
 import { type SessionRestartSubsystem, sessionRestartRoutes } from './lib/runtime/mounts/session-restart.ts';
-import { type SessionSignalSubsystem, sessionSignalRoutes } from './lib/runtime/mounts/session-signal.ts';
-import { AgentPinsFile, FerretDetailsFiles, FerretPinFiles, FerretSummaryFiles } from './lib/state.ts';
+import { sessionSignalRoutes } from './lib/runtime/mounts/session-signal.ts';
+import { AgentPinsFile, FerretDetailsFiles, FerretPinFiles, FerretSummaryFiles, FerretWaitFiles } from './lib/state.ts';
+import { FerretSignals } from './lib/ferrets/signals.ts';
+import { SessionSignalService } from './lib/session/signal/service.ts';
+import {
+  FerretSignalArtifacts,
+  type FerretSignalHost,
+  FerretSignalRepository,
+  FerretSignalTerminal,
+} from './adapters/session/signal/ferret-signal.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
@@ -116,6 +124,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       const details = await kernel.state.read(FerretDetailsFiles, name);
       if (details.ok && details.value !== undefined) registry.putDetails(read.value.id, details.value);
       else if (!details.ok) log.warn('a ferret details file could not be read', { file: details.error.file });
+      // Its declared wait, if it was parked when the daemon last ran.
+      const wait = await kernel.state.read(FerretWaitFiles, name);
+      if (wait.ok && wait.value?.waiting !== undefined) registry.putWaiting(read.value.id, wait.value.waiting);
+      else if (!wait.ok) log.warn('a ferret waiting file could not be read', { file: wait.error.file });
     }
     const held = await kernel.state.read(FerretTokensFile);
     // An unreadable/missing token document beside existing records cannot prove no owner cut-off was held.
@@ -214,8 +226,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     history: appendHistory,
     limits: () => kernel.config.file(LimitsConfigFile),
     pinnedAt: async () => await agentPins.pinnedAt(),
-    // GAP: nothing writes `summary.md` on this base — `signal` is not built and `FileSignalArtifacts` is not wired —
-    // so this read answers nothing in a real daemon until the signal writer lands (Packs' result and Clean up wait on it).
+    // `signal done` writes the summary (Packs' result and Clean up read it); a ferret that has not finished has none.
     summaryText: async ferret => {
       const read = await kernel.state.read(FerretSummaryFiles, ferret);
       return read.ok && read.value !== undefined ? new TextDecoder().decode(read.value) : undefined;
@@ -256,6 +267,15 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     terminalRoots: async () => undefined,
     newId: () => randomUUID(),
   });
+
+  /** The ferret an id or a name addresses; a name two ferrets hold on one footing addresses none. */
+  const resolveFerret = (reference: string): FerretId | undefined => {
+    const resolution = resolveAgentAddress(
+      reference,
+      registry.list().map(ferret => ({ id: ferret.id, name: ferret.name, status: ferret.state })),
+    );
+    return resolution.kind === 'session' ? (resolution.id as FerretId) : undefined;
+  };
 
   /** The ferret a path names: an exact id, or a name (a live holder wins; two on one footing are refused). */
   const pathFerret = async (call: CallContext): Promise<FerretId> => {
@@ -348,7 +368,48 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         throw new ApiError(503, `${what} is not built yet in this version of Ferretry.`, 'plugin_unavailable');
       },
     });
-  const signals = sessionSignalRoutes(notBuilt<SessionSignalSubsystem>('The ferret lifecycle signal'));
+  const signalHost: FerretSignalHost = {
+    ready,
+    record: ferret => registry.get(ferret),
+    resolve: resolveFerret,
+    waitingOf: ferret => registry.waitingOf(ferret),
+    creditOf: async ferret => {
+      const read = await kernel.state.read(FerretWaitFiles, ferret);
+      return read.ok ? read.value?.creditSeconds : undefined;
+    },
+    saveWaiting: async (ferret, waiting, creditSeconds) => {
+      await kernel.state.write(
+        FerretWaitFiles,
+        { ...(waiting === undefined ? {} : { waiting }), ...(creditSeconds === undefined ? {} : { creditSeconds }) },
+        ferret,
+      );
+      registry.putWaiting(ferret, waiting);
+    },
+    writeSummary: async (ferret, text) => {
+      await kernel.state.write(FerretSummaryFiles, new TextEncoder().encode(text), ferret);
+    },
+    history: appendHistory,
+    stop: async (ferret, reason) => await service.stop(ferret, 'now', reason),
+  };
+  const signalRoutes = sessionSignalRoutes(
+    new FerretSignals(
+      new SessionSignalService({
+        repository: new FerretSignalRepository(signalHost),
+        artifacts: new FerretSignalArtifacts(signalHost),
+        terminal: new FerretSignalTerminal(signalHost),
+        serial: new KeyedSerialExecutor(),
+        clock: { now: () => kernel.clock.now() },
+      }),
+      { resolve: resolveFerret, view: async ferret => await service.get(ferret) },
+    ),
+  );
+  // A ferret signals for itself and its helpers; a person for any ferret (the same rule as stop, resume and rename).
+  const signals = {
+    'POST /v1/ferrets/:ferretId/signal': async (call: CallContext): Promise<ApiResponse> => {
+      mayAct(call, await pathFerret(call));
+      return await signalRoutes['POST /v1/ferrets/:ferretId/signal'](call);
+    },
+  };
   const restarts = sessionRestartRoutes(notBuilt<SessionRestartSubsystem>('Restarting ferrets'));
   const archived = sessionArchiveRoutes(notBuilt<SessionArchiveSubsystem>('The archived ferret list'));
 

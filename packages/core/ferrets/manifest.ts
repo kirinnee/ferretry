@@ -36,6 +36,7 @@ import {
   FerretDetailsFiles,
   FerretPinFiles,
   FerretSummaryFiles,
+  FerretWaitFiles,
   SessionConfigFiles,
   SessionStateFiles,
 } from './daemon/lib/state.ts';
@@ -221,7 +222,7 @@ export default definePlugin({
         audit: { skip: 'a folder listing records nothing, as today' },
         guard: 'secrets',
       }),
-      // R-0371 (today's mounts/session-signal.ts, renamed). Answers 503 until the session services are bound.
+      // R-0371 (today's mounts/session-signal.ts, renamed).
       route('POST /v1/ferrets/:ferretId/signal', {
         minimum: 'operator',
         caller: 'any',
@@ -361,6 +362,7 @@ export default definePlugin({
       FerretPinFiles,
       FerretDetailsFiles,
       FerretSummaryFiles,
+      FerretWaitFiles,
     ],
     // Cast: see packages/core/gate/manifest.ts (leaf `ConfigDef<unknown>` variance; reported to the lead).
     config: [LimitsConfigFile as ConfigDef<any>],

@@ -160,6 +160,8 @@ describe('every ferret lifecycle path publishes its state', () => {
 
   test('I108 a daemon that boots with ferrets announces each one with the state it holds', async () => {
     const h = await host([planted('a', 'working'), planted('b', 'stopped')]);
+    // The load is asynchronous; a read of the fleet waits for it.
+    await h.request('GET', '/v1/ferrets');
     expect(states(h, 'a')).toContain('working');
     expect(states(h, 'b')).toContain('stopped');
     await h.stop();

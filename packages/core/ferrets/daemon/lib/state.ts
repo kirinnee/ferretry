@@ -1,6 +1,6 @@
 import { defineState } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { FerretTitleSchema, StartOptionsSchema } from '../../contract/index.ts';
+import { FerretTitleSchema, FerretWaitingSchema, StartOptionsSchema } from '../../contract/index.ts';
 import { AgentPinFileSchema } from './agent-pins/types.ts';
 import { PinSchema } from './protocol/pins.ts';
 import { SessionConfigSchema, SessionStateSchema } from './protocol/session.ts';
@@ -91,4 +91,23 @@ export const FerretSummaryFiles = defineState<'summary', Uint8Array>({
   store: 'opaque',
   format: 1,
   mode: 0o600,
+});
+
+/**
+ * A ferret's declared wait and the time it has been credited for waiting: `state/ferrets/<ferret>/waiting.json` (today's
+ * `waiting` and `waitingCreditSeconds` on the session's state document). `ferret.json` is frozen, and a wait moves
+ * far more often than who a ferret is. The credit outlives the wait: the turn ceiling must never charge a ferret for
+ * time it spent deliberately parked. Private to Ferrets.
+ */
+export const FerretWaitFiles = defineState({
+  name: 'waiting',
+  path: '*/waiting.json',
+  store: 'json',
+  format: 1,
+  schema: z.strictObject({
+    waiting: FerretWaitingSchema.optional(),
+    creditSeconds: z.number().int().nonnegative().optional(),
+  }),
+  mode: 0o600,
+  onDamaged: { narrower: 'a damaged waiting.json reads as no declared wait and no credit' },
 });
