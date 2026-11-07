@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from 'node:crypto';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { type FerretSummary, FerretSummarySchema } from '../../contract/index.ts';
 import type {
@@ -10,14 +11,7 @@ import type { IRestartGateway } from './restart/ports.ts';
 import type { CompactAtChange, ISessionCompactAtGateway, SessionCompactAt } from './session/compact-at.ts';
 import type { ListedFerret } from './session/display.ts';
 import type { PinnedView, ISessionPinGateway } from './session/pin-agent.ts';
-import type {
-  ISessionApi,
-  RenameChange,
-  SignalAnswer,
-  SignalKind,
-  SignalOptions,
-  StartBody,
-} from './session/ports.ts';
+import type { ISessionApi, RenameChange, SignalAnswer, SignalKind, SignalOptions, StartBody } from './session/ports.ts';
 import type { CredentialRevoked, ISessionCredentialGateway } from './session/revoke-credential.ts';
 import type { IStopSessionGateway } from './stop/types.ts';
 
@@ -30,6 +24,7 @@ export const FERRET_ROUTES = {
   list: 'GET /v1/ferrets',
   get: 'GET /v1/ferrets/:ferretId',
   start: 'POST /v1/ferrets',
+  recoverStart: 'GET /v1/ferrets/by-request/:requestId',
   stop: 'POST /v1/ferrets/:ferretId/stop',
   resume: 'POST /v1/ferrets/:ferretId/resume',
   rename: 'POST /v1/ferrets/:ferretId/rename',
@@ -47,6 +42,30 @@ export const FERRET_ROUTES = {
 
 const ListedSchema = FerretSummarySchema.array();
 const at = (reference: string) => ({ params: { ferretId: reference } });
+
+/** Only a transport failure retries a start; HTTP refusals and local guard errors are final (S54). */
+function lostStartAnswer(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || 'status' in error || 'exitCode' in error) return false;
+  if (error instanceof TypeError && /fetch failed|network|load failed/iu.test(error.message)) return true;
+  if (error instanceof Error && error.name === 'TimeoutError') return true;
+  if (
+    'code' in error &&
+    typeof error.code === 'string' &&
+    [
+      'ConnectionRefused',
+      'FailedToOpenSocket',
+      'ECONNREFUSED',
+      'ENOENT',
+      'ECONNRESET',
+      'ConnectionClosed',
+      'EPIPE',
+      'UND_ERR_SOCKET',
+      'UND_ERR_CLOSED',
+    ].includes(error.code)
+  )
+    return true;
+  return 'cause' in error && error.cause !== error && lostStartAnswer(error.cause);
+}
 
 /**
  * The ferret verbs' daemon side, over the shell's guarded client. Every method is one route and a parse of its answer
@@ -72,7 +91,32 @@ export class ClientSessionApi
   }
 
   async start(body: StartBody): Promise<{ readonly id: string }> {
-    return await this.client.call<{ id: string }>(FERRET_ROUTES.start, { body });
+    // Today's protocol start: one id and one body snapshot, reused by both POSTs and the recovery read.
+    const requestId = randomUUID();
+    const payload = JSON.stringify(body);
+    const captured: unknown = JSON.parse(payload);
+    const init = Object.freeze({ body: captured, headers: Object.freeze({ 'x-fy-request-id': requestId }) });
+    // GG's header shape. Until the shell forwards GG, the server answers 400 missing_request_id, fail closed.
+    let originalError: unknown;
+    try {
+      return await this.client.call<{ id: string }>(FERRET_ROUTES.start, init);
+    } catch (error) {
+      if (!lostStartAnswer(error)) throw error;
+      originalError = error;
+    }
+    try {
+      return await this.client.call<{ id: string }>(FERRET_ROUTES.start, init);
+    } catch (error) {
+      if (!lostStartAnswer(error)) throw error;
+    }
+    const recovered = await this.client
+      .call<{ id: string }>(FERRET_ROUTES.recoverStart, {
+        params: { requestId },
+        query: { payload: createHash('sha256').update(payload, 'utf8').digest('hex') },
+      })
+      .catch(() => undefined);
+    if (recovered === undefined) throw originalError;
+    return recovered;
   }
 
   async stop(

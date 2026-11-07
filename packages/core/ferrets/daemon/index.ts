@@ -49,6 +49,7 @@ import { RegistryPinSessionDirectory, StatePinRepository } from './adapters/pins
 import { KeyedSerialExecutor } from './adapters/storage/keyed-serial-executor.ts';
 import { stateHomeLaunchRefusal } from './lib/route-security/state-home.ts';
 import { terminalLaunchRefusal } from './lib/route-security/launch.ts';
+import { confirmRestore } from './lib/route-security/restore.ts';
 import { AgentPinService, AgentPinSubsystem, withPinned } from './lib/agent-pins/index.ts';
 import { PinService } from './lib/pins/index.ts';
 import { pinRoutes } from './lib/runtime/mounts/pins.ts';
@@ -101,6 +102,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       else if (!details.ok) log.warn('a ferret details file could not be read', { file: details.error.file });
     }
     const held = await kernel.state.read(FerretTokensFile);
+    // An unreadable/missing token document beside existing records cannot prove no owner cut-off was held.
+    if (!held.ok || (held.value === undefined && registry.list().length > 0)) tokens.unavailable();
     if (held.ok && held.value !== undefined) for (const entry of held.value.tokens) tokens.add(entry as TokenEntry);
   })();
   const ready = async (): Promise<void> => {
@@ -429,7 +432,12 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         // A start is IDEMPOTENT on its request id (today's retry contract): the same id and body answer the ferret it
         // already started; the same id with another body is a conflict, never a second ferret.
         const requestId = headerValue(call.request, FY_REQUEST_ID_HEADER)?.trim();
-        if (requestId === undefined || requestId === '') return await start();
+        if (requestId === undefined || requestId === '')
+          throw new ApiError(
+            400,
+            `a start must carry ${FY_REQUEST_ID_HEADER}: without it a retried request starts a second session`,
+            'missing_request_id',
+          );
         const digest = payloadDigest(text);
         return await oneAtATime(requestId, async () => {
           const held = await kernel.state.read(StartRequestsFile);
@@ -485,7 +493,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         const id = await pathFerret(call);
         mayAct(call, id);
         const { message } = parseResumeBody(await body(call));
-        const resumed = await service.resume(id, message);
+        const resumed = await service.resume(id, message, confirmRestore(call, callerIsAgent(call)));
         if (!resumed.ok) return startFailure(resumed.error);
         return jsonResponse({ id: resumed.value });
       },
