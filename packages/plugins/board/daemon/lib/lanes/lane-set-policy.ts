@@ -86,11 +86,11 @@ export const decideLaneChange = (
   request: LaneSetActionRequest,
   actor: LaneActor,
   /** Whether `actor` leads the ferret that proposed a waiting proposal, so it may replace that proposal. */
-  leads: (proposerFerret: string) => boolean = () => false,
+  leads: (proposerSession: string) => boolean = () => false,
 ): Result<LaneSetDecision, LaneSetProblem> => {
   if (actor.kind === 'ferret' && request.action !== 'confirm' && current?.pending !== undefined) {
-    const { proposerFerret, version, proposedBy } = current.pending;
-    const theirs = proposerFerret !== undefined && proposerFerret !== actor.ferretId && !leads(proposerFerret);
+    const { proposerSession, version, proposedBy } = current.pending;
+    const theirs = proposerSession !== undefined && proposerSession !== actor.ferretId && !leads(proposerSession);
     if (theirs) return err({ code: 'proposal-waiting', version, proposedBy });
   }
   switch (request.action) {
@@ -128,7 +128,7 @@ const waitForOwner = (
   current: LaneSet,
   built: LaneSet,
   relocate: Readonly<Record<string, string>>,
-  proposerFerret: string,
+  proposerSession: string,
 ): Result<LaneSetDecision, LaneSetProblem> => {
   // A proposal that drops a lane says where its cards go, or the owner's Accept would strand them.
   const unplaced = laneEditProblems(current, { layout: built, relocate });
@@ -137,7 +137,7 @@ const waitForOwner = (
     version: built.version,
     baseVersion: current.version,
     proposedBy: built.proposedBy,
-    proposerFerret,
+    proposerSession,
     lanes: built.lanes,
     variants: built.variants,
     doneLane: built.doneLane,

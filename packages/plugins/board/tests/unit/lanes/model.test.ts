@@ -212,8 +212,8 @@ const INVALID: readonly SchemaCase[] = [
     value: {
       kind: 'gate',
       options: [
-        { id: 'no', label: 'No', outcome: { kind: 'reopen-with-agenda' } },
-        { id: 'never', label: 'Never', outcome: { kind: 'reopen-with-agenda' } },
+        { id: 'no', label: 'No', outcome: { kind: 'reopen-with-ask' } },
+        { id: 'never', label: 'Never', outcome: { kind: 'reopen-with-ask' } },
       ],
     },
   },
@@ -759,10 +759,10 @@ describe('when a card belongs in a lane', () => {
 
   it('should tell a plan lane the owner gates from the lane the building happens in', () => {
     should(useOf('pr-release-verify', 'plan')).equal(
-      'you are planning or designing it; its agenda asks the owner OK to build before it moves on; moves in when a ferret starts on it',
+      'you are planning or designing it; its agenda asks the owner OK to build before it moves on; moves in when a session starts on it',
     );
     should(useOf('pr-release-verify', 'implement')).equal(
-      'you are building it now; moves in when a ferret starts on it or a PR opens or a PR is ready',
+      'you are building it now; moves in when a session starts on it or a PR opens or a PR is ready',
     );
   });
 

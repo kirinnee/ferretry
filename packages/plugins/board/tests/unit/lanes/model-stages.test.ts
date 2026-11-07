@@ -59,7 +59,7 @@ describe('a lane’s stage, derived when it stores none', () => {
       kind: 'gate',
       options: [
         { id: 'done', label: 'Done', outcome: { kind: 'close' } },
-        { id: 'not-good', label: 'Not good', outcome: { kind: 'reopen-with-agenda' } },
+        { id: 'not-good', label: 'Not good', outcome: { kind: 'reopen-with-ask' } },
       ],
     };
 
@@ -247,7 +247,7 @@ describe('where a gate’s answer sends a card', () => {
           options: [
             option('send', { kind: 'next' }),
             option('skip', { kind: 'lane', laneId: 'deployed' }),
-            option('redo', { kind: 'reopen-with-agenda' }),
+            option('redo', { kind: 'reopen-with-ask' }),
           ],
         },
       }),
@@ -286,7 +286,7 @@ describe('where a gate’s answer sends a card', () => {
     const result = gateOutcomeLane(FERRETRY, 'quick', 'released', 'not-good');
 
     // Assert
-    should(result.ok && result.value.option.outcome).deepEqual({ kind: 'reopen-with-agenda' });
+    should(result.ok && result.value.option.outcome).deepEqual({ kind: 'reopen-with-ask' });
   });
 
   it('should refuse a lane that is not a gate, an option it lacks, and a lane it does not have', () => {

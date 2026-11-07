@@ -319,7 +319,7 @@ describe('LaneSetService and a waiting proposal’s card', () => {
     const actual = await service.apply(FERRETRY_ID, rename('Inbox'), OTHER);
 
     should(actual).deepEqual({ ok: false, error: { code: 'proposal-waiting', version: 4, proposedBy: 'koen' } });
-    should(store.sets.get(FERRETRY_ID)?.pending).containDeep({ version: 4, proposerFerret: 'ms8-abcd1234' });
+    should(store.sets.get(FERRETRY_ID)?.pending).containDeep({ version: 4, proposerSession: 'ms8-abcd1234' });
     should(agenda.withdrawn).deepEqual([]);
   });
 
@@ -333,7 +333,7 @@ describe('LaneSetService and a waiting proposal’s card', () => {
 
     // Assert
     should(own.ok && lead.ok).be.true();
-    should(store.sets.get(FERRETRY_ID)?.pending).containDeep({ version: 6, proposerFerret: 'lead' });
+    should(store.sets.get(FERRETRY_ID)?.pending).containDeep({ version: 6, proposerSession: 'lead' });
     should(agenda.withdrawn).deepEqual([
       ['ms8-abcd1234', reference(4), LANE_ASK_WITHDRAWN.replaced],
       ['ms8-abcd1234', reference(5), LANE_ASK_WITHDRAWN.replaced],

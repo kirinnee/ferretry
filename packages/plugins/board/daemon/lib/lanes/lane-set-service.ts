@@ -162,7 +162,7 @@ export class LaneSetService implements LaneSetSource {
    * somebody else is judged as not this ferret's to replace.
    */
   private async leadsProposer(projectId: BoardProjectId, actor: LaneActor): Promise<(ferret: string) => boolean> {
-    const proposer = actor.kind === 'ferret' ? (await this.store.read(projectId))?.pending?.proposerFerret : undefined;
+    const proposer = actor.kind === 'ferret' ? (await this.store.read(projectId))?.pending?.proposerSession : undefined;
     if (proposer === undefined || this.parents === undefined) return () => false;
     const above = await ancestorsOf(proposer, this.parents);
     return ferret => ferret === proposer && actor.kind === 'ferret' && above.includes(actor.ferretId);
@@ -179,7 +179,7 @@ export class LaneSetService implements LaneSetSource {
     now: LaneSet,
     confirmed = false,
   ): Promise<void> {
-    if (was?.proposerFerret === undefined || now.pending?.version === was.version) return;
+    if (was?.proposerSession === undefined || now.pending?.version === was.version) return;
     const why =
       now.pending !== undefined
         ? LANE_ASK_WITHDRAWN.replaced
@@ -187,7 +187,7 @@ export class LaneSetService implements LaneSetSource {
           ? LANE_ASK_WITHDRAWN.accepted
           : LANE_ASK_WITHDRAWN.dropped;
     await this.asks
-      .withdraw(was.proposerFerret, laneProposalReference(projectId, was.version), why)
+      .withdraw(was.proposerSession, laneProposalReference(projectId, was.version), why)
       .catch(() => undefined);
   }
 }
