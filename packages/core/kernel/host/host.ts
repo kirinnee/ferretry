@@ -454,6 +454,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     ),
     identity: identityPort,
     paths: ownerPaths,
+    timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
     secrets: ownSecretsPort(
       manifest.permissions?.secrets ?? [],
       () => config.secretReferences?.(manifest.id) ?? new Set<string>(),

@@ -31,6 +31,11 @@ export interface KernelPorts {
   readonly identity: IdentityPort;
   /** Read-only facts about where things are on this machine (daemon halves only; never on the app or CLI contexts). */
   readonly paths: PathsPort;
+  /**
+   * The daemon's time-bound rules as this boot runs them: the shipped numbers, or `FYD_TEST_TIMINGS`'s shorter ones
+   * (R247). Read-only; Access's idle expiry counts in `idleDayMs`.
+   */
+  readonly timings: DaemonTimings;
   /** This plugin's OWN secrets, for its own daemon-side use: declared, named by its own config, known to the Vault. */
   readonly secrets: SecretsPort;
   /**
@@ -582,6 +587,20 @@ export interface WebSocketPort {
  * Where the owner's files are, read-only (today's `homedir()`). A name, never a capability: nothing here opens,
  * resolves or reaches a path; reaching one goes through a declared root.
  */
+/** A session's lease, its renewal lead and its cap, in milliseconds. */
+export interface LeaseTimings {
+  readonly leaseMs: number;
+  readonly renewLeadMs: number;
+  readonly maxSessionMs: number;
+}
+
+/** The daemon's time-bound rules (`kernel.timings`). */
+export interface DaemonTimings {
+  readonly lease: LeaseTimings;
+  /** How long one idle day is: the unit `idleExpiryDays` counts in. */
+  readonly idleDayMs: number;
+}
+
 export interface PathsPort {
   /** The owner's home directory as the OS reports it (Accounts orders sign-ins by work folders under it, I184). */
   home(): string;

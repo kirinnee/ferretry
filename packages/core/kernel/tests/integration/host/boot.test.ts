@@ -389,3 +389,29 @@ describe('config/plugins.yaml (§3.6)', () => {
     expect(PluginsConfig.loosens({ plugins: {} }, { plugins: { voice: 'off' } })).toEqual([]);
   });
 });
+
+describe('RR R247 HostOptions.timings on a real boot', () => {
+  test('R247 the timings fyd parsed reach every daemon half as kernel.timings', async () => {
+    const home = await freshHome();
+    let idleDayMs = 0;
+    const access = implementDaemon(
+      definePlugin({ id: 'idle', title: 'Idle', version: '5.0.0', api: 5, core: false, kinds: [] }),
+      {
+        build: ctx => {
+          idleDayMs = ctx.kernel.timings.idleDayMs;
+          return {};
+        },
+      },
+    );
+    const outcome = await bootHost({
+      home,
+      version: '5.0.0',
+      implementations: [access],
+      adapters: realAdapters(home, () => {}, { binary: 'fy' }),
+      timings: { lease: { leaseMs: 6_000, renewLeadMs: 2_000, maxSessionMs: 20_000 }, idleDayMs: 5_000 },
+    });
+    if (outcome.kind === 'refused') throw new Error(outcome.sentence);
+    running.push(outcome.host);
+    expect(idleDayMs).toBe(5_000);
+  });
+});

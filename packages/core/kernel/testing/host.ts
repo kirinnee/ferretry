@@ -1,3 +1,5 @@
+import type { DaemonTimings } from '../contract/ports.ts';
+import { DEFAULT_DAEMON_TIMINGS } from '../host/session/timings.ts';
 import { addedSecretReferenceSentences, ownSecretsPort, secretReferencesIn } from '../host/secrets.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { hours, instantFromEpochMs } from '@ferretry/std';
@@ -104,6 +106,8 @@ export interface TestHostOptions {
   readonly identity?: IdentityPort;
   /** Text the stand-in redaction masks (same-width `*`). */
   readonly secrets?: readonly string[];
+  /** What `kernel.timings` answers. Default: the shipped numbers (`DEFAULT_DAEMON_TIMINGS`). */
+  readonly timings?: DaemonTimings;
   /** The Vault stand-in for `kernel.secrets.resolve`: name to value. Absent, every declared and configured name is `unknown`. */
   readonly vault?: Readonly<Record<string, string>>;
 }
@@ -736,6 +740,7 @@ async function start(world: World): Promise<TestHost> {
       },
       identity,
       paths: Object.freeze({ home: () => options.ownerHome ?? '/home/owner' }),
+      timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
       // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in
       secrets: ownSecretsPort(
         manifest.permissions?.secrets ?? [],

@@ -15,18 +15,16 @@
  */
 
 import { z } from 'zod';
-import { type AccessLeasePolicy, DEFAULT_ACCESS_LEASE_POLICY } from './limits.ts';
+import type { DaemonTimings } from '../../contract/ports.ts';
+import { DEFAULT_ACCESS_LEASE_POLICY } from './limits.ts';
 
 /** The variable a test sets; read once, at boot. */
 export const TEST_TIMINGS_VARIABLE = 'FYD_TEST_TIMINGS';
 
 const DAY_SECONDS = 24 * 60 * 60;
 
-export interface DaemonTimings {
-  readonly lease: AccessLeasePolicy;
-  /** How long one idle day is: the unit `idleExpiryDays` counts in. */
-  readonly idleDayMs: number;
-}
+/** The contract's shape (`kernel.timings`), re-exported where it is parsed. */
+export type { DaemonTimings } from '../../contract/ports.ts';
 
 export const DEFAULT_DAEMON_TIMINGS: DaemonTimings = Object.freeze({
   lease: DEFAULT_ACCESS_LEASE_POLICY,
