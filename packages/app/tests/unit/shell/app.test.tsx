@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { implementApp, type Manifest, skeletonApp } from '@ferretry/kernel/manifest';
 import type { TransportRequest } from '../../../src/client/transport.ts';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
+import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { App } from '../../../src/shell/app.tsx';
 import type { ShellWindow } from '../../../src/shell/context.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
@@ -126,7 +127,7 @@ describe('the app shell', () => {
       <App
         runtime={runtime}
         themes={new ThemePreferenceStore(storage)}
-        storage={storage}
+        layouts={new DeviceLayoutStore(storage)}
         browser={browser}
         scroll={new ScrollMemory(null)}
       />,
@@ -144,7 +145,7 @@ describe('the app shell', () => {
       <App
         runtime={runtime}
         themes={new ThemePreferenceStore(storage)}
-        storage={storage}
+        layouts={new DeviceLayoutStore(storage)}
         browser={browser}
         scroll={new ScrollMemory(null)}
       />,
@@ -164,7 +165,7 @@ describe('the app shell', () => {
       <App
         runtime={runtime}
         themes={new ThemePreferenceStore(storage)}
-        storage={storage}
+        layouts={new DeviceLayoutStore(storage)}
         browser={browser}
         scroll={new ScrollMemory(null)}
       />,
@@ -182,7 +183,7 @@ describe('the app shell', () => {
       <App
         runtime={runtime}
         themes={new ThemePreferenceStore(storage)}
-        storage={storage}
+        layouts={new DeviceLayoutStore(storage)}
         browser={browser}
         scroll={new ScrollMemory(null)}
       />,
@@ -199,7 +200,7 @@ describe('the app shell', () => {
       <App
         runtime={runtime}
         themes={new ThemePreferenceStore(storage)}
-        storage={storage}
+        layouts={new DeviceLayoutStore(storage)}
         browser={browser}
         scroll={new ScrollMemory(null)}
       />,
@@ -215,7 +216,13 @@ describe('the app shell', () => {
     const themes = new ThemePreferenceStore(storage);
     themes.setFamily('mission');
     const view = await mount(
-      <App runtime={runtime} themes={themes} storage={storage} browser={browser} scroll={new ScrollMemory(null)} />,
+      <App
+        runtime={runtime}
+        themes={themes}
+        layouts={new DeviceLayoutStore(storage)}
+        browser={browser}
+        scroll={new ScrollMemory(null)}
+      />,
     );
     await settle();
     const nav = view.container.querySelector('nav[data-slot="nav"]');
