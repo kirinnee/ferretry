@@ -15,6 +15,7 @@ import {
   type VaultApi,
 } from '../contract/index.ts';
 import { KernelOutboundTransport } from './adapters/secrets/kernel-outbound-transport.ts';
+import { KernelSealedDocuments } from './adapters/secrets/kernel-sealed-documents.ts';
 import { kernelSealedFiles } from './adapters/secrets/kernel-sealed-files.ts';
 import { KernelSecretChildRunner } from './adapters/secrets/kernel-secret-child-runner.ts';
 import { FileSecretDocumentStore } from './adapters/secrets/file-secret-document-store.ts';
@@ -48,6 +49,9 @@ const IDENTITY_NOT_OFFERED: SecretCloneIdentitySource = { load: async () => unde
  *
  *   redaction · use · child environments (the fleet launch's, now `childEnvironment`) · authorized fetch · export.
  *
+ * The vault KEY has one more holder, as today (the MCP sign-in's and the accounts' second documents, the link keys):
+ * `sealedDocuments`, which opens only the calling plugin's own documents and never `vault.json`.
+ *
  * The routes are handed `SecretDirectory` and the services, never a `SecretVault` (S6).
  */
 export default implementDaemon(manifest, {
@@ -55,7 +59,8 @@ export default implementDaemon(manifest, {
     const { kernel } = ctx;
     const files = kernelSealedFiles(kernel.state);
     const store = new FileSecretDocumentStore(files);
-    const cipher = new WebCryptoSecretCipher(new FileSecretKey(files));
+    const key = new FileSecretKey(files);
+    const cipher = new WebCryptoSecretCipher(key);
     const directory = new SecretDirectory(store, cipher, kernel.clock);
     const vault = new SecretVault(store, cipher);
     const environments = new ChildEnvironments();
@@ -147,6 +152,8 @@ export default implementDaemon(manifest, {
         inputHolds: input.inputHolds,
         redaction,
         childEnvironments: environments,
+        // Each plugin's OWN sealed documents, over the state port the kernel rooted at its folder (change C).
+        sealedDocuments: new KernelSealedDocuments(key, kernel.clock),
       },
       hooks: { 'ask.sources:input': input.askSource },
     };

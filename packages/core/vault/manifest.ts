@@ -12,6 +12,7 @@ import {
   InputTargets,
   OutputGuardPort,
   RedactionPort,
+  SealedDocumentsPort,
   SecretsChanged,
   VaultFile,
   VaultKeyFile,
@@ -110,6 +111,8 @@ export default definePlugin({
     inputHolds: InputHoldsPort,
     redaction: RedactionPort,
     childEnvironments: ChildEnvironmentPort,
+    /** A daemon half's OWN sealed documents, scoped by its own state port (contract change C). Never a route. */
+    sealedDocuments: SealedDocumentsPort,
   },
   data: {
     state: [VaultFile, VaultKeyFile, HoldsFile, InputRequestFiles],
