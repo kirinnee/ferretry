@@ -8,6 +8,7 @@ import {
   type FencedPath,
   headerValue,
   jsonResponse,
+  type PinnedWorkingDirectory,
   queryValue,
 } from '@ferretry/kernel/contract';
 import { type DaemonContext, type DaemonHalf, implementDaemon } from '@ferretry/kernel/manifest';
@@ -48,6 +49,13 @@ import { FY_REQUEST_ID_HEADER } from './lib/protocol/headers.ts';
 import { WARDEN_LABEL } from './lib/session/peers/warden-lifecycle.ts';
 import { lookupStartRequest, StartRequestsFile, withStartRequest } from './lib/ferrets/start-requests.ts';
 import { sessionFilesystemRoutes } from './lib/runtime/mounts/session-filesystem.ts';
+import { SessionFilesystem } from './lib/session/filesystem/index.ts';
+import { KernelGitRunner } from './adapters/git/runner.ts';
+import {
+  KernelDiffScratch,
+  KernelSessionRootPinner,
+  RunnerSessionGit,
+} from './adapters/session/filesystem/index.ts';
 import { StateAgentPinRepository } from './adapters/agent-pins/index.ts';
 import { RegistryPinSessionDirectory, StatePinRepository } from './adapters/pins/index.ts';
 import { KeyedSerialExecutor } from './adapters/storage/keyed-serial-executor.ts';
@@ -212,9 +220,13 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       const read = await kernel.state.read(FerretSummaryFiles, ferret);
       return read.ok && read.value !== undefined ? new TextDecoder().decode(read.value) : undefined;
     },
-    // Binds to the `work` root's `RootHandle.realPath` when kernel item N reaches the base; until then no work folder
-    // is answered (fails closed: Accounts gets no folder default).
-    realPath: async () => undefined,
+    // The ferret's own `work` root decides: the folder must lie inside what the registry holds for THAT ferret, outside
+    // the daemon's fence, and its links are resolved before the check. A refusal answers no folder (fails closed).
+    realPath: async (ferret, folder) => {
+      const root = kernel.roots.root('work', { ferret });
+      const checked = root.resolve(folder);
+      return checked.ok ? await root.realPath(checked.value) : undefined;
+    },
     vault: needs.vault,
     asks: needs.asks,
   });
@@ -286,23 +298,32 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       throw new ApiError(403, `a ferret acts only on itself and its helpers, and ${target} is neither`, 'forbidden');
   };
 
-  // The file browser's listing, index, changes and diff (today's session-filesystem mount). The service runs on the
-  // kernel's identity-returning root walk, which is not bound yet, so these answer 503 until it is.
+  // The file browser (today's session-filesystem mount) over the kernel: each ferret's `work` root pins its folder and
+  // walks beneath it by descriptor, Git runs in the held object, and the kernel's fence keeps every read out of the
+  // state home (S47). The service is stateless, so one is made for the ferret a request names.
+  const sessionGit = new RunnerSessionGit(
+    new KernelGitRunner({
+      // A string folder is one this module already fenced (a scratch folder); a held directory is the kernel's pin.
+      runBytes: async (program, args, { cwd, ...rest }) =>
+        await kernel.spawn.runBytes(program, args, {
+          ...rest,
+          ...(cwd === undefined ? {} : { cwd: cwd as FencedPath | PinnedWorkingDirectory }),
+        }),
+    }),
+    new KernelDiffScratch(kernel.scratch),
+  );
   const fileBrowser = sessionFilesystemRoutes({
-    filesystem: undefined,
+    filesystem: ferret =>
+      new SessionFilesystem(
+        new KernelSessionRootPinner(kernel.roots.root('work', { ferret: ferret as FerretId })),
+        sessionGit,
+        () => kernel.clock.nowMs(),
+      ),
     reach: async call => {
       const id = await pathFerret(call);
       agentMayReach(call, id);
       const folder = registry.get(id)?.folder;
       if (folder === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
-      // An agent's read sits behind the state-home fence, which the host resolves; with none resolved an agent is
-      // refused, exactly as today's daemon refused it when it could not resolve its own home.
-      if (callerIsAgent(call))
-        throw new ApiError(
-          503,
-          'this daemon cannot resolve its own state home, so it does nothing for an agent that could reach it',
-          'state_home_unresolved',
-        );
       return { id, cwd: folder };
     },
   });

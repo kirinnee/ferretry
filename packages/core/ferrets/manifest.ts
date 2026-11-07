@@ -380,5 +380,6 @@ export default definePlugin({
     ],
     takes: [{ hook: Bearers, key: 'ferret' }],
   },
-  permissions: { roots: ['agent-homes', 'worktrees', 'work'] },
+  // `git`: the file browser's status, listing and diff, and the managed worktrees (today's Git runner).
+  permissions: { roots: ['agent-homes', 'worktrees', 'work'], spawn: ['git'] },
 });

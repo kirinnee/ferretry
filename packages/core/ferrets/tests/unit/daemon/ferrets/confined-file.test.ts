@@ -1,13 +1,23 @@
 import { expect, test } from 'bun:test';
+import { FsError } from '../../../../daemon/lib/session/filesystem/index.ts';
+import { directory, FakeRootPinner, textFile, treeOf } from '../session/filesystem/support.ts';
 import { as, host, record } from './route-fixture.ts';
 
-test('S47 R-0151 fs/file serves no bytes until single-link, ignore and identity-confined readFile is bound', async () => {
+/**
+ * The file route reads bytes through the ferret's own `work` root and nothing else: `RootHandle.pin` holds its folder
+ * open, the walk beneath it refuses links, and a root that cannot be held answers a refusal, never an ordinary read.
+ */
+
+test('S47 R-0151 fs/file serves no bytes where the root cannot be held open: a plain root read is never the fallback', async () => {
+  // The default test pinner refuses, as a platform with no descriptor walk does.
   const h = await host([record('lead'), record('helper', 'lead'), record('stranger')]);
-  // The old RootHandle reader served this as an ordinary file: its stat cannot prove a single link or home identity.
+  // The file is present in the root, where the old RootHandle reader would have served it: stat cannot prove a single
+  // link or the home's identity.
   h.putRoot('work', 'hard-link.txt', 'state content');
   for (const headers of [{}, as('lead').headers]) {
     const answer = await h.request('GET', '/v1/ferrets/helper/fs/file', { headers, query: { path: 'hard-link.txt' } });
-    expect(answer.status).toBe(503);
+    expect(answer.status).toBe(501);
+    expect(answer.json<{ code: string }>().code).toBe('unsupported');
     expect(answer.body).not.toContain('state content');
   }
   expect(
@@ -18,6 +28,40 @@ test('S47 R-0151 fs/file serves no bytes until single-link, ignore and identity-
       })
     ).status,
   ).toBe(403);
+});
+
+test('S47 R-0151 fs/file is served from the pinned walk of the ferret’s own work root', async () => {
+  const pinner = new FakeRootPinner({
+    tree: treeOf(['', directory([{ name: 'a.txt', type: 'file' }])], ['a.txt', textFile('hello\n')]),
+  });
+  // Git answers "not a repository", so the ignore gate has nothing to refuse on.
+  const git = async () => ({ exitCode: 128, signal: null, stdout: '', stderr: 'fatal: not a git repository' });
+  const h = await host([record('lead'), record('helper', 'lead')], { pinner, spawn: git });
+  const answer = await h.request('GET', '/v1/ferrets/lead/fs/file', { query: { path: 'a.txt' } });
+  expect(answer.status).toBe(200);
+  expect(answer.body).toContain('hello');
+  expect(pinner.pinnedCwds.length).toBe(1);
+  // The pin was closed with the request, and the root walked is the one the kernel minted for the ferret.
+  expect(pinner.lastRoot.closed).toBe(true);
+});
+
+test('S47 R-0151 when Git cannot confirm a file is not ignored the file is refused, not served', async () => {
+  const pinner = new FakeRootPinner({
+    tree: treeOf(['', directory([{ name: 'a.txt', type: 'file' }])], ['a.txt', textFile('hello\n')]),
+  });
+  const h = await host([record('lead')], { pinner });
+  const answer = await h.request('GET', '/v1/ferrets/lead/fs/file', { query: { path: 'a.txt' } });
+  expect(answer.json<{ ignored?: boolean }>().ignored).toBe(true);
+  expect(answer.body).not.toContain('hello');
+});
+
+test('S47 a refusal of the pin is the viewer’s own status and never an open root', async () => {
+  const h = await host([record('lead')], {
+    pinner: new FakeRootPinner({ pinError: new FsError('denied', 'session cwd is not served') }),
+  });
+  const answer = await h.request('GET', '/v1/ferrets/lead/fs/file', { query: { path: 'a.txt' } });
+  expect(answer.status).toBe(403);
+  expect(answer.json<{ code: string }>().code).toBe('denied');
 });
 
 test('R-0151 file query scope, rev, format and required path are validated instead of silently serving other bytes', async () => {
@@ -34,13 +78,8 @@ test('R-0151 file query scope, rev, format and required path are validated inste
     expect(answer.status).toBe(400);
     expect(answer.json<{ code: string }>().code).toBe(code);
   }
-  const supported: readonly Readonly<Record<string, string>>[] = [
-    { path: 'a.txt', scope: 'media' },
-    { path: 'a.txt', rev: 'head', format: 'base64' },
-  ];
-  for (const query of supported) {
-    const answer = await h.request('GET', '/v1/ferrets/lead/fs/file', { query });
-    expect(answer.status).toBe(503);
-    expect(answer.body).not.toContain('hello');
-  }
+  // The media folder is kept in the daemon's own state, which this walk never serves: today's answer when none is kept.
+  const media = await h.request('GET', '/v1/ferrets/lead/fs/file', { query: { path: 'a.txt', scope: 'media' } });
+  expect(media.status).toBe(404);
+  expect(media.body).not.toContain('hello');
 });

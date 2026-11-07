@@ -1,3 +1,4 @@
+import type { PinOptions } from '@ferretry/kernel/contract';
 import type { GitWorkingDirectory } from '../../worktrees/ports.ts';
 import type { FsEntryType } from './types.ts';
 
@@ -248,7 +249,7 @@ export interface PinnedRoot {
  */
 export interface SessionRootPinner {
   /** `cwd` is the CONFIGURED pathname from the session document — the last name this subsystem trusts. */
-  pin(cwd: string): Promise<PinnedRoot>;
+  pin(cwd: string, options?: PinOptions): Promise<PinnedRoot>;
 }
 
 export interface SessionRepoInfo {

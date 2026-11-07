@@ -89,10 +89,10 @@ export interface FerretsPorts {
   /** Appends one event to the ferret's `history.jsonl` (today's journal event shape). */
   history?(ferret: FerretId, type: string, data: Readonly<Record<string, unknown>>): Promise<void>;
   /**
-   * The real path of a folder through the fenced `work` root (kernel item N, `RootHandle.realPath`); `undefined` when
-   * it cannot be resolved. Unbound, no work folder is answered.
+   * The real path of a ferret's folder through ITS fenced `work` root (`RootHandle.realPath`); `undefined` when it
+   * cannot be resolved. Unbound, no work folder is answered.
    */
-  realPath?(folder: string): Promise<string | undefined>;
+  realPath?(ferret: FerretId, folder: string): Promise<string | undefined>;
   /** `limits.yaml` as it is now (the kernel's config port), read fresh for every agent-control answer. */
   limits?(): LimitsFile | undefined;
   /** Ferret id → the instant the owner pinned it (`agent-pins.json`). */
@@ -150,7 +150,7 @@ export class FerretsService implements FerretsApi {
     await this.ports.ready?.();
     const record = this.registry.get(ferret);
     if (record === undefined || this.ports.realPath === undefined) return undefined;
-    const folder = await this.ports.realPath(record.folder).catch(() => undefined);
+    const folder = await this.ports.realPath(ferret, record.folder).catch(() => undefined);
     return folder === undefined || folder !== record.folder ? undefined : { folder };
   }
 
