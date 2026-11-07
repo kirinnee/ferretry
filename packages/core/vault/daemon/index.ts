@@ -1,4 +1,5 @@
 import type { ChildEnvironment, FerretId } from '@ferretry/kernel/contract';
+import type { FerretState } from '@ferretry/core-ferrets/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { err, ok, type Result } from '@ferretry/std';
 import manifest from '../manifest.ts';
@@ -6,6 +7,7 @@ import {
   type AuthorizedOutcome,
   type CredentialPlacement,
   type OutboundHttpRequest,
+  HoldsChanged,
   SecretsChanged,
   type SecretName,
   type SecretUseCommand,
@@ -21,7 +23,13 @@ import { KernelSecretChildRunner } from './adapters/secrets/kernel-secret-child-
 import { FileSecretDocumentStore } from './adapters/secrets/file-secret-document-store.ts';
 import { WebCryptoCloneCrypto } from './adapters/secrets/webcrypto-clone-crypto.ts';
 import { FileSecretKey, WebCryptoSecretCipher } from './adapters/secrets/webcrypto-secret-cipher.ts';
-import { inputs } from './lib/inputs.ts';
+import { quarantineOverOutputGuard } from './adapters/inputs/output-guard.ts';
+import { buildInputs } from './inputs.ts';
+import { INPUT_ASK_SOURCE } from './adapters/inputs/asks.ts';
+import type { AgendaId } from './lib/inputs/wire.ts';
+import { EphemeralAwareRedactor } from './lib/inputs/ephemeral-redactor.ts';
+import { EphemeralValues } from './lib/inputs/ephemeral-values.ts';
+import { InputRequestError } from './lib/inputs/errors.ts';
 import { secretRouteHandlers } from './lib/runtime/mounts/secrets.ts';
 import { OutboundProviderAuthorizer } from './lib/secrets/authorizer.ts';
 import { ChildEnvironments } from './lib/secrets/child-environments.ts';
@@ -29,7 +37,7 @@ import { type SecretCloneIdentitySource, SecretExportService, SecretImportServic
 import { HoldRegistry } from './lib/secrets/output-guard.ts';
 import { expandSecretReferences } from './lib/secrets/policy.ts';
 import { VaultRedaction } from './lib/secrets/read-scope.ts';
-import { combinedValues } from './lib/secrets/redaction.ts';
+import { combinedValues, SecretRedactor } from './lib/secrets/redaction.ts';
 import { UnknownSecretError } from './lib/secrets/types.ts';
 import { NO_RECIPES, SecretUseError, SecretUseService } from './lib/secrets/use.ts';
 import { SecretDirectory, SecretVault } from './lib/secrets/vault.ts';
@@ -66,10 +74,26 @@ export default implementDaemon(manifest, {
     const environments = new ChildEnvironments();
     const holds = new HoldRegistry();
 
-    // ── the input half (vault-b): ONE call; what it answers is wired below ──────────────────────────────────────
-    const input = inputs({ directory, holds });
-
-    const redaction = new VaultRedaction(combinedValues(vault, ...input.maskSources));
+    const inputClock = { now: () => kernel.clock.nowMs() };
+    const values = new EphemeralValues(inputClock);
+    const quarantine = quarantineOverOutputGuard(inputClock, holds, event =>
+      kernel.events.publish(HoldsChanged, event),
+    );
+    // As today: close every surface before exposing readers, until durable holds have been replayed (I82).
+    quarantine.lock();
+    const maskSources = combinedValues(vault);
+    const masks = new EphemeralAwareRedactor(new SecretRedactor(maskSources), values);
+    const redaction = new VaultRedaction(maskSources, scrub => masks.scope(scrub));
+    const redact = async (text: string): Promise<string> => await masks.redact(text);
+    const secretStore = directory;
+    // Ferrets already needs Vault: lifecycle events carry status without a reverse needs edge (I108).
+    // Unknown or unreadable status keeps masking, as today; only known ends release the typed values.
+    const ferretStates = new Map<string, FerretState | 'gone'>();
+    const ferretEnded = async (ferret: FerretId): Promise<boolean> => {
+      const state = ferretStates.get(ferret);
+      return state === 'stopped' || state === 'gone';
+    };
+    const inputs = buildInputs(ctx, { values, quarantine, redact, secretStore, ferretEnded });
     // GAP (for the lead): today's operator `secretEnvironment` recipes and the reference sources (recipes, fleet
     // accounts) were composed here from Accounts' and Logins' code; until those ports offer them, a use gets exactly
     // the secrets it named and the listing shows no configured references.
@@ -139,23 +163,48 @@ export default implementDaemon(manifest, {
         placement?: CredentialPlacement,
       ): Promise<AuthorizedOutcome> => await authorizer.send(name, hostAllowlist, request, placement),
       childEnvironment,
-      raiseInput: input.raiseInput,
-      cancelInput: input.cancelInput,
-      inputState: input.inputState,
+      raiseInput: async (ferret, raise) => {
+        try {
+          return ok(await inputs.service.raiseForFerret(ferret, raise));
+        } catch (error) {
+          if (error instanceof InputRequestError) return err(error.message);
+          throw error;
+        }
+      },
+      cancelInput: async (ferret, id) => await inputs.service.cancelForFerret(ferret, id),
+      inputState: async id => await inputs.service.requestState(id),
     };
 
     return {
-      routes: secretRouteHandlers({ directory, references: NO_REFERENCES, uses, imports, exports, changed }),
+      routes: {
+        ...secretRouteHandlers({ directory, references: NO_REFERENCES, uses, imports, exports, changed }),
+        ...inputs.routes,
+      },
+      tools: { ...inputs.tools },
       provides: {
         vault: api,
         outputGuard: holds,
-        inputHolds: input.inputHolds,
+        inputHolds: inputs.holds,
         redaction,
         childEnvironments: environments,
         // Each plugin's OWN sealed documents, over the state port the kernel rooted at its folder (change C).
         sealedDocuments: new KernelSealedDocuments(key, kernel.clock),
       },
-      hooks: { 'ask.sources:input': input.askSource },
+      hooks: { 'ask.sources:input': inputs.askSource },
+      subscribers: {
+        'ferrets.changed': async ({ ferret, state, gone }) => {
+          if (gone === true) ferretStates.set(ferret, 'gone');
+          else if (state !== undefined) ferretStates.set(ferret, state);
+          if (await ferretEnded(ferret as FerretId)) await inputs.service.sessionEnded(ferret);
+        },
+        'asks.changed': async ({ askId, state }) => {
+          if (state !== 'closed') return;
+          const ask = await ctx.needs.asks.get(askId);
+          if (ask?.source !== INPUT_ASK_SOURCE || ask.state !== 'closed' || ask.ferret === undefined) return;
+          // As today, only the request's current pending card is ended; our own final-card close is a no-op.
+          await inputs.service.cardDismissed(ask.ferret, askId as string as AgendaId);
+        },
+      },
     };
   },
 });

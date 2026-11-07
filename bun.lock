@@ -98,6 +98,7 @@
       "version": "5.0.0",
       "dependencies": {
         "@ferretry/core-asks": "workspace:*",
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
