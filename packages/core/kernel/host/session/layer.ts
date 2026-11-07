@@ -1280,7 +1280,7 @@ class SealedSession implements CarrierLink {
    */
   #consume(): boolean {
     this.#receive = recordConsumed(this.#receive);
-    if (this.#receive.consumed - this.#backlog.length > this.#receive.credited + CREDIT_WINDOW_FRAMES) {
+    if (this.#receive.consumed > this.#receive.credited + CREDIT_WINDOW_FRAMES) {
       this.#endSession(SESSION_CLOSE_CODES.flowViolation, 'the peer exceeded its credit window');
       return false;
     }
@@ -1306,7 +1306,9 @@ class SealedSession implements CarrierLink {
 
   /** A request-side record: a queue deeper than one window means the peer is not honouring the protocol. */
   #sendEncodedRecord(record: PendingRecord): void {
-    if (record.plaintext.byteLength > MAX_PLAINTEXT_BYTES || wholeRecords(this.#waiting) >= CREDIT_WINDOW_FRAMES) {
+    const room = Math.max(0, this.#send.allowed - this.#send.sent);
+    // Only records past what the peer has credited are WAITING FOR CREDIT; the rest wait only for the pull.
+    if (record.plaintext.byteLength > MAX_PLAINTEXT_BYTES || wholeRecords(this.#waiting) - room >= CREDIT_WINDOW_FRAMES) {
       this.#endSession(SESSION_CLOSE_CODES.protocolError, 'this session cannot carry its own answer');
       return;
     }
