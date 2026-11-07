@@ -7,7 +7,7 @@ import { diagnose, renderFindings } from '../../src/lib/commands/doctor.ts';
 import { compiledWords, findWords } from '../../src/lib/commands/words.ts';
 import type { DaemonController } from '../../src/lib/daemon/controller.ts';
 import { runFy } from '../../src/lib/run.ts';
-import { boardEntry, fakeWorld, inventoryOf, registryOf, skeletonEntry } from './fakes.ts';
+import { boardEntry, fakeWorld, inventoryOf, RecordingTransport, registryOf, skeletonEntry } from './fakes.ts';
 import { route } from '@ferretry/kernel/manifest';
 
 const up = { state: 'up', baseUrl: 'http://127.0.0.1:7431', health: { protocol: 1, version: '5.0.0' } } as const;
@@ -258,6 +258,70 @@ describe('fy doctor', () => {
     should(await runFy(['doctor'], healthy.world)).equal(0);
     const broken = fakeWorld({ registry: registryOf(boardEntry()), probe: down });
     should(await runFy(['doctor'], broken.world)).equal(1);
+  });
+
+  describe('the daemon’s own host checks (GET /v1/doctor)', () => {
+    const check = (over: Record<string, unknown>) => ({
+      name: 'git',
+      requirement: 'required',
+      status: 'present',
+      summary: 'git is on PATH',
+      impact: 'no repository work without it',
+      ...over,
+    });
+    const report = (checks: unknown[], ready = true) => ({ checks, harnesses: [], ready, limitation: 'presence only' });
+    const healthyWorld = (body: unknown) => {
+      const transport = new RecordingTransport();
+      transport.replies.push({ status: 200, body });
+      return {
+        transport,
+        ...fakeWorld({
+          registry: registryOf(boardEntry()),
+          inventory: inventoryOf({ id: 'board', contract: 'h-board' }),
+          transport,
+        }),
+      };
+    };
+
+    it('should exit 1 when a required host check is missing, and say the fix', async () => {
+      const { world, io, transport } = healthyWorld(report([check({ status: 'missing', summary: 'git is not on PATH' })], false));
+      should(await runFy(['doctor'], world)).equal(1);
+      should(transport.sent.map(request => request.path)).containEql('/v1/doctor');
+      should(io.stdout()).containEql('FAIL  host git: git is not on PATH');
+      should(io.stdout()).containEql('fix: no repository work without it');
+    });
+
+    it('should exit 0 when every host check is present', async () => {
+      const { world, io } = healthyWorld(report([check({}), check({ name: 'gh', requirement: 'optional' })]));
+      should(await runFy(['doctor'], world)).equal(0);
+      should(io.stdout()).containEql('ok    host git');
+    });
+
+    it('should only warn for a missing optional check, and fail when the daemon says it is not ready', async () => {
+      const optional = healthyWorld(report([check({ requirement: 'optional', status: 'missing' })]));
+      should(await runFy(['doctor'], optional.world)).equal(0);
+      should(optional.io.stdout()).containEql('warn  host git');
+      const notReady = healthyWorld(report([], false));
+      should(await runFy(['doctor'], notReady.world)).equal(1);
+      should(notReady.io.stdout()).containEql('FAIL  host checks: the daemon reports it is not ready');
+    });
+
+    it('should warn, not fail, when the report is refused or not readable', async () => {
+      const refused = healthyWorld({ error: 'no' });
+      refused.transport.replies[0] = { status: 403, body: { error: 'not allowed' } };
+      should(await runFy(['doctor'], refused.world)).equal(0);
+      should(refused.io.stdout()).containEql('warn  host checks: host checks could not be read');
+      const shapeless = healthyWorld({ nonsense: true });
+      should(await runFy(['doctor'], shapeless.world)).equal(0);
+      should(shapeless.io.stdout()).containEql('warn  host checks');
+    });
+
+    it('should not ask for the report when the daemon is away', async () => {
+      const transport = new RecordingTransport();
+      const { world } = fakeWorld({ registry: registryOf(boardEntry()), probe: down, transport });
+      await runFy(['doctor'], world);
+      should(transport.sent).be.empty();
+    });
   });
 
   it('should keep going when the plugin list cannot be read or a half will not load', async () => {

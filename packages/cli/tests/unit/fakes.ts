@@ -88,7 +88,9 @@ const kernelEntry: KernelEntry = {
     api: 5,
     core: true,
     kinds: [],
-    actions: { routes: [route('GET /v1/glossary', { ...SCOPE, caller: 'any' })] },
+    actions: {
+      routes: [route('GET /v1/glossary', { ...SCOPE, caller: 'any' }), route('GET /v1/doctor', { ...SCOPE, caller: 'any' })],
+    },
   }),
   contract: 'h-kernel',
 };
