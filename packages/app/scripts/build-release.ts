@@ -13,7 +13,8 @@
  * `packages/app/release-signing-key.pub` and names the release by the repository.
  *
  * Writes three files:
- *   - `sw.verified.js`         the worker (`src/worker/service-worker.ts`), with the committed public
+ *   - `sw.verified.js`         the worker (`src/worker/service-worker.ts`) with every plugin worker extension
+ *                              (`packages/{core,plugins}/<id>/app/worker.ts`), the committed public
  *                              key, the app's rewrites and its header rules compiled in;
  *   - `release-manifest.json`  every file in `dist/` and the SHA-256 of its bytes;
  *   - `release-manifest.sig`   the UNSIGNED marker. Only `scripts/ci/sign-pwa-release.sh`, holding
@@ -62,6 +63,33 @@ const listFiles = async (directory: string): Promise<string[]> => {
 
 const COMMITTED_RELEASE_KEY = join(packageRoot, 'release-signing-key.pub');
 
+/**
+ * Every plugin worker extension (`src/worker/extensions.ts`): `packages/core/<id>/app/worker.ts`, then
+ * `packages/plugins/<id>/app/worker.ts`, each group by id. Compiled INTO the signed worker, never loaded at run time.
+ */
+const workerExtensionFiles = async (): Promise<string[]> => {
+  const found: string[] = [];
+  for (const group of ['packages/core', 'packages/plugins']) {
+    const ids = (await readdir(join(repositoryRoot, group), { withFileTypes: true }))
+      .filter(entry => entry.isDirectory())
+      .map(entry => entry.name)
+      .sort();
+    for (const id of ids) {
+      const file = join(repositoryRoot, group, id, 'app/worker.ts');
+      if (await Bun.file(file).exists()) found.push(file);
+    }
+  }
+  return found;
+};
+
+/** The body `src/worker/extension-list.ts` is built with: one import per extension, in that order. */
+const extensionListSource = (files: readonly string[]): string =>
+  [
+    "import type { WorkerExtension } from './extensions.ts';",
+    ...files.map((file, index) => `import extension${index} from ${JSON.stringify(file)};`),
+    `export const workerExtensions: readonly WorkerExtension[] = [${files.map((_, index) => `extension${index}`).join(', ')}];`,
+  ].join('\n');
+
 /** The arguments that are neither a `--flag` nor a flag's value. */
 const positionals = (args: readonly string[]): string[] =>
   args.filter((arg, index) => !arg.startsWith('--') && !(args[index - 1] ?? '').startsWith('--'));
@@ -89,8 +117,20 @@ const buildRelease = async (
   const headers = parseReleaseHeaders(await readFile(join(packageRoot, 'public/_headers'), 'utf8'));
   if (headers.length === 0) fail('public/_headers names no header rules');
 
+  const extensionList = extensionListSource(await workerExtensionFiles());
   const worker = await Bun.build({
     entrypoints: [join(packageRoot, 'src/worker/service-worker.ts')],
+    plugins: [
+      {
+        name: 'fy-worker-extensions',
+        setup: build => {
+          build.onLoad({ filter: /[\\/]src[\\/]worker[\\/]extension-list\.ts$/u }, () => ({
+            contents: extensionList,
+            loader: 'ts',
+          }));
+        },
+      },
+    ],
     format: 'esm',
     minify: true,
     splitting: false,

@@ -5,11 +5,11 @@ import {
   checkLayout,
   chooseLayout,
   DEFAULT_LAYOUT,
-  layoutCandidates,
   LayoutSchema,
+  applyOverrides,
+  layoutCandidates,
   resolveLayout,
   setDeviceOverride,
-  setLayoutField,
 } from '../../../src/layout/layout.ts';
 import { FRAME_SLOTS, FRAME_SLOTS_COMPLETE, isSlotName } from '../../../src/layout/slots.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
@@ -41,17 +41,6 @@ const surfaces = [
 ];
 const views = viewsOf(surfaces);
 
-/** A layout with only the fields the Layouts contract requires, plus `extra`. */
-function bare(id: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    id,
-    nav: { side: 'left', style: 'rail', items: [] },
-    side: { show: 'none', holds: 'none' },
-    density: 'comfortable',
-    ...extra,
-  };
-}
-
 describe('slots', () => {
   test('the frame slot list matches the leaf', () => {
     expect(FRAME_SLOTS_COMPLETE).toBe(true);
@@ -71,14 +60,19 @@ describe('the layout item', () => {
   });
 
   test('an unknown view name is refused, naming where', () => {
-    const layout = LayoutSchema.parse(bare('mine', { nav: { side: 'right', style: 'rail', items: ['agenda', 'nowhere'] } }));
+    const layout = LayoutSchema.parse({ id: 'mine', nav: { side: 'right', items: ['agenda', 'nowhere'] } });
     expect(checkLayout(layout, views.installed)).toEqual([
       { at: 'nav.items', message: '"nowhere" is not an installed screen' },
     ]);
   });
 
   test('an unknown panel or top item is refused', () => {
-    const layout = LayoutSchema.parse(bare('mine', { top: ['clock'], panels: { 'ferret.side': ['ghost'] } }));
+    const layout = LayoutSchema.parse({
+      id: 'mine',
+      nav: { side: 'left', items: [] },
+      top: ['clock'],
+      panels: { 'ferret.side': ['ghost'] },
+    });
     expect(checkLayout(layout, views.installed).map(issue => issue.at)).toEqual(['top', 'panels.ferret.side']);
   });
 
@@ -91,8 +85,8 @@ describe('the layout item', () => {
 
 describe('choosing a layout', () => {
   test('the device override wins, then the daemon, then the default', () => {
-    const device = bare('device', { nav: { side: 'top', style: 'bar', items: ['board'] } });
-    const daemon = bare('daemon', { nav: { side: 'right', style: 'rail', items: ['agenda'] } });
+    const device = { id: 'device', nav: { side: 'top', items: ['board'] } };
+    const daemon = { id: 'daemon', nav: { side: 'right', items: ['agenda'] } };
     expect(chooseLayout([device, daemon], views.installed)).toMatchObject({
       kind: 'applied',
       layout: { id: 'device' },
@@ -102,7 +96,7 @@ describe('choosing a layout', () => {
   });
 
   test('a refused layout falls through and says why', () => {
-    const broken = bare('broken', { nav: { side: 'left', style: 'rail', items: ['nowhere'] } });
+    const broken = { id: 'broken', nav: { side: 'left', items: ['nowhere'] } };
     const choice = chooseLayout([broken], views.installed);
     expect(choice.kind).toBe('refused');
     if (choice.kind === 'refused') {
@@ -112,17 +106,50 @@ describe('choosing a layout', () => {
   });
 });
 
-describe('fy layout set', () => {
-  test('moves the sidebar and chooses the nav items', () => {
-    const right = setLayoutField(DEFAULT_LAYOUT, 'nav.side', 'right');
-    expect(right.ok && right.layout.nav.side).toBe('right');
-    const items = setLayoutField(DEFAULT_LAYOUT, 'nav.items', 'agenda, board');
-    expect(items.ok && items.layout.nav.items).toEqual(['agenda', 'board']);
+describe('layout set --device', () => {
+  test('moves the sidebar and chooses the nav items, as overrides of only those keys', () => {
+    const right = setDeviceOverride(DEFAULT_LAYOUT, {}, 'nav.side', 'right');
+    expect(right).toEqual({ ok: true, overrides: { nav: { side: 'right' } } });
+    if (!right.ok) return;
+    const items = setDeviceOverride(DEFAULT_LAYOUT, right.overrides, 'nav.items', 'agenda, board');
+    expect(items).toEqual({ ok: true, overrides: { nav: { side: 'right', items: ['agenda', 'board'] } } });
   });
 
   test('refuses an unknown setting or value', () => {
-    expect(setLayoutField(DEFAULT_LAYOUT, 'nav.colour', 'red').ok).toBe(false);
-    expect(setLayoutField(DEFAULT_LAYOUT, 'nav.side', 'middle').ok).toBe(false);
+    expect(setDeviceOverride(DEFAULT_LAYOUT, {}, 'nav.colour', 'red').ok).toBe(false);
+    expect(setDeviceOverride(DEFAULT_LAYOUT, {}, 'nav.side', 'middle').ok).toBe(false);
+  });
+});
+
+describe('the owner layout and this device (§5.3)', () => {
+  const owner = LayoutSchema.parse({ id: 'owner', nav: { side: 'right', items: ['agenda'] } });
+
+  test('the owner layout applies on every device when this device changed nothing', () => {
+    expect(chooseLayout(layoutCandidates(owner, {}), views.installed)).toEqual({ kind: 'applied', layout: owner });
+  });
+
+  test('a device override sits on top of the owner layout, field by field', () => {
+    const edited = setDeviceOverride(owner, {}, 'nav.style', 'bar');
+    expect(edited.ok).toBe(true);
+    if (!edited.ok) return;
+    const choice = chooseLayout(layoutCandidates(owner, edited.overrides), views.installed);
+    // The device's field wins; every field it did not touch still follows the owner.
+    expect(choice.layout).toMatchObject({ id: 'owner', nav: { side: 'right', style: 'bar', items: ['agenda'] } });
+  });
+
+  test('an override the views refuse falls back to the owner layout alone', () => {
+    const choice = chooseLayout(layoutCandidates(owner, { nav: { items: ['nowhere'] } }), views.installed);
+    expect(choice).toMatchObject({ kind: 'refused', layout: { id: 'owner', nav: { items: ['agenda'] } } });
+  });
+
+  test('without an owner layout the overrides go on the built-in default', () => {
+    expect(layoutCandidates(undefined, {})).toEqual([]);
+    expect(layoutCandidates(undefined, { density: 'compact' })[0]).toMatchObject({ id: 'default', density: 'compact' });
+  });
+
+  test('applyOverrides lays phone fields over the phone overrides the layout has', () => {
+    const laid = applyOverrides(DEFAULT_LAYOUT, { phone: { nav: { side: 'top' } } });
+    expect(laid?.phone?.nav).toEqual({ side: 'top', items: ['agenda', 'ferrets', 'board'] });
   });
 });
 
@@ -142,7 +169,7 @@ describe('the frame plan', () => {
   });
 
   test('a slot the layout does not list shows every declared panel by order', () => {
-    const layout = resolveLayout(LayoutSchema.parse(bare('bare')), 'wide');
+    const layout = resolveLayout(LayoutSchema.parse({ id: 'bare', nav: { side: 'left', items: [] } }), 'wide');
     expect(
       planFrame(layout, views)
         .panels('ferret.side')
@@ -155,41 +182,5 @@ describe('the frame plan', () => {
     expect(twice.screens.get('board')).toBeUndefined();
     expect(twice.screens.get('board.board')?.plugin).toBe('board');
     expect(twice.screens.get('other.board')?.plugin).toBe('other');
-  });
-});
-
-describe('the owner layout and this device (§5.3)', () => {
-  const owner = LayoutSchema.parse(bare('owner', { nav: { side: 'right', style: 'rail', items: ['agenda'] } }));
-
-  test('the owner layout applies on every device when this device changed nothing', () => {
-    expect(chooseLayout(layoutCandidates(owner, {}), views.installed)).toEqual({ kind: 'applied', layout: owner });
-  });
-
-  test('a device override sits on top of the owner layout, key by key', () => {
-    const edited = setDeviceOverride(owner, {}, 'density', 'compact');
-    expect(edited.ok).toBe(true);
-    if (!edited.ok) return;
-    expect(edited.overrides).toEqual({ density: 'compact' });
-    const choice = chooseLayout(layoutCandidates(owner, edited.overrides), views.installed);
-    // The device's key wins; every key it did not touch still follows the owner.
-    expect(choice.layout).toMatchObject({ id: 'owner', density: 'compact', nav: { side: 'right' } });
-  });
-
-  test('an override the views refuse falls back to the owner layout alone', () => {
-    const choice = chooseLayout(
-      layoutCandidates(owner, { nav: { side: 'left', style: 'rail', items: ['nowhere'] } }),
-      views.installed,
-    );
-    expect(choice).toMatchObject({ kind: 'refused', layout: { id: 'owner', nav: { side: 'right' } } });
-  });
-
-  test('without an owner layout the overrides go on the built-in default', () => {
-    expect(layoutCandidates(undefined, {})).toEqual([]);
-    expect(layoutCandidates(undefined, { density: 'compact' })[0]).toMatchObject({ id: 'default', density: 'compact' });
-  });
-
-  test('a device edit to an unknown path or value is refused', () => {
-    expect(setDeviceOverride(owner, {}, 'nav.colour', 'red').ok).toBe(false);
-    expect(setDeviceOverride(owner, {}, 'side.show', 'never').ok).toBe(false);
   });
 });

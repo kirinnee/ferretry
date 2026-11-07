@@ -7,7 +7,7 @@ import { DEFAULT_LAYOUT } from '../../../src/layout/layout.ts';
 import { APP_STORAGE } from '../../../src/storage/names.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
 
-const theme = { id: 'default', tokens: {} };
+const theme = { id: 'default', label: 'Default', base: 'studio' };
 const owner = { ...DEFAULT_LAYOUT, id: 'owner', density: 'compact' as const };
 
 /** A guarded client for the `layouts` package that answers `GET /v1/layouts/current` from `answer`. */
