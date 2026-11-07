@@ -1,3 +1,6 @@
+import type { HostFactsPort } from '../contract/ports.ts';
+import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
+import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
 import type { DaemonTimings } from '../contract/ports.ts';
 import { DEFAULT_DAEMON_TIMINGS } from '../host/session/timings.ts';
 import { addedSecretReferenceSentences, ownSecretsPort, secretReferencesIn } from '../host/secrets.ts';
@@ -106,6 +109,8 @@ export interface TestHostOptions {
   readonly identity?: IdentityPort;
   /** Text the stand-in redaction masks (same-width `*`). */
   readonly secrets?: readonly string[];
+  /** What `kernel.hostFacts` answers to a plugin that declared `permissions.hostFacts`. Absent: every read refuses. */
+  readonly hostFacts?: HostFactsPort;
   /** What `kernel.timings` answers. Default: the shipped numbers (`DEFAULT_DAEMON_TIMINGS`). */
   readonly timings?: DaemonTimings;
   /** The Vault stand-in for `kernel.secrets.resolve`: name to value. Absent, every declared and configured name is `unknown`. */
@@ -740,6 +745,10 @@ async function start(world: World): Promise<TestHost> {
       },
       identity,
       paths: Object.freeze({ home: () => options.ownerHome ?? '/home/owner' }),
+      hostFacts:
+        manifest.permissions?.hostFacts === true && options.hostFacts !== undefined
+          ? options.hostFacts
+          : undeclaredHostFacts(manifest.id, options.hostFacts ?? NO_HOST_FACTS),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
       // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in
       secrets: ownSecretsPort(

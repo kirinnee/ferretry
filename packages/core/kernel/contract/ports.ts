@@ -31,6 +31,8 @@ export interface KernelPorts {
   readonly identity: IdentityPort;
   /** Read-only facts about where things are on this machine (daemon halves only; never on the app or CLI contexts). */
   readonly paths: PathsPort;
+  /** Read-only facts about this machine from `/proc` and `/sys`; only for a manifest with `permissions.hostFacts`. */
+  readonly hostFacts: HostFactsPort;
   /**
    * The daemon's time-bound rules as this boot runs them: the shipped numbers, or `FYD_TEST_TIMINGS`'s shorter ones
    * (R247). Read-only; Access's idle expiry counts in `idleDayMs`.
@@ -593,6 +595,65 @@ export interface WebSocketPort {
  * Where the owner's files are, read-only (today's `homedir()`). A name, never a capability: nothing here opens,
  * resolves or reaches a path; reaching one goes through a declared root.
  */
+/** A per-process file under `/proc/<pid>/` (or `/proc/self/`) that `hostFacts.procFile` reads. */
+export type ProcPidFile = 'stat' | 'status' | 'comm' | 'cmdline' | 'cgroup' | 'statm';
+
+/** A machine-wide file under `/proc/` that `hostFacts.procSystemFile` reads. */
+export type ProcSystemFile = 'stat' | 'meminfo' | 'sys/kernel/pid_max' | 'net/tcp' | 'net/tcp6';
+
+/** A cgroup-v2 interface file under `/sys/fs/cgroup/<path>/` that `hostFacts.cgroupFile` reads. */
+export type CgroupFile =
+  | 'cgroup.controllers'
+  | 'cgroup.procs'
+  | 'memory.events'
+  | 'memory.events.local'
+  | 'memory.high'
+  | 'memory.max'
+  | 'memory.swap.max'
+  | 'pids.max'
+  | 'cpu.weight'
+  | 'cpu.max';
+
+/**
+ * The machine reads today's Terminals made through `node:fs` (its interim `adapters/host/fs.ts`), as narrow methods
+ * that each name one kind of file: a pid is a whole number, a descriptor is digits, a cgroup path is plain segments,
+ * and no method takes a free path. Each throws as the read it replaces did (a vanished process, a missing file), so
+ * a caller keeps its own catch.
+ */
+export interface HostFactsPort {
+  /** `process.platform`. */
+  readonly platform: string;
+  /** `os.availableParallelism()`. */
+  readonly cpus: number;
+  /** `os.totalmem()`. */
+  readonly totalMemoryBytes: number;
+  /** The numeric entries of `/proc`. */
+  pids(): Promise<readonly number[]>;
+  procFile(pid: number | 'self', file: ProcPidFile): Promise<string>;
+  procSystemFile(file: ProcSystemFile): Promise<string>;
+  /** `readdir /proc/<pid>/task`. */
+  procTasks(pid: number): Promise<readonly string[]>;
+  /** `/proc/<pid>/task/<task>/children`. */
+  procTaskChildren(pid: number, task: number): Promise<string>;
+  /** `readdir /proc/<pid>/fd`. */
+  procFds(pid: number): Promise<readonly string[]>;
+  /** `readlink /proc/<pid>/fd/<fd>`. */
+  procFdLink(pid: number, fd: string): Promise<string>;
+  /** What `stat /proc/<pid>/fd/<fd>` reaches: whether a character device, and which (`rdev`). */
+  procFdReach(pid: number, fd: string): Promise<{ readonly character: boolean; readonly device: number }>;
+  /** `readlink /proc/<pid>/exe`. */
+  procExecutable(pid: number): Promise<string>;
+  /** `/sys/fs/cgroup/<path>/<file>`; `path` is relative (`''` is the root). */
+  cgroupFile(path: string, file: CgroupFile): Promise<string>;
+  /** `readdir /sys/fs/cgroup/<path>`. */
+  cgroupChildren(path: string): Promise<readonly string[]>;
+  /**
+   * A block device's I/O scheduler (`/sys/dev/block/<major>:<minor>`, resolved; a partition reads its parent
+   * disk's `queue/scheduler`): the device's name and the file's text.
+   */
+  blockScheduler(major: number, minor: number): Promise<{ readonly device: string; readonly scheduler: string }>;
+}
+
 /** A session's lease, its renewal lead and its cap, in milliseconds. */
 export interface LeaseTimings {
   readonly leaseMs: number;

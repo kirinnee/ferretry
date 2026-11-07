@@ -1,0 +1,96 @@
+/**
+ * `kernel.hostFacts` on the real machine: each method builds its one path from checked parts (today's Terminals
+ * reads, copied: the same files, `utf8`, the same throw on a missing one) and reads nothing else.
+ */
+import { readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
+import { availableParallelism, totalmem } from 'node:os';
+import { basename, dirname, join } from 'node:path';
+import type { HostFactsPort } from '../../contract/ports.ts';
+
+const SEGMENT = /^[A-Za-z0-9_.@:+-]+$/u;
+
+function pidOf(pid: number | 'self'): string {
+  if (pid === 'self') return 'self';
+  if (!Number.isSafeInteger(pid) || pid < 1) throw new RangeError(`${String(pid)} is not a process id`);
+  return String(pid);
+}
+
+function fdOf(fd: string): string {
+  if (!/^[0-9]{1,9}$/u.test(fd)) throw new RangeError(`${fd} is not a descriptor number`);
+  return fd;
+}
+
+function cgroupPathOf(path: string): string[] {
+  const segments = path.split('/').filter(segment => segment !== '');
+  for (const segment of segments)
+    if (!SEGMENT.test(segment) || segment === '.' || segment === '..')
+      throw new RangeError(`${path} is not a cgroup path`);
+  return segments;
+}
+
+function deviceNumber(value: number, label: string): string {
+  if (!Number.isSafeInteger(value) || value < 0) throw new RangeError(`${String(value)} is not a ${label} number`);
+  return String(value);
+}
+
+/** The real `/proc` and `/sys`; a suite points the roots at a fixture tree. */
+export function nodeHostFacts(roots: { readonly proc?: string; readonly sys?: string } = {}): HostFactsPort {
+  const proc = roots.proc ?? '/proc';
+  const sys = roots.sys ?? '/sys';
+  const cgroupRoot = join(sys, 'fs', 'cgroup');
+  const port: HostFactsPort = {
+    platform: process.platform,
+    cpus: availableParallelism(),
+    totalMemoryBytes: totalmem(),
+    pids: async () => (await readdir(proc)).filter(name => /^[1-9][0-9]*$/u.test(name)).map(name => Number(name)),
+    procFile: async (pid, file) => await readFile(join(proc, pidOf(pid), file), 'utf8'),
+    procSystemFile: async file => await readFile(join(proc, file), 'utf8'),
+    procTasks: async pid => await readdir(join(proc, pidOf(pid), 'task')),
+    procTaskChildren: async (pid, task) =>
+      await readFile(join(proc, pidOf(pid), 'task', pidOf(task), 'children'), 'utf8'),
+    procFds: async pid => await readdir(join(proc, pidOf(pid), 'fd')),
+    procFdLink: async (pid, fd) => await readlink(join(proc, pidOf(pid), 'fd', fdOf(fd))),
+    procFdReach: async (pid, fd) => {
+      const found = await stat(join(proc, pidOf(pid), 'fd', fdOf(fd)));
+      return { character: found.isCharacterDevice(), device: found.rdev };
+    },
+    procExecutable: async pid => await readlink(join(proc, pidOf(pid), 'exe')),
+    cgroupFile: async (path, file) => await readFile(join(cgroupRoot, ...cgroupPathOf(path), file), 'utf8'),
+    cgroupChildren: async path => await readdir(join(cgroupRoot, ...cgroupPathOf(path))),
+    blockScheduler: async (major, minor) => {
+      let node = await realpath(
+        join(sys, 'dev', 'block', `${deviceNumber(major, 'major')}:${deviceNumber(minor, 'minor')}`),
+      );
+      // A partition has no queue of its own; its parent disk does.
+      const own = await readFile(join(node, 'queue', 'scheduler'), 'utf8').catch(() => undefined);
+      if (own === undefined) node = dirname(node);
+      const scheduler = own ?? (await readFile(join(node, 'queue', 'scheduler'), 'utf8').catch(() => ''));
+      return { device: basename(node), scheduler };
+    },
+  };
+  return Object.freeze(port);
+}
+
+/** What a plugin without `permissions.hostFacts` holds: the facts are there to be named, every read refuses. */
+export function undeclaredHostFacts(plugin: string, base: HostFactsPort): HostFactsPort {
+  const refuse = async (): Promise<never> => {
+    throw new Error(`${plugin} did not declare permissions.hostFacts, so it reads no /proc or /sys facts.`);
+  };
+  return Object.freeze({
+    platform: base.platform,
+    cpus: base.cpus,
+    totalMemoryBytes: base.totalMemoryBytes,
+    pids: refuse,
+    procFile: refuse,
+    procSystemFile: refuse,
+    procTasks: refuse,
+    procTaskChildren: refuse,
+    procFds: refuse,
+    procFdLink: refuse,
+    procFdReach: refuse,
+    procExecutable: refuse,
+    cgroupFile: refuse,
+    cgroupChildren: refuse,
+    blockScheduler: refuse,
+  });
+}

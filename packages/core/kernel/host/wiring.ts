@@ -5,6 +5,7 @@ import { homedir, hostname } from 'node:os';
 import { platformRootPinner } from './adapters/pinned/index.ts';
 import { bunSpawn, bunWebSockets, bunWorkers, globalFetch } from './adapters/process.ts';
 import { scratchPort } from './scratch.ts';
+import { nodeHostFacts } from './adapters/host-facts.ts';
 import { createConfigFiles } from './config/index.ts';
 import type { ConfigJudge, HostAdapters, HostConfig, PluginStateHandle } from './host.ts';
 import { type LogSink, scopedLog } from './log.ts';
@@ -113,6 +114,7 @@ export function realAdapters(
     ownerHome: () => homedir(),
     pinner: platformRootPinner(),
     scratch: scratchPort(),
+    hostFacts: nodeHostFacts(),
   };
 }
 

@@ -1,3 +1,4 @@
+import type { HostFactsPort } from '../contract/ports.ts';
 import type { Instant } from '@ferretry/std';
 import { milliseconds } from '@ferretry/std';
 import type { InputHolds, OutputGuard, Admission, Redaction, WorkFolders } from '../contract/bound.ts';
@@ -65,6 +66,8 @@ import { PluginLifecycle } from './lifecycle.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import { noWebSockets } from './adapters/process.ts';
 import { ownSecretsPort } from './secrets.ts';
+import { NO_HOST_FACTS } from './no-host-facts.ts';
+import { undeclaredHostFacts } from './adapters/host-facts.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
 import { type DaemonTimings, DEFAULT_DAEMON_TIMINGS } from './session/timings.ts';
 import {
@@ -151,6 +154,8 @@ export interface HostAdapters {
   readonly hostname?: () => string;
   /** The owner's home directory (`homedir()`), for `kernel.paths.home()`. Absent: the process's `HOME`, else `/`. */
   readonly ownerHome?: () => string;
+  /** `kernel.hostFacts` (`/proc`, `/sys`). Absent: every read refuses. */
+  readonly hostFacts?: HostFactsPort;
   /** Holds a folder open for `RootHandle.pin`. Absent: every pin is refused (`unsupported`). */
   readonly pinner?: SessionRootPinner;
   /** Private scratch folders. Absent: every open is refused. */
@@ -454,6 +459,10 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     ),
     identity: identityPort,
     paths: ownerPaths,
+    hostFacts:
+      manifest.permissions?.hostFacts === true
+        ? (adapters.hostFacts ?? NO_HOST_FACTS)
+        : undeclaredHostFacts(manifest.id, adapters.hostFacts ?? NO_HOST_FACTS),
     timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
     secrets: ownSecretsPort(
       manifest.permissions?.secrets ?? [],
