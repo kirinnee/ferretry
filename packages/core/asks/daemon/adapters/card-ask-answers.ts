@@ -9,7 +9,7 @@ import type {
   SourceKey,
 } from '../../contract/index.ts';
 import type { AgendaService } from '../lib/agenda/index.ts';
-import { cardAskOf, cardAskReference, openCardAsks } from '../lib/protocol/agenda-card-asks.ts';
+import { askedCardAsks, cardAskOf, cardAskReference } from '../lib/protocol/agenda-card-asks.ts';
 import { gateChoice, gateReopenOption } from '../lib/protocol/agenda-gate.ts';
 import type { AgendaResponse } from '../lib/protocol/agenda.ts';
 import type { AgendaGatePort, GateAnswer, GateAnswerOutcome } from '../lib/routes/agenda-gates.ts';
@@ -43,7 +43,7 @@ export function cardAskAnswers(
     if (!listed.ok) return undefined;
     const item = [...listed.value.items, ...listed.value.resolved].find(each => each.id === id);
     if (item === undefined) return undefined;
-    const open = openCardAsks(item);
+    const open = askedCardAsks(item);
     return reference === undefined ? open[0] : cardAskOf(item, reference);
   };
   return {
