@@ -64,7 +64,7 @@ export interface HttpTransportOptions {
 export class HttpTransport implements DaemonTransport {
   constructor(private readonly options: HttpTransportOptions) {}
 
-  async send(request: DaemonRequest, { repeatable, recheck }: SendOptions): Promise<DaemonReply> {
+  async send(request: DaemonRequest, { repeatable, recheck, signal }: SendOptions): Promise<DaemonReply> {
     const fetcher = this.options.fetcher ?? ((url, init) => fetch(url, init));
     let headers: Headers | undefined;
     // The credential is read once per request, and only after an address has passed the check: a refused check
@@ -97,7 +97,10 @@ export class HttpTransport implements DaemonTransport {
           method: request.method,
           headers: sending,
           ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
-          signal: AbortSignal.timeout(this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+          signal:
+            signal === undefined
+              ? AbortSignal.timeout(this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+              : AbortSignal.any([AbortSignal.timeout(this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS), signal]),
         });
         // A daemon that has bound its address but not mounted its routes ran nothing: still away.
         const starting = await daemonStartingOf(response);
@@ -126,7 +129,7 @@ export class HttpTransport implements DaemonTransport {
     const outcome =
       this.options.restart === undefined
         ? first
-        : await waitOutRestart({ ...this.options.restart, attempt: again, first, repeatable });
+        : await waitOutRestart({ ...this.options.restart, attempt: again, first, repeatable, signal });
     if (outcome.kind !== 'answered') throw outcome.error;
     const text = await outcome.value.text();
     return { status: outcome.value.status, body: parseBody(text) };

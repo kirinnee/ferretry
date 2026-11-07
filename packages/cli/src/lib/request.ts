@@ -13,6 +13,8 @@ export interface CallInit {
   readonly params?: Readonly<Record<string, string>>;
   readonly query?: Readonly<Record<string, string>>;
   readonly body?: unknown;
+  /** The caller stopped waiting: aborting ends the send in flight (and any wait for a restarting daemon). */
+  readonly signal?: AbortSignal;
 }
 
 /** `GET /v1/cards/:id` with `{ id: 'c 1' }` becomes `GET /v1/cards/c%201`. A missing or unused parameter is a bug. */

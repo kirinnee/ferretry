@@ -35,6 +35,8 @@ export interface SendOptions {
    * to stop the resend. The first attempt does not ask it; the caller checked before sending.
    */
   readonly recheck?: () => Promise<void>;
+  /** The caller's own signal: once it aborts the send in flight ends and no resend is waited for. */
+  readonly signal?: AbortSignal;
 }
 
 /** Sends one request, with whatever credential the connection chose. Never throws for an HTTP status. */
@@ -177,9 +179,16 @@ async function ensureAllAllowed(deps: ClientDeps, ids: readonly string[]): Promi
  * inventory is dropped and `ids` are checked afresh first: a daemon that came back on another build or with a plugin
  * off is judged by what it says now.
  */
-export async function sendChecked(deps: ClientDeps, request: DaemonRequest, ids: readonly string[]): Promise<unknown> {
+export async function sendChecked(
+  deps: ClientDeps,
+  request: DaemonRequest,
+  ids: readonly string[],
+  signal?: AbortSignal,
+): Promise<unknown> {
+  signal?.throwIfAborted();
   const reply = await deps.transport.send(request, {
     repeatable: isRepeatable(request.method),
+    ...(signal === undefined ? {} : { signal }),
     recheck: async () => {
       deps.inventory.invalidate();
       await ensureAllAllowed(deps, ids);
@@ -362,11 +371,13 @@ export function pluginClient(deps: ClientDeps, caller: Manifest['id']): Followin
       const request = buildRequest(route, init);
       const ids = [caller, facts.owner];
       await ensureAllAllowed(deps, ids);
-      return (await sendChecked(deps, request, ids)) as Answer;
+      return (await sendChecked(deps, request, ids, init?.signal)) as Answer;
     },
     async tool(name: string, input?: unknown): Promise<unknown> {
       const facts = toolFactsBeforeContact(deps.surfaces, deps.inPane, name);
-      const request = buildRequest(AGENT_TOOLS_ROUTE, { body: { tool: name, ...(input === undefined ? {} : { input }) } });
+      const request = buildRequest(AGENT_TOOLS_ROUTE, {
+        body: { tool: name, ...(input === undefined ? {} : { input }) },
+      });
       const ids = [caller, facts.owner];
       await ensureAllAllowed(deps, ids);
       return await sendChecked(deps, request, ids);

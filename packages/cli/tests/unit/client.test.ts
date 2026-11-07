@@ -329,7 +329,9 @@ describe('the agent-tool client', () => {
     await should(pluginClient(paned.deps, 'board').tool('card_rules', {})).be.rejectedWith(PERSON_ONLY_REFUSAL);
     should(paned.transport.sent).deepEqual([]);
     should(paned.reads.count).equal(0);
-    await should(pluginClient(healthyDeps().deps, 'board').tool('nope', {})).be.rejectedWith(/no plugin declares the tool/u);
+    await should(pluginClient(healthyDeps().deps, 'board').tool('nope', {})).be.rejectedWith(
+      /no plugin declares the tool/u,
+    );
   });
 
   it('should block a tool of a plugin the daemon does not agree on, unsent', async () => {
@@ -454,5 +456,49 @@ describe('the guard keeps up with the daemon (§9.6)', () => {
     const allowed = depsOf(registry, healthy);
     await pluginClient(allowed.deps, 'kernel').call('GET /v1/glossary');
     should(allowed.transport.sent).deepEqual([{ method: 'GET', path: '/v1/glossary' }]);
+  });
+});
+
+describe('a call whose caller may stop waiting', () => {
+  it('G95 hands the caller’s signal to the transport, so the send in flight can be cancelled', async () => {
+    const { deps, transport } = depsOf(registry, healthy);
+    const caller = new AbortController();
+
+    await pluginClient(deps, 'board').call('GET /v1/cards/:id', { params: { id: 'c1' }, signal: caller.signal });
+
+    should(transport.options[0]?.signal).equal(caller.signal);
+    // The signal is the transport's, never a part of the request the daemon is sent.
+    should(transport.sent).deepEqual([{ method: 'GET', path: '/v1/cards/c1' }]);
+  });
+
+  it('G95 a call whose caller already stopped waiting sends nothing and ends with the signal’s reason', async () => {
+    const { deps, transport } = depsOf(registry, healthy);
+    const caller = new AbortController();
+    caller.abort(new Error('gave up'));
+
+    const error = await pluginClient(deps, 'board')
+      .call('GET /v1/cards/:id', { params: { id: 'c1' }, signal: caller.signal })
+      .then(
+        () => undefined,
+        (failure: unknown) => failure,
+      );
+
+    should((error as Error).message).equal('gave up');
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('G95 a call with no signal sends none, and an abort after the answer changes nothing', async () => {
+    const { deps, transport } = depsOf(registry, healthy);
+    await pluginClient(deps, 'board').call('GET /v1/cards/:id', { params: { id: 'c1' } });
+    should(transport.options[0]?.signal).equal(undefined);
+
+    const caller = new AbortController();
+    transport.replies.push({ status: 200, body: { id: 'c2' } });
+    const answer = await pluginClient(deps, 'board').call('GET /v1/cards/:id', {
+      params: { id: 'c2' },
+      signal: caller.signal,
+    });
+    caller.abort();
+    should(answer).deepEqual({ id: 'c2' });
   });
 });

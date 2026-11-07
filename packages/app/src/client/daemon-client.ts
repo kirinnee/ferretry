@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { PairedDaemon } from '../daemons/daemon-list.ts';
 import { type PasskeyHandler, type PasskeyNeed, type PromptOrigin, requestOrigin } from '../passkey/passkey.ts';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
+import { untilAborted } from './machine-deadline.ts';
 import { eventOwner, type Inventory, parseInventory, type Standing, standings } from './inventory.ts';
 import {
   DaemonCallError,
@@ -266,12 +267,18 @@ export class DaemonClient {
       ...(init.query === undefined ? {} : { query: init.query }),
       ...(init.body === undefined ? {} : { body: init.body }),
       ...(headers === undefined ? {} : { headers }),
+      ...(init.signal === undefined ? {} : { signal: init.signal }),
     };
     // A resend is the same request, its request id included: the daemon sees one act asked twice, never two acts.
-    const answer = await this.#confirmed(method, await this.#transport.request(request), async () => {
-      await this.#admit(caller, owner);
-      return await this.#transport.request(request);
-    });
+    const answer = await this.#confirmed(
+      method,
+      await this.#transport.request(request),
+      async () => {
+        await this.#admit(caller, owner);
+        return await this.#transport.request(request);
+      },
+      init.signal,
+    );
     if (answer.status >= 400) throw refusal(answer);
     return answer.body as Answer;
   }
@@ -286,6 +293,7 @@ export class DaemonClient {
     method: string,
     first: TransportAnswer,
     resend: () => Promise<TransportAnswer>,
+    signal?: AbortSignal,
   ): Promise<TransportAnswer> {
     const passkey = this.#passkey;
     if (passkey === undefined || first.status < 400) return first;
@@ -294,13 +302,13 @@ export class DaemonClient {
     let answer = first;
     let need = this.#need(answer);
     if (need?.kind === 'unlock') {
-      if (!(await this.#confirm(need, origin))) return answer;
+      if (!(await this.#confirm(need, origin, signal))) return answer;
       answer = await resend();
       if (answer.status < 400) return answer;
       need = this.#need(answer);
     }
     if (need?.kind !== 'step-up') return answer;
-    if (!(await this.#confirm(need, origin))) return answer;
+    if (!(await this.#confirm(need, origin, signal))) return answer;
     return await resend();
   }
 
@@ -313,12 +321,18 @@ export class DaemonClient {
     }
   }
 
-  /** The one prompt; a prompt that fails to open is a prompt not confirmed. */
-  async #confirm(need: PasskeyNeed, origin: PromptOrigin): Promise<boolean> {
+  /**
+   * The one prompt; a prompt that fails to open is a prompt not confirmed. The wait honours the caller's own signal
+   * (today's `untilAborted`, `relay-carrier.ts`): a background read parked behind a prompt for a machine that is not
+   * on screen, whose caller stopped waiting (its deadline, an unmount), gets its refusal back as "not confirmed"
+   * rather than staying parked behind a prompt nobody is going to answer for it. The prompt itself is the
+   * handler's and stays; only this caller leaves it.
+   */
+  async #confirm(need: PasskeyNeed, origin: PromptOrigin, signal?: AbortSignal): Promise<boolean> {
     const passkey = this.#passkey;
     if (passkey === undefined || this.#stopped) return false;
     try {
-      return (await passkey.handler.confirm(passkey.daemon, need, origin)) === true;
+      return (await untilAborted(passkey.handler.confirm(passkey.daemon, need, origin), signal, false)) === true;
     } catch {
       return false;
     }

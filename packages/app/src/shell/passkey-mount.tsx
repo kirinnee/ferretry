@@ -31,6 +31,10 @@ const unsubscribed = () => () => {};
 /**
  * Every machine with a request waiting on an unlock, for a list that shows it as locked (today's `useLockedMachines`).
  * Empty outside a shell, or when Access gave no passkey handler.
+ *
+ * GAP(access): nothing consumes this yet (G95). The update dot asks locked machines too, where today it skipped them
+ * (rebuild-ref App.tsx:1099 `useLockedMachines`), and the settings machine rows and the machine switcher
+ * (App.tsx:1961, :2637) do not mark a locked machine either. Drawing them is the app shell's and Access's, not Gate's.
  */
 export function useLockedDaemons(): readonly string[] {
   const handler = useOptionalShell()?.runtime.passkey()?.handler;

@@ -1,7 +1,6 @@
 {
   "format": 1,
   "pending": [
-    "gate",
     "ferrets",
     "connections",
     "claude-code",
@@ -130,10 +129,6 @@
       "Actions › Add MCP server: the form, its model and the panel’s Add… link are Ferrets’ Actions rows (add-mcp-form, add-mcp-model, session-mcp-api) and wait for the plugin that owns the row to contribute it",
       "MCP rows in the ferret panel: share / add to a catalog, “installed from” and install from a file need Catalogs’ row host; the half has no Catalogs edge",
       "Runtimes’ components page MCP rows (today’s ComponentMcpStatus and useMachineMcp) are not drawn: Runtimes cannot import this half, and no contract offers the row yet"
-    ],
-    "gate": [
-      "GAP(kernel): a background read parked behind the unlock prompt is never released when its caller stops waiting: PluginClient.call takes no abort signal, so today's untilAborted (rebuild-ref relay-carrier.ts:1752) has no equivalent; it resolves only on focus and confirm, or dismiss. Feed-aware polls skip a tick while their read is in flight (G95): startFeedAwarePoll skips only when `read` returns its promise, and both Browsers page polls (useSessionBrowser, useBrowserControl) now do, so one parked read per page is all that waits; any other poll must return its promise too",
-      "GAP(access): the update dot asks locked machines too: today it skipped them (rebuild-ref App.tsx:1099 useLockedMachines); useLockedDaemons() from @ferretry/app has no consumer yet, so the settings machine rows and the machine switcher (App.tsx:1961, :2637) do not mark a locked machine either (G95)"
     ]
   },
   "pendingHalves": {

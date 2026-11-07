@@ -241,6 +241,12 @@ export interface PluginClient {
       readonly body?: unknown;
       /** Allow-listed (`PluginCallHeaders`), through the same contract-hash guard as the call. */
       readonly headers?: PluginCallHeaders;
+      /**
+       * Set by a caller that may stop waiting (its deadline passed, its screen closed): once it aborts, the call
+       * ends at once — a request in flight is cancelled, and a read parked behind an unlock or step-up prompt it does
+       * not own gets the daemon's original refusal back instead of staying parked. After the answer it does nothing.
+       */
+      readonly signal?: AbortSignal;
     },
   ): Promise<Answer>;
   subscribe<Name extends string, Payload>(event: EventDef<Name, Payload>, listener: (payload: Payload) => void): Cancel;

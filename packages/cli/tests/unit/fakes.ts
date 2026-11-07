@@ -89,7 +89,10 @@ const kernelEntry: KernelEntry = {
     core: true,
     kinds: [],
     actions: {
-      routes: [route('GET /v1/glossary', { ...SCOPE, caller: 'any' }), route('GET /v1/doctor', { ...SCOPE, caller: 'any' })],
+      routes: [
+        route('GET /v1/glossary', { ...SCOPE, caller: 'any' }),
+        route('GET /v1/doctor', { ...SCOPE, caller: 'any' }),
+      ],
     },
   }),
   contract: 'h-kernel',
@@ -151,10 +154,13 @@ export const inventoryOf = (...plugins: { id: string; on?: boolean; contract: st
 /** Records requests and answers from a script; an unscripted request is answered 200 `{}`. */
 export class RecordingTransport implements DaemonTransport {
   readonly sent: DaemonRequest[] = [];
+  /** The options each send carried, in order. */
+  readonly options: (SendOptions | undefined)[] = [];
   readonly replies: (DaemonReply | Error)[] = [];
 
-  async send(request: DaemonRequest, _options?: SendOptions): Promise<DaemonReply> {
+  async send(request: DaemonRequest, options?: SendOptions): Promise<DaemonReply> {
     this.sent.push(request);
+    this.options.push(options);
     const next = this.replies.shift() ?? { status: 200, body: {} };
     if (next instanceof Error) throw next;
     return next;
