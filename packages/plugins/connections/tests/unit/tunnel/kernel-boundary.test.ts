@@ -82,6 +82,7 @@ async function throughTheTunnel(fx: KernelFixture, opened: string[]) {
     dispatcher: () => dispatcher,
     daemonId: fx.daemonId,
     onStop: () => {},
+    stopping: () => false,
   }).open({ carrier: 'tunnel' as CarrierKey, surface: { socket: declared.key, peer: tunnelPeer } });
   cleanups.push(() => listener.close());
   // What `cloudflared` forwards: a loopback upgrade, carrying the address Cloudflare's edge saw.

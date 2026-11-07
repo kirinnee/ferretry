@@ -26,7 +26,7 @@ export interface CarrierListenerDeps {
   /** Stopping the plugin (or the daemon) closes every listener it still holds. */
   readonly onStop: (fn: () => void | Promise<void>) => void;
   /** Whether the plugin's lifecycle has stopped: nothing is bound after it, because nothing would ever close it. */
-  readonly stopping?: () => boolean;
+  readonly stopping: () => boolean;
 }
 
 /**
@@ -52,7 +52,7 @@ export function carrierListenerPort(deps: CarrierListenerDeps): CarrierListenerP
   return {
     open: async ({ carrier, surface }) => {
       const declared = declaredSocket(manifest, carrier, surface);
-      if (deps.stopping?.() === true)
+      if (deps.stopping())
         throw new PermissionError(`${manifest.title} has stopped, so it cannot open a carrier listener.`);
       if (!watching) {
         watching = true;
