@@ -2,7 +2,8 @@
  * bun migration/v4-to-v5/src/main.ts --from <stopped v4 home> --to <new folder> [--report <file>] [--dry-run]
  *
  * Exit 0: complete (home.json written). 3: ran, but some step is pending or failed (no home.json; v5 refuses the
- * folder). 2: refused before writing anything. 64: usage.
+ * folder). 2: refused before writing anything. 64: usage. A dry run writes nothing (its report says `complete: false`)
+ * and exits 0 when every step WOULD convert, 3 when one would not.
  */
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -36,10 +37,11 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   const from = resolve(values.from);
   const to = resolve(values.to);
+  const dryRun = values['dry-run'] ?? false;
   const result = await convert({
     from,
     to,
-    dryRun: values['dry-run'] ?? false,
+    dryRun,
     lock: hostLockProbe(),
     now: () => new Date(),
   });
@@ -52,7 +54,8 @@ async function main(argv: readonly string[]): Promise<number> {
   await writeFile(reportPath, `${JSON.stringify(result.report, null, 2)}\n`, { mode: 0o600 });
   console.log(summarise(result.report));
   console.log(`report: ${reportPath}`);
-  return result.report.complete ? 0 : 3;
+  const wouldComplete = result.report.steps.every(step => step.status === 'converted');
+  return (dryRun ? wouldComplete : result.report.complete) ? 0 : 3;
 }
 
 process.exit(await main(process.argv.slice(2)));
