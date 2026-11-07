@@ -5,7 +5,7 @@ import { type SecretName, secretReference } from '@ferretry/core-vault/contract'
 import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
 import { ok } from '@ferretry/std';
-import { MCP_OAUTH_STATE, type McpItem, mcpOAuthSecretNames } from '../../contract/index.ts';
+import { MCP_OAUTH_SECRETS, MCP_OAUTH_STATE, type McpItem, mcpOAuthSecretNames } from '../../contract/index.ts';
 import daemon from '../../daemon/index.ts';
 import type { ProjectMcpLaunchShare } from '../../daemon/lib/inventory/index.ts';
 import { McpLaunchParts } from '../../daemon/lib/launch-parts.ts';
@@ -252,25 +252,41 @@ describe('MCP launch renewal', () => {
 });
 
 describe('MCP launch renewal through the daemon half', () => {
-  test('the launch.parts hook renews from the sign-in state, then binds the held token by reference only', async () => {
-    // Arrange — a carried sign-in: the Vault holds the access token's NAME (fake value), the state is read by renewal.
+  test('the launch.parts hook refreshes a due carried sign-in through kernel.fetch, then binds the held token by reference only', async () => {
+    // Arrange — a real sign-in made against the fake issuer gives a genuine record and refresh token (fake values),
+    // carried into the daemon half's own state and sealed document; its access token is 10 s from expiry, a minute on.
+    const w = world({ expiresIn: 10 });
+    await signIn(w);
+    const carried = w.state.document;
+    const record = carried.connections.linear;
+    if (record === undefined) throw new Error('the sign-in filed no record');
+    const refreshToken = w.internal.entries.get(NAMES.refresh);
+    if (refreshToken === undefined) throw new Error('the sign-in filed no refresh token');
     const vault = new FakeVault();
     await vault.put(NAMES.access as SecretName, 'fake-access-value');
-    const stateReads: string[] = [];
+    const written: unknown[] = [];
+    const state = {
+      read: async (file: { readonly path: string }) => ok(file.path === MCP_OAUTH_STATE.path ? carried : undefined),
+      write: async (_file: unknown, value: unknown) => void written.push(value),
+    };
+    const sealed = new FakeSealedDocuments();
+    await sealed.open(state as never, MCP_OAUTH_SECRETS).put(NAMES.refresh as never, refreshToken);
+    const fetched: string[] = [];
     const ferrets = new FakeFerrets();
     ferrets.add({ id: ferretId('f1'), folder: '/work/app' });
     const half = daemon.build?.({
       manifest,
-      needs: { ferrets, vault, sealed: new FakeSealedDocuments() },
+      needs: { ferrets, vault, sealed },
       uses: {},
       hooks: {} as never,
       kernel: {
         config: { collection: () => ITEMS },
-        clock: { nowMs: () => Date.parse('2026-11-07T00:00:00.000Z') },
-        state: {
-          read: async (file: { readonly path: string }) => {
-            stateReads.push(file.path);
-            return ok(undefined);
+        clock: { nowMs: () => w.clock.at + 60_000 },
+        state,
+        fetch: {
+          request: async (url: string | URL, init?: RequestInit) => {
+            fetched.push(String(url));
+            return await w.provider.handle(new Request(url, init));
           },
         },
         roots: { root: () => ({ resolve: () => ({ ok: false }) }) },
@@ -285,10 +301,18 @@ describe('MCP launch renewal through the daemon half', () => {
     // Act
     const parts = await launch.parts(SPEC);
 
-    // Assert
+    // Assert — the refresh reached the issuer through the kernel's fetch, with the carried refresh token…
     expect(contributions.map(contribution => contribution.id)).toEqual(['mcp']);
-    expect(stateReads).toContain(MCP_OAUTH_STATE.path);
+    expect(fetched).toEqual([record.tokenEndpoint]);
+    expect(w.provider.tokenRequests).toHaveLength(2);
+    expect(w.provider.tokenRequests[1]?.get('grant_type')).toBe('refresh_token');
+    expect(w.provider.tokenRequests[1]?.get('refresh_token')).toBe(refreshToken);
+    // …the renewed sign-in was filed with a later expiry…
+    const filed = written.at(-1) as typeof carried | undefined;
+    expect(Date.parse(filed?.connections.linear?.expiresAt ?? '')).toBeGreaterThan(Date.parse(record.expiresAt ?? ''));
+    // …and the launch names the token by reference only.
     expect(envOf(parts)).toEqual({ [NAMES.variable]: secretReference(NAMES.access) });
+    expect(leaks(w.provider, parts, logged)).toEqual([]);
     expect(JSON.stringify(parts)).not.toContain('fake-access-value');
     expect(logged.join('\n')).not.toContain('fake-access-value');
   });
