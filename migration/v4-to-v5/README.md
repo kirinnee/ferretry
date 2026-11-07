@@ -147,8 +147,8 @@ capabilities and both axes written explicitly at v4's effective value (`configur
 `state/security.json` → `gate.yaml` `security` (a damaged one as v4's strictest reading), with v4's effective `catalogs.memberUnlockDays` beside it; the parsed result is compared
 with what v4 enforced and any widening fails the step. Carriers → `connections.yaml` (`direct`, the ordered `relay` list, `tunnel`,
 `webrtc`; every relay entry keeps its order and its own on/off, and an owner's `enabled: false` stays false). `harness` paths →
-both harness files and the agenda deadline → `agenda.yaml`, added to what Settings wrote there. A catalog link store
-turned off or the owner's own waits for Catalogs' `catalogs.yaml` (`pending`); `secretEnvironment`, `usage.url`, CORS,
+both harness files and the agenda deadline → `agenda.yaml`, added to what Settings wrote there. `catalogs` → `catalogs.yaml`
+(`linkStore` as written, v4's effective `memberUnlockDays`; checked with the contract's own loosening rule); `secretEnvironment`, `usage.url`, CORS,
 `publicUrl` and tuning keys are listed in `notCarried`, by key only; `routing.json` belongs to the Packs step.
 
 The `rebuild/migration-ferrets-b` development branch contains a local merge of the unreviewed
