@@ -108,6 +108,13 @@ jobs:
           test ! -e "${FIXTURE_OUT}/v5-dry"
           if [ "${real}" = 0 ]; then test -f "${FIXTURE_OUT}/v5/home.json"; else test ! -e "${FIXTURE_OUT}/v5/home.json"; fi
 
+      # Starts this repository's v5 daemon on the converted home and proves every plugin came up and the fixture's
+      # ferrets, project, cards and agenda items are served by v5's own routes. While a step is pending (no home.json)
+      # it boots a labelled COPY with a home.json of its own, and only the pending steps' plugins may be down; once the
+      # conversion is complete it boots the real output. See fixtures/boot-v5.ts.
+      - name: Boot v5 on the converted home
+        run: ./scripts/ci/in-devshell.sh env TMPDIR=/tmp bun migration/v4-to-v5/fixtures/boot-v5.ts --fixture "${FIXTURE_OUT}"
+
       - name: Upload made.json and the conversion reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -117,6 +124,7 @@ jobs:
             ${{ env.FIXTURE_OUT }}/made.json
             ${{ env.FIXTURE_OUT }}/report-dry.json
             ${{ env.FIXTURE_OUT }}/report.json
+            ${{ env.FIXTURE_OUT }}/boot/summary.json
           if-no-files-found: warn
 
       # The daemon's own log, only when something failed: it is the first thing the next fix needs.
@@ -128,5 +136,7 @@ jobs:
           path: |
             ${{ env.FIXTURE_OUT }}/fyd.log
             ${{ env.FIXTURE_OUT }}/fake-claude.log
+            ${{ env.FIXTURE_OUT }}/boot/fyd.stderr
+            ${{ env.FIXTURE_OUT }}/boot/fyd.log
           if-no-files-found: ignore
           retention-days: 3
