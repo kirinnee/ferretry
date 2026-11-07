@@ -1,8 +1,5 @@
 /**
- * THE MACHINE'S HEALTH, read for the features it offers (`daemon-health.ts` decides what that means).
- *
- * Read when the machine changes and again whenever this page comes back to the foreground — an owner
- * who runs `fy daemon update` in another window should not have to reload to see the longer limit.
+ * THE MACHINE'S HEALTH, read for its disk pressure (`daemon-health.ts` decides what that means).
  */
 
 import { HealthViewSchema } from '@ferretry/app';

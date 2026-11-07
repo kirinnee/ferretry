@@ -12,7 +12,7 @@
  * shipped daemon configuration surface.
  */
 
-import { DAEMON_FEATURES, type TwoFactorStageId } from '@ferretry/protocol';
+import type { TwoFactorStageId } from '@ferretry/protocol';
 import type { ConnectionChoice } from '@ferretry/relay';
 import {
   ChevronLeft,
@@ -40,12 +40,9 @@ import {
 } from 'lucide-react';
 import { type ComponentType, createContext, type ReactNode, useContext, useId, useMemo } from 'react';
 import { useCarrierRtt } from '../../../../../plugins/connections/app/hooks/use-carrier-rtt.ts';
-import type { WardenStatusReader } from '../../../../../plugins/warden/app/hooks/use-warden-status.ts';
 import type { ConnectionHealthState } from '../../../../../plugins/connections/app/lib/connection-health.ts';
 import type { DaemonConnectionRecord } from '../../../../../plugins/connections/app/lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { machineLacks, machineOffers } from '../../lib/daemon-health.ts';
-import { needsNewerFerretry } from '../../lib/machine-update-words.ts';
 import type { StepUpWords } from '../../../../../plugins/access/app/lib/step-up-gate.ts';
 import {
   useAddKeyStepUp,
@@ -53,12 +50,10 @@ import {
   useApproveSignInRuleStepUp,
   useDaemonClient,
 } from '@ferretry/app';
-import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { Button } from '@ferretry/app';
 import { AccountsSurface } from '../../../../../plugins/accounts/app/features/accounts/accounts-surface.tsx';
 import { ActiveCarrierCard, type CarrierPreferenceControl } from '../../../../../plugins/connections/app/features/carrier/active-carrier-card.tsx';
 import { PANEL_NAMES } from '../fleet/shell/machine-panels.ts';
-import { LoginsSurface } from '../../../../../plugins/accounts/app/features/secrets/logins-surface.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../../../../../plugins/accounts/app/features/secrets/secrets-surface.tsx';
 import { CopyRulesSurface } from '../../../../../plugins/accounts/app/features/secure-copy/copy-rules-surface.tsx';
 import { SignInRulesSurface } from '../../../../../plugins/accounts/app/features/secure-copy/sign-in-rules-surface.tsx';
@@ -208,44 +203,22 @@ function SecretsPanel({ connection }: DaemonSettingsTabProps) {
 function AccountsPanel({ connection }: DaemonSettingsTabProps) {
   const { createSecretClient } = useFrameLive();
   const routed = useDaemonClient();
-  const health = useDaemonHealth(connection);
   const requireAddKey = useAddKeyStepUp();
   const requireRule = useApproveSignInRuleStepUp();
   const createClient = createSecretClient ?? routed;
-  // A machine that does not say it has accounts keeps today's saved-logins surface, whatever the reason it is silent.
-  if (!machineOffers(health, DAEMON_FEATURES.accountsSignIns))
-    return (
-      <div className="flex min-w-0 flex-col gap-3">
-        {machineLacks(health, DAEMON_FEATURES.accountsSignIns) ? (
-          <UpdateNote what="Accounts with their sign-ins, 2FA keys and standing rules" />
-        ) : null}
-        <LoginsSurface connection={connection} createClient={createClient} />
-      </div>
-    );
-  const withKeys = machineOffers(health, DAEMON_FEATURES.twoFactorKeys);
-  const withRules = machineOffers(health, DAEMON_FEATURES.signInRules);
-  const lacking = [
-    ...(machineLacks(health, DAEMON_FEATURES.twoFactorKeys) ? ['2FA keys'] : []),
-    ...(machineLacks(health, DAEMON_FEATURES.signInRules) ? ['standing sign-in rules'] : []),
-  ];
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      {lacking.length === 0 ? null : <UpdateNote what={lacking.join(' and ')} />}
       <AccountsSurface
         connection={connection}
         createClient={createClient}
-        withKeys={withKeys}
-        {...(withRules
-          ? {
-              rules: {
-                askPasskey:
-                  requireRule === undefined
-                    ? undefined
-                    : (stage: `srs_${string}`, words: StepUpWords) => requireRule(connection, stage, words),
-              },
-            }
-          : {})}
-        {...(withKeys && requireAddKey !== undefined
+        withKeys={true}
+        rules={{
+          askPasskey:
+            requireRule === undefined
+              ? undefined
+              : (stage: `srs_${string}`, words: StepUpWords) => requireRule(connection, stage, words),
+        }}
+        {...(requireAddKey !== undefined
           ? { addKey: (stage: TwoFactorStageId, words: string) => requireAddKey(connection, stage, words) }
           : {})}
       />
@@ -253,19 +226,9 @@ function AccountsPanel({ connection }: DaemonSettingsTabProps) {
   );
 }
 
-/** A machine that answered without a feature name: say so in one line, never leave the group silently shorter. */
-function UpdateNote({ what }: { readonly what: string }) {
-  return (
-    <p className="m-0 text-cell text-muted" data-machine-needs-update="" role="status">
-      {needsNewerFerretry(what)}
-    </p>
-  );
-}
-
 function SecureCopyPanel({ connection }: DaemonSettingsTabProps) {
   const { createSecretClient } = useFrameLive();
   const routed = useDaemonClient();
-  const health = useDaemonHealth(connection);
   const createClient = createSecretClient ?? routed;
   const requirePasteRule = useApprovePasteRuleStepUp();
   return (
@@ -273,32 +236,23 @@ function SecureCopyPanel({ connection }: DaemonSettingsTabProps) {
       <CopyRulesSurface
         connection={connection}
         createClient={createClient}
-        staging={machineOffers(health, DAEMON_FEATURES.pasteRulePasskey)}
+        staging={true}
         {...(requirePasteRule === undefined
           ? {}
           : { askPasskey: (stage, words, act) => requirePasteRule(connection, stage, words, act) })}
       />
-      {machineOffers(health, DAEMON_FEATURES.taskPlan) ? (
-        <TaskPlansSurface connection={connection} createClient={createClient} />
-      ) : machineLacks(health, DAEMON_FEATURES.taskPlan) ? (
-        <UpdateNote what="Task plans" />
-      ) : null}
-      {machineOffers(health, DAEMON_FEATURES.signInRules) ? (
-        <SignInRulesSurface connection={connection} createClient={createClient} />
-      ) : machineLacks(health, DAEMON_FEATURES.signInRules) ? (
-        <UpdateNote what="Standing sign-in rules" />
-      ) : null}
+      <TaskPlansSurface connection={connection} createClient={createClient} />
+      <SignInRulesSurface connection={connection} createClient={createClient} />
     </div>
   );
 }
 
 function DevicesPanel({ connection }: DaemonSettingsTabProps) {
   const { createPairingClient } = useFrameLive();
-  const health = useDaemonHealth(connection);
   return (
     <AddDeviceSurface
       connection={connection}
-      rulesOffered={machineOffers(health, DAEMON_FEATURES.signInRules)}
+      rulesOffered={true}
       {...(createPairingClient ? { createClient: createPairingClient } : {})}
     />
   );
@@ -443,8 +397,6 @@ export interface DaemonSettingsFrameProps {
   /** The browser's persisted pairing record; only Host checks needs its local metadata. */
   readonly connectionRecord?: DaemonConnectionRecord;
   readonly name: string;
-  /** @deprecated Unused since the Warden's status moved to its own page; kept so callers still compile. */
-  readonly readWardenStatus?: WardenStatusReader;
   /** Test and harness seam; production uses the daemon-bound default client. */
   readonly createWardenClient?: WardenClientFactory;
   /** The same seam for the secret store. */

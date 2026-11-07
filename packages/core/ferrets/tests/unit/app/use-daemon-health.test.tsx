@@ -1,6 +1,5 @@
 import '@ferretry/app/testing';
 import { afterEach, describe, expect, it } from 'bun:test';
-import { DAEMON_FEATURES } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/app';
 import type { z } from 'zod';
 import type { DaemonHealthRead } from '../../../app/lib/daemon-health.ts';
@@ -80,12 +79,6 @@ describe('useDaemonHealth', () => {
     const stopped = machine.paths.length;
     await new Promise(resolve => setTimeout(resolve, 80));
     expect(machine.paths.length).toBe(stopped);
-  });
-
-  it('reads the features a newer machine lists', async () => {
-    await mounted(alpha, served(healthOf('4.90.0', [DAEMON_FEATURES.packIdea4000])).factory);
-    await settleUntil(() => kind() === 'read', 'the health to be read', runAsync);
-    expect(latest?.kind === 'read' && latest.health.features).toEqual([DAEMON_FEATURES.packIdea4000]);
   });
 
   it('says failed when the machine cannot be asked, and never reads without a machine', async () => {

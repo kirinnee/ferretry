@@ -15,7 +15,6 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { ConnectionChoice } from '@ferretry/relay';
-import type { ComponentProps } from 'react';
 
 import {
   DaemonSettingsFrame,
@@ -23,10 +22,7 @@ import {
 } from '../../../../../app/features/settings/daemon-settings-frame.tsx';
 import type { DaemonConnectionRecord } from '../../../../../../../plugins/connections/app/lib/connections.ts';
 import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
-import { needsNewerFerretry, UPDATE_MACHINE_WHERE } from '../../../../../app/lib/machine-update-words.ts';
-import { DaemonClientProvider } from '@ferretry/app';
 import { interact, mount, must } from '@ferretry/app/testing';
-import { healthOf } from '@ferretry/app/testing';
 import { render, run } from '@ferretry/app/testing';
 
 const alpha = daemonConnection({
@@ -75,7 +71,6 @@ describe('daemon settings panel rail', () => {
         connection={alpha}
         name="Alpha"
         additionalTabs={PRODUCTION_ADDITIONAL_TABS}
-        readWardenStatus={unavailable}
         createWardenClient={unavailable}
         onOpenPanel={() => undefined}
       />,
@@ -124,7 +119,6 @@ describe('daemon settings panel rail', () => {
       <DaemonSettingsFrame
         connection={alpha}
         name="Alpha"
-        readWardenStatus={unavailable}
         createWardenClient={unavailable}
         panel="host-checks"
         onOpenPanel={() => undefined}
@@ -146,7 +140,6 @@ describe('daemon settings panel rail', () => {
         connection={alpha}
         name="Alpha"
         additionalTabs={[{ id: 'invented', label: 'Invented', description: 'Not in the table.', Surface: () => null }]}
-        readWardenStatus={unavailable}
         createWardenClient={unavailable}
         onOpenPanel={() => undefined}
       />,
@@ -165,7 +158,6 @@ describe('daemon settings panel list', () => {
       connection={alpha}
       name="Alpha"
       additionalTabs={PRODUCTION_ADDITIONAL_TABS}
-      readWardenStatus={unavailable}
       createWardenClient={unavailable}
       onOpenPanel={panel => opened.push(panel)}
       {...props}
@@ -283,7 +275,6 @@ describe('daemon settings panel group', () => {
       connection={alpha}
       name="Alpha"
       additionalTabs={PRODUCTION_ADDITIONAL_TABS}
-      readWardenStatus={unavailable}
       createWardenClient={unavailable}
       onOpenPanel={panel => opened.push(panel)}
       group={group}
@@ -372,7 +363,6 @@ describe('daemon settings panel group', () => {
         connection={alpha}
         name="Alpha"
         additionalTabs={PRODUCTION_ADDITIONAL_TABS}
-        readWardenStatus={unavailable}
         createWardenClient={unavailable}
         onOpenPanel={() => undefined}
         group={{ label: 'Tools', panels: ['secrets'] }}
@@ -395,7 +385,6 @@ describe('daemon settings panel group', () => {
         connection={alpha}
         name="Alpha"
         additionalTabs={PRODUCTION_ADDITIONAL_TABS}
-        readWardenStatus={unavailable}
         createWardenClient={unavailable}
         onOpenPanel={() => undefined}
         group={{ label: 'Only lead', panels: ['retired-panel'] }}
@@ -420,111 +409,25 @@ describe('daemon settings panel group', () => {
 });
 
 describe('daemon settings Secure copy panel', () => {
-  const frame = () => (
-    <DaemonSettingsFrame
-      connection={alpha}
-      name="Alpha"
-      additionalTabs={PRODUCTION_ADDITIONAL_TABS}
-      readWardenStatus={unavailable}
-      createWardenClient={unavailable}
-      createSecretClient={unavailable}
-      onOpenPanel={() => undefined}
-      panel="secure-copy"
-    />
-  );
-  const healthClient = (features: string[]) =>
-    (async () => ({
-      request: async (_path: string, schema: { parse: (value: unknown) => unknown }) =>
-        schema.parse(healthOf('1.0.0', features)),
-    })) as unknown as ComponentProps<typeof DaemonClientProvider>['client'];
-  const settled = () =>
-    interact(async () => {
-      await new Promise(resolve => setTimeout(resolve, 20));
-    });
-
-  it('lists the task plans only on a machine that offers task-plan.1', async () => {
-    const offered = await mount(
-      <DaemonClientProvider client={healthClient(['task-plan.1'])}>{frame()}</DaemonClientProvider>,
+  it('lists the task plans and the standing sign-in rules', async () => {
+    const view = await mount(
+      <DaemonSettingsFrame
+        connection={alpha}
+        name="Alpha"
+        additionalTabs={PRODUCTION_ADDITIONAL_TABS}
+        createWardenClient={unavailable}
+        createSecretClient={unavailable}
+        onOpenPanel={() => undefined}
+        panel="secure-copy"
+      />,
     );
     try {
-      await settled();
-      expect(offered.container.querySelector('[data-task-plans]')).not.toBeNull();
+      await interact(async () => {
+        await new Promise(resolve => setTimeout(resolve, 20));
+      });
+      expect(view.container.querySelector('[data-task-plans]')).not.toBeNull();
     } finally {
-      await offered.unmount();
-    }
-
-    const lacking = await mount(<DaemonClientProvider client={healthClient([])}>{frame()}</DaemonClientProvider>);
-    try {
-      await settled();
-      expect(lacking.container.querySelector('[data-task-plans]')).toBeNull();
-      expect(lacking.container.querySelector('[aria-label="Loading task plans"]')).toBeNull();
-    } finally {
-      await lacking.unmount();
-    }
-  });
-});
-
-describe('daemon settings notes for a machine that is too old', () => {
-  const frame = (panel: string) => (
-    <DaemonSettingsFrame
-      connection={alpha}
-      name="Alpha"
-      additionalTabs={PRODUCTION_ADDITIONAL_TABS}
-      readWardenStatus={unavailable}
-      createWardenClient={unavailable}
-      createSecretClient={unavailable}
-      onOpenPanel={() => undefined}
-      panel={panel}
-    />
-  );
-  const healthClient = (features: string[]) =>
-    (async () => ({
-      request: async (_path: string, schema: { parse: (value: unknown) => unknown }) =>
-        schema.parse(healthOf('1.0.0', features)),
-    })) as unknown as ComponentProps<typeof DaemonClientProvider>['client'];
-  const settled = () =>
-    interact(async () => {
-      await new Promise(resolve => setTimeout(resolve, 20));
-    });
-  const notes = (root: Element): string[] =>
-    [...root.querySelectorAll('[data-machine-needs-update]')].map(node => node.textContent ?? '');
-
-  it('says in one line what Secure copy lacks, with where to update, and says nothing on a machine that has it', async () => {
-    const old = await mount(
-      <DaemonClientProvider client={healthClient([])}>{frame('secure-copy')}</DaemonClientProvider>,
-    );
-    try {
-      await settled();
-      expect(notes(old.container)).toEqual([
-        needsNewerFerretry('Task plans'),
-        needsNewerFerretry('Standing sign-in rules'),
-      ]);
-      expect(notes(old.container)[0]).toContain(UPDATE_MACHINE_WHERE);
-    } finally {
-      await old.unmount();
-    }
-    const current = await mount(
-      <DaemonClientProvider client={healthClient(['task-plan.1', 'sign-in-rules.1'])}>
-        {frame('secure-copy')}
-      </DaemonClientProvider>,
-    );
-    try {
-      await settled();
-      expect(notes(current.container)).toEqual([]);
-    } finally {
-      await current.unmount();
-    }
-  });
-
-  it('says what Accounts lacks on a machine that answered without it', async () => {
-    const old = await mount(<DaemonClientProvider client={healthClient([])}>{frame('accounts')}</DaemonClientProvider>);
-    try {
-      await settled();
-      expect(notes(old.container)).toEqual([
-        needsNewerFerretry('Accounts with their sign-ins, 2FA keys and standing rules'),
-      ]);
-    } finally {
-      await old.unmount();
+      await view.unmount();
     }
   });
 });
@@ -535,7 +438,6 @@ describe('daemon settings Connection panel', () => {
       <DaemonSettingsFrame
         connection={alpha}
         name="Alpha"
-        readWardenStatus={unavailable}
         createWardenClient={unavailable}
         panel="carrier"
         onOpenPanel={() => undefined}
@@ -564,7 +466,6 @@ describe('daemon settings Connection panel', () => {
       <DaemonSettingsFrame
         connection={alpha}
         name="Alpha"
-        readWardenStatus={unavailable}
         createWardenClient={unavailable}
         panel="carrier"
         onOpenPanel={() => undefined}

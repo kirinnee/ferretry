@@ -11,7 +11,7 @@
  * first one set unconfirmed could reset a day already over budget.
  */
 
-import { type ConfigInvalidBody, configFilePath, DAEMON_FEATURES, type FleetCredentialView } from '@ferretry/protocol';
+import { type ConfigInvalidBody, configFilePath, type FleetCredentialView } from '@ferretry/protocol';
 import { useState } from 'react';
 import {
   configErrorCode,
@@ -22,9 +22,6 @@ import {
   writeConfigFile,
 } from '../../../../../kernel/app/features/config-files/config-files-api.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { machineLacks, machineOffers } from '../../../lib/daemon-health.ts';
-import { UPDATE_MACHINE_WHERE } from '../../../lib/machine-update-words.ts';
-import { useDaemonHealth } from '../../../lib/use-daemon-health.ts';
 import { Button } from '@ferretry/app';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
@@ -143,28 +140,11 @@ function BudgetPeriodFields({
 /** What a Confirm press came to: idle, in flight, or the sentence that says why it did not land. */
 type ConfirmState = 'idle' | 'busy' | { readonly failed: string };
 
-/** What an owner reads where a machine too old for budgets would have shown the editor. */
-export const BUDGET_UPDATE_WORDS = `This machine needs an update to set a spend budget — ${UPDATE_MACHINE_WHERE}.`;
-
 type BudgetEditorProps = Parameters<typeof BudgetEditor>[0];
 
-/**
- * THE BUDGET EDITOR, ONLY WHERE THE MACHINE CAN KEEP A BUDGET (`DAEMON_FEATURES.loginBudget`). The app ships before
- * the daemon: a machine older than budgets refuses `budget` and `timeZone` as unknown keys, so offering the editor
- * there is a Save that can only fail. A login that already carries a budget proves the machine keeps them. A machine
- * that answered without the name is told to update; one whose answer has not come is shown nothing yet.
- */
+/** The budget editor for one login. */
 export function BudgetSection(props: BudgetEditorProps) {
-  const health = useDaemonHealth(props.connection);
-  if (props.credential.budget !== undefined || machineOffers(health, DAEMON_FEATURES.loginBudget))
-    return <BudgetEditor {...props} />;
-  if (!machineLacks(health, DAEMON_FEATURES.loginBudget)) return null;
-  return (
-    <section className="kt-panel flex min-w-0 flex-col gap-1 p-panel" data-budget-update="">
-      <h4 className="m-0 text-meta font-semibold uppercase text-muted">Spend budget</h4>
-      <p className="m-0 text-cell leading-base text-muted">{BUDGET_UPDATE_WORDS}</p>
-    </section>
-  );
+  return <BudgetEditor {...props} />;
 }
 
 function BudgetEditor({

@@ -26,7 +26,6 @@ import {
 import type { DaemonAccountPickerStore } from '../../../../plugins/accounts/app/lib/account-picker-store.ts';
 import { type DaemonConnection, sameDaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
-import { UPDATE_MACHINE_WHERE } from '../lib/machine-update-words.ts';
 import { useDaemonClient } from '@ferretry/app';
 import type { DaemonUsageSlice, DaemonUsageStore } from '../../../../plugins/usage/app/lib/usage-store.ts';
 import { BottomSheet } from '@ferretry/app';
@@ -36,8 +35,6 @@ import { statusMark, TERMINAL_STATUSES } from '@ferretry/app';
 import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model.ts';
 import { AccountName, DaemonAccountName, DaemonAccountPicker } from './daemon-pickers.tsx';
 import {
-  AGENT_JOBS_ASK_SINCE,
-  askNeedsDaemonUpdate,
   type MoveFailure,
   type MoveTarget,
   moveContextDecision,
@@ -676,8 +673,6 @@ export function MoveSheet({
                     jobs={failure.inflight?.items.filter(item => item.blocks) ?? []}
                     onAsk={() => void askAgentToStopJobs()}
                   />
-                ) : askNeedsDaemonUpdate(failure) ? (
-                  <AgentJobsNeedUpdate daemonVersion={failure.daemonVersion ?? ''} />
                 ) : null}
                 <p className="mt-3 text-ui font-semibold text-err">
                   There is no force control. A refused preflight cannot start a move.
@@ -878,21 +873,3 @@ function AgentJobsAsk({
   );
 }
 
-/**
- * The same refusal from a daemon too old to tell the agent's own jobs apart, or to ask about them. The app
- * deploys before the machine updates, so this is the commonest way to meet the card without its button:
- * it says what would bring the button, instead of leaving "no force control" as the only answer.
- */
-function AgentJobsNeedUpdate({ daemonVersion }: { readonly daemonVersion: string }) {
-  return (
-    <div className="mt-3 rounded-control border border-border bg-surface p-3" data-agent-jobs-update="">
-      <p className="m-0 text-ui font-semibold text-fg">
-        Update this machine’s daemon to ask the agent to stop these jobs
-      </p>
-      <p className="mt-1 text-ui leading-base text-muted">
-        If the agent started them from its own shell, a newer daemon can send it one message asking it to stop them.
-        This machine runs {daemonVersion}; that needs {AGENT_JOBS_ASK_SINCE} or newer — {UPDATE_MACHINE_WHERE}.
-      </p>
-    </div>
-  );
-}

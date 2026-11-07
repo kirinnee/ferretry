@@ -1,4 +1,3 @@
-import { compareProtocolVersions } from '@ferretry/protocol';
 import { type MoveRefusal, MoveRefusedBodySchema } from '../../contract/index.ts';
 import { FyHttpError } from '@ferretry/app';
 import { downgradeOf, downgradeSentence } from '../features/session-actions/context-downgrade.ts';
@@ -36,7 +35,6 @@ type MoveFailureKind =
   | 'not-found'
   | 'invalid'
   | 'failed'
-  | 'unsupported'
   | 'other';
 
 export interface MoveFailure {
@@ -48,26 +46,7 @@ export interface MoveFailure {
   readonly suggestedModel?: string;
   /** What the preflight saw, on a refusal from a daemon that attaches it. */
   readonly inflight?: MoveRefusal;
-  /** The version the refusing daemon stamped on its answer, when it did. */
-  readonly daemonVersion?: string;
 }
-
-/** The first daemon that marks the agent's own background jobs and can be asked to have them stopped. */
-export const AGENT_JOBS_ASK_SINCE = '4.153.0';
-
-/**
- * Whether a refusal COULD have offered the ask, had the daemon been new enough: it came from a daemon
- * older than {@link AGENT_JOBS_ASK_SINCE}, which never marks a job, and everything in the way is a
- * process — which is what a job is. An open tool call, a blind spot or a codex terminal is not, so an
- * update would not offer the ask there and the sheet does not promise it. A daemon that did not say its
- * version is not guessed at.
- */
-export const askNeedsDaemonUpdate = (failure: MoveFailure): boolean => {
-  if (failure.kind !== 'preflight-refused' || failure.daemonVersion === undefined) return false;
-  if (compareProtocolVersions(failure.daemonVersion, AGENT_JOBS_ASK_SINCE) !== -1) return false;
-  const blockers = failure.inflight?.items.filter(item => item.blocks) ?? [];
-  return blockers.length > 0 && blockers.every(item => item.kind === 'process');
-};
 
 /**
  * Whether the ONLY things in the way are jobs the agent started from its own shell — the one refusal the
@@ -178,7 +157,6 @@ const FAILURE_COPY: Readonly<Record<MoveFailureKind, readonly [title: string, gu
   'not-found': ['Session not found', 'Refresh this daemon’s fleet; the session may have been removed.'],
   invalid: ['Invalid session identity', 'Return to this daemon’s session list and reopen the session.'],
   failed: ['Move did not complete', 'Inspect the session and its move report before retrying.'],
-  unsupported: ['Daemon upgrade required', 'This paired daemon does not expose the move route yet.'],
   other: ['Move failed', 'Review the daemon response, then retry when its cause is resolved.'],
 };
 
@@ -202,8 +180,6 @@ const kindForCode = (code: string | undefined): MoveFailureKind => {
       return 'invalid';
     case 'session_move_failed':
       return 'failed';
-    case 'unknown_route':
-      return 'unsupported';
     default:
       return 'other';
   }
@@ -230,6 +206,5 @@ export const moveFailure = (error: unknown): MoveFailure => {
     ...(http?.code === undefined ? {} : { code: http.code }),
     ...(suggestedModel === null ? {} : { suggestedModel }),
     ...(inflight === undefined ? {} : { inflight }),
-    ...(http?.daemonVersion === undefined ? {} : { daemonVersion: http.daemonVersion }),
   };
 };
