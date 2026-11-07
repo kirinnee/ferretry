@@ -128,6 +128,12 @@ describe('useAccountPickerSlice', () => {
     await bus.emit('runtimes.default-changed', { defaultRuntime: 'codex-auto-default' });
     await settle();
     expect(mounted.container.textContent).toBe('ready:codex-auto-default');
+
+    // A sign-in changing re-reads the roster too: the picker's health rows come from it.
+    roster = 'codex-auto-signed-in';
+    await bus.emit('logins.changed', { loginId: 'codex' });
+    await settle();
+    expect(mounted.container.textContent).toBe('ready:codex-auto-signed-in');
     await mounted.unmount();
   });
 });

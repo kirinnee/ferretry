@@ -60,9 +60,15 @@ export const runtimeNameProblem = (
   return null;
 };
 
+/** The word a runtime's name starts with: the CLI's short name (`claude`, `codex`), not the wire harness key. */
+const runtimeNamePrefix = (harness: HarnessKind): string => (harness === 'claude-code' ? 'claude' : harness);
+
 /** The prefilled name: harness plus profile, made unique (`claude-default`, `claude-default-2`). */
 export const suggestedRuntimeName = (harness: HarnessKind, profile: string, runtimes: readonly RuntimeView[]): string =>
-  uniqueName(`${harness}-${slug(profile) || 'runtime'}`, new Set(runtimes.map(runtime => runtime.name)));
+  uniqueName(
+    `${runtimeNamePrefix(harness)}-${slug(profile) || 'runtime'}`,
+    new Set(runtimes.map(runtime => runtime.name)),
+  );
 
 /** A runtime that already uses this login and profile (R4, E15). */
 export const sameLoginAndProfile = (
