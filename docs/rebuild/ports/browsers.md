@@ -303,10 +303,11 @@ pwa/tests/unit/use-remote-browser.test.tsx
 
 _none_
 
-## Keep (tests required): 24 rows owned (24 kept, 0 split)
+## Keep (tests required): 25 rows owned (25 kept, 0 split)
 
 Every row below gets a test whose name contains the row id, e.g. `test('I56 …', …)`; `ports-pending.json` loses this plugin's line in the same PR (§10.4).
 
+- **G27** kept (grants) — open-url passes the address as one argv element, never a shell string. Credentials and non-http(s) schemes are refused, the rate is 10 per 10 s, and the log records `link.opened` with the host only. · enforcer: behaviour as written · with: gate · test name: `G27`
 - **I56** kept (input-requests) — A Send whose look does not match looks again; a page search that cannot prove a candidate, finds more than eight, or sees the page change is ambiguous (not even the pointer decides); a field in a frame is found again only through the pointer · enforcer: `InputTargetPort.refind` · with: vault · note: integration fixture across the packages named · test name: `I56`
 - **I63** kept (input-requests) — `inputType` writes only to the exact nodes the (redrawn) card showed; a write refused at the last moment redraws the card and is never retried within that Send · enforcer: `inputType` · with: vault · note: integration fixture across the packages named · test name: `I63`
 - **I96** kept (input-requests) — The dummy probe runs only on a page card, one empty main-frame secret field, no open WebSocket, in the page's queue; it types 3 chars, never presses Enter or changes field, empties the field and proves it empty; any request, new document, WebSocket, non-empty field or unreadable page aborts it and keeps 120 s · enforcer: dummy probe, `aborted` · with: vault · note: integration fixture across the packages named · test name: `I96`

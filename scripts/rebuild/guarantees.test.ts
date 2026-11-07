@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { OWNER_OVERRIDE, parseAppendixD } from './guarantees.ts';
+import { ledgerRows, OWNER_OVERRIDE, parseAppendixD } from './guarantees.ts';
 
 const root = join(import.meta.dir, '..', '..');
 const regenerated = async () =>
   new Map(
-    parseAppendixD(await Bun.file(join(root, 'docs/design/redesign.md')).text()).rows.map(
+    ledgerRows(parseAppendixD(await Bun.file(join(root, 'docs/design/redesign.md')).text()).rows).map(
       row => [row.id, row.owner] as const,
     ),
   );

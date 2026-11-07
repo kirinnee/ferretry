@@ -330,7 +330,7 @@ pwa/tests/unit/use-qr-scan.test.tsx
 
 _none_
 
-## Keep (tests required): 183 rows owned (180 kept, 3 split)
+## Keep (tests required): 188 rows owned (185 kept, 3 split)
 
 Every row below gets a test whose name contains the row id, e.g. `test('G51 …', …)`; `ports-pending.json` loses this plugin's line in the same PR (§10.4).
 
@@ -338,10 +338,15 @@ Every row below gets a test whose name contains the row id, e.g. `test('G51 …'
 - **G52** kept (grants) — A remote caller may switch `pairing` off but can never switch it back on. · enforcer: behaviour as written · with: gate · note: integration fixture across the packages named · test name: `G52`
 - **G53** kept (grants) — `pairing` governs minting, never redemption. There is no redemption route; redemption is a sealed record on a pre-auth session, on every carrier. · enforcer: relay-protocol §14 · with: gate · note: integration fixture across the packages named · test name: `G53`
 - **G54** kept (grants) — Ending a code and revoking a device are both on the `use` axis. · enforcer: behaviour as written · with: gate · note: integration fixture across the packages named · test name: `G54`
+- **G56** kept (grants) — The remote `pairing` turn-off warning carries "revoke that device FIRST". · enforcer: `COARSE_SWITCH_ALSO_STOPS` (`packages/pwa/src/lib/grants.ts`) · with: gate · test name: `G56`
+- **G59** kept (grants) — The `secrets` turn-off control names `fy daemon config set secrets --use`. · enforcer: behaviour as written · with: gate · test name: `G59`
+- **G95** kept (grants) — A background `GET`/`HEAD` that meets an unlock or step-up waits until its machine is on screen; anything a person pressed asks at once. Same-named machines are told apart by address. · enforcer: behaviour as written · with: gate · note: integration fixture across the packages named · test name: `G95`
 - **G105** kept (grants) — There is one step-up prompt: raised on refusal, one ceremony, one retry. There is no second implementation. · enforcer: behaviour as written · with: gate · note: integration fixture across the packages named · test name: `G105`
 - **G106** kept (grants) — The prompt is the operating system's, not one drawn by the page. · enforcer: behaviour as written · with: gate · note: integration fixture across the packages named · test name: `G106`
 - **G107** kept (grants) — A surface that just stepped up re-reads its own permissions. · enforcer: behaviour as written · with: gate · note: integration fixture across the packages named · test name: `G107`
 - **G108** kept (grants) — `not-granted` and `undetermined` refusals get no prompt, and a caller on the host is never asked. · enforcer: behaviour as written · with: gate · note: integration fixture across the packages named · test name: `G108`
+- **G128h** kept (grants) — device revoke (`DELETE /v1/pair/devices/:deviceId`) is a narrowing: never held, never needs a step-up beyond today's. Narrowing routes: plan revoke, sign-in rule narrow/revoke, paste-rule delete/drop, removing a default account, device revoke, and device grants `PATCH`. · enforcer: behaviour as written · with: gate · test name: `G128h`
+- **G128i** kept (grants) — device grants `PATCH` (`PATCH /v1/pair/devices/:deviceId/grants`) is a narrowing: never held, never needs a step-up beyond today's. Narrowing routes: plan revoke, sign-in rule narrow/revoke, paste-rule delete/drop, removing a default account, device revoke, and device grants `PATCH`. · enforcer: behaviour as written · with: gate · test name: `G128i`
 - **G143** kept (grants) — `PATCH …/grants` answers the whole device list. A device may widen only an axis it effectively holds, plus `pairing.configure`, with a step-up. · enforcer: `DeviceGrantsPatch` · with: gate · note: integration fixture across the packages named · test name: `G143`
 - **G144** kept (grants) — A device may narrow any device, its own included, with no per-act step-up. · enforcer: behaviour as written · with: gate · note: integration fixture across the packages named · test name: `G144`
 - **G145** kept (grants) — A device widening anything it does not hold gets `403 grant_forbidden`, naming the host command. · enforcer: behaviour as written · with: gate · note: integration fixture across the packages named · test name: `G145`
@@ -518,7 +523,7 @@ Every row below gets a test whose name contains the row id, e.g. `test('G51 …'
 - **R590** kept (relay-protocol) — The relay never sees the code, key or device name of a pairing. · enforcer: behaviour as written · with: kernel · note: integration fixture across the packages named · test name: `R590`
 - **R633** kept (relay-protocol) — Pairing ignores the preference: direct, then the hosted relay. · enforcer: behaviour as written · with: connections · note: integration fixture across the packages named · test name: `R633`
 
-### Co-owned rows (37): another port owns the row; this port writes its side of the integration fixture
+### Co-owned rows (36): another port owns the row; this port writes its side of the integration fixture
 
 - **G74** kept (grants) — A governed device gets `401 unlock_required` on everything except the routes it needs to get in, until it unlocks. · enforcer: behaviour as written · with: access · note: integration fixture across the packages named · test name: `G74`
 - **G75** kept (grants) — One unlock lasts `unlockValidityHours` per device (default 8, range 1 h–7 d) and survives a daemon restart. · enforcer: `unlockValidityHours` · with: access · note: integration fixture across the packages named · test name: `G75`
@@ -539,7 +544,6 @@ Every row below gets a test whose name contains the row id, e.g. `test('G51 …'
 - **G92** kept (grants) — Sign-in rules: reading, dropping, narrowing and revoking need `secrets.use` and never a passkey. · enforcer: behaviour as written · with: access · note: integration fixture across the packages named · test name: `G92`
 - **G93** kept (grants) — Sign-in rules: staging, confirming, `…/bind` and commit need `secrets.configure` plus `browser.use`. This is decided before the proof is claimed, so a refusal never spends it. · enforcer: behaviour as written · with: access · note: integration fixture across the packages named · test name: `G93`
 - **G94** kept (grants) — A rule commit takes only the kept `approve-sign-in-rule` assertion over that stage, from a paired device. The admin token on loopback gets the step-up demand. · enforcer: behaviour as written · with: access · note: integration fixture across the packages named · test name: `G94`
-- **G95** kept (grants) — A background `GET`/`HEAD` that meets an unlock or step-up waits until its machine is on screen; anything a person pressed asks at once. Same-named machines are told apart by address. · enforcer: behaviour as written · with: access · note: integration fixture across the packages named · test name: `G95`
 - **G96** kept (grants) — There is no operator password, and nothing is kept for compatibility. · enforcer: behaviour as written · with: access · note: integration fixture across the packages named · test name: `G96`
 - **G97** kept (grants) — The step-up window is `stepUpWindowMinutes` (0–60, default 15). At 0 one step-up admits exactly one act and the boundary spends it. An unlock is never spent. · enforcer: `stepUpWindowMinutes` · with: access · note: integration fixture across the packages named · test name: `G97`
 - **G98** kept (grants) — A governed caller needs a step-up for every `configure`, and for `use` of terminal, browser, pairing, secrets and sharing. Every other `use` needs only the grant. · enforcer: `demandNeedsStepUp` · with: access · note: integration fixture across the packages named · test name: `G98`

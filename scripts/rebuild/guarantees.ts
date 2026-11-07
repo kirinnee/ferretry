@@ -164,6 +164,26 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
     reason:
       'enforced by the Vault sign-in lock (`LoginObserver.pageSteer`, `steerOf`); Browsers tells it what a page did',
   },
+  G27: {
+    owner: 'browsers',
+    reason:
+      "`POST /v1/system/open-url` is Browsers' (lead ruling guarantees-reown): its `OpenUrlService` validates the address, rations it and records `link.opened`; Gate keeps the `privilegedOnly` carrier check (G26) as a co-owner",
+  },
+  G56: {
+    owner: 'access',
+    reason:
+      "the remote turn-off warning is Access's app half (`COARSE_SWITCH_ALSO_STOPS` in `app/lib/grants.ts`); the lead ruling named the app shell, but the shell holds no grants screen and cannot import a plugin, so the owner is the package that serves it; Gate keeps the grants contract as a co-owner",
+  },
+  G59: {
+    owner: 'access',
+    reason:
+      "the `secrets` turn-off control is Access's app half (`remoteRevokeWarning`, `app/lib/grants.ts`); see G56 for why Access and not the app shell; Gate keeps the grants contract as a co-owner",
+  },
+  G95: {
+    owner: 'access',
+    reason:
+      "the prompt gate is Access's app half (`StepUpGate`, `app/lib/step-up-gate.ts`, and `distinctDaemonName`, `app/shell-pairing.ts`); see G56 for why Access and not the app shell; Gate keeps the step-up policy as a co-owner",
+  },
   G33: {
     owner: 'conversation',
     reason:
@@ -209,6 +229,51 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
       "the kept half is Access's device document (`StatePairingRepository`, `DevicesFile`): malformed grants fail the document closed and every write carries grants; Gate keeps the daemon-wide half",
   },
 };
+
+/**
+ * Appendix D rows the ledger splits into one row per ROUTE (lead ruling guarantees-reown: each route is owned by the
+ * plugin that serves it, and each has its own test named with its id). The appendix keeps its one row; the ledger
+ * (`guarantees.tsv`) carries these instead, so the appendix totals (1,215 = 1,158 + 26 + 31) still hold.
+ */
+export const ROW_SPLITS: Record<string, readonly { id: string; owner: string; route: string; what: string }[]> = {
+  G128: [
+    {
+      id: 'G128a',
+      owner: 'accounts',
+      route: 'POST /v1/ferrets/:ferretId/task-plans/:planId/revoke',
+      what: 'plan revoke',
+    },
+    { id: 'G128b', owner: 'accounts', route: 'POST /v1/sign-in-rules/:id/narrow', what: 'sign-in rule narrow' },
+    { id: 'G128c', owner: 'accounts', route: 'DELETE /v1/sign-in-rules/:id', what: 'sign-in rule revoke' },
+    {
+      id: 'G128d',
+      owner: 'accounts',
+      route: 'POST /v1/accounts/:id/sign-in-rules/revoke',
+      what: 'revoking every sign-in rule of an account',
+    },
+    { id: 'G128e', owner: 'accounts', route: 'DELETE /v1/copy-rules/:ruleId', what: 'paste-rule delete' },
+    { id: 'G128f', owner: 'accounts', route: 'DELETE /v1/copy-rules/stages/:stage', what: 'paste-rule drop' },
+    { id: 'G128g', owner: 'accounts', route: 'PUT /v1/accounts/defaults', what: 'removing a default account' },
+    { id: 'G128h', owner: 'access', route: 'DELETE /v1/pair/devices/:deviceId', what: 'device revoke' },
+    { id: 'G128i', owner: 'access', route: 'PATCH /v1/pair/devices/:deviceId/grants', what: 'device grants `PATCH`' },
+  ],
+};
+
+/** The ledger's rows: the Appendix D rows, with every {@link ROW_SPLITS} row replaced by its per-route rows. */
+export function ledgerRows(appendix: readonly Row[]): Row[] {
+  return appendix.flatMap(row => {
+    const parts = ROW_SPLITS[row.id];
+    if (parts === undefined) return [row];
+    return parts.map(part => ({
+      ...row,
+      id: part.id,
+      owner: part.owner,
+      with: [...new Set([row.owner, ...row.with].filter(x => x !== part.owner))],
+      test: part.id,
+      guarantee: `${part.what} (\`${part.route}\`) is a narrowing: never held, never needs a step-up beyond today's. ${row.guarantee}`,
+    }));
+  });
+}
 
 const cells = (line: string): string[] =>
   line
@@ -306,7 +371,9 @@ export function parseAppendixD(markdown: string): { rows: Row[]; gaps: number; s
 
 if (import.meta.main) {
   const [src = 'docs/design/redesign.md', out = 'docs/rebuild/guarantees.tsv'] = process.argv.slice(2);
-  const { rows, gaps } = parseAppendixD(readFileSync(src, 'utf8'));
+  const parsed = parseAppendixD(readFileSync(src, 'utf8'));
+  const { gaps } = parsed;
+  const rows = ledgerRows(parsed.rows);
   const tsv = [
     'id\tstatus\towner\twith\tenforcer\tdoc\ttest',
     ...rows.map(r =>
@@ -323,9 +390,9 @@ if (import.meta.main) {
       .join(' ');
   };
   const st = { kept: 0, split: 0, removed: 0 };
-  for (const r of rows) st[r.status]++;
+  for (const r of parsed.rows) st[r.status]++;
   console.log(
-    `rows ${rows.length} (stated 1215); kept ${st.kept}/1158 split ${st.split}/26 removed ${st.removed}/31; declared gaps ${gaps} (stated 161)`,
+    `appendix rows ${parsed.rows.length} (stated 1215); kept ${st.kept}/1158 split ${st.split}/26 removed ${st.removed}/31; declared gaps ${gaps} (stated 161); ledger rows ${rows.length} (${rows.length - parsed.rows.length} more from ROW_SPLITS)`,
   );
   console.log('ids unique:', new Set(rows.map(r => r.id)).size === rows.length);
   console.log(
