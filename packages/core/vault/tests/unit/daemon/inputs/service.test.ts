@@ -651,6 +651,30 @@ describe('InputRequestService.deliver', () => {
     }
   });
 
+  it('I19 should allow secret, private and code values on an unfamiliar echoing target, while refusing control input', async () => {
+    const unfamiliar: InputTargetFacts = {
+      ...FACTS,
+      echo: 'on',
+      canonical: false,
+      recognisedConsumer: false,
+      program: 'myapp',
+      foreground: { ...FACTS.foreground, comm: 'myapp', argv: 'myapp' },
+      promptLine: 'Enter value:',
+    };
+    for (const sensitivity of ['secret', 'private', 'code'] as const) {
+      const { w, service, id, digest } = await raised(
+        { facts: unfamiliar },
+        { ...RAISE, prompt: 'Enter value', sensitivity },
+      );
+      const error = await refused(service.deliver(SESSION, id, bodyFor(digest, {}, '12\n34'), HOST));
+      should(error.code).equal('bad_request');
+      should(w.writes).eql([]);
+      const done = await service.deliver(SESSION, id, bodyFor(digest), HOST);
+      should(done.state).equal('delivered');
+      should(w.writes).eql([{ text: VALUE, submit: true }]);
+    }
+  });
+
   it('I22 should accept a private code, flag it amber and quarantine the terminal like a secret', async () => {
     const { w, service, values, id, digest, view } = await raised({}, { ...RAISE, sensitivity: 'private' });
     const [card] = await service.list(HOST);
