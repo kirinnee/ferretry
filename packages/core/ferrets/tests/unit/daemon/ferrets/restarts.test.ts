@@ -1,10 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { TestHost } from '@ferretry/kernel/testing';
-import { FerretHistoryFiles, type FerretSummary } from '../../../../contract/index.ts';
+import {
+  FerretHistoryFiles,
+  type FerretSummary,
+  type RestartResult,
+  type RestartStatus,
+  RestartsFile,
+} from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner } from '../../../../contract/testing/index.ts';
-import type { RestartResult, RestartStatus } from '../../../../daemon/lib/protocol/session-restart.ts';
-import { RestartsFile } from '../../../../contract/index.ts';
 import { as, host } from './route-fixture.ts';
 
 /**
