@@ -1,6 +1,6 @@
 /**
  * The words for the models a local server (Ollama) has installed on the machine — the pure half. The
- * daemon reads Ollama on demand (`POST /v1/logins/models/local/refresh`) and answers with a state, a ready
+ * daemon reads Ollama on demand (`POST /v1/models/local/refresh`) and answers with a state, a ready
  * sentence and the exact command that installs a model; this file only turns that answer into the
  * tile's second line, a size, and the note under a picker. Nothing here reads a clock or a network.
  */

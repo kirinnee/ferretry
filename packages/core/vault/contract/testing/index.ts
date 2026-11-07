@@ -35,6 +35,8 @@ import {
   allowedDestination,
   type AuthorizedOutcome,
   type CredentialPlacement,
+  optionalSecretReference,
+  optionalSecretReferenceOf,
   type OutboundHttpRequest,
   type SecretName,
   type SecretSummary,
@@ -434,10 +436,20 @@ export class FakeVault implements VaultApi {
       out = out.split(entry.value).join(secretMask(name));
     return out;
   }
-  #resolve(env: Readonly<Record<string, string>>): Result<Record<string, string>, readonly SecretName[]> {
+  /** `optional`: a ferret child's environment, where a whole-value `${secret?:NAME}` not held is left out. */
+  #resolve(
+    env: Readonly<Record<string, string>>,
+    optional = false,
+  ): Result<Record<string, string>, readonly SecretName[]> {
     const unknown: SecretName[] = [];
     const out: Record<string, string> = {};
     for (const [key, raw] of Object.entries(env)) {
+      const named = optional ? optionalSecretReferenceOf(raw) : undefined;
+      if (named !== undefined) {
+        const held = this.#values.get(named)?.value;
+        if (held !== undefined) out[key] = held;
+        continue;
+      }
       for (const name of secretReferencesIn(raw)) if (!this.#values.has(name)) unknown.push(name);
       out[key] = raw.replace(
         /\$\{secret:([A-Z][A-Z0-9_]{0,63})\}/gu,
@@ -483,11 +495,12 @@ export class FakeVault implements VaultApi {
     _ferret: FerretId,
     env: Readonly<Record<string, string>>,
   ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>> {
-    const resolved = this.#resolve(env);
+    const resolved = this.#resolve(env, true);
     if (!resolved.ok) return err({ unknown: resolved.error });
+    const names = Object.keys(resolved.value);
     const handle = Object.freeze({
-      names: Object.keys(env),
-      toJSON: () => ({ names: Object.keys(env) }),
+      names,
+      toJSON: () => ({ names }),
     }) as unknown as ChildEnvironment;
     childValues.set(handle, Object.freeze(resolved.value));
     return ok(handle);
@@ -588,6 +601,25 @@ export function vaultConformance(name: string, make: () => VaultSubject | Promis
         expect(env.value.names).toEqual(['TOKEN']);
         expect(JSON.stringify(env.value).includes(VALUE)).toBe(false);
       }
+    });
+    test('an optional reference is set when held and left unset when not; a plain reference still refuses', async () => {
+      const { vault } = await make();
+      await vault.put(NAME, VALUE);
+      const env = await vault.childEnvironment('f1' as FerretId, {
+        HELD: optionalSecretReference(NAME),
+        GONE: optionalSecretReference('SIGNED_OUT' as SecretName),
+      });
+      expect(env.ok).toBe(true);
+      if (env.ok) {
+        expect([...env.value.names].sort()).toEqual(['HELD']);
+        expect(JSON.stringify(env.value).includes(VALUE)).toBe(false);
+      }
+      const plain = await vault.childEnvironment('f1' as FerretId, {
+        GONE: optionalSecretReference('SIGNED_OUT' as SecretName),
+        X: '${secret:NOPE}',
+      });
+      expect(plain.ok).toBe(false);
+      if (!plain.ok) expect(plain.error.unknown).toEqual(['NOPE']);
     });
   });
 }

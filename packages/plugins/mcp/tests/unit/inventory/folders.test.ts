@@ -9,19 +9,29 @@ import type { SecretName } from '@ferretry/core-vault/contract';
 import { mcpOAuthSecretNames, mcpProjectSubject } from '../../../contract/index.ts';
 import should from 'should';
 import {
-  type ClaudeLocalScope,
   combinedMcpOAuthServers,
   type McpInventoryFolder,
   McpInventoryService,
+  managedWorktreeRows,
   mcpFolderFor,
   mcpFolderSubject,
+  mcpInventoryFolders,
   mcpProjectKey,
   ProjectMcpLaunch,
   ProjectMcpOAuthServers,
 } from '../../../daemon/lib/inventory/index.ts';
 import { McpOAuthRefusal, McpOAuthService } from '../../../daemon/lib/oauth/index.ts';
 import { PWA_REDIRECT, testCrypto, world } from '../oauth/support.ts';
-import { ACCOUNTS, FOLDERS, knownFolders, MemoryDocuments, PROJECT, session, WORKTREE } from './support.ts';
+import {
+  ACCOUNTS,
+  documentApprovals,
+  FOLDERS,
+  knownFolders,
+  MemoryDocuments,
+  PROJECT,
+  session,
+  WORKTREE,
+} from './support.ts';
 
 const LONE = '/Users/someone/Workspace/work/PE';
 const NESTED = `${LONE}/tools/inner`;
@@ -45,6 +55,45 @@ describe('mcpFolderFor', () => {
     should(mcpFolderFor(`${LONE}//./`, FOLDERS)).deepEqual({ root: LONE, project: LONE });
     // A lexical compare: a sibling sharing a prefix is not inside the project.
     should(mcpFolderFor(`${PROJECT}-old`, FOLDERS)).deepEqual({ root: `${PROJECT}-old`, project: `${PROJECT}-old` });
+  });
+});
+
+describe('managed worktrees (Ferrets’ managedWorktrees(), lead ruling (B))', () => {
+  const COMMON = `${PROJECT}/.git`;
+  const managed = (path: string, repositoryRoot: string, commonDirectory: string, removedAt?: string) => ({
+    path,
+    repositoryRoot,
+    commonDirectory,
+    ...(removedAt === undefined ? {} : { removedAt }),
+  });
+
+  it('should map a live managed worktree to the project registered for its common directory, as today', async () => {
+    // Arrange — forked from another checkout, so only the common directory names the project.
+    const projects = [{ id: 'p1', name: 'repo', path: PROJECT, git: { commonDirectory: COMMON } }];
+    const rows = managedWorktreeRows(
+      [
+        managed('/fy-home-worktrees/feature', '/elsewhere/checkout', COMMON),
+        managed('/fy-home-worktrees/stranger', '/srv/stranger', '/srv/stranger/.git'),
+        managed('/fy-home-worktrees/gone', '/elsewhere/checkout', COMMON, '2026-11-07T10:00:00.000Z'),
+        managed('/fy-home-worktrees/blank', PROJECT, ''),
+      ],
+      projects,
+    );
+
+    // Act
+    const folders = await mcpInventoryFolders(
+      { projects: async () => projects },
+      { list: async () => ({ worktrees: rows }) },
+    )();
+
+    // Assert — the joined one is the project; an unjoined one is its repository; a removed one is no folder.
+    should(folders).deepEqual([
+      { root: PROJECT, project: PROJECT, name: 'repo' },
+      { root: '/fy-home-worktrees/feature', project: PROJECT, name: 'repo' },
+      { root: '/fy-home-worktrees/stranger', project: '/srv/stranger' },
+      { root: '/fy-home-worktrees/blank', project: PROJECT },
+    ]);
+    should(mcpFolderFor('/fy-home-worktrees/feature/src', folders)).deepEqual(folders[1]);
   });
 });
 
@@ -80,8 +129,6 @@ function machineFiles(): Map<string, unknown> {
   return files;
 }
 
-const NO_LOCAL_SCOPE: ClaudeLocalScope = { reconcile: async () => undefined };
-
 describe('one derivation of a project server’s subject', () => {
   const ferrets = [LONE, NESTED, `${PROJECT}/src`, `${WORKTREE}/lib`, `${OTHER}/`];
 
@@ -105,7 +152,7 @@ describe('one derivation of a project server’s subject', () => {
         documents,
         secrets: { held: async () => new Set() },
         renewal: { refreshForLaunch: async names => void renewed.push(...names) },
-        localScope: NO_LOCAL_SCOPE,
+        approvals: documentApprovals(machineFiles()),
       });
 
       // Act

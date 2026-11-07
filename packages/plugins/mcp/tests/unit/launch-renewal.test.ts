@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { LaunchPart, LaunchPartSource, LaunchSpec } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
-import { type SecretName, secretReference } from '@ferretry/core-vault/contract';
+import { optionalSecretReference, type SecretName } from '@ferretry/core-vault/contract';
 import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
 import { ok } from '@ferretry/std';
@@ -89,7 +89,7 @@ describe('MCP launch renewal', () => {
     expect(seen[0]?.access).not.toBe(before);
     expect(w.secrets.entries.get(NAMES.access)).toBe(w.provider.issued.at(-2));
     // …and the env names the server's variable by REFERENCE: the Vault opens it into the child.
-    expect(envOf(parts)).toEqual({ [NAMES.variable]: secretReference(NAMES.access) });
+    expect(envOf(parts)).toEqual({ [NAMES.variable]: optionalSecretReference(NAMES.access) });
     expect(NAMES.variable).toContain('LINEAR');
     expect(parts.find(part => part.kind === 'mcp' && part.name === 'linear')).toEqual({
       kind: 'mcp',
@@ -117,7 +117,7 @@ describe('MCP launch renewal', () => {
     expect(w.provider.tokenRequests).toHaveLength(2);
     expect(w.provider.tokenRequests[1]?.get('grant_type')).toBe('refresh_token');
     expect(seen[0]?.access).toBe(w.provider.issued.at(-2));
-    expect(envOf(parts)).toEqual({ [NAMES.variable]: secretReference(NAMES.access) });
+    expect(envOf(parts)).toEqual({ [NAMES.variable]: optionalSecretReference(NAMES.access) });
     expect(leaks(w.provider, parts, logged)).toEqual([]);
   });
 
@@ -133,7 +133,7 @@ describe('MCP launch renewal', () => {
 
     // Assert
     expect(signedIn.provider.tokenRequests).toHaveLength(1);
-    expect(envOf(fresh)).toEqual({ [NAMES.variable]: secretReference(NAMES.access) });
+    expect(envOf(fresh)).toEqual({ [NAMES.variable]: optionalSecretReference(NAMES.access) });
     expect(never.provider.tokenRequests).toHaveLength(0);
     expect(envOf(unsigned)).toEqual({});
     expect(unsigned.find(part => part.kind === 'mcp' && part.name === 'linear')).toEqual({
@@ -157,7 +157,7 @@ describe('MCP launch renewal', () => {
     expect(w.provider.tokenRequests).toHaveLength(2);
     expect((await w.service.connections())[0]?.state).toBe('needs-sign-in');
     expect(parts.map(part => (part.kind === 'mcp' ? part.name : part.kind))).toEqual(['linear', 'lint', 'env']);
-    expect(envOf(parts)).toEqual({ [NAMES.variable]: secretReference(NAMES.access) });
+    expect(envOf(parts)).toEqual({ [NAMES.variable]: optionalSecretReference(NAMES.access) });
   });
 
   test('a refresh that cannot reach the issuer, or a damaged sign-in record, never refuses the launch', async () => {
@@ -192,7 +192,7 @@ describe('MCP launch renewal', () => {
           headers: { Authorization: `Bearer \${${docs.variable}}` },
         },
       },
-      env: { [docs.variable]: secretReference(docs.access) },
+      env: { [docs.variable]: optionalSecretReference(docs.access) },
     };
 
     // Act
@@ -211,8 +211,8 @@ describe('MCP launch renewal', () => {
       },
     });
     expect(envOf(parts)).toEqual({
-      [docs.variable]: secretReference(docs.access),
-      [NAMES.variable]: secretReference(NAMES.access),
+      [docs.variable]: optionalSecretReference(docs.access),
+      [NAMES.variable]: optionalSecretReference(NAMES.access),
     });
   });
 
@@ -277,7 +277,10 @@ describe('MCP launch renewal through the daemon half', () => {
     const half = daemon.build?.({
       manifest,
       needs: { ferrets, vault, sealed },
-      uses: {},
+      uses: {
+        claudeCode: { current: () => undefined },
+        projects: { current: () => undefined },
+      },
       hooks: {} as never,
       kernel: {
         config: { collection: () => ITEMS },
@@ -311,7 +314,7 @@ describe('MCP launch renewal through the daemon half', () => {
     const filed = written.at(-1) as typeof carried | undefined;
     expect(Date.parse(filed?.connections.linear?.expiresAt ?? '')).toBeGreaterThan(Date.parse(record.expiresAt ?? ''));
     // …and the launch names the token by reference only.
-    expect(envOf(parts)).toEqual({ [NAMES.variable]: secretReference(NAMES.access) });
+    expect(envOf(parts)).toEqual({ [NAMES.variable]: optionalSecretReference(NAMES.access) });
     expect(leaks(w.provider, parts, logged)).toEqual([]);
     expect(JSON.stringify(parts)).not.toContain('fake-access-value');
     expect(logged.join('\n')).not.toContain('fake-access-value');

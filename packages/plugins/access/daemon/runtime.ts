@@ -245,7 +245,9 @@ export class AccessRuntime {
     });
     // Connections owns the host-facing reach (`advertisement()`). Without it, the honest answer is `none`: the code is
     // still minted, the link is refused and the fix is named (P84).
-    const advertised: ConnectionAdvertisement = this.#deps.connections()?.advertisement() ?? {
+    const advertised: Omit<ConnectionAdvertisement, 'appOrigin' | 'allowedOrigins'> = this.#deps
+      .connections()
+      ?.advertisement() ?? {
       advertisement: { kind: 'none', refusal: 'no-port' },
     };
     pairing = new AccessPairingService(

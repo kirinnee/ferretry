@@ -285,6 +285,12 @@ sandbox can enforce it.
 
 One grammar, everywhere: `${secret:NAME}`.
 
+There is one narrow exception, for a ferret's launch environment only. A variable whose **whole** value is
+`${secret?:NAME}` is set to the secret when the store holds it, and **left unset** when it does not.
+`${secret:NAME}` refuses the launch instead. MCP uses it for its sign-in variables, so a sign-out that
+lands while a ferret is starting does not stop that ferret. It names nothing a plain reference could not.
+Anywhere else, or inside a longer value, it is plain text.
+
 `config/daemon.json` may carry a `secretEnvironment` block of reusable recipes:
 
 ```json

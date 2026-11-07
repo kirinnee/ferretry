@@ -2,6 +2,8 @@ import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
+import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
+import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import {
   MCP_AUDIT,
   MCP_CONFIG,
@@ -37,6 +39,13 @@ export default definePlugin({
 
   // `sealed`: the sign-in's own refresh tokens and client secrets (MCP_OAUTH_SECRETS), never another plugin's.
   needs: { ferrets: FerretsPort, vault: VaultPort, sealed: SealedDocumentsPort },
+
+  // Optional (lead ruling): Claude Code answers which project servers it approved for a ferret, read from its OWN
+  // home (MCP has no root there); Projects answers the registered roots a launch folder belongs to. Off = fail closed
+  // (no project server bound) and each folder its own project. Codex is not asked: its answer is always `not-taken`
+  // (today handed a Codex launch nothing), so MCP answers that itself, whether or not Codex's daemon half is built.
+  // Neither uses MCP, so the graph stays acyclic.
+  uses: { claudeCode: ClaudeCodePort, projects: ProjectsPort },
 
   provides: { mcp: McpPort },
 
@@ -190,7 +199,9 @@ export default definePlugin({
   doctor: ['mcp-inventory'],
 
   permissions: {
-    roots: ['work'],
+    // `work`: a ferret's own folder. `imports`: ONLY the `.mcp.json` of a registered project root or a live managed
+    // worktree, read-only (lead ruling (B); `daemon/adapters/project-root-files.ts`).
+    roots: ['work', 'imports'],
     // GAP: see the note above. Declared empty rather than guessed.
     network: [],
     spawn: [],

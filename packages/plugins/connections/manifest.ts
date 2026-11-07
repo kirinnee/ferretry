@@ -1,4 +1,4 @@
-import { Carriers, type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
+import { Carriers, DoctorChecks, type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import { definePlugin, panel, route, settingsTab, socket, verb } from '@ferretry/kernel/manifest';
 import {
   AUDIT,
@@ -9,6 +9,7 @@ import {
   ConnectionsPort,
   connectionsLoosens,
   GUARD_NONE,
+  HOSTED_RELAY_DIRECTORY_ORIGIN,
   SKIP_READ,
   SKIP_SEALED,
   SKIP_UNRECORDED,
@@ -111,6 +112,7 @@ export default definePlugin({
 
   hooks: {
     takes: [
+      { hook: DoctorChecks },
       { hook: Carriers, key: 'direct' },
       { hook: Carriers, key: 'relay' },
       { hook: Carriers, key: 'tunnel' },
@@ -118,11 +120,8 @@ export default definePlugin({
     ],
   },
 
-  doctor: ['relay', 'tunnel', 'webrtc'],
-
-  /**
-   * The relay directory and rendezvous are runtime values read from the build's discovery origin; the kernel's
-   * fetch port is expected to admit that origin by name (not listed here, so no address is compiled in).
-   */
-  permissions: { network: ['stun.cloudflare.com'], spawn: ['cloudflared'] },
+  permissions: {
+    network: [new URL(HOSTED_RELAY_DIRECTORY_ORIGIN).host, { resolver: 'relay' }, 'stun.cloudflare.com'],
+    spawn: ['cloudflared'],
+  },
 });
