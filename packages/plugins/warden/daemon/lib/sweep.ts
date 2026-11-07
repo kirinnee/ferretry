@@ -203,6 +203,7 @@ import {
 import {
   jevActDetail,
   jevNudgeMessage,
+  leftAloneUnproved,
   mayActAlone,
   type WardenLeftAlone,
   verdictAct,
@@ -2231,7 +2232,14 @@ export class WardenSweepService {
             detail: `Closing its leftover browser did not take: the signal was refused.${left}`,
           });
         } else if (leftAlone.length > 0) {
-          // Nothing it could prove was there to close: no act is recorded, but what it left alone is kept.
+          // Nothing it could prove was there to close. A pid it could not prove ownership of is shown to the owner
+          // (held); `gone` / `tool-running` alone are a race, not an ownership question, so they are journal-only.
+          if (leftAloneUnproved(leftAlone))
+            next = this.recordAction(next, {
+              ...base,
+              outcome: 'held',
+              detail: `A browser this ferret launched is still running after its turn ended, but the Warden could not prove it is the ferret’s own, so it closed nothing.${left}`,
+            });
           this.ports.journal.record('fleet.warden_leftover_left_alone', {
             sessionId: candidate.sessionId,
             since: candidate.since,

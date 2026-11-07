@@ -259,10 +259,76 @@ describe('the Warden closes a browser left under a ferret’s pane (today’s re
     const acted = host.published.filter(event => event.event === 'warden.acted');
     disarm();
 
-    // Assert
+    // Assert: a race with the browser is not an ownership question, so it is the journal line only.
     should(browsers.closed).containEql(FERRET);
     should(actions).eql([]);
     should(acted).eql([]);
+    should(host.logged).containEql('fleet.warden_leftover_left_alone');
+  });
+
+  it('should show the owner a pid it left alone as not proved, when nothing else happened (one held row, one held event)', async () => {
+    // Arrange: nothing closed, nothing refused; the pid now names another process.
+    const browsers = fakeBrowsers({}, undefined, { f1: { closed: 0, leftAlone: [{ pid: 905, why: 'not-proved' }] } });
+    const host = livenessHost({ state: 'idle', sample: () => leftover, browsers });
+    const disarm = host.arm();
+
+    // Act
+    await host.ticks(22);
+    await host.sweep();
+    await host.sweep();
+    const actions = (await host.subsystem.status()).actions.filter(action => action.action === 'close_leftover');
+    const acted = host.published.filter(event => event.event === 'warden.acted');
+    disarm();
+
+    // Assert: said once per leftover in the actions; the journal line is kept.
+    should(actions.map(action => action.outcome)).eql(['held']);
+    should(actions[0]?.detail).match(/Left alone: pid 905 \(not proved\)\./u);
+    should(acted.length).be.above(0);
+    for (const event of acted)
+      should(event.payload).eql({
+        ferret: FERRET,
+        action: 'close_leftover',
+        outcome: 'held',
+        leftAlone: [{ pid: 905, why: 'not-proved' }],
+      });
+    should(host.logged).containEql('fleet.warden_leftover_left_alone');
+  });
+
+  it('should show the owner a pid it left alone as invalid, when nothing else happened', async () => {
+    // Arrange
+    const browsers = fakeBrowsers({}, undefined, { f1: { closed: 0, leftAlone: [{ pid: -1, why: 'invalid-pid' }] } });
+    const host = livenessHost({ state: 'idle', sample: () => leftover, browsers });
+    const disarm = host.arm();
+
+    // Act
+    await host.ticks(22);
+    await host.sweep();
+    const actions = (await host.subsystem.status()).actions.filter(action => action.action === 'close_leftover');
+    const acted = host.published.filter(event => event.event === 'warden.acted');
+    disarm();
+
+    // Assert
+    should(actions.map(action => action.outcome)).eql(['held']);
+    should(acted.map(event => (event.payload as { outcome: string }).outcome)).containEql('held');
+  });
+
+  it('should not show tool-running alone to the owner either (journal only)', async () => {
+    // Arrange
+    const browsers = fakeBrowsers({}, undefined, { f1: { closed: 0, leftAlone: [{ pid: 701, why: 'tool-running' }] } });
+    const host = livenessHost({ state: 'idle', sample: () => leftover, browsers });
+    const disarm = host.arm();
+
+    // Act
+    await host.ticks(22);
+    await host.sweep();
+    const actions = (await host.subsystem.status()).actions.filter(action => action.action === 'close_leftover');
+    const acted = host.published.filter(event => event.event === 'warden.acted');
+    disarm();
+
+    // Assert
+    should(actions).eql([]);
+    should(acted).eql([]);
+    should(host.logged).containEql('fleet.warden_leftover_left_alone');
   });
 
   it('should close nothing before the ten-minute grace has passed', async () => {

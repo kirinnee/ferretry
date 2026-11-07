@@ -3,7 +3,7 @@ import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
 import type { BrowsersApi, LeftoverBrowsersClosed } from '@ferretry/plugin-browsers/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { hasOpenQuestion } from './fleet.ts';
-import type { WardenRemedyPort, WardenResumeOutcome } from './lib/index.ts';
+import { leftAloneUnproved, type WardenRemedyPort, type WardenResumeOutcome } from './lib/index.ts';
 import { authorizeWardenResume, WardenResumeRefused } from './resume-guard.ts';
 
 /** What the remedies act through: Ferrets and Conversation, never around them; Asks to know a pending question. */
@@ -18,7 +18,7 @@ export interface WardenRemedyHost {
   readonly acted: (
     ferret: string,
     action: string,
-    outcome: 'done' | 'failed',
+    outcome: 'done' | 'held' | 'failed',
     leftAlone?: LeftoverBrowsersClosed['leftAlone'],
   ) => void;
   /** Browsers, while it is on (an optional use): it closes the browsers left under a ferret's pane. */
@@ -100,7 +100,9 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
     // before its signal is closed — never the ferret; every other one is left alone and reported.
     // The sweep calls this only when the owner lets the Warden close leftovers alone (`mayActAlone.closeLeftovers`).
     // Browsers off: nothing closes, and the sweep is never told of a leftover to close (`withLiveness`).
-    // Recorded `done` only when one closed, `failed` only when every browser it proved refused the signal.
+    // Recorded `done` when one closed, `failed` when every browser it proved refused the signal, and `held` when it
+    // closed and refused nothing but left a browser alone because it could not prove it (`not-proved`, `invalid-pid`):
+    // the owner is told. `gone` and `tool-running` alone are not ownership questions and raise nothing.
     closeLeftoverBrowsers: async ferret => {
       const browsers = host.browsers?.();
       if (browsers === undefined) return { closed: 0, leftAlone: [] };
@@ -109,6 +111,7 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
         const refused = result.leftAlone.some(browser => browser.why === 'signal-refused');
         if (result.closed > 0) acted(ferret, 'close_leftover', 'done', result.leftAlone);
         else if (refused) acted(ferret, 'close_leftover', 'failed', result.leftAlone);
+        else if (leftAloneUnproved(result.leftAlone)) acted(ferret, 'close_leftover', 'held', result.leftAlone);
         return result;
       } catch (error) {
         acted(ferret, 'close_leftover', 'failed');

@@ -88,6 +88,8 @@ export function livenessHost(options: LivenessHostOptions = {}) {
     conversation: base,
     browsers,
     published: fake.published,
+    /** The daemon log lines the Warden's journal wrote (`kernel.log.info`). */
+    logged: fake.logged,
     looks: () => looks,
     /** Arms the subsystem: the sweep timer and the liveness tick. */
     arm: () => subsystem.arm(),

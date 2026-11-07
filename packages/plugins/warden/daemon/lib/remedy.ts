@@ -25,6 +25,14 @@ export interface WardenLeftAlone {
   readonly why: string;
 }
 
+/**
+ * Whether a close left a browser alone because ownership could not be proved (`not-proved`, `invalid-pid`). That is
+ * the owner's business; `gone` and `tool-running` are a race with the browser or a tool, not an ownership question.
+ */
+export function leftAloneUnproved(leftAlone: readonly WardenLeftAlone[]): boolean {
+  return leftAlone.some(browser => browser.why === 'not-proved' || browser.why === 'invalid-pid');
+}
+
 /** What one leftover close did: how many browsers closed, and each one left alone. */
 export interface WardenLeftoverClose {
   readonly closed: number;
