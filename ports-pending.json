@@ -5,7 +5,6 @@
     "vault",
     "ferrets",
     "connections",
-    "updates",
     "claude-code",
     "codex",
     "logins",
@@ -27,7 +26,6 @@
     "onboarding"
   ],
   "pendingReasons": {
-    "updates": ["FY_UPDATE_CHECK=off is not honoured: the kernel UpdateHostPort cannot express it (kernel item)"],
     "runtimes": [
       "GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) is not ported into Runtimes; Add runtime and a runtime that needs sign-in link to Logins' tab until Logins' app half draws it",
       "GAP(kernel): Edit as YAML on a profile is not offered, because the kernel's /v1/config/file is not declared yet (renderFileEditor is never supplied)"
