@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { AgendaItemSchema } from '@ferretry/protocol';
+import { AgendaItemSchema } from '../../../../daemon/lib/protocol/agenda.ts';
 import should from 'should';
 import {
   type AgendaActor,
@@ -9,7 +9,7 @@ import {
   applyAgendaCommand,
   applyAgendaCommandToSession,
   type EditAgendaPatch,
-} from '../../../src/lib/agenda/state-machine.ts';
+} from '../../../../daemon/lib/agenda/state-machine.ts';
 
 /**
  * THE ITEM'S TABS (&F923; docs/agenda.md § The tabs): an edit's tab operations become the new `tabs` through the

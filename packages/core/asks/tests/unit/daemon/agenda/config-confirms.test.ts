@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { MAX_AGENDA_DETAIL_LENGTH, MAX_AGENDA_REASON_LENGTH } from '@ferretry/protocol';
+import { MAX_AGENDA_DETAIL_LENGTH, MAX_AGENDA_REASON_LENGTH } from '../../../../daemon/lib/protocol/agenda.ts';
 import should from 'should';
 import {
   allowLine,
@@ -7,7 +7,7 @@ import {
   confirmationDecision,
   confirmationNote,
   confirmationPremise,
-} from '../../../src/lib/agenda/config-confirms.ts';
+} from '../../../../daemon/lib/agenda/config-confirms.ts';
 
 const PRICE = 'the Jev price the cap counts with goes down from 2 to 0.042';
 

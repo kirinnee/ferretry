@@ -10,7 +10,7 @@
  * 4. Else, for a NOTICE only, the machine-wide agenda ({@link MACHINE_AGENDA_ID}). A gate item or a follow-up never goes there.
  * 5. Else the root itself; a broken lineage keeps the item on the session it was raised for, and says so.
  */
-import type { AgendaItem } from '@ferretry/protocol';
+import type { AgendaItem } from '../protocol/agenda.ts';
 import type { AgendaActor, RaiseAgendaRequest } from './state-machine.ts';
 
 /** Deepest lineage the walk follows; a longer chain is a loop or an accident. */

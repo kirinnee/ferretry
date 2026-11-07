@@ -1,11 +1,7 @@
 import { describe, it } from 'bun:test';
-import {
-  type AgendaCardAskAnswer,
-  type AgendaGate,
-  type AgendaItem,
-  agendaState,
-  cardAgendaReference,
-} from '@ferretry/protocol';
+import { type AgendaCardAskAnswer, type AgendaGate, type AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
+import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
+import { cardAgendaReference } from '../../../../daemon/lib/protocol/agenda-card-asks.ts';
 import should from 'should';
 import {
   applyCardAsk,
@@ -14,7 +10,7 @@ import {
   LEGACY_REPLAY_MS,
   sealCardAsks,
   withCardAsks,
-} from '../../../src/lib/agenda/card-asks.ts';
+} from '../../../../daemon/lib/agenda/card-asks.ts';
 
 const T0 = Date.parse('2026-11-03T08:00:00.000Z');
 const at = (minutes: number): string => new Date(T0 + minutes * 60_000).toISOString();

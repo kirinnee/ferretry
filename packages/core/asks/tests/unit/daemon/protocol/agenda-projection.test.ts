@@ -1,11 +1,11 @@
-import { agendaListSnapshot } from '../../src/lib/agenda-list.ts';
+import { agendaListSnapshot } from '../../../../daemon/lib/protocol/agenda-list.ts';
 import { describe, expect, it } from 'bun:test';
 import {
   AgendaListSnapshotSchema,
   AgendaReadItemSchema,
   AgendaSnapshotSchema,
   isAgendaHeader,
-} from '../../src/lib/agenda.ts';
+} from '../../../../daemon/lib/protocol/agenda.ts';
 import { projectionSnapshot } from '../fixtures/agenda-projection.ts';
 
 describe('the agenda list projection', () => {

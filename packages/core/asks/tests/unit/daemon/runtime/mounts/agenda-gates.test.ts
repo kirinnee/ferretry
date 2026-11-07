@@ -10,7 +10,7 @@ import type { AuthenticatedCredential } from '../../../../src/lib/api/authentica
 import type { CallerGovernance } from '../../../../src/lib/api/capability.ts';
 import { ApiError } from '../../../../src/lib/api/error.ts';
 import type { RouteContext } from '../../../../src/lib/api/route.ts';
-import type { AgendaService } from '../../../../src/lib/agenda/index.ts';
+import type { AgendaService } from '../../../../../daemon/lib/agenda/index.ts';
 import type { GateAnswer, GateAnswerOutcome } from '../../../../src/lib/board/index.ts';
 import { agendaRoutes } from '../../../../src/lib/runtime/index.ts';
 import { jsonBody, request } from '../../api/support.ts';

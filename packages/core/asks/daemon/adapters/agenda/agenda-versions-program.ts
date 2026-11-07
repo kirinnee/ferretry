@@ -1,4 +1,5 @@
-import type { AgendaConversationEntry, AgendaId, AgendaVersion, AgendaVersionSummary } from '@ferretry/protocol';
+import type { AgendaConversationEntry, AgendaId } from '../../lib/protocol/agenda.ts';
+import type { AgendaVersion, AgendaVersionSummary } from '../../lib/protocol/agenda-versions.ts';
 import type { AgendaVersionDraft, AgendaVersionStore } from '../../lib/agenda/versions.ts';
 import { SqliteAgendaVersionStore } from './sqlite-agenda-versions.ts';
 

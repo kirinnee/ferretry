@@ -1,10 +1,5 @@
-import {
-  type AgendaId,
-  type AgendaItem,
-  type AgendaLink,
-  MAX_AGENDA_LINK_LABEL_LENGTH,
-  type WorkRelatedResponse,
-} from '@ferretry/protocol';
+import { type AgendaId, type AgendaItem, type AgendaLink, MAX_AGENDA_LINK_LABEL_LENGTH } from '../protocol/agenda.ts';
+import { type WorkRelatedResponse } from '@ferretry/protocol';
 
 /**
  * THE CLOSEST AGENDA of something the daemon raises for a ferret (docs/agenda.md § One channel per topic): an agenda is

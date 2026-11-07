@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
-import { AgendaAgentClearer } from '../../../../src/lib/agenda/index.ts';
-import { agendaClearRoutes } from '../../../../src/lib/runtime/mounts/agenda-clear.ts';
+import { AgendaAgentClearer } from '../../../../../daemon/lib/agenda/index.ts';
+import { agendaClearRoutes } from '../../../../../daemon/lib/runtime/mounts/agenda-clear.ts';
 import should from 'should';
 import { jsonBody, request } from '../../api/support.ts';
 import { handleDirectly } from './second-line.ts';

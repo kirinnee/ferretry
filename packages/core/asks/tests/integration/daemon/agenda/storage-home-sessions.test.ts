@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { StorageHomeSessions } from '../../../src/adapters/agenda/storage-home-sessions.ts';
+import { StorageHomeSessions } from '../../../../daemon/adapters/agenda/storage-home-sessions.ts';
 import {
   BunSqliteIndexFactory,
   DaemonStorageFactory,

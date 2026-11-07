@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { armSessionTurnChanges, StorageSessionStops } from '../../../src/adapters/agenda/session-turn-stops.ts';
+import { armSessionTurnChanges, StorageSessionStops } from '../../../../daemon/adapters/agenda/session-turn-stops.ts';
 import {
   BunSqliteIndexFactory,
   DaemonStorageFactory,
@@ -14,7 +14,7 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../src/adapters/index.ts';
-import { TurnChanges } from '../../../src/lib/agenda/index.ts';
+import { TurnChanges } from '../../../../daemon/lib/agenda/index.ts';
 import { parseSessionId } from '../../../src/lib/index.ts';
 import { waitFor } from '../support/wait-for.ts';
 

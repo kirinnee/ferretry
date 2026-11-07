@@ -6,7 +6,7 @@ import {
   AgendaConfirmsSchema,
   AgendaItemSchema,
   agendaConfirmsProblems,
-} from '../../src/lib/agenda.ts';
+} from '../../../../daemon/lib/protocol/agenda.ts';
 
 const ADD = {
   action: 'add',

@@ -1,18 +1,19 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { gateReference, gatesAnsweredOn } from '@ferretry/protocol';
+import { gateReference } from '../../../../daemon/lib/protocol/agenda-gate.ts';
+import { gatesAnsweredOn } from '../../../../daemon/lib/protocol/agenda.ts';
 import type {
   AgendaLedger,
   AgendaLedgerRepository,
   AgendaMutation,
   AgendaRaisedObserver,
-} from '../../../src/lib/agenda/index.ts';
+} from '../../../../daemon/lib/agenda/index.ts';
 import {
   type AgendaFocusSource,
   AgendaService,
   isAgendaSessionId,
   NO_AGENDA_FOCUS,
-} from '../../../src/lib/agenda/service.ts';
+} from '../../../../daemon/lib/agenda/service.ts';
 
 const SESSION = 'session-1';
 const NOW = '2026-07-31T10:00:00Z';

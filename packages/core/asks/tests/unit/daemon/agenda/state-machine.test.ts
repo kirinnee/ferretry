@@ -1,22 +1,30 @@
 import { describe, it } from 'bun:test';
-import type { AgendaAsk, AgendaCardAnswer, AgendaId, AgendaItem, AgendaResponse } from '@ferretry/protocol';
+import type {
+  AgendaAsk,
+  AgendaCardAnswer,
+  AgendaId,
+  AgendaItem,
+  AgendaResponse,
+} from '../../../../daemon/lib/protocol/agenda.ts';
+import { AGENDA_SHAPE_ERRORS } from '../../../../daemon/lib/protocol/agenda-shape.ts';
 import {
-  AGENDA_SHAPE_ERRORS,
   AGENDA_URGENT_WAKE_MS,
   AgendaItemSchema,
   AgendaSnapshotSchema,
   agendaBadgeCount,
-  agendaState,
-  awaitsOwnAnswer,
-  cardAgendaReference,
-  gateReference,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_RESOLUTIONS,
   MAX_AGENDA_SUBJECT_LENGTH,
   MAX_AGENDA_PER_SESSION,
   MAX_AGENDA_REVISIONS,
+} from '../../../../daemon/lib/protocol/agenda.ts';
+import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
+import {
+  awaitsOwnAnswer,
+  cardAgendaReference,
   openCardAsks,
-} from '@ferretry/protocol';
+} from '../../../../daemon/lib/protocol/agenda-card-asks.ts';
+import { gateReference } from '../../../../daemon/lib/protocol/agenda-gate.ts';
 import should from 'should';
 import {
   type AgendaActor,
@@ -39,8 +47,8 @@ import {
   parkOwnerReplies,
   parseAgendaLedger,
   type RaiseAgendaRequest,
-} from '../../../src/lib/agenda/state-machine.ts';
-import type { CardAskOperation } from '../../../src/lib/agenda/card-asks.ts';
+} from '../../../../daemon/lib/agenda/state-machine.ts';
+import type { CardAskOperation } from '../../../../daemon/lib/agenda/card-asks.ts';
 
 const SESSION_ID = 'session-1';
 const OTHER_SESSION_ID = 'session-2';

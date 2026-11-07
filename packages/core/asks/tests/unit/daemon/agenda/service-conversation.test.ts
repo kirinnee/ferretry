@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { AgendaItem } from '@ferretry/protocol';
+import type { AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
 import should from 'should';
 import {
   type AgendaLedger,
@@ -9,8 +9,8 @@ import {
   AgendaService,
   type AgendaVersionStore,
   type OwnerChat,
-} from '../../../src/lib/agenda/index.ts';
-import type { AgendaVersionDraft } from '../../../src/lib/agenda/versions.ts';
+} from '../../../../daemon/lib/agenda/index.ts';
+import type { AgendaVersionDraft } from '../../../../daemon/lib/agenda/versions.ts';
 
 const SESSION = 'session-1';
 const NOW = '2026-07-31T10:00:00Z';

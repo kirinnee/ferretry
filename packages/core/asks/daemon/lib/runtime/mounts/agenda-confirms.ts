@@ -31,9 +31,8 @@ import {
   type AgendaActionRequest,
   type AgendaId,
   type AgendaResponse,
-  classifyConfigPath,
-  type ConfigPending,
-} from '@ferretry/protocol';
+} from '../../protocol/agenda.ts';
+import { classifyConfigPath, type ConfigPending } from '@ferretry/protocol';
 import { ApiError } from '../../api/error.ts';
 import type { ApiResponse } from '../../api/http.ts';
 import type { RouteContext } from '../../api/route.ts';

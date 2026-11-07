@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
-import type { AgendaId, AgendaItem } from '@ferretry/protocol';
-import { MAX_AGENDA_BODY_LENGTH } from '@ferretry/protocol';
+import type { AgendaId, AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
+import { MAX_AGENDA_BODY_LENGTH } from '../../../../daemon/lib/protocol/agenda.ts';
 import should from 'should';
 import {
   type AgendaActor,
@@ -10,8 +10,8 @@ import {
   applyAgendaCommand,
   applyAgendaCommandToSession,
   type RaiseAgendaRequest,
-} from '../../../src/lib/agenda/state-machine.ts';
-import { versionDrafts } from '../../../src/lib/agenda/versions.ts';
+} from '../../../../daemon/lib/agenda/state-machine.ts';
+import { versionDrafts } from '../../../../daemon/lib/agenda/versions.ts';
 
 const SESSION_ID = 'session-1';
 const T = (minute: number): string => `2026-07-30T10:${String(minute).padStart(2, '0')}:00Z`;

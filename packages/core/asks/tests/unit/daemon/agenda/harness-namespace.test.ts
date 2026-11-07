@@ -13,7 +13,7 @@ import {
   AgendaService,
   HarnessPromptAgenda,
   harnessWait,
-} from '../../../src/lib/agenda/index.ts';
+} from '../../../../daemon/lib/agenda/index.ts';
 import { InputAgendaAdapter } from '../../../src/lib/input-requests/agenda-adapter.ts';
 
 const SESSION = 'session-1';

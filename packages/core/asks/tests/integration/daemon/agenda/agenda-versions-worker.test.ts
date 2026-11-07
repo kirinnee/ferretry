@@ -1,7 +1,7 @@
 import { it } from 'bun:test';
 import should from 'should';
 import { bundledWorkerUrl, probeBundledWorker } from '../../../src/adapters/runtime/bundled-worker.ts';
-import { agendaVersionsWorkerContract } from '../../support/agenda-versions-worker-contract.ts';
+import { agendaVersionsWorkerContract } from '../../../support/daemon/agenda-versions-worker-contract.ts';
 
 agendaVersionsWorkerContract();
 

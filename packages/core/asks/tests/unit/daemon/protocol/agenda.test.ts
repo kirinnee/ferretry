@@ -15,8 +15,8 @@ import {
   readsAgendaHeaders,
   agendaBriefRequiredProblems,
   agendaNoticeProblems,
-} from '../../src/lib/agenda.ts';
-import { agendaTurn } from '../../src/lib/agenda-card.ts';
+} from '../../../../daemon/lib/protocol/agenda.ts';
+import { agendaTurn } from '../../../../daemon/lib/protocol/agenda-card.ts';
 
 const AT = '2026-10-26T09:00:00.000Z';
 
@@ -453,7 +453,7 @@ describe('the bounds of an owner response', () => {
 });
 
 it('sheds oldest history when it crowds the transport bound, retaining gate receipts', async () => {
-  const { fitAgendaItem, MAX_AGENDA_ITEM_LENGTH } = await import('../../src/lib/agenda.ts');
+  const { fitAgendaItem, MAX_AGENDA_ITEM_LENGTH } = await import('../../../../daemon/lib/protocol/agenda.ts');
   const item = {
     body: 'b'.repeat(MAX_AGENDA_ITEM_LENGTH - 100),
     history: [

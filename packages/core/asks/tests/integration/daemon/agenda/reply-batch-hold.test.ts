@@ -3,8 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { FileAgendaOutboxRepository } from '../../../src/adapters/agenda/file-agenda-outbox-repository.ts';
-import { AgendaReplyBatcher, type AgendaReplyTimers } from '../../../src/lib/agenda/index.ts';
+import { FileAgendaOutboxRepository } from '../../../../daemon/adapters/agenda/file-agenda-outbox-repository.ts';
+import { AgendaReplyBatcher, type AgendaReplyTimers } from '../../../../daemon/lib/agenda/index.ts';
 import { waitFor } from '../support/wait-for.ts';
 
 const homes: string[] = [];

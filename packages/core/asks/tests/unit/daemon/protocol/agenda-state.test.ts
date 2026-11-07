@@ -1,9 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { AgendaActionRequestSchema, AgendaItemSchema, agendaBadgeCount } from '../../src/lib/agenda.ts';
-import { type AgendaQueueSource, needsYouQueue, restingQueue } from '../../src/lib/agenda-queue.ts';
-import { agendaStage, agendaStageOfKind } from '../../src/lib/agenda-stage.ts';
-import { agendaState } from '../../src/lib/agenda-state.ts';
+import {
+  AgendaActionRequestSchema,
+  AgendaItemSchema,
+  agendaBadgeCount,
+} from '../../../../daemon/lib/protocol/agenda.ts';
+import { type AgendaQueueSource, needsYouQueue, restingQueue } from '../../../../daemon/lib/protocol/agenda-queue.ts';
+import { agendaStage, agendaStageOfKind } from '../../../../daemon/lib/protocol/agenda-stage.ts';
+import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
 
 const T1 = '2026-11-03T09:00:00.000Z';
 const T2 = '2026-11-03T10:00:00.000Z';

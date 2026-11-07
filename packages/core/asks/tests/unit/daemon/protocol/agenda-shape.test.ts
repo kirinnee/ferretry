@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { AgendaCardAnswer } from '../../src/lib/agenda.ts';
-import { agendaCardAnswers, agendaShape, isDefaultAnswerLabel } from '../../src/lib/agenda-card.ts';
+import type { AgendaCardAnswer } from '../../../../daemon/lib/protocol/agenda.ts';
+import { agendaCardAnswers, agendaShape, isDefaultAnswerLabel } from '../../../../daemon/lib/protocol/agenda-card.ts';
 import {
   AGENDA_NEED_HEADING,
   AGENDA_SHAPE_ERRORS,
@@ -10,7 +10,7 @@ import {
   agendaEditShapeProblems,
   agendaShapeHelp,
   agendaShapeProblems,
-} from '../../src/lib/agenda-shape.ts';
+} from '../../../../daemon/lib/protocol/agenda-shape.ts';
 
 const choice = { kind: 'multiple-choice' as const, options: [{ label: 'EU' }, { label: 'US' }] };
 const card = (fields: Omit<Parameters<typeof agendaCardAnswers>[0], 'subject'>) => ({ subject: 'x', ...fields });

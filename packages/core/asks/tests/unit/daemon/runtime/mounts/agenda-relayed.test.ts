@@ -3,7 +3,7 @@ import { LIMITED_DEVICE_GRANTS, type CapabilityGrants } from '@ferretry/protocol
 import should from 'should';
 import { ApiDispatcher, ApiRouter, type ApiRoute, type SessionDevice } from '../../../../src/lib/api/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
-import { agendaRoutes } from '../../../../src/lib/runtime/mounts/agenda.ts';
+import { agendaRoutes } from '../../../../../daemon/lib/runtime/mounts/agenda.ts';
 import { wardenRoutes } from '../../../../src/lib/runtime/mounts/warden.ts';
 import { request } from '../../api/support.ts';
 import { agendaService, CREDENTIALS, FakeWarden, grantSubsystem, NO_HELD_REPLIES } from './support.ts';

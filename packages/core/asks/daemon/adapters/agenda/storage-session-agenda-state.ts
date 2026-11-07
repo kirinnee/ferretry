@@ -1,4 +1,4 @@
-import type { SessionAgendaSummary } from '@ferretry/protocol';
+import type { SessionAgendaSummary } from '../../lib/protocol/agenda.ts';
 import type { AgendaBoardChange, SessionAgendaState } from '../../lib/agenda/index.ts';
 import { type FrozenJsonValue, jsonObject } from '../../lib/json.ts';
 import { tryParseSessionId } from '../../lib/session-id.ts';

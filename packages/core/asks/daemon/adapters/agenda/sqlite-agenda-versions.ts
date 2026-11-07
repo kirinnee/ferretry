@@ -7,11 +7,13 @@ import {
   AgendaConversationEntrySchema,
   type AgendaId,
   AgendaIdSchema,
+} from '../../lib/protocol/agenda.ts';
+import {
   type AgendaVersion,
   AgendaVersionSchema,
   type AgendaVersionSummary,
   AgendaVersionSummarySchema,
-} from '@ferretry/protocol';
+} from '../../lib/protocol/agenda-versions.ts';
 import { z } from 'zod';
 import {
   type AgendaVersionDraft,

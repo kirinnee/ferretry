@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
-import { FileMachineMigrationMarker } from '../../../src/adapters/agenda/file-machine-migration-marker.ts';
+import { FileMachineMigrationMarker } from '../../../../daemon/adapters/agenda/file-machine-migration-marker.ts';
 import { withTempRoot } from '../atomic-file/fixtures.ts';
 
 describe('FileMachineMigrationMarker', () => {

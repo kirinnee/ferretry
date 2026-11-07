@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { MAX_OWNER_ASK_LENGTH, MAX_OWNER_ASKS, ownerAsks } from '../../../src/lib/agenda/owner-asks.ts';
+import { MAX_OWNER_ASK_LENGTH, MAX_OWNER_ASKS, ownerAsks } from '../../../../daemon/lib/agenda/owner-asks.ts';
 
 describe('owner asks', () => {
   it('should read only the owner-labelled item under a mixed Next steps list', () => {

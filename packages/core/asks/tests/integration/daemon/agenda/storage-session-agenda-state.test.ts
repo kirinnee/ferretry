@@ -7,7 +7,7 @@ import should from 'should';
 import {
   AGENDA_CHANGED_EVENT,
   StorageSessionAgendaState,
-} from '../../../src/adapters/agenda/storage-session-agenda-state.ts';
+} from '../../../../daemon/adapters/agenda/storage-session-agenda-state.ts';
 import {
   BunSqliteIndexFactory,
   DaemonStorageFactory,
@@ -18,7 +18,7 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../src/adapters/index.ts';
-import type { AgendaBoardChange } from '../../../src/lib/agenda/index.ts';
+import type { AgendaBoardChange } from '../../../../daemon/lib/agenda/index.ts';
 import { parseSessionId } from '../../../src/lib/index.ts';
 
 /**

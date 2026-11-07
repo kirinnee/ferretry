@@ -3,14 +3,13 @@ import {
   type AgendaCardAsk,
   type AgendaGate,
   type AgendaItem,
-  agendaState,
-  cardAgendaReference,
-  cardAskReference,
-  gateReference,
   MAX_AGENDA_CARD_ASKS,
-} from '@ferretry/protocol';
+} from '../../../../daemon/lib/protocol/agenda.ts';
+import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
+import { cardAgendaReference, cardAskReference } from '../../../../daemon/lib/protocol/agenda-card-asks.ts';
+import { gateReference } from '../../../../daemon/lib/protocol/agenda-gate.ts';
 import should from 'should';
-import { joinCardAsks, leaveCardAsks, sealCardAsks, withoutCardAsks } from '../../../src/lib/agenda/card-asks.ts';
+import { joinCardAsks, leaveCardAsks, sealCardAsks, withoutCardAsks } from '../../../../daemon/lib/agenda/card-asks.ts';
 import {
   type AgendaActor,
   type AgendaLedger,
@@ -18,7 +17,7 @@ import {
   applyAgendaCommand,
   applyAgendaCommandToSession,
   type RaiseAgendaRequest,
-} from '../../../src/lib/agenda/state-machine.ts';
+} from '../../../../daemon/lib/agenda/state-machine.ts';
 
 /**
  * CARD ASKS ACROSS MERGE AND SPLIT (docs/agenda.md § Merge and split): a merge keeps every card ask of both items, once

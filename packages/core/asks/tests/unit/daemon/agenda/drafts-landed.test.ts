@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { draftsLanded, type AgendaVersionDraft } from '../../../src/lib/agenda/versions.ts';
+import { draftsLanded, type AgendaVersionDraft } from '../../../../daemon/lib/agenda/versions.ts';
 
 const AT = '2026-11-03T10:00:00.000Z';
 const SINCE = '2026-11-03T09:00:00.000Z';

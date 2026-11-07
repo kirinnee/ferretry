@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
-import type { AgendaItem } from '@ferretry/protocol';
+import type { AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
 import should from 'should';
-import { seedConversation } from '../../../src/lib/agenda/item-words.ts';
+import { seedConversation } from '../../../../daemon/lib/agenda/item-words.ts';
 import {
   type AgendaActor,
   type AgendaCommand,
@@ -10,7 +10,7 @@ import {
   applyAgendaCommand,
   applyAgendaCommandToSession,
   toChannel,
-} from '../../../src/lib/agenda/state-machine.ts';
+} from '../../../../daemon/lib/agenda/state-machine.ts';
 
 /** THE CONVERSATION'S SEED (docs/agenda.md § The conversation): an item from before it was stored reads with its words. */
 
@@ -99,7 +99,7 @@ describe('The conversation seed', () => {
 
 it('migrates a valid near-budget legacy item losslessly and validates it on every reread', async () => {
   const { AgendaItemSchema } = await import('@ferretry/protocol');
-  const { agendaLedgerDocument, parseAgendaLedger } = await import('../../../src/lib/agenda/state-machine.ts');
+  const { agendaLedgerDocument, parseAgendaLedger } = await import('../../../../daemon/lib/agenda/state-machine.ts');
   const before = beforeConversation();
   const item = {
     ...before.entries[0]?.item,
@@ -159,7 +159,7 @@ it('seeds a closing note exactly once with the actual closing speaker', () => {
 it('keeps a full original snapshot when migration metadata displaces revisions at the transport bound', async () => {
   // Arrange
   const { AgendaItemSchema } = await import('@ferretry/protocol');
-  const { agendaLedgerDocument, parseAgendaLedger } = await import('../../../src/lib/agenda/state-machine.ts');
+  const { agendaLedgerDocument, parseAgendaLedger } = await import('../../../../daemon/lib/agenda/state-machine.ts');
   const before = beforeConversation();
   const first = before.entries[0];
   if (first === undefined) throw new Error('missing migration fixture');
@@ -242,13 +242,13 @@ it('projects every legacy discussion path and orphaned textual answer into the t
 });
 
 it('rejects an invalid migration archive without replacing the durable ledger', async () => {
-  const { parseAgendaLedger } = await import('../../../src/lib/agenda/state-machine.ts');
+  const { parseAgendaLedger } = await import('../../../../daemon/lib/agenda/state-machine.ts');
   should(parseAgendaLedger({ ...beforeConversation(), carriedEntries: [] }, SESSION_ID)).equal(null);
 });
 
 it('seeds owner records archived by the base migration before the bounded live history, without duplicating them on reread', async () => {
   // Arrange
-  const { agendaLedgerDocument, parseAgendaLedger } = await import('../../../src/lib/agenda/state-machine.ts');
+  const { agendaLedgerDocument, parseAgendaLedger } = await import('../../../../daemon/lib/agenda/state-machine.ts');
   const before = beforeConversation();
   const answer = 'Archived owner answer';
   const legacy: AgendaLedger = {

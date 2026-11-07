@@ -1,5 +1,8 @@
-import { type AgendaVersionsScope, serveAgendaVersions } from '../../../src/adapters/agenda/agenda-versions-program.ts';
-import { SqliteAgendaVersionStore } from '../../../src/adapters/agenda/sqlite-agenda-versions.ts';
+import {
+  type AgendaVersionsScope,
+  serveAgendaVersions,
+} from '../../../../daemon/adapters/agenda/agenda-versions-program.ts';
+import { SqliteAgendaVersionStore } from '../../../../daemon/adapters/agenda/sqlite-agenda-versions.ts';
 import { SlowCommitDatabase } from './slow-sqlite.ts';
 
 declare const self: AgendaVersionsScope;

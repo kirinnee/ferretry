@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { AgendaItem } from '@ferretry/protocol';
+import type { AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
 import should from 'should';
 import {
   AgendaHomes,
@@ -10,8 +10,8 @@ import {
   type HomeSession,
   NO_MACHINE_AGENDA,
   SELF_AGENDA_HOME,
-} from '../../../src/lib/agenda/home.ts';
-import type { AgendaActor, RaiseAgendaRequest } from '../../../src/lib/agenda/state-machine.ts';
+} from '../../../../daemon/lib/agenda/home.ts';
+import type { AgendaActor, RaiseAgendaRequest } from '../../../../daemon/lib/agenda/state-machine.ts';
 
 const session = (id: string, overrides: Partial<HomeSession> = {}): HomeSession => ({
   id,

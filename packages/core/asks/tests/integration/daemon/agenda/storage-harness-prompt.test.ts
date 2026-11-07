@@ -4,14 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PendingQuestion, StructuredQuestionAnswer } from '@ferretry/protocol';
 import should from 'should';
-import { FileAgendaLedgerRepository } from '../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
+import { FileAgendaLedgerRepository } from '../../../../daemon/adapters/agenda/file-agenda-ledger-repository.ts';
 import {
   HARNESS_ANSWER_FAILED_EVENT,
   StorageHarnessPromptJournal,
   StorageHarnessPromptStates,
   StorageHarnessQuestionAnswerer,
-} from '../../../src/adapters/agenda/storage-harness-prompt.ts';
-import { StorageSessionAgendaState } from '../../../src/adapters/agenda/storage-session-agenda-state.ts';
+} from '../../../../daemon/adapters/agenda/storage-harness-prompt.ts';
+import { StorageSessionAgendaState } from '../../../../daemon/adapters/agenda/storage-session-agenda-state.ts';
 import {
   BunSqliteIndexFactory,
   DaemonStorageFactory,
@@ -28,7 +28,7 @@ import {
   HarnessPromptAgenda,
   HarnessPromptAnswerDelivery,
   SessionAgendaProjection,
-} from '../../../src/lib/agenda/index.ts';
+} from '../../../../daemon/lib/agenda/index.ts';
 import { parseSessionId } from '../../../src/lib/index.ts';
 
 /**

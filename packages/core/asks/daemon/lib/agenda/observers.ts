@@ -1,4 +1,4 @@
-import type { AgendaItem, ResolvedAgendaItem, SessionAgendaSummary } from '@ferretry/protocol';
+import type { AgendaItem, ResolvedAgendaItem, SessionAgendaSummary } from '../protocol/agenda.ts';
 import type { SerialExecutor } from '../ports.ts';
 import {
   boardReplyMessage,

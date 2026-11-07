@@ -3,10 +3,10 @@ import {
   type AgendaId,
   AgendaIdSchema,
   type AgendaReplies,
-  agendaBatchMessage,
-  InstantSchema,
   MAX_AGENDA_RESOLUTIONS,
-} from '@ferretry/protocol';
+} from '../protocol/agenda.ts';
+import { agendaBatchMessage } from '../protocol/agenda-message.ts';
+import { InstantSchema } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { SerialExecutor } from '../ports.ts';
 

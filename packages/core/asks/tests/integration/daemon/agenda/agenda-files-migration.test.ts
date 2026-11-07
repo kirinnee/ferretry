@@ -3,11 +3,11 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { FileAgendaFileStore } from '../../../src/adapters/agenda/file-agenda-file-store.ts';
-import { FileAgendaFilesMigrationMarker } from '../../../src/adapters/agenda/file-agenda-files-migration-marker.ts';
-import { FileAgendaLedgerRepository } from '../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
-import { FileAgendaOutboxRepository } from '../../../src/adapters/agenda/file-agenda-outbox-repository.ts';
-import { emptyAgendaLedger, emptyAgendaOutbox, migrateAgendaFiles } from '../../../src/lib/agenda/index.ts';
+import { FileAgendaFileStore } from '../../../../daemon/adapters/agenda/file-agenda-file-store.ts';
+import { FileAgendaFilesMigrationMarker } from '../../../../daemon/adapters/agenda/file-agenda-files-migration-marker.ts';
+import { FileAgendaLedgerRepository } from '../../../../daemon/adapters/agenda/file-agenda-ledger-repository.ts';
+import { FileAgendaOutboxRepository } from '../../../../daemon/adapters/agenda/file-agenda-outbox-repository.ts';
+import { emptyAgendaLedger, emptyAgendaOutbox, migrateAgendaFiles } from '../../../../daemon/lib/agenda/index.ts';
 
 const homes: string[] = [];
 const AT = '2026-10-28T17:00:00.000Z';

@@ -7,9 +7,9 @@ import {
   type AgendaLedgerRepository,
   type AgendaMutation,
   AgendaService,
-} from '../../../../src/lib/agenda/index.ts';
+} from '../../../../../daemon/lib/agenda/index.ts';
 import { agendaActor, agendaRoutes, type DirectNotificationSubsystem } from '../../../../src/lib/runtime/index.ts';
-import type { AgendaGatePort } from '../../../../src/lib/runtime/mounts/agenda-gates.ts';
+import type { AgendaGatePort } from '../../../../../daemon/lib/runtime/mounts/agenda-gates.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   agentIn,

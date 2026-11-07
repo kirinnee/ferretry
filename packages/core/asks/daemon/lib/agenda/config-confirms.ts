@@ -19,11 +19,11 @@ import {
   type AgendaCardAnswer,
   type AgendaItem,
   type AgendaResponse,
-  clipAtWord,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_REASON_LENGTH,
   toBullets,
-} from '@ferretry/protocol';
+} from '../protocol/agenda.ts';
+import { clipAtWord } from '../protocol/agenda-card.ts';
 
 /** What the owner decided about a held change. */
 export type ConfirmationDecision = 'allow' | 'deny' | 'discard';

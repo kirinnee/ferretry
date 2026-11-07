@@ -7,7 +7,8 @@
  * ferret, a lead over its sub-ferret and the daemon are refused here; the state machine records a card ask's answer
  * only from the daemon itself, once this check passed and the card moved.
  */
-import type { AgendaId, AgendaResponse, BoardReopenAttachments } from '@ferretry/protocol';
+import type { AgendaId, AgendaResponse } from '../../protocol/agenda.ts';
+import type { BoardReopenAttachments } from '@ferretry/protocol';
 import { grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiActor } from '../../api/actor.ts';

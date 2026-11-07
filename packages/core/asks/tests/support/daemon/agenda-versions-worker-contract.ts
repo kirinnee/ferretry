@@ -5,10 +5,10 @@ import {
   type AgendaVersionsResponse,
   type AgendaVersionsScope,
   serveAgendaVersions,
-} from '../../src/adapters/agenda/agenda-versions-program.ts';
-import { FileAgendaVersionStore } from '../../src/adapters/agenda/worker-agenda-versions.ts';
+} from '../../../daemon/adapters/agenda/agenda-versions-program.ts';
+import { FileAgendaVersionStore } from '../../../daemon/adapters/agenda/worker-agenda-versions.ts';
 import type { HostedWorker } from '../../src/adapters/runtime/bundled-worker-host.ts';
-import type { AgendaVersionStore } from '../../src/lib/agenda/versions.ts';
+import type { AgendaVersionStore } from '../../../daemon/lib/agenda/versions.ts';
 
 export function agendaVersionsWorkerContract() {
   describe('awaited agenda version worker requests', () => {

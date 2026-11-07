@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AgendaId } from '@ferretry/protocol';
+import type { AgendaId } from '../../lib/protocol/agenda.ts';
 import { z } from 'zod';
 import { type AgendaSeenStore, isAgendaSessionId } from '../../lib/agenda/index.ts';
 

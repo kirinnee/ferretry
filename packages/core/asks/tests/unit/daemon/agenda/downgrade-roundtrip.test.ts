@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
-import type { AgendaConversationEntry, AgendaItem } from '@ferretry/protocol';
+import type { AgendaConversationEntry, AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
 import should from 'should';
-import type { RecordedItem } from '../../../src/lib/agenda/item-words.ts';
+import type { RecordedItem } from '../../../../daemon/lib/agenda/item-words.ts';
 import {
   type AgendaActor,
   type AgendaCommand,
@@ -11,7 +11,7 @@ import {
   applyAgendaCommand,
   applyAgendaCommandToSession,
   parseAgendaLedger,
-} from '../../../src/lib/agenda/state-machine.ts';
+} from '../../../../daemon/lib/agenda/state-machine.ts';
 
 /**
  * THE ROUND TRIP THROUGH THE PREVIOUS RELEASE (2a): it keeps version 2 and the archive cursor and strips the stored

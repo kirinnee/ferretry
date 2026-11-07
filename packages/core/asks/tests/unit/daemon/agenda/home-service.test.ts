@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { MACHINE_AGENDA_ID } from '@ferretry/protocol';
+import { MACHINE_AGENDA_ID } from '../../../../daemon/lib/protocol/agenda.ts';
 import {
   type AgendaActor,
   type AgendaLedger,
@@ -10,7 +10,7 @@ import {
   MachineAgenda,
   type MachineMembersStore,
   type RaiseAgendaRequest,
-} from '../../../src/lib/agenda/index.ts';
+} from '../../../../daemon/lib/agenda/index.ts';
 
 const NOW = '2026-10-01T10:00:00.000Z';
 const LEADS: Readonly<Record<string, string>> = { kid: 'lead', grandkid: 'kid' };

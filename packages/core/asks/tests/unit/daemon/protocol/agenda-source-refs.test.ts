@@ -1,13 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { gateFollowupReference, gateReference } from '../../src/lib/agenda-gate.ts';
+import { gateFollowupReference, gateReference } from '../../../../daemon/lib/protocol/agenda-gate.ts';
 import {
   DAEMON_SOURCE_REF_PREFIXES,
   harnessQuestionRef,
   harnessToolUseId,
   isDaemonSourceRef,
   isHarnessQuestionId,
-} from '../../src/lib/agenda-source-refs.ts';
+} from '../../../../daemon/lib/protocol/agenda-source-refs.ts';
 import { laneProposalReference } from '../../src/lib/board-lanes.ts';
 
 describe('reserved source references (docs/agenda.md § Reserved sourceRefs)', () => {

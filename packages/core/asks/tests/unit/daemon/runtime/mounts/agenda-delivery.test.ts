@@ -17,7 +17,7 @@ import {
   AgendaReplyDelivery,
   type AgendaReplyTimers,
   AgendaService,
-} from '../../../../src/lib/agenda/index.ts';
+} from '../../../../../daemon/lib/agenda/index.ts';
 import { agendaRoutes, type DirectNotificationSubsystem } from '../../../../src/lib/runtime/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, FakeLedgerRepository, human } from './support.ts';

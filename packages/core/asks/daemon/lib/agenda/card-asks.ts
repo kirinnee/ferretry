@@ -28,24 +28,25 @@ import {
   type AgendaCardAskAnswer,
   type AgendaCardAskWoke,
   type AgendaItem,
-  agendaState,
+  MAX_AGENDA_CARD_ASKS,
+  MAX_AGENDA_REPLY_LENGTH,
+} from '../protocol/agenda.ts';
+import { agendaState } from '../protocol/agenda-state.ts';
+import {
   canCarryCardAsk,
   cardAskReference,
-  canonicalJson,
   cardAskStage,
-  formatTaskRef,
   awaitsOwnAnswer as protocolAwaitsOwnAnswer,
   hasOpenCardAsk,
   itemAsksOwnQuestion,
   isOpenCardAsk,
-  MAX_AGENDA_CARD_ASKS,
-  MAX_AGENDA_REPLY_LENGTH,
   mirroredCardAsk,
   ownAskDigest,
   openCardAsks,
   parseCardAgendaReference,
   repliedToOwnAsk,
-} from '@ferretry/protocol';
+} from '../protocol/agenda-card-asks.ts';
+import { canonicalJson, formatTaskRef } from '@ferretry/protocol';
 
 /** What the gate engine does to one agenda's card asks. */
 export type CardAskOperation =

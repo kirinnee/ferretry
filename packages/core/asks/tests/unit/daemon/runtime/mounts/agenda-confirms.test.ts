@@ -15,10 +15,8 @@ import {
   AGENDA_CONFIG_CHANGED_CODE,
   type AgendaItem,
   type AgendaSnapshot,
-  type CapabilityGrants,
-  type GrantRefusal,
-  STEP_UP_REQUIRED_CODE,
-} from '@ferretry/protocol';
+} from '../../../../../daemon/lib/protocol/agenda.ts';
+import { type CapabilityGrants, type GrantRefusal, STEP_UP_REQUIRED_CODE } from '@ferretry/protocol';
 import should from 'should';
 import type { AuthenticatedCredential } from '../../../../src/lib/api/authentication.ts';
 import type { CallerGovernance, CapabilityDemand } from '../../../../src/lib/api/capability.ts';
@@ -32,7 +30,7 @@ import {
   type StepUpWitness,
 } from '../../../../src/lib/api/index.ts';
 import type { RouteContext } from '../../../../src/lib/api/route.ts';
-import type { AgendaService } from '../../../../src/lib/agenda/index.ts';
+import type { AgendaService } from '../../../../../daemon/lib/agenda/index.ts';
 import {
   type AcceptedConfigStore,
   type ConfigDirectoryPort,
@@ -40,8 +38,11 @@ import {
 } from '../../../../src/lib/config-files/index.ts';
 import { CapabilityGrantService, DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import type { AuditEntry } from '../../../../src/lib/audit/index.ts';
-import { agendaRoutes } from '../../../../src/lib/runtime/mounts/agenda.ts';
-import { type AgendaConfigPort, configFilesConfirmations } from '../../../../src/lib/runtime/mounts/agenda-confirms.ts';
+import { agendaRoutes } from '../../../../../daemon/lib/runtime/mounts/agenda.ts';
+import {
+  type AgendaConfigPort,
+  configFilesConfirmations,
+} from '../../../../../daemon/lib/runtime/mounts/agenda-confirms.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { agendaService, NO_HELD_REPLIES } from './support.ts';
 

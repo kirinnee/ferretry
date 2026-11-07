@@ -6,9 +6,8 @@ import {
   type AgendaBrief,
   type AgendaCardAnswer,
   type AgendaKind,
-  agendaCardAnswers,
-  agendaCardKind,
-} from '@ferretry/protocol';
+} from '../protocol/agenda.ts';
+import { agendaCardAnswers, agendaCardKind } from '../protocol/agenda-card.ts';
 
 /** What an item says, as the lint reads it: its title, its ask, the context, its answers and the brief. */
 export interface AgendaWriting extends AgendaBrief {

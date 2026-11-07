@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { FileAgendaMigrationMarker } from '../../../src/adapters/agenda/file-agenda-migration-marker.ts';
+import { FileAgendaMigrationMarker } from '../../../../daemon/adapters/agenda/file-agenda-migration-marker.ts';
 
 /** The one-time agenda-mode migration's record, as it is kept on disk. */
 

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type AgendaCardAsk, type AgendaGate, AgendaItemSchema } from '../../src/lib/agenda.ts';
+import { type AgendaCardAsk, type AgendaGate, AgendaItemSchema } from '../../../../daemon/lib/protocol/agenda.ts';
 import {
   askedCardAsks,
   askLineRepeatsCardAsk,
@@ -21,9 +21,9 @@ import {
   ownCardAsk,
   parseCardAgendaReference,
   repliedToOwnAsk,
-} from '../../src/lib/agenda-card-asks.ts';
+} from '../../../../daemon/lib/protocol/agenda-card-asks.ts';
 import { canonicalJson } from '../../src/lib/canonical-json.ts';
-import { type AgendaQueueSource, needsYouQueue } from '../../src/lib/agenda-queue.ts';
+import { type AgendaQueueSource, needsYouQueue } from '../../../../daemon/lib/protocol/agenda-queue.ts';
 
 const AT = '2026-11-03T09:00:00.000Z';
 const LATER = '2026-11-03T10:00:00.000Z';

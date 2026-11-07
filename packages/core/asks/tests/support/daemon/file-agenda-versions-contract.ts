@@ -8,7 +8,7 @@ import {
   AGENDA_VERSIONS_DIRECTORY,
   FileAgendaSeenStore,
   FileAgendaVersionStore as WorkerAgendaVersionStore,
-} from '../../src/adapters/agenda/file-agenda-versions.ts';
+} from '../../../daemon/adapters/agenda/file-agenda-versions.ts';
 import {
   type AgendaActor,
   type AgendaEntry,
@@ -16,8 +16,8 @@ import {
   type AgendaMutation,
   applyAgendaCommand,
   applyAgendaCommandToSession,
-} from '../../src/lib/agenda/state-machine.ts';
-import { type AgendaVersionDraft, versionDrafts } from '../../src/lib/agenda/versions.ts';
+} from '../../../daemon/lib/agenda/state-machine.ts';
+import { type AgendaVersionDraft, versionDrafts } from '../../../daemon/lib/agenda/versions.ts';
 import { inlineAgendaVersionsWorker } from './agenda-versions-worker.ts';
 
 const SESSION = 'session-1';

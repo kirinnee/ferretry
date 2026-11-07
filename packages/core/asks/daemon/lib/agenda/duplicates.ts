@@ -15,7 +15,7 @@
  * Never closed, however alike: a hands-on card, a gate the owner answered, an item the owner has begun a conversation on
  * (they asked for more, or the ferret was told something that never arrived). Those are reported instead.
  */
-import type { AgendaGate, AgendaId, AgendaItem } from '@ferretry/protocol';
+import type { AgendaGate, AgendaId, AgendaItem } from '../protocol/agenda.ts';
 import { handsOnItem } from './home.ts';
 
 /** One open agenda, with the home of the lineage it belongs to. */

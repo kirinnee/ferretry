@@ -13,7 +13,7 @@ import {
   agendaReMessage,
   parseAgendaMessage,
   referencedAgendaIds,
-} from '../../src/lib/agenda-message.ts';
+} from '../../../../daemon/lib/protocol/agenda-message.ts';
 
 const ask = { id: 'A45', quote: 'How should outdated ferrets pick up new instructions after an update?' };
 const other = { id: 'A7', quote: 'Ship it?' };

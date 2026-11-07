@@ -1,6 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { AgendaActionRequestSchema, AgendaItemSchema, agendaInputProblems } from '../../src/lib/agenda.ts';
+import {
+  AgendaActionRequestSchema,
+  AgendaItemSchema,
+  agendaInputProblems,
+} from '../../../../daemon/lib/protocol/agenda.ts';
 
 const REQUEST_ID = 'a'.repeat(32);
 

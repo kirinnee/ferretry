@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { AgendaGate, AgendaGateOption } from '../../src/lib/agenda.ts';
+import type { AgendaGate, AgendaGateOption } from '../../../../daemon/lib/protocol/agenda.ts';
 import {
   GATE_GOOD_LABEL,
   gateAskLine,
@@ -12,7 +12,7 @@ import {
   gateTypedPlaceholder,
   previewUrlOf,
   tryItText,
-} from '../../src/lib/agenda-gate-wording.ts';
+} from '../../../../daemon/lib/protocol/agenda-gate-wording.ts';
 
 const DONE: AgendaGateOption = { id: 'done', label: 'Done', outcome: 'close' };
 const NOT_GOOD: AgendaGateOption = { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' };

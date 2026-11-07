@@ -1,4 +1,5 @@
-import type { AgendaConversationEntry, AgendaId, AgendaVersion, AgendaVersionSummary } from '@ferretry/protocol';
+import type { AgendaConversationEntry, AgendaId } from '../protocol/agenda.ts';
+import type { AgendaVersion, AgendaVersionSummary } from '../protocol/agenda-versions.ts';
 import { z } from 'zod';
 import { speakerOf } from './item-words.ts';
 import type { AgendaActor, AgendaEntry, AgendaLedger, AgendaMutation } from './state-machine.ts';

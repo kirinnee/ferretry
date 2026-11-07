@@ -2,7 +2,7 @@ import {
   type AgendaVersionsRequest,
   type AgendaVersionsResponse,
   serveAgendaVersions,
-} from '../../src/adapters/agenda/agenda-versions-program.ts';
+} from '../../../daemon/adapters/agenda/agenda-versions-program.ts';
 import type { HostedWorker } from '../../src/adapters/runtime/bundled-worker-host.ts';
 
 /** The real archive worker program over an in-process message scope; no thread in deterministic tests. */

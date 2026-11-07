@@ -1,12 +1,14 @@
 import { describe, it } from 'bun:test';
-import { type AgendaItem, agendaState, gateReference, MAX_AGENDA_HISTORY } from '@ferretry/protocol';
+import { type AgendaItem, MAX_AGENDA_HISTORY } from '../../../../daemon/lib/protocol/agenda.ts';
+import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
+import { gateReference } from '../../../../daemon/lib/protocol/agenda-gate.ts';
 import should from 'should';
 import {
   type AgendaActor,
   type AgendaLedger,
   applyAgendaCommand,
   applyAgendaCommandToSession,
-} from '../../../src/lib/agenda/state-machine.ts';
+} from '../../../../daemon/lib/agenda/state-machine.ts';
 
 /**
  * Where a ferret's thread ends up when the card asks on it come and go (docs/agenda.md § Card asks, Leaving), driven

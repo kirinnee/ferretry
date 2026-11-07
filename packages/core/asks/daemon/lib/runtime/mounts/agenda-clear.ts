@@ -1,4 +1,4 @@
-import { AgendaClearAgentsRequestSchema, AgendaClearAgentsResultSchema } from '@ferretry/protocol';
+import { AgendaClearAgentsRequestSchema, AgendaClearAgentsResultSchema } from '../../protocol/agenda.ts';
 import type { AgendaAgentClearer } from '../../agenda/index.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';

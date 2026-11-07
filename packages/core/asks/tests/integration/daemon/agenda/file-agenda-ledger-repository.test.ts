@@ -3,20 +3,20 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import should from 'should';
-import { FileAgendaFileStore } from '../../../src/adapters/agenda/file-agenda-file-store.ts';
+import { FileAgendaFileStore } from '../../../../daemon/adapters/agenda/file-agenda-file-store.ts';
 import {
   AGENDA_CACHE_LIMIT,
   FileAgendaLedgerRepository,
   InvalidAgendaLedgerError,
-} from '../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
-import { AGENDA_ARCHIVE_FILE } from '../../../src/lib/agenda/archive.ts';
+} from '../../../../daemon/adapters/agenda/file-agenda-ledger-repository.ts';
+import { AGENDA_ARCHIVE_FILE } from '../../../../daemon/lib/agenda/archive.ts';
 import {
   AGENDA_LEDGER_VERSION,
   type AgendaMutation,
   agendaSnapshot,
   emptyAgendaLedger,
-} from '../../../src/lib/agenda/index.ts';
-import { AgendaService } from '../../../src/lib/agenda/service.ts';
+} from '../../../../daemon/lib/agenda/index.ts';
+import { AgendaService } from '../../../../daemon/lib/agenda/service.ts';
 
 const homes: string[] = [];
 

@@ -1,4 +1,4 @@
-import type { AgendaConversationEntry, AgendaItem, AgendaResponse, ResolvedAgendaItem } from '@ferretry/protocol';
+import type { AgendaConversationEntry, AgendaItem, AgendaResponse, ResolvedAgendaItem } from '../protocol/agenda.ts';
 import type { AgendaActor } from './state-machine.ts';
 
 /**

@@ -4,10 +4,10 @@ import should from 'should';
 import {
   AGENDA_CHANGED_EVENT,
   StorageSessionAgendaState,
-} from '../../../src/adapters/agenda/storage-session-agenda-state.ts';
-import { AGENDA_NUDGED_EVENT } from '../../../src/adapters/agenda/storage-agenda-nudge.ts';
-import { HARNESS_ANSWER_FAILED_EVENT } from '../../../src/adapters/agenda/storage-harness-prompt.ts';
-import type { AgendaBoardChange } from '../../../src/lib/agenda/index.ts';
+} from '../../../../daemon/adapters/agenda/storage-session-agenda-state.ts';
+import { AGENDA_NUDGED_EVENT } from '../../../../daemon/adapters/agenda/storage-agenda-nudge.ts';
+import { HARNESS_ANSWER_FAILED_EVENT } from '../../../../daemon/adapters/agenda/storage-harness-prompt.ts';
+import type { AgendaBoardChange } from '../../../../daemon/lib/agenda/index.ts';
 import type { FrozenJsonValue } from '../../../src/lib/json.ts';
 
 /**

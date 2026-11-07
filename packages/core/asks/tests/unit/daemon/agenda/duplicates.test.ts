@@ -1,12 +1,13 @@
 import { describe, it } from 'bun:test';
-import { type AgendaGate, type AgendaItem, gateReference } from '@ferretry/protocol';
+import { type AgendaGate, type AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
+import { gateReference } from '../../../../daemon/lib/protocol/agenda-gate.ts';
 import should from 'should';
 import {
   duplicateNote,
   type DuplicateAgenda,
   type DuplicateFacts,
   findDuplicates,
-} from '../../../src/lib/agenda/duplicates.ts';
+} from '../../../../daemon/lib/agenda/duplicates.ts';
 
 const gate = (cardId: string): AgendaGate => ({
   cardId,

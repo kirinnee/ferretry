@@ -10,28 +10,28 @@ import {
   type AgendaVersionsResponse,
   type AgendaVersionsScope,
   serveAgendaVersions,
-} from '../../src/adapters/agenda/agenda-versions-program.ts';
+} from '../../../daemon/adapters/agenda/agenda-versions-program.ts';
 import {
   AGENDA_CHANGE_MAX_ATTEMPTS,
   AGENDA_CHANGE_OUTBOX,
   AGENDA_CHANGE_RETRY_MS,
   FileAgendaChangeOutbox,
-} from '../../src/adapters/agenda/file-agenda-change-outbox.ts';
-import { FileAgendaFileStore } from '../../src/adapters/agenda/file-agenda-file-store.ts';
+} from '../../../daemon/adapters/agenda/file-agenda-change-outbox.ts';
+import { FileAgendaFileStore } from '../../../daemon/adapters/agenda/file-agenda-file-store.ts';
 import {
   AGENDA_VERSION_PENDING,
   FileAgendaLedgerRepository,
   InvalidAgendaLedgerError,
-} from '../../src/adapters/agenda/file-agenda-ledger-repository.ts';
-import { FileAgendaOutboxRepository } from '../../src/adapters/agenda/file-agenda-outbox-repository.ts';
-import { SqliteAgendaVersionStore } from '../../src/adapters/agenda/sqlite-agenda-versions.ts';
-import { FileAgendaVersionStore } from '../../src/adapters/agenda/worker-agenda-versions.ts';
+} from '../../../daemon/adapters/agenda/file-agenda-ledger-repository.ts';
+import { FileAgendaOutboxRepository } from '../../../daemon/adapters/agenda/file-agenda-outbox-repository.ts';
+import { SqliteAgendaVersionStore } from '../../../daemon/adapters/agenda/sqlite-agenda-versions.ts';
+import { FileAgendaVersionStore } from '../../../daemon/adapters/agenda/worker-agenda-versions.ts';
 import type { HostedWorker } from '../../src/adapters/runtime/bundled-worker-host.ts';
-import { AGENDA_ARCHIVE_FILE } from '../../src/lib/agenda/archive.ts';
-import { AgendaChangeFanout, AgendaReplyDelivery } from '../../src/lib/agenda/observers.ts';
-import { AgendaReplyBatcher } from '../../src/lib/agenda/reply-batch.ts';
-import type { AgendaBoardChange } from '../../src/lib/agenda/service.ts';
-import { AgendaService } from '../../src/lib/agenda/service.ts';
+import { AGENDA_ARCHIVE_FILE } from '../../../daemon/lib/agenda/archive.ts';
+import { AgendaChangeFanout, AgendaReplyDelivery } from '../../../daemon/lib/agenda/observers.ts';
+import { AgendaReplyBatcher } from '../../../daemon/lib/agenda/reply-batch.ts';
+import type { AgendaBoardChange } from '../../../daemon/lib/agenda/service.ts';
+import { AgendaService } from '../../../daemon/lib/agenda/service.ts';
 import {
   type AgendaCommand,
   type AgendaLedger,
@@ -40,8 +40,8 @@ import {
   agendaSnapshot,
   applyAgendaCommandToSession,
   parseAgendaEntry,
-} from '../../src/lib/agenda/state-machine.ts';
-import type { AgendaVersionStore } from '../../src/lib/agenda/versions.ts';
+} from '../../../daemon/lib/agenda/state-machine.ts';
+import type { AgendaVersionStore } from '../../../daemon/lib/agenda/versions.ts';
 
 const SESSION = 'session-1';
 const AT = '2026-11-03T10:00:00.000Z';

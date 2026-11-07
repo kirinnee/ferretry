@@ -1,14 +1,15 @@
 import { describe, it } from 'bun:test';
-import type { AgendaConversationEntry, AgendaVersion } from '@ferretry/protocol';
+import type { AgendaConversationEntry } from '../../../../daemon/lib/protocol/agenda.ts';
+import type { AgendaVersion } from '../../../../daemon/lib/protocol/agenda-versions.ts';
 import should from 'should';
 import {
   AGENDA_CACHE_LIMIT,
   FileAgendaLedgerRepository,
-} from '../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
-import { AGENDA_ARCHIVE_FILE, type AgendaArchiveRecord } from '../../../src/lib/agenda/archive.ts';
-import { AGENDA_FILES, emptyAgendaLedger } from '../../../src/lib/agenda/index.ts';
-import { AgendaService } from '../../../src/lib/agenda/service.ts';
-import type { AgendaVersionDraft, AgendaVersionStore } from '../../../src/lib/agenda/versions.ts';
+} from '../../../../daemon/adapters/agenda/file-agenda-ledger-repository.ts';
+import { AGENDA_ARCHIVE_FILE, type AgendaArchiveRecord } from '../../../../daemon/lib/agenda/archive.ts';
+import { AGENDA_FILES, emptyAgendaLedger } from '../../../../daemon/lib/agenda/index.ts';
+import { AgendaService } from '../../../../daemon/lib/agenda/service.ts';
+import type { AgendaVersionDraft, AgendaVersionStore } from '../../../../daemon/lib/agenda/versions.ts';
 import {
   AGENDA_LEDGER_VERSION,
   type AgendaLedger,
@@ -17,7 +18,7 @@ import {
   agendaSnapshot,
   type applyAgendaCommand,
   applyAgendaCommandToSession,
-} from '../../../src/lib/agenda/state-machine.ts';
+} from '../../../../daemon/lib/agenda/state-machine.ts';
 
 /**
  * The agenda repository's parsed copy: kept per session against the identity of the file it was read from,

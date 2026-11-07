@@ -6,12 +6,12 @@ import {
   AgendaReadItemSchema,
   AgendaSnapshotSchema,
   MACHINE_AGENDA_ID,
-} from '@ferretry/protocol';
+} from '../../../../../daemon/lib/protocol/agenda.ts';
 import { projectionSnapshot } from '../../../../../protocol/tests/fixtures/agenda-projection.ts';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
-import { type AgendaLedger, AgendaService } from '../../../../src/lib/agenda/index.ts';
-import { agendaRoutes } from '../../../../src/lib/runtime/mounts/agenda.ts';
+import { type AgendaLedger, AgendaService } from '../../../../../daemon/lib/agenda/index.ts';
+import { agendaRoutes } from '../../../../../daemon/lib/runtime/mounts/agenda.ts';
 import { agendaMachineRoutes } from '../../../../src/lib/runtime/mounts/agenda-machine.ts';
 import { machineAgendaWorld } from '../../../support/machine-agenda-isolation.ts';
 import { jsonBody, request } from '../../api/support.ts';

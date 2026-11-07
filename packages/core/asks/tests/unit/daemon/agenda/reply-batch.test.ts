@@ -23,7 +23,7 @@ import {
   MAX_AGENDA_PENDING_REPLIES,
   needsInfoReplyKey,
   withPendingReply,
-} from '../../../src/lib/agenda/index.ts';
+} from '../../../../daemon/lib/agenda/index.ts';
 
 const AT = '2026-10-28T17:00:00.000Z';
 const SESSION = 'session-1';

@@ -3,7 +3,7 @@ import {
   AgendaIdSchema,
   StoredAgendaItemSchema,
   StoredResolvedAgendaItemSchema,
-} from '@ferretry/protocol';
+} from '../protocol/agenda.ts';
 import { z } from 'zod';
 
 /** Private per-session append-only history. Neither records nor pending writes are served on the wire. */

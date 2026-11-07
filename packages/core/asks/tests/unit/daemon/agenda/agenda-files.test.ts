@@ -8,8 +8,8 @@ import {
   migrateAgendaFile,
   migrateAgendaFiles,
   readAgendaFile,
-} from '../../../src/lib/agenda/agenda-files.ts';
-import { AGENDA_LEDGER_VERSION } from '../../../src/lib/agenda/state-machine.ts';
+} from '../../../../daemon/lib/agenda/agenda-files.ts';
+import { AGENDA_LEDGER_VERSION } from '../../../../daemon/lib/agenda/state-machine.ts';
 
 const T1 = '2026-10-30T10:00:00.000Z';
 const T2 = '2026-10-30T11:00:00.000Z';

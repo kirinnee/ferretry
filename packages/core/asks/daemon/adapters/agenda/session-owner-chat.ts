@@ -1,4 +1,5 @@
-import { parseAgendaMessage, type QueuedMessage } from '@ferretry/protocol';
+import { parseAgendaMessage } from '../../lib/protocol/agenda-message.ts';
+import { type QueuedMessage } from '@ferretry/protocol';
 import type { OwnerChat, OwnerChatLookup, OwnerChatMessage } from '../../lib/agenda/index.ts';
 import type { SendRecord } from '../../lib/session/send/types.ts';
 import { type SessionId, tryParseSessionId } from '../../lib/session-id.ts';

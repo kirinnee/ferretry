@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import * as agendaMode from '../../src/lib/agenda-mode.ts';
+import * as agendaMode from '../../../../daemon/lib/protocol/agenda-mode.ts';
 import { sessionView } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 

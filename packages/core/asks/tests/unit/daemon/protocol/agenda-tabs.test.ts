@@ -11,8 +11,13 @@ import {
   MAX_AGENDA_TAB_NAME_LENGTH,
   MAX_AGENDA_TABS,
   MAX_AGENDA_TABS_LENGTH,
-} from '../../src/lib/agenda.ts';
-import { agendaTabId, agendaTabs, applyAgendaTabEdits, findAgendaTab } from '../../src/lib/agenda-tabs.ts';
+} from '../../../../daemon/lib/protocol/agenda.ts';
+import {
+  agendaTabId,
+  agendaTabs,
+  applyAgendaTabEdits,
+  findAgendaTab,
+} from '../../../../daemon/lib/protocol/agenda-tabs.ts';
 
 const AT = '2026-11-04T09:00:00.000Z';
 

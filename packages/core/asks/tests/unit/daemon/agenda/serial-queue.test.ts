@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SerialQueue } from '../../../src/lib/agenda/serial-queue.ts';
+import { SerialQueue } from '../../../../daemon/lib/agenda/serial-queue.ts';
 
 describe('the serial queue', () => {
   it('should run work one at a time, in the order it was given', async () => {

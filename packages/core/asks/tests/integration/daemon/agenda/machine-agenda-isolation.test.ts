@@ -2,9 +2,9 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MACHINE_AGENDA_ID } from '@ferretry/protocol';
+import { MACHINE_AGENDA_ID } from '../../../../daemon/lib/protocol/agenda.ts';
 import should from 'should';
-import { FileAgendaLedgerRepository } from '../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
+import { FileAgendaLedgerRepository } from '../../../../daemon/adapters/agenda/file-agenda-ledger-repository.ts';
 import {
   assertMachineAgendaIsolation,
   assertOwnerAndSessionRoutes,

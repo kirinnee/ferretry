@@ -1,3 +1,3 @@
-import { agendaVersionRecoveryContract } from '../../support/agenda-version-recovery-contract.ts';
+import { agendaVersionRecoveryContract } from '../../../support/daemon/agenda-version-recovery-contract.ts';
 
 agendaVersionRecoveryContract();

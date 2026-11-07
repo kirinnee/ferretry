@@ -1,25 +1,19 @@
 import type {
   AgendaConfirms,
-  AgendaConversationPage,
   AgendaId,
   AgendaItem,
   AgendaKind,
   AgendaResponse,
   AgendaSnapshot,
   AgendaSource,
-  AgendaVersion,
-  AgendaVersionSummary,
   ResolvedAgendaItem,
-  TaskRef,
-} from '@ferretry/protocol';
-import {
-  agendaCardKind,
-  clipAtWord,
-  formatTaskRef,
-  MACHINE_AGENDA_ID,
-  MAX_AGENDA_CONVERSATION_FRAGMENT_LENGTH,
-  MAX_AGENDA_TITLE_LENGTH,
-} from '@ferretry/protocol';
+} from '../protocol/agenda.ts';
+import type { AgendaConversationPage, AgendaVersion, AgendaVersionSummary } from '../protocol/agenda-versions.ts';
+import type { TaskRef } from '@ferretry/protocol';
+import { agendaCardKind, clipAtWord } from '../protocol/agenda-card.ts';
+import { MACHINE_AGENDA_ID, MAX_AGENDA_TITLE_LENGTH } from '../protocol/agenda.ts';
+import { MAX_AGENDA_CONVERSATION_FRAGMENT_LENGTH } from '../protocol/agenda-versions.ts';
+import { formatTaskRef } from '@ferretry/protocol';
 import type { CardAskOperation } from './card-asks.ts';
 import {
   isAncestorOf,

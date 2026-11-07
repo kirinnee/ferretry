@@ -7,7 +7,7 @@ import {
   AGENDA_NUDGED_EVENT,
   armAgendaNudge,
   StorageAgendaNudgeSessions,
-} from '../../../src/adapters/agenda/storage-agenda-nudge.ts';
+} from '../../../../daemon/adapters/agenda/storage-agenda-nudge.ts';
 import {
   BunSqliteIndexFactory,
   DaemonStorageFactory,
@@ -18,7 +18,7 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../src/adapters/index.ts';
-import { AGENDA_NUDGE_MARK, AgendaTurnNudge } from '../../../src/lib/agenda/index.ts';
+import { AGENDA_NUDGE_MARK, AgendaTurnNudge } from '../../../../daemon/lib/agenda/index.ts';
 import { parseSessionId } from '../../../src/lib/index.ts';
 import type { TranscriptEvent } from '../../../src/lib/transcript/types.ts';
 import { waitFor } from '../support/wait-for.ts';

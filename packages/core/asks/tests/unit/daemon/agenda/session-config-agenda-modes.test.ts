@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { SessionConfig } from '@ferretry/protocol';
 import should from 'should';
-import { SessionConfigAgendaModes } from '../../../src/adapters/agenda/session-agenda-modes.ts';
+import { SessionConfigAgendaModes } from '../../../../daemon/adapters/agenda/session-agenda-modes.ts';
 
 function modes(configs: Readonly<Record<string, Pick<SessionConfig, 'agenda'>>>, fault = false) {
   return new SessionConfigAgendaModes({

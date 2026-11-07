@@ -1,5 +1,7 @@
 import { describe, it } from 'bun:test';
-import { type AgendaItem, AGENDA_URGENT_WAKE_MS, agendaState, needsYouQueue, restingQueue } from '@ferretry/protocol';
+import { type AgendaItem, AGENDA_URGENT_WAKE_MS } from '../../../../daemon/lib/protocol/agenda.ts';
+import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
+import { needsYouQueue, restingQueue } from '../../../../daemon/lib/protocol/agenda-queue.ts';
 import should from 'should';
 import {
   AGENDA_LEDGER_VERSION,
@@ -14,7 +16,7 @@ import {
   parseAgendaLedger,
   restsOnAnswer,
   toChannel,
-} from '../../../src/lib/agenda/state-machine.ts';
+} from '../../../../daemon/lib/agenda/state-machine.ts';
 
 /**
  * THE AGENDA AS A CHANNEL (docs/agenda.md § States), the owner's rules on !A304: any reply or answer rests an item,

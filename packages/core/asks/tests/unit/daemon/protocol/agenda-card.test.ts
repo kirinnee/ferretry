@@ -5,7 +5,7 @@ import {
   type AgendaAsk,
   AgendaItemSchema,
   agendaAnswerProblems,
-} from '../../src/lib/agenda.ts';
+} from '../../../../daemon/lib/protocol/agenda.ts';
 import {
   AGENDA_ANSWER_TEXT_CHARS,
   AGENDA_ANSWER_TEXT_CHARS_OF_THREE,
@@ -30,7 +30,7 @@ import {
   unswipedChoices,
   YES_NO_ORDER,
   yesNoOrder,
-} from '../../src/lib/agenda-card.ts';
+} from '../../../../daemon/lib/protocol/agenda-card.ts';
 
 const AT = '2026-10-29T09:00:00.000Z';
 

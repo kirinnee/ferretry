@@ -1,4 +1,4 @@
-import { type AgendaVersionsScope, serveAgendaVersions } from '../src/adapters/agenda/agenda-versions-program.ts';
+import { type AgendaVersionsScope, serveAgendaVersions } from '../adapters/agenda/agenda-versions-program.ts';
 
 declare const self: AgendaVersionsScope;
 

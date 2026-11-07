@@ -1,3 +1,3 @@
-import { agendaVersionStoreContract } from '../../support/file-agenda-versions-contract.ts';
+import { agendaVersionStoreContract } from '../../../support/daemon/file-agenda-versions-contract.ts';
 
 agendaVersionStoreContract();

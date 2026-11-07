@@ -4,7 +4,7 @@ import {
   AGENDA_MIXED_BODY_LENGTH,
   AGENDA_MIXED_BODY_SECTIONS,
   lintAgendaWriting,
-} from '../../../src/lib/agenda/writing-lint.ts';
+} from '../../../../daemon/lib/agenda/writing-lint.ts';
 
 const clean = {
   title: 'Work login plan',

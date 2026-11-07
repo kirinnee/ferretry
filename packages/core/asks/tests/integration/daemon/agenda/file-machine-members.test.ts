@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
-import { FileMachineMembers } from '../../../src/adapters/agenda/file-machine-members.ts';
+import { FileMachineMembers } from '../../../../daemon/adapters/agenda/file-machine-members.ts';
 import { withTempRoot } from '../atomic-file/fixtures.ts';
 
 const files = {

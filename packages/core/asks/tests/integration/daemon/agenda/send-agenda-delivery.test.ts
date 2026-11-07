@@ -4,8 +4,8 @@ import {
   LedgerAgendaReceipts,
   PaneAgendaComposer,
   SendAgendaMessenger,
-} from '../../../src/adapters/agenda/send-agenda-delivery.ts';
-import { AgendaNotTyped } from '../../../src/lib/agenda/index.ts';
+} from '../../../../daemon/adapters/agenda/send-agenda-delivery.ts';
+import { AgendaNotTyped } from '../../../../daemon/lib/agenda/index.ts';
 import {
   composerOccupiedRefusal,
   composerUnreadableRefusal,

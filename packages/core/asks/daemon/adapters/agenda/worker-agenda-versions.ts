@@ -1,5 +1,6 @@
-import type { AgendaConversationEntry, AgendaId, AgendaVersion, AgendaVersionSummary } from '@ferretry/protocol';
-import { AgendaIdSchema } from '@ferretry/protocol';
+import type { AgendaConversationEntry, AgendaId } from '../../lib/protocol/agenda.ts';
+import type { AgendaVersion, AgendaVersionSummary } from '../../lib/protocol/agenda-versions.ts';
+import { AgendaIdSchema } from '../../lib/protocol/agenda.ts';
 import { isAgendaSessionId } from '../../lib/agenda/index.ts';
 import type { AgendaVersionDraft, AgendaVersionStore } from '../../lib/agenda/versions.ts';
 import { deepFreezeJson, type JsonValue } from '../../lib/json.ts';

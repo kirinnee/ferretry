@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SessionConfigSchema, SessionStateSchema } from '@ferretry/protocol';
 import should from 'should';
-import { FileAgendaLedgerRepository } from '../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
+import { FileAgendaLedgerRepository } from '../../../../daemon/adapters/agenda/file-agenda-ledger-repository.ts';
 import {
   BunSqliteIndexFactory,
   type DaemonStorage,

@@ -1,18 +1,20 @@
 import {
   AgendaConversationPageSchema,
   AgendaConversationQuerySchema,
-  type AgendaActionRequest,
-  AgendaActionRequestSchema,
-  AgendaIdSchema,
   type AgendaSeenResponse,
   AgendaSeenRequestSchema,
   type AgendaVersionList,
+} from '../../protocol/agenda-versions.ts';
+import {
+  type AgendaActionRequest,
+  AgendaActionRequestSchema,
+  AgendaIdSchema,
   type AgendaErrorCode,
   type AgendaSnapshot,
-  agendaListSnapshot,
   isMachineAgendaId,
   readsAgendaHeaders,
-} from '@ferretry/protocol';
+} from '../../protocol/agenda.ts';
+import { agendaListSnapshot } from '../../protocol/agenda-list.ts';
 import { type ApiActor, isHumanAdminActor, parseActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';

@@ -1,10 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  AgendaConversationEntrySchema,
-  AgendaIdSchema,
-  type AgendaVersionSummary,
-  AgendaVersionSummarySchema,
-} from '@ferretry/protocol';
+import { AgendaConversationEntrySchema, AgendaIdSchema } from '../../lib/protocol/agenda.ts';
+import { type AgendaVersionSummary, AgendaVersionSummarySchema } from '../../lib/protocol/agenda-versions.ts';
 import { z } from 'zod';
 import type { AgendaVia } from '../../lib/agenda/service.ts';
 import type { AgendaActor, AgendaEntry } from '../../lib/agenda/state-machine.ts';

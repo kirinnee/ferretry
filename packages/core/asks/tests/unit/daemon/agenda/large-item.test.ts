@@ -8,7 +8,7 @@ import {
   MAX_AGENDA_GATE_HISTORY_LENGTH,
   MAX_AGENDA_ITEM_LENGTH,
   ResolvedAgendaItemSchema,
-} from '@ferretry/protocol';
+} from '../../../../daemon/lib/protocol/agenda.ts';
 import should from 'should';
 import {
   type AgendaActor,
@@ -20,7 +20,7 @@ import {
   applyAgendaCommandToSession,
   parseAgendaLedger,
   type RaiseAgendaRequest,
-} from '../../../src/lib/agenda/state-machine.ts';
+} from '../../../../daemon/lib/agenda/state-machine.ts';
 
 /**
  * A LONG ITEM STAYS CLOSABLE (docs/agenda.md § No size limit): its content is bounded well under the transport bound,

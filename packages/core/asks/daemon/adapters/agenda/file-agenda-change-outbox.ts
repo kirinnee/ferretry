@@ -1,4 +1,4 @@
-import { AgendaItemSchema, AgendaSnapshotSchema, ResolvedAgendaItemSchema } from '@ferretry/protocol';
+import { AgendaItemSchema, AgendaSnapshotSchema, ResolvedAgendaItemSchema } from '../../lib/protocol/agenda.ts';
 import { z } from 'zod';
 import type { AgendaFileStore } from '../../lib/agenda/agenda-files.ts';
 import type { AgendaBoardChange, AgendaChangeObserver } from '../../lib/agenda/service.ts';

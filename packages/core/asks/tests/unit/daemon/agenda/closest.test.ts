@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
-import type { AgendaItem, WorkHit, WorkRelatedResponse } from '@ferretry/protocol';
+import type { AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
+import type { WorkHit, WorkRelatedResponse } from '@ferretry/protocol';
 import should from 'should';
-import { closestAgenda, closestAgendaLink } from '../../../src/lib/agenda/closest.ts';
+import { closestAgenda, closestAgendaLink } from '../../../../daemon/lib/agenda/closest.ts';
 
 const SESSION = 'mvzyotb7-7613fdae';
 

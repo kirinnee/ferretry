@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import { AgendaItemSchema, agendaItemRevision } from '@ferretry/protocol';
+import { AgendaItemSchema } from '../../../../daemon/lib/protocol/agenda.ts';
+import { agendaItemRevision } from '../../../../daemon/lib/protocol/agenda-patch.ts';
 import should from 'should';
 import {
   type AgendaActor,
@@ -9,7 +10,7 @@ import {
   applyAgendaCommand,
   applyAgendaCommandToSession,
   type EditAgendaPatch,
-} from '../../../src/lib/agenda/state-machine.ts';
+} from '../../../../daemon/lib/agenda/state-machine.ts';
 
 /**
  * PATCHING AN ITEM (&F957; docs/agenda.md § Patch): an edit that names the revision it read is refused `stale` once the

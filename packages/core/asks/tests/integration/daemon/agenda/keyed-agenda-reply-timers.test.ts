@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { KeyedAgendaReplyTimers } from '../../../src/adapters/agenda/keyed-agenda-reply-timers.ts';
+import { KeyedAgendaReplyTimers } from '../../../../daemon/adapters/agenda/keyed-agenda-reply-timers.ts';
 import { waitFor } from '../support/wait-for.ts';
 
 /**

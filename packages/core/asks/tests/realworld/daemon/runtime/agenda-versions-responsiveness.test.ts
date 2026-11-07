@@ -3,9 +3,9 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { FileAgendaVersionStore } from '../../../src/adapters/agenda/worker-agenda-versions.ts';
+import { FileAgendaVersionStore } from '../../../../daemon/adapters/agenda/worker-agenda-versions.ts';
 import { LoadSafeWorker } from '../../../src/adapters/runtime/load-safe-worker.ts';
-import { applyAgendaCommandToSession } from '../../../src/lib/agenda/state-machine.ts';
+import { applyAgendaCommandToSession } from '../../../../daemon/lib/agenda/state-machine.ts';
 
 const AT = '2026-11-03T10:00:00.000Z';
 const SESSION = 'archive-responsive';

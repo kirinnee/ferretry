@@ -7,10 +7,10 @@ import {
   AgendaResponseSchema,
   agendaFormProblems,
   type AgendaFormField,
-} from '../../src/lib/agenda.ts';
-import { agendaCardAnswers, agendaShape } from '../../src/lib/agenda-card.ts';
-import { formAnswerProblems, formFieldName, formWords } from '../../src/lib/agenda-form.ts';
-import { AGENDA_SHAPE_LINE, agendaShapeProblems } from '../../src/lib/agenda-shape.ts';
+} from '../../../../daemon/lib/protocol/agenda.ts';
+import { agendaCardAnswers, agendaShape } from '../../../../daemon/lib/protocol/agenda-card.ts';
+import { formAnswerProblems, formFieldName, formWords } from '../../../../daemon/lib/protocol/agenda-form.ts';
+import { AGENDA_SHAPE_LINE, agendaShapeProblems } from '../../../../daemon/lib/protocol/agenda-shape.ts';
 
 const region: AgendaFormField = {
   id: '1',
