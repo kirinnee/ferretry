@@ -100,6 +100,7 @@ export default definePlugin({
       verb('daemon audit', {
         summary: 'show the security log: who was paired, removed or refused, and what was done, newest first',
       }),
+      verb('daemon security', { summary: 'read and change this machine’s security settings' }),
       verb('daemon security show', {
         summary: 'show every setting, its bounds and where the values came from',
       }),
