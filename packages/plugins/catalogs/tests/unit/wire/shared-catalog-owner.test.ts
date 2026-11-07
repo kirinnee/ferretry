@@ -11,8 +11,8 @@ import {
   QuickAddRequestSchema,
   QuickAddUndoneSchema,
   QuickAddUndoRequestSchema,
-  ShelveVersionRequestSchema,
-  ShelvedVersionSchema,
+  RetireVersionRequestSchema,
+  RetiredVersionSchema,
   SharedItemPreviewSchema,
   UpdateCatalogRequestSchema,
 } from '../../../wire/index.ts';
@@ -148,7 +148,7 @@ describe('publishing at the item', () => {
   });
 });
 
-describe('making a version current and shelving one', () => {
+describe('making a version current and retiring one', () => {
   it('should take a version and the one it was chosen from, and nothing else', () => {
     should(MakeCurrentRequestSchema.safeParse({ version: 1, from: 2 }).success).equal(true);
     should(MakeCurrentRequestSchema.safeParse({ version: 0, from: 2 }).success).equal(false);
@@ -156,10 +156,10 @@ describe('making a version current and shelving one', () => {
     should(MakeCurrentRequestSchema.safeParse({ version: 1, from: 2, extra: 1 }).success).equal(false);
   });
 
-  it('should take shelved as a boolean, and nothing else', () => {
-    should(ShelveVersionRequestSchema.safeParse({ shelved: true }).success).equal(true);
-    should(ShelveVersionRequestSchema.safeParse({ shelved: 'yes' }).success).equal(false);
-    should(ShelveVersionRequestSchema.safeParse({ shelved: false, extra: 1 }).success).equal(false);
+  it('should take retired as a boolean, and nothing else', () => {
+    should(RetireVersionRequestSchema.safeParse({ retired: true }).success).equal(true);
+    should(RetireVersionRequestSchema.safeParse({ retired: 'yes' }).success).equal(false);
+    should(RetireVersionRequestSchema.safeParse({ retired: false, extra: 1 }).success).equal(false);
   });
 
   it('should answer with the version’s state and every catalog raised, with no stamp once it is back in use', () => {
@@ -169,12 +169,12 @@ describe('making a version current and shelving one', () => {
       changed: true,
       catalogs: [{ catalogId: `cat_${'A'.repeat(22)}`, revision: 3 }],
     };
-    should(ShelvedVersionSchema.safeParse({ ...answer, changed: undefined }).success).equal(false);
-    should(ShelvedVersionSchema.safeParse(answer).success).equal(true);
-    should(ShelvedVersionSchema.safeParse({ ...answer, shelvedAt: '2026-01-01T00:00:00.000Z' }).success).equal(true);
+    should(RetiredVersionSchema.safeParse({ ...answer, changed: undefined }).success).equal(false);
+    should(RetiredVersionSchema.safeParse(answer).success).equal(true);
+    should(RetiredVersionSchema.safeParse({ ...answer, retiredAt: '2026-01-01T00:00:00.000Z' }).success).equal(true);
     should(
-      ShelvedVersionSchema.safeParse({ ...answer, catalogs: [{ ...answer.catalogs[0], revision: 0 }] }).success,
+      RetiredVersionSchema.safeParse({ ...answer, catalogs: [{ ...answer.catalogs[0], revision: 0 }] }).success,
     ).equal(false);
-    should(ShelvedVersionSchema.safeParse({ ...answer, extra: 1 }).success).equal(false);
+    should(RetiredVersionSchema.safeParse({ ...answer, extra: 1 }).success).equal(false);
   });
 });

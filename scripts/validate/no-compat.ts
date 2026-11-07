@@ -22,12 +22,27 @@ export const ALLOWED: ReadonlyMap<string, string> = new Map([
   ],
 ]);
 
+/** Real product words, scoped to their owning package (lead decision DECISIONS-1 #15). */
+export const PRODUCT_WORDS: ReadonlyMap<string, { readonly word: RegExp; readonly reason: string }> = new Map([
+  [
+    'packages/plugins/catalogs/',
+    {
+      word: /retired/gi,
+      reason: "Catalog version retirement is today's product state and signed wire wording; keep it unchanged.",
+    },
+  ],
+]);
+
 export function compatIn(file: string, where = file): Finding[] {
   const findings: Finding[] = [];
   const parsed = parseFile(file);
   const seen = new Set<string>();
   const add = (start: number, text: string): void => {
-    const match = BANNED_WORDS.exec(text);
+    let checked = text;
+    for (const [prefix, allowed] of PRODUCT_WORDS) {
+      if (where.startsWith(prefix)) checked = checked.replace(allowed.word, '');
+    }
+    const match = BANNED_WORDS.exec(checked);
     if (match === null) return;
     const at = `${where}:${parsed.line(start)}:${text}`;
     if (seen.has(at)) return;

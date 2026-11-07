@@ -89,8 +89,8 @@ export const CatalogItemVersionSchema = z.strictObject({
   digest: CatalogDigestSchema,
   size: z.number().int().min(1),
   publishedAt: InstantSchema,
-  /** When the version was shelved (versions, 3d); unset while it is in use. */
-  shelvedAt: InstantSchema.optional(),
+  /** When the version was retired (versions, 3d); unset while it is in use. */
+  retiredAt: InstantSchema.optional(),
 });
 export type CatalogItemVersion = z.infer<typeof CatalogItemVersionSchema>;
 
@@ -161,8 +161,8 @@ export const OwnedSharedItemVersionSchema = z.strictObject({
   /** Bytes of the frozen copy, which is the same whichever catalog lists it. */
   size: z.number().int().min(1),
   publishedAt: InstantSchema,
-  /** When the version was shelved (versions, 3d); unset while it is in use. */
-  shelvedAt: InstantSchema.optional(),
+  /** When the version was retired (versions, 3d); unset while it is in use. */
+  retiredAt: InstantSchema.optional(),
   summary: CatalogSummarySchema,
   /** Skills only: how many files it holds. */
   fileCount: z.number().int().min(0).optional(),
@@ -283,7 +283,7 @@ export const CatalogItemPreviewSchema = z.strictObject({
    * The newest SHELVED version the frozen copy is the same as, when no version it could be published against is.
    * Publishing is still allowed — it makes a new number — so this is a warning for the person, not a refusal.
    */
-  sameAsShelvedVersion: z.number().int().min(1).optional(),
+  sameAsRetiredVersion: z.number().int().min(1).optional(),
   digest: CatalogDigestSchema,
   /** Bytes of the frozen item. */
   size: z.number().int().min(1),
@@ -452,7 +452,7 @@ export const SharedItemVersionDetailSchema = z.strictObject({
   harness: CatalogHarnessSchema.optional(),
   size: z.number().int().min(1),
   publishedAt: InstantSchema,
-  shelvedAt: InstantSchema.optional(),
+  retiredAt: InstantSchema.optional(),
   review: z.array(CatalogReviewEntrySchema).readonly(),
   warnings: z.array(CatalogInstallWarningSchema).readonly(),
 });
@@ -493,18 +493,18 @@ export const MakeCurrentRequestSchema = z.strictObject({
 });
 export type MakeCurrentRequest = z.infer<typeof MakeCurrentRequestSchema>;
 
-/** `PATCH /v1/catalog-items/:itemId/versions/:version`: shelve a version (it stops being offered) or bring it back. */
-export const ShelveVersionRequestSchema = z.strictObject({ shelved: z.boolean() });
-export type ShelveVersionRequest = z.infer<typeof ShelveVersionRequestSchema>;
+/** `PATCH /v1/catalog-items/:itemId/versions/:version`: retire a version (it stops being offered) or bring it back. */
+export const RetireVersionRequestSchema = z.strictObject({ retired: z.boolean() });
+export type RetireVersionRequest = z.infer<typeof RetireVersionRequestSchema>;
 
-/** The answer to shelving or unshelving: the version's new state and every live catalog the change raised. */
-export const ShelvedVersionSchema = z.strictObject({
+/** The answer to retiring or unretiring: the version's new state and every live catalog the change raised. */
+export const RetiredVersionSchema = z.strictObject({
   itemId: SharedCatalogItemIdSchema,
   version: z.number().int().min(1),
-  /** When it was shelved; unset when it is in use again. */
-  shelvedAt: InstantSchema.optional(),
+  /** When it was retired; unset when it is in use again. */
+  retiredAt: InstantSchema.optional(),
   /** False when the version was already in the state asked for: nothing was written and no revision rose. */
   changed: z.boolean(),
   catalogs: z.array(z.strictObject({ catalogId: SharedCatalogIdSchema, revision: z.number().int().min(1) })).readonly(),
 });
-export type ShelvedVersion = z.infer<typeof ShelvedVersionSchema>;
+export type RetiredVersion = z.infer<typeof RetiredVersionSchema>;

@@ -178,7 +178,7 @@ export const CATALOG_LINK_REFUSALS = [
   'changed_since_preview',
   'link_kind_unsupported',
   'links_full',
-  'version_shelved',
+  'version_retired',
   'version_linked',
   'link_too_big',
   'link_not_public',

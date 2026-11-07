@@ -571,7 +571,7 @@ export type SharedCatalogOfferedVersion = z.infer<typeof SharedCatalogOfferedVer
  * The versions of one item a catalog offers at one revision. It carries the manifest's `revision` and
  * `issuedAt` and the manifest line's `current`, so a reader proves it belongs to a manifest it holds.
  * It lists only versions the catalog may serve (its `sinceVersion`, and those published after it joined, never the ones
- * that already existed then) that are not shelved; `current` is always in it.
+ * that already existed then) that are not retired; `current` is always in it.
  */
 export const SharedCatalogItemVersionsSchema = z
   .strictObject({
