@@ -48,10 +48,12 @@ function requireCipherMatch(document: SecretVaultDocument, algorithm: string): S
 
 /** Name and timestamps, sorted by name so a listing is stable between reads. */
 function summaries(document: SecretVaultDocument): readonly SecretSummary[] {
-  return Object.entries(document.entries)
-    // The instants rest as the clock wrote them; the listing hands them back as the instants they are.
-    .map(([name, entry]) => ({ name, createdAt: entry.createdAt as Instant, updatedAt: entry.updatedAt as Instant }))
-    .sort((left, right) => left.name.localeCompare(right.name));
+  return (
+    Object.entries(document.entries)
+      // The instants rest as the clock wrote them; the listing hands them back as the instants they are.
+      .map(([name, entry]) => ({ name, createdAt: entry.createdAt as Instant, updatedAt: entry.updatedAt as Instant }))
+      .sort((left, right) => left.name.localeCompare(right.name))
+  );
 }
 
 /**

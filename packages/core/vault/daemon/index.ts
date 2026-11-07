@@ -68,7 +68,12 @@ export default implementDaemon(manifest, {
     // GAP (for the lead): today's operator `secretEnvironment` recipes and the reference sources (recipes, fleet
     // accounts) were composed here from Accounts' and Logins' code; until those ports offer them, a use gets exactly
     // the secrets it named and the listing shows no configured references.
-    const uses = new SecretUseService(vault, new KernelSecretChildRunner(kernel.spawn, kernel.clock), environments, NO_RECIPES);
+    const uses = new SecretUseService(
+      vault,
+      new KernelSecretChildRunner(kernel.spawn, kernel.clock),
+      environments,
+      NO_RECIPES,
+    );
     const authorizer = new OutboundProviderAuthorizer(vault, new KernelOutboundTransport(kernel.fetch, kernel.clock));
     const crypto = new WebCryptoCloneCrypto();
     const imports = new SecretImportService({ crypto, identity: IDENTITY_NOT_OFFERED, directory, clock: kernel.clock });

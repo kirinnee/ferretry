@@ -1,6 +1,11 @@
 import { ApiError, type ApiResponse, type CallContext, decodeParameter, jsonResponse } from '@ferretry/kernel/contract';
 import { isFerretCall, STEP_UP_REQUIRED_CODE, type StepUpRequiredBody } from '@ferretry/core-gate/contract';
-import { type SecretName, SecretNameSchema, type SecretSummary, SecretUseRequestSchema } from '../../../../contract/index.ts';
+import {
+  type SecretName,
+  SecretNameSchema,
+  type SecretSummary,
+  SecretUseRequestSchema,
+} from '../../../../contract/index.ts';
 import { parseBody } from '../../api/body.ts';
 import { SecretCloneError, type SecretExportService, type SecretImportService } from '../../secrets/clone.ts';
 import { SecretStoreError, type SecretReferenceSource, UnknownSecretError } from '../../secrets/types.ts';

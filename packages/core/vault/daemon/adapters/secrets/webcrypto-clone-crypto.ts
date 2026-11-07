@@ -11,7 +11,12 @@
  * the public half; that is noted where it happens.
  */
 
-import type { CloneCrypto, DaemonIdentity, EphemeralKeyPair, PrivateKeyHandle } from '../../lib/secrets/clone-crypto.ts';
+import type {
+  CloneCrypto,
+  DaemonIdentity,
+  EphemeralKeyPair,
+  PrivateKeyHandle,
+} from '../../lib/secrets/clone-crypto.ts';
 import { concatBytes, isAllZero } from '../../lib/secrets/clone-binary.ts';
 import { AEAD_TAG_BYTES, daemonIdFromPublicKey, SHARED_SECRET_BYTES } from '../../lib/secrets/clone-crypto.ts';
 
