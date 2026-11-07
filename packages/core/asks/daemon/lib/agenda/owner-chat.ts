@@ -4,14 +4,14 @@
  */
 
 /** One message the owner sent, its words as they typed them (a chat reply's `[re !A5 …]` heading is not theirs). */
-export interface OwnerChatMessage {
+interface OwnerChatMessage {
   /** The id the message has in the session's queue and send ledger. */
   readonly messageId: string;
   readonly at: string;
   readonly text: string;
 }
 
-export type OwnerChatLookup =
+type OwnerChatLookup =
   | { readonly ok: true; readonly message: OwnerChatMessage }
   /** `none`: the owner sent nothing; `unknown`: no such message in this session; `not-owner`: it is not the owner's. */
   | { readonly ok: false; readonly reason: 'none' | 'unknown' | 'not-owner' };

@@ -12,4 +12,4 @@ export interface MachineAgendaPort {
   list(): Promise<AgendaSnapshot>;
 }
 
-export type MachineRaise = Omit<RaiseAgendaRequest, 'source' | 'sourceRef'>;
+type MachineRaise = Omit<RaiseAgendaRequest, 'source' | 'sourceRef'>;

@@ -36,7 +36,6 @@ import {
   cardAskReference,
   cardAskStage,
   awaitsOwnAnswer as protocolAwaitsOwnAnswer,
-  hasOpenCardAsk,
   itemAsksOwnQuestion,
   isOpenCardAsk,
   ownAskDigest,
@@ -183,16 +182,6 @@ const awaitsOwnAnswer = (item: AgendaItem, held: readonly AgendaCardAsk[]): bool
     { ...item, cardAsks: held },
     held.map(ask => ({ gate: ask.gate, howToTest: ask.howToTest ?? null })),
   );
-
-/**
- * Whether an agenda asks the owner NOTHING BUT its card asks: it carries one still open and nothing of its own to
- * answer (`awaitsOwnAnswer`, the shared own-question rule and the reply digest). The ask made its push when it was put,
- * which is then the item's whole signal: a stop never names it again and it has no deadline of its own. The card agenda
- * the daemon opened is that while its subject is the one it wrote; a ferret's thread is, until its ferret asks (or
- * rewords) a question of its own, which the owner has yet to answer. Total.
- */
-export const asksOnlyCardAsks = (item: AgendaItem): boolean =>
-  hasOpenCardAsk(item) && !awaitsOwnAnswer(item, item.cardAsks ?? []);
 
 /**
  * The item resting on the owner's answer, waiting on its ferret, as every other answer rests one — unless another

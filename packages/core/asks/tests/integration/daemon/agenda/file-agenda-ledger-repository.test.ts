@@ -18,16 +18,14 @@ import {
   NO_AGENDA_VERSIONS,
 } from '../../../../daemon/lib/agenda/index.ts';
 import { AgendaService } from '../../../../daemon/lib/agenda/service.ts';
-import {
-  agendaFilePath,
-  agendaFilesAt,
-  recordingRuntime,
-  setAsidePath,
-} from '../../../support/daemon/agenda-state.ts';
+import { agendaFilePath, agendaFilesAt, recordingRuntime, setAsidePath } from '../../../support/daemon/agenda-state.ts';
 
 const homes: string[] = [];
 let ids = 0;
-const uniqueId = (): string => `id-${String((ids += 1))}`;
+const uniqueId = (): string => {
+  ids += 1;
+  return `id-${String(ids)}`;
+};
 
 async function createRepository(): Promise<{
   readonly home: string;
@@ -116,9 +114,9 @@ describe('the agenda files on the kernel state port', () => {
       second.toString(),
     );
     should((await files.readAfter('session-1', AGENDA_ARCHIVE_FILE, first.length + second.length)).length).equal(0);
-    await should(
-      files.readAfter('session-1', AGENDA_ARCHIVE_FILE, first.length + second.length + 1),
-    ).be.rejectedWith(/cursor exceeds/u);
+    await should(files.readAfter('session-1', AGENDA_ARCHIVE_FILE, first.length + second.length + 1)).be.rejectedWith(
+      /cursor exceeds/u,
+    );
   });
 
   it('should cut a file back to its committed bytes, keeping them untouched', async () => {

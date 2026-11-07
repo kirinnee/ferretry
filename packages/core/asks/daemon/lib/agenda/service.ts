@@ -173,7 +173,7 @@ export interface AgendaCardLanes {
 }
 
 /** No card is known to be in the to-test lane: nothing is offered to close by default. */
-export const NO_AGENDA_CARD_LANES: AgendaCardLanes = { inToTest: async () => false };
+const NO_AGENDA_CARD_LANES: AgendaCardLanes = { inToTest: async () => false };
 
 /**
  * Whether a card's gate is asking the owner already (docs/agenda.md § One ask per thing): where, as the item and the
@@ -211,7 +211,7 @@ const refusedForGate = (
 ): AgendaMutation => ({ ok: false, error: { code: 'invalid', message: carriedBy(task, asking, from) } });
 
 /** No card is known to be asking: every ask keeps the card it names. */
-export const NO_AGENDA_GATE_ASKING: AgendaGateAsking = { asking: async () => undefined };
+const NO_AGENDA_GATE_ASKING: AgendaGateAsking = { asking: async () => undefined };
 
 /** The kinds of item whose card the owner is most likely to close with the answer: a to-do or a review. */
 const CLOSE_OFFERED_KINDS: ReadonlySet<AgendaKind> = new Set<AgendaKind>(['task', 'review']);

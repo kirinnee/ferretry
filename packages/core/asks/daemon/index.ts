@@ -28,11 +28,7 @@ import { FileAgendaOutboxRepository } from './adapters/agenda/file-agenda-outbox
 import { FileAgendaSeenStore, SqliteAgendaVersionStore } from './adapters/agenda/file-agenda-versions.ts';
 import { KeyedAgendaReplyTimers } from './adapters/agenda/keyed-agenda-reply-timers.ts';
 import { StateAgendaFiles } from './adapters/agenda/state-agenda-files.ts';
-import {
-  AgendaReplyBatcher,
-  AgendaService,
-  isAgendaSessionId,
-} from './lib/agenda/index.ts';
+import { AgendaReplyBatcher, AgendaService, isAgendaSessionId } from './lib/agenda/index.ts';
 import { KeyedSerialQueue } from './lib/agenda/serial-queue.ts';
 import { agendaRoutes } from './lib/routes/agenda.ts';
 import { agendaClearRoutes } from './lib/routes/agenda-clear.ts';
@@ -88,11 +84,16 @@ export default implementDaemon(manifest, {
 
     return {
       routes: {
-        ...agendaRoutes(agenda, replies, undefined, undefined, cardAskAnswers(agenda, () => sources(CARD_SOURCE), now)),
+        ...agendaRoutes(
+          agenda,
+          replies,
+          undefined,
+          undefined,
+          cardAskAnswers(agenda, () => sources(CARD_SOURCE), now),
+        ),
         ...agendaClearRoutes(undefined),
       },
       provides: { asks: asksPort(agenda, boards, sources) },
     };
   },
 });
-

@@ -20,13 +20,13 @@ type RouteContext = CallContext;
  * plugin's `card` source answers through it once the card-ask flow is settled (an `apply(answer)` before an ask is
  * answered is still a lead decision), and until then no build wires it, so a card ask is answered like any choice.
  */
-export type BoardCaller =
+type BoardCaller =
   | { readonly kind: 'owner'; readonly via?: 'admin-token' }
   | { readonly kind: 'ferret'; readonly sessionId: string }
   | { readonly kind: 'daemon'; readonly sessionId?: string };
 
 /** Why the board refused to move the card (today's `GateRefusal`). */
-export interface GateRefusal {
+interface GateRefusal {
   readonly code: 'forbidden' | 'invalid' | 'moved-on' | 'not-moved';
   readonly message: string;
 }

@@ -71,33 +71,27 @@ describe('agenda list and one-item reads', () => {
     },
   );
 
-  it.each(['/v1/ferrets/s1/agenda'])(
-    'preserves complete records for readers below channel 2 of %s',
-    async path => {
-      const { read, snapshot } = fixture();
-      for (const caller of [human, { ...human, [AGENDA_CHANNEL_HEADER]: '1' }]) {
-        const response = await read(path, caller);
-        expect(response.status).toBe(200);
-        // This full-record schema is the one PWA/CLI readers used before list headers.
-        expect(AgendaSnapshotSchema.parse(jsonBody(response)).resolved).toEqual(snapshot.resolved);
-      }
-    },
-  );
+  it.each(['/v1/ferrets/s1/agenda'])('preserves complete records for readers below channel 2 of %s', async path => {
+    const { read, snapshot } = fixture();
+    for (const caller of [human, { ...human, [AGENDA_CHANNEL_HEADER]: '1' }]) {
+      const response = await read(path, caller);
+      expect(response.status).toBe(200);
+      // This full-record schema is the one PWA/CLI readers used before list headers.
+      expect(AgendaSnapshotSchema.parse(jsonBody(response)).resolved).toEqual(snapshot.resolved);
+    }
+  });
 
-  it.each(['/v1/ferrets/s1/agenda'])(
-    'keeps mutation snapshots complete on %s for every reader',
-    async path => {
-      for (const version of [undefined, '1', '2']) {
-        const { mutate } = fixture();
-        const caller = version === undefined ? human : { ...human, [AGENDA_CHANNEL_HEADER]: version };
-        const response = await mutate(path, caller);
-        expect(response.status).toBe(200);
-        const snapshot = AgendaSnapshotSchema.parse(jsonBody(response));
-        expect(snapshot.resolved).toHaveLength(3);
-        expect(snapshot.resolved.every(item => !('projection' in item))).toBe(true);
-      }
-    },
-  );
+  it.each(['/v1/ferrets/s1/agenda'])('keeps mutation snapshots complete on %s for every reader', async path => {
+    for (const version of [undefined, '1', '2']) {
+      const { mutate } = fixture();
+      const caller = version === undefined ? human : { ...human, [AGENDA_CHANNEL_HEADER]: version };
+      const response = await mutate(path, caller);
+      expect(response.status).toBe(200);
+      const snapshot = AgendaSnapshotSchema.parse(jsonBody(response));
+      expect(snapshot.resolved).toHaveLength(3);
+      expect(snapshot.resolved.every(item => !('projection' in item))).toBe(true);
+    }
+  });
 
   it.each(['/v1/ferrets/s1/agenda'])(
     'reads one whole active or addressed item from %s, with no sibling documents',

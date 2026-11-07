@@ -32,13 +32,11 @@ import {
 } from '../../../../daemon/lib/agenda/index.ts';
 import manifest from '../../../../manifest.ts';
 
-export const AT = '2024-05-01T10:00:00.000Z';
+const AT = '2024-05-01T10:00:00.000Z';
 export const FERRET_SESSION = 'ferret-own';
 
 /** The human's CLI: the admin token at the machine. */
 export const human: CallStanding = ownerStanding('cli');
-/** The owner's app at the machine. */
-export const humanApp: CallStanding = ownerStanding('ui');
 /** A ferret, on its own token. */
 export const agentIn = (sessionId: string): CallStanding => ferretStanding(sessionId as FerretId);
 /** The ferret whose own credential a case presents. */

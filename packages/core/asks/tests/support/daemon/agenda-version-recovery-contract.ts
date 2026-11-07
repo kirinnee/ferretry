@@ -78,12 +78,20 @@ async function world() {
     conversation: (session, id, version) => backing.conversation(session, id, version),
   };
   const repository = (archive: AgendaVersionStore = versions) =>
-    new FileAgendaLedgerRepository(files, () => `id-${String((ids += 1))}`, archive, {
-      now: () => now,
-      warn: message => {
-        warnings.push(message);
+    new FileAgendaLedgerRepository(
+      files,
+      () => {
+        ids += 1;
+        return `id-${String(ids)}`;
       },
-    });
+      archive,
+      {
+        now: () => now,
+        warn: message => {
+          warnings.push(message);
+        },
+      },
+    );
   let repo = repository();
   type Timeless<T> = T extends unknown ? Omit<T, 'at'> : never;
   const save = (command: Timeless<AgendaCommand>) =>
@@ -255,7 +263,10 @@ export function agendaVersionRecoveryContract() {
             await should(
               w.save({ action: 'edit', actor: ACTOR, id: 'A1', patch: { subject: 'Intermediate' } }),
             ).be.rejected();
-            should(JSON.parse(await readFile(agendaFilePath(w.root, SESSION, 'agenda.json'), 'utf8')).entries[0].item.subject).equal('Initial');
+            should(
+              JSON.parse(await readFile(agendaFilePath(w.root, SESSION, 'agenda.json'), 'utf8')).entries[0].item
+                .subject,
+            ).equal('Initial');
             should((await stat(agendaFilePath(w.root, SESSION, AGENDA_VERSION_PENDING))).mode & 0o777).equal(0o600);
             w.restart();
             // A read, not another edit, must recover the intent after daemon restart.
@@ -377,7 +388,10 @@ export function agendaVersionRecoveryContract() {
         await should(
           w.save({ action: 'edit', actor: ACTOR, id: 'A1', patch: { subject: 'Intermediate' } }),
         ).be.rejected();
-        const archiveAbsent = new FileAgendaLedgerRepository(w.files, () => 'id', NO_AGENDA_VERSIONS, { now: () => 0, warn: () => undefined });
+        const archiveAbsent = new FileAgendaLedgerRepository(w.files, () => 'id', NO_AGENDA_VERSIONS, {
+          now: () => 0,
+          warn: () => undefined,
+        });
         await should(archiveAbsent.read(SESSION)).be.rejectedWith(/archive is required/u);
         const original = JSON.parse((await w.files.read(SESSION, AGENDA_VERSION_PENDING)) ?? '');
         await w.files.writeAtomic(
@@ -661,7 +675,9 @@ export function agendaVersionRecoveryContract() {
         await should(w.save({ action: 'resolve', actor: HUMAN, id: 'A101' })).be.rejectedWith(
           'crash before dropping hot keys',
         );
-        should(JSON.parse(await readFile(agendaFilePath(w.root, SESSION, 'agenda.json'), 'utf8')).conversations.A1).have.length(words.length);
+        should(
+          JSON.parse(await readFile(agendaFilePath(w.root, SESSION, 'agenda.json'), 'utf8')).conversations.A1,
+        ).have.length(words.length);
         w.files.writeAtomic = write;
         w.restart();
         const cold = await w.repo.read(SESSION);
@@ -741,13 +757,11 @@ export function agendaVersionRecoveryContract() {
           if (closed === undefined) throw new Error('missing fixture');
           if (source === 'human' || source === 'daemon') {
             const origin = source === 'human' ? HUMAN : { kind: 'daemon' as const, cause: 'system' as const };
-            const archived = parseAgendaEntry(
-              {
-                ...closed,
-                origin,
-                item: { ...closed.item, raisedBy: source, raisedBySession: null, raisedByName: null },
-              },
-            );
+            const archived = parseAgendaEntry({
+              ...closed,
+              origin,
+              item: { ...closed.item, raisedBy: source, raisedBySession: null, raisedByName: null },
+            });
             if (archived === null) throw new Error('invalid orphan fixture');
             await w.backing.record(SESSION, [
               {

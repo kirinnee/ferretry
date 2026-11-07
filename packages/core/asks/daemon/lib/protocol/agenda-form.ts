@@ -9,11 +9,11 @@
 import type { AgendaFormAnswer, AgendaFormField } from './agenda.ts';
 
 /** The words a yes-or-no field is answered with. */
-export const FORM_YES = 'Yes';
-export const FORM_NO = 'No';
+const FORM_YES = 'Yes';
+const FORM_NO = 'No';
 
 /** What a line says for a field the owner skipped: every field may be left empty (&F922). */
-export const FORM_UNANSWERED = '(skipped)';
+const FORM_UNANSWERED = '(skipped)';
 
 /** The short word a field's line uses: its own `name`, else its question without the closing mark. */
 export const formFieldName = (field: Pick<AgendaFormField, 'name' | 'label'>): string =>
@@ -24,11 +24,11 @@ export const formFieldName = (field: Pick<AgendaFormField, 'name' | 'label'>): s
     .replace(/[?:.!\s]+$/u, '');
 
 /** The value a field is answered with, as a list: a pick-many holds several, every other field one. */
-export const formValues = (answer: AgendaFormAnswer | undefined): readonly string[] =>
+const formValues = (answer: AgendaFormAnswer | undefined): readonly string[] =>
   answer === undefined ? [] : typeof answer.picked === 'string' ? [answer.picked] : answer.picked;
 
 /** The answer to one field, if the owner gave one. */
-export const formAnswerOf = (
+const formAnswerOf = (
   answers: readonly AgendaFormAnswer[],
   field: Pick<AgendaFormField, 'id'>,
 ): AgendaFormAnswer | undefined => answers.find(answer => answer.id === field.id);

@@ -24,7 +24,7 @@ const removable = <T extends z.ZodType>(schema: z.ZodOptional<T>) => schema.unwr
 const TabBodySchema = AgendaTabEditSchema.shape.body.unwrap().nullable();
 
 /** The ferret's own tabs, by name (or id): Markdown makes or rewrites one, `null` removes it. */
-export const AgendaPatchTabsSchema = z
+const AgendaPatchTabsSchema = z
   .record(AgendaTabEditSchema.shape.tab, TabBodySchema)
   .refine(tabs => Object.keys(tabs).length >= 1, 'tabs names at least one tab')
   .refine(
@@ -32,7 +32,7 @@ export const AgendaPatchTabsSchema = z
     `a patch changes at most ${MAX_AGENDA_TAB_EDITS} tabs at once`,
   );
 
-export const AgendaPatchSchema = z.strictObject({
+const AgendaPatchSchema = z.strictObject({
   /**
    * READ BEFORE WRITE: the revision `fy agenda show <id> --yaml` printed. Required, so a patch is always written
    * against the whole item as last read; one the item has moved past is refused `stale` (read it again).
@@ -82,10 +82,10 @@ export const AgendaPatchSchema = z.strictObject({
   answers: edit.answers,
   fields: edit.fields,
 });
-export type AgendaPatch = z.infer<typeof AgendaPatchSchema>;
+type AgendaPatch = z.infer<typeof AgendaPatchSchema>;
 
 /** Every key a patch takes, in the order `show --yaml` prints them. */
-export const AGENDA_PATCH_KEYS = Object.keys(AgendaPatchSchema.shape) as readonly (keyof AgendaPatch)[];
+const AGENDA_PATCH_KEYS = Object.keys(AgendaPatchSchema.shape) as readonly (keyof AgendaPatch)[];
 
 /**
  * The fields an item's revision covers: everything the owner reads on it and a ferret may change, the ask's version,

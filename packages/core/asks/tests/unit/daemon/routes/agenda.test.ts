@@ -50,7 +50,9 @@ function fixture(
   notifications: DirectNotificationSubsystem = new FakeNotifications(),
   gates?: AgendaGatePort,
 ) {
-  const dispatch = routeDispatcher(agendaRoutes(agendaService(repository), NO_HELD_REPLIES, notifications, undefined, gates));
+  const dispatch = routeDispatcher(
+    agendaRoutes(agendaService(repository), NO_HELD_REPLIES, notifications, undefined, gates),
+  );
   return async (overrides: RequestOverrides): Promise<ApiResponse> => await dispatch(overrides);
 }
 
@@ -81,7 +83,15 @@ describe('agendaActor', () => {
     should(agendaActor('admin-cli')).deepEqual({ kind: 'human' });
     should(agendaActor('admin-ui')).deepEqual({ kind: 'human' });
     should(agendaActor('device:browser-1')).deepEqual({ kind: 'human' });
-    for (const unavailable of ['ferret:', 'ferret:not/a/session', 'peer:s1', 'device:', 'warden:s1', 'unknown', undefined]) {
+    for (const unavailable of [
+      'ferret:',
+      'ferret:not/a/session',
+      'peer:s1',
+      'device:',
+      'warden:s1',
+      'unknown',
+      undefined,
+    ]) {
       should(() => agendaActor(unavailable)).throw(/established human or session provenance/u);
     }
   });
@@ -609,15 +619,21 @@ describe('agenda routes', () => {
 describe('agenda routes and held answers', () => {
   it('should serve the board without `replies` when the outbox cannot be read', async () => {
     // Arrange
-    const dispatcher = routeDispatcher(agendaRoutes(agendaService(), {
-      pending: async () => {
-        throw new Error('outbox unreadable');
-      },
-      delivery: async () => {
-        throw new Error('outbox unreadable');
-      },
-      sendNow: async () => undefined,
-    }, new FakeNotifications()));
+    const dispatcher = routeDispatcher(
+      agendaRoutes(
+        agendaService(),
+        {
+          pending: async () => {
+            throw new Error('outbox unreadable');
+          },
+          delivery: async () => {
+            throw new Error('outbox unreadable');
+          },
+          sendNow: async () => undefined,
+        },
+        new FakeNotifications(),
+      ),
+    );
 
     // Act
     const response = await dispatcher({ path: '/v1/ferrets/s1/agenda', headers: human });
@@ -630,11 +646,17 @@ describe('agenda routes and held answers', () => {
 
   it('should serve the answers on their way as `delivery`, beside the held ones', async () => {
     // Arrange
-    const dispatcher = routeDispatcher(agendaRoutes(agendaService(), {
-      pending: async () => undefined,
-      delivery: async () => ({ sending: ['A2'], heldForComposer: true }),
-      sendNow: async () => undefined,
-    }, new FakeNotifications()));
+    const dispatcher = routeDispatcher(
+      agendaRoutes(
+        agendaService(),
+        {
+          pending: async () => undefined,
+          delivery: async () => ({ sending: ['A2'], heldForComposer: true }),
+          sendNow: async () => undefined,
+        },
+        new FakeNotifications(),
+      ),
+    );
 
     // Act
     const response = await dispatcher({ path: '/v1/ferrets/s1/agenda', headers: human });

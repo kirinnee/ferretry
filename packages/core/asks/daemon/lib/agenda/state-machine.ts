@@ -163,10 +163,10 @@ export interface AgendaLedger {
  * saying how (`resting`); every item names its stage; full threads live in the ledger-level conversations map, with
  * bounded recent tails on current items and wire snapshots; a card's asks ride its agenda (`cardAsks`).
  */
-export const AGENDA_LEDGER_VERSION = 1;
+const AGENDA_LEDGER_VERSION = 1;
 
 /** The card an item is: what it is about, its kind and its answers by direction (all derived when absent). */
-export interface AgendaCardFields {
+interface AgendaCardFields {
   readonly title?: string;
   readonly kind?: AgendaKind;
   readonly answers?: AgendaCardAnswer[];
@@ -558,7 +558,7 @@ export function isWardenEscalationAgenda(entry: AgendaEntry): boolean {
 }
 
 /** A gate follow-up as its item says: the gate producer's `task` source, raised by the daemon, under its reference. */
-export function isGateFollowupItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
+function isGateFollowupItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
   return (
     item.raisedBy === 'daemon' && item.source === 'task' && parseGateFollowupReference(item.sourceRef) !== undefined
   );
@@ -568,17 +568,17 @@ export function isGateFollowupItem(item: Pick<AgendaItem, 'raisedBy' | 'source' 
  * The agenda the daemon opened for a card nobody's agenda carried (`card-agenda:`, docs/agenda.md § Card asks): like a
  * follow-up, raised ON BEHALF of the card's ferret, which works and closes it as its own.
  */
-export function isCardAgendaItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
+function isCardAgendaItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
   return item.raisedBy === 'daemon' && item.source === 'task' && parseCardAgendaReference(item.sourceRef) !== undefined;
 }
 
 /** An item the daemon raised on behalf of the ferret whose board holds it: a gate's follow-up, or a card's agenda. */
-export function isOnBehalfItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
+function isOnBehalfItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
   return isGateFollowupItem(item) || isCardAgendaItem(item);
 }
 
 /** {@link isOnBehalfItem}, of an entry the daemon raised. */
-export function isOnBehalfAgenda(entry: Pick<AgendaEntry, 'origin' | 'item'>): boolean {
+function isOnBehalfAgenda(entry: Pick<AgendaEntry, 'origin' | 'item'>): boolean {
   return entry.origin.kind === 'daemon' && isOnBehalfItem(entry.item);
 }
 
@@ -1398,7 +1398,7 @@ function addressById(
  * Exempt, and still closed by the answer, are the items whose answer the DAEMON acts on: a card's gate (until card
  * asks move into agendas), a held configuration change, an input card, and every item the daemon raised for itself.
  */
-export function restsOnAnswer(entry: Pick<AgendaEntry, 'origin' | 'item'>): boolean {
+function restsOnAnswer(entry: Pick<AgendaEntry, 'origin' | 'item'>): boolean {
   const speaksForFerret = entry.origin.kind === 'agent' || isOnBehalfAgenda(entry);
   return (
     speaksForFerret && entry.item.confirms === undefined && entry.item.kind !== 'input' && entry.item.notice !== true

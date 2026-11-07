@@ -1,13 +1,7 @@
 /** Asks' private state is declared in the manifest (a manifest imports only contracts); the engine's names for it. */
 export {
   AGENDA_STATE_FILES,
-  AgendaHistoryFiles,
-  AgendaHistoryMarkFiles,
   AgendaLedgerFiles,
-  AgendaPendingChangesFiles,
-  AgendaPendingVersionsFiles,
-  AgendaRepliesFiles,
-  AgendaSeenFiles,
   AgendaSetAsideFiles,
   ASKS_STATE,
 } from '../../manifest.ts';

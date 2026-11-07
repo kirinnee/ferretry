@@ -74,7 +74,7 @@ export const yesNoOrder = <T>(items: readonly T[], labelOf: (item: T) => string)
 };
 
 /** The default label of each answer a card can give, when the ferret did not word it. */
-export const DEFAULT_ANSWER_LABELS: Readonly<Record<Exclude<AgendaAnswerEffect, 'choose'>, string>> = {
+const DEFAULT_ANSWER_LABELS: Readonly<Record<Exclude<AgendaAnswerEffect, 'choose'>, string>> = {
   approve: 'Approve',
   reject: 'Deny',
   good: 'Approve',
@@ -85,7 +85,7 @@ export const DEFAULT_ANSWER_LABELS: Readonly<Record<Exclude<AgendaAnswerEffect, 
 };
 
 /** The one answer a to-do offers: the owner did the steps. */
-export const MARK_DONE_LABEL = 'Mark as done';
+const MARK_DONE_LABEL = 'Mark as done';
 
 /**
  * The words each effect was given by default before (and the to-do's and info's own words): an item stored with
@@ -124,10 +124,10 @@ export const agendaInDiscussion = (item: {
 }): boolean => item.waitingOn === 'ferret' && item.waitingFor === 'discussion';
 
 /** The label `info`'s one answer carries: it resolves the item, acknowledged. */
-export const GOT_IT_LABEL = 'Got it';
+const GOT_IT_LABEL = 'Got it';
 
 /** The order the answer bar lays answers out in: the same order the swipes point. */
-export const ANSWER_DIRECTIONS: readonly AgendaDirection[] = ['left', 'up', 'right'];
+const ANSWER_DIRECTIONS: readonly AgendaDirection[] = ['left', 'up', 'right'];
 
 /** What the card fields are read from: an item, or a request to raise one. */
 export interface AgendaCardSource extends AgendaBrief {
@@ -179,9 +179,6 @@ export const AGENDA_KIND_LABELS: Readonly<Record<AgendaKind, string>> = {
   form: 'Fill in',
   input: 'Type in',
 };
-
-/** The chip of a card waiting for the owner to try the work (a gate in a verify lane): it is a choice, but it asks for a test. */
-export const TEST_KIND_LABEL = 'Test';
 
 /** The chip word of an item or a request: the kind's plain word. */
 export const agendaKindLabel = (item: Pick<AgendaCardSource, 'kind' | 'ask'>): string =>
@@ -292,7 +289,7 @@ export const defaultAgendaAnswers = (
 };
 
 /** Answers in the order the answer bar draws them: left, up, right. */
-export const byDirection = (answers: readonly AgendaCardAnswer[]): AgendaCardAnswer[] =>
+const byDirection = (answers: readonly AgendaCardAnswer[]): AgendaCardAnswer[] =>
   [...answers].sort(
     (left, right) => ANSWER_DIRECTIONS.indexOf(left.direction) - ANSWER_DIRECTIONS.indexOf(right.direction),
   );

@@ -26,15 +26,19 @@ export interface AgendaAgentClearer {
 export function agendaClearRoutes(clearer: AgendaAgentClearer | undefined) {
   return {
     'POST /v1/agenda/clear-agents': (async context => {
-        const actor = agendaActor(context.actor);
-        if (actor.kind !== 'human') {
-          throw new ApiError(403, 'only the owner can clear the agent ferrets’ agenda items', 'forbidden');
-        }
-        const request = await parseBody(context.request, AgendaClearAgentsRequestSchema);
-        if (clearer === undefined)
-          throw new ApiError(503, 'this daemon cannot tell which ferrets are agent ferrets yet, so nothing was cleared', 'unavailable');
-        const result = request.dryRun === true ? await clearer.preview() : await clearer.clear(actor);
-        return jsonResponse(AgendaClearAgentsResultSchema.parse(result));
+      const actor = agendaActor(context.actor);
+      if (actor.kind !== 'human') {
+        throw new ApiError(403, 'only the owner can clear the agent ferrets’ agenda items', 'forbidden');
+      }
+      const request = await parseBody(context.request, AgendaClearAgentsRequestSchema);
+      if (clearer === undefined)
+        throw new ApiError(
+          503,
+          'this daemon cannot tell which ferrets are agent ferrets yet, so nothing was cleared',
+          'unavailable',
+        );
+      const result = request.dryRun === true ? await clearer.preview() : await clearer.clear(actor);
+      return jsonResponse(AgendaClearAgentsResultSchema.parse(result));
     }) satisfies RouteHandler,
   } as const;
 }

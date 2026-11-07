@@ -22,17 +22,11 @@
 import { z } from 'zod';
 import { InstantSchema, PositiveIntegerSchema } from './common.ts';
 
-export const AgendaStateSchema = z.enum(['needs-you', 'resting', 'snoozed', 'done']);
-export type AgendaState = z.infer<typeof AgendaStateSchema>;
-
-export const AgendaRestSubStateSchema = z.enum(['waiting-on-ferret', 'working']);
+const AgendaRestSubStateSchema = z.enum(['waiting-on-ferret', 'working']);
 export type AgendaRestSubState = z.infer<typeof AgendaRestSubStateSchema>;
 
 /** The longest line a ferret says it is working on (`fy agenda rest --why`). */
 export const MAX_AGENDA_REST_WHY_LENGTH = 1_024;
-
-/** How long a `waiting-on-ferret` item may sit silent before the Warden nudges its ferret, the first time. */
-export const AGENDA_REST_NUDGE_MS = 30 * 60_000;
 
 /**
  * WHAT A RESTING ITEM WAITS ON, beside the `parked: replied` (or `waitingOn: ferret`) an older app reads. `at` is
@@ -60,7 +54,6 @@ export const MAX_AGENDA_STAGES = 64;
 
 /** One stage an item entered, and when. */
 export const AgendaStageEntrySchema = z.object({ stage: AgendaStageSchema, at: InstantSchema });
-export type AgendaStageEntry = z.infer<typeof AgendaStageEntrySchema>;
 
 const EPOCH = '1970-01-01T00:00:00.000Z';
 

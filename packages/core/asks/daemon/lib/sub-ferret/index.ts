@@ -31,9 +31,6 @@ const SUB_FERRET_MAY_ON_BOARD =
 /** What a sub-ferret may still do on the agenda: read it and report to its lead. */
 export const SUB_FERRET_MAY_ON_AGENDA = 'read the agenda and report to your lead';
 
-/** What a sub-ferret may still do to a project's lanes: read them. */
-export const SUB_FERRET_MAY_ON_LANES = 'read the board and its lanes';
-
 /**
  * The sentence a refused sub-ferret reads: what it may not do, what it MAY do instead, and the command that reaches
  * who can do the rest. It speaks to the caller, never of "sub-ferrets" at large: a sub-ferret that leads a subtree of
@@ -68,29 +65,6 @@ export const subFerretRefusal = async (
 /** Whether `sessionId` was started by another session. */
 export const isSubFerret = async (directory: SubFerretDirectory, sessionId: string): Promise<boolean> =>
   (await directory.leadOf(sessionId).catch(() => undefined)) !== undefined;
-
-/** The session registry as the directory reads it: `config.parent` is the lead, `config.teammate` the callsign. */
-export interface SessionConfigReader {
-  get(
-    sessionId: string,
-  ): Promise<{ readonly config: { readonly parent?: string; readonly teammate?: string } } | undefined>;
-}
-
-/** The directory over the session registry, so the lineage fact has one owner: the session's own configuration. */
-export const sessionSubFerretDirectory = (sessions: SessionConfigReader): SubFerretDirectory => ({
-  leadOf: async sessionId => {
-    const parent = (await sessions.get(sessionId))?.config.parent;
-    return parent === undefined || parent === '' ? undefined : parent;
-  },
-  addressOf: async sessionId => (await sessions.get(sessionId))?.config.teammate || sessionId,
-});
-
-/**
- * Who a board nudge about `sessionId`'s card is typed to: its lead when it is a sub-ferret (the lead moves the
- * card and decides what the sub-ferret does next), else the session itself.
- */
-export const nudgeTarget = async (directory: SubFerretDirectory, sessionId: string): Promise<string> =>
-  (await directory.leadOf(sessionId).catch(() => undefined)) ?? sessionId;
 
 /** Deepest lineage the ancestor walk follows; a longer chain is treated as not an ancestor. */
 const MAX_LINEAGE_DEPTH = 16;

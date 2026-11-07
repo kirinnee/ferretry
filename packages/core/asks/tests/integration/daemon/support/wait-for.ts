@@ -20,7 +20,7 @@ export async function waitFor(
 }
 
 /** Resolve with the first value `read` returns that is not `undefined`; fail naming `what` at the safety net. */
-export async function waitForValue<T>(
+async function waitForValue<T>(
   read: () => T | undefined | Promise<T | undefined>,
   what: string,
   { within = SAFETY_NET_MS, every = POLL_MS }: WaitOptions = {},

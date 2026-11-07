@@ -8,7 +8,7 @@ import {
 const AGENDA_PROJECTION_AT = '2026-10-26T09:00:00.000Z';
 
 /** Synthetic documents only: repeated revision, tab and conversation text models a long-lived agenda. */
-export const projectionRecord = (id = 'A1'): ResolvedAgendaItem =>
+const projectionRecord = (id = 'A1'): ResolvedAgendaItem =>
   ResolvedAgendaItemSchema.parse({
     id,
     title: 'Release the relay fix',

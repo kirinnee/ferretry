@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AgendaCardAskAnswer, type AgendaGate, type AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
+import type { AgendaCardAskAnswer, AgendaGate, AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
 import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
 import { cardAgendaReference } from '../../../../daemon/lib/protocol/agenda-card-asks.ts';
 import should from 'should';

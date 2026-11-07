@@ -35,7 +35,11 @@ export class StateAgendaFiles implements AgendaFileStore, AppendOnlyFiles {
     const def = (AGENDA_STATE_FILES as Readonly<Record<string, StateFileDef<string, Uint8Array>>>)[name];
     if (def !== undefined) return { def, name: sessionId, label: `state/asks/ferrets/${sessionId}/${name}` };
     const aside = `${sessionId}~${name}`;
-    return { def: AgendaSetAsideFiles as StateFileDef<string, Uint8Array>, name: aside, label: `state/asks/set-aside/${aside}` };
+    return {
+      def: AgendaSetAsideFiles as StateFileDef<string, Uint8Array>,
+      name: aside,
+      label: `state/asks/set-aside/${aside}`,
+    };
   }
 
   /** Where the file is, for a sentence that names it. */

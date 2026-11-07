@@ -73,7 +73,7 @@ export const needsInfoReplyKey = (id: AgendaId, request: number): ReplyKey => `$
 export const instructionsReplyKey = (digest: string): ReplyKey => `instructions~${digest}`;
 
 /** The item a key belongs to, or `undefined` for a key that is not about one. */
-export const itemOfKey = (key: ReplyKey): AgendaId | undefined => AgendaIdSchema.safeParse(key.split('~')[0]).data;
+const itemOfKey = (key: ReplyKey): AgendaId | undefined => AgendaIdSchema.safeParse(key.split('~')[0]).data;
 
 const PendingReplySchema = z.strictObject({
   /** A reply key (an item id for an answer); the field keeps its name so an outbox written before is read. */
@@ -134,7 +134,7 @@ export function agendaReplyDueAt(
  * (`[answer to !A3 «ask»] …`), in the order the owner gave them, a blank line apart. One answer reads
  * exactly as it did before batching.
  */
-export function batchReplyMessage(pending: readonly PendingReply[]): string {
+function batchReplyMessage(pending: readonly PendingReply[]): string {
   return agendaBatchMessage(pending.map(each => each.message));
 }
 
@@ -168,7 +168,7 @@ export function beginAgendaBatch(
 }
 
 /** Records a batch as handed to the send path: from now on only a receipt (or its absence) settles it. */
-export function sentAgendaBatch(outbox: AgendaOutbox, sendId: string, at: string): AgendaOutbox {
+function sentAgendaBatch(outbox: AgendaOutbox, sendId: string, at: string): AgendaOutbox {
   return {
     ...outbox,
     sending: outbox.sending.map(batch => (batch.sendId === sendId ? { ...batch, sentAt: at } : batch)),
@@ -179,7 +179,7 @@ export function sentAgendaBatch(outbox: AgendaOutbox, sendId: string, at: string
  * Puts a batch nothing was typed for back to waiting, ahead of anything held since, keeping each answer's
  * own time so the window it already waited out is not waited again.
  */
-export function returnAgendaBatch(outbox: AgendaOutbox, batch: SendingBatch): AgendaOutbox {
+function returnAgendaBatch(outbox: AgendaOutbox, batch: SendingBatch): AgendaOutbox {
   const back = (batch.replies ?? []).filter(reply => !outbox.pending.some(each => each.id === reply.id));
   return {
     ...outbox,
@@ -189,12 +189,12 @@ export function returnAgendaBatch(outbox: AgendaOutbox, batch: SendingBatch): Ag
 }
 
 /** Forgets a batch that did not arrive: its items may be queued again when the owner answers again. */
-export function dropAgendaBatch(outbox: AgendaOutbox, batch: SendingBatch): AgendaOutbox {
+function dropAgendaBatch(outbox: AgendaOutbox, batch: SendingBatch): AgendaOutbox {
   return { ...outbox, sending: outbox.sending.filter(each => each.sendId !== batch.sendId) };
 }
 
 /** Forgets held answers that did not arrive, by key. */
-export function dropPendingReplies(outbox: AgendaOutbox, keys: readonly ReplyKey[]): AgendaOutbox {
+function dropPendingReplies(outbox: AgendaOutbox, keys: readonly ReplyKey[]): AgendaOutbox {
   return { ...outbox, pending: outbox.pending.filter(each => !keys.includes(each.id)) };
 }
 
@@ -236,7 +236,7 @@ export interface AgendaMessenger {
 export type AgendaComposerState = 'empty' | 'occupied' | 'unreadable';
 
 /** Reads the ferret's composer before anything is typed into it. */
-export interface AgendaComposer {
+interface AgendaComposer {
   state(sessionId: string): Promise<AgendaComposerState>;
 }
 
@@ -247,12 +247,12 @@ export type AgendaReceipt =
   | { readonly state: 'failed'; readonly reason: string };
 
 /** The send ledger's account of one send: delivered only when the transcript holds it. */
-export interface AgendaReceipts {
+interface AgendaReceipts {
   receipt(sessionId: string, sendId: string): Promise<AgendaReceipt>;
 }
 
 /** Hands an answer that never arrived back to the owner, as an open card that says so. Total. */
-export interface AgendaUndeliveredSink {
+interface AgendaUndeliveredSink {
   undelivered(sessionId: string, key: ReplyKey, reason: string): Promise<void>;
 }
 
@@ -263,7 +263,7 @@ export interface AgendaReplyTimers {
 }
 
 /** Where an answer to a ferret's item is handed to be delivered. */
-export interface AgendaReplyQueue {
+interface AgendaReplyQueue {
   add(sessionId: string, key: ReplyKey, message: string): Promise<void>;
 }
 

@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import type { ApiRequest, ApiResponse, CallStanding } from '@ferretry/kernel/contract';
-import { ApiError } from '@ferretry/kernel/contract';
+import type { ApiError } from '@ferretry/kernel/contract';
 import { owner, testArrival } from '@ferretry/kernel/testing';
 import should from 'should';
 import { type AgendaAgentClearer, agendaClearRoutes } from '../../../../daemon/lib/routes/agenda-clear.ts';

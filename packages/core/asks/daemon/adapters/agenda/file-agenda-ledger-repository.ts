@@ -75,12 +75,7 @@ import {
   draftsLanded,
   versionDrafts,
 } from '../../lib/agenda/index.ts';
-import {
-  type AppendOnlyFiles,
-  appendedCursor,
-  appendLogRecords,
-  commitLogAppend,
-} from '../../lib/append-only-log.ts';
+import { type AppendOnlyFiles, appendedCursor, appendLogRecords, commitLogAppend } from '../../lib/append-only-log.ts';
 import type { StateAgendaFiles } from './state-agenda-files.ts';
 
 /** Raised when a durable board cannot safely be supplied to the state machine. */

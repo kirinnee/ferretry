@@ -21,7 +21,8 @@ export function askDelivery(source: AskDeliverySource): {
     messenger: {
       send: async (ferret, message, sendId) => {
         const delivery = provider();
-        if (delivery === undefined) throw new AgendaNotTyped('nothing can type into a ferret yet (Conversation is off)');
+        if (delivery === undefined)
+          throw new AgendaNotTyped('nothing can type into a ferret yet (Conversation is off)');
         try {
           await delivery.send(ferret, message, sendId);
         } catch (error) {
@@ -32,7 +33,9 @@ export function askDelivery(source: AskDeliverySource): {
     },
     ports: {
       composer: { state: async ferret => (await provider()?.composer?.(ferret)) ?? 'empty' },
-      receipts: { receipt: async (ferret, sendId) => (await provider()?.receipt?.(ferret, sendId)) ?? { state: 'delivered' } },
+      receipts: {
+        receipt: async (ferret, sendId) => (await provider()?.receipt?.(ferret, sendId)) ?? { state: 'delivered' },
+      },
       // An answer that never arrived goes back to the owner as an open card once Conversation can say so.
       undelivered: { undelivered: async () => undefined },
     },

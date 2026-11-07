@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
-import type { AnswerEffect, AnswerId, AskAnswer, AskId, AskSourceSpec, EntryId, SourceKey } from '../../contract/index.ts';
+import type {
+  AnswerEffect,
+  AnswerId,
+  AskAnswer,
+  AskId,
+  AskSourceSpec,
+  EntryId,
+  SourceKey,
+} from '../../contract/index.ts';
 import type { AgendaService } from '../lib/agenda/index.ts';
 import { cardAskReference, openCardAsks } from '../lib/protocol/agenda-card-asks.ts';
 import { gateChoice } from '../lib/protocol/agenda-gate.ts';
@@ -36,9 +44,7 @@ export function cardAskAnswers(
     const item = listed.value.items.find(each => each.id === id);
     if (item === undefined) return undefined;
     const open = openCardAsks(item);
-    return reference === undefined
-      ? open[0]
-      : (open.find(ask => cardAskReference(ask) === reference) ?? undefined);
+    return reference === undefined ? open[0] : (open.find(ask => cardAskReference(ask) === reference) ?? undefined);
   };
   return {
     isGate: async (sessionId, id) => (await askOn(sessionId, id)) !== undefined,
@@ -46,12 +52,19 @@ export function cardAskAnswers(
       const ask = await askOn(answer.sessionId, answer.id, answer.cardAsk);
       if (ask === undefined) return { handled: false };
       if (answer.actor.kind !== 'human')
-        return refused('forbidden', `only the owner answers ${answer.id}'s card ask: it decides where the card goes next`);
+        return refused(
+          'forbidden',
+          `only the owner answers ${answer.id}'s card ask: it decides where the card goes next`,
+        );
       const denied = answer.permitted?.();
       if (denied !== undefined) return refused('forbidden', denied);
       const response = answer.response;
       const choice = response.kind === 'multiple-choice' ? gateChoice(ask.gate, response.choice) : undefined;
-      if (choice?.kind === 'unknown') return refused('invalid', `${answer.id} has no option ${response.kind === 'multiple-choice' ? response.choice : ''}`);
+      if (choice?.kind === 'unknown')
+        return refused(
+          'invalid',
+          `${answer.id} has no option ${response.kind === 'multiple-choice' ? response.choice : ''}`,
+        );
       const spec = source();
       if (spec === 'unavailable' || spec.apply === undefined)
         return refused('not-moved', `the board cannot move the card right now, so ${answer.id} stays open`);

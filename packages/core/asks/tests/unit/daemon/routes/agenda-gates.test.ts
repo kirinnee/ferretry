@@ -5,13 +5,7 @@
  */
 import { describe, it } from 'bun:test';
 import type { AuthenticatedCredential, CallerGovernance, GrantRefusal } from '@ferretry/core-gate/contract';
-import {
-  ApiError,
-  type ApiRequest,
-  type CallContext,
-  type HolderId,
-  type SessionId,
-} from '@ferretry/kernel/contract';
+import { ApiError, type ApiRequest, type CallContext, type HolderId, type SessionId } from '@ferretry/kernel/contract';
 import { owner, testArrival } from '@ferretry/kernel/testing';
 import should from 'should';
 import type { AgendaService } from '../../../../daemon/lib/agenda/index.ts';

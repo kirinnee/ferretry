@@ -102,7 +102,11 @@ describe('the Asks daemon half over a kernel state folder', () => {
     // Arrange
     const half = await world();
     const mine = await half.asks.raise(draft('e1', 'f1'));
-    await half.call(BOARD, F1, { action: 'resolve', id: mine.id, response: { kind: 'multiple-choice', choice: 'Yes' } });
+    await half.call(BOARD, F1, {
+      action: 'resolve',
+      id: mine.id,
+      response: { kind: 'multiple-choice', choice: 'Yes' },
+    });
 
     // Act
     const answers = await half.asks.answers({ source: 'ferret' as SourceKey, entry: 'e1' as EntryId });
@@ -138,7 +142,7 @@ describe('the Asks daemon half over a kernel state folder', () => {
     expect(cleared.status).toBe(503);
   });
 
-  it('should hold the owner\'s answer for a ferret while nothing can type into it, and say it is held', async () => {
+  it("should hold the owner's answer for a ferret while nothing can type into it, and say it is held", async () => {
     // Arrange
     const half = await world();
     await half.call(BOARD, F1, RAISE, ferretStanding('f1' as FerretId));

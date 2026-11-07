@@ -5,8 +5,8 @@ import type { AgendaBoardChange, AgendaChangeObserver } from '../../lib/agenda/s
 import { DAEMON_AGENDA_CAUSES } from '../../lib/agenda/state-machine.ts';
 
 export const AGENDA_CHANGE_OUTBOX = 'agenda-changes.pending.json';
-export const AGENDA_CHANGE_MAX_ATTEMPTS = 5;
-export const AGENDA_CHANGE_RETRY_MS = 1_000;
+const AGENDA_CHANGE_MAX_ATTEMPTS = 5;
+const AGENDA_CHANGE_RETRY_MS = 1_000;
 // A mapped type makes a new domain change a compile error here until its persisted spelling is supported.
 const CHANGE_KINDS: Record<AgendaBoardChange['change'], null> = {
   created: null,

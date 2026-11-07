@@ -42,7 +42,7 @@ function parseObligation(sourceRef: string | null): { source: SourceKey; entry: 
 }
 
 /** Thrown when a raise names a source no plugin registers under `ask.sources` (and Asks does not own). */
-export class UnknownAskSourceError extends Error {
+class UnknownAskSourceError extends Error {
   override readonly name = 'UnknownAskSourceError';
   constructor(source: string) {
     super(`no plugin registers the ask source "${source}" (it may be turned off), so nothing was raised`);
@@ -50,7 +50,7 @@ export class UnknownAskSourceError extends Error {
 }
 
 /** Thrown when the engine refused a raise or a close: its own sentence. */
-export class AskRefusedError extends Error {
+class AskRefusedError extends Error {
   override readonly name = 'AskRefusedError';
 }
 
@@ -120,7 +120,10 @@ function answerOf(ferret: string, item: ResolvedAgendaItem): AskAnswer | undefin
     ...(response?.kind === 'form'
       ? {
           values: Object.fromEntries(
-            response.answers.map(field => [field.id, Array.isArray(field.picked) ? field.picked.join(', ') : field.picked]),
+            response.answers.map(field => [
+              field.id,
+              Array.isArray(field.picked) ? field.picked.join(', ') : field.picked,
+            ]),
           ),
         }
       : {}),
@@ -138,8 +141,7 @@ function summaryOf(
 ): AskSummary {
   const obligation = parseObligation(item.sourceRef);
   const source = obligation?.source ?? ('ferret' as SourceKey);
-  const unavailable =
-    !(BUILT_IN_SOURCES as readonly string[]).includes(source) && sources(source) === 'unavailable';
+  const unavailable = !(BUILT_IN_SOURCES as readonly string[]).includes(source) && sources(source) === 'unavailable';
   return {
     id: item.id as AskId,
     source,
@@ -248,7 +250,12 @@ export function asksPort(
           : state === 'open'
             ? board.items.map(item => summaryOf(ferret, item, 'open', sources))
             : board.resolved.map(item =>
-                summaryOf(ferret, item, item.resolvedBy === 'human' && item.response !== undefined ? 'answered' : 'closed', sources),
+                summaryOf(
+                  ferret,
+                  item,
+                  item.resolvedBy === 'human' && item.response !== undefined ? 'answered' : 'closed',
+                  sources,
+                ),
               ),
       );
       return listed.filter(

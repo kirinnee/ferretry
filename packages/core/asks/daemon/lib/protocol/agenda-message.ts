@@ -27,7 +27,7 @@
  */
 
 /** What a form says about the items it names. */
-export type AgendaMessageKind = 'answer' | 'done' | 'dismissed' | 'needs-info' | 'discuss' | 're';
+type AgendaMessageKind = 'answer' | 'done' | 'dismissed' | 'needs-info' | 'discuss' | 're';
 
 /** The words each kind's heading opens with. */
 const OPENERS: Readonly<Record<AgendaMessageKind, string>> = {
@@ -46,7 +46,7 @@ export interface AgendaMessageItem {
 }
 
 /** One form, read. */
-export interface AgendaMessagePart {
+interface AgendaMessagePart {
   readonly kind: AgendaMessageKind;
   /** Every item the heading names, in its order. Only `re` names more than one. */
   readonly items: readonly AgendaMessageItem[];

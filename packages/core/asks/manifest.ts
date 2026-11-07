@@ -1,14 +1,7 @@
 import { GatePort } from '@ferretry/core-gate/contract';
 import { defineState } from '@ferretry/kernel/contract';
 import { definePlugin, route } from '@ferretry/kernel/manifest';
-import {
-  AskAnswered,
-  AskDeliveries,
-  AskSources,
-  AsksChanged,
-  AsksPort,
-  AskVersionsFiles,
-} from './contract/index.ts';
+import { AskAnswered, AskDeliveries, AskSources, AsksChanged, AsksPort, AskVersionsFiles } from './contract/index.ts';
 
 /**
  * Asks' private state (§9.2, lead decision 2026-11-07): ONE LEDGER PER FERRET, as today's engine keeps it, under
@@ -67,7 +60,6 @@ export const ASKS_STATE = [
   AgendaSetAsideFiles,
 ] as const;
 
-
 /**
  * Asks (§2.2): every question for the owner and the owner's answers; the Agenda plugin is how you see them. Core,
  * because answering is a security act.
@@ -76,7 +68,9 @@ export const ASKS_STATE = [
  * dispatcher requires. `/v1/sessions/:sessionId/agenda…` moved to `/v1/ferrets/:ferretId/agenda…` (§1.4); the
  * machine agenda and `/v1/agenda/open` are the Agenda plugin's.
  */
-const AGENDA_AUDIT = { skip: 'an agenda change is recorded on the item itself; a config confirm records its own act' } as const;
+const AGENDA_AUDIT = {
+  skip: 'an agenda change is recorded on the item itself; a config confirm records its own act',
+} as const;
 const AGENDA_GUARD = {
   none: 'ask words a ferret, the daemon or the owner wrote; an input card holds its prompt, never the value typed',
 } as const;

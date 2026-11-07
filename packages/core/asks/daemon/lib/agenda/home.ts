@@ -14,7 +14,7 @@ import type { AgendaItem } from '../protocol/agenda.ts';
 import type { AgendaActor, RaiseAgendaRequest } from './state-machine.ts';
 
 /** Deepest lineage the walk follows; a longer chain is a loop or an accident. */
-export const MAX_HOME_CHAIN = 16;
+const MAX_HOME_CHAIN = 16;
 
 /** What the home rule reads of one session: its configuration document. */
 export interface HomeSession {

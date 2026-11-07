@@ -32,7 +32,7 @@ const keyOf = (ask: AskRef): string => `${ask.ferret}~${ask.id}`;
 /** The board a draft is raised on: the ferret it is about, else the ferret raising it. */
 export function boardOf(draft: Pick<AskDraft, 'ferret' | 'raisedBy'>): string {
   const ferret = draft.ferret ?? (draft.raisedBy.kind === 'ferret' ? draft.raisedBy.ferret : undefined);
-  if (ferret === undefined) throw new Error('an ask lives on a ferret\'s board: the draft names no ferret');
+  if (ferret === undefined) throw new Error("an ask lives on a ferret's board: the draft names no ferret");
   return ferret;
 }
 
@@ -69,7 +69,12 @@ export class FakeAsks implements AsksApi {
     return await this.raise({ ...notice, kind: 'notice' });
   }
   /** TEST ONLY: the owner answers. */
-  answerAs(ref: AskRef, effect: AnswerEffect, by: Answerer = { kind: 'host' }, extra: Partial<AskAnswer> = {}): AnswerId {
+  answerAs(
+    ref: AskRef,
+    effect: AnswerEffect,
+    by: Answerer = { kind: 'host' },
+    extra: Partial<AskAnswer> = {},
+  ): AnswerId {
     const ask = this.#asks.get(keyOf(ref));
     if (ask === undefined) throw new Error(`no ask ${ref.ferret} ${ref.id}`);
     this.#nextAnswer += 1;

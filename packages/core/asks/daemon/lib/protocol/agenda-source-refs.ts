@@ -7,7 +7,7 @@
 import { MAX_AGENDA_SOURCE_REF_LENGTH } from './agenda.ts';
 
 /** The harness's own question items: `question:<the provider's tool id>`, so no other producer's id can collide. */
-export const HARNESS_QUESTION_REF_PREFIX = 'question:';
+const HARNESS_QUESTION_REF_PREFIX = 'question:';
 
 /**
  * Every grammar a daemon producer writes its `sourceRef` in: lane proposals, gate items and their follow-ups, the

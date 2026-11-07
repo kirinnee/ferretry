@@ -115,7 +115,7 @@ function pathSessionId(context: Call): string {
 type HeldReplies = Pick<AgendaRepliesSubsystem, 'pending' | 'delivery'>;
 
 /** List projection is opt-in: only a reader that names channel 2 gets resolved headers on list reads. */
-export const servedAgendaListSnapshot = (context: Call, snapshot: AgendaSnapshot) =>
+const servedAgendaListSnapshot = (context: Call, snapshot: AgendaSnapshot) =>
   readsAgendaHeaders(context.request.headers) ? agendaListSnapshot(snapshot) : snapshot;
 
 /**
@@ -161,7 +161,7 @@ async function sendReplies(
 }
 
 /** The item id in the path, or a 400: the same grammar the board uses. */
-export function pathItemId(context: Call): string {
+function pathItemId(context: Call): string {
   const parsed = AgendaIdSchema.safeParse(decodeParameter(context.params.get('id') ?? ''));
   if (!parsed.success) throw new ApiError(400, 'the item id in the path is not an agenda id', 'invalid');
   return parsed.data;

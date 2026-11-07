@@ -6,12 +6,12 @@ import { z } from 'zod';
  */
 
 /** A board task id (`F12`). */
-export const BOARD_TASK_ID_PATTERN = /^[BFIC][1-9][0-9]{0,8}$/u;
-export const BoardTaskIdSchema = z.string().regex(BOARD_TASK_ID_PATTERN);
+const BOARD_TASK_ID_PATTERN = /^[BFIC][1-9][0-9]{0,8}$/u;
+const BoardTaskIdSchema = z.string().regex(BOARD_TASK_ID_PATTERN);
 
-export const MAX_MACHINE_ID_LENGTH = 128;
+const MAX_MACHINE_ID_LENGTH = 128;
 /** The daemon a card lives on. Opaque to the board; the app's merged view keys on it. */
-export const MachineIdSchema = z.string().trim().min(1).max(MAX_MACHINE_ID_LENGTH);
+const MachineIdSchema = z.string().trim().min(1).max(MAX_MACHINE_ID_LENGTH);
 
 /** A card, named. Without `machineId` it means "on this machine". */
 export const TaskRefSchema = z.strictObject({
@@ -21,16 +21,16 @@ export const TaskRefSchema = z.strictObject({
 export type TaskRef = z.infer<typeof TaskRefSchema>;
 
 /** The sigil of the `&task` reference kind (`docs/reference-standard.md`). */
-export const TASK_REF_SIGIL = '&';
+const TASK_REF_SIGIL = '&';
 
 /** How a card is written everywhere: `&F412`. The machine is not part of it. */
 export const formatTaskRef = (ref: TaskRef): string => `${TASK_REF_SIGIL}${ref.id}`;
 
 /** Files one answer to a card's ask may carry to the card's ferret (the owner's "Not good" composer). */
-export const MAX_BOARD_REOPEN_ATTACHMENTS = 10;
+const MAX_BOARD_REOPEN_ATTACHMENTS = 10;
 
 /** A stored attachment's id: the content address the attachment store gives every file it keeps. */
-export const BoardAttachmentIdSchema = z.string().regex(/^att_[0-9a-f]{64}$/u);
+const BoardAttachmentIdSchema = z.string().regex(/^att_[0-9a-f]{64}$/u);
 
 /**
  * The files the "Not good" composer carries to the card's ferret in an answer to a card's ask. They are uploaded first,

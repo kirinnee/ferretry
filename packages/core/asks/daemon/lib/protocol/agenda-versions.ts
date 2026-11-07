@@ -31,7 +31,7 @@ export const AgendaVersionSchema = z.union([
 export type AgendaVersion = z.infer<typeof AgendaVersionSchema>;
 
 /** `GET /v1/sessions/:sessionId/agenda/:id/versions`. */
-export const AgendaVersionListSchema = z.strictObject({
+const AgendaVersionListSchema = z.strictObject({
   sessionId: z.string().min(1),
   id: AgendaIdSchema,
   /** The newest version's number; 0 when the item has none kept (an item from before versions, not yet changed). */
@@ -44,8 +44,7 @@ export type AgendaVersionList = z.infer<typeof AgendaVersionListSchema>;
 
 /** `PUT /v1/sessions/:sessionId/agenda/:id/seen`: the app opened the item at this version. */
 export const AgendaSeenRequestSchema = z.strictObject({ version: PositiveIntegerSchema });
-export type AgendaSeenRequest = z.infer<typeof AgendaSeenRequestSchema>;
-export const AgendaSeenResponseSchema = z.strictObject({ seen: PositiveIntegerSchema });
+const AgendaSeenResponseSchema = z.strictObject({ seen: PositiveIntegerSchema });
 export type AgendaSeenResponse = z.infer<typeof AgendaSeenResponseSchema>;
 
 /** Maximum text in one wire fragment, measured in UTF-16 code units. */

@@ -27,21 +27,21 @@ export interface DuplicateAgenda {
 }
 
 /** An item named by where it is open. */
-export interface DuplicateMember {
+interface DuplicateMember {
   readonly sessionId: string;
   readonly id: AgendaId;
 }
 
-export type DuplicateKind = 'card' | 'source' | 'title';
+type DuplicateKind = 'card' | 'source' | 'title';
 
 /** An item to close, and the one it duplicates. */
-export interface DuplicateClosure extends DuplicateMember {
+interface DuplicateClosure extends DuplicateMember {
   readonly kind: DuplicateKind;
   readonly keep: DuplicateMember;
 }
 
 /** Items that look alike but are not provably the same ask: nothing is closed for them. */
-export interface PossibleDuplicate {
+interface PossibleDuplicate {
   readonly kind: DuplicateKind;
   readonly members: readonly DuplicateMember[];
   readonly why: string;
@@ -182,6 +182,3 @@ export const findDuplicates = (agendas: readonly DuplicateAgenda[]): DuplicateFi
 
   return { closures, possible };
 };
-
-/** The note a closed duplicate carries. */
-export const duplicateNote = (keep: DuplicateMember): string => `duplicate of !${keep.id}`;

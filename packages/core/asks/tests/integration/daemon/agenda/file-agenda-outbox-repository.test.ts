@@ -138,15 +138,27 @@ describe('FileAgendaOutboxRepository', () => {
     const messenger = {
       send: async (_sessionId: string, _message: string, sendId: string) => void sent.push(sendId),
     };
-    const first = new AgendaReplyBatcher(new FileAgendaOutboxRepository(agendaFilesAt(home), () => 'fixed'), messenger, timers, serial, {
-      now: () => AT,
-    });
+    const first = new AgendaReplyBatcher(
+      new FileAgendaOutboxRepository(agendaFilesAt(home), () => 'fixed'),
+      messenger,
+      timers,
+      serial,
+      {
+        now: () => AT,
+      },
+    );
     await first.add(SESSION, 'A1', '[answer to !A1 «Ship?»] Yes');
 
     // Act — the next daemon, over the same files, resumes and then flushes twice.
-    const second = new AgendaReplyBatcher(new FileAgendaOutboxRepository(agendaFilesAt(home), () => 'fixed'), messenger, timers, serial, {
-      now: () => '2026-10-28T17:05:00.000Z',
-    });
+    const second = new AgendaReplyBatcher(
+      new FileAgendaOutboxRepository(agendaFilesAt(home), () => 'fixed'),
+      messenger,
+      timers,
+      serial,
+      {
+        now: () => '2026-10-28T17:05:00.000Z',
+      },
+    );
     await second.resume([SESSION]);
     await second.flush(SESSION);
     await second.flush(SESSION);

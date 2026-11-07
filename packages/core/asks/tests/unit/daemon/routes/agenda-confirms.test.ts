@@ -9,7 +9,16 @@ import { type ApiResponse, errorResponse } from '@ferretry/kernel/contract';
 import should from 'should';
 import type { AgendaConfigPort, ConfigPending, HeldEditAct } from '../../../../daemon/lib/routes/agenda-confirms.ts';
 import { agendaRoutes } from '../../../../daemon/lib/routes/agenda.ts';
-import { agendaService, agentIn, device, human, jsonBody, NO_HELD_REPLIES, routeDispatcher, warden } from './support.ts';
+import {
+  agendaService,
+  agentIn,
+  device,
+  human,
+  jsonBody,
+  NO_HELD_REPLIES,
+  routeDispatcher,
+  warden,
+} from './support.ts';
 
 const PATH = 'warden.yaml';
 const CHANGES = ['the Warden may now spend on AI investigations'];

@@ -27,7 +27,10 @@ import {
 
 const NOW = '2026-10-31T10:00:00.000Z';
 let uniqueIds = 0;
-const nextUniqueId = (): string => `id-${String((uniqueIds += 1))}`;
+const nextUniqueId = (): string => {
+  uniqueIds += 1;
+  return `id-${String(uniqueIds)}`;
+};
 const TEST_RUNTIME = { now: () => Date.parse(NOW), warn: () => undefined };
 const SESSION = 'session-1';
 const current = AGENDA_FILES.ledger;
@@ -455,11 +458,13 @@ describe('the private agenda archive', () => {
     const { files, repository } = subject();
     const first = { id: 'A1', entry: { at: NOW, kind: 'replied', note: 'first committed owner record' } };
     const second = { kind: 'owner-history', id: 'A1', entry: { at: NOW, kind: 'replied', note: 'second 雪 record' } };
-    const archiving = (record: AgendaArchiveRecord) => (ledger: AgendaLedger | null): AgendaMutation => {
-      const board = ledger ?? emptyAgendaLedger(SESSION, NOW);
-      const next = { ...board, archivePending: [record] };
-      return { ok: true, changed: true, change: 'refreshed', ledger: next, snapshot: agendaSnapshot(board) };
-    };
+    const archiving =
+      (record: AgendaArchiveRecord) =>
+      (ledger: AgendaLedger | null): AgendaMutation => {
+        const board = ledger ?? emptyAgendaLedger(SESSION, NOW);
+        const next = { ...board, archivePending: [record] };
+        return { ok: true, changed: true, change: 'refreshed', ledger: next, snapshot: agendaSnapshot(board) };
+      };
     ok(await repository.transact(SESSION, archiving({ kind: 'owner-history', ...first } as AgendaArchiveRecord)));
     const committed = files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text ?? '';
     should(files.files.has(MARK)).be.false();
@@ -627,5 +632,4 @@ describe('the private agenda archive', () => {
       should(await repository.readArchive(SESSION)).deepEqual([]);
     });
   });
-
 });

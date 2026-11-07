@@ -52,7 +52,7 @@ const byTime = (left: AgendaConversationEntry, right: AgendaConversationEntry): 
   Date.parse(left.at) - Date.parse(right.at);
 
 /** Two conversations as one, interleaved by time; on a tie the first one's entries come first. Nothing is dropped. */
-export function interleaved(
+function interleaved(
   first: readonly AgendaConversationEntry[] | undefined,
   second: readonly AgendaConversationEntry[] | undefined,
 ): AgendaConversationEntry[] {

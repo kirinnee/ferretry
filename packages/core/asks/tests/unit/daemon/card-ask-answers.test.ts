@@ -60,16 +60,20 @@ describe('a card ask answered through the card source', () => {
     // Arrange
     const { agenda, recorded } = board();
     const source = cardSource('applied');
-    const gates = cardAskAnswers(agenda, () => source.spec, () => AT);
+    const gates = cardAskAnswers(
+      agenda,
+      () => source.spec,
+      () => AT,
+    );
 
     // Act
     const outcome = await gates.answer(answer('Done'));
 
     // Assert
     expect(outcome.handled).toBe(true);
-    expect(source.applied.map(each => [each.ferret, each.ask, each.source, each.effect, each.choice, each.by])).toEqual([
-      ['f1', 'A1', 'card', 'choose', 'Done', { kind: 'device', holder: 'phone' }],
-    ]);
+    expect(source.applied.map(each => [each.ferret, each.ask, each.source, each.effect, each.choice, each.by])).toEqual(
+      [['f1', 'A1', 'card', 'choose', 'Done', { kind: 'device', holder: 'phone' }]],
+    );
     expect(recorded.map(operation => operation.kind)).toEqual(['answered']);
   });
 
@@ -77,7 +81,11 @@ describe('a card ask answered through the card source', () => {
     // Arrange
     const { agenda, recorded } = board();
     const source = cardSource({ refused: 'F12 is no longer in To test, so nothing was moved' });
-    const gates = cardAskAnswers(agenda, () => source.spec, () => AT);
+    const gates = cardAskAnswers(
+      agenda,
+      () => source.spec,
+      () => AT,
+    );
 
     // Act
     const outcome = await gates.answer(answer('Done'));
@@ -93,7 +101,11 @@ describe('a card ask answered through the card source', () => {
   it('should refuse when no Board is running, and record nothing', async () => {
     // Arrange
     const { agenda, recorded } = board();
-    const gates = cardAskAnswers(agenda, () => 'unavailable', () => AT);
+    const gates = cardAskAnswers(
+      agenda,
+      () => 'unavailable',
+      () => AT,
+    );
 
     // Act
     const outcome = await gates.answer(answer('Done'));
@@ -107,7 +119,11 @@ describe('a card ask answered through the card source', () => {
     // Arrange
     const { agenda, recorded } = board();
     const source = cardSource('applied');
-    const gates = cardAskAnswers(agenda, () => source.spec, () => AT);
+    const gates = cardAskAnswers(
+      agenda,
+      () => source.spec,
+      () => AT,
+    );
 
     // Act
     await gates.answer(answer('Not yet', { note: 'the badge is still blue' }));
@@ -120,7 +136,11 @@ describe('a card ask answered through the card source', () => {
     // Arrange
     const { agenda } = board();
     const source = cardSource('applied');
-    const gates = cardAskAnswers(agenda, () => source.spec, () => AT);
+    const gates = cardAskAnswers(
+      agenda,
+      () => source.spec,
+      () => AT,
+    );
 
     // Act
     const byFerret = await gates.answer(answer('Done', { actor: { kind: 'agent', sessionId: 'f1', name: null } }));

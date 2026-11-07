@@ -36,7 +36,7 @@ function world() {
 }
 
 describe('who answers an ask', () => {
-  it("should let a ferret answer an ordinary ask on its own board, as today", async () => {
+  it('should let a ferret answer an ordinary ask on its own board, as today', async () => {
     // Arrange
     const { post } = world();
     await post(ORDINARY);

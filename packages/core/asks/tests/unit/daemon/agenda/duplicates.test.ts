@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
+import type { AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
 import should from 'should';
 import { type DuplicateAgenda, findDuplicates } from '../../../../daemon/lib/agenda/duplicates.ts';
 

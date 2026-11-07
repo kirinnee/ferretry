@@ -31,7 +31,11 @@ class FileAgendaVersionStore extends SqliteAgendaVersionStore {
 }
 /** The seen marks of a home's ferrets, as the daemon keeps them. */
 class FileAgendaSeenStore extends StateAgendaSeenStore {
-  constructor(home: () => string, uniqueId: () => string = () => 'id', warn: (message: string) => void = () => undefined) {
+  constructor(
+    home: () => string,
+    uniqueId: () => string = () => 'id',
+    warn: (message: string) => void = () => undefined,
+  ) {
     super(agendaFilesAt(home()), uniqueId, warn);
   }
 }
@@ -323,7 +327,9 @@ export function agendaVersionStoreContract() {
       // Assert
       should(marksSeenWhileDamaged).be.undefined();
       should([marked, again]).deepEqual([2, 3]);
-      should(await readFile(join(root, 'state', 'asks', 'set-aside', `${SESSION}~agenda-seen.json.corrupt-id1`), 'utf8')).equal('{"phone":{"A1":"two"}}');
+      should(
+        await readFile(join(root, 'state', 'asks', 'set-aside', `${SESSION}~agenda-seen.json.corrupt-id1`), 'utf8'),
+      ).equal('{"phone":{"A1":"two"}}');
       should(JSON.parse(await readFile(file, 'utf8'))).deepEqual({ phone: { A1: 3 } });
       should(warnings).have.length(2);
       should(warnings[0]).containEql('set aside as');
