@@ -3,6 +3,7 @@
  * finished. The v4 home is opened read-only and never written.
  */
 import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { type LockProbe, preflight } from './preflight.ts';
 import type { ConversionReport, StepReport } from './report.ts';
 import { STEPS, type Step } from './steps/index.ts';
@@ -22,6 +23,9 @@ export interface ConvertOptions {
 export type ConvertResult =
   | { readonly kind: 'refused'; readonly problems: readonly string[] }
   | { readonly kind: 'done'; readonly report: ConversionReport };
+
+/** `packages/core/kernel/host/home.ts` `openHome`: the folders a new v5 home starts with, each `0700`. */
+export const V5_HOME_TREE = ['config', 'state', 'state/kernel', 'run', 'logs'] as const;
 
 export async function convert(options: ConvertOptions): Promise<ConvertResult> {
   const checked = await preflight(options.from, options.to, options.lock);
@@ -54,7 +58,12 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
 
   const finished = reports.every(step => step.status === 'converted' || step.status === 'not-carried');
   const at = options.now();
-  if (finished && !options.dryRun) await writeHomeJson(options.to, at, 'ferretry-v4-to-v5');
+  if (finished && !options.dryRun) {
+    // The tree v5's openHome makes for a NEW home (it makes none for an existing one): without `logs/` fyd writes no
+    // log at all, and `run/` holds its lock and sockets. Then home.json, last.
+    for (const folder of V5_HOME_TREE) await mkdir(join(options.to, folder), { recursive: true, mode: 0o700 });
+    await writeHomeJson(options.to, at, 'ferretry-v4-to-v5');
+  }
   return {
     kind: 'done',
     report: {

@@ -85,6 +85,18 @@ export interface V5Writer {
   resolve(relativePath: string): string;
 }
 
+/**
+ * `value` with `format` as its FIRST key when it is a plain object that has one (or `stamp` is given), else unchanged.
+ * The kernel reads the first key to decide a line's or document's format, so order matters here, unlike in JSON.
+ */
+export function formatFirst(value: unknown, stamp?: number): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  if (!('format' in record)) return stamp === undefined ? value : { format: stamp, ...record };
+  const { format, ...rest } = record;
+  return { format, ...rest };
+}
+
 export function v5Writer(home: string, options: { readonly dryRun: boolean }): V5Writer {
   const configs = new Map<string, string>();
   const place = async (relativePath: string, text: string | Uint8Array, mode: number): Promise<void> => {
@@ -98,22 +110,17 @@ export function v5Writer(home: string, options: { readonly dryRun: boolean }): V
   };
   return {
     async json(def, value) {
-      const parsed = def.schema.parse(value);
-      await place(def.path, `${JSON.stringify(parsed, null, 2)}\n`, def.mode ?? 0o600);
+      // A document that carries `format` has it FIRST, as the kernel writes it (a parsed `.extend({format})` puts it
+      // last). One without it is a file v5 itself keeps bare, and is written as parsed.
+      const parsed = def.schema.parse(value) as unknown;
+      await place(def.path, `${JSON.stringify(formatFirst(parsed), null, 2)}\n`, def.mode ?? 0o600);
     },
     async jsonl(def, lines) {
       // Every v5 JSONL line is an object whose FIRST key is `"format": <n>` (the kernel's one-format rule,
       // `packages/core/kernel/host/state/format.ts`): a line whose schema does not name `format` is stamped here, as
-      // the kernel's own append stamps it. A line that already carries its format is written as parsed.
+      // the kernel's own append stamps it, and one that does has it moved first.
       const text = lines
-        .map(line => {
-          const parsed = def.schema.parse(line) as unknown;
-          const stamped =
-            typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) && !('format' in parsed)
-              ? { format: def.format, ...parsed }
-              : parsed;
-          return JSON.stringify(stamped);
-        })
+        .map(line => JSON.stringify(formatFirst(def.schema.parse(line) as unknown, def.format)))
         .join('\n');
       await place(def.path, lines.length === 0 ? '' : `${text}\n`, def.mode ?? 0o600);
     },

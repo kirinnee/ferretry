@@ -3,7 +3,8 @@ import { decideHome } from '@ferretry/kernel/contract';
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { convert } from '../../src/convert.ts';
+import { convert, V5_HOME_TREE } from '../../src/convert.ts';
+import { formatFirst } from '../../src/v5/write.ts';
 import type { LockProbe } from '../../src/preflight.ts';
 import { moveSealed } from '../../src/sealed.ts';
 import type { Step } from '../../src/steps/index.ts';
@@ -87,6 +88,16 @@ describe('conversion', () => {
     const text = await readFile(join(to, 'home.json'), 'utf8');
     expect(decideHome(to, { kind: 'home-json', text }).kind).toBe('start');
     expect((await stat(to)).mode & 0o777).toBe(0o700);
+    // The tree v5's openHome makes only for a new home: without logs/ fyd writes no log at all.
+    for (const folder of V5_HOME_TREE) expect((await stat(join(to, folder))).mode & 0o777).toBe(0o700);
+  });
+
+  test('a document carrying format has it first; a JSONL line always does', () => {
+    expect(Object.keys(formatFirst({ a: 1, format: 1 }) as object)).toEqual(['format', 'a']);
+    expect(formatFirst({ a: 1 })).toEqual({ a: 1 });
+    expect(Object.keys(formatFirst({ a: 1 }, 1) as object)).toEqual(['format', 'a']);
+    expect(formatFirst({ format: 2, a: 1 }, 1)).toEqual({ format: 2, a: 1 });
+    expect(formatFirst([1, 2], 1)).toEqual([1, 2]);
   });
 
   test('the v4 home is never written', async () => {
