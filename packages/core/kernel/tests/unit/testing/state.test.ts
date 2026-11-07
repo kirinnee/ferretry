@@ -120,3 +120,12 @@ describe('LL the test host state port: opaque bytes and sqlite collections, as t
     expect(await port.list(Db)).toEqual(['b']);
   });
 });
+
+describe('SS the test host state port hands out an opaque file path only', () => {
+  test('opaque yes, json no', () => {
+    const port = new MemoryStateFolder().port([Blob]);
+    expect(port.pathOf(Blob, 'x')).toContain('x');
+    const Json = defineState({ name: 'j', path: 'j.json', store: 'json', format: 1, schema: z.strictObject({}) });
+    expect(() => new MemoryStateFolder().port([Json]).pathOf(Json)).toThrow(TypeError);
+  });
+});

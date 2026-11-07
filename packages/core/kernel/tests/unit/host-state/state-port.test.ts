@@ -352,3 +352,39 @@ describe('StatePort: records() and tail() check each line on its own', () => {
     await expect(port.records(counterFile as never)).rejects.toThrow(TypeError);
   });
 });
+
+describe('SS pathOf: the absolute path of an own declared opaque file only', () => {
+  test('an opaque file gets its path under the plugin’s state folder; any other store or an undeclared file throws', () => {
+    const { port, path } = memoryStore();
+    expect(port.pathOf(blobFile)).toBe(path('blob.bin'));
+    expect(() => port.pathOf(keyFile)).toThrow(TypeError);
+    expect(() => port.pathOf(counterFile)).toThrow(TypeError);
+    const theirs = defineState({ name: 'sock', path: 'tmux.sock', store: 'opaque', format: 1 });
+    expect(() => port.pathOf(theirs)).toThrow(UndeclaredStateFileError);
+  });
+});
+
+describe('SS widened: an opaque named tree takes path-safe segments, in the plugin’s own folder only', () => {
+  const turns = defineState({ name: 'ferret-files', path: 'ferrets/*', store: 'opaque', format: 1 });
+  test('a named file is written and its absolute path handed out; traversal and a claimed folder are refused', async () => {
+    const { port, fs, path } = memoryStore({ files: [...allFiles, turns] });
+    await port.write(turns, new TextEncoder().encode('# turn 1') as never, 'F12/turns/turn-001.md');
+    expect(port.pathOf(turns, 'F12/turns/turn-001.md')).toBe(path('ferrets/F12/turns/turn-001.md'));
+    expect(port.pathOf(turns, 'F12/queued-7.md')).toBe(path('ferrets/F12/queued-7.md'));
+    expect(fs.snapshot().has(path('ferrets/F12/turns/turn-001.md'))).toBe(true);
+    for (const bad of ['F12/../../vault/key', '../x', 'F12//x', 'F12/./x', '/abs'])
+      expect(() => port.pathOf(turns, bad)).toThrow(UndeclaredStateFileError);
+    // segments are only for a tree: a plain opaque collection, or a tree whose folder another file claims, refuse
+    const flat = defineState({ name: 'flat', path: 'flat-*.bin', store: 'opaque', format: 1 });
+    const claimed = defineState({ name: 'claimed', path: 'cards/*', store: 'opaque', format: 1 });
+    const { port: other } = memoryStore({
+      files: [
+        flat,
+        claimed,
+        defineState({ name: 'inside', path: 'cards/index.json', store: 'json', format: 1, schema: z.strictObject({}) }),
+      ],
+    });
+    expect(() => other.pathOf(flat, 'a/b')).toThrow(UndeclaredStateFileError);
+    expect(() => other.pathOf(claimed, 'a/b')).toThrow(UndeclaredStateFileError);
+  });
+});

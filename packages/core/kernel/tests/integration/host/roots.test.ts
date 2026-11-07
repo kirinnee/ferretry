@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { link, mkdir, mkdtemp, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { err, ok } from '@ferretry/std';
 import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
 import type { FerretId } from '../../../contract/ids.ts';
+import { MAX_ROOT_WINDOW_BYTES } from '../../../contract/ports.ts';
 import { nodeFs } from '../../../host/adapters/node-fs.ts';
 import { fenceFolders } from '../../../host/home.ts';
 import { resolveInRoot, RootError, rootsPortFor } from '../../../host/roots.ts';
@@ -140,6 +141,31 @@ describe('RootHandle: makeDirectory, realPath, lstat and exclusive writes (workt
 });
 
 describe('HH writeBytes, a fenced tree copy or link, and the credentials root', () => {
+  test('S40 copyTree refuses a nested home and a moved-aside home at every walk entry', async () => {
+    const { home, parent } = await layout();
+    const imports = rootsPortFor(
+      fs,
+      { home, plugin: 'skills', worktrees: `${home}-worktrees` },
+      ['imports', 'agent-homes'],
+      () => undefined,
+    );
+    const source = imports.root('imports', { subfolder: parent });
+    const destination = imports.root('agent-homes', { subfolder: 'f1' });
+    const at = (root: typeof source, path: string): FencedPath => {
+      const result = root.resolve(path);
+      if (!result.ok) throw new Error(result.error);
+      return result.value;
+    };
+    await mkdir(`${home}/state/skills/agent-homes/f1`, { recursive: true });
+    await expect(
+      destination.copyTree(source, at(source, ''), at(destination, 'copy'), { maxEntries: 32 }),
+    ).rejects.toThrow('fenced');
+    expect(await Bun.file(`${home}/state/skills/agent-homes/f1/copy/home/state/vault/vault.key`).exists()).toBe(false);
+    await expect(
+      destination.copyTree(source, `${home}-before-2026-11-01-0900` as FencedPath, at(destination, 'before')),
+    ).rejects.toThrow('fenced');
+  });
+
   async function homes() {
     const { home, parent } = await layout();
     const roots = rootsPortFor(
@@ -150,6 +176,7 @@ describe('HH writeBytes, a fenced tree copy or link, and the credentials root', 
     );
     const homesRoot = roots.root('agent-homes', { subfolder: 'f1' });
     const downloads = roots.root('downloads');
+    await mkdir(`${home}/state/skills/agent-homes/f1`, { recursive: true });
     const at = (root: typeof homesRoot, relative: string): FencedPath => {
       const resolved = root.resolve(relative);
       if (!resolved.ok) throw new Error(resolved.error);
@@ -228,5 +255,99 @@ describe('HH writeBytes, a fenced tree copy or link, and the credentials root', 
     const file = logins.resolve('file');
     if (!file.ok) throw new Error(file.error);
     await expect(logins.ensurePrivateDirectory(file.value)).rejects.toThrow(RootError);
+  });
+});
+
+describe('QQ replace an existing file without following a link; links and mode at list and stat time', () => {
+  async function downloads() {
+    const { home } = await layout();
+    const root = rootsPortFor(
+      fs,
+      { home, plugin: 'mcp', worktrees: `${home}-worktrees` },
+      ['downloads'],
+      () => undefined,
+    ).root('downloads');
+    const at = (relative: string): FencedPath => {
+      const resolved = root.resolve(relative);
+      if (!resolved.ok) throw new Error(resolved.error);
+      return resolved.value;
+    };
+    const dir = `${home}/state/mcp/downloads`;
+    await mkdir(dir, { recursive: true });
+    return { home, root, at, dir };
+  }
+
+  test('replaceExisting keeps the old mode, and refuses a link at the leaf, a missing file and a folder', async () => {
+    const { home, root, at, dir } = await downloads();
+    await writeFile(`${dir}/.mcp.json`, '{}', { mode: 0o664 });
+    await chmod(`${dir}/.mcp.json`, 0o664);
+    await root.writeText(at('.mcp.json'), '{"a":1}', { replaceExisting: true });
+    expect(await Bun.file(`${dir}/.mcp.json`).text()).toBe('{"a":1}');
+    expect((await Bun.file(`${dir}/.mcp.json`).stat()).mode & 0o777).toBe(0o664);
+    await writeFile(`${dir}/target.json`, 'kept');
+    await symlink(`${dir}/target.json`, `${dir}/linked.json`);
+    await expect(root.writeText(at('linked.json'), 'x', { replaceExisting: true })).rejects.toThrow(RootError);
+    expect(await Bun.file(`${dir}/target.json`).text()).toBe('kept');
+    expect(await readlink(`${dir}/linked.json`)).toBe(`${dir}/target.json`);
+    await expect(root.writeText(at('absent.json'), 'x', { replaceExisting: true })).rejects.toThrow(RootError);
+    await mkdir(`${dir}/folder`);
+    await expect(root.writeBytes(at('folder'), new Uint8Array([1]), { replaceExisting: true })).rejects.toThrow(
+      RootError,
+    );
+    void home;
+  });
+
+  test('entries lists each leaf with its kind, mode and hard-link count, a link listed and never followed', async () => {
+    const { home, root, at, dir } = await downloads();
+    await writeFile(`${dir}/one`, 'x', { mode: 0o640 });
+    await chmod(`${dir}/one`, 0o640);
+    await link(`${dir}/one`, `${dir}/two`);
+    await symlink(`${home}/state/vault/vault.key`, `${dir}/key`);
+    const entries = Object.fromEntries((await root.entries(at(''))).map(entry => [entry.name, entry]));
+    expect(entries['one']).toMatchObject({ kind: 'file', links: 2, mode: 0o640 });
+    expect(entries['two']).toMatchObject({ kind: 'file', links: 2 });
+    expect(entries['key']?.kind).toBe('symlink');
+  });
+
+  test('stat and lstat carry the mode and the link count', async () => {
+    const { root, at, dir } = await downloads();
+    await writeFile(`${dir}/run`, '#!/bin/sh', { mode: 0o755 });
+    await chmod(`${dir}/run`, 0o755);
+    expect(await root.stat(at('run'))).toMatchObject({ kind: 'file', mode: 0o755, links: 1 });
+    expect(await root.lstat(at('run'))).toMatchObject({ kind: 'file', mode: 0o755, links: 1 });
+  });
+});
+
+describe('WW bounded reads: a window from an offset, and a tail with the size, fenced as readBytes', () => {
+  test('readBytes with a window, readTail, and a window over the cap or a link out of the root refused', async () => {
+    const { home } = await layout();
+    const root = rootsPortFor(
+      fs,
+      { home, plugin: 'codex', worktrees: `${home}-worktrees` },
+      ['downloads'],
+      () => undefined,
+    ).root('downloads');
+    const dir = `${home}/state/codex/downloads`;
+    await mkdir(dir, { recursive: true });
+    await writeFile(`${dir}/rollout.jsonl`, '0123456789');
+    const at = (relative: string): FencedPath => {
+      const resolved = root.resolve(relative);
+      if (!resolved.ok) throw new Error(resolved.error);
+      return resolved.value;
+    };
+    const text = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
+    expect(text(await root.readBytes(at('rollout.jsonl'), { offset: 2, length: 3 }))).toBe('234');
+    expect(text(await root.readBytes(at('rollout.jsonl'), { offset: 8, length: 10 }))).toBe('89');
+    const tail = await root.readTail(at('rollout.jsonl'), 4);
+    expect({ text: text(tail.bytes), size: tail.size }).toEqual({ text: '6789', size: 10 });
+    expect(text((await root.readTail(at('rollout.jsonl'), 64)).bytes)).toBe('0123456789');
+    await expect(root.readBytes(at('rollout.jsonl'), { offset: 0, length: MAX_ROOT_WINDOW_BYTES + 1 })).rejects.toThrow(
+      RootError,
+    );
+    await expect(root.readTail(at('rollout.jsonl'), MAX_ROOT_WINDOW_BYTES + 1)).rejects.toThrow(RootError);
+    await expect(root.readBytes(at('rollout.jsonl'), { offset: -1, length: 1 })).rejects.toThrow(RootError);
+    await writeFile(`${home}/outside.txt`, 'secret');
+    await symlink(`${home}/outside.txt`, `${dir}/escape`);
+    await expect(root.readTail(at('escape'), 4)).rejects.toThrow(RootError);
   });
 });

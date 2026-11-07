@@ -2,6 +2,8 @@ import { Database } from 'bun:sqlite';
 import type { Result } from '@ferretry/std';
 import { err, ok } from '@ferretry/std';
 import type { StateFileDef } from '../contract/define.ts';
+import type { CliContext } from '../manifest/implement.ts';
+import type { Manifest } from '../manifest/types.ts';
 import {
   type JsonlRecords,
   MAX_STATE_TAIL_BYTES,
@@ -30,8 +32,14 @@ export class MemoryStateFolder {
   /** path → stored bytes of a `secret` or `opaque` file: kept byte for byte, never parsed or stamped. */
   readonly bytes = new Map<string, Uint8Array>();
   readonly databases = new Map<string, Database>();
+  readonly directories = new Map<string, { readonly mode: number; readonly modifiedMs: number }>();
+  /** Planted links are metadata only; the test store never follows one. */
+  readonly symlinks = new Map<string, string>();
+  readonly modified = new Map<string, number>();
   private crashArmed = false;
   crashed = false;
+
+  constructor(readonly nowMs: () => number = () => 0) {}
 
   armCrash(): void {
     this.crashArmed = true;
@@ -72,11 +80,28 @@ export class MemoryStateFolder {
   port(declared: readonly StateFileDef[]): StatePort {
     return memoryStatePort(this, declared);
   }
+
+  /** The CLI's optional local state capability, restricted to this plugin's declared opaque files. */
+  ownState(declared: readonly StateFileDef[]): NonNullable<CliContext<Manifest>['ownState']> {
+    const port = this.port(declared.filter(file => file.store === 'opaque'));
+    return Object.freeze({
+      write: port.write,
+      pathOf: port.pathOf,
+      stat: port.stat,
+      remove: port.remove,
+      list: port.list,
+      removeEmptyDirectory: port.removeEmptyDirectory,
+      createPrivateDirectory: port.createPrivateDirectory,
+    });
+  }
 }
 
 function pathOf(file: StateFileDef, name?: string): string {
   if (!file.path.includes('*')) return file.path;
-  if (name === undefined || name.includes('/') || name === '..' || name === '.')
+  const plain = (segment: string): boolean => /^[A-Za-z0-9_][A-Za-z0-9._%~-]{0,200}$/u.test(segment);
+  // as the real port: an opaque named tree (path ending `/*`) takes path-safe segments
+  const tree = file.store === 'opaque' && file.path.endsWith('/*');
+  if (name === undefined || (name.includes('/') && !tree) || !name.split('/').every(plain))
     throw new TypeError(`state ${file.name}: a collection file needs a plain name`);
   return file.path.replace('*', name);
 }
@@ -130,10 +155,12 @@ function stamp(file: StateFileDef, value: unknown): string {
 }
 
 function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFileDef[]): StatePort {
-  const known = new Set(declared.map(file => file.name));
+  const known = new Map(declared.map(file => [file.name, file]));
   const guard = (file: StateFileDef): void => {
     if (folder.crashed) throw new SimulatedCrash();
-    if (!known.has(file.name)) throw new Error(`state ${file.name} is not declared in the manifest`);
+    const def = known.get(file.name);
+    if (def === undefined || def.path !== file.path || def.store !== file.store || def.format !== file.format)
+      throw new Error(`state ${file.name} is not declared in the manifest`);
   };
   const chains = new Map<string, Promise<unknown>>();
   const serial = <T>(key: string, fn: () => Promise<T>): Promise<T> => {
@@ -145,6 +172,28 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
     return run;
   };
   const isBytes = (file: StateFileDef): boolean => file.store === 'secret' || file.store === 'opaque';
+  const entries = (): string[] => [
+    ...folder.files.keys(),
+    ...folder.bytes.keys(),
+    ...folder.databases.keys(),
+    ...folder.directories.keys(),
+    ...folder.symlinks.keys(),
+  ];
+  const directory = (path: string): boolean =>
+    folder.directories.has(path) || entries().some(key => key.startsWith(`${path}/`));
+  const treePath = (file: StateFileDef, name: string): string => {
+    guard(file);
+    if (file.store !== 'opaque' || !file.path.endsWith('/*'))
+      throw new TypeError('state operation needs an opaque named tree');
+    const path = pathOf(file, name);
+    const parts = path.split('/');
+    for (let i = 1; i < parts.length; i += 1) {
+      const parent = parts.slice(0, i).join('/');
+      if (folder.symlinks.has(parent) || folder.bytes.has(parent) || folder.files.has(parent))
+        throw new TypeError('state parent is not a directory');
+    }
+    return path;
+  };
   const read = async <Shape>(file: StateFileDef<string, Shape>, name?: string): Promise<StateRead<Shape>> => {
     guard(file);
     // As the real port (host/state/state-port.ts readRaw → readBytesFile): bytes as they are, no parse, no format.
@@ -171,6 +220,7 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
         pathOf(file, name),
         typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value),
       );
+      folder.modified.set(pathOf(file, name), folder.nowMs());
       folder.landed();
       return;
     }
@@ -181,6 +231,28 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
   return {
     read,
     write,
+    async stat(file, name) {
+      const path = treePath(file, name);
+      if (folder.symlinks.has(path)) return { kind: 'symlink', modifiedMs: folder.modified.get(path) ?? 0 };
+      if (directory(path)) return { kind: 'directory', modifiedMs: folder.directories.get(path)?.modifiedMs ?? 0 };
+      if (folder.bytes.has(path) || folder.files.has(path))
+        return { kind: 'file', modifiedMs: folder.modified.get(path) ?? 0 };
+      return undefined;
+    },
+    async createPrivateDirectory(file, name) {
+      const path = treePath(file, name);
+      if (entries().includes(path) || directory(path)) throw new Error('directory entry already exists');
+      folder.directories.set(path, { mode: 0o700, modifiedMs: folder.nowMs() });
+      folder.landed();
+    },
+    async removeEmptyDirectory(file, name) {
+      const path = treePath(file, name);
+      if (folder.symlinks.has(path) || folder.bytes.has(path) || folder.files.has(path))
+        throw new Error('not a directory');
+      if (entries().some(key => key.startsWith(`${path}/`))) throw new Error('directory is not empty');
+      folder.directories.delete(path);
+      folder.landed();
+    },
     update: async (file, fn, name) => {
       if (file.store !== 'json') throw new TypeError(`state ${file.name}: only a json file is updated in place`);
       return await serial(pathOf(file, name), async () => {
@@ -229,7 +301,7 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
       const bytes = new TextEncoder().encode(folder.files.get(pathOf(file, options.name)) ?? '');
       const from = Math.max(0, bytes.byteLength - maxBytes);
       let window = bytes.subarray(from);
-      if (from > 0) {
+      if (from > 0 && bytes[from - 1] !== 0x0a) {
         const firstBreak = window.indexOf(0x0a);
         window = firstBreak < 0 ? new Uint8Array() : window.subarray(firstBreak + 1);
       }
@@ -238,6 +310,16 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
     async list(file) {
       guard(file);
       const [prefix, suffix] = file.path.split('*') as [string, string | undefined];
+      if (file.store === 'opaque' && file.path.endsWith('/*'))
+        return [
+          ...new Set(
+            entries()
+              .filter(path => path.startsWith(prefix))
+              .map(path => path.slice(prefix.length).split('/')[0] as string),
+          ),
+        ]
+          .filter(Boolean)
+          .sort();
       // as the real port lists what is on disk for the file's store: bytes, a database, or text
       const stored: ReadonlyMap<string, unknown> = isBytes(file)
         ? folder.bytes
@@ -253,11 +335,25 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
     },
     async remove(file, name) {
       guard(file);
+      const path = pathOf(file, name);
+      for (const key of entries()) {
+        if (key !== path && !key.startsWith(`${path}/`)) continue;
+        folder.files.delete(key);
+        folder.bytes.delete(key);
+        folder.directories.delete(key);
+        folder.symlinks.delete(key);
+        folder.modified.delete(key);
+      }
       folder.files.delete(pathOf(file, name));
       folder.bytes.delete(pathOf(file, name));
       folder.databases.get(pathOf(file, name))?.close();
       folder.databases.delete(pathOf(file, name));
       folder.landed();
+    },
+    pathOf(file, name) {
+      guard(file);
+      if (file.store !== 'opaque') throw new TypeError(`state ${file.name}: only an opaque file's path is handed out`);
+      return `/memory-state/${pathOf(file, name)}`;
     },
     sqlite(file, name): SqliteHandle {
       guard(file);

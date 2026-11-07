@@ -8,12 +8,14 @@ import type {
 } from '../client/transport.ts';
 import {
   RelayClientSession,
+  RelaySessionError,
   type RelayClientSessionDependencies,
   type RelayClientSocket,
   type RelayStreamFrame,
+  type RelayTunnelAnswer,
   type SessionDeviceClaim,
 } from './session-client.ts';
-import { fromBase64Url, type RelayCrypto, toBase64Url } from './wire/index.ts';
+import { fromBase64Url, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE, type RelayCrypto, toBase64Url } from './wire/index.ts';
 
 /**
  * THE SEALED SESSION, AS THE GENERATED CLIENT'S TRANSPORT (§9.6, §4.8). Every call is a `req` inside a sealed
@@ -175,16 +177,28 @@ export class SessionTransport implements DaemonTransport {
       ...(request.body === undefined || typeof request.body === 'string' ? {} : { 'content-type': 'application/json' }),
       ...request.headers,
     };
-    const answer = await session.request(
-      {
-        method: request.method,
-        path: request.path,
-        ...(request.query === undefined ? {} : { query: pairs(request.query) }),
-        ...(Object.keys(headers).length === 0 ? {} : { headers }),
-        ...(body === undefined ? {} : { body }),
-      },
-      request.signal,
-    );
+    const record = {
+      method: request.method,
+      path: request.path,
+      ...(request.query === undefined ? {} : { query: pairs(request.query) }),
+      ...(Object.keys(headers).length === 0 ? {} : { headers }),
+      ...(body === undefined ? {} : { body }),
+    };
+    let answer: RelayTunnelAnswer;
+    try {
+      answer = await session.request(record, request.signal);
+    } catch (reason) {
+      // R244, copied from today's relay-carrier: a lapsed lease silently reopens a read ONCE.
+      // A write may already have happened, and a revocation is final on every method.
+      if (
+        !(reason instanceof RelaySessionError) ||
+        reason.code !== RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE ||
+        !['GET', 'HEAD'].includes(request.method.toUpperCase())
+      )
+        throw reason;
+      const fresh = await this.#requestSession();
+      answer = await fresh.request(record, request.signal);
+    }
     return { status: answer.status, headers: answer.headers, body: decodeBody(answer.body) };
   }
 

@@ -6,6 +6,7 @@ import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { KeyedSerialExecutor } from './serial.ts';
 import type {
   FerretChangedPayload,
+  FerretStartedPayload,
   FerretId,
   FerretRecord,
   FerretsApi,
@@ -79,6 +80,10 @@ export interface FerretsPorts {
   /** The folder fenced by the kernel's `work` root, or why not. */
   folder(path: string): Result<FencedPath, string>;
   changed(payload: FerretChangedPayload): void;
+  /** A stop of this ferret is being attempted (`ferret.stopping`), before anything in it can fail. */
+  stopping?(ferret: FerretId): void;
+  /** `ferret.started` (additive, D2 #12): told once a start's record is written, before its launch. */
+  started?(payload: FerretStartedPayload): void;
   /** Writes a ferret's `details.json` (its start options and title). */
   saveDetails?(ferret: FerretId, details: FerretDetails): Promise<void>;
   /** Appends one event to the ferret's `history.jsonl` (today's journal event shape). */
@@ -92,6 +97,8 @@ export interface FerretsPorts {
   limits?(): LimitsFile | undefined;
   /** Ferret id → the instant the owner pinned it (`agent-pins.json`). */
   pinnedAt?(): Promise<ReadonlyMap<string, string>>;
+  /** A ferret's `summary.md` (what its `signal done` wrote), or `undefined` when it has none. */
+  summaryText?(ferret: FerretId): Promise<string | undefined>;
   vault: Pick<VaultApi, 'childEnvironment'>;
   asks: Pick<AsksApi, 'open'>;
 }
@@ -145,6 +152,16 @@ export class FerretsService implements FerretsApi {
     if (record === undefined || this.ports.realPath === undefined) return undefined;
     const folder = await this.ports.realPath(record.folder).catch(() => undefined);
     return folder === undefined || folder !== record.folder ? undefined : { folder };
+  }
+
+  /**
+   * Today's `pack.result` read of `summary.md` (fyd.ts): a ferret this daemon does not know has none, and neither has
+   * one that has not finished — a revived ferret's previous `summary.md` is not its report while it works on.
+   */
+  async summary(ferret: FerretId): Promise<string | undefined> {
+    await this.ports.ready?.();
+    if (this.registry.get(ferret)?.state !== 'stopped' || this.ports.summaryText === undefined) return undefined;
+    return await this.ports.summaryText(ferret);
   }
 
   mayTouch(caller: FerretId, target: FerretId): boolean {
@@ -222,6 +239,18 @@ export class FerretsService implements FerretsApi {
     };
     return await this.serial.run(id, async () => {
       await this.write(record, undefined, 'started');
+      this.ports.started?.({
+        ferret: id,
+        name,
+        role,
+        ...(request.parent === undefined ? {} : { parent: request.parent }),
+        ...(request.pack === undefined ? {} : { pack: request.pack }),
+        folder: folder.value,
+        by: request.by,
+        ...(request.prompt === undefined || request.prompt === '' ? {} : { brief: request.prompt }),
+        ...(request.options?.label === undefined ? {} : { label: request.options.label }),
+        ...(request.options?.card === undefined ? {} : { card: request.options.card }),
+      });
       return await this.launch(record, request.prompt, record.harnessConversation);
     });
   }
@@ -234,6 +263,7 @@ export class FerretsService implements FerretsApi {
     await this.ports.ready?.();
     const record = this.registry.get(ferret);
     if (record === undefined || record.state === 'stopped') return;
+    this.ports.stopping?.(ferret);
     const harness = this.ports.harness(record.harness);
     const runner = this.ports.runner();
     if (record.handle !== undefined && (harness === undefined || runner === undefined))

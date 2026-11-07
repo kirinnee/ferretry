@@ -5,14 +5,12 @@ import type {
   ComponentCatalog,
   LayeredProfileCatalog,
   MachineView,
-  Recommendation,
-  RecommendationRequest,
   RuntimeCatalog,
   SetupScan,
 } from '../../../contract/index.ts';
 
 /**
- * The ports the runtime, profile, model-set, import, scan and recommend verbs share.
+ * The ports the runtime, profile, model-set, link and scan verbs share.
  *
  * EVERY WRITE GOES THROUGH THE DAEMON. This terminal never edits a configuration file: it names one
  * change, the daemon derives the next setup and previews it, and a second explicit call applies
@@ -29,7 +27,6 @@ export interface IRuntimesGateway {
   stage(change: AccountChange): Promise<AccountChangeView>;
   apply(changeId: string): Promise<AccountChangeOutcome>;
   scan(): Promise<SetupScan>;
-  recommend(request: RecommendationRequest): Promise<Recommendation>;
 }
 
 /** The slice of the terminal these verbs print through; the shell's `TerminalIo` is adapted onto it. */

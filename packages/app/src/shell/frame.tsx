@@ -138,7 +138,13 @@ function Main({ route }: { readonly route: Route }) {
     case 'daemon-home':
       return <DaemonHomePage daemon={route.daemon} />;
     case 'daemon-settings':
-      return <DaemonSettingsPage daemon={route.daemon} {...(route.tab === undefined ? {} : { tab: route.tab })} />;
+      return (
+        <DaemonSettingsPage
+          daemon={route.daemon}
+          {...(route.tab === undefined ? {} : { tab: route.tab })}
+          {...(route.tabId === undefined ? {} : { tabId: route.tabId })}
+        />
+      );
     case 'screen':
       return <ScreenView daemon={route.daemon} screen={route.screen} params={route.params} />;
     case 'not-found':
@@ -187,7 +193,7 @@ function ShellCommandBar(props: {
       placeSource({
         daemons,
         daemon: props.daemon,
-        screens: views.screens.values(),
+        screens: [...views.screens.values()],
         routes,
         navigate: href => router.navigate(href),
       }),

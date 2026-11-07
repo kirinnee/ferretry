@@ -20,7 +20,7 @@ export interface RuntimeControlApi {
 
 // Runtime control is owned by Runtimes; Ferrets keeps the ferret detail GET.
 export const RUNTIME_SWITCH_ROUTE = 'POST /v1/ferrets/:id/runtime' as const;
-export const FERRET_ROUTE = 'GET /v1/ferrets/:id' as const;
+export const FERRET_ROUTE = 'GET /v1/ferrets/:ferretId' as const;
 
 /**
  * GAP(kernel): `PluginClient.call` carries no headers, so the per-click request id (the daemon's idempotency key
@@ -73,4 +73,4 @@ export const parseRuntimeSessionView = (value: unknown): RuntimeSessionView => {
 };
 
 export const readRuntimeSessionView = async (client: RuntimesClient, sessionId: string): Promise<RuntimeSessionView> =>
-  parseRuntimeSessionView(await client.call(FERRET_ROUTE, { params: { id: sessionId } }));
+  parseRuntimeSessionView(await client.call(FERRET_ROUTE, { params: { ferretId: sessionId } }));

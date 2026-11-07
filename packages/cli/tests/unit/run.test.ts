@@ -1,6 +1,8 @@
 import { describe, it } from 'bun:test';
+import { defineEvent } from '@ferretry/kernel/contract';
 import { definePlugin, implementCli, type PluginClient, verb } from '@ferretry/kernel/manifest';
 import should from 'should';
+import { z } from 'zod';
 import { runFy } from '../../src/lib/run.ts';
 import {
   boardEntry,
@@ -8,6 +10,7 @@ import {
   callsThenOk,
   entry,
   fakeWorld,
+  FeedingTransport,
   inventoryOf,
   registryOf,
   skeletonEntry,
@@ -60,17 +63,28 @@ describe('runFy', () => {
     should(io.stderr()).equal('Board is not built yet in this version of Ferretry.\n');
   });
 
-  it('should refuse a verb that subscribes to events, which this build does not offer', async () => {
+  it('should hand a plugin verb events through the guarded connection, opened when it first listens', async () => {
     // Arrange
     const calls: { client?: PluginClient } = {};
-    const { world } = fakeWorld({ registry: registryOf(boardEntry(calls)) });
+    const transport = new FeedingTransport();
+    const { world, connects } = fakeWorld({
+      registry: registryOf(boardEntry(calls)),
+      inventory: inventoryOf({ id: 'board', contract: 'h-board' }),
+      transport,
+    });
     await runFy(['board'], world);
+    const moved = defineEvent('board.moved', z.strictObject({ id: z.string() }));
+    const heard: string[] = [];
 
     // Act
-    const subscribing = (): unknown => calls.client?.subscribe({} as never, () => undefined);
+    calls.client?.subscribe(moved, payload => heard.push(payload.id));
+    await Bun.sleep(10);
+    transport.push('board.moved', { id: 'c1' });
+    await Bun.sleep(10);
 
     // Assert
-    should(subscribing).throw(/events are not available/u);
+    should(connects.length).equal(1);
+    should(heard).deepEqual(['c1']);
   });
 
   it('should not open a connection for a verb that never calls the daemon', async () => {
@@ -105,7 +119,7 @@ describe('runFy', () => {
   });
 
   it('S58 --as-owner inside a pane prints its stderr line before acting', async () => {
-    const manifest = definePlugin({ ...boardManifest, actions: { cli: [verb('board')] } });
+    const manifest = definePlugin({ ...boardManifest, actions: { ...boardManifest.actions, cli: [verb('board')] } });
     const half = implementCli(manifest, {
       build: ctx => ({
         verbs: { board: callsThenOk(ctx.client, 'GET /v1/cards/:id', { params: { id: 'a' } }) },
@@ -152,6 +166,68 @@ describe('runFy', () => {
     const second = fakeWorld({ registry: registryOf(broken) });
     should(await runFy(['board'], second.world)).equal(1);
     should(second.io.stderr()).containEql('boom');
+  });
+
+  it('S59 a person-only call from a pane is refused before any connection is opened', async () => {
+    // Arrange
+    const manifest = definePlugin({ ...boardManifest });
+    let ran = false;
+    const half = implementCli(manifest, {
+      build: ctx => ({
+        verbs: {
+          'card move': async () => {
+            ran = true;
+            await ctx.client.call('POST /v1/cards/:id/move', { params: { id: 'a' } });
+            return 0;
+          },
+          'card show': async () => 0,
+          board: async () => 0,
+        },
+      }),
+    });
+    const { world, io, connects, transport } = fakeWorld({
+      registry: registryOf(entry(manifest, 'h-board', half)),
+      inventory: inventoryOf({ id: 'board', contract: 'h-board' }),
+      environment: { FY_SESSION_ID: 's1' },
+    });
+
+    // Act
+    const code = await runFy(['card', 'move', 'a'], world);
+
+    // Assert
+    should(ran).be.true();
+    should(code).equal(1);
+    should(io.stderr()).containEql("this is the owner's command; a ferret's pane can't run it");
+    should(connects).deepEqual([]);
+    should(transport.sent).deepEqual([]);
+  });
+
+  for (const argv of [
+    ['card', 'move', '-h'],
+    ['card', 'move', '-h', 'a'],
+    ['card', 'move', 'a', '--help', 'b'],
+    ['card', 'move', '--to', 'done', '-h'],
+  ])
+    it(`should show help for ${argv.join(' ')} and never connect or run the handler`, async () => {
+      // Arrange
+      const calls: { args?: readonly string[] } = {};
+      const { world, io, connects } = fakeWorld({ registry: registryOf(boardEntry(calls)) });
+
+      // Act
+      const code = await runFy(argv, world);
+
+      // Assert
+      should(code).equal(0);
+      should(io.stdout()).equal('fy card move: move a card\n');
+      should(calls.args).be.undefined();
+      should(connects).deepEqual([]);
+    });
+
+  it('should pass -h through as an argument after --', async () => {
+    const calls: { args?: readonly string[] } = {};
+    const { world } = fakeWorld({ registry: registryOf(boardEntry(calls)) });
+    should(await runFy(['card', 'show', '--', '-h'], world)).equal(0);
+    should(calls.args).deepEqual(['-h']);
   });
 
   it('should print a verb’s summary for --help after it', async () => {

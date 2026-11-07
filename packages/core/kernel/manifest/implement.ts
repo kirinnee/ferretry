@@ -14,7 +14,7 @@ import type {
   TransformHook,
 } from '../contract/define.ts';
 import type { DoctorFinding } from '../contract/kernel.ts';
-import type { Cancel, KernelPorts } from '../contract/ports.ts';
+import type { Cancel, KernelPorts, StatePort } from '../contract/ports.ts';
 import type { CallContext, MemberRouteHandler, RouteHandler } from '../contract/route.ts';
 import type { SocketAccept } from '../contract/socket.ts';
 import type { Manifest } from './types.ts';
@@ -92,6 +92,8 @@ export interface HookInvoker {
   decide<I>(hook: DecideHook<string, I>, input: I): Promise<HookDecision>;
   transform<V>(hook: TransformHook<string, V>, value: V): Promise<Result<V, string>>;
   provider<K extends string, V>(hook: ProvideHook<string, K, V>, key: K): V | 'unavailable';
+  /** The declaring plugin id, even when off, failed or skeleton; undefined when nobody declares that key. */
+  declaredProvider<K extends string, V>(hook: ProvideHook<string, K, V>, key: K): string | undefined;
   providers<K extends string, V>(hook: ProvideHook<string, K, V>): ReadonlyMap<K, V>;
   contributions<I>(hook: ContributeHook<string, I>): readonly Contribution<I>[];
 }
@@ -127,9 +129,17 @@ export type DaemonHalf<M extends Manifest> = Section<'routes', { readonly [K in 
   Section<'tools', { readonly [K in ToolNamesOf<M>]: ToolHandler }> &
   Section<'provides', PortsOf<TokensOf<M, 'provides'>>> &
   Section<'hooks', HookImplsOf<M>> &
-  Section<'subscribers', SubscribersOf<M>> &
-  Section<'doctor', { readonly [K in DoctorIdsOf<M>]: DoctorRun }> &
-  Section<'resolvers', { readonly [K in ResolverIdsOf<M>]: NetworkResolver }>;
+  Section<'subscribers', SubscribersOf<M>> & /**
+   * A declared check with no run still boots: `fy doctor` reports it as a failure that names it (`has no
+   * implementation`), so a missing check is seen, never silent. A run for an undeclared id is refused.
+   */
+  { readonly doctor?: { readonly [K in DoctorIdsOf<M>]?: DoctorRun } } & Section<
+    'resolvers',
+    { readonly [K in ResolverIdsOf<M>]: NetworkResolver }
+  > & {
+    /** Once per boot after state and ports are ready, under the home lock, before listeners. Best effort; at most 5 seconds. */
+    readonly beforeListen?: (ctx: DaemonContext<M>) => Promise<void>;
+  };
 
 export interface DaemonImplementation<M extends Manifest = Manifest> {
   readonly half: 'daemon';
@@ -169,6 +179,17 @@ export interface PluginCallHeaders {
   readonly 'x-fy-request-id'?: string;
 }
 
+/** `PluginClient.conditional`'s request: the etag the caller holds, and the same allow-listed headers as `call`. */
+export interface PluginConditionalInit {
+  readonly ifNoneMatch?: string;
+  readonly headers?: PluginCallHeaders;
+}
+
+/** A conditional read's answer: the body with its etag, or `304` when the held etag is still current. */
+export type PluginConditionalAnswer =
+  | { readonly status: 200; readonly etag?: string; readonly body: unknown }
+  | { readonly status: 304; readonly etag?: string };
+
 /** The per-daemon generated client a half talks through (§9.6). It checks the plugin's inventory entry first. */
 export interface PluginClient {
   call<Answer = unknown>(
@@ -187,6 +208,15 @@ export interface PluginClient {
    * through the same contract-hash guard as `call`. Optional until the app shell and the CLI fill it in.
    */
   socket?(key: string, params: Readonly<Record<string, string>>, listeners: PluginSocketListeners): PluginSocket;
+  /**
+   * A conditional GET (today's per-connection etag/304 list read, the held fleet list R502): sends `If-None-Match`
+   * and answers `304` without a body when it still matches. Optional until the app shell and the CLI fill it in.
+   */
+  conditional?(
+    key: string,
+    params: Readonly<Record<string, string>>,
+    init?: PluginConditionalInit,
+  ): Promise<PluginConditionalAnswer>;
 }
 
 /** A UI component, framework-neutral here; the app shell narrows it to React. */
@@ -253,6 +283,17 @@ export interface CliContext<M extends Manifest> {
   readonly manifest: M;
   readonly client: PluginClient;
   readonly io: TerminalIo;
+  /**
+   * UTF-8 text from a path (relative to the CLI working directory); '-' reads stdin.
+   * As today's readRecipe (Bun.file/Bun.stdin.text): no reader size cap. The caller validates length
+   * (a sign-in recipe, for example, must be 1–4000 characters).
+   */
+  readText?(path: string): Promise<string>;
+  /** Own declared opaque defs only; private directory operations and stat require named trees. Optional until fy supplies it. */
+  readonly ownState?: Pick<
+    StatePort,
+    'write' | 'pathOf' | 'stat' | 'remove' | 'list' | 'removeEmptyDirectory' | 'createPrivateDirectory'
+  >;
   /** The time, for a verb that reports or waits. Optional until the fy shell fills it in. */
   readonly clock?: { now(): Instant; nowMs(): number };
   /** Waits, cancellable (a poll loop). */

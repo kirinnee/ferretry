@@ -1,3 +1,4 @@
+import { close as closeDescriptor } from 'node:fs';
 import type { ChildEnvironment, ChildEnvironmentOpener } from '../../contract/bound.ts';
 import type {
   ChildHandle,
@@ -19,6 +20,9 @@ import type {
  * values go straight into the child and never back to the caller (lead decision 9). A handle with no opener bound, or
  * one the opener does not recognise, refuses the start: it is never passed through as if it were plain values.
  */
+/** The most extra pipes one child may have (Chrome's DevTools pipe needs two). */
+export const MAX_EXTRA_PIPES = 4;
+
 export function bunSpawn(
   baseEnv: Readonly<Record<string, string>>,
   opener: () => ChildEnvironmentOpener | undefined = () => undefined,
@@ -32,14 +36,17 @@ export function bunSpawn(
     // A pin is installed for exactly the one spawn statement, no await inside the bracket, and the child is given
     // `.`: it inherits the held directory and resolves `.` against it, never a name re-resolved after the fact.
     const release = cwd === undefined || typeof cwd === 'string' ? undefined : cwd.install();
+    const extra = options?.extraPipes ?? 0;
+    if (!Number.isInteger(extra) || extra < 0 || extra > MAX_EXTRA_PIPES)
+      throw new RangeError(`extraPipes must be a whole number from 0 to ${String(MAX_EXTRA_PIPES)}`);
     let child: Bun.Subprocess<'pipe', 'pipe', 'pipe'>;
     try {
       child = Bun.spawn([program, ...args], {
         ...(cwd === undefined ? {} : { cwd: typeof cwd === 'string' ? cwd : '.' }),
         env: env(options),
-        stdin: 'pipe',
-        stdout: 'pipe',
-        stderr: 'pipe',
+        ...(extra === 0
+          ? { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }
+          : { stdio: ['pipe', 'pipe', 'pipe', ...Array.from({ length: extra }, () => 'pipe' as const)] }),
         ...(options?.signal === undefined ? {} : { signal: options.signal }),
         ...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
       });
@@ -50,8 +57,17 @@ export function bunSpawn(
       child.stdin.write(options.stdin);
       void child.stdin.end();
     }
+    // Reading `stdio` hands the daemon's ends over; Bun made them close-on-exec.
+    const pipes = extra === 0 ? [] : (child.stdio as unknown as readonly (number | null)[]).slice(3, 3 + extra);
+    let pipesOpen = pipes.length > 0;
     return {
       pid: child.pid,
+      pipes: pipes.filter((fd): fd is number => typeof fd === 'number'),
+      closePipes: () => {
+        if (!pipesOpen) return;
+        pipesOpen = false;
+        for (const fd of pipes) if (typeof fd === 'number') closeDescriptor(fd, () => undefined);
+      },
       stdout: child.stdout,
       stderr: child.stderr,
       write: chunk => {
@@ -202,6 +218,27 @@ export function bunWorkers(): WorkersPort {
           const handler = (event: MessageEvent): void => listener(event.data);
           worker.addEventListener('message', handler);
           return () => worker.removeEventListener('message', handler);
+        },
+        onExit: listener => {
+          let reason: string | undefined;
+          let told = false;
+          const onError = (event: ErrorEvent): void => {
+            reason = event.message || String(event.error ?? 'the worker failed');
+          };
+          const onClose = (event: Event): void => {
+            if (told) return;
+            told = true;
+            const given = (event as Event & { readonly code?: number }).code ?? 0;
+            // an uncaught error is a failure even when the runtime reports the thread's code as 0
+            const code = reason !== undefined && given === 0 ? 1 : given;
+            listener(reason === undefined ? { code } : { code, reason });
+          };
+          worker.addEventListener('error', onError);
+          worker.addEventListener('close', onClose);
+          return () => {
+            worker.removeEventListener('error', onError);
+            worker.removeEventListener('close', onClose);
+          };
         },
         terminate: async () => {
           worker.terminate();

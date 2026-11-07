@@ -214,11 +214,22 @@ export interface ChildEnvironmentOpener {
 export const ChildEnvironmentPort = defineBoundPort<ChildEnvironmentOpener>('child-environment', 'vault');
 
 /**
+ * The Vault's value for one secret name, for the KERNEL's own-secret resolve only (`kernel.secrets`, lead decision J):
+ * the kernel asks it after checking the plugin declared the name and its own configuration names it. `undefined` =
+ * the Vault has no such secret. No half may hold it.
+ */
+export interface SecretResolver {
+  resolve(name: string): Promise<string | undefined>;
+}
+
+export const SecretResolverPort = defineBoundPort<SecretResolver>('secret-resolver', 'vault');
+
+/**
  * Kernel-bound ports no half may hold, not even through `needs` or `uses`: the kernel binds them into its own
  * adapters only (the ChildEnvironment opener into the spawn adapter, lead decision 8). A manifest that asks for one
  * is refused at plan, and plugin-graph refuses it in CI.
  */
-export const KERNEL_ONLY_PORTS: readonly string[] = Object.freeze([ChildEnvironmentPort.name]);
+export const KERNEL_ONLY_PORTS: readonly string[] = Object.freeze([ChildEnvironmentPort.name, SecretResolverPort.name]);
 
 export const KERNEL_BOUND_PORTS = [
   AdmissionPort,
@@ -227,4 +238,5 @@ export const KERNEL_BOUND_PORTS = [
   RedactionPort,
   WorkFoldersPort,
   ChildEnvironmentPort,
+  SecretResolverPort,
 ] as const;

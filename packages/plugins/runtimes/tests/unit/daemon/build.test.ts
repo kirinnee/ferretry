@@ -20,7 +20,7 @@ import {
   RuntimesPort,
 } from '../../../contract/index.ts';
 import { runtimesConformance } from '../../../contract/testing/index.ts';
-import { RECOMMENDER_NOT_WIRED, type RuntimesAssembly, runtimesDaemon } from '../../../daemon/index.ts';
+import { type RuntimesAssembly, runtimesDaemon } from '../../../daemon/index.ts';
 import { UNAVAILABLE } from '../../../daemon/lib/service/assembly.ts';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
 import { fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
@@ -74,7 +74,6 @@ async function build(
       },
     } as unknown as RuntimesAssembly['catalog'],
     setup: {} as RuntimesAssembly['setup'],
-    recommend: { recommend: async () => await Promise.reject(new Error('not used here')) },
   });
   const daemon = (
     options.assembled === false ? runtimesDaemon() : runtimesDaemon(assembly)
@@ -104,7 +103,7 @@ describe('the runtimes daemon', () => {
     }
 
     // Assert
-    should(manifest.actions.routes).have.length(17);
+    should(manifest.actions.routes).have.length(16);
     should(missing).deepEqual([]);
   });
 
@@ -114,16 +113,10 @@ describe('the runtimes daemon', () => {
 
     // Act
     const machine = await host.request('GET', '/v1/runtimes/machine');
-    const recommend = await host.request('POST', '/v1/recommend', { body: { task: 'tidy a README', usage: false } });
 
     // Assert
     should(machine.status).equal(409);
     should(machine.json<{ error: string }>().error).containEql(UNAVAILABLE);
-    should(recommend.status).equal(503);
-    should(recommend.json<{ error: string; code: string }>()).deepEqual({
-      error: RECOMMENDER_NOT_WIRED,
-      code: 'recommender_unconfigured',
-    });
   });
 
   it('should provide a runtimes port that passes the conformance suite', async () => {

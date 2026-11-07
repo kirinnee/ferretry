@@ -217,6 +217,10 @@ export interface Permissions {
   readonly spawn?: readonly SpawnEntry[];
   /** Vault secret names it may use by name (never read). */
   readonly secrets?: readonly string[];
+  /** It reads this machine's `/proc` and `/sys` facts through `kernel.hostFacts` (today's Terminals). */
+  readonly hostFacts?: true;
+  /** It reads the running build's facts and launches the self-update through `kernel.updateHost` (Updates). */
+  readonly updateHost?: true;
 }
 
 // the manifest ─────────────────────────────────────────────────────────────────────────────────────────────────────

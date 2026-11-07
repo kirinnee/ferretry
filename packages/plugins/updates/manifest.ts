@@ -1,4 +1,4 @@
-import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
+import type { ConfigDef } from '@ferretry/kernel/contract';
 import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import {
@@ -9,10 +9,12 @@ import {
   UPDATES_WORDS,
   UpdateAvailable,
   UpdateFinished,
-  UpdatesConfigSchema,
   UpdatesPort,
+  UPDATES_CONFIG,
+  UPDATES_LATEST,
+  UPDATES_LOG,
+  UPDATES_REPORT,
   USE,
-  updatesLoosens,
 } from './contract/index.ts';
 
 /**
@@ -59,12 +61,7 @@ export default definePlugin({
         guard: GUARD_NONE,
       }),
     ],
-    cli: [
-      verb('update', {
-        summary:
-          'update the daemon the way this machine installed it, restart it, and roll back if it does not come up',
-      }),
-    ],
+    cli: [verb('update check', { summary: 'read the daemon’s cached update state' })],
   },
 
   ui: {
@@ -73,19 +70,8 @@ export default definePlugin({
   },
 
   data: {
-    state: [
-      defineState({ name: 'latest', path: 'update/latest.json', store: 'json', format: 1 }),
-      defineState({ name: 'report', path: 'update/report.json', store: 'json', format: 1 }),
-      defineState({ name: 'log', path: 'update.log', store: 'opaque', format: 1 }),
-    ],
-    config: [
-      defineConfig({
-        file: 'updates.yaml',
-        schema: UpdatesConfigSchema,
-        axis: 'configure',
-        loosens: updatesLoosens,
-      }) as ConfigDef,
-    ],
+    state: [UPDATES_LATEST, UPDATES_REPORT, UPDATES_LOG],
+    config: [UPDATES_CONFIG as ConfigDef],
     readModels: ['status'],
     publishes: [UpdateAvailable, UpdateFinished],
   },

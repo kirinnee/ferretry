@@ -41,6 +41,9 @@ export interface StatePortOptions {
   readonly clock?: Pick<Clock, 'now'>;
   /** What boot found already (`openPluginState`), so `damaged()` is right before the first read. */
   readonly initialDamage?: readonly StateDamage[];
+  readonly initialNarrowed?: readonly StateDamage[];
+  /** The host's live serving-state projection; called synchronously on damage and repair. */
+  readonly changed?: (damage: readonly StateDamage[]) => void;
   readonly sqliteFiles?: SqliteFiles;
   /** Told each time a file is found damaged (logging, audit). */
   readonly report?: (event: StateDamageEvent) => void;
@@ -92,7 +95,21 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     paths.set(def.path, def.name);
   }
   const damaged = new Map<string, StateDamage>((options.initialDamage ?? []).map(damage => [damage.file, damage]));
-  const narrowed = new Map<string, StateDamage>();
+  const narrowed = new Map<string, StateDamage>((options.initialNarrowed ?? []).map(damage => [damage.file, damage]));
+
+  /**
+   * A plain name, or, for an opaque NAMED TREE (a def whose path ends `/*`, today's Conversation files under
+   * `state/conversation/<ferret>/`), path-safe segments such as `F12/turns/turn-001.md`: each segment a plain
+   * name, none `.` or `..`, and the tree's folder claimed by no other declared file.
+   */
+  const nameAllowed = (def: StateFileDef, name: string): boolean => {
+    const plain = (segment: string): boolean => COLLECTION_NAME.test(segment) && segment !== '.' && segment !== '..';
+    if (!name.includes('/')) return plain(name);
+    if (def.store !== 'opaque' || !def.path.endsWith('/*')) return false;
+    const folder = def.path.slice(0, -1);
+    if ([...declared.values()].some(other => other.name !== def.name && other.path.startsWith(folder))) return false;
+    return name.split('/').every(plain);
+  };
 
   const locate = (def: StateFileDef, name: string | undefined): Located => {
     const known = declared.get(def.name);
@@ -105,7 +122,7 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
           ? `state ${def.name} is a collection: it needs a name`
           : `state ${def.name} is one file: it takes no name`,
       );
-    if (name !== undefined && (!COLLECTION_NAME.test(name) || name === '.' || name === '..'))
+    if (name !== undefined && !nameAllowed(def, name))
       throw new UndeclaredStateFileError(`state ${def.name}: "${name}" is not a valid name`);
     const relative = name === undefined ? def.path : def.path.replace('*', name);
     return { path: `${root}/${relative}`, relative, label: stateLabel(pluginId, relative) };
@@ -115,11 +132,13 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     const policy = def.onDamaged === 'subsystem' ? 'subsystem' : 'narrower';
     if (policy === 'subsystem') damaged.set(damage.file, damage);
     else narrowed.set(damage.file, damage);
+    if (policy === 'subsystem') options.changed?.([...damaged.values()]);
     options.report?.({ damage, policy, ...(options.clock === undefined ? {} : { at: options.clock.now() }) });
   };
   const healthy = (label: string): void => {
-    damaged.delete(label);
+    const repaired = damaged.delete(label);
     narrowed.delete(label);
+    if (repaired) options.changed?.([...damaged.values()]);
   };
 
   /** Line-by-line reading (`records` / `tail`): only an io fault or a missing required file is a damage. */
@@ -162,7 +181,52 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     throw new TypeError(`state ${def.name}: a ${def.store} file is not read with read()`);
   };
 
+  const locateTree = (def: StateFileDef, name: string): Located => {
+    const at = locate(def, name);
+    if (def.store !== 'opaque' || !def.path.endsWith('/*'))
+      throw new TypeError('state operation needs an opaque named tree');
+    return at;
+  };
+
+  /** Check every parent with lstat; a planted link never becomes a route into another folder. */
+  const treeParents = async (path: string, create: boolean): Promise<boolean> => {
+    const parts = path
+      .slice(home.length + 1)
+      .split('/')
+      .slice(0, -1);
+    let parent = home;
+    for (const part of ['', ...parts]) {
+      if (part !== '') parent += `/${part}`;
+      const info = await fs.info(parent);
+      if (info === undefined) {
+        if (!create) return false;
+        await fs.ensureDirectory(parent, PRIVATE_DIRECTORY_MODE);
+      } else if (!info.directory) throw new TypeError('state parent is not a directory');
+    }
+    return true;
+  };
+
   const port: HostStatePort = {
+    async stat(def, name) {
+      const at = locateTree(def, name);
+      if (!(await treeParents(at.path, false))) return undefined;
+      const info = await fs.info(at.path);
+      if (info === undefined) return undefined;
+      const kind =
+        info.symlink === true ? 'symlink' : info.directory ? 'directory' : info.regularFile ? 'file' : undefined;
+      if (kind === undefined) throw new TypeError('state entry is not a file, directory or symlink');
+      return { kind, modifiedMs: info.modifiedAtMs };
+    },
+    async createPrivateDirectory(def, name) {
+      const at = locateTree(def, name);
+      await treeParents(at.path, true);
+      await fs.createPrivateDirectory(at.path);
+    },
+    async removeEmptyDirectory(def, name) {
+      const at = locateTree(def, name);
+      if (!(await treeParents(at.path, false))) return;
+      await fs.removeEmptyDirectory(at.path);
+    },
     sqliteGrant(def: StateFileDef, name?: string) {
       const at = locate(def, name);
       if (def.store !== 'sqlite' && def.store !== 'sqlite-cache')
@@ -273,6 +337,12 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
         }
         healthy(at.label);
       });
+    },
+
+    pathOf(def: StateFileDef, name?: string): string {
+      const at = locate(def, name);
+      if (def.store !== 'opaque') throw new TypeError(`state ${def.name}: only an opaque file's path is handed out`);
+      return at.path;
     },
 
     sqlite(def: StateFileDef, name?: string): SqliteHandle {

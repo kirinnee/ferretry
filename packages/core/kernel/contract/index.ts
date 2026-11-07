@@ -17,6 +17,7 @@ export * from './ports.ts';
 export * from './refusals.ts';
 export * from './run.ts';
 export * from './route.ts';
+export * from './secrets.ts';
 export * from './session.ts';
 export * from './snapshot.ts';
 export * from './socket.ts';

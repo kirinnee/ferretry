@@ -1,5 +1,6 @@
 import type { ChildEnvironmentOpener, FencedPath } from '../contract/bound.ts';
 import type { StateFileDef } from '../contract/define.ts';
+import { CORE_IDS } from '../contract/ids.ts';
 import type { FetchPort, SpawnOptions, SpawnPort, WebSocketPort, WorkersPort } from '../contract/ports.ts';
 import { WORKER_STATE_KEY } from '../worker.ts';
 import type { ItemKind, PermissionEntry } from '../manifest/types.ts';
@@ -16,10 +17,17 @@ export type ItemReachOf = (kind: ItemKind) => ItemReach;
 
 export const NO_ITEMS: ItemReachOf = () => ({ programs: [], hosts: [] });
 
-/** The declared strings plus what each `{ items }` entry's installed items name now (a resolver is asked apart). */
+/**
+ * The declared strings plus what each `{ items }` entry's installed items name now (a resolver is asked apart). An
+ * item's name with `*` in it is dropped: `'*'` (and any pattern) is a core piece's alone, never an item's.
+ */
 function expand(declared: readonly PermissionEntry[], items: ItemReachOf, pick: keyof ItemReach): readonly string[] {
   return declared.flatMap(entry =>
-    typeof entry === 'string' ? [entry] : 'items' in entry ? items(entry.items)[pick] : [],
+    typeof entry === 'string'
+      ? [entry]
+      : 'items' in entry
+        ? items(entry.items)[pick].filter(name => !name.includes('*'))
+        : [],
   );
 }
 
@@ -100,8 +108,8 @@ export function hostPermitted(
 export const WILDCARD = '*';
 
 /** What the host hands the restrict wrappers: a non-core manifest's `'*'` is dropped, so it grants nothing. */
-export function effectivePermissions(core: boolean, declared: readonly PermissionEntry[]): readonly PermissionEntry[] {
-  return core ? declared : declared.filter(entry => entry !== WILDCARD);
+export function effectivePermissions(plugin: string, declared: readonly PermissionEntry[]): readonly PermissionEntry[] {
+  return (CORE_IDS as readonly string[]).includes(plugin) ? declared : declared.filter(entry => entry !== WILDCARD);
 }
 
 /** Only programs the manifest declared in `permissions.spawn` (§3.7); refused before anything starts. */

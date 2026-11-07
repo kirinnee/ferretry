@@ -15,6 +15,8 @@ import { err, ok } from '@ferretry/std';
 import {
   type FerretId,
   FerretChanged,
+  FerretStopping,
+  FerretStarted,
   FerretFiles,
   FerretHistoryFiles,
   type FerretRecord,
@@ -59,7 +61,7 @@ import { sessionPinRoutes } from './lib/runtime/mounts/session-pin.ts';
 import { type SessionArchiveSubsystem, sessionArchiveRoutes } from './lib/runtime/mounts/session-archive.ts';
 import { type SessionRestartSubsystem, sessionRestartRoutes } from './lib/runtime/mounts/session-restart.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './lib/runtime/mounts/session-signal.ts';
-import { AgentPinsFile, FerretDetailsFiles, FerretPinFiles } from './lib/state.ts';
+import { AgentPinsFile, FerretDetailsFiles, FerretPinFiles, FerretSummaryFiles } from './lib/state.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
@@ -194,10 +196,22 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     changed: payload => {
       hooks.observe(FerretChanged, payload);
     },
+    stopping: ferret => {
+      hooks.observe(FerretStopping, { ferret });
+    },
+    started: payload => {
+      hooks.observe(FerretStarted, payload);
+    },
     saveDetails: async (ferret, details) => await kernel.state.write(FerretDetailsFiles, details, ferret),
     history: appendHistory,
     limits: () => kernel.config.file(LimitsConfigFile),
     pinnedAt: async () => await agentPins.pinnedAt(),
+    // GAP: nothing writes `summary.md` on this base — `signal` is not built and `FileSignalArtifacts` is not wired —
+    // so this read answers nothing in a real daemon until the signal writer lands (Packs' result and Clean up wait on it).
+    summaryText: async ferret => {
+      const read = await kernel.state.read(FerretSummaryFiles, ferret);
+      return read.ok && read.value !== undefined ? new TextDecoder().decode(read.value) : undefined;
+    },
     // Binds to the `work` root's `RootHandle.realPath` when kernel item N reaches the base; until then no work folder
     // is answered (fails closed: Accounts gets no folder default).
     realPath: async () => undefined,

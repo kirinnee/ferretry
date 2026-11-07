@@ -1,4 +1,7 @@
-/** `manifest-match` and the manifest's `doctor` ids: each declared id needs a check function in the daemon half. */
+/**
+ * `manifest-match` and the manifest's `doctor` ids: a declared id may have a check function in the daemon half (one
+ * without is reported by `fy doctor` as a failure naming it); a function for an undeclared id is refused.
+ */
 import { describe, expect, test } from 'bun:test';
 import type { Manifest } from '../../../packages/core/kernel/manifest/index.ts';
 import { halfFindings } from '../lib/halves.ts';
@@ -14,8 +17,9 @@ describe('manifest-match: doctor checks', () => {
   test('a declared doctor id with its function passes', () => {
     expect(messages({ doctor: { 'alpha-ok': async () => ({ state: 'ok', detail: 'fine' }) } })).toEqual([]);
   });
-  test('planted: a declared doctor id with no function, and an undeclared one', () => {
-    expect(messages({})).toEqual(['daemon half misses doctor "alpha-ok"']);
+  test('planted: a declared doctor id with no function passes (fy doctor names it); an undeclared one is refused', () => {
+    expect(messages({})).toEqual([]);
+    expect(messages({ doctor: {} })).toEqual([]);
     expect(messages({ doctor: { 'alpha-ok': async () => ({}), 'alpha-extra': async () => ({}) } })).toEqual([
       'daemon half implements undeclared doctor "alpha-extra"',
     ]);

@@ -172,6 +172,7 @@ describe('boot (§7.6)', () => {
     await host.stop();
     expect(host.trace).toEqual([
       'home',
+      'lock',
       'identity',
       'config',
       'check',
@@ -195,6 +196,7 @@ describe('boot (§7.6)', () => {
       'stop:board',
       'stop:gate',
       'stop:kernel',
+      'stop:lock',
     ]);
   });
 
@@ -387,5 +389,69 @@ describe('config/plugins.yaml (§3.6)', () => {
       'turns voice on (its off line was removed)',
     ]);
     expect(PluginsConfig.loosens({ plugins: {} }, { plugins: { voice: 'off' } })).toEqual([]);
+  });
+});
+
+describe('RR R247 HostOptions.timings on a real boot', () => {
+  test('R247 the timings fyd parsed reach every daemon half as kernel.timings', async () => {
+    const home = await freshHome();
+    let idleDayMs = 0;
+    const access = implementDaemon(
+      definePlugin({ id: 'idle', title: 'Idle', version: '5.0.0', api: 5, core: false, kinds: [] }),
+      {
+        build: ctx => {
+          idleDayMs = ctx.kernel.timings.idleDayMs;
+          return {};
+        },
+      },
+    );
+    const outcome = await bootHost({
+      home,
+      version: '5.0.0',
+      implementations: [access],
+      adapters: realAdapters(home, () => {}, { binary: 'fy' }),
+      timings: { lease: { leaseMs: 6_000, renewLeadMs: 2_000, maxSessionMs: 20_000 }, idleDayMs: 5_000 },
+    });
+    if (outcome.kind === 'refused') throw new Error(outcome.sentence);
+    running.push(outcome.host);
+    expect(idleDayMs).toBe(5_000);
+  });
+});
+
+describe('state/kernel/plugins-accepted.json (§2.4): the last enabled set the daemon accepted', () => {
+  test('a resolved boot records its set (format 1, 0600); a plugins.yaml that strands a plugin boots that set and names the line', async () => {
+    const home = await freshHome();
+    await (await boot(home)).stop();
+    running.splice(0);
+    const accepted = JSON.parse(await readFile(`${home}/state/kernel/plugins-accepted.json`, 'utf8')) as {
+      format: number;
+      enabled: string[];
+    };
+    expect(accepted.format).toBe(1);
+    expect(accepted.enabled).toContain('board');
+    expect(accepted.enabled).toContain('agenda');
+    expect((await stat(`${home}/state/kernel/plugins-accepted.json`)).mode & 0o777).toBe(0o600);
+    // Agenda needs Board: turning Board off by hand strands Agenda, so the accepted set is kept
+    await writeFile(`${home}/config/plugins.yaml`, 'plugins:\n  board: off\n');
+    const host = await boot(home);
+    expect(host.plugins.get('board')?.status).toBe('serving');
+    expect(host.plugins.get('agenda')?.status).toBe('serving');
+    const note = (await host.doctor()).find(line => line.plugin === 'kernel' && line.detail.includes('plugins.yaml'));
+    expect(note?.state).toBe('warn');
+    expect(note?.detail).toContain('line 2');
+    expect(note?.detail).toContain('Board');
+  });
+
+  test('a plugins.yaml that strands nothing is accepted and recorded', async () => {
+    const home = await freshHome();
+    await (await boot(home)).stop();
+    running.splice(0);
+    await writeFile(`${home}/config/plugins.yaml`, 'plugins:\n  voice: off\n');
+    const host = await boot(home);
+    expect(host.plugins.get('voice')?.status).toBe('off');
+    const accepted = JSON.parse(await readFile(`${home}/state/kernel/plugins-accepted.json`, 'utf8')) as {
+      enabled: string[];
+    };
+    expect(accepted.enabled).not.toContain('voice');
   });
 });

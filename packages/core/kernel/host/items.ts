@@ -15,7 +15,14 @@ const ITEM_FILE_MAX_BYTES = 256 * 1024;
 const isPlainRelative = (file: string): boolean =>
   file !== '' && !file.startsWith('/') && !file.split('/').some(part => part === '..' || part === '' || part === '.');
 
-/** The program an item's `command` names, and the host its `url` names; nothing else in the item is read. */
+/** A name with `*` in it is a pattern, and a pattern is a core piece's alone: an item never grants one. */
+const literal = (name: string | undefined): string | undefined =>
+  name === undefined || name.includes('*') ? undefined : name;
+
+/**
+ * The program an item's `command` names, and the host its `url` names; nothing else in the item is read. A program or
+ * host with `*` in it (`command: '*'`, a url whose host is `*`) names nothing.
+ */
 function reachOf(value: unknown): { readonly program?: string; readonly host?: string } {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
   const { command, url } = value as { command?: unknown; url?: unknown };
@@ -28,8 +35,10 @@ function reachOf(value: unknown): { readonly program?: string; readonly host?: s
       host = undefined;
     }
   }
+  const program = literal(typeof command === 'string' && command.trim() !== '' ? command.trim() : undefined);
+  host = literal(host);
   return {
-    ...(typeof command === 'string' && command.trim() !== '' ? { program: command.trim() } : {}),
+    ...(program === undefined ? {} : { program }),
     ...(host === undefined ? {} : { host }),
   };
 }
@@ -47,14 +56,22 @@ export async function installedItemReach(
 ): Promise<ItemReachOf> {
   const byKind = new Map<string, { programs: Set<string>; hosts: Set<string> }>();
   for (const plugin of installed) {
+    if (!isPlainRelative(plugin.id) || plugin.id.includes('/')) continue;
     for (const item of plugin.items ?? []) {
       if (!isPlainRelative(item.file)) continue;
       const path = `${home}/state/kernel/plugins/${plugin.id}/${item.file}`;
       let value: unknown;
       try {
+        // Resolve every parent before reading permission-bearing data. A lexical child (including a plugin
+        // folder itself) may be a link to another install or somewhere outside the installed-plugin root.
+        const plugins = await fs.realpath(`${home}/state/kernel/plugins`);
+        const root = await fs.realpath(`${home}/state/kernel/plugins/${plugin.id}`);
+        if (root !== `${plugins}/${plugin.id}`) continue;
+        const resolved = await fs.realpath(path);
+        if (!resolved.startsWith(`${root}/`)) continue;
         const info = await fs.lstat(path);
         if (info?.kind !== 'file' || info.size > ITEM_FILE_MAX_BYTES) continue;
-        value = parseYaml(await fs.readText(path));
+        value = parseYaml(await fs.readText(resolved));
       } catch {
         continue;
       }

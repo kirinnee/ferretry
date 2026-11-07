@@ -1,3 +1,14 @@
+import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
+import { beforeListen } from '../host/before-listen.ts';
+import type { DaemonContext } from '../manifest/implement.ts';
+import { failureResponse } from '../host/responses.ts';
+import type { HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
+import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
+import { undeclaredUpdateHost } from '../host/adapters/update-host.ts';
+import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
+import type { DaemonTimings } from '../contract/ports.ts';
+import { DEFAULT_DAEMON_TIMINGS } from '../host/session/timings.ts';
+import { addedSecretReferenceSentences, ownSecretsPort, secretReferencesIn } from '../host/secrets.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { hours, instantFromEpochMs } from '@ferretry/std';
 import type { Actor, HoldDecision, RefusalCode, TargetRef } from '../contract/act.ts';
@@ -48,6 +59,8 @@ import {
 import { scratchPort } from '../host/scratch.ts';
 import { PinRegistry } from '../host/pins.ts';
 import { type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
+import { matchingHook } from '../host/hooks.ts';
+import { CORE_IDS } from '../contract/ids.ts';
 import type { ScratchPort } from '../contract/ports.ts';
 import { testIdentity } from './identity.ts';
 import type { IdentitySigner } from '../contract/session.ts';
@@ -56,7 +69,7 @@ import type { DoctorFinding } from '../contract/kernel.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
 import type { DoctorRun, DaemonImplementation, HookInvoker, ToolHandler, ToolResult } from '../manifest/implement.ts';
-import type { Manifest, ToolDecl } from '../manifest/types.ts';
+import type { HookTake, Manifest, ToolDecl } from '../manifest/types.ts';
 import { type ActRecord, TestMintedIds, testActRunner } from './act.ts';
 import { type TestCaller, owner, standInAdmission, testArrival, testPrincipal } from './admission.ts';
 import { type DrivenClock, fixedClock } from './clock.ts';
@@ -103,6 +116,14 @@ export interface TestHostOptions {
   readonly identity?: IdentityPort;
   /** Text the stand-in redaction masks (same-width `*`). */
   readonly secrets?: readonly string[];
+  /** What `kernel.hostFacts` answers to a plugin that declared `permissions.hostFacts`. Absent: every read refuses. */
+  readonly hostFacts?: HostFactsPort;
+  /** What `kernel.updateHost` answers to a plugin that declared `permissions.updateHost`. */
+  readonly updateHost?: UpdateHostPort;
+  /** What `kernel.timings` answers. Default: the shipped numbers (`DEFAULT_DAEMON_TIMINGS`). */
+  readonly timings?: DaemonTimings;
+  /** The Vault stand-in for `kernel.secrets.resolve`: name to value. Absent, every declared and configured name is `unknown`. */
+  readonly vault?: Readonly<Record<string, string>>;
 }
 
 export interface TestResponse {
@@ -250,6 +271,22 @@ export async function testHost(options: TestHostOptions): Promise<TestHost> {
 
 async function start(world: World): Promise<TestHost> {
   const { options, clock, identity, identitySigner } = world;
+  const manifests: readonly Manifest[] = options.plugins.map(plugin => plugin.manifest);
+  const hookOffers = new Map(
+    manifests.flatMap(manifest => (manifest.hooks?.offers ?? []).map(offer => [offer.hook.name, offer.hook] as const)),
+  );
+  const validTake = (id: string, take: HookTake): boolean => {
+    const hook = hookOffers.get(take.hook.name);
+    if (hook === undefined) return true;
+    if (!matchingHook(hook, take.hook)) return false;
+    if (hook.mode === 'provide')
+      return (hook.takers === undefined || hook.takers.includes(id)) && hook.key.safeParse(take.key).success;
+    return hook.mode !== 'decide' || !hook.securityPath || (CORE_IDS as readonly string[]).includes(id);
+  };
+  for (const plugin of options.plugins)
+    for (const take of plugin.manifest.hooks?.takes ?? [])
+      if (!validTake(plugin.manifest.id, take))
+        throw new Error(`testHost: ${plugin.manifest.id} takes a refused hook definition`);
   const acts: ActRecord[] = [];
   const published: { event: string; payload: unknown }[] = [];
   const logs: { level: string; scope: string; message: string; fields?: LogFields }[] = [];
@@ -288,6 +325,7 @@ async function start(world: World): Promise<TestHost> {
   const admission = options.gate ?? standInAdmission(request => callers.get(request) ?? owner());
 
   const built: Built[] = [];
+  const bootContexts = new Map<string, DaemonContext<Manifest>>();
   const providedBy = new Map<string, unknown>();
   const usesBound = { done: false };
 
@@ -306,10 +344,10 @@ async function start(world: World): Promise<TestHost> {
     built
       .flatMap((b, index) =>
         (b.manifest.hooks?.takes ?? [])
-          .filter(take => take.hook.name === hookName)
+          .filter(take => take.hook.name === hookName && validTake(b.manifest.id, take))
           .map(take => {
-            const implKey =
-              take.hook.mode === 'provide' && take.key !== undefined ? `${take.hook.name}:${take.key}` : take.hook.name;
+            const hook = hookOffers.get(hookName) ?? take.hook;
+            const implKey = hook.mode === 'provide' && take.key !== undefined ? `${hook.name}:${take.key}` : hook.name;
             return {
               id: b.manifest.id,
               ...(take.key === undefined ? {} : { key: take.key }),
@@ -376,6 +414,23 @@ async function start(world: World): Promise<TestHost> {
         own(hook.name);
         const taker = hookTakers(hook.name).find(t => t.key === key);
         return taker === undefined || taker.impl === undefined ? 'unavailable' : (taker.impl as never);
+      },
+      declaredProvider(hook, key) {
+        own(hook.name);
+        const declared = (manifest.hooks?.offers ?? []).find(offer => offer.hook.name === hook.name)?.hook;
+        if (declared?.mode !== 'provide' || !declared.key.safeParse(key).success) return undefined;
+        const ids = new Set(
+          options.plugins
+            .filter(
+              plugin =>
+                (declared.takers === undefined || declared.takers.includes(plugin.manifest.id)) &&
+                (plugin.manifest.hooks?.takes ?? []).some(
+                  (take: HookTake) => take.hook.name === declared.name && take.key === key,
+                ),
+            )
+            .map(plugin => plugin.manifest.id),
+        );
+        return ids.size === 1 ? [...ids][0] : undefined;
       },
       providers(hook) {
         own(hook.name);
@@ -499,9 +554,12 @@ async function start(world: World): Promise<TestHost> {
         if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null))
           return { kind: 'conflict' };
         const prior = before === undefined ? undefined : def.schema.safeParse(before);
-        const sentences = judgeLoosening(def, prior?.success === true ? prior.data : undefined, checked.data);
+        const priorValue = prior?.success === true ? prior.data : undefined;
+        // as the real port: a plugin's own write that adds a secret reference is held for the owner, judge or not
+        const added = addedSecretReferenceSentences(priorValue, checked.data);
+        const sentences = [...judgeLoosening(def, priorValue, checked.data), ...added];
         const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
-        if (sentences.length > 0 && !judged(manifest.id, path, false, sentences))
+        if (added.length > 0 || (sentences.length > 0 && !judged(manifest.id, path, false, sentences)))
           return { kind: 'held', etag, id: `${path}@held`, sentences };
         world.config.set(key, def.shape === 'file' ? next : { ...(all ?? {}), [name as string]: next });
         for (const listener of configListeners.get(key) ?? []) listener();
@@ -547,6 +605,13 @@ async function start(world: World): Promise<TestHost> {
     root(name) {
       if (!(manifest.permissions?.roots ?? []).includes(name))
         throw new Error(`${manifest.id}: root ${name} is not declared`);
+      const fileStat = (path: string) => ({
+        kind: 'file' as const,
+        size: (world.roots.get(path) ?? '').length,
+        modified: clock.now(),
+        mode: 0o600,
+        links: 1,
+      });
       const handle: RootHandle = {
         name,
         resolve(relative) {
@@ -558,13 +623,27 @@ async function start(world: World): Promise<TestHost> {
           if (text === undefined) throw new Error(`no such file ${path}`);
           return text;
         },
-        readBytes: async path => new TextEncoder().encode(await handle.readText(path)),
+        readBytes: async (path, limit) => {
+          const bytes = new TextEncoder().encode(await handle.readText(path));
+          if (typeof limit === 'number') return bytes.slice(0, limit);
+          if (limit === undefined) return bytes;
+          if (limit.length > MAX_ROOT_WINDOW_BYTES || limit.offset < 0 || limit.length < 0)
+            throw new Error('the window is out of range');
+          return bytes.slice(limit.offset, limit.offset + limit.length);
+        },
+        readTail: async (path, maxBytes) => {
+          if (maxBytes > MAX_ROOT_WINDOW_BYTES || maxBytes < 0) throw new Error('the tail is out of range');
+          const bytes = new TextEncoder().encode(await handle.readText(path));
+          return { bytes: bytes.slice(Math.max(0, bytes.length - maxBytes)), size: bytes.length };
+        },
         writeText: async (path, text, writeOptions) => {
           if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
+          if (writeOptions?.replaceExisting === true && !world.roots.has(path)) throw new Error(`no such file ${path}`);
           world.roots.set(path, text);
         },
         writeBytes: async (path, bytes, writeOptions) => {
           if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
+          if (writeOptions?.replaceExisting === true && !world.roots.has(path)) throw new Error(`no such file ${path}`);
           world.roots.set(path, new TextDecoder().decode(bytes));
         },
         copyTree: async (_source, from, to, copyOptions) => {
@@ -575,10 +654,9 @@ async function start(world: World): Promise<TestHost> {
         },
         ensurePrivateDirectory: async () => {},
         lstat: async path => {
-          if (world.roots.has(path))
-            return { kind: 'file', size: (world.roots.get(path) as string).length, modified: clock.now() };
+          if (world.roots.has(path)) return fileStat(path);
           return [...world.roots.keys()].some(p => p.startsWith(`${path}/`))
-            ? { kind: 'directory', size: 0, modified: clock.now() }
+            ? { kind: 'directory', size: 0, modified: clock.now(), mode: 0o700, links: 1 }
             : undefined;
         },
         makeDirectory: async () => {},
@@ -589,10 +667,11 @@ async function start(world: World): Promise<TestHost> {
         },
         list: async path =>
           [...world.roots.keys()].filter(p => p.startsWith(`${path}/`)).map(p => p.slice(path.length + 1)),
-        stat: async path =>
-          world.roots.has(path)
-            ? { kind: 'file', size: (world.roots.get(path) as string).length, modified: clock.now() }
-            : undefined,
+        entries: async path =>
+          [...world.roots.keys()]
+            .filter(p => p.startsWith(`${path}/`))
+            .map(p => ({ name: p.slice(path.length + 1), ...fileStat(p) })),
+        stat: async path => (world.roots.has(path) ? fileStat(path) : undefined),
         remove: async path => {
           world.roots.delete(path);
         },
@@ -607,7 +686,7 @@ async function start(world: World): Promise<TestHost> {
   const kernelFor = (manifest: Manifest): KernelPorts => {
     let state = world.states.get(manifest.id);
     if (state === undefined) {
-      state = new MemoryStateFolder();
+      state = new MemoryStateFolder(() => clock.nowMs());
       world.states.set(manifest.id, state);
     }
     const publishes = new Set((manifest.data?.publishes ?? []).map(event => event.name));
@@ -643,7 +722,7 @@ async function start(world: World): Promise<TestHost> {
         async run(program, args, spawnOptions) {
           if (
             !spawnPermitted(
-              effectivePermissions(manifest.core, manifest.permissions?.spawn ?? []),
+              effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
               options.items ?? NO_ITEMS,
               program,
             )
@@ -676,7 +755,7 @@ async function start(world: World): Promise<TestHost> {
           const parsed = new URL(url);
           if (
             !hostPermitted(
-              effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+              effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
               options.items ?? NO_ITEMS,
               parsed.hostname,
               name =>
@@ -701,7 +780,7 @@ async function start(world: World): Promise<TestHost> {
             throw new Error(`${manifest.id}: ${parsed.protocol} is not a WebSocket address`);
           if (
             !hostPermitted(
-              effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+              effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
               options.items ?? NO_ITEMS,
               parsed.hostname,
               name =>
@@ -721,6 +800,26 @@ async function start(world: World): Promise<TestHost> {
       },
       identity,
       paths: Object.freeze({ home: () => options.ownerHome ?? '/home/owner' }),
+      updateHost:
+        manifest.permissions?.updateHost === true && options.updateHost !== undefined
+          ? options.updateHost
+          : undeclaredUpdateHost(manifest.id, options.updateHost?.release ?? '5.0.0'),
+      hostFacts:
+        manifest.permissions?.hostFacts === true && options.hostFacts !== undefined
+          ? options.hostFacts
+          : undeclaredHostFacts(manifest.id, options.hostFacts ?? NO_HOST_FACTS),
+      timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
+      // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in
+      secrets: ownSecretsPort(
+        manifest.permissions?.secrets ?? [],
+        () => {
+          const named = new Set<string>();
+          for (const def of manifest.data?.config ?? [])
+            secretReferencesIn(world.config.get(def.shape === 'file' ? def.file : def.collection), named);
+          return named;
+        },
+        () => (options.vault === undefined ? undefined : { resolve: async name => options.vault?.[name] }),
+      ),
       signer: signerFor(manifest.id, identitySigner),
       act: testActRunner({
         holds: () => holds,
@@ -775,18 +874,25 @@ async function start(world: World): Promise<TestHost> {
           return lookup(options.uses ?? {}, field, token) ?? providedBy.get(token.name);
         },
       };
-    const half = impl.build({
+    const ctx = {
       manifest,
       needs,
       uses,
       kernel: kernelFor(manifest),
       hooks: hooksFor(manifest),
-    } as never) as Record<string, any>;
+    } as DaemonContext<Manifest>;
+    const half = impl.build(ctx as never) as Record<string, any>;
+    bootContexts.set(manifest.id, ctx);
     for (const [field, token] of Object.entries(manifest.provides ?? {}))
       providedBy.set(token.name, half.provides?.[field]);
     built.push({ impl, manifest, half });
   }
   usesBound.done = true;
+  for (const { manifest, half } of built) {
+    const ctx = bootContexts.get(manifest.id);
+    if (ctx !== undefined && half?.beforeListen !== undefined)
+      await beforeListen(() => half.beforeListen(ctx), manifest.id, clock, logFor(manifest.id));
+  }
   const snapshot: PostBuildSnapshot = Object.freeze({
     instructions: [],
     words: built.flatMap(b => (b.manifest.words ?? []).map(word => ({ ...word, plugin: b.manifest.id as never }))),
@@ -1001,7 +1107,14 @@ async function start(world: World): Promise<TestHost> {
         return result;
       }
       const accept = b.half.sockets?.[found.route.key] as SocketAccept;
-      const attach = await accept({ request, params: found.params, ...decision.standing } as CallContext);
+      let attach: Awaited<ReturnType<SocketAccept>>;
+      try {
+        attach = await accept({ request, params: found.params, ...decision.standing } as CallContext);
+      } catch (error) {
+        // as the real dispatcher's upgrade: a refusal the accept named keeps its status and body, anything else a 500
+        result.response = toTestResponse(failureResponse(error));
+        return result;
+      }
       const downstream: SocketDownstream = {
         send(frame, permit) {
           let allowed = true;

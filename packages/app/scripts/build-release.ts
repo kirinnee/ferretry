@@ -13,9 +13,8 @@
  * `packages/app/release-signing-key.pub` and names the release by the repository.
  *
  * Writes three files:
- *   - `sw.verified.js`         the worker (`src/worker/service-worker.ts`) with every plugin worker extension
- *                              (`packages/{core,plugins}/<id>/app/worker.ts`), the committed public
- *                              key, the app's rewrites and its header rules compiled in;
+ *   - `sw.verified.js`         the worker (`src/worker/service-worker.ts`) with the committed public key,
+ *                              the app's rewrites and its header rules compiled in — and no plugin code;
  *   - `release-manifest.json`  every file in `dist/` and the SHA-256 of its bytes;
  *   - `release-manifest.sig`   the UNSIGNED marker. Only `scripts/ci/sign-pwa-release.sh`, holding
  *                              the key, replaces it with a signature.
@@ -26,6 +25,8 @@
  * `docs/pwa-release-signing.md`.
  */
 import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+import { isBuiltin } from 'node:module';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import {
@@ -41,6 +42,7 @@ import {
 } from '../src/release/manifest.ts';
 import { parseReleaseHeaders } from '../src/release/headers.ts';
 import { sha256Base64Url } from '../src/release/verification.ts';
+import type { BunPlugin } from 'bun';
 
 const packageRoot = resolve(import.meta.dir, '..');
 const repositoryRoot = resolve(packageRoot, '../..');
@@ -64,31 +66,63 @@ const listFiles = async (directory: string): Promise<string[]> => {
 const COMMITTED_RELEASE_KEY = join(packageRoot, 'release-signing-key.pub');
 
 /**
- * Every plugin worker extension (`src/worker/extensions.ts`): `packages/core/<id>/app/worker.ts`, then
- * `packages/plugins/<id>/app/worker.ts`, each group by id. Compiled INTO the signed worker, never loaded at run time.
+ * NO PLUGIN CODE RUNS IN THE RELEASE WORKER. Code evaluated in the worker's realm could rewrite the globals the release
+ * check serves through (`Response`, `crypto.subtle`, `caches`, …) before any event arrives, and no list of names can
+ * stop that — so the worker compiles `src/worker/service-worker.ts` and the shell's own modules only, and the build
+ * REFUSES any `packages/{core,plugins}/<id>/app/worker.ts` and any resolved input outside the shell allowlist and zod.
+ * A plugin that needs worker behaviour (push, notification
+ * taps) asks for it as declarative data the worker interprets, through its own contract — later; none does today.
  */
-const workerExtensionFiles = async (): Promise<string[]> => {
+export async function pluginWorkerFiles(root: string): Promise<string[]> {
   const found: string[] = [];
   for (const group of ['packages/core', 'packages/plugins']) {
-    const ids = (await readdir(join(repositoryRoot, group), { withFileTypes: true }))
+    const entries = await readdir(join(root, group), { withFileTypes: true }).catch(() => []);
+    const ids = entries
       .filter(entry => entry.isDirectory())
       .map(entry => entry.name)
       .sort();
     for (const id of ids) {
-      const file = join(repositoryRoot, group, id, 'app/worker.ts');
-      if (await Bun.file(file).exists()) found.push(file);
+      const file = join(root, group, id, 'app/worker.ts');
+      if (await Bun.file(file).exists()) found.push(relative(root, file).split(sep).join('/'));
     }
   }
   return found;
-};
+}
 
-/** The body `src/worker/extension-list.ts` is built with: one import per extension, in that order. */
-const extensionListSource = (files: readonly string[]): string =>
-  [
-    "import type { WorkerExtension } from './extensions.ts';",
-    ...files.map((file, index) => `import extension${index} from ${JSON.stringify(file)};`),
-    `export const workerExtensions: readonly WorkerExtension[] = [${files.map((_, index) => `extension${index}`).join(', ')}];`,
-  ].join('\n');
+/** Fails the build when any plugin ships worker code (see {@link pluginWorkerFiles}). */
+export async function refusePluginWorkers(root: string): Promise<void> {
+  const found = await pluginWorkerFiles(root);
+  if (found.length > 0)
+    fail(
+      `no plugin code may run in the signed service worker; remove ${found.join(', ')} (a plugin needing worker behaviour asks for it as declarative data in its contract)`,
+    );
+}
+
+/** Guard the resolved graph, including transitive imports and symlinks, before any worker bytes are emitted. */
+export function workerInputGuard(root = packageRoot, inputs?: Set<string>): BunPlugin {
+  const app = realpathSync(root);
+  const zod = realpathSync(resolve(Bun.resolveSync('zod/package.json', packageRoot), '..'));
+  const allowed = ['worker', 'release', 'router', 'storage'].map(directory => join(app, 'src', directory) + sep);
+  return {
+    name: 'shell-worker-inputs',
+    setup(build) {
+      build.onResolve({ filter: /.*/u }, args => {
+        if (isBuiltin(args.path) || args.path.startsWith('bun:')) {
+          throw new Error(`no plugin code may run in the signed service worker: refused input ${args.path}`);
+        }
+        return undefined;
+      });
+      build.onLoad({ filter: /.*/u }, args => {
+        const path = realpathSync(args.path);
+        if (!allowed.some(directory => path.startsWith(directory)) && !path.startsWith(zod + sep)) {
+          throw new Error(`no plugin code may run in the signed service worker: refused input ${path}`);
+        }
+        inputs?.add(path);
+        return undefined;
+      });
+    },
+  };
+}
 
 /** The arguments that are neither a `--flag` nor a flag's value. */
 const positionals = (args: readonly string[]): string[] =>
@@ -117,24 +151,14 @@ const buildRelease = async (
   const headers = parseReleaseHeaders(await readFile(join(packageRoot, 'public/_headers'), 'utf8'));
   if (headers.length === 0) fail('public/_headers names no header rules');
 
-  const extensionList = extensionListSource(await workerExtensionFiles());
+  await refusePluginWorkers(repositoryRoot);
   const worker = await Bun.build({
     entrypoints: [join(packageRoot, 'src/worker/service-worker.ts')],
-    plugins: [
-      {
-        name: 'fy-worker-extensions',
-        setup: build => {
-          build.onLoad({ filter: /[\\/]src[\\/]worker[\\/]extension-list\.ts$/u }, () => ({
-            contents: extensionList,
-            loader: 'ts',
-          }));
-        },
-      },
-    ],
     format: 'esm',
     minify: true,
     splitting: false,
     target: 'browser',
+    plugins: [workerInputGuard()],
     define: {
       __FY_RELEASE_KEY__: JSON.stringify(key),
       __FY_RELEASE_REWRITES__: JSON.stringify(rewrites),

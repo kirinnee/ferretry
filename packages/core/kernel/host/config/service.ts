@@ -27,6 +27,7 @@
  * Every load and every write runs one at a time, so two of them can never each decide against a record the other is
  * about to replace.
  */
+import { addedSecretReferenceSentences, secretReferencesIn } from '../secrets.ts';
 import { createHash } from 'node:crypto';
 import { type Duration, milliseconds } from '@ferretry/std';
 import type {
@@ -103,6 +104,11 @@ export interface ConfigWriteOptions {
   readonly judge?: (sentences: readonly string[], removal: boolean) => boolean;
   /** The etag the editor read; a file that moved since is refused `conflict`. */
   readonly ifMatch?: string;
+  /**
+   * The plugin's OWN write (`kernel.config.write`): an edit that adds a `${secret:NAME}` reference is held for the
+   * owner, and neither Gate's judge nor anything else confirms it (NN2). The owner's writer never sets it.
+   */
+  readonly byPlugin?: true;
 }
 
 export type ConfigWriteRefusal = ConfigRefusal | 'not_declared' | 'bad_name' | 'conflict' | 'not_a_mapping';
@@ -196,6 +202,11 @@ export interface ConfigFiles {
   publishSchemas(): Promise<void>;
   /** The writer over every declared file, as Gate receives it (`kernel.configFiles`). */
   writer(): ConfigFilesWriter;
+  /**
+   * Every `${secret:NAME}` the plugin's OWN files name, as they are IN EFFECT (an edit held for the owner names
+   * nothing yet): what `kernel.secrets` checks a name against.
+   */
+  secretReferences(plugin: string): ReadonlySet<string>;
 }
 
 /** A write result as the contract says it: never thrown, `conflict` on its own. */
@@ -497,14 +508,15 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     return {
       file<Shape>(def: ConfigFileDef<Shape>): Shape | undefined {
         own(def);
-        return settled.get(def.file)?.evaluated.value as Shape | undefined;
+        // The settled value is authority (including secret references), never a plugin's mutable object.
+        return structuredClone(settled.get(def.file)?.evaluated.value) as Shape | undefined;
       },
       collection<Shape>(def: ConfigCollectionDef<Shape>): ReadonlyMap<string, Shape> {
         own(def);
         const found = new Map<string, Shape>();
         for (const { slot, evaluated } of settled.values()) {
           if (slot.declaration.def === def && slot.name !== undefined && evaluated.value !== undefined)
-            found.set(slot.name, evaluated.value as Shape);
+            found.set(slot.name, structuredClone(evaluated.value) as Shape);
         }
         return new Map([...found].toSorted(([a], [b]) => a.localeCompare(b)));
       },
@@ -525,6 +537,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       write: async (def, name, edit, writeOptions = {}): Promise<ConfigWriteOutcome> =>
         writeOutcome(
           await write(pluginId, def as ConfigDef, name, edit, {
+            byPlugin: true,
             judge: ownJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
             ...(writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch }),
           }),
@@ -627,10 +640,13 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         };
       const etag = digest(text);
       const before = settled.get(slot.path)?.evaluated.value;
-      const loosens =
-        etag === settled.get(slot.path)?.evaluated.inEffect?.etag ? [] : judgeLoosening(def, before, checked.value);
+      const unchanged = etag === settled.get(slot.path)?.evaluated.inEffect?.etag;
+      const added =
+        unchanged || writeOptions.byPlugin !== true ? [] : addedSecretReferenceSentences(before, checked.value);
+      const loosens = unchanged ? [] : [...judgeLoosening(def, before, checked.value), ...added];
       const confirmed =
-        writeOptions.confirmedLoosening === true || (loosens.length > 0 && askJudge(writeOptions, loosens, false));
+        added.length === 0 &&
+        (writeOptions.confirmedLoosening === true || (loosens.length > 0 && askJudge(writeOptions, loosens, false)));
       if (loosens.length === 0 || confirmed) acknowledge(slot.path, text);
       await fs.writeAtomic(absolute, text, PRIVATE_FILE_MODE);
       await load();
@@ -795,6 +811,12 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     write,
     remove,
     read,
+    secretReferences: plugin => {
+      const named = new Set<string>();
+      for (const entry of settled.values())
+        if (entry.slot.declaration.plugin === plugin) secretReferencesIn(entry.evaluated.value, named);
+      return named;
+    },
     held: () => heldOf(settled),
     confirm,
     discard,

@@ -1,3 +1,4 @@
+import type { SecretsPort } from './secrets.ts';
 import type { Duration, Instant, Result } from '@ferretry/std';
 import type { ActRunner, OpaqueId } from './act.ts';
 import type { ChildEnvironment, FencedPath, FolderRefusal, Redaction } from './bound.ts';
@@ -30,6 +31,17 @@ export interface KernelPorts {
   readonly identity: IdentityPort;
   /** Read-only facts about where things are on this machine (daemon halves only; never on the app or CLI contexts). */
   readonly paths: PathsPort;
+  /** Read-only facts about this machine from `/proc` and `/sys`; only for a manifest with `permissions.hostFacts`. */
+  readonly hostFacts: HostFactsPort;
+  /** The running build and its self-update launch; only for a manifest with `permissions.updateHost` (Updates). */
+  readonly updateHost: UpdateHostPort;
+  /**
+   * The daemon's time-bound rules as this boot runs them: the shipped numbers, or `FYD_TEST_TIMINGS`'s shorter ones
+   * (R247). Read-only; Access's idle expiry counts in `idleDayMs`.
+   */
+  readonly timings: DaemonTimings;
+  /** This plugin's OWN secrets, for its own daemon-side use: declared, named by its own config, known to the Vault. */
+  readonly secrets: SecretsPort;
   /**
    * The daemon identity's fixed-label signatures (claim, tunnel, catalog), each refused unless this plugin is the
    * one allowed it (`sign`/`signTunnel`: Connections; `signCatalog`: Catalogs). No key export, no raw signing.
@@ -154,8 +166,25 @@ export interface StatePort {
     options: { readonly maxBytes: number; readonly name?: string },
   ): Promise<JsonlRecords<Shape>>;
   list(file: StateFileDef): Promise<readonly string[]>;
+  /** Own opaque named trees only. Metadata of the entry itself via lstat; a symlink is never followed. */
+  stat(
+    file: StateFileDef,
+    name: string,
+  ): Promise<{ readonly kind: 'file' | 'directory' | 'symlink'; readonly modifiedMs: number } | undefined>;
+  /** Own opaque named trees only. Plain rmdir: never recursive, refuses links and nonempty directories. */
+  removeEmptyDirectory(file: StateFileDef, name: string): Promise<void>;
+  /** Own opaque named trees only. Exclusive mkdir, mode 0700; any existing entry is refused. */
+  createPrivateDirectory(file: StateFileDef, name: string): Promise<void>;
   remove(file: StateFileDef, name?: string): Promise<void>;
   sqlite(file: StateFileDef, name?: string): SqliteHandle;
+  /**
+   * The absolute path of one of THIS plugin's own declared `opaque` state files (today's `tmux.sock` under
+   * `state/terminals/`), for a child that makes or opens the file itself. An opaque def whose path ends `/*` is a
+   * NAMED TREE: its name may be path-safe segments (`F12/turns/turn-001.md`, today's Conversation files), written
+   * with `write` and handed on by this path. Any other store, or an undeclared file,
+   * throws: a path is never handed out for a file the port reads and writes, nor for another plugin's.
+   */
+  pathOf(file: StateFileDef, name?: string): string;
   /** Whether this subsystem is damaged, and which files. */
   damaged(): readonly StateDamage[];
 }
@@ -306,6 +335,10 @@ export interface RootStat {
   readonly kind: 'file' | 'directory';
   readonly size: number;
   readonly modified: Instant;
+  /** POSIX permission bits (`& 0o7777`), so a copy or a replace can keep them. */
+  readonly mode: number;
+  /** Hard links to the object: a file with more than one may be a file from anywhere and is never read or copied. */
+  readonly links: number;
 }
 
 /** What is AT a name, the leaf not followed: a link is reported as a `symlink`, never as what it points at. */
@@ -313,13 +346,43 @@ export interface RootLstat {
   readonly kind: 'file' | 'directory' | 'symlink' | 'other';
   readonly size: number;
   readonly modified: Instant;
+  /** POSIX permission bits (`& 0o7777`) of the leaf itself. */
+  readonly mode: number;
+  /** Hard links to the leaf itself. */
+  readonly links: number;
 }
+
+/** One name in a folder, as `RootHandle.entries` lists it: the leaf as it is, never followed. */
+export interface RootEntry extends RootLstat {
+  readonly name: string;
+}
+
+/** `RootHandle.readBytes` with a window: `length` bytes from `offset`; fewer at the end of the file. */
+export interface RootReadWindow {
+  readonly offset: number;
+  readonly length: number;
+}
+
+/** `RootHandle.readTail`: the bytes, and the file's size when they were read. */
+export interface RootTail {
+  readonly bytes: Uint8Array;
+  readonly size: number;
+}
+
+/** The longest window or tail one root read returns (today's rollout tail is 256 KiB). */
+export const MAX_ROOT_WINDOW_BYTES = 4 * 1024 * 1024;
 
 export interface RootWriteOptions {
   /** POSIX mode of a file this write creates. Default `0o600`. */
   readonly mode?: number;
   /** Create only: refused when anything (a file, a link) is already at the name; never follows a link. */
   readonly exclusive?: boolean;
+  /**
+   * Replace an EXISTING regular file only, never through a link (today's MCP project-file replace, O_NOFOLLOW):
+   * refused when nothing, a link or anything but a regular file is at the name. The new file lands atomically
+   * under the name and keeps the old file's mode unless `mode` is given.
+   */
+  readonly replaceExisting?: boolean;
 }
 
 /**
@@ -330,7 +393,16 @@ export interface RootHandle {
   readonly name: RootName;
   resolve(relative: string): Result<FencedPath, FolderRefusal>;
   readText(path: FencedPath, limitBytes?: number): Promise<string>;
-  readBytes(path: FencedPath, limitBytes?: number): Promise<Uint8Array>;
+  /**
+   * The whole file (up to `limitBytes`), or, with a {@link RootReadWindow}, `length` bytes from `offset` (today's
+   * Codex rollout index head window). A window longer than {@link MAX_ROOT_WINDOW_BYTES} is refused.
+   */
+  readBytes(path: FencedPath, limitOrWindow?: number | RootReadWindow): Promise<Uint8Array>;
+  /**
+   * The last `maxBytes` of a file (at most {@link MAX_ROOT_WINDOW_BYTES}) and its size, from one open (today's
+   * rollout tail window): fenced exactly as `readBytes`.
+   */
+  readTail(path: FencedPath, maxBytes: number): Promise<RootTail>;
   /** Atomic replace by default; `exclusive` creates only (today's worktree registry write, `wx`). */
   writeText(path: FencedPath, text: string, options?: RootWriteOptions): Promise<void>;
   /** The same, for bytes. */
@@ -344,6 +416,8 @@ export interface RootHandle {
   /** A folder made (or narrowed) to `0700`, refused when a link or a file is at the name. */
   ensurePrivateDirectory(path: FencedPath): Promise<void>;
   list(path: FencedPath): Promise<readonly string[]>;
+  /** The folder's names with each leaf's own kind, size, mode and hard-link count (a link is listed, never entered). */
+  entries(path: FencedPath): Promise<readonly RootEntry[]>;
   stat(path: FencedPath): Promise<RootStat | undefined>;
   /** The leaf's own kind (a link is `symlink`); its parents are resolved and fenced as for every call. */
   lstat(path: FencedPath): Promise<RootLstat | undefined>;
@@ -384,6 +458,11 @@ export interface JobSpec {
   readonly schedule: JobSchedule;
   /** Waits for each named job's first run. */
   readonly after?: readonly string[];
+  /**
+   * `worker`: housekeeping (today's BackgroundLane). It waits until the lane opens (`FYD_BACKGROUND_DELAY_SECONDS`
+   * after the daemon serves, two minutes by default), then runs ONE lane job at a time, handing the loop back between
+   * jobs; a fire while the job already waits queues no second copy. `main` (the default) runs when it fires.
+   */
   readonly lane?: 'main' | 'worker';
   run(signal: AbortSignal): Promise<void>;
 }
@@ -397,9 +476,17 @@ export interface JobsPort {
 
 // workers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** How a worker ended: its exit code, and the uncaught error's message when one ended it. */
+export interface WorkerExit {
+  readonly code: number;
+  readonly reason?: string;
+}
+
 export interface WorkerHandle {
   post(message: unknown, transfer?: readonly ArrayBuffer[]): void;
   onMessage(listener: (message: unknown) => void): Cancel;
+  /** Called once when the worker ends (a crash included), so a dead worker is seen rather than waited on. */
+  onExit(listener: (exit: WorkerExit) => void): Cancel;
   terminate(): Promise<void>;
 }
 
@@ -439,6 +526,11 @@ export interface SpawnOptions {
   readonly signal?: AbortSignal;
   /** Runs inside this ferret's limits. */
   readonly forFerret?: FerretId;
+  /**
+   * `start` only: this many extra pipes beyond stdio 0-2, the child's fds 3, 4, … (today's Chrome launch,
+   * `--remote-debugging-pipe` on 3 and 4). The daemon's ends are {@link ChildHandle.pipes}. At most 4.
+   */
+  readonly extraPipes?: number;
 }
 
 export interface SpawnResult {
@@ -474,6 +566,13 @@ export interface ChildHandle {
   write(chunk: string | Uint8Array): void;
   kill(signal?: string): void;
   readonly exited: Promise<number | null>;
+  /**
+   * The daemon's ends of the {@link SpawnOptions.extraPipes}, in order (the child's fd 3 first); empty without any.
+   * Close-on-exec, so no other child inherits one. Hand them on (a worker's transport) and close with `closePipes`.
+   */
+  readonly pipes: readonly number[];
+  /** Closes the daemon's ends of the extra pipes, once; later calls do nothing. */
+  closePipes(): void;
 }
 
 export interface SpawnPort {
@@ -538,6 +637,112 @@ export interface WebSocketPort {
  * Where the owner's files are, read-only (today's `homedir()`). A name, never a capability: nothing here opens,
  * resolves or reaches a path; reaching one goes through a declared root.
  */
+/** A per-process file under `/proc/<pid>/` (or `/proc/self/`) that `hostFacts.procFile` reads. */
+export type ProcPidFile = 'stat' | 'status' | 'comm' | 'cmdline' | 'cgroup' | 'statm';
+
+/** A machine-wide file under `/proc/` that `hostFacts.procSystemFile` reads. */
+export type ProcSystemFile = 'stat' | 'meminfo' | 'sys/kernel/pid_max' | 'net/tcp' | 'net/tcp6';
+
+/** A cgroup-v2 interface file under `/sys/fs/cgroup/<path>/` that `hostFacts.cgroupFile` reads. */
+export type CgroupFile =
+  | 'cgroup.controllers'
+  | 'cgroup.procs'
+  | 'memory.events'
+  | 'memory.events.local'
+  | 'memory.high'
+  | 'memory.max'
+  | 'memory.swap.max'
+  | 'pids.max'
+  | 'cpu.weight'
+  | 'cpu.max';
+
+/**
+ * The machine reads today's Terminals made through `node:fs` (its interim `adapters/host/fs.ts`), as narrow methods
+ * that each name one kind of file: a pid is a whole number, a descriptor is digits, a cgroup path is plain segments,
+ * and no method takes a free path. Each throws as the read it replaces did (a vanished process, a missing file), so
+ * a caller keeps its own catch.
+ */
+export interface HostFactsPort {
+  /** `process.platform`. */
+  readonly platform: string;
+  /** `os.availableParallelism()`. */
+  readonly cpus: number;
+  /** `os.totalmem()`. */
+  readonly totalMemoryBytes: number;
+  /** The numeric entries of `/proc`. */
+  pids(): Promise<readonly number[]>;
+  procFile(pid: number | 'self', file: ProcPidFile): Promise<string>;
+  procSystemFile(file: ProcSystemFile): Promise<string>;
+  /** `readdir /proc/<pid>/task`. */
+  procTasks(pid: number): Promise<readonly string[]>;
+  /** `/proc/<pid>/task/<task>/children`. */
+  procTaskChildren(pid: number, task: number): Promise<string>;
+  /** `readdir /proc/<pid>/fd`. */
+  procFds(pid: number): Promise<readonly string[]>;
+  /** `readlink /proc/<pid>/fd/<fd>`. */
+  procFdLink(pid: number, fd: string): Promise<string>;
+  /** What `stat /proc/<pid>/fd/<fd>` reaches: whether a character device, and which (`rdev`). */
+  procFdReach(pid: number, fd: string): Promise<{ readonly character: boolean; readonly device: number }>;
+  /** `readlink /proc/<pid>/exe`. */
+  procExecutable(pid: number): Promise<string>;
+  /** `/sys/fs/cgroup/<path>/<file>`; `path` is relative (`''` is the root). */
+  cgroupFile(path: string, file: CgroupFile): Promise<string>;
+  /** `readdir /sys/fs/cgroup/<path>`. */
+  cgroupChildren(path: string): Promise<readonly string[]>;
+  /**
+   * A block device's I/O scheduler (`/sys/dev/block/<major>:<minor>`, resolved; a partition reads its parent
+   * disk's `queue/scheduler`): the device's name and the file's text.
+   */
+  blockScheduler(major: number, minor: number): Promise<{ readonly device: string; readonly scheduler: string }>;
+}
+
+/** What the running daemon executable is (today's update install facts seams). */
+export interface ExecutableFacts {
+  /** `process.argv0`: the path the daemon was launched as (a link the install made, often). */
+  readonly argv0: string;
+  /** `process.execPath`: the executable itself. */
+  readonly execPath: string;
+  /** `execPath` with every link resolved; `execPath` itself when it cannot be resolved. */
+  readonly resolvedExecPath: string;
+  /** `Bun.main`: `/$bunfs/…` inside a compiled binary, a source file otherwise. */
+  readonly main: string;
+  readonly workingDirectory: string;
+  readonly platform: string;
+}
+
+export type UpdateLaunchOutcome = { readonly kind: 'started' } | { readonly kind: 'failed'; readonly reason: string };
+
+/**
+ * The daemon's own update seam (today's `DaemonUpdateService` host parts): the release this build carries, what the
+ * running executable is, and one launch: `<client> daemon update --yes --to <target> --report <report>` (the verb is
+ * the host's `UPDATE_LAUNCH_VERB`), detached in
+ * its own process group so it survives the daemon's restart, its output appended to the plugin's `update.log` and
+ * its report written to the plugin's `report.json` (both in the plugin's own state folder). No other command.
+ */
+export interface UpdateHostPort {
+  /** The release number this build carries. */
+  readonly release: string;
+  /** Whether this is a compiled release (a source run has no release to compare with). */
+  readonly compiled: boolean;
+  executable(): Promise<ExecutableFacts>;
+  /** `target` is a release number (`5.1.0`, `v5.1.0-rc.1`); anything else is refused without a launch. */
+  launchUpdate(target: string): Promise<UpdateLaunchOutcome>;
+}
+
+/** A session's lease, its renewal lead and its cap, in milliseconds. */
+export interface LeaseTimings {
+  readonly leaseMs: number;
+  readonly renewLeadMs: number;
+  readonly maxSessionMs: number;
+}
+
+/** The daemon's time-bound rules (`kernel.timings`). */
+export interface DaemonTimings {
+  readonly lease: LeaseTimings;
+  /** How long one idle day is: the unit `idleExpiryDays` counts in. */
+  readonly idleDayMs: number;
+}
+
 export interface PathsPort {
   /** The owner's home directory as the OS reports it (Accounts orders sign-ins by work folders under it, I184). */
   home(): string;

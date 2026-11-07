@@ -24,9 +24,7 @@ export const processes: SpawnPort = {
   run: async () => {
     throw new Error('test does not use run');
   },
-  runBytes: async () => {
-    throw new Error('test does not use runBytes');
-  },
+  runBytes: () => Promise.reject(new Error('the fixture runs no bytes')),
   start: (program, args, options) => {
     const child = Bun.spawn([program, ...args], {
       env:
@@ -44,6 +42,8 @@ export const processes: SpawnPort = {
     });
     return {
       pid: child.pid,
+      pipes: [],
+      closePipes: () => undefined,
       stdout: child.stdout,
       stderr: child.stderr,
       write: chunk => {

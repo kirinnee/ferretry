@@ -8,7 +8,6 @@ a plugin's app half, read from the generated surfaces registry (`src/generated/s
 | ----------------------- | ----------------------------------------------------------------------------- |
 | `@ferretry/app`         | the public API: connect interface, client types, layout, slots, theme, refs   |
 | `@ferretry/app/ui`      | the shared UI kit (primitives, sheet, menu, tabs, picker, command bar, hooks) |
-| `@ferretry/app/worker`  | the service-worker extension point                                            |
 | `@ferretry/app/testing` | fakes for the connect interface                                               |
 
 ## Reaching a daemon: what Access and Connections provide
@@ -27,7 +26,8 @@ export default provideToShell(implementApp(manifest, { build }), {
 
 - **`DeviceClaims`** (Access): `claim(daemon)` answers the `device` session claim (the non-extractable key handle, from
   `ports.crypto.deviceKeyHandle`) or `undefined`; `pairingKey(daemonId)` answers the key a `pair` session registers;
-  `forget(daemonId)` drops the key when the pairing is removed.
+  `forget(daemonId)` drops the key when the pairing is removed. `pairingKey` returns a memory-only key; persist it
+  only inside its `save`, after validating the response.
 - **`CarrierDialer`** (Connections): `{ id, order, dial(daemon) }`; the lowest `order` that answers a dial carries the
   session. With no carrier registered the shell dials the pairing's address directly.
 - **`ConnectPorts`** is everything a provider may touch, bound once in `src/main.tsx`: the session crypto, WebCrypto,
@@ -59,29 +59,15 @@ re-copying: `Button`, `Badge`, `Card`, `BottomSheet`, `ContextMenu`, `SheetTabs`
 (`src/ui/design-system.css`) and Tailwind are loaded once by the shell; `tailwind.config.ts` scans every plugin's
 `app/` for utilities, so a plugin ships no CSS pipeline. A feature's own stylesheet comes with its app half.
 
-## Service-worker extensions
+## The service worker runs no plugin code
 
-A plugin that handles Web Push or notification taps ships `app/worker.ts`:
-
-```ts
-import { defineWorkerExtension } from '@ferretry/app/worker';
-
-export default defineWorkerExtension({
-  id: 'agenda',
-  push: async ({ payload }, scope) => {
-    /* show it */ return true;
-  },
-  notificationClick: async (tap, scope) => {
-    await scope.openWindow('/app/…');
-    return true;
-  },
-});
-```
-
-`scripts/build-release.ts` compiles every `packages/{core,plugins}/<id>/app/worker.ts` into the signed `sw.verified.js`;
-nothing is loaded at run time. An extension gets a narrow scope (notifications, this origin's windows, IndexedDB) and
-never a `fetch`, `install`, `activate` or `message` event, the caches or the registration, so the signed-release rules
-are untouched. A push no extension handles still shows a plain notification.
+`sw.verified.js` (`src/worker/service-worker.ts`) is the signed-release check plus the shell's own push and
+notification handling, copied from today's worker (`src/worker/notifications.ts`): a push is shown plainly, titled for
+the machine whose registration received it, and a tap opens only this site's pages — only that machine's. **No plugin
+code is compiled into it**: code evaluated in the worker's realm could rewrite the globals the release check serves
+through before any event arrives. `scripts/build-release.ts` fails if any `packages/{core,plugins}/<id>/app/worker.ts`
+exists. A plugin that needs worker behaviour asks for it as declarative data the worker interprets, through its own
+contract — later; none does today.
 
 ## Layout
 

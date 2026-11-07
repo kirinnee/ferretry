@@ -20,6 +20,7 @@
  */
 import type { AnyConfigDef as ConfigDef } from './claims.ts';
 import { judgeLoosening } from '../../contract/define.ts';
+import { addedSecretReferenceSentences } from '../secrets.ts';
 import { type ConfigIssue, checkConfigText } from './check.ts';
 
 /** What was put into effect for one file: the text, and its etag. */
@@ -128,7 +129,12 @@ export function evaluateConfig(input: EvaluateInput): EvaluatedConfig {
   if (!checked.ok) return kept('invalid', previous, checked.issues);
   const etag = input.digest(disk.text);
   if (etag !== previous?.etag) {
-    const sentences = judgeLoosening(def, previous?.value, checked.value);
+    // A file changed on disk that nobody acknowledged (a plugin's own write, a hand edit) and that adds a secret
+    // reference waits for the owner: only an owner-written reference may be resolved by `kernel.secrets` (NN2).
+    const sentences = [
+      ...judgeLoosening(def, previous?.value, checked.value),
+      ...addedSecretReferenceSentences(previous?.value, checked.value),
+    ];
     if (sentences.length > 0) return kept('pending', previous, [], { etag, sentences });
   }
   return {
