@@ -53,6 +53,11 @@ export interface McpLaunchPartsDeps {
  * 4. One `env` part binding each variable to its `${secret:NAME}` reference. The Vault opens the references into the
  *    child as it starts, so no part holds a value. Only a token the Vault HOLDS is bound: an unbound reference would
  *    refuse the whole launch over one server nobody signed in to.
+ *
+ * A SIGN-OUT RACING A LAUNCH refuses that launch (accepted; docs/mcp-oauth.md). What is held is sampled here, but the
+ * references are opened only once every `launch.parts` source has answered; a token signed out in between is an
+ * unknown secret then, and the Vault refuses the launch naming the secret, never its value. Today's launch copied the
+ * value early and never refused; resolving a missing reference to "unset" would need a Vault contract change.
  */
 export class McpLaunchParts implements LaunchPartSource {
   constructor(private readonly deps: McpLaunchPartsDeps) {}
