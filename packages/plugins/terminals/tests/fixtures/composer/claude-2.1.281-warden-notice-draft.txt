@@ -1,0 +1,24 @@
+
+  Next steps:
+  - You: register ~/Workspace/personal/ferretry on the Projects page.
+  - Me: retry lizzette later, refile my cards once the project exists, and
+    report the first useful release when U8 (#985) merges.
+
+✻ Crunched for 10s · done 11:41 AM
+
+────────────────────────────────────────────────────────────────────────────────
+❯ [ferretry] The Warden: your card &F91 “U6 GitHub watcher” has nobody on it.
+  It is in Doing, but its ferret :joziah is completed and nothing under it is
+  alive.
+
+  This notice is from Ferretry, not from the owner. You own the card, so pick
+  it up: Resume its ferret (`fy resume mvurrvhm-6973f733`), hand the card to
+  another ferret (`fy task assign F91 <ferret>`), or drop it (`fy task drop
+  F91 --reason "<why>"`).
+────────────────────────────────────────────────────────────────────────────────
+  👤 kirinnee97 │ 🤖 Opus 5.5 │ 📂 ferretry
+  ⏱ 35m │ 📊 51% (510k/1M) │ 💰 $7.67
+  ⏳ 5h 18% │ 📅 wk 63%
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+                                        new task? /clear to save 510.7k tokens
+

@@ -353,12 +353,26 @@
       "name": "@ferretry/plugin-terminals",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/app": "workspace:*",
         "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/core-vault": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
+        "@xterm/addon-fit": "^0.11.0",
+        "@xterm/xterm": "^6.0.0",
+        "lucide-react": "^0.468.0",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
         "zod": "4.4.3",
+      },
+      "devDependencies": {
+        "@happy-dom/global-registrator": "^20.11.1",
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
+        "@types/react-test-renderer": "^19.0.0",
+        "react-test-renderer": "^19.0.0",
+        "should": "^13.2.3",
       },
     },
     "packages/plugins/tidy": {
@@ -783,6 +797,10 @@
     "@typescript/typescript-win32-arm64": ["@typescript/typescript-win32-arm64@7.0.2", "", { "os": "win32", "cpu": "arm64" }, "sha512-Gyl1Vy6OsWesLzmq+EP0Fb7b4Nid5232AvcA2SFcdYreldpNtYFFofPjnt62y9hQy7VTaZp65ICJjuAQRaVcIQ=="],
 
     "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.0.2", "", { "os": "win32", "cpu": "x64" }, "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g=="],
+
+    "@xterm/addon-fit": ["@xterm/addon-fit@0.11.0", "", {}, "sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g=="],
+
+    "@xterm/xterm": ["@xterm/xterm@6.0.0", "", {}, "sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg=="],
 
     "agent-base": ["agent-base@9.0.0", "", {}, "sha512-TQf59BsZnytt8GdJKLPfUZ54g/iaUL2OWDSFCCvMOhsHduDQxO8xC4PNeyIkVcA5KwL2phPSv0douC0fgWzmnA=="],
 
