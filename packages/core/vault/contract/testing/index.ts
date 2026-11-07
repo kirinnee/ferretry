@@ -574,14 +574,191 @@ export const goneTargetAdapter: InputTargetAdapter = {
   type: async () => 'target_gone',
 };
 
+/** What a write is bound to (today's `InputTargetPort.type`, input-requests/ports.ts:143): any change types nothing. */
+export const TERMINAL_BINDINGS = ['pane', 'foreground', 'echo', 'prompt'] as const;
+export const PAGE_BINDINGS = ['document', 'element'] as const;
+export type InputTargetBinding = (typeof TERMINAL_BINDINGS)[number] | (typeof PAGE_BINDINGS)[number];
+
+/** A target the adapter can see and type into now, with a recorder of the writes that reached it. */
+export interface LiveInputTarget {
+  /** Its key; it has one field, `value`. */
+  readonly key: string;
+  /** Changes one binding of the live target, as the world would between the card and the write. */
+  change(binding: InputTargetBinding): void | Promise<void>;
+  /** Writes that reached the live target since the subject was made. */
+  writes(): number;
+}
+
 export interface InputTargetSubject {
   readonly adapter: InputTargetAdapter;
   /** A target key the adapter has never seen. */
   readonly unknownKey: string;
   readonly kind: 'terminal' | 'page';
+  readonly live: LiveInputTarget;
 }
 
-/** What every `input.targets` adapter must do with a target that is not there; tools add their own cases. */
+/** One live-target case: the card's target unchanged, one binding changed, or a grant fill told not to go ahead. */
+export type LiveTargetCase = 'unchanged' | InputTargetBinding | 'proceed-refused';
+
+export const liveTargetCases = (kind: 'terminal' | 'page'): readonly LiveTargetCase[] => [
+  'unchanged',
+  ...(kind === 'terminal' ? TERMINAL_BINDINGS : PAGE_BINDINGS),
+  'proceed-refused',
+];
+
+/**
+ * Runs one live-target case and says what went wrong, or `undefined` when the adapter behaved: an unchanged target is
+ * typed into exactly once; a changed binding or a refused `proceed` types nothing and answers neither `typed` nor
+ * `uncertain`.
+ */
+export async function liveTargetFailure(
+  subject: InputTargetSubject,
+  which: LiveTargetCase,
+): Promise<string | undefined> {
+  const { adapter, kind, live } = subject;
+  const target = { kind, key: live.key } as const;
+  const observed = await adapter.observe('f1' as FerretId, target, [{ id: 'value' }]);
+  if (!observed.ok) return `the live ${kind} could not be observed (${observed.reason})`;
+  if (which !== 'unchanged' && which !== 'proceed-refused') await live.change(which);
+  const typed = await adapter.type(
+    'f1' as FerretId,
+    target,
+    [{ field: 'value', text: 'synthetic-value' }],
+    false,
+    observed.facts,
+    which === 'proceed-refused' ? { proceed: () => false } : undefined,
+  );
+  const writes = live.writes();
+  if (which === 'unchanged')
+    return typed === 'typed' && writes === 1
+      ? undefined
+      : `an unchanged ${kind} answered ${typed} and was written ${writes} times`;
+  return typed !== 'typed' && typed !== 'uncertain' && writes === 0
+    ? undefined
+    : `a ${kind} with ${which} answered ${typed} and was written ${writes} times`;
+}
+
+/** A terminal or page with one live target: observes it, checks every binding before a write, records each write. */
+export class FakeInputTarget implements InputTargetAdapter {
+  readonly masking = 'text' as const;
+  #facts: InputTargetFacts;
+  #writes = 0;
+
+  constructor(
+    readonly kind: 'terminal' | 'page',
+    readonly key = 'live',
+  ) {
+    this.#facts =
+      kind === 'terminal'
+        ? {
+            kind: 'terminal',
+            paneProof: { paneId: '%1', pid: 100 },
+            foreground: { pid: 200, pgid: 200, comm: 'sudo', argv: 'sudo true' },
+            echo: 'off',
+            cursorRow: 3,
+            promptLine: 'Password:',
+            promptLineDigest: 'a'.repeat(64),
+            recognisedConsumer: true,
+          }
+        : {
+            kind: 'page',
+            pageId: key,
+            origin: 'https://example.test',
+            secure: true,
+            navigationId: 'n1',
+            fields: [
+              {
+                fieldId: 'value',
+                frameOrigin: 'https://example.test',
+                frameId: 'frame-1',
+                backendNodeId: 10,
+                field: { tag: 'input', type: 'password' },
+                box: { x: 0, y: 0, w: 100, h: 20 },
+                visible: true,
+              },
+            ],
+          };
+  }
+
+  /** The `live` fixture for this adapter. */
+  get live(): LiveInputTarget {
+    return { key: this.key, change: binding => this.change(binding), writes: () => this.#writes };
+  }
+
+  change(binding: InputTargetBinding): void {
+    const facts = this.#facts;
+    if (facts.kind === 'terminal') {
+      if (binding === 'pane') this.#facts = { ...facts, paneProof: { paneId: '%2', pid: 101 } };
+      if (binding === 'foreground')
+        this.#facts = { ...facts, foreground: { pid: 300, pgid: 300, comm: 'bash', argv: 'bash' } };
+      if (binding === 'echo') this.#facts = { ...facts, echo: 'on' };
+      if (binding === 'prompt') this.#facts = { ...facts, promptLine: '$', promptLineDigest: 'b'.repeat(64) };
+    } else if (facts.kind === 'page') {
+      if (binding === 'document') this.#facts = { ...facts, navigationId: 'n2' };
+      if (binding === 'element')
+        this.#facts = {
+          ...facts,
+          fields: facts.fields.map(field => ({ ...field, backendNodeId: field.backendNodeId + 1 })),
+        };
+    }
+  }
+
+  async observe(_ferret: FerretId, target: { readonly kind: string; readonly key: string }) {
+    return target.kind === this.kind && target.key === this.key
+      ? { ok: true as const, facts: this.#facts }
+      : { ok: false as const, reason: 'target_gone' as const };
+  }
+
+  async type(
+    _ferret: FerretId,
+    target: { readonly kind: string; readonly key: string },
+    _values: readonly { readonly field: string; readonly text: string }[],
+    _submit: boolean,
+    expected: InputTargetFacts,
+    options?: { readonly proceed?: () => boolean },
+  ) {
+    if (target.kind !== this.kind || target.key !== this.key) return 'target_gone' as const;
+    if (!sameBindings(this.#facts, expected)) return 'target_changed' as const;
+    if (options?.proceed !== undefined && !options.proceed()) return 'target_changed' as const;
+    this.#writes += 1;
+    return 'typed' as const;
+  }
+}
+
+/** Whether every binding of `now` matches what the card showed: pane, foreground, echo, prompt; document, element. */
+function sameBindings(now: InputTargetFacts, expected: InputTargetFacts): boolean {
+  if (now.kind === 'terminal' && expected.kind === 'terminal')
+    return (
+      JSON.stringify(now.paneProof) === JSON.stringify(expected.paneProof) &&
+      JSON.stringify(now.foreground) === JSON.stringify(expected.foreground) &&
+      now.echo === expected.echo &&
+      now.cursorRow === expected.cursorRow &&
+      now.promptLineDigest === expected.promptLineDigest
+    );
+  if (now.kind === 'page' && expected.kind === 'page')
+    return (
+      now.pageId === expected.pageId &&
+      now.origin === expected.origin &&
+      now.navigationId === expected.navigationId &&
+      now.fields.length === expected.fields.length &&
+      now.fields.every((field, at) => {
+        const was = expected.fields[at];
+        return (
+          was !== undefined &&
+          field.fieldId === was.fieldId &&
+          field.frameId === was.frameId &&
+          field.backendNodeId === was.backendNodeId
+        );
+      })
+    );
+  return false;
+}
+
+/**
+ * What every `input.targets` adapter must do with a target that is not there, and with a live one: typed into once
+ * while every binding holds, never once a binding changed (pane, foreground, echo, prompt; document, element) or a
+ * grant fill's `proceed` says no. Tools add their own cases.
+ */
 export function inputTargetConformance(
   name: string,
   make: () => InputTargetSubject | Promise<InputTargetSubject>,
@@ -637,6 +814,10 @@ export function inputTargetConformance(
       );
       expect(typed === 'target_gone' || typed === 'target_changed').toBe(true);
     });
+    test('a live target is typed into once while its bindings hold, and never once one changes', async () => {
+      const { kind } = await make();
+      for (const which of liveTargetCases(kind)) expect(await liveTargetFailure(await make(), which)).toBeUndefined();
+    });
   });
 }
 
@@ -668,6 +849,7 @@ export class FakeSealedDocuments implements SealedDocumentsApi {
       return name;
     };
     return {
+      names: async () => [...entries().keys()],
       put: async (name, value) => {
         entries().set(named(name), typeof value === 'string' ? new TextEncoder().encode(value) : value.slice());
       },
@@ -698,6 +880,29 @@ export function sealedDocumentsConformance(
   const VALUE = 'rt-test-0123456789abcdef';
   const ENTRY = 'MCP_DOCS_REFRESH' as SealedName;
   describe(`sealed documents conformance: ${name}`, () => {
+    test('names lists exactly this document’s stored names, never values or another plugin’s names', async () => {
+      const { port, mine, theirs, document } = await make();
+      const own = port.open(mine, document);
+      const other = port.open(theirs, document);
+      const bytesName = 'lnk_bytes-1' as SealedName;
+      const otherName = 'OTHER_PLUGIN_ONLY' as SealedName;
+      expect(await own.names()).toEqual([]);
+      await other.put(otherName, 'other-plugin-value');
+      await own.put(ENTRY, VALUE);
+      await own.put(bytesName, new Uint8Array([0, 1, 254, 255]));
+      await own.put(ENTRY, `${VALUE}-rotated`);
+
+      const names = await port.open(mine, document).names();
+      expect([...names].sort()).toEqual([ENTRY, bytesName].sort());
+      expect(names.every(entry => typeof entry === 'string')).toBe(true);
+      expect(JSON.stringify(names).includes(VALUE)).toBe(false);
+      expect(await other.names()).toEqual([otherName]);
+
+      await own.delete(ENTRY);
+      expect(await own.names()).toEqual([bytesName]);
+      await own.delete(bytesName);
+      expect(await own.names()).toEqual([]);
+    });
     test('a plugin puts, gets and deletes its own sealed values', async () => {
       const { port, mine, document } = await make();
       const own = port.open(mine, document);

@@ -81,6 +81,8 @@ export function defineSealedDocument<const Name extends string>(spec: {
 
 /** One plugin's handle on one of its own sealed documents. A failure never carries a value in its message. */
 export interface SealedDocumentHandle {
+  /** Lists only the names stored in this document, never their values. */
+  names(): Promise<readonly SealedName[]>;
   /** Seals `value` (text as UTF-8, or raw bytes) under `name`, replacing what was there. */
   put(name: SealedName, value: string | Uint8Array): Promise<void>;
   /** The value as UTF-8 text, or `undefined` when nothing is sealed under `name`. */

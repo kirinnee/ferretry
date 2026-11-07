@@ -79,6 +79,9 @@ export class KernelSealedDocuments implements SealedDocumentsApi {
           'unreadable',
           `${label} is not a sealed document of format 1 and ${SECRET_CIPHER_ALGORITHM}`,
         );
+      // Today's FileSecretDocumentStore refuses ciphertext without its key before any seal or write.
+      if (Object.keys(parsed.data.entries).length > 0 && (await this.keys.read()) === undefined)
+        throw new SecretStoreError('key_missing', `the vault key is gone, so ${label} cannot be opened`);
       return parsed.data;
     };
 
@@ -125,6 +128,7 @@ export class KernelSealedDocuments implements SealedDocumentsApi {
     };
 
     return {
+      names: async () => Object.keys((await read()).entries),
       put: async (name, value) => {
         named(name);
         await inTurn(async () => {

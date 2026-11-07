@@ -25,6 +25,7 @@
       "version": "5.0.0",
       "dependencies": {
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-layouts": "workspace:*",
         "@ferretry/std": "workspace:*",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",

@@ -99,6 +99,7 @@ describe('sealed documents: scope', () => {
 
     await expect(intruder.get('lnk_one' as SealedName)).rejects.toThrow(/did not declare/u);
     await expect(intruder.delete('lnk_one' as SealedName)).rejects.toThrow(/did not declare/u);
+    await expect(intruder.names()).rejects.toThrow(/did not declare/u);
     expect(await w.port.open(catalogs, LINK_KEYS).get('lnk_one' as SealedName)).toBe('link-key-of-catalogs');
   });
 
@@ -126,6 +127,33 @@ describe('sealed documents: scope', () => {
     expect((await vault.values()).has('MCP_X_REFRESH')).toBe(false);
     expect(text(w.fs, 'vault/vault.json')).toBeUndefined();
   });
+});
+
+describe('sealed documents: D16 a lost key never orphans existing entries', () => {
+  for (const document of [MCP_SECRETS, LINK_KEYS]) {
+    for (const name of ['EXISTING', 'NEW'] as const) {
+      test(`D16 put ${name} refuses key_missing without minting or writing ${document.state.path}`, async () => {
+        const w = world();
+        const own = w.port.open(w.plugin('plugin', document), document);
+        await own.put('EXISTING' as SealedName, 'fixture-existing-value');
+        const before = text(w.fs, `plugin/${document.state.path}`);
+        expect(before).toBeDefined();
+        await w.fs.remove(`${HOME}/state/vault/vault.key`);
+        const ensure = spyOn(w.key, 'ensure');
+        try {
+          await expect(own.put(name as SealedName, 'fixture-new-value')).rejects.toMatchObject({
+            failure: 'key_missing',
+          });
+          expect(ensure).not.toHaveBeenCalled();
+          expect(text(w.fs, 'vault/vault.key')).toBeUndefined();
+          expect(text(w.fs, `plugin/${document.state.path}`)).toBe(before);
+          await expect(own.names()).rejects.toMatchObject({ failure: 'key_missing' });
+        } finally {
+          ensure.mockRestore();
+        }
+      });
+    }
+  }
 });
 
 describe('sealed documents: D16 bytes are today’s', () => {
