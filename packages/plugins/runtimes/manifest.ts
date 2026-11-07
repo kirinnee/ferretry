@@ -1,5 +1,7 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { LoginsPort } from '@ferretry/plugin-logins/contract';
+import { UsagePort } from '@ferretry/plugin-usage/contract';
+import { MOVE_ACCOUNT_SLOT, NEW_FERRET_ACCOUNT_SLOT } from '@ferretry/core-ferrets/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import {
   FerretsPort,
@@ -17,8 +19,8 @@ import {
 
 /**
  * Runtimes (§2.3): named ways to start a ferret (a login plus a profile), profiles, model sets, the first-run scan and
- * the Clone export. Route paths follow §3.2 (`/v1/<id>/…`): today's `/v1/fleet/…` and `/v1/recommend` moved under
- * `/v1/runtimes/…`, descriptors copied from `lib/runtime/mounts/{fleet-catalog,fleet-setup,recommend}.ts`.
+ * the Clone export. Route paths follow §3.2 (`/v1/<id>/…`): today's `/v1/fleet/…` moved under `/v1/runtimes/…`,
+ * descriptors copied from `lib/runtime/mounts/{fleet-catalog,fleet-setup}.ts`. `fy recommend` is Packs' verb (D2 #14).
  *
  * The per-ferret runtime model/control routes belong here. Ferrets owns its detail GET; Logins owns sign-in.
  * MCP and skill installs belong to their plugins.
@@ -33,6 +35,8 @@ export default definePlugin({
   words: RUNTIMES_WORDS,
 
   needs: { ferrets: FerretsPort, logins: LoginsPort },
+  // Optional (§2.4): the account picker shows each runtime's quota from Usage's feed. Usage off = the picker without quota.
+  uses: { usage: UsagePort },
   provides: { runtimes: RuntimesPort },
 
   actions: {
@@ -165,14 +169,6 @@ export default definePlugin({
         audit: { skip: "records timestamps of secret names only; not on today's audit table" },
         guard: { none: 'counts only' },
       }),
-      // ── the recommender (recommend.ts): no capability today; it names every login, so `operator` ───────────────────
-      route('POST /v1/recommend', {
-        minimum: 'operator',
-        caller: 'any',
-        noStore: true,
-        audit: { skip: 'a read: it starts nothing' },
-        guard: { none: 'logins, models and reasons; no pane text' },
-      }),
     ],
     cli: [
       verb('runtime ls', { summary: 'the runtimes on this machine: a sign-in plus a profile' }),
@@ -187,13 +183,12 @@ export default definePlugin({
       verb('runtime enable', { summary: 'switch a disabled runtime back on' }),
       verb('runtime rename', { summary: 'give a runtime a new name; nothing restarts' }),
       verb('runtime rm', { summary: 'remove a runtime' }),
-      verb('runtime import', {
-        summary: "import one harness's own sign-in and setup, with no questions (for scripts)",
+      verb('runtime link', {
+        summary: "link one harness's own sign-in and setup as a runtime, with no questions (for scripts)",
       }),
       verb('runtime scan', {
         summary: 'what the first run would find: each harness, its sign-in, instructions, settings, servers and skills',
       }),
-      verb('recommend', { summary: 'which sign-in and model should take one task, and why' }),
       verb('profile ls', { summary: 'the profiles on this machine, each with its scope' }),
       verb('profile show', { summary: 'one profile: its layers, overrides and where it is used' }),
       verb('profile build', { summary: 'build a new profile from layers' }),
@@ -227,8 +222,13 @@ export default definePlugin({
       settingsTab('profiles', { label: 'Profiles', order: 11 }),
       settingsTab('model-sets', { label: 'Model sets', order: 12 }),
     ],
-    // The runtime picker above the composer (today's runtime controls on a new ferret).
-    panels: [panel('composer.tools', { id: 'runtime-picker', order: 10 })],
+    // The model and effort switches above the composer, and the account picker (with its health and quota) that
+    // Ferrets' new-ferret and move pages OFFER as slots: Runtimes contributes, Ferrets imports nothing of it.
+    panels: [
+      panel('composer.tools', { id: 'runtime-picker', order: 10 }),
+      panel(NEW_FERRET_ACCOUNT_SLOT, { id: 'new-ferret-account', order: 10 }),
+      panel(MOVE_ACCOUNT_SLOT, { id: 'move-account', order: 10 }),
+    ],
   },
 
   data: {

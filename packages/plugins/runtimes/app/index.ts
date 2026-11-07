@@ -1,19 +1,22 @@
 import type { AppComponent, PanelProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
-import type { RuntimesClient } from './lib/client.ts';
+import type { LiveRuntimesClient, RuntimesClient } from './lib/client.ts';
 import { lazyComponent } from './lazy.ts';
 
-type ViewName = 'runtimes-settings' | 'profiles-settings' | 'model-sets-settings' | 'runtime-picker';
+type SettingsView = 'runtimes-settings' | 'profiles-settings' | 'model-sets-settings';
 
 /**
- * A view module (React), loaded on first use. The specifier is a Vite dynamic-import variable (`./views/*.tsx`), which
- * is also why the type-checker, which has no React in this workspace yet, does not follow it into the views.
+ * A view module (React), loaded on first use. The specifier is a Vite dynamic-import variable (`./views/*.tsx`).
  */
-const loadView = (name: ViewName): Promise<Record<string, unknown>> => import(`./views/${name}.tsx`);
+const loadView = (name: SettingsView | 'runtime-picker' | 'account-picker-panels'): Promise<Record<string, unknown>> =>
+  import(`./views/${name}.tsx`);
 
-const settingsView = (name: ViewName): AppComponent<SettingsProps> =>
-  lazyComponent<SettingsProps>(async () => (await loadView(name)).default as AppComponent<SettingsProps>);
+/** A Settings tab: its module exports `create…(client)`, called once the tab is first drawn. */
+const settingsView = (name: SettingsView, factory: string, client: LiveRuntimesClient): AppComponent<SettingsProps> =>
+  lazyComponent<SettingsProps>(async () =>
+    ((await loadView(name))[factory] as (client: LiveRuntimesClient) => AppComponent<SettingsProps>)(client),
+  );
 
 const pickerView = (client: RuntimesClient): AppComponent<PanelProps> =>
   lazyComponent<PanelProps>(async () =>
@@ -22,18 +25,33 @@ const pickerView = (client: RuntimesClient): AppComponent<PanelProps> =>
     ),
   );
 
+const accountPanel = (
+  client: LiveRuntimesClient,
+  factory: 'createNewFerretAccountPanel' | 'createMoveAccountPanel',
+): AppComponent<PanelProps> =>
+  lazyComponent<PanelProps>(async () =>
+    ((await loadView('account-picker-panels'))[factory] as (client: LiveRuntimesClient) => AppComponent<PanelProps>)(
+      client,
+    ),
+  );
+
 /**
- * Runtimes' app half: the three Settings tabs (`runtimes`, `profiles`, `model-sets`) and the runtime picker above the
- * composer. The views are React and load on first use (`./lazy.ts`), so this module imports no React and stays
- * loadable by the registry generator before the app shell, which owns React, is in place.
+ * Runtimes' app half: the three Settings tabs (`runtimes`, `profiles`, `model-sets`), the runtime picker above the
+ * composer, and the account picker it contributes to the two slots Ferrets' new-ferret and move pages offer. The views
+ * are React and load on first use (`./lazy.ts`), so this module imports no React and stays loadable by the registry
+ * generator before the app shell, which owns React, is in place.
  */
 export default implementApp(manifest, {
   build: ({ client }) => ({
     settings: {
-      runtimes: settingsView('runtimes-settings'),
-      profiles: settingsView('profiles-settings'),
-      'model-sets': settingsView('model-sets-settings'),
+      runtimes: settingsView('runtimes-settings', 'createRuntimesSettings', client),
+      profiles: settingsView('profiles-settings', 'createProfilesSettings', client),
+      'model-sets': settingsView('model-sets-settings', 'createModelSetsSettings', client),
     },
-    panels: { 'runtime-picker': pickerView(client) },
+    panels: {
+      'runtime-picker': pickerView(client),
+      'new-ferret-account': accountPanel(client, 'createNewFerretAccountPanel'),
+      'move-account': accountPanel(client, 'createMoveAccountPanel'),
+    },
   }),
 });
