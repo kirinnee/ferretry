@@ -1,6 +1,9 @@
+import { afterAll, mock } from 'bun:test';
+import { fileURLToPath } from 'node:url';
 import type { ReactNode } from 'react';
 import { config } from '@ferretry/kernel/host';
 import type { ConfigFiles } from '../../../app/lib/pack-config.ts';
+import * as realUiModule from '../../../app/ui.ts';
 import { clockAt } from './timers.ts';
 
 /**
@@ -9,6 +12,27 @@ import { clockAt } from './timers.ts';
  * A suite installs them with `mock.module('<path to app/ui.ts>', () => uiDoubles)` before importing the component.
  */
 type Props = Record<string, unknown> & { readonly children?: ReactNode };
+
+/**
+ * What `app/ui.ts` really exports, copied the moment this support file first loads. `mock.module` replaces a module for
+ * the whole bun process (the unit tier runs every package's files in one), so the real exports are gone once ANY suite
+ * has installed its doubles; a suite that reads the real seam afterwards (the parity suite) would be handed the
+ * doubles. Every suite that mocks the seam goes through {@link mockUi}, which imports this file before it mocks
+ * anything, so the copy is always the real one.
+ */
+const realUi: object = { ...realUiModule };
+const UI_SEAM = fileURLToPath(new URL('../../../app/ui.ts', import.meta.url));
+
+/**
+ * Installs `doubles` in place of the app shell's seam (`app/ui.ts`) for the calling suite, and puts the real seam
+ * back when that suite's tests are done, so the next suite in the process finds the module as it ships.
+ */
+export const mockUi = (doubles: object = uiDoubles): void => {
+  mock.module(UI_SEAM, () => doubles);
+  afterAll(() => {
+    mock.module(UI_SEAM, () => realUi);
+  });
+};
 
 export const uiDoubles = {
   Badge: ({ tone, children, ...rest }: Props): ReactNode => (

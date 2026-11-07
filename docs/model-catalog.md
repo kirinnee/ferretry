@@ -197,7 +197,7 @@ reads.
 
 **Switches.** `FY_MODEL_CATALOG=off` follows no published catalog; `FY_MODEL_CATALOG_ORIGIN=<origin>`
 reads it from another origin (a self-hosted app built from this repository). Every test tier runs with
-`FY_MODEL_CATALOG=off`, `FY_LOCAL_MODELS=off`, `FY_RELAY_DIRECTORY_ORIGIN=off` and `FY_UPDATE_CHECK=off` (`packages/daemon/tests/support/offline-environment.ts`,
+`FY_MODEL_CATALOG=off`, `FY_LOCAL_MODELS=off`, `FY_RELAY_DIRECTORY_ORIGIN=off` and `FY_UPDATE_CHECK=off` (**declared GAP:** the Updates plugin does not honour `FY_UPDATE_CHECK` on 5.0 yet — a kernel item, see [updating.md](updating.md) — so for that check the switch is a request, not yet a guarantee) (`packages/daemon/tests/support/offline-environment.ts`,
 preloaded by each `bunfig.*.toml`), and refuses any in-process fetch to a Ferretry-hosted origin or GitHub's release API.
 
 ### How to update the model list

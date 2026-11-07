@@ -1,13 +1,13 @@
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 import { InstantSchema } from '@ferretry/std';
 import type { FerretPackPatchResult } from '../../../../../contract/index.ts';
 import type { PacksClient } from '../../../../../app/lib/client.ts';
 import { type Mounted, mount, must } from '../../../support/dom.ts';
 import { click, waitFor, waitForText } from '../../../support/learning-dom.ts';
-import { uiDoubles } from '../../../support/ui-doubles.tsx';
+import { mockUi } from '../../../support/ui-doubles.tsx';
 
-mock.module('../../../../../app/ui.ts', () => uiDoubles);
+mockUi();
 const { PackNote, PackSwitchRow, usePackFerretSwitch } = await import(
   '../../../../../app/features/pack/pack-ferret-switch.tsx'
 );

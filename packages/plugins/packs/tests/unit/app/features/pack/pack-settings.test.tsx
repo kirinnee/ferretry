@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { DEFAULT_PACK_CONFIG, type PackView } from '../../../../../contract/index.ts';
 import type { MachinePack, PackRead, PackSave } from '../../../../../app/features/pack/use-machine-pack.ts';
 import type { PacksClient } from '../../../../../app/lib/client.ts';
@@ -6,9 +6,9 @@ import type { PackConfigPatch } from '../../../../../app/lib/pack/pack-files.ts'
 import { type Mounted, mount, must } from '../../../support/dom.ts';
 import { byText, click, textOf, typeInto, waitFor, waitForText } from '../../../support/learning-dom.ts';
 import { IDLE_ROUTING_API, PACK_VIEW } from '../../../support/pack.ts';
-import { uiDoubles } from '../../../support/ui-doubles.tsx';
+import { mockUi, uiDoubles } from '../../../support/ui-doubles.tsx';
 
-mock.module('../../../../../app/ui.ts', () => uiDoubles);
+mockUi();
 const { PACK_SETTINGS_TAB, PackSettingsSurface } = await import('../../../../../app/features/pack/pack-settings.tsx');
 
 const client = { call: () => new Promise(() => undefined) } as unknown as PacksClient;
