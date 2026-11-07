@@ -1,0 +1,136 @@
+import { afterEach, describe, expect, it } from 'bun:test';
+import type { ToTestAnswers } from '../../../../app/features/agenda/to-test-rows.tsx';
+import { ToTestStep } from '../../../../app/features/agenda/to-test-step.tsx';
+import type { ToTestCard } from '../../../../app/lib/to-test-inbox.ts';
+import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+
+let view: Mounted | null = null;
+afterEach(async () => {
+  await view?.unmount();
+  view = null;
+});
+
+const rowOf = (title: string, taskName: string | null): ToTestCard =>
+  ({
+    key: 'to-test:F1',
+    card: { key: 'F1', daemonId: 'd1', machine: 'Liftoff EC2', task: { id: 'F1', title, shippedIn: null } },
+    group: {},
+    doneLaneId: 'closed',
+    notGoodLaneId: 'implement',
+    howToTest: '1. Try it\n2. Press Done',
+    taskName,
+    since: null,
+    snoozedUntil: null,
+  }) as unknown as ToTestCard;
+
+const answers: ToTestAnswers = {
+  answerFor: () => ({ pressed: null, error: null }) as never,
+  done: () => undefined,
+  notGood: () => undefined,
+  snooze: () => undefined,
+};
+
+const mountStep = async (row: ToTestCard, onNext: () => void = () => undefined): Promise<HTMLElement> => {
+  view = await mount(
+    <ToTestStep
+      answers={answers}
+      index={0}
+      now={undefined}
+      onNavigate={() => undefined}
+      onNext={onNext}
+      onPrevious={undefined}
+      row={row}
+      total={2}
+    />,
+  );
+  return view.container;
+};
+
+const pointer = (type: string, y: number): PointerEvent =>
+  new PointerEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: 100,
+    clientY: y,
+    pointerId: 4,
+    pointerType: 'touch',
+  });
+
+describe('the quick-answer run — the card to test', () => {
+  it('prints the title once when the ferret task has the same name', async () => {
+    const root = await mountStep(rowOf('Secret card program check', 'Secret Card Program Check'));
+    expect(root.querySelector('[data-to-test-ferret]')).toBeNull();
+    expect(root.textContent?.toLowerCase().split('secret card program check').length).toBe(2);
+  });
+
+  it('still names the ferret task when it differs from the title', async () => {
+    const root = await mountStep(rowOf('Try the board', 'Credentials Build Lead'));
+    await interact(() => must(root.querySelector<HTMLElement>('[data-agenda-info-toggle]'), 'the (i)').click());
+    expect(root.querySelector('[data-to-test-ferret]')?.textContent).toBe('Credentials Build Lead');
+  });
+
+  it('skips on a swipe down that starts on the title link, which is most of the head', async () => {
+    const skipped: string[] = [];
+    const root = await mountStep(rowOf('Try the board', null), () => skipped.push('next'));
+    const title = must(root.querySelector<HTMLElement>('[data-to-test-title]'), 'title link');
+    await interact(() => title.dispatchEvent(pointer('pointerdown', 300)));
+    await interact(() => title.dispatchEvent(pointer('pointermove', 340)));
+    await interact(() => title.dispatchEvent(pointer('pointermove', 430)));
+    await interact(() => title.dispatchEvent(pointer('pointerup', 430)));
+    expect(skipped).toEqual(['next']);
+  });
+
+  it('does not skip when the touch was held first: that is the reader selecting text', async () => {
+    const skipped: string[] = [];
+    const root = await mountStep(rowOf('Try the board', null), () => skipped.push('next'));
+    const title = must(root.querySelector<HTMLElement>('[data-to-test-title]'), 'title link');
+    const at = (event: PointerEvent, timeStamp: number): PointerEvent => {
+      Object.defineProperty(event, 'timeStamp', { value: timeStamp });
+      return event;
+    };
+    await interact(() => title.dispatchEvent(at(pointer('pointerdown', 300), 1000)));
+    await interact(() => title.dispatchEvent(at(pointer('pointermove', 340), 1600)));
+    await interact(() => title.dispatchEvent(at(pointer('pointermove', 600), 1700)));
+    await interact(() => title.dispatchEvent(at(pointer('pointerup', 600), 1700)));
+    expect(skipped).toEqual([]);
+  });
+
+  it('skips on a pull down that starts in the steps while the card is at its top: nothing above can scroll', async () => {
+    const skipped: string[] = [];
+    const root = await mountStep(rowOf('Try the board', null), () => skipped.push('next'));
+    const how = must(root.querySelector<HTMLElement>('[data-to-test-how]'), 'steps');
+    await interact(() => how.dispatchEvent(pointer('pointerdown', 300)));
+    await interact(() => how.dispatchEvent(pointer('pointermove', 340)));
+    await interact(() => how.dispatchEvent(pointer('pointermove', 430)));
+    await interact(() => how.dispatchEvent(pointer('pointerup', 430)));
+    expect(skipped).toEqual(['next']);
+  });
+
+  it('does not skip on a swipe down that starts in the steps once the card has scrolled: that is the card scrolling', async () => {
+    const skipped: string[] = [];
+    const root = await mountStep(rowOf('Try the board', null), () => skipped.push('next'));
+    const box = must(root.querySelector<HTMLElement>('.fy-inbox-step'), 'the scroll box');
+    Object.defineProperty(box, 'scrollTop', { value: 120, configurable: true });
+    const how = must(root.querySelector<HTMLElement>('[data-to-test-how]'), 'steps');
+    await interact(() => how.dispatchEvent(pointer('pointerdown', 300)));
+    await interact(() => how.dispatchEvent(pointer('pointermove', 340)));
+    await interact(() => how.dispatchEvent(pointer('pointermove', 430)));
+    await interact(() => how.dispatchEvent(pointer('pointerup', 430)));
+    expect(skipped).toEqual([]);
+  });
+
+  it('shows the place in the run in the head, with no bar of its own', async () => {
+    const root = await mountStep(rowOf('Try the board', null));
+    expect(root.querySelector('[data-card-head] [data-agenda-where]')?.textContent).toBe('1/2');
+    expect(root.querySelector('.fy-inbox-step__bar')).toBeNull();
+  });
+
+  it('has Skip, and the facts behind (i), reachable by keyboard', async () => {
+    const skipped: string[] = [];
+    const root = await mountStep(rowOf('Try the board', null), () => skipped.push('next'));
+    expect(root.querySelector('[data-to-test-skip]')).toBeNull();
+    await interact(() => must(root.querySelector<HTMLElement>('[data-agenda-info-toggle]'), 'the (i)').click());
+    await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-skip]'), 'Skip').click());
+    expect(skipped).toEqual(['next']);
+  });
+});

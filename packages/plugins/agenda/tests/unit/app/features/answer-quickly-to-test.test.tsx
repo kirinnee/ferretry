@@ -1,0 +1,215 @@
+import { afterEach, describe, expect, it } from 'bun:test';
+import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
+import type { ToTestHost } from '../../../../app/features/agenda/to-test-rows.tsx';
+import { toTestCards } from '../../../../app/lib/to-test-inbox.ts';
+import { agendaItem, choices, fakeInbox, InboxHarness, inboxCard } from '../../../support/app/agenda-inbox.tsx';
+import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { boardModelOf, card, flush, laptop } from '../board-support.ts';
+import { fakeActions } from './board-detail-support.tsx';
+import { sendBack, sendBackBox, plainSendBackEditor } from './send-back-support.ts';
+
+const NOW = Date.parse('2026-08-02T12:00:00.000Z');
+
+plainSendBackEditor();
+
+let view: Mounted | null = null;
+afterEach(async () => {
+  await view?.unmount();
+  view = null;
+});
+
+const shipped = { version: '1.2.0', tag: 'v1.2.0', at: '2026-08-01T09:00:00.000Z' };
+
+const rowsOf = async () =>
+  toTestCards(
+    await boardModelOf([
+      card('F22', {
+        laneId: 'tested',
+        title: 'Try the board',
+        shippedIn: shipped,
+        howToTest: '1. Open the Board\n2. Press Done',
+      }),
+      card('F23', { laneId: 'tested', title: 'Second try', shippedIn: { ...shipped, version: '1.1.0' } }),
+    ]),
+  );
+
+const owner = inboxCard(agendaItem('A3', { subject: 'Rebase onto main?', ask: choices('Rebase now', 'Wait') }));
+
+const open = async (
+  options: { readonly agendaCards?: readonly (typeof owner)[]; readonly page?: Partial<AgendaInboxPageProps> } = {},
+) => {
+  const fake = fakeInbox();
+  const rows = await rowsOf();
+  const actions = fakeActions({});
+  const host: ToTestHost = { actions, ports: {}, connectionOf: () => laptop };
+  view = await mount(
+    <InboxHarness
+      cards={options.agendaCards ?? [owner]}
+      fake={fake}
+      reading={false}
+      toTest={rows}
+      render={inbox => (
+        <AgendaInboxPage
+          clock={fake.clock.now}
+          inbox={inbox}
+          now={NOW}
+          onNavigate={() => undefined}
+          phone
+          reducedMotion
+          toTestHost={host}
+          {...options.page}
+        />
+      )}
+    />,
+  );
+  await interact(() => flush());
+  return { root: view.container, actions };
+};
+
+const quick = (root: HTMLElement): HTMLElement =>
+  must(root.querySelector<HTMLElement>('[data-agenda-quick]'), 'Answer quickly');
+const where = (root: HTMLElement): string | null | undefined => root.querySelector('[data-agenda-where]')?.textContent;
+const step = (root: HTMLElement): HTMLElement | null => root.querySelector<HTMLElement>('[data-inbox-open-to-test]');
+const next = (root: HTMLElement): HTMLElement => must(root.querySelector<HTMLElement>('[aria-label^="Next"]'), 'Next');
+const previous = (root: HTMLElement): HTMLElement =>
+  must(root.querySelector<HTMLElement>('[aria-label^="Previous"]'), 'Previous');
+
+describe('Answer quickly — with the cards waiting for a try', () => {
+  it('counts the cards to test with the agenda items', async () => {
+    const { root } = await open();
+    expect(quick(root).querySelector('.fy-inbox-quick__count')?.textContent).toBe('3');
+  });
+
+  it('is offered when only cards to test are waiting', async () => {
+    const { root } = await open({ agendaCards: [] });
+    expect(quick(root).querySelector('.fy-inbox-quick__count')?.textContent).toBe('2');
+  });
+
+  it('deals the agenda items first, then each card to test, numbered through the whole run', async () => {
+    const { root } = await open();
+    await interact(() => quick(root).click());
+    expect(step(root)).toBeNull();
+    expect(where(root)).toBe('1/3');
+    await interact(() => must(root.querySelector<HTMLElement>('[aria-label^="Next"]'), 'Next').click());
+    const second = must(step(root), 'the first card to test');
+    expect(where(root)).toBe('2/3');
+    expect(second.textContent).toContain('Try the board');
+    await interact(() => must(second.querySelector<HTMLElement>('[data-agenda-info-toggle]'), 'the (i)').click());
+    expect(second.textContent).toContain('Shipped in v1.2.0');
+    expect(second.textContent).toContain('How to test');
+    expect(second.textContent).toContain('Open the Board');
+  });
+
+  it('opens on the first card to test when no agenda item waits', async () => {
+    const { root } = await open({ agendaCards: [] });
+    await interact(() => quick(root).click());
+    expect(step(root)?.textContent).toContain('Try the board');
+    expect(where(root)).toBe('1/2');
+  });
+
+  it('steps back to the agenda item and forward to the next card to test', async () => {
+    const { root } = await open();
+    await interact(() => quick(root).click());
+    await interact(() => next(root).click());
+    await interact(() => next(root).click());
+    expect(step(root)?.textContent).toContain('Second try');
+    expect(where(root)).toBe('3/3');
+    await interact(() => previous(root).click());
+    expect(step(root)?.textContent).toContain('Try the board');
+    await interact(() => previous(root).click());
+    expect(step(root)).toBeNull();
+    expect(where(root)).toBe('1/3');
+  });
+
+  it('ends the run after the last card to test, offering the skipped ones', async () => {
+    const { root } = await open({ agendaCards: [] });
+    await interact(() => quick(root).click());
+    await interact(() => next(root).click());
+    await interact(() => next(root).click());
+    expect(root.querySelector('[data-agenda-queue-end]')).not.toBeNull();
+  });
+
+  it('Done on a card to test moves it to the Done lane at once', async () => {
+    const { root, actions } = await open({ agendaCards: [] });
+    await interact(() => quick(root).click());
+    await interact(() => must(step(root)?.querySelector<HTMLElement>('[data-to-test-done]'), 'Done').click());
+    await interact(() => flush());
+    expect(actions.calls).toEqual(['moveTask:["closed"]']);
+  });
+
+  it('Not good asks for a reason, then reopens the card with it', async () => {
+    const { root, actions } = await open({ agendaCards: [] });
+    await interact(() => quick(root).click());
+    await interact(() => must(step(root)?.querySelector<HTMLElement>('[data-to-test-not-good]'), 'Not good').click());
+    const box = sendBackBox(document.body);
+    expect(actions.calls).toEqual([]);
+    await sendBack(box, 'It crashes');
+    expect(actions.calls).toEqual(['moveTask:["implement","It crashes"]']);
+  });
+
+  const touch = (type: string, x: number, y = 300) =>
+    new PointerEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      clientX: x,
+      clientY: y,
+      pointerId: 4,
+      pointerType: 'touch',
+    });
+
+  it('answers by swipe on a phone: right is Done, with the same row as the Inbox list', async () => {
+    const { root, actions } = await open({ agendaCards: [] });
+    await interact(() => quick(root).click());
+    const row = must(root.querySelector<HTMLElement>('[data-to-test]'), 'the row');
+    const grip = must(row.querySelector<HTMLElement>('.fy-totest__top'), 'grip');
+    await interact(() => grip.dispatchEvent(touch('pointerdown', 100)));
+    await interact(() => grip.dispatchEvent(touch('pointermove', 200)));
+    await interact(() => grip.dispatchEvent(touch('pointermove', 400)));
+    expect(row.getAttribute('data-swipe-answer')).toBe('Done');
+    await interact(() => grip.dispatchEvent(touch('pointerup', 400)));
+    await interact(() => flush());
+    expect(actions.calls).toEqual(['moveTask:["closed"]']);
+  });
+
+  it('a swipe down is Skip: it goes to the next card and changes nothing', async () => {
+    const { root, actions } = await open({ agendaCards: [] });
+    await interact(() => quick(root).click());
+    expect(step(root)?.textContent).toContain('Try the board');
+    const row = must(root.querySelector<HTMLElement>('[data-to-test]'), 'the row');
+    const grip = must(row.querySelector<HTMLElement>('.fy-totest__top'), 'grip');
+    await interact(() => grip.dispatchEvent(touch('pointerdown', 100, 300)));
+    await interact(() => grip.dispatchEvent(touch('pointermove', 100, 340)));
+    await interact(() => grip.dispatchEvent(touch('pointermove', 100, 430)));
+    expect(row.querySelector('[data-swipe-compass]')?.getAttribute('data-swipe-reveal')).toBe('down');
+    await interact(() => grip.dispatchEvent(touch('pointerup', 100, 430)));
+    await interact(() => flush());
+    expect(step(root)?.textContent).toContain('Second try');
+    expect(where(root)).toBe('2/2');
+    expect(actions.calls).toEqual([]);
+  });
+
+  it('has a Skip button that does the same as the swipe down', async () => {
+    const { root, actions } = await open({ agendaCards: [] });
+    await interact(() => quick(root).click());
+    await interact(() => must(step(root)?.querySelector<HTMLElement>('[data-agenda-info-toggle]'), 'the (i)').click());
+    await interact(() => must(step(root)?.querySelector<HTMLElement>('[data-to-test-skip]'), 'Skip').click());
+    expect(step(root)?.textContent).toContain('Second try');
+    expect(actions.calls).toEqual([]);
+  });
+
+  it('shows no run when nothing at all is waiting', async () => {
+    const fake = fakeInbox();
+    view = await mount(
+      <InboxHarness
+        cards={[]}
+        fake={fake}
+        reading={false}
+        render={inbox => (
+          <AgendaInboxPage clock={fake.clock.now} inbox={inbox} now={NOW} onNavigate={() => undefined} phone />
+        )}
+      />,
+    );
+    await interact(() => flush());
+    expect(view.container.querySelector('[data-agenda-quick]')).toBeNull();
+  });
+});
