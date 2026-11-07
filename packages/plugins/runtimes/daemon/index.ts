@@ -27,6 +27,7 @@ import {
   RUNTIMES_CONFIG,
   RuntimesChanged,
   RuntimesDefaultChanged,
+  RuntimesLaunchFailed,
   type ApplyOutcome,
   type CatalogInstallChange,
   type ModelSetFile,
@@ -39,6 +40,7 @@ import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from '
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
 import { loginUsers } from './lib/service/login-users.ts';
 import { createRuntimesApi } from './lib/service/runtimes-api.ts';
+import { RuntimeEndSupervision, type RuntimeEndSeams } from './lib/service/runtime-end-supervision.ts';
 import type { FleetSetupService } from './lib/service/setup-service.ts';
 import { ferretRuntimeRoutes } from './routes/ferret-runtime.ts';
 import { fleetCatalogRoutes } from './routes/fleet-catalog.ts';
@@ -70,6 +72,11 @@ export interface RuntimesAssembly {
   >;
   /** Running-ferret model discovery and controls. Pending until Ferrets exposes these operations. */
   readonly runtime?: import('./routes/ferret-runtime.ts').FerretRuntimeSubsystem;
+  /**
+   * What an ended Codex ferret's follow-up stands on: the app-server supervisor, a runtime's published wrapper and the
+   * dead pane's last screen. Absent until the host offers the process and pane seams; the subscriber then does nothing.
+   */
+  readonly ended?: RuntimeEndSeams;
 }
 
 export type RuntimesAssembler = (ctx: DaemonContext<typeof manifest>) => RuntimesAssembly;
@@ -151,6 +158,13 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
         );
       });
 
+      // Ferrets never calls a plugin (§2.1): Runtimes hears that a ferret stopped and looks after its own runtime.
+      const ending = new RuntimeEndSupervision({
+        ferrets: ctx.needs.ferrets,
+        seams: assembly.ended,
+        launchFailed: failure => events.publish(RuntimesLaunchFailed, failure),
+      });
+
       return {
         routes: {
           ...fleetCatalogRoutes(assembly.catalog),
@@ -160,6 +174,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
         provides: { runtimes: api },
         // Logins asks which runtimes use a login before it removes one (`logins.used-by`).
         hooks: { 'logins.used-by:runtimes': loginUsers(() => config.collection(runtimeItems)) },
+        subscribers: { 'ferrets.changed': async change => await ending.onChanged(change) },
       };
     },
   });
