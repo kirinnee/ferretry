@@ -16,6 +16,7 @@ import { assertOwnLoopbackListener } from './daemon/listener-guard.ts';
 import { probeHealth } from './daemon/probe.ts';
 import { readDaemonRunDocument } from './daemon/run-file.ts';
 import { readAdminToken } from './daemon/token-file.ts';
+import { createPluginHost } from './plugin-host.ts';
 import { terminalPrompt } from './terminal/prompt.ts';
 import { buildDaemonController } from './daemon/control.ts';
 import { buildUpdateMachine } from './update/machine.ts';
@@ -100,6 +101,7 @@ export function createWorld(inputs: WorldInputs): CliWorld {
     launch,
     prompt: terminalPrompt,
     readText: path => Bun.file(path).text(),
+    host: createPluginHost({ home }),
     daemon: reads =>
       buildDaemonController(
         {
