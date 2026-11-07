@@ -1,6 +1,6 @@
 /**
- * Daemon settings: v4's JSON daemon documents → the v5 config files that own each key (§9.2: `daemon.json` and
- * `routing.json` are gone in v5, split by owner). The full per-key table is `docs/migration/v4-formats.md` §5a; the
+ * Daemon settings: v4's JSON daemon document → the v5 config files that own each key (§9.2: `daemon.json` is gone in
+ * v5, split by owner; `routing.json` is the Packs step's). The full per-key table is `docs/migration/v4-formats.md` §5a; the
  * short form:
  *
  * | v4                                                   | v5                                                                |
@@ -15,7 +15,7 @@
  * | `daemon.json` `harness.searchPaths`                  | both harness files' `searchPaths`                                 |
  * | `daemon.json` `agenda` (else `attention`) deadline   | `agenda.yaml` `deadlineWarnHours`                                 |
  * | `daemon.json` `analyticsPricing*`                    | the Usage step's (`state/usage/pricing.json`)                     |
- * | everything else, `routing.json`                      | not carried, each with its reason                                 |
+ * | everything else                                      | not carried, each with its reason                                 |
  *
  * SECURITY: the result never allows more than v4 enforced. Every grant axis is written with v4's EFFECTIVE value
  * (`configure` only where `use` is on, v4's rule), so no v5 default is ever relied on; the parsed v5 file is then
@@ -55,7 +55,6 @@ import {
   V4_LOOPBACK,
   V4_MEMBER_UNLOCK_DAYS_DEFAULT,
   V4_OPERATOR_PASSWORD,
-  V4_ROUTING_JSON,
   V4_SECURITY_JSON,
   v4AgendaWindow,
   V4DaemonDocument,
@@ -101,7 +100,7 @@ const RESURFACE_NOT_CARRIED =
 
 const STATIC_NOT_CARRIED: readonly NotCarried[] = [
   {
-    what: 'config/daemon.json and config/routing.json as files',
+    what: 'config/daemon.json as a file',
     why: 'v5 has no daemon document (§9.2); each key goes to its owner or is listed here',
   },
   {
@@ -379,11 +378,7 @@ async function buildPlan(ctx: StepContext): Promise<Plan> {
     if (document[key as keyof V4DaemonDocument] !== undefined)
       plan.dropped.push({ what: `${V4_DAEMON_JSON} ${key}`, why });
 
-  // The owner's routing choices are waited for, not dropped: v5 Packs owns routing (§2 Packs) but declares no config
-  // file or schema yet (packages/plugins/packs is a stub). When it does, accounts[].accountId (runtime uuids) are
-  // re-keyed to runtime names (M7).
-  if (await present(home, V4_ROUTING_JSON))
-    plan.waiting.push(`${V4_ROUTING_JSON} (v5 Packs declares no routing config yet)`);
+  // config/routing.json is the Packs step's (src/steps/packs.ts).
   if (await present(home, V4_OPERATOR_PASSWORD))
     plan.dropped.push({
       what: V4_OPERATOR_PASSWORD,
@@ -436,12 +431,7 @@ export const daemonSettingsStep: Step = {
   id: 'daemon-settings',
   title: 'Daemon settings (grants and security, carriers, harness paths, agenda deadline)',
   owner: ['core-gate', 'plugin-connections', 'plugin-claude-code', 'plugin-codex', 'plugin-agenda'],
-  reads: [
-    V4_DAEMON_JSON,
-    V4_SECURITY_JSON,
-    `${V4_ROUTING_JSON} (lstat only)`,
-    `${V4_OPERATOR_PASSWORD} (lstat only, never opened)`,
-  ],
+  reads: [V4_DAEMON_JSON, V4_SECURITY_JSON, `${V4_OPERATOR_PASSWORD} (lstat only, never opened)`],
   sealed: [],
   notCarried: STATIC_NOT_CARRIED,
   async run(ctx): Promise<StepReport> {
