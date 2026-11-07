@@ -21,7 +21,7 @@ import { renderMachine, installTools, machineSettingsEdit, parseCloneBundle } fr
 import { MACHINE_ROUTES } from '../../src/lib/machine/gateway.ts';
 import { runClone } from '../../src/lib/machine/clone-command.ts';
 import { runChange } from '../../src/lib/machine/change.ts';
-import { type IMachineGateway, type MachineDeps } from '../../src/lib/machine/ports.ts';
+import type { IMachineGateway, MachineDeps } from '../../src/lib/machine/ports.ts';
 import { runFy } from '../../src/lib/run.ts';
 import { CapturedOutput } from './update/support.ts';
 import { fakeWorld, inventoryOf, registryOf, skeletonEntry } from './fakes.ts';

@@ -1,12 +1,12 @@
 import type { ChildHandle, Clock } from '@ferretry/kernel/contract';
-import type { BrowserElementTarget, BrowserScreenshotFormat, BrowserTarget } from '../pages/wire/target.ts';
+import type { BrowserElementTarget, BrowserScreenshotFormat, BrowserTarget } from '../../contract/wire/target.ts';
 import type {
   BrowserInputEvent,
   BrowserPageSnapshot,
   BrowserScreencastFrame,
   BrowserViewport,
-} from '../pages/wire/browser.ts';
-import type { BrowserPageLifecycleReply, BrowserPageLifecycleRequest } from '../pages/wire/page-lifecycle.ts';
+} from '../../contract/wire/browser.ts';
+import type { BrowserPageLifecycleReply, BrowserPageLifecycleRequest } from '../../contract/wire/page-lifecycle.ts';
 import type { CopyElementPart } from '../pages/copy-contracts.ts';
 import { COPY_VALUE_MAX_BYTES } from '../pages/copy-contracts.ts';
 import { BROWSER_COPY_WORKER_METHODS, type BrowserCopyRead } from '../pages/copy-contracts.ts';
@@ -48,7 +48,7 @@ import {
   type WorkerStagedFile,
 } from './protocol.ts';
 import { type FrameClock } from '../stream/contracts.ts';
-import { PAGE_SCRIPT_ORIGIN_MAX_CHARS, type PageScript } from '../pages/wire/page-script.ts';
+import { PAGE_SCRIPT_ORIGIN_MAX_CHARS, type PageScript } from '../../contract/wire/page-script.ts';
 import { type PointerAct } from '../pages/pointer-acts.ts';
 import { KernelFrameClock } from '../stream/frame-clock.ts';
 

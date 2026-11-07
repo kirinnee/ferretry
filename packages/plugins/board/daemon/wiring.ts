@@ -7,7 +7,7 @@ import {
 } from '@ferretry/core-ferrets/contract';
 import { ProjectIdSchema } from '@ferretry/plugin-projects/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
-import { type ConfigFileDef, type KernelPorts, type StateFileDef } from '@ferretry/kernel/contract';
+import type { ConfigFileDef, KernelPorts, StateFileDef } from '@ferretry/kernel/contract';
 import {
   type BoardChangedEvent,
   type BoardConfig,

@@ -7,7 +7,7 @@ import { AnalyticsPricingViewSchema } from '../analytics-pricing-api.ts';
 import { type AnalyticsResponse, AnalyticsResponseSchema } from '../analytics.ts';
 import { type LoginId, LoginIdSchema } from '../ids.ts';
 import type { LoginPause } from '../pause.ts';
-import { type UsageApi } from '../port.ts';
+import type { UsageApi } from '../port.ts';
 import { type UsageFeedView, UsageFeedViewSchema } from '../feed.ts';
 
 const AT = '2026-11-07T09:00:00.000Z' as Instant;

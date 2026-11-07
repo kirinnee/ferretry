@@ -5,7 +5,7 @@ import type {
   BrowserPageSnapshot,
   BrowserPageSummary,
   BrowserScreencastFrame,
-} from '../../daemon/pages/wire/browser.ts';
+} from '../../contract/wire/browser.ts';
 
 export type Page = BrowserPageSummary & { pageState?: 'ready' | 'error' };
 

@@ -1,13 +1,17 @@
-/** An in-memory config tree: a `ConfigPort` and a door over the same documents, for tests of the service. */
-import type { ConfigCollectionDef, ConfigFileDef, ConfigPort } from '@ferretry/kernel/contract';
-import type { ConfigDoor, ConfigEdit, DoorResult } from '../../daemon/lib/config-door.ts';
+/** An in-memory config tree: a `ConfigPort` over documents, writing with the kernel's real `ConfigWriteOutcome`s. */
+import type {
+  ConfigCollectionDef,
+  ConfigEdit,
+  ConfigFileDef,
+  ConfigPort,
+  ConfigWriteOutcome,
+} from '@ferretry/kernel/contract';
 
 type Def = ConfigFileDef<any> | ConfigCollectionDef<any>;
 
 export interface Tree {
   readonly port: ConfigPort;
-  readonly door: ConfigDoor;
-  /** Every door call, in order. */
+  /** Every write and remove, in order. */
   readonly calls: { readonly op: 'write' | 'remove'; readonly where: string; readonly edit?: ConfigEdit }[];
   /** The raw documents by `file` or `collection/name`. */
   readonly documents: Map<string, Record<string, unknown>>;
@@ -16,7 +20,18 @@ export interface Tree {
 const keyOf = (def: Def, name: string | undefined): string =>
   def.shape === 'file' ? def.file : `${def.collection}/${name ?? ''}`;
 
-export function configTree(initial: Record<string, Record<string, unknown>> = {}, refuse?: string): Tree {
+/** The kernel's refusal for a text that does not check: it names the problem and never quotes a value. */
+export const refusing = (message: string): ConfigWriteOutcome => ({
+  kind: 'refused',
+  reason: 'schema',
+  issues: [{ path: 'density', message }],
+});
+
+/**
+ * `forced`: the outcome EVERY write and remove answers with, nothing stored (a refusal, a hold for the owner, a
+ * conflict); left out, a write is stored and answers `written`, as the kernel's does for an edit that checks.
+ */
+export function configTree(initial: Record<string, Record<string, unknown>> = {}, forced?: ConfigWriteOutcome): Tree {
   const documents = new Map(Object.entries(initial));
   const calls: Tree['calls'][number][] = [];
   const port: ConfigPort = {
@@ -33,13 +48,9 @@ export function configTree(initial: Record<string, Record<string, unknown>> = {}
     },
     watch: () => () => {},
     fileState: () => ({ state: 'absent', inEffect: false, sentences: [] }),
-    write: () => Promise.reject(new Error('the fixture writes through its config door')),
-    remove: () => Promise.reject(new Error('the fixture removes through its config door')),
-  };
-  const door: ConfigDoor = {
-    async write(def, name, edit): Promise<DoorResult> {
+    async write(def, name, edit): Promise<ConfigWriteOutcome> {
       calls.push({ op: 'write', where: keyOf(def, name), edit });
-      if (refuse !== undefined) return { kind: 'refused', reason: 'schema', issues: [{ message: refuse }] };
+      if (forced !== undefined) return forced;
       const where = keyOf(def, name);
       const patch = typeof edit === 'string' ? (Bun.YAML.parse(edit) as Record<string, unknown>) : edit.patch;
       const next = typeof edit === 'string' ? { ...patch } : { ...documents.get(where) };
@@ -49,13 +60,14 @@ export function configTree(initial: Record<string, Record<string, unknown>> = {}
           else next[key] = value;
         }
       documents.set(where, next);
-      return { kind: 'applied' };
+      return { kind: 'written', etag: `etag-${calls.length}`, loosened: [] };
     },
-    async remove(def, name): Promise<DoorResult> {
+    async remove(def, name): Promise<ConfigWriteOutcome> {
       calls.push({ op: 'remove', where: keyOf(def, name) });
+      if (forced !== undefined) return forced;
       documents.delete(keyOf(def, name));
-      return { kind: 'applied' };
+      return { kind: 'written', etag: `etag-${calls.length}`, loosened: [] };
     },
   };
-  return { port, door, calls, documents };
+  return { port, calls, documents };
 }

@@ -1,4 +1,4 @@
-import { type InputTargetFacts } from '@ferretry/core-vault/contract';
+import type { InputTargetFacts } from '@ferretry/core-vault/contract';
 
 /**
  * EMPTYING A PASSWORD LEFT IN A FIELD (docs/input-requests.md, "Task plan fills"). A grant fill that typed a password

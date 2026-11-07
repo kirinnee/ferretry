@@ -227,9 +227,10 @@ export class SessionTransport implements DaemonTransport {
     return { status: answer.status, headers: answer.headers, body: decodeBody(answer.body) };
   }
 
-  events(listener: (event: RawEvent) => void, onClose: (reason: string) => void): () => void {
+  events(listener: (event: RawEvent) => void, onClose: (reason: string) => void, onOpen?: () => void): () => void {
     const path = this.#options.eventsPath ?? '/v1/events';
     const stream = this.socket(path, {
+      ...(onOpen === undefined ? {} : { onOpen }),
       onFrame: frame => {
         if (typeof frame !== 'string') return;
         let value: unknown;
@@ -251,10 +252,10 @@ export class SessionTransport implements DaemonTransport {
     const url = new URL(path, 'http://session.invalid');
     const query = [...url.searchParams.entries()];
     let closed = false;
-    const end = (reason: string): void => {
+    const end = (reason: string, code?: number): void => {
       if (closed) return;
       closed = true;
-      listeners.onClose(reason);
+      listeners.onClose(reason, code);
     };
     const mode: RelayClientSessionDependencies['mode'] = {
       kind: 'stream',
@@ -270,9 +271,12 @@ export class SessionTransport implements DaemonTransport {
     const open = (dial: CarrierDial): void => {
       const opened = openSession(this.#options, dial, mode, onData);
       session = opened.session;
-      opened.session.onStreamClosed(closedWith => end(closedWith.reason));
+      opened.session.onStreamClosed(closedWith => end(closedWith.reason, closedWith.code));
       opened.session.ready().then(
-        () => opened.socket.accepted?.(),
+        () => {
+          opened.socket.accepted?.();
+          if (!closed) listeners.onOpen?.();
+        },
         (error: unknown) => {
           if (closed) return;
           const onward = opened.socket.onward?.();
@@ -290,10 +294,10 @@ export class SessionTransport implements DaemonTransport {
         session?.sendStream(
           typeof frame === 'string' ? { kind: 'text', text: frame } : { kind: 'bytes', bytes: frame },
         ),
-      close: () => {
+      close: (code, reason) => {
         if (closed) return;
         closed = true;
-        session?.closeStream();
+        session?.closeStream(code, reason);
       },
     };
   }

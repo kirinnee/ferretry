@@ -229,3 +229,24 @@ export const BrowsersConfigSchema = z.strictObject({
   proxy: BrowserProxySettingSchema.optional(),
 });
 export type BrowsersConfig = z.infer<typeof BrowsersConfigSchema>;
+
+// ─── handing a link to this computer's own browser (today's `protocol/src/lib/open-url.ts`) ─────────────────────────
+
+/** The longest address the daemon will hand to the operating system. */
+export const OPEN_URL_MAX_LENGTH = 2048 as const;
+
+/**
+ * `POST /v1/system/open-url`. The schema only bounds the shape: what counts as an openable address (http or https, no
+ * credentials) is the daemon's decision at its own boundary, because that is the one place a refusal protects anything.
+ */
+export const OpenUrlRequestSchema = z.strictObject({
+  url: z.string().min(1).max(OPEN_URL_MAX_LENGTH),
+});
+export type OpenUrlRequest = z.infer<typeof OpenUrlRequestSchema>;
+
+/** The answer carries the host and nothing else, so a link with a token in its query never travels back out. */
+export const OpenUrlViewSchema = z.strictObject({
+  opened: z.literal(true),
+  host: z.string().min(1).max(253),
+});
+export type OpenUrlView = z.infer<typeof OpenUrlViewSchema>;

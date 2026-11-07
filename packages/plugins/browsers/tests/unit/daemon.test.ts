@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
+import { FakeGate, ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import type { FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
@@ -40,7 +40,7 @@ async function built(): Promise<{ host: TestHost; tabs: Tabs; identities: TypedI
   const host = await testHost({
     plugins: [half],
     uses: { ferrets: FERRETS },
-    fakes: { vault },
+    fakes: { vault, gate: new FakeGate() },
     gate,
     secrets: [SECRET],
   });
@@ -60,7 +60,7 @@ describe('the browsers daemon half', () => {
 
   it('should build over the test host and answer the machine browser state with nothing running', async () => {
     // Arrange
-    host = await testHost({ plugins: [daemon], fakes: { vault: new FakeVault() } });
+    host = await testHost({ plugins: [daemon], fakes: { vault: new FakeVault(), gate: new FakeGate() } });
 
     // Act
     const state = await host.request('GET', '/v1/browser/state');
@@ -72,7 +72,7 @@ describe('the browsers daemon half', () => {
 
   it('should provide no browserPorts reading while it has no read of the machine’s ports (GAP), so Logins treats the host as shared', async () => {
     // Arrange
-    host = await testHost({ plugins: [daemon], fakes: { vault: new FakeVault() } });
+    host = await testHost({ plugins: [daemon], fakes: { vault: new FakeVault(), gate: new FakeGate() } });
 
     // Act
     const browsers = host.provided(BrowsersPort);
@@ -190,6 +190,22 @@ describe('the browsers daemon half', () => {
     should(status.json<{ pageError?: string }>().pageError).equal(
       'page.goto: net::ERR_NAME_NOT_RESOLVED at https://login.example.test/?token=*************',
     );
+  });
+
+  it('SF3 should publish PageChanged driving when a ferret acts on a page, so the typing chip shows at once', async () => {
+    // Arrange
+    const world = await built();
+    host = world.host;
+
+    // Act
+    await host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, as('f1'));
+    const drivings = host.published
+      .filter(entry => entry.event === 'browsers.page-changed')
+      .map(entry => entry.payload as { change: string; page: string; ferret: string })
+      .filter(change => change.change === 'driving');
+
+    // Assert
+    should(drivings).deepEqual([{ ferret: 'f1', page: 'p1', change: 'driving' }]);
   });
 
   it('should publish PageChanged closed when a ferret closes its page, and for every page its session ends with', async () => {

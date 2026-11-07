@@ -1,4 +1,5 @@
 import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
+import { GatePort } from '@ferretry/core-gate/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
 import { FerretsPort } from '@ferretry/core-ferrets/contract';
 import { InputTargets, VaultPort } from '@ferretry/core-vault/contract';
@@ -11,7 +12,9 @@ import {
   CONFIGURE,
   GUARD_ACK,
   GUARD_NONE,
+  GUARD_OPEN_URL,
   PageChanged,
+  SKIP_BY_SERVICE,
   SKIP_READ,
   USE,
 } from './contract/index.ts';
@@ -54,7 +57,7 @@ export default definePlugin({
    * The Vault: input requests raised from a page (`browser_request_input`), and what a ferret did to a page and where
    * page scripts ran, told to its sign-in lock (lead DECISIONS-2 #5, I98–I100).
    */
-  needs: { vault: VaultPort },
+  needs: { vault: VaultPort, gate: GatePort },
   provides: { browsers: BrowsersPort },
 
   actions: {
@@ -130,6 +133,15 @@ export default definePlugin({
         noStore: true,
         audit: { record: AUDIT.agentTool },
         guard: 'secrets',
+      }),
+      /** Today's `runtime/mounts/system-open.ts`: only a caller ON this machine (`privilegedOnly`, from the carrier). */
+      route('POST /v1/system/open-url', {
+        minimum: 'operator',
+        caller: 'any',
+        privilegedOnly: true,
+        noStore: true,
+        audit: SKIP_BY_SERVICE,
+        guard: GUARD_OPEN_URL,
       }),
     ],
     sockets: [
@@ -337,6 +349,10 @@ export default definePlugin({
       'fyd-browser-worker-linux-arm64',
       'fyd-browser-worker-linux-x64-baseline',
       'kill',
+      /** The operating system's opener for one web address (`daemon/open-url`): one argv element, never a shell. */
+      'open',
+      'xdg-open',
+      'rundll32',
     ],
     /** Uploads come from the ferret's own folder, and downloads and PDFs are saved into it (S51). */
     roots: ['work'],

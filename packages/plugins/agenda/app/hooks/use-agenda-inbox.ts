@@ -430,7 +430,6 @@ export function useAgendaInboxModel(
     (): readonly Promise<void>[] => latest.current.map(({ connection }) => client.rollup.read(connection)),
     [client],
   );
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the set of machines is the signal to read again
   useEffect(() => {
     void machineKey;
     void readRollups();

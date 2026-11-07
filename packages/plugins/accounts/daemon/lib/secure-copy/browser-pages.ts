@@ -1,7 +1,7 @@
 import type { CopyElementPart } from '../../../contract/routes/index.ts';
 import type { BrowserCopyPort } from '../local-ports.ts';
 import type { CopyPageGuard, CopyPagePort, CopyPageQueue, CopyPageRead } from './ports.ts';
-import { type BrowserElementTarget } from '../vault-inputs.ts';
+import type { BrowserElementTarget } from '../vault-inputs.ts';
 
 /** The agent browser as it runs one page's work in that page's own queue (`BrowserSubsystem.copyOnPage`). */
 export interface CopyPageHost {
