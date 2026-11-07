@@ -4,14 +4,12 @@
     "gate",
     "vault",
     "ferrets",
-    "asks",
     "access",
     "connections",
     "updates",
     "claude-code",
     "codex",
     "logins",
-    "runtimes",
     "terminals",
     "browsers",
     "accounts",
@@ -28,7 +26,9 @@
     "skills",
     "shells",
     "layouts",
+    "tidy",
+    "runtimes",
     "onboarding",
-    "tidy"
+    "agenda"
   ]
 }

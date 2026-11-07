@@ -1,3 +1,4 @@
+import { DaemonAgendaSchema, DaemonAgendaActionSchema } from '../../contract/index.ts';
 import {
   AGENDA_CHANNEL_HEADER,
   AGENDA_CHANNEL_VERSION,
@@ -43,7 +44,7 @@ const responseError = async (response: Response): Promise<DaemonResponseError> =
 };
 
 const parseSnapshot = (scope: DaemonSessionScope, value: unknown): AgendaSnapshot => {
-  const snapshot = AgendaSnapshotSchema.parse(value);
+  const snapshot = (isMachineAgendaId(scope.sessionId) ? DaemonAgendaSchema : AgendaSnapshotSchema).parse(value);
   if (snapshot.sessionId !== scope.sessionId) throw new DaemonResponseError(502, 'daemon returned another session');
   return snapshot;
 };
@@ -101,7 +102,9 @@ export const applyAgendaAction = async (
   action: AgendaActionRequest,
   fetcher: DaemonFetch = browserFetch,
 ): Promise<AgendaSnapshot> => {
-  const body = AgendaActionRequestSchema.parse(action);
+  const body = (isMachineAgendaId(scope.sessionId) ? DaemonAgendaActionSchema : AgendaActionRequestSchema).parse(
+    action,
+  );
   const init = {
     method: 'POST',
     headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },

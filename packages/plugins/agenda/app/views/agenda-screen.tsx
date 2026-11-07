@@ -5,19 +5,12 @@
  */
 
 import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
+import { MachineNotificationList, NotificationsOffBanner } from '../features/settings/notification-machines.tsx';
 import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
 import { AgendaClientContext } from '../lib/agenda-client-context.tsx';
 import { inboxSourceFromSearch } from '../lib/agenda-inbox-list.ts';
 import { useAgendaInbox } from '../hooks/use-agenda-inbox.ts';
-import {
-  MachineNotificationList,
-  NotificationsOffBanner,
-  useAgendaItemOpened,
-  useAppStore,
-  useLayoutMode,
-  usePairedMachineNotifications,
-  useRouter,
-} from '../shell.ts';
+import { useAgendaItemOpened, useAppStore, useLayoutMode, usePairedMachineNotifications, useRouter } from '../shell.ts';
 
 export function createAgendaScreen(client: PluginClient) {
   return function AgendaScreen(_props: ScreenProps) {

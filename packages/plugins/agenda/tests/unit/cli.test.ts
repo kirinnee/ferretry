@@ -20,8 +20,9 @@ function world(answers: Record<string, unknown>) {
   } as unknown as PluginClient;
   const io: TerminalIo = { out: text => void out.push(text), err: text => void err.push(text), isTty: false };
   const half = cli.build?.({ manifest: cli.manifest, client, io });
+  if (half === undefined) throw new Error('missing CLI half');
   const verb = (line: string, invocation: Partial<VerbInvocation> = {}) =>
-    (half?.verbs as Record<string, (i: VerbInvocation) => Promise<number>>)[line]?.({
+    (half.verbs as Record<string, (i: VerbInvocation) => Promise<number>>)[line]?.({
       args: [],
       options: {},
       ...invocation,
@@ -60,30 +61,33 @@ describe('fy notify', () => {
 
 const summary = (id: string, subject: string) => ({
   id,
-  source: 'ferret',
-  entry: id,
-  kind: 'task',
   subject,
-  raisedBy: { kind: 'daemon' },
-  state: 'open',
-  raisedAt: '2026-11-07T12:00:00.000Z',
+  kind: 'task',
+  source: 'question',
+  sourceRef: null,
+  why: 'Ready',
+  howToResolve: 'Choose',
+  waitingSince: '2026-11-07T12:00:00.000Z',
+  raisedBy: 'daemon',
+  raisedBySession: null,
+  raisedByName: null,
 });
 
 describe('fy agenda', () => {
-  const page = { ferrets: [{ ferret: 'f1', asks: [summary('A1', 'Pick a colour')] }] };
+  const page = { sessions: [{ sessionId: 'f1', items: [summary('A1', 'Pick a colour')] }] };
 
   test('prints each ferret with its asks, and says when nothing waits', async () => {
     const w = world({ 'GET /v1/agenda/open': page });
     expect(await w.verb('agenda')).toBe(0);
     expect(w.out.join('')).toContain('!A1 [task] Pick a colour');
-    expect(renderOpen({ ferrets: [] })).toBe('Nothing is waiting on you.');
+    expect(renderOpen({ sessions: [] })).toBe('Nothing is waiting on you.');
   });
 
   test('follows every page for `agenda` and one page for `agenda open`', async () => {
     let served = 0;
     const answers = {
       'GET /v1/agenda/open': () =>
-        ++served === 1 ? { ...page, next: 'f1' } : { ferrets: [{ ferret: 'f2', asks: [summary('A1', 'Two')] }] },
+        ++served === 1 ? { ...page, next: 'f1' } : { sessions: [{ sessionId: 'f2', items: [summary('A1', 'Two')] }] },
     };
     const all = world(answers);
     await all.verb('agenda');

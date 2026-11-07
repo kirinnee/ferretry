@@ -8,18 +8,16 @@ import {
   useInboxMachines,
 } from '../../../app/hooks/use-agenda-inbox.ts';
 import type { DaemonAgendaClient } from '../../../app/lib/agenda-client.ts';
-import { type DeferredTimers, DISMISS_ACTION, DONE_ACTION, inboxOptions } from '../../../app/lib/agenda-inbox.ts';
+import { type DeferredTimers, DISMISS_ACTION } from '../../../app/lib/agenda-inbox.ts';
 import { DaemonAgendaStore } from '../../../app/lib/agenda-store.ts';
 import { AgendaRollupStore } from '../../../app/lib/agenda-rollup.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../../../app/shell.ts';
 import type { DaemonSessionScope } from '../../../app/shell.ts';
 import type { DaemonFleetStore, FleetSnapshot } from '../../../app/shell.ts';
 import '../../support/app/dom.ts';
-import { toTestCards } from '../../../app/lib/to-test-inbox.ts';
-import { interact, type Mounted, mount, must } from '../../support/app/dom.ts';
+import { interact, type Mounted, mount } from '../../support/app/dom.ts';
 import { sessionView } from '../../support/app/sessions.ts';
 import { settleUntil } from '../../support/app/settle.ts';
-import { laptop as boardLaptop, boardModelOf, card } from './board-support.ts';
 
 const studio = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'd-studio' });
 const laptop = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'd-laptop' });
@@ -150,18 +148,16 @@ function Probe({
   client,
   machines,
   timers,
-  toTest,
   withdraw,
   onInbox,
 }: {
   readonly client: DaemonAgendaClient;
   readonly machines: readonly AgendaInboxMachine[];
   readonly timers: DeferredTimers;
-  readonly toTest?: AgendaInbox['toTest'];
-  readonly withdraw?: Parameters<typeof useAgendaInboxModel>[4];
+  readonly withdraw?: Parameters<typeof useAgendaInboxModel>[3];
   readonly onInbox: (inbox: AgendaInbox) => void;
 }) {
-  onInbox(useAgendaInboxModel(client, machines, timers, toTest, withdraw));
+  onInbox(useAgendaInboxModel(client, machines, timers, withdraw));
   return null;
 }
 
@@ -173,40 +169,6 @@ const settle = async (): Promise<void> => {
 };
 
 describe('useAgendaInboxModel', () => {
-  test('counts the cards waiting for a try with the unread agenda items, and holds them apart', async () => {
-    const { client } = fakeClient(new Map());
-    const { timers } = manualTimers();
-    let inbox: AgendaInbox | null = null;
-    const rows = toTestCards(await boardModelOf([card('F1', { laneId: 'tested' }), card('F2', { laneId: 'tested' })]));
-    view = await mount(
-      <Probe client={client} machines={[]} onInbox={value => (inbox = value)} timers={timers} toTest={rows} />,
-    );
-    await settle();
-    const read = inbox as unknown as AgendaInbox;
-    expect(read.total).toBe(2);
-    expect(read.toTest.map(row => row.card.task.id).sort()).toEqual(['F1', 'F2']);
-    expect(read.cards).toEqual([]);
-  });
-
-  test('gives a card ask the card’s How to test from the board it already reads, for that machine only', async () => {
-    const { client } = fakeClient(new Map());
-    const { timers } = manualTimers();
-    let inbox: AgendaInbox | null = null;
-    const rows = toTestCards(
-      await boardModelOf([card('F1', { laneId: 'tested', howToTest: '1. Try it.' }), card('F2', { laneId: 'tested' })]),
-    );
-    view = await mount(
-      <Probe client={client} machines={[]} onInbox={value => (inbox = value)} timers={timers} toTest={rows} />,
-    );
-    await settle();
-    const read = inbox as unknown as AgendaInbox;
-    const machine = must(rows[0], 'a row').card.daemonId;
-    expect(read.howToTestFor?.(machine, 'F1')).toBe('1. Try it.');
-    expect(read.howToTestFor?.(machine, 'F2')).toBe('');
-    expect(read.howToTestFor?.(machine, 'F9')).toBeNull();
-    expect(read.howToTestFor?.('another-machine' as typeof machine, 'F1')).toBeNull();
-  });
-
   describe('when the page goes to the background', () => {
     const setVisibility = (state: DocumentVisibilityState) =>
       Object.defineProperty(document, 'visibilityState', { configurable: true, value: state });
@@ -315,7 +277,7 @@ describe('useAgendaInboxModel', () => {
     expect(up.reading).toBe(false);
     expect(up.unavailable).toEqual([]);
     expect(up.total).toBe(4);
-    expect(up.total).toBe(up.cards.length + up.toTest.length);
+    expect(up.total).toBe(up.cards.length);
   });
 
   test('counts what the page lists once the boards are read, whatever the summaries said', async () => {
@@ -331,14 +293,12 @@ describe('useAgendaInboxModel', () => {
     const { client } = fakeClient(boards);
     const { timers } = manualTimers();
     let inbox: AgendaInbox | null = null;
-    const rows = toTestCards(await boardModelOf([card('F1', { laneId: 'tested' })]));
     view = await mount(
       <Probe
         client={client}
         machines={[{ connection: studio, name: 'Studio', sessions: [waiting('a', summary(3, 5))] }]}
         onInbox={value => (inbox = value)}
         timers={timers}
-        toTest={rows}
       />,
     );
     await settle();
@@ -346,13 +306,13 @@ describe('useAgendaInboxModel', () => {
     expect(read.cards.map(entry => entry.item.id)).toEqual(['A4', 'A1']);
     expect(read.withFerret.map(entry => entry.item.id).sort()).toEqual(['A2', 'A3']);
     expect(read.parked.map(entry => entry.item.id)).toEqual(['A5']);
-    expect(read.total).toBe(read.cards.length + read.toTest.length);
+    expect(read.total).toBe(read.cards.length);
     expect(read.total).toBe(3);
   });
 });
 
 describe('a reply the owner takes back', () => {
-  const replying = async (withdraw?: Parameters<typeof useAgendaInboxModel>[4]) => {
+  const replying = async (withdraw?: Parameters<typeof useAgendaInboxModel>[3]) => {
     const { client, calls } = fakeClient(new Map([['studio/a', board('a', [item('A1', 1)])]]));
     const { timers } = manualTimers();
     let inbox: AgendaInbox | null = null;

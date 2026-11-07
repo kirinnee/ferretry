@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
-import type { ToTestHost } from '../../../../app/features/agenda/to-test-rows.tsx';
-import { toTestCards } from '../../../../app/lib/to-test-inbox.ts';
 import {
   agendaItem,
   choices,
@@ -11,7 +9,7 @@ import {
   inboxCard,
 } from '../../../support/app/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must, pressKey } from '../../../support/app/dom.ts';
-import { boardModelOf, card, flush, laptop } from '../board-support.ts';
+import { flush } from '../board-support.ts';
 import { fakeActions } from './board-detail-support.tsx';
 
 const NOW = Date.parse('2026-08-02T12:00:00.000Z');
@@ -21,16 +19,6 @@ afterEach(async () => {
   await view?.unmount();
   view = null;
 });
-
-const shipped = { version: '1.2.0', tag: 'v1.2.0', at: '2026-08-01T09:00:00.000Z' };
-
-const rowsOf = async () =>
-  toTestCards(
-    await boardModelOf([
-      card('F22', { laneId: 'tested', title: 'Try the board', shippedIn: shipped, howToTest: '1. Open the Board' }),
-      card('F23', { laneId: 'tested', title: 'Second try', shippedIn: { ...shipped, version: '1.1.0' } }),
-    ]),
-  );
 
 const rebase = inboxCard(
   agendaItem('A3', {
@@ -46,22 +34,18 @@ const second = inboxCard(
 
 interface Options {
   readonly cards?: readonly (typeof rebase)[];
-  readonly toTest?: boolean;
   readonly phone?: boolean;
   readonly page?: Partial<AgendaInboxPageProps>;
 }
 
-const open = async ({ cards = [rebase, second], toTest = false, phone = false, page = {} }: Options = {}) => {
+const open = async ({ cards = [rebase, second], phone = false, page = {} }: Options = {}) => {
   const fake = fakeInbox();
-  const rows = toTest ? await rowsOf() : [];
   const actions = fakeActions({});
-  const host: ToTestHost = { actions, ports: {}, connectionOf: () => laptop };
   view = await mount(
     <InboxHarness
       cards={cards}
       fake={fake}
       reading={false}
-      toTest={rows}
       render={inbox => (
         <AgendaInboxPage
           clock={fake.clock.now}
@@ -70,7 +54,6 @@ const open = async ({ cards = [rebase, second], toTest = false, phone = false, p
           onNavigate={() => undefined}
           phone={phone}
           reducedMotion
-          toTestHost={host}
           {...page}
         />
       )}
@@ -92,19 +75,13 @@ const keys = (root: HTMLElement): string | undefined => {
     ? undefined
     : [...line.querySelectorAll('.fy-inbox-keys__entry')].map(e => e.textContent).join(' ');
 };
-const step = (root: HTMLElement): HTMLElement | null => root.querySelector<HTMLElement>('[data-inbox-open-to-test]');
 const pending = (fake: FakeInbox): string[] => fake.deferred.getSnapshot().pending.map(entry => entry.action.label);
 const press = async (key: string, target: EventTarget = document.body, init: KeyboardEventInit = {}) =>
   interact(() => pressKey(target, key, init));
 
 describe('Answer quickly on a wide screen — the button', () => {
   it('is offered above the list with the count of everything waiting', async () => {
-    const { root } = await open({ toTest: true });
-    expect(quick(root).querySelector('.fy-inbox-quick__count')?.textContent).toBe('4');
-  });
-
-  it('is offered when only cards to test are waiting', async () => {
-    const { root } = await open({ cards: [], toTest: true });
+    const { root } = await open();
     expect(quick(root).querySelector('.fy-inbox-quick__count')?.textContent).toBe('2');
   });
 
@@ -249,73 +226,6 @@ describe('Answer quickly on a wide screen — the run', () => {
   });
 });
 
-describe('Answer quickly on a wide screen — the card to test', () => {
-  it('says its two answers by arrow, then Skip, j k and Esc', async () => {
-    const { root } = await open({ cards: [], toTest: true });
-    await start(root);
-    expect(step(root)?.textContent).toContain('Try the board');
-    expect(keys(root)).toBe('← Not good → Done ↓ Skip j k Next, previous Esc Close');
-  });
-
-  it('answers Done on → and Not good on ←', async () => {
-    const { root, actions } = await open({ cards: [], toTest: true });
-    await start(root);
-    await press('ArrowRight');
-    await interact(() => flush());
-    expect(actions.calls).toEqual(['moveTask:["closed"]']);
-    await press('ArrowLeft');
-    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
-  });
-
-  it('skips on ↓ and moves with j and k', async () => {
-    const { root, actions } = await open({ cards: [], toTest: true });
-    await start(root);
-    await press('ArrowDown');
-    expect(step(root)?.textContent).toContain('Second try');
-    await press('k');
-    expect(step(root)?.textContent).toContain('Try the board');
-    await press('j');
-    expect(step(root)?.textContent).toContain('Second try');
-    expect(actions.calls).toEqual([]);
-  });
-
-  it('answers nothing on an arrow it has no answer for, and does not answer twice while one is sent', async () => {
-    const fake = fakeInbox();
-    const rows = await rowsOf();
-    const never = new Promise<never>(() => undefined);
-    const actions = fakeActions({ moveTask: () => never });
-    const host: ToTestHost = { actions, ports: {}, connectionOf: () => laptop };
-    view = await mount(
-      <InboxHarness
-        cards={[]}
-        fake={fake}
-        reading={false}
-        toTest={rows}
-        render={inbox => (
-          <AgendaInboxPage
-            clock={fake.clock.now}
-            inbox={inbox}
-            now={NOW}
-            onNavigate={() => undefined}
-            phone={false}
-            reducedMotion
-            toTestHost={host}
-          />
-        )}
-      />,
-    );
-    await interact(() => flush());
-    await start(view.container);
-    await press('ArrowUp');
-    await press('ArrowRight');
-    await press('ArrowRight');
-    await press('ArrowLeft');
-    await press('ArrowDown');
-    expect(actions.calls).toEqual(['moveTask:["closed"]']);
-    expect(step(view.container)?.textContent).toContain('Try the board');
-  });
-});
-
 describe('Answer quickly on a wide screen — All done', () => {
   it('says so after the last answer, with the way back', async () => {
     const { root } = await open();
@@ -449,22 +359,6 @@ describe('Answer quickly on a wide screen — a mouse or trackpad never swipes',
     expect(pending(fake)).toEqual([]);
   });
 
-  it('leaves a card to test alone too, from its head and from its body', async () => {
-    const { root, actions } = await open({ cards: [], toTest: true });
-    await start(root);
-    const row = must(root.querySelector<HTMLElement>('[data-to-test]'), 'the row');
-    const grip = must(row.querySelector<HTMLElement>('.fy-totest__top'), 'grip');
-    const body = must(row.querySelector<HTMLElement>('.fy-totest__body, .fy-totest__steps, p, li'), 'the body');
-    const selection = selectionSpy();
-    await drag(grip, mouse, [100, 300], [450, 300]);
-    await drag(body, mouse, [100, 300], [100, 450]);
-    selection.restore();
-    expect(selection.released).toEqual([]);
-    expect(row.getAttribute('data-swipe-answer')).toBeNull();
-    expect(step(root)?.textContent).toContain('Try the board');
-    expect(actions.calls).toEqual([]);
-  });
-
   it('does nothing for a mouse on a phone either', async () => {
     const { root, fake } = await open({ phone: true });
     await start(root);
@@ -481,19 +375,5 @@ describe('Answer quickly on a wide screen — a finger still swipes', () => {
     const grip = must(root.querySelector<HTMLElement>('[data-agenda-frame] .fy-card-head'), 'the head');
     await drag(grip, touch, [100, 300], [450, 300]);
     expect(pending(fake)).toEqual(['Wait']);
-  });
-
-  it('swipes a card to test with touch: right is Done', async () => {
-    const { root, actions } = await open({ cards: [], toTest: true });
-    await start(root);
-    const row = must(root.querySelector<HTMLElement>('[data-to-test]'), 'the row');
-    const grip = must(row.querySelector<HTMLElement>('.fy-totest__top'), 'grip');
-    await interact(() => grip.dispatchEvent(touch('pointerdown', 100)));
-    await interact(() => grip.dispatchEvent(touch('pointermove', 200)));
-    await interact(() => grip.dispatchEvent(touch('pointermove', 450)));
-    expect(row.getAttribute('data-swipe-answer')).toBe('Done');
-    await interact(() => grip.dispatchEvent(touch('pointerup', 450)));
-    await interact(() => flush());
-    expect(actions.calls).toEqual(['moveTask:["closed"]']);
   });
 });

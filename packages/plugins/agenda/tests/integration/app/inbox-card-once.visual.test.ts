@@ -71,7 +71,7 @@ const VIEWPORTS = [
 describe('the Inbox shows each card once', () => {
   for (const viewport of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const)
-      it(`lists the snoozed gate card once and keeps the plain card's row (${viewport.name}, ${scheme})`, async () => {
+      it(`lists the snoozed gate card once and keeps other parked agenda rows (${viewport.name}, ${scheme})`, async () => {
         const context = await browser.newContext({
           viewport: { width: viewport.width, height: viewport.height },
           colorScheme: scheme,
@@ -88,8 +88,8 @@ describe('the Inbox shows each card once', () => {
           await tab.waitForSelector('.fy-parked-row', { timeout: 4_000 });
           const titles = await tab.$$eval('.fy-parked-row', rows => rows.map(row => row.textContent ?? ''));
           expect(titles.filter(text => text.includes('Duplicate gate items on reassign'))).toHaveLength(1);
-          expect(titles.filter(text => text.includes('Warden revives dead ferrets'))).toHaveLength(1);
-          expect(await tab.$$('[data-to-test-snoozed]')).toHaveLength(1);
+          expect(titles.filter(text => text.includes('Share links over the relay'))).toHaveLength(1);
+          expect(await tab.$('[data-to-test-snoozed]')).toHaveLength(0);
           if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-snoozed.png`) });
         } finally {
           await context.close();

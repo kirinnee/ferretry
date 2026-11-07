@@ -22,11 +22,14 @@
  */
 
 import type { CellGrid, Redaction, RedactionScope } from '@ferretry/kernel/contract';
-import { coverageOf, redactSecretValues, type TextRange } from './policy.ts';
-import type { RedactionValueSource } from './redaction.ts';
+import { coverageOf, redactJsonValue, redactSecretValues, type TextRange } from './policy.ts';
+import type { RedactionValueSource, Scrub } from './redaction.ts';
 
 export class VaultRedaction implements Redaction {
-  constructor(private readonly source: RedactionValueSource) {}
+  constructor(
+    private readonly source: RedactionValueSource,
+    private readonly compose: (scrub: Scrub) => Scrub = scrub => scrub,
+  ) {}
 
   async read<T>(fn: (scope: RedactionScope) => T | Promise<T>): Promise<T> {
     let opened: ReadonlyMap<string, string> | undefined = await this.source.values();
@@ -35,11 +38,19 @@ export class VaultRedaction implements Redaction {
       return opened;
     };
     const needles = (): readonly string[] => [...values().values()].filter(value => value !== '');
+    const scrub = this.compose({
+      text: text => redactSecretValues(text, values()),
+      data: value => redactJsonValue(value, values()),
+      cover: text => coverageOf(text, needles()),
+    });
     try {
       return await fn({
-        text: text => redactSecretValues(text, values()),
-        cells: grid => maskGrid(grid, needles()),
-        lines: lines => maskLines(lines, needles()),
+        text: text => {
+          values();
+          return scrub.text(text);
+        },
+        cells: grid => maskGrid(grid, needles(), text => scrub.cover(text)),
+        lines: lines => maskLines(lines, needles(), text => scrub.cover(text)),
       });
     } finally {
       // Revoked, so a scope that escaped its read holds nothing.
@@ -59,9 +70,12 @@ function starred(text: string, ranges: readonly TextRange[], offset: number): st
 }
 
 /** Lines matched as one run (a wrapped value spans the join), then cut back into lines of their own lengths. */
-export function maskLines(lines: readonly string[], needles: readonly string[]): readonly string[] {
-  if (needles.length === 0) return lines;
-  const ranges = coverageOf(lines.join(''), needles);
+export function maskLines(
+  lines: readonly string[],
+  needles: readonly string[],
+  cover: (text: string) => readonly TextRange[] = text => coverageOf(text, needles),
+): readonly string[] {
+  const ranges = cover(lines.join(''));
   if (ranges.length === 0) return lines;
   const out: string[] = [];
   let offset = 0;
@@ -73,17 +87,20 @@ export function maskLines(lines: readonly string[], needles: readonly string[]):
 }
 
 /** Cells matched over the whole grid read row by row; each matched cell becomes `*` of the same width. */
-export function maskGrid(grid: CellGrid, needles: readonly string[]): CellGrid {
-  if (needles.length === 0) return grid;
+export function maskGrid(
+  grid: CellGrid,
+  needles: readonly string[],
+  cover: (text: string) => readonly TextRange[] = text => coverageOf(text, needles),
+): CellGrid {
   const flat: { readonly row: number; readonly cell: number; readonly start: number }[] = [];
   let text = '';
-  grid.rows.forEach((row, rowIndex) =>
+  grid.rows.forEach((row, rowIndex) => {
     row.forEach((cell, cellIndex) => {
       flat.push({ row: rowIndex, cell: cellIndex, start: text.length });
       text += cell;
-    }),
-  );
-  const ranges = coverageOf(text, needles);
+    });
+  });
+  const ranges = cover(text);
   if (ranges.length === 0) return grid;
   const rows = grid.rows.map(row => [...row]);
   for (const entry of flat) {

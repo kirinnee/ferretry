@@ -1,21 +1,4 @@
-/**
- * SNOOZE IS IN EVERY CARD'S ONE-ROW HEAD, in a real browser, on a phone and a desktop, in light and dark, in the house
- * look and the one with hard rules.
- *
- * The owner (2026-11-01, &F370): "snooze is a common operation, would prefer if you can fit it into the top bar (for
- * cards, tasks, both in inbox and in chat)".
- *
- *  - The Inbox's quick-answer card to test (`ToTestStep`) and a list of cards to test (`ToTestList`: the chat's task
- *    panel, the Board's Cards view) each draw ONE clock, in the head's row, after ⓘ and before ✕ where those exist:
- *    never in the ⓘ panel, never in the answer row.
- *  - The open agenda item (`AgendaItemView`) keeps Snooze behind its ONE ⋯ (&F920, the owner: "make it context menu
- *    (and btm sheet on mobile)"), so its head has room for the title: a bottom sheet on a phone, a popover wider, and
- *    never a clock in the row or the answer row.
- *  - The head stays ONE row, and on a 390px phone the title still has room for 16 characters before it scrolls.
- *  - The snooze menu opens inside the viewport and holds 1 hour / 4 hours / Tomorrow / Custom.
- *
- * Set `FY_SNOOZE_HEAD_SHOTS_DIR` to keep `<viewport>-<family>-<scheme>-<scene>-<case>.png`.
- */
+/** The unified agenda item keeps Snooze in its one menu. */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -84,12 +67,9 @@ const VIEWPORTS = [
 ] as const;
 const SCENES = [
   { scene: 'item', head: '.fy-item-view__head [data-card-head]', ready: '.fy-item-view__head [data-agenda-title]' },
-  { scene: 'run', head: '.fy-totest__top', ready: '.fy-totest__top [data-to-test-title]' },
-  { scene: 'list', head: '.fy-totest__top', ready: '.fy-totest__top [data-to-test-title]' },
 ] as const;
 
 /** The cards whose head draws the clock itself; the open agenda item's Snooze is behind its ⋯. */
-const CLOCK_SCENES = SCENES.slice(1);
 
 /** One row's tallest control is 44px on touch; the head's own padding is under 20px more. */
 const ONE_ROW = 72;
@@ -164,72 +144,6 @@ const headGeometry = async (tab: Page, head: string) =>
 
 describe('snooze in the card’s head', () => {
   for (const { name } of VIEWPORTS)
-    for (const family of FAMILIES)
-      for (const scheme of ['light', 'dark'] as const)
-        for (const scene of CLOCK_SCENES) {
-          const tag = `${family}-${scheme}`;
-          const label = `${scene.scene}, ${name}, ${family}, ${scheme}`;
-
-          it(`has ONE clock, in the one-row head, with room for the title (${label})`, async () => {
-            const { tab, close } = await open(name, family, scheme, scene);
-            try {
-              const g = await headGeometry(tab, scene.head);
-              expect(g.clock, 'the head has a clock').not.toBeNull();
-              expect(g.clocksOutsideHead, 'no second snooze anywhere else on the card').toBe(0);
-              if (scene.scene !== 'list') expect(g.clocksInCard, 'one clock on the screen').toBe(1);
-              const clock = g.clock as Rect;
-              expect(g.bar?.height, 'the head is one row tall').toBeLessThanOrEqual(ONE_ROW);
-              expect(clock.top, 'the clock is on the title’s row').toBeGreaterThanOrEqual((g.bar?.top ?? 0) - 1);
-              expect(clock.bottom, 'the clock is on the title’s row').toBeLessThanOrEqual((g.bar?.bottom ?? 0) + 1);
-              expect(clock.width, 'a compact hit area').toBeGreaterThanOrEqual(28);
-              expect(clock.width, 'a compact hit area').toBeLessThanOrEqual(32);
-              expect(g.title?.right ?? 0, 'the title ends before the clock').toBeLessThanOrEqual(clock.left + 1);
-              if (g.info !== null) expect(g.info.right, 'ⓘ comes before the clock').toBeLessThanOrEqual(clock.left + 1);
-              if (g.close !== null)
-                expect(clock.right, '✕ comes after the clock').toBeLessThanOrEqual(g.close.left + 1);
-              expect(g.titleBox, 'the title shows 16 characters before it scrolls').toBeGreaterThanOrEqual(g.sixteen);
-              await shot(tab, name, tag, `${scene.scene}-head`);
-            } finally {
-              await close();
-            }
-          });
-
-          it(`opens the menu inside the viewport with 1h / 4h / tomorrow / custom (${label})`, async () => {
-            const { tab, close } = await open(name, family, scheme, scene);
-            try {
-              await tab.locator('[data-agenda-snooze]').first().click();
-              await tab.waitForSelector('.fy-snooze__popover');
-              await tab.evaluate(
-                () => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
-              );
-              const found = await tab.evaluate(() => {
-                const menu = (document.querySelector('.fy-snooze__popover') as HTMLElement).getBoundingClientRect();
-                return {
-                  menu: { top: menu.top, bottom: menu.bottom, left: menu.left, right: menu.right },
-                  width: document.documentElement.clientWidth,
-                  height: window.innerHeight,
-                  words: [...document.querySelectorAll('.fy-snooze__popover [role="menuitem"]')].map(
-                    entry => entry.textContent?.trim() ?? '',
-                  ),
-                };
-              });
-              expect(found.menu.left, 'inside on the left').toBeGreaterThanOrEqual(0);
-              expect(found.menu.right, 'inside on the right').toBeLessThanOrEqual(found.width);
-              expect(found.menu.top, 'inside at the top').toBeGreaterThanOrEqual(0);
-              expect(found.menu.bottom, 'inside at the bottom').toBeLessThanOrEqual(found.height);
-              expect(found.words.length, 'four choices').toBe(4);
-              expect(found.words[0]?.toLowerCase()).toContain('1 hour');
-              expect(found.words[1]?.toLowerCase()).toContain('4 hours');
-              expect(found.words[2]?.toLowerCase()).toContain('tomorrow');
-              expect(found.words[3]?.toLowerCase()).toContain('custom');
-              await shot(tab, name, tag, `${scene.scene}-menu`);
-            } finally {
-              await close();
-            }
-          });
-        }
-
-  for (const { name } of VIEWPORTS)
     it(`keeps the open item’s Snooze behind ⋯ — no clock in the row, none in the answer row — on a sheet or popover inside the viewport (${name})`, async () => {
       const item = SCENES[0];
       const { tab, close } = await open(name, 'studio', 'light', item);
@@ -265,15 +179,6 @@ describe('snooze in the card’s head', () => {
         await shot(tab, name, 'studio-light', 'item-menu');
       } finally {
         await close();
-      }
-      const run = await open(name, 'studio', 'light', SCENES[1]);
-      try {
-        const inActions = await run.tab.evaluate(
-          () => document.querySelectorAll('.fy-totest__actions [data-agenda-snooze]').length,
-        );
-        expect(inActions, 'the answer row no longer holds a snooze').toBe(0);
-      } finally {
-        await run.close();
       }
     });
 });

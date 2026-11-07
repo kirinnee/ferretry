@@ -2163,33 +2163,16 @@ export const AgendaClearAgentsResultSchema = z.strictObject({
 export type AgendaClearAgentsResult = z.infer<typeof AgendaClearAgentsResultSchema>;
 
 /** `GET /v1/agenda/open` (`agenda.open.1`): the most items one page carries, and the one it carries when `limit` is absent. */
-export const AGENDA_OPEN_MAX_LIMIT = 500;
-export const AGENDA_OPEN_DEFAULT_LIMIT = 200;
-
-/** What a page of the roll-up is asked: where the last one stopped (a session id) and how many items to carry at most. */
-export const AgendaOpenQuerySchema = z.strictObject({
-  after: z.string().min(1).max(128).optional(),
-  limit: z.number().int().min(1).max(AGENDA_OPEN_MAX_LIMIT).optional(),
-});
-export type AgendaOpenQuery = z.infer<typeof AgendaOpenQuerySchema>;
-
-/** One conversation's items in the roll-up: every item still on its board, open and parked (snoozed or replied). */
-export const AgendaOpenSessionSchema = z.strictObject({
-  sessionId: z.string().min(1),
-  items: z.array(AgendaItemSchema).min(1).max(MAX_AGENDA_PER_SESSION),
-});
-export type AgendaOpenSession = z.infer<typeof AgendaOpenSessionSchema>;
-
-/**
- * One page of every conversation's open and parked agenda items on this machine, in session-id order. A
- * conversation is never split across pages and one with nothing on its board is left out; `next` is the session id
- * to pass as `after` for the following page, absent on the last.
- */
-export const AgendaOpenPageSchema = z.strictObject({
-  sessions: z.array(AgendaOpenSessionSchema),
-  next: z.string().min(1).optional(),
-});
-export type AgendaOpenPage = z.infer<typeof AgendaOpenPageSchema>;
+export {
+  AGENDA_OPEN_MAX_LIMIT,
+  AGENDA_OPEN_DEFAULT_LIMIT,
+  AgendaOpenQuerySchema,
+  AgendaOpenSessionSchema,
+  AgendaOpenPageSchema,
+  type AgendaOpenQuery,
+  type AgendaOpenSession,
+  type AgendaOpenPage,
+} from '../../contract/index.ts';
 
 export const AgendaCountResponseSchema = z.object({
   sessionId: z.string().min(1),

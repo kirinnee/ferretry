@@ -1,5 +1,8 @@
-import { skeletonCli } from '@ferretry/kernel/manifest';
+import { implementCli } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 
-/** Skeleton cli half (§10.3): listed in ports-pending.json until the port lands. */
-export default skeletonCli(manifest);
+/**
+ * Asks' CLI half: Asks declares no verbs. Today's `fy agenda …` verbs are the Agenda plugin's (the view of asks), and
+ * `fy ask` is the shell's own (§1.4); both speak Asks' routes.
+ */
+export default implementCli(manifest, { build: () => ({}) });

@@ -122,6 +122,31 @@ describe('the dispatcher (§7.1, §7.6 step 6)', () => {
     expect(body(damaged).error).toContain('board/cards.json');
   });
 
+  test('live damage during a handler and after seal refuses the prepared answer at publication', async () => {
+    let state: Serving = { kind: 'serving' };
+    let damageDuringHandler = false;
+    const route = mounted('/v1/board', {
+      owner: { ...owner(), serving: () => state },
+      handle: async () => {
+        await Promise.resolve();
+        if (damageDuringHandler) state = { kind: 'damaged', files: ['board/cards.json'] };
+        return jsonResponse({ text: 'fixture-content' });
+      },
+    });
+    const table = dispatcher([route]);
+    const response = await table.dispatch(request('GET', '/v1/board'));
+    const { answerRecords } = await import('../../../host/session/wire/answer.ts');
+    const records = answerRecords(1, response);
+    state = { kind: 'damaged', files: ['board/cards.json'] };
+    expect(records[0]?.permit?.()).toBe(false);
+    expect(body(finalised(response)).code).toBe('store_damaged');
+    state = { kind: 'serving' };
+    damageDuringHandler = true;
+    const damaged = finalised(await table.dispatch(request('GET', '/v1/board')));
+    expect(body(damaged).code).toBe('store_damaged');
+    expect(damaged.body).not.toContain('fixture-content');
+  });
+
   test('a thrown ApiError keeps its status and code; anything else is a bare 500', async () => {
     const named = mounted('/v1/a', {
       handle: async () => {
@@ -201,6 +226,44 @@ describe('the final check on a guard: secrets route (§7.3)', () => {
       guardWith({ generation: 1, throws: true }),
     ).dispatch(request('GET', '/v1/pane'));
     expect(finalised(throwing).body).toContain(WITHHELD_SENTENCE);
+  });
+
+  test('R516 R517 a thrown ApiError uses the guarded publication path, including its extra content', async () => {
+    const state = { generation: 1 };
+    const route = mounted('/v1/pane', {
+      guard: 'secrets',
+      handle: async () => {
+        await Promise.resolve();
+        state.generation++;
+        throw new ApiError(409, 'fixture-content', 'fixture', undefined, { value: 'fixture-content' });
+      },
+    });
+    const response = await dispatcher([route], recordingAdmission(), guardWith(state)).dispatch(
+      request('GET', '/v1/pane'),
+    );
+    expect(response.late).toBeDefined();
+    expect(finalised(response).body).toContain(WITHHELD_SENTENCE);
+    expect(finalised(response).body).not.toContain('fixture-content');
+  });
+
+  test('R515 R516 an allowed guarded error keeps its status and is withheld if a hold starts before publication', async () => {
+    const state = { generation: 1 };
+    const route = mounted('/v1/pane', {
+      guard: 'secrets',
+      handle: async () => {
+        throw new ApiError(409, 'fixture-content');
+      },
+    });
+    const response = await dispatcher([route], recordingAdmission(), guardWith(state)).dispatch(
+      request('GET', '/v1/pane'),
+    );
+    expect(finalised(response).status).toBe(409);
+    expect(finalised(response).body).toContain('fixture-content');
+    const { answerRecords } = await import('../../../host/session/wire/answer.ts');
+    const records = answerRecords(1, response);
+    state.generation++;
+    expect(records[0]?.permit?.()).toBe(false);
+    expect(finalised(response).body).toContain(WITHHELD_SENTENCE);
   });
 });
 

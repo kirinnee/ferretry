@@ -3,12 +3,11 @@ import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-pa
 import type { InboxCard, InboxResolved } from '../../../../app/lib/agenda-inbox.ts';
 import { findRows, isFinding } from '../../../../app/lib/agenda-inbox-find.ts';
 import { NO_FILTER } from '../../../../app/lib/agenda-inbox-list.ts';
-import { splitSnoozed, toTestCards } from '../../../../app/lib/to-test-inbox.ts';
 import { agendaItem, choices, fakeInbox, InboxHarness, inboxCard } from '../../../support/app/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
 import { chooseFromMenu, openFind } from '../../../support/app/inbox-menus.ts';
 import { sessionView } from '../../../support/app/sessions.ts';
-import { boardModelOf, card, flush } from '../board-support.ts';
+import { flush } from '../board-support.ts';
 import { fill } from './board-detail-support.tsx';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
@@ -30,37 +29,14 @@ const resolved = {
   record: { ...agendaItem('A4', { subject: 'Rebase done in the relay repo' }), resolvedAt: '2026-08-01T00:00:00.000Z' },
 } as unknown as InboxResolved;
 
-const toTestRows = async () =>
-  toTestCards(
-    await boardModelOf([
-      card('F22', { laneId: 'tested', title: 'Relay card to try' }),
-      card('F25', {
-        laneId: 'tested',
-        title: 'Relay card parked',
-        snoozed: { until: '2026-08-02T16:00:00.000Z', laneId: 'tested' },
-      }),
-    ]),
-  );
-
-const sources = async () => {
-  const rows = await toTestRows();
-  const split = splitSnoozed(rows, NOW);
-  return {
-    cards: [open],
-    withFerret: [],
-    parked: [snoozed, replied],
-    resolved: [resolved],
-    toTest: split.awake,
-    toTestSnoozed: split.snoozed,
-  };
-};
+const sources = async () => ({ cards: [open], withFerret: [], parked: [snoozed, replied], resolved: [resolved] });
 
 describe('the chip stays short', () => {
   it('shortens "tomorrow", keeps a clock or a date as said, and keeps the full wording', async () => {
     const find = async (until: string) => {
       const base = await sources();
       const later = parked('A2', 'Rebase the relay branch later', { reason: 'snoozed', until });
-      return findRows({ ...base, parked: [later] }, { ...NO_FILTER, query: 'rebase' }, false, NOW).find(
+      return findRows({ ...base, parked: [later] }, { ...NO_FILTER, query: 'rebase' }, NOW).find(
         row => row.chip.tone === 'snoozed',
       )?.chip;
     };
@@ -74,26 +50,6 @@ describe('the chip stays short', () => {
     });
     expect(await find('not a time')).toEqual({ tone: 'snoozed', label: 'Snoozed', full: 'Snoozed' });
   });
-
-  it('says plain Snoozed for a card to test whose wake is unknown or unreadable', async () => {
-    const base = await sources();
-    const [row] = base.toTestSnoozed;
-    for (const snoozedUntil of [null, 'not a time'])
-      expect(
-        findRows(
-          {
-            ...base,
-            toTest: [],
-            parked: [],
-            resolved: [],
-            toTestSnoozed: [{ ...(row as NonNullable<typeof row>), snoozedUntil }],
-          },
-          { ...NO_FILTER, query: 'relay' },
-          false,
-          NOW,
-        )[0]?.chip,
-      ).toEqual({ tone: 'snoozed', label: 'Snoozed', full: 'Snoozed' });
-  });
 });
 
 describe('isFinding', () => {
@@ -106,27 +62,22 @@ describe('isFinding', () => {
 
 describe('findRows', () => {
   it('looks in every tab and gives each row the state it is in', async () => {
-    const rows = findRows(await sources(), { ...NO_FILTER, query: 'relay' }, false, NOW);
+    const rows = findRows(await sources(), { ...NO_FILTER, query: 'relay' }, NOW);
     expect(rows.map(row => [row.key.includes('A2') ? 'A2' : row.chip.tone, row.chip.label])).toEqual(
       expect.arrayContaining([['A2', 'Snoozed · tmrw 09:00']]),
     );
-    expect(rows.map(row => row.chip.tone).sort()).toEqual(['card', 'replied', 'resolved', 'snoozed', 'snoozed']);
+    expect(rows.map(row => row.chip.tone).sort()).toEqual(['replied', 'resolved', 'snoozed']);
     expect(rows.find(row => row.chip.tone === 'replied')?.chip.label).toBe('Replied');
     expect(rows.find(row => row.chip.tone === 'resolved')?.chip.label).toBe('Resolved');
   });
 
   it('puts the open items first, and the resolved last', async () => {
-    const rows = findRows(await sources(), { ...NO_FILTER, query: 'rebase' }, false, NOW);
+    const rows = findRows(await sources(), { ...NO_FILTER, query: 'rebase' }, NOW);
     expect(rows.map(row => row.chip.tone)).toEqual(['open', 'snoozed', 'resolved']);
   });
 
-  it('leaves out a card to test when only the agenda was asked about', async () => {
-    const rows = findRows(await sources(), { ...NO_FILTER, query: 'relay' }, true, NOW);
-    expect(rows.some(row => row.kind === 'card')).toBe(false);
-  });
-
   it('finds nothing for words that match nothing', async () => {
-    expect(findRows(await sources(), { ...NO_FILTER, query: 'zebra' }, false, NOW)).toEqual([]);
+    expect(findRows(await sources(), { ...NO_FILTER, query: 'zebra' }, NOW)).toEqual([]);
   });
 });
 
@@ -138,7 +89,6 @@ afterEach(async () => {
 
 const mountPage = async (cards: readonly InboxCard[] = [open]) => {
   const fake = fakeInbox();
-  const all = await sources();
   const navigated: string[] = [];
   const loads = { count: 0 };
   view = await mount(
@@ -160,8 +110,6 @@ const mountPage = async (cards: readonly InboxCard[] = [open]) => {
         />
       )}
       resolved={[resolved]}
-      toTest={all.toTest}
-      toTestSnoozed={all.toTestSnoozed}
     />,
   );
   await interact(() => flush());

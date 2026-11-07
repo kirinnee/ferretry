@@ -1,4 +1,4 @@
-import type { AskId, AsksApi } from '@ferretry/core-asks/contract';
+import { AskOwnerActionError, type AskId, type AsksApi } from '@ferretry/core-asks/contract';
 import { ferretOf, isFerretCall } from '@ferretry/core-gate/contract';
 import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import {
@@ -24,7 +24,7 @@ import {
 } from '../contract/index.ts';
 import type { AccessBuzzApi } from '../contract/others.ts';
 import { parseBody } from './lib/body.ts';
-import { type BuzzLedger } from './lib/buzz-service.ts';
+import type { BuzzLedger } from './lib/buzz-service.ts';
 import { waitingOnOwner } from './lib/buzz-policy.ts';
 import type { AgendaAgentClearer } from './lib/clear-agents.ts';
 import { AgendaModeError, type AgendaModeService } from './lib/agenda-mode.ts';
@@ -84,12 +84,22 @@ const queryOf = (call: CallContext) => {
 };
 
 function machineFailure(error: unknown): never {
-  if (error instanceof MachineAgendaError)
-    throw new ApiError(
-      error.reason === 'not-found' ? 404 : error.reason === 'unsupported' ? 501 : 400,
-      error.message,
-      error.reason === 'unsupported' ? 'unavailable' : error.reason,
-    );
+  if (error instanceof MachineAgendaError || error instanceof AskOwnerActionError) {
+    const reason = error instanceof MachineAgendaError ? error.reason : error.code;
+    const status =
+      reason === 'not-found'
+        ? 404
+        : reason === 'forbidden'
+          ? 403
+          : ['read-only', 'full', 'ask_changed', 'stale'].includes(reason)
+            ? 409
+            : reason === 'rate-limited'
+              ? 429
+              : reason === 'corrupt'
+                ? 500
+                : 400;
+    throw new ApiError(status, error.message, reason);
+  }
   throw error;
 }
 
@@ -155,7 +165,7 @@ export function agendaRoutes(parts: AgendaRouteParts) {
 
     'GET /v1/machine/agenda': (async call => {
       ownerOnly(call, OWNER_ONLY);
-      return jsonResponse(DaemonAgendaSchema.parse(await parts.machine.list()));
+      return jsonResponse(DaemonAgendaSchema.parse(await parts.machine.list().catch(machineFailure)));
     }) satisfies RouteHandler,
 
     'GET /v1/machine/agenda/:id': (async call => {

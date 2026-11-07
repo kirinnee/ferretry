@@ -149,8 +149,7 @@ export const inboxCount = (
   unread: readonly UnreadSession[],
   held: (entry: UnreadSession) => boolean,
   cards: readonly InboxCard[],
-  toTest: number,
-): number => cards.length + unreadTotal(unread.filter(entry => !held(entry))) + toTest;
+): number => cards.length + unreadTotal(unread.filter(entry => !held(entry)));
 
 /** A machine whose boards could not be read: the items the Inbox counts there but cannot show yet. */
 export interface InboxUnavailable {

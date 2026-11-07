@@ -1,0 +1,1 @@
+Agenda remains pending: its app half waits on app-shell-fill for typed shell bindings, React runtime and the app test harness. Registered screens, panels and settings are not bound yet. Parity rows remain unchecked; daemon fixes do not claim app parity.

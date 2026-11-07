@@ -1,8 +1,7 @@
-import type { AskSummary, AsksApi } from '@ferretry/core-asks/contract';
-import type { FerretId } from '@ferretry/kernel/contract';
+import type { AskItem, AsksApi } from '@ferretry/core-asks/contract';
 import {
   AGENDA_OPEN_DEFAULT_LIMIT,
-  type AgendaOpenFerret,
+  type AgendaOpenSession,
   type AgendaOpenPage,
   type AgendaOpenQuery,
 } from '../../contract/index.ts';
@@ -16,28 +15,27 @@ import {
  * the limit. Only reads; changes nothing.
  */
 export class AgendaRollup {
-  constructor(private readonly asks: Pick<AsksApi, 'open'>) {}
+  constructor(private readonly asks: Pick<AsksApi, 'snapshots'>) {}
 
   async page(query: AgendaOpenQuery): Promise<AgendaOpenPage> {
     const limit = query.limit ?? AGENDA_OPEN_DEFAULT_LIMIT;
     const after = query.after;
-    const byFerret = new Map<string, AskSummary[]>();
-    for (const ask of await this.asks.open({ state: 'open' })) {
-      if (ask.ferret === undefined) continue;
-      byFerret.set(ask.ferret, [...(byFerret.get(ask.ferret) ?? []), ask]);
+    const byFerret = new Map<string, AskItem[]>();
+    for (const board of await this.asks.snapshots()) {
+      if (board.items.length > 0) byFerret.set(board.sessionId, board.items);
     }
     const ids = [...byFerret.keys()].sort().filter(id => after === undefined || id > after);
-    const ferrets: AgendaOpenFerret[] = [];
+    const sessions: AgendaOpenSession[] = [];
     let carried = 0;
     let last: string | undefined;
     for (const id of ids) {
-      if (carried >= limit) return { ferrets, next: last as string };
+      if (carried >= limit) return { sessions, next: last as string };
       last = id;
       const asks = byFerret.get(id) ?? [];
       if (asks.length === 0) continue;
-      ferrets.push({ ferret: id as FerretId, asks });
+      sessions.push({ sessionId: id, items: asks });
       carried += asks.length;
     }
-    return { ferrets };
+    return { sessions };
   }
 }

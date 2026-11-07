@@ -116,17 +116,16 @@ describe('unread conversations', () => {
     test('should count a read board by its deck, and an unread one by its summary, never both', () => {
       // The deck holds A1 and the notification; the item waiting on its ferret is not in it.
       expect(cards.map(card => card.item.id)).toEqual(['A3', 'A1']);
-      expect(inboxCount(entries, held, cards, 0)).toBe(2 + 3);
-      expect(inboxCount(entries, held, cards, 4)).toBe(2 + 3 + 4);
+      expect(inboxCount(entries, held, cards)).toBe(2 + 3);
     });
 
     test('should leave out an answer still in its undo window, as the deck does', () => {
       const deck = inboxCards(entries, boardFor, new Set([cards[0]?.key ?? '']));
-      expect(inboxCount(entries, held, deck, 0)).toBe(1 + 3);
+      expect(inboxCount(entries, held, deck)).toBe(1 + 3);
     });
 
     test('should count nothing for an empty Inbox', () => {
-      expect(inboxCount([], () => false, [], 0)).toBe(0);
+      expect(inboxCount([], () => false, [])).toBe(0);
     });
 
     test('should name each machine whose boards could not be read, once, with its items', () => {

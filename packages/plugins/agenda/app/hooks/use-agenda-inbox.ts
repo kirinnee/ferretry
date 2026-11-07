@@ -64,14 +64,6 @@ import { withMachineAgendas } from '../lib/machine-agenda.ts';
 import { daemonSessionKey, daemonSessionScope } from '../shell.ts';
 import type { DaemonFleetStore } from '../shell.ts';
 import { type BoardReadFailure, InboxBoardReads } from '../lib/inbox-board-reads.ts';
-import {
-  nextWake,
-  rootSessionIds,
-  rootTaskNames,
-  splitSnoozed,
-  type ToTestCard,
-  withTaskName,
-} from '../lib/to-test-inbox.ts';
 
 /** One paired machine, as the inbox reads it: its pairing, its name, its last session list. */
 export interface AgendaInboxMachine {
@@ -85,10 +77,6 @@ export interface AgendaInbox {
   readonly unread: readonly UnreadSession[];
   /** The Inbox count (`inboxCount`): the one number every Inbox badge and the Inbox page's heading show. */
   readonly total: number;
-  /** Cards waiting in a verify lane for the owner's try (Done or Not good): counted in `total`, listed under Needs you. */
-  readonly toTest: readonly ToTestCard[];
-  /** Cards the owner put aside until later: not in `toTest` and not in `total`, back in `toTest` when their time is up. */
-  readonly toTestSnoozed: readonly ToTestCard[];
   /** The deck: every read open item, newest first, minus the answers still undoable or in flight. */
   readonly cards: readonly InboxCard[];
   /** Items on the ferret's turn: not in the deck and not in `total` — the "With ferrets" section. */
@@ -200,48 +188,14 @@ const unreadKey = (entries: readonly UnreadSession[]): string =>
 const cardsKey = (cards: readonly InboxCard[]): string =>
   cards.map(card => `${card.key}\u0000${JSON.stringify(card.item)}`).join('\u0001');
 
-const NO_TO_TEST: readonly ToTestCard[] = [];
 const NO_RECORDS: readonly AgendaListRecord[] = [];
-
-const toTestKeyOf = (rows: readonly ToTestCard[]): string =>
-  rows
-    .map(
-      row =>
-        `${row.key}\u0000${row.card.task.laneId}\u0000${row.card.task.lastTouchedAt}\u0000${row.taskName ?? ''}\u0000${row.snoozedUntil ?? ''}`,
-    )
-    .join('\u0001');
-
-/** The clock the snoozed cards wake by: it moves to the soonest wake, so a card comes back when its time is up. */
-const useWakeClock = (rows: readonly ToTestCard[], timers: DeferredTimers): number => {
-  const [now, setNow] = useState(() => timers.now());
-  useEffect(() => {
-    const wake = nextWake(rows, now);
-    if (wake === null) return;
-    // A little past the wake, and never past what a timer can hold; a longer snooze re-arms when this fires.
-    const handle = timers.setTimeout(() => setNow(timers.now()), Math.min(wake - now + 50, MAX_TIMER_MS));
-    return () => timers.clearTimeout(handle);
-  }, [rows, now, timers]);
-  return now;
-};
-const MAX_TIMER_MS = 2_147_483_647;
 
 export function useAgendaInboxModel(
   client: DaemonAgendaClient,
   machines: readonly AgendaInboxMachine[],
   timers?: DeferredTimers,
-  toTestRead: readonly ToTestCard[] = NO_TO_TEST,
   withdraw?: RepliedPorts['withdraw'],
 ): AgendaInbox {
-  // A card to test is named for its owner's thread (the lineage root), never the sub-ferret that built it.
-  const allSessions = useMemo(() => machines.flatMap(machine => machine.sessions ?? []), [machines]);
-  const taskNames = useMemo(() => rootTaskNames(allSessions), [allSessions]);
-  const rootIds = useMemo(() => rootSessionIds(allSessions), [allSessions]);
-  const named = useMemo(
-    () => toTestRead.map(row => withTaskName(row, taskNames, rootIds)),
-    [toTestRead, taskNames, rootIds],
-  );
-  const now = useWakeClock(named, timers ?? browserDeferredTimers);
-  const split = useMemo(() => splitSnoozed(named, now), [named, now]);
   const latest = useRef(machines);
   latest.current = machines;
   // The machines on screen, as a key: a roll-up is read again when the set changes.
@@ -430,17 +384,6 @@ export function useAgendaInboxModel(
       boards.snapshots.get(daemonSessionKey({ daemonId, sessionId }))?.resolved ?? NO_RECORDS,
     [boards],
   );
-  // Every machine carries a card's ask inside its agenda, so the agenda keeps no To-test list of its own.
-  const awakeRows: typeof split.awake = NO_TO_TEST;
-  const snoozedRows: typeof split.snoozed = NO_TO_TEST;
-  // Every card read for a try, replaced by a gate item or not: a card ask carries the card's id, the board its steps.
-  const howToTestFor = useCallback(
-    (daemonId: DaemonId, cardId: string): string | null =>
-      named.find(row => row.card.daemonId === daemonId && row.card.task.id === cardId)?.howToTest ?? null,
-    [named],
-  );
-  const toTest = useStable(awakeRows, toTestKeyOf(awakeRows));
-  const toTestSnoozed = useStable(snoozedRows, toTestKeyOf(snoozedRows));
   const freshWithFerretCards = useMemo(
     () =>
       withFerretCards(withFerretEntries, (daemonId, sessionId) =>
@@ -455,7 +398,7 @@ export function useAgendaInboxModel(
   const failed = (entry: UnreadSession): BoardReadFailure | undefined =>
     held(entry) ? undefined : failedBoards.get(boardKey(entry));
   const reading = unread.some(entry => !held(entry) && failed(entry) === undefined);
-  const total = inboxCount(unread, held, cards, toTest.length);
+  const total = inboxCount(unread, held, cards);
   const freshUnavailable = inboxUnavailable(unread, failed);
   const unavailable = useStable(
     freshUnavailable,
@@ -540,8 +483,6 @@ export function useAgendaInboxModel(
     () => ({
       unread,
       total,
-      toTest,
-      toTestSnoozed,
       cards,
       withFerret,
       reading,
@@ -556,7 +497,6 @@ export function useAgendaInboxModel(
       replied,
       repliedState,
       connectionFor,
-      howToTestFor,
       agendaClient: client,
       boardOf,
       recordsOf,
@@ -565,8 +505,6 @@ export function useAgendaInboxModel(
       unread,
       total,
       unavailable,
-      toTest,
-      toTestSnoozed,
       cards,
       withFerret,
       reading,
@@ -580,7 +518,6 @@ export function useAgendaInboxModel(
       replied,
       repliedState,
       connectionFor,
-      howToTestFor,
       client,
       boardOf,
       recordsOf,

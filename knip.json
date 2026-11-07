@@ -18,7 +18,12 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/*": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
+      "entry": [
+        "tests/**/*.test.{ts,tsx}",
+        "tests/types/*.types.ts",
+        "app/views/*.tsx",
+        "tests/**/fixtures/**/*.{ts,tsx}"
+      ],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/cli": {

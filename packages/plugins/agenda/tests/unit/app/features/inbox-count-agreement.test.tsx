@@ -16,13 +16,11 @@ import { AgendaRollupStore } from '../../../../app/lib/agenda-rollup.ts';
 import { type DaemonConnection, daemonConnection } from '../../../../app/shell.ts';
 import { DaemonResponseError } from '../../../../app/shell.ts';
 import type { DaemonSessionScope } from '../../../../app/shell.ts';
-import { type ToTestCard, toTestCards } from '../../../../app/lib/to-test-inbox.ts';
 import { AppBar, AppTabBar } from '../../../../app/shell.ts';
 import { SessionsBarAgenda } from '../../../../app/shell.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
 import { interact, type Mounted, mount } from '../../../support/app/dom.ts';
 import { sessionView } from '../../../support/app/sessions.ts';
-import { boardModelOf, card } from '../board-support.ts';
 
 const ec2 = daemonConnection({ daemonId: 'ec2', baseUrl: 'https://ec2.example.test', deviceId: 'd-ec2' });
 const studio = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'd-studio' });
@@ -132,8 +130,8 @@ const fakeClient = (hold: Gate[] | null = null) => {
 
 const quietTimers: DeferredTimers = { setTimeout: () => 0, clearTimeout: () => undefined, now: () => NOW };
 
-function Surfaces({ client, toTest }: { readonly client: DaemonAgendaClient; readonly toTest: readonly ToTestCard[] }) {
-  const inbox = useAgendaInboxModel(client, MACHINES, quietTimers, toTest);
+function Surfaces({ client }: { readonly client: DaemonAgendaClient }) {
+  const inbox = useAgendaInboxModel(client, MACHINES, quietTimers);
   return (
     <div data-total={inbox.total}>
       <SessionsBarAgenda current href="/inbox" onNavigate={() => undefined} rail={false} total={inbox.total} />
@@ -177,13 +175,12 @@ afterEach(async () => {
 
 describe('the Inbox count across the shell', () => {
   it('shows one number on the sidebar, the top bar, the tab bar and the page, and clears Updating once read', async () => {
-    const toTest = toTestCards(await boardModelOf([card('F2', { laneId: 'tested' })]));
-    view = await mount(<Surfaces client={fakeClient()} toTest={toTest} />);
+    view = await mount(<Surfaces client={fakeClient()} />);
     await settle();
 
     // Liftoff EC2: Credentials redesign and its notification (2), the gate card (1). Studio: Rebase now? (1) — the
-    // snoozed item is not counted. Laptop: 3 by its summary, its boards unreadable. One card to test.
-    const total = String(2 + 1 + 1 + 3 + 1);
+    // snoozed item is not counted. Laptop: 3 by its summary, its boards unreadable.
+    const total = String(2 + 1 + 1 + 3);
     expect(view.container.querySelector('[data-total]')?.getAttribute('data-total')).toBe(total);
     const shown = counts(view);
     expect(shown.sidebar).toBe(total);
@@ -202,7 +199,7 @@ describe('the Inbox count across the shell', () => {
 
   it('says Updating only while a first read is in flight, and stops when the reads settle — the failed one too', async () => {
     const held: Gate[] = [];
-    view = await mount(<Surfaces client={fakeClient(held)} toTest={[]} />);
+    view = await mount(<Surfaces client={fakeClient(held)} />);
     await settle();
     expect(view.container.querySelector('[data-agenda-updating], [data-agenda-reading]')).not.toBeNull();
     // Until the boards answer, every surface counts the summaries, and they agree.

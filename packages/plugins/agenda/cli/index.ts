@@ -33,11 +33,12 @@ export default implementCli(manifest, {
 
     async function open(invocation: VerbInvocation, all: boolean): Promise<number> {
       const limit = text(invocation.options.limit);
-      if (limit !== undefined && !/^[1-9][0-9]*$/u.test(limit)) return fail('--limit is a whole number of asks, 1 or more');
+      if (limit !== undefined && !/^[1-9][0-9]*$/u.test(limit))
+        return fail('--limit is a whole number of asks, 1 or more');
       if (limit !== undefined && Number(limit) > AGENDA_OPEN_MAX_LIMIT)
         return fail(`--limit is at most ${String(AGENDA_OPEN_MAX_LIMIT)}`);
       let after = text(invocation.options.after);
-      const ferrets: AgendaOpenPage['ferrets'][number][] = [];
+      const sessions: AgendaOpenPage['sessions'][number][] = [];
       let next: string | undefined;
       do {
         const page = AgendaOpenPageSchema.parse(
@@ -45,12 +46,12 @@ export default implementCli(manifest, {
             query: { ...(after === undefined ? {} : { after }), ...(limit === undefined ? {} : { limit }) },
           }),
         );
-        ferrets.push(...page.ferrets);
+        sessions.push(...page.sessions);
         next = page.next;
         after = page.next;
       } while (all && next !== undefined);
-      if (flag(invocation, 'json')) say(JSON.stringify({ ferrets, ...(next === undefined ? {} : { next }) }, null, 2));
-      else say(renderOpen({ ferrets, ...(next === undefined ? {} : { next }) }));
+      if (flag(invocation, 'json')) say(JSON.stringify({ sessions, ...(next === undefined ? {} : { next }) }, null, 2));
+      else say(renderOpen({ sessions, ...(next === undefined ? {} : { next }) }));
       return 0;
     }
 
@@ -71,17 +72,22 @@ export default implementCli(manifest, {
             say(`Agenda mode is ${mode.enabled ? 'on' : 'off'}. ${mode.note}`);
             return 0;
           }
-          const switched = (await client.call<{ enabled: boolean; note: string }>('PATCH /v1/ferrets/:ferretId/agenda-mode', {
-            params,
-            body: { enabled: state === 'on' },
-          })) as { enabled: boolean; note: string };
+          const switched = (await client.call<{ enabled: boolean; note: string }>(
+            'PATCH /v1/ferrets/:ferretId/agenda-mode',
+            {
+              params,
+              body: { enabled: state === 'on' },
+            },
+          )) as { enabled: boolean; note: string };
           say(`Agenda mode is now ${switched.enabled ? 'on' : 'off'}. ${switched.note}`);
           return 0;
         },
 
         'agenda clear': async invocation => {
           if (!flag(invocation, 'agents'))
-            return fail('say what to clear: `agenda clear --agents` clears every open ask on the agent ferrets’ boards');
+            return fail(
+              'say what to clear: `agenda clear --agents` clears every open ask on the agent ferrets’ boards',
+            );
           const found = AgendaClearAgentsResultSchema.parse(
             await client.call('POST /v1/agenda/clear-agents', { body: { dryRun: true } }),
           );
@@ -94,7 +100,9 @@ export default implementCli(manifest, {
             return 0;
           }
           if (!flag(invocation, 'yes'))
-            return fail(`this would dismiss ${describeClear(found)} and nobody can be asked here: re-run with --yes to go ahead`);
+            return fail(
+              `this would dismiss ${describeClear(found)} and nobody can be asked here: re-run with --yes to go ahead`,
+            );
           const done = AgendaClearAgentsResultSchema.parse(
             await client.call('POST /v1/agenda/clear-agents', { body: {} }),
           );
@@ -105,7 +113,7 @@ export default implementCli(manifest, {
         notify: async invocation => {
           const ferret = text(invocation.options.ferret);
           if (ferret === undefined) return fail('no ferret id — pass --ferret <id>');
-          let request;
+          let request: ReturnType<typeof composeNoticeRequest>;
           try {
             request = composeNoticeRequest(invocation.args, {
               body: text(invocation.options.body),
@@ -115,7 +123,9 @@ export default implementCli(manifest, {
             return fail(error instanceof Error ? error.message : String(error));
           }
           await client.call('POST /v1/ferrets/:ferretId/agenda', { params: { ferretId: ferret }, body: request });
-          say(`Sent. The owner sees it in this ferret's agenda${flag(invocation, 'buzz') ? ' and their phone buzzes' : ''}.`);
+          say(
+            `Sent. The owner sees it in this ferret's agenda${flag(invocation, 'buzz') ? ' and their phone buzzes' : ''}.`,
+          );
           return 0;
         },
       },

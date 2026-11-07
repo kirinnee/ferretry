@@ -36,13 +36,7 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
-import {
-  type AgendaId,
-  type AgendaItem,
-  agendaAnswerText,
-  formatTaskRef,
-  isMachineAgendaId,
-} from '../../wire/index.ts';
+import { type AgendaId, type AgendaItem, agendaAnswerText, isMachineAgendaId } from '../../wire/index.ts';
 import {
   AlarmClockOff,
   ArrowLeft,
@@ -113,7 +107,7 @@ import {
   stepSelection,
 } from '../../lib/agenda-inbox-list.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
-import { agendaAuthor, agendaStatus, clockWords } from '../../lib/agenda-status.ts';
+import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import { itemCardKind } from '../../shell.ts';
 import type { ModeFilter } from '../../shell.ts';
 import type { DaemonConnection, DaemonId } from '../../shell.ts';
@@ -130,10 +124,9 @@ import {
   firstOpenGate,
 } from '../../lib/gate-items.ts';
 import { laneEditDestination } from '../../shell.ts';
-import { daemonAgendaPath, daemonBoardCardPath, daemonSessionPath } from '../../shell.ts';
+import { daemonAgendaPath, daemonSessionPath } from '../../shell.ts';
 import { composerQuoteTarget } from '../../shell.ts';
 import type { TranscriptEntry } from '../../shell.ts';
-import { filterToTest, type ToTestCard } from '../../lib/to-test-inbox.ts';
 import { AgendaCountBadge } from '../../shell.ts';
 import { RouteLink } from '../../shell.ts';
 import { sessionsBarNames } from '../../shell.ts';
@@ -162,8 +155,6 @@ import { CardMetaLine, hasWords, joinMeta } from './card-meta-line.tsx';
 import { ClearAgentsControl } from './clear-agents.tsx';
 import { FilterMenu, FindToggle } from './inbox-filter-menu.tsx';
 import { InboxFindResults } from './inbox-find-results.tsx';
-import { type ToTestAnswers, type ToTestHost, ToTestList, useToTestAnswers, wordsOf } from './to-test-rows.tsx';
-import { ToTestStep } from './to-test-step.tsx';
 import { useItemLifecycle } from './use-item-lifecycle.ts';
 
 /**
@@ -987,65 +978,11 @@ function ParkedRow({
   );
 }
 
-/** One snoozed card to test: when it wakes, and the button that brings it back now. */
-function SnoozedToTestRow({
-  row,
-  answers,
-  now,
-  onNavigate,
-}: {
-  readonly row: ToTestCard;
-  readonly answers: ToTestAnswers;
-  readonly now: number | undefined;
-  readonly onNavigate: (to: string) => void;
-}) {
-  const wakes = row.snoozedUntil === null ? null : clockWords(row.snoozedUntil, now ?? shellClock.nowMs());
-  const more = [row.taskName, row.card.machine, formatTaskRef({ id: row.card.task.id })].filter(
-    (text): text is string => text !== null,
-  );
-  return (
-    <li className="fy-parked-row" data-to-test-snoozed={row.key}>
-      <RouteLink
-        className="fy-inbox-row fy-parked-row__link"
-        onNavigate={onNavigate}
-        to={daemonBoardCardPath(row.card.daemonId, row.card.task.id)}
-      >
-        <span className="fy-inbox-row__top">
-          <span className="fy-inbox-row__title" data-to-test-snoozed-title="">
-            {row.card.task.title}
-          </span>
-        </span>
-        <span className="fy-inbox-row__meta">
-          <span data-to-test-wakes="">{wakes === null ? 'Snoozed' : `Snoozed until ${wakes}`}</span>
-          {more.map(text => (
-            <Fragment key={text}>
-              <span aria-hidden="true">·</span>
-              <span>{text}</span>
-            </Fragment>
-          ))}
-        </span>
-      </RouteLink>
-      <button
-        aria-label={`Unsnooze: ${row.card.task.title}`}
-        className="kt-btn kt-btn--sm fy-parked-row__back"
-        data-to-test-unsnooze=""
-        title="Unsnooze"
-        onClick={() => answers.snooze(row, null)}
-        type="button"
-      >
-        <AlarmClockOff aria-hidden="true" size={18} />
-      </button>
-    </li>
-  );
-}
-
 /** The Snoozed and Replied filters: what is parked, each with the way back to the owner's list. */
 function InboxParkedList({
   inbox,
   filter,
   rows,
-  toTestRows,
-  answers,
   now,
   onNavigate,
   onClear,
@@ -1053,15 +990,12 @@ function InboxParkedList({
   readonly inbox: AgendaInbox;
   readonly filter: ParkedReason;
   readonly rows: readonly InboxCard[];
-  /** The snoozed cards to test (the Snoozed filter only). */
-  readonly toTestRows: readonly ToTestCard[];
-  readonly answers: ToTestAnswers;
   readonly now: number | undefined;
   readonly onNavigate: (to: string) => void;
   readonly onClear: () => void;
 }) {
-  if (rows.length === 0 && toTestRows.length === 0)
-    return inbox.parked.length > 0 || (filter === 'snoozed' && inbox.toTestSnoozed.length > 0) ? (
+  if (rows.length === 0)
+    return inbox.parked.length > 0 ? (
       <NothingMatches onClear={onClear} />
     ) : inbox.resolvedReading ? (
       <InboxReading words="Reading agenda items…" />
@@ -1075,9 +1009,6 @@ function InboxParkedList({
       <ul aria-label={FILTER_WORDS[filter]} className="fy-parked-list">
         {rows.map(card => (
           <ParkedRow card={card} filter={filter} inbox={inbox} key={card.key} now={now} onNavigate={onNavigate} />
-        ))}
-        {toTestRows.map(row => (
-          <SnoozedToTestRow answers={answers} key={row.key} now={now} onNavigate={onNavigate} row={row} />
         ))}
       </ul>
       {inbox.parkedWhole ? (
@@ -1146,8 +1077,8 @@ export interface AgendaInboxPageProps {
   readonly renderComposer?: (card: InboxCard, answerForm: (() => void) | undefined) => ReactNode;
   /** How "Clear all from agent ferrets" reaches the machines. Absent: the Agents filter has no such button. */
   readonly clearPort?: ClearPort;
-  /** How the "Ready to test" items move their cards (the Board's own verbs). Absent: they list, and refuse to move. */
-  readonly toTestHost?: ToTestHost;
+  /** Uploads files with the unified ask answer, through the item's own conversation. */
+  readonly answerPorts?: SendBackPorts;
   /**
    * An item was opened here (it is the deck's top card): its alerts come down on this device and the owner's others
    * (docs/notifications.md § When an alert is cleared). Called once each time a different item opens. Absent: nothing.
@@ -1453,12 +1384,6 @@ function AgendaRunKeysHint({ card }: { readonly card: InboxCard }) {
   return <RunKeysHint keys={agendaRunKeys(card, doneClose)} />;
 }
 
-/** A task card's two answers by arrow, then Skip. */
-const toTestRunKeys = (row: ToTestCard): readonly RunKey[] => {
-  const words = wordsOf(row);
-  return [{ key: '←', word: words.left }, { key: '→', word: words.right }, ...RUN_MOVES];
-};
-
 /** The keys the desktop run answers to at the page: the deck takes the arrows of an agenda card itself. */
 const RUN_KEY_NAMES: ReadonlySet<string> = new Set(['Escape', 'j', 'k', 'ArrowLeft', 'ArrowRight', 'ArrowDown']);
 
@@ -1518,7 +1443,7 @@ export function AgendaInboxPage({
   withFerretsOpen = false,
   renderComposer,
   clearPort,
-  toTestHost,
+  answerPorts,
   onItemOpened,
 }: AgendaInboxPageProps) {
   const headingId = useId();
@@ -1551,28 +1476,18 @@ export function AgendaInboxPage({
   const visible = filterInboxCards(inbox.cards, listFilter);
   const withFerret = filterInboxCards(inbox.withFerret, listFilter);
   const sections = useMemo(() => inboxSections(visible, withFerret), [visible, withFerret]);
-  const toTestRows = useMemo(
-    () => filterToTest(inbox.toTest, { machine: machineFilter, query, agendaOnly: from !== null || kind !== 'all' }),
-    [inbox.toTest, machineFilter, query, from, kind],
-  );
-  const snoozedToTest = useMemo(
-    () =>
-      filterToTest(inbox.toTestSnoozed, { machine: machineFilter, query, agendaOnly: from !== null || kind !== 'all' }),
-    [inbox.toTestSnoozed, machineFilter, query, from, kind],
-  );
-  const toTestAnswers = useToTestAnswers(toTestHost);
   const filtered = machineFilter !== null || query !== '' || from !== null || kind !== 'all';
   const snoozed = parkedBy(inbox.parked, 'snoozed');
   const replied = parkedBy(inbox.parked, 'replied');
   // A count is the length of what is listed under it: the rows the machine, who and Find filters keep.
   const snoozedShown = filterInboxCards(snoozed, listFilter);
   const repliedShown = filterInboxCards(replied, listFilter);
-  const parkedCounts = { snoozed: snoozedShown.length + snoozedToTest.length, replied: repliedShown.length };
+  const parkedCounts = { snoozed: snoozedShown.length, replied: repliedShown.length };
 
-  // The deck deals what waits on the owner, in the order the page lists it: the agenda items, then the cards to test.
+  // The deck deals what waits on the owner, in the order the page lists it: the agenda items and their card asks.
   const deckCards = groupCards([...sections.stopped, ...sections.needsYou]);
   const order = deckCards.map(card => card.key);
-  const runOrder = [...order, ...toTestRows.map(row => row.key)];
+  const runOrder = order;
   // j/k walk the rows that are showing: the owner's sections, and With ferrets only once it is open.
   const navigable = [...order, ...(withFerretsShown ? groupCards(sections.withFerrets).map(card => card.key) : [])];
   const selectedKey = cursor !== null && navigable.includes(cursor) ? cursor : null;
@@ -1587,7 +1502,6 @@ export function AgendaInboxPage({
     if (orderKey === '') setDeckOpen(false);
   }, [orderKey, deckPlace, deckAt]);
   const deckSelected = deckCards.find(card => card.key === deckPlace);
-  const stepRow = toTestRows.find(row => row.key === deckPlace);
 
   // Words typed make Find look in every tab, and the snoozed, replied and resolved ones come from the resolved read.
   const loadResolved = inbox.loadResolved;
@@ -1601,11 +1515,8 @@ export function AgendaInboxPage({
           withFerret: inbox.withFerret,
           parked: inbox.parked,
           resolved: inbox.resolved,
-          toTest: inbox.toTest,
-          toTestSnoozed: inbox.toTestSnoozed,
         },
         listFilter,
-        from !== null || kind !== 'all',
         now ?? shellClock.nowMs(),
       )
     : [];
@@ -1650,8 +1561,8 @@ export function AgendaInboxPage({
 
   // The heading shows the shell's one Inbox count, the number the sidebar, top bar and tab bar show.
   const count = inbox.total;
-  const empty = inbox.cards.length === 0 && inbox.withFerret.length === 0 && inbox.toTest.length === 0;
-  const nothingForYou = inbox.cards.length === 0 && inbox.toTest.length === 0 && inbox.unavailable.length === 0;
+  const empty = inbox.cards.length === 0 && inbox.withFerret.length === 0;
+  const nothingForYou = inbox.cards.length === 0 && inbox.unavailable.length === 0;
   const updating =
     filter === 'open'
       ? inbox.reading && !empty
@@ -1760,7 +1671,7 @@ export function AgendaInboxPage({
   }, [deckPlace]);
 
   // An open item is the deck's top card, on a phone and a wide screen alike.
-  const cardOpen = deckOpen && filter === 'open' && (deckSelected !== undefined || stepRow !== undefined || atEnd);
+  const cardOpen = deckOpen && filter === 'open' && (deckSelected !== undefined || atEnd);
   // Opening an item is the owner seeing it: its alerts come down here and on their other devices. Only while someone is
   // at this page (review round 9): a deck that moved on by itself on a screen nobody is at — its card was answered
   // elsewhere — or a hidden tab is not an open, or it would take the next card's alert off the phone in the owner's
@@ -1808,11 +1719,6 @@ export function AgendaInboxPage({
       setDeckOpen(false);
     } else if (event.key === 'j' && at >= 0) setDeckAt(skipSelection(runOrder, deckPlace));
     else if (event.key === 'k' && at > 0) setDeckAt(runOrder[at - 1] ?? null);
-    else if (stepRow !== undefined && toTestAnswers.answerFor(stepRow.card).pressed === null) {
-      if (event.key === 'ArrowLeft') toTestAnswers.notGood(stepRow);
-      else if (event.key === 'ArrowRight') toTestAnswers.done(stepRow);
-      else if (event.key === 'ArrowDown') setDeckAt(skipSelection(runOrder, stepRow.key));
-    }
   };
   const runKeysLive = resolvedMachine === null && !phone && (cardOpen || allDone);
   useEffect(() => {
@@ -1912,8 +1818,7 @@ export function AgendaInboxPage({
     </header>
   );
 
-  const nothingShown =
-    sections.stopped.length + sections.needsYou.length + sections.withFerrets.length + toTestRows.length === 0;
+  const nothingShown = sections.stopped.length + sections.needsYou.length + sections.withFerrets.length === 0;
   const openBody =
     empty && !filtered ? (
       inbox.reading ? (
@@ -1936,16 +1841,6 @@ export function AgendaInboxPage({
         )}
         {sections.needsYou.length === 0 ? null : (
           <Section env={env} groups={sections.needsYou} id="needs-you" title="Needs you" />
-        )}
-        {toTestRows.length === 0 ? null : (
-          <Section
-            env={env}
-            extra={<ToTestList answers={toTestAnswers} now={now} onNavigate={onNavigate} rows={toTestRows} />}
-            extraCount={toTestRows.length}
-            groups={[]}
-            id="to-test"
-            title="To test"
-          />
         )}
         {sections.withFerrets.length === 0 ? null : (
           <Section
@@ -1991,8 +1886,8 @@ export function AgendaInboxPage({
     // never the ones before it, so the queue only moves forward; past the last, the skipped ones are offered.
     const deck = deckSelected === undefined ? [] : deckCards.slice(Math.max(0, deckCards.indexOf(deckSelected)));
     // The toast takes a row of its own between the card and the composer (never over the input, Send or the keys hint);
-    // wherever the deck foot is not drawn (the end of the run, a to-test step) it floats at the bottom as before.
-    const toastInFoot = !atEnd && stepRow === undefined;
+    // wherever the deck foot is not drawn (the end of the run, a card) it floats at the bottom as before.
+    const toastInFoot = !atEnd;
     return (
       <main
         {...(phone ? { 'aria-label': 'Inbox' } : { 'aria-labelledby': headingId })}
@@ -2034,25 +1929,6 @@ export function AgendaInboxPage({
           <div className="fy-attn-inbox__deck fy-attn-inbox__deck--end">
             <QueueEnd onReview={review} remaining={runOrder.length} />
             <p aria-hidden="true" className="fy-attn-inbox__hint" />
-          </div>
-        ) : stepRow !== undefined ? (
-          <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open" data-agenda-deck-host="">
-            <ToTestStep
-              answers={toTestAnswers}
-              index={runOrder.indexOf(stepRow.key)}
-              now={now}
-              onClose={() => setDeckOpen(false)}
-              onNavigate={onNavigate}
-              onNext={() => setDeckAt(skipSelection(runOrder, stepRow.key))}
-              onPrevious={
-                runOrder.indexOf(stepRow.key) > 0
-                  ? () => setDeckAt(runOrder[runOrder.indexOf(stepRow.key) - 1] ?? null)
-                  : undefined
-              }
-              row={stepRow}
-              total={runOrder.length}
-            />
-            {phone ? null : <RunKeysHint keys={toTestRunKeys(stepRow)} />}
           </div>
         ) : (
           <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open" data-agenda-deck-host="">
@@ -2098,12 +1974,12 @@ export function AgendaInboxPage({
               <AgendaUndoToast inbox={inbox} inline {...(clock === undefined ? {} : { clock })} />
               {deck[0] !== undefined && gateWhy?.key === deck[0].key ? (
                 <GateWhy
+                  ports={answerPorts}
                   card={deck[0]}
                   daemon={inbox.connectionFor(deck[0].daemonId)}
                   optional={gateWordsFor(deck[0].item, gateWhy.action) === 'optional'}
                   subject={gateWhySubject(deck[0].item, gateWhy.action)}
                   error={failureFor(inbox.deferredState.failed, deck[0].key)}
-                  ports={toTestHost?.ports}
                   onCancel={() => setGateWhy(null)}
                   onSend={(sent, from) => {
                     const label = choiceLabel(gateWhy.action);
@@ -2165,11 +2041,6 @@ export function AgendaInboxPage({
       <AgentsBulk inbox={inbox} kind={kind} machines={machines} port={clearPort} />
       <OrphanedFailures inbox={inbox} />
       {filter === 'open' ? <UnreadableMachines inbox={inbox} /> : null}
-      {toTestAnswers.notice === null ? null : (
-        <p className="fy-totest__error" data-to-test-notice="" role="alert">
-          {toTestAnswers.notice}
-        </p>
-      )}
       {finding ? (
         <InboxFindResults
           onClear={clearFilters}
@@ -2183,14 +2054,12 @@ export function AgendaInboxPage({
         />
       ) : filter === 'snoozed' || filter === 'replied' ? (
         <InboxParkedList
-          answers={toTestAnswers}
           filter={filter}
           inbox={inbox}
           now={now}
           onClear={clearFilters}
           onNavigate={onNavigate}
           rows={filter === 'snoozed' ? snoozedShown : repliedShown}
-          toTestRows={filter === 'snoozed' ? snoozedToTest : []}
         />
       ) : filter === 'resolved' ? (
         <InboxResolvedList

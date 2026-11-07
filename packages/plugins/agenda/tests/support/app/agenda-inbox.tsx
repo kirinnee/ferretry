@@ -161,8 +161,6 @@ export function InboxHarness({
   parked = [],
   parkedWhole = false,
   loadResolved = () => undefined,
-  toTest = [],
-  toTestSnoozed = [],
   render,
 }: {
   readonly fake: FakeInbox;
@@ -174,8 +172,6 @@ export function InboxHarness({
   readonly parked?: AgendaInbox['parked'];
   readonly parkedWhole?: boolean;
   readonly loadResolved?: () => void;
-  readonly toTest?: AgendaInbox['toTest'];
-  readonly toTestSnoozed?: AgendaInbox['toTestSnoozed'];
   readonly render: (inbox: AgendaInbox) => ReactElement;
 }) {
   const state = useSyncExternalStore(fake.deferred.subscribe, fake.deferred.getSnapshot);
@@ -202,11 +198,9 @@ export function InboxHarness({
   }, [fake, cards, parked, replied]);
   const inbox: AgendaInbox = {
     unread: [],
-    // As the shell counts: the deck that shows, plus what an unreadable machine holds, plus the cards to test.
+    // As the shell counts: the deck that shows, plus what an unreadable machine holds.
     total:
-      shown.filter(card => isOnOwner(card.item)).length +
-      unavailable.reduce((sum, machine) => sum + machine.items, 0) +
-      toTest.length,
+      shown.filter(card => isOnOwner(card.item)).length + unavailable.reduce((sum, machine) => sum + machine.items, 0),
     // Split as the shell splits them: by whose turn the item is on.
     withFerret: shown.filter(card => agendaTurn(card.item) === 'ferret'),
     cards: shown.filter(card => isOnOwner(card.item)),
@@ -222,8 +216,6 @@ export function InboxHarness({
     replied: fake.replied,
     repliedState: replied,
     connectionFor: () => undefined,
-    toTest,
-    toTestSnoozed,
   };
   return render(inbox);
 }

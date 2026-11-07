@@ -1,6 +1,6 @@
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { AskSummarySchema } from '@ferretry/core-asks/contract';
+import { AskItemSchema, AskListSnapshotSchema } from '@ferretry/core-asks/contract';
 import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 /** The id the daemon agenda goes by: the daemon's own ledger for notices that belong to no ferret. */
@@ -38,15 +38,15 @@ export const AgendaOpenQuerySchema = z.strictObject({
 export type AgendaOpenQuery = z.infer<typeof AgendaOpenQuerySchema>;
 
 /** One ferret's asks in the roll-up: every ask still open or parked (snoozed or replied). */
-export const AgendaOpenFerretSchema = z.strictObject({
-  ferret: FerretIdSchema,
-  asks: z.array(AskSummarySchema).min(1),
+export const AgendaOpenSessionSchema = z.strictObject({
+  sessionId: z.string().min(1),
+  items: z.array(AskItemSchema).min(1).max(20),
 });
-export type AgendaOpenFerret = z.infer<typeof AgendaOpenFerretSchema>;
+export type AgendaOpenSession = z.infer<typeof AgendaOpenSessionSchema>;
 
 /** One page, in ferret-id order. A ferret is never split across pages; `next` is the `after` for the following page. */
 export const AgendaOpenPageSchema = z.strictObject({
-  ferrets: z.array(AgendaOpenFerretSchema),
+  sessions: z.array(AgendaOpenSessionSchema),
   next: z.string().min(1).optional(),
 });
 export type AgendaOpenPage = z.infer<typeof AgendaOpenPageSchema>;
@@ -63,17 +63,22 @@ export const AgendaClearAgentsResultSchema = z.strictObject({
 export type AgendaClearAgentsResult = z.infer<typeof AgendaClearAgentsResultSchema>;
 
 // ─── the daemon agenda ───────────────────────────────────────────────────────────────────────────────────────────
-export const DaemonAgendaSchema = z.strictObject({
-  asks: z.array(AskSummarySchema),
-  resolved: z.array(AskSummarySchema),
-});
+export const DaemonAgendaSchema = AskListSnapshotSchema;
 export type DaemonAgenda = z.infer<typeof DaemonAgendaSchema>;
 /** The owner's few verbs on the daemon agenda: dismiss, snooze, unsnooze, resolve. Raising and editing are the daemon's. */
 export const DaemonAgendaActionSchema = z.discriminatedUnion('action', [
-  z.strictObject({ action: z.literal('dismiss'), ask: z.string().min(1) }),
-  z.strictObject({ action: z.literal('snooze'), ask: z.string().min(1), until: InstantSchema }),
-  z.strictObject({ action: z.literal('unsnooze'), ask: z.string().min(1) }),
-  z.strictObject({ action: z.literal('resolve'), ask: z.string().min(1) }),
+  z.strictObject({
+    action: z.literal('dismiss'),
+    id: z.string().regex(/^A[1-9][0-9]*$/u),
+    note: z.string().max(64_000).optional(),
+  }),
+  z.strictObject({ action: z.literal('snooze'), id: z.string().regex(/^A[1-9][0-9]*$/u), until: InstantSchema }),
+  z.strictObject({ action: z.literal('unsnooze'), id: z.string().regex(/^A[1-9][0-9]*$/u) }),
+  z.strictObject({
+    action: z.literal('resolve'),
+    id: z.string().regex(/^A[1-9][0-9]*$/u),
+    note: z.string().max(64_000).optional(),
+  }),
 ]);
 export type DaemonAgendaAction = z.infer<typeof DaemonAgendaActionSchema>;
 

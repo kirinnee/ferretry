@@ -303,7 +303,7 @@ describe('a gate item in the Inbox', () => {
       await mouseIsLastPointer();
       const fake = fakeInbox();
       const given = ports(true);
-      const mounted = await mount(page(fake, [gate], { initialOpen: gate.key, toTestHost: host(given.ports) }));
+      const mounted = await mount(page(fake, [gate], { initialOpen: gate.key, answerPorts: given.ports }));
       await press(buttonNamed(mounted, 'Not good'));
       await flush();
       expect(attach(mounted)).not.toBeNull();
@@ -322,7 +322,7 @@ describe('a gate item in the Inbox', () => {
     it('sends no files when none were attached', async () => {
       await mouseIsLastPointer();
       const fake = fakeInbox();
-      const mounted = await mount(page(fake, [gate], { initialOpen: gate.key, toTestHost: host(ports(true).ports) }));
+      const mounted = await mount(page(fake, [gate], { initialOpen: gate.key, answerPorts: ports(true).ports }));
       await press(buttonNamed(mounted, 'Not good'));
       await flush();
       const why = sendBackBox(mounted.container);
@@ -338,7 +338,7 @@ describe('a gate item in the Inbox', () => {
         host(undefined),
         host({ sendBackFiles: async () => true } as never),
       ]) {
-        const mounted = await mount(page(fakeInbox(), [gate], { initialOpen: gate.key, toTestHost: given }));
+        const mounted = await mount(page(fakeInbox(), [gate], { initialOpen: gate.key, answerPorts: given.ports }));
         await press(buttonNamed(mounted, 'Not good'));
         await flush();
         expect(attach(mounted)).toBeNull();
@@ -362,9 +362,7 @@ describe('a gate item in the Inbox', () => {
         }),
         sessionView('sess-p', { config: { teammate: 'judson', name: 'Plan' } as never }),
       );
-      const mounted = await mount(
-        page(fakeInbox(), [plan], { initialOpen: plan.key, toTestHost: host(ports(true).ports) }),
-      );
+      const mounted = await mount(page(fakeInbox(), [plan], { initialOpen: plan.key, answerPorts: ports(true).ports }));
       await press(buttonNamed(mounted, 'Not yet'));
       await flush();
       expect(attach(mounted)).toBeNull();

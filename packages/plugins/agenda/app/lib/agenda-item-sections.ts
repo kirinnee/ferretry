@@ -161,8 +161,7 @@ export interface ItemCardAsk {
 }
 
 /**
- * The open card asks an item carries, oldest first. `howToTestFor` is where the card's How to test is read from: the board
- * the app already holds (the ask itself carries the card's id and lane, not its steps); absent or empty, the ask has none.
+ * The current card ask carries its own How to test in the snapshot. A host may also provide board steps.
  */
 export const itemCardAsks = (
   item: AgendaItem,
@@ -170,7 +169,8 @@ export const itemCardAsks = (
 ): readonly ItemCardAsk[] => {
   const view = attachedGateView(item);
   if (view === undefined) return [];
-  const steps = howToTestFor?.(view.gate.cardId)?.trim() ?? '';
+  const attached = item.cardAsks?.find(ask => gateReference(ask.gate) === gateReference(view.gate));
+  const steps = (attached?.howToTest ?? howToTestFor?.(view.gate.cardId))?.trim() ?? '';
   return [{ key: gateReference(view.gate), gate: view.gate, view, howToTest: steps === '' ? null : steps }];
 };
 

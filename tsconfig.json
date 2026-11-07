@@ -1,8 +1,6 @@
 {
   "compilerOptions": {
-    "lib": [
-      "ESNext"
-    ],
+    "lib": ["ESNext"],
     "target": "ESNext",
     "module": "Preserve",
     "moduleDetection": "force",
@@ -20,9 +18,7 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": false,
-    "types": [
-      "bun"
-    ]
+    "types": ["bun"]
   },
   "include": [
     "packages/std",
@@ -60,6 +56,7 @@
     "packages/plugins/agenda/app/lib/agenda-form-state.ts",
     "packages/plugins/agenda/app/lib/notification-filter-mirror.ts",
     "packages/plugins/agenda/app/lib/notification-filter.ts",
+    "packages/plugins/agenda/app/lib/notification-ledger.ts",
     "packages/plugins/agenda/app/lib/notification-open.ts",
     "packages/plugins/agenda/app/lib/notify.ts",
     "packages/plugins/agenda/tests/integration/app",
@@ -91,13 +88,17 @@
     "packages/plugins/agenda/tests/unit/app/gate-items.test.ts",
     "packages/plugins/agenda/tests/unit/app/machine-agenda.test.ts",
     "packages/plugins/agenda/tests/unit/app/notification-filter-mirror.test.ts",
+    "packages/plugins/agenda/tests/unit/app/notification-filter.test.ts",
+    "packages/plugins/agenda/tests/unit/app/notification-ledger.test.ts",
     "packages/plugins/agenda/tests/unit/app/notification-open.test.ts",
     "packages/plugins/agenda/tests/unit/app/notification-tap.test.ts",
     "packages/plugins/agenda/tests/unit/app/notify.test.ts",
     "packages/plugins/agenda/tests/unit/app/reply-approval.test.ts",
     "packages/plugins/agenda/tests/unit/app/to-test-inbox.test.ts",
-    "packages/plugins/agenda/tests/unit/app/notification-ledger.test.ts",
-    "packages/plugins/agenda/tests/unit/app/notification-filter.test.ts",
-    "packages/plugins/agenda/app/lib/notification-ledger.ts"
+    "packages/plugins/onboarding/app/landing-geometry.ts",
+    "packages/plugins/onboarding/app/setup-qr.ts",
+    "packages/plugins/onboarding/tests/unit/app/get-started-script.test.ts",
+    "packages/plugins/onboarding/tests/unit/app/setup-qr.test.ts",
+    "packages/plugins/runtimes/app/hooks"
   ]
 }

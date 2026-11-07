@@ -38,8 +38,7 @@ const DEFAULT_CONFIG: AgendaConfig = { agendaMode: true, agendaNudge: true, dead
  * agenda, and the buzzes to your phone.
  *
  * SEAMS NOT BOUND HERE (declared GAPS; each degrades in words instead of guessing):
- * - **Snooze, parked asks, deadlines.** Asks' port carries no snooze, `neededBy` or "parked" state, so the wake sweep, the
- *   resurfacing timer and the deadline warning (today's waker, resurfacer, `deadline` buzz) cannot be driven from here;
+ * - **Deadline buzzes and wake scheduling.** Asks owns the engine's wake sweep and resurfacing timer;
  *   they act on Asks' own ledger and belong beside it. `AgendaApi.buzz` is the generic once-per-moment buzz whoever knows
  *   a deadline or a wake calls.
  * - **A notice's `--buzz`.** Asks' summary carries no `blocking` flag yet; the buzz reads it when the summary has it.

@@ -4,17 +4,15 @@
  * an OPEN item opens here as the deck's card, like a tap on the Open list does.
  */
 
-import { formatTaskRef } from '../../wire/index.ts';
 import { Fragment } from 'react';
 import { agendaConversationPath } from '../../lib/agenda-inbox.ts';
 import type { FindRow, FindTone } from '../../lib/agenda-inbox-find.ts';
 import { inboxRowTitle, inboxWho } from '../../lib/agenda-inbox-list.ts';
-import { daemonBoardCardPath } from '../../shell.ts';
 import { RouteLink } from '../../shell.ts';
 import { sessionsBarNames } from '../../shell.ts';
 import { agendaReference } from './agenda-board.tsx';
 
-const WHERE_WORDS = 'Find looks in Open, Snoozed, Replied, Resolved and Cards to test.';
+const WHERE_WORDS = 'Find looks in Open, Snoozed, Replied, Resolved.';
 
 interface Line {
   readonly title: string;
@@ -33,7 +31,7 @@ const lineOf = (row: FindRow): Line => {
       open: row.chip.tone === 'open' ? row.card.key : null,
     };
   }
-  if (row.kind === 'resolved') {
+  {
     const names = sessionsBarNames(row.row.view);
     return {
       title: row.row.record.title ?? row.row.record.subject,
@@ -42,13 +40,6 @@ const lineOf = (row: FindRow): Line => {
       open: null,
     };
   }
-  const { card, taskName } = row.row;
-  return {
-    title: card.task.title,
-    more: [taskName, card.machine, formatTaskRef({ id: card.task.id })].filter((text): text is string => text !== null),
-    to: daemonBoardCardPath(card.daemonId, card.task.id),
-    open: null,
-  };
 };
 
 /** One line, always: the label is short, and the full wording is the tooltip and the accessible name. */

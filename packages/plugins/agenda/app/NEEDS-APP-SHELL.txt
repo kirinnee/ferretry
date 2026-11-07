@@ -3,7 +3,7 @@ app/lib/agenda-client.ts, agenda-api.ts, agenda-item-client.ts, agenda-clear-age
 app/features/agenda/agenda-swipe-gesture.ts | DOM types (HTMLElement, Element, Node, Selection, window)
 app/features/agenda/use-down-swipe.ts | react; DOM types
 app/features/agenda/{deck-down-context,use-agenda-item,use-changed-tabs,use-done-close-flow,use-item-lifecycle}.ts | react
-app/hooks/*.ts (use-agenda, use-agenda-deep-link, use-agenda-inbox, use-agenda-replies, use-done-close, use-group-needs-you, use-notification-open, use-notifications, use-to-test-cards) | react; use-agenda-inbox also window and document
+app/hooks/*.ts (use-agenda, use-agenda-deep-link, use-agenda-inbox, use-agenda-replies, use-done-close, use-notification-open, use-notifications) | react; use-agenda-inbox also window and document
 app/lib/agenda-form-send.ts, agenda-form-state.ts | react
 app/lib/agenda-deep-link.ts, agenda-fold.ts | DOM types (Location, window)
 app/lib/notification-filter-mirror.ts | IndexedDB types (IDBFactory, IDBDatabase, IDBRequest, IDBTransaction)
@@ -13,11 +13,11 @@ app/**/*.tsx | react, lucide-react, react-dom; the root tsconfig excludes them
 app/views/*.tsx | react; the shell hooks named in shell.ts (useRouter, useLayoutMode, useAppStore, useAgendaItemOpened, usePairedMachineNotifications, useNotificationPreferences, useFerretAgendaModel); screens agenda and agenda-ask, panel ferret-agenda and settings tab agenda are wired by app/index.ts and load these on first use
 tests/support/app/agenda-folds.ts, inbox-menus.ts | DOM helpers (tests/support/app/dom.ts is the shell's DOM harness, not in this package)
 tests/support/app/dom.ts, react.ts, settle.ts, dom-form.ts, learning-dom.ts | NOT COPIED: the shell's DOM and React test harness (happy-dom, react-test-renderer); every *.test.tsx imports it
-tests/support/app/board-support.ts (tests/unit/board-support.ts) | NOT COPIED: board fixtures, they need the Board plugin's wire; tests/unit/app/{agenda-done-close,awaiting-owner,gate-items,to-test-inbox}.test.ts import it
+tests/support/app/board-support.ts (tests/unit/board-support.ts) | NOT COPIED: board fixtures, they need the Board plugin's wire; tests/unit/app/{agenda-done-close,awaiting-owner,gate-items}.test.ts import it
 tests/unit/app/**/*.test.tsx | happy-dom, react-test-renderer and the harness above; not run
 tests/unit/app/features/agenda-swipe-gesture.test.ts | document and window (happy-dom); 15 of 21 tests need it
 tests/unit/app/notification-tap.test.ts | the shell's push-scope helpers (notificationUrl, notificationTapUrl, machineNotification ...) are placeholders; 10 of 14 tests need them
 tests/unit/app/agenda-form-send.test.ts | react
-tests/unit/app/{agenda-done-close,awaiting-owner,to-test-inbox,gate-items}.test.ts | the Board fixtures above (and board shapes typed as Opaque in the seam)
+tests/unit/app/{agenda-done-close,awaiting-owner,gate-items}.test.ts | the Board fixtures above (and board shapes typed as Opaque in the seam)
 tests/integration/app/*.visual.test.ts and fixtures/ | playwright-core and the Vite browser harness (pwa/harness, not copied); never run here
 tests/integration/app/notification-open.test.ts | playwright-core, a signed release build, tests/integration/app/support/{chromium,wait-for,signed-release}.ts (not copied)

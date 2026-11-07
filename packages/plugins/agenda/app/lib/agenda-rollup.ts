@@ -1,3 +1,4 @@
+import { AgendaOpenPageSchema, type AgendaOpenPage } from '../../contract/index.ts';
 /**
  * EVERY CONVERSATION'S OPEN AND PARKED ITEMS, read once per machine (docs/agenda.md § The roll-up).
  *
@@ -10,13 +11,7 @@
  * than it read.
  */
 
-import {
-  AGENDA_CHANNEL_HEADER,
-  AGENDA_CHANNEL_VERSION,
-  type AgendaItem,
-  AgendaOpenPageSchema,
-  type AgendaOpenPage,
-} from '../wire/index.ts';
+import { AGENDA_CHANNEL_HEADER, AGENDA_CHANNEL_VERSION, type AgendaItem } from '../wire/index.ts';
 import type { DaemonConnection, DaemonId } from '../shell.ts';
 import { daemonRequest } from '../shell.ts';
 import { type DaemonFetch, DaemonResponseError } from '../shell.ts';

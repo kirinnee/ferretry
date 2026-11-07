@@ -104,7 +104,6 @@ export const TwoFactorSeedHost: Primitive = missing('TwoFactorSeedHost');
 export const useAnsweredSuggestionSweep: Primitive = missing('useAnsweredSuggestionSweep');
 export const useBoard: Primitive = missing('useBoard');
 export const useBoardActions: Primitive = missing('useBoardActions');
-export const useBoardAnswers: Primitive = missing('useBoardAnswers');
 export const useBoardProjects: Primitive = missing('useBoardProjects');
 export const useBoardTask: Primitive = missing('useBoardTask');
 export const useDaemonFetch: Primitive = missing('useDaemonFetch');
@@ -209,7 +208,6 @@ export const wordCut: Primitive = missing('wordCut');
 
 export type AppStore = Opaque;
 export type BoardActions = Opaque;
-export type BoardAnswers = Opaque;
 export type BoardCardOf = Opaque;
 export type BoardGroupOf = Opaque;
 export type BoardMachine = Opaque;
