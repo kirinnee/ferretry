@@ -16,7 +16,7 @@ import type { DaemonConnection, DaemonId } from './machine.ts';
 import { ListRefresh, type ListRefreshEnvironment, browserListRefreshEnvironment } from '../shell.ts';
 
 /** One machine's ferrets as the inbox reads them: `null` until the first list read answers. */
-export interface FleetMachine {
+interface FleetMachine {
   readonly sessions: readonly FerretView[] | null;
 }
 
@@ -31,7 +31,7 @@ export interface DaemonFleetStore {
 }
 
 /** How soon a change is read again: quick enough to feel live, slow enough that a burst is one read. */
-export const FERRET_REFRESH_MIN_MS = 1_000;
+const FERRET_REFRESH_MIN_MS = 1_000;
 
 export class AgendaFerretStore implements DaemonFleetStore {
   readonly #listeners = new Set<() => void>();

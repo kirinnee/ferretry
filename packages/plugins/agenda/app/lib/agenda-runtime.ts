@@ -20,7 +20,7 @@ import { AgendaFerretStore } from './ferret-store.ts';
 import { type DaemonConnection, daemonConnection, THIS_MACHINE } from './machine.ts';
 
 /** What the Inbox calls the one machine when the shell does not name it. */
-export const THIS_MACHINE_NAME = 'This machine';
+const THIS_MACHINE_NAME = 'This machine';
 
 export interface AgendaRuntime {
   readonly client: AgendaCall;

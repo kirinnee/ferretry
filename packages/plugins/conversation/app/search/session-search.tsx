@@ -68,7 +68,7 @@ export interface FerretCardsRead {
 }
 
 /** No board on this host: an empty, ready slice, never an error (the search simply holds files only). */
-export const NO_BOARD: FerretCardsRead = { state: 'ready', error: null, cards: [] };
+const NO_BOARD: FerretCardsRead = { state: 'ready', error: null, cards: [] };
 
 /** Which daemon and ferret a search is about. Ferret ids are per daemon, so both are its identity. */
 export interface FerretSearchScope {

@@ -125,7 +125,7 @@ export const unverifiedNotification = (payload: NotificationPayload, origin: str
 });
 
 /** The fixed, per-machine tag every filtered push collapses into — see `filteredPushNotification`. */
-export const FILTERED_PUSH_TAG_PREFIX = 'fy-quiet:';
+const FILTERED_PUSH_TAG_PREFIX = 'fy-quiet:';
 
 /**
  * What a push the reader's own filter hides is shown as (`shouldShowNotification`): a push that shows NOTHING can

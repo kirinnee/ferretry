@@ -32,7 +32,7 @@ export function CompactAtPanel({
   return subject === undefined || !canControl ? null : <CompactAtControl client={client} ferretId={subject} />;
 }
 
-export function CompactAtControl({
+function CompactAtControl({
   client,
   ferretId,
 }: {

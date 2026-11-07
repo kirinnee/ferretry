@@ -69,7 +69,7 @@ import type { TranscriptHistoryControl } from './transcript-history-row.tsx';
 import { useStuckMessageActions } from './use-stuck-message-actions.tsx';
 
 /** The browser's clock, timers and visibility, for the refresh (today's `browserWorkspaceRefreshEnvironment`). */
-export const browserChatRefreshEnvironment: ChatRefreshEnvironment = {
+const browserChatRefreshEnvironment: ChatRefreshEnvironment = {
   visible: () => typeof document === 'undefined' || document.visibilityState !== 'hidden',
   setInterval: (callback, milliseconds) => globalThis.setInterval(callback, milliseconds),
   clearInterval: handle => globalThis.clearInterval(handle as ReturnType<typeof globalThis.setInterval>),

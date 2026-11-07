@@ -1,5 +1,4 @@
 import type { Redaction } from '@ferretry/kernel/contract';
-import type { ScrubText } from '../lib/documents.ts';
 import type { WorkRedaction } from '../lib/service.ts';
 
 /**
@@ -36,5 +35,3 @@ export function workRedaction(
     epochTracksValues: generation !== unchangingGeneration,
   };
 }
-
-export type { ScrubText };

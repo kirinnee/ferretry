@@ -3,7 +3,7 @@
  * that read that list. The shape is today's `SignInRuleSuggestionView`; the Agenda reads only its id.
  */
 
-export const SUGGESTION_ID = 'srg_0000000000000001';
+const SUGGESTION_ID = 'srg_0000000000000001';
 
 export interface SuggestionFixture {
   readonly id: string;

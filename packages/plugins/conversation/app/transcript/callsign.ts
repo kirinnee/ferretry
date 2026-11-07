@@ -52,10 +52,3 @@ export const displayCallsign = (raw: string | null | undefined): string => {
     .map(segment => (segment === '' ? segment : `${segment[0]?.toUpperCase() ?? ''}${segment.slice(1)}`))
     .join('-');
 };
-
-/**
- * Session ids are long and readers only ever use their head to tell two apart,
- * so a truncated form with an ellipsis is what gets rendered. An id short enough
- * to show whole is shown whole rather than being padded with a lie.
- */
-export const shortSessionId = (id: string): string => (id.length > 8 ? `${id.slice(0, 8)}…` : id);

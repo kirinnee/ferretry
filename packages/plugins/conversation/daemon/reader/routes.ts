@@ -78,7 +78,7 @@ const numberQuery = (call: Call, name: string): number | undefined => {
 };
 
 /** A strong validator over the body AS SERVED, after redaction (R265): never over the raw evidence. */
-export const entityTag = (body: string): string => `"${createHash('sha256').update(body).digest('base64url')}"`;
+const entityTag = (body: string): string => `"${createHash('sha256').update(body).digest('base64url')}"`;
 
 /** The answer, or a 304 when `If-None-Match` already names it. */
 function conditional(response: ApiResponse, call: Call): ApiResponse {

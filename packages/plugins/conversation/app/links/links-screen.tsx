@@ -31,11 +31,11 @@ const PARTS: readonly { readonly id: LinksPart; readonly label: string }[] = [
 ];
 
 /** Ferrets' `GET /v1/ferrets`: every ferret's summary. */
-export const readFerrets = async (client: Pick<PluginClient, 'call'>): Promise<readonly FerretSummary[]> =>
+const readFerrets = async (client: Pick<PluginClient, 'call'>): Promise<readonly FerretSummary[]> =>
   z.array(FerretSummarySchema).parse(await client.call('GET /v1/ferrets'));
 
 /** Ferrets' resume: a stopped ferret relaunches its harness on the same conversation. */
-export const resumeFerret = async (client: Pick<PluginClient, 'call'>, ferretId: string): Promise<void> => {
+const resumeFerret = async (client: Pick<PluginClient, 'call'>, ferretId: string): Promise<void> => {
   await client.call('POST /v1/ferrets/:ferretId/resume', {
     params: { ferretId },
     body: {},

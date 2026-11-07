@@ -48,18 +48,3 @@ export const PUSH_UNSUPPORTED_MESSAGE =
 
 /** Shown when a device could not be revoked with its machine. */
 export const PUSH_REVOKE_FAILED_MESSAGE = 'Could not revoke that device with this daemon.';
-
-const unbound = async (): Promise<PushDeliveryReport> => ({
-  status: 'unavailable',
-  message: PUSH_UNSUPPORTED_MESSAGE,
-  devices: [],
-  currentDeviceId: null,
-});
-
-/** The port where nothing can enrol: every readout is unavailable, and nothing is sent anywhere. */
-export const UNBOUND_PUSH_DELIVERY: PushDeliveryPort = {
-  read: unbound,
-  enable: unbound,
-  disable: unbound,
-  revoke: unbound,
-};

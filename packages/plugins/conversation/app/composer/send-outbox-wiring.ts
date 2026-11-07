@@ -151,7 +151,7 @@ export const createDaemonOutbox = (options: DaemonOutboxOptions): DaemonOutbox =
 const documentOutboxes = new Map<string, DaemonOutbox>();
 
 /** The document-lifetime outbox of one daemon, made on first use over the browser's storage. */
-export const documentOutbox = (daemonId: string): DaemonOutbox => {
+const documentOutbox = (daemonId: string): DaemonOutbox => {
   let existing = documentOutboxes.get(daemonId);
   if (existing === undefined) {
     existing = createDaemonOutbox({ daemonId, backend: browserOutboxBackend() ?? new MemoryOutboxBackend() });

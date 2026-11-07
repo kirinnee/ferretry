@@ -18,7 +18,7 @@ export interface CardKind {
 export const TASK_CARD_KIND: CardKind = { family: 'task', word: TEST_KIND_LABEL };
 
 /** The word an agenda item carries: the protocol's plain word for its kind (a notice is FYI). */
-export const agendaWord = (item: Pick<AgendaItem, 'kind' | 'ask'> & { readonly notice?: true | undefined }): string =>
+const agendaWord = (item: Pick<AgendaItem, 'kind' | 'ask'> & { readonly notice?: true | undefined }): string =>
   agendaKindLabel(item.notice === true ? { kind: 'info' } : item);
 
 /** An Inbox item's kind: a gate is the owner's go-ahead on a task (Test or Approve); everything else is the agenda's. */

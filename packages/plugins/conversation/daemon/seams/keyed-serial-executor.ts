@@ -6,7 +6,7 @@ import type { YieldingSerialExecutor } from './ports.ts';
  * Each step waits for real work to settle, so this is not a spin. It bounds the yield: a fleet so busy
  * that a keyed tail is always open would otherwise never let its backlog proof run at all.
  */
-export const EXCLUSIVE_YIELD_LIMIT = 16;
+const EXCLUSIVE_YIELD_LIMIT = 16;
 
 /** Serializes work per key while allowing an exclusive rebuild barrier. */
 export class KeyedSerialExecutor implements YieldingSerialExecutor {

@@ -2,7 +2,7 @@ import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
 import type { QueuedMessage } from '../../../../daemon/seams/protocol.ts';
 import should from 'should';
-import { canMove, foldQueue, isFinal, type QueueEvent, QueueEventSchema } from '../../../../daemon/seams/index.ts';
+import { canMove, foldQueue, isFinal, type QueueEvent, QueueEventSchema } from '../../../../daemon/queue/lib/model.ts';
 
 /**
  * A session's queue is the fold of its log. These pin what each event may change, from where the message

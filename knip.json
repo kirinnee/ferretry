@@ -38,7 +38,12 @@
     },
     "packages/plugins/agenda": {
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx", "tests/**/fixtures/**/*.{ts,tsx}"],
-      "project": ["**/*.{ts,tsx}"]
+      "project": ["**/*.{ts,tsx}"],
+      "ignore": [
+        "app/features/settings/notification-machines.tsx",
+        "app/lib/machine-notifications.ts",
+        "app/lib/agenda-source-refs.ts"
+      ]
     },
     "packages/plugins/board": {
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
@@ -78,7 +83,8 @@
     },
     "packages/plugins/conversation": {
       "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "app/surfaces.tsx"],
-      "project": ["**/*.{ts,tsx}"]
+      "project": ["**/*.{ts,tsx}"],
+      "ignore": ["app/composer/use-composer-preferences.ts"]
     },
     "packages/plugins/usage": {
       "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}"],

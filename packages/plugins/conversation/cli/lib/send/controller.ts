@@ -19,7 +19,7 @@ export interface SendCommandFlags extends Omit<SendFlags, 'fileMessage'> {
 }
 
 /** How long a `send --wait` waits, and how often it asks. A send to a busy agent may wait longer. */
-export const WAIT_LIMIT_MS = 5 * 60_000;
+const WAIT_LIMIT_MS = 5 * 60_000;
 export const WAIT_INTERVAL_MS = 2_000;
 
 /** Sends a message to a ferret: `fy send` (and its peer-reply spelling, `fy reply`). */

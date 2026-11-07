@@ -17,7 +17,7 @@ export function withClient(element: ReactElement, client: PluginClient = BARE_CL
 }
 
 /** Today's suites opened a draft stream through a `DaemonStreamOpener`; this is that opener as the client's socket. */
-export interface SuiteStreamRequest {
+interface SuiteStreamRequest {
   readonly ferretId: string;
   readonly onData: (
     data: { readonly kind: 'text'; readonly text: string } | { readonly kind: 'bytes'; readonly bytes: Uint8Array },

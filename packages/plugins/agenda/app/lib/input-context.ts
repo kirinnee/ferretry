@@ -5,7 +5,7 @@
  */
 
 /** Where the agent's own sentence starts in an input card's agenda context (Vault's `INPUT_PROMPT_MARKER`). */
-export const INPUT_PROMPT_MARKER = 'The agent says: ';
+const INPUT_PROMPT_MARKER = 'The agent says: ';
 
 /** The daemon's own lines only, or `null` when there are none. */
 export const inputContextLines = (context: string | null | undefined): string | null => {

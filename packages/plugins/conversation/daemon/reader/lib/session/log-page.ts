@@ -21,7 +21,7 @@
 import type { TranscriptBatch, TranscriptEvent, TranscriptSource } from '../transcript/types.ts';
 
 /** The windows a page tries, from its end backwards, before the last one ({@link MAX_LOG_PAGE_SCAN_BYTES}). */
-export const LOG_PAGE_GROWTH_BYTES: readonly number[] = [512 * 1024, 2 * 1024 * 1024, 8 * 1024 * 1024];
+const LOG_PAGE_GROWTH_BYTES: readonly number[] = [512 * 1024, 2 * 1024 * 1024, 8 * 1024 * 1024];
 
 /**
  * The furthest back from its end one page reads.
@@ -29,7 +29,7 @@ export const LOG_PAGE_GROWTH_BYTES: readonly number[] = [512 * 1024, 2 * 1024 * 
  * It is the per-record bound (`DEFAULT_MAX_PENDING_BYTES`), so any record the source can parse at all
  * fits inside one page's scan, and a page that found nothing in it hands back a `start` that far back.
  */
-export const MAX_LOG_PAGE_SCAN_BYTES = 64 * 1024 * 1024;
+const MAX_LOG_PAGE_SCAN_BYTES = 64 * 1024 * 1024;
 
 /** The steps one page window may take: a scan of {@link MAX_LOG_PAGE_SCAN_BYTES} in 8 MiB steps, with room. */
 const PAGE_STEP_LIMIT = 64;

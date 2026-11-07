@@ -88,7 +88,7 @@ function cut(
  * iterator cost about 30 ms a megabyte, and a bounded read counts up to 32 MiB of them, so counting
  * lines alone held the event loop longer than parsing the records did.
  */
-export function countLines(bytes: Uint8Array): number {
+function countLines(bytes: Uint8Array): number {
   let lines = 0;
   for (let at = bytes.indexOf(LINE_FEED); at >= 0; at = bytes.indexOf(LINE_FEED, at + 1)) lines += 1;
   return lines;

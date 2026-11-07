@@ -4,20 +4,19 @@ import type { QueuedMessage } from '../../../../daemon/seams/protocol.ts';
 import should from 'should';
 import {
   type DeliveryView,
-  defaultQueueDeliverySettings,
-  foldQueue,
   type HandOver,
   movesFrom,
   type OwnDraft,
+  reasonForWaiting,
+} from '../../../../daemon/queue/lib/delivery.ts';
+import {
+  defaultQueueDeliverySettings,
   QueueDeliverer,
   type QueueDelivery,
   type QueueDeliverySettings,
-  type QueueEvent,
-  type SendFate,
-  type SendPaneObservation,
-  type SendTarget,
-  reasonForWaiting,
-} from '../../../../daemon/seams/index.ts';
+} from '../../../../daemon/queue/lib/deliverer.ts';
+import { foldQueue, type QueueEvent } from '../../../../daemon/queue/lib/model.ts';
+import { type SendFate, type SendPaneObservation, type SendTarget } from '../../../../daemon/delivery/lib/types.ts';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
 
 const ID = parseSessionId('session-1');

@@ -103,7 +103,7 @@ export function dispositionOf(path: SendPath, held = true): SendDisposition {
  * the only code that knows what was typed, so the tracker does not have to re-derive it.
  */
 /** One message inside a combined delivery, as the ledger remembers it. */
-export interface SendBatchMember {
+interface SendBatchMember {
   /** The queued message's own id — the send id its sender was given. */
   readonly queueId: string;
   /** The sending ferret's session. */

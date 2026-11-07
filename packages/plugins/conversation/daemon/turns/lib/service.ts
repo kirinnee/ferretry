@@ -37,7 +37,7 @@ export interface TurnWatchReport {
 }
 
 /** The background loop as the composition root arms it. */
-export interface TurnWatchLoop {
+interface TurnWatchLoop {
   readonly intervalMs: number;
   /** One tick. Never rejects: a background timer must not take the daemon down. */
   run(): Promise<TurnWatchReport | undefined>;
