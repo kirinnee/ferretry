@@ -28,9 +28,14 @@ describe('the host process table', () => {
   it('should list this very process, with a parent and an elapsed time, through the real ps', async () => {
     // Arrange
     const host = { platform: globalThis.process.platform } as ProcessHostFacts;
-    const probe = new KernelProcessProbe(realPs, host, { nowMs: () => Date.now() }, {
-      procfs: false,
-    });
+    const probe = new KernelProcessProbe(
+      realPs,
+      host,
+      { nowMs: () => Date.now() },
+      {
+        procfs: false,
+      },
+    );
 
     // Act
     const read = await probe.processTable();

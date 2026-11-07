@@ -12,7 +12,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { MemoryStateFolder } from '@ferretry/kernel/testing';
+import type { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { TransferBriefFiles, TransferPlanFiles } from '../../../../contract/transfer-state.ts';
 import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import { ForkFiles } from '../../../../contract/index.ts';
@@ -35,7 +35,7 @@ export const SOURCE_ID = '20260806-source';
 export const TARGET_ID = '20260806-target';
 
 /** Every declared file a fork touches: the session store's, the receipts, and the target's plan and brief. */
-export const FORK_STATE_FILES = [...SESSION_STORE_FILES, ForkFiles, TransferPlanFiles, TransferBriefFiles] as const;
+const FORK_STATE_FILES = [...SESSION_STORE_FILES, ForkFiles, TransferPlanFiles, TransferBriefFiles] as const;
 
 const directories = new Set<string>();
 

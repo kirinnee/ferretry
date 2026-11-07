@@ -42,7 +42,7 @@ export interface ConversationCarryRequest {
 }
 
 /** The record the relaunch is bound to, and the copy that has to happen first for it to be true. */
-export interface ConversationCarried {
+interface ConversationCarried {
   readonly kind: 'carry';
   readonly provenance: TranscriptProvenance;
   /** Absent when the target already holds the file — the same login, or nothing written yet. */
@@ -50,7 +50,7 @@ export interface ConversationCarried {
 }
 
 /** Why the conversation cannot go with the session, in words a person reads. */
-export interface ConversationUnresumable {
+interface ConversationUnresumable {
   readonly kind: 'unresumable';
   readonly reason: string;
 }

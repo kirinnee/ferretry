@@ -205,7 +205,8 @@ describe('StorageTransferEnvelopeWriter', () => {
     // escalation on the strength of somebody else's ancestry.
     const { storage, folder } = await memoryStorage();
     const target = parseSessionId(TARGET_ID);
-    plantConfig(folder, 
+    plantConfig(
+      folder,
       target,
       created(TARGET_ID, {
         provenance: {
@@ -235,12 +236,10 @@ describe('StorageTransferEnvelopeWriter', () => {
     const before = folder.raw(SessionConfigFiles, TARGET_ID);
 
     // Act
-    const failure = await new StorageTransferEnvelopeWriter(storage)
-      .apply(TARGET_ID, envelope('/work/x'))
-      .then(
-        () => undefined,
-        (error: unknown) => error,
-      );
+    const failure = await new StorageTransferEnvelopeWriter(storage).apply(TARGET_ID, envelope('/work/x')).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
 
     // Assert: a record that cannot be parsed is not the same as no record, and treating it as one
     // would erase whatever wrote it. The refusal is the port's damage, and the bytes are untouched.
@@ -271,12 +270,10 @@ describe('StorageTransferEnvelopeWriter', () => {
     const { storage, folder } = await memoryStorage();
 
     // Act
-    const failure = await new StorageTransferEnvelopeWriter(storage)
-      .apply(TARGET_ID, envelope('/work/forked'))
-      .then(
-        () => undefined,
-        (error: unknown) => error,
-      );
+    const failure = await new StorageTransferEnvelopeWriter(storage).apply(TARGET_ID, envelope('/work/forked')).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
 
     // Assert: the envelope is applied to the session the lifecycle reserved, never to a document it made up.
     should(failure).be.instanceOf(Error);

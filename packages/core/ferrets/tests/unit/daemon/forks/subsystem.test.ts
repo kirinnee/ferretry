@@ -3,8 +3,8 @@ import {
   type ForkSessionFailure,
   type ForkSessionRequest,
 } from '../../../../contract/fork.ts';
-import { type SessionTransferPlan } from '../../../../contract/transfer.ts';
-import { type SessionView } from '../../../../daemon/lib/protocol/session.ts';
+import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
+import type { SessionView } from '../../../../daemon/lib/protocol/session.ts';
 import { describe, expect, it } from 'bun:test';
 import {
   SessionForkPhaseRegressionError,

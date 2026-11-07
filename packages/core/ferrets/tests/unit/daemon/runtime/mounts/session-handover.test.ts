@@ -204,7 +204,8 @@ class Dispatcher {
       return { status: response.status, body: response.body };
     } catch (error) {
       // The kernel's dispatcher answers anything that is not a stated refusal as a bare 500, with no code of ours.
-      if (!(error instanceof ApiError)) return { status: 500, body: JSON.stringify({ error: 'internal error', code: 'internal' }) };
+      if (!(error instanceof ApiError))
+        return { status: 500, body: JSON.stringify({ error: 'internal error', code: 'internal' }) };
       const response = errorResponse(error.status, error.message, error.code);
       return { status: response.status, body: response.body };
     }
@@ -245,11 +246,7 @@ function getRequest(sessionId: string, standing: CallStanding = ownerStanding())
   return { method: 'GET', template: '/v1/ferrets/:ferretId/handover', sessionId, headers: {}, standing };
 }
 
-function cancelRequest(
-  sessionId: string,
-  headers: Readonly<Record<string, string>> = human,
-  body: unknown = {},
-): Sent {
+function cancelRequest(sessionId: string, headers: Readonly<Record<string, string>> = human, body: unknown = {}): Sent {
   const supplied = FY_REQUEST_ID_HEADER in headers ? headers : withRequestId(headers);
   return {
     method: 'POST',

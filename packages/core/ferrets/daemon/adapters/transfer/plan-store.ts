@@ -1,5 +1,5 @@
 import type { StatePort } from '@ferretry/kernel/contract';
-import { type SessionTransferPlan } from '../../../contract/transfer.ts';
+import type { SessionTransferPlan } from '../../../contract/transfer.ts';
 import { TransferPlanFiles } from '../../../contract/transfer-state.ts';
 import type { SessionId } from '../../lib/session-id.ts';
 

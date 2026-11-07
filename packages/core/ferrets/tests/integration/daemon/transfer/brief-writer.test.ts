@@ -54,7 +54,7 @@ const stored = (folder: MemoryStateFolder, id = TARGET): string | undefined => {
 };
 
 describe('FileSessionTransferBriefWriter', () => {
-  it('writes turn one under only the explicit target key, at the declared file\'s own path', async () => {
+  it("writes turn one under only the explicit target key, at the declared file's own path", async () => {
     const { folder, subject } = harness();
     const document = '# Frozen transfer brief\n';
 

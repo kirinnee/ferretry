@@ -169,8 +169,7 @@ describe('StorageTransferConversationReader', () => {
     // Arrange
     const asked: Asked[] = [];
     const reader = new StorageTransferConversationReader(owner(asked), {
-      read: async work =>
-        await work(scopeOf(text => text.replace('the message the fork is cut at', '[redacted:cut]'))),
+      read: async work => await work(scopeOf(text => text.replace('the message the fork is cut at', '[redacted:cut]'))),
     });
 
     // Act
@@ -216,7 +215,10 @@ describe('StorageTransferConversationReader', () => {
 
     // Assert
     should(opens).equal(0);
-    should(digest?.messages.map(carried => carried.text)).eql(['the first thing said', 'the message the fork is cut at']);
+    should(digest?.messages.map(carried => carried.text)).eql([
+      'the first thing said',
+      'the message the fork is cut at',
+    ]);
   });
 
   it('should hand the owner the frozen coordinate unchanged, whatever was appended to the source since', async () => {

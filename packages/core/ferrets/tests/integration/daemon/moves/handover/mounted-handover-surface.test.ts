@@ -1,10 +1,7 @@
 import { beforeEach, describe, it } from 'bun:test';
 import { ownerStanding } from '@ferretry/core-gate/contract/testing';
 import type { CallContext, StatePort } from '@ferretry/kernel/contract';
-import {
-  type SessionHandoverReceipt,
-  SessionHandoverReceiptSchema,
-} from '../../../../../contract/handover.ts';
+import { type SessionHandoverReceipt, SessionHandoverReceiptSchema } from '../../../../../contract/handover.ts';
 import should from 'should';
 import { FileHandoverReceiptStore } from '../../../../../daemon/adapters/moves/handover/file-handover-receipt-store.ts';
 import { HandoverReconcileLoop, RememberedHandoverReceipts } from '../../../../../daemon/lib/moves/handover/index.ts';

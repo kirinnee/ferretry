@@ -137,7 +137,9 @@ describe('session transfer protocol', () => {
     assertRoundTrips(cases);
     // The fork receipt's schemas live in this contract file too, but the receipt is the fork's fact: they are
     // exercised by the receipt store's tests (tests/integration/daemon/forks), not restated here.
-    const transferOnly = Object.fromEntries(Object.entries(transfer).filter(([name]) => !name.startsWith('SessionFork')));
+    const transferOnly = Object.fromEntries(
+      Object.entries(transfer).filter(([name]) => !name.startsWith('SessionFork')),
+    );
     assertCoversEverySchema(transferOnly, cases);
   });
 

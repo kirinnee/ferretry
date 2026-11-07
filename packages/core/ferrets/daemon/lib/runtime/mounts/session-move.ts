@@ -12,7 +12,7 @@ import {
 import { parseBody, parseOptionalBody } from '../../http/body.ts';
 import { ferretSummaryOfSessionView } from '../../moves/ferret-view.ts';
 import { FY_REQUEST_ID_HEADER } from '../../protocol/headers.ts';
-import { type SessionRelaunchSettings, type SessionView } from '../../protocol/session.ts';
+import type { SessionRelaunchSettings, SessionView } from '../../protocol/session.ts';
 import {
   AskToStopJobsRequestSchema,
   type AskToStopJobsResult,

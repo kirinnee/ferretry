@@ -206,13 +206,15 @@ describe('StorageTransferSourceReader', () => {
     const inconsistent = parseSessionId('20260806-badstamp');
     const untraceable = parseSessionId('20260806-unnamedwarden');
     const nonsense = parseSessionId('20260806-stampnonsense');
-    await plantConfig(folder, 
+    await plantConfig(
+      folder,
       inconsistent,
       configuration(inconsistent, {
         provenance: { v: 1, at: NOW, origin: 'warden', wardenLineage: true, lineageSource: 'none' },
       }),
     );
-    await plantConfig(folder, 
+    await plantConfig(
+      folder,
       untraceable,
       configuration(untraceable, {
         provenance: { v: 1, at: NOW, origin: 'warden', wardenLineage: true, lineageSource: 'parent_stamp' },

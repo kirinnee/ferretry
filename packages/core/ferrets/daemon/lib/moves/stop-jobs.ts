@@ -52,9 +52,9 @@ export interface StoppedJobs {
 }
 
 /** How long a job has to exit after SIGTERM, how often it is looked at, and how long SIGKILL gets. */
-export const STOP_GRACE_MS = 5_000;
-export const STOP_POLL_MS = 500;
-export const KILL_GRACE_MS = 1_000;
+const STOP_GRACE_MS = 5_000;
+const STOP_POLL_MS = 500;
+const KILL_GRACE_MS = 1_000;
 
 /**
  * How far apart two readings of one process's START may fall and still be the same process: each is a whole-second

@@ -1,11 +1,6 @@
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { HandoverFiles } from '../../../../../contract/handover-state.ts';
-import {
-  type BuiltSessionHandover,
-  type SessionHandoverLifecycle,
-  type SessionHandoverNeeds,
-  sessionHandoverModule,
-} from '../../../../../daemon/modules/session-handover.ts';
+import type { SessionHandoverNeeds } from '../../../../../daemon/modules/session-handover.ts';
 
 /**
  * THE `session-handover` MODULE'S TEST CONSTRUCTION.
@@ -42,11 +37,4 @@ export function sessionHandoverNeedsForTest(overrides: Partial<SessionHandoverNe
     },
     ...overrides,
   };
-}
-
-const LIFECYCLE: SessionHandoverLifecycle = { onRelease: () => undefined };
-
-/** The module as production builds it, over the fixture's inputs. */
-export function builtSessionHandover(): BuiltSessionHandover {
-  return sessionHandoverModule.build(sessionHandoverNeedsForTest(), undefined, LIFECYCLE);
 }

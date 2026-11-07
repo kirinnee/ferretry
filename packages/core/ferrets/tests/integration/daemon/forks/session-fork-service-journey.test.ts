@@ -6,7 +6,7 @@ import should from 'should';
 import type { JsonValue } from '@ferretry/std';
 import { ForkFiles } from '../../../../contract/index.ts';
 import { TransferBriefFiles, TransferPlanFiles } from '../../../../contract/transfer-state.ts';
-import { type SessionTransferPlan } from '../../../../contract/transfer.ts';
+import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import {
   forkReceiptName,
   StateSessionForkReceiptStore,
@@ -39,7 +39,7 @@ import { SessionForkRequestConflictError } from '../../../../daemon/lib/forks/fa
 import { type SessionForkCommand, type SessionForkKey, sessionForkKey } from '../../../../daemon/lib/forks/identity.ts';
 import { SessionForkService } from '../../../../daemon/lib/forks/service.ts';
 import type { SessionForkPorts, SessionForkResult } from '../../../../daemon/lib/forks/types.ts';
-import { type ConversationMessagePoint } from '../../../../daemon/lib/protocol/session-transfer-edge.ts';
+import type { ConversationMessagePoint } from '../../../../daemon/lib/protocol/session-transfer-edge.ts';
 import {
   type RuntimeModelChoice,
   SessionConfigSchema,
@@ -326,15 +326,15 @@ function readTranscript(text: string): readonly Carried[] {
         timestamp: string;
         message: { content: readonly { text: string }[] };
       };
-      record.message.content.forEach((block, blockIndex) =>
+      record.message.content.forEach((block, blockIndex) => {
         found.push({
           point: { v: 1, byteOffset: offset, blockIndex },
           role: record.type,
           text: block.text,
           timestamp: record.timestamp,
           recordEnd: offset + length + 1,
-        }),
-      );
+        });
+      });
     }
     offset += length + 1;
   }

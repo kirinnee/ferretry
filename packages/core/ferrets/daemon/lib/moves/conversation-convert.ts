@@ -31,7 +31,7 @@ import type {
  */
 
 /** The folder inside the session directory where a conversion's attachments are saved. */
-export const CONVERSION_ATTACHMENTS = 'conversions';
+const CONVERSION_ATTACHMENTS = 'conversions';
 
 /** What the plan knows before it decides. */
 export interface ConversationConvertRequest {
@@ -68,7 +68,7 @@ export interface ConversationConvertRequest {
 }
 
 /** The conversion, ready to be checked and written. */
-export interface ConversationConverted {
+interface ConversationConverted {
   readonly kind: 'convert';
   /** The target conversation's fresh id. */
   readonly conversationId: string;
@@ -83,7 +83,7 @@ export interface ConversationConverted {
 }
 
 /** Why the conversation cannot be converted, in words a person reads. */
-export interface ConversationNotConvertible {
+interface ConversationNotConvertible {
   readonly kind: 'unconvertible';
   readonly reason: string;
 }
@@ -91,7 +91,7 @@ export interface ConversationNotConvertible {
 export type ConversationConvert = ConversationConverted | ConversationNotConvertible;
 
 /** Where a rendering of the conversion will live. */
-export interface ConversionPlace {
+interface ConversionPlace {
   readonly cwd: string;
   readonly conversationId: string;
   /** Codex: the provider the place's configuration selects, overriding the target login's. */
@@ -191,7 +191,7 @@ export function planConversationConvert(
  * What a validation run found. `missingTools` names native tools the history uses that the target CLI
  * did not declare — the one failure a text-only rendering can get past.
  */
-export type ConversionCheck =
+type ConversionCheck =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: string; readonly missingTools?: readonly string[] };
 

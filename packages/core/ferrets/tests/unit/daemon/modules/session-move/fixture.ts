@@ -1,15 +1,6 @@
 import { MemoryStateFolder, fixedClock } from '@ferretry/kernel/testing';
 import { MoveInflightFiles } from '../../../../../contract/move-state.ts';
-import {
-  type SessionMoveSubsystem,
-  sessionMoveContribution,
-} from '../../../../../daemon/lib/runtime/mounts/session-move.ts';
-import {
-  type SessionMoveModule,
-  type SessionMoveNeeds,
-  type SessionMoveProvides,
-  sessionMoveModule,
-} from '../../../../../daemon/modules/session-move.ts';
+import type { SessionMoveNeeds } from '../../../../../daemon/modules/session-move.ts';
 import { testToolkit } from '../../../../support/daemon/move-toolkit.ts';
 
 /**
@@ -25,7 +16,7 @@ import { testToolkit } from '../../../../support/daemon/move-toolkit.ts';
  */
 
 /** A port that throws, naming itself, the moment any member of it is called. */
-export function refusing<T extends object>(name: string): T {
+function refusing<T extends object>(name: string): T {
   return new Proxy({} as T, {
     get: (_target, member) => () => {
       throw new Error(`${name}.${String(member)} is not exercised by the session-move fixture`);
@@ -72,25 +63,3 @@ export function sessionMoveNeedsForTest(overrides: Partial<SessionMoveNeeds> = {
     ...overrides,
   };
 }
-
-type BuiltSessionMove = ReturnType<SessionMoveModule['build']>;
-
-/** The module as production builds it, over the fixture's inputs. */
-export function builtSessionMove(): BuiltSessionMove {
-  return sessionMoveModule.build(sessionMoveNeedsForTest(), undefined, undefined);
-}
-
-/**
- * The module's contribution over a move subsystem the TEST owns: the same four routes the real build contributes,
- * driving the test's subsystem instead of the refusing doubles — for a test that dispatches a move.
- */
-export function builtSessionMoveOver(subsystem: SessionMoveSubsystem): {
-  readonly id: 'sessionMove';
-  readonly provides: SessionMoveSubsystem;
-  readonly jobs: Record<string, never>;
-  readonly contributes: ReturnType<typeof sessionMoveContribution>;
-} {
-  return { id: 'sessionMove', provides: subsystem, jobs: {}, contributes: sessionMoveContribution(subsystem) };
-}
-
-export type { SessionMoveProvides };

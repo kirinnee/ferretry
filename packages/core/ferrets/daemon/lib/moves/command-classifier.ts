@@ -69,7 +69,7 @@ function headIndex(values: readonly string[], head: string): number {
 function classifyGitConfig(values: readonly string[], from: number): InflightVerdict {
   let operands = 0;
   for (let position = from; position < values.length; position++) {
-    const value = values[position]!;
+    const value = values[position] ?? '';
     if (writingGitConfigFlags.has(value)) return 'destructive_to_interrupt';
     if (readingGitConfigFlags.has(value)) return 'safe_to_kill';
     if (!value.startsWith('-')) operands++;
@@ -80,7 +80,7 @@ function classifyGitConfig(values: readonly string[], from: number): InflightVer
 function classifyGit(values: readonly string[]): InflightVerdict {
   const index = headIndex(values, 'git');
   for (let position = index + 1; position < values.length; position++) {
-    const value = values[position]!;
+    const value = values[position] ?? '';
     if (value.startsWith('-')) {
       if (value === '-C' || value === '-c') position++;
       continue;
@@ -99,7 +99,7 @@ function classifyGit(values: readonly string[]): InflightVerdict {
 function classifyShell(head: string, values: readonly string[]): InflightVerdict {
   const index = headIndex(values, head);
   for (let position = index + 1; position < values.length; position++) {
-    const value = values[position]!;
+    const value = values[position] ?? '';
     if (shellCommandFlags.has(value)) {
       const program = unquote(
         values
@@ -135,7 +135,7 @@ function classifyFind(values: readonly string[]): InflightVerdict {
 function classifyTmux(values: readonly string[]): InflightVerdict {
   const index = headIndex(values, 'tmux');
   for (let position = index + 1; position < values.length; position++) {
-    const value = values[position]!;
+    const value = values[position] ?? '';
     if (tmuxValueFlags.has(value)) {
       position++;
       continue;
@@ -154,13 +154,13 @@ function classifyStreamEditor(values: readonly string[]): InflightVerdict {
 function classifyPackageManager(head: string, values: readonly string[]): InflightVerdict {
   const index = headIndex(values, head);
   for (let position = index + 1; position < values.length; position++) {
-    const value = values[position]!;
+    const value = values[position] ?? '';
     if (value.startsWith('-')) continue;
     if (destructivePackageCommands.has(value)) return 'destructive_to_interrupt';
     if (rearmablePackageCommands.has(value)) return 're_armable';
     if (!runCommands.has(value)) return 'unknown';
     for (let scriptPosition = position + 1; scriptPosition < values.length; scriptPosition++) {
-      const script = values[scriptPosition]!;
+      const script = values[scriptPosition] ?? '';
       if (script.startsWith('-')) continue;
       if (destructiveScripts.has(script)) return 'destructive_to_interrupt';
       return rearmableScripts.has(script) ? 're_armable' : 'unknown';

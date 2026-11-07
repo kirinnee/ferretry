@@ -70,7 +70,7 @@ export type HandoverResolvedAccount = SessionHandoverResolvedAccount;
 export type HandoverResolvedTarget = SessionHandoverResolvedTarget;
 
 /** Turns the `agent` a caller named into the account facts the operation will actually launch. */
-export interface HandoverAccountResolverPort {
+interface HandoverAccountResolverPort {
   resolve(agent: string, model: string | null): Promise<HandoverResolvedAccount>;
 }
 
@@ -121,7 +121,7 @@ export interface HandoverBoardObservation {
   readonly invitation: HandoverInvitationObservation | null;
 }
 
-export interface HandoverInvitationObservation {
+interface HandoverInvitationObservation {
   readonly requestId: string;
   readonly targetSessionId: string;
   readonly grantId?: string;
@@ -237,14 +237,14 @@ export interface HandoverRelinquishCommand {
 }
 
 /** Reading a board is a different capability from writing one, so it is a different port. */
-export interface HandoverBoardReader {
+interface HandoverBoardReader {
   membership(sessionId: string): Promise<HandoverBoardMembership | null>;
   /** `null` when no board carries this id — which is the whole of the "the board never moved" check. */
   observe(boardId: string, invitationRequestId: string | undefined): Promise<HandoverBoardObservation | null>;
 }
 
 /** The lifecycle leg. It knows no board, and it is the only port that can stop anything. */
-export interface HandoverSessionPort {
+interface HandoverSessionPort {
   read(sessionId: string): Promise<HandoverSessionView | null>;
   /** Creates the record under an id decided by the caller, so the create replays after a crash. */
   create(input: HandoverCreateCommand): Promise<void>;
@@ -263,12 +263,12 @@ export interface HandoverCreateCommand {
 }
 
 /** Mints the identity a replacement is created under, written ahead of the create. */
-export interface HandoverIdentityPort {
+interface HandoverIdentityPort {
   sessionId(): string;
 }
 
 /** The preparation half of the shared transfer seam. It reads the source and writes nothing. */
-export interface HandoverTransferPreparePort {
+interface HandoverTransferPreparePort {
   prepare(input: HandoverPrepareCommand): Promise<SessionTransferPlan>;
 }
 
@@ -288,12 +288,12 @@ export interface HandoverPrepareCommand {
 }
 
 /** The import half. A DISTINCT port, so no caller can reach preparation and import as one thing. */
-export interface HandoverTransferImportPort {
+interface HandoverTransferImportPort {
   importPlan(plan: SessionTransferPlan, newSessionId: string): Promise<void>;
 }
 
 /** The destructive gate, run advisory at `requested` and binding immediately before the retirement. */
-export interface HandoverPreflightPort {
+interface HandoverPreflightPort {
   evaluate(sessionId: string): Promise<HandoverPreflightVerdict>;
 }
 
@@ -305,7 +305,7 @@ export interface HandoverPreflightVerdict {
 }
 
 /** Raising the one item a human must act on when a handover strands. */
-export interface HandoverAgendaPort {
+interface HandoverAgendaPort {
   raise(input: HandoverAgendaRequest): Promise<void>;
 }
 
@@ -326,7 +326,7 @@ export interface HandoverAgendaRequest {
  * completion event twice and leave the fleet's own history claiming a session was handed over twice.
  * The id is derived from the receipt and the side, so the second attempt is recognisably the first.
  */
-export interface HandoverJournalPort {
+interface HandoverJournalPort {
   appendOnce(input: HandoverJournalAppend): Promise<void>;
 }
 
@@ -337,7 +337,7 @@ export interface HandoverJournalAppend {
   readonly data: Readonly<Record<string, string | null>>;
 }
 
-export interface HandoverClock {
+interface HandoverClock {
   now(): string;
 }
 
@@ -381,7 +381,7 @@ export interface HandoverPorts {
  * Generous on purpose: stranding destroys nothing, but it does need a human, and a deadline tight
  * enough to strand a slow launch would manufacture the incident it exists to report.
  */
-export const DEFAULT_HANDOVER_VERIFICATION_DEADLINE_MINUTES = 30;
+const DEFAULT_HANDOVER_VERIFICATION_DEADLINE_MINUTES = 30;
 
 export interface HandoverSettings {
   readonly verificationDeadlineMinutes: number;

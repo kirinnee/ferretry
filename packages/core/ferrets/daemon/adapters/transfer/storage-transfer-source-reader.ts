@@ -65,7 +65,7 @@ function present(value: string | undefined): string | null {
  * The provenance a stored configuration carries, parsed rather than trusted: the ONE parse of the `transcript` record
  * of a configuration document (its schema is the contract's, `contract/records.ts`).
  */
-export function storedTranscriptProvenance(config: unknown): TranscriptProvenance | undefined {
+function storedTranscriptProvenance(config: unknown): TranscriptProvenance | undefined {
   const record =
     typeof config === 'object' && config !== null && !Array.isArray(config)
       ? (config as Readonly<Record<string, unknown>>)

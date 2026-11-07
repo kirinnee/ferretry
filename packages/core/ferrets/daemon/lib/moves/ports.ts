@@ -27,7 +27,7 @@ export interface MoveTranscriptTail {
 }
 
 /** What a start (or a fresh-conversation move) captures of the target's transcript: the home, and the evidence. */
-export interface MoveTranscriptCapture {
+interface MoveTranscriptCapture {
   readonly provenance?: TranscriptProvenance;
   readonly launchArguments: readonly string[];
 }
@@ -47,7 +47,7 @@ export interface MoveTranscriptProvenance {
 }
 
 /** One Codex rollout under a home, and whether it carries the correlation token asked about. */
-export interface CodexRolloutCandidate {
+interface CodexRolloutCandidate {
   readonly id: string;
   readonly file: string;
   readonly correlated: boolean;
@@ -68,7 +68,7 @@ export type RolloutFormatVerdict =
   | { readonly kind: 'unchecked'; readonly reason: string };
 
 /** What a conversion dropped rather than carried. */
-export interface ConversionDroppedCounts {
+interface ConversionDroppedCounts {
   readonly reasoning: number;
   readonly sidechains: number;
   readonly internal: number;
@@ -189,7 +189,7 @@ export interface MoveAccountResolver {
 export type PersistedReasoningEffort = (kind: HarnessKind, home: string | undefined) => Promise<string | undefined>;
 
 /** What a context window is read from (today's `SessionContextWindowEvidence`). */
-export interface SessionContextWindowEvidence {
+interface SessionContextWindowEvidence {
   readonly configuredModel?: string;
   readonly modelHint?: string;
   readonly observedModel?: string;
@@ -203,7 +203,7 @@ export type ContextWindowForSession = (evidence: SessionContextWindowEvidence) =
 // ─── the host ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The signal a stopped job is sent. */
-export type ProcessStopSignal = 'SIGTERM' | 'SIGKILL';
+type ProcessStopSignal = 'SIGTERM' | 'SIGKILL';
 
 /**
  * Signalling a process, and which processes are never signalled. The kernel hands a plugin no way to signal a pid it

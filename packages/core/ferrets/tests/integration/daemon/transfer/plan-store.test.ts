@@ -184,7 +184,7 @@ describe('FileSessionTransferTargetPlanStore install (target plan copy)', () => 
     should(folder.raw(TransferPlanFiles, target)).equal(before);
   });
 
-  it('keeps each target its own: one ferret\'s plan never answers for another\'s', async () => {
+  it("keeps each target its own: one ferret's plan never answers for another's", async () => {
     // Arrange
     const { subject } = harness();
     const first = parseSessionId('target-one');

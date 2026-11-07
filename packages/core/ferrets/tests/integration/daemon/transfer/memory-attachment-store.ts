@@ -51,7 +51,8 @@ export class MemoryAttachmentStore implements TransferAttachmentStore {
   async read(sessionId: string, attachmentId: string, file: AttachmentFile): Promise<Uint8Array | undefined> {
     const at = key(sessionId, attachmentId, file);
     this.calls.push(`read ${at}`);
-    if (this.unreadable.has(at)) throw Object.assign(new Error('EISDIR: illegal operation on a directory'), { code: 'EISDIR' });
+    if (this.unreadable.has(at))
+      throw Object.assign(new Error('EISDIR: illegal operation on a directory'), { code: 'EISDIR' });
     const stored = this.files.get(at);
     return stored === undefined ? undefined : new Uint8Array(stored);
   }

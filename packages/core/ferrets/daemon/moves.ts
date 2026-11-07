@@ -33,7 +33,7 @@ export const MOVE_ROUTE_KEYS = [
   'POST /v1/ferrets/:ferretId/move',
   'POST /v1/ferrets/:ferretId/move/ask-to-stop-jobs',
 ] as const;
-export type MoveRouteKey = (typeof MOVE_ROUTE_KEYS)[number];
+type MoveRouteKey = (typeof MOVE_ROUTE_KEYS)[number];
 
 /** What `buildMoves` is built from: each module's needs, less what this file composes itself. */
 export interface MovesDeps {

@@ -2,11 +2,11 @@ import { isAbsolute, join, relative } from 'node:path';
 import type { Clock, FerretId, RootsPort, SpawnPort, StatePort } from '@ferretry/kernel/contract';
 import { jsonObject, milliseconds } from '@ferretry/std';
 import type { z } from 'zod';
-import {
-  type AskToStopJobsResult,
-  type ConversionPreview,
-  type ConversionSummary as ConversionSummaryView,
-  type MoveConversation,
+import type {
+  AskToStopJobsResult,
+  ConversionPreview,
+  ConversionSummary as ConversionSummaryView,
+  MoveConversation,
 } from '../../contract/move.ts';
 import { HistoryConversationFiles } from '../adapters/moves/history-conversation-files.ts';
 import { KernelProcessProbe, type ProcessHostFacts } from '../adapters/moves/process-inventory.ts';
@@ -47,7 +47,7 @@ import {
   type ProcessSignalPort,
   type TranscriptToolkit,
 } from '../lib/moves/ports.ts';
-import { type Harness } from '../lib/protocol/session-base.ts';
+import type { Harness } from '../lib/protocol/session-base.ts';
 import {
   SessionConfigSchema,
   SessionStateSchema,
@@ -277,7 +277,7 @@ function moveRelaunchRefusal(error: unknown): never {
  * serves.  The core projection also retains a configured `[1m]` selector that
  * harness output strips away.
  */
-export function currentContextWindow(
+function currentContextWindow(
   contextWindowFor: ContextWindowForSession,
   config: z.infer<typeof SessionConfigSchema>,
   state: z.infer<typeof SessionStateSchema>,

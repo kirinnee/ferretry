@@ -18,7 +18,12 @@ import type { TransferAttachmentStore } from '../../../../../daemon/lib/transfer
  * store (the attachment owner's, an unbound port) is not asked anything.
  */
 
-function parts(): { readonly folder: MemoryStateFolder; readonly asked: string[]; readonly state: ReturnType<MemoryStateFolder['port']>; readonly attachments: TransferAttachmentStore } {
+function parts(): {
+  readonly folder: MemoryStateFolder;
+  readonly asked: string[];
+  readonly state: ReturnType<MemoryStateFolder['port']>;
+  readonly attachments: TransferAttachmentStore;
+} {
   const folder = new MemoryStateFolder();
   const asked: string[] = [];
   const unusedStore: TransferAttachmentStore = {

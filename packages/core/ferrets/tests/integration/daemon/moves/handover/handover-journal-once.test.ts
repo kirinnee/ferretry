@@ -78,7 +78,6 @@ async function completions(
   }
 }
 
-
 describe('the handover completion journal', () => {
   it('should write one event per side, in source-then-replacement order, when a crash replays the step', async () => {
     // Arrange: two real sessions in a real state home, and the two operation ids one completion uses.

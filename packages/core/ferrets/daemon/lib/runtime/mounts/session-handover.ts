@@ -316,7 +316,11 @@ export interface HandoverRoute {
  */
 export function sessionHandoverRoutes(subsystem: SessionHandoverSubsystem): readonly HandoverRoute[] {
   return [
-    { method: 'POST', path: '/v1/ferrets/:ferretId/handover', handle: async context => await begin(subsystem, context) },
+    {
+      method: 'POST',
+      path: '/v1/ferrets/:ferretId/handover',
+      handle: async context => await begin(subsystem, context),
+    },
     { method: 'GET', path: '/v1/ferrets/:ferretId/handover', handle: async context => await read(subsystem, context) },
     {
       method: 'POST',

@@ -37,7 +37,7 @@
  */
 
 import { type SessionTransferEdge, SessionTransferEdgeSchema } from '../protocol/session-transfer-edge.ts';
-import { type SessionTransferPlan } from '../../../contract/transfer.ts';
+import type { SessionTransferPlan } from '../../../contract/transfer.ts';
 import { isConversationDigestError } from './ports.ts';
 import { renderTransferBrief } from './brief.ts';
 import { type SessionTransferImportOutcome, type SessionTransferImportPorts, TransferImportError } from './types.ts';

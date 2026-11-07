@@ -234,7 +234,12 @@ describe('transfer artifact durability before receipt advancement', () => {
       new SessionTransferImporter(
         {
           conversation: {
-            digestPinned: async () => ({ sessionId: SOURCE, through: CUT, messages: [{ point: CUT, role: 'user', text: 'ship it', timestamp: AT }], omissions: [] }),
+            digestPinned: async () => ({
+              sessionId: SOURCE,
+              through: CUT,
+              messages: [{ point: CUT, role: 'user', text: 'ship it', timestamp: AT }],
+              omissions: [],
+            }),
           },
           envelope: { apply: async () => undefined },
           attachments: new FileSessionAttachmentCopier(store),
@@ -382,7 +387,9 @@ describe('TransferArtifactDurability', () => {
     };
 
     // Act
-    const error = await reject(new TransferArtifactDurability().materialize('brief', [{ ...artifact, bytes: 'frozen' }]));
+    const error = await reject(
+      new TransferArtifactDurability().materialize('brief', [{ ...artifact, bytes: 'frozen' }]),
+    );
 
     // Assert — refused, with the bound pinned: two publish-then-re-prove rounds, and then it stops instead of
     // chasing another writer for ever.
@@ -462,7 +469,9 @@ describe('TransferArtifactDurability', () => {
       throw Object.assign(new Error('write answered EIO'), { code: 'EIO' });
     };
 
-    const error = await reject(new TransferArtifactDurability().materialize('brief', [{ ...artifact, bytes: 'frozen' }]));
+    const error = await reject(
+      new TransferArtifactDurability().materialize('brief', [{ ...artifact, bytes: 'frozen' }]),
+    );
 
     should((error as { code?: string }).code).equal('EIO');
   });

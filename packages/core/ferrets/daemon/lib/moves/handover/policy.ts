@@ -75,7 +75,7 @@ type HandoverHarness = ReturnType<typeof HarnessSchema.parse>;
  * may already have been applied — and the invariant checks differ between them. Reading that
  * distinction out of a detail string would make a comment load-bearing.
  */
-export function handoverIsRetiring(receipt: HandoverReceipt): boolean {
+function handoverIsRetiring(receipt: HandoverReceipt): boolean {
   if (receipt.effectIntent === 'retiring') return true;
   // THE COMMITTED EVENT COUNTS TOO, for the same reason irreversibility reads it: writing a settlement
   // intent CLEARS the active field, so a receipt that has just recorded why it is stopping would
@@ -86,7 +86,7 @@ export function handoverIsRetiring(receipt: HandoverReceipt): boolean {
 }
 
 /** A named refusal cause with the sentence an operator acts on. */
-export interface HandoverRefusal {
+interface HandoverRefusal {
   readonly failure: HandoverFailure;
   readonly message: string;
 }

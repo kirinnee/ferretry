@@ -167,9 +167,6 @@ async function fork(subsystem: SessionForkSubsystem, context: CallContext): Prom
   return jsonResponse(ForkSessionOutcomeSchema.parse(outcome));
 }
 
-/** The one route key this mount serves, exactly as `manifest.ts` declares it. */
-export const SESSION_FORK_ROUTE_KEY = 'POST /v1/ferrets/:ferretId/fork';
-
 /** One mounted route: the method and path it answers and its handler. The descriptor is the manifest's. */
 export interface SessionForkRoute {
   readonly method: 'POST';

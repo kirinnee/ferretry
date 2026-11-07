@@ -124,11 +124,7 @@ describe('deriveTransferPlanId', () => {
 describe('SessionTransferPreparer', () => {
   it('refuses a stale selection binding through selection_stale so the app can ask for one refresh', async () => {
     // Arrange: the owner of the binding codec answers false for a binding it does not accept.
-    const { preparer: subject } = preparer(
-      sourceSession(),
-      {},
-      { verifySelection: async () => false },
-    );
+    const { preparer: subject } = preparer(sourceSession(), {}, { verifySelection: async () => false });
     // Act
     const actual = await subject
       .prepare(request({ selectionBinding: `s1.${'A'.repeat(43)}` }))

@@ -34,7 +34,7 @@ export interface HandoverScheduler {
 }
 
 /** The roster: which sessions still have a handover to finish. */
-export interface HandoverRoster {
+interface HandoverRoster {
   pendingSourceSessionIds(): Promise<readonly string[]>;
 }
 

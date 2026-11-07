@@ -20,7 +20,7 @@ import type { HarnessKind } from '../session/peers/fleet.ts';
  * something only its modal picker can set (Codex). `mintsOwnSessionIds`: the harness names its own sessions after launch
  * (Codex), so the daemon records a correlation token instead of choosing the id.
  */
-export interface ForkHarnessQuirks {
+interface ForkHarnessQuirks {
   readonly effortIsRuntimeCommand: boolean;
   readonly mintsOwnSessionIds: boolean;
 }
@@ -39,7 +39,7 @@ export interface ForkHarnessFacts {
 }
 
 /** What a start knows before it launches anything (today's `TranscriptCaptureRequest`). */
-export interface ForkTranscriptCaptureRequest {
+interface ForkTranscriptCaptureRequest {
   readonly harness: Harness;
   /** The absolute wrapper the session will be launched through. */
   readonly executable: string;
@@ -51,7 +51,7 @@ export interface ForkTranscriptCaptureRequest {
 }
 
 /** The record to persist and the arguments the launch must carry for it to come true (today's `TranscriptCapture`). */
-export interface ForkTranscriptCapture {
+interface ForkTranscriptCapture {
   /** Absent when this session's transcript is genuinely not locatable. */
   readonly provenance?: TranscriptProvenance;
   /** Appended to the launch argv: the minted session for Claude, the correlation root for Codex. */
@@ -64,7 +64,7 @@ export interface ForkTranscriptCaptures {
 }
 
 /** What a selection binding is verified against: the exact source and the exact transcript it was issued for. */
-export interface ForkSelectionSubject {
+interface ForkSelectionSubject {
   readonly sessionId: string;
   readonly incarnation: string;
   readonly provenance: TranscriptProvenance;

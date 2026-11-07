@@ -115,7 +115,7 @@ export async function appendHandoverEventOnce(
  * fork's is) rather than re-derived from the inventory, the executable resolver and the client name here. The host binds
  * it to `resolveStartAccount(...)` and answers its `account`.
  */
-export type HandoverStartAccount = (agent: string) => Promise<CoreAccount>;
+type HandoverStartAccount = (agent: string) => Promise<CoreAccount>;
 
 /** The collaborators a cross-harness handover needs from the rest of the root. */
 interface SessionHandoverWiring {
@@ -297,7 +297,7 @@ export interface SessionHandoverProvides {
 }
 
 /** What `start()` arms. `arm` keeps the loop's own signature: synchronous, returning the disarm. */
-export interface SessionHandoverJobs {
+interface SessionHandoverJobs {
   readonly arm: () => () => void;
 }
 

@@ -408,7 +408,8 @@ describe('FileSessionAttachmentCopier', () => {
     const minted = mintAttachment(store, SOURCE, new Uint8Array([5, 4, 3, 2]));
     let substitutions = 1;
     store.afterWrite = written => {
-      if (written.file === 'original' && substitutions-- > 0) store.put(TARGET, minted.id, 'original', new Uint8Array([0]));
+      if (written.file === 'original' && substitutions-- > 0)
+        store.put(TARGET, minted.id, 'original', new Uint8Array([0]));
     };
 
     // Act + Assert — one substitution is re-read and the whole set republished.

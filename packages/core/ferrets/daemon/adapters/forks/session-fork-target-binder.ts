@@ -41,7 +41,7 @@
 import { createHash } from 'node:crypto';
 import type { JsonValue } from '@ferretry/std';
 import { type TranscriptProvenance, TranscriptProvenanceSchema } from '../../../contract/records.ts';
-import { type SessionTransferPlan } from '../../../contract/transfer.ts';
+import type { SessionTransferPlan } from '../../../contract/transfer.ts';
 import { type SessionConfig, SessionConfigSchema, type SessionView } from '../../lib/protocol/session.ts';
 import type { ForkHarnessFacts, ForkTranscriptCaptures } from '../../lib/forks/ports.ts';
 import type {

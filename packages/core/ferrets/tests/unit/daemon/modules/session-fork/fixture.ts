@@ -1,4 +1,4 @@
-import { type SessionForkNeeds, sessionForkModule } from '../../../../../daemon/modules/session-fork.ts';
+import type { SessionForkNeeds } from '../../../../../daemon/modules/session-fork.ts';
 import { transferPorts } from '../../../../../daemon/modules/transfer.ts';
 
 /**
@@ -57,12 +57,4 @@ export function sessionForkNeedsForTest(overrides: Partial<SessionForkNeeds> = {
     clock: refusing('clock'),
     ...overrides,
   };
-}
-
-/** The module as production builds it, over the fixture's inputs. */
-export function builtSessionFork(): ReturnType<typeof sessionForkModule.build> {
-  return sessionForkModule.build(sessionForkNeedsForTest(), undefined, {
-    onRelease: () => undefined,
-    releasing: () => false,
-  });
 }
