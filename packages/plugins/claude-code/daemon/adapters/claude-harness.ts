@@ -41,6 +41,7 @@ import {
 } from '../../contract/index.ts';
 import type { DialogAnswerService } from '../lib/dialog/service.ts';
 import { claudeTranscriptPath, isConversationId } from '../lib/harness/claude-path.ts';
+import { mergeClaudeJson } from '../lib/harness/claude-json.ts';
 import { HOME_FILES, homeText, launchCommand } from '../lib/harness/launch.ts';
 import { parseEntries, parseUsage } from '../lib/harness/transcript.ts';
 import { parseHarnessDialog } from '../lib/pane/harness-dialog.ts';
@@ -71,6 +72,8 @@ export interface ClaudeHarnessDeps {
 const TMUX_TIMEOUT_MS = 5_000;
 const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
 const FIRST_RECORDS_BYTES = 16 * 1024;
+/** Larger than any real one: a busy `.claude.json` runs to a few hundred kilobytes (the approvals read's limit). */
+const MAX_CLAUDE_JSON_BYTES = 16 * 1024 * 1024;
 
 const configFile = CLAUDE_CODE_CONFIG as unknown as ConfigFileDef<HarnessConfig>;
 const settingsCollection = CLAUDE_CODE_SETTINGS as never;
@@ -140,7 +143,10 @@ export class ClaudeHarness implements Harness {
     await write(HOME_FILES.memory, text.memory);
     await write(HOME_FILES.settings, text.settings);
     await write(HOME_FILES.overlay, text.overlay);
-    await write(HOME_FILES.claudeJson, text.claudeJson);
+    // MERGED into the document already there, never replaced: Claude keeps its own decisions in it (a project
+    // server the person disabled among them), and a launch must not undo them (today's wrapper seed).
+    const claudeJson = await this.claudeJsonText(home, text.claudeJson);
+    if (claudeJson !== undefined) await write(HOME_FILES.claudeJson, claudeJson);
     if (text.mcp !== undefined) await write(HOME_FILES.mcp, text.mcp);
     return { files, args: [] };
   }
@@ -321,6 +327,19 @@ export class ClaudeHarness implements Harness {
     const homes = this.deps.roots.root('agent-homes');
     await homes.ensurePrivateDirectory(this.fenced(homes.resolve(spec.ferret)));
     return home;
+  }
+
+  /**
+   * The `.claude.json` to write, or `undefined` to leave it as it is (already seeded, or a document that cannot be
+   * merged — see `mergeClaudeJson`). Read through the ferret's own home, so a link or a file the root refuses fails
+   * the launch exactly as the write would; one too large to read is left as it is, like one that is not JSON.
+   */
+  private async claudeJsonText(home: RootHandle, fresh: string): Promise<string | undefined> {
+    const path = this.fenced(home.resolve(HOME_FILES.claudeJson));
+    const info = await home.stat(path);
+    if (info === undefined || info.kind !== 'file') return mergeClaudeJson(undefined, fresh);
+    if (info.size > MAX_CLAUDE_JSON_BYTES) return undefined;
+    return mergeClaudeJson(await home.readText(path, MAX_CLAUDE_JSON_BYTES), fresh);
   }
 
   private home(ferret: FerretId): RootHandle {
