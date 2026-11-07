@@ -250,6 +250,49 @@ async function entry(scope: Scope, folder: OpenedDirectory, real: string, leaf: 
 }
 
 /**
+ * A fresh scoped agent home is made below its declared, already-existing parent. Use the same checked-folder,
+ * descriptor-reached mkdir and no-follow open as writeChecked: a sibling link is never a creation shortcut.
+ */
+async function ensureScopedBase(
+  fs: HostFs,
+  home: string,
+  base: string,
+  parentRoot: string,
+  anchor: string | undefined,
+): Promise<void> {
+  if (!within(parentRoot, base)) refuse('outside');
+  let existing = base;
+  const missing: string[] = [];
+  while ((await fs.lstat(existing)) === undefined) {
+    if (existing === parentRoot) refuse('outside');
+    missing.unshift(basename(existing));
+    existing = dirname(existing);
+    if (!within(parentRoot, existing)) refuse('outside');
+  }
+  if (missing.length === 0) return;
+  const checked = await checkBase(fs, home, existing, false, anchor);
+  if (!checked.ok) return refuse(checked.error);
+  const scope: Scope = { fs, base: checked.value, ownerRoot: false, immutable: async () => [] };
+  let parent = checked.value.real;
+  let folder = await openCheckedFolder(scope, parent);
+  try {
+    for (const segment of missing) {
+      const at = await entry(scope, folder, parent, segment);
+      await fs.mkdir(at, 0o700).catch(() => refuse('changed'));
+      const made = await fs.openDirectory(at).catch(() => refuse('changed'));
+      const previous = folder;
+      folder = made;
+      await previous.close();
+      parent = join(parent, segment);
+      const problem = await folderProblem(scope, parent, made.identity);
+      if (problem !== undefined) refuse(problem);
+    }
+  } finally {
+    await folder.close();
+  }
+}
+
+/**
  * Today's `createOutsideStateHomes`, atomically: the nearest existing folder is opened and checked, every missing
  * folder below it is made THROUGH it one at a time and checked in turn, the content goes into a NEW temp file made
  * through the checked folder (`O_EXCL | O_NOFOLLOW`), and that is renamed over the leaf in the same folder.
@@ -381,15 +424,22 @@ function rootHandle(
   name: RootName,
   base: () => string | undefined,
   anchor: string | undefined,
+  scopedParent: string | undefined,
   check: (path: string) => Result<FencedPath, FolderRefusal> | undefined,
   immutable: () => Promise<readonly string[]>,
   random: () => string,
 ): RootHandle {
   const ownerRoot = OWNER_ROOTS.has(name);
   const readOnly = READ_ONLY_ROOTS.has(name);
-  const real = async (path: FencedPath): Promise<{ readonly full: string; readonly scope: Scope }> => {
+  const real = async (path: FencedPath, create = false): Promise<{ readonly full: string; readonly scope: Scope }> => {
     const root = base();
     if (root === undefined) refuse(name === 'work' ? 'unknown_ferret' : 'outside');
+    if (create && scopedParent !== undefined) {
+      // A forged path outside this scope must not create even an empty directory.
+      const lexical = lexicalInRoot(home, root as string, ownerRoot, path);
+      if (!lexical.ok) return refuse(lexical.error);
+      await ensureScopedBase(fs, home, root as string, scopedParent, anchor);
+    }
     const resolved = await resolveChecked(fs, home, root as string, ownerRoot, path, anchor);
     if (!resolved.ok) return refuse(resolved.error);
     return { full: resolved.value.full, scope: { fs, base: resolved.value.base, ownerRoot, immutable } };
@@ -416,7 +466,7 @@ function rootHandle(
     },
     writeText: async (path, text) => {
       writable();
-      const { full, scope } = await real(path);
+      const { full, scope } = await real(path, true);
       await writeChecked(scope, full, text, random);
     },
     list: async path => {
@@ -504,7 +554,11 @@ export function rootsPortFor(
         if (name !== 'work' || scope?.ferret === undefined) return undefined;
         return workFolders()?.check(scope.ferret, path) ?? err('unknown_ferret');
       };
-      return rootHandle(fs, home, name, base, anchor, check, immutable, random);
+      const scopedParent =
+        name === 'agent-homes' && subfolder !== undefined && subfolder !== ''
+          ? `${home}/state/${layout.plugin}/agent-homes`
+          : undefined;
+      return rootHandle(fs, home, name, base, anchor, scopedParent, check, immutable, random);
     },
   };
 }
