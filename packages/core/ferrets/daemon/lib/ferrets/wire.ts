@@ -29,6 +29,7 @@ const StartIdentitySchema = z.strictObject({
   pack: PackIdSchema.optional(),
   role: FerretRoleSchema.optional(),
   harness: HarnessKeySchema.optional(),
+  harnessConversation: z.string().min(1).max(256).optional(),
   runtime: RuntimeNameSchema.optional(),
   login: LoginNameSchema.optional(),
   folder: z.string().min(1).max(4_096),
