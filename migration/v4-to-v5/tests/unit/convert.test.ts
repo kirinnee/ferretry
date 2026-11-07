@@ -7,7 +7,7 @@ import { convert } from '../../src/convert.ts';
 import type { LockProbe } from '../../src/preflight.ts';
 import { moveSealed } from '../../src/sealed.ts';
 import type { Step } from '../../src/steps/index.ts';
-import { STEPS } from '../../src/steps/index.ts';
+import { pending, STEPS } from '../../src/steps/index.ts';
 
 const notHeld: LockProbe = { held: async () => false };
 const at = new Date('2026-11-07T01:00:00.000Z');
@@ -65,7 +65,11 @@ describe('preflight', () => {
 
 describe('conversion', () => {
   test('a pending step leaves no home.json, so v5 refuses the folder', async () => {
-    const result = await convert({ from, to, dryRun: false, lock: notHeld, now: () => at });
+    const waiting = pending(
+      { id: 'waits', title: 'A step whose v5 schema has not landed', owner: [], reads: [], sealed: [], notCarried: [] },
+      'a test schema',
+    );
+    const result = await convert({ from, to, dryRun: false, lock: notHeld, now: () => at, steps: [...STEPS, waiting] });
     if (result.kind !== 'done') throw new Error('expected a run');
     expect(result.report.complete).toBe(false);
     expect(await readdir(to)).not.toContain('home.json');

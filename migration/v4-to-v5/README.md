@@ -43,7 +43,7 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 ## State (Phase B)
 
 The preflight, sealed mover, report and ordered step table (`src/steps/index.ts`) exist. Vault, identity, ferrets,
-terminals, harness-homes, conversation, board, asks/agenda, projects, lessons, usage, warden, catalogs and shares, MCP, logins, website accounts, Gate, Access, settings, daemon settings and Packs have real conversions: every step converts, so a complete v4 home converts with exit 0 and gets its `home.json`.
+terminals, harness-homes, conversation, board, asks/agenda, projects, lessons, usage, warden, catalogs and shares, skill folders, MCP, logins, website accounts, Gate, Access, settings, daemon settings and Packs have real conversions: every step converts, so a complete v4 home converts with exit 0 and gets its `home.json`.
 Fixture homes built from the real 4.291.5 release are in
 `fixtures/` (CI-only on shared boxes).
 
@@ -176,8 +176,12 @@ is re-signed. The sealed `link-keys.json` (AAD `catalog-link:<linkId>`, unstampe
 with `rewrapSealed` (`v` → `format`, entries unchanged), and a test opens it with v5's own `KernelSealedDocuments`
 and the moved vault key. `local-skill-installs.json` becomes Skills' `state/skills/installs.json`
 (`LocalSkillInstallStateSchema`, harness `claude` → `claude-code`). A former runtime name becomes the current one
-(M7). Live member unlocks, the install hold/skip prefs, the upgrade backups and the runtime skill folders under
-`fleet/assets/skills/` (the Runtimes asset tree, whose v5 place is not declared yet) are listed in `notCarried`.
+(M7). Live member unlocks, the install hold/skip prefs and the upgrade backups are listed in `notCarried`.
+
+Skill folders (`src/steps/skill-folders.ts`): the runtime-installed skills under `fleet/assets/skills/<name>/` are
+copied byte for byte, never opened, to the same path in the v5 home, which is where v5 Runtimes reads its asset tree
+(`join(paths.fleet, 'assets')`; only the kernel root that hands it the folder is still a GAP). Links are never followed
+or re-made and are counted; an unreadable file fails the step with a `chmod u+r` remedy.
 
 MCP (`src/steps/mcp.ts`): `mcp-oauth.json` → `state/mcp/oauth.json`, envelope only (`v` → `format`); the records are
 the same in both. The access tokens are vault secrets kept by name (the Vault step). The sealed
