@@ -11,7 +11,13 @@ import { useRuntimeVersion, useShell } from './context.tsx';
  */
 
 /** One quiet line in place of a view. */
-export function ShellLine({ children, tone = 'info' }: { readonly children: ReactNode; readonly tone?: 'info' | 'warn' }) {
+export function ShellLine({
+  children,
+  tone = 'info',
+}: {
+  readonly children: ReactNode;
+  readonly tone?: 'info' | 'warn';
+}) {
   return (
     <p className={`fy-shell-line fy-shell-line--${tone}`} role="status">
       {children}
