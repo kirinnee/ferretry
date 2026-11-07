@@ -541,7 +541,7 @@ export default definePlugin({
   },
 
   hooks: {
-    offers: [CatalogItems],
+    offers: [{ hook: CatalogItems }],
     takes: [
       { hook: Credentials, key: 'member' },
       { hook: StepUp, key: 'member' },
