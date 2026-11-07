@@ -43,7 +43,7 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 ## State (Phase B)
 
 The preflight, sealed mover, report and ordered step table (`src/steps/index.ts`) exist. Vault, identity, ferrets,
-terminals, harness-homes, conversation, board, asks/agenda, projects, lessons, usage, warden, MCP, logins, Gate, settings and daemon settings have real conversions. The other steps remain `pending`, so the default conversion still exits 3. Each step names what it waits for.
+terminals, harness-homes, conversation, board, asks/agenda, projects, lessons, usage, warden, MCP, logins, Gate, Access, settings and daemon settings have real conversions. The other steps remain `pending`, so the default conversion still exits 3. Each step names what it waits for.
 Fixture homes built from the real 4.291.5 release are in
 `fixtures/` (CI-only on shared boxes).
 
@@ -174,7 +174,10 @@ bearer document is not converted. `passkeys.json` keeps credential ids, public k
 passkey of a device that is not carried goes with it. Live unlocks are not carried (each device unlocks again once);
 the unlock settings are `gate.yaml` `security` (Daemon settings). v4's `grant-audit.jsonl` and
 `security-audit.jsonl` become the ONE `grant-audit.jsonl` v5 Access declares and writes both journals into, line for
-line with `format: 1` first, oldest first. Push (`push.json` with the VAPID key) is pending.
+line with `format: 1` first, oldest first. `push-vapid.json` → `push-keys.json` changes its envelope only
+(`schemaVersion: 1` → `format: 1`, lead decision: v5 reads the bytes as `{format: 1, privateKeyJwk}`): read once in
+memory, the JWK object written back unchanged in one atomic 0600 write, never in a report or error. `push.json` moves
+only in the run that writes its key, both checked first; a subscription of a device that is not carried goes with it.
 
 Lessons (`src/steps/lessons.ts`) writes every file `@ferretry/plugin-lessons` declares under `state/lessons/`:
 `state.json` (v4's learning state, with `sessions.json`'s per-ferret switches folded in as `ferrets`, lead decision M5),
