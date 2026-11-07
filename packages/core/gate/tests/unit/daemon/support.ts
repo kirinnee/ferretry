@@ -29,6 +29,7 @@ import {
 } from '../../../contract/testing/index.ts';
 import { GateAdmission } from '../../../daemon/lib/api/admission.ts';
 import { bearerDigest } from '../../../daemon/lib/api/authentication.ts';
+import { CredentialWatch } from '../../../daemon/lib/api/credential-watch.ts';
 import { FailClosedStepUps } from '../../../daemon/lib/step-up/witness.ts';
 import { loadManifests, loadWorkspace } from '../../../../../../scripts/gen/lib/workspace.ts';
 
@@ -154,11 +155,13 @@ export function world(initial: Partial<Pick<World, 'policy'>> = {}): World {
         : undefined;
     },
   });
+  // Followed as the built daemon follows them (G149): a provider's own notice re-asks the open streams.
+  const credentialWatch = new CredentialWatch(() => gate.policyChanged());
   const gate = new GateAdmission({
     tokens: () => ({ admin: ADMIN, warden: WARDEN }),
     ferrets: () => ferrets,
-    devices: () => (state.devicesOff ? undefined : devices),
-    members: () => members as never,
+    devices: () => credentialWatch.follow('device', state.devicesOff ? undefined : devices),
+    members: () => credentialWatch.follow('member', members as never),
     policy: () => state.policy,
     stepUps: new FailClosedStepUps(() => {
       if (state.stepUpsOff === 'throwing') throw new Error('the step-up provider failed');

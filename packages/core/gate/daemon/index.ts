@@ -14,7 +14,9 @@ import {
   type GateApi,
   type GateConfig,
   GateConfigFile,
+  type HolderKind,
   GatePolicyChanged,
+  type HolderStanding,
   type MemberHolderStanding,
   securitySettingsOf,
   StepUp,
@@ -29,6 +31,7 @@ import { type GateConfigSource, policyInEffect } from './lib/policy/in-effect.ts
 import { StateAuditJournal } from './adapters/audit/state-audit-journal.ts';
 import { StateTokens } from './adapters/tokens/state-tokens.ts';
 import { GateAdmission } from './lib/api/admission.ts';
+import { CredentialWatch } from './lib/api/credential-watch.ts';
 import type { GateTokens } from './lib/api/authentication.ts';
 import { AUDIT_FOLD_WINDOW_MS, AuditLog } from './lib/audit/service.ts';
 import { gateRoutes, grantRoutes } from './lib/routes.ts';
@@ -115,10 +118,17 @@ export default implementDaemon(manifest, {
 
     // ─── providers the security path binds ─────────────────────────────────────────────────────────────────────
     const provided = <V>(value: V | 'unavailable'): V | undefined => (value === 'unavailable' ? undefined : value);
+    // G149: a credentials provider that pushes (`watch`) re-asks every open stream when its generation moves — a
+    // device narrowed, revoked, locked or unlocked loses its stream at once, as today's grant service did. Followed
+    // at every admission, so the subscription goes with a provider that stops or is replaced.
+    const credentialWatch = new CredentialWatch(() => admission.policyChanged());
+    kernel.lifecycle.onStop(() => credentialWatch.stop());
+    const credentials = <S extends HolderStanding>(kind: HolderKind): CredentialProvider<S> | undefined =>
+      credentialWatch.follow(kind, provided(hooks.provider(Credentials, kind)) as CredentialProvider<S> | undefined);
     const devices = (): CredentialProvider<DeviceHolderStanding> | undefined =>
-      provided(hooks.provider(Credentials, 'device')) as CredentialProvider<DeviceHolderStanding> | undefined;
+      credentials<DeviceHolderStanding>('device');
     const members = (): CredentialProvider<MemberHolderStanding> | undefined =>
-      provided(hooks.provider(Credentials, 'member')) as CredentialProvider<MemberHolderStanding> | undefined;
+      credentials<MemberHolderStanding>('member');
     const ferrets = (): FerretBearerDirectory | undefined => provided(hooks.provider(Bearers, 'ferret'));
 
     // `step-up:device` (Access alone): read live, so a provider that goes away is no step-up at once (fail closed).

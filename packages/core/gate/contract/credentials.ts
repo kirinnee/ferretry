@@ -1,4 +1,4 @@
-import { defineHook, type FerretId, type HolderId } from '@ferretry/kernel/contract';
+import { type Cancel, defineHook, type FerretId, type HolderId } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import { z } from 'zod';
 import type {
@@ -43,6 +43,14 @@ export interface CredentialProvider<S extends HolderStanding = HolderStanding> {
   standing(holder: HolderId, now: Instant): S | 'unknown' | 'revoked';
   /** Bumps on any revoke, narrowing, unlock, lock or grant change; Gate re-admits every open stream of the kind. */
   generation(): number;
+  /**
+   * Tells `listener` each time `generation()` moves (a revoke, narrowing, unlock, lock or grant change), after the
+   * new standing can be read, and returns the cancel. Gate subscribes to every provider it is bound to and re-asks
+   * every open stream on each notice (G149), so a device narrowed by Access loses its stream at once instead of at its
+   * next frame. Optional: a provider that does not push is still re-asked on every call and frame. A throwing listener
+   * is the provider's to isolate.
+   */
+  watch?(listener: () => void): Cancel;
 }
 
 export const Credentials = defineHook('credentials', {

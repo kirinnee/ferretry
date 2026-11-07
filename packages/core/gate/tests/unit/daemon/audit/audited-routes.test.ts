@@ -13,23 +13,27 @@ const ROOT = resolve(import.meta.dir, '../../../../../../..');
  * declared (the test below fails if a listed rule already matches), so this list can only shrink.
  */
 const PENDING: Readonly<Record<string, string>> = {
+  'POST /v1/pack/routing/clean-up': 'packs (declares audit.skip; today records session.opened, routed by the lead)',
+  'POST /v1/pack/routing/accept': 'packs (declares audit.skip; today records fleet.configured, routed by the lead)',
+  'POST /v1/pack/routing/undo': 'packs (declares audit.skip; today records fleet.configured, routed by the lead)',
   'POST /v1/ferrets/:ferretId/fork': 'ferrets (fork, rebuild-parity R-0344)',
   'PUT /v1/config/file': 'kernel (config routes, D2 #3)',
   'POST /v1/config/confirm': 'kernel (config routes, D2 #3)',
   'POST /v1/agent/config': 'kernel (config routes, D2 #3)',
 };
 
-async function declaredRoutes(): Promise<Set<string>> {
+/** Every declared route, socket and member route by `METHOD path`, with whether its descriptor records. */
+async function declaredRoutes(): Promise<ReadonlyMap<string, { readonly records: boolean }>> {
   const { loaded, failures } = await loadManifests(loadWorkspace(ROOT));
   expect(failures).toEqual([]);
-  const keys = new Set<string>();
+  const keys = new Map<string, { readonly records: boolean }>();
   for (const { manifest } of loaded)
     for (const r of [
       ...(manifest.actions?.routes ?? []),
       ...(manifest.actions?.sockets ?? []),
       ...(manifest.actions?.memberRoutes ?? []),
     ])
-      keys.add(`${r.method} ${r.path}`);
+      keys.set(`${r.method} ${r.path}`, { records: 'record' in r.audit });
   return keys;
 }
 
@@ -75,9 +79,21 @@ describe('the audited-route table names routes that exist', () => {
     expect(dead).toEqual([]);
   });
 
-  test('a pending rule is dropped from the list once its route is declared', async () => {
+  test('every rule’s descriptor declares audit.record, so the rule can fire, bar the pending ones named above', async () => {
     const declared = await declaredRoutes();
-    expect(Object.keys(PENDING).filter(key => declared.has(key))).toEqual([]);
+    const silent = AUDITED_ROUTES.map(rule => `${rule.method} ${rule.path}`).filter(
+      key => declared.get(key)?.records === false && !(key in PENDING),
+    );
+    expect(silent).toEqual([]);
+  });
+
+  test('a pending rule is dropped from the list once its route is declared and records', async () => {
+    const declared = await declaredRoutes();
+    const stillPending = Object.keys(PENDING).filter(key => {
+      const route = declared.get(key);
+      return route === undefined || !route.records;
+    });
+    expect(Object.keys(PENDING).filter(key => !stillPending.includes(key))).toEqual([]);
     const rules = new Set(AUDITED_ROUTES.map(rule => `${rule.method} ${rule.path}`));
     expect(Object.keys(PENDING).filter(key => !rules.has(key))).toEqual([]);
   });

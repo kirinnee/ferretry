@@ -72,13 +72,8 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subjectIsDevice: true,
     detail: { scope: 'device' },
   },
-  {
-    method: 'PATCH',
-    path: '/v1/security',
-    event: 'security.changed',
-    fixedSubject: 'security-settings',
-    responseSettings: ['view', 'settings'],
-  },
+  // `PATCH /v1/security` has no rule: its descriptor says `audit: { skip }` because SecuritySettingsService journals
+  // `security.changed` itself, with each field's old and new value (G115), so a rule here could never fire.
   // A tunnel changes how other devices reach this machine — a hostname on Cloudflare's edge in front of it
   // — so switching it is kept as a change to the machine's security, beside the settings above.
   { method: 'PUT', path: '/v1/tunnel', event: 'security.changed', fixedSubject: 'tunnel' },

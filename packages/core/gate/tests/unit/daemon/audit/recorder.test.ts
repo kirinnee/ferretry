@@ -127,13 +127,13 @@ describe('Admission.recorded: today’s audited-route rules, after the handler',
   });
 
   test('a setting change keeps the numbers and switches of the answer, never text (responseSettings)', () => {
-    const rule = AUDITED_ROUTES.find(candidate => candidate.responseSettings?.length === 2);
+    const rule = AUDITED_ROUTES.find(
+      candidate => candidate.method === 'PUT' && candidate.path === '/v1/copy-rules/settings',
+    );
     if (rule?.responseSettings === undefined) throw new Error('today records the settings a change left');
-    const [outer, inner] = rule.responseSettings as [string, string];
+    expect(rule.responseSettings).toEqual([]);
     const draft = recordedCallDraft(
-      told(rule.method, rule.path, {
-        body: { [outer]: { [inner]: { idleExpiryDays: 1, unlockOnOpen: true, note: 'x' } } },
-      }),
+      told(rule.method, rule.path, { body: { idleExpiryDays: 1, unlockOnOpen: true, note: 'x' } }),
     );
     expect(draft?.detail).toMatchObject({ idleExpiryDays: 1, unlockOnOpen: true });
     expect(draft?.detail).not.toHaveProperty('note');

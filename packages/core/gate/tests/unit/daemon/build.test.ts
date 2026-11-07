@@ -18,15 +18,19 @@ import {
   AdminTokenFile,
   type Admission,
   cap,
+  Credentials,
+  type CredentialProvider,
   DEFAULT_GATE_CONFIG,
   type GateApi,
   type GateConfig,
   GatePolicyChanged,
+  LIMITED_DEVICE_GRANTS,
   WardenTokenFile,
 } from '../../../contract/index.ts';
 import gateDaemon from '../../../daemon/index.ts';
 import manifest, { GrantAuditFile } from '../../../manifest.ts';
-import { ADMIN, carried, descriptor, local, WARDEN } from './support.ts';
+import { FakeDeviceProvider, holder } from '../../../contract/testing/index.ts';
+import { ADMIN, carried, descriptor, local, request, WARDEN } from './support.ts';
 
 // ─── a minimal kernel: only the ports Gate's build touches, each observable ─────────────────────────────────────────
 
@@ -45,6 +49,8 @@ interface FakeKernelOptions {
   readonly jsonl?: Readonly<Record<string, string>>;
   /** Holds every state read until released: a slow disk, to race the eager load against the start job. */
   readonly slowReads?: boolean;
+  /** The `credentials` providers the hooks answer, by kind; a kind left out is "that plugin is off". */
+  readonly credentials?: Readonly<Partial<Record<'device' | 'member', CredentialProvider>>>;
 }
 
 function boot(options: FakeKernelOptions = {}) {
@@ -59,6 +65,7 @@ function boot(options: FakeKernelOptions = {}) {
   const jobs = new Map<string, () => Promise<void>>();
   const releases: (() => void)[] = [];
   const watchers: (() => void)[] = [];
+  const stops: (() => void | Promise<void>)[] = [];
   const published: { event: string; payload: unknown }[] = [];
   const held = (): Promise<void> =>
     options.slowReads === true ? new Promise(resolve => releases.push(resolve)) : Promise.resolve();
@@ -126,9 +133,14 @@ function boot(options: FakeKernelOptions = {}) {
       subscribe: () => () => undefined,
     },
     clock: { now: () => '2026-11-07T12:00:00.000Z', nowMs: () => Date.parse('2026-11-07T12:00:00.000Z') },
-    lifecycle: { onStop() {}, onStart() {} },
+    lifecycle: { onStop: (fn: () => void | Promise<void>) => stops.push(fn), onStart() {} },
   };
-  const hooks = { provider: () => 'unavailable', invoke: async () => [] };
+  const credentials = { ...options.credentials };
+  const hooks = {
+    provider: (hook: { name: string }, key: string) =>
+      (hook.name === Credentials.name ? credentials[key as 'device' | 'member'] : undefined) ?? 'unavailable',
+    invoke: async () => [],
+  };
   const build = gateDaemon.build;
   if (build === undefined) throw new Error('the daemon half is real');
   const half = build({ manifest, needs: {}, uses: {}, kernel, hooks } as never) as unknown as {
@@ -147,6 +159,8 @@ function boot(options: FakeKernelOptions = {}) {
     configWrites,
     jobs,
     watchers,
+    stops,
+    credentials,
     published,
     settle,
     release: () => {
@@ -433,5 +447,100 @@ describe('a policy change in the built daemon', () => {
       { event: GatePolicyChanged.name, payload: { generation: 1 } },
       { event: GatePolicyChanged.name, payload: { generation: 2 } },
     ]);
+  });
+
+  test('G149 a gate.yaml change tells the admission’s watchers, so the kernel re-asks every open stream', () => {
+    const built = boot({ config: DEFAULT_GATE_CONFIG });
+    let told = 0;
+    built.half.provides.admission.watch?.(() => {
+      told += 1;
+    });
+    expect(told).toBe(0);
+    built.watchers[0]?.();
+    expect(told).toBe(1);
+    built.watchers[0]?.();
+    expect(told).toBe(2);
+  });
+});
+
+describe('a device-grant change in the built daemon', () => {
+  /** One admitted-or-refused ask for a device, which is when Gate binds the provider. */
+  const ask = (built: ReturnType<typeof boot>, device: string): void => {
+    built.half.provides.admission.admit({
+      table: 'route',
+      descriptor: descriptor(),
+      request: request({ device }),
+      params: new Map(),
+    });
+  };
+
+  test('G149 a device’s grant change tells the admission’s watchers, with no gate.yaml change', () => {
+    const devices = new FakeDeviceProvider();
+    devices.enrol(holder('d1'));
+    const built = boot({ config: DEFAULT_GATE_CONFIG, credentials: { device: devices } });
+    let told = 0;
+    built.half.provides.admission.watch?.(() => {
+      told += 1;
+    });
+    ask(built, 'd1');
+    expect(told).toBe(0);
+    devices.narrow(holder('d1'), LIMITED_DEVICE_GRANTS);
+    expect(told).toBe(1);
+    devices.revoke(holder('d1'));
+    expect(told).toBe(2);
+    expect(built.published).toEqual([]);
+  });
+
+  test('G149 a provider is followed once, however many calls ask for it', () => {
+    const devices = new FakeDeviceProvider();
+    devices.enrol(holder('d1'));
+    const built = boot({ config: DEFAULT_GATE_CONFIG, credentials: { device: devices } });
+    let told = 0;
+    built.half.provides.admission.watch?.(() => {
+      told += 1;
+    });
+    for (let i = 0; i < 3; i += 1) ask(built, 'd1');
+    devices.revoke(holder('d1'));
+    expect(told).toBe(1);
+  });
+
+  test('G149 a replaced provider’s notices stop and the new one’s start', () => {
+    const first = new FakeDeviceProvider();
+    const second = new FakeDeviceProvider();
+    first.enrol(holder('d1'));
+    second.enrol(holder('d1'));
+    const built = boot({ config: DEFAULT_GATE_CONFIG, credentials: { device: first } });
+    let told = 0;
+    built.half.provides.admission.watch?.(() => {
+      told += 1;
+    });
+    ask(built, 'd1');
+    built.credentials.device = second;
+    ask(built, 'd1');
+    first.revoke(holder('d1'));
+    expect(told).toBe(0);
+    second.revoke(holder('d1'));
+    expect(told).toBe(1);
+  });
+
+  test('G149 a stopped provider and a daemon stop both drop the subscription', async () => {
+    const devices = new FakeDeviceProvider();
+    devices.enrol(holder('d1'));
+    const built = boot({ config: DEFAULT_GATE_CONFIG, credentials: { device: devices } });
+    let told = 0;
+    built.half.provides.admission.watch?.(() => {
+      told += 1;
+    });
+    ask(built, 'd1');
+    delete built.credentials.device;
+    ask(built, 'd1');
+    devices.narrow(holder('d1'), LIMITED_DEVICE_GRANTS);
+    expect(told).toBe(0);
+
+    built.credentials.device = devices;
+    ask(built, 'd1');
+    for (const stop of built.stops) await stop();
+    devices.revoke(holder('d1'));
+    expect(told).toBe(0);
   });
 });
