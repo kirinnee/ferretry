@@ -14,7 +14,7 @@ import type {
   TransformHook,
 } from '../contract/define.ts';
 import type { DoctorFinding } from '../contract/kernel.ts';
-import type { Cancel, KernelPorts } from '../contract/ports.ts';
+import type { Cancel, KernelPorts, StatePort } from '../contract/ports.ts';
 import type { CallContext, MemberRouteHandler, RouteHandler } from '../contract/route.ts';
 import type { SocketAccept } from '../contract/socket.ts';
 import type { Manifest } from './types.ts';
@@ -278,6 +278,11 @@ export interface CliContext<M extends Manifest> {
   readonly manifest: M;
   readonly client: PluginClient;
   readonly io: TerminalIo;
+  /** Own declared opaque defs only; private directory operations and stat require named trees. Optional until fy supplies it. */
+  readonly ownState?: Pick<
+    StatePort,
+    'write' | 'pathOf' | 'stat' | 'remove' | 'list' | 'removeEmptyDirectory' | 'createPrivateDirectory'
+  >;
   /** The time, for a verb that reports or waits. Optional until the fy shell fills it in. */
   readonly clock?: { now(): Instant; nowMs(): number };
   /** Waits, cancellable (a poll loop). */

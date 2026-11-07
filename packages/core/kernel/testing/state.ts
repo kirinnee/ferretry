@@ -2,6 +2,8 @@ import { Database } from 'bun:sqlite';
 import type { Result } from '@ferretry/std';
 import { err, ok } from '@ferretry/std';
 import type { StateFileDef } from '../contract/define.ts';
+import type { CliContext } from '../manifest/implement.ts';
+import type { Manifest } from '../manifest/types.ts';
 import {
   type JsonlRecords,
   MAX_STATE_TAIL_BYTES,
@@ -77,6 +79,20 @@ export class MemoryStateFolder {
 
   port(declared: readonly StateFileDef[]): StatePort {
     return memoryStatePort(this, declared);
+  }
+
+  /** The CLI's optional local state capability, restricted to this plugin's declared opaque files. */
+  ownState(declared: readonly StateFileDef[]): NonNullable<CliContext<Manifest>['ownState']> {
+    const port = this.port(declared.filter(file => file.store === 'opaque'));
+    return Object.freeze({
+      write: port.write,
+      pathOf: port.pathOf,
+      stat: port.stat,
+      remove: port.remove,
+      list: port.list,
+      removeEmptyDirectory: port.removeEmptyDirectory,
+      createPrivateDirectory: port.createPrivateDirectory,
+    });
   }
 }
 
