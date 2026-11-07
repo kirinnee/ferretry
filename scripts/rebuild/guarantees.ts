@@ -137,6 +137,34 @@ export const REMOVED_OWNER: Record<string, string> = {
   R611: 'catalogs',
 };
 
+/**
+ * The owner IS the enforcer (§3.9 guarantee-owner; lead decision 2026-11-07). Rows the table assigns to one package
+ * whose enforcer lives in another are moved to the enforcer, with the reason. Tests live with the enforcer.
+ */
+export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> = {
+  R238: { owner: 'kernel', reason: 'enforced by the kernel session layer (pre-auth device proof cost)' },
+  R241: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
+  R244: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
+  R245: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
+  R247: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
+  R540: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
+  R572: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
+  P24: { owner: 'connections', reason: 'enforced by the Connections relay client (browser carrier walk)' },
+  P29: { owner: 'connections', reason: 'enforced by the Connections relay client (browser carrier walk)' },
+  P30: { owner: 'connections', reason: 'enforced by the Connections relay client (browser carrier walk)' },
+  P31: { owner: 'connections', reason: 'enforced by the Connections relay client (browser carrier walk)' },
+  P135: { owner: 'connections', reason: 'enforced by the Connections relay client (browser carrier walk)' },
+  R570: { owner: 'connections', reason: 'enforced by the Connections relay client (browser carrier walk)' },
+  R582: { owner: 'connections', reason: 'enforced by the Connections relay client (browser carrier walk)' },
+  R633: { owner: 'connections', reason: 'enforced by the Connections relay client (browser carrier walk)' },
+  P28: { owner: 'app-shell', reason: 'enforced by the app shell device store' },
+  R575: { owner: 'app-shell', reason: 'enforced by the app shell device store' },
+  G167: {
+    owner: 'agenda',
+    reason: 'POST /v1/push/seen moved to Agenda (DECISIONS-1 #4); Agenda computes the seen outcome',
+  },
+};
+
 const cells = (line: string): string[] =>
   line
     .replace(/^\|/, '')
@@ -205,6 +233,11 @@ export function parseAppendixD(markdown: string): { rows: Row[]; gaps: number; s
       const co = status === 'split' || /integration fixture/.test(notes) ? others : [];
       w = [...co, ...n.workers];
       if (id === 'R662' || id === 'R675') w = ['connections']; // "pairing refused by carrier tag": the tag is Connections'
+      const ovr = OWNER_OVERRIDE[id];
+      if (ovr) {
+        w = [...new Set([owner, ...w].filter(x => x !== ovr.owner))];
+        owner = ovr.owner;
+      }
     }
     rows.push({
       id,

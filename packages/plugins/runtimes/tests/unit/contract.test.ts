@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import {
   AccountChangeRequestSchema,
@@ -14,16 +15,28 @@ import { fakeRuntimes, runtimesConformance } from '../../contract/testing/index.
 import manifest from '../../manifest.ts';
 
 describe('runtimes contract', () => {
+  test('keeps runtimes and onboarding pending until real assembly and screens are ported', () => {
+    const pending = JSON.parse(
+      readFileSync(new URL('../../../../../ports-pending.json', import.meta.url), 'utf8'),
+    ).pending;
+    expect(pending).toContain('runtimes');
+    expect(pending).toContain('onboarding');
+  });
+
   test('the fake passes the conformance suite', async () => {
     const result = await runtimesConformance(fakeRuntimes);
     expect(result.ok).toBe(true);
   });
 
-  test('the manifest declares fifteen routes under /v1/runtimes and the Ferrets need', () => {
+  test('the manifest owns seventeen routes and requires Logins', () => {
     const keys = manifest.actions.routes.map(route => route.key);
-    expect(keys).toHaveLength(15);
-    expect(keys.every(key => key.includes(' /v1/runtimes'))).toBe(true);
-    expect(Object.keys(manifest.needs)).toEqual(['ferrets']);
+    expect(keys).toHaveLength(17);
+    expect(keys.filter(key => !key.includes(' /v1/runtimes'))).toEqual([
+      'GET /v1/ferrets/:id/runtime-models',
+      'POST /v1/ferrets/:id/runtime',
+      'POST /v1/recommend',
+    ]);
+    expect(Object.keys(manifest.needs)).toEqual(['ferrets', 'logins']);
   });
 
   test('every route is operator-minimum and no-store, and a ferret may not apply a change', () => {
@@ -43,9 +56,7 @@ describe('runtimes contract', () => {
     expect(axis('POST /v1/runtimes/proposals')).toBe('configure');
     expect(axis('GET /v1/runtimes/setup/scan')).toBe('configure');
     expect(axis('GET /v1/runtimes/export')).toBe('configure');
-    expect(
-      manifest.actions.routes.find(route => route.key === 'POST /v1/runtimes/recommend')?.capability,
-    ).toBeUndefined();
+    expect(manifest.actions.routes.find(route => route.key === 'POST /v1/recommend')?.capability).toBeUndefined();
   });
 
   test('no two verbs are the same and none is a bare setup or import', () => {
@@ -121,5 +132,15 @@ describe('runtimes contract', () => {
     };
     expect(CloneBundleSchema.safeParse(bundle).success).toBe(true);
     expect(CloneBundleSchema.safeParse({ ...bundle, version: 2 }).success).toBe(false);
+  });
+});
+
+describe('runtime file shell (Q18)', () => {
+  test('a runtime file may name a shell item, and the field is optional', async () => {
+    const { RuntimeFileSchema } = await import('../../contract/index.ts');
+    expect(RuntimeFileSchema.safeParse({ login: 'claude-main', profile: 'default' }).success).toBe(true);
+    const named = RuntimeFileSchema.parse({ login: 'claude-main', profile: 'default', shell: 'nix-dev' });
+    expect(named.shell).toBe('nix-dev');
+    expect(RuntimeFileSchema.safeParse({ login: 'claude-main', profile: 'default', shell: 'a/b' }).success).toBe(false);
   });
 });

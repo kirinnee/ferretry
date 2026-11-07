@@ -31,6 +31,7 @@ import {
   surfaceOf,
 } from './lib/hashes.ts';
 import { type ImportEdge, importsOf, scannedImportsOf } from './lib/imports.ts';
+import { readPendingApps } from './lib/pending-apps.ts';
 import {
   HALVES,
   type LoadedSubsystem,
@@ -222,6 +223,7 @@ function commandsRegistry(model: Model): string {
  */
 function surfacesRegistry(model: Model): string {
   const out = join(model.ws.root, GENERATED.surfaces);
+  const pendingApps = readPendingApps(model.ws.root).halves;
   const imports: string[] = [];
   const entries: string[] = [];
   for (const id of startOrder(model)) {
@@ -229,7 +231,7 @@ function surfacesRegistry(model: Model): string {
     if (pkg?.manifestPath === undefined) continue;
     const manifest = ident('manifest', id);
     imports.push(`import ${manifest} from '${importPath(out, pkg.manifestPath)}';`);
-    const app = halfPath(pkg, 'app');
+    const app = pendingApps.has(id) ? undefined : halfPath(pkg, 'app');
     const appName = ident('app', id);
     if (app !== undefined) imports.push(`import ${appName} from '${importPath(out, app)}';`);
     entries.push(

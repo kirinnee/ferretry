@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "lib": ["ESNext"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "target": "ESNext",
     "module": "Preserve",
     "moduleDetection": "force",
@@ -28,5 +28,28 @@
     "packages/cli/src",
     "packages/cli/tests"
   ],
-  "exclude": ["packages/app", "**/node_modules"]
+  "exclude": [
+    "packages/app",
+    "**/node_modules",
+    // pending app port: agenda separate app port in flight
+    "packages/plugins/agenda/app",
+    // pending app port: browsers separate app port in flight
+    "packages/plugins/browsers/app",
+    // pending app port: terminals shell daemon-client, grants and browser-link facilities
+    "packages/plugins/terminals/app",
+    // pending app port: terminals shell daemon-client, grants and browser-link facilities
+    "packages/plugins/terminals/tests/unit/app",
+    // pending app port: terminals shell daemon-client, grants and browser-link facilities
+    "packages/plugins/terminals/tests/support/app",
+    // pending app port: runtimes Logins roster/health, Usage quota readout and shell daemon picker
+    "packages/plugins/runtimes/app/components/runtime-buttons.tsx",
+    // pending app port: runtimes Logins account-picker store/catalog and shell roster polling
+    "packages/plugins/runtimes/app/hooks/use-account-picker.ts",
+    // pending app port: runtimes Runtimes reviewed apply-change screens and machine settings
+    "packages/plugins/runtimes/app/features/fleet/runtimes/runtime-actions.tsx",
+    // pending app port: runtimes Logins account-picker store/catalog and shell roster polling
+    "packages/plugins/runtimes/tests/unit/app/use-account-picker.test.tsx",
+    // pending app port: runtimes Runtimes reviewed apply-change screens and machine settings
+    "packages/plugins/runtimes/tests/unit/app/features/fleet/runtimes/runtime-actions.test.tsx"
+  ]
 }

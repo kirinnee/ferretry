@@ -6,8 +6,10 @@ import {
   chooseLayout,
   DEFAULT_LAYOUT,
   LayoutSchema,
+  applyOverrides,
+  layoutCandidates,
   resolveLayout,
-  setLayoutField,
+  setDeviceOverride,
 } from '../../../src/layout/layout.ts';
 import { FRAME_SLOTS, FRAME_SLOTS_COMPLETE, isSlotName } from '../../../src/layout/slots.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
@@ -104,17 +106,50 @@ describe('choosing a layout', () => {
   });
 });
 
-describe('fy layout set', () => {
-  test('moves the sidebar and chooses the nav items', () => {
-    const right = setLayoutField(DEFAULT_LAYOUT, 'nav.side', 'right');
-    expect(right.ok && right.layout.nav.side).toBe('right');
-    const items = setLayoutField(DEFAULT_LAYOUT, 'nav.items', 'agenda, board');
-    expect(items.ok && items.layout.nav.items).toEqual(['agenda', 'board']);
+describe('layout set --device', () => {
+  test('moves the sidebar and chooses the nav items, as overrides of only those keys', () => {
+    const right = setDeviceOverride(DEFAULT_LAYOUT, {}, 'nav.side', 'right');
+    expect(right).toEqual({ ok: true, overrides: { nav: { side: 'right' } } });
+    if (!right.ok) return;
+    const items = setDeviceOverride(DEFAULT_LAYOUT, right.overrides, 'nav.items', 'agenda, board');
+    expect(items).toEqual({ ok: true, overrides: { nav: { side: 'right', items: ['agenda', 'board'] } } });
   });
 
   test('refuses an unknown setting or value', () => {
-    expect(setLayoutField(DEFAULT_LAYOUT, 'nav.colour', 'red').ok).toBe(false);
-    expect(setLayoutField(DEFAULT_LAYOUT, 'nav.side', 'middle').ok).toBe(false);
+    expect(setDeviceOverride(DEFAULT_LAYOUT, {}, 'nav.colour', 'red').ok).toBe(false);
+    expect(setDeviceOverride(DEFAULT_LAYOUT, {}, 'nav.side', 'middle').ok).toBe(false);
+  });
+});
+
+describe('the owner layout and this device (§5.3)', () => {
+  const owner = LayoutSchema.parse({ id: 'owner', nav: { side: 'right', items: ['agenda'] } });
+
+  test('the owner layout applies on every device when this device changed nothing', () => {
+    expect(chooseLayout(layoutCandidates(owner, {}), views.installed)).toEqual({ kind: 'applied', layout: owner });
+  });
+
+  test('a device override sits on top of the owner layout, field by field', () => {
+    const edited = setDeviceOverride(owner, {}, 'nav.style', 'bar');
+    expect(edited.ok).toBe(true);
+    if (!edited.ok) return;
+    const choice = chooseLayout(layoutCandidates(owner, edited.overrides), views.installed);
+    // The device's field wins; every field it did not touch still follows the owner.
+    expect(choice.layout).toMatchObject({ id: 'owner', nav: { side: 'right', style: 'bar', items: ['agenda'] } });
+  });
+
+  test('an override the views refuse falls back to the owner layout alone', () => {
+    const choice = chooseLayout(layoutCandidates(owner, { nav: { items: ['nowhere'] } }), views.installed);
+    expect(choice).toMatchObject({ kind: 'refused', layout: { id: 'owner', nav: { items: ['agenda'] } } });
+  });
+
+  test('without an owner layout the overrides go on the built-in default', () => {
+    expect(layoutCandidates(undefined, {})).toEqual([]);
+    expect(layoutCandidates(undefined, { density: 'compact' })[0]).toMatchObject({ id: 'default', density: 'compact' });
+  });
+
+  test('applyOverrides lays phone fields over the phone overrides the layout has', () => {
+    const laid = applyOverrides(DEFAULT_LAYOUT, { phone: { nav: { side: 'top' } } });
+    expect(laid?.phone?.nav).toEqual({ side: 'top', items: ['agenda', 'ferrets', 'board'] });
   });
 });
 

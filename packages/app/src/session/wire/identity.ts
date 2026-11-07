@@ -26,7 +26,7 @@ export async function daemonIdFromPublicKey(crypto: RelayCrypto, publicKeySpki: 
 }
 
 /** Parse an identifier a peer supplied. Returns null rather than a value that only looks like one. */
-export function parseDaemonId(value: string): string | null {
+function parseDaemonId(value: string): string | null {
   const parsed = DaemonIdSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }

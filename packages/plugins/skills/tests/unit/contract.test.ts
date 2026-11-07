@@ -5,7 +5,7 @@ import manifest from '../../manifest.ts';
 
 const route = (key: string) => manifest.actions.routes.find(candidate => candidate.key === key);
 const demand = (key: string) => `${String(route(key)?.capability?.capability)}.${route(key)?.capability?.axis}`;
-const COPY = manifest.actions.routes.filter(candidate => candidate.path.startsWith('/v1/skills/installs/local'));
+const COPY = manifest.actions.routes.filter(candidate => candidate.path.startsWith('/v1/skill-installs/local'));
 
 describe('skills contract', () => {
   test('the fake passes the conformance suite', async () => {
@@ -20,15 +20,15 @@ describe('skills contract', () => {
   });
 
   test('G172 (declaration only) both previews are filesystem.use', () => {
-    expect(demand('POST /v1/skills/installs/local/project/preview')).toBe('filesystem.use');
-    expect(demand('POST /v1/skills/installs/local/runtime/preview')).toBe('filesystem.use');
+    expect(demand('POST /v1/skill-installs/local/project/preview')).toBe('filesystem.use');
+    expect(demand('POST /v1/skill-installs/local/runtime/preview')).toBe('filesystem.use');
   });
 
   test('G173 (declaration only) a project apply or remove is filesystem.configure, a runtime one fleet.configure', () => {
-    expect(demand('POST /v1/skills/installs/local/project')).toBe('filesystem.configure');
-    expect(demand('DELETE /v1/skills/installs/local/project/:installId')).toBe('filesystem.configure');
-    expect(demand('POST /v1/skills/installs/local/runtime')).toBe('fleet.configure');
-    expect(demand('DELETE /v1/skills/installs/local/runtime/:installId')).toBe('fleet.configure');
+    expect(demand('POST /v1/skill-installs/local/project')).toBe('filesystem.configure');
+    expect(demand('DELETE /v1/skill-installs/local/project/:installId')).toBe('filesystem.configure');
+    expect(demand('POST /v1/skill-installs/local/runtime')).toBe('fleet.configure');
+    expect(demand('DELETE /v1/skill-installs/local/runtime/:installId')).toBe('fleet.configure');
   });
 
   test('G174 (declaration only) every copy route is a person act, so a ferret is refused all of them', () => {

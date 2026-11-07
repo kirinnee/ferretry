@@ -7,13 +7,13 @@ import { join } from 'node:path';
 import { contextFor } from '../lib/check.ts';
 import type { Finding } from '../lib/graph.ts';
 import { check as actRunner } from '../../validate/act-runner.ts';
-import { bannedIn } from '../../validate/banned-globals.ts';
+import { bannedIn, check as bannedGlobals } from '../../validate/banned-globals.ts';
 import { check as contextImports } from '../../validate/context-imports.ts';
 import { check as contractConsumes } from '../../validate/contract-consumes.ts';
 import { check as contractGraph } from '../../validate/contract-graph.ts';
 import { check as coreClosed } from '../../validate/core-closed.ts';
 import { parity, readChanges } from '../../validate/descriptor-parity.ts';
-import { check as glossary } from '../../validate/glossary.ts';
+import { check as glossary, glossaryFindings } from '../../validate/glossary.ts';
 import { enforcerSymbols, guaranteeFindings, parseTsv } from '../../validate/guarantees.ts';
 import { check as hostFiles } from '../../validate/host-files.ts';
 import { check as manifestMatch } from '../../validate/manifest-match.ts';
@@ -177,6 +177,36 @@ describe('core-closed', () => {
 // ─── import checks ────────────────────────────────────────────────────────────────────────────────────────────────
 
 describe('context-imports', () => {
+  test('app halves and their tests use only the public shell facilities; daemon halves and private paths are refused', async () => {
+    const f = ws([
+      {
+        id: 'alpha',
+        files: {
+          'app/view.tsx': `import '@ferretry/app';\nimport '@ferretry/app/ui';\n`,
+          'app/private.ts': `import '../../../app/src/private.ts';\n`,
+          'app/testing.ts': `import '@ferretry/app/testing';\n`,
+          'daemon/shell.ts': `import '@ferretry/app/ui';\n`,
+          'tests/ui.test.ts': `import '@ferretry/app/testing';\nimport '@ferretry/app/ui';\n`,
+        },
+      },
+    ]);
+    f.write(
+      'packages/app/package.json',
+      JSON.stringify({
+        name: '@ferretry/app',
+        exports: { '.': './src/index.ts', './ui': './src/ui.ts', './testing': './src/testing.ts' },
+      }),
+    );
+    for (const file of ['index.ts', 'ui.ts', 'testing.ts', 'private.ts'])
+      f.write(`packages/app/src/${file}`, 'export {};\n');
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('alpha/app/view.tsx');
+    expect(found).not.toContain('alpha/tests/ui.test.ts');
+    expect(found).toContain('alpha/app/private.ts');
+    expect(found).toContain('alpha/app/testing.ts');
+    expect(found).toContain('alpha/daemon/shell.ts');
+  });
+
   test('planted: a half reaches another package past its contract; a contract imports node:fs; a manifest imports a half', async () => {
     const f = ws(
       [
@@ -283,6 +313,26 @@ describe('source scans', () => {
     return join(f.root, name);
   };
 
+  test('banned-globals exempts only the explicit standalone Worker trees and native WebRTC engine', async () => {
+    const f = ws([
+      {
+        id: 'connections',
+        files: {
+          'worker/src/worker.ts': 'await fetch("https://fixture.invalid");',
+          'adapters/webrtc/node-datachannel-engine.ts': 'const platform = process.platform;',
+          'daemon/worker.ts': 'await fetch("https://fixture.invalid");',
+          'adapters/webrtc/other.ts': 'const platform = process.platform;',
+        },
+      },
+      { id: 'catalogs', files: { 'worker/src/worker.ts': 'await fetch("https://fixture.invalid");' } },
+      { id: 'other', files: { 'worker/src/worker.ts': 'await fetch("https://fixture.invalid");' } },
+    ]);
+    const found = await run(bannedGlobals, f);
+    expect(found).toHaveLength(3);
+    expect(messages(found)).toContain('connections/daemon/worker.ts');
+    expect(messages(found)).toContain('connections/adapters/webrtc/other.ts');
+    expect(messages(found)).toContain('other/worker/src/worker.ts');
+  });
   test('banned-globals planted: clock, timers, env, fs, network and spawn around the ports', () => {
     const found = messages(
       bannedIn(
@@ -391,6 +441,41 @@ describe('act-runner', () => {
     expect(found).not.toContain('alpha_read declares');
     expect(found).toContain('never calls kernel.act');
   });
+
+  const askAndInputTools = [
+    'terminal_ask_owner',
+    'terminal_request_input',
+    'browser_ask_owner',
+    'browser_request_input',
+  ];
+  const noOpTool = (name: string): string =>
+    `tool('${name}', { minimum: 'authenticated', caller: 'any', audit: { skip: 'fixture' }, guard: { none: 'fixture' } })`;
+  const noOpPlugin = (names: readonly string[]) =>
+    ws(
+      [
+        {
+          id: 'alpha',
+          kinds: ['tool'],
+          manifestImports: `import { tool } from '${SDK}';`,
+          manifest: `  actions: { agentTools: [${names.map(noOpTool).join(', ')}] },`,
+        },
+      ],
+      { pending: ['alpha'] },
+    );
+  test('each listed ask and input-request tool passes with no Op', async () => {
+    for (const name of askAndInputTools) {
+      const found = messages(await run(actRunner, noOpPlugin([name])));
+      expect(found).not.toContain('declares');
+    }
+  });
+  test('an unlisted look-alike of a listed tool still fails with no Op', async () => {
+    const found = messages(
+      await run(actRunner, noOpPlugin(['terminal_ask_owner2', 'xterminal_ask_owner', 'browser_ask'])),
+    );
+    expect(found).toContain('tool terminal_ask_owner2 declares no Op');
+    expect(found).toContain('tool xterminal_ask_owner declares no Op');
+    expect(found).toContain('tool browser_ask declares no Op');
+  });
 });
 
 describe('words and glossary', () => {
@@ -422,6 +507,27 @@ describe('words and glossary', () => {
     expect(found).toContain('verb card move: says "task"; the word is "card"');
     expect(found).toContain('instructions/cards.md:2');
     expect(found).not.toContain('cards.md:1');
+  });
+});
+
+describe('glossary phrase exceptions', () => {
+  const index = new Map([
+    ['proxy', 'relay'],
+    ['timer', 'job'],
+  ]);
+  test('the reviewed phrases pass', () => {
+    expect(glossaryFindings('x', 'check the saved browser proxy without saving it', index)).toEqual([]);
+    expect(glossaryFindings('x', 'print the Firewall Timer that runs the verify unit', index)).toEqual([]);
+    expect(glossaryFindings('x', 'Browser proxy. Firewall timer.', index)).toEqual([]);
+  });
+  test('the bare banned word in another phrase still fails', () => {
+    expect(glossaryFindings('x', 'check the saved proxy', index).length).toBe(1);
+    expect(glossaryFindings('x', 'print the systemd timer', index).length).toBe(1);
+    expect(glossaryFindings('x', 'a proxy server for the browser', index).length).toBe(1);
+  });
+  test('the phrase covers only itself: a second bare use beside it still fails', () => {
+    expect(glossaryFindings('x', 'the browser proxy, not a plain proxy', index).length).toBe(1);
+    expect(glossaryFindings('x', 'the firewall timer and a second timer', index).length).toBe(1);
   });
 });
 
@@ -577,6 +683,30 @@ describe('registry generator', () => {
     };
     expect(registry.halves.daemon.skeleton).toBe(true);
     expect(typeof registry.contractTesting.alpha?.fakeAlpha).toBe('function');
+  });
+
+  test('pending app halves are omitted, ported halves register, and registries --check stays exact', async () => {
+    const f = ws([{ id: 'alpha' }, { id: 'beta' }]);
+    f.write(
+      'ports-pending.json',
+      JSON.stringify({ format: 1, pending: ['alpha', 'beta'], pendingHalves: { alpha: ['app'] } }),
+    );
+    const files = generateGlobal(await buildModel(f.root));
+    const surfaces = files.get('packages/app/src/generated/surfaces.ts') ?? '';
+    expect(surfaces).not.toContain('import app_alpha');
+    expect(surfaces).not.toContain('app: app_alpha');
+    expect(surfaces).toContain('manifest: manifest_alpha');
+    expect(surfaces).toContain('import app_beta');
+    expect(surfaces).toContain('app: app_beta');
+    writeFiles(f.root, files);
+    const check = () => Bun.spawnSync(['bun', join(import.meta.dir, '../registries.ts'), '--root', f.root, '--check']);
+    expect(check().exitCode).toBe(0);
+    f.write('ports-pending.json', JSON.stringify({ format: 1, pending: ['alpha', 'beta'], pendingHalves: {} }));
+    expect(check().exitCode).toBe(1);
+    const ported = generateGlobal(await buildModel(f.root));
+    expect(ported.get('packages/app/src/generated/surfaces.ts')).toContain('app: app_alpha');
+    writeFiles(f.root, ported);
+    expect(check().exitCode).toBe(0);
   });
 
   test('registries-fresh planted: a hand-edited generated file', async () => {

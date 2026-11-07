@@ -4,12 +4,14 @@
  * through `harnessConformance`; Logins through `loginKindConformance`. The fakes pass the same suites.
  */
 import { describe, expect, test } from 'bun:test';
-import type { ChildEnvironment } from '@ferretry/core-vault/contract';
+import { type ChildEnvironment, SECRET_REFERENCE_SOURCE } from '@ferretry/core-vault/contract';
 import type { FencedPath, FerretId, FolderRefusal, WorkFolders } from '@ferretry/kernel/contract';
 import { err, type Instant, instantFromEpochMs, ok, type Result } from '@ferretry/std';
-import type { FerretState, FerretSummary, HarnessKey, LoginKindKey } from '../ids.ts';
+import type { FerretState, FerretSummary, HarnessKey, LoginKindKey, PackId } from '../ids.ts';
 import type {
   AttachRefusal,
+  DeliveryOutcome,
+  RunnerDelivery,
   Delivery,
   Harness,
   LaunchSpec,
@@ -23,6 +25,7 @@ import type {
   Started,
 } from '../kinds.ts';
 import type { FerretsApi, Sitrep, StartFailure, StartRequest } from '../port.ts';
+import { type AgentControl, DEFAULT_AGENT_CONTROL, NO_AGENT_CONTROL } from '../state.ts';
 
 /** 2026-11-07T12:00:00Z. */
 export const T0: Instant = instantFromEpochMs(1_794_052_800_000);
@@ -38,6 +41,8 @@ export const emptyChildEnvironment = (): ChildEnvironment =>
 export class FakeRunner implements Runner {
   readonly key = 'tmux' as const;
   starts = 0;
+  /** Every delivery made, with the handle it went to. */
+  readonly deliveries: { readonly handle: RunnerHandle; readonly delivery: RunnerDelivery }[] = [];
   readonly #live = new Map<string, RunningFerret & { readonly ferret: FerretId }>();
   #next = 0;
 
@@ -71,6 +76,12 @@ export class FakeRunner implements Runner {
     return this.#live.has(handle);
   }
   async signal(): Promise<void> {}
+  async deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome> {
+    if (!this.#live.has(handle)) throw new Error(`no pane ${handle}`);
+    await delivery.beforeWrite?.();
+    this.deliveries.push({ handle, delivery });
+    return delivery.text.startsWith('/') ? 'handled-local' : 'turn-started';
+  }
 }
 
 export interface RunnerSubject {
@@ -110,6 +121,27 @@ export function runnerConformance(name: string, make: () => RunnerSubject | Prom
       expect(attached.ok).toBe(false);
       expect(subject.starts()).toBe(before);
     });
+    test('a delivery to a live ferret lands after its beforeWrite step and answers an outcome', async () => {
+      const subject = await make();
+      const started = await subject.runner.start(subject.spec);
+      if (!started.ok) throw new Error('start refused');
+      const steps: string[] = [];
+      const outcome = await subject.runner.deliver(started.value.handle, {
+        text: 'hello',
+        beforeWrite: async () => {
+          steps.push('before');
+        },
+      });
+      expect(['turn-started', 'handled-local']).toContain(outcome);
+      expect(steps).toEqual(['before']);
+      await subject.runner.stop(started.value.handle, 'now');
+    });
+    test('a delivery to a handle with nothing behind it rejects and starts nothing', async () => {
+      const subject = await make();
+      const before = subject.starts();
+      await expect(subject.runner.deliver('%99999' as RunnerHandle, { text: 'hello' })).rejects.toThrow();
+      expect(subject.starts()).toBe(before);
+    });
     test('attach after stop is refused', async () => {
       const subject = await make();
       const handle = await subject.adoptable();
@@ -125,6 +157,8 @@ export function runnerConformance(name: string, make: () => RunnerSubject | Prom
 export class FakeHarness implements Harness {
   readonly accepts: readonly LoginKindKey[] = ['anthropic', 'api-key'];
   readonly delivered: OutboundMessage[] = [];
+  /** Every launch spec this harness was handed (start and resume), so a test sees what reached it. */
+  readonly launched: LaunchSpec[] = [];
   readonly #seen = new Set<string>();
   constructor(readonly key: HarnessKey = 'claude-code') {}
 
@@ -135,10 +169,12 @@ export class FakeHarness implements Harness {
     return { files: [fenced(`${spec.home}/INSTRUCTIONS.md`)], args: [] };
   }
   async start(spec: LaunchSpec, runner: Runner, env: ChildEnvironment): Promise<Result<Started, StartRefusal>> {
+    this.launched.push(spec);
     const running = await runner.start({ ferret: spec.ferret, command: ['fake-harness'], cwd: spec.folder, env });
     return running.ok ? ok({ running: running.value, harnessConversation: `conv-${spec.ferret}` }) : running;
   }
   async resume(spec: LaunchSpec, runner: Runner, env: ChildEnvironment, conversation: string) {
+    this.launched.push(spec);
     const running = await runner.resume(
       { ferret: spec.ferret, command: ['fake-harness', '--resume'], cwd: spec.folder, env },
       conversation,
@@ -233,8 +269,38 @@ export class FakeLoginKind implements LoginKind {
   }
 }
 
+/** Which environment entries a login kind returns, so the suite can hold EVERY credential-bearing one to a reference. */
+export interface LoginEnvFixture {
+  /** Entries that carry a credential: each value must be exactly one `${secret:NAME}` reference. */
+  readonly credentialEnv: readonly string[];
+  /** Entries that carry no credential (a base URL, a flag). An entry in neither list is refused. */
+  readonly plainEnv?: readonly string[];
+}
+
+const WHOLE_SECRET_REFERENCE = new RegExp(`^${SECRET_REFERENCE_SOURCE}$`, 'u');
+
+/**
+ * Why a login's environment fails the values-as-references rule, one sentence per entry; empty when it passes. Every
+ * credential-bearing entry must be a whole `${secret:NAME}` reference with no literal material beside it, and every
+ * entry must be declared, so a literal credential cannot ride along next to a reference.
+ */
+export function loginEnvRefusals(env: Readonly<Record<string, string>>, fixture: LoginEnvFixture): readonly string[] {
+  const refusals: string[] = [];
+  for (const [key, value] of Object.entries(env)) {
+    if (fixture.credentialEnv.includes(key)) {
+      if (!WHOLE_SECRET_REFERENCE.test(value))
+        refusals.push(`${key} carries a credential that is not a \${secret:NAME} reference`);
+    } else if (!(fixture.plainEnv ?? []).includes(key)) refusals.push(`${key} is not a declared environment entry`);
+  }
+  return refusals;
+}
+
 /** The `logins` conformance suite (§4.4): secret values only as `${secret:NAME}`, fields unique, a harness named. */
-export function loginKindConformance(name: string, make: () => LoginKind | Promise<LoginKind>): void {
+export function loginKindConformance(
+  name: string,
+  make: () => LoginKind | Promise<LoginKind>,
+  fixture: LoginEnvFixture,
+): void {
   describe(`login conformance: ${name}`, () => {
     test('field ids are unique and at least one harness can spend it', async () => {
       const login = await make();
@@ -242,13 +308,14 @@ export function loginKindConformance(name: string, make: () => LoginKind | Promi
       expect(new Set(ids).size).toBe(ids.length);
       expect(login.harnesses.length).toBeGreaterThan(0);
     });
-    test('env carries secret fields only as ${secret:NAME} references', async () => {
+    test('env carries every credential-bearing entry only as a ${secret:NAME} reference', async () => {
       const login = await make();
-      if (!login.fields.some(field => field.secret)) return;
-      const env = await login.env('work', login.harnesses[0] ?? 'claude-code');
-      const values = Object.values(env);
-      expect(values.length).toBeGreaterThan(0);
-      expect(values.some(value => /\$\{secret:[A-Z][A-Z0-9_]*\}/u.test(value))).toBe(true);
+      for (const harness of login.harnesses) {
+        const env = await login.env('work', harness);
+        expect(loginEnvRefusals(env, fixture)).toEqual([]);
+        if (login.fields.some(field => field.secret))
+          expect(Object.keys(env).some(key => fixture.credentialEnv.includes(key))).toBe(true);
+      }
     });
   });
 }
@@ -258,6 +325,10 @@ export function loginKindConformance(name: string, make: () => LoginKind | Promi
 /** An in-memory Ferrets port: lineage, `mayTouch`, start through nothing (records only). */
 export class FakeFerrets implements FerretsApi {
   readonly #ferrets = new Map<FerretId, FerretSummary>();
+  /** Every start request, stop and resume, in order, so a test can assert what reached the port. */
+  readonly starts: StartRequest[] = [];
+  readonly stops: { readonly ferret: FerretId; readonly how: 'polite' | 'now'; readonly reason?: string }[] = [];
+  readonly resumes: { readonly ferret: FerretId; readonly message?: string }[] = [];
   #next = 0;
 
   add(summary: Partial<FerretSummary> & { readonly id: FerretId }): FerretSummary {
@@ -282,11 +353,12 @@ export class FakeFerrets implements FerretsApi {
   async get(ferret: FerretId) {
     return this.#ferrets.get(ferret);
   }
-  async list(filter: { readonly state?: FerretState; readonly parent?: FerretId } = {}) {
+  async list(filter: { readonly state?: FerretState; readonly parent?: FerretId; readonly pack?: PackId } = {}) {
     return [...this.#ferrets.values()].filter(
       f =>
         (filter.state === undefined || f.state === filter.state) &&
-        (filter.parent === undefined || f.parent === filter.parent),
+        (filter.parent === undefined || f.parent === filter.parent) &&
+        (filter.pack === undefined || f.pack === filter.pack),
     );
   }
   mayTouch(caller: FerretId, target: FerretId): boolean {
@@ -301,33 +373,58 @@ export class FakeFerrets implements FerretsApi {
     return [...this.#ferrets.values()].filter(f => f.parent === ferret).map(f => f.id);
   }
   async start(request: StartRequest): Promise<Result<FerretId, StartFailure>> {
+    this.starts.push(request);
     this.#next += 1;
     const id = ferretId(`f${this.#next}`);
+    const { model, card, title } = request.options ?? {};
     this.add({
       id,
       name: request.name ?? id,
       folder: request.folder,
       state: 'starting',
       ...(request.parent === undefined ? {} : { parent: request.parent }),
+      ...(model === undefined ? {} : { model }),
+      ...(card === undefined ? {} : { card }),
+      ...(title === undefined ? {} : { title }),
     });
     return ok(id);
   }
-  async stop(ferret: FerretId) {
+  async stop(ferret: FerretId, how: 'polite' | 'now' = 'polite', reason?: string) {
+    this.stops.push({ ferret, how, ...(reason === undefined ? {} : { reason }) });
     this.setState(ferret, 'stopped');
   }
-  async resume(ferret: FerretId): Promise<Result<FerretId, StartFailure>> {
+  async resume(ferret: FerretId, message?: string): Promise<Result<FerretId, StartFailure>> {
     if (!this.#ferrets.has(ferret)) return err({ code: 'failed', reason: 'no such ferret' });
+    this.resumes.push({ ferret, ...(message === undefined ? {} : { message }) });
     this.setState(ferret, 'starting');
     return ok(ferret);
   }
-  async attach(ferret: FerretId, _handle: RunnerHandle): Promise<Result<FerretId, StartFailure>> {
+  async workFolder(ferret: FerretId): Promise<{ readonly folder: string } | undefined> {
+    const summary = this.#ferrets.get(ferret);
+    return summary === undefined ? undefined : { folder: summary.folder };
+  }
+  readonly #handles = new Map<FerretId, RunnerHandle>();
+  async attach(ferret: FerretId, handle: RunnerHandle): Promise<Result<FerretId, StartFailure>> {
     if (!this.#ferrets.has(ferret)) return err({ code: 'failed', reason: 'no such ferret' });
     this.setState(ferret, 'working');
+    this.#handles.set(ferret, handle);
     return ok(ferret);
+  }
+  async handle(ferret: FerretId): Promise<RunnerHandle | undefined> {
+    return this.#ferrets.get(ferret)?.state === 'stopped' ? undefined : this.#handles.get(ferret);
   }
   async sitrep(ferret: FerretId): Promise<Sitrep | undefined> {
     const summary = this.#ferrets.get(ferret);
     return summary === undefined ? undefined : { ferret: summary, lines: [], blockers: [] };
+  }
+  readonly #controls = new Map<FerretId, Partial<AgentControl>>();
+  /** TEST ONLY: what one ferret may control, over today's defaults. */
+  setAgentControl(ferret: FerretId, control: Partial<AgentControl>): void {
+    this.#controls.set(ferret, control);
+  }
+  async agentControl(ferret: FerretId): Promise<AgentControl> {
+    if (!this.#ferrets.has(ferret)) return NO_AGENT_CONTROL;
+    return { ...DEFAULT_AGENT_CONTROL, ...this.#controls.get(ferret) };
   }
 }
 
