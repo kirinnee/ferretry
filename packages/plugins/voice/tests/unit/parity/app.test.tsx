@@ -196,7 +196,9 @@ describe('the Voice app half', () => {
     expect(text(document.body)).toContain('0:09');
   });
 
-  test('S-0280 S-0281 S-0518 S-0481 S-0528 VoiceCleanupSettings (its VoiceCleanupView) offers Off, Fix and Polish', async () => {
+  test.skip('S-0280 VoiceCleanupSettings reads and writes voice.yaml … pending port: kernel config routes (D2 #3)', () => {});
+
+  test('S-0281 S-0518 S-0481 S-0528 VoiceCleanupView (rendered through VoiceCleanupSettings with injected state) offers Off, Fix and Polish', async () => {
     const container = await show(
       <VoiceCleanupSettings
         state={{ cleanup: DEFAULT_VOICE_CLEANUP, loaded: true, save: async () => ({ kind: 'applied' }) }}
