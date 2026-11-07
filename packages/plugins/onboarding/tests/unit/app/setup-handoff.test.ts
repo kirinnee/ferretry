@@ -16,7 +16,6 @@ import {
   encodeSetupHandoff,
   landSetupHandoff,
   parseSetupHandoff,
-  qrModules,
   SETUP_HANDOFF_KEY,
   setupHandoffFromHref,
   setupHandoffUrl,
@@ -30,9 +29,9 @@ describe('the hand-off payload', () => {
     // It is read aloud, typed by hand and printed inside a QR whose size grows
     // with every character. A reader can see it says `first-time`, `this`, `self`
     // and nothing else.
-    expect(encodeSetupHandoff({ route: 'add-client', step: 'pair' })).toBe('v2;route=add-client;step=pair');
+    expect(encodeSetupHandoff({ route: 'add-client', step: 'pair' })).toBe('f1;route=add-client;step=pair');
     expect(encodeSetupHandoff({ route: 'first-time', target: 'this', doer: 'self', step: 'install' })).toBe(
-      'v2;route=first-time;target=this;doer=self;step=install',
+      'f1;route=first-time;target=this;doer=self;step=install',
     );
   });
 
@@ -56,30 +55,24 @@ describe('the hand-off payload', () => {
       undefined,
       '',
       'route=first-time;step=install',
-      // The positional `v1` grammar: a route plus a step no longer says what
-      // journey somebody meant, and `install` belongs to exactly one of them.
-      'v1;first-time;install',
-      'v3;route=first-time;step=install',
-      'v2;route=stepper;step=install',
-      'v2;route=first-time;step=billing',
-      'v2;step=install',
-      'v2;route=first-time',
-      'v2;route=first-time;target=cloud;doer=self;step=install',
-      'v2;route=first-time;target=this;doer=nobody;step=install',
+      'f2;route=first-time;step=install',
+      'f1;route=stepper;step=install',
+      'f1;route=first-time;step=billing',
+      'f1;step=install',
+      'f1;route=first-time',
+      'f1;route=first-time;target=cloud;doer=self;step=install',
+      'f1;route=first-time;target=this;doer=nobody;step=install',
       // Fields that could not matter on the journey they are attached to, which
       // means this payload was not produced by this page.
-      'v2;route=add-client;target=this;step=pair',
-      'v2;route=add-client;doer=self;step=pair',
-      // Unknown keys, bare tokens and duplicates. `connection` is unknown now: the
-      // carrier chooser that wrote it is gone, and no link this page makes names one.
-      'v2;route=first-time;target=this;doer=self;step=local;connection=direct',
-      'v2;route=first-time;target=this;doer=self;step=relay-source;connection=own-relay',
-      'v2;route=first-time;target=this;doer=self;step=install;theme=dark',
-      'v2;route=first-time;install',
-      'v2;route=first-time;route=add-client;step=pair',
+      'f1;route=add-client;target=this;step=pair',
+      'f1;route=add-client;doer=self;step=pair',
+      // Unknown keys, bare tokens and duplicates.
+      'f1;route=first-time;target=this;doer=self;step=install;theme=dark',
+      'f1;route=first-time;install',
+      'f1;route=first-time;route=add-client;step=pair',
       // The routes this replaced, which describe journeys that no longer exist.
-      'v2;route=have-link;step=scan',
-      'v2;route=agent;step=brief',
+      'f1;route=have-link;step=scan',
+      'f1;route=agent;step=brief',
     ]) {
       expect(parseSetupHandoff(raw)).toBeUndefined();
     }
@@ -92,7 +85,7 @@ describe('the hand-off link', () => {
     // and anyone may deploy it themselves. The query and fragment that brought
     // this reader here are dropped — they are not what the other device replays.
     expect(setupHandoffUrl(HREF, { route: 'add-client', step: 'pair' })).toBe(
-      'https://ferretry.example.invalid/setup#fy-setup=v2;route=add-client;step=pair',
+      'https://ferretry.example.invalid/setup#fy-setup=f1;route=add-client;step=pair',
     );
     expect(setupPageUrl(HREF)).toBe('https://ferretry.example.invalid/setup');
     expect(SETUP_HANDOFF_KEY).toBe('fy-setup');
@@ -108,7 +101,7 @@ describe('the hand-off link', () => {
   });
 
   it('is read back out of a fragment, and never confused with a pairing one', () => {
-    expect(setupHandoffFromHref('https://x.invalid/setup#fy-setup=v2;route=add-client;step=scan')).toEqual({
+    expect(setupHandoffFromHref('https://x.invalid/setup#fy-setup=f1;route=add-client;step=scan')).toEqual({
       route: 'add-client',
       step: 'scan',
     });
@@ -116,7 +109,7 @@ describe('the hand-off link', () => {
     // this parser recognises.
     expect(setupHandoffFromHref('https://x.invalid/pair#v1;https://d.invalid;sha256:ab;CODE')).toBeUndefined();
     expect(setupHandoffFromHref('https://x.invalid/setup')).toBeUndefined();
-    expect(setupHandoffFromHref('https://x.invalid/setup#fy-setup=v2;route=bogus;step=scan')).toBeUndefined();
+    expect(setupHandoffFromHref('https://x.invalid/setup#fy-setup=f1;route=bogus;step=scan')).toBeUndefined();
     expect(setupHandoffFromHref('not a url at all')).toBeUndefined();
   });
 });
@@ -171,35 +164,5 @@ describe('landing a hand-off', () => {
       journey: { route: 'first-time', target: 'this', doer: 'self' },
       step: 'daemon',
     });
-  });
-});
-
-describe('the QR modules', () => {
-  it('are a square grid with the finder patterns a scanner looks for', () => {
-    const modules = qrModules('https://ferretry.example.invalid/setup#fy-setup=v2;route=add-client;step=pair');
-
-    // Square, and a real QR version rather than an empty grid.
-    expect(modules.length).toBeGreaterThan(20);
-    for (const row of modules) expect(row).toHaveLength(modules.length);
-
-    // The top-left finder pattern: 7×7, a solid ring around a 3×3 core. If this
-    // holds, the encoder ran — a hand-rolled grid of noise would not have it.
-    const dark = (row: number, column: number): boolean => modules[row]?.[column] === true;
-    for (let index = 0; index < 7; index += 1) {
-      expect(dark(0, index)).toBe(true);
-      expect(dark(6, index)).toBe(true);
-      expect(dark(index, 0)).toBe(true);
-      expect(dark(index, 6)).toBe(true);
-    }
-    expect(dark(1, 1)).toBe(false);
-    expect(dark(3, 3)).toBe(true);
-  });
-
-  it('stays small for a short link and grows for a long one', () => {
-    // Version 0 asks the encoder for the smallest version the text fits in, so a
-    // short link stays a coarse QR a cheap camera can read.
-    const short = qrModules('https://f.invalid/setup');
-    const long = qrModules(`https://f.invalid/setup#fy-setup=${'x'.repeat(400)}`);
-    expect(long.length).toBeGreaterThan(short.length);
   });
 });

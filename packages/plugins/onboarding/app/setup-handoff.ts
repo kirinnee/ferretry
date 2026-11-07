@@ -25,14 +25,13 @@
  *   mechanism and be useless, which is worse than offering the honest one.
  *
  * NOTHING IDENTIFYING TRAVELS. The payload is a route, a step, and at most which
- * computer, who installs it and which carrier — five closed unions, all of them
+ * computer and who installs it — four closed unions, all of them
  * already public constants in this bundle. No daemon address, no code, no token,
  * no name. A hand-off link is safe to photograph, and it has to be, because
  * photographing it is the point. A pairing code travels the OTHER way, from
  * `fy pair`, and never through here.
  */
 
-import qrcode from 'qrcode-generator';
 import type { DeviceKind } from './device-kind.ts';
 import {
   firstOnboardingStep,
@@ -57,17 +56,10 @@ import {
 export const SETUP_HANDOFF_KEY = 'fy-setup';
 
 /**
- * The payload grammar's version, so a future shape can be refused rather than misread.
- *
- * It moved from `v1` to `v2` when the daemon subflow gained its two answers. A
- * `v1` payload was three positional fields — version, route, step — and a route
- * plus a step is no longer enough to say what journey somebody meant: `install`
- * belongs to "this computer, by hand" and nothing in a `v1` link says so. Rather
- * than infer it, a `v1` link is refused, and its reader answers the entry question
- * once. These links are minutes-old artifacts of a setup in progress, so the cost
- * of refusing one is a tap; the cost of guessing is a journey nobody chose.
+ * The payload grammar's format, the first token: a payload in any other format is refused rather than misread.
+ * A route plus a step is not enough to say what journey somebody meant, so every field after it is named.
  */
-const SETUP_HANDOFF_VERSION = 'v2';
+const SETUP_HANDOFF_FORMAT = 'f1';
 
 /** Where the other device should open, and what it should already have decided. */
 export interface SetupHandoff {
@@ -87,14 +79,14 @@ const FIELDS = ['route', 'step', 'target', 'doer'] as const;
  *
  * Semicolons rather than JSON: this is read aloud, typed by hand and printed
  * inside a QR whose size grows with every character, and a base64 blob is three
- * of those things done badly. NAMED rather than positional since `v2` — five
+ * of those things done badly. NAMED rather than positional — five
  * fields of which three are optional cannot be read by counting, and the reader
  * about to open this on their laptop can still see that it says `first-time`,
  * `this`, `self` and `install` and nothing else.
  */
 export const encodeSetupHandoff = (handoff: SetupHandoff): string =>
   [
-    SETUP_HANDOFF_VERSION,
+    SETUP_HANDOFF_FORMAT,
     `route=${handoff.route}`,
     ...(handoff.target === undefined ? [] : [`target=${handoff.target}`]),
     ...(handoff.doer === undefined ? [] : [`doer=${handoff.doer}`]),
@@ -103,8 +95,8 @@ export const encodeSetupHandoff = (handoff: SetupHandoff): string =>
 
 /** The named fields of a payload, or nothing if any token is not exactly one field. */
 const payloadFields = (raw: string): Map<string, string> | undefined => {
-  const [version, ...tokens] = raw.split(';');
-  if (version !== SETUP_HANDOFF_VERSION) return undefined;
+  const [format, ...tokens] = raw.split(';');
+  if (format !== SETUP_HANDOFF_FORMAT) return undefined;
   const fields = new Map<string, string>();
   for (const token of tokens) {
     const at = token.indexOf('=');
@@ -119,7 +111,7 @@ const payloadFields = (raw: string): Map<string, string> | undefined => {
  * A payload, or nothing — never a partial one.
  *
  * PARSE, DO NOT VALIDATE, and refuse rather than repair. A link whose step is not
- * a step, or whose version is not this one, is not a hand-off with a typo in it;
+ * a step, or whose format is not this one, is not a hand-off with a typo in it;
  * it is something else, and guessing which journey its author meant would land a
  * reader somewhere nobody chose. The entry chooser is always a correct answer here.
  *
@@ -183,7 +175,7 @@ export const setupHandoffUrl = (href: string, handoff: SetupHandoff): string => 
  * The same link with the place stripped off — the one a human can retype.
  *
  * A reader who is copying this off a phone screen onto a laptop keyboard should
- * not have to transcribe `#fy-setup=v2;route=first-time;target=this;doer=self;step=install`
+ * not have to transcribe `#fy-setup=f1;route=first-time;target=this;doer=self;step=install`
  * correctly, and they do not need to: the bare setup page asks the same question,
  * and answering it by hand costs two taps. Offered BESIDE the full link, never
  * instead of it.
@@ -230,27 +222,4 @@ export const landSetupHandoff = (handoff: SetupHandoff, device: DeviceKind): Set
   if (target === undefined) return { kind: 'ask', question: 'target', route };
   if (handoff.doer === undefined) return { kind: 'ask', question: 'doer', route, target };
   return walkFrom({ route, target, doer: handoff.doer }, device, handoff.step);
-};
-
-/**
- * The QR, as a grid of dark/light modules.
- *
- * Returned as data rather than as markup so the component owns every pixel: the
- * library's own `createSvgTag` hardcodes black on white, which is a hole punched
- * through the dark theme, and an `<img>` of a data URL cannot inherit a token.
- * Error correction is `M` — the QR is read off a lit screen at arm's length, not
- * off a printed label under a forklift, and every level above `M` costs modules
- * that make the picture denser and therefore harder for a cheap camera.
- *
- * Type number 0 lets the library pick the smallest version the text fits in, so a
- * short link stays a coarse, easily-read QR instead of being padded into a fine one.
- */
-export const qrModules = (text: string): readonly (readonly boolean[])[] => {
-  const code = qrcode(0, 'M');
-  code.addData(text);
-  code.make();
-  const size = code.getModuleCount();
-  return Array.from({ length: size }, (_row, row) =>
-    Array.from({ length: size }, (_column, column) => code.isDark(row, column)),
-  );
 };

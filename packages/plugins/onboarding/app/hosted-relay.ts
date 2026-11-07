@@ -43,7 +43,44 @@
  * lists still dial the daemon's own address.
  */
 
-import { SocketEndpointSchema } from '@ferretry/relay';
+import { z } from 'zod';
+
+/**
+ * A socket address this protocol will dial: secure schemes anywhere, insecure only against loopback, no query and no
+ * fragment, trailing slash dropped.
+ *
+ * GAP(connections): the owner of this rule is Connections' contract (`SocketEndpointSchema`, today's
+ * `protocol/src/lib/carriers.ts`), which does not export it yet. This is a minimal local copy of the same rule; delete
+ * it when the contract has the name.
+ */
+const isLoopbackHost = (host: string): boolean => {
+  const bare = host.replace(/^\[|\]$/g, '').toLowerCase();
+  return bare === 'localhost' || bare.endsWith('.localhost') || /^127(?:\.\d{1,3}){3}$/.test(bare) || bare === '::1';
+};
+
+const SocketEndpointSchema = z
+  .string()
+  .max(2048)
+  .transform((value, context) => {
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      context.addIssue({ code: 'custom', message: 'endpoint is not a URL' });
+      return z.NEVER;
+    }
+    const secure = url.protocol === 'https:' || url.protocol === 'wss:';
+    const insecure = url.protocol === 'http:' || url.protocol === 'ws:';
+    if (!secure && !(insecure && isLoopbackHost(url.hostname))) {
+      context.addIssue({ code: 'custom', message: 'endpoint must be wss/https, or ws/http on loopback' });
+      return z.NEVER;
+    }
+    if (url.search !== '' || url.hash !== '') {
+      context.addIssue({ code: 'custom', message: 'endpoint carries a query or fragment' });
+      return z.NEVER;
+    }
+    return url.toString().replace(/\/$/u, '');
+  });
 
 /** The public discovery path from `docs/relay-protocol.md` §13, joined onto the configured origin. */
 export const HOSTED_RELAY_PATH = '/v1/default-relay';
@@ -93,8 +130,7 @@ export const NO_RELAY_DIRECTORY: HostedRelayFallback = Object.freeze(
  * Vite's define, and a free identifier would throw rather than degrade.
  *
  * An origin that fails the endpoint rule is refused downstream rather than
- * dialled. `NO_RELAY_DIRECTORY` remains for an old binary or a deliberately
- * absent test define; the current source build always carries the default.
+ * dialled. `NO_RELAY_DIRECTORY` is the answer of a build with no define (a fork, a test).
  */
 declare const __FY_RELAY_DIRECTORY__: string | undefined;
 
@@ -263,7 +299,7 @@ export const carrierDisclosure = (): CarrierDisclosure => ({
  * What the fallback does and does not cover, said on the screen rather than only in
  * a review.
  *
- * THE NAME IS LEGACY AND THE TEXT HAS OUTLIVED TWO VERSIONS OF ITSELF. It first said
+ * THE TEXT HAS OUTLIVED TWO VERSIONS OF ITSELF. It first said
  * nothing dialled a relay at all. It then said the two remaining constraints were
  * that pairing is always direct and that a relayed connection has no live updates.
  * `docs/relay-protocol.md` §14 has since built a pairing session and one stream

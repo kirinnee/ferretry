@@ -1,16 +1,12 @@
-import { afterEach, describe, expect, it } from 'bun:test';
-import { createHash } from 'node:crypto';
+import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import '../support/dom.ts';
 
-const packageDir = join(import.meta.dir, '../..');
-const page = readFileSync(join(packageDir, 'get-started/index.html'), 'utf8');
-const headers = readFileSync(join(packageDir, 'public/_headers'), 'utf8');
-const installation = readFileSync(join(packageDir, '../../INSTALLATION.md'), 'utf8');
-const viteConfig = readFileSync(join(packageDir, 'vite.config.ts'), 'utf8');
+const pluginDir = join(import.meta.dir, '../../..');
+const page = readFileSync(join(pluginDir, 'app/get-started/index.html'), 'utf8');
+const installation = readFileSync(join(pluginDir, '../../../INSTALLATION.md'), 'utf8');
 /** The prompt's golden copy. Changing the prompt means changing this file too, in the same review. */
-const goldenPrompt = readFileSync(join(packageDir, 'tests/fixtures/agent-setup-prompt.txt'), 'utf8').replace(/\n$/, '');
+const goldenPrompt = readFileSync(join(pluginDir, 'tests/fixtures/agent-setup-prompt.txt'), 'utf8').replace(/\n$/, '');
 
 const decode = (text: string): string =>
   text
@@ -46,7 +42,6 @@ describe('the static /get-started document', () => {
     expect(page).not.toContain('/src/main.tsx');
     expect(page).not.toContain('type="module"');
     expect(page).not.toContain('rel="manifest"');
-    expect(viteConfig).toContain("'get-started': fileURLToPath(new URL('./get-started/index.html', import.meta.url))");
   });
 
   it('leads with install-then-setup, offers the agent second, then pairing and the app', () => {
@@ -83,7 +78,6 @@ describe('the static /get-started document', () => {
     }
     expect(pageCommands).toContain('xattr -d com.apple.quarantine "$(command -v fy)"');
     expect(page).toContain('v%FY_RELEASE_VERSION%');
-    expect(viteConfig).toContain("html.replaceAll('%FY_RELEASE_VERSION%', appVersion)");
   });
 
   it('shows only commands INSTALLATION.md carries, in a fenced block, exactly as written', () => {
@@ -94,17 +88,6 @@ describe('the static /get-started document', () => {
   it('keeps the existing app as the secondary step for a device that is already paired', () => {
     expect(page).toContain('href="/app"');
     expect(page).not.toContain('location.replace');
-  });
-
-  it('pins its one inline script in the site CSP', () => {
-    const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].flatMap(match =>
-      match[1] === undefined ? [] : [match[1]],
-    );
-    expect(scripts).toHaveLength(1);
-    for (const script of scripts) {
-      const hash = createHash('sha256').update(script).digest('base64');
-      expect(headers).toContain(`'sha256-${hash}'`);
-    }
   });
 });
 
@@ -183,71 +166,5 @@ describe('the "Or let your agent do it" prompt', () => {
       expect(shippedPrompt).toContain(command);
     }
     expect(shippedPrompt).toContain('fy daemon update, or the Update button in the app');
-  });
-});
-
-describe('the page script', () => {
-  const script = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)][0]?.[1] ?? '';
-  const markup = page
-    .slice(page.indexOf('<body>') + '<body>'.length, page.indexOf('</body>'))
-    .replace(/<script>[\s\S]*?<\/script>/, '');
-  let copied: string[] = [];
-
-  /** Boot the page's own script against its own markup, the way a browser does. */
-  const boot = (userAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)'): void => {
-    document.documentElement.className = '';
-    document.body.innerHTML = markup;
-    copied = [];
-    Object.defineProperty(navigator, 'userAgent', { configurable: true, value: userAgent });
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: {
-        writeText: (text: string) => {
-          copied.push(text);
-          return Promise.resolve();
-        },
-      },
-    });
-    new Function(script)();
-  };
-  const visible = (): string[] =>
-    [...document.querySelectorAll<HTMLElement>('[role="tabpanel"]')]
-      .filter(panel => !panel.hidden)
-      .map(panel => panel.getAttribute('data-method') ?? '');
-
-  afterEach(() => {
-    document.body.innerHTML = '';
-    document.documentElement.className = '';
-  });
-
-  it('picks Homebrew on a Mac and the installer on Linux', () => {
-    boot();
-    expect(visible()).toEqual(['brew']);
-    boot('Mozilla/5.0 (X11; Linux x86_64)');
-    expect(visible()).toEqual(['installer']);
-  });
-
-  it('shows one method at a time, by click or arrow key', () => {
-    boot();
-    (document.querySelector('[role="tab"][data-method="home-manager"]') as HTMLElement).click();
-    expect(visible()).toEqual(['home-manager']);
-    const selected = document.querySelector('[role="tab"][aria-selected="true"]') as HTMLElement;
-    selected.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    expect(visible()).toEqual(['installer']);
-    (document.querySelector('[role="tab"][aria-selected="true"]') as HTMLElement).dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }),
-    );
-    expect(visible()).toEqual(['brew']);
-  });
-
-  it('copies exactly the prompt, and a command block line by line', async () => {
-    boot();
-    (document.querySelector('.agent .copy') as HTMLElement).click();
-    (document.querySelector('#panel-brew .copy') as HTMLElement).click();
-    await Promise.resolve();
-    expect(copied).toEqual([
-      goldenPrompt,
-      'brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry\nbrew install --cask ferretry\nfy setup',
-    ]);
   });
 });

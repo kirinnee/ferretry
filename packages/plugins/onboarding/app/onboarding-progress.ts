@@ -1,24 +1,17 @@
 /**
- * SOLE OWNER of the `fy-onboarding-v4` browser-storage key.
+ * SOLE OWNER of the `fy:onboarding:progress` browser-storage key.
  *
  * Setup happens across two devices and a terminal: the reader leaves to run a
  * command and comes back minutes — or hours, after the tab was evicted — later.
  * Losing their place is the cheapest possible way to make this feel broken, so
- * every answer they gave AND the step they are on are a persisted preference,
- * following the versioned `fy-<thing>-v<n>` document convention
- * `lib/theme-preferences.ts` records.
+ * every answer they gave AND the step they are on are a persisted preference.
+ * The document carries `format: 1` inside, and the key carries no version.
  *
- * The key moved from `v1` to `v2` when the single fixed arc became three routes,
- * from `v2` to `v3` when those routes stopped being about what the reader was
- * HOLDING and became about what the DEVICE IS, and from `v3` to `v4` when the
- * device question was deleted outright. What replaced it is two questions about
- * the ARRANGEMENT — which computer runs the daemon, and who installs it — so a
- * `v3` walking document names a route without saying either. `first-time` at
- * `install` used to mean "this machine, by hand" by implication; inferring that
- * from an old document would be guessing on the reader's behalf about the one
- * thing this flow exists to establish. An older document is therefore ignored and
- * its owner is asked once. That is a lost place, not lost work: nothing on this
- * page is state the daemon does not already hold.
+ * ONE READER, ONE FORMAT. A document that does not say exactly `format: 1`, or
+ * that names a route without saying which computer runs the daemon or who
+ * installs it, is not guessed at: it reads as the first question. That is a lost
+ * place, not lost work: nothing on this page is state the daemon does not
+ * already hold.
  *
  * THE DEVICE IS NEVER STORED. It is detected on every load, because the same
  * document can legitimately be read by two different devices — that is exactly
@@ -62,25 +55,25 @@ import {
 } from './onboarding-model.ts';
 import { landSetupHandoff, type SetupHandoff } from './setup-handoff.ts';
 
-export const ONBOARDING_PROGRESS_KEY = 'fy-onboarding-v4';
-export const ONBOARDING_PROGRESS_VERSION = 4;
+export const ONBOARDING_PROGRESS_KEY = 'fy:onboarding:progress';
+export const ONBOARDING_PROGRESS_FORMAT = 1;
 
 /** The ENTRY question is on the glass: nothing has been answered at all. */
 export interface OnboardingAsking {
-  readonly v: typeof ONBOARDING_PROGRESS_VERSION;
+  readonly format: typeof ONBOARDING_PROGRESS_FORMAT;
   readonly stage: 'entry';
 }
 
 /** WHICH COMPUTER runs the daemon — asked only when this device does not settle it. */
 export interface OnboardingTargeting {
-  readonly v: typeof ONBOARDING_PROGRESS_VERSION;
+  readonly format: typeof ONBOARDING_PROGRESS_FORMAT;
   readonly stage: 'target';
   readonly route: OnboardingDaemonRouteId;
 }
 
 /** WHO INSTALLS IT — asked on every daemon journey, with the machine already known. */
 export interface OnboardingChoosingDoer {
-  readonly v: typeof ONBOARDING_PROGRESS_VERSION;
+  readonly format: typeof ONBOARDING_PROGRESS_FORMAT;
   readonly stage: 'doer';
   readonly route: OnboardingDaemonRouteId;
   readonly target: SetupTargetId;
@@ -94,7 +87,7 @@ export interface OnboardingChoosingDoer {
  * be caught holding a carrier answer it was never asked for.
  */
 export type OnboardingWalking = {
-  readonly v: typeof ONBOARDING_PROGRESS_VERSION;
+  readonly format: typeof ONBOARDING_PROGRESS_FORMAT;
   readonly stage: 'walk';
   /** Where the reader is now. */
   readonly current: OnboardingStepId;
@@ -112,7 +105,7 @@ export type OnboardingWalking = {
 export type OnboardingProgress = OnboardingAsking | OnboardingTargeting | OnboardingChoosingDoer | OnboardingWalking;
 
 export const FRESH_ONBOARDING_PROGRESS: OnboardingAsking = Object.freeze({
-  v: ONBOARDING_PROGRESS_VERSION,
+  format: ONBOARDING_PROGRESS_FORMAT,
   stage: 'entry' as const,
 });
 
@@ -120,14 +113,14 @@ const fresh = (): OnboardingProgress => ({ ...FRESH_ONBOARDING_PROGRESS });
 
 /** The target question, for an entry that this device does not answer by itself. */
 export const targetQuestion = (route: OnboardingDaemonRouteId): OnboardingTargeting => ({
-  v: ONBOARDING_PROGRESS_VERSION,
+  format: ONBOARDING_PROGRESS_FORMAT,
   stage: 'target',
   route,
 });
 
 /** The doer question, which every daemon journey reaches with its machine settled. */
 export const doerQuestion = (route: OnboardingDaemonRouteId, target: SetupTargetId): OnboardingChoosingDoer => ({
-  v: ONBOARDING_PROGRESS_VERSION,
+  format: ONBOARDING_PROGRESS_FORMAT,
   stage: 'doer',
   route,
   target,
@@ -150,7 +143,7 @@ export const enterOnboardingRoute = (route: OnboardingRouteId, device: DeviceKin
 /** Opening a journey on its own first step, with nothing remembered from any other. */
 export const walk = (journey: OnboardingJourney, device: DeviceKind): OnboardingWalking => {
   const first = firstOnboardingStep({ ...journey, device });
-  return { v: ONBOARDING_PROGRESS_VERSION, stage: 'walk', ...journey, current: first, furthest: first };
+  return { format: ONBOARDING_PROGRESS_FORMAT, stage: 'walk', ...journey, current: first, furthest: first };
 };
 
 /** Opening a journey AT A KNOWN PLACE, which is what a hand-off link asks for. */
@@ -163,7 +156,7 @@ export const resumeOnboardingRoute = (handoff: SetupHandoff, device: DeviceKind)
         doerQuestion(landing.route, landing.target ?? 'other');
   }
   return {
-    v: ONBOARDING_PROGRESS_VERSION,
+    format: ONBOARDING_PROGRESS_FORMAT,
     stage: 'walk',
     ...landing.journey,
     current: landing.step,
@@ -172,7 +165,7 @@ export const resumeOnboardingRoute = (handoff: SetupHandoff, device: DeviceKind)
 };
 
 /**
- * Parse, do not validate: anything that is not exactly a version-4 document whose
+ * Parse, do not validate: anything that is not exactly a format-1 document whose
  * answers are possible ON THIS DEVICE and whose two steps both belong to its own
  * journey, with `current` no further than `furthest`, is the first question. There
  * is no partial recovery, because a half-trusted step is indistinguishable from a
@@ -195,7 +188,7 @@ export const parseOnboardingProgress = (raw: string | null | undefined, device: 
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fresh();
   const fields = parsed as Record<string, unknown>;
-  if (fields.v !== ONBOARDING_PROGRESS_VERSION) return fresh();
+  if (fields.format !== ONBOARDING_PROGRESS_FORMAT) return fresh();
   if (fields.stage === 'entry') return fresh();
   if (fields.stage === 'target') return parseQuestion(fields, device);
   if (fields.stage === 'doer') return parseQuestion(fields, device);
@@ -226,7 +219,7 @@ const parseWalk = (fields: Record<string, unknown>, device: DeviceKind): Onboard
   /* A step from another journey's list is not this reader's place; it is a mismatch. */
   if (!isStepOfRoute(path, current) || !isStepOfRoute(path, furthest)) return fresh();
   if (onboardingStepIndex(path, current) > onboardingStepIndex(path, furthest)) return fresh();
-  return { v: ONBOARDING_PROGRESS_VERSION, stage: 'walk', ...journey, current, furthest };
+  return { format: ONBOARDING_PROGRESS_FORMAT, stage: 'walk', ...journey, current, furthest };
 };
 
 /** The stored answers as a journey, or nothing when they do not make one. */
@@ -242,12 +235,6 @@ const parseJourney = (
   }
   if (!isSetupTargetId(target) || !isTargetPossible(target, device)) return undefined;
   if (!isOnboardingDoerId(doer)) return undefined;
-  /*
-   * A document from before the carrier chooser was removed may still carry its
-   * `connection` answer. It is ignored rather than refused: a reader parked on
-   * `local` keeps their place, and one parked on a self-hosting step fails the
-   * step guard above and starts again, because those steps no longer exist.
-   */
   return { route, target, doer };
 };
 

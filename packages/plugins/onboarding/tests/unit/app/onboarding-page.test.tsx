@@ -15,14 +15,11 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import type { DeviceKind } from '../../../src/features/onboarding/device-kind.ts';
+import type { DeviceKind } from '../../../app/device-kind.ts';
 import { CHECKING_HOSTED_RELAY, type HostedRelayFallback } from '../../../app/hosted-relay.ts';
 import type { OnboardingStepId } from '../../../app/onboarding-model.ts';
 import { OnboardingPage, scheduleFocusedOnboardingControl } from '../../../app/onboarding-page.tsx';
-import {
-  type OnboardingProgressStorage,
-  OnboardingProgressStore,
-} from '../../../app/onboarding-progress.ts';
+import { type OnboardingProgressStorage, OnboardingProgressStore } from '../../../app/onboarding-progress.ts';
 import type { SetupSharePort } from '../../../app/setup-handoff-panel.tsx';
 import { interact, mount, must } from '../../support/dom.ts';
 

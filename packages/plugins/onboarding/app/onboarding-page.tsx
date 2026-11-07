@@ -109,8 +109,8 @@ interface OnboardingPairingHost {
   /** The daemon answered and this browser is paired; the journey is finished. */
   readonly onPaired: () => void;
   /**
-   * The pairing screen is showing a failure whose sentence is the whole remedy (an older Ferretry on
-   * one side, say), so this step stops adding advice about codes expiring or the step finishing itself.
+   * The pairing screen is showing a failure whose sentence is the whole remedy (a refusal that names its own remedy,
+   * say), so this step stops adding advice about codes expiring or the step finishing itself.
    */
   readonly onStatedFailure: (stated: boolean) => void;
 }

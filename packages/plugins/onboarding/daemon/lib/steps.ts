@@ -13,9 +13,7 @@ export const EMPTY_PROGRESS: Progress = Object.freeze({ format: 1, steps: Object
 
 /** By `order`, then plugin, then id: two steps with the same `order` never swap between reads. */
 export function orderedSteps(entries: readonly OnboardingEntry[]): readonly OnboardingEntry[] {
-  return [...entries].sort(
-    (a, b) => a.order - b.order || a.plugin.localeCompare(b.plugin) || a.id.localeCompare(b.id),
-  );
+  return [...entries].sort((a, b) => a.order - b.order || a.plugin.localeCompare(b.plugin) || a.id.localeCompare(b.id));
 }
 
 /** The snapshot's steps in order, each with its recorded state (`pending` when nothing was recorded). */

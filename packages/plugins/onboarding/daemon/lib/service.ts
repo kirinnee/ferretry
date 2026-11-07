@@ -41,7 +41,9 @@ export class OnboardingService implements OnboardingApi {
     const entries = this.deps.entries();
     if (findEntry(entries, plugin, step) === undefined) return undefined;
     const at = this.deps.clock.now();
-    const written = await this.deps.state.update(ONBOARDING_PROGRESS, current => withAnswer(current, plugin, step, answer, at));
+    const written = await this.deps.state.update(ONBOARDING_PROGRESS, current =>
+      withAnswer(current, plugin, step, answer, at),
+    );
     if (!written.ok) throw new ProgressDamaged(written.error.sentence);
     this.deps.events.publish(OnboardingChanged, { plugin, step });
     return joinProgress(entries, written.value).find(view => view.plugin === plugin && view.id === step);

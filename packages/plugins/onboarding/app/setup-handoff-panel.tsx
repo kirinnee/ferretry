@@ -19,7 +19,7 @@
  *   link — shared through the OS if this browser has that, copied if not, and
  *   printed in full so it can be read aloud or typed as a last resort.
  *
- * THE SHORT URL IS ALWAYS THERE. A link carrying `#fy-setup=v1;first-time;install`
+ * THE SHORT URL IS ALWAYS THERE. A link carrying `#fy-setup=f1;route=first-time;target=this;doer=self;step=install`
  * is not something a human retypes correctly, and they never have to: the bare
  * setup page asks the same question, and answering it by hand costs one tap. It
  * is offered BESIDE the full link, never instead of it, because losing the place
@@ -30,7 +30,7 @@ import { Share2 } from 'lucide-react';
 
 import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
 import type { HandoffReceiver } from './onboarding-model.ts';
-import { qrModules } from './setup-handoff.ts';
+import { qrModules } from './setup-qr.ts';
 
 /**
  * How this browser hands something to the operating system, or nothing.

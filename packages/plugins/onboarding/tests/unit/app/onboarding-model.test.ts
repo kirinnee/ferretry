@@ -64,7 +64,7 @@ import {
 } from '../../../app/onboarding-model.ts';
 
 const repoFile = async (path: string): Promise<string> =>
-  await Bun.file(new URL(`../../../../../${path}`, import.meta.url)).text();
+  await Bun.file(new URL(`../../../../../../${path}`, import.meta.url)).text();
 
 const installationDoc = await repoFile('INSTALLATION.md');
 

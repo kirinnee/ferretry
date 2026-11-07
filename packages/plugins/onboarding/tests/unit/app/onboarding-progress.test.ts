@@ -17,14 +17,14 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import type { DeviceKind } from '../../../src/features/onboarding/device-kind.ts';
+import type { DeviceKind } from '../../../app/device-kind.ts';
 import {
   browserOnboardingStorage,
   doerQuestion,
   enterOnboardingRoute,
   FRESH_ONBOARDING_PROGRESS,
   ONBOARDING_PROGRESS_KEY,
-  ONBOARDING_PROGRESS_VERSION,
+  ONBOARDING_PROGRESS_FORMAT,
   type OnboardingProgressStorage,
   OnboardingProgressStore,
   parseOnboardingProgress,
@@ -38,13 +38,21 @@ import {
 
 const stored = (value: unknown): string => JSON.stringify(value);
 
-/** A version-4 walking document for a daemon standing up on this machine, by hand. */
+/** A format-1 walking document for a daemon standing up on this machine, by hand. */
 const walking = (route: string, current: string, furthest = current): string =>
-  stored({ v: ONBOARDING_PROGRESS_VERSION, stage: 'walk', route, target: 'this', doer: 'self', current, furthest });
+  stored({ format: ONBOARDING_PROGRESS_FORMAT, stage: 'walk', route, target: 'this', doer: 'self', current, furthest });
 
 /** The same, for a daemon that lives on a machine the reader has to walk to. */
 const walkingAway = (route: string, current: string, furthest = current): string =>
-  stored({ v: ONBOARDING_PROGRESS_VERSION, stage: 'walk', route, target: 'other', doer: 'self', current, furthest });
+  stored({
+    format: ONBOARDING_PROGRESS_FORMAT,
+    stage: 'walk',
+    route,
+    target: 'other',
+    doer: 'self',
+    current,
+    furthest,
+  });
 
 /** Every store in this suite states its device, because the device changes the answer. */
 const onDevice = (
@@ -76,7 +84,7 @@ class HostileStorage implements OnboardingProgressStorage {
 describe('parseOnboardingProgress', () => {
   it('reads a well-formed document back exactly', () => {
     expect(parseOnboardingProgress(walking('first-time', 'daemon', 'local'), 'desktop')).toEqual({
-      v: 4,
+      format: 1,
       stage: 'walk',
       route: 'first-time',
       target: 'this',
@@ -86,55 +94,6 @@ describe('parseOnboardingProgress', () => {
     });
   });
 
-  it('keeps the place of a reader who answered the carrier chooser before it was removed', () => {
-    // A stored journey from before the chooser went away still carries its
-    // answer. It is ignored, not refused: a reader parked on `local` keeps
-    // their place instead of being sent back to the first question.
-    expect(
-      parseOnboardingProgress(
-        stored({
-          v: 4,
-          stage: 'walk',
-          route: 'first-time',
-          target: 'this',
-          doer: 'self',
-          connection: 'default-relay',
-          current: 'local',
-          furthest: 'local',
-        }),
-        'desktop',
-      ),
-    ).toEqual({
-      v: 4,
-      stage: 'walk',
-      route: 'first-time',
-      target: 'this',
-      doer: 'self',
-      current: 'local',
-      furthest: 'local',
-    });
-  });
-
-  it('starts again for a reader parked on a self-hosting step that no longer exists', () => {
-    for (const step of ['connect', 'relay-source']) {
-      expect(
-        parseOnboardingProgress(
-          stored({
-            v: 4,
-            stage: 'walk',
-            route: 'first-time',
-            target: 'this',
-            doer: 'self',
-            connection: 'own-relay',
-            current: step,
-            furthest: step,
-          }),
-          'desktop',
-        ),
-      ).toEqual({ ...FRESH_ONBOARDING_PROGRESS });
-    }
-  });
-
   it('starts at the entry question on anything it cannot fully trust', () => {
     const damaged = [
       null,
@@ -142,40 +101,60 @@ describe('parseOnboardingProgress', () => {
       '',
       'not json at all',
       stored(null),
-      stored([{ v: 4, stage: 'walk', route: 'first-time', current: 'local', furthest: 'local' }]),
+      stored([{ format: 1, stage: 'walk', route: 'first-time', current: 'local', furthest: 'local' }]),
       stored('done'),
-      // Version 1 was a single fixed arc; version 2's routes named what the reader
-      // was holding; version 3 named what this DEVICE was about to become. None of
-      // them says which computer runs the daemon or who installs it.
-      stored({ v: 1, current: 'pair', furthest: 'done' }),
-      stored({ v: 2, stage: 'walk', route: 'have-link', current: 'scan', furthest: 'done' }),
-      stored({ v: 3, stage: 'walk', route: 'first-time', current: 'install', furthest: 'install' }),
-      stored({ v: 5, stage: 'walk', route: 'first-time', current: 'local', furthest: 'done' }),
+      // Any other format is not read, whatever else it holds.
+      stored({
+        format: 0,
+        stage: 'walk',
+        route: 'first-time',
+        target: 'this',
+        doer: 'self',
+        current: 'local',
+        furthest: 'done',
+      }),
+      stored({
+        format: 2,
+        stage: 'walk',
+        route: 'first-time',
+        target: 'this',
+        doer: 'self',
+        current: 'local',
+        furthest: 'done',
+      }),
+      stored({ stage: 'walk', route: 'first-time', target: 'this', doer: 'self', current: 'local', furthest: 'done' }),
       // A stage this store does not ship, and the entry question itself.
-      stored({ v: 4, stage: 'browse' }),
-      stored({ v: 4, stage: 'entry' }),
+      stored({ format: 1, stage: 'browse' }),
+      stored({ format: 1, stage: 'entry' }),
       // Unknown entry, unknown steps, missing fields.
       walking('stepper', 'install'),
       walking('first-time', 'billing', 'done'),
-      stored({ v: 4, stage: 'walk', route: 'first-time', target: 'this', doer: 'self', current: 'install' }),
+      stored({ format: 1, stage: 'walk', route: 'first-time', target: 'this', doer: 'self', current: 'install' }),
       // A journey with no answers on it at all: a route is no longer enough.
-      stored({ v: 4, stage: 'walk', route: 'first-time', current: 'install', furthest: 'install' }),
-      stored({ v: 4, stage: 'walk', route: 'first-time', target: 'this', current: 'install', furthest: 'install' }),
-      stored({ v: 4, stage: 'walk', route: 'first-time', doer: 'self', current: 'install', furthest: 'install' }),
+      stored({ format: 1, stage: 'walk', route: 'first-time', current: 'install', furthest: 'install' }),
+      stored({
+        format: 1,
+        stage: 'walk',
+        route: 'first-time',
+        target: 'this',
+        current: 'install',
+        furthest: 'install',
+      }),
+      stored({ format: 1, stage: 'walk', route: 'first-time', doer: 'self', current: 'install', furthest: 'install' }),
       // Answers that are not answers.
-      stored({ v: 4, stage: 'walk', route: 'first-time', target: 'cloud', doer: 'self', current: 'install' }),
-      stored({ v: 4, stage: 'walk', route: 'first-time', target: 'this', doer: 'nobody', current: 'install' }),
+      stored({ format: 1, stage: 'walk', route: 'first-time', target: 'cloud', doer: 'self', current: 'install' }),
+      stored({ format: 1, stage: 'walk', route: 'first-time', target: 'this', doer: 'nobody', current: 'install' }),
       // The pairing entry answers neither question, so a document holding one is
       // not this document.
-      stored({ v: 4, stage: 'walk', route: 'add-client', target: 'this', current: 'pair', furthest: 'pair' }),
-      stored({ v: 4, stage: 'walk', route: 'add-client', doer: 'self', current: 'pair', furthest: 'pair' }),
+      stored({ format: 1, stage: 'walk', route: 'add-client', target: 'this', current: 'pair', furthest: 'pair' }),
+      stored({ format: 1, stage: 'walk', route: 'add-client', doer: 'self', current: 'pair', furthest: 'pair' }),
       // A step from another journey's list: not this reader's place, a mismatch.
-      stored({ v: 4, stage: 'walk', route: 'add-client', current: 'install', furthest: 'install' }),
+      stored({ format: 1, stage: 'walk', route: 'add-client', current: 'install', furthest: 'install' }),
       walking('add-daemon', 'handoff', 'done'),
       // A stored question that names something other than a daemon entry.
-      stored({ v: 4, stage: 'doer', route: 'add-client', target: 'this' }),
-      stored({ v: 4, stage: 'doer', route: 'first-time' }),
-      stored({ v: 4, stage: 'target', route: 'add-client' }),
+      stored({ format: 1, stage: 'doer', route: 'add-client', target: 'this' }),
+      stored({ format: 1, stage: 'doer', route: 'first-time' }),
+      stored({ format: 1, stage: 'target', route: 'add-client' }),
       // Self-inconsistent: further along than the furthest point ever reached.
       walking('first-time', 'done', 'daemon'),
     ];
@@ -192,7 +171,7 @@ describe('parseOnboardingProgress', () => {
     expect(parseOnboardingProgress(document, 'desktop')).toMatchObject({ current: 'install' });
     expect(parseOnboardingProgress(document, 'mobile')).toEqual({ ...FRESH_ONBOARDING_PROGRESS });
     expect(
-      parseOnboardingProgress(stored({ v: 4, stage: 'doer', route: 'first-time', target: 'this' }), 'mobile'),
+      parseOnboardingProgress(stored({ format: 1, stage: 'doer', route: 'first-time', target: 'this' }), 'mobile'),
     ).toEqual({ ...FRESH_ONBOARDING_PROGRESS });
     // And the recursion's own screen is a real place on BOTH kinds of device.
     for (const device of ['desktop', 'mobile'] as const) {
@@ -205,18 +184,18 @@ describe('parseOnboardingProgress', () => {
 
   it('resumes a stored question, unless this device would never have asked it', () => {
     expect(
-      parseOnboardingProgress(stored({ v: 4, stage: 'doer', route: 'first-time', target: 'other' }), 'mobile'),
+      parseOnboardingProgress(stored({ format: 1, stage: 'doer', route: 'first-time', target: 'other' }), 'mobile'),
     ).toEqual(doerQuestion('first-time', 'other'));
-    expect(parseOnboardingProgress(stored({ v: 4, stage: 'target', route: 'add-daemon' }), 'desktop')).toEqual(
+    expect(parseOnboardingProgress(stored({ format: 1, stage: 'target', route: 'add-daemon' }), 'desktop')).toEqual(
       targetQuestion('add-daemon'),
     );
     // A phone never sees the target question, so a document claiming it was there
     // is answered by what this device settles instead of by a screen it skips.
-    expect(parseOnboardingProgress(stored({ v: 4, stage: 'target', route: 'add-daemon' }), 'mobile')).toEqual(
+    expect(parseOnboardingProgress(stored({ format: 1, stage: 'target', route: 'add-daemon' }), 'mobile')).toEqual(
       doerQuestion('add-daemon', 'other'),
     );
     // Nor does a computer starting from scratch: it is assumed, not asked.
-    expect(parseOnboardingProgress(stored({ v: 4, stage: 'target', route: 'first-time' }), 'desktop')).toEqual(
+    expect(parseOnboardingProgress(stored({ format: 1, stage: 'target', route: 'first-time' }), 'desktop')).toEqual(
       doerQuestion('first-time', 'this'),
     );
   });
@@ -235,7 +214,7 @@ describe('enterOnboardingRoute', () => {
 
   it('opens the pairing entry immediately, because it asks neither question', () => {
     expect(enterOnboardingRoute('add-client', 'mobile')).toEqual({
-      v: 4,
+      format: 1,
       stage: 'walk',
       route: 'add-client',
       current: 'pair',
@@ -247,7 +226,7 @@ describe('enterOnboardingRoute', () => {
 describe('resumeOnboardingRoute', () => {
   it('lands exactly where the other device said, when that place exists here', () => {
     expect(resumeOnboardingRoute({ route: 'add-client', step: 'pair' }, 'mobile')).toEqual({
-      v: 4,
+      format: 1,
       stage: 'walk',
       route: 'add-client',
       current: 'pair',
@@ -261,7 +240,7 @@ describe('resumeOnboardingRoute', () => {
     expect(
       resumeOnboardingRoute({ route: 'first-time', target: 'this', doer: 'self', step: 'install' }, 'desktop'),
     ).toEqual({
-      v: 4,
+      format: 1,
       stage: 'walk',
       route: 'first-time',
       target: 'this',
@@ -278,7 +257,7 @@ describe('resumeOnboardingRoute', () => {
     expect(
       resumeOnboardingRoute({ route: 'first-time', target: 'this', doer: 'self', step: 'install' }, 'mobile'),
     ).toEqual({
-      v: 4,
+      format: 1,
       stage: 'walk',
       route: 'first-time',
       target: 'other',
@@ -319,7 +298,7 @@ describe('OnboardingProgressStore', () => {
     expect(store.snapshot()).toMatchObject({ current: 'install', furthest: 'local' });
     expect(seen).toEqual(['walk', 'walk']);
     expect(JSON.parse(storage.writes[storage.writes.length - 1] ?? '{}')).toEqual({
-      v: 4,
+      format: 1,
       stage: 'walk',
       route: 'first-time',
       target: 'this',
@@ -439,7 +418,7 @@ describe('OnboardingProgressStore', () => {
     store.goTo('daemon');
     // "Rather have an agent do it?", pressed halfway through the commands.
     expect(store.switchDoer('agent')).toEqual({
-      v: 4,
+      format: 1,
       stage: 'walk',
       route: 'first-time',
       target: 'this',
@@ -487,7 +466,7 @@ describe('OnboardingProgressStore', () => {
     // `install` belongs to a daemon standing up here; a client never has it.
     expect(store.goTo('install')).toMatchObject({ route: 'add-client', current: 'pair' });
     expect(store.goTo('done')).toEqual({
-      v: 4,
+      format: 1,
       stage: 'walk',
       route: 'add-client',
       current: 'done',
@@ -503,7 +482,7 @@ describe('OnboardingProgressStore', () => {
     first.goTo('daemon');
     // A new tab, hours later, with only storage between them.
     expect(onDevice('desktop', { storage }).snapshot()).toMatchObject({ current: 'daemon', target: 'this' });
-    expect(ONBOARDING_PROGRESS_KEY).toBe('fy-onboarding-v4');
+    expect(ONBOARDING_PROGRESS_KEY).toBe('fy:onboarding:progress');
   });
 
   it('lets an arrival answer the question without rewriting their history', () => {
@@ -521,11 +500,11 @@ describe('OnboardingProgressStore', () => {
     // Back on the scan step of the pairing it is still walking: the arrival must
     // not throw them back to the start of the journey they are walking.
     const storage = new MemoryStorage(
-      stored({ v: 4, stage: 'walk', route: 'add-client', current: 'scan', furthest: 'done' }),
+      stored({ format: 1, stage: 'walk', route: 'add-client', current: 'scan', furthest: 'done' }),
     );
     const store = onDevice('desktop', { storage, entry: { route: 'add-client', step: 'scan' }, paired: true });
     expect(store.snapshot()).toEqual({
-      v: 4,
+      format: 1,
       stage: 'walk',
       route: 'add-client',
       current: 'scan',
@@ -537,11 +516,11 @@ describe('OnboardingProgressStore', () => {
     // An already-paired browser opening a second machine's link, or this machine's
     // again after a revoke: "You are set up" would ignore the link it holds.
     const storage = new MemoryStorage(
-      stored({ v: 4, stage: 'walk', route: 'add-client', current: 'done', furthest: 'done' }),
+      stored({ format: 1, stage: 'walk', route: 'add-client', current: 'done', furthest: 'done' }),
     );
     const store = onDevice('desktop', { storage, entry: { route: 'add-client', step: 'scan' }, paired: true });
     expect(store.snapshot()).toEqual({
-      v: 4,
+      format: 1,
       stage: 'walk',
       route: 'add-client',
       current: 'scan',
@@ -561,7 +540,7 @@ describe('OnboardingProgressStore', () => {
       handoff: { route: 'add-client', step: 'scan' },
     });
     expect(store.snapshot()).toEqual({
-      v: 4,
+      format: 1,
       stage: 'walk',
       route: 'add-client',
       current: 'scan',
@@ -622,7 +601,7 @@ describe('OnboardingProgressStore', () => {
 describe('walk', () => {
   it('opens a journey on the first step that journey has', () => {
     expect(walk({ route: 'first-time', target: 'other', doer: 'self' }, 'mobile')).toEqual({
-      v: 4,
+      format: 1,
       stage: 'walk',
       route: 'first-time',
       target: 'other',
@@ -655,11 +634,11 @@ describe('startOnboardingPairing', () => {
   it('sends the next visit to the pairing step, past the question, for a browser told to pair again', () => {
     // A finished pairing, then the machine stopped accepting this browser.
     const storage = new MemoryStorage(
-      stored({ v: 4, stage: 'walk', route: 'add-client', current: 'done', furthest: 'done' }),
+      stored({ format: 1, stage: 'walk', route: 'add-client', current: 'done', furthest: 'done' }),
     );
     startOnboardingPairing('mobile', storage);
     expect(onDevice('mobile', { storage, paired: true }).snapshot()).toEqual({
-      v: 4,
+      format: 1,
       stage: 'walk',
       route: 'add-client',
       current: 'scan',
@@ -693,7 +672,7 @@ describe('reconcileOnboardingProgress', () => {
 
   it('leaves every unfinished document alone, paired or not', () => {
     const midway = {
-      v: 4,
+      format: 1,
       stage: 'walk',
       route: 'first-time',
       target: 'this',
@@ -707,7 +686,7 @@ describe('reconcileOnboardingProgress', () => {
     expect(
       reconcileOnboardingProgress(
         {
-          v: 4,
+          format: 1,
           stage: 'walk',
           route: 'first-time',
           target: 'this',
