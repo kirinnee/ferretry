@@ -10,7 +10,7 @@ import { SystemMonotonicClock } from '../../../../../daemon/adapters/session/res
 import { UnmountedSupervisionRepair } from '../../../../../daemon/adapters/session/resume/unmounted-repair.ts';
 import { createSessionPaths } from '../../../../../daemon/lib/paths.ts';
 import { defaultSessionHealthSettings } from '../../../../../daemon/lib/session/health/settings.ts';
-import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import { SessionStateFiles } from '../../../../../daemon/lib/state.ts';
 import { MEMORY_PATHS, MemoryFileSystem } from '../../../../support/daemon/memory-file-system.ts';
 import { memoryStorage, sessionConfig, sessionState } from '../../../../support/daemon/storage.ts';
@@ -36,11 +36,6 @@ function memoryFiles(): MemoryFileSystem {
 
 async function openStorage() {
   return await memoryStorage({ clock: { now: () => NOW } });
-}
-
-/** A write to the session's journal file, as the consistency pass reads its last modification. */
-async function journalWrite(files: MemoryFileSystem, id: SessionId): Promise<void> {
-  await files.appendLineDurable(createSessionPaths(MEMORY_PATHS, id).events, '{"type":"session.late_write"}');
 }
 
 function capabilities(overrides: Partial<SupervisionCapabilities> = {}): SupervisionCapabilities {
@@ -212,7 +207,7 @@ describe('storage consistency pass', () => {
     // Arrange
     const opened = await openStorage();
     await opened.storage.writeState(parseSessionId('known'), sessionState('known', { status: 'running' }));
-    const pass = new StorageConsistencyPass(opened.storage, memoryFiles(), MEMORY_PATHS, SETTINGS);
+    const pass = new StorageConsistencyPass(opened.storage, SETTINGS);
 
     // Act
     const actual = await pass.run(false);
@@ -235,7 +230,7 @@ describe('storage consistency pass', () => {
     const orphan = parseSessionId('orphan');
     await opened.storage.writeState(orphan, sessionState('orphan', { status: 'running' }));
     opened.storage.forgetFromIndex(orphan);
-    const pass = new StorageConsistencyPass(opened.storage, memoryFiles(), MEMORY_PATHS, SETTINGS);
+    const pass = new StorageConsistencyPass(opened.storage, SETTINGS);
 
     // Act
     const actual = await pass.run(false);
@@ -250,13 +245,11 @@ describe('storage consistency pass', () => {
   it('should report a terminal session whose journal outlived it as a zombie on a deep pass', async () => {
     // Arrange
     const opened = await openStorage();
-    const files = memoryFiles();
     const id = parseSessionId('zombie');
     await opened.storage.writeState(id, sessionState('zombie', { status: 'stopped', finishedAt: TEN_MINUTES_BEFORE }));
     // The journal keeps growing long after the session was declared finished.
     await opened.storage.append(id, 'session.late_write', { note: 'still working' });
-    await journalWrite(files, id);
-    const pass = new StorageConsistencyPass(opened.storage, files, MEMORY_PATHS, SETTINGS);
+    const pass = new StorageConsistencyPass(opened.storage, SETTINGS);
 
     // Act
     const actual = await pass.run(true);
@@ -271,7 +264,7 @@ describe('storage consistency pass', () => {
     const opened = await openStorage();
     await opened.storage.writeState(parseSessionId('known'), sessionState('known', { status: 'running' }));
     const stages: string[] = [];
-    const pass = new StorageConsistencyPass(opened.storage, memoryFiles(), MEMORY_PATHS, SETTINGS, {
+    const pass = new StorageConsistencyPass(opened.storage, SETTINGS, {
       run: async (name, work) => {
         stages.push(name);
         return await work();
@@ -294,7 +287,7 @@ describe('storage consistency pass', () => {
     // Arrange — the session is stored and indexed; only the handed walk says otherwise.
     const opened = await openStorage();
     await opened.storage.writeState(parseSessionId('known'), sessionState('known', { status: 'running' }));
-    const pass = new StorageConsistencyPass(opened.storage, memoryFiles(), MEMORY_PATHS, SETTINGS);
+    const pass = new StorageConsistencyPass(opened.storage, SETTINGS);
 
     // Act
     const handed = await pass.run(false, []);
@@ -309,12 +302,10 @@ describe('storage consistency pass', () => {
   it('should not look for zombies on a shallow pass', async () => {
     // Arrange
     const opened = await openStorage();
-    const files = memoryFiles();
     const id = parseSessionId('zombie');
     await opened.storage.writeState(id, sessionState('zombie', { status: 'stopped', finishedAt: TEN_MINUTES_BEFORE }));
     await opened.storage.append(id, 'session.late_write', { note: 'still working' });
-    await journalWrite(files, id);
-    const pass = new StorageConsistencyPass(opened.storage, files, MEMORY_PATHS, SETTINGS);
+    const pass = new StorageConsistencyPass(opened.storage, SETTINGS);
 
     // Act
     const actual = await pass.run(false);
@@ -330,7 +321,7 @@ describe('storage consistency pass', () => {
     const id = parseSessionId('lost-journal');
     await opened.storage.append(id, 'session.started', { durable: true });
     opened.folder.files.delete(FerretHistoryFiles.path.replace('*', id));
-    const pass = new StorageConsistencyPass(opened.storage, memoryFiles(), MEMORY_PATHS, SETTINGS);
+    const pass = new StorageConsistencyPass(opened.storage, SETTINGS);
 
     // Act
     const actual = await pass.run(true);
@@ -351,7 +342,7 @@ describe('storage consistency pass', () => {
     const healthy = parseSessionId('healthy-session');
     await opened.storage.append(lost, 'session.started', { durable: true });
     await opened.storage.append(healthy, 'session.started', { durable: true });
-    const pass = new StorageConsistencyPass(opened.storage, memoryFiles(), MEMORY_PATHS, SETTINGS);
+    const pass = new StorageConsistencyPass(opened.storage, SETTINGS);
     const healthyPass = await pass.run(true);
     opened.folder.files.delete(FerretHistoryFiles.path.replace('*', lost));
     const reconcile = opened.storage.reconcile.bind(opened.storage);
@@ -377,12 +368,10 @@ describe('storage consistency pass', () => {
   it('should ignore a terminal session with no finish stamp rather than call it a zombie', async () => {
     // Arrange
     const opened = await openStorage();
-    const files = memoryFiles();
     const id = parseSessionId('undated');
     await opened.storage.writeState(id, sessionState('undated', { status: 'failed' }));
     await opened.storage.append(id, 'session.late_write', { note: 'no finish stamp' });
-    await journalWrite(files, id);
-    const pass = new StorageConsistencyPass(opened.storage, files, MEMORY_PATHS, SETTINGS);
+    const pass = new StorageConsistencyPass(opened.storage, SETTINGS);
 
     // Act
     const actual = await pass.run(true);
@@ -395,13 +384,11 @@ describe('storage consistency pass', () => {
   it('should not call a terminal session a zombie when its state record can no longer be read', async () => {
     // Arrange — without the finish stamp there is nothing to compare the journal's last write against.
     const opened = await openStorage();
-    const files = memoryFiles();
     const id = parseSessionId('torn-state');
     await opened.storage.writeState(id, sessionState('torn-state', { status: 'stopped', finishedAt: TEN_MINUTES_BEFORE }));
     await opened.storage.append(id, 'session.late_write', { note: 'still working' });
-    await journalWrite(files, id);
     opened.folder.plant(SessionStateFiles, '{"id": "torn-state"', id);
-    const pass = new StorageConsistencyPass(opened.storage, files, MEMORY_PATHS, SETTINGS);
+    const pass = new StorageConsistencyPass(opened.storage, SETTINGS);
 
     // Act
     const actual = await pass.run(true);
@@ -420,7 +407,7 @@ describe('storage consistency pass', () => {
     await opened.storage.writeState(id, sessionState('quiet', { status: 'stopped', finishedAt: NOW }));
     files.plant(createSessionPaths(MEMORY_PATHS, id).events, '');
     const journal = await files.information(createSessionPaths(MEMORY_PATHS, id).events);
-    const pass = new StorageConsistencyPass(opened.storage, files, MEMORY_PATHS, SETTINGS);
+    const pass = new StorageConsistencyPass(opened.storage, SETTINGS);
 
     // Act
     const actual = await pass.run(true);

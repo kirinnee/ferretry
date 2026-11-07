@@ -1,5 +1,4 @@
-import { createSessionPaths, type FoundationPaths } from '../../../lib/paths.ts';
-import type { FileSystemPort } from '../../../lib/ports.ts';
+import { instantMs } from '../../../lib/time.ts';
 import type { ConsistencyPassPort } from '../../../lib/session/health/service.ts';
 import type { SessionHealthSettings } from '../../../lib/session/health/settings.ts';
 import {
@@ -26,8 +25,6 @@ const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['failed', 'stopped', 'co
 export class StorageConsistencyPass implements ConsistencyPassPort {
   constructor(
     private readonly storage: DaemonStorage,
-    private readonly fileSystem: FileSystemPort,
-    private readonly paths: FoundationPaths,
     private readonly settings: SessionHealthSettings,
     /** Names the deep pass's own stages — the zombie scan, the reindex and its verification. */
     private readonly stages: SelfCheckActivityPort = UNNAMED_SELF_CHECK_STAGES,
@@ -88,8 +85,16 @@ export class StorageConsistencyPass implements ConsistencyPassPort {
     return typeof value === 'string' ? { finishedAt: value } : {};
   }
 
+  /**
+   * When the journal last changed: the time of its last event. Today this was the journal file's mtime; the journal
+   * is the state port's history file now and has no file of its own to stat, and a journal is only ever appended to,
+   * so its last event's time is the instant it last changed.
+   */
   private async journalModified(id: SessionId): Promise<{ journalModifiedMs?: number }> {
-    const information = await this.fileSystem.information(createSessionPaths(this.paths, id).events);
-    return information === undefined ? {} : { journalModifiedMs: information.modifiedAtMs };
+    const last = this.storage.listSessions().find(session => session.id === id)?.lastSequence;
+    if (last === undefined || last < 1) return {};
+    const page = await this.storage.replay(id, last - 1, 1).catch(() => undefined);
+    const ms = instantMs(page?.events[0]?.time);
+    return ms === undefined ? {} : { journalModifiedMs: ms };
   }
 }
