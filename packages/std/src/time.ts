@@ -46,11 +46,5 @@ export function isBefore(a: Instant, b: Instant): boolean {
   return epochMs(a) < epochMs(b);
 }
 
-const DATE =
-  '(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))';
-const TIME = '(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?';
-const OFFSET = '(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d))';
-const ISO_INSTANT = new RegExp(`^${DATE}T(?:${TIME}${OFFSET})$`);
-
-/** The same accepted set as {@link InstantSchema}, without zod (for workers that must not load it). */
-export const isIsoInstant = (value: string): boolean => ISO_INSTANT.test(value);
+/** The same accepted set as {@link InstantSchema}, without zod: a worker imports it from `@ferretry/std/iso-instant`. */
+export { isIsoInstant } from './iso-instant.ts';

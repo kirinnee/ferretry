@@ -5,7 +5,8 @@
   "description": "Generic helpers with no Ferretry noun: results, brands, instants, durations, JSON",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./iso-instant": "./src/iso-instant.ts"
   },
   "types": "./src/index.ts",
   "dependencies": {
