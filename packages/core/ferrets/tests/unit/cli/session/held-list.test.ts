@@ -31,14 +31,11 @@ describe('the held fleet list', () => {
     expect((await reader.list())[0]?.name).toBe('a');
   });
 
-  test('R502 an answer with no etag holds nothing: the next read is a full one', async () => {
-    const sent: Record<string, string>[] = [];
+  test('R502 an answer with no etag is refused instead of falling back to full reads', async () => {
     const reader = new HeldFleetList(async headers => {
-      sent.push({ ...headers });
+      expect(headers).toEqual({});
       return { status: 200, body: JSON.stringify([summary('a')]) };
     });
-    await reader.list();
-    await reader.list();
-    expect(sent).toEqual([{}, {}]);
+    await expect(reader.list()).rejects.toThrow('etag');
   });
 });
