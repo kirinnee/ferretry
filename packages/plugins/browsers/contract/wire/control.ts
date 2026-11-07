@@ -1,8 +1,7 @@
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { SurfaceNameSchema } from '../../contract/index.ts';
-import { AGENT_TOOL_MAX_URL_CHARS } from './limits.ts';
-import { AskOwnerMessageSchema } from './wire.ts';
+import { SurfaceNameSchema } from '../wire.ts';
+import { AGENT_TOOL_MAX_URL_CHARS, AskOwnerMessageSchema } from './limits.ts';
 
 /**
  * Who is driving, has taken over, was handed or was asked to take each page (today's `surface.*` views of

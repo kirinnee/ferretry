@@ -1,4 +1,4 @@
-import { type BrowserElementTarget } from '../pages/wire/target.ts';
+import { type BrowserElementTarget } from '../../contract/wire/target.ts';
 import { COPY_VALUE_MAX_BYTES, type CopyElementPart } from '../pages/copy-contracts.ts';
 import type { BrowserCopyRead } from '../pages/copy-contracts.ts';
 import { originOfUrl } from '../target/lib/fields.ts';

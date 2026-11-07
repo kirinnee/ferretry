@@ -279,8 +279,8 @@ export default definePlugin({
 
   ui: {
     screens: [
-      screen('board', { path: '/board/:project?', nav: { label: 'Board', icon: 'columns', order: 30 } }),
-      screen('card', { path: '/card/:id' }),
+      screen('board', { path: 'board/:project?', nav: { label: 'Board', icon: 'columns', order: 30 } }),
+      screen('card', { path: 'card/:id' }),
     ],
     panels: [
       panel('ferret.side', { id: 'cards-of-ferret', order: 20 }),

@@ -47,7 +47,7 @@
       "an orphaned card is told by a notice on one ferret’s own board (an ask), not on today’s single machine item that listed every orphan: needs Asks’ machine-wide item",
       "a sub-ferret overdue on a report is flagged but never nudged, nor its parent told: overdue-report nudges need Ferrets’ waiting/done on FerretSummary and its signal route (today skipped a ferret that declared a wait or signalled done)",
       "the liveness reflex detects but never nudges (frozen, sus_* and dead_monitor still fire): reflex nudges need `FerretSummary` to carry `waiting` and the per-ferret `nudgeAfterSeconds`/`killAfterSeconds` (Ferrets additive)",
-      "an owner's own save is refused while the kernel holds another edit, instead of today's both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged write (Gate's judgeConfigWrite judges the whole patched file, so an owner's plain save over a held edit could otherwise put that edit into effect); a broken file or a hand edit the kernel has not reloaded yet is overwritten with the value in effect (every setting is written from the settings in effect plus the owner's patch), never put into effect, but lost; refusing a write over a file that moved since the kernel's last reload, so such an edit is held instead, waits on the kernel"
+      "an owner's own save is refused while the kernel holds another edit, instead of today's both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged write (Gate's judgeConfigWrite judges the whole patched file, so an owner's plain save over a held edit could otherwise put that edit into effect); a broken file or a hand edit the kernel has not reloaded yet is overwritten with the value in effect (every setting is written from the settings in effect plus the owner's patch), never put into effect, but lost (a file with a top-level key the schema does not know is refused instead; the owner repairs it by hand); refusing a write over a file that moved since the kernel's last reload, so such an edit is held instead, waits on the kernel"
     ],
     "claude-code": [
       "GAP(skills): selected skill parts are not materialized into the ferret home; copyTree takes only this plugin's own root handles, and no root the manifest declares reaches a skill source",
@@ -69,11 +69,18 @@
     "connections": [
       "GAP(kernel): the tunnel carrier cannot run: the kernel offers no port to bind its own loopback listener (serving only the session route, every arrival remote) and none to find cloudflared (FY_CLOUDFLARED, PATH); the daemon half composes the carrier and says so out loud until a port exists",
       "GAP(parity): the J-, S- and V-0245 rows still point at tests/unit/parity files that are not written"
+    ],
+    "browsers": [
+      "GAP(kernel): Settings › Browser reads and writes browsers.yaml through the kernel's /v1/config/file, which no manifest declares yet (D2 #3); until it is declared the tab says the settings did not load and still shows the status, the user agent and Test proxy",
+      "GAP(shell): today's link-behaviour facility (open a link in the in-app browser or the real one) is not in @ferretry/app, so the in-app link sheet and workspace host are ported but nothing in the shell mounts them yet",
+      "GAP(app): the human sign-in window (Real window login) is ported as a client and a model; the panel does not offer the button until the shell can open an external window",
+      "GAP(tests): today's visual tests browser-mode.visual, browser-proxy.visual and browser-tab.visual (tests/integration/features), with browser-pane-jumpy.visual and browser-tab-bars.visual, are not moved: plugin app halves have no visual harness yet",
+      "GAP(shell): Settings › Browser has no authority line: today's ChangeApplyPanel (\"{machine} will ask you to confirm with your passkey when you save\", the grant-refused explanation, the disabled Save button) is being ported into @ferretry/app/ui by the Logins fixer (fix/logins-r1, 7d06c97bd3, not pushed yet); the daemon still enforces step-up and a held change says so, so only the up-front sentence and the disabled button are missing. Wire BrowserModeSection and BrowserProxySection to it (useChangeAuthority + ChangeApplyPanel) once it lands; Browsers then declares GET /v1/grants",
+      "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\""
     ]
   },
   "pendingHalves": {
     "agenda": ["app"],
-    "browsers": ["app"],
     "conversation": ["app"],
     "terminals": ["app"],
     "warden": ["app"]
@@ -87,11 +94,6 @@
     {
       "plugin": "agenda",
       "path": "packages/plugins/agenda/app",
-      "reason": "separate app port in flight"
-    },
-    {
-      "plugin": "browsers",
-      "path": "packages/plugins/browsers/app",
       "reason": "separate app port in flight"
     },
     {

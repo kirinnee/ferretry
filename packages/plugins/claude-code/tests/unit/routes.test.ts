@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type ApiResponse, BodyTooLargeError } from '@ferretry/kernel/contract';
+import { type ApiResponse, BodyTooLargeError, MAX_REQUEST_BODY_BYTES } from '@ferretry/kernel/contract';
 import { deviceStanding, ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
 import {
   HARNESS_UPDATE_CODES,
@@ -200,6 +200,86 @@ describe('the harness-dialog answer route', () => {
     const error = await refused(route(call({ kind: 'choice', dialogId: dialogId(SETTINGS), number: 8 })));
 
     expect(error).toMatchObject({ status: 400, code: 'invalid_dialog_choice' });
+  });
+});
+
+/** The answer routes read their body the way today's `session-permission.ts` / `session-dialog.ts` do: bounded, and
+ *  refused with the kernel's own codes. Nothing reaches the pane on a refusal. */
+describe.each([
+  [
+    'G31 the permission answer route',
+    (pane: Pane) => permissionRoute(new PermissionAnswerService(pane, sleep, TIMING)),
+    { kind: 'deny', requestId: parsePermissionPrompt(BASH)?.id },
+    [BASH, IDLE],
+  ],
+  [
+    'G32 the dialog answer route',
+    (pane: Pane) => dialogRoute(new DialogAnswerService(pane, sleep, TIMING)),
+    { kind: 'escape', dialogId: parseHarnessDialog(SETTINGS)?.id },
+    [SETTINGS, IDLE],
+  ],
+])('%s reads its body as today', (_name, makeRoute, valid, validFrames) => {
+  test('a body over the transport bound is 413 body_too_large, read with that bound', async () => {
+    const pane = new Pane([BASH]);
+    const limits: (number | undefined)[] = [];
+    const oversize = {
+      request: {
+        text: async (limit?: number) => {
+          limits.push(limit);
+          throw new BodyTooLargeError(limit ?? 0);
+        },
+      },
+      params: new Map([['ferretId', 'f1']]),
+    } as never;
+
+    const error = await refused(makeRoute(pane)(oversize));
+
+    expect(error).toMatchObject({ status: 413, code: 'body_too_large' });
+    expect(limits).toEqual([MAX_REQUEST_BODY_BYTES]);
+    expect(pane.writes).toEqual([]);
+  });
+
+  test('an empty body is 400 invalid_json, not an empty object', async () => {
+    const pane = new Pane([BASH]);
+
+    const error = await refused(makeRoute(pane)(rawCall('')));
+
+    expect(error).toMatchObject({ status: 400, code: 'invalid_json' });
+    expect(pane.writes).toEqual([]);
+  });
+
+  test('a body that is not JSON is 400 invalid_json', async () => {
+    const pane = new Pane([BASH]);
+
+    const error = await refused(makeRoute(pane)(rawCall('{nope')));
+
+    expect(error).toMatchObject({ status: 400, code: 'invalid_json' });
+    expect(pane.writes).toEqual([]);
+  });
+
+  test('a body that is not the schema is 400 invalid_request and never echoes its values', async () => {
+    const pane = new Pane([BASH]);
+
+    const error = (await refused(
+      makeRoute(pane)(rawCall(JSON.stringify({ kind: 'choice', number: 'SECRET-VALUE' }))),
+    )) as {
+      status: number;
+      code?: string;
+      message?: string;
+    };
+
+    expect(error).toMatchObject({ status: 400, code: 'invalid_request' });
+    expect(error.message ?? '').not.toContain('SECRET-VALUE');
+    expect(pane.writes).toEqual([]);
+  });
+
+  test('a valid body is answered as before', async () => {
+    const pane = new Pane(validFrames);
+
+    const response = body(await makeRoute(pane)(rawCall(JSON.stringify(valid))));
+
+    expect(response.status).toBe(200);
+    expect(pane.writes).toEqual(['\u001b']);
   });
 });
 

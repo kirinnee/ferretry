@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'bun:test';
 import { fixedClock } from '@ferretry/kernel/testing';
-import type { BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
+import type { BrowserScreencastFrame } from '../../../contract/wire/browser.ts';
 import should from 'should';
 import { BrowserWorkerClient, type WorkerClientOptions } from '../../../daemon/worker/client.ts';
 import type { ChildHandle } from '@ferretry/kernel/contract';

@@ -1,4 +1,4 @@
-import { PAGE_SCRIPT_ORIGIN_MAX_CHARS, type PageScript } from '../../pages/wire/page-script.ts';
+import { PAGE_SCRIPT_ORIGIN_MAX_CHARS, type PageScript } from '../../../contract/wire/page-script.ts';
 import { AGENT_TOOL_DEFAULT_SCRIPT_MS, AGENT_TOOL_MAX_SCRIPT_MS } from '../../tools/limits.ts';
 import { type ActableCdp, type ActablePage, browserElementOf } from '../../pages/page-acts.ts';
 

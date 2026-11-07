@@ -1,5 +1,6 @@
 import type { Instant } from '@ferretry/std';
-import type { BrowserLoginConnection, BrowserLoginState, BrowserLoginStatus } from '../../pages/wire/login.ts';
+import type { BrowserLoginConnection, BrowserLoginState } from '../../../contract/wire/login.ts';
+import type { BrowserLoginStatus } from '../../../contract/index.ts';
 import type { BrowserProfileLease, BrowserProfilePort } from './profile.ts';
 
 /**

@@ -148,7 +148,7 @@ export default definePlugin({
   // Today's PWA drew the pack-health strip and the recent verdicts on the ferrets dashboard (`session-dashboard.tsx`):
   // here they are the dashboard's `daemon.status` panels.
   ui: {
-    screens: [screen('warden', { path: '/warden', nav: { label: 'Warden', icon: 'shield', order: 60 } })],
+    screens: [screen('warden', { path: 'warden', nav: { label: 'Warden', icon: 'shield', order: 60 } })],
     panels: [
       panel('daemon.status', { id: 'warden-strip', order: 60 }),
       panel('daemon.status', { id: 'warden-verdicts', order: 61 }),

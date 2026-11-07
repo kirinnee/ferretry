@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
+import type { BrowserScreencastFrame } from '../../../contract/wire/browser.ts';
 import should from 'should';
 import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
 import {
