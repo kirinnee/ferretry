@@ -508,14 +508,15 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     return {
       file<Shape>(def: ConfigFileDef<Shape>): Shape | undefined {
         own(def);
-        return settled.get(def.file)?.evaluated.value as Shape | undefined;
+        // The settled value is authority (including secret references), never a plugin's mutable object.
+        return structuredClone(settled.get(def.file)?.evaluated.value) as Shape | undefined;
       },
       collection<Shape>(def: ConfigCollectionDef<Shape>): ReadonlyMap<string, Shape> {
         own(def);
         const found = new Map<string, Shape>();
         for (const { slot, evaluated } of settled.values()) {
           if (slot.declaration.def === def && slot.name !== undefined && evaluated.value !== undefined)
-            found.set(slot.name, evaluated.value as Shape);
+            found.set(slot.name, structuredClone(evaluated.value) as Shape);
         }
         return new Map([...found].toSorted(([a], [b]) => a.localeCompare(b)));
       },
