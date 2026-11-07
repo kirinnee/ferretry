@@ -5,7 +5,7 @@
  * same one the Inbox and the chat open; nothing is answered from a row.
  */
 
-import type { AgendaItem, AgendaListRecord } from '../../wire/index.ts';
+import type { AgendaItem, AgendaListRecord } from '@ferretry/core-asks/contract';
 import { useState } from 'react';
 import {
   AGENDA_TAB_EMPTY,

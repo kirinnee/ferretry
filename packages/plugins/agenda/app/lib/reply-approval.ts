@@ -15,7 +15,7 @@
  *   approvals, or the forward option's own label. Nothing longer is read: "build it after lunch" offers nothing.
  */
 
-import { type AgendaGate, type AgendaItem, cardAskReference, openCardAsks } from '../wire/index.ts';
+import { type AgendaGate, type AgendaItem, cardAskReference, openCardAsks } from '@ferretry/core-asks/contract';
 import { type HistoryEvent, withoutLeadingReference } from './agenda-history.ts';
 
 /** The words that alone mean "yes, go on" to any card ask, in lower case. */

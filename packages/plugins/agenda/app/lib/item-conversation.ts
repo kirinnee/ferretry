@@ -11,12 +11,34 @@
  * in its reply. `itemHistory` then applies the one relevance rule to them, exactly as it does to the live chat.
  */
 
-import type { AgendaItem } from '../wire/index.ts';
-import type { IFyApiClient, SessionTranscriptMessage } from '../shell.ts';
-import type { TranscriptEntry } from '../shell.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { withFreshMessageCursor } from '../shell.ts';
+import type { TranscriptEntry } from './transcript.ts';
 
-export type ItemConversationClient = Pick<IFyApiClient, 'messagesTail'>;
+/**
+ * One row of a ferret's conversation, as far as this read looks at it. The conversation is Conversation's; a host that
+ * reads it hands this read a {@link ItemConversationClient}, and its rows fit this shape structurally.
+ */
+export interface SessionTranscriptMessage {
+  readonly point: { readonly byteOffset: number; readonly blockIndex?: number | undefined };
+  readonly role: string;
+  readonly text: string;
+  readonly timestamp?: string | undefined;
+}
+
+/** One backward page of a conversation: its rows, oldest first, and the cursor to the page before it. */
+export interface SessionTranscriptTail {
+  readonly messages: readonly SessionTranscriptMessage[];
+  readonly previousCursor?: string | null | undefined;
+}
+
+/** How this read reaches a conversation: one backward page at a time, from the newest. */
+export interface ItemConversationClient {
+  readonly messagesTail: (
+    sessionId: string,
+    options: { readonly limit: number; readonly through?: string },
+  ) => Promise<SessionTranscriptTail>;
+}
 
 /** Rows per page when reading from the tail: the route's own default, so a recent item is one small read. */
 const TAIL_PAGE = 200;

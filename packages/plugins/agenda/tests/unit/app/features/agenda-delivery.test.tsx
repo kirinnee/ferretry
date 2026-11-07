@@ -6,7 +6,7 @@ import {
 } from '../../../../app/features/agenda/agenda-delivery.tsx';
 import type { InboxAction } from '../../../../app/lib/agenda-answers.ts';
 import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 const undelivered = agendaItem('A5', {
   undelivered: {

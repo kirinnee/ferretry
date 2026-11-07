@@ -16,14 +16,19 @@
  * task's name and its card, `&F12`) and the machine ({@link inboxWho}).
  */
 
-import { type AgendaItem, agendaTitle, agendaWakeAt, formatTaskRef, isMachineAgendaId } from '../wire/index.ts';
+import { matchesMode, sessionsBarNames, type ModeFilter } from './ferret-names.ts';
+import {
+  type AgendaItem,
+  agendaTitle,
+  agendaWakeAt,
+  formatTaskRef,
+  isMachineAgendaId,
+} from '@ferretry/core-asks/contract';
 import type { SessionView } from '../shell.ts';
-import { matchesMode, sessionsBarNames } from '../shell.ts';
 import { sortAgenda } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
 import type { InboxCard, InboxResolved } from './agenda-inbox.ts';
 import { visibleWhy } from './agenda-inbox.ts';
-import type { ModeFilter } from '../shell.ts';
 import type { DaemonId } from '../shell.ts';
 
 /** One ferret's open items on one machine, under one header. */

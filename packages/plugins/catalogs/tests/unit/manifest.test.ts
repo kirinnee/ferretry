@@ -5,9 +5,9 @@ const routes = manifest.actions.routes;
 const members = manifest.actions.memberRoutes;
 
 describe('catalogs manifest', () => {
-  test("declares today's catalog, share, member, link and install routes and the ten member routes", () => {
+  test('declares the catalog, share, member, link and install routes and the eleven member routes (the new GET /v1/shared/contract is one)', () => {
     expect(routes).toHaveLength(47);
-    expect(members).toHaveLength(10);
+    expect(members).toHaveLength(11);
   });
   test("Projects' and Skills' routes, mounted from catalogs.ts today, are not declared here", () => {
     expect(routes.some(entry => /\/v1\/(projects|skills)\b/u.test(entry.key))).toBe(false);

@@ -155,6 +155,16 @@ describe('host setup filesystem aliases', () => {
     expect(result.listed).toEqual([]);
     expect(JSON.stringify(result.scans)).not.toContain(inert);
   });
+
+  it('treats a skills path that is a file as no skills, without a problem', async () => {
+    const result = await fixtureScan({
+      '/fixture/home/.claude/skills': { kind: 'file', text: 'a file, not a folder' },
+    });
+    expect(result.scans[0]?.skills).toEqual([]);
+    expect(result.scans[0]?.problems).toEqual([]);
+    expect(result.opened).toEqual([]);
+    expect(result.listed).toEqual([]);
+  });
 });
 
 const scan = async (logins: Pick<LoginsApi, 'list'>) => {

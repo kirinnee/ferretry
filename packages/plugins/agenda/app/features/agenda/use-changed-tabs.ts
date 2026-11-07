@@ -6,7 +6,7 @@
  * marks fall back to what the item's last edit changed. An older version on screen marks nothing.
  */
 
-import type { AgendaItem } from '../../wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { useEffect, useState } from 'react';
 import { changedTabs, tabsChangedSince } from '../../lib/agenda-tab-view.ts';
 import type { AgendaVersionsView } from './use-item-lifecycle.ts';

@@ -1,23 +1,24 @@
-app/shell.ts | THE ONE SEAM: every name this half takes from the app shell. Placeholders (`missing`) for the UI kit, hooks, stores, router, session/board/push shapes; real copies of the pure helpers (cn, daemon identity and scope, request building, concurrency, deadlines, list refresh, task names, callsigns, root views, deep-link fragment, message cursor). The shell fills it by re-exporting; `shellClock` is the only clock/timer this half uses (banned-globals), replace it with the kernel clock
-app/lib/agenda-client.ts, agenda-api.ts, agenda-item-client.ts, agenda-clear-agents.ts, agenda-rollup.ts | the libs still build requests with the shell's `daemonRequest` and a `DaemonFetch`, not `client.call`: the agenda channel header and the request id travel as headers, which PluginClient.call cannot carry. Move them onto `client.call` once it can (the client is available to the views as `useAgendaPluginClient()`)
-app/features/agenda/agenda-swipe-gesture.ts | DOM types (HTMLElement, Element, Node, Selection, window)
-app/features/agenda/use-down-swipe.ts | react; DOM types
-app/features/agenda/{deck-down-context,use-agenda-item,use-changed-tabs,use-done-close-flow,use-item-lifecycle}.ts | react
-app/hooks/*.ts (use-agenda, use-agenda-deep-link, use-agenda-inbox, use-agenda-replies, use-done-close, use-notification-open, use-notifications) | react; use-agenda-inbox also window and document
-app/lib/agenda-form-send.ts, agenda-form-state.ts | react
-app/lib/agenda-deep-link.ts, agenda-fold.ts | DOM types (Location, window)
-app/lib/notification-filter-mirror.ts | IndexedDB types (IDBFactory, IDBDatabase, IDBRequest, IDBTransaction)
-app/lib/notification-open.ts | Transferable (worker messaging)
-app/lib/notify.ts | NotificationOptions (Notifications API)
-app/**/*.tsx | react, lucide-react, react-dom; the root tsconfig excludes them
-app/views/*.tsx | react; the shell hooks named in shell.ts (useRouter, useLayoutMode, useAppStore, useAgendaItemOpened, usePairedMachineNotifications, useNotificationPreferences, useFerretAgendaModel); screens agenda and agenda-ask, panel ferret-agenda and settings tab agenda are wired by app/index.ts and load these on first use
-tests/support/app/agenda-folds.ts, inbox-menus.ts | DOM helpers (tests/support/app/dom.ts is the shell's DOM harness, not in this package)
-tests/support/app/dom.ts, react.ts, settle.ts, dom-form.ts, learning-dom.ts | NOT COPIED: the shell's DOM and React test harness (happy-dom, react-test-renderer); every *.test.tsx imports it
-tests/support/app/board-support.ts (tests/unit/board-support.ts) | NOT COPIED: board fixtures, they need the Board plugin's wire; tests/unit/app/{agenda-done-close,awaiting-owner,gate-items}.test.ts import it
-tests/unit/app/**/*.test.tsx | happy-dom, react-test-renderer and the harness above; not run
-tests/unit/app/features/agenda-swipe-gesture.test.ts | document and window (happy-dom); 15 of 21 tests need it
-tests/unit/app/notification-tap.test.ts | the shell's push-scope helpers (notificationUrl, notificationTapUrl, machineNotification ...) are placeholders; 10 of 14 tests need them
-tests/unit/app/agenda-form-send.test.ts | react
-tests/unit/app/{agenda-done-close,awaiting-owner,gate-items}.test.ts | the Board fixtures above (and board shapes typed as Opaque in the seam)
-tests/integration/app/*.visual.test.ts and fixtures/ | playwright-core and the Vite browser harness (pwa/harness, not copied); never run here
-tests/integration/app/notification-open.test.ts | playwright-core, a signed release build, tests/integration/app/support/{chromium,wait-for,signed-release}.ts (not copied)
+The Agenda app half is bound onto @ferretry/app (/ui, /worker, /testing). What is still open, by GAP name:
+
+app/hooks/use-done-close.ts | GAP(done-close-board): Done · closes reads and moves a card through a DoneCloseBoard a host provides; Agenda has no need on Board's routes, so no host provides one and no ask offers it until Board contributes the board (or Agenda is given a need)
+app/features/agenda/agenda-nav.tsx | GAP(agenda-nav): AgendaNavEntry (the Inbox door) and NeedsYouGroup (ferrets waiting on the owner) wait for a navigation-column slot in the 5.0 shell; nothing mounts them yet
+app/features/agenda/agenda-inbox-page.tsx | GAP(answer-files): a Not good takes files only through AnswerFilePorts a host hands in (upload into the item's conversation is Conversation's); unbound, the box is words alone
+app/features/agenda/agenda-inbox-composer.tsx | GAP(agenda-composer): the ask page draws Conversation's panel in the agenda.conversation slot (lead decision Q9); AgendaInboxComposer draws a host-bound composer (AgendaComposerContext) and nothing binds one. A reply typed in the slot does not mark the Inbox replied (the slot carries {ferret, ask} only)
+@ferretry/app/ui registerComposerQuoteTarget | GAP(quote-target): "Quote in composer" on an open ask quotes into the composer registered for its scope; Conversation's composer has to register itself there
+app/features/agenda/agenda.tsx (useAgenda) | GAP(agenda-drawer): the in-chat agenda drawer has no mount: the chat is Conversation's, and Agenda draws into it only through a slot Conversation would offer
+app/features/agenda/agenda.tsx (AgendaInputCard) | GAP(input-hold) and GAP(ask-input): no plugin contributes the ask:input renderer yet, and no contract carries its hold on the view
+app/features/agenda/ask-renderers.tsx | ask:sign-in-approval is Accounts', ask:card is Board's: an owner that is not installed draws nothing and the card keeps its own words
+app/features/agenda/agenda-cards-host.tsx, agenda-cards-list.tsx, app/lib/agenda-cards-actions.ts | GAP(cards-board): a machine notice's cards draw with Open working; Start and Close write through an AgendaCardsBoard a host provides (AgendaCardsBoardProvider), and until Board contributes one they are refused with the reason
+app/features/permission-request/approval-card.tsx, app/lib/permission-request.ts | not mounted: a copy of Claude Code's approval card (plugins/claude-code/app/views/prompt-cards.tsx) — lead to decide who keeps it
+app/hooks/use-answered-suggestion-sweep.ts | GAP(sign-in-rule-sweep): reads Accounts' GET /v1/sign-in-rules/suggestions through a RuleClient nobody binds; not mounted
+app/hooks/use-agenda-deep-link.ts, use-agenda-replies.ts, app/features/agenda/agenda-replies-notice.tsx | not mounted: the deep-link fragment and the held-replies notice wait for the shell root (deep links) and the conversation surface (replies)
+app/hooks/use-notifications.ts, use-notification-open.ts, app/lib/notification-*.ts, notify.ts, push-delivery.ts | GAP(notification-open) no shell root mounts the watch or the open handler; GAP(push-delivery) PushDeliveryPort is Agenda-side and Access must bind it; GAP(agenda-push-tap) the tap rules duplicate Access's push-scope until the payload is contract data; GAP(ferret-failed-status) Ferrets reports no failed state, so the ledger's failed alert never fires
+app/features/settings/notification-settings.tsx, notification-machines.tsx | not mounted: device notification settings are Access's device.settings › notifications panel; Agenda's Settings tab draws the filter only
+app/lib/agenda-runtime.ts | the machine's name is "This machine": the shell hands a half no daemon name
+tests/unit/app/features/use-touch-affected.test.tsx, use-settled-busy.test.tsx | test @ferretry/app/ui hooks (copies also in packages/app/tests/unit/ui); kept here because they were listed as Agenda's
+tests/integration/app/*.visual.test.ts and fixtures/, notification-open.test.ts | need a real browser (playwright-core, the Vite browser harness and a signed release build): agenda-clip, agenda-head-oneline, agenda-sticky-gap, agenda-tab, agenda-table-head, inbox-card-once, inbox-find, inbox-layout, inbox-machine, inbox-text-voice, snooze-head, snoozed-tidy, notification-open; never run here
+app/lib/agenda-runtime.ts, app/hooks/use-agenda-inbox.ts | GAP(agenda-inbox-machines): the Inbox reads the one machine this half is built for; today's hook read every paired machine's session list. The cross-machine count, the machine filter and the per-machine "Couldn't read … on <machine>" notes need a shell-level reader over every daemon's Agenda half
+app/features/agenda/agenda-inbox-page.tsx, agenda-item-view.tsx | GAP(agenda-references): references in an ask's prose render as plain text. @ferretry/app has ReferenceSurfaceProvider but no surface; building one reads Board's, Ferrets' and Files' resolvers and openers, which Agenda may not import
+app/features/agenda/agenda-inbox-page.tsx, app/lib/item-conversation.ts, history-rows.tsx | GAP(agenda-history-conversation): readConversation is not passed to AgendaInboxPage, so History shows the item's own words and not the chat messages that name the ask; binding it reads Conversation's transcript (an Agenda-to-Conversation edge, not approved). The receipt badges of history-rows.tsx come back with it
+app/lib/agenda-runtime.ts (itemOpened) | GAP(item-opened): Access's agendaItemOpenedHandler (closes this device's own buzz lines for the opened ask) is a function in Access's app, and Access's contract exposes no app-side seam for it, so itemOpened only tells the machine (POST /v1/push/seen)
+app/features/settings/notification-filter-settings.tsx | the sentence says "…is that machine's own notification switch" where today it said "…is in its row above": the rows are Access's now

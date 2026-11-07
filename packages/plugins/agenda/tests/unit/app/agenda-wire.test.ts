@@ -1,11 +1,20 @@
+import { type SessionAgendaSummary } from '../../../contract/wire.ts';
 import { describe, expect, it } from 'bun:test';
-import { sessionAgendaPath, sessionAgendaRepliesPath, sessionAgendaSummary } from '../../../app/lib/agenda-wire.ts';
-import type { SessionAgendaSummary } from '../../../app/wire/index.ts';
+import {
+  MACHINE_AGENDA_READ,
+  SESSION_AGENDA_READ,
+  SESSION_AGENDA_REPLIES,
+  sessionAgendaSummary,
+} from '../../../app/lib/agenda-wire.ts';
+import { requestOf } from '../../support/app/call-from-fetch.ts';
 
-describe('the agenda paths', () => {
-  it('spells every path as the daemon serves it', () => {
-    expect(sessionAgendaPath('s 1')).toBe('/v1/ferrets/s%201/agenda');
-    expect(sessionAgendaRepliesPath('s 1')).toBe('/v1/ferrets/s%201/agenda/replies');
+describe('the agenda route keys', () => {
+  it('name every route as the daemon serves it', () => {
+    expect(requestOf(SESSION_AGENDA_READ, { params: { ferretId: 's 1' } }).url).toEndWith('/v1/ferrets/s%201/agenda');
+    expect(requestOf(SESSION_AGENDA_REPLIES, { params: { ferretId: 's 1' } }).url).toEndWith(
+      '/v1/ferrets/s%201/agenda/replies',
+    );
+    expect(MACHINE_AGENDA_READ).toBe('GET /v1/machine/agenda');
   });
 });
 

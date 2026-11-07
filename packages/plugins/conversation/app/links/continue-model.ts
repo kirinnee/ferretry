@@ -18,6 +18,7 @@
 
 import type { FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { LinkableConversation, LinkQuery } from '../../contract/index.ts';
+import { displayCallsign } from './callsign.ts';
 import type { HarnessKey } from './link-words.ts';
 import {
   type DateFilter,
@@ -74,10 +75,10 @@ export const ferretActivityAt = (ferret: FerretSummary): string => ferret.stateA
  */
 export const ferretResumable = (ferret: FerretSummary): boolean => ferret.state === 'stopped';
 
-/** A ferret as its marks name it: its label, else its name, and its state. */
+/** A ferret as its marks name it: its callsign, else its label or name, and its state. */
 export const ferretMark = (ferret: FerretSummary): FerretMark => ({
   id: ferret.id,
-  name: ferret.label ?? ferret.name,
+  name: displayCallsign(ferret.name) || ferret.label || ferret.name,
   status: ferret.state,
 });
 

@@ -16,7 +16,13 @@
  * inbox's deck, whose answered cards leave it at once) simply has no "Sending…" to say.
  */
 
-import { type AgendaId, type AgendaItem, type AgendaListSnapshot, agendaTitle, hasOwnTitle } from '../../wire/index.ts';
+import {
+  type AgendaId,
+  type AgendaItem,
+  type AgendaListSnapshot,
+  agendaTitle,
+  hasOwnTitle,
+} from '@ferretry/core-asks/contract';
 import { LoaderCircle, TriangleAlert } from 'lucide-react';
 import { createContext, useContext } from 'react';
 import { type InboxAction, undeliveredAction } from '../../lib/agenda-answers.ts';

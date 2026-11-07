@@ -4,17 +4,20 @@
  * for an item answered in the message box. Pure; the surfaces only draw it.
  */
 
-import type { AgendaAskOption, AgendaCardAnswer, AgendaItem, AgendaShape } from '../wire/index.ts';
 import {
   AGENDA_SHAPE_LEADS,
+  type AgendaAskOption,
+  type AgendaCardAnswer,
   agendaCardKind,
+  type AgendaItem,
+  type AgendaShape,
   agendaShape,
   agendaTitle,
   hasOwnTitle,
   recommendedAgendaOption,
   singleAgendaQuestion,
   unswipedChoices,
-} from '../wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import { cardAnswers, isTextOnlyAsk, needsReplyText } from './agenda-answers.ts';
 import { visibleWhy } from './agenda-inbox.ts';
 

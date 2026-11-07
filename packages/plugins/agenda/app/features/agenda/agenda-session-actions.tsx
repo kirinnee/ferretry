@@ -1,99 +1,73 @@
 /**
- * AGENDA MODE IN A FERRET'S ACTIONS MENU: one "Agenda mode" menuitemcheckbox, contributed to the session
- * action registry, and the polite status line that says what the switch did (docs/agenda.md).
+ * AGENDA MODE FOR ONE FERRET: the "Agenda mode" switch and the polite status line that says what the switch did
+ * (docs/agenda.md). Today it was one row of the shell's ferret Actions menu; that registry is gone, and a plugin draws its
+ * own control in the ferret's toolbar (`ferret.toolbar`, as Lessons draws "Passive lessons"), so this is that control.
  *
- * The switch decides only what the ferret is TOLD — whether it keeps an agenda the owner can see. Its
- * instructions were fixed when it started, so a change takes effect at its next launch and nothing is
- * sent to it; the daemon's own `note` says so, and the host shows it.
+ * The switch decides only what the ferret is TOLD — whether it keeps an agenda the owner can see. Its instructions were
+ * fixed when it started, so a change takes effect at its next launch and nothing is sent to it; the daemon's own `note`
+ * says so, and the status line shows it.
  *
- * The state is the session's own `config.agenda` (absent means OFF). Until the list re-reads that
- * session, the answer the daemon gave is what the toggle shows, so it never flips back under the reader.
+ * The state is Agenda's own (`GET /v1/ferrets/:ferretId/agenda-mode`), read when the switch is drawn. Once switched, the
+ * answer the daemon gave is what the switch shows, so it never flips back under the reader.
  */
 
-import type { SessionView } from '../../shell.ts';
 import { ListTodo, X } from 'lucide-react';
-import { type ReactNode, useCallback, useMemo, useState } from 'react';
-import { patchSessionAgenda } from '../../lib/agenda-api.ts';
-import type { DaemonConnection } from '../../shell.ts';
-import type { DaemonFetch } from '../../shell.ts';
-import type { SessionActionContribution } from '../../shell.ts';
-import { agendaOn } from '../../shell.ts';
-
-/** What the entry needs to know about the ferret the menu is for. */
-export interface AgendaActionContext {
-  readonly view: SessionView;
-  readonly canControl: boolean;
-}
-
-const AGENDA_ACTION_ID = 'agenda';
+import { type ReactNode, useCallback, useEffect, useState } from 'react';
+import type { AgendaCall } from '../../lib/agenda-call.ts';
+import { patchSessionAgenda, readSessionAgenda } from '../../lib/agenda-api.ts';
 
 export interface AgendaSessionActions {
-  readonly contributions: readonly SessionActionContribution<AgendaActionContext>[];
   /** The switch's status line; render it beside the page. */
   readonly host: ReactNode;
-  /** Whether one ferret is told to keep an agenda, with an answer the list has not caught up with yet. */
-  readonly onFor: (view: SessionView) => boolean;
+  /** Whether one ferret is told to keep an agenda; `undefined` until it was read. */
+  readonly onFor: (ferret: string) => boolean | undefined;
+  /** Reads one ferret's switch (once; an answer already given wins). */
+  readonly read: (ferret: string) => Promise<void>;
+  /** Switches one ferret; a refusal throws. */
+  readonly toggle: (ferret: string, next: boolean) => Promise<void>;
   /**
-   * Switches one ferret from outside the Actions menu — its header mark. A refusal is said in the same
-   * status line as the answer, because a mark has no menu of its own to report it in.
+   * Switches one ferret from a control with no place of its own to report in (a header mark): a refusal is said in
+   * the same status line as the answer.
    */
-  readonly tap: (sessionId: string, next: boolean) => Promise<void>;
+  readonly tap: (ferret: string, next: boolean) => Promise<void>;
 }
 
-export function useAgendaSessionActions({
-  connection,
-  fetcher,
-}: {
-  readonly connection: DaemonConnection;
-  readonly fetcher: DaemonFetch;
-}): AgendaSessionActions {
+const refusalSentence = (reason: unknown): string =>
+  `Agenda mode could not be switched: ${reason instanceof Error ? reason.message : String(reason)}`;
+
+export function useAgendaSessionActions({ client }: { readonly client: AgendaCall }): AgendaSessionActions {
   const [note, setNote] = useState<string | null>(null);
   const [answered, setAnswered] = useState<ReadonlyMap<string, boolean>>(new Map());
 
-  const onFor = useCallback((view: SessionView) => answered.get(view.config.id) ?? agendaOn(view), [answered]);
+  const onFor = useCallback((ferret: string) => answered.get(ferret), [answered]);
+
+  const read = useCallback(
+    async (ferret: string) => {
+      const mode = await readSessionAgenda(client, ferret);
+      setAnswered(current => (current.has(ferret) ? current : new Map(current).set(ferret, mode.enabled)));
+    },
+    [client],
+  );
 
   const toggle = useCallback(
-    async (sessionId: string, next: boolean) => {
+    async (ferret: string, next: boolean) => {
       setNote(null);
-      const result = await patchSessionAgenda(connection, sessionId, next, fetcher);
-      setAnswered(current => new Map(current).set(sessionId, result.enabled));
+      const result = await patchSessionAgenda(client, ferret, next);
+      setAnswered(current => new Map(current).set(ferret, result.enabled));
       setNote(result.note);
     },
-    [connection, fetcher],
+    [client],
   );
 
   const tap = useCallback(
-    async (sessionId: string, next: boolean) => {
+    async (ferret: string, next: boolean) => {
       try {
-        await toggle(sessionId, next);
+        await toggle(ferret, next);
       } catch (reason) {
-        setNote(`Agenda mode could not be switched: ${reason instanceof Error ? reason.message : String(reason)}`);
+        setNote(refusalSentence(reason));
       }
     },
     [toggle],
-  );
-
-  const contributions = useMemo<readonly SessionActionContribution<AgendaActionContext>[]>(
-    () => [
-      {
-        group: 'tools',
-        order: 100,
-        build: context => {
-          if (!context.canControl) return null;
-          const on = onFor(context.view);
-          return {
-            kind: 'toggle',
-            id: AGENDA_ACTION_ID,
-            label: 'Agenda mode',
-            icon: ListTodo,
-            checked: on,
-            detail: on ? 'On' : 'Off',
-            onToggle: next => toggle(context.view.config.id, next),
-          };
-        },
-      },
-    ],
-    [onFor, toggle],
   );
 
   const host =
@@ -116,5 +90,51 @@ export function useAgendaSessionActions({
       </div>
     );
 
-  return { contributions, host, onFor, tap };
+  return { host, onFor, read, toggle, tap };
+}
+
+/**
+ * The "Agenda mode" switch for one ferret, for its toolbar. Nothing is offered to a reader who cannot control the
+ * ferret; a refusal is handed to `onFailure` (the toolbar's own failure line), or said in the status line without one.
+ */
+export function AgendaModeSwitch({
+  actions,
+  ferret,
+  canControl,
+  onFailure,
+}: {
+  readonly actions: AgendaSessionActions;
+  readonly ferret: string;
+  readonly canControl: boolean;
+  readonly onFailure?: (sentence: string) => void;
+}) {
+  const { read, onFor, toggle, tap } = actions;
+  useEffect(() => {
+    if (canControl) read(ferret).catch(() => undefined);
+  }, [canControl, ferret, read]);
+  if (!canControl) return null;
+  const on = onFor(ferret);
+  const known = on !== undefined;
+  const flip = (next: boolean): void => {
+    if (onFailure === undefined) {
+      void tap(ferret, next);
+      return;
+    }
+    toggle(ferret, next).catch((reason: unknown) => onFailure(refusalSentence(reason)));
+  };
+  return (
+    <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-ui" data-session-action-item="agenda">
+      <input
+        type="checkbox"
+        role="switch"
+        aria-checked={on === true}
+        checked={on === true}
+        disabled={!known}
+        onChange={event => flip(event.target.checked)}
+      />
+      <ListTodo size={15} aria-hidden="true" />
+      Agenda mode
+      <span className="text-meta text-muted">{known ? (on ? 'On' : 'Off') : ''}</span>
+    </label>
+  );
 }

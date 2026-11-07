@@ -9,7 +9,9 @@
  * they said, and where. Tapping a row opens a short preview of its last few exchanges with the button
  * that continues it. A conversation a ferret already keeps resumes (or opens) that ferret instead of
  * making a second one; any other is kept with `start: true` on a runtime that drives its CLI — the
- * only one, or one the person picks — and the new ferret opens on its full history.
+ * person picks it on the runtime step, which opens even when only one runtime drives it (today's Continue adopted on
+ * the only runtime at once; the extra "Continue" press is the declared "Runtimes is not a need" line) — and the new
+ * ferret opens on its full history.
  */
 
 import { Button } from '@ferretry/app/ui';

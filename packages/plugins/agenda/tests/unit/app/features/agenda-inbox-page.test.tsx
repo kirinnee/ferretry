@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import type { ResolvedAgendaItem } from '../../../../app/wire/index.ts';
-import { LANE_PROPOSAL_ANSWERS, laneProposalReference } from '../../../../app/shell.ts';
+import type { ResolvedAgendaItem } from '@ferretry/core-asks/contract';
+import { LANE_PROPOSAL_ANSWERS } from '../../../../app/lib/lane-edit.ts';
+
+/** A lane-proposal card's `sourceRef`, in Board's spelling (`lanes:<project>:<version>`). */
+const laneProposalReference = (projectId: string, version: number): string => `lanes:${projectId}:${version}`;
 import { AgendaCard } from '../../../../app/features/agenda/agenda-card.tsx';
 import { AgendaDetail } from '../../../../app/features/agenda/agenda-detail.tsx';
 import {
@@ -22,7 +25,7 @@ import {
   inboxCard,
 } from '../../../support/app/agenda-inbox.tsx';
 import { openConversation } from '../../../support/app/agenda-folds.ts';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { chooseFromMenu, openFind } from '../../../support/app/inbox-menus.ts';
 import { sessionView } from '../../../support/app/sessions.ts';
 
@@ -107,7 +110,7 @@ describe('agenda inbox helpers', () => {
     expect(origin.ferret).toBe('Kai');
     expect(origin.task).toBe('Release train');
     expect(origin.machine).toBe('Laptop');
-    expect(origin.href).toBe('/d/laptop/session/sess-2?agenda=A2');
+    expect(origin.href).toBe('/d/laptop/agenda/sess-2/A2');
     expect(inboxCardOrigin(bare, () => undefined).ferret).toBe('Moe');
   });
 });
@@ -370,7 +373,7 @@ describe('AgendaInboxPage rows', () => {
     const navigated: string[] = [];
     const mounted = await mount(page(fakeInbox(), [twoWay], {}, navigated));
     const link = must(mounted.container.querySelector<HTMLAnchorElement>('[data-agenda-row]'), 'the item row');
-    expect(link.getAttribute('href')).toBe('/d/laptop/session/sess-2?agenda=A2');
+    expect(link.getAttribute('href')).toBe('/d/laptop/agenda/sess-2/A2');
     expect(link.textContent).toContain('Ship it?');
     expect(link.textContent).toContain('!A2');
     await interact(() => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
@@ -428,7 +431,7 @@ describe('AgendaInboxPage rows', () => {
     expect(lines).toEqual([withItem.key, notice.key]);
     const line = must(group.querySelector('[data-agenda-notice]'), 'the notice');
     expect(line.textContent).toContain('The build finished');
-    expect(line.querySelector('a')?.getAttribute('href')).toBe('/d/workshop/session/sess-5?agenda=N1');
+    expect(line.querySelector('a')?.getAttribute('href')).toBe('/d/workshop/agenda/sess-5/N1');
     expect(line.querySelector('[data-agenda-clear]')?.textContent).toBe('Clear');
     await mounted.unmount();
   });
@@ -452,7 +455,7 @@ describe('AgendaInboxPage rows', () => {
     const mounted = await mount(page(fake, [notice], {}, navigated));
     const link = must(mounted.container.querySelector<HTMLAnchorElement>('[data-agenda-notice] a'), 'the notice');
     await interact(() => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
-    expect(navigated).toEqual(['/d/workshop/session/sess-5?agenda=N1']);
+    expect(navigated).toEqual(['/d/workshop/agenda/sess-5/N1']);
     await advance(fake, 6_000);
     expect(fake.commits.map(commit => commit.card.item.id)).toEqual(['N1']);
     await mounted.unmount();
@@ -764,9 +767,9 @@ describe('AgendaNeedsYou', () => {
     ).toEqual(['A3', 'A2', 'A1']);
     const all = must(section.querySelector<HTMLAnchorElement>('[data-agenda-see-all]'), 'See all');
     expect(all.textContent).toBe('See all 4');
-    expect(all.getAttribute('href')).toBe('/d/workshop/inbox');
+    expect(all.getAttribute('href')).toBe('/d/workshop/agenda');
     await interact(() => all.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
-    expect(navigated).toEqual(['/d/workshop/inbox']);
+    expect(navigated).toEqual(['/d/workshop/agenda']);
     // Buttons only: these cards do not swipe.
     expect(section.querySelector('.fy-attn-card__swipe')).toBeNull();
     await mounted.unmount();
@@ -1039,7 +1042,8 @@ describe('a lane-proposal card', () => {
       sourceRef: laneProposalReference(PROJECT_ID, 2),
     }),
   );
-  const editPath = `/d/${proposal.daemonId}/projects/${PROJECT_ID}/lanes`;
+  // Board's lane editor: its board page with the lanes open (the harness spells Board's screens as a shell would).
+  const editPath = `/d/${proposal.daemonId}/board/${PROJECT_ID}?lanes=1`;
 
   const answerBy = (mounted: Mounted, label: string): HTMLButtonElement =>
     must(

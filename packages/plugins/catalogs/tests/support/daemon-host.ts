@@ -215,6 +215,8 @@ export interface CatalogsFixtureOptions {
   readonly mcp?: McpSourceServer[];
   /** The sealed-documents port Catalogs is given; absent = Vault's fake. */
   readonly sealed?: SealedDocumentsApi;
+  /** The effective contract hash the host answers each package; absent = `unhashed`. */
+  readonly contractHash?: (id: string) => string;
 }
 
 /**
@@ -357,6 +359,7 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
     uses: { connections },
     gate: admission,
     clock,
+    ...(options.contractHash === undefined ? {} : { contractHash: options.contractHash }),
     ...(options.config === undefined && options.memberUnlockDays === undefined
       ? {}
       : {

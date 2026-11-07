@@ -40,10 +40,14 @@ describe('BunTmuxProcess', () => {
     }
   });
 
-  it('should refuse a non-absolute executable or socket path before spawning', () => {
+  it('should refuse a non-absolute socket path before spawning, and take the executable as a declared program name', () => {
+    // 5.0 runs tmux through the kernel's spawn port, which runs only the programs the manifest declares in
+    // `permissions.spawn` — so the executable is the declared name (`tmux`), no longer an absolute path. The socket
+    // is still mandatory, private and absolute.
     // Act + Assert
-    should(() => new BunTmuxProcess('tmux', '/tmp/socket')).throw(Error);
-    should(() => new BunTmuxProcess('/usr/bin/tmux', 'socket')).throw(Error);
+    should(() => new BunTmuxProcess('/usr/bin/tmux', 'socket')).throw(/socket path must be absolute/u);
+    should(() => new BunTmuxProcess('tmux', 'socket')).throw(/socket path must be absolute/u);
+    should(() => new BunTmuxProcess('tmux', '/tmp/socket')).not.throw();
   });
 
   it('should refuse empty argv and a leading socket override without spawning', async () => {

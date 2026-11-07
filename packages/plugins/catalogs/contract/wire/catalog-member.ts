@@ -549,6 +549,14 @@ export const SharedMeSchema = z.strictObject({
 export type SharedMe = z.infer<typeof SharedMeSchema>;
 
 /**
+ * `GET /v1/shared/contract`: the effective contract hash of Catalogs' member routes, so a member's app can guard its
+ * `/v1/shared/*` calls against the surface it was built for. It names this one hash and nothing else: no inventory, no
+ * other plugin (redesign §9.6).
+ */
+export const SharedContractSchema = z.strictObject({ contract: z.string().min(1) });
+export type SharedContract = z.infer<typeof SharedContractSchema>;
+
+/**
  * `POST /v1/shared/redeem`: a browser that already belongs to a member spends a code (design §2.3). The
  * publisher BURNS the code first, whatever happens next, so no answer can leave it alive for somebody else.
  */

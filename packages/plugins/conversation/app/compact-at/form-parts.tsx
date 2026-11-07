@@ -1,6 +1,6 @@
 /**
- * The pieces the Compact memory at form is built from (today's `session-actions/form-parts.tsx`, Ferrets' until its app
- * half ports; GAP(ferrets): one copy here until then): a labelled field, a one-line error, and the foot with
+ * The pieces the Compact memory at form is built from (today's `session-actions/form-parts.tsx`; GAP(ferrets): Ferrets' app half has
+ * the same file, but neither its contract nor `@ferretry/app` exports it, so this is its one copy here): a labelled field, a one-line error, and the foot with
  * Cancel and the form's one primary button. Shared so a popover on a desktop and a sheet on a phone
  * draw the same form, and so the rename, fork and Add MCP server forms cannot drift into three
  * spacings and three error styles.

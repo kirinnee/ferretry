@@ -1,20 +1,23 @@
 import { describe, expect, it } from 'bun:test';
-import { type AgendaId, MACHINE_AGENDA_ID, agendaListSnapshot } from '../../../app/wire/index.ts';
+import { type AgendaId, agendaListSnapshot, MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
 import { projectionRecord, projectionSnapshot } from '../../support/app/agenda-projection.ts';
-import { fetchAgendaItem } from '../../../app/lib/agenda-item-client.ts';
-import { daemonConnection } from '../../../app/shell.ts';
+import { fetchAgendaItem as fetchItem } from '../../../app/lib/agenda-item-client.ts';
+import { type DaemonConnection, type DaemonSessionScope, daemonConnection } from '../../../app/shell.ts';
 import { daemonSessionScope } from '../../../app/shell.ts';
+import { callFromFetch, type TestFetch } from '../../support/app/call-from-fetch.ts';
+
+/** One item read through the half's client, answered by a scripted fetcher. */
+const fetchAgendaItem = (daemon: DaemonConnection, scope: DaemonSessionScope, item: AgendaId, fetcher: TestFetch) =>
+  fetchItem(daemon, scope, item, callFromFetch(fetcher));
 
 const connection = daemonConnection({
   daemonId: 'fixture',
-  baseUrl: 'https://fixture.example.test',
-  deviceId: 'device',
 });
 const scope = daemonSessionScope(connection, 'session');
 const id = 'A1' as AgendaId;
 
 describe('the one-item agenda client', () => {
-  it.each(['session', MACHINE_AGENDA_ID])('reads one full item from %s, with the channel header', async sessionId => {
+  it.each(['session', MACHINE_AGENDA_ID])('reads one full item from %s, on the agenda channel', async sessionId => {
     // Arrange
     const calls: { input: string; init?: RequestInit }[] = [];
     const input = projectionRecord();

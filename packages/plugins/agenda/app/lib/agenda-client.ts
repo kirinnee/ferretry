@@ -1,46 +1,50 @@
 import { DaemonAgendaSchema, DaemonAgendaActionSchema } from '../../contract/index.ts';
 import {
-  AGENDA_CHANNEL_HEADER,
-  AGENDA_CHANNEL_VERSION,
   type AgendaActionRequest,
   AgendaActionRequestSchema,
   type AgendaConversationEntry,
   AgendaConversationPageSchema,
   type AgendaCountResponse,
   type AgendaId,
-  type AgendaResponse,
-  AgendaSeenResponseSchema,
   type AgendaListSnapshot as AgendaSnapshot,
   AgendaListSnapshotSchema as AgendaSnapshotSchema,
+  type AgendaResponse,
+  AgendaSeenResponseSchema,
   type AgendaVersion,
   type AgendaVersionList,
   AgendaVersionListSchema,
   AgendaVersionSchema,
   type BoardReopenAttachments,
   isMachineAgendaId,
-} from '../wire/index.ts';
-import { type FyEvent, FY_REQUEST_ID_HEADER } from '../shell.ts';
+} from '@ferretry/core-asks/contract';
+import { ConcurrencyLimit, ListRefresh, type ListRefreshEnvironment, browserListRefreshEnvironment } from '../shell.ts';
+import {
+  AGENDA_READ_HEADERS,
+  type AgendaCall,
+  type AgendaCallInit,
+  agendaCall,
+  DaemonResponseError,
+  requestIdHeaders,
+} from './agenda-call.ts';
 import { AgendaRollupStore } from './agenda-rollup.ts';
 import { DaemonAgendaStore } from './agenda-store.ts';
-import { sessionAgendaPath, sessionAgendaRepliesPath } from './agenda-wire.ts';
-import { ConcurrencyLimit } from '../shell.ts';
-import { ListRefresh, type ListRefreshEnvironment, browserListRefreshEnvironment } from '../shell.ts';
-import type { DaemonConnection, DaemonId } from '../shell.ts';
-import { type DaemonSessionScope, daemonSessionKey } from '../shell.ts';
-import { daemonRequest } from '../shell.ts';
-import { type DaemonFetch, DaemonResponseError } from '../shell.ts';
+import {
+  MACHINE_AGENDA_ACT,
+  MACHINE_AGENDA_READ,
+  MACHINE_AGENDA_ROUTES,
+  SESSION_AGENDA_ACT,
+  SESSION_AGENDA_CONVERSATION,
+  SESSION_AGENDA_READ,
+  SESSION_AGENDA_REPLIES,
+  SESSION_AGENDA_SEEN,
+  SESSION_AGENDA_VERSION,
+  SESSION_AGENDA_VERSIONS,
+} from './agenda-wire.ts';
+import type { DaemonConnection, DaemonId } from './machine.ts';
+import { type DaemonSessionScope, daemonSessionKey } from './machine.ts';
 
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('attention scope must belong to the requested daemon');
-};
-
-const responseError = async (response: Response): Promise<DaemonResponseError> => {
-  const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
-  return new DaemonResponseError(
-    response.status,
-    typeof body.error === 'string' ? body.error : `HTTP ${response.status}`,
-    typeof body.code === 'string' ? body.code : undefined,
-  );
 };
 
 const parseSnapshot = (scope: DaemonSessionScope, value: unknown): AgendaSnapshot => {
@@ -49,37 +53,38 @@ const parseSnapshot = (scope: DaemonSessionScope, value: unknown): AgendaSnapsho
   return snapshot;
 };
 
-const fetchAgenda = async (
+/** A ferret route's parameters: the ferret, and any more the route names. */
+const ferretParams = (scope: DaemonSessionScope, more: Readonly<Record<string, string>> = {}) => ({
+  ferretId: scope.sessionId,
+  ...more,
+});
+
+const callAgenda = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  path: string,
-  init: RequestInit,
-  fetcher: DaemonFetch,
+  route: string,
+  init: AgendaCallInit,
+  client: AgendaCall,
 ): Promise<unknown> => {
   assertScopeDaemon(daemon, scope);
   // The machine board has only owner list/actions routes. Versions, conversation, seen and held replies belong
   // to session boards; never turn an unsupported machine operation into a session request for its reserved id.
-  if (isMachineAgendaId(scope.sessionId) && path !== '/v1/machine/agenda')
+  if (isMachineAgendaId(scope.sessionId) && !MACHINE_AGENDA_ROUTES.has(route))
     throw new DaemonResponseError(404, 'this operation is unavailable on /v1/machine/agenda', 'not-found');
-  const headers = new Headers(init.headers);
-  headers.set(AGENDA_CHANNEL_HEADER, AGENDA_CHANNEL_VERSION);
-  const request = daemonRequest(daemon, path, { ...init, headers });
-  const response = await fetcher(request.url, request.init);
-  if (!response.ok) throw await responseError(response);
-  return await response.json();
+  return await agendaCall(client, route, { ...init, headers: { ...AGENDA_READ_HEADERS, ...init.headers } });
 };
 
 /** Reads the complete agenda board from exactly the daemon that owns the scope. */
 export const fetchAgendaSnapshot = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch,
+  client: AgendaCall,
 ): Promise<AgendaSnapshot> =>
   parseSnapshot(
     scope,
     await (isMachineAgendaId(scope.sessionId)
-      ? fetchAgenda(daemon, scope, '/v1/machine/agenda', { method: 'GET' }, fetcher)
-      : fetchAgenda(daemon, scope, sessionAgendaPath(scope.sessionId), {}, fetcher)),
+      ? callAgenda(daemon, scope, MACHINE_AGENDA_READ, {}, client)
+      : callAgenda(daemon, scope, SESSION_AGENDA_READ, { params: ferretParams(scope) }, client)),
   );
 
 /**
@@ -89,9 +94,9 @@ export const fetchAgendaSnapshot = async (
 export const fetchAgendaCount = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch,
+  client: AgendaCall,
 ): Promise<AgendaCountResponse> => {
-  const snapshot = await fetchAgendaSnapshot(daemon, scope, fetcher);
+  const snapshot = await fetchAgendaSnapshot(daemon, scope, client);
   return { sessionId: snapshot.sessionId, count: snapshot.count };
 };
 
@@ -100,19 +105,20 @@ export const applyAgendaAction = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   action: AgendaActionRequest,
-  fetcher: DaemonFetch,
+  client: AgendaCall,
 ): Promise<AgendaSnapshot> => {
   const body = (isMachineAgendaId(scope.sessionId) ? DaemonAgendaActionSchema : AgendaActionRequestSchema).parse(
     action,
   );
-  const init = {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
-    body: JSON.stringify(body),
-  };
   const value = await (isMachineAgendaId(scope.sessionId)
-    ? fetchAgenda(daemon, scope, '/v1/machine/agenda', init, fetcher)
-    : fetchAgenda(daemon, scope, sessionAgendaPath(scope.sessionId), init, fetcher));
+    ? callAgenda(daemon, scope, MACHINE_AGENDA_ACT, { body, headers: requestIdHeaders() }, client)
+    : callAgenda(
+        daemon,
+        scope,
+        SESSION_AGENDA_ACT,
+        { params: ferretParams(scope), body, headers: requestIdHeaders() },
+        client,
+      ));
   return parseSnapshot(scope, value);
 };
 
@@ -120,25 +126,18 @@ export const applyAgendaAction = async (
 export const sendAgendaReplies = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch,
+  client: AgendaCall,
 ): Promise<AgendaSnapshot> =>
   parseSnapshot(
     scope,
-    await fetchAgenda(
+    await callAgenda(
       daemon,
       scope,
-      sessionAgendaRepliesPath(scope.sessionId),
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
-        body: '{}',
-      },
-      fetcher,
+      SESSION_AGENDA_REPLIES,
+      { params: ferretParams(scope), body: {}, headers: requestIdHeaders() },
+      client,
     ),
   );
-
-const itemVersionsPath = (sessionId: string, id: AgendaId): string =>
-  `/v1/ferrets/${encodeURIComponent(sessionId)}/agenda/${encodeURIComponent(id)}/versions`;
 
 /**
  * Every version an item has been kept as, with the one this device last opened.
@@ -147,10 +146,10 @@ export const fetchAgendaVersions = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   id: AgendaId,
-  fetcher: DaemonFetch,
+  client: AgendaCall,
 ): Promise<AgendaVersionList> =>
   AgendaVersionListSchema.parse(
-    await fetchAgenda(daemon, scope, itemVersionsPath(scope.sessionId, id), { method: 'GET' }, fetcher),
+    await callAgenda(daemon, scope, SESSION_AGENDA_VERSIONS, { params: ferretParams(scope, { id }) }, client),
   );
 
 /** One whole version of an item, as it was left. */
@@ -159,10 +158,16 @@ export const fetchAgendaVersion = async (
   scope: DaemonSessionScope,
   id: AgendaId,
   version: number,
-  fetcher: DaemonFetch,
+  client: AgendaCall,
 ): Promise<AgendaVersion> =>
   AgendaVersionSchema.parse(
-    await fetchAgenda(daemon, scope, `${itemVersionsPath(scope.sessionId, id)}/${version}`, { method: 'GET' }, fetcher),
+    await callAgenda(
+      daemon,
+      scope,
+      SESSION_AGENDA_VERSION,
+      { params: ferretParams(scope, { id, version: String(version) }) },
+      client,
+    ),
   );
 
 /** The most fragment reads one call takes: a runaway cursor ends the read instead of looping. */
@@ -194,19 +199,24 @@ export const fetchAgendaConversation = async (
   scope: DaemonSessionScope,
   id: AgendaId,
   range: AgendaConversationRange = {},
-  fetcher: DaemonFetch,
+  client: AgendaCall,
 ): Promise<AgendaConversationRead> => {
-  const base = `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/agenda/${encodeURIComponent(id)}/conversation`;
   const from = range.from ?? 0;
   const until = range.until ?? Number.POSITIVE_INFINITY;
   const entries: AgendaConversationEntry[] = [];
   let cursor: { readonly index: number; readonly offset: number } | undefined = { index: from, offset: 0 };
   let reads = 0;
   while (cursor !== undefined && cursor.index < until && reads < MAX_CONVERSATION_FRAGMENTS) {
-    const query = new URLSearchParams({ index: String(cursor.index), offset: String(cursor.offset) });
-    if (range.version !== undefined) query.set('version', String(range.version));
+    const query: Record<string, string> = { index: String(cursor.index), offset: String(cursor.offset) };
+    if (range.version !== undefined) query.version = String(range.version);
     const page = AgendaConversationPageSchema.parse(
-      await fetchAgenda(daemon, scope, `${base}?${query.toString()}`, { method: 'GET' }, fetcher),
+      await callAgenda(
+        daemon,
+        scope,
+        SESSION_AGENDA_CONVERSATION,
+        { params: ferretParams(scope, { id }), query },
+        client,
+      ),
     );
     reads += 1;
     if (page.entry !== undefined) {
@@ -226,19 +236,15 @@ export const markAgendaVersionSeen = async (
   scope: DaemonSessionScope,
   id: AgendaId,
   version: number,
-  fetcher: DaemonFetch,
+  client: AgendaCall,
 ): Promise<number> =>
   AgendaSeenResponseSchema.parse(
-    await fetchAgenda(
+    await callAgenda(
       daemon,
       scope,
-      `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/agenda/${encodeURIComponent(id)}/seen`,
-      {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ version }),
-      },
-      fetcher,
+      SESSION_AGENDA_SEEN,
+      { params: ferretParams(scope, { id }), body: { version } },
+      client,
     ),
   ).seen;
 
@@ -255,8 +261,6 @@ export const markAgendaVersionSeen = async (
 export const AGENDA_READS_PER_DAEMON = 4;
 
 interface ConnectionBinding {
-  readonly baseUrl: string;
-  readonly deviceId: string;
   readonly generation: number;
 }
 
@@ -271,9 +275,9 @@ interface MachineAgendaRead {
 }
 
 /**
- * Daemon-scoped attention coordinator. It keeps request coalescing out of the
- * immutable store and fences every continuation by the concrete paired
- * connection: a same-id re-pair or unpair cannot publish stale daemon data.
+ * Daemon-scoped attention coordinator, over this half's one client. It keeps request coalescing out of the
+ * immutable store and fences every continuation by the machine's generation: a cleared machine cannot publish
+ * stale daemon data.
  */
 export class DaemonAgendaClient {
   readonly #machineReads = new Map<DaemonId, MachineAgendaRead>();
@@ -292,10 +296,10 @@ export class DaemonAgendaClient {
 
   constructor(
     readonly store: DaemonAgendaStore = new DaemonAgendaStore(),
-    private readonly fetcher: DaemonFetch,
+    private readonly client: AgendaCall,
     private readonly refreshEnvironment: ListRefreshEnvironment = browserListRefreshEnvironment,
   ) {
-    this.rollup = new AgendaRollupStore(fetcher);
+    this.rollup = new AgendaRollupStore(client);
   }
 
   hydrate(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
@@ -330,11 +334,10 @@ export class DaemonAgendaClient {
     return entry.read;
   }
 
-  /** The fleet stream also carries agenda changes, including the machine's own ledger. */
-  noteEvent(daemon: DaemonConnection, event: FyEvent): void {
-    if (event.type !== 'agenda.changed' && event.type !== 'attention.changed') return;
-    const scope = { daemonId: daemon.daemonId, sessionId: event.sessionId };
-    if (isMachineAgendaId(event.sessionId)) {
+  /** An ask of one ferret changed (Asks' `asks.changed`), the machine's own ledger included: re-read that board. */
+  noteEvent(daemon: DaemonConnection, event: { readonly ferret: string }): void {
+    const scope = { daemonId: daemon.daemonId, sessionId: event.ferret };
+    if (isMachineAgendaId(event.ferret)) {
       void this.#machineRead(daemon, scope)
         .invalidate()
         .catch(() => undefined);
@@ -385,7 +388,7 @@ export class DaemonAgendaClient {
     // may reach its turn after the machine was unpaired or re-paired, and then it sends nothing at all.
     const promise = this.#readLimit(daemon.daemonId)
       .run(async () =>
-        this.#currentConnection(daemon, generation) ? await fetchAgendaSnapshot(daemon, scope, this.fetcher) : null,
+        this.#currentConnection(daemon, generation) ? await fetchAgendaSnapshot(daemon, scope, this.client) : null,
       )
       .then(snapshot => {
         if (snapshot !== null && this.#current(daemon, generation, key, revision)) {
@@ -419,7 +422,7 @@ export class DaemonAgendaClient {
     if (existing?.generation === generation) return existing.promise;
 
     const revision = this.#boardRevisions.get(key) ?? 0;
-    const promise = fetchAgendaCount(daemon, scope, this.fetcher)
+    const promise = fetchAgendaCount(daemon, scope, this.client)
       .then(count => {
         if (this.#current(daemon, generation, key, revision)) this.store.applyCount(scope, count);
       })
@@ -538,7 +541,7 @@ export class DaemonAgendaClient {
 
   /** Delivers the answers the daemon is holding for this ferret now. */
   sendReplies(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
-    return this.#mutate(daemon, scope, () => sendAgendaReplies(daemon, scope, this.fetcher));
+    return this.#mutate(daemon, scope, () => sendAgendaReplies(daemon, scope, this.client));
   }
 
   #mutate(
@@ -550,7 +553,7 @@ export class DaemonAgendaClient {
     const generation = this.#bind(daemon);
     const key = daemonSessionKey(scope);
     const revision = this.#advanceBoardRevision(key);
-    const promise = (typeof action === 'function' ? action() : applyAgendaAction(daemon, scope, action, this.fetcher))
+    const promise = (typeof action === 'function' ? action() : applyAgendaAction(daemon, scope, action, this.client))
       .then(snapshot => {
         if (this.#current(daemon, generation, key, revision)) {
           this.#advanceBoardRevision(key);
@@ -581,11 +584,9 @@ export class DaemonAgendaClient {
 
   #bind(daemon: DaemonConnection): number {
     const existing = this.#bindings.get(daemon.daemonId);
-    if (existing && existing.baseUrl === daemon.baseUrl && existing.deviceId === daemon.deviceId)
-      return existing.generation;
-    if (existing) this.clearDaemon(daemon.daemonId);
+    if (existing) return existing.generation;
     const generation = this.#generations.get(daemon.daemonId) ?? 0;
-    this.#bindings.set(daemon.daemonId, { baseUrl: daemon.baseUrl, deviceId: daemon.deviceId, generation });
+    this.#bindings.set(daemon.daemonId, { generation });
     return generation;
   }
 
@@ -601,12 +602,7 @@ export class DaemonAgendaClient {
 
   #currentConnection(daemon: DaemonConnection, generation: number): boolean {
     const binding = this.#bindings.get(daemon.daemonId);
-    return (
-      binding !== undefined &&
-      binding.generation === generation &&
-      binding.baseUrl === daemon.baseUrl &&
-      binding.deviceId === daemon.deviceId
-    );
+    return binding !== undefined && binding.generation === generation;
   }
 
   #clearInFlight<Value>(inFlight: Map<string, InFlight<Value>>, daemonId: DaemonId): void {
