@@ -8,7 +8,7 @@ test('work folder: omitted, the ferret works in the folder it was started in', a
   const started = await f.service.start({ folder: '/repo', by: 'owner' });
   expect(started.ok).toBe(true);
   expect(f.registry.get(f.id)?.folder).toBe('/repo');
-  expect(f.harness.launched.at(-1)?.folder).toBe('/repo');
+  expect(f.harness.launched.at(-1)?.folder).toBe(fenced('/repo'));
 });
 
 test('work folder: given, it is the folder the ferret works in and launches in', async () => {
@@ -16,7 +16,7 @@ test('work folder: given, it is the folder the ferret works in and launches in',
   const started = await f.service.start({ folder: '/repo', workFolder: '/warden/investigations/one', by: 'owner' });
   expect(started.ok).toBe(true);
   expect(f.registry.get(f.id)?.folder).toBe('/warden/investigations/one');
-  expect(f.harness.launched.at(-1)?.folder).toBe('/warden/investigations/one');
+  expect(f.harness.launched.at(-1)?.folder).toBe(fenced('/warden/investigations/one'));
 });
 
 test('work folder: it goes through the same fence as the folder; a refusal is a folder failure and starts nothing', async () => {

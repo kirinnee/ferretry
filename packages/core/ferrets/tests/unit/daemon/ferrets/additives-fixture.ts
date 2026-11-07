@@ -22,8 +22,8 @@ export interface ActedRecord {
 /** A runner that also records every interrupt it is asked for. */
 export class SignalRunner extends FakeRunner {
   readonly signals: { readonly handle: RunnerHandle; readonly signal: 'interrupt' | 'terminate' }[] = [];
-  override async signal(handle: RunnerHandle, signal: 'interrupt' | 'terminate'): Promise<void> {
-    this.signals.push({ handle, signal });
+  override async signal(handle?: RunnerHandle, signal?: 'interrupt' | 'terminate'): Promise<void> {
+    if (handle !== undefined && signal !== undefined) this.signals.push({ handle, signal });
   }
 }
 

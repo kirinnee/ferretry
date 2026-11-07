@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { targetRef } from '@ferretry/core-vault/contract';
 import { ferretId } from '../../../../contract/testing/index.ts';
 import { additivesFixture } from './additives-fixture.ts';
 
@@ -16,14 +17,14 @@ test('decision 18: deliver goes through kernel.act on the ferret’s terminal pa
   expect(answer).toEqual({ ok: true, value: 'turn-started' });
   expect(f.acted).toHaveLength(1);
   expect(f.acted[0]!.op).toBe('keys');
-  expect(f.acted[0]!.target).toEqual({ kind: 'terminal', key: f.handle });
+  expect(f.acted[0]!.target).toEqual(targetRef('terminal', f.handle));
   expect(f.runner.deliveries.map(entry => entry.delivery.text)).toEqual(['hello there']);
 });
 
 test('decision 18: interrupt goes through kernel.act on the same pane and signals the runner', async () => {
   const f = await running();
   expect(await f.seam.interrupt()).toEqual({ ok: true, value: true });
-  expect(f.acted).toEqual([{ target: { kind: 'terminal', key: f.handle }, op: 'keys' }]);
+  expect(f.acted).toEqual([{ target: targetRef('terminal', f.handle), op: 'keys' }]);
   expect(f.runner.signals).toEqual([{ handle: f.handle, signal: 'interrupt' }]);
 });
 
