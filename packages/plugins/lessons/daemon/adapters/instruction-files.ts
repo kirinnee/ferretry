@@ -51,7 +51,7 @@ export class WorkRootLessonFiles implements LessonFilesPort {
 
   private async exists(path: string): Promise<boolean> {
     const reached = await this.reach(path);
-    return reached !== undefined && (await reached.root.stat(reached.path).catch(() => undefined)) !== undefined;
+    return reached !== undefined && (await guarded(path, () => reached.root.stat(reached.path))) !== undefined;
   }
 
   /** The git root at or above `cwd`, as far as any ferret's folder reaches; else `cwd` itself. */
@@ -70,15 +70,15 @@ export class WorkRootLessonFiles implements LessonFilesPort {
     if (path === GLOBAL_LESSONS_FILE) return await this.store.readGlobal();
     const reached = await this.reach(path);
     if (reached === undefined) throw unreachable(path);
-    if ((await reached.root.stat(reached.path).catch(() => undefined)) === undefined) return undefined;
-    return await reached.root.readText(reached.path);
+    if ((await guarded(path, () => reached.root.stat(reached.path))) === undefined) return undefined;
+    return await guarded(path, () => reached.root.readText(reached.path));
   }
 
   async write(path: string, text: string): Promise<void> {
     if (path === GLOBAL_LESSONS_FILE) return await this.store.writeGlobal(text);
     const reached = await this.reach(path);
     if (reached === undefined) throw unreachable(path);
-    await reached.root.writeText(reached.path, text);
+    await guarded(path, () => reached.root.writeText(reached.path, text));
   }
 
   join(directory: string, name: string): string {
@@ -92,6 +92,22 @@ function unreachable(path: string): LessonsError {
     'not-found',
     `${path} is outside every ferret's folder, so Ferretry cannot reach it; start a ferret in that project and apply again`,
   );
+}
+
+/**
+ * A root that refuses `path` (a link that leads outside the ferret's folder, for one) is a refusal with a sentence,
+ * never "the file does not exist" and never a bare error the dispatcher turns into a 500. Any error from the root
+ * handle counts; the host's own error type is not imported.
+ */
+async function guarded<T>(path: string, act: () => Promise<T>): Promise<T> {
+  try {
+    return await act();
+  } catch {
+    throw new LessonsError(
+      'invalid',
+      `${path} is a link that leads outside the ferret's folder, so Ferretry will not write through it`,
+    );
+  }
 }
 
 /** What the owner should know about the Global document, in the preview and in `GET /v1/lessons/global`. */

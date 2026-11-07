@@ -99,6 +99,36 @@ describe('the project a Repo lesson applies to (finding 3)', () => {
     await expect(lessons.read('/repo/AGENTS.md')).rejects.toMatchObject({ reason: 'not-found' });
   });
 
+  it('a root that refuses a link leading outside the folder is a LessonsError sentence, in read, exists and write (no 500)', async () => {
+    const refusing = {
+      name: 'work',
+      resolve: (path: string) => ok(path as FencedPath),
+      stat: async () => {
+        throw new Error('link_escape');
+      },
+      readText: async () => '',
+      readBytes: async () => new Uint8Array(),
+      writeText: async () => {
+        throw new Error('link_escape');
+      },
+      list: async () => [],
+      remove: async () => {},
+    } as RootHandle;
+    const ferrets = new FakeFerrets();
+    ferrets.add({ id: ferretId('helper'), folder: '/repo' });
+    const store = { readGlobal: async () => undefined, writeGlobal: async () => {} };
+    const lessons = new WorkRootLessonFiles(ferrets, { root: () => refusing }, store);
+    const sentence =
+      "/repo/CLAUDE.md is a link that leads outside the ferret's folder, so Ferretry will not write through it";
+
+    const read = lessons.read('/repo/CLAUDE.md');
+    await expect(read).rejects.toBeInstanceOf(LessonsError);
+    await expect(read).rejects.toMatchObject({ reason: 'invalid', message: sentence });
+    await expect(lessons.write('/repo/CLAUDE.md', 'x')).rejects.toMatchObject({ reason: 'invalid', message: sentence });
+    // `exists` is what the git-root walk asks about `.git`: a refused link there is a refusal too.
+    await expect(lessons.projectRoot('/repo')).rejects.toMatchObject({ reason: 'invalid' });
+  });
+
   it('keeps the Global document in the plugin’s state, never on disk', async () => {
     const { lessons, global, files } = world({}, []);
     await lessons.write(GLOBAL_LESSONS_FILE, '- Use bun.\n');
