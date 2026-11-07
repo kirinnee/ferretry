@@ -365,3 +365,20 @@ describe('pins', () => {
     expect(board.json<{ pins: { text?: string }[] }>().pins.map(pin => pin.text)).toEqual(['ship it']);
   });
 });
+
+describe('session routes whose services are not bound in this build', () => {
+  test('signal, restarts and the archive list answer 503 not built yet rather than a missing route', async () => {
+    const h = await host([record('lead')]);
+    const answers = [
+      await h.request('POST', '/v1/ferrets/lead/signal', { body: { kind: 'done' } }),
+      await h.request('POST', '/v1/restarts', { body: { scope: 'outdated' } }),
+      await h.request('GET', '/v1/restarts'),
+      await h.request('DELETE', '/v1/restarts'),
+      await h.request('GET', '/v1/archived-sessions'),
+    ];
+    for (const answer of answers) {
+      expect(answer.status).toBe(503);
+      expect(answer.json<{ code: string }>().code).toBe('plugin_unavailable');
+    }
+  });
+});

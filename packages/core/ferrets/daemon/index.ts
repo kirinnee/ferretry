@@ -47,6 +47,9 @@ import { AgentPinService, AgentPinSubsystem, withPinned } from './lib/agent-pins
 import { PinService } from './lib/pins/index.ts';
 import { pinRoutes } from './lib/runtime/mounts/pins.ts';
 import { sessionPinRoutes } from './lib/runtime/mounts/session-pin.ts';
+import { type SessionArchiveSubsystem, sessionArchiveRoutes } from './lib/runtime/mounts/session-archive.ts';
+import { type SessionRestartSubsystem, sessionRestartRoutes } from './lib/runtime/mounts/session-restart.ts';
+import { type SessionSignalSubsystem, sessionSignalRoutes } from './lib/runtime/mounts/session-signal.ts';
 import { AgentPinsFile, FerretPinFiles } from './lib/state.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
@@ -228,6 +231,20 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
   const body = async (call: CallContext): Promise<unknown> => parseJson(await call.request.text());
 
+  /**
+   * A session service whose ports (terminals, harness, runtimes) are not bound in this build yet: every call answers
+   * the spine's 503 skeleton (D10) instead of a route that is missing. Signal, restarts and the archive list.
+   */
+  const notBuilt = <T extends object>(what: string): T =>
+    new Proxy({} as T, {
+      get: () => () => {
+        throw new ApiError(503, `${what} is not built yet in this version of Ferretry.`, 'plugin_unavailable');
+      },
+    });
+  const signals = sessionSignalRoutes(notBuilt<SessionSignalSubsystem>('The ferret lifecycle signal'));
+  const restarts = sessionRestartRoutes(notBuilt<SessionRestartSubsystem>('Restarting ferrets'));
+  const archived = sessionArchiveRoutes(notBuilt<SessionArchiveSubsystem>('The archived ferret list'));
+
   // Pins (a3's handlers): the owner's sidebar pins (agent-pins.json) and each ferret's note board (<ferret>/pins.json).
   const pinClock = { now: () => kernel.clock.now() };
   const agentPins = new AgentPinService(
@@ -299,6 +316,9 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     routes: {
       ...worktrees.routes,
       ...fileBrowser,
+      ...signals,
+      ...restarts,
+      ...archived,
       'POST /v1/ferrets/:ferretId/pin': sidebarPins.pin,
       'POST /v1/ferrets/:ferretId/unpin': sidebarPins.unpin,
       'GET /v1/ferrets/:ferretId/pins': noteBoard.list,

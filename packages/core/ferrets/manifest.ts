@@ -203,6 +203,47 @@ export default definePlugin({
         audit: { skip: 'a folder listing records nothing, as today' },
         guard: 'secrets',
       }),
+      // R-0371 (today's mounts/session-signal.ts, renamed). Answers 503 until the session services are bound.
+      route('POST /v1/ferrets/:ferretId/signal', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a lifecycle signal is recorded in the ferret history, as today' },
+        guard: { none: 'answers the ferret state' },
+      }),
+      // Restarts (today's mounts/session-restart.ts, paths unchanged). 503 until the session services are bound.
+      // R-0323
+      route('POST /v1/restarts', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a restart is recorded in each ferret history, as today' },
+        guard: { none: 'ferret ids and what was restarted or queued' },
+      }),
+      // R-0128
+      route('GET /v1/restarts', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a restart list records nothing' },
+        guard: { none: 'outdated ferret ids and the waiting restarts' },
+      }),
+      // R-0023
+      route('DELETE /v1/restarts', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'clearing the restart queue records nothing, as today' },
+        guard: { none: 'how many waiting restarts were cleared' },
+      }),
+      // R-0047 (today's mounts/session-archive.ts, path unchanged). 503 until the session services are bound.
+      route('GET /v1/archived-sessions', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'an archive read records nothing' },
+        guard: { none: 'archived ferret identity records' },
+      }),
       // Managed worktrees (today's `mounts/worktrees.ts`); the removal check is a deeper literal than the collection.
       // R-0211
       route('GET /v1/worktrees/removal', {
