@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { RestartQueueEntrySchema, type RestartQueueEntry } from '../../../lib/protocol/session-restart.ts';
+import { RestartQueueEntrySchema, type RestartQueueEntry } from '../../../../contract/index.ts';
 import { z } from 'zod';
 
 /**

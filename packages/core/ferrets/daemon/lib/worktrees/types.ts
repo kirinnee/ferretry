@@ -10,7 +10,7 @@ import type {
   WorktreeRemovalDecision,
   WorktreeRemovalOverride,
   WorktreeStatusSummaryView,
-} from '../protocol/worktrees.ts';
+} from '../../../contract/index.ts';
 
 /**
  * THE DECISION VOCABULARY IS NOT DECLARED HERE, and that is deliberate.
@@ -150,9 +150,7 @@ export type ManagedWorktreeAdoption =
  * treating somebody else's object as proof that the interrupted removal never happened.
  */
 export type ManagedWorktreePresence =
-  | { readonly kind: 'owned' }
-  | { readonly kind: 'absent' }
-  | { readonly kind: 'unverified'; readonly reason: string };
+  { readonly kind: 'owned' } | { readonly kind: 'absent' } | { readonly kind: 'unverified'; readonly reason: string };
 
 export interface ManagedWorktreePlan {
   readonly sourceCwd: string;

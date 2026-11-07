@@ -7,7 +7,7 @@ import {
   RestartResultSchema,
   RestartStatusSchema,
   type RestartRequest,
-} from '../../../../../daemon/lib/protocol/session-restart.ts';
+} from '../../../../../contract/index.ts';
 import should from 'should';
 import {
   type SessionRestartSubsystem,

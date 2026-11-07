@@ -5,7 +5,7 @@ import type {
   WorktreeListResponse,
   WorktreeRemovalDecision,
   WorktreeRemovalRequest,
-} from '../../../daemon/lib/protocol/worktrees.ts';
+} from '../../../contract/index.ts';
 
 /** Presentation port for the worktree commands. */
 export interface IWorktreeOutput {
