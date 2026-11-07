@@ -28,7 +28,7 @@ import type { WorktreeDirectoryPinner, WorktreeFileSystem } from '../lib/worktre
  * passes none, and this daemon hosts no managed checkouts — which every route then says plainly (`no_managed_root`),
  * exactly as today's daemon did without a managed root.
  */
-export interface WorktreeHostIo {
+interface WorktreeHostIo {
   readonly git: GitByteSpawn;
   readonly fileSystem: WorktreeFileSystem;
   readonly pinner: WorktreeDirectoryPinner;

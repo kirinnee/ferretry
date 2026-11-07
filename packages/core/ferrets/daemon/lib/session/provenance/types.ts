@@ -10,11 +10,7 @@
 import type { SessionProvenance } from '../../protocol/session.ts';
 
 export type { SessionProvenance, SessionSpawnOrigin, WardenLineageSource } from '../../protocol/session-provenance.ts';
-export {
-  SessionProvenanceSchema,
-  SessionSpawnOriginSchema,
-  WardenLineageSourceSchema,
-} from '../../protocol/session-provenance.ts';
+export { SessionProvenanceSchema } from '../../protocol/session-provenance.ts';
 
 /**
  * One session as lineage resolution sees it.

@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun"],
+    "paths": {
+      "@ferretry/std": ["../../packages/std/src/index.ts"],
+      "@ferretry/kernel/contract": ["../../packages/core/kernel/contract/index.ts"],
+      "@ferretry/core-*/contract": ["../../packages/core/*/contract/index.ts"],
+      "@ferretry/plugin-*/contract": ["../../packages/plugins/*/contract/index.ts"]
+    }
+  },
+  "include": ["src", "tests", "scripts"],
+  "exclude": ["node_modules", "fixtures/out"]
+}

@@ -2,11 +2,10 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   SessionProvenanceSchema,
-  resolveSpawnLabel,
-  resolveWardenLineage,
   type SessionAncestor,
   type SessionProvenance,
-} from '../../../../../daemon/lib/session/provenance/index.ts';
+} from '../../../../../daemon/lib/session/provenance/types.ts';
+import { resolveSpawnLabel, resolveWardenLineage } from '../../../../../daemon/lib/session/provenance/lineage.ts';
 import { WARDEN_LABEL } from '../../../../../daemon/lib/session/peers/warden-lifecycle.ts';
 
 const STAMPED_AT = '2026-07-30T12:00:00.000Z';

@@ -33,13 +33,7 @@ const ENVELOPE_BYTES = 4 * 1024 * 1024;
  * inside a JSON envelope. A route that carries bulk caller-supplied text rather than an attachment should
  * not inherit this: pass `maxBytes` and bound it near its own contract.
  */
-export const MAX_REQUEST_BODY_BYTES = ENCODED_PAYLOAD_BYTES + ENVELOPE_BYTES;
-
-/**
- * The bound for a route whose payload is bulk caller-supplied TEXT rather than an attachment: pass
- * `{ maxBytes: MAX_TEXT_BODY_BYTES }`.
- */
-export const MAX_TEXT_BODY_BYTES = 512 * 1024;
+const MAX_REQUEST_BODY_BYTES = ENCODED_PAYLOAD_BYTES + ENVELOPE_BYTES;
 
 /**
  * What `request.text(limit)` throws when the body is over `limit`, on every arrival (the local listener and a
@@ -77,16 +71,6 @@ export async function parseOptionalBody<Schema extends z.ZodType>(
 ): Promise<z.output<Schema>> {
   const text = await readText(request, limits);
   return text.trim() === '' ? parseValue(schema, {}, 'body') : parseJson(schema, text, 'body');
-}
-
-/** Parses query parameters against a schema, taking the first value given for each key. */
-export function parseQuery<Schema extends z.ZodType>(request: ApiRequest, schema: Schema): z.output<Schema> {
-  const single: Record<string, string> = {};
-  for (const [key, values] of request.query) {
-    const first = values[0];
-    if (first !== undefined) single[key] = first;
-  }
-  return parseValue(schema, single, 'query');
 }
 
 /**

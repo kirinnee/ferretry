@@ -8,7 +8,7 @@ import {
   type TranscriptDigestJournal,
   type TranscriptFileResolver,
   tailTranscriptEvents,
-} from '../../../daemon/reader/lib/session/index.ts';
+} from '../../../daemon/reader/lib/session/reader.ts';
 import type {
   TranscriptBatch,
   TranscriptEvent,

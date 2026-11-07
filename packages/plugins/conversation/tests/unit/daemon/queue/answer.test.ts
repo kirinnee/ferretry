@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { answerOf, type SendRecord } from '../../../../daemon/seams/index.ts';
+import { answerOf } from '../../../../daemon/queue/lib/answer.ts';
+import { type SendRecord } from '../../../../daemon/delivery/lib/types.ts';
 import { at } from '../../../support/instant.ts';
 
 const AT = at('2026-10-30T17:00:00.000Z');

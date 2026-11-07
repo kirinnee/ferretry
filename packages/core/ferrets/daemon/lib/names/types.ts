@@ -1,5 +1,5 @@
 export const CALLSIGN_WINDOW_MS = 5 * 24 * 60 * 60 * 1_000;
-export { MAX_CALLSIGN_LENGTH } from '../../../contract/state.ts';
+
 export const MAX_SESSION_TITLE_LENGTH = 120;
 
 export interface NameClaim {
@@ -7,26 +7,6 @@ export interface NameClaim {
   readonly ownerId: string;
   readonly claimedAtMs: number;
   readonly expiresAtMs: number;
-}
-
-export type NameClaimAttempt =
-  | { readonly claimed: true; readonly claim: NameClaim }
-  | { readonly claimed: false; readonly conflict: NameClaim };
-
-/**
- * Persistence must make `tryClaim` atomic across daemon requests. Expired claims
- * need not be retained, but compaction is not guaranteed on any schedule: an
- * aged-out reservation may still appear in `listClaims` until a later claim
- * rewrites the ledger, so callers must inspect `expiresAtMs`.
- */
-export interface NameClaimStore {
-  listClaims(): Promise<readonly NameClaim[]>;
-  tryClaim(claim: NameClaim): Promise<NameClaimAttempt>;
-  release(callsign: string, ownerId: string): Promise<void>;
-}
-
-export interface NameRandomSource {
-  nextIndex(upperExclusive: number): number;
 }
 
 export interface NameAllocationRequest {
@@ -37,7 +17,7 @@ export interface NameAllocationRequest {
   readonly windowMs?: number;
 }
 
-export type NameAllocationSource = 'automatic' | 'requested' | 'fallback';
+type NameAllocationSource = 'automatic' | 'requested' | 'fallback';
 
 export type NameAllocationErrorCode =
   | 'invalid_callsign'

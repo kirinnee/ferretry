@@ -103,7 +103,7 @@ export function handoffDocumentMessage(document: string): string {
 }
 
 /** A user message without the reminders and the blocks a harness injected, keeping a delivery's attachment list. */
-export function withoutHarnessBlocks(text: string): string {
+function withoutHarnessBlocks(text: string): string {
   return text.replace(REMINDER_BLOCK, '').replace(AGENTS_FILE_BLOCK, '').replace(INJECTED_BLOCK, '').trim();
 }
 

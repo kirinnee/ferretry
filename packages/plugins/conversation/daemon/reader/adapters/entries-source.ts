@@ -21,7 +21,7 @@ import type {
 } from '../lib/transcript/types.ts';
 
 /** The ferret's transcript as its harness plugin's `TranscriptReader` reads it; absent when the ferret is not known. */
-export interface HarnessTranscript {
+interface HarnessTranscript {
   readonly harness: TranscriptHarness;
   readonly reader: TranscriptReader;
 }
@@ -31,7 +31,7 @@ export type HarnessTranscripts = (ferret: FerretId) => Promise<HarnessTranscript
 /** The most entries one read pulls from a harness reader: the reader pages, this walks until the end. */
 const ENTRY_PAGE = 1_000;
 /** A conversation longer than this is refused as unreadable, never served as a shorter one (lost history is not a prefix). */
-export const MAX_ENTRIES = 200_000;
+const MAX_ENTRIES = 200_000;
 
 const ROLES: Readonly<Record<TranscriptEntry['role'], TranscriptRole>> = {
   user: 'user',

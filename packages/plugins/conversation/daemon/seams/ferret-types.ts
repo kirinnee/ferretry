@@ -4,7 +4,7 @@ import { z } from 'zod';
 const InstantSchema = z.string().min(1);
 type Instant = string;
 
-export const SessionStatusSchema = z.enum([
+const SessionStatusSchema = z.enum([
   'created',
   'starting',
   'running',
@@ -39,9 +39,9 @@ export type SessionStatus = z.infer<typeof SessionStatusSchema>;
  * Absent for a session that is not live (not launched yet, or finished), and from a daemon that
  * predates the watcher.
  */
-export const SessionTurnStateSchema = z.enum(['working', 'your-turn', 'needs-input']);
+const SessionTurnStateSchema = z.enum(['working', 'your-turn', 'needs-input']);
 export type SessionTurnState = z.infer<typeof SessionTurnStateSchema>;
-export const SessionHealthSchema = z.enum([
+const SessionHealthSchema = z.enum([
   'healthy',
   'thinking',
   'waiting',
@@ -52,11 +52,11 @@ export const SessionHealthSchema = z.enum([
   'unknown',
 ]);
 export type SessionHealth = z.infer<typeof SessionHealthSchema>;
-export const PendingQuestionOptionSchema = z.object({
+const PendingQuestionOptionSchema = z.object({
   label: z.string().min(1),
   description: z.string().optional(),
 });
-export const PendingQuestionSchema = z.object({
+const PendingQuestionSchema = z.object({
   toolUseId: z.string().min(1),
   questions: z
     .array(
@@ -73,12 +73,12 @@ export const PendingQuestionSchema = z.object({
   missingSince: InstantSchema.optional(),
 });
 export type PendingQuestion = z.infer<typeof PendingQuestionSchema>;
-export const InteractionModeSchema = z.enum(['auto', 'interactive']);
+const InteractionModeSchema = z.enum(['auto', 'interactive']);
 export type InteractionMode = z.infer<typeof InteractionModeSchema>;
 /** The dialog's identity: a digest of everything a person decides on, so a changed dialog is a new id. */
-export const HarnessDialogIdSchema = z.string().regex(/^[0-9a-f]{16}$/u);
+const HarnessDialogIdSchema = z.string().regex(/^[0-9a-f]{16}$/u);
 /** Harness family shared by session records and transfer lineage leaves. */
-export const HarnessSchema = z.enum(['claude', 'codex']);
+const HarnessSchema = z.enum(['claude', 'codex']);
 /**
  * A HARNESS DIALOG, read off the agent's own pane.
  *
@@ -95,7 +95,7 @@ export const HarnessSchema = z.enum(['claude', 'codex']);
  */
 
 /** Which dialog it is. `other` is any screen of the same shape this list does not name. */
-export const HarnessDialogKindSchema = z.enum([
+const HarnessDialogKindSchema = z.enum([
   /** Codex: hooks it has not been told to trust ("1 hook is new or changed"). */
   'hooks-review',
   /** Codex: the hook list "Review hooks" opens. Esc closes it and the session goes on. */
@@ -114,7 +114,7 @@ export const HarnessDialogKindSchema = z.enum([
   'usage-limit',
   'other',
 ]);
-export const HarnessDialogOptionSchema = z.strictObject({
+const HarnessDialogOptionSchema = z.strictObject({
   /** Its position in the list, from 1 — the harness's own digit where it draws one. */
   number: z.number().int().min(1).max(9),
   /** The choice in the harness's own words. */
@@ -124,7 +124,7 @@ export const HarnessDialogOptionSchema = z.strictObject({
   /** Choosing it trusts something to run — hooks, an MCP server, a folder. Never chosen by the daemon. */
   grantsTrust: z.boolean(),
 });
-export const HarnessDialogSchema = z
+const HarnessDialogSchema = z
   .strictObject({
     id: HarnessDialogIdSchema,
     harness: HarnessSchema,
@@ -153,9 +153,9 @@ export const HarnessDialogSchema = z
   });
 export type HarnessDialog = z.infer<typeof HarnessDialogSchema>;
 /** The prompt's identity: a digest of everything a person decides on, so a changed prompt is a new id. */
-export const PermissionRequestIdSchema = z.string().regex(/^[0-9a-f]{16}$/u);
+const PermissionRequestIdSchema = z.string().regex(/^[0-9a-f]{16}$/u);
 /** What the agent is asking to do, in one verb a sentence can be built on. */
-export const PermissionActionSchema = z.enum(['run', 'read', 'edit', 'create', 'fetch', 'use', 'exit-plan', 'other']);
+const PermissionActionSchema = z.enum(['run', 'read', 'edit', 'create', 'fetch', 'use', 'exit-plan', 'other']);
 /**
  * A HARNESS PERMISSION PROMPT, read off the agent's own pane.
  *
@@ -171,7 +171,7 @@ export const PermissionActionSchema = z.enum(['run', 'read', 'edit', 'create', '
  */
 
 /** What a choice does, as far as its own words say. The words themselves are `label`. */
-export const PermissionOptionKindSchema = z.enum([
+const PermissionOptionKindSchema = z.enum([
   /** Run this one call ("Yes", "Yes, proceed"). */
   'allow',
   /** Allow it and more like it — "don't ask again for …", "allow all edits during this session". */
@@ -179,14 +179,14 @@ export const PermissionOptionKindSchema = z.enum([
   /** Refuse ("No", "No, and tell Claude what to do differently"). */
   'deny',
 ]);
-export const PermissionOptionSchema = z.strictObject({
+const PermissionOptionSchema = z.strictObject({
   /** The digit the harness drew beside it, and the key that picks it. */
   number: z.number().int().min(1).max(9),
   /** The choice in the harness's own words, without its keyboard hint (`(y)`, `(shift+tab)`, `(esc)`). */
   label: z.string().min(1).max(300),
   kind: PermissionOptionKindSchema,
 });
-export const PermissionRequestSchema = z
+const PermissionRequestSchema = z
   .strictObject({
     id: PermissionRequestIdSchema,
     harness: HarnessSchema,
@@ -210,10 +210,10 @@ export const PermissionRequestSchema = z
 export type PermissionRequest = z.infer<typeof PermissionRequestSchema>;
 export const AgendaIdSchema = z.string().regex(/^A[1-9][0-9]*$/u);
 export type AgendaId = z.infer<typeof AgendaIdSchema>;
-export const AccountAvailabilitySchema = z.enum(['available', 'unavailable']);
-export const AccountUnavailableReasonSchema = z.enum(['cooldown', 'spend_limit', 'auth', 'provider', 'no_credentials']);
+const AccountAvailabilitySchema = z.enum(['available', 'unavailable']);
+const AccountUnavailableReasonSchema = z.enum(['cooldown', 'spend_limit', 'auth', 'provider', 'no_credentials']);
 const NonNegativeFiniteSchema = z.number().finite().nonnegative();
-export const QuotaSchema = z.object({
+const QuotaSchema = z.object({
   usageBased: z.boolean().optional(),
   availability: AccountAvailabilitySchema.optional(),
   unavailable: z.boolean().optional(),
@@ -256,4 +256,4 @@ export type SessionState = {
 
 /** What a changed ferret answers to the caller of a write: its record, as the owning plugin shows it. */
 export type SessionView = SessionState & { readonly [field: string]: unknown };
-export type Quota = z.infer<typeof QuotaSchema>;
+type Quota = z.infer<typeof QuotaSchema>;

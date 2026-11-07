@@ -11,10 +11,9 @@ import { z } from 'zod';
  * Objects are not strict: a newer daemon may add a field this page has no use for, and that must not turn every
  * listing into a failed read.
  */
-export const FsEntryTypeSchema = z.enum(['file', 'dir', 'symlink']);
-export type FsEntryType = z.infer<typeof FsEntryTypeSchema>;
+const FsEntryTypeSchema = z.enum(['file', 'dir', 'symlink']);
 
-export const FsEntrySchema = z.object({
+const FsEntrySchema = z.object({
   name: z.string().min(1),
   type: FsEntryTypeSchema,
   size: z.number().int().nonnegative().optional(),
@@ -38,8 +37,7 @@ export const FsListingSchema = z.object({
 });
 export type FsListing = z.infer<typeof FsListingSchema>;
 
-export const FsRefusalReasonSchema = z.enum(['denylist', 'ignored', 'escapes']);
-export type FsRefusalReason = z.infer<typeof FsRefusalReasonSchema>;
+const FsRefusalReasonSchema = z.enum(['denylist', 'ignored', 'escapes']);
 
 export const FsFileSchema = z.object({
   path: z.string(),
@@ -60,7 +58,7 @@ export const FsFileSchema = z.object({
 });
 export type FsFile = z.infer<typeof FsFileSchema>;
 
-export const FsChangeSchema = z.object({
+const FsChangeSchema = z.object({
   /** Relative to the ferret's folder, never to the repository root. */
   path: z.string().min(1),
   /** The two-character porcelain XY code, for example `" M"`, `"A "`, `"??"`. */

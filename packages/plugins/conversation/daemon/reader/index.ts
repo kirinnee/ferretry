@@ -10,8 +10,6 @@ import { PacedTranscriptParser } from './lib/transcript/sliced.ts';
 import { type FerretExists, readerRoutes } from './routes.ts';
 
 export * from './lib/reads.ts';
-export { EntriesTranscriptSource, type HarnessTranscripts } from './adapters/entries-source.ts';
-export type { FerretExists } from './routes.ts';
 
 export interface ReaderNeeds {
   /** A ferret's harness and that harness plugin's `TranscriptReader`: the only way a transcript is read (G162). */

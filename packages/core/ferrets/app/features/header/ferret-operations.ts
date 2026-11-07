@@ -19,7 +19,7 @@ import { callFailure, type FerretsClient } from '../../lib/client.ts';
 import { downgradeOf, downgradeSentence, type RefusedCall } from '../../lib/context-downgrade.ts';
 import type { RenamePatch } from './rename-model.ts';
 
-export const REQUEST_ID_HEADER = 'x-fy-request-id';
+const REQUEST_ID_HEADER = 'x-fy-request-id';
 
 /** A failure with a plain sentence for the alert and the daemon's own words kept behind a disclosure. */
 export class DetailedFailure extends Error {
@@ -141,7 +141,7 @@ interface RestartConsent {
 export const newRestartRequestId = (): string => `ferret-restart-${globalThis.crypto.randomUUID()}`;
 
 /** The runtime a restart relaunches on: the one the ferret already has. */
-export const restartTarget = (ferret: Pick<FerretSummary, 'runtime'>): string | undefined => ferret.runtime;
+const restartTarget = (ferret: Pick<FerretSummary, 'runtime'>): string | undefined => ferret.runtime;
 
 /**
  * Restarts the ferret's CLI on the login it is already on, with its conversation: the move onto the same runtime, which

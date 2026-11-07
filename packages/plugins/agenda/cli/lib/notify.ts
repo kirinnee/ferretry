@@ -10,7 +10,7 @@ const PUSH_TITLE_LENGTH = 40;
  * What `fy notify` posts to the ferret's board route (Asks'): a plain notice with no answers and no turn. The wire field
  * for "buzz the phone" keeps its name; only the flag is `--buzz`.
  */
-export const NoticeRequestSchema = z.strictObject({
+const NoticeRequestSchema = z.strictObject({
   action: z.literal('add'),
   source: z.literal('agent-raised'),
   sourceRef: z.null(),

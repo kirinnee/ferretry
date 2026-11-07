@@ -36,7 +36,7 @@ export interface PaneReading {
 export const UNREAD_PANE: PaneReading = Object.freeze({ read: false, activity: null });
 
 /** Whether a live session is idle at its prompt, on the evidence above. */
-export const sessionAtPrompt = (view: FerretView, pane: PaneReading): boolean => {
+const sessionAtPrompt = (view: FerretView, pane: PaneReading): boolean => {
   const { state } = view;
   if (state.status !== 'running') return false;
   if (pane.activity !== null) return false;

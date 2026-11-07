@@ -47,6 +47,6 @@ export class FileResumeTurnStore implements ResumeTurnStore {
 }
 
 /** Where a turn document's author is kept: `turn-008.md` → `turn-008.by.json`. */
-export function authorFile(turnFile: string): string {
+function authorFile(turnFile: string): string {
   return turnFile.replace(/\.md$/u, '.by.json');
 }

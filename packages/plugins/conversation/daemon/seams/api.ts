@@ -7,18 +7,13 @@ import type { CallContext, RouteHandler } from '@ferretry/kernel/contract';
 
 export {
   ApiError,
-  type ApiRequest,
   type ApiResponse,
   decodeParameter,
   headerValue,
   jsonResponse,
-  queryValue,
-  queryValues,
   type SocketDownstream,
-  type SocketFrame,
-  type SocketHandler,
 } from '@ferretry/kernel/contract';
-export { MAX_REQUEST_BODY_BYTES, MAX_TEXT_BODY_BYTES, parseBody, parseOptionalBody } from './body.ts';
+export { parseBody } from './body.ts';
 
 /** What Gate stamps for a call from a ferret's own credential: `peer:<ferret id>`. */
 export const PEER_ACTOR_PREFIX = 'peer:';
@@ -33,7 +28,6 @@ export interface MountRoute {
   readonly path: string;
   readonly handle: RouteHandler;
 }
-export type ApiRoute = MountRoute;
 
 /** A mount list as the daemon half's `routes` record: `"POST /v1/ferrets/:ferretId/send"` -> handler. */
 export function routeTable(mounts: readonly MountRoute[]): Record<string, RouteHandler> {
@@ -64,12 +58,6 @@ export interface MountSocket {
   readonly method: string;
   readonly path: string;
   readonly accept: SocketAccept;
-}
-
-/** What a module adds to the daemon: its routes and its sockets. */
-export interface MountContribution {
-  readonly routes: readonly MountRoute[];
-  readonly sockets: readonly MountSocket[];
 }
 
 export function socketTable(mounts: readonly MountSocket[]): Record<string, SocketAccept> {

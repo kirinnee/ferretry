@@ -104,7 +104,7 @@ const roomOf = (element: HTMLElement, reserve: number): number => {
  * detail grows into the screen it has rather than a guess at it. Re-measured when the window resizes,
  * when a new card comes on top and when what is drawn under the deck changes size.
  */
-export const useDeckRoom = (
+const useDeckRoom = (
   deck: { readonly current: HTMLElement | null },
   topKey: string | undefined,
   reserve = 0,

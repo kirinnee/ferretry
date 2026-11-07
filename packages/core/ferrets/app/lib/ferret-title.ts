@@ -5,7 +5,7 @@ import { displayCallsign } from './callsign.ts';
 export type TitledFerret = Pick<FerretSummary, 'id' | 'name' | 'folder' | 'title'>;
 
 /** The last segment of a folder path, whichever separator it uses. */
-export const baseName = (path: string): string =>
+const baseName = (path: string): string =>
   path
     .split(/[\\/]/u)
     .filter(part => part !== '')
@@ -32,13 +32,3 @@ export const ferretTitles = (ferret: TitledFerret): { readonly title: string; re
 
 /** The one-line name for a sentence or an accessible label: the title, nothing else. */
 export const ferretLabel = (ferret: TitledFerret): string => ferretTitles(ferret).title;
-
-/** WHO is working: the callsign, else the id. The speaker in the transcript and the secondary line of a header. */
-export const ferretDisplayName = (ferret: Pick<FerretSummary, 'id' | 'name'>): string =>
-  displayCallsign(ferret.name) || ferret.id;
-
-/**
- * WHAT this ferret is for: the task it was given, never the callsign; the callsign only when it has no task.
- */
-export const ferretTitle = (ferret: Pick<FerretSummary, 'id' | 'name' | 'title'>): string =>
-  ferretTask(ferret) || ferretDisplayName(ferret);

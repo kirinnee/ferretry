@@ -38,7 +38,7 @@ export interface PickerQuarantine {
 }
 
 /** A failure's message, whatever it was thrown as. */
-export function failureMessage(failure: unknown): string {
+function failureMessage(failure: unknown): string {
   return failure instanceof Error ? failure.message : String(failure);
 }
 
@@ -64,21 +64,6 @@ export function quarantineUnconfirmedPicker(
       cleanupError: failureMessage(cleanupFailure),
     },
   };
-}
-
-/** True when a session is holding the picker quarantine and must accept no
- *  input. Read from durable state, so it survives a daemon restart. */
-export function isPickerQuarantined(state: { readonly needsHumanKind?: string }): boolean {
-  return state.needsHumanKind === CODEX_PICKER_QUARANTINE_KIND;
-}
-
-/** Why a send or a runtime control was refused on a quarantined session. */
-export function pickerInputRefusal(binaryName: string): string {
-  return (
-    'input is blocked because Codex picker cleanup was not confirmed; ' +
-    `run \`${binaryName} resume <session>\` or \`${binaryName} stop <session>\` ` +
-    'before sending or retrying runtime control'
-  );
 }
 
 /**

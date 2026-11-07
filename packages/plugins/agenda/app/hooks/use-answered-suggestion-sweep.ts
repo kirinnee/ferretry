@@ -15,7 +15,7 @@ import { type AnsweredSuggestions, answeredSuggestions } from '../lib/answered-s
 import type { DaemonConnection, DaemonId } from '../lib/machine.ts';
 
 /** The owner's suggestion list route. */
-export const SIGN_IN_RULE_SUGGESTIONS_PATH = '/v1/sign-in-rules/suggestions';
+const SIGN_IN_RULE_SUGGESTIONS_PATH = '/v1/sign-in-rules/suggestions';
 
 /** A machine's client for the suggestion list: one read by path, parsed with the caller's schema. */
 export interface RuleClient {

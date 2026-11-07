@@ -106,7 +106,7 @@ export class ListedSessionIndex implements SessionIndex {
 }
 
 /** The index's listing order: most recently touched first, then by id. */
-export function compareListed(left: IndexedSession, right: IndexedSession): number {
+function compareListed(left: IndexedSession, right: IndexedSession): number {
   const leftKey = left.updatedAt ?? left.createdAt ?? left.id;
   const rightKey = right.updatedAt ?? right.createdAt ?? right.id;
   if (leftKey !== rightKey) return leftKey < rightKey ? 1 : -1;

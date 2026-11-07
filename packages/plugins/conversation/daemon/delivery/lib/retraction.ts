@@ -26,7 +26,7 @@ import type { SendRecord } from './types.ts';
 export type ReplyProof = 'answered' | 'unanswered' | 'unknown';
 
 /** How many bytes from a transcript's END the proof reads: the newest turn's records sit there. */
-export const RETRACTION_TAIL_BYTES = 8 * 1024 * 1024;
+const RETRACTION_TAIL_BYTES = 8 * 1024 * 1024;
 
 /** A Claude record id: a UUID. Anything else cannot be searched for safely and proves nothing. */
 const RECORD_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;

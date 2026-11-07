@@ -18,7 +18,7 @@ import type { ConversationCandidate, ConversationDescriber, ConversationFiles } 
 import { codexIndexNames } from './conversation-name.ts';
 
 /** One harness conversation as its plugin's `ConversationFinder` reports it. */
-export interface FoundLink {
+interface FoundLink {
   readonly id: string;
   readonly folder: string;
   readonly title?: string;
@@ -109,7 +109,7 @@ const historyEntryOf = (row: LinkableConversation): ForeignHistoryEntry => ({
 });
 
 /** The search a listing applies: every word must appear somewhere, and the date is a floor (today's matcher). */
-export function linkMatcher(query: LinkQuery): (row: LinkableConversation) => boolean {
+function linkMatcher(query: LinkQuery): (row: LinkableConversation) => boolean {
   const words = (query.q ?? '')
     .toLowerCase()
     .split(/\s+/u)

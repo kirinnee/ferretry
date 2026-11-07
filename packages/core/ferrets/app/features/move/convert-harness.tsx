@@ -27,8 +27,8 @@ import {
   refusedCause,
 } from './conversion-model.ts';
 
-export type ReadConversionPreview = (agent: string) => Promise<ConversionPreview>;
-export type MoveToOtherHarness = (agent: string, requestId: string, forceInflight: boolean) => Promise<FerretSummary>;
+type ReadConversionPreview = (agent: string) => Promise<ConversionPreview>;
+type MoveToOtherHarness = (agent: string, requestId: string, forceInflight: boolean) => Promise<FerretSummary>;
 
 export interface ConvertHarnessProps {
   readonly summary: FerretSummary;

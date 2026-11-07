@@ -156,7 +156,7 @@ const forConfirmation = (item: AgendaItem): AgendaItem => {
 };
 
 /** One written part of a card's status: its key, the label it is drawn under, and its Markdown. */
-export interface StatusPart {
+interface StatusPart {
   readonly key: string;
   readonly label: string;
   readonly text: string;
@@ -167,7 +167,7 @@ export interface StatusPart {
  * STATUS (the card's current state: Now / Done so far / Next, each Markdown, the empty ones left out) as a calm block
  * above them; an agenda card never has one.
  */
-export function Situation({
+function Situation({
   premise,
   context,
   status = [],

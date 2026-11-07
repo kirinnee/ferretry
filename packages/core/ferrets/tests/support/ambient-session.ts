@@ -23,7 +23,7 @@ import { delimiter, isAbsolute, resolve, sep } from 'node:path';
 import rootManifest from '../../../../../package.json' with { type: 'json' };
 
 /** What a pane's environment carries about the session and the daemon it belongs to. */
-export const AMBIENT_SESSION_VARIABLES = [
+const AMBIENT_SESSION_VARIABLES = [
   'FY_HOME',
   'TMUX',
   'TMUX_PANE',
@@ -45,7 +45,7 @@ export const AMBIENT_SESSION_VARIABLES = [
  * process tree has already been shed: `scripts/test/swept.sh` sets it before Bun starts, and a later
  * module load must never mistake a test's own temporary `FY_HOME` for an inherited one.
  */
-export const PROTECTED_PATHS_VARIABLE = 'FY_TEST_PROTECTED_PATHS';
+const PROTECTED_PATHS_VARIABLE = 'FY_TEST_PROTECTED_PATHS';
 
 /** The system temporary roots a disposable path must lie strictly inside. */
 const TEMPORARY_BASES = ['/tmp', '/private/tmp', '/var/tmp', '/var/folders'] as const;
@@ -69,7 +69,7 @@ function strictlyWithin(base: string, path: string): boolean {
 }
 
 /** The socket a `TMUX` value names — `<socket>,<server pid>,<session index>` — when it names one. */
-export function tmuxSocketOf(value: string | undefined): string | undefined {
+function tmuxSocketOf(value: string | undefined): string | undefined {
   const socket = value?.split(',', 1)[0]?.trim();
   return socket !== undefined && isAbsolute(socket) ? socket : undefined;
 }
@@ -85,7 +85,7 @@ function defaultStateHome(userHome: string): string | undefined {
 }
 
 /** Every protected path this process knows of: what it inherited, and the account's default home. */
-export function protectedPaths(
+function protectedPaths(
   environment: Environment = process.env,
   userHome: string = process.env.FY_TEST_REAL_HOME ?? homedir(),
 ): readonly string[] {
@@ -127,7 +127,7 @@ export function shedAmbientSession(
  * system temporary root (or this run's own temporary directory), and never one that is, holds, or lies
  * inside a protected home or socket. Throws, naming the path, rather than letting a fixture guess.
  */
-export function assertDisposable(
+function assertDisposable(
   path: string,
   what: string,
   environment: Environment = process.env,

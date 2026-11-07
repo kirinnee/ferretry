@@ -7,7 +7,6 @@ import type { z } from 'zod';
 import {
   AnswerRequestSchema,
   type CompactAtPatchResult,
-  CompactAtPatchResultSchema,
   CompactAtPatchSchema,
   ComposerRequestSchema,
   ComposerResultSchema,
@@ -31,20 +30,14 @@ import {
   type DraftSlot,
   type DraftSnapshot,
   DraftSnapshotSchema,
-  FerretQueueSchema,
   type FerretCompactAt,
-  FerretCompactAtSchema,
-  type HandoffName,
   HandoffNameSchema,
   InterruptRequestSchema,
-  type MessageLabel,
-  MessageLabelSchema,
   type SendCancelEffectSchema,
   type SendDispositionSchema,
   SendRequestSchema,
   REQUEST_ID_HEADER,
   type SenderKind,
-  SenderKindSchema,
   draftFrameBytes,
   isDraftItemSlot,
 } from '../../contract/index.ts';
@@ -55,25 +48,22 @@ export * from '../../contract/index.ts';
 export const AnswerSessionRequestSchema = AnswerRequestSchema;
 export const ComposerDraftRequestSchema = ComposerRequestSchema;
 export type ComposerDraftRequest = z.infer<typeof ComposerRequestSchema>;
-export const ComposerDraftResultSchema = ComposerResultSchema;
+
 export type ComposerDraftResult = z.infer<typeof ComposerResultSchema>;
 export const InterruptSessionRequestSchema = InterruptRequestSchema;
 export const SendSubmitRequestSchema = SendRequestSchema;
-export type PeerMessageLabelAlias = MessageLabel;
-export const PeerMessageLabelSchema = MessageLabelSchema;
+
 export type SendSenderKind = SenderKind;
-export const SendSenderKindSchema = SenderKindSchema;
+
 export type SendCancelEffect = z.infer<typeof SendCancelEffectSchema>;
 export type SendDisposition = z.infer<typeof SendDispositionSchema>;
 export type SendQueueProof = 'transcript' | 'pane';
-export const SessionQueueSchema = FerretQueueSchema;
-export const SessionCompactAtSchema = FerretCompactAtSchema;
+
 export type SessionCompactAt = FerretCompactAt;
 export const SessionCompactAtPatchSchema = CompactAtPatchSchema;
-export const SessionCompactAtPatchResultSchema = CompactAtPatchResultSchema;
+
 export type SessionCompactAtPatchResult = CompactAtPatchResult;
 export const SessionHandoffNameSchema = HandoffNameSchema;
-export type SessionHandoffName = HandoffName;
 
 // shared draft → draft
 export const SHARED_DRAFT_ERROR_CODES = DRAFT_ERROR_CODES;
@@ -105,5 +95,3 @@ export type {
   HandoffDocument as SessionHandoff,
   HandoffAttachment as SessionHandoffAttachment,
 } from '../../contract/index.ts';
-export { HandoffDocumentSchema as SessionHandoffSchema } from '../../contract/index.ts';
-export { InstantSchema } from '@ferretry/std';

@@ -55,8 +55,6 @@ export interface InputsDeps {
     readonly grants?: SignInGrantSource;
     readonly loginFacts?: LoginFactSink;
   };
-  /** Tells a ferret its request ended (today's agent reply outbox); absent, the ferret reads its state instead. */
-  readonly tellFerret?: (ferret: FerretId, key: string, message: string) => Promise<unknown>;
   /** Whether a ferret has finished, so what it was given is no longer held for it; absent, none has. */
   readonly ferretEnded?: (ferret: FerretId) => Promise<boolean>;
   readonly hostName?: string;
@@ -135,7 +133,7 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
       deps.secretStore === undefined ? undefined : new SecretStoreTarget(deps.secretStore),
     ),
     agenda: new InputAsksAdapter(ctx.needs.asks, journal),
-    notifier: new InputAgentNotifierAdapter(deps.tellFerret ?? (async () => undefined)),
+    notifier: new InputAgentNotifierAdapter(ctx.needs.asks),
     journal,
     audit: new InputGateAudit(ctx.needs.gate),
     clock: { now: () => clock.nowMs() },

@@ -19,7 +19,7 @@ import { type ConversationCaller, DaemonCallError } from './seam.ts';
 // ─── transcript images (copy of today's lib/transcript-image-source.ts) ───────────────────────────────────────────
 
 /** Base64 characters decoded per slice. A multiple of 4, so every slice but the last is whole quanta. */
-export const TRANSCRIPT_IMAGE_DECODE_SLICE = 256 * 1024;
+const TRANSCRIPT_IMAGE_DECODE_SLICE = 256 * 1024;
 
 const CACHE_ID_PREFIX = 'transcript-image:';
 

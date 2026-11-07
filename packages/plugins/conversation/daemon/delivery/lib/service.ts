@@ -98,7 +98,7 @@ export interface SessionSendPorts {
 }
 
 /** One ferret's message inside a combined delivery (`SendMessageRequest.parts`). */
-export interface SendPart {
+interface SendPart {
   /** The queued message's own id. */
   readonly queueId: string;
   /** The sending ferret's session. */
@@ -177,7 +177,7 @@ const DRAFT_QUOTE_CHARS = 40;
  * Quoted so a person can recognise it, and the remedy named, because the obvious one (send again) is
  * what made it worse. The whole draft rides along, so the app can offer to send or clear exactly it.
  */
-export function composerOccupiedRefusal(draft: string): SendDraftRefused {
+function composerOccupiedRefusal(draft: string): SendDraftRefused {
   const quoted = draft.length > DRAFT_QUOTE_CHARS ? `${draft.slice(0, DRAFT_QUOTE_CHARS)}…` : draft;
   return new SendDraftRefused(
     `the agent's composer already holds unsent text ("${quoted}"); a message typed now would be sent ` +
@@ -190,7 +190,7 @@ export function composerOccupiedRefusal(draft: string): SendDraftRefused {
  * Why nothing was typed when the agent's composer could not be read: it may hold a person's draft, and
  * a message typed onto one is submitted joined to it. Usually a passing repaint, so trying again works.
  */
-export function composerUnreadableRefusal(): SendScreenUnreadable {
+function composerUnreadableRefusal(): SendScreenUnreadable {
   return new SendScreenUnreadable(
     "the agent's screen could not be read to prove its composer empty, so nothing was typed; send it again " +
       'in a moment, or check the terminal for a half-written message',
@@ -209,7 +209,7 @@ const NOT_READY_REASON: Readonly<Record<SendNotReadyCause, SendNotReady['reason'
  * idle while its agent is still mid-turn — a declared wait is set from inside the turn — and the wait for a
  * prompt then gives up before the first key. Nothing was typed, so the same send may go again.
  */
-export function paneNotReadyRefusal(error: SendPaneNotReady): SendNotReady {
+function paneNotReadyRefusal(error: SendPaneNotReady): SendNotReady {
   const reason = NOT_READY_REASON[error.why];
   const remedy =
     reason === 'dialog'

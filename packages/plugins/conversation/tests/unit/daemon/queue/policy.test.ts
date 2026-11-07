@@ -2,15 +2,9 @@ import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
 import type { QueuedMessage } from '../../../../daemon/seams/protocol.ts';
 import should from 'should';
-import {
-  boardOnly,
-  defaultQueueCoalesceSettings,
-  deliveryOrder,
-  effectiveLabel,
-  planDelivery,
-  type QueueCoalesceSettings,
-  type SendTarget,
-} from '../../../../daemon/seams/index.ts';
+import { boardOnly, deliveryOrder, effectiveLabel, planDelivery } from '../../../../daemon/queue/lib/policy.ts';
+import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from '../../../../daemon/queue/lib/settings.ts';
+import { type SendTarget } from '../../../../daemon/delivery/lib/types.ts';
 import { parseSessionId } from '../../../../daemon/seams/ferret-id.ts';
 
 const at = (seconds: number): Instant =>

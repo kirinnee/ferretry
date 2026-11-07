@@ -22,7 +22,7 @@ import type { WorkDocument, WorkField } from './documents.ts';
 import { matchLine, meaningfulTokens, normalizePhrase, tokensOf } from './text.ts';
 
 /** How surely a document is the one asked about. */
-export type WorkRelatedStrength = 'strong' | 'weak';
+type WorkRelatedStrength = 'strong' | 'weak';
 
 /**
  * Where a related check takes the rarity of a word it reads that was NOT asked (a candidate's own title, summary and

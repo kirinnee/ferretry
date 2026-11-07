@@ -51,7 +51,7 @@ import type { TranscriptRowsIndex, TranscriptTarget } from './reader.ts';
  * keeps the handful of long sessions someone is actually reading, and the one being read is never
  * evicted however large it is: evicting it would make every page of it a whole-file read again.
  */
-export const DEFAULT_CONVERSATION_INDEX_BYTES = 64 * 1024 * 1024;
+const DEFAULT_CONVERSATION_INDEX_BYTES = 64 * 1024 * 1024;
 
 /**
  * The most window steps one read takes before it answers with what it has folded.

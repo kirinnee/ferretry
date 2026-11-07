@@ -20,7 +20,7 @@ interface PendingTail {
 }
 
 /** The piece of the file-event hub this cache listens to (`FileEventHub` is one). */
-export interface TranscriptChangeFeed {
+interface TranscriptChangeFeed {
   subscribe(path: string, listener: (path: string) => void): { live(): boolean; close(): void };
 }
 
@@ -42,16 +42,16 @@ interface WatchedTail {
 }
 
 /** How many sessions' tails are remembered; the least recently asked-for is forgotten first. */
-export const TRANSCRIPT_TAIL_CACHE_CAPACITY = 256;
+const TRANSCRIPT_TAIL_CACHE_CAPACITY = 256;
 /** How many transcript tails are parsed at once across the whole daemon. */
-export const TRANSCRIPT_TAIL_CONCURRENCY = 2;
+const TRANSCRIPT_TAIL_CONCURRENCY = 2;
 /**
  * How long a tail verified under a live watch is answered without a `stat`. The watch is what keeps it
  * current; this bound is only the backstop for an event the platform lost, which inotify does only on a
  * queue overflow (reported to every watch) and FSEvents coalesces rather than drops. It is longer than
  * the slowest roster pass (the warden's 30 s) on purpose: a bound shorter than the asks re-stats every one.
  */
-export const TRANSCRIPT_TAIL_TRUST_MS = 300_000;
+const TRANSCRIPT_TAIL_TRUST_MS = 300_000;
 
 const sameBytes = (a: TranscriptFingerprint, b: TranscriptFingerprint): boolean =>
   a.file === b.file && a.size === b.size && a.mtimeMs === b.mtimeMs;

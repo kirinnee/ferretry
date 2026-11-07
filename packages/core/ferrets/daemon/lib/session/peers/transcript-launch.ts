@@ -31,7 +31,7 @@ export function claudeSessionArguments(harnessSessionId: string): readonly strin
 // --- session/transcript/codex-rollout.ts ------------------------------------------------------------------------
 
 /** The root a Codex correlation token is declared under. Nobody creates it, so the proof costs no access. */
-export const CODEX_CORRELATION_ROOT = 'codex-correlation';
+const CODEX_CORRELATION_ROOT = 'codex-correlation';
 
 /** The declared root's own name, under {@link CODEX_CORRELATION_ROOT}. */
 const CODEX_CORRELATION_LEAF = 'unreachable';

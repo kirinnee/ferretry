@@ -1,14 +1,15 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { ConversationDigestError, type PortableConversationRow } from '../../../daemon/reader/lib/session/digest.ts';
 import {
-  ConversationDigestError,
   ConversationIndex,
   type ConversationIndexFiles,
   type ConversationIndexLimits,
+} from '../../../daemon/reader/lib/session/conversation-index.ts';
+import {
   extendSessionTranscriptRawPrefix,
-  type PortableConversationRow,
   sessionTranscriptRawPrefixStart,
-} from '../../../daemon/reader/lib/session/index.ts';
+} from '../../../daemon/reader/lib/session/raw-prefix.ts';
 import type {
   TranscriptBatch,
   TranscriptEvent,

@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { portableConversationRows } from '../../../daemon/reader/lib/session/index.ts';
+import { portableConversationRows } from '../../../daemon/reader/lib/session/digest.ts';
 import { ClaudeTranscriptParser } from '../../../daemon/reader/lib/transcript/claude.ts';
 import fixture from '../../fixtures/transcript/claude.jsonl' with { type: 'text' };
 import compactionFixture from '../../fixtures/transcript/claude-compaction.jsonl' with { type: 'text' };

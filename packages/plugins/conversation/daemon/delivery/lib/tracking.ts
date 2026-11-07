@@ -310,7 +310,7 @@ function kindOf(input: ObservedHumanInput): SendEvidence['kind'] {
  * five records, in order, and an older identical message can never prove a newer send. A record a
  * delivered send already cites (`claimed`) is never offered again.
  */
-export function judgeSends(
+function judgeSends(
   watched: readonly SendRecord[],
   claimed: ReadonlySet<string>,
   inputs: readonly ObservedHumanInput[],
