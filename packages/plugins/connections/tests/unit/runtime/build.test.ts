@@ -7,6 +7,8 @@ import { anonymous, device } from '../../../../../core/kernel/testing/admission.
 import {
   CarriersViewSchema,
   ConnectionsPort,
+  HOSTED_APP_ORIGIN,
+  HOSTED_RELAY_DIRECTORY_ORIGIN,
   type PublishedCarriers,
   PublishedCarriersSchema,
 } from '../../../contract/index.ts';
@@ -89,8 +91,46 @@ describe('published carrier route', () => {
     expect(host.provided(ConnectionsPort).advertisement()).toEqual({
       advertisement: { kind: 'address', url: 'http://box.example:7431', origin: 'derived' },
       port: 7431,
+      appOrigin: HOSTED_APP_ORIGIN,
+      allowedOrigins: [HOSTED_APP_ORIGIN, 'http://box.example:7431'],
+      directoryOrigin: HOSTED_RELAY_DIRECTORY_ORIGIN,
     });
     await host.stop();
+  });
+  test('the advertisement names the app origin, the browser origins and the directory from the same facts as the QR', async () => {
+    const custom = implementDaemon(manifest, {
+      build: ctx =>
+        buildConnections(ctx, {
+          ...bindings,
+          publicUrl: 'https://fy.example.org/',
+          corsOrigins: ['https://app.example', HOSTED_APP_ORIGIN],
+          directoryOrigin: 'https://directory.example',
+        }),
+    });
+    const host = await testHost({ plugins: [custom] });
+    await host.runJob('relay-discovery');
+    const advertised = host.provided(ConnectionsPort).advertisement();
+    expect(advertised.appOrigin).toBe(HOSTED_APP_ORIGIN);
+    expect(advertised.allowedOrigins).toEqual([
+      'https://app.example',
+      HOSTED_APP_ORIGIN,
+      'https://fy.example.org',
+      'http://box.example:7431',
+    ]);
+    expect(advertised.directoryOrigin).toBe('https://directory.example');
+    await host.stop();
+    // A build with no directory (`off`) names none.
+    const off = implementDaemon(manifest, {
+      build: ctx =>
+        buildConnections(ctx, {
+          ...bindings,
+          directoryOrigin: 'off',
+          directory: { read: async () => ({ kind: 'undetermined', reason: 'off' }) } as never,
+        }),
+    });
+    const offHost = await testHost({ plugins: [off] });
+    expect(offHost.provided(ConnectionsPort).advertisement().directoryOrigin).toBeUndefined();
+    await offHost.stop();
   });
   test('R173 a switched-off discovery entry stays off', async () => {
     const host = await testHost({

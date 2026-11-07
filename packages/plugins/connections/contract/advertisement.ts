@@ -21,4 +21,16 @@ export interface ConnectionAdvertisement {
   /** Only an address read from this daemon’s hosted directory, never an operator-written relay. */
   readonly discoveredRelayUrl?: string;
   readonly port?: number;
+  /**
+   * The app origin a pairing, share or catalog link points at (today's `HOSTED_APP_ORIGIN`), from the same facts the
+   * pairing QR is minted from.
+   */
+  readonly appOrigin: string;
+  /**
+   * The browser origins a passkey's `clientData.origin` may equal (today's `browserOrigins`): the configured browser
+   * origins, the operator's public address and the listener's own, each once.
+   */
+  readonly allowedOrigins: readonly string[];
+  /** The relay directory origin this daemon discovers from; absent when this build or boot has none. */
+  readonly directoryOrigin?: string;
 }

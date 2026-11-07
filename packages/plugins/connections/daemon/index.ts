@@ -13,6 +13,7 @@ import { implementDaemon, type DaemonContext } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
 import {
   CarriersChanged,
+  HOSTED_APP_ORIGIN,
   HOSTED_RELAY_DIRECTORY_ORIGIN,
   isLoopbackHost,
   type ConnectionAdvertisement,
@@ -38,6 +39,7 @@ import {
 import type { OpenCarrierSession, RendezvousSigner } from './lib/relay/session-ports.ts';
 import { DISCOVERED_RELAY_CARRIER, type DaemonRelayCarrierEntry } from './lib/runtime/relay-config.ts';
 import { decideAdvertisement } from './lib/runtime/advertisement.ts';
+import { browserOrigins, directoryOriginOf } from './lib/runtime/browser-origins.ts';
 import { carrierRoutes } from './lib/runtime/mounts/carriers.ts';
 import { PublishedCarrierSet } from './lib/runtime/published-carriers.ts';
 
@@ -51,6 +53,8 @@ export interface ConnectionBindings {
   readonly publicUrl?: string;
   readonly directoryOrigin?: string;
   readonly directory?: RelayDirectoryPort;
+  /** The browser origins this daemon answers (today's `corsOrigins`); the hosted app's by default. */
+  readonly corsOrigins?: readonly string[];
   readonly socketFactory?: RelayWebSocketFactory;
   readonly randomBytes?: (length: number) => Uint8Array;
 }
@@ -229,6 +233,20 @@ export function buildConnections(
               ...(bindings?.publicUrl === undefined ? {} : { operatorPublicUrl: bindings.publicUrl }),
             }),
             ...(bindings?.port === undefined ? {} : { port: bindings.port }),
+            appOrigin: HOSTED_APP_ORIGIN,
+            allowedOrigins: browserOrigins({
+              corsOrigins: bindings?.corsOrigins ?? [HOSTED_APP_ORIGIN],
+              host: bindings?.host ?? config?.direct?.host ?? '127.0.0.1',
+              ...(bindings?.publicUrl === undefined ? {} : { publicUrl: bindings.publicUrl }),
+              ...((bindings?.port ?? config?.direct?.port) === undefined
+                ? {}
+                : { port: (bindings?.port ?? config?.direct?.port) as number }),
+            }),
+            ...(() => {
+              // The origin the one discovery read asks (`initialise`), so links and passkeys name the same directory.
+              const origin = directoryOriginOf(bindings?.directoryOrigin ?? HOSTED_RELAY_DIRECTORY_ORIGIN);
+              return origin === undefined ? {} : { directoryOrigin: origin };
+            })(),
             ...(() => {
               const discovered = sources.find(s => s.kind === 'discovered');
               return discovered?.kind === 'discovered' && discovered.config.enabled
