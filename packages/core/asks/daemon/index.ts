@@ -36,7 +36,14 @@ import { KeyedSerialQueue } from './lib/agenda/serial-queue.ts';
 import { AgendaChangeFanout, AgendaReplyDelivery, AgendaBoardUndelivered } from './lib/agenda/observers.ts';
 import { agendaRoutes } from './lib/routes/agenda.ts';
 import { agendaClearRoutes } from './lib/routes/agenda-clear.ts';
-import { AgendaRepliesFiles, AgendaPendingChangesFiles, AgendaPendingVersionsFiles } from '../manifest.ts';
+import {
+  AgendaRepliesFiles,
+  AgendaPendingChangesFiles,
+  AgendaPendingVersionsFiles,
+  AsksConfigFile,
+} from '../manifest.ts';
+import { AgendaWaker, WAKE_SWEEP_MS } from './lib/agenda/waker.ts';
+import { AgendaResurfacer, RESURFACE_SWEEP_MS } from './lib/agenda/resurfacer.ts';
 import { AgendaLedgerFiles } from './lib/state.ts';
 
 export default implementDaemon(manifest, {
@@ -112,6 +119,23 @@ export default implementDaemon(manifest, {
       schedule: { every: milliseconds(1_000) },
       run: async () => {
         for (const ferret of await boards.ferrets()) await agenda.list(ferret).catch(error => warn(String(error)));
+      },
+    });
+    const waker = new AgendaWaker(repository, agenda, boards.ferrets, now);
+    kernel.jobs.add({
+      id: 'wake',
+      schedule: { every: milliseconds(WAKE_SWEEP_MS) },
+      run: async () => {
+        await waker.sweep();
+      },
+    });
+    kernel.jobs.add({
+      id: 'resurface',
+      schedule: { every: milliseconds(RESURFACE_SWEEP_MS) },
+      run: async () => {
+        const afterMinutes = kernel.config.file(AsksConfigFile)?.resurfaceAfterMinutes;
+        if (afterMinutes === undefined) return;
+        await new AgendaResurfacer(repository, agenda, boards.ferrets, now, afterMinutes).sweep();
       },
     });
 

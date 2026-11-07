@@ -43,6 +43,7 @@ export async function asksHalf(
   options: {
     home?: string;
     wrapState?: (state: StatePort) => StatePort;
+    resurfaceAfterMinutes?: number;
   } = {},
 ) {
   const home = options.home ?? (await mkdtemp(join(tmpdir(), 'asks-half-')));
@@ -84,6 +85,12 @@ export async function asksHalf(
     jobs: { add: (job: JobSpec) => jobs.push(job) },
     events: { publish: (event: { name: string }, payload: unknown) => events.push({ name: event.name, payload }) },
     lifecycle: { onStop: (stop: () => void | Promise<void>) => stops.push(stop) },
+    config: {
+      file: () =>
+        options.resurfaceAfterMinutes === undefined
+          ? undefined
+          : { resurfaceAfterMinutes: options.resurfaceAfterMinutes },
+    },
   } as unknown as KernelPorts;
   const build = asksDaemon.build;
   if (build === undefined) throw new Error('the Asks daemon half has no build');
@@ -103,7 +110,12 @@ export async function asksHalf(
     restart: async () => {
       for (const stop of stops) await stop();
       await drain();
-      return asksHalf(providers, { home });
+      return asksHalf(providers, {
+        home,
+        ...(options.resurfaceAfterMinutes === undefined
+          ? {}
+          : { resurfaceAfterMinutes: options.resurfaceAfterMinutes }),
+      });
     },
     async call(
       key: string,
