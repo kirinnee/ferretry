@@ -18,16 +18,36 @@ function pathOf(key: string, params: Readonly<Record<string, string>> = {}): { m
   return { method, path };
 }
 
+/** `pending`, or the signal's reason as soon as it aborts; a late answer after an abort is dropped. */
+function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abandon = (): void => reject(signal.reason);
+    signal.addEventListener('abort', abandon, { once: true });
+    pending.then(
+      value => {
+        signal.removeEventListener('abort', abandon);
+        resolve(value);
+      },
+      (cause: unknown) => {
+        signal.removeEventListener('abort', abandon);
+        reject(cause);
+      },
+    );
+  });
+}
+
 export function testPluginClient(host: TestHost, as?: TestCaller): PluginClient {
   return {
     async call(route, init = {}) {
       const { method, path } = pathOf(route, init.params);
-      const response = await host.request(method, path, {
+      init.signal?.throwIfAborted();
+      const sent = host.request(method, path, {
         ...(init.body === undefined ? {} : { body: init.body }),
         ...(init.query === undefined ? {} : { query: init.query }),
         ...(init.headers === undefined ? {} : { headers: { ...init.headers } as Record<string, string> }),
         ...(as === undefined ? {} : { as }),
       });
+      const response = await (init.signal === undefined ? sent : abortable(sent, init.signal));
       if (response.status >= 400) throw new Error(`${route} answered ${String(response.status)}: ${response.body}`);
       return (response.body === '' ? undefined : response.json()) as never;
     },

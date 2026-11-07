@@ -91,7 +91,8 @@ export interface RestartWait<T> {
   readonly repeatable: boolean;
   readonly patience: RestartPatience | undefined;
   readonly nowMs: () => number;
-  readonly sleep: (milliseconds: number) => Promise<void>;
+  /** Ends early, quietly, when the signal aborts; the loop then notices the abort itself. */
+  readonly sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -110,9 +111,11 @@ export async function waitOutRestart<T>(wait: RestartWait<T>): Promise<Attempt<T
   for (let look = 0; waitable(outcome, wait.repeatable); look += 1) {
     const remaining = until - wait.nowMs();
     if (remaining <= 0 || left()) break;
-    await wait.sleep(Math.min(restartBackoffMs(look), remaining));
+    await wait.sleep(Math.min(restartBackoffMs(look), remaining), wait.signal);
     if (left()) break;
     outcome = await wait.attempt();
   }
+  // A caller that stopped waiting is told so, not that the daemon was unreachable.
+  if (left() && outcome.kind === 'unreachable') return { kind: 'failed', error: wait.signal?.reason };
   return outcome;
 }

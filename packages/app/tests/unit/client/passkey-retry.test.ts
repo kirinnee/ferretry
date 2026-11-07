@@ -246,3 +246,191 @@ describe('G95 who started the request', () => {
     ]);
   });
 });
+
+/** A handler whose prompt stays parked until the test settles it, like a background read for a machine off screen. */
+function parkedHandler() {
+  const asked: PromptOrigin[] = [];
+  const settle: ((confirmed: boolean) => void)[] = [];
+  const { fake } = handler([]);
+  const parked: PasskeyHandler = {
+    ...fake,
+    confirm: (_daemon, _need, origin) => {
+      asked.push(origin);
+      return new Promise<boolean>(resolve => settle.push(resolve));
+    },
+  };
+  return { parked, asked, settle };
+}
+
+describe('G95 a read that stops waiting leaves its parked prompt', () => {
+  test('G95 an aborted background read behind the unlock prompt gets the original refusal back at once', async () => {
+    const { parked, asked } = parkedHandler();
+    const { client, sends } = daemon([UNLOCK, OK], parked);
+    await client.start();
+    const caller = new AbortController();
+    const waiting = client
+      .forPackage('board')
+      .call('GET /v1/board', { signal: caller.signal })
+      .catch((error: unknown) => error);
+    await Bun.sleep(0);
+    expect(asked).toEqual(['background']);
+    caller.abort();
+    const failure = await waiting;
+    expect(failure).toBeInstanceOf(DaemonCallError);
+    expect((failure as DaemonCallError).status).toBe(401);
+    expect((failure as DaemonCallError).code).toBe('unlock_required');
+    expect(sends()).toHaveLength(1);
+  });
+
+  test('G95 an abandoned read is not sent again when the prompt is answered later', async () => {
+    const { parked, settle } = parkedHandler();
+    const { client, sends } = daemon([UNLOCK, OK], parked);
+    await client.start();
+    const caller = new AbortController();
+    const waiting = client
+      .forPackage('board')
+      .call('GET /v1/board', { signal: caller.signal })
+      .catch((error: unknown) => error);
+    await Bun.sleep(0);
+    caller.abort();
+    await waiting;
+    settle[0]?.(true);
+    await Bun.sleep(0);
+    expect(sends()).toHaveLength(1);
+  });
+
+  test('G95 a read that is not aborted still waits for the prompt, then sends again once', async () => {
+    const { parked, settle } = parkedHandler();
+    const { client, sends } = daemon([UNLOCK, OK], parked);
+    await client.start();
+    const caller = new AbortController();
+    let done = false;
+    const waiting = client
+      .forPackage('board')
+      .call('GET /v1/board', { signal: caller.signal })
+      .finally(() => {
+        done = true;
+      });
+    await Bun.sleep(0);
+    expect(done).toBe(false);
+    settle[0]?.(true);
+    expect(await waiting).toEqual({ cards: [] });
+    expect(sends()).toHaveLength(2);
+  });
+
+  test('G95 an abort after the answer is a no-op', async () => {
+    const { parked, settle } = parkedHandler();
+    const { client, sends } = daemon([UNLOCK, OK], parked);
+    await client.start();
+    const caller = new AbortController();
+    const waiting = client.forPackage('board').call('GET /v1/board', { signal: caller.signal });
+    await Bun.sleep(0);
+    settle[0]?.(true);
+    expect(await waiting).toEqual({ cards: [] });
+    caller.abort();
+    await Bun.sleep(0);
+    expect(sends()).toHaveLength(2);
+  });
+
+  test('G95 the signal travels with the request, so a request in flight can be cut short', async () => {
+    const { fake } = handler([]);
+    const { client, transport } = daemon([OK], fake);
+    await client.start();
+    const caller = new AbortController();
+    await client.forPackage('board').call('GET /v1/board', { signal: caller.signal });
+    expect(transport.requests.at(-1)?.signal).toBe(caller.signal);
+  });
+
+  test('G95 the step-up wait is not abortable, as today: an aborted read still waits and is sent again on confirm', async () => {
+    const { parked, settle } = parkedHandler();
+    const { client, sends } = daemon([STEP_UP, OK], parked);
+    await client.start();
+    const caller = new AbortController();
+    let done = false;
+    const waiting = client
+      .forPackage('board')
+      .call('GET /v1/board', { signal: caller.signal })
+      .finally(() => {
+        done = true;
+      });
+    await Bun.sleep(0);
+    caller.abort();
+    await Bun.sleep(0);
+    expect(done).toBe(false);
+    expect(sends()).toHaveLength(1);
+    settle[0]?.(true);
+    expect(await waiting).toEqual({ cards: [] });
+    expect(sends()).toHaveLength(2);
+  });
+
+  test('G95 an explicit press behind a step-up that is aborted keeps waiting for the prompt too', async () => {
+    const { parked, asked, settle } = parkedHandler();
+    const { client, sends } = daemon([STEP_UP, OK], parked);
+    await client.start();
+    const caller = new AbortController();
+    let done = false;
+    const waiting = client
+      .forPackage('board')
+      .call('POST /v1/board', { signal: caller.signal })
+      .finally(() => {
+        done = true;
+      });
+    await Bun.sleep(0);
+    expect(asked).toEqual(['explicit']);
+    caller.abort();
+    await Bun.sleep(0);
+    expect(done).toBe(false);
+    settle[0]?.(false);
+    const failure = await waiting.catch((error: unknown) => error);
+    expect((failure as DaemonCallError).code).toBe('grant_step_up_required');
+    expect(sends()).toHaveLength(1);
+  });
+
+  test('G95 two reads share one prompt: one aborts and leaves, the other still waits and is sent again once', async () => {
+    // One prompt per machine, however many requests wait on it: both waiters are handed the same promise.
+    const settle: ((confirmed: boolean) => void)[] = [];
+    let prompts = 0;
+    let shared: Promise<boolean> | undefined;
+    const { fake } = handler([]);
+    const gate: PasskeyHandler = {
+      ...fake,
+      confirm: () => {
+        if (shared === undefined) {
+          prompts += 1;
+          shared = new Promise<boolean>(resolve => settle.push(resolve));
+        }
+        return shared;
+      },
+    };
+    const { client, sends } = daemon([UNLOCK, UNLOCK, OK, OK], gate);
+    await client.start();
+    const leaving = new AbortController();
+    const staying = new AbortController();
+    let stayingDone = false;
+    const left = client
+      .forPackage('board')
+      .call('GET /v1/board', { signal: leaving.signal })
+      .catch((error: unknown) => error);
+    const stayed = client
+      .forPackage('board')
+      .call('GET /v1/board', { signal: staying.signal })
+      .finally(() => {
+        stayingDone = true;
+      });
+    await Bun.sleep(0);
+    expect(prompts).toBe(1);
+    expect(sends()).toHaveLength(2);
+    leaving.abort();
+    const failure = await left;
+    expect((failure as DaemonCallError).code).toBe('unlock_required');
+    // The other waiter is still parked; the prompt is still open (its promise is unsettled), and nothing was resent.
+    await Bun.sleep(0);
+    expect(stayingDone).toBe(false);
+    expect(sends()).toHaveLength(2);
+    // Confirming now resolves the waiter that stayed, which is sent again exactly once; the one that left is not.
+    settle[0]?.(true);
+    expect(await stayed).toEqual({ cards: [] });
+    expect(sends()).toHaveLength(3);
+    expect(prompts).toBe(1);
+  });
+});

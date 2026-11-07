@@ -46,3 +46,55 @@ describe('YY PluginClient.conditional: the held list read, 200 with an etag or 3
     await host.stop();
   });
 });
+
+describe('YY PluginClient.call: a caller that may stop waiting', () => {
+  const make = async (release: Promise<void>) => {
+    const half = implementDaemon(manifest, {
+      build: () => ({
+        routes: {
+          'GET /v1/ferrets/:id/list': async () => {
+            await release;
+            return jsonResponse({ ferrets: [] });
+          },
+        },
+      }),
+    });
+    return await testHost({ plugins: [half] });
+  };
+
+  test('an aborted call ends at once with the signal’s reason', async () => {
+    let open: () => void = () => {};
+    const host = await make(new Promise<void>(resolve => (open = resolve)));
+    const client = testPluginClient(host);
+    const caller = new AbortController();
+    const waiting = client
+      .call('GET /v1/ferrets/:id/list', { params: { id: 'F1' }, signal: caller.signal })
+      .catch((error: unknown) => error);
+    caller.abort(new Error('gave up'));
+    expect(((await waiting) as Error).message).toBe('gave up');
+    open();
+    await host.stop();
+  });
+
+  test('a call already aborted never reaches the host', async () => {
+    const host = await make(Promise.resolve());
+    const caller = new AbortController();
+    caller.abort(new Error('gave up'));
+    await expect(
+      testPluginClient(host).call('GET /v1/ferrets/:id/list', { params: { id: 'F1' }, signal: caller.signal }),
+    ).rejects.toThrow('gave up');
+    await host.stop();
+  });
+
+  test('an abort after the answer is a no-op', async () => {
+    const host = await make(Promise.resolve());
+    const caller = new AbortController();
+    const answer = await testPluginClient(host).call('GET /v1/ferrets/:id/list', {
+      params: { id: 'F1' },
+      signal: caller.signal,
+    });
+    caller.abort();
+    expect(answer).toEqual({ ferrets: [] });
+    await host.stop();
+  });
+});

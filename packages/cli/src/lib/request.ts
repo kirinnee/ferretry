@@ -13,6 +13,8 @@ export interface CallInit {
   readonly params?: Readonly<Record<string, string>>;
   readonly query?: Readonly<Record<string, string>>;
   readonly body?: unknown;
+  /** The caller stopped waiting: aborting ends the send in flight (and any wait for a restarting daemon). */
+  readonly signal?: AbortSignal;
 }
 
 /**
