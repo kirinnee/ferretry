@@ -22,7 +22,7 @@ import {
   SecretImportIdSchema,
   SecretImportOfferSchema,
   SecretImportResultSchema,
-} from '../../secrets/wire.ts';
+} from '../../../../contract/index.ts';
 
 /**
  * The secret store's HTTP surface (today's `lib/runtime/mounts/secrets.ts`, the vault half: `/v1/secrets*`). The

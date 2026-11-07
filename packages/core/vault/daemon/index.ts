@@ -1,4 +1,4 @@
-import type { ChildEnvironment, FerretId } from '@ferretry/kernel/contract';
+import type { ChildEnvironment, FerretId, SecretResolver } from '@ferretry/kernel/contract';
 import type { FerretState } from '@ferretry/core-ferrets/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { err, ok, type Result } from '@ferretry/std';
@@ -57,7 +57,8 @@ const IDENTITY_NOT_OFFERED: SecretCloneIdentitySource = { load: async () => unde
  * authorized fetch, the read-scoped redaction and the output guard. Every value-holder is built HERE and nowhere
  * else, so the list of things that can open the vault is this function (S7):
  *
- *   redaction · use · child environments (the fleet launch's, now `childEnvironment`) · authorized fetch · export.
+ *   redaction · use · child environments (the fleet launch's, now `childEnvironment`) · authorized fetch · export ·
+ *   the kernel's own `${secret:NAME}` lookup (`secretResolver`, kernel-bound: no route, tool or half is handed it).
  *
  * The vault KEY has one more holder, as today (the MCP sign-in's and the accounts' second documents, the link keys):
  * `sealedDocuments`, which opens only the calling plugin's own documents and never `vault.json`.
@@ -152,6 +153,15 @@ export default implementDaemon(manifest, {
       return ok(environments.mint(resolved));
     };
 
+    /**
+     * The kernel's own `${secret:NAME}` lookup (`kernel.secrets`): the value for a NAME, as today's consumers took it
+     * (`(await secretVault.values()).get(name)`). A store that cannot be opened raises, which the kernel answers as
+     * `unknown`. Held by the kernel alone: no route, tool or other plugin is handed it.
+     */
+    const secretResolver: SecretResolver = {
+      resolve: async name => (await vault.values()).get(name as SecretName),
+    };
+
     const api: VaultApi = {
       names: async () => await directory.list(),
       has: async name => (await directory.list()).some(secret => secret.name === name),
@@ -203,6 +213,7 @@ export default implementDaemon(manifest, {
         childEnvironments: environments,
         // Each plugin's OWN sealed documents, over the state port the kernel rooted at its folder (change C).
         sealedDocuments: new KernelSealedDocuments(key, kernel.clock),
+        secretResolver,
       },
       hooks: { 'ask.sources:input': inputs.askSource },
       subscribers: {

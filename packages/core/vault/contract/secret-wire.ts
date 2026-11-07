@@ -1,24 +1,16 @@
 /**
- * The secret routes' wire shapes that the frozen contract does not hold, used only inside this package (`common.md`:
- * protocol code that is not in the contract and only used here goes to `daemon/lib`). Copied field for field from
- * today's `protocol/src/lib/secrets.ts` (listing, put, removed) and `protocol/src/lib/secret-clone.ts` (copying a
- * secret to another machine).
+ * The secret routes' wire shapes: the listing, the put body, what a delete answers, and copying a secret to another
+ * machine. Copied field for field from today's `protocol/src/lib/secrets.ts` (listing, put, removed) and
+ * `protocol/src/lib/secret-clone.ts` (copying a secret to another machine), and held in the CONTRACT so the daemon,
+ * the app and `fy` halves import one definition.
  *
  * NOTHING HERE CARRIES A SECRET VALUE A CALLER CAN READ. A value travels IN on {@link PutSecretBodySchema} and never
  * back; a copy's values travel only inside a bundle's ciphertext, which only the target daemon opens.
- *
- * FOR THE LEAD: the app and `fy` halves (Accounts owns `fy secret`) need these too, so they belong in
- * `@ferretry/core-vault/contract`; that is a contract change and was asked for in the port report.
  */
 
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import {
-  MAX_SECRETS_PER_DAEMON,
-  SecretNameSchema,
-  SecretSummarySchema,
-  SecretValueSchema,
-} from '../../../contract/index.ts';
+import { MAX_SECRETS_PER_DAEMON, SecretNameSchema, SecretSummarySchema, SecretValueSchema } from './secrets.ts';
 
 // ─── listing ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -69,6 +61,12 @@ export type PutSecretBody = z.infer<typeof PutSecretBodySchema>;
 // ─── copying to another machine ───────────────────────────────────────────────────────────────────────────────────
 
 export const SECRET_CLONE_SCHEMA_VERSION = 1 as const;
+
+/** The target's half: opening an import, and completing one at `/:importId` (today's `SECRET_IMPORTS_PATH`). */
+export const SECRET_IMPORTS_PATH = '/v1/secrets/imports' as const;
+
+/** The source's half: sealing chosen secrets for one import, at `/:importId` (today's `SECRET_EXPORTS_PATH`). */
+export const SECRET_EXPORTS_PATH = '/v1/secrets/exports' as const;
 
 /** How long an opened import accepts a bundle. */
 export const SECRET_IMPORT_TTL_SECONDS = 300;
