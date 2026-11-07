@@ -1,4 +1,4 @@
-import type { HarnessInstalledVersion } from '../../../contract/index.ts';
+import type { HarnessInstalledVersion } from './types.ts';
 import type { InstallFacts } from './install-method.ts';
 
 /** The newest published Codex, or the sentence why it could not be learned. A failure is never a throw. */

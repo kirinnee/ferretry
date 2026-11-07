@@ -5,8 +5,9 @@
  * update draws: a module install is pinned by somebody's flake, a temporary nix shell is gone at the next garbage
  * collection, and a binary Ferretry did not recognise is not Ferretry's to replace.
  */
-import type { HarnessInstallMethod, HarnessUpdatePlan } from '../../../contract/index.ts';
+import type { HarnessInstallMethod } from '../../../contract/index.ts';
 import { nixModuleUpdate, type UpdateStep } from './install-method.ts';
+import type { HarnessUpdatePlan } from './types.ts';
 import { CODEX_LABEL, CODEX_PACKAGES } from './version.ts';
 
 /** The programs an update runs. `harness` is Codex's own binary. */

@@ -255,7 +255,7 @@ export async function symlinkHops(
 }
 
 /** The store paths a link chain leads through, in order. */
-export const storePathHops = (hops: readonly string[]): readonly string[] => hops.filter(isStorePath);
+export const nixPathHops = (hops: readonly string[]): readonly string[] => hops.filter(isStorePath);
 
 /** Whether a link chain passes through a `home-manager-path` store path — home-manager's own generation. */
 export const passesThroughHomeManagerPath = (hops: readonly string[]): boolean =>

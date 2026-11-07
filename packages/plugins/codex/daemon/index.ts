@@ -1,5 +1,73 @@
-import { skeletonDaemon } from '@ferretry/kernel/manifest';
+import type { ConfigFileDef } from '@ferretry/kernel/contract';
+import { implementDaemon } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { CODEX_CONFIG, CODEX_DISCOVERY, type CodexApi, type Discovery, type HarnessConfig, HarnessConfigSchema } from '../contract/index.ts';
+import { codexHarness } from './adapters/codex-harness.ts';
+import { HostCodexFacts } from './adapters/facts.ts';
+import { HostPrograms } from './adapters/host-programs.ts';
+import { NpmCodexLatest } from './adapters/npm-latest.ts';
+import { packageRunner } from './adapters/package-run.ts';
+import { HostCodexProbe } from './adapters/probe.ts';
+import { codexUpdateRoutes, HarnessUpdateService, locateCodex } from './lib/index.ts';
 
-/** Skeleton daemon half (§10.3): listed in ports-pending.json until the port lands. */
-export default skeletonDaemon(manifest);
+export default implementDaemon(manifest, {
+  build(ctx) {
+    const { kernel } = ctx;
+    const host = new HostPrograms(kernel.spawn);
+
+    // `config/harness-codex.yaml`, read each time so an edit is seen on the next look.
+    const paths = () => HarnessConfigSchema.parse(kernel.config.file(CODEX_CONFIG as ConfigFileDef<HarnessConfig>) ?? {});
+    let home: Promise<string> | undefined;
+    const homeDirectory = async (): Promise<string> => {
+      home ??= host.environment('HOME').then(value => value ?? '');
+      return await home;
+    };
+    const locate = async () => {
+      const configured = paths();
+      return await locateCodex({ binary: configured.binary, searchPaths: configured.searchPaths }, host, await homeDirectory());
+    };
+
+    const probeHome = kernel.roots.root('agent-homes', { subfolder: 'probe' }).resolve('');
+    if (!probeHome.ok) throw new Error(`Codex's probe home could not be placed: ${probeHome.error}`);
+    const probe = new HostCodexProbe(kernel.spawn, host, probeHome.value);
+
+    const service = new HarnessUpdateService({
+      product: 'ferretry',
+      homeDirectory,
+      locate,
+      facts: new HostCodexFacts(host),
+      probe,
+      latest: new NpmCodexLatest(kernel.fetch, kernel.clock, 'ferretry'),
+      executables: host,
+      run: packageRunner(kernel.spawn, kernel.clock, host),
+      nowMs: () => kernel.clock.nowMs(),
+      checks: true,
+    });
+
+    // Looking is when discovery is recorded: what was found, never anything read from Codex's sign-in files.
+    const view: CodexApi['view'] = async () => {
+      const seen = await service.view();
+      const found: Discovery = {
+        format: 1,
+        checkedAt: kernel.clock.now(),
+        location: seen.location,
+        installed: seen.installed,
+        method: seen.method,
+      };
+      await kernel.state.write(CODEX_DISCOVERY, found);
+      return seen;
+    };
+    const discovery: CodexApi['discovery'] = async () => {
+      const read = await kernel.state.read(CODEX_DISCOVERY);
+      return read.ok ? read.value : undefined;
+    };
+
+    const routes = codexUpdateRoutes({ view, start: request => service.start(request) });
+
+    return {
+      routes,
+      provides: { codex: { view, discovery } },
+      hooks: { 'harnesses:codex': codexHarness({ kernel, locate, probe, update: { view, start: request => service.start(request), settled: () => service.settled() } }) },
+    };
+  },
+});

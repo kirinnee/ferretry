@@ -84,7 +84,7 @@ export default definePlugin({
   permissions: {
     roots: ['agent-homes', 'harness-history'],
     network: ['registry.npmjs.org'],
-    spawn: ['codex', 'npm', 'pnpm', 'bun', 'volta', 'brew', 'nix'],
+    spawn: ['codex', 'npm', 'pnpm', 'bun', 'volta', 'brew', 'nix', 'which', 'test', 'realpath', 'readlink', 'printenv', 'uname'],
     secrets: [],
   },
 });

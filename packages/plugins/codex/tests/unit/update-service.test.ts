@@ -1,11 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { HarnessCliView, HarnessInstalledVersion, HarnessUpdateReport } from '../../contract/index.ts';
+import type { HarnessCliView } from '../../contract/index.ts';
 import {
   HARNESS_CHECK_REUSE_MS,
   HARNESS_PROBE_REUSE_MS,
+  type HarnessInstalledVersion,
   type HarnessLocation,
   type HarnessStartupCheck,
+  type HarnessUpdateReport,
   HarnessUpdateRefusal,
   HarnessUpdateService,
   type InstallFacts,

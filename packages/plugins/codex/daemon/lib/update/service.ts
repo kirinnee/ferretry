@@ -3,13 +3,8 @@ import {
   HARNESS_UPDATE_CODES,
   type HarnessCliLocation,
   type HarnessCliView,
-  type HarnessInstalledVersion,
   type HarnessInstallMethod,
-  type HarnessUpdateJob,
-  type HarnessUpdateOutcome,
-  type HarnessUpdateReport,
   type HarnessUpdateStartRequest,
-  type UpdateCheck,
 } from '../../../contract/index.ts';
 import { classifyCodexInstall, harnessInstallLabel } from './install-method.ts';
 import { locateManager, readManagerTail } from './manager.ts';
@@ -28,6 +23,13 @@ import {
   type HarnessUpdateRecipe,
   harnessCommandLine,
 } from './recipe.ts';
+import type {
+  HarnessInstalledVersion,
+  HarnessUpdateJob,
+  HarnessUpdateOutcome,
+  HarnessUpdateReport,
+  UpdateCheck,
+} from './types.ts';
 import {
   CODEX_LABEL,
   codexVerification,
