@@ -4,11 +4,12 @@ import { tmpdir } from 'node:os';
 import { err, ok } from '@ferretry/std';
 import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
 import type { FerretId } from '../../../contract/ids.ts';
-import type { PinnedRoot, SessionRootPinner } from '../../../contract/pinned.ts';
+import type { PinnedRoot, PinOptions, SessionRootPinner } from '../../../contract/pinned.ts';
 import { platformRootPinner } from '../../../host/adapters/pinned/index.ts';
 import { nodeFs } from '../../../host/adapters/node-fs.ts';
 import { PinRegistry } from '../../../host/pins.ts';
 import { RootError, rootsPortFor } from '../../../host/roots.ts';
+import { fenceOf, PINNED_KEY_PATHS } from '../../../host/fence-guard.ts';
 
 /**
  * A ferret working in `~`: the pinned `work` root is an ANCESTOR of the state home. The root itself is outside the
@@ -42,7 +43,12 @@ const workFolders = (folder: string): WorkFolders => ({
   check: (_ferret, path) => (path.startsWith(folder) ? ok(path as FencedPath) : err('outside')),
 });
 
-async function pinOf(home: string, work: string, pinner: SessionRootPinner = platformRootPinner()) {
+async function pinOf(
+  home: string,
+  work: string,
+  pinner: SessionRootPinner = platformRootPinner(),
+  options?: PinOptions,
+) {
   const roots = rootsPortFor(
     fs,
     { home, plugin: 'ferrets', worktrees: `${home}-worktrees` },
@@ -53,7 +59,7 @@ async function pinOf(home: string, work: string, pinner: SessionRootPinner = pla
   const root = roots.root('work', { ferret: 'F1' as FerretId });
   const resolved = root.resolve('.');
   if (!resolved.ok) throw new Error(resolved.error);
-  return await root.pin(resolved.value);
+  return await root.pin(resolved.value, options);
 }
 
 /** What an op through the pin came to: its text, or the refusal it threw. */
@@ -176,6 +182,199 @@ describe('S40 S47 a pinned work root that is an ancestor of the state home', () 
     try {
       expect(await outcome(read(pinned, 'sibling.txt'))).toBe('refused:fenced');
     } finally {
+      await pinned.close();
+    }
+  });
+});
+
+/** A pinner whose walk reports the home's identity on every folder it opens at `aliased` (a bind mount of the home). */
+function aliasingPinner(
+  aliased: string,
+  home: { readonly device: bigint; readonly inode: bigint; readonly mode: number },
+) {
+  const real = platformRootPinner();
+  const pinner: SessionRootPinner = {
+    pin: async (cwd, options) => {
+      const held = await real.pin(cwd, options);
+      return {
+        rootReal: held.rootReal,
+        policyCwd: held.policyCwd,
+        probe: () => held.probe(),
+        close: () => held.close(),
+        open: async (rel, openOptions) => {
+          const target = await held.open(rel, openOptions);
+          const alias = rel === aliased || rel.startsWith(`${aliased}/`);
+          return {
+            metadata: target.metadata,
+            canonical: target.canonical,
+            identities: alias
+              ? [...target.identities, { dev: home.device, ino: home.inode, ctimeNs: 0n, mode: home.mode }]
+              : target.identities,
+            read: max => target.read(max),
+            list: (max, budget) => target.list(max, budget),
+            close: () => target.close(),
+          };
+        },
+      };
+    },
+  };
+  return pinner;
+}
+
+describe('S47 the pin is caller-scoped: an agent is fenced, a person is not', () => {
+  test('S47 a pin that names no caller is fenced, as an agent pin is (fail safe)', async () => {
+    const { parent, home } = await layout();
+    for (const options of [undefined, { fence: 'agent' as const }]) {
+      const pinned = await pinOf(home, parent, platformRootPinner(), options);
+      try {
+        expect(await outcome(read(pinned, '.ferretry/state/vault/vault.key'))).toBe('refused:fenced');
+        expect(await outcome(listing(pinned, '.ferretry'))).toBe('refused:fenced');
+      } finally {
+        await pinned.close();
+      }
+    }
+  });
+
+  test("S47 a person's pin reads inside the home and a hard-linked file as today, and lists the home", async () => {
+    const { parent, home } = await layout();
+    await link(`${home}/state/vault/vault.key`, `${parent}/planted`);
+    const pinned = await pinOf(home, parent, platformRootPinner(), { fence: 'none' });
+    const probe = pinned.probe();
+    try {
+      expect(await outcome(read(pinned, '.ferretry/state/vault/vault.key'))).toBe(SECRET);
+      expect(await outcome(read(pinned, 'planted'))).toBe(SECRET);
+      expect(await outcome(listing(pinned, '.ferretry'))).toBe('state');
+      expect(await probe.classify(['.ferretry/state/vault/vault.key', 'sibling.txt'])).toEqual(['file', 'file']);
+    } finally {
+      await probe.close();
+      await pinned.close();
+    }
+  });
+
+  test('S47 the root itself is still refused for a person when it is inside the home', async () => {
+    const { home } = await layout();
+    expect(
+      await outcome(async () => {
+        await (await pinOf(home, `${home}/state`, platformRootPinner(), { fence: 'none' })).close();
+        return 'pinned';
+      }),
+      // The root's own check (§7.7) refuses it before the pin: the lexical half names it, the held object is judged again.
+    ).toMatch(/fenced$/);
+  });
+});
+
+describe('S47 the held root answers a name verdict for output the walk never sees', () => {
+  test('S47 a name inside the home is fenced by name, present or not; one beside it is not', async () => {
+    const { parent, home } = await layout();
+    const pinned = await pinOf(home, parent);
+    try {
+      expect(
+        await pinned.fenced([
+          '.ferretry',
+          '.ferretry/state/vault/vault.key',
+          '.ferretry/never-made.txt',
+          '.ferretry-before-2026-01-01-0000/x',
+          'sibling.txt',
+          'project/a.ts',
+          'project/deleted.ts',
+          'gone/deeper/still.ts',
+          '',
+        ]),
+      ).toEqual([true, true, true, true, false, false, false, false, false]);
+    } finally {
+      await pinned.close();
+    }
+  });
+
+  test("S47 the verdict answers the same for a person's pin, which the walk does not fence", async () => {
+    const { parent, home } = await layout();
+    const pinned = await pinOf(home, parent, platformRootPinner(), { fence: 'none' });
+    try {
+      expect(await pinned.fenced(['.ferretry/state/vault/vault.key', 'sibling.txt'])).toEqual([true, false]);
+    } finally {
+      await pinned.close();
+    }
+  });
+
+  test('S47 a folder that IS the home by identity fences every name in it, present or not', async () => {
+    const { parent, home } = await layout();
+    const identity = await fs.identity(home);
+    if (identity === undefined) throw new Error('the fixture home has no identity');
+    const pinned = await pinOf(home, parent, aliasingPinner('project', identity));
+    try {
+      expect(await pinned.fenced(['project/a.ts', 'project/not-there.ts', 'sibling.txt'])).toEqual([true, true, false]);
+    } finally {
+      await pinned.close();
+    }
+  });
+
+  test('S47 a home that cannot be identified fences every name', async () => {
+    const { parent, home } = await layout();
+    const pinned = await pinOf(home, parent);
+    try {
+      await rm(home, { recursive: true, force: true });
+      expect(await pinned.fenced(['sibling.txt', 'project/a.ts'])).toEqual([true, true]);
+    } finally {
+      await pinned.close();
+    }
+  });
+});
+
+describe("S47 S40 the fence holds the home's pinned key files and folders by identity", () => {
+  test("S47 the fence's identities hold each pinned key path that is there, as today's list names them", async () => {
+    const { home } = await layout();
+    await writeFile(`${home}/api-token`, 'fy_admin');
+    await writeFile(`${home}/state/secrets.key`, 'key');
+    await mkdir(`${home}/fleet/homes`, { recursive: true });
+    const fence = await fenceOf(fs, home);
+    for (const key of ['api-token', 'state/secrets.key', 'fleet', 'fleet/homes']) {
+      const identity = await fs.identity(`${home}/${key}`);
+      expect(fence.identities.some(held => held.device === identity?.device && held.inode === identity.inode)).toBe(
+        true,
+      );
+    }
+    expect(PINNED_KEY_PATHS).toEqual([
+      'api-token',
+      'api-warden-token',
+      'tmux.sock',
+      'state/secrets.key',
+      'state/secrets.json',
+      'state/mcp-oauth-secrets.json',
+      'state/login-secrets.json',
+      'state/passkeys.json',
+      'state/daemon-identity.json',
+      'fleet',
+      'fleet/homes',
+      'state/sessions',
+    ]);
+  });
+
+  test('S47 a key file linked into the work folder is refused for an agent by identity (fenced, not hard_link), and fenced in the verdict and probe', async () => {
+    const { parent, home } = await layout();
+    await writeFile(`${home}/api-token`, 'fy_admin');
+    await link(`${home}/api-token`, `${parent}/innocent.txt`);
+    const pinned = await pinOf(home, parent);
+    const probe = pinned.probe();
+    try {
+      expect(await outcome(read(pinned, 'innocent.txt'))).toBe('refused:fenced');
+      expect(await pinned.fenced(['innocent.txt', 'sibling.txt'])).toEqual([true, false]);
+      expect(await probe.classify(['sibling.txt'])).toEqual(['file']);
+    } finally {
+      await probe.close();
+      await pinned.close();
+    }
+  });
+
+  test("S47 the probe calls a name in a folder that IS the home by identity unsupported (today's inHome)", async () => {
+    const { parent, home } = await layout();
+    const identity = await fs.identity(home);
+    if (identity === undefined) throw new Error('the fixture home has no identity');
+    const pinned = await pinOf(home, parent, aliasingPinner('project', identity));
+    const probe = pinned.probe();
+    try {
+      expect(await probe.classify(['project/a.ts', 'sibling.txt'])).toEqual(['unsupported', 'file']);
+    } finally {
+      await probe.close();
       await pinned.close();
     }
   });

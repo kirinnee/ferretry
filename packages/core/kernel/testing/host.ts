@@ -676,7 +676,9 @@ async function start(world: World): Promise<TestHost> {
           world.roots.delete(path);
         },
         pin: async (path, pinOptions) => {
-          return await pins.pin(manifest.id, path, pinOptions);
+          // The test world keeps no state home, so its pin fences nothing beneath the root.
+          const held = await pins.pin(manifest.id, path, pinOptions);
+          return Object.freeze({ ...held, fenced: async (rels: readonly string[]) => rels.map(() => false) });
         },
       };
       return handle;

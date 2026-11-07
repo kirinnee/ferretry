@@ -34,8 +34,28 @@ export interface Fence {
 }
 
 /**
- * The fence of `home`: its real path, and the identity of the home and of every `<home>-before-*` and
- * `state/<id>-before-*` folder. A home that cannot be resolved fails closed (throws).
+ * The home's key files and folders, relative to the home: today's `stateHomeFence(home).pinned`
+ * (`packages/fleet/src/lib/state-home-fence.ts`), exactly. Each is recognised by IDENTITY wherever a walk meets it, so
+ * one bind-mounted or hard-linked alone into a work folder is refused under any name.
+ */
+export const PINNED_KEY_PATHS: readonly string[] = [
+  'api-token',
+  'api-warden-token',
+  'tmux.sock',
+  ...['secrets.key', 'secrets.json', 'mcp-oauth-secrets.json', 'login-secrets.json', 'passkeys.json'].map(
+    name => `state/${name}`,
+  ),
+  'state/daemon-identity.json',
+  'fleet',
+  'fleet/homes',
+  'state/sessions',
+];
+
+/**
+ * The fence of `home`: its real path, and the identity of the home, of every `<home>-before-*` and
+ * `state/<id>-before-*` folder, and of each pinned key file and folder ({@link PINNED_KEY_PATHS}) that is there — the
+ * entry itself, never followed, as today's `resolveStateHomes` takes it. A home that cannot be resolved, or a key
+ * path that cannot be looked at, fails closed (throws).
  */
 export async function fenceOf(fs: HostFs, home: string): Promise<Fence> {
   const named = absolute(home, 'the home');
@@ -51,6 +71,10 @@ export async function fenceOf(fs: HostFs, home: string): Promise<Fence> {
   for (const folder of folders) {
     const identity = await fs.identity(folder);
     if (folder === real && identity?.kind !== 'directory') throw new Error('the home cannot be identified');
+    if (identity !== undefined) identities.push(identity);
+  }
+  for (const key of PINNED_KEY_PATHS) {
+    const identity = await fs.identity(join(real, key));
     if (identity !== undefined) identities.push(identity);
   }
   return { named, real, identities };
