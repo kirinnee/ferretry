@@ -4,6 +4,7 @@ import { HarnessConfigSchema as CodexHarnessSchema } from '@ferretry/plugin-code
 import { AgendaConfigSchema } from '@ferretry/plugin-agenda/contract';
 import { ConnectionsConfigSchema } from '@ferretry/plugin-connections/contract';
 import { CatalogsConfigSchema } from '@ferretry/plugin-catalogs/contract';
+import { VaultConfigSchema } from '@ferretry/core-vault/contract';
 import { CAPABILITY_NAMES, DEFAULT_SECURITY_SETTINGS, GateConfigSchema } from '@ferretry/core-gate/contract';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -227,10 +228,10 @@ test('a key v4 did not boot with, a wrong type, or an unknown capability fails t
   }
 });
 
-test('nothing secret appears in the report: recipes, a collector address and retired files are named, never read', async () => {
+test('nothing secret appears in the report: a collector address and retired files are named, never read', async () => {
   const marker = 'FAKE-SECRET-MARKER-0f3c9a';
   await daemon({
-    secretEnvironment: { AUTH_HEADER: `Bearer ${marker}` },
+    secretEnvironment: { AUTH_HEADER: 'Bearer ${secret:FAKE_TOKEN}' },
     usage: { url: `https://user:${marker}@collector.example.com/usage` },
     corsOrigins: ['https://own-app.example.com'],
     terminals: { shell: '/bin/zsh' },
@@ -245,16 +246,27 @@ test('nothing secret appears in the report: recipes, a collector address and ret
   expect(shown).not.toContain(marker);
   expect(shown).not.toContain('own-app.example.com');
   const dropped = report.notCarried.map(item => item.what);
-  for (const what of [
-    'config/daemon.json secretEnvironment',
-    'config/daemon.json usage',
-    'config/daemon.json terminals',
-    'state/operator-password.json',
-  ])
+  for (const what of ['config/daemon.json usage', 'config/daemon.json terminals', 'state/operator-password.json'])
     expect(dropped).toContain(what);
   expect(dropped.some(what => what.includes('corsOrigins') && what.includes('without the hosted app'))).toBe(true);
   for (const file of await readdir(join(f.to, 'config')))
     expect(await readFile(join(f.to, 'config', file), 'utf8')).not.toContain(marker);
+  // The recipe carries to vault.yaml key for key; only its count is reported.
+  expect(await read('vault.yaml', VaultConfigSchema)).toEqual({
+    secretEnvironment: { AUTH_HEADER: 'Bearer ${secret:FAKE_TOKEN}' },
+  });
+  expect(report.kept).toContainEqual({ what: 'secret environment recipes (vault.yaml)', count: 1 });
+  expect(shown).not.toContain('FAKE_TOKEN');
+});
+
+test('a recipe holding a raw secret fails the step by key, never by value, and writes nothing', async () => {
+  const fake = 'sk-ant-FAKEFAKEFAKEFAKE1234';
+  await daemon({ secretEnvironment: { AUTH_HEADER: `Bearer ${fake}` } });
+  const report = await daemonSettingsStep.run(f.ctx());
+  expect(report.status).toBe('failed');
+  expect(report.note).toContain('secretEnvironment.AUTH_HEADER');
+  expect(JSON.stringify(report)).not.toContain(fake);
+  expect(await readdir(f.to).catch(() => [])).toEqual([]);
 });
 
 test('a shorter member unlock carries into gate.yaml security', async () => {

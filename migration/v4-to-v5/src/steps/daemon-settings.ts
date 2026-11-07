@@ -7,6 +7,7 @@
  * | ---------------------------------------------------- | ----------------------------------------------------------------- |
  * | `daemon.json` `grants`                               | `gate.yaml` `grants`: all eight capabilities, both axes, EXPLICIT |
  * | `state/security.json` `settings`                     | `gate.yaml` `security`, explicit (v4's default or strictest)      |
+ * | `daemon.json` `secretEnvironment`                    | `vault.yaml` `secretEnvironment` (key for key)                     |
  * | `daemon.json` `catalogs`                             | `catalogs.yaml` `linkStore`, `memberUnlockDays` (also in `gate.yaml`) |
  * | `daemon.json` `carriers` bind, else `host` + `port`  | `connections.yaml` `direct`                                       |
  * | `daemon.json` `carriers` relays, else `relay`        | `connections.yaml` `relay` (the same ordered list, up to four)    |
@@ -23,7 +24,7 @@
  * compared axis by axis and setting by setting with what v4 enforced, and any widening fails the step. A capability
  * v5 cannot name fails the step by name. A carrier the owner switched off stays `enabled: false`. A restriction v5
  * has no field for yet would leave the step `pending` rather than be dropped. Nothing here is a credential (v4's grants doc keeps the password verifier out of daemon.json, and
- * 4.291.5 retired the operator password): `secretEnvironment` and `usage.url` are not carried and never echoed, and
+ * 4.291.5 retired the operator password): `secretEnvironment` goes to `vault.yaml` unchanged and `usage.url` is not carried, neither echoed, and
  * every value written passes the raw-secret rule. The report names keys, never values.
  *
  * Two of these files are also written by the Settings step (the harness files' `permissionMode`, `agenda.yaml`'s
@@ -34,6 +35,7 @@ import { CODEX_CONFIG } from '@ferretry/plugin-codex/contract';
 import { CLAUDE_CODE_CONFIG } from '@ferretry/plugin-claude-code/contract';
 import { AGENDA_CONFIG } from '@ferretry/plugin-agenda/contract';
 import { ConnectionsConfigSchema } from '@ferretry/plugin-connections/contract';
+import { VaultConfigFile } from '@ferretry/core-vault/contract';
 import { CatalogsConfigFile, CatalogsConfigSchema, catalogConfigLoosens } from '@ferretry/plugin-catalogs/contract';
 import {
   CAPABILITY_NAMES,
@@ -76,6 +78,7 @@ export const CONNECTIONS_CONFIG: V5ConfigTarget = {
 };
 const GATE_CONFIG = GateConfigFile as V5ConfigTarget;
 const CATALOGS_CONFIG = CatalogsConfigFile as V5ConfigTarget;
+const VAULT_CONFIG = VaultConfigFile as V5ConfigTarget;
 
 /** `daemon.json` keys v5 declares no field for, and why (listed only when the document wrote them). */
 const KEY_NOT_CARRIED: Readonly<Record<string, string>> = {
@@ -91,8 +94,6 @@ const KEY_NOT_CARRIED: Readonly<Record<string, string>> = {
   terminals: 'v5 terminals.yaml declares only terminal counts; a new terminal runs the account’s own login shell',
   fleet: 'retired in v4 (fleet.prepareDefaults): v4 read it as nothing',
   accountModel: 'retired in v4: v4 read it as nothing',
-  secretEnvironment:
-    'the v5 Vault declares no environment-recipe config yet (a declared GAP); a recipe only ever added a reference the caller had already asked for, so its absence narrows. The owner re-adds the recipes in v5; their text is not read or shown here',
 };
 
 const AGENDA_NOT_CARRIED =
@@ -359,6 +360,13 @@ async function buildPlan(ctx: StepContext): Promise<Plan> {
   planHarness(plan, document);
   planAgenda(plan, document);
   planCatalogs(plan, document);
+  // The Vault's environment recipes, key for key (same meaning): each value names secrets as ${secret:NAME} and is
+  // checked by the raw-secret rule like every value written. Only the count reaches the report.
+  const recipes = document.secretEnvironment;
+  if (recipes !== undefined && Object.keys(recipes).length > 0) {
+    add(plan, VAULT_CONFIG, 'secretEnvironment', { ...recipes }, `${V4_DAEMON_JSON} secretEnvironment`);
+    count(plan, 'secret environment recipes (vault.yaml)', Object.keys(recipes).length);
+  }
 
   if (document.corsOrigins !== undefined) {
     const narrowed = !document.corsOrigins.includes(V4_HOSTED_APP_ORIGIN);

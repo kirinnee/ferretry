@@ -53,8 +53,10 @@ and shared pools; the transcript bytes are never parsed. Journals become history
 and archive entries, worktree records/intents and fork receipts retain their schema-backed fields. The kernel's
 declared `format: 1` stamp is added to document bodies; fork receipts also retain their original `v: 1`.
 
-Beside each `ferret.json` (`src/steps/ferret-details.ts`): `config.json` and `state.json` are the v4 documents whole
-(v5 keeps them loose), with `migration`/`migrations` renamed `move`/`moves` and old-home paths (runtime wrapper,
+Beside each `ferret.json` (`src/steps/ferret-details.ts`): `config.json` and `state.json` are the v4 documents
+parsed with the contract's STRICT schemas (final key lists): every key v5 lists is kept, any other is dropped and named
+in the report (never its value), `sessionCapabilityHash` becomes `capabilityHash` (kept only for a ferret neither
+stopped nor cut off), a state's old `attention` key and its `null` values are dropped, `migration`/`migrations` are renamed `move`/`moves` and old-home paths (runtime wrapper,
 transcript, a pooled conversion source) pointed into the new home; `state.json` keeps the v4 status `ferret.json`'s
 state was decided from. `pins.json` becomes `{format: 1, pins}`, `state/agent-pins.json` becomes
 `state/ferrets/agent-pins.json` (pins of converted ferrets only), and `details.json` holds the start options
@@ -148,7 +150,7 @@ capabilities and both axes written explicitly at v4's effective value (`configur
 with what v4 enforced and any widening fails the step. Carriers → `connections.yaml` (`direct`, the ordered `relay` list, `tunnel`,
 `webrtc`; every relay entry keeps its order and its own on/off, and an owner's `enabled: false` stays false). `harness` paths →
 both harness files and the agenda deadline → `agenda.yaml`, added to what Settings wrote there. `catalogs` → `catalogs.yaml`
-(`linkStore` as written, v4's effective `memberUnlockDays`; checked with the contract's own loosening rule); `secretEnvironment`, `usage.url`, CORS,
+(`linkStore` as written, v4's effective `memberUnlockDays`; checked with the contract's own loosening rule); `secretEnvironment` → `vault.yaml` key for key (raw-secret rule applies); `usage.url`, CORS,
 `publicUrl` and tuning keys are listed in `notCarried`, by key only; `routing.json` belongs to the Packs step.
 
 The `rebuild/migration-ferrets-b` development branch contains a local merge of the unreviewed
