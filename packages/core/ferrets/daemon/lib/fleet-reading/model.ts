@@ -12,7 +12,7 @@
  *
  * Pure and total. A state is replaced, never mutated.
  */
-import { activeUsageReadDueAt, type PassiveUsageRecord } from '@ferretry/fleet';
+import { activeUsageReadDueAt, type PassiveUsageRecord } from './ports.ts';
 
 /** What the reading knows about one stored credential. */
 export interface CredentialReading {

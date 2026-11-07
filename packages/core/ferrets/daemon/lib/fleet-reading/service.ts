@@ -30,10 +30,14 @@
  * as before; and the due time counts a passive reading only once it is current, so it errs early, never
  * late. Correctness never depends on an event arriving; only how little is read does.
  */
-import type { CredentialSubject, PassiveUsageRecord, StoredCredentialResolution } from '@ferretry/fleet';
-import type { FileSubscription } from '../file-events/hub.ts';
-import { attributedTranscripts } from '../fleet/credentials-service.ts';
-import type { HousekeepingJobs } from '../housekeeping/ports.ts';
+import {
+  attributedTranscripts,
+  type CredentialSubject,
+  type FileSubscription,
+  type FleetReadingJobs,
+  type PassiveUsageRecord,
+  type StoredCredentialResolution,
+} from './ports.ts';
 import {
   dueCredentials,
   EMPTY_FLEET_READING,
@@ -65,7 +69,7 @@ export interface FleetReadingPorts {
   credentials(): Promise<readonly FleetReadingSubject[]>;
   /** The sessions this daemon has records for: where a Codex credential's rollouts are. Shared, kept. */
   readonly roster: SessionRosterReader;
-  readonly jobs: HousekeepingJobs;
+  readonly jobs: FleetReadingJobs;
   /** Hear when a file may have changed (`FileEventHub.subscribe`): once at first, then on each change. */
   watch(path: string, listener: () => void): FileSubscription;
   /** A Claude credential's statusLine file. */

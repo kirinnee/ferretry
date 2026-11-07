@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { PassiveUsageRecord } from '@ferretry/fleet';
+import type { PassiveUsageRecord } from '../../../../daemon/lib/fleet-reading/ports.ts';
 import should from 'should';
 import {
   dueCredentials,
@@ -15,7 +15,6 @@ import {
 const MINUTE = 60_000;
 const NOW = 1_786_000_000_000;
 const passive = (at: number): PassiveUsageRecord => ({
-  version: 1,
   source: 'claude-statusline',
   at,
   fiveHour: { usedPercent: 12 },

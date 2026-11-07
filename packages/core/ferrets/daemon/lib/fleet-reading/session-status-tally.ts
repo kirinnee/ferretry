@@ -16,7 +16,10 @@
  * read at the latest {@link SessionStatusTallyPorts.maxAgeMs} after the last read, so correctness never
  * depends on hearing every write; only how often every document is read does.
  */
-import type { SessionStatus } from '@ferretry/protocol';
+import type { FerretState } from '../../../contract/index.ts';
+
+/** A ferret's state, as the tally counts it. */
+type SessionStatus = FerretState;
 
 export interface SessionStatusTallyPorts {
   /** Every session's status by id, from its documents: the costly read the tally exists to avoid repeating. */
