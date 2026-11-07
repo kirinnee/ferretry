@@ -7,6 +7,7 @@ import type {
   SessionLayer,
   SocketDownstream,
 } from '@ferretry/kernel/contract';
+import { encodeFrame, FRAME_KINDS } from '../../../worker/src/lib/index.ts';
 import { sealedWebRtcSessions } from '../../../daemon/lib/webrtc/session.ts';
 
 function harness() {
@@ -97,7 +98,12 @@ function harness() {
 it('R682 WebRTC hands sealed bytes to the kernel session and derives no authority from DTLS', async () => {
   const h = harness();
   await h.session.open();
-  const bytes = Uint8Array.of(10, 20, 30);
+  const bytes = encodeFrame({
+    kind: FRAME_KINDS.handshake,
+    sessionId: h.session.sessionId,
+    sequence: 0,
+    payload: Uint8Array.of(10, 20, 30),
+  });
   h.session.fromClient(bytes);
   expect(h.arrivals).toEqual([{ key: 'webrtc' as CarrierKey, peer: { address: 'webrtc-peer:minted-by-daemon' } }]);
   expect(h.received).toEqual([bytes]);

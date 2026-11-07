@@ -13,6 +13,7 @@ import {
   RELAY_LIMITS,
   RELAY_PROTOCOL_ID,
   RENDEZVOUS_SESSION_ID,
+  sessionIdFromBytes,
 } from '../../../worker/src/lib/index.ts';
 import { BrowserEnd, type KernelFixture, kernelCrypto, kernelFixture } from '../../support/kernel-session.ts';
 
@@ -63,6 +64,27 @@ it('a WebRTC channel announces ready with its own nonzero session id before any 
   expect(browser.last('authenticated')).toBeDefined();
   expect(browser.end).toBeUndefined();
   fx.layer.close();
+});
+
+it('R669 R680 a WebRTC handshake naming a client-chosen session is refused before the real kernel can key it', async () => {
+  const fx = await kernelFixture();
+  try {
+    const { session, browser, released } = channel(fx);
+    await session.open();
+    const chosen = sessionIdFromBytes(Uint8Array.from(session.sessionId.bytes, byte => byte ^ 255));
+    if (chosen === null) throw new Error('no client-chosen id');
+    expect(chosen.text).not.toBe(session.sessionId.text);
+    expect(await browser.handshake(chosen, fx.daemonId)).toBe(false);
+    expect(browser.keyed).toBe(false);
+    expect(browser.wire).toHaveLength(1); // Only ready: no kernel handshake answer.
+    expect(browser.end?.code).toBe(4400);
+    expect(released()).toBe(1);
+    // Closing the channel also prevents a second handshake on its announced id.
+    expect(await browser.handshake(session.sessionId, fx.daemonId)).toBe(false);
+    expect(fx.requests).toHaveLength(0);
+  } finally {
+    fx.layer.close();
+  }
 });
 
 it('R682 over WebRTC the §6 pin authenticates the daemon, not DTLS: a wrong pin never keys and never reaches a route', async () => {

@@ -1,8 +1,10 @@
 import { isSessionEnd, type CarrierKey, type SessionLayer } from '@ferretry/kernel/contract';
 import {
+  decodeFrame,
   encodeControlMessage,
   encodeFrame,
   FRAME_KINDS,
+  SESSION_CLOSE_CODES,
   RELAY_LIMITS,
   RELAY_PROTOCOL_ID,
   SESSION_ID_BYTES,
@@ -101,11 +103,23 @@ export function sealedWebRtcSessions(
           }
           return;
         }
-        link.inbound(
+        const bytes =
           frame instanceof ArrayBuffer
             ? new Uint8Array(frame)
-            : new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength),
-        );
+            : new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength);
+        const decoded = decodeFrame(bytes);
+        if (!decoded.ok) {
+          downstream.close(decoded.code, decoded.reason);
+          close();
+          return;
+        }
+        // As on a direct socket, the channel serves only the session it announced in ready.
+        if (decoded.frame.sessionId.text !== sessionId.text) {
+          downstream.close(SESSION_CLOSE_CODES.protocolError, 'a frame named no live session');
+          close();
+          return;
+        }
+        link.inbound(bytes);
       },
       close,
     };
