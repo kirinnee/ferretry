@@ -1,13 +1,20 @@
-import { defineHook, type FerretId, type HolderId } from '@ferretry/kernel/contract';
+import { type Cancel, defineHook, type FerretId, type HolderId } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import { z } from 'zod';
-import type { CapabilityGrants, StepUpAct, StepUpRefusal } from './policy.ts';
-import type { MemberHolderStanding } from './standing.ts';
+import type {
+  CapabilityGrants,
+  EveryCallerStepUpAct,
+  MachineSkippableStepUpAct,
+  StepUpSubjectOf,
+  StoredProofStepUpAct,
+} from './policy.ts';
+import type { MemberHolderStanding, StoredStepUpProof } from './standing.ts';
 
 /**
- * The two security-path provide hooks Gate offers (§4.13, §7.1), taken only by Access (`device`) and Catalogs
- * (`member`). Plugins answer only for the holders they enrolled, by holder id from the kernel's principal, never by a
- * token. The policy itself (daemon-wide grants, unlock and step-up settings) is Gate's (`gate.yaml`).
+ * The security-path provide hooks Gate offers (§4.13, §7.1): `credentials`, taken only by Access (`device`) and
+ * Catalogs (`member`), and `step-up`, taken only by Access (`device`). Plugins answer only for the holders they
+ * enrolled, by holder id from the kernel's principal, never by a token. The policy itself (daemon-wide grants, unlock
+ * and step-up settings) is Gate's (`gate.yaml`).
  *
  * Fail closed: when the taking plugin is off, failed, throwing or damaged, its kind is unknown — every new call of
  * that kind gets R605's identical refusal and every open session or stream of that kind closes (`4401`).
@@ -36,6 +43,14 @@ export interface CredentialProvider<S extends HolderStanding = HolderStanding> {
   standing(holder: HolderId, now: Instant): S | 'unknown' | 'revoked';
   /** Bumps on any revoke, narrowing, unlock, lock or grant change; Gate re-admits every open stream of the kind. */
   generation(): number;
+  /**
+   * Tells `listener` each time `generation()` moves (a revoke, narrowing, unlock, lock or grant change), after the
+   * new standing can be read, and returns the cancel. Gate subscribes to every provider it is bound to and re-asks
+   * every open stream on each notice (G149), so a device narrowed by Access loses its stream at once instead of at its
+   * next frame. Optional: a provider that does not push is still re-asked on every call and frame. A throwing listener
+   * is the provider's to isolate.
+   */
+  watch?(listener: () => void): Cancel;
 }
 
 export const Credentials = defineHook('credentials', {
@@ -45,7 +60,7 @@ export const Credentials = defineHook('credentials', {
   takers: ['access', 'catalogs'],
 });
 
-// ─── step-up witness ──────────────────────────────────────────────────────────────────────────────────────────────
+// ─── step-up wire shapes (Access and Accounts read these) ─────────────────────────────────────────────────────────
 
 const Base64UrlSchema = (max: number) =>
   z
@@ -72,59 +87,70 @@ export const DeviceKeyRotationSchema = z.strictObject({
   proof: Base64UrlSchema(128),
 });
 
-/** An assertion as `navigator.credentials.get` produced it (today's `StepUpAssertionSchema`). */
-export const PasskeyAssertionSchema = z.strictObject({
-  credentialId: Base64UrlSchema(1_366),
-  clientDataJSON: Base64UrlSchema(5_462),
-  authenticatorData: Base64UrlSchema(5_462),
-  signature: Base64UrlSchema(1_366),
-  rotation: DeviceKeyRotationSchema.optional(),
-});
-export type PasskeyAssertion = z.infer<typeof PasskeyAssertionSchema>;
+// ─── step-up witness ──────────────────────────────────────────────────────────────────────────────────────────────
 
-/** One registered passkey the browser may pick, as the challenge offers it. Never a key. */
-export interface PasskeyDescriptor {
-  readonly type: 'public-key';
-  readonly id: string;
+/**
+ * One copy of the app on one paired device (today's `SessionDevice`): the step-up is a fact about THIS device and
+ * THIS app session, never about a device as a whole (G100). Gate builds it from the kernel's principal only.
+ */
+export interface StepUpSubject {
+  readonly deviceId: string;
+  readonly appSession: string;
 }
 
-/** What Gate hands the witness for one ceremony: the challenge it issued (and spends), bound to one act. */
-export interface StepUpCeremony {
-  readonly holder: HolderId;
-  readonly origin: string;
-  readonly challenge: Uint8Array;
-  readonly assertion: PasskeyAssertion;
-  readonly act?: StepUpAct;
-  /** The staged subject an every-caller act is bound to. */
-  readonly subject?: string;
-  readonly now: Instant;
-}
-
-/** A verified ceremony. Gate stamps the window and spends it; the witness never decides whether one was needed. */
-export interface StepUpVerified {
-  readonly holder: HolderId;
-  readonly act?: StepUpAct;
-  readonly subject?: string;
-  readonly provedAt: Instant;
-  /** The assertion carried a rotation and the provider now holds the new key. */
-  readonly keyRotated?: true;
+/** {@link StepUpWitness.claimFresh}, overloaded so an act every caller must prove cannot be asked the short way. */
+export interface ClaimFreshWitness {
+  (subject: StepUpSubject, act?: MachineSkippableStepUpAct): boolean;
+  (subject: StepUpSubject, act: Exclude<EveryCallerStepUpAct, StoredProofStepUpAct>, bound: string): boolean;
 }
 
 /**
- * The value of `step-up:<kind>`: verifies a passkey assertion against the holder's registered passkeys (§7.1).
- * Gate decides WHETHER an act needs one (its settings and closed lists), issues and spends challenges and proofs.
+ * The value of `step-up:device` (today's boundary `StepUpWitness`, which today's `StepUpService` satisfies): Access
+ * owns the passkeys, the ceremonies, the unlock and the proofs, and answers these questions; Gate asks them at
+ * admission and decides WHETHER an act needs a step-up (its settings and closed lists). Synchronous where admission
+ * is synchronous, memory-only, no secret.
+ *
+ * FAIL CLOSED: with no provider (Access off, failed, throwing or damaged) nobody holds a step-up or a fresh proof,
+ * every claim is answered `false` or nothing, nothing is spent, and every device must unlock before it is served.
  */
 export interface StepUpWitness {
-  /** The passkeys this holder may answer with for this origin; `unknown` when the holder is not this provider's. */
-  passkeys(holder: HolderId, origin: string): readonly PasskeyDescriptor[] | 'unknown';
-  verify(ceremony: StepUpCeremony): Promise<StepUpVerified | { readonly refused: StepUpRefusal }>;
+  /** Whether this copy of the app holds a step-up right now (the unlock standing in for it, or a window). */
+  held(subject: StepUpSubject): boolean;
+  /** Whether it proved a passkey for the act at hand and has not spent it. */
+  freshlyHeld(subject: StepUpSubject): boolean;
+  /** Whether this device must confirm a person is present before it is served at all (`unlockOnOpen`, G74). */
+  unlockRequired(subject: StepUpSubject): boolean;
+  /**
+   * Takes that proof atomically: of concurrent acts on one proof, exactly one is answered `true`. An act every caller
+   * must prove names what its proof is bound to, and takes no other proof; no other claim takes one of its proofs.
+   */
+  claimFresh: ClaimFreshWitness;
+  /**
+   * Takes the KEPT assertion of a passkey proved for a stored-proof act on exactly `stage`, once, while it is fresh,
+   * and only when `expectedChallenge` is the challenge it was verified against — or nothing (G85).
+   */
+  claimStoredProof<Act extends StoredProofStepUpAct>(
+    subject: StepUpSubject,
+    act: Act,
+    stage: StepUpSubjectOf<Act>,
+    expectedChallenge: Uint8Array,
+  ): StoredStepUpProof | undefined;
+  /** Verifies a kept proof again, against a holder that is still paired; `false` for anything else. */
+  verifyStoredProof(proof: StoredStepUpProof, expectedChallenge: Uint8Array): Promise<boolean>;
+  /** Spends the fresh proof. */
+  spendFresh(subject: StepUpSubject): void;
+  /** One act that needed the step-up was just admitted: spends it when the machine asks every time (G97). */
+  spend(subject: StepUpSubject): void;
+  /** When this device's key is due for replacement (epoch ms), or `undefined` when it is not known. */
+  rotateBy(deviceId: string): number | undefined;
 }
 
+/** Access alone answers for the step-up: Catalogs' members unlock with their own passkeys and never step up. */
 export const StepUp = defineHook('step-up', {
   mode: 'provide',
-  key: HolderKindSchema,
+  key: z.enum(['device']),
   value: z.custom<StepUpWitness>(),
-  takers: ['access', 'catalogs'],
+  takers: ['access'],
 });
 
 // ─── ferret bearers ───────────────────────────────────────────────────────────────────────────────────────────────

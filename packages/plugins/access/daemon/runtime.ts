@@ -424,11 +424,9 @@ export class AccessRuntime {
     generation: () => this.#generation,
   };
 
-  /** `step-up:device`: the passkeys a device may answer with. Verification is Access's own step-up service. */
+  /** `step-up:device`: Gate's witness questions, answered by Access's own step-up service (today's StepUpService). */
   readonly witness: StepUpWitness & AccessStepUpProvider = {
     ...stepUpProvider(() => this.#current?.stepUp),
-    passkeys: () => 'unknown',
-    verify: async () => ({ refused: 'not-verified' }),
   };
 
   /** What other plugins may ask of Access (Catalogs' verifier, Agenda's buzz). */

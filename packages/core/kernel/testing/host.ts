@@ -31,6 +31,7 @@ import type {
   PortToken,
 } from '../contract/define.ts';
 import { judgeLoosening } from '../contract/define.ts';
+import { SOCKET_CLOSES } from '../contract/socket.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError, errorResponse, finalised, headersFrom, queryFrom } from '../contract/http.ts';
 import type {
@@ -64,7 +65,13 @@ import { CORE_IDS } from '../contract/ids.ts';
 import type { ScratchPort } from '../contract/ports.ts';
 import { testIdentity } from './identity.ts';
 import type { IdentitySigner } from '../contract/session.ts';
-import type { CallContext, MemberRouteHandler, RouteDescriptor, RouteHandler } from '../contract/route.ts';
+import type {
+  CallContext,
+  CallStanding,
+  MemberRouteHandler,
+  RouteDescriptor,
+  RouteHandler,
+} from '../contract/route.ts';
 import type { DoctorFinding } from '../contract/kernel.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
@@ -204,7 +211,7 @@ interface World {
   readonly config: Map<string, unknown>;
 }
 
-const actorScope = new AsyncLocalStorage<Actor>();
+const actorScope = new AsyncLocalStorage<{ readonly actor: Actor; readonly standing?: CallStanding }>();
 
 function actorOf(caller: TestCaller): Actor {
   if (caller.kind === 'ferret') return 'ferret';
@@ -323,6 +330,12 @@ async function start(world: World): Promise<TestHost> {
     read: async fn => fn(maskScope(options.secrets ?? [])),
   };
   const admission = options.gate ?? standInAdmission(request => callers.get(request) ?? owner());
+  // Open streams, re-asked at once when the admission says its policy moved (as the real host does).
+  const openStreams = new Set<() => void>();
+  const stopWatching = admission.watch?.(() => {
+    for (const recheck of [...openStreams]) recheck();
+  });
+  if (stopWatching !== undefined) stopHandlers.push(stopWatching);
 
   const built: Built[] = [];
   const bootContexts = new Map<string, DaemonContext<Manifest>>();
@@ -471,8 +484,14 @@ async function start(world: World): Promise<TestHost> {
   const judged = (plugin: string, path: string, removal: boolean, sentences: readonly string[]): boolean => {
     try {
       return (
-        admission.judgeConfigWrite?.({ plugin, path, removal, sentences, actor: actorScope.getStore() ?? 'ferret' }) ===
-        'apply'
+        admission.judgeConfigWrite?.({
+          plugin,
+          path,
+          removal,
+          sentences,
+          actor: actorScope.getStore()?.actor ?? 'ferret',
+          standing: actorScope.getStore()?.standing,
+        }) === 'apply'
       );
     } catch {
       return false;
@@ -823,7 +842,7 @@ async function start(world: World): Promise<TestHost> {
       signer: signerFor(manifest.id, identitySigner),
       act: testActRunner({
         holds: () => holds,
-        actor: () => actorScope.getStore() ?? 'ferret',
+        actor: () => actorScope.getStore()?.actor ?? 'ferret',
         minted: world.minted,
         record: entry => acts.push(entry),
       }),
@@ -1057,7 +1076,9 @@ async function start(world: World): Promise<TestHost> {
       const call = { request, params: found.params, ...decision.standing } as CallContext;
       const caller = callers.get(request) ?? owner();
       return toTestResponse(
-        await actorScope.run(actorOf(caller), () => runHandler(() => handler(call), route.guard, route.noStore)),
+        await actorScope.run({ actor: actorOf(caller), standing: decision.standing }, () =>
+          runHandler(() => handler(call), route.guard, route.noStore),
+        ),
       );
     },
     async doctor(plugin, check) {
@@ -1081,7 +1102,7 @@ async function start(world: World): Promise<TestHost> {
         return { text: skeletonSentence(entry.plugin.manifest.title), isError: true };
       const handler = entry.plugin.half.tools?.[name] as ToolHandler;
       const call = { request, params: new Map(), ...decision.standing } as CallContext;
-      return actorScope.run(actorOf(caller), () => handler(call, input));
+      return actorScope.run({ actor: actorOf(caller), standing: decision.standing }, () => handler(call, input));
     },
     async socket(path, init = {}) {
       const request = makeRequest(init.method ?? 'GET', path, { as: init.as ?? owner() });
@@ -1134,6 +1155,13 @@ async function start(world: World): Promise<TestHost> {
       };
       const handler = await attach(downstream);
       result.handler = handler;
+      const recheck = (): void => {
+        if (result.closed !== undefined || admission.readmit(request, found.route)) return;
+        openStreams.delete(recheck);
+        downstream.close(SOCKET_CLOSES.unauthorized.code, SOCKET_CLOSES.unauthorized.reason);
+        handler.close(SOCKET_CLOSES.unauthorized);
+      };
+      openStreams.add(recheck);
       await handler.open();
       return result;
     },
