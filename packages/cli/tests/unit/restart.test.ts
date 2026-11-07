@@ -89,4 +89,51 @@ describe('waiting out a restart', () => {
     should(now).equal(1000);
     should((await waitOutRestart({ ...base, patience: undefined })).kind).equal('unreachable');
   });
+
+  it('G95 an abort during the backoff ends the wait at once and answers the abort, not "unreachable"', async () => {
+    // Arrange
+    const caller = new AbortController();
+    const reason = new Error('gave up');
+    let attempts = 0;
+    let slept: AbortSignal | undefined;
+
+    // Act
+    const outcome = await waitOutRestart({
+      first: refused,
+      attempt: async () => {
+        attempts += 1;
+        return refused;
+      },
+      repeatable: false,
+      patience: { expected: () => true, waiting: () => {} },
+      nowMs: () => 0,
+      signal: caller.signal,
+      sleep: async (_ms, signal) => {
+        slept = signal;
+        caller.abort(reason);
+      },
+    });
+
+    // Assert
+    should(slept).equal(caller.signal);
+    should(attempts).equal(0);
+    should(outcome).deepEqual({ kind: 'failed', error: reason });
+  });
+
+  it('G95 an answer that lands as the caller leaves is still the answer', async () => {
+    const caller = new AbortController();
+    const outcome = await waitOutRestart({
+      first: refused,
+      attempt: async () => {
+        caller.abort();
+        return { kind: 'answered', value: 'back' } as Attempt<string>;
+      },
+      repeatable: false,
+      patience: { expected: () => true, waiting: () => {} },
+      nowMs: () => 0,
+      signal: caller.signal,
+      sleep: async () => {},
+    });
+    should(outcome).deepEqual({ kind: 'answered', value: 'back' });
+  });
 });

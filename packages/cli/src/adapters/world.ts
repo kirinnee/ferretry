@@ -84,7 +84,7 @@ export function createWorld(inputs: WorldInputs): CliWorld {
       },
     },
     nowMs: () => Date.now(),
-    sleep: milliseconds => Bun.sleep(milliseconds),
+    sleep: sleepUnlessAborted,
   };
   const ferretId = ownFerretId(environment);
   const clientHeaders = {
@@ -189,4 +189,19 @@ export function createWorld(inputs: WorldInputs): CliWorld {
       return { baseUrl: address, transport, inventory };
     },
   };
+}
+
+/** A pause that ends at once, quietly, when the signal aborts: the restart backoff must not outlast a caller who left. */
+function sleepUnlessAborted(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  if (signal === undefined) return Bun.sleep(milliseconds);
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>(resolve => {
+    const timer = setTimeout(done, milliseconds);
+    signal.addEventListener('abort', done, { once: true });
+    function done(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    }
+  });
 }

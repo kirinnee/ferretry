@@ -308,7 +308,8 @@ export class DaemonClient {
       need = this.#need(answer);
     }
     if (need?.kind !== 'step-up') return answer;
-    if (!(await this.#confirm(need, origin, signal))) return answer;
+    // Today's step-up wait is NOT abortable (only the unlock is), so the step-up prompt takes no signal.
+    if (!(await this.#confirm(need, origin))) return answer;
     return await resend();
   }
 
@@ -322,8 +323,8 @@ export class DaemonClient {
   }
 
   /**
-   * The one prompt; a prompt that fails to open is a prompt not confirmed. The wait honours the caller's own signal
-   * (today's `untilAborted`, `relay-carrier.ts`): a background read parked behind a prompt for a machine that is not
+   * The one prompt; a prompt that fails to open is a prompt not confirmed. THE UNLOCK WAIT alone honours the caller's
+   * own signal (today's `untilAborted`, `relay-carrier.ts`; the step-up wait is not abortable): a background read parked behind a prompt for a machine that is not
    * on screen, whose caller stopped waiting (its deadline, an unmount), gets its refusal back as "not confirmed"
    * rather than staying parked behind a prompt nobody is going to answer for it. The prompt itself is the
    * handler's and stays; only this caller leaves it.

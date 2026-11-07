@@ -59,6 +59,14 @@ re-copying: `Button`, `Badge`, `Card`, `BottomSheet`, `ContextMenu`, `SheetTabs`
 (`src/ui/design-system.css`) and Tailwind are loaded once by the shell; `tailwind.config.ts` scans every plugin's
 `app/` for utilities, so a plugin ships no CSS pipeline. A feature's own stylesheet comes with its app half.
 
+## Open items
+
+- **GAP(app-shell): feed-aware polls do not pass their signal.** `client.call(route, { signal })` now releases a read
+  parked behind the UNLOCK prompt when its caller stops waiting (the step-up wait is not abortable, as today). No app
+  caller passes one yet: `startFeedAwarePoll`'s `read()` takes no signal, and neither do the Browsers polls
+  (`useSessionBrowser`, `useBrowserControl`). Each should hand its read an `AbortController` that the poll's stop (an
+  unmount) aborts, as today's `shared-reads` did.
+
 ## The service worker runs no plugin code
 
 `sw.verified.js` (`src/worker/service-worker.ts`) is the signed-release check plus the shell's own push and

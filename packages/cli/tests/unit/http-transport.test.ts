@@ -289,12 +289,49 @@ describe('a send whose caller may stop waiting', () => {
     let fetches = 0;
     const transport = transportFor(rig, async () => {
       fetches += 1;
-      caller.abort();
+      caller.abort(new Error('gave up'));
       throw refused();
     });
     await expect(
       transport.send({ method: 'GET', path: '/v1/plugins' }, { repeatable: true, signal: caller.signal }),
-    ).rejects.toThrow('connection refused');
+    ).rejects.toThrow('gave up');
+    expect(fetches).toBe(1);
+  });
+
+  it('G95 an abort during the backoff cuts the sleep short and rejects as the abort, not as unreachable', async () => {
+    const rig = rigAt('http://127.0.0.1:7457', [HEADER, listening(7457, OWN_UID)].join('\n'));
+    const caller = new AbortController();
+    let fetches = 0;
+    let sleeping: Promise<void> | undefined;
+    const transport = new HttpTransport({
+      baseUrl: async () => rig.base,
+      authorization: async () => CREDENTIAL,
+      fetcher: async () => {
+        fetches += 1;
+        throw refused();
+      },
+      restart: {
+        patience: { expected: () => true, waiting: () => {} },
+        nowMs: () => 0,
+        // A sleep that would outlast the test unless the signal ends it, like the real backoff of up to 2 s.
+        sleep: (_ms, signal) =>
+          (sleeping = new Promise<void>(resolve => {
+            const timer = setTimeout(resolve, 60_000);
+            signal?.addEventListener('abort', () => {
+              clearTimeout(timer);
+              resolve();
+            });
+          })),
+      },
+    });
+    const sending = transport
+      .send({ method: 'GET', path: '/v1/plugins' }, { repeatable: true, signal: caller.signal })
+      .catch((error: unknown) => error);
+    await Bun.sleep(5);
+    expect(sleeping).toBeDefined();
+    caller.abort(new Error('gave up'));
+    const failure = (await sending) as Error;
+    expect(failure.message).toBe('gave up');
     expect(fetches).toBe(1);
   });
 

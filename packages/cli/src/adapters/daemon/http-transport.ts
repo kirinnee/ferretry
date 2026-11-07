@@ -41,7 +41,7 @@ const MAX_EVENT_NAME = 128;
 export interface RestartWaiting {
   readonly patience: RestartPatience;
   readonly nowMs: () => number;
-  readonly sleep: (milliseconds: number) => Promise<void>;
+  readonly sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
 }
 
 export interface HttpTransportOptions {

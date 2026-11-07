@@ -71,7 +71,12 @@ const isThenable = (value: unknown): value is PromiseLike<unknown> =>
   value !== null &&
   typeof (value as { then?: unknown }).then === 'function';
 
-/** Starts reading as described above; the returned function stops every timer and subscription. */
+/**
+ * Starts reading as described above; the returned function stops every timer and subscription.
+ *
+ * GAP(app-shell): `read()` takes no abort signal, so a read parked behind a passkey prompt is not released when the poll
+ * stops (today's `shared-reads` abort chain did). See `packages/app/README.md` › Open items.
+ */
 export const startFeedAwarePoll = <Event = unknown>(options: FeedAwarePollOptions<Event>): (() => void) => {
   const environment = options.environment ?? browserFeedAwarePollEnvironment;
   const { feed, read } = options;
