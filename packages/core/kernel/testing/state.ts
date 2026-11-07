@@ -20,6 +20,8 @@ export class SimulatedCrash extends Error {
 export class MemoryStateFolder {
   /** path (with `*` filled) → stored text */
   readonly files = new Map<string, string>();
+  /** path → stored bytes of a `secret` or `opaque` file: kept byte for byte, never parsed or stamped. */
+  readonly bytes = new Map<string, Uint8Array>();
   readonly databases = new Map<string, Database>();
   private crashArmed = false;
   crashed = false;
@@ -35,6 +37,17 @@ export class MemoryStateFolder {
 
   raw(file: StateFileDef, name?: string): string | undefined {
     return this.files.get(pathOf(file, name));
+  }
+
+  /** Sets a `secret` or `opaque` file's bytes. */
+  plantBytes(file: StateFileDef, bytes: Uint8Array, name?: string): void {
+    this.bytes.set(pathOf(file, name), new Uint8Array(bytes));
+  }
+
+  /** A `secret` or `opaque` file's bytes as stored. */
+  rawBytes(file: StateFileDef, name?: string): Uint8Array | undefined {
+    const stored = this.bytes.get(pathOf(file, name));
+    return stored === undefined ? undefined : new Uint8Array(stored);
   }
 
   /** Called after each landed write. */
@@ -106,8 +119,17 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
     );
     return run;
   };
+  const isBytes = (file: StateFileDef): boolean => file.store === 'secret' || file.store === 'opaque';
   const read = async <Shape>(file: StateFileDef<string, Shape>, name?: string): Promise<StateRead<Shape>> => {
     guard(file);
+    // As the real port (host/state/state-port.ts readRaw → readBytesFile): bytes as they are, no parse, no format.
+    if (isBytes(file)) {
+      const stored = folder.bytes.get(pathOf(file, name));
+      if (stored === undefined)
+        return file.required === true ? err(damage(file, 'missing', 'it is missing')) : ok(undefined);
+      return ok(new Uint8Array(stored) as Shape);
+    }
+    if (file.store !== 'json') throw new TypeError(`state ${file.name}: a ${file.store} file is not read with read()`);
     const text = folder.files.get(pathOf(file, name));
     if (text === undefined)
       return file.required === true ? err(damage(file, 'missing', 'it is missing')) : ok(undefined);
@@ -115,6 +137,15 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
   };
   const write = async <Shape>(file: StateFileDef<string, Shape>, value: Shape, name?: string): Promise<void> => {
     guard(file);
+    if (file.store === 'jsonl' || file.store === 'sqlite' || file.store === 'sqlite-cache')
+      throw new TypeError(`state ${file.name}: a ${file.store} file is not written with write()`);
+    if (isBytes(file)) {
+      if (!(value instanceof Uint8Array) && typeof value !== 'string')
+        throw new TypeError(`state ${file.name}: a ${file.store} file holds bytes`);
+      folder.bytes.set(pathOf(file, name), typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value));
+      folder.landed();
+      return;
+    }
     if (file.schema !== undefined) file.schema.parse(value);
     folder.files.set(pathOf(file, name), stamp(file, value));
     folder.landed();
@@ -122,16 +153,19 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
   return {
     read,
     write,
-    update: (file, fn, name) =>
-      serial(pathOf(file, name), async () => {
+    update: async (file, fn, name) => {
+      if (file.store !== 'json') throw new TypeError(`state ${file.name}: only a json file is updated in place`);
+      return await serial(pathOf(file, name), async () => {
         const current = await read(file, name);
         if (!current.ok) return current;
         const next = fn(current.value);
         await write(file, next, name);
         return ok(next) as Result<typeof next, StateDamage>;
-      }),
+      });
+    },
     async append(file, entry, name) {
       guard(file);
+      if (file.store !== 'jsonl') throw new TypeError(`state ${file.name}: only a jsonl file is appended to`);
       const path = pathOf(file, name);
       folder.files.set(path, `${folder.files.get(path) ?? ''}${stamp(file, entry)}\n`);
       folder.landed();
@@ -149,8 +183,9 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
     async list(file) {
       guard(file);
       const [prefix, suffix] = file.path.split('*') as [string, string | undefined];
-      if (suffix === undefined) return folder.files.has(file.path) ? [file.path] : [];
-      return [...folder.files.keys()]
+      const stored = isBytes(file) ? folder.bytes : folder.files;
+      if (suffix === undefined) return stored.has(file.path) ? [file.path] : [];
+      return [...stored.keys()]
         .filter(path => path.startsWith(prefix) && path.endsWith(suffix) && path.length > prefix.length + suffix.length)
         .map(path => path.slice(prefix.length, path.length - suffix.length))
         .filter(name => !name.includes('/'))
@@ -159,6 +194,7 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
     async remove(file, name) {
       guard(file);
       folder.files.delete(pathOf(file, name));
+      folder.bytes.delete(pathOf(file, name));
       folder.landed();
     },
     sqlite(file, name): SqliteHandle {
