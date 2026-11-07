@@ -81,7 +81,6 @@ export const STEPS: readonly Step[] = [
   ),
   usageStep,
   wardenStep,
-  mcpStep,
   pending(
     {
       id: 'catalogs',
@@ -99,6 +98,8 @@ export const STEPS: readonly Step[] = [
   daemonSettingsStep,
   loginsStep,
   vaultStep,
+  // After the vault: MCP's sealed document is opened by the key the vault step moves (once).
+  mcpStep,
   identityStep,
   pending(
     {

@@ -7,33 +7,35 @@
  *   `clientSecretRef` names a secret with the same grammar in both, so only the envelope changes. Component names
  *   (the record keys) are kept, since `config/mcp/<name>.yaml` and the vault names join on them.
  * - The ACCESS tokens are vault secrets kept by NAME; the Vault step moves the vault unopened, so the names travel.
- * - `state/mcp-oauth-secrets.json` (refresh tokens, registered client secrets; sealed under the vault key) is NOT
- *   carried and NOT opened: v5 MCP declares no `store: 'secret'` document for it yet (`data.state` is inventory, oauth
- *   and payloads only; the Vault's `defineSealedDocument` has no MCP declaration). It stays in the kept v4 backup, so
- *   it can be moved byte for byte once MCP declares that file.
+ * - `state/mcp-oauth-secrets.json` (refresh tokens, registered client secrets) → `state/mcp/oauth-secrets.json` (lead
+ *   decision 2026-11-07, via nelly: MCP's `defineSealedDocument`). It is sealed under the VAULT key with the entry name as
+ *   the AAD (Vault contract `sealed.ts`), so the Vault step's key move (`state/vault/vault.key`, done once, before
+ *   this step) opens it. Every entry's `iv`, `ciphertext` and stamps move as the same strings; only the envelope's
+ *   `v: 1` becomes `format: 1`, which is outside the AAD. Nothing is decrypted or printed.
  * - `inventory.json` and `payloads/` have no v4 source: v4 computed the inventory live and pinned no payloads.
  */
+import { SealedDocumentSchema } from '@ferretry/core-vault/contract';
 import { MCP_OAUTH_STATE, McpOAuthStateFileSchema } from '@ferretry/plugin-mcp/contract';
 import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { StepReport } from '../report.ts';
+import { rewrapSealed } from '../rewrap.ts';
 import { failureNote, readV4Json, V4InputError } from '../v4/documents.ts';
 import { V4_MCP_OAUTH, V4_MCP_OAUTH_SECRETS, V4McpOAuthDocument } from '../v4/mcp.ts';
 import type { Step } from './index.ts';
 
 export const V5_MCP_OAUTH = join('state/mcp', MCP_OAUTH_STATE.path);
+/** MCP's sealed document (lead decision 2026-11-07); the Vault key opens it. */
+export const V5_MCP_OAUTH_SECRETS = 'state/mcp/oauth-secrets.json';
+const V4_VAULT_KEY = 'state/secrets.key';
 
 export const mcpStep: Step = {
   id: 'mcp',
   title: 'MCP sign-ins (issuer, endpoints, client ids, expiry; tokens stay in the vault by name)',
   owner: ['plugin-mcp'],
   reads: [V4_MCP_OAUTH],
-  sealed: [],
+  sealed: [V4_MCP_OAUTH_SECRETS],
   notCarried: [
-    {
-      what: `${V4_MCP_OAUTH_SECRETS} (sealed: MCP refresh tokens and registered client secrets)`,
-      why: 'v5 MCP declares no store: secret document to move it into (its state is inventory.json, oauth.json and payloads/ only), so it is left unopened in the v4 backup. Until MCP declares it, an OAuth MCP server whose access token expires must be signed in to again from the app',
-    },
     {
       what: 'the MCP inventory',
       why: 'v4 kept none (computed live); v5 writes inventory.json itself on its first read',
@@ -44,18 +46,32 @@ export const mcpStep: Step = {
     },
   ],
   async run(ctx): Promise<StepReport> {
-    const base = { id: this.id, title: this.title, notCarried: this.notCarried, sealed: [] };
     const home = ctx.v4.home;
+    const sealed: { file: string; bytes: number }[] = [];
+    const base = () => ({ id: this.id, title: this.title, notCarried: this.notCarried, sealed });
     try {
       const notes: string[] = ctx.dryRun ? ['dry run: nothing written'] : [];
-      // `lstat` only: the sealed half is never opened, its presence is all the report says.
-      if ((await lstat(join(home, V4_MCP_OAUTH_SECRETS)).catch(() => undefined)) !== undefined)
-        notes.push(`${V4_MCP_OAUTH_SECRETS} left unopened in the v4 backup (no v5 file declared for it yet)`);
+      // The sealed half: its envelope re-labelled, every entry's bytes kept; never decrypted.
+      const secrets = await lstat(join(home, V4_MCP_OAUTH_SECRETS)).catch(() => undefined);
+      if (secrets !== undefined) {
+        if ((await lstat(join(home, V4_VAULT_KEY)).catch(() => undefined)) === undefined)
+          throw new V4InputError(
+            `${V4_MCP_OAUTH_SECRETS} exists but the vault key ${V4_VAULT_KEY} that seals it does not`,
+          );
+        if (ctx.dryRun) sealed.push({ file: V5_MCP_OAUTH_SECRETS, bytes: secrets.size });
+        else {
+          const moved = await rewrapSealed(join(home, V4_MCP_OAUTH_SECRETS), ctx.v5.resolve(V5_MCP_OAUTH_SECRETS), {
+            stamped: true,
+            schema: SealedDocumentSchema,
+          });
+          sealed.push({ file: V5_MCP_OAUTH_SECRETS, bytes: (await lstat(moved.to)).size });
+        }
+      }
 
       const value = await readV4Json(home, join(home, V4_MCP_OAUTH));
       if (value === undefined)
         return {
-          ...base,
+          ...base(),
           status: 'converted',
           note: ['this home has no MCP sign-ins', ...notes].join('; '),
           kept: [],
@@ -79,7 +95,7 @@ export const mcpStep: Step = {
       );
       const registrations = Object.values(document.data.registrations).reduce((sum, list) => sum + list.length, 0);
       return {
-        ...base,
+        ...base(),
         status: 'converted',
         ...(notes.length > 0 ? { note: notes.join('; ') } : {}),
         kept: [
@@ -88,7 +104,12 @@ export const mcpStep: Step = {
         ],
       };
     } catch (error) {
-      return { ...base, status: 'failed', note: failureNote(error, 'cannot convert the MCP sign-in state'), kept: [] };
+      return {
+        ...base(),
+        status: 'failed',
+        note: failureNote(error, 'cannot convert the MCP sign-in state'),
+        kept: [],
+      };
     }
   },
 };
