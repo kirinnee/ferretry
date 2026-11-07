@@ -86,8 +86,7 @@ export interface TranscriptEntry {
  * automation stays unavailable" is context, not conversation, and the transcript no longer keeps a
  * "Show details" fold to file it under.
  */
-export const hiddenFromTranscript = (entry: TranscriptEntry): boolean =>
-  entry.kind === 'notice' && entry.alert !== true;
+const hiddenFromTranscript = (entry: TranscriptEntry): boolean => entry.kind === 'notice' && entry.alert !== true;
 
 /** One rendered transcript row and the last VISIBLE row before it, which is what its rhythm reads. */
 export interface TranscriptItem {
@@ -114,11 +113,8 @@ export const transcriptItems = (entries: readonly TranscriptEntry[]): readonly T
 export const isTerminalSessionStatus = (status: SessionStatus): boolean =>
   status === 'completed' || status === 'failed' || status === 'stopped';
 
-export const canSubmitComposer = (draft: string, disabled: boolean, sending: boolean): boolean =>
-  draft.trim().length > 0 && !disabled && !sending;
-
 /** A pause this long between two assistant messages starts a new run, so the name returns after it. */
-export const RUN_GAP_MS = 10 * 60 * 1000;
+const RUN_GAP_MS = 10 * 60 * 1000;
 
 /** Where an assistant text row sits in its run: the first one names the agent, the rest do not. */
 export interface AgentRunMark {

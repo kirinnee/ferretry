@@ -54,7 +54,7 @@ export interface TranscriptRowsIndex {
 }
 
 /** The most recent window of a transcript, which is all any in-flight question needs. */
-export const DEFAULT_TRANSCRIPT_TAIL = 400;
+const DEFAULT_TRANSCRIPT_TAIL = 400;
 
 /**
  * How many bytes from a transcript's END a tail reads.

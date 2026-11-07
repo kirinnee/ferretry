@@ -1,12 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  buildDaemonHealthReport,
-  emptySelfCheckLedger,
-  type DaemonHealthInput,
-  type SelfCheckLedger,
-  type WardenSweepVerdict,
-} from '../../../../../daemon/lib/session/health/index.ts';
+import { buildDaemonHealthReport, type DaemonHealthInput } from '../../../../../daemon/lib/session/health/report.ts';
+import { emptySelfCheckLedger } from '../../../../../daemon/lib/session/health/wedge.ts';
+import { type SelfCheckLedger, type WardenSweepVerdict } from '../../../../../daemon/lib/session/health/types.ts';
 
 const AT = '2026-07-31T10:00:00.000Z';
 const FRESH_SWEEP: WardenSweepVerdict = { state: 'fresh', needsRearm: false, ageMs: 20_000, deadlineMs: 120_000 };

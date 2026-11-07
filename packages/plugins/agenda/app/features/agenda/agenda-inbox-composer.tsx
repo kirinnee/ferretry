@@ -40,7 +40,7 @@ export interface AgendaComposerApi {
 }
 
 /** A message the composer saw accepted: the owner's own words, and how it went. */
-export interface AgendaComposerSent {
+interface AgendaComposerSent {
   readonly words: string;
   readonly sendId?: string | undefined;
   readonly disposition?: string | undefined;

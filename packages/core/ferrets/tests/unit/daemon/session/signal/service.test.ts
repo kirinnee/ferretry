@@ -2,9 +2,9 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { ClockPort, SerialExecutor } from '../../../../../daemon/lib/ports.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import { InvalidDeadlineRefused } from '../../../../../daemon/lib/session/signal/policy.ts';
+import { SessionSignalService } from '../../../../../daemon/lib/session/signal/service.ts';
 import {
-  InvalidDeadlineRefused,
-  SessionSignalService,
   SignalRefused,
   UnknownPeerRefused,
   type SignalArtifacts,
@@ -12,7 +12,7 @@ import {
   type SignalTarget,
   type SignalTerminal,
   type SignalTransition,
-} from '../../../../../daemon/lib/session/signal/index.ts';
+} from '../../../../../daemon/lib/session/signal/types.ts';
 
 /**
  * What the daemon does about each of the four things a session may say about itself.

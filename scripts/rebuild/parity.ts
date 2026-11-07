@@ -1677,6 +1677,10 @@ for (const owner of [...owners, ...(unplaced.length ? ['UNPLACED'] : [])]) {
     );
   out.push('');
 }
+// The v4 -> v5 home conversion's rows (lead decision 2026-11-07): owned by the converter at migration/, which
+// regenerates this file from its own step table; included verbatim so --check covers it too.
+const migrationSection = join(outputDirectory, 'rebuild-parity-migration.md');
+if (existsSync(migrationSection)) out.push(readFileSync(migrationSection, 'utf8').trimEnd(), '');
 const markdown = `${out.join('\n').trimEnd()}\n`;
 if (args.includes('--check')) {
   if (

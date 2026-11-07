@@ -7,7 +7,7 @@
 
 import { DaemonResponseError } from './agenda-call.ts';
 
-export type PermissionOptionKind = 'allow' | 'allow-always' | 'deny';
+type PermissionOptionKind = 'allow' | 'allow-always' | 'deny';
 
 /** One choice the harness drew: its digit, its words, and what it does. */
 export interface PermissionOption {
@@ -16,7 +16,7 @@ export interface PermissionOption {
   readonly kind: PermissionOptionKind;
 }
 
-export type PermissionAction = 'run' | 'read' | 'edit' | 'create' | 'fetch' | 'use' | 'exit-plan' | 'other';
+type PermissionAction = 'run' | 'read' | 'edit' | 'create' | 'fetch' | 'use' | 'exit-plan' | 'other';
 
 /** The prompt on the ferret's pane. */
 export interface PermissionRequest {
@@ -44,7 +44,7 @@ export interface PermissionAnswerResult {
 }
 
 /** The refusal code for a prompt the pane no longer shows. */
-export const PERMISSION_PROMPT_GONE = 'permission_prompt_gone';
+const PERMISSION_PROMPT_GONE = 'permission_prompt_gone';
 
 /**
  * The prompt this answer was for is no longer on the agent's screen — answered at the machine, timed out, or replaced

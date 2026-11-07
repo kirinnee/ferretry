@@ -9,7 +9,7 @@ import { z } from 'zod';
  * `status` is what the session claimed BEFORE that settle rewrote it to `failed`, because whether it
  * was mid-turn decides what a revived agent is told.
  */
-export const AutoResumeCandidateSchema = z.strictObject({
+const AutoResumeCandidateSchema = z.strictObject({
   id: NonEmptyStringSchema,
   status: NonEmptyStringSchema,
   at: InstantSchema,
@@ -43,7 +43,7 @@ export interface AutoResumeAvailabilityPort {
   unavailable(id: string): Promise<string | undefined>;
 }
 
-export interface AutoResumeResumerPort {
+interface AutoResumeResumerPort {
   /** The ordinary revive. Rejects when it was refused or failed; the message is the reason. */
   resume(id: string, message: string | undefined): Promise<void>;
 }
@@ -56,11 +56,11 @@ export interface AutoResumeJournalPort {
   record(id: string, outcome: AutoResumeOutcome): Promise<void>;
 }
 
-export interface AutoResumeSummaryPort {
+interface AutoResumeSummaryPort {
   write(summary: AutoResumeSummary): Promise<void>;
 }
 
-export interface AutoResumeSettingPort {
+interface AutoResumeSettingPort {
   enabled(): Promise<boolean>;
 }
 

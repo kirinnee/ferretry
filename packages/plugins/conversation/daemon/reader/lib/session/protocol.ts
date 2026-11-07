@@ -12,7 +12,7 @@ const NonNegativeIntegerSchema = z.number().int().nonnegative();
 const InstantSchema = z.iso.datetime({ offset: true });
 
 /** One durable message inside a provenance-bound harness transcript. */
-export const ConversationMessagePointSchema = z.strictObject({
+const ConversationMessagePointSchema = z.strictObject({
   v: z.literal(1),
   byteOffset: NonNegativeIntegerSchema,
   blockIndex: NonNegativeIntegerSchema.optional(),
@@ -39,8 +39,7 @@ export const parsePoint = (text: string): ExactConversationMessagePoint | undefi
 };
 
 /** How this ferret's harness transcript was IDENTIFIED. */
-export const TranscriptIdentitySchema = z.enum(['minted', 'correlated', 'adopted', 'undiscovered']);
-export type TranscriptIdentity = z.infer<typeof TranscriptIdentitySchema>;
+const TranscriptIdentitySchema = z.enum(['minted', 'correlated', 'adopted', 'undiscovered']);
 
 /** Where this ferret's transcript lives, recorded as evidence captured at launch (a provenance record, not a cache). */
 export const TranscriptProvenanceSchema = z

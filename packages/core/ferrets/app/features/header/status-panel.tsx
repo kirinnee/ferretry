@@ -8,7 +8,7 @@ import type { FerretSummary } from '../../../contract/index.ts';
 import { StatusMark, statusMark } from '../../lib/status-mark.tsx';
 
 /** The word for a mark: its class and detail, the person's words rather than the daemon's. */
-export const statusWord = (ferret: FerretSummary): string => {
+const statusWord = (ferret: FerretSummary): string => {
   const info = statusMark(ferret);
   const [, detail] = info.label.split(' — ');
   return detail ?? info.label;

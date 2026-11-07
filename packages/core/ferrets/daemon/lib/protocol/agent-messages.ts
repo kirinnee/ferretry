@@ -26,7 +26,7 @@
  *   * `reply` — the answer to a question the RECEIVER asked, and is parked on.
  */
 export const PEER_MESSAGE_KINDS = ['message', 'question', 'reply'] as const;
-export type PeerMessageKind = (typeof PEER_MESSAGE_KINDS)[number];
+type PeerMessageKind = (typeof PEER_MESSAGE_KINDS)[number];
 
 /**
  * An optional label a sender gives a message so its receiver can triage it: `blocker` (the sender cannot
@@ -38,10 +38,10 @@ export type PeerMessageKind = (typeof PEER_MESSAGE_KINDS)[number];
  * say `label`, because `kind` already means "does it want an answer" (`PeerMessageKind`).
  */
 export const PEER_MESSAGE_LABELS = ['blocker', 'action', 'fyi'] as const;
-export type PeerMessageLabel = (typeof PEER_MESSAGE_LABELS)[number];
+type PeerMessageLabel = (typeof PEER_MESSAGE_LABELS)[number];
 
 /** Which message of a combined delivery this is: 1-based `index` of `total`. */
-export interface PeerEnvelopePart {
+interface PeerEnvelopePart {
   readonly index: number;
   readonly total: number;
 }

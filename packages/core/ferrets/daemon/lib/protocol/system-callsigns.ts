@@ -14,7 +14,7 @@ export const SYSTEM_CALLSIGN_PREFIXES = ['warden', 'learning', 'pack'] as const;
 export type SystemCallsignPrefix = (typeof SYSTEM_CALLSIGN_PREFIXES)[number];
 
 /** Any system callsign, in either case. */
-export const SYSTEM_CALLSIGN_PATTERN = new RegExp(`^(${SYSTEM_CALLSIGN_PREFIXES.join('|')})-([0-9a-f]{6})$`, 'iu');
+const SYSTEM_CALLSIGN_PATTERN = new RegExp(`^(${SYSTEM_CALLSIGN_PREFIXES.join('|')})-([0-9a-f]{6})$`, 'iu');
 
 /** The largest sequence: `FFFFFF`. The next one wraps to 1. */
 export const SYSTEM_CALLSIGN_MAX_SEQUENCE = 0xff_ff_ff;

@@ -65,7 +65,7 @@ export interface TranscriptProps {
  * runtime's account. The row's time is not part of the label: it is the row's own instant, drawn at the
  * foot of the message on the reader's clock.
  */
-export const withAgentName = (entry: TranscriptEntry, agentName: string): TranscriptEntry =>
+const withAgentName = (entry: TranscriptEntry, agentName: string): TranscriptEntry =>
   entry.kind !== 'assistant' || agentName === '' ? entry : { ...entry, label: agentName };
 
 /**

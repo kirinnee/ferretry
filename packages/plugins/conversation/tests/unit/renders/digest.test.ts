@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { RenderIdSchema } from '../../../contract/index.ts';
 import { RENDER_ID_MAX_LENGTH } from '../../../daemon/renders/lib/constants.ts';
 import should from 'should';
-import { renderDigest, renderIdPrefix } from '../../../daemon/renders/lib/index.ts';
+import { renderDigest, renderIdPrefix } from '../../../daemon/renders/lib/digest.ts';
 
 describe('renderDigest', () => {
   it('should be the same for the same kind, alt and payload and different otherwise', () => {

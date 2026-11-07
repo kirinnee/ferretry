@@ -47,7 +47,7 @@ const matchLine = (hit: WorkHit): string => {
 };
 
 /** Hits as aligned lines: `&F303  card  In progress  Title — the matching line`. */
-export function renderHits(hits: readonly WorkHit[], own: string | undefined): string[] {
+function renderHits(hits: readonly WorkHit[], own: string | undefined): string[] {
   const rows = hits.map(hit => ({ hit, ref: reference(hit) }));
   const refWidth = Math.max(0, ...rows.map(row => row.ref.length));
   const kindWidth = Math.max(0, ...rows.map(row => row.hit.kind.length));

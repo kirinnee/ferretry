@@ -63,7 +63,7 @@ export interface BoardItems {
 }
 
 /** An instant as a sortable number: unparseable (and absent, by the caller's `??`) reads as 0. */
-export const instant = (value: string): number => {
+const instant = (value: string): number => {
   const at = Date.parse(value);
   return Number.isNaN(at) ? 0 : at;
 };

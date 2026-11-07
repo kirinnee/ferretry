@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { parseSessionId } from '../../../../daemon/seams/index.ts';
+import { parseSessionId } from '../../../../daemon/seams/ferret-id.ts';
 import type { ObservedHumanInput } from '../../../../daemon/seams/transcript-types.ts';
 import {
   judgeWatchedSends,

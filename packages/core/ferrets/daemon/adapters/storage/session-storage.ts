@@ -72,7 +72,7 @@ export class InvalidStateDocumentError extends Error {
   }
 }
 
-export class MissingSessionJournalError extends Error {
+class MissingSessionJournalError extends Error {
   constructor(
     readonly sessionId: SessionId,
     readonly file: string,
@@ -82,7 +82,7 @@ export class MissingSessionJournalError extends Error {
   }
 }
 
-export class DurableEventIndexError extends Error {
+class DurableEventIndexError extends Error {
   readonly durable = true;
 
   constructor(
@@ -168,18 +168,6 @@ export interface ArchiveVerdict {
   readonly name?: string;
   /** The configuration's `createdAt` and `updatedAt`: what a callsign's hold on its name is measured from. */
   readonly configTimes?: { readonly createdAt: string; readonly updatedAt: string };
-}
-
-/** Opens the session store: the archive first, so every walk after it already knows which sessions have left. */
-export async function openDaemonStorage(state: StatePort, clock: ClockPort, log: Log): Promise<DaemonStorage> {
-  const storage = new DaemonStorage(state, clock, log);
-  try {
-    await storage.loadArchive();
-    return storage;
-  } catch (error) {
-    await storage.close();
-    throw error;
-  }
 }
 
 export class DaemonStorage {

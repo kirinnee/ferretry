@@ -7,26 +7,26 @@ import { useCallback, useEffect, useState } from 'react';
 import { FerretsChanged, type FerretSummary, FerretSummarySchema } from '../../contract/index.ts';
 import { callFailure, type LiveFerretsClient } from './client.ts';
 
-export const FERRET_ROUTE = 'GET /v1/ferrets/:ferretId';
+const FERRET_ROUTE = 'GET /v1/ferrets/:ferretId';
 
 /** Why a ferret could not be read, in a sentence a person can use. */
-export interface FerretReadFailure {
+interface FerretReadFailure {
   readonly status: number | null;
   readonly sentence: string;
 }
 
-export type FerretRead =
+type FerretRead =
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly ferret: FerretSummary }
   | { readonly kind: 'failed'; readonly failure: FerretReadFailure };
 
 /** One read of one ferret. A 404 is a failure with its own status: the ferret is gone, or was never here. */
-export const readFerret = async (client: Pick<LiveFerretsClient, 'call'>, ferret: string): Promise<FerretSummary> => {
+const readFerret = async (client: Pick<LiveFerretsClient, 'call'>, ferret: string): Promise<FerretSummary> => {
   const answer = await client.call<unknown>(FERRET_ROUTE, { params: { ferretId: ferret } });
   return FerretSummarySchema.parse(answer);
 };
 
-export const failureOf = (reason: unknown): FerretReadFailure => {
+const failureOf = (reason: unknown): FerretReadFailure => {
   const failure = callFailure(reason);
   const status = typeof failure?.status === 'number' ? failure.status : null;
   const message = reason instanceof Error ? reason.message : String(reason);

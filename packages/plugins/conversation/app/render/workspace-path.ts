@@ -11,13 +11,12 @@ const hasUnsupportedNameChar = (value: string): boolean => {
   return false;
 };
 
-export const isOpenableName = (name: string | null | undefined): boolean => {
+const isOpenableName = (name: string | null | undefined): boolean => {
   const value = name ?? '';
   return value !== '' && value !== '.' && value !== '..' && !value.includes('/') && !hasUnsupportedNameChar(value);
 };
 
-export const isOpenablePath = (rel: string | null | undefined): boolean =>
-  !!rel && rel.split('/').every(isOpenableName);
+const isOpenablePath = (rel: string | null | undefined): boolean => !!rel && rel.split('/').every(isOpenableName);
 
 /** The folder-relative path a candidate names, or `null` when it is outside the folder or cannot be opened. */
 export const codeReferenceRelativePath = (candidate: string, cwd?: string): string | null => {

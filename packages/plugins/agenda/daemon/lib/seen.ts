@@ -38,8 +38,3 @@ export async function markSeen(store: SeenStore, ferret: string, ask: string, at
     seen: { ...current.seen, [ferret]: { ...(current.seen[ferret] ?? {}), [ask]: at } },
   }));
 }
-
-/** When the owner last saw the ask, or `undefined` when never. */
-export async function seenAt(store: SeenStore, ferret: string, ask: string): Promise<Instant | undefined> {
-  return (await store.read()).seen[ferret]?.[ask];
-}

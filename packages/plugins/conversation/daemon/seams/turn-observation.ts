@@ -13,9 +13,6 @@ import {
 } from '../turns/lib/policy.ts';
 import { transcriptUsageLimit, type UsageLimit } from '../turns/lib/usage-limit.ts';
 
-/** How much of a transcript's end a turn decision reads: the last turn boundary is always near the end. */
-export const TURN_TAIL_EVENTS = 80;
-
 /** The durable fields a turn decision reads — what the main thread tells an observer about a session. */
 export type TurnFacts = Pick<
   SessionState,
@@ -99,33 +96,5 @@ export function stepTurn(
       ...(dialog === undefined ? {} : { dialog }),
       ...(limit === undefined ? {} : { limit }),
     },
-  };
-}
-
-/**
- * Whether a session that is not live leaves the turn part anything to decide. For such a session every
- * settle answers nothing, so a change is recorded exactly when one of these four is still recorded — and
- * once none is, it never will be again until the session is live.
- */
-export function turnLeftToSettle(facts: TurnFacts): boolean {
-  return (
-    isTurnStatus(facts.status) ||
-    facts.turnState !== undefined ||
-    facts.turnPrompt !== undefined ||
-    facts.permissionRequest !== undefined ||
-    facts.harnessDialog !== undefined
-  );
-}
-
-/** The turn facts of a session document — the few fields the main thread tells an observer. */
-export function turnFactsOf(state: SessionState): TurnFacts {
-  return {
-    status: state.status,
-    turn: state.turn,
-    ...(state.pendingQuestion === undefined ? {} : { pendingQuestion: state.pendingQuestion }),
-    ...(state.turnState === undefined ? {} : { turnState: state.turnState }),
-    ...(state.turnPrompt === undefined ? {} : { turnPrompt: state.turnPrompt }),
-    ...(state.permissionRequest === undefined ? {} : { permissionRequest: state.permissionRequest }),
-    ...(state.harnessDialog === undefined ? {} : { harnessDialog: state.harnessDialog }),
   };
 }

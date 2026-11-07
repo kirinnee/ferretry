@@ -5,7 +5,7 @@ import './questions.css';
  * One question a question tool asked, as the transcript card shows it (the chat's `readAskedQuestions` reads these out
  * of a tool call and its result; that reader is the transcript's).
  */
-export interface AskedQuestion {
+interface AskedQuestion {
   readonly header?: string;
   readonly question: string;
   readonly options: readonly { readonly label: string; readonly description?: string }[];

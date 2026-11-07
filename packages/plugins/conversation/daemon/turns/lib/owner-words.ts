@@ -68,11 +68,11 @@ const ownerPart = (by: QueueAuthor | undefined, text: string): string | null =>
   by === undefined ? ownerPartOf(text) : by.kind === 'owner' ? text : null;
 
 /** A person's message in the queue (one a ferret or Ferretry sent says so), as far as it is the owner's. */
-export const queuedByOwner = (message: QueuedMessage): string | null =>
+const queuedByOwner = (message: QueuedMessage): string | null =>
   message.sender === 'human' ? ownerPart(message.by, message.text) : null;
 
 /** A person's send (no sending ferret; a ferret's or Ferretry's says so), as far as it is the owner's. */
-export const sentByOwner = (record: Pick<SendRecord, 'senderKind' | 'from' | 'by' | 'message'>): string | null =>
+const sentByOwner = (record: Pick<SendRecord, 'senderKind' | 'from' | 'by' | 'message'>): string | null =>
   (record.senderKind ?? 'human') === 'human' && record.from === undefined ? ownerPart(record.by, record.message) : null;
 
 export interface OwnerWordsSources {

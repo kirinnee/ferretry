@@ -213,6 +213,18 @@ pre-commit-lib.run {
     # conflict-markers gate does — the opener reaches `main` through the file nobody was looking at.
     # The two files that must SHOW the syntax to teach it are exempt by exact path; see
     # scripts/validate/no-fy-render-in-docs.sh and docs/fy-render.md.
+    # The one-time v4 -> v5 converter stays outside the product: no workspace glob or root tsconfig include reaches
+    # `migration/`, no file outside it, docs and this wiring names it, and it is private with no bin. Runs on every
+    # commit and scans the whole tree, because a leak arrives through the file nobody was looking at; its own
+    # planted-violation self-test runs first. See scripts/validate/migration-isolated.sh.
+    a-migration-isolated = {
+      enable = true;
+      name = "v4 to v5 converter stays outside the product";
+      entry = validator "scripts/validate/migration-isolated.sh";
+      pass_filenames = false;
+      language = "system";
+    };
+
     # Test code never kills by pattern. Suites run from inside live agents' panes, and `pkill -f`
     # matches a regular expression against every command line on the machine — the live tmux server's
     # included. Teardowns kill by pid or by an exact `-S <own temp socket>` argv; see
@@ -239,14 +251,16 @@ pre-commit-lib.run {
       language = "system";
     };
 
-    # A dead-code keep marker (`@pending`, `@public`, a knip `ignore`) must name an open gap of a pending
-    # port, a kept guarantee row or a declared surface, so the knip gates cannot be quieted by a tag.
+    # A dead-code keep marker (`@pending`, `@public`, a knip `ignore`, any other knip setting that keeps code
+    # alive) must name an open gap of a pending port, a kept guarantee row, a declared surface or an
+    # ALLOWED_KNIP reason, so the knip gates cannot be quieted by a tag. A package.json change can make a
+    # package a subsystem, so it runs here too.
     # See scripts/validate/pending-tags.sh.
     a-pending-tags = {
       enable = true;
       name = "Dead-code keep markers name an open fact";
       entry = validator "scripts/validate/pending-tags.sh";
-      files = "^(packages/.*\\.(ts|tsx|mts)|knip(\\.production)?\\.json|ports-pending\\.json|docs/rebuild/guarantees\\.tsv|scripts/validate/pending-tags\\.(sh|ts))$";
+      files = "^((.*/)?package\\.json|packages/.*\\.(ts|tsx|mts)|knip(\\.production)?\\.json|ports-pending\\.json|docs/rebuild/guarantees\\.tsv|scripts/validate/(pending-tags(\\.test)?\\.(sh|ts)|ports-pending\\.ts|guarantees\\.ts)|scripts/gen/lib/(workspace|imports)\\.ts)$";
       pass_filenames = false;
       language = "system";
     };

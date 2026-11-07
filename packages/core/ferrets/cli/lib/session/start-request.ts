@@ -16,7 +16,7 @@ export const START_FLAGS_ELSEWHERE: readonly string[] = ['compact-at', 'file', '
  * a couple of minutes to come up") rather than a work ceiling — the exact misread that killed a
  * healthy session in the source system.
  */
-export const TURN_TIMEOUT_HINT_SECONDS = 600;
+const TURN_TIMEOUT_HINT_SECONDS = 600;
 
 /** The numeric `start` flags, kept together so one validator covers all of them. */
 interface StartNumericFlags {

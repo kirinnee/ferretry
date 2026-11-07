@@ -3,19 +3,10 @@ import type { z } from 'zod';
 import { callFailure } from '../../lib/client.ts';
 import { grantRefusalSentence } from './refusal-words.ts';
 import { type FilesScope, scopeKey } from './scope.ts';
-import {
-  type FsChange,
-  type FsChanges,
-  FsChangesSchema,
-  type FsEntry,
-  type FsFile,
-  FsFileSchema,
-  type FsListing,
-  FsListingSchema,
-} from './wire.ts';
+import { type FsChanges, FsChangesSchema, type FsFile, FsFileSchema, type FsListing, FsListingSchema } from './wire.ts';
 
 // The wire shapes are `wire.ts`'s. These names stay because the views already speak them.
-export type { FsChange, FsChanges, FsEntry, FsFile, FsListing };
+export type { FsChanges, FsFile, FsListing };
 
 /** A read this page could not trust: the daemon answered with a body that is not the shape the route declares. */
 export class UnreadableAnswerError extends Error {

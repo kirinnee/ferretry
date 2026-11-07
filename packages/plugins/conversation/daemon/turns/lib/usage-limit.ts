@@ -116,7 +116,7 @@ export function limitedQuota(current: Quota | undefined, limit: UsageLimit): Quo
 }
 
 /** The quota once the limit is gone: this module's fields removed, everything else kept. */
-export function clearedQuota(current: Quota | undefined): Quota | undefined {
+function clearedQuota(current: Quota | undefined): Quota | undefined {
   if (current === undefined) return undefined;
   const rest = { ...current };
   for (const field of OWNED) delete rest[field];

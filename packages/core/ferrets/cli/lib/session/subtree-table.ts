@@ -3,7 +3,7 @@ import type { SubtreeRow, SubtreeView } from '../../../contract/index.ts';
 const HEADER: readonly string[] = ['FERRET', 'STATE', 'LAST'];
 
 /** `3m`, `2h`, `5d`: the coarsest whole unit, `now` under a minute. */
-export function sinceLabel(nowMs: number, instant: string): string {
+function sinceLabel(nowMs: number, instant: string): string {
   const ms = nowMs - Date.parse(instant);
   if (Number.isNaN(ms) || ms < 60_000) return 'now';
   const minutes = Math.floor(ms / 60_000);

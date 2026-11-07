@@ -76,7 +76,7 @@ export interface SendScheduler {
 }
 
 /** Types a send again under its original id, or presses Enter again for its stranded pointer. */
-export interface SendReattempter {
+interface SendReattempter {
   /**
    * Answers the record as it then stands — retyped, or proven `queued` when the pane showed it held.
    * Throws `SendRetypeWithheld` when the pane said not to type at all.
@@ -95,7 +95,7 @@ export interface SendFailureNotifier {
 }
 
 /** Every session this daemon holds, for the re-derivation a restart owes its in-flight sends. */
-export interface SendRoster {
+interface SendRoster {
   sessions(): readonly SessionId[];
 }
 
@@ -114,7 +114,7 @@ export interface SendTrackerPorts {
 }
 
 /** The background half of the tracker, as the composition root arms it. */
-export interface SendTrackingLoop {
+interface SendTrackingLoop {
   /** Re-derives every session's in-flight sends, then returns the disarm. */
   arm(): () => void;
 }

@@ -10,7 +10,7 @@
 
 import type { PluginClient } from '@ferretry/kernel/manifest';
 
-export const CALL_ORIGIN = 'https://daemon.test';
+const CALL_ORIGIN = 'https://daemon.test';
 
 export type TestFetch = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -23,7 +23,7 @@ export interface RecordedCall {
 }
 
 /** The refusal shape the shell's client throws. */
-export class CallRefusal extends Error {
+class CallRefusal extends Error {
   constructor(
     readonly status: number,
     message: string,
