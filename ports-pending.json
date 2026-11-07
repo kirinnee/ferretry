@@ -18,8 +18,6 @@
     "board",
     "warden",
     "usage",
-    "lessons",
-    "voice",
     "catalogs",
     "mcp",
     "skills",
@@ -87,6 +85,16 @@
       "plugin": "agenda",
       "path": "packages/plugins/agenda/tests/support/app",
       "reason": "app-shell-fill React runtime and app test harness"
+    },
+    {
+      "plugin": "voice",
+      "path": "packages/plugins/voice/app/features/settings/use-machine-voice-cleanup.ts",
+      "reason": "kernel config routes (D2 #3) not declared yet: GET/PUT /v1/config/file, so machine voice.yaml clean-up and the setup Voice default cannot be read or written"
+    },
+    {
+      "plugin": "voice",
+      "path": "packages/plugins/voice/app/features/fleet/setup/voice-default.ts",
+      "reason": "kernel config routes (D2 #3) not declared yet: GET/PUT /v1/config/file, so machine voice.yaml clean-up and the setup Voice default cannot be read or written"
     },
     {
       "plugin": "packs",
