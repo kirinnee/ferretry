@@ -31,7 +31,7 @@ G29	kept	terminals	-	attach proof	grants	G29
 G30	kept	terminals	gate	behaviour as written	grants	G30
 G31	kept	claude-code	codex,gate	behaviour as written	grants	G31
 G32	kept	claude-code	codex,gate	behaviour as written	grants	G32
-G33	kept	terminals	gate	behaviour as written	grants	G33
+G33	kept	conversation	terminals,gate	behaviour as written	grants	G33
 G34	kept	terminals	gate	behaviour as written	grants	G34
 G35	kept	gate	-	behaviour as written	grants	G35
 G36	kept	gate	-	`tests/unit/runtime/mounts/shared-drafts.test.ts`	grants	G36

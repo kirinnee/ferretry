@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fixtureTexts } from '../../../support/fixtures.ts';
 import should from 'should';
 import {
   bindQuestionForm,
@@ -14,7 +14,8 @@ import {
 } from '../../../../daemon/questions/lib/rendered-form.ts';
 
 const FIXTURES = join(import.meta.dir, '../../../fixtures/question-forms');
-const fixture = (name: string): string => readFileSync(join(FIXTURES, `${name}.txt`), 'utf8');
+const text = await fixtureTexts(FIXTURES);
+const fixture = (name: string): string => text(`${name}.txt`);
 /** A pane whose whole scrollback is its screen, as the shorter captures were taken. */
 const screenOnly = (name: string) => questionScreen(fixture(name), fixture(name));
 
@@ -260,15 +261,12 @@ describe('rendered question form', () => {
    * prompt that asked for the form, which QUOTES every question — the trap for a header search.
    */
   describe('a tabbed four-question form', () => {
-    const TABS = join(FIXTURES, 'claude-2.1.281-tabs4');
     const pane = (name: string) => {
-      const history = readFileSync(join(TABS, `${name}.txt`), 'utf8');
+      const history = text(`claude-2.1.281-tabs4/${name}.txt`);
       const visible = `${history.split('\n').slice(0, -1).slice(-24).join('\n')}\n`;
       return questionScreen(visible, history);
     };
-    const questions: readonly RenderedQuestion[] = JSON.parse(
-      readFileSync(join(TABS, 'pending.json'), 'utf8'),
-    ).questions;
+    const questions: readonly RenderedQuestion[] = JSON.parse(text('claude-2.1.281-tabs4/pending.json')).questions;
     const [socials, weekly, meet, sprint] = questions as [
       RenderedQuestion,
       RenderedQuestion,

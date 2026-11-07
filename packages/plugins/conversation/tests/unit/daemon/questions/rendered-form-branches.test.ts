@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fixtureTexts } from '../../../support/fixtures.ts';
 import should from 'should';
 import {
   bindReviewPage,
@@ -9,6 +9,7 @@ import {
 } from '../../../../daemon/questions/lib/rendered-form.ts';
 
 const FIXTURES = join(import.meta.dir, '../../../fixtures/question-forms');
+const text = await fixtureTexts(FIXTURES);
 
 const colour: RenderedQuestion = {
   question: 'Which colour should the banner use?',
@@ -23,10 +24,7 @@ const extras: RenderedQuestion = {
 describe('the closing review page, when an answer wraps', () => {
   it('should join the continuation of a wrapped answer back into the one answer it belongs to', () => {
     // Arrange: a narrow pane wraps `→ Shadow, Icon` onto a second line under the arrow.
-    const wrapped = readFileSync(join(FIXTURES, 'claude-2.1.281-review.txt'), 'utf8').replace(
-      '   → Shadow, Icon',
-      '   → Shadow,\n     Icon',
-    );
+    const wrapped = text('claude-2.1.281-review.txt').replace('   → Shadow, Icon', '   → Shadow,\n     Icon');
 
     // Act
     const page = bindReviewPage(questionScreen(wrapped, wrapped), [colour, extras]);

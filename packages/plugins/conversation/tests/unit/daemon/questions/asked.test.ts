@@ -1,11 +1,12 @@
 import { describe, it } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import should from 'should';
 import { type AskedQuestion, parseAskedQuestion, withAskedQuestion } from '../../../../daemon/questions/lib/asked.ts';
 import { projectStructuredQuestion } from '../../../../daemon/questions/lib/projection.ts';
 import { ClaudeTranscriptParser } from '../../../support/claude-transcript.ts';
 import type { TranscriptEvent } from '../../../../daemon/seams/transcript-types.ts';
 import { at } from '../../../support/instant.ts';
+import { fixtureTexts } from '../../../support/fixtures.ts';
 
 /**
  * LIVE BYTES, Claude Code 2.1.281 (`tests/fixtures/question-asked/`), from a real interactive ferret that
@@ -19,8 +20,7 @@ import { at } from '../../../support/instant.ts';
  *
  * Paths are rewritten under `/home/user` and `/work`; nothing else is changed.
  */
-const fixture = (name: string): string =>
-  readFileSync(new URL(`../../../fixtures/question-asked/${name}`, import.meta.url), 'utf8');
+const fixture = await fixtureTexts(join(import.meta.dir, '../../../fixtures/question-asked'));
 const events = (name: string): readonly TranscriptEvent[] =>
   new ClaudeTranscriptParser().parse({ text: fixture(name), endOfInput: true }).events;
 

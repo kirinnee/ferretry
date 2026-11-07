@@ -5,12 +5,29 @@ import manifest from '../manifest.ts';
 import { followFerretChanges } from './ferret-changes.ts';
 import { buildConversationA } from './host.ts';
 import { buildReading } from './reading.ts';
+import { maskedBody } from './seams/masked-body.ts';
 
 const unavailable =
   (sentence: string): RouteHandler =>
   async () => {
     throw new ApiError(503, sentence, 'plugin_unavailable');
   };
+
+/**
+ * The `guard: 'secrets'` routes that already build their answer inside their own redaction read (the transcript reads
+ * and the work search), or serve bytes no mask may touch (an image, a render's payload). Every other such route is
+ * wrapped in {@link maskedBody}.
+ */
+const SCRUBS_ITS_OWN_BODY: ReadonlySet<string> = new Set([
+  'GET /v1/ferrets/:ferretId/logs',
+  'GET /v1/ferrets/:ferretId/log-page',
+  'GET /v1/ferrets/:ferretId/log-search',
+  'GET /v1/ferrets/:ferretId/messages',
+  'GET /v1/ferrets/:ferretId/transcript-images/:handle',
+  'GET /v1/renders/:id',
+  'GET /v1/search',
+  'POST /v1/search/related',
+]);
 
 /** One handler per key the manifest declares: the one a part serves, or the fallback. */
 function declared<K extends string, H>(
@@ -48,9 +65,17 @@ export default implementDaemon(manifest, {
       b.stop();
     });
 
+    const served = { ...a.routes, ...b.routes };
     const routes = declared(
       manifest.actions.routes.map(route => route.key),
-      { ...a.routes, ...b.routes },
+      Object.fromEntries(
+        manifest.actions.routes.flatMap(route => {
+          const handler = served[route.key];
+          if (handler === undefined) return [];
+          const masks = route.guard === 'secrets' && !SCRUBS_ITS_OWN_BODY.has(route.key);
+          return [[route.key, masks ? maskedBody(ctx.kernel.redaction, handler) : handler]];
+        }),
+      ),
       () => unavailable('This part of Conversation is not ready yet.'),
     );
     const sockets = declared(
