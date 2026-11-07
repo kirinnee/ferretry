@@ -6,7 +6,7 @@
  * Drawn on the Conversations screen (`screens.links`); today Settings › Runtimes and the onboarding step showed it.
  */
 
-import { PanelSlot, statusLabel } from '@ferretry/app';
+import { PanelSlot, statusLabel, useSlotHasPanels } from '@ferretry/app';
 import { MOVE_ACCOUNT_SLOT, type MoveAccountSlotProps } from '@ferretry/core-ferrets/contract';
 import { Button, cn } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
@@ -94,13 +94,31 @@ export function Segmented<T extends string>({
 /**
  * The runtime field. Runtimes is not a need of Conversation, so the picker does not read the machine's runtimes: it
  * mounts the slot Ferrets offers for "which runtime of this harness?" (`ferrets.move-account`), where Runtimes
- * contributes its picker. Neither half imports the other; a daemon without Runtimes shows no picker and keeps nothing.
+ * contributes its picker. Neither half imports the other; where no panel is placed the field is a typed runtime name.
  */
 export type RuntimeField = (props: MoveAccountSlotProps) => ReactNode;
 
+function RuntimeSlot({ daemon, field }: { readonly daemon: string; readonly field: MoveAccountSlotProps }) {
+  const placed = useSlotHasPanels(MOVE_ACCOUNT_SLOT);
+  if (placed) return <PanelSlot daemon={daemon} slot={MOVE_ACCOUNT_SLOT} props={{ ...field }} />;
+  return (
+    <input
+      id={field.fallbackId}
+      type="text"
+      className="kt-input w-full font-mono"
+      autoComplete="off"
+      spellCheck={false}
+      placeholder={field.fallbackPlaceholder}
+      data-runtime-typed=""
+      value={field.value}
+      onChange={event => field.onValueChange(event.target.value)}
+    />
+  );
+}
+
 export const runtimeSlotField =
   (daemon: string): RuntimeField =>
-  props => <PanelSlot daemon={daemon} slot={MOVE_ACCOUNT_SLOT} props={{ ...props }} />;
+  props => <RuntimeSlot daemon={daemon} field={props} />;
 
 /** What the runtime field shows when the machine has no runtime of this harness. */
 export const noRuntimeSentence = (harness: HarnessKey): string =>

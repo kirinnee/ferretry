@@ -18,13 +18,13 @@ import { skeletonSentence } from '@ferretry/kernel/contract';
 import type { ReactNode } from 'react';
 import { ChatScreen } from './chat/chat-screen.tsx';
 import { ConversationClientProvider } from './client.ts';
+import { ComposerAttachPanel } from './composer/composer-attach.tsx';
+import { ConversationSettings } from './composer/conversation-settings.tsx';
 import { CompactAtPanel } from './compact-at/compact-at-panel.tsx';
 import { LinksScreen } from './links/links-screen.tsx';
 import { QuestionRenderer } from './questions/question-renderer.tsx';
 import { QueuePanel } from './queue/queue-page.tsx';
 import { HypermediaPanel } from './toolbar/hypermedia-panel.tsx';
-import { ComposerAttachPanel } from './composer/composer-attach.tsx';
-import { ConversationSettings } from './composer/conversation-settings.tsx';
 
 const TITLE = 'Conversation';
 
