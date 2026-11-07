@@ -1,6 +1,7 @@
 /**
  * `@ferretry/core-vault/contract/testing` (§7.8): Vault's fakes and conformance suites. The real Vault port passes
- * `inputHoldsConformance`, `outputGuardConformance`, `redactionConformance` and `vaultConformance`; Terminals and
+ * `inputHoldsConformance`, `outputGuardConformance`, `redactionConformance`, `vaultConformance` and
+ * `sealedDocumentsConformance`; Terminals and
  * Browsers run their `input.targets` adapters through `inputTargetConformance`. The fakes pass the same suites.
  */
 import { describe, expect, test } from 'bun:test';
@@ -17,11 +18,19 @@ import {
   type Redaction,
   type RedactionScope,
   type RevealGrant,
+  type StatePort,
   type TargetRef,
 } from '@ferretry/kernel/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import type { InputRaise, InputRequestId, InputRequestState } from '../inputs.ts';
 import type { ChildEnvironment, VaultApi } from '../port.ts';
+import {
+  type SealedDocumentDef,
+  type SealedDocumentHandle,
+  type SealedDocumentsApi,
+  type SealedName,
+  SealedNameSchema,
+} from '../sealed.ts';
 import {
   allowedDestination,
   type AuthorizedOutcome,
@@ -627,6 +636,92 @@ export function inputTargetConformance(
         facts,
       );
       expect(typed === 'target_gone' || typed === 'target_changed').toBe(true);
+    });
+  });
+}
+
+// ─── sealed documents (contract change C) ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Sealed documents in memory, scoped exactly as the real port is: by the caller's own state port (the kernel's
+ * knowledge of the caller), then the document. Nothing is sealed; a test that needs today's bytes uses the real one.
+ */
+export class FakeSealedDocuments implements SealedDocumentsApi {
+  readonly #folders = new WeakMap<StatePort, Map<string, Map<string, Uint8Array>>>();
+
+  open(own: StatePort, document: SealedDocumentDef): SealedDocumentHandle {
+    const entries = (): Map<string, Uint8Array> => {
+      let folder = this.#folders.get(own);
+      if (folder === undefined) {
+        folder = new Map();
+        this.#folders.set(own, folder);
+      }
+      let held = folder.get(document.state.path);
+      if (held === undefined) {
+        held = new Map();
+        folder.set(document.state.path, held);
+      }
+      return held;
+    };
+    const named = (name: SealedName): SealedName => {
+      if (!SealedNameSchema.safeParse(name).success) throw new TypeError(`${document.state.path}: not a sealed name`);
+      return name;
+    };
+    return {
+      put: async (name, value) => {
+        entries().set(named(name), typeof value === 'string' ? new TextEncoder().encode(value) : value.slice());
+      },
+      get: async name => {
+        const bytes = entries().get(named(name));
+        return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+      },
+      getBytes: async name => entries().get(named(name))?.slice(),
+      delete: async name => entries().delete(named(name)),
+    };
+  }
+}
+
+export interface SealedDocumentsSubject {
+  readonly port: SealedDocumentsApi;
+  /** The calling plugin's own state port, declaring `document`. */
+  readonly mine: StatePort;
+  /** Another plugin's state port, declaring a document of the same name and path. */
+  readonly theirs: StatePort;
+  readonly document: SealedDocumentDef;
+}
+
+/** Own round trip, and another plugin's documents unreachable even under the same document and entry names. */
+export function sealedDocumentsConformance(
+  name: string,
+  make: () => SealedDocumentsSubject | Promise<SealedDocumentsSubject>,
+): void {
+  const VALUE = 'rt-test-0123456789abcdef';
+  const ENTRY = 'MCP_DOCS_REFRESH' as SealedName;
+  describe(`sealed documents conformance: ${name}`, () => {
+    test('a plugin puts, gets and deletes its own sealed values', async () => {
+      const { port, mine, document } = await make();
+      const own = port.open(mine, document);
+      await own.put(ENTRY, VALUE);
+      await own.put('lnk_bytes-1' as SealedName, new Uint8Array([0, 1, 254, 255]));
+      expect(await own.get(ENTRY)).toBe(VALUE);
+      expect([...((await own.getBytes('lnk_bytes-1' as SealedName)) ?? [])]).toEqual([0, 1, 254, 255]);
+      await own.put(ENTRY, `${VALUE}-rotated`);
+      expect(await own.get(ENTRY)).toBe(`${VALUE}-rotated`);
+      expect(await own.delete(ENTRY)).toBe(true);
+      expect(await own.delete(ENTRY)).toBe(false);
+      expect(await own.get(ENTRY)).toBeUndefined();
+    });
+    test("another plugin's documents cannot be read or deleted, even under the same names", async () => {
+      const { port, mine, theirs, document } = await make();
+      await port.open(theirs, document).put(ENTRY, VALUE);
+      const own = port.open(mine, document);
+      expect(await own.get(ENTRY)).toBeUndefined();
+      expect(await own.delete(ENTRY)).toBe(false);
+      expect(await port.open(theirs, document).get(ENTRY)).toBe(VALUE);
+    });
+    test('a name outside the grammar is refused', async () => {
+      const { port, mine, document } = await make();
+      await expect(port.open(mine, document).put('../escape' as SealedName, VALUE)).rejects.toThrow();
     });
   });
 }
