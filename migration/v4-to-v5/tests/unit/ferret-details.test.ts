@@ -96,7 +96,7 @@ const v4State = (id: string, extra: Json = {}): Json => ({
   turnState: 'your-turn',
   turnStateAt: LATER,
   launchInstructions: { sections: [{ id: 'tools', chars: 10, digest: 'abc' }], mode: 'auto', questions: true },
-  queue: [{ internal: 'kept by the loose schema' }],
+  queue: [{ internal: 'a key v5 does not list' }],
   ...extra,
 });
 
@@ -138,7 +138,7 @@ async function readWithV5(ferrets: string[]): Promise<Json> {
     `
 const [repo, home, ...ferrets] = process.argv.slice(2);
 const { decodeJson } = await import(repo + '/packages/core/kernel/host/state/format.ts');
-const files = await import(repo + '/packages/core/ferrets/daemon/lib/state.ts');
+const files = await import(repo + '/packages/core/ferrets/contract/index.ts');
 const { existsSync, readFileSync } = await import('node:fs');
 const read = (def, path) => {
   if (!existsSync(path)) return null;
@@ -151,10 +151,10 @@ const result = { agentPins: read(files.AgentPinsFile, home + '/state/ferrets/age
 for (const ferret of ferrets) {
   const dir = home + '/state/ferrets/' + ferret;
   result[ferret] = {
-    config: read(files.SessionConfigFiles, dir + '/config.json'),
-    state: read(files.SessionStateFiles, dir + '/state.json'),
-    pins: read(files.FerretPinFiles, dir + '/pins.json'),
-    details: read(files.FerretDetailsFiles, dir + '/details.json'),
+    config: read(files.FerretConfigFile, dir + '/config.json'),
+    state: read(files.FerretStateFile, dir + '/state.json'),
+    pins: read(files.FerretPinsFile, dir + '/pins.json'),
+    details: read(files.FerretDetailsFile, dir + '/details.json'),
   };
 }
 console.log(JSON.stringify(result));
@@ -216,17 +216,18 @@ test('config, state, pins, details and pinned ferrets are written and v5 reads e
 
   const config = v5.lead?.config?.value as Json;
   const ferret = await readJson('lead/ferret.json');
-  // The two renamed keys moved; nothing else of the v4 document is lost.
+  // The renamed keys moved (the credential hash as capabilityHash: this ferret is live); every listed key is kept.
   expect(config.move).toEqual({ from: 'claude-old', to: 'claude-work', at: AT });
   expect(config.moves).toEqual([{ from: 'claude-old', to: 'claude-work', at: AT }]);
   expect(config).not.toHaveProperty('migration');
   expect(config).not.toHaveProperty('migrations');
+  expect(config).not.toHaveProperty('sessionCapabilityHash');
   expect(config).toMatchObject({
     teammate: 'quill',
     prompt: 'FAKE task brief',
     focusTask: { id: 'F12' },
     boardSkip: { reason: 'fake skip', at: AT },
-    sessionCapabilityHash: FAKE_HASH,
+    capabilityHash: FAKE_HASH,
     retry: { transientAttempts: 3, stalledAttempts: 1, waitForQuotaReset: true, allowAccountFailover: false },
   });
   // Old-home paths now point into the new home; the transcript is the pointer ferret.json carries.
@@ -238,13 +239,10 @@ test('config, state, pins, details and pinned ferrets are written and v5 reads e
     join(f.to, agentHomesRoot('codex'), '_shared', 'sessions/2026/11/01/rollout-fake.jsonl'),
   );
 
-  // state.json keeps the v4 status ferret.json's state was decided from, and the loose internal keys.
+  // state.json keeps the v4 status ferret.json's state was decided from; a key v5 does not list (queue) is dropped.
   const state = v5.lead?.state?.value as Json;
-  expect(state).toMatchObject({
-    status: 'awaiting_user',
-    pid: 4242,
-    queue: [{ internal: 'kept by the loose schema' }],
-  });
+  expect(state).toMatchObject({ status: 'awaiting_user', pid: 4242 });
+  expect(state).not.toHaveProperty('queue');
   expect(ferret.state).toBe('idle');
   expect((v5.child?.state?.value as Json).status).toBe('completed');
   expect((await readJson('child/ferret.json')).state).toBe('stopped');
@@ -276,12 +274,40 @@ test('config, state, pins, details and pinned ferrets are written and v5 reads e
   expect(JSON.stringify(report)).not.toContain('FAKE');
 });
 
-test('a minimal v4 session gets config.json and no details, pins or state it never had', async () => {
+test('strict v5 key lists: unlisted keys are dropped and named, a stopped ferret keeps no hash, state drops attention and nulls', async () => {
+  await f.session('f1', { sessionCapabilityHash: FAKE_HASH, oldSetting: 'FAKE-VALUE-1', retiredFlag: true });
+  await f.put('state/sessions/f1/state.json', {
+    id: 'f1',
+    status: 'completed',
+    turn: 3,
+    attention: { count: 1 },
+    pid: null,
+    legacyCounter: 'FAKE-VALUE-2',
+  });
+  const report = await ferretsStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  const config = await readJson('f1/config.json');
+  expect(Object.keys(config)[0]).toBe('format');
+  for (const key of ['oldSetting', 'retiredFlag', 'sessionCapabilityHash', 'capabilityHash'])
+    expect(config).not.toHaveProperty(key);
+  const state = await readJson('f1/state.json');
+  expect(state).toEqual({ format: 1, id: 'f1', status: 'completed', turn: 3 });
+  const whats = report.notCarried.map(item => item.what);
+  expect(whats).toContain('state/sessions/<sid>/config.json keys: oldSetting, retiredFlag');
+  expect(whats).toContain('state/sessions/<sid>/state.json keys: legacyCounter');
+  expect(JSON.stringify(report)).not.toContain('FAKE-VALUE');
+  const v5 = await readWithV5(['f1']);
+  expect((v5.f1 as Json).config).toMatchObject({ formatFirst: true });
+  expect((v5.f1 as Json).state).toMatchObject({ formatFirst: true });
+});
+
+test('a minimal v4 session gets config.json and details, and no pins or state it never had', async () => {
   await f.session('f1');
   expect((await ferretsStep.run(f.ctx())).status).toBe('converted');
   expect(await readJson('f1/config.json')).toMatchObject({ format: 1, id: 'f1', agent: 'codex-work' });
-  // `name` is the title; the fixture's name is its id, a legitimate title.
-  expect(await readJson('f1/details.json')).toEqual({ format: 1, title: 'f1' });
+  // `name` is the title (the fixture's name is its id, a legitimate title); v4's required start facts are its options.
+  const details = await readJson('f1/details.json');
+  expect(details).toMatchObject({ format: 1, title: 'f1', options: { mode: 'auto', intervalSeconds: 60 } });
   for (const name of ['state.json', 'pins.json', 'agent-pins.json'])
     expect(await exists(name === 'agent-pins.json' ? name : `f1/${name}`)).toBe(false);
 });
@@ -294,7 +320,10 @@ test('the bare interactive placeholder is not a title, and a refused start optio
     model: 'gpt-fake',
   });
   expect((await ferretsStep.run(f.ctx())).status).toBe('converted');
-  expect(await readJson('f1/details.json')).toEqual({ format: 1, options: { model: 'gpt-fake' } });
+  const details = await readJson('f1/details.json');
+  expect(details.title).toBeUndefined();
+  expect(details.options).toMatchObject({ model: 'gpt-fake' });
+  expect((details.options as Json).harnessFlags).toBeUndefined();
   expect((await readJson('f1/config.json')).harnessFlags).toEqual(['--ok', 'bad\u0007flag']);
 });
 

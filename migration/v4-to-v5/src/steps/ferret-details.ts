@@ -1,33 +1,41 @@
 /**
  * The second half of the Ferrets step: the documents v5 keeps BESIDE each `ferret.json`.
  *
- * | v4                                    | v5 (`packages/core/ferrets/daemon/lib/state.ts`)                       |
- * | ------------------------------------- | ---------------------------------------------------------------------- |
- * | `state/sessions/<sid>/config.json`    | `state/ferrets/<sid>/config.json`  `SessionConfigSchema.loose()`       |
- * | `state/sessions/<sid>/state.json`     | `state/ferrets/<sid>/state.json`   `SessionStateSchema.loose()`        |
- * | `state/sessions/<sid>/pins.json`      | `state/ferrets/<sid>/pins.json`    `{pins: PinSchema[]}` (strict)      |
- * | (config.json start facts and name)    | `state/ferrets/<sid>/details.json` `{options?, title?}` (strict)       |
- * | `state/agent-pins.json`               | `state/ferrets/agent-pins.json`    `AgentPinFileSchema` (strict)       |
+ * | v4                                    | v5 (`@ferretry/core-ferrets/contract`, every body STRICT)            |
+ * | ------------------------------------- | -------------------------------------------------------------------- |
+ * | `state/sessions/<sid>/config.json`    | `state/ferrets/<sid>/config.json`  `FerretConfigDocumentSchema`     |
+ * | `state/sessions/<sid>/state.json`     | `state/ferrets/<sid>/state.json`   `FerretStateDocumentSchema`      |
+ * | `state/sessions/<sid>/pins.json`      | `state/ferrets/<sid>/pins.json`    `FerretPinsDocumentSchema`       |
+ * | (config.json start facts and name)    | `state/ferrets/<sid>/details.json` `FerretDetailsSchema`            |
+ * | `state/agent-pins.json`               | `state/ferrets/agent-pins.json`    `AgentPinsDocumentSchema`        |
  *
- * Those v5 schemas are private to the Ferrets daemon, and this tool imports product code only through a contract,
- * so the documents are built from this mapping and `tests/unit/ferret-details.test.ts` reads every one back with
- * v5's REAL schemas in a subprocess. `details.json` alone is checked here, against `StartOptionsSchema` and
- * `FerretTitleSchema`, which ARE in the contract.
- *
- * The v4 → v5 session documents differ only in `migration`/`migrations`, renamed `move`/`moves`; both are loose, so
- * every other key (lifecycle `command`, `prompt`, `tmuxSession`, `sessionCapabilityHash`, queue payloads) is kept.
+ * Every body is parsed with the contract's own strict schema before it is written, `format: 1` first. The v5 key lists
+ * are final (gustavo, 2026-11-07): `migration`/`migrations` are renamed `move`/`moves`, `sessionCapabilityHash` is
+ * renamed `capabilityHash` and kept only for a ferret that is neither stopped nor cut off (v5 keeps the hash of the
+ * CURRENT pane's credential), the lifecycle keys `command`, `prompt` and `tmuxSession` are kept, a state document's old
+ * `attention` key and its cleared (`null`) values are dropped, and any other key v5 does not list is dropped and named in
+ * the report (never its value): a strict v5 file with an unlisted key reads as damaged.
  * Paths into the old home are rewritten to the new one: the runtime wrapper (`agent`, `command[0]`), the transcript
  * (the same pointer `ferret.json` got, or none) and a conversion's `fromFile` in the shared pool.
  *
  * `environment.json` (a plaintext credential) is never opened.
  */
-import { FerretTitleSchema, StartOptionsSchema, type TranscriptProvenance } from '@ferretry/core-ferrets/contract';
+import {
+  AgentPinsDocumentSchema,
+  FerretConfigDocumentSchema,
+  FerretDetailsSchema,
+  FerretPinsDocumentSchema,
+  FerretStateDocumentSchema,
+  FerretTitleSchema,
+  StartOptionsSchema,
+  type TranscriptProvenance,
+} from '@ferretry/core-ferrets/contract';
 import { isAbsolute, join, sep } from 'node:path';
 import { z } from 'zod';
 import type { KeptItem } from '../report.ts';
 import { agentHomesRoot, inside } from '../v5/harness-paths.ts';
 import { info, json, type V4Config } from '../v4/ferrets.ts';
-import { MAX_AGENT_PINS, V4AgentPin, V4AgentPinFile, V4Pin, V4PinSnapshot } from '../v4/pins.ts';
+import { MAX_AGENT_PINS, V4AgentPinFile, V4PinSnapshot } from '../v4/pins.ts';
 import type { StepContext } from './index.ts';
 
 /** One converted ferret, as the record half of the step decided it. */
@@ -37,22 +45,32 @@ export interface DetailsSource {
   readonly runtime: string;
   /** The transcript pointer `ferret.json` carries; `undefined` when it carries none. */
   readonly transcript: TranscriptProvenance | undefined;
+  /** v4 last saw it finished (or never started): v5 keeps no credential hash for it. */
+  readonly stopped: boolean;
 }
 
 type Json = Record<string, unknown>;
 
 const Document = z.record(z.string(), z.unknown());
-/** v5's kernel stamps `format` first; the body schemas below mirror v5's own declarations. */
+/** The kernel stamps `format` first; the contract's bodies describe the document without it. */
 const Stamp = { format: z.literal(1) };
-const SessionDocument = z.looseObject({ ...Stamp, id: z.string().min(1) });
-const PinsDocument = z.strictObject({ ...Stamp, pins: z.array(V4Pin) });
-const AgentPinsDocument = z.strictObject({ ...Stamp, pins: z.array(V4AgentPin).max(MAX_AGENT_PINS) });
+const ConfigDocument = FerretConfigDocumentSchema.extend(Stamp);
+const StateDocument = FerretStateDocumentSchema.extend(Stamp);
+const PinsDocument = FerretPinsDocumentSchema.extend(Stamp);
+const AgentPinsDocument = AgentPinsDocumentSchema.extend(Stamp);
+const DetailsDocument = FerretDetailsSchema.extend(Stamp);
 const StartOptions = StartOptionsSchema.omit({ title: true });
-const DetailsDocument = z.strictObject({
-  ...Stamp,
-  options: StartOptions.optional(),
-  title: FerretTitleSchema.optional(),
-});
+const CONFIG_KEYS = new Set(Object.keys(FerretConfigDocumentSchema.shape));
+const STATE_KEYS = new Set(Object.keys(FerretStateDocumentSchema.shape));
+
+/** `body` with only the keys v5 lists; each other key's NAME goes into `dropped`. */
+function listedOnly(body: Json, listed: ReadonlySet<string>, dropped: Set<string>): Json {
+  const out: Json = {};
+  for (const [key, value] of Object.entries(body))
+    if (listed.has(key)) out[key] = value;
+    else dropped.add(key);
+  return out;
+}
 
 const file = <Shape>(path: string, schema: z.ZodType<Shape>) => ({ path, format: 1, schema, mode: 0o600 });
 
@@ -80,12 +98,29 @@ function conversion(ctx: StepContext, value: unknown): unknown {
     : { ...record, fromFile: ctx.v5.resolve(join(agentHomesRoot(harness), '_shared', pooled)) };
 }
 
-/** `config.json`: the v4 document whole, `format` first, the two renamed keys moved and old-home paths rewritten. */
-export function sessionConfigDocument(ctx: StepContext, source: DetailsSource, raw: Json): Json {
-  const { format: _format, migration, migrations, transcript: _transcript, agent, command, ...rest } = raw;
+/**
+ * `config.json`: the v4 document, `format` first, the renamed keys moved, old-home paths rewritten and every key v5 does
+ * not list left out (its name added to `dropped`).
+ */
+export function sessionConfigDocument(
+  ctx: StepContext,
+  source: DetailsSource,
+  raw: Json,
+  dropped: Set<string> = new Set(),
+): Json {
+  const {
+    format: _format,
+    migration,
+    migrations,
+    transcript: _transcript,
+    agent,
+    command,
+    sessionCapabilityHash,
+    ...rest
+  } = raw;
   const isName = typeof agent === 'string' && !isAbsolute(agent);
-  return {
-    format: 1,
+  const keepHash = !source.stopped && raw.credentialRevoked !== true && sessionCapabilityHash !== undefined;
+  const body: Json = {
     ...rest,
     agent: isName ? source.runtime : wrapper(ctx, source.runtime, agent),
     ...(command === undefined
@@ -99,7 +134,16 @@ export function sessionConfigDocument(ctx: StepContext, source: DetailsSource, r
     ...(rest.conversion === undefined ? {} : { conversion: conversion(ctx, rest.conversion) }),
     ...(migration === undefined ? {} : { move: migration }),
     ...(migrations === undefined ? {} : { moves: migrations }),
+    ...(keepHash ? { capabilityHash: sessionCapabilityHash } : {}),
   };
+  return { format: 1, ...listedOnly(body, CONFIG_KEYS, dropped) };
+}
+
+/** `state.json`: `format` first, the old `attention` key and cleared (`null`) values left out, then v5's list only. */
+export function sessionStateDocument(raw: Json, dropped: Set<string> = new Set()): Json {
+  const { format: _format, attention: _attention, ...rest } = raw;
+  const body = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== null));
+  return { format: 1, ...listedOnly(body, STATE_KEYS, dropped) };
 }
 
 /** The card a v4 session was anchored to (or last touched), when it is a card on this machine. */
@@ -172,6 +216,8 @@ async function readTolerant(path: string): Promise<unknown> {
 export async function prepareDetails(ctx: StepContext, sources: readonly DetailsSource[]) {
   const writes: (() => Promise<void>)[] = [];
   const counts = { configs: 0, states: 0, details: 0, pinFiles: 0, pins: 0, unreadablePins: 0, agentPins: 0 };
+  const droppedConfig = new Set<string>();
+  const droppedState = new Set<string>();
   const ids = new Set<string>();
   for (const source of sources) {
     const id = source.config.id;
@@ -181,16 +227,15 @@ export async function prepareDetails(ctx: StepContext, sources: readonly Details
 
     const raw = await json(join(folder, 'config.json'), Document);
     if (raw === undefined) throw new Error('v4 session config vanished');
-    const config = SessionDocument.parse(sessionConfigDocument(ctx, source, raw));
-    writes.push(() => ctx.v5.json(file(target('config.json'), SessionDocument), config));
+    const config = ConfigDocument.parse(sessionConfigDocument(ctx, source, raw, droppedConfig));
+    writes.push(() => ctx.v5.json(file(target('config.json'), ConfigDocument), config));
     counts.configs += 1;
 
     const state = await json(join(folder, 'state.json'), Document);
     if (state !== undefined) {
-      const { format: _format, ...body } = state;
-      const document = SessionDocument.parse({ format: 1, ...body });
+      const document = StateDocument.parse(sessionStateDocument(state, droppedState));
       if (document.id !== id) throw new Error('v4 state identity mismatch');
-      writes.push(() => ctx.v5.json(file(target('state.json'), SessionDocument), document));
+      writes.push(() => ctx.v5.json(file(target('state.json'), StateDocument), document));
       counts.states += 1;
     }
 
@@ -236,8 +281,27 @@ export async function prepareDetails(ctx: StepContext, sources: readonly Details
   ];
   if (counts.unreadablePins > 0)
     kept.push({ what: 'damaged pin files read as no pins, as v4 read them', count: counts.unreadablePins });
+  const notCarried = [
+    ...(droppedConfig.size === 0
+      ? []
+      : [
+          {
+            what: `state/sessions/<sid>/config.json keys: ${[...droppedConfig].sort().join(', ')}`,
+            why: 'v5 lists no such key in a ferret’s config.json (its key list is final and strict); values never read into the report',
+          },
+        ]),
+    ...(droppedState.size === 0
+      ? []
+      : [
+          {
+            what: `state/sessions/<sid>/state.json keys: ${[...droppedState].sort().join(', ')}`,
+            why: 'v5 lists no such key in a ferret’s state.json (its key list is final and strict); values never read into the report',
+          },
+        ]),
+  ];
   return {
     kept,
+    notCarried,
     async write() {
       for (const write of writes) await write();
     },

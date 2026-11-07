@@ -136,7 +136,7 @@ export const ferretsStep: Step = {
           stateAt: state?.finishedAt ?? state?.lastActivityAt ?? state?.startedAt ?? config.updatedAt,
         });
         records.push(record);
-        details.push({ config, runtime, transcript: record.transcript });
+        details.push({ config, runtime, transcript: record.transcript, stopped });
         // M4: v4 hashes the full fys_ bearer with SHA-256, exactly the v5 token contract.
         // v4 has no issuance timestamp; creation is the known lower bound, not conversion time.
         // A person's cut-off (v4 `credentialRevoked`) is v5's `cutOff`. v4 drops the hash when it cuts a ferret off,
@@ -171,6 +171,7 @@ export const ferretsStep: Step = {
       return {
         ...base,
         status: 'converted',
+        notCarried: [...this.notCarried, ...documents.notCarried],
         kept: [
           { what: 'ferret records (including archived sessions)', count: records.length },
           { what: 'ferret credential hashes', count: tokens.length },

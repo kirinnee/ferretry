@@ -19,15 +19,31 @@ export async function fixture() {
     await writeFile(target, JSON.stringify(value), { mode: 0o600 });
   };
   const session = async (id = 'f1', extra: Record<string, unknown> = {}) => {
+    // Every key v4.291.5's SessionConfigSchema requires (v4 refuses a config without them), so every real one has them.
     await put(`state/sessions/${id}/config.json`, {
       id,
+      incarnation: `inc-${id}`,
+      runtimeGeneration: 1,
       name: id,
       agent: 'codex-work',
       harness: 'codex',
+      modelHint: '',
+      mode: 'auto',
+      remoteControl: false,
+      harnessFlags: [],
       cwd: '/work/project',
       tmuxSession: `fy-${id}`,
       createdAt: AT,
       updatedAt: AT,
+      turn: 0,
+      intervalSeconds: 60,
+      timeoutSeconds: 0,
+      nudgeAfterSeconds: 0,
+      killAfterSeconds: 0,
+      directSendMaxChars: 0,
+      resumeMenuChoice: 'full',
+      maxSnapshots: 1,
+      retry: { transientAttempts: 0, stalledAttempts: 0, waitForQuotaReset: false, allowAccountFailover: false },
       ...extra,
     });
   };

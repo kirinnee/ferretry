@@ -29,7 +29,7 @@ test('keeps live and archived ids, parent, runtime, resume id and D15 pane handl
     },
     sessionCapabilityHash: FAKE_HASH,
   });
-  await f.put('state/sessions/lead/state.json', { id: 'lead', status: 'thinking', lastActivityAt: AT });
+  await f.put('state/sessions/lead/state.json', { id: 'lead', status: 'thinking', turn: 0, lastActivityAt: AT });
   await f.pane('lead');
   const provenance = {
     v: 1,
@@ -50,7 +50,7 @@ test('keeps live and archived ids, parent, runtime, resume id and D15 pane handl
     at: AT,
   } as const;
   await f.session('child', { parent: 'lead', provenance, transferredFrom, projectId: RUNTIME });
-  await f.put('state/sessions/child/state.json', { id: 'child', status: 'completed', finishedAt: AT });
+  await f.put('state/sessions/child/state.json', { id: 'child', status: 'completed', turn: 0, finishedAt: AT });
   await f.put('state/archived-sessions.json', {
     version: 1,
     sessions: { child: { archivedAt: AT, lastSequence: 0, journalLine: 1, journal: null } },
