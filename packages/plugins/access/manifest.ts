@@ -10,6 +10,7 @@ import {
   DevicesFile,
   GrantAuditFile,
   PasskeysFile,
+  StepUpStages,
   PushFile,
   PushKeysFile,
   UnlocksFile,
@@ -231,6 +232,7 @@ export default definePlugin({
       { hook: SessionModes, key: 'device' },
       { hook: SessionModes, key: 'pair' },
     ],
+    offers: [{ hook: StepUpStages }],
   },
 
   doctor: ['notifications'],

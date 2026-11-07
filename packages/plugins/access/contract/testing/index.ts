@@ -8,6 +8,8 @@ export interface FakeAccessOptions {
   readonly enrolments?: number;
   /** What every passkey ceremony answers; a fake refuses unless told otherwise. */
   readonly passkeys?: PasskeyVerifier;
+  /** The devices that hold a passkey. */
+  readonly withPasskeys?: readonly string[];
 }
 
 const refusingVerifier: PasskeyVerifier = {
@@ -23,6 +25,7 @@ export function fakeAccess(options: FakeAccessOptions = {}): AccessApi & { reado
     buzzes,
     devices: async () => [...devices],
     passkeys: options.passkeys ?? refusingVerifier,
+    holdsPasskey: async deviceId => (options.withPasskeys ?? []).includes(deviceId),
     buzz: async message => {
       buzzes.push(BuzzSchema.parse(message));
       return options.enrolments ?? 0;
@@ -42,6 +45,9 @@ export function accessConformance(name: string, make: () => AccessApi): void {
     test('a buzz answers how many devices it reached, never a negative count', async () => {
       const reached = await make().buzz({ tag: 'test', title: 'Test', body: '', url: '/' });
       expect(Number.isInteger(reached) && reached >= 0).toBe(true);
+    });
+    test('a device it never paired holds no passkey', async () => {
+      expect(await make().holdsPasskey('d_never-paired')).toBe(false);
     });
     test('a passkey ceremony with garbage bytes is refused, not thrown', async () => {
       const verdict = await make().passkeys.verifyAssertion({
