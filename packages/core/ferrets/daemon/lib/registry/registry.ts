@@ -24,7 +24,10 @@ export interface FerretFilter {
  * card it was started with and its title from `details.json`. The pin instant is the reader's to add.
  */
 export function summaryOf(record: FerretRecord, details?: FerretDetails): FerretSummary {
-  const { format: _format, handle: _handle, ...summary } = record;
+  const { format: _format, handle: _handle, transcript, ...rest } = record;
+  // Public reads never carry the launch-time rollout exclusion set (today's session view).
+  const summary: FerretSummary =
+    transcript === undefined ? rest : { ...rest, transcript: (({ baseline: _baseline, ...shown }) => shown)(transcript) };
   if (details === undefined) return summary;
   const model = details.options?.model;
   const card = details.options?.card;

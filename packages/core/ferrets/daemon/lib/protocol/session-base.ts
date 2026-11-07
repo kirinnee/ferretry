@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
-/** Harness family shared by session records and transfer lineage leaves. */
-export const HarnessSchema = z.enum(['claude', 'codex']);
+import { RecordedHarnessSchema } from '../../../contract/records.ts';
+
+/** Harness family shared by session records and transfer lineage leaves (the contract owns it). */
+export const HarnessSchema = RecordedHarnessSchema;
 export type Harness = z.infer<typeof HarnessSchema>;
 
 export const SessionStatusSchema = z.enum([

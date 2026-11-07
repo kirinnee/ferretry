@@ -1,6 +1,13 @@
 import type { FerretId } from '@ferretry/kernel/contract';
 import { type Brand, InstantSchema, KEBAB_NAME } from '@ferretry/std';
 import { z } from 'zod';
+import {
+  FerretProjectIdSchema,
+  SessionProvenanceSchema,
+  SessionTransferEdgeSchema,
+  TranscriptProvenanceSchema,
+  TranscriptViewSchema,
+} from './records.ts';
 
 /**
  * Ferret identity (§2.2): ids, names, parent/child, packs, the state machine. `FerretId` is the kernel's (it only
@@ -77,6 +84,14 @@ export const FerretRecordSchema = z.strictObject({
   handle: z.string().min(1).max(256).optional(),
   createdAt: InstantSchema,
   stateAt: InstantSchema,
+  /** Who caused it to exist and whether it descends from a warden (today's `SessionConfig.provenance`). */
+  provenance: SessionProvenanceSchema.optional(),
+  /** Target-only lineage back to the transfer decision that created this fresh ferret (today's `transferredFrom`). */
+  transferredFrom: SessionTransferEdgeSchema.optional(),
+  /** The board it works on, resolved once at start (today's `projectId`). */
+  projectId: FerretProjectIdSchema.optional(),
+  /** Where its harness transcript lives: the agent home a resume needs, and the file (today's `transcript`). */
+  transcript: TranscriptProvenanceSchema.optional(),
 });
 export type FerretRecord = z.infer<typeof FerretRecordSchema>;
 
@@ -128,8 +143,11 @@ export type FerretQuota = z.infer<typeof FerretQuotaSchema>;
  * What other subsystems and the app read about a ferret: its record without the format stamp and runner handle, and
  * today's view fields Ferrets keeps beside it — the model and card it was started with and its task title (from its
  * `details.json`), the instant the owner pinned it, and its quota (no core source; see {@link FerretQuotaSchema}).
+ * Provenance, transfer lineage, project and transcript show as today's session view showed them: the transcript
+ * without its launch-time `baseline`.
  */
 export const FerretSummarySchema = FerretRecordSchema.omit({ format: true, handle: true }).extend({
+  transcript: TranscriptViewSchema.optional(),
   model: z.string().min(1).optional(),
   card: FerretCardIdSchema.optional(),
   title: FerretTitleSchema.optional(),

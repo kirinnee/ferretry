@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { type ManagedWorktreeDocument, ManagedWorktreeDocumentSchema } from '../../../contract/state.ts';
 import { WorktreeError } from './errors.ts';
 import type { ManagedWorktree, ManagedWorktreeIntent } from './types.ts';
 
@@ -26,48 +26,11 @@ import type { ManagedWorktree, ManagedWorktreeIntent } from './types.ts';
  * empty fleet and then happily create a second checkout on a branch the lost record was holding.
  */
 
-const ManagedWorktreeRecordSchema = z.strictObject({
-  version: z.literal(1),
-  path: z.string().min(1),
-  branch: z.string().min(1),
-  repositoryRoot: z.string().min(1),
-  commonDir: z.string().min(1),
-  gitDir: z.string().min(1),
-  ownershipToken: z.string().min(1),
-  createdAt: z.string().min(1),
-  initialHead: z.string().min(1),
-  branchPreexisted: z.boolean(),
-  sourceCwd: z.string().min(1),
-  relativeCwd: z.string(),
-  ownerSessionId: z.string().min(1).optional(),
-  removalStartedAt: z.string().min(1).optional(),
-  removedAt: z.string().min(1).optional(),
-});
-
-const ManagedWorktreeIntentSchema = z.strictObject({
-  version: z.literal(1),
-  path: z.string().min(1),
-  branch: z.string().min(1),
-  repositoryRoot: z.string().min(1),
-  commonDir: z.string().min(1),
-  ownershipToken: z.string().min(1),
-  declaredAt: z.string().min(1),
-  initialHead: z.string().min(1),
-  branchPreexisted: z.boolean(),
-  sourceCwd: z.string().min(1),
-  relativeCwd: z.string(),
-  ownerSessionId: z.string().min(1).optional(),
-});
-
 /**
- * `state/ferrets/worktrees.json` (§9.2, the contract's `WorktreesFile`). Its `format: 1` is stamped and checked by the
- * kernel's state port, so the document here is the body only.
+ * `state/ferrets/worktrees.json` (§9.2, the contract's `WorktreesFile`, which owns the schema). Its `format: 1` is
+ * stamped and checked by the kernel's state port, so the document here is the body only.
  */
-export const ManagedWorktreeDocumentSchema = z.strictObject({
-  worktrees: z.array(ManagedWorktreeRecordSchema),
-  intents: z.array(ManagedWorktreeIntentSchema),
-});
-export type ManagedWorktreeDocument = z.infer<typeof ManagedWorktreeDocumentSchema>;
+export { type ManagedWorktreeDocument, ManagedWorktreeDocumentSchema } from '../../../contract/state.ts';
 
 /** Everything the registry holds: finished records, and creations Git was asked for. */
 export interface ManagedWorktreeRegistryState {

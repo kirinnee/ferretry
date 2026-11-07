@@ -6,36 +6,13 @@
  * body no longer carries today's `version: 1`; everything else — one entry per archived session with the index row
  * it had — is unchanged. The `ArchivedSession` type stays where today's registry module declares it.
  */
-import { z } from 'zod';
-import { InstantSchema } from '../protocol/common.ts';
+import type { z } from 'zod';
+import { ArchiveDocumentSchema, type ArchivedFerretSchema } from '../../../contract/state.ts';
 import type { ArchivedSession } from '../session/archive/registry.ts';
 import { type SessionId, tryParseSessionId } from '../session-id.ts';
 
-const JournalFingerprintSchema = z.strictObject({
-  device: z.string(),
-  inode: z.string(),
-  size: z.number().int().nonnegative(),
-  modifiedAtMs: z.number().nonnegative(),
-});
-
-const ArchivedSessionSchema = z.strictObject({
-  archivedAt: InstantSchema,
-  /** The agent name the session answered to (`config.teammate`), so a name still addresses it. */
-  name: z.string().optional(),
-  /** The configuration's own `createdAt` and `updatedAt`, which a callsign's hold on its name is measured from. */
-  configCreatedAt: z.string().optional(),
-  configUpdatedAt: z.string().optional(),
-  status: z.string().optional(),
-  createdAt: z.string().optional(),
-  updatedAt: z.string().optional(),
-  lastSequence: z.number().int().nonnegative(),
-  journalLine: z.number().int().positive(),
-  journal: JournalFingerprintSchema.nullable(),
-});
-
-export const ArchiveRegistryValueSchema = z.strictObject({
-  sessions: z.record(z.string(), ArchivedSessionSchema),
-});
+/** The registry body; the contract owns it as `ArchiveFile`'s schema. */
+export const ArchiveRegistryValueSchema = ArchiveDocumentSchema;
 export type ArchiveRegistryValue = z.infer<typeof ArchiveRegistryValueSchema>;
 
 /** Parses the stored value; `undefined` for one that is damaged. An absent document is an empty registry. */
@@ -69,7 +46,7 @@ export function parseArchiveRegistryValue(value: unknown): ReadonlyMap<SessionId
 
 /** The value for a registry: keys sorted, so two writes of the same set are the same document. */
 export function archiveRegistryValue(sessions: ReadonlyMap<SessionId, ArchivedSession>): ArchiveRegistryValue {
-  const document: Record<string, z.infer<typeof ArchivedSessionSchema>> = {};
+  const document: Record<string, z.infer<typeof ArchivedFerretSchema>> = {};
   for (const [id, entry] of [...sessions].sort(([left], [right]) => left.localeCompare(right))) {
     const { indexed } = entry;
     document[id] = {

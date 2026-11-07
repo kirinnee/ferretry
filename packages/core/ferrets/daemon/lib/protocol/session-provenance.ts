@@ -22,59 +22,12 @@
  * or warden origin beside `wardenLineage: false` would preserve only half of the same safety fact.
  */
 
-import { z } from 'zod';
-import { InstantSchema } from './common.ts';
-
-/** What caused a session to be started. */
-export const SessionSpawnOriginSchema = z.enum([
-  /** A person asked for it. */
-  'human',
-  /** Another session spawned it as a teammate. */
-  'session',
-  /** A warden created it — either the warden itself or something it delegated to. */
-  'warden',
-]);
-export type SessionSpawnOrigin = z.infer<typeof SessionSpawnOriginSchema>;
-
-/**
- * How warden descent was established.
- *
- * Recorded because the three mechanisms are not equally trustworthy, and a shield that turns out to
- * be wrong is only diagnosable if the evidence behind it was kept. `parent_stamp` is the
- * authoritative path; `ancestor_walk` is the backstop that only works while the ancestor still
- * exists.
- */
-export const WardenLineageSourceSchema = z.enum(['self_label', 'parent_stamp', 'ancestor_walk', 'none']);
-export type WardenLineageSource = z.infer<typeof WardenLineageSourceSchema>;
-
-export const SessionProvenanceSchema = z
-  .object({
-    v: z.literal(1),
-    /** When the stamp was first made. Preserved across resume and revive. */
-    at: InstantSchema,
-    origin: SessionSpawnOriginSchema,
-    /** The resolved parent session, when the spawn had one. */
-    parent: z.string().min(1).optional(),
-    /**
-     * The warden this session traces back to: itself when it IS a warden, the nearest warden
-     * ancestor otherwise. This is the traceback that lets a verdict be attributed to the warden that
-     * issued it after that warden is gone.
-     */
-    warden: z.string().min(1).optional(),
-    /** Authoritative descent record read by the warden detector. */
-    wardenLineage: z.boolean(),
-    lineageSource: WardenLineageSourceSchema,
-  })
-  .refine(value => value.wardenLineage === (value.lineageSource !== 'none'), {
-    message: 'wardenLineage disagrees with the recorded lineage source',
-    path: ['wardenLineage'],
-  })
-  .refine(value => value.wardenLineage === (value.warden !== undefined), {
-    message: 'wardenLineage disagrees with the recorded warden traceback',
-    path: ['warden'],
-  })
-  .refine(value => value.wardenLineage === (value.origin === 'warden'), {
-    message: 'wardenLineage disagrees with the recorded spawn origin',
-    path: ['origin'],
-  });
-export type SessionProvenance = z.infer<typeof SessionProvenanceSchema>;
+/** The contract owns these shapes (`contract/records.ts`): `ferret.json` carries the stamp. */
+export {
+  type SessionProvenance,
+  SessionProvenanceSchema,
+  type SessionSpawnOrigin,
+  SessionSpawnOriginSchema,
+  type WardenLineageSource,
+  WardenLineageSourceSchema,
+} from '../../../contract/records.ts';

@@ -1,13 +1,8 @@
 import { type AgentAddressCandidate, resolveAgentAddress } from '../protocol/agent-address.ts';
-import { MAX_CALLSIGN_LENGTH, MAX_SESSION_TITLE_LENGTH, type NameClaim } from './types.ts';
+import { MAX_SESSION_TITLE_LENGTH, type NameClaim } from './types.ts';
 
-const CALLSIGN_PATTERN = /^[a-z][a-z0-9-]*$/;
-
-export function normalizeCallsign(raw: string): string | null {
-  const normalized = raw.trim().toLowerCase();
-  if (normalized.length === 0 || normalized.length > MAX_CALLSIGN_LENGTH) return null;
-  return CALLSIGN_PATTERN.test(normalized) ? normalized : null;
-}
+/** A callsign in its one stored spelling, or `null` (the contract owns the rule: names.json stores it). */
+export { normalizeCallsign } from '../../../contract/state.ts';
 
 export function formatSessionTitle(raw: string): string {
   const printable = [...raw]

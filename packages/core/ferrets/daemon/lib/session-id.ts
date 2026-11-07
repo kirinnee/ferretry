@@ -1,9 +1,8 @@
-import { z } from 'zod';
+import type { z } from 'zod';
+import { StoredSessionIdSchema } from '../../contract/records.ts';
 
-export const SessionIdSchema = z
-  .string()
-  .regex(/^[a-z0-9][a-z0-9._-]{0,127}$/, 'session id must be 1-128 lowercase ASCII path-safe characters')
-  .brand<'SessionId'>();
+/** Today's session id; the contract owns its grammar (`StoredSessionIdSchema`), the journal and archive store it. */
+export const SessionIdSchema = StoredSessionIdSchema;
 
 export type SessionId = z.infer<typeof SessionIdSchema>;
 

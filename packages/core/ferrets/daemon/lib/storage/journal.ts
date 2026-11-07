@@ -8,10 +8,9 @@
  * of lines read. `byteLength` is always 1 (one line). The index, the rebuild plan and the reconciliation plan keep
  * their shapes, and "the journal grew" still means "it has more lines than the index has seen".
  */
-import { canonicalJsonValue, type JsonValue, JsonValueSchema } from '@ferretry/std';
-import { z } from 'zod';
-import { InstantSchema } from '../protocol/common.ts';
-import { type SessionId, SessionIdSchema } from '../session-id.ts';
+import { canonicalJsonValue, type JsonValue } from '@ferretry/std';
+import { FerretHistoryEventSchema } from '../../../contract/state.ts';
+import type { SessionId } from '../session-id.ts';
 import type { EventPointer, JournalFingerprint, JournalProblem, SessionEvent } from '../storage-types.ts';
 
 /**
@@ -37,17 +36,8 @@ export function assertJournalRecordSize(encoded: string, maxBytes: number = MAX_
   if (byteLength > maxBytes) throw new JournalRecordTooLargeError(byteLength, maxBytes);
 }
 
-export const SessionEventSchema = z.strictObject({
-  schemaVersion: z.literal(1),
-  sequence: z.number().int().safe().positive(),
-  sessionId: SessionIdSchema,
-  time: InstantSchema,
-  type: z
-    .string()
-    .min(1)
-    .refine(value => value.trim() === value, 'event type must not have surrounding whitespace'),
-  data: JsonValueSchema,
-});
+/** Today's stored event record; the contract owns it as `FerretHistoryFiles`' schema. */
+export const SessionEventSchema = FerretHistoryEventSchema;
 
 /** One line of a journal as the state port gave it: the parsed entry, or why that line could not be read. */
 export type JournalLine = { readonly value: unknown } | { readonly damaged: string };

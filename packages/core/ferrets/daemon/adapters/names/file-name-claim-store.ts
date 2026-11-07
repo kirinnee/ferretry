@@ -1,10 +1,10 @@
 import { z } from 'zod';
+import { NameClaimSchema } from '../../../contract/state.ts';
 import type { FileSystemPort, SerialExecutor } from '../../lib/ports.ts';
 import {
   type NameClaim,
   type NameClaimAttempt,
   type NameClaimStore,
-  normalizeCallsign,
 } from '../../lib/names/index.ts';
 
 /**
@@ -27,17 +27,7 @@ import {
  * the reservation a start is holding right now. A callsign is free only when nobody in either holds it.
  */
 
-// STRICT so an unknown field on a ledger row fails closed. Zod's default strip mode would accept the
-// row, drop the extra field, and silently rewrite it on the next successful claim — hiding exactly
-// the tampering or corruption the damaged-ledger cases exist to surface.
-const NameClaimSchema = z
-  .strictObject({
-    callsign: z.string().refine(callsign => normalizeCallsign(callsign) === callsign, 'callsign is not canonical'),
-    ownerId: z.string().min(1),
-    claimedAtMs: z.number().int().nonnegative(),
-    expiresAtMs: z.number().int().nonnegative(),
-  })
-  .refine(claim => claim.expiresAtMs > claim.claimedAtMs, 'claim expiry must be after its creation');
+// The claim row is the contract's (`NameClaimSchema`, strict so an unknown field fails closed).
 
 const LedgerSchema = z.array(NameClaimSchema);
 

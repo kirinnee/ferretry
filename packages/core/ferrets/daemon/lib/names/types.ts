@@ -1,5 +1,5 @@
 export const CALLSIGN_WINDOW_MS = 5 * 24 * 60 * 60 * 1_000;
-export const MAX_CALLSIGN_LENGTH = 32;
+export { MAX_CALLSIGN_LENGTH } from '../../../contract/state.ts';
 export const MAX_SESSION_TITLE_LENGTH = 120;
 
 export interface NameClaim {
