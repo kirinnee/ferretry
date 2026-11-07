@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { PLUGIN_API } from '../contract/ids.ts';
 import { DATA_KINDS } from '../manifest/types.ts';
 import type { HostFs } from './adapters/node-fs.ts';
+import { looksLikeRawSecret, RAW_SECRET_KEY_MESSAGE } from './config/secrets.ts';
 import type { DataPluginManifest } from './snapshot.ts';
 
 const DATA_PLUGIN_FORMAT = 1;
@@ -31,7 +32,28 @@ const DataPluginSchema = z.strictObject({
 
 export interface DataPluginRefusal {
   readonly folder: string;
+  /** What `fy doctor` and `GET /v1/doctor` say: it never repeats a name that looks like a token. */
   readonly sentence: string;
+  /** The same refusal with zod's own text, for the local log ONLY — it may name a key that was pasted by mistake. */
+  readonly detail?: string;
+}
+
+/** The config writer's own test for a token-shaped name (`config/secrets.ts`), applied to a name that would be echoed. */
+const shown = (name: string): string => (looksLikeRawSecret(undefined, name) ? '[redacted]' : name);
+
+/** zod's first complaint, with every token-shaped key left out of it. */
+function safeIssue(issue: z.core.$ZodIssue | undefined): string {
+  if (issue === undefined) return 'invalid';
+  if (issue.code === 'unrecognized_keys') {
+    const kept = issue.keys.filter(key => !looksLikeRawSecret(undefined, key));
+    const hidden = issue.keys.length - kept.length;
+    const named =
+      kept.length === 0
+        ? ''
+        : `Unrecognized key${kept.length === 1 ? '' : 's'}: ${kept.map(key => JSON.stringify(key)).join(', ')}`;
+    return [named, hidden === 0 ? '' : RAW_SECRET_KEY_MESSAGE].filter(part => part !== '').join('; ');
+  }
+  return looksLikeRawSecret(undefined, issue.message) ? RAW_SECRET_KEY_MESSAGE : issue.message;
 }
 
 /**
@@ -60,7 +82,8 @@ export async function loadDataPlugins(
     if (!parsed.success) {
       refused.push({
         folder,
-        sentence: `The data plugin in ${folder} does not check: ${parsed.error.issues[0]?.message ?? 'invalid'}.`,
+        sentence: `The data plugin in ${folder} does not check: ${safeIssue(parsed.error.issues[0])}.`,
+        detail: `The data plugin in ${folder} does not check: ${parsed.error.issues[0]?.message ?? 'invalid'}.`,
       });
       continue;
     }
@@ -71,7 +94,7 @@ export async function loadDataPlugins(
     ) {
       refused.push({
         folder,
-        sentence: `The data plugin in ${folder} names the id ${parsed.data.id}, which is taken or not its folder.`,
+        sentence: `The data plugin in ${folder} names the id ${shown(parsed.data.id)}, which is taken or not its folder.`,
       });
       continue;
     }

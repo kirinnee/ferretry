@@ -508,6 +508,10 @@ async function bootLocked(
   const { engine: hooks } = HookEngine.plan(order, log, deadline, manifests);
 
   const data = await loadDataPlugins(adapters.fs, home, new Set(manifests.map(manifest => manifest.id)));
+  // The refusal's zod text may name a key that was pasted by mistake: it stays in the local log; the doctor says less.
+  for (const refusal of data.refused)
+    if (refusal.detail !== undefined)
+      log.warn('a data plugin was refused', { folder: refusal.folder, detail: refusal.detail });
   const items = await installedItemReach(adapters.fs, home, data.accepted as readonly InstalledItems[]);
 
   const records = new Map<string, PluginRecord>();
