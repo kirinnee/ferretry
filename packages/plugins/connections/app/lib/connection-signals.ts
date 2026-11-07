@@ -21,9 +21,9 @@ export interface ConnectionSignalEnvironment {
 
 /** What a signal acts on. The health model and the carrier router, as narrowly as they are used. */
 export interface ConnectionSignalTargets {
-  /** Every daemon currently reconnecting. */
-  readonly reconnecting: () => readonly DaemonId[];
-  readonly retryNow: (daemonId: DaemonId) => void;
+  /** Every daemon currently reconnecting; absent where no reconnect loop is held. */
+  readonly reconnecting?: () => readonly DaemonId[];
+  readonly retryNow?: (daemonId: DaemonId) => void;
   /** A ping on every held session, with a short deadline. */
   readonly checkLiveness: () => void;
   /** The device is on a different network than before (back online, or its network type changed). */
@@ -38,7 +38,7 @@ export const watchConnectionSignals = (
   environment.listen(signal => {
     if (signal !== 'visible') targets.networkChanged?.();
     targets.checkLiveness();
-    for (const daemonId of targets.reconnecting()) targets.retryNow(daemonId);
+    for (const daemonId of targets.reconnecting?.() ?? []) targets.retryNow?.(daemonId);
   });
 
 /** The slice of a browser this reads. Each part is optional: a browser without one has no such signal. */

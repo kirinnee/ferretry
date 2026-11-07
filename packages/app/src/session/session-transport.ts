@@ -16,8 +16,10 @@ import {
   type RelayTunnelAnswer,
   type SessionDeviceClaim,
 } from './session-client.ts';
+import { sharingIdenticalReads } from './shared-reads.ts';
 import {
   fromBase64Url,
+  MAX_PLAINTEXT_BYTES,
   type PrivateKeyHandle,
   RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
   RELAY_CLOSE_CODES,
@@ -115,6 +117,9 @@ export interface SessionKeyRotation {
   discard(daemonId: string): Promise<void>;
 }
 
+/** A stream this side ends on purpose is a normal closure, never a drop. */
+const NORMAL_CLOSE = 1000;
+
 /** `4403` is the one code that means this device is not accepted (today's `deviceRefusal`). */
 const deviceRefusal = (reason: unknown): boolean =>
   reason instanceof RelaySessionError && reason.code === RELAY_CLOSE_CODES.authRejected;
@@ -135,6 +140,20 @@ export interface SessionTransportOptions {
   /** The event stream route (the kernel's); frames are `{ name, payload }` JSON text, one event per frame. */
   readonly eventsPath?: string;
 }
+
+/**
+ * Which request session carries a request: `bulk` for a body that has to travel in parts, `request` for everything
+ * else (R532; moved from today's `requestLane`).
+ *
+ * A SESSION IS ONE CREDIT WINDOW AND ONE QUEUE, so a request waits behind every record queued ahead of it. A phone photo
+ * is about eighty records; a few of them queued ahead of the fleet list's poll held it past its deadline, and a request
+ * that misses its deadline retires the session it was on — the one carrying the uploads. Bodies that need parts
+ * therefore share a session of their own, and the reads every panel polls never wait behind one.
+ */
+export type RequestLane = 'request' | 'bulk';
+
+export const requestLane = (body: string | undefined): RequestLane =>
+  body !== undefined && body.length > MAX_PLAINTEXT_BYTES / 2 ? 'bulk' : 'request';
 
 /** A body sent as JSON text; an answer read back as JSON when it parses, else kept as text. */
 function encodeBody(body: unknown): string | undefined {
@@ -229,20 +248,25 @@ function lostUnder(opened: OpenedSession, reason: unknown, signal: AbortSignal |
 export class SessionTransport implements DaemonTransport {
   readonly #options: SessionTransportOptions;
   readonly #reconnect = new Set<() => void>();
-  #session: Promise<OpenedSession> | undefined;
-  #opened = 0;
+  /** One request session per lane (R532): the reads every panel polls, and the bodies that travel in parts. */
+  readonly #sessions = new Map<RequestLane, Promise<OpenedSession>>();
+  readonly #opened = new Map<RequestLane, number>();
+  /** Every stream this transport opened and has not seen end, each as how to end it (R568). */
+  readonly #streams = new Set<(reason: string) => void>();
+  /** Identical reads in flight are sent once (R519). */
+  readonly #sharing = sharingIdenticalReads(request => this.#send(request));
 
   constructor(options: SessionTransportOptions) {
     this.#options = options;
   }
 
-  /** The live request session, or a new one when the last ended (a lease ran out, the carrier dropped). */
-  #requestSession(): Promise<OpenedSession> {
-    const current = this.#session;
+  /** The lane's live request session, or a new one when the last ended (a lease ran out, the carrier dropped). */
+  #requestSession(lane: RequestLane): Promise<OpenedSession> {
+    const current = this.#sessions.get(lane);
     if (current !== undefined) {
-      return current.then(opened => (opened.session.live() ? opened : this.#fresh()));
+      return current.then(opened => (opened.session.live() ? opened : this.#fresh(lane)));
     }
-    return this.#fresh();
+    return this.#fresh(lane);
   }
 
   /** The claim the next session proves: read again per session when a reader was given. */
@@ -281,15 +305,16 @@ export class SessionTransport implements DaemonTransport {
     }
   }
 
-  #fresh(): Promise<OpenedSession> {
+  #fresh(lane: RequestLane): Promise<OpenedSession> {
     const ready = this.#openKeyed();
-    this.#session = ready;
+    this.#sessions.set(lane, ready);
     ready.catch(() => {
-      if (this.#session === ready) this.#session = undefined;
+      if (this.#sessions.get(lane) === ready) this.#sessions.delete(lane);
     });
-    this.#opened += 1;
-    // Every session after the first is a reconnect: the client re-reads the inventory before anything resumes.
-    if (this.#opened > 1) ready.then(() => this.#announceReconnect()).catch(() => {});
+    const opened = (this.#opened.get(lane) ?? 0) + 1;
+    this.#opened.set(lane, opened);
+    // Every session after a lane's first is a reconnect: the client re-reads the inventory before anything resumes.
+    if (opened > 1) ready.then(() => this.#announceReconnect()).catch(() => {});
     return ready;
   }
 
@@ -297,8 +322,13 @@ export class SessionTransport implements DaemonTransport {
     for (const listener of this.#reconnect) listener();
   }
 
-  async request(given: TransportRequest): Promise<TransportAnswer> {
-    const session = await this.#requestSession();
+  request(given: TransportRequest): Promise<TransportAnswer> {
+    return this.#sharing(given);
+  }
+
+  async #send(given: TransportRequest): Promise<TransportAnswer> {
+    const lane = requestLane(encodeBody(given.body));
+    const session = await this.#requestSession(lane);
     const rotation = this.#options.rotation;
     const daemon = { daemonId: this.#options.daemonId, deviceId: (session.device ?? this.#options.device).deviceId };
     // AMENDED HERE, on the session that will carry the request (R248), because the rotation proof signs THAT
@@ -335,7 +365,7 @@ export class SessionTransport implements DaemonTransport {
         lostUnder(session, reason, request.signal);
         throw reason;
       }
-      const fresh = await this.#requestSession();
+      const fresh = await this.#requestSession(lane);
       try {
         answer = await fresh.session.request(record, request.signal);
       } catch (again) {
@@ -378,8 +408,18 @@ export class SessionTransport implements DaemonTransport {
     const end = (reason: string, code?: number): void => {
       if (closed) return;
       closed = true;
+      this.#streams.delete(shutdown);
       listeners.onClose(reason, code);
     };
+    // The transport closing ends this stream too (R568), and says so: the page did not ask for it.
+    const shutdown = (reason: string): void => {
+      if (closed) return;
+      closed = true;
+      this.#streams.delete(shutdown);
+      session?.closeStream(NORMAL_CLOSE, reason);
+      listeners.onClose(reason, NORMAL_CLOSE);
+    };
+    this.#streams.add(shutdown);
     const mode = (device: SessionDeviceClaim): RelayClientSessionDependencies['mode'] => ({
       kind: 'stream',
       device,
@@ -388,7 +428,12 @@ export class SessionTransport implements DaemonTransport {
     });
     const onData = (frame: RelayStreamFrame): void =>
       listeners.onFrame(frame.kind === 'text' ? frame.text : frame.bytes);
-    const failed = (error: unknown): void => end(error instanceof Error ? error.message : String(error));
+    // The close code a refused stream carried survives to the page (R567): a `4429` ceiling must not read as a drop.
+    const failed = (error: unknown): void =>
+      end(
+        error instanceof Error ? error.message : String(error),
+        error instanceof RelaySessionError ? error.code : undefined,
+      );
     const { rotation, daemonId } = this.#options;
     let session: RelayClientSession | undefined;
     // A stream the daemon never opened carried nothing (a stream session sends no data before `stream-opened`), so it
@@ -444,6 +489,7 @@ export class SessionTransport implements DaemonTransport {
       close: (code, reason) => {
         if (closed) return;
         closed = true;
+        this.#streams.delete(shutdown);
         session?.closeStream(code, reason);
       },
     };
@@ -454,9 +500,11 @@ export class SessionTransport implements DaemonTransport {
     return () => this.#reconnect.delete(listener);
   }
 
+  /** Ends every session this transport owns: each request lane's, and every stream it opened and none has ended (R568). */
   close(): void {
-    void this.#session?.then(opened => opened.session.close()).catch(() => {});
-    this.#session = undefined;
+    for (const ready of this.#sessions.values()) void ready.then(opened => opened.session.close()).catch(() => {});
+    this.#sessions.clear();
+    for (const shutdown of [...this.#streams]) shutdown('the transport was closed');
   }
 }
 

@@ -3,8 +3,6 @@
  * `relay-carrier-drops.test.ts` and `relay-carrier-reconnect.test.ts`. A scripted socket, a hand-moved clock and
  * hand-fired timers: "the timer fired a minute late" is a number this suite sets, never a wait.
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import { RELAY_CLOSE_CODES } from '@ferretry/app';
 import type { CarrierSocketEvents } from '@ferretry/app';
@@ -14,6 +12,7 @@ import {
   KEEPALIVE_DEADLINE_MS,
   KEEPALIVE_INTERVAL_MS,
   LIVENESS_CHECK_DEADLINE_MS,
+  type ScopedSocket,
   walkingDial,
   type WalkObserver,
 } from '../../../app/carriers/carrier-socket.ts';
@@ -51,7 +50,8 @@ const timers = () => {
   };
 };
 
-async function openSession() {
+async function openSession(options: { readonly accepted?: boolean } = {}) {
+  const held: ScopedSocket[] = [];
   const clock = { at: 0 };
   const hand = timers();
   const socket = new Socket();
@@ -78,12 +78,20 @@ async function openSession() {
       };
     },
     observer,
+    {
+      stale: () => undefined,
+      track: tracked => {
+        held.push(tracked);
+        return () => undefined;
+      },
+    },
   );
-  dial(events);
+  const adapted = dial(events);
   // The carrier's first frame binds this leg to the session and starts the keepalive.
   await new Promise(resolve => setTimeout(resolve, 0));
   socket.onText?.('fy-pong');
-  return { socket, hand, clock, drops, closes };
+  if (options.accepted === true) adapted.accepted?.();
+  return { socket, hand, clock, drops, closes, held };
 }
 
 describe('the browser keepalive', () => {
@@ -112,17 +120,32 @@ describe('the browser keepalive', () => {
     expect(closes).toEqual([]);
   });
 
-  /**
-   * REAL FAILURE (reported, product untouched): `watchConnectionSignals` and `browserConnectionSignals` exist and are
-   * unit-tested, but nothing in the shipped app half calls them and `WalkingSocket` has no liveness-check entry, so the
-   * browser never runs the 4 s check on foreground, online or network change. `.failing` keeps this out of the guarantee
-   * check's passing set until the wiring lands; when it does, this starts passing and bun will say to drop `.failing`.
-   */
-  test.failing('R88 (open) the shipped app half wires the foreground, online and network-change signals to a 4 s liveness check', () => {
-    const sources = ['app/index.ts', 'app/carriers/router.ts', 'app/carriers/carrier-socket.ts'].map(file =>
-      readFileSync(join(import.meta.dir, '../../..', file), 'utf8'),
-    );
-    expect(sources.some(source => source.includes('watchConnectionSignals'))).toBe(true);
+  test('R88 a liveness check pings a held session now, and closes 4408 if nothing comes back within 4 s', async () => {
+    const { socket, hand, closes, held } = await openSession({ accepted: true });
+    expect(held).toHaveLength(1);
+
+    held[0]?.checkLiveness();
+    expect(socket.texts).toEqual(['fy-ping']);
+    expect(hand.pending(LIVENESS_CHECK_DEADLINE_MS)).toBe(true);
+    hand.fire(LIVENESS_CHECK_DEADLINE_MS);
+
+    expect(socket.closed?.code).toBe(4408);
+    expect(closes.map(end => end.code)).toEqual([4408]);
+  });
+
+  test('R88 a liveness check answered in time leaves the session open', async () => {
+    const { socket, hand, closes, held } = await openSession({ accepted: true });
+    held[0]?.checkLiveness();
+    socket.onText?.('fy-pong');
+    hand.fire(LIVENESS_CHECK_DEADLINE_MS);
+    expect(socket.closed).toBeNull();
+    expect(closes).toEqual([]);
+  });
+
+  test('R88 a session the daemon has not accepted is not pinged by a liveness check', async () => {
+    const { socket, held } = await openSession();
+    held[0]?.checkLiveness();
+    expect(socket.texts).toEqual([]);
   });
 
   test('R89 a deadline that fires more than 2 s late is forgiven once with a 4 s re-ping', async () => {

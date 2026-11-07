@@ -788,7 +788,7 @@ Every row below gets a test whose name contains the row id, e.g. `test('G14 …'
 - **R558** kept (relay-protocol) — Cancellation is an explicit sealed record. There is no half-close, and in-flight data is known-lost. · enforcer: behaviour as written · test name: `R558`
 - **R559** kept (relay-protocol) — Reconnection is a new session, never a resumption. Clients re-request via cursors and fresh attaches. · enforcer: behaviour as written · test name: `R559`
 - **R565** kept (relay-protocol) — No stream is compressed: it would open the compress-then-encrypt size channel. · enforcer: behaviour as written · test name: `R565`
-- **R567** kept (relay-protocol) — A `4429` session-ceiling refusal must be shown with its reason, and `openStream` throws the close code intact rather than demoting the carrier. · enforcer: `openStream` · test name: `R567`
+- **R567** kept (relay-protocol) — A `4429` session-ceiling refusal must be shown with its reason, and `openStream` throws the close code intact rather than demoting the carrier. · enforcer: `SessionTransport.socket` · test name: `R567`
 - **R568** kept (relay-protocol) — Every client session (request, stream or pairing) must be owned by the structure that unpairing and carrier-set replacement tear down. · enforcer: behaviour as written · test name: `R568`
 - **R624** kept (relay-protocol) — A second credential is refused by schema on every session. · enforcer: behaviour as written · test name: `R624`
 - **R625** kept (relay-protocol) — A relayed arrival is never local. A direct session is local only if its upgrade arrived on loopback. · enforcer: behaviour as written · test name: `R625`

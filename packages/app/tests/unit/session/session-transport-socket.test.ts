@@ -131,13 +131,8 @@ describe('a stream the rendezvous refuses for its session ceiling', () => {
     return { dial, dials };
   };
 
-  /**
-   * REAL FAILURE (reported, product untouched): `SessionTransport.socket` ends a refused stream with the error's
-   * message only (`session-transport.ts`, the `ready()` rejection branch calls `end(message)`), so the close code the
-   * session carried is dropped before the page's `onClose` sees it. `.failing` keeps it out of the guarantee check's
-   * passing set; the session-level R567 test in `session-client.test.ts` proves the code survives up to that point.
-   */
-  test.failing('R567 (open) the stream socket hands the page the 4429 code with its reason, and does not dial again', async () => {
+  /** A refused stream ends the page's socket with the close code the session carried, so a ceiling never reads as a drop. */
+  test('R567 the stream socket hands the page the 4429 code with its reason, and does not dial again', async () => {
     const reason = 'this daemon is carrying as many sessions as it allows';
     const carrier = refusing(reason);
     const transport = new SessionTransport({
@@ -157,12 +152,8 @@ describe('a stream the rendezvous refuses for its session ceiling', () => {
 });
 
 describe('who owns a stream session', () => {
-  /**
-   * REAL FAILURE (reported): `SessionTransport.close()` ends only the request session; a stream session opened by
-   * `socket()` / `events()` is never tracked by the transport, so a live socket presenting the device grant survives
-   * it. (Connections' carrier router tracks every walked socket, but a stream on a plain direct dial has no owner.)
-   */
-  test.failing('R568 (open) closing the transport ends the stream sessions it opened, not only its request session', async () => {
+  /** The transport owns every stream it opened: closing it ends them too, and tells each page. */
+  test('R568 closing the transport ends the stream sessions it opened, not only its request session', async () => {
     const daemon = await streamDaemon();
     const transport = new SessionTransport({
       crypto: relayCrypto,
