@@ -28,7 +28,7 @@ Generator typecheck: it is part of the repository typecheck (`scripts/tsconfig.j
 | kernel | 12 | 22 | 3 | 19 | 48 | 56 | 160 |
 | gate | 3 | 10 | 0 | 10 | 2 | 15 | 40 |
 | vault | 14 | 37 | 1 | 7 | 6 | 6 | 71 |
-| ferrets | 56 | 53 | 1 | 36 | 17 | 44 | 207 |
+| ferrets | 56 | 54 | 1 | 36 | 17 | 44 | 208 |
 | asks | 14 | 1 | 0 | 0 | 12 | 18 | 45 |
 | access | 29 | 8 | 0 | 13 | 2 | 13 | 65 |
 | connections | 5 | 4 | 0 | 6 | 21 | 3 | 39 |
@@ -56,7 +56,7 @@ Generator typecheck: it is part of the repository typecheck (`scripts/tsconfig.j
 | layouts | 0 | 0 | 0 | 9 | 0 | 0 | 9 |
 | onboarding | 1 | 1 | 0 | 5 | 0 | 3 | 10 |
 | tidy | 3 | 2 | 0 | 0 | 0 | 0 | 5 |
-| cli | 0 | 11 | 0 | 0 | 0 | 0 | 11 |
+| cli | 0 | 10 | 0 | 0 | 0 | 0 | 10 |
 | app | 0 | 0 | 0 | 125 | 0 | 0 | 125 |
 
 ## Reading the inventory
@@ -365,7 +365,7 @@ No unresolved Commander declarations.
 | V-0428 | V | fy secret set &lt;name&gt; | packages/cli/src/lib/secrets/commands.ts:60 | secrets | packages/core/vault | fy secret set &lt;name&gt; | store or replace a secret, reading its VALUE from stdin; flags (including inherited): --as-owner; -h, --help; -v, --version | packages/core/vault/tests/unit/parity/commands.test.ts | [ ] |
 | V-0429 | V | fy secret use &lt;command...&gt; | packages/cli/src/lib/secrets/commands.ts:75 | secrets | packages/core/vault | fy secret use &lt;command...&gt; | run a command with secrets in ITS environment; output comes back masked; flags (including inherited): --as-owner; --cwd &lt;path&gt;; --json; --timeout &lt;ms&gt;; -h, --help; -v, --version; -w, --with &lt;name...&gt; | packages/core/vault/tests/unit/parity/commands.test.ts | [ ] |
 
-## ferrets (207)
+## ferrets (208)
 
 <!-- prettier-ignore -->
 | id | Kind | Today | Today’s source | Today’s module | 5.0 owner package | 5.0 name | Descriptor / detail | Check to add | Status |
@@ -567,6 +567,7 @@ No unresolved Commander declarations.
 | V-0449 | V | fy stop children &lt;session&gt; | packages/cli/src/lib/stop/command.ts:56 | stop | packages/core/ferrets | fy stop children &lt;session&gt; | stop every transitive descendant and keep the root running; flags (including inherited): --as-owner; --include-caller; -h, --help; -n, --dry-run; -r, --reason &lt;text&gt;; -v, --version; -y, --yes | packages/core/ferrets/tests/unit/parity/commands.test.ts | [ ] |
 | V-0450 | V | fy stop label &lt;label&gt; | packages/cli/src/lib/stop/command.ts:56 | stop | packages/core/ferrets | fy stop label &lt;label&gt; | stop every session carrying an exact label, independent of lineage; flags (including inherited): --as-owner; --include-caller; -h, --help; -n, --dry-run; -r, --reason &lt;text&gt;; -v, --version; -y, --yes | packages/core/ferrets/tests/unit/parity/commands.test.ts | [ ] |
 | V-0451 | V | fy stop orphan &lt;session&gt; | packages/cli/src/lib/stop/command.ts:56 | stop | packages/core/ferrets | fy stop orphan &lt;session&gt; | stop one session and leave its descendants running; flags (including inherited): --as-owner; --include-caller; -h, --help; -n, --dry-run; -r, --reason &lt;text&gt;; -v, --version; -y, --yes | packages/core/ferrets/tests/unit/parity/commands.test.ts | [ ] |
+| V-0452 | V | fy stream [id] | packages/cli/src/lib/reads/commands.ts:92 | reads | packages/core/ferrets | fy stream [id] | follow one session or this daemon's whole fleet until interrupted; flags (including inherited): --after &lt;sequence&gt;; --as-owner; --json; -h, --help; -v, --version | packages/core/ferrets/tests/unit/parity/commands.test.ts | [x] |
 | V-0496 | V | fy wait &lt;id&gt; | packages/cli/src/lib/reads/commands.ts:102 | reads | packages/core/ferrets | fy wait &lt;id&gt; | block until a session settles and print its result; exits 0 completed, 1 ended, 3 needs a human, 69 daemon lost, 124 timeout; flags (including inherited): --as-owner; --interval &lt;seconds&gt;; --json; --keep; --timeout &lt;seconds&gt;; --until-marker &lt;file&gt;; -h, --help; -v, --version | packages/core/ferrets/tests/unit/parity/commands.test.ts | [ ] |
 | V-0497 | V | fy worktree | packages/cli/src/lib/worktrees/commands.ts:33 | worktrees | packages/core/ferrets | fy worktree | inspect and remove the checkouts the daemon created for sessions; flags (including inherited): --as-owner; --json; -h, --help; -v, --version | packages/core/ferrets/tests/unit/parity/commands.test.ts | [ ] |
 | V-0498 | V | fy worktree add &lt;branch&gt; | packages/cli/src/lib/worktrees/commands.ts:77 | worktrees | packages/core/ferrets | fy worktree add &lt;branch&gt; | alias of fy worktree fork; fork a new checkout for a branch, and say where to start work in it; flags (including inherited): --as-owner; --base &lt;ref&gt;; --from &lt;path&gt;; --from-default; --from-head; --json; --session &lt;id&gt;; -h, --help; -v, --version | packages/core/ferrets/tests/unit/parity/commands.test.ts | removed by design (§1.4: no aliases) |
@@ -2388,7 +2389,7 @@ No unresolved Commander declarations.
 | V-0271 | V | fy gc | packages/cli/src/lib/scratch/commands.ts:6 | scratch | packages/plugins/tidy | fy gc | reclaim agent scratch from sessions terminal past the TTL (daemon data is never touched); flags (including inherited): --as-owner; --dry-run; --json; --limit &lt;count&gt;; -h, --help; -v, --version | packages/plugins/tidy/tests/unit/parity/commands.test.ts | [x] |
 | V-0494 | V | fy tidy | packages/cli/src/lib/tidy/commands.ts:6 | tidy | packages/plugins/tidy | fy tidy | drop your own cards nobody asked for and close your own agenda items that only track work (dry run unless --yes); flags (including inherited): --as-owner; --json; --reason &lt;why&gt;; --session &lt;id&gt;; --yes; -h, --help; -v, --version | packages/plugins/tidy/tests/unit/parity/commands.test.ts | [x] |
 
-## cli (11)
+## cli (10)
 
 <!-- prettier-ignore -->
 | id | Kind | Today | Today’s source | Today’s module | 5.0 owner package | 5.0 name | Descriptor / detail | Check to add | Status |
@@ -2402,7 +2403,6 @@ No unresolved Commander declarations.
 | V-0314 | V | fy machine export | packages/cli/src/lib/machine/commands.ts:248 | machine | packages/cli | fy machine export | print this machine's setup for `{dynamic} machine clone`: no login and no history; flags (including inherited): --as-owner; --json; -h, --help; -v, --version | packages/cli/tests/unit/parity/commands.test.ts | [ ] |
 | V-0315 | V | fy machine install &lt;tool...&gt; | packages/cli/src/lib/machine/commands.ts:238 | machine | packages/cli | fy machine install &lt;tool...&gt; | install Claude Code or Codex on this machine (shows the command first); flags (including inherited): --as-owner; --dry-run; --json; -h, --help; -v, --version; -y, --yes | packages/cli/tests/unit/parity/commands.test.ts | [ ] |
 | V-0316 | V | fy machine set &lt;setting&gt; &lt;value...&gt; | packages/cli/src/lib/machine/commands.ts:221 | machine | packages/cli | fy machine set &lt;setting&gt; &lt;value...&gt; | change a machine setting: agent-permissions auto\|skip, default-runtime &lt;name&gt;\|automatic, agent-control terminals\|browsers\|files\|settings\|scripts on\|off, auto-resume on\|off, agenda-mode on\|off; flags (including inherited): --as-owner; --dry-run; --json; -h, --help; -v, --version; -y, --yes | packages/cli/tests/unit/parity/commands.test.ts | [ ] |
-| V-0452 | V | fy stream [id] | packages/cli/src/lib/reads/commands.ts:92 | reads | packages/cli | fy stream [id] | follow one session or this daemon's whole fleet until interrupted; flags (including inherited): --after &lt;sequence&gt;; --as-owner; --json; -h, --help; -v, --version | packages/cli/tests/unit/parity/commands.test.ts | [ ] |
 | V-0495 | V | fy view &lt;id&gt; | packages/cli/src/lib/reads/commands.ts:80 | reads | packages/cli | fy view &lt;id&gt; | alias of fy events; read the durable events the daemon recorded for a session; flags (including inherited): --after &lt;sequence&gt;; --as-owner; --json; --limit &lt;count&gt;; -h, --help; -v, --version | packages/cli/tests/unit/parity/commands.test.ts | removed by design (§1.4: no aliases) |
 
 ## app (125)

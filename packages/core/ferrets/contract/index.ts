@@ -39,3 +39,4 @@ export * from './ferret-files.ts';
 export * from './session-restart.ts';
 export * from './start-requests.ts';
 export * from './worktrees.ts';
+export * from './view/event-stream.ts';
