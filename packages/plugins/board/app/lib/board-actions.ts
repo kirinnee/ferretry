@@ -72,10 +72,9 @@ type BoardEdit = Omit<Action<'edit'>, 'action'>;
 export interface BoardActions {
   /**
    * Moves a card. A move back needs `reason` (refused here without a round trip when it is missing). An owner's
-   * move back may carry `attachments`, already uploaded to the card's ferret — only to a machine that reports
-   * `board.reopen.attachments.1`, because an older one refuses the field.
+   * move back may carry `attachments`, already uploaded to the card's ferret.
    */
-  moveTask(
+  moveCard(
     target: BoardMoveTarget,
     to: string,
     reason?: string,
@@ -166,7 +165,7 @@ export const createBoardActions = (deps: BoardActionsDeps): BoardActions => {
     saveLanes: (daemonId, projectId, { version, layout, relocate }) =>
       changeLanes(daemonId, projectId, { action: 'edit', version, layout, relocate }),
     acceptLanes: (daemonId, projectId, version) => changeLanes(daemonId, projectId, { action: 'confirm', version }),
-    moveTask: async (target, to, reason, attachments) => {
+    moveCard: async (target, to, reason, attachments) => {
       const checked = checkMove(target.laneSet, target.laneId, to, reason);
       if (!checked.ok) {
         const problem = checked.error;

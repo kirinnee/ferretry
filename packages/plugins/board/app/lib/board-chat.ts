@@ -23,13 +23,13 @@ import {
 } from './board-view.ts';
 import type { DaemonId } from './machine.ts';
 
-/** Every session that descends from `sessionId`, by the `parent` links of `sessions`. */
 /** A ferret as the chat panel needs it: its id and the ferret that started it. */
 export interface FerretLineage {
   readonly id: string;
   readonly parent?: string | undefined;
 }
 
+/** Every ferret that descends from `sessionId`, by the `parent` links of `sessions`. */
 export const descendantSessionIds = (sessions: readonly FerretLineage[], sessionId: string): ReadonlySet<string> => {
   const found = new Set<string>();
   let frontier = new Set([sessionId]);
