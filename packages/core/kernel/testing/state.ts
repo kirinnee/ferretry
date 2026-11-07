@@ -79,8 +79,12 @@ export function parseDocument<Shape>(file: StateFileDef<string, Shape>, text: st
   if (format < file.format) return err(damage(file, 'lower_format', `format ${format} is older than ${file.format}`));
   if (format > file.format) return err(damage(file, 'higher_format', `format ${format} is newer than ${file.format}`));
   if (file.schema === undefined) return ok(rest as Shape);
+  // As the real host (host/state/format.ts shapeOf): the bare body first, then the body stamped with its format, so a
+  // schema that declares `format: z.literal(n)` itself reads back too.
   const parsed = file.schema.safeParse(rest);
-  return parsed.success ? ok(parsed.data) : err(damage(file, 'schema', 'it does not match its schema'));
+  if (parsed.success) return ok(parsed.data);
+  const stamped = file.schema.safeParse({ format, ...rest });
+  return stamped.success ? ok(stamped.data) : err(damage(file, 'schema', 'it does not match its schema'));
 }
 
 function stamp(file: StateFileDef, value: unknown): string {
