@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
-import { FakeVault } from '@ferretry/core-vault/contract/testing';
+import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
 import { testHost } from '@ferretry/kernel/testing';
 import { McpServerAdded, mcpServerRefusal, McpSignInChanged } from '../../contract/index.ts';
 import mcp from '../../daemon/index.ts';
@@ -17,7 +17,10 @@ const as = (...capabilities: string[]) => ({ kind: 'device', holder: 'dev_a', ca
 async function host() {
   const ferrets = new FakeFerrets();
   ferrets.add({ id: ferretId('f1'), folder: '/work/app' });
-  return await testHost({ plugins: [mcp], fakes: { ferrets, vault: new FakeVault() } });
+  return await testHost({
+    plugins: [mcp],
+    fakes: { ferrets, vault: new FakeVault(), sealed: new FakeSealedDocuments() },
+  });
 }
 
 describe('adding an MCP server for one ferret', () => {
@@ -192,7 +195,7 @@ describe('the MCP half as the host runs it', () => {
     ferrets.add({ id: ferretId('f1'), folder: '/work/app' });
     const h = await testHost({
       plugins: [mcp],
-      fakes: { ferrets, vault: new FakeVault() },
+      fakes: { ferrets, vault: new FakeVault(), sealed: new FakeSealedDocuments() },
       config: {
         mcp: {
           docs: { url: 'https://docs.example.com/mcp' },
