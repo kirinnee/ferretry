@@ -34,7 +34,7 @@ import {
   utf8Bytes,
   verifyLinkStoreRequest,
   writeUint32,
-} from '../../../worker/lib/index.ts';
+} from '../../../worker/src/lib/index.ts';
 import should from 'should';
 import { newDaemonIdentity, relayCrypto } from '../../support/worker/identities.ts';
 

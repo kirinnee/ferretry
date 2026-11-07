@@ -10,7 +10,7 @@ import {
   verifyCatalogItemAgainstVersions,
   verifySignedCatalogItemVersions,
   verifySignedCatalogManifest,
-} from '../../../worker/lib/index.ts';
+} from '../../../worker/src/lib/index.ts';
 import {
   catalogCanonicalText,
   catalogVersionsSignedBytes,
