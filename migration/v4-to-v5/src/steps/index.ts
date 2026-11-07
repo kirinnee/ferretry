@@ -10,6 +10,7 @@ import type { V4Paths } from '../v4/layout.ts';
 import type { V5Writer } from '../v5/write.ts';
 import type { NotCarried, StepReport } from '../report.ts';
 import { accessStep } from './access.ts';
+import { accountsStep } from './accounts.ts';
 import { agendaStep } from './agenda.ts';
 import { boardStep } from './board.ts';
 import { conversationStep } from './conversation.ts';
@@ -95,17 +96,8 @@ export const STEPS: readonly Step[] = [
   // After the vault: MCP's sealed document is opened by the key the vault step moves (once).
   mcpStep,
   identityStep,
-  pending(
-    {
-      id: 'accounts',
-      title: 'Website accounts (index, sign-in and copy rules; sealed values moved unopened)',
-      owner: ['plugin-accounts'],
-      reads: ['state/login-entries.json', 'state/accounts/sign-in-rules.json', 'state/secure-copy/rules.json'],
-      sealed: ['state/login-secrets.json'],
-      notCarried: [{ what: 'login-entries.v1.json', why: 'a v4 upgrade backup, never read' }],
-    },
-    'the Accounts state schema and its sealed-document declaration',
-  ),
+  // After the vault: Accounts' sealed values are opened by the same key the vault step moves (once).
+  accountsStep,
   accessStep,
   gateStep,
 ];

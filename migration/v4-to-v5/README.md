@@ -43,7 +43,7 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 ## State (Phase B)
 
 The preflight, sealed mover, report and ordered step table (`src/steps/index.ts`) exist. Vault, identity, ferrets,
-terminals, harness-homes, conversation, board, asks/agenda, projects, lessons, usage, warden, MCP, logins, Gate, Access, settings, daemon settings and Packs have real conversions. The other steps remain `pending`, so the default conversion still exits 3. Each step names what it waits for.
+terminals, harness-homes, conversation, board, asks/agenda, projects, lessons, usage, warden, MCP, logins, website accounts, Gate, Access, settings, daemon settings and Packs have real conversions. The other steps remain `pending`, so the default conversion still exits 3. Each step names what it waits for.
 Fixture homes built from the real 4.291.5 release are in
 `fixtures/` (CI-only on shared boxes).
 
@@ -170,6 +170,19 @@ the same in both. The access tokens are vault secrets kept by name (the Vault st
 key, which the Vault step moves once, BEFORE this step; every entry moves as the same strings and only the envelope's
 `v` → `format` changes (outside the AAD). A test seals fake entries the v4 way and opens both moved documents with the
 moved key. Nothing is decrypted by the tool.
+
+Accounts (`src/steps/accounts.ts`) writes `state/accounts/`: `login-entries.json` (`v: 2`) → `accounts.json` under
+`AccountIndexDocumentSchema` with every handle, `L…` key, `si_` sign-in and `tf_` 2FA key id kept; `v: 2` becomes
+`format: 1`, the one-time `migrated` record is dropped, and a 2FA key v4 marked `addedBy: 'migration'` is the
+owner's (v5's only origin). `accounts/sign-in-rules.json` and `secure-copy/rules.json` (→ `copy-rules.json`) are the
+same JSON values with `format: 1` stamped first, so every passkey-signed rule body still verifies; an absent paste
+`settings` is v4's default (profile targets off). The sealed `login-secrets.json` → `accounts/login-secrets.json`:
+v5's `LOGIN_SECRETS` opens it with the vault key the Vault step moves (BEFORE this step) and the entry name alone as
+the AAD, exactly as v4 sealed it, so only the envelope's `v` → `format` changes; a test seals fake entries the v4
+way and opens them with the moved key. A sealed value no account points at is carried and swept by v5's first start,
+as every v4 start swept it. A `v: 1` (saved-logins) index fails by name: v4 upgrades it only at daemon start. Task
+and paste plans, rule suggestions, phone approvals and staged seeds were memory-only in v4; `account-defaults.yaml`
+is the Settings step's.
 
 Gate (`src/steps/gate.ts`): `api-token` and `api-warden-token` (home root) move byte for byte to
 `state/gate/admin-token` and `warden-token` (`0600`; v5's CLI reads the same raw text). The four audit files — the
