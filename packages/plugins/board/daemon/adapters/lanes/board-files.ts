@@ -41,7 +41,8 @@ export class BoardFiles {
 
   async read(project: BoardProjectId): Promise<BoardFile | null> {
     const read = await this.state.read(this.file, project);
-    if (!read.ok) throw new BoardFileDamaged(`refusing to use a damaged board at ${read.error.file}: ${read.error.reason}`);
+    if (!read.ok)
+      throw new BoardFileDamaged(`refusing to use a damaged board at ${read.error.file}: ${read.error.reason}`);
     if (read.value === undefined) return null;
     if (read.value.project !== project) {
       throw new BoardFileDamaged(`refusing to use a board file that names another project (${project})`);

@@ -21,8 +21,7 @@ export const defaultVisibility = (card: Pick<Card, 'ask' | 'askedBy' | 'parent'>
   (card.askedBy ?? cardAskedBy(card)) === 'person' && card.parent === null ? 'public' : 'private';
 
 /** A card's visibility: the stored one, else {@link defaultVisibility}. Pure and total. */
-export const cardVisibility = (card: VisibilityFacts): CardVisibility =>
-  card.visibility ?? defaultVisibility(card);
+export const cardVisibility = (card: VisibilityFacts): CardVisibility => card.visibility ?? defaultVisibility(card);
 
 /** Whether a stored visibility is a choice (set by a person or a ferret) rather than the derived default. */
 export const visibilityChosen = (card: Pick<Card, 'visibility' | 'visibilitySource'>): boolean =>

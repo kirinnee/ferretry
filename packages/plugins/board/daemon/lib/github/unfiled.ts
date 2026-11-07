@@ -20,7 +20,13 @@
  * {@link SESSION_BOARD_RETRY_MS}, so a board of old cards costs no git call per card per tick. It never
  * throws: a card it cannot refile is reported once, and the rest go on.
  */
-import { type BoardProjectId, type Card, formatCardRef, type LaneSet, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
+import {
+  type BoardProjectId,
+  type Card,
+  formatCardRef,
+  type LaneSet,
+  UNFILED_PROJECT_ID,
+} from '../../../contract/index.ts';
 import type { BoardDiagnostics } from '../board/index.ts';
 import { isRefilable, PROJECT_REMOTES_TTL_MS, type RefileTarget, refileTargets, repoKey } from './plan.ts';
 import type { ProjectFolders, WatchedBoard, WatcherClock, WorkingCopies } from './ports.ts';

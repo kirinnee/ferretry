@@ -129,9 +129,7 @@ export class BoardGateCheck {
     const duplicates: DuplicateGateItem[] = [];
     for (const item of raised) {
       const ref = item.card as CardRef;
-      const gateItem = open.find(
-        candidate => candidate.id !== item.id && (candidate.gateOf ?? []).includes(ref.id),
-      );
+      const gateItem = open.find(candidate => candidate.id !== item.id && (candidate.gateOf ?? []).includes(ref.id));
       if (gateItem === undefined) continue;
       if (!(await this.atGate(ref))) continue;
       duplicates.push({ card: ref.id, gateItem: gateItem.id, item: item.id });

@@ -51,7 +51,6 @@ export const cardLicence = (facts: CardLicenceFacts): CardLicence | null => {
 const YES = 'yes';
 const NO = 'no';
 
-
 /** The labels of an ask's options, folded: a yes/no asks exactly Yes and No. */
 const isYesNo = (ask: Pick<AnsweredAsk, 'options'>): boolean => {
   const choices = ask.options.map(option => option.trim().toLowerCase());

@@ -24,7 +24,17 @@
  *   its facts put it.
  */
 import { compareVersions } from './versions.ts';
-import { type Card, categoryOf, isBackwardMove, type Lane, type LaneSet, type LaneTrigger, laneForTrigger, type PrLink, type Workflow } from '../../../contract/index.ts';
+import {
+  type Card,
+  categoryOf,
+  isBackwardMove,
+  type Lane,
+  type LaneSet,
+  type LaneTrigger,
+  laneForTrigger,
+  type PrLink,
+  type Workflow,
+} from '../../../contract/index.ts';
 
 /** What the facts are: the card's PRs as cached, and the version this machine runs (`null` when unknown). */
 export interface LaneFacts {
@@ -128,12 +138,7 @@ const factMayEnter = (lane: Lane, laneSet: LaneSet): boolean =>
  * The lane the card's PR facts put it in, or `null` for no opinion (see the file header). Pure and total:
  * a lane id the set does not know, or a workflow with no lane for the fact, is no opinion.
  */
-export const laneFromFacts = (
-  card: Card,
-  laneSet: LaneSet,
-  workflow: Workflow,
-  facts: LaneFacts,
-): FactMove | null => {
+export const laneFromFacts = (card: Card, laneSet: LaneSet, workflow: Workflow, facts: LaneFacts): FactMove | null => {
   if (card.dropped !== null) return null;
   const category = categoryOf(laneSet, card.laneId);
   if (!category.ok || category.value === 'closed') return null;

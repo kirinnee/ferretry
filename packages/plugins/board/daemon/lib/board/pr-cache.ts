@@ -18,7 +18,16 @@
  *   assignee, else the nearest live lead — is decided where the message is sent (`notice-route.ts`).
  * - **`releasedIn` is immutable** once set: a later poll never rewrites the release a PR shipped in.
  */
-import { type Card, formatCardRef, type LaneTrigger, type PrChangeKind, type PrChecks, type PrLink, prUrlParts, type ReleasedIn } from '../../../contract/index.ts';
+import {
+  type Card,
+  formatCardRef,
+  type LaneTrigger,
+  type PrChangeKind,
+  type PrChecks,
+  type PrLink,
+  prUrlParts,
+  type ReleasedIn,
+} from '../../../contract/index.ts';
 import { type CardContext, reconcileFacts, requireStanding, triggerMove, withEvent } from './card-actions.ts';
 import type { PrAlertReason } from './notice-route.ts';
 

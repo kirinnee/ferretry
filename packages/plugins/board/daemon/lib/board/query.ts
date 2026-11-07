@@ -6,7 +6,15 @@
  * board the header describes. State, activity and PR state are the views a person flips between on that
  * board (the pills, the Archive), so they FILTER the page and never change the counts.
  */
-import { type BoardCounts, type BoardPrStateFilter, type BoardQuery, type CardView, isInBoardState, type LaneCategory, type PrLink } from '../../../contract/index.ts';
+import {
+  type BoardCounts,
+  type BoardPrStateFilter,
+  type BoardQuery,
+  type CardView,
+  isInBoardState,
+  type LaneCategory,
+  type PrLink,
+} from '../../../contract/index.ts';
 import { BoardError } from './errors.ts';
 import { cardVisibility } from './visibility.ts';
 

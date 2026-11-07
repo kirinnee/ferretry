@@ -10,7 +10,15 @@
  * Pure: the caller hands in the card, the claims it just made, and the board as read inside the board-wide
  * dependency section, so two clashing claims are decided one after the other and cannot miss each other.
  */
-import { type CardActor, type Card, type CardEvent, formatCardRef, isBlockerDone, MAX_BOARD_DEPENDENCIES, type CardRef } from '../../../contract/index.ts';
+import {
+  type CardActor,
+  type Card,
+  type CardEvent,
+  formatCardRef,
+  isBlockerDone,
+  MAX_BOARD_DEPENDENCIES,
+  type CardRef,
+} from '../../../contract/index.ts';
 import { type BoardIndex, cardCategory, dependencyCycle, type LaneSets } from './graph.ts';
 import { ShippingUnits } from './shipping-unit.ts';
 

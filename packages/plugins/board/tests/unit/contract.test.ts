@@ -49,6 +49,9 @@ describe('board wire schemas', () => {
     expect(LaneSetActionRequestSchema.safeParse({ action: 'confirm' }).success).toBe(false);
   });
   test('the config defaults the GitHub watch on', () => {
-    expect(BoardConfigSchema.parse({})).toEqual({ github: { watch: true, pollSeconds: 60 } });
+    expect(BoardConfigSchema.parse({})).toEqual({
+      github: { watch: true, pollSeconds: 60 },
+      projectRoots: ['~/Workspace', '~/.config'],
+    });
   });
 });

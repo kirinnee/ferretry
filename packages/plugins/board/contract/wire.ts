@@ -1188,28 +1188,6 @@ export const CardAskRefSchema = z.strictObject({
 });
 export type CardAskRef = z.infer<typeof CardAskRefSchema>;
 
-// ─── plans (the `card_plan` tool) ────────────────────────────────────────────────────────────────────────────────
-/** A plan a ferret asks the owner to pre-approve once: sign-ins and pastes on one card. Lines are Accounts' kinds. */
-export const PlanLineSchema = z.looseObject({
-  kind: z.enum(['sign-in', 'terminal-sign-in', 'paste']),
-  why: z.string().min(1),
-});
-export const PlanSchema = z.strictObject({
-  id: z.string().min(1),
-  ferret: FerretRefSchema,
-  lines: z.array(PlanLineSchema).min(1),
-  createdAt: InstantSchema,
-  expiresAt: InstantSchema,
-});
-export const PlanListSchema = z.strictObject({ plans: z.array(PlanSchema) });
-export const PlanToolInputSchema = z.strictObject({
-  lines: z.array(PlanLineSchema).min(1),
-  expiresInSeconds: z.number().int().positive().optional(),
-});
-export const PlanApprovalRequestSchema = z.strictObject({
-  lines: z.array(z.strictObject({ line: z.number().int().nonnegative() })),
-});
-
 // ─── stored files ────────────────────────────────────────────────────────────────────────────────────────────────
 export const CountersFileSchema = z.strictObject({
   format: z.literal(1),
@@ -1226,7 +1204,29 @@ export const BoardFileSchema = z.strictObject({
   switch: BoardSwitchSchema,
   laneSet: LaneSetSchema.nullable(),
 });
-export const SweepFileSchema = z.strictObject({ format: z.literal(1), lastRunAt: InstantSchema.nullable() });
+/** `state/board/sweep.json`: what the last sweep saw and when each card was nudged. Open cards only. */
+export const SweepFileSchema = z.strictObject({
+  format: z.literal(1),
+  sweptAt: InstantSchema.nullable(),
+  nudged: z.record(z.string(), InstantSchema),
+  seen: z.record(z.string(), z.looseObject({ blockedBy: z.array(z.string()) })),
+});
+export type SweepFile = z.infer<typeof SweepFileSchema>;
+
+/**
+ * `state/board/focus.json`: the card each ferret works on, the card its delegations go under, and why its work has no
+ * card. Ferrets keeps no such fact, so Board holds it (today's `config.focusTask`, `focusAnchor`, `boardSkip`).
+ */
+export const FerretFocusEntrySchema = z.strictObject({
+  card: CardRefSchema.nullable(),
+  anchor: CardRefSchema.nullable(),
+  skip: z.strictObject({ reason: z.string(), at: InstantSchema }).nullable(),
+});
+export const FocusFileSchema = z.strictObject({
+  format: z.literal(1),
+  ferrets: z.record(z.string(), FerretFocusEntrySchema),
+});
+export type FocusFile = z.infer<typeof FocusFileSchema>;
 export const GithubFileSchema = z.strictObject({
   format: z.literal(1),
   prs: z.record(z.string(), PrLinkSchema),
@@ -1237,6 +1237,20 @@ export const BoardConfigSchema = z.strictObject({
   github: z
     .strictObject({ watch: z.boolean().default(true), pollSeconds: z.number().int().min(15).default(60) })
     .default({ watch: true, pollSeconds: 60 }),
+  /**
+   * The folders a ferret's repository is registered from when its first card is made on the Unfiled board
+   * (`~` is the home folder). A repository outside every one of them stays Unfiled.
+   */
+  projectRoots: z.array(z.string().trim().min(1)).default(['~/Workspace', '~/.config']),
 });
 export type BoardConfig = z.infer<typeof BoardConfigSchema>;
 
+// ─── the `card_progress` agent tool ──────────────────────────────────────────────────────────────────────────────
+/** What a ferret hands `card_progress`: the card and the parts of its progress it rewrites (the rest are kept). */
+export const CardProgressToolInputSchema = z.strictObject({
+  card: CardIdSchema,
+  now: z.string().max(MAX_PROGRESS_PART_LENGTH).optional(),
+  doneSoFar: z.string().max(MAX_PROGRESS_PART_LENGTH).optional(),
+  next: z.string().max(MAX_PROGRESS_PART_LENGTH).optional(),
+});
+export type CardProgressToolInput = z.infer<typeof CardProgressToolInputSchema>;

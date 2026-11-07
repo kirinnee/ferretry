@@ -4,7 +4,19 @@
  * work is checked (a review lane, else the verify lane the owner tries it in) — never into a `closed` lane,
  * because only the owner closes. A card whose PR is open waits in the review lane for the merge; one whose PR merged is left to the GitHub watcher.
  */
-import { type CardActor, type Card, categoryOf, formatCardRef, type Lane, type LaneSet, MAX_CARD_NOTE_LENGTH, MAX_BOARD_REASON_LENGTH, needsOwner, type CardRef, variantLanes } from '../../../contract/index.ts';
+import {
+  type CardActor,
+  type Card,
+  categoryOf,
+  formatCardRef,
+  type Lane,
+  type LaneSet,
+  MAX_CARD_NOTE_LENGTH,
+  MAX_BOARD_REASON_LENGTH,
+  needsOwner,
+  type CardRef,
+  variantLanes,
+} from '../../../contract/index.ts';
 import { gatesBetween, withEvent } from './card-actions.ts';
 
 /** What a `done` with no message says on the card. */

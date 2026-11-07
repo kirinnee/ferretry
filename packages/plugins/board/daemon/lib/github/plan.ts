@@ -10,7 +10,15 @@
  * - **Refiling** (`board-design.md` §2.2): an Unfiled card with a PR in a registered project's repository
  *   moves to that project at once ({@link refileTargets}); `unfiled.ts` adds the ferret's own folder.
  */
-import { type BoardProjectId, type Card, categoryOf, formatCardRef, type LaneCategory, type PrLink, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
+import {
+  type BoardProjectId,
+  type Card,
+  categoryOf,
+  formatCardRef,
+  type LaneCategory,
+  type PrLink,
+  UNFILED_PROJECT_ID,
+} from '../../../contract/index.ts';
 import type { LaneSets } from '../board/index.ts';
 
 /** About once a minute while a repository has an open PR linked. */

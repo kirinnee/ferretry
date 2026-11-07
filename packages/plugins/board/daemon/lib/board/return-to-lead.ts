@@ -67,12 +67,7 @@ export const returnTarget = (
   endedForGrace(card, roster, effectiveAssignee(card), nowMs) ? returnLead(card, category, roster) : null;
 
 /** The card handed back: assigned to `lead`, with the ferret that finished recorded in the event. */
-export const returnCard = (
-  card: Card,
-  lead: string,
-  finished: string,
-  context: Pick<CardContext, 'now'>,
-): Card => ({
+export const returnCard = (card: Card, lead: string, finished: string, context: Pick<CardContext, 'now'>): Card => ({
   ...withEvent(
     card,
     { type: 'assigned', from: card.assignee, to: lead, returnedFrom: finished },

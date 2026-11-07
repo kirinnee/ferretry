@@ -54,4 +54,3 @@ export const shippedCloseReason = (card: Card, laneSet: LaneSet): string | null 
  */
 export const helperCloseReason = (card: Card, laneSet: LaneSet): string | null =>
   closable(card, laneSet) && isPrFreeHelper(card) ? SUB_CARD_HELPER_REASON : null;
-

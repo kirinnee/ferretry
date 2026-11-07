@@ -19,7 +19,16 @@
  * - **The dependencies a person added** (not the daemon's own claim-time ones), on a card outside the unit that is not
  *   done. A card inside the unit, or one linking the same PR, ships in the same merge and never holds it.
  */
-import { type BoardMergeGateResponse, type BoardMergeWait, type Card, type CardEvent, isBlockerDone, type PrLink, prUrlParts, type CardRef } from '../../../contract/index.ts';
+import {
+  type BoardMergeGateResponse,
+  type BoardMergeWait,
+  type Card,
+  type CardEvent,
+  isBlockerDone,
+  type PrLink,
+  prUrlParts,
+  type CardRef,
+} from '../../../contract/index.ts';
 import { claimsClash } from './clash-queue.ts';
 import { type BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
 import { ShippingUnits } from './shipping-unit.ts';

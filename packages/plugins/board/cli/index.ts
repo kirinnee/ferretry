@@ -287,16 +287,13 @@ export default implementCli(manifest, {
             reason: text(invocation, 'reason'),
           });
         }),
-        // The owner's switch. The manifest declares `board status` only; these two answer the day a manifest line
-        // names them (V-0091, V-0092), and are left out of the typed table until then.
-        ...({
-          'board on': verb(async invocation => {
-            await lanes.turn(target(invocation), true);
-          }),
-          'board off': verb(async invocation => {
-            await lanes.turn(target(invocation), false);
-          }),
-        } as Record<string, VerbHandler>),
+        // The owner's switch (V-0091, V-0092).
+        'board on': verb(async invocation => {
+          await lanes.turn(target(invocation), true);
+        }),
+        'board off': verb(async invocation => {
+          await lanes.turn(target(invocation), false);
+        }),
       },
     };
   },

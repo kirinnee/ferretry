@@ -9,7 +9,15 @@
  * - `origin` and `humanParent` come from the card and its ancestors (`origin.ts`), with the lineage of the
  *   sessions a card was recorded from read through the {@link FerretParents} port.
  */
-import { type Card, type CardId, type CardView, firstLaneOfCategory, LANE_CATEGORIES, type LaneCategory, type Rollup } from '../../../contract/index.ts';
+import {
+  type Card,
+  type CardId,
+  type CardView,
+  firstLaneOfCategory,
+  LANE_CATEGORIES,
+  type LaneCategory,
+  type Rollup,
+} from '../../../contract/index.ts';
 import { type BoardIndex, blockedBy, cardCategory, type LaneSets, shippedIn } from './graph.ts';
 import { askFerretOf, cardAskedBy, cardOrigin, humanParentOf, type OriginFacts } from './origin.ts';
 import type { ActivityDeriver, CardAskLinkSource, CardActivityFacts, CardAsks, FerretParents } from './ports.ts';

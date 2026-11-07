@@ -10,7 +10,37 @@
  * event — can no longer undo it, so a failure there is reported to {@link BoardDiagnostics} and the
  * caller still gets the card it changed.
  */
-import { ADMIN_TOKEN_ACTOR_WORDS, type CardActor, type CardActorVia, type BoardEditableField, BoardEditableFieldSchema, type BoardIdsResponse, type BoardMergeGateResponse, type AskRef, type BoardProjectId, type BoardQuery, type BoardReopenAttachments, type BoardResponse, type BoardSkipRequest, type BoardSkipResponse, type Card, type CardActionRequest, type CardCreateRequest, type CardId, type CardResponse, CardSchema, type CardView, categoryOf, formatCardRef, type Lane, type LaneSet, type LaneTrigger, type CardKind, type CardRef, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
+import {
+  ADMIN_TOKEN_ACTOR_WORDS,
+  type CardActor,
+  type CardActorVia,
+  type BoardEditableField,
+  BoardEditableFieldSchema,
+  type BoardIdsResponse,
+  type BoardMergeGateResponse,
+  type AskRef,
+  type BoardProjectId,
+  type BoardQuery,
+  type BoardReopenAttachments,
+  type BoardResponse,
+  type BoardSkipRequest,
+  type BoardSkipResponse,
+  type Card,
+  type CardActionRequest,
+  type CardCreateRequest,
+  type CardId,
+  type CardResponse,
+  CardSchema,
+  type CardView,
+  categoryOf,
+  formatCardRef,
+  type Lane,
+  type LaneSet,
+  type LaneTrigger,
+  type CardKind,
+  type CardRef,
+  UNFILED_PROJECT_ID,
+} from '../../../contract/index.ts';
 import { describeRelocationProblem, relocationProblems } from '../lanes/lane-set-policy.ts';
 import type { RelocationAuthority } from '../lanes/ports.ts';
 import { helperRefusal, NO_HELPERS, type HelperDirectory } from './helper-limits.ts';
@@ -160,12 +190,8 @@ export interface SignalDoneOutcome {
 export const DEPENDENCY_SECTION = 'board:dependencies';
 
 /** The line a reopened card's ferret is told (§2.9): a plain sentence, with no tag around it. */
-export const reopenMessage = (
-  task: Pick<Card, 'id'>,
-  by: CardActor,
-  reason: string,
-  byVia?: CardActorVia,
-): string => `${formatCardRef(task)} was reopened by ${reopenerWords(by, byVia)}: ${reason}`;
+export const reopenMessage = (task: Pick<Card, 'id'>, by: CardActor, reason: string, byVia?: CardActorVia): string =>
+  `${formatCardRef(task)} was reopened by ${reopenerWords(by, byVia)}: ${reason}`;
 
 const reopenerWords = (by: CardActor, byVia: CardActorVia | undefined): string => {
   if (by.kind === 'owner') return byVia === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : 'the owner';
@@ -176,10 +202,7 @@ const reopenerWords = (by: CardActor, byVia: CardActorVia | undefined): string =
  * The line a card's ferret is told the owner closed it: a plain sentence, with no tag around it. A batch
  * (one ferret's cards closed together) lists them.
  */
-export const doneMessage = (
-  tasks: readonly Pick<Card, 'id' | 'title'>[],
-  by: DoneNotice['by'] = 'owner',
-): string => {
+export const doneMessage = (tasks: readonly Pick<Card, 'id' | 'title'>[], by: DoneNotice['by'] = 'owner'): string => {
   const named = tasks.map(task => `${formatCardRef(task)} “${task.title}”`);
   const who = by === 'owner' ? 'The owner' : `The${ADMIN_TOKEN_ACTOR_WORDS.slice('the'.length)}`;
   return named.length === 1
@@ -558,10 +581,7 @@ export class BoardService {
     if (card === undefined)
       throw new BoardError('not-found', `there is no card ${formatCardRef({ id })} on this machine`);
     if (card.dropped !== null) {
-      throw new BoardError(
-        'invalid',
-        `${formatCardRef(card)} is dropped; reopen it before you hand it to a helper`,
-      );
+      throw new BoardError('invalid', `${formatCardRef(card)} is dropped; reopen it before you hand it to a helper`);
     }
     // The assignee may hand it down; the child does not exist yet, and `handOver` proves it is the lead's own.
     const standing = await this.standing({ kind: 'ferret', ferret: lead }, card);
@@ -575,13 +595,7 @@ export class BoardService {
    * assignment is recorded as the lead's; the lead's own focus is not touched.
    */
   async handOver(id: CardId, lead: string, session: string, held: CardHolders): Promise<Card> {
-    const outcome = await this.assignTo(
-      id,
-      { kind: 'ferret', ferret: lead },
-      session,
-      'hand it to a helper',
-      held,
-    );
+    const outcome = await this.assignTo(id, { kind: 'ferret', ferret: lead }, session, 'hand it to a helper', held);
     await this.afterWrite({ kind: 'daemon', ferret: lead }, outcome, [outcome.projectId]);
     return await this.focusOn(outcome, session);
   }
@@ -1126,11 +1140,7 @@ export class BoardService {
    * descendant the daemon's lineage proves. An assign to nobody, upward or sideways stays forbidden to the card's holder
    * too, so it is the lead's to do.
    */
-  private async claimThenAssign(
-    caller: BoardCaller,
-    card: Card,
-    assignee: string | null,
-  ): Promise<string | undefined> {
+  private async claimThenAssign(caller: BoardCaller, card: Card, assignee: string | null): Promise<string | undefined> {
     if (caller.kind !== 'ferret' || assignee === null || assignee === caller.ferret) return undefined;
     if (!(await ancestorsOf(assignee, this.ports.parents)).includes(caller.ferret)) return undefined;
     return await this.claimCommand(caller, card);
@@ -1266,10 +1276,7 @@ export class BoardService {
   }
 
   /** The leads above the card's owner and above its assignee; empty for the caller that is that very ferret. */
-  private async lineages(
-    caller: BoardCaller,
-    card: Card,
-  ): Promise<readonly [readonly string[], readonly string[]]> {
+  private async lineages(caller: BoardCaller, card: Card): Promise<readonly [readonly string[], readonly string[]]> {
     if (caller.kind !== 'ferret') return [[], []];
     const assignee = effectiveAssignee(card);
     return [
@@ -1307,9 +1314,7 @@ export class BoardService {
     let problem: string | undefined;
     if (named !== undefined) {
       const item = await optIn.answered(caller.ferret, named).catch(() => undefined);
-      const usedBy = proof.cards.find(
-        card => card.approval?.ferret === caller.ferret && card.approval.id === named,
-      );
+      const usedBy = proof.cards.find(card => card.approval?.ferret === caller.ferret && card.approval.id === named);
       problem = approvalProblem(named, item, caller.ferret, usedBy) ?? undefined;
     }
     const licence = cardLicence({
@@ -1523,12 +1528,7 @@ export class BoardService {
   }
 
   /** Tells the card's ferret the owner closed it: only the owner's move into a closed lane from an open one. */
-  private async deliverDone(
-    caller: BoardCaller,
-    request: CardActionRequest,
-    before: Card,
-    after: Card,
-  ): Promise<void> {
+  private async deliverDone(caller: BoardCaller, request: CardActionRequest, before: Card, after: Card): Promise<void> {
     if (caller.kind !== 'owner' || request.action !== 'move') return;
     const laneSets = await this.laneSetsOf([after.projectId]);
     if (cardCategory(after, laneSets) !== 'closed' || cardCategory(before, laneSets) === 'closed') return;

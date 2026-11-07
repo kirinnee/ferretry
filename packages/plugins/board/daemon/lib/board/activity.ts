@@ -136,9 +136,7 @@ export const nearestLiveLead = (roster: FerretRoster, ferret: string): string | 
 /** Thinking, or running a tool, right now. */
 export const isWorking = (session: FerretLiveness): boolean =>
   !isTerminalStatus(session.status) &&
-  (session.status === 'working' ||
-    session.turnState === 'working' ||
-    session.subprocessSince !== undefined);
+  (session.status === 'working' || session.turnState === 'working' || session.subprocessSince !== undefined);
 
 const instant = (value: string | undefined): number => (value === undefined ? Number.NaN : Date.parse(value));
 

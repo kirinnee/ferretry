@@ -70,7 +70,7 @@ const everyone = rosterOf(['lead', 'child', 'other'].map(id => liveSession(id)))
 
 /** A memory that has seen the child card up to its creation, with nothing blocking it. */
 const sawChild = (mark: Partial<SweepMemory['seen'][string]> = {}): SweepMemory => ({
-  v: 1,
+  format: 1,
   sweptAt: EARLIER,
   nudged: {},
   seen: { F1: { blockedBy: [] }, F2: { blockedBy: [], ...mark } },
@@ -215,7 +215,7 @@ describe('the sweep plan: nudges', () => {
   it('should forget closed, dropped and vanished cards, and keep what it saw of the open ones', () => {
     // Arrange
     const memory: SweepMemory = {
-      v: 1,
+      format: 1,
       sweptAt: EARLIER,
       nudged: { F1: EARLIER, F2: EARLIER, F3: EARLIER, F9: EARLIER },
       seen: {},

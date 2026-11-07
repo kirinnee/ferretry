@@ -36,12 +36,7 @@ export type ReopenDelivery =
  * to the ferret's own session first when they were uploaded to another.
  */
 export interface ReopenMessenger {
-  deliver(
-    ferret: string,
-    message: string,
-    key: string,
-    attachments?: BoardReopenAttachments,
-  ): Promise<ReopenDelivery>;
+  deliver(ferret: string, message: string, key: string, attachments?: BoardReopenAttachments): Promise<ReopenDelivery>;
 }
 
 /** The idempotency key of one reopen: the card and the history event that reopened it. */

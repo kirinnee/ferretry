@@ -182,15 +182,11 @@ export const claimableFrom = (
 };
 
 /** The sentence a refused claim answers with: who may claim, and what to do instead. */
-export const claimRefusalMessage = (
-  card: Pick<Card, 'id' | 'owner' | 'assignee'>,
-  caller: BoardCaller,
-): string => {
+export const claimRefusalMessage = (card: Pick<Card, 'id' | 'owner' | 'assignee'>, caller: BoardCaller): string => {
   const ref = formatCardRef(card);
   if (caller.kind !== 'ferret') return `claim is a ferret's: ${ref} is taken with \`fy card assign ${ref} <ferret>\``;
   if (caller.ferret === effectiveAssignee(card)) return `${ref} is already yours`;
-  if (caller.ferret === card.owner)
-    return `you own ${ref}: take it with \`fy card assign ${ref} ${caller.ferret}\``;
+  if (caller.ferret === card.owner) return `you own ${ref}: take it with \`fy card assign ${ref} ${caller.ferret}\``;
   return `only a ferret below the ferret holding ${ref} may claim it (held by ${effectiveAssignee(card)}); a card held by a ferret outside your lineage is theirs: ask your lead`;
 };
 
@@ -235,10 +231,7 @@ const OPERATION_WORDS: Readonly<Record<BoardOperation, string>> = {
  * The sentence a refusal answers with: what was refused and who may do it instead, naming the card's
  * own ferrets so the caller knows whom to ask.
  */
-export const refusalMessage = (
-  operation: BoardOperation,
-  card: Pick<Card, 'id' | 'owner' | 'assignee'>,
-): string => {
+export const refusalMessage = (operation: BoardOperation, card: Pick<Card, 'id' | 'owner' | 'assignee'>): string => {
   const who = OPERATION_STANDINGS[operation].map(standing => STANDING_WORDS[standing]);
   const ferrets =
     card.assignee === null || card.assignee === card.owner

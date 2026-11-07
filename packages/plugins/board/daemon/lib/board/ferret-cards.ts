@@ -25,7 +25,18 @@
  * with a note saying how to move it.
  */
 import { cardTitleFor, deriveCardTitle } from './card-title.ts';
-import { type BoardProjectId, type Card, type CardCreateRequest, type CardId, firstCardRefIn, formatCardRef, MAX_CARD_BRIEF_LENGTH, type CardMessage, type CardRef, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
+import {
+  type BoardProjectId,
+  type Card,
+  type CardCreateRequest,
+  type CardId,
+  firstCardRefIn,
+  formatCardRef,
+  MAX_CARD_BRIEF_LENGTH,
+  type CardMessage,
+  type CardRef,
+  UNFILED_PROJECT_ID,
+} from '../../../contract/index.ts';
 import type { BoardSwitchReader } from '../lanes/board-switch.ts';
 import { effectiveAssignee } from './authority.ts';
 import { BoardError } from './errors.ts';
@@ -424,10 +435,7 @@ export class FerretCards {
       const brief = delegation?.brief ?? start.brief;
       if (delegation?.existing === true) return await this.handOver(delegation, start.ferret);
       // A start with no delegation makes its own card only where the board is on.
-      if (
-        delegation === undefined &&
-        !(await this.ports.switches.isOn(await this.ports.lanes.projectOf(start.ferret)))
-      )
+      if (delegation === undefined && !(await this.ports.switches.isOn(await this.ports.lanes.projectOf(start.ferret))))
         return { notes: [] };
       const placed = await this.place(start.ferret, owner);
       // The board the child landed on is the one asked: a guess at start time that came out otherwise makes no card.

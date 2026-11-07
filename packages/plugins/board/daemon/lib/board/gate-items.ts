@@ -169,11 +169,7 @@ export interface GateExpectation {
 }
 
 /** Runs `work` once every earlier one queued under `key` has settled: one at a time per key. */
-const serially = async <T>(
-  queues: Map<CardId, Promise<unknown>>,
-  key: CardId,
-  work: () => Promise<T>,
-): Promise<T> => {
+const serially = async <T>(queues: Map<CardId, Promise<unknown>>, key: CardId, work: () => Promise<T>): Promise<T> => {
   const turn = (queues.get(key) ?? Promise.resolve()).then(work);
   const tail = turn.catch(() => undefined);
   queues.set(key, tail);
@@ -300,7 +296,8 @@ export class GateItems implements CardWriteObserver {
         ? undefined
         : tryItVerdict({ ...task, blockedBy: card.blockedBy, building: card.building }, seen);
     // Nothing to try: the card closes, so what follows is the card as it stands NOW, past that gate.
-    const closed = seen !== undefined && verdict?.kind === 'nothing' && (await this.closeNothing(card, seen, verdict.why));
+    const closed =
+      seen !== undefined && verdict?.kind === 'nothing' && (await this.closeNothing(card, seen, verdict.why));
     if (verdict?.kind === 'nothing' && !closed) return false;
     const gate = closed ? undefined : seen;
     // Blocked: the card is not ready to try, so nothing is asked, and an ask still waiting for the owner is taken back
@@ -376,7 +373,8 @@ export class GateItems implements CardWriteObserver {
           : [...opens].sort((left, right) => newest(right.entry) - newest(left.entry))[0]?.entry;
       for (const open of opens) {
         const stale = card === undefined || gate === undefined || open.entry !== keeper;
-        if (stale && !(await this.isBeingAnswered(cardId))) await this.ports.obligations.withdraw(open.entry, 'superseded');
+        if (stale && !(await this.isBeingAnswered(cardId)))
+          await this.ports.obligations.withdraw(open.entry, 'superseded');
       }
     }
   }

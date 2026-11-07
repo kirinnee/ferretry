@@ -40,8 +40,16 @@
  *
  * {@link planSweep} is pure; {@link BoardSweep} does the IO through its ports.
  */
-import { BoardInstantSchema as InstantSchema, type CardId, type CardRef, type CardView, formatCardRef, isBlockerDone, laneOf } from '../../../contract/index.ts';
-import { z } from 'zod';
+import {
+  type CardId,
+  type CardRef,
+  type CardView,
+  formatCardRef,
+  isBlockerDone,
+  laneOf,
+  type SweepFile,
+  SweepFileSchema,
+} from '../../../contract/index.ts';
 import {
   cardStaleAfterMs,
   presenceOf,
@@ -59,23 +67,11 @@ import type { BoardClock, BoardDiagnostics } from './ports.ts';
 /** How often the daemon sweeps the board. */
 export const BOARD_SWEEP_INTERVAL_MS = 60_000;
 
-/**
- * What the last tick saw of one card: its unfinished blockers, as `machine/id` keys. Not strict, so a
- * memory written when the sweep also kept a card's history position and asks still reads.
- */
-const CardMarkSchema = z.object({ blockedBy: z.array(z.string()) });
-type CardMark = z.infer<typeof CardMarkSchema>;
+export const SweepMemorySchema = SweepFileSchema;
+type CardMark = SweepFile['seen'][string];
+export type SweepMemory = SweepFile;
 
-/** What the last tick saw, and when each card was last nudged. Open cards only: closed ones are forgotten. */
-export const SweepMemorySchema = z.strictObject({
-  v: z.literal(1),
-  sweptAt: InstantSchema.nullable(),
-  nudged: z.record(z.string(), InstantSchema),
-  seen: z.record(z.string(), CardMarkSchema),
-});
-export type SweepMemory = z.infer<typeof SweepMemorySchema>;
-
-export const EMPTY_SWEEP_MEMORY: SweepMemory = { v: 1, sweptAt: null, nudged: {}, seen: {} };
+export const EMPTY_SWEEP_MEMORY: SweepMemory = { format: 1, sweptAt: null, nudged: {}, seen: {} };
 
 /**
  * A message to send: one queued message to one ferret about one card. `stale` is throttled by the card's
@@ -246,7 +242,7 @@ export const planSweep = (memory: SweepMemory, board: SweepBoard, roster: Ferret
       message: nudgeMessage(view, idle, laneName(board, view, view.laneId)),
     });
   }
-  return { memory: { v: 1, sweptAt: now, nudged, seen }, nudges, closes, returns };
+  return { memory: { format: 1, sweptAt: now, nudged, seen }, nudges, closes, returns };
 };
 
 // ---------------------------------------------------------------------------------------------------

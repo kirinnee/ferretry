@@ -13,4 +13,7 @@ export {
   type MoveReasonProblem,
   moveReasonProblem,
 } from '../../../contract/index.ts';
-export { type CardActorVia as BoardActorVia, CardActorViaSchema as BoardActorViaSchema } from '../../../contract/index.ts';
+export {
+  type CardActorVia as BoardActorVia,
+  CardActorViaSchema as BoardActorViaSchema,
+} from '../../../contract/index.ts';

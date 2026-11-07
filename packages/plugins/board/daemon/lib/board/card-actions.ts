@@ -15,7 +15,42 @@
  * - **Dependencies** (§2.7): a card with unfinished blockers cannot move to a later CATEGORY; only the
  *   owner overrides a dependency, and the override is recorded. Cycles are refused.
  */
-import { type CardActor, type CardActorVia, cardRevision, type BoardAttachment, type BoardClarification, type BoardEditableField, type Progress, BoardEditableFieldSchema, type CardVisibility, type BoardProjectId, type Card, type CardActionRequest, type CardCreateRequest, type CardEvent, type CardId, categoryOf, firstLaneOfCategory, formatCardRef, gateOptions, isBackwardMove, LANE_CATEGORIES, type Lane, type LaneSet, type LaneTrigger, laneForTrigger, laneOf, laneStage, moveReasonProblem, needsOwner, type PrLink, prUrlParts, type BoardReopenAttachments, type CardRef, variantLanes } from '../../../contract/index.ts';
+import {
+  type CardActor,
+  type CardActorVia,
+  cardRevision,
+  type BoardAttachment,
+  type BoardClarification,
+  type BoardEditableField,
+  type Progress,
+  BoardEditableFieldSchema,
+  type CardVisibility,
+  type BoardProjectId,
+  type Card,
+  type CardActionRequest,
+  type CardCreateRequest,
+  type CardEvent,
+  type CardId,
+  categoryOf,
+  firstLaneOfCategory,
+  formatCardRef,
+  gateOptions,
+  isBackwardMove,
+  LANE_CATEGORIES,
+  type Lane,
+  type LaneSet,
+  type LaneTrigger,
+  laneForTrigger,
+  laneOf,
+  laneStage,
+  moveReasonProblem,
+  needsOwner,
+  type PrLink,
+  prUrlParts,
+  type BoardReopenAttachments,
+  type CardRef,
+  variantLanes,
+} from '../../../contract/index.ts';
 import {
   type BoardCaller,
   type BoardOperation,
@@ -97,11 +132,7 @@ export interface CardOutcome {
 /** The source recorded with an owner's words when they arrived as a move on the board. */
 export const OWNER_MOVE_SOURCE = 'owner (board move)';
 
-type NewEvent = CardEvent extends infer E
-  ? E extends CardEvent
-    ? Omit<E, 'seq' | 'at' | 'actor'>
-    : never
-  : never;
+type NewEvent = CardEvent extends infer E ? (E extends CardEvent ? Omit<E, 'seq' | 'at' | 'actor'> : never) : never;
 
 /** The card with one more history event: next seq, this instant, this actor. */
 export const withEvent = (

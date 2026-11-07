@@ -3,7 +3,19 @@
  * blocks (`board-design.md` §2.7). Everything here is derived from the stored cards on every read and
  * never stored, so there is no inverse index to drift.
  */
-import { type BoardProjectId, type Card, type CardId, categoryOf, formatCardRef, isBlockerDone, type LaneCategory, type LaneSet, laneOf, type ReleasedIn, type CardRef } from '../../../contract/index.ts';
+import {
+  type BoardProjectId,
+  type Card,
+  type CardId,
+  categoryOf,
+  formatCardRef,
+  isBlockerDone,
+  type LaneCategory,
+  type LaneSet,
+  laneOf,
+  type ReleasedIn,
+  type CardRef,
+} from '../../../contract/index.ts';
 
 export type LaneSets = ReadonlyMap<BoardProjectId, LaneSet>;
 

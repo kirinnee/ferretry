@@ -105,11 +105,7 @@ const section = (heading: string, text: string): readonly string[] =>
  * (nobody's work yet, so a lead being alive does not hold every card it has not handed out); else any live ferret
  * whose focus it is.
  */
-function heldBy(
-  card: CardView,
-  laneSet: LaneSet | null,
-  live: ReadonlyMap<string, CardId | null>,
-): string | undefined {
+function heldBy(card: CardView, laneSet: LaneSet | null, live: ReadonlyMap<string, CardId | null>): string | undefined {
   if (card.assignee !== null) {
     if (live.has(card.assignee)) return card.assignee;
   } else if (live.has(card.owner)) {
@@ -147,16 +143,14 @@ const focusCardBrief = (card: CardView, laneSet: LaneSet | null): string => {
   lines.push(
     '',
     'Last on the card:',
-    ...card.history
-      .slice(-FOCUS_HISTORY_LINES)
-      .map(
-        event =>
-          `- ${event.at}  ${describeCardEvent(
-            event,
-            id => laneNameIn(laneSet, id),
-            id => id,
-          )}`,
-      ),
+    ...card.history.slice(-FOCUS_HISTORY_LINES).map(
+      event =>
+        `- ${event.at}  ${describeCardEvent(
+          event,
+          id => laneNameIn(laneSet, id),
+          id => id,
+        )}`,
+    ),
   );
   return lines.join('\n');
 };
@@ -207,9 +201,7 @@ export async function startOnCard(
     }
     // A pane that would not stop is terminal to the roster but may still be working: it holds the card, so a start
     // beside it is refused until the owner has stopped it.
-    const stuck = [...(await ports.stuck())].some(
-      ([ferret, focus]) => task.assignee === ferret || focus === task.id,
-    );
+    const stuck = [...(await ports.stuck())].some(([ferret, focus]) => task.assignee === ferret || focus === task.id);
     if (stuck) throw new BoardError('invalid', `A ferret on ${ref} could not be stopped; stop it first.`);
     const folder = await ports.folderOf(task);
     if (folder === undefined) {
