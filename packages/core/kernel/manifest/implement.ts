@@ -182,11 +182,13 @@ export interface PluginSocketListeners {
 }
 
 /**
- * The only headers a half may set on a call (lead decision 7): today's idempotency id for a move or a fork. Anything
- * else is the shell's (credentials, the contract hash).
+ * The only headers a half may set on a call (lead decision 7): today's idempotency id for a move or a fork, and the
+ * agenda channel (`2`: an agenda list read asks for resolved records as headers). A closed list the shell checks; a
+ * channel value other than `2` is dropped. Anything else is the shell's (credentials, the contract hash).
  */
 export interface PluginCallHeaders {
   readonly 'x-fy-request-id'?: string;
+  readonly 'x-fy-agenda-channel'?: '2';
 }
 
 /** `PluginClient.conditional`'s request: the etag the caller holds, and the same allow-listed headers as `call`. */
@@ -208,7 +210,7 @@ export interface PluginClient {
       readonly params?: Readonly<Record<string, string>>;
       readonly query?: Readonly<Record<string, string>>;
       readonly body?: unknown;
-      /** Allow-listed: `x-fy-request-id` only, through the same contract-hash guard as the call. */
+      /** Allow-listed (`PluginCallHeaders`), through the same contract-hash guard as the call. */
       readonly headers?: PluginCallHeaders;
     },
   ): Promise<Answer>;

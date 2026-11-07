@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { AgendaNeedsYou } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import { daemonConnection } from '../../../../app/shell.ts';
 import { agendaItem, fakeInbox, InboxHarness, inboxCard } from '../../../support/app/agenda-inbox.tsx';
-import { type Mounted, mount } from '../../../support/app/dom.ts';
+import { type Mounted, mount } from '@ferretry/app/testing';
 import { settle } from '../../../support/app/dom-form.ts';
 
-const WORKSHOP = daemonConnection({ daemonId: 'workshop', baseUrl: 'https://workshop.example.test', deviceId: 't1' });
+const WORKSHOP = daemonConnection({ daemonId: 'workshop' });
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 const mounted: Mounted[] = [];
 

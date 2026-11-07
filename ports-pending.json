@@ -115,19 +115,22 @@
       "GAP(access): the device-revoke rule-count warning (\"revoking this device suspends N standing sign-in rules\") needs a slot in Access's revoke-device panel",
       "GAP(shells): the `#rules/<stage>` deep link and the \"Don't ask again\" offer on the input card are not drawn; they are not Accounts' surfaces, and dropping them removes no protection",
       "67 kept rows owned by the daemon half, the CLI half and half a have no id-named test yet: G90 I130 I136 I137 I139 I141 I142 I143 I144 I146 I148 I149 I150 I156 I157 I158 I160 I161 I162 I163 I164 I166 I167 I168 I169 I170 I171 I172 I174 I175 I177 I178 I186 I195 I200 I201 I205 I207 I208 I212 I214 I216 I225 I226 I227 I228 I229 I230 I244 I34 S100 S109 S114 S135 S136 S137 S138 S139 S140 S68 S73 S76 S86 S91 S93 S97 S98"
+    ],
+    "agenda": [
+      "GAP(agenda-inbox-machines): the Inbox reads the one machine this half is built for (runtime.client), where today's hook read every paired machine's list; the cross-machine count, machine filter and per-machine notes need a shell-level reader over every daemon's Agenda half, which is not built",
+      "GAP(agenda-references): references in an ask's prose (&F12, !A3, :agent, …) render as plain text: @ferretry/app offers the ReferenceSurfaceProvider but the surface builder reads other plugins' resolvers and openers (Board's reference:&, Ferrets, Files), which Agenda may not import",
+      "GAP(agenda-history-conversation): an open ask's History shows the words stored on the item, not the chat messages that name it: readConversation is not bound, because it would read Conversation's transcript through an Agenda-to-Conversation edge that is not approved; the receipt badges (Cancelled, Unconfirmed, Held for revive, Typed-not-sent, Saved) return with that read",
+      "GAP(done-close-board) and GAP(cards-board): Done · closes and a notice's Start/Close write through Board ports (DoneCloseBoard, AgendaCardsBoard) that no host provides until Board contributes them or Agenda is given a need on Board",
+      "GAP(agenda-composer) and GAP(quote-target): the ask page offers the agenda.conversation slot (Q9); a reply typed there does not mark the Inbox replied, and Quote in composer needs Conversation's composer to register its quote target",
+      "GAP(agenda-nav) and GAP(agenda-drawer): the Inbox nav entry, the needs-you group and the in-chat drawer have no 5.0 shell or Conversation slot to mount in",
+      "GAP(answer-files), GAP(sign-in-rule-sweep), GAP(push-delivery), GAP(notification-open), GAP(item-opened): answer uploads, the sign-in rule sweep and push delivery/open run through ports Conversation, Accounts and Access must bind (Access's agendaItemOpenedHandler is an app function its contract does not expose, so opening an ask does not yet close this device's own buzz lines); the notification filter's sentence says the switch is that machine's own, as the rows are Access's now; app/NEEDS-APP-SHELL.txt lists every open gap"
     ]
   },
   "pendingHalves": {
-    "agenda": ["app"],
     "terminals": ["app"],
     "warden": ["app"]
   },
   "pendingAppPorts": [
-    {
-      "plugin": "agenda",
-      "path": "packages/plugins/agenda/app",
-      "reason": "separate app port in flight"
-    },
     {
       "plugin": "terminals",
       "path": "packages/plugins/terminals/app",
@@ -142,16 +145,6 @@
       "plugin": "terminals",
       "path": "packages/plugins/terminals/tests/support/app",
       "reason": "shell daemon-client, grants and browser-link facilities"
-    },
-    {
-      "plugin": "agenda",
-      "path": "packages/plugins/agenda/tests/unit/app",
-      "reason": "app-shell-fill React runtime and app test harness"
-    },
-    {
-      "plugin": "agenda",
-      "path": "packages/plugins/agenda/tests/support/app",
-      "reason": "app-shell-fill React runtime and app test harness"
     },
     {
       "plugin": "warden",

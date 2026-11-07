@@ -1,11 +1,11 @@
-import '../../../support/app/dom.ts';
+import { ensureDom } from '@ferretry/app/testing';
+ensureDom();
 import { afterEach, describe, expect, it } from 'bun:test';
 import { AgendaInboxComposer } from '../../../../app/features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import type { AgendaInbox } from '../../../../app/hooks/use-agenda-inbox.ts';
 import type { InboxCard } from '../../../../app/lib/agenda-inbox.ts';
 import { daemonConnection } from '../../../../app/shell.ts';
-import { documentDraftStore } from '../../../../app/shell.ts';
 import {
   agendaItem,
   choices,
@@ -14,11 +14,12 @@ import {
   InboxHarness,
   inboxCard,
 } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { sessionView } from '../../../support/app/sessions.ts';
+import { fakeComposerDrafts as documentDraftStore, WithFakeComposer } from '../../../support/app/composer-port.tsx';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
-const daemon = daemonConnection({ daemonId: 'workshop', baseUrl: 'https://workshop.example.test', deviceId: 'device' });
+const daemon = daemonConnection({ daemonId: 'workshop' });
 
 const shipIt = inboxCard(
   agendaItem('A2', { subject: 'Ship it?', ask: choices('Ship', 'Hold'), waitingSince: '2026-08-01T10:00:00.000Z' }),
@@ -48,7 +49,10 @@ interface Rig {
   readonly mounted: Mounted;
 }
 
-/** The page, a REAL Inbox composer under the open card, and the toast, over the fake inbox. */
+/**
+ * The page, the Inbox's composer under the open card (bound to the host composer the suites use: the real one is
+ * Conversation's), and the toast, over the fake inbox.
+ */
 const rig = async (
   cards: readonly InboxCard[],
   send: (sessionId: string, message: string) => Promise<unknown>,
@@ -63,36 +67,38 @@ const rig = async (
     },
   };
   const mounted = await mount(
-    <InboxHarness
-      cards={cards}
-      fake={fake}
-      render={inbox => {
-        latest = inbox;
-        return (
-          <AgendaInboxPage
-            clock={fake.clock.now}
-            inbox={inbox}
-            initialOpen={cards[0]?.key}
-            now={NOW}
-            onNavigate={() => undefined}
-            phone
-            reducedMotion
-            renderComposer={card => (
-              <AgendaInboxComposer
-                clientFor={async () => api}
-                compact
-                connection={daemon}
-                itemId={card.item.id}
-                onReplied={message => inbox.replied.mark(card, message)}
-                onRestored={() => inbox.replied.takeRestore(card.key)}
-                restore={inbox.repliedState.restores.find(each => each.key === card.key)?.text}
-                view={card.view}
-              />
-            )}
-          />
-        );
-      }}
-    />,
+    <WithFakeComposer>
+      <InboxHarness
+        cards={cards}
+        fake={fake}
+        render={inbox => {
+          latest = inbox;
+          return (
+            <AgendaInboxPage
+              clock={fake.clock.now}
+              inbox={inbox}
+              initialOpen={cards[0]?.key}
+              now={NOW}
+              onNavigate={() => undefined}
+              phone
+              reducedMotion
+              renderComposer={card => (
+                <AgendaInboxComposer
+                  clientFor={async () => api}
+                  compact
+                  connection={daemon}
+                  itemId={card.item.id}
+                  onReplied={message => inbox.replied.mark(card, message)}
+                  onRestored={() => inbox.replied.takeRestore(card.key)}
+                  restore={inbox.repliedState.restores.find(each => each.key === card.key)?.text}
+                  view={card.view}
+                />
+              )}
+            />
+          );
+        }}
+      />
+    </WithFakeComposer>,
   );
   await settle();
   return { fake, sent, mounted, latest: () => must(latest, 'the inbox') };
@@ -106,15 +112,16 @@ const settle = async (): Promise<void> => {
 
 const editor = (mounted: Mounted): HTMLElement =>
   must(mounted.container.querySelector<HTMLElement>('.fy-composer [data-live-editor]'), 'the composer box');
-/** Types into the box the way the platform does: a focus, then an insertion at the caret. */
+/** Types into the box the way a keyboard does: a focus, then the value through the native setter and `input`. */
 const type = async (mounted: Mounted, text: string): Promise<void> => {
-  const box = editor(mounted);
+  const box = editor(mounted) as HTMLTextAreaElement;
   await interact(() => box.focus());
-  const event = new Event('beforeinput', { bubbles: true, cancelable: true });
-  Object.assign(event, { inputType: 'insertText', data: text, dataTransfer: null });
-  await interact(() => box.dispatchEvent(event));
+  await interact(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(box, `${box.value}${text}`);
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+  });
 };
-const words = (mounted: Mounted): string => editor(mounted).textContent ?? '';
+const words = (mounted: Mounted): string => (editor(mounted) as HTMLTextAreaElement).value;
 const deckAbout = (mounted: Mounted): string =>
   must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-view]'), 'the open card')
     .textContent ?? '';

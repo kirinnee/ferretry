@@ -18,12 +18,12 @@
  * the bottom tab bar (`agenda-inbox.css`).
  */
 
+import { sessionsBarNames } from '../../lib/ferret-names.ts';
 import { Undo2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import { actionSentence } from '../../lib/agenda-inbox.ts';
 import type { RepliedEntry, RepliedNotice } from '../../lib/agenda-replied.ts';
-import { sessionsBarNames, shellClock } from '../../shell.ts';
 
 /** How often the countdown redraws while something is held. */
 const TICK_MS = 250;
@@ -50,13 +50,14 @@ export interface AgendaUndoToastProps {
 
 const toastClass = (inline: boolean): string => `fy-attn-undo kt-panel${inline ? ' fy-attn-undo--inline' : ''}`;
 
-export function AgendaUndoToast({ inbox, clock = shellClock.nowMs, inline = false }: AgendaUndoToastProps) {
+export function AgendaUndoToast({ inbox, clock = Date.now, inline = false }: AgendaUndoToastProps) {
   const pending = inbox.deferredState.pending;
   const latest = pending.at(-1);
   const [, setTick] = useState(0);
   useEffect(() => {
     if (pending.length === 0) return;
-    return shellClock.every(() => setTick(tick => tick + 1), TICK_MS);
+    const handle = setInterval(() => setTick(tick => tick + 1), TICK_MS);
+    return () => clearInterval(handle);
   }, [pending.length]);
 
   if (latest === undefined) return <RepliedToast clock={clock} inbox={inbox} inline={inline} />;
@@ -125,7 +126,8 @@ function RepliedToast({ inbox, clock, inline }: Required<AgendaUndoToastProps>) 
   const active = entries.some(entry => entry.phase === 'replied') || notice !== null;
   useEffect(() => {
     if (!active) return;
-    return shellClock.every(() => setTick(tick => tick + 1), TICK_MS);
+    const handle = setInterval(() => setTick(tick => tick + 1), TICK_MS);
+    return () => clearInterval(handle);
   }, [active]);
   const now = clock();
   const entry = undoableReply(entries, now);

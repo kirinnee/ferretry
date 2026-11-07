@@ -2,15 +2,16 @@ import { describe, expect, it } from 'bun:test';
 import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import type { ClearPort } from '../../../../app/lib/agenda-clear-agents.ts';
 import { daemonConnection } from '../../../../app/shell.ts';
+import { callFromFetch } from '../../../support/app/call-from-fetch.ts';
 import { agendaItem, fakeInbox, InboxHarness, inboxCard } from '../../../support/app/agenda-inbox.tsx';
 import { chooseFromMenu } from '../../../support/app/inbox-menus.ts';
-import { interact, mount, must } from '../../../support/app/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import { sessionView } from '../../../support/app/sessions.ts';
-import { settleUntil } from '../../../support/app/settle.ts';
+import { settleUntil } from '@ferretry/app/testing';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
-const WORKSHOP = daemonConnection({ daemonId: 'workshop', baseUrl: 'https://workshop.example.test', deviceId: 't1' });
-const LAPTOP = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 't2' });
+const WORKSHOP = daemonConnection({ daemonId: 'workshop' });
+const LAPTOP = daemonConnection({ daemonId: 'laptop' });
 
 const agentCard = inboxCard(
   agendaItem('A1', { subject: 'Agent asks' }),
@@ -42,16 +43,17 @@ const settle = async (): Promise<void> =>
 const mountPage = async (withPort: boolean, down: readonly string[] = [], calls: string[] = []) => {
   const fake = fakeInbox();
   const port: ClearPort = {
-    fetcher: async (input, init) => {
-      const body = JSON.parse(String(init?.body ?? '{}')) as { dryRun?: boolean };
-      const host = new URL(String(input)).hostname;
-      calls.push(`${host} ${body.dryRun === true ? 'dry' : 'clear'}`);
-      if (down.some(name => host.startsWith(name))) throw new Error('offline');
-      return new Response(JSON.stringify({ cleared: body.dryRun === true ? 2 : 2, ferrets: 1 }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    },
+    clientFor: target =>
+      callFromFetch(async (input, init) => {
+        const body = JSON.parse(String(init.body ?? '{}')) as { dryRun?: boolean };
+        const host = new URL(input).hostname;
+        calls.push(`${host} ${body.dryRun === true ? 'dry' : 'clear'}`);
+        if (down.some(name => host.startsWith(name))) throw new Error('offline');
+        return new Response(JSON.stringify({ cleared: body.dryRun === true ? 2 : 2, ferrets: 1 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }, `https://${target.daemonId}.example.test`),
   };
   const view = await mount(
     <InboxHarness

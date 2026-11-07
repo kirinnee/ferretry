@@ -24,7 +24,7 @@
  * follows the daemon-qualified SPA path the ledger already put in the spec.
  */
 
-import type { PushNotificationKind } from '../shell.ts';
+import type { PushNotificationKind } from './notification-filter.ts';
 import type { DaemonId } from '../shell.ts';
 import type { NotificationSpec } from './notification-ledger.ts';
 

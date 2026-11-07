@@ -9,7 +9,7 @@ import {
   NOTIFICATION_OPEN_MESSAGE,
   NotificationOpenInbox,
 } from '../../../app/lib/notification-open.ts';
-import { type Mounted, mount } from '../../support/app/dom.ts';
+import { type Mounted, mount } from '@ferretry/app/testing';
 
 const ORIGIN = 'https://pwa.example.test';
 

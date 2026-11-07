@@ -7,7 +7,7 @@ import {
   agendaReMessage,
   type AgendaSnapshot,
   parseAgendaMessage,
-} from '../../../app/wire/index.ts';
+} from '@ferretry/core-asks/contract';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import {
   AGENDA_KIND_LABEL,
@@ -18,9 +18,8 @@ import {
   useAgendaChatReply,
 } from '../../../app/components/agenda-message.tsx';
 import { ReferenceSurfaceProvider } from '../../../app/shell.ts';
-import { TranscriptRow } from '../../../app/shell.ts';
-import type { TranscriptEntry } from '../../../app/shell.ts';
-import { render, run, runAsync } from '../../support/app/react.ts';
+import type { TranscriptEntry } from '../../../app/lib/transcript.ts';
+import { render, run, runAsync } from '@ferretry/app/testing';
 
 const textOf = (node: ReactTestRenderer | ReactTestInstance): string => {
   const walk = (value: unknown): string => {
@@ -163,6 +162,8 @@ describe('which answers are a choice', () => {
   });
 });
 
+// The transcript row is Conversation's: it draws an owner message through this half's `AgendaMessageOr`, which is what
+// is asserted here — the owner's message the daemon worded about an item, drawn as its card.
 describe('the transcript', () => {
   test('draws the owner message the daemon worded about an item as its card', () => {
     const entry: TranscriptEntry = {
@@ -171,7 +172,7 @@ describe('the transcript', () => {
       text: agendaAnswerMessage(named, 'Button only'),
       at: Date.UTC(2026, 9, 30, 10, 7),
     };
-    const view = render(<TranscriptRow entry={entry} />);
+    const view = render(<AgendaMessageOr fallback={<p>{entry.text}</p>} text={entry.text} />);
     expect(byClass(view, 'fy-agenda-msg')).toHaveLength(1);
     expect(textOf(view)).not.toContain('[answer to');
   });

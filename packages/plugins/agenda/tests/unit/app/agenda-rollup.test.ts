@@ -1,11 +1,26 @@
 import { describe, expect, it } from 'bun:test';
-import { AgendaRollupStore, fetchAgendaRollup, ROLLUP_MAX_PAGES } from '../../../app/lib/agenda-rollup.ts';
+import {
+  AgendaRollupStore as RollupStore,
+  fetchAgendaRollup as fetchRollup,
+  ROLLUP_MAX_PAGES,
+} from '../../../app/lib/agenda-rollup.ts';
+import type { DaemonConnection } from '../../../app/shell.ts';
+import { callFromFetch, type TestFetch } from '../../support/app/call-from-fetch.ts';
 import { daemonConnection } from '../../../app/shell.ts';
 import { DaemonResponseError } from '../../../app/shell.ts';
 import { agendaItem } from '../../support/app/agenda-inbox.tsx';
 
-const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
-const other = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
+/** The roll-up over a scripted fetcher, through the half's client. */
+const fetchAgendaRollup = (connection: DaemonConnection, fetcher: TestFetch) =>
+  fetchRollup(connection, callFromFetch(fetcher));
+class AgendaRollupStore extends RollupStore {
+  constructor(fetcher: TestFetch) {
+    super(callFromFetch(fetcher));
+  }
+}
+
+const daemon = daemonConnection({ daemonId: 'daemon-a' });
+const other = daemonConnection({ daemonId: 'daemon-b' });
 
 const reply = (value: unknown, status = 200): Response =>
   new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
@@ -13,7 +28,7 @@ const page = (ids: readonly string[], next?: string) => ({
   sessions: ids.map(sessionId => ({ sessionId, items: [agendaItem('A1')] })),
   ...(next === undefined ? {} : { next }),
 });
-const urls = (): { calls: string[]; fetcher: (input: string | URL | Request) => Promise<Response> } => {
+const urls = (): { calls: string[]; fetcher: TestFetch } => {
   const calls: string[] = [];
   return {
     calls,
@@ -29,12 +44,13 @@ describe('fetchAgendaRollup', () => {
     const calls: string[] = [];
     const pages = [page(['a', 'b'], 'b'), page(['c'])];
     const boards = await fetchAgendaRollup(daemon, async (input, init) => {
-      expect(new Headers(init?.headers).get('x-fy-agenda-channel')).toBe('2');
+      // The read asks for the channel that answers resolved records as headers.
+      expect(new Headers(init.headers).get('x-fy-agenda-channel')).toBe('2');
       calls.push(String(input));
       return reply(pages.shift());
     });
     expect([...boards.keys()]).toEqual(['a', 'b', 'c']);
-    expect(calls).toEqual(['https://a.example.test/v1/agenda/open', 'https://a.example.test/v1/agenda/open?after=b']);
+    expect(calls).toEqual(['https://daemon.test/v1/agenda/open', 'https://daemon.test/v1/agenda/open?after=b']);
   });
 
   it('fails on a refusal, on a page that is not the contract and on a daemon that never stops', async () => {

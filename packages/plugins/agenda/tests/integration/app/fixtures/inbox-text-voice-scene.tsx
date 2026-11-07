@@ -5,7 +5,7 @@
  *   ?theme=<family>-<mode>
  */
 
-import type { AgendaId } from '../../../../app/wire/index.ts';
+import type { AgendaId } from '@ferretry/core-asks/contract';
 import { createRoot } from 'react-dom/client';
 import { AgendaCard } from '../../../../app/features/agenda/agenda-card.tsx';
 import { AgendaInboxComposer } from '../../../../app/features/agenda/agenda-inbox-composer.tsx';

@@ -1,17 +1,26 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { type AgendaItem, boardErr, boardOk, type TaskRef } from '../../../../app/wire/index.ts';
+import type { AgendaItem, TaskRef } from '@ferretry/core-asks/contract';
 import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view.tsx';
 import { AgendaQuickReplies } from '../../../../app/features/agenda/agenda-quick-replies.tsx';
 import { useDoneCloseFlow } from '../../../../app/features/agenda/use-done-close-flow.ts';
-import { useDoneClose } from '../../../../app/hooks/use-done-close.ts';
+import { DoneCloseBoardProvider, useDoneClose } from '../../../../app/hooks/use-done-close.ts';
 import { cardModel } from '../../../../app/lib/agenda-card-model.ts';
 import type { DoneCloseResult, DoneCloseSource } from '../../../../app/lib/agenda-done-close.ts';
 import { type InboxAction, swipeMap } from '../../../../app/lib/agenda-inbox.ts';
-import { DaemonBoardStore } from '../../../../app/shell.ts';
-import { type AppStore, StoreProvider } from '../../../../app/shell.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
-import { card, deferred, fakeEnvironment, fakePort, flush, laneSetFor, laptop } from '../board-support.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import {
+  type BoardMove,
+  type BoardRead,
+  card,
+  deferred,
+  fakeDoneCloseBoard,
+  flush,
+  laneSetFor,
+  laptop,
+  moved,
+  refusedMove,
+} from '../board-support.ts';
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -25,37 +34,16 @@ const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 const closing = (extra: Partial<AgendaItem> = {}): AgendaItem =>
   agendaItem('A9', { task: { id: 'F1' }, offerClose: true, ...extra } as Partial<AgendaItem>);
 
-interface World {
-  readonly store: AppStore;
-  readonly board: DaemonBoardStore;
-  readonly moves: string[];
-  readonly respond: (result: unknown) => void;
-}
+type World = ReturnType<typeof fakeDoneCloseBoard>;
 
-/** An app store with the pieces the button reads: the pairing, and a board on a fake port. */
+/** The board a host hands the ask surfaces: a card on the classic lanes, read and moved through a fake. */
 const world = (
-  options: {
-    readonly task?: () => Promise<{ task: ReturnType<typeof card>; laneSet: typeof lanes } | null>;
-    readonly act?: () => ReturnType<DaemonBoardStore['act']>;
-  } = {},
-): World => {
-  const moves: string[] = [];
-  const port = fakePort({
+  options: { readonly task?: () => Promise<BoardRead>; readonly act?: () => Promise<BoardMove> } = {},
+): World =>
+  fakeDoneCloseBoard({
     task: options.task ?? (async () => ({ task: card('F1', { laneId: 'tested' }), laneSet: lanes })),
-    act: async (_daemon, id, request) => {
-      moves.push(`${id}:${request.action}:${'to' in request ? request.to : ''}`);
-      if (options.act !== undefined) return (await options.act()) as never;
-      return boardOk({ task: card(id, { laneId: 'closed' }), laneSet: lanes });
-    },
+    ...(options.act === undefined ? {} : { act: options.act }),
   });
-  const board = new DaemonBoardStore(port, fakeEnvironment());
-  const store = {
-    connections: { list: () => [laptop] },
-    board,
-    attention: { respond: async () => undefined },
-  } as unknown as AppStore;
-  return { store, board, moves, respond: () => undefined };
-};
 
 const drawItem = async (
   item: AgendaItem,
@@ -79,7 +67,7 @@ const drawItem = async (
       swipeable
     />
   );
-  view = await mount(app === null ? element : <StoreProvider store={app.store}>{element}</StoreProvider>);
+  view = await mount(app === null ? element : <DoneCloseBoardProvider board={app}>{element}</DoneCloseBoardProvider>);
   await interact(() => flush());
 };
 
@@ -111,7 +99,7 @@ describe('Done · closes on an agenda item: when it is offered', () => {
     expect(chip()).toBeNull();
   });
 
-  test('draws nothing without an app store or a machine to read the board from', async () => {
+  test('draws nothing without a board from the host or a machine to read it from', async () => {
     await drawItem(closing(), null);
     expect(chip()).toBeNull();
     await view?.unmount();
@@ -147,9 +135,9 @@ describe('Done · closes: one tap', () => {
   });
 
   test('is off while the card closes, so a second tap closes nothing twice', async () => {
-    const gate = deferred<ReturnType<typeof boardOk>>();
+    const gate = deferred<BoardMove>();
     const acted: InboxAction[] = [];
-    const app = world({ act: () => gate.promise as never });
+    const app = world({ act: () => gate.promise });
     await drawItem(closing(), app, action => acted.push(action));
     await interact(() => theChip().click());
     expect(theChip().disabled).toBe(true);
@@ -157,7 +145,7 @@ describe('Done · closes: one tap', () => {
     await interact(() => flush());
     expect(app.moves).toEqual(['F1:move:closed']);
     expect(acted).toEqual([]);
-    gate.resolve(boardOk({ task: card('F1', { laneId: 'closed' }), laneSet: lanes }));
+    gate.resolve(moved({ task: card('F1', { laneId: 'closed' }), laneSet: lanes }));
     await interact(() => flush());
     expect(acted).toHaveLength(1);
   });
@@ -165,7 +153,7 @@ describe('Done · closes: one tap', () => {
   test('leaves the item open with the reason when the card will not close', async () => {
     const acted: InboxAction[] = [];
     const app = world({
-      act: async () => boardErr({ status: 409, message: 'owner only', boardCode: null }) as never,
+      act: async () => refusedMove('owner only'),
     });
     await drawItem(closing(), app, action => acted.push(action));
     await interact(() => theChip().click());
@@ -177,8 +165,8 @@ describe('Done · closes: one tap', () => {
 
   test('says so when the card could not be read, and when the board has no Done for it', async () => {
     const acted: InboxAction[] = [];
-    const never = deferred<null>();
-    await drawItem(closing(), world({ task: () => never.promise as never }), action => acted.push(action));
+    const never = deferred<BoardRead>();
+    await drawItem(closing(), world({ task: () => never.promise }), action => acted.push(action));
     await interact(() => theChip().click());
     await interact(() => flush());
     expect(errorLine()).toBe('Not closed: &F1: the card could not be read');
@@ -203,14 +191,16 @@ describe('the hook that reads the card to close', () => {
       return null;
     }
     view = await mount(
-      <StoreProvider store={app.store}>
+      <DoneCloseBoardProvider board={app}>
         <Probe />
-      </StoreProvider>,
+      </DoneCloseBoardProvider>,
     );
     await interact(() => flush());
     const source = must(seen.source, 'a source');
     expect(source.cards).toEqual([{ ref: { id: 'F1' }, title: 'Card F1' }]);
-    await interact(() => app.board.act(laptop, 'F1', { action: 'move', to: 'closed' }));
+    await interact(async () => {
+      await app.act('F1', 'closed');
+    });
     expect(await source.close([{ id: 'F1' }])).toEqual({ ok: true });
     expect(app.moves).toEqual(['F1:move:closed']);
     await interact(() => flush());

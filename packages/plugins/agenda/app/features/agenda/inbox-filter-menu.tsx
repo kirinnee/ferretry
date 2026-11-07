@@ -67,7 +67,7 @@ export function FilterMenu<T extends string>({
     }
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
     const items = itemsOf(list.current);
-    const at = items.indexOf(document.activeElement);
+    const at = items.indexOf(document.activeElement as HTMLElement);
     event.preventDefault();
     const step = event.key === 'ArrowDown' ? 1 : -1;
     items[(at + step + items.length) % items.length]?.focus();

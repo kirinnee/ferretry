@@ -5,7 +5,7 @@
  * no chips goes out exactly as typed.
  */
 
-import type { AgendaId } from '../wire/index.ts';
+import type { AgendaId } from '@ferretry/core-asks/contract';
 import { withReferences } from './agenda-reply.ts';
 
 /** Where a reference-carrying client keeps its chips, for a sender that must remember them past this send. */

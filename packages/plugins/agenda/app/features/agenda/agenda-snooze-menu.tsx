@@ -6,7 +6,6 @@
  * draws — and this only draws them.
  */
 
-import { shellClock } from '../../shell.ts';
 import { Clock } from 'lucide-react';
 import { type FormEvent, type KeyboardEvent, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { customSnooze, localInputValue, snoozePicks } from '../../lib/agenda-snooze.ts';
@@ -37,7 +36,7 @@ export function CustomSnoozeForm({ now, onSnooze }: CustomFormProps) {
   const fieldId = useId();
   const submit = (event: FormEvent): void => {
     event.preventDefault();
-    const parsed = customSnooze(value, shellClock.nowMs());
+    const parsed = customSnooze(value, Date.now());
     if (parsed.ok) onSnooze(parsed.until);
     else setProblem(parsed.message);
   };
@@ -137,13 +136,13 @@ export function AgendaSnoozeMenu({
     }
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
     const items = itemsOf(list.current);
-    const at = items.indexOf(document.activeElement);
+    const at = items.indexOf(document.activeElement as HTMLElement);
     if (at < 0) return;
     event.preventDefault();
     items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
   };
 
-  const at = now ?? shellClock.nowMs();
+  const at = now ?? Date.now();
   const snooze = (until: string): void => {
     close(false);
     onSnooze(until);

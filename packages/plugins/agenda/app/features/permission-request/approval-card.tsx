@@ -18,12 +18,18 @@
  * showing the prompt would land in the prompt.
  */
 
-import type { PermissionAnswerRequest, PermissionAnswerResult, PermissionRequest } from '../../shell.ts';
+import {
+  grantRefusalNotice,
+  type PermissionAnswerRequest,
+  type PermissionAnswerResult,
+  PermissionPromptGone,
+  type PermissionRequest,
+  permissionOptionWords,
+  permissionWords,
+} from '../../lib/permission-request.ts';
 import { useId, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../shell.ts';
 import type { DaemonSessionScope } from '../../shell.ts';
-import { grantRefusalNotice } from '../../shell.ts';
-import { PermissionPromptGone, permissionOptionWords, permissionWords } from '../../shell.ts';
 import { Button, Textarea } from '../../shell.ts';
 
 /** The two daemon calls the card makes, bound by the page to its own pairing. */

@@ -14,7 +14,7 @@
  * - Every entry is kept WHOLE and in the order the daemon stored it.
  */
 
-import type { AgendaConversationEntry, AgendaItem } from '../wire/index.ts';
+import type { AgendaConversationEntry, AgendaItem } from '@ferretry/core-asks/contract';
 import { type HistoryEvent, revisionEvents } from './agenda-history.ts';
 
 /** How many entries the item holds in all: its own count, or the tail it carries when the daemon sent no count. */

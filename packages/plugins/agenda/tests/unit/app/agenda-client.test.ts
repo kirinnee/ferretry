@@ -1,25 +1,77 @@
 import { describe, it } from 'bun:test';
-import { type AgendaResponse, MACHINE_AGENDA_ID } from '../../../app/wire/index.ts';
+import {
+  type AgendaActionRequest,
+  type AgendaId,
+  type AgendaResponse,
+  MACHINE_AGENDA_ID,
+} from '@ferretry/core-asks/contract';
 import should from 'should';
 import {
   AGENDA_READS_PER_DAEMON,
-  applyAgendaAction,
+  applyAgendaAction as applyAgendaActionBy,
   DaemonAgendaClient,
-  fetchAgendaConversation,
-  fetchAgendaCount,
-  fetchAgendaSnapshot,
-  fetchAgendaVersion,
-  fetchAgendaVersions,
+  fetchAgendaConversation as fetchAgendaConversationBy,
+  fetchAgendaCount as fetchAgendaCountBy,
+  fetchAgendaSnapshot as fetchAgendaSnapshotBy,
+  fetchAgendaVersion as fetchAgendaVersionBy,
+  fetchAgendaVersions as fetchAgendaVersionsBy,
   MAX_CONVERSATION_FRAGMENTS,
-  markAgendaVersionSeen,
-  sendAgendaReplies,
+  markAgendaVersionSeen as markAgendaVersionSeenBy,
+  sendAgendaReplies as sendAgendaRepliesBy,
 } from '../../../app/lib/agenda-client.ts';
-import { daemonConnection } from '../../../app/shell.ts';
+import type { AgendaConversationRange } from '../../../app/lib/agenda-client.ts';
+import type { DaemonAgendaStore } from '../../../app/lib/agenda-store.ts';
+import { type DaemonConnection, daemonConnection, type DaemonSessionScope } from '../../../app/shell.ts';
 import { daemonSessionScope } from '../../../app/shell.ts';
 import { DaemonResponseError } from '../../../app/shell.ts';
+import { callFromFetch, type TestFetch } from '../../support/app/call-from-fetch.ts';
 
-const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
-const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
+// Each read below goes through the half's one client by route key; a scripted fetcher answers it (`callFromFetch`).
+const fetchAgendaSnapshot = (daemon: DaemonConnection, scope: DaemonSessionScope, fetcher: TestFetch) =>
+  fetchAgendaSnapshotBy(daemon, scope, callFromFetch(fetcher));
+const fetchAgendaCount = (daemon: DaemonConnection, scope: DaemonSessionScope, fetcher: TestFetch) =>
+  fetchAgendaCountBy(daemon, scope, callFromFetch(fetcher));
+const applyAgendaAction = (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  action: AgendaActionRequest,
+  fetcher: TestFetch,
+) => applyAgendaActionBy(daemon, scope, action, callFromFetch(fetcher));
+const sendAgendaReplies = (daemon: DaemonConnection, scope: DaemonSessionScope, fetcher: TestFetch) =>
+  sendAgendaRepliesBy(daemon, scope, callFromFetch(fetcher));
+const fetchAgendaVersions = (daemon: DaemonConnection, scope: DaemonSessionScope, id: AgendaId, fetcher: TestFetch) =>
+  fetchAgendaVersionsBy(daemon, scope, id, callFromFetch(fetcher));
+const fetchAgendaVersion = (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  id: AgendaId,
+  version: number,
+  fetcher: TestFetch,
+) => fetchAgendaVersionBy(daemon, scope, id, version, callFromFetch(fetcher));
+const markAgendaVersionSeen = (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  id: AgendaId,
+  version: number,
+  fetcher: TestFetch,
+) => markAgendaVersionSeenBy(daemon, scope, id, version, callFromFetch(fetcher));
+const fetchAgendaConversation = (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  id: AgendaId,
+  range: AgendaConversationRange | undefined,
+  fetcher: TestFetch,
+) => fetchAgendaConversationBy(daemon, scope, id, range, callFromFetch(fetcher));
+
+/** The coordinator over a scripted fetcher. */
+class FetchAgendaClient extends DaemonAgendaClient {
+  constructor(store: DaemonAgendaStore | undefined, fetcher: TestFetch) {
+    super(store, callFromFetch(fetcher));
+  }
+}
+
+const daemonA = daemonConnection({ daemonId: 'daemon-a' });
+const daemonB = daemonConnection({ daemonId: 'daemon-b' });
 const scopeA = daemonSessionScope(daemonA, 'same/session');
 const scopeB = daemonSessionScope(daemonB, 'same/session');
 
@@ -82,7 +134,7 @@ describe('attention transport', () => {
       await should(operation()).be.rejectedWith(/unavailable on \/v1\/machine\/agenda/u);
     should(calls).equal(0);
   });
-  it('should opt into the channel on Send now and retain its request identity', async () => {
+  it('sends Send now with its request identity and the agenda channel header', async () => {
     await sendAgendaReplies(daemonA, scopeA, async (_input, init) => {
       should(new Headers(init?.headers).get('x-fy-agenda-channel')).equal('2');
       should(new Headers(init?.headers).get('x-fy-request-id')).not.be.empty();
@@ -105,9 +157,9 @@ describe('attention transport', () => {
     await applyAgendaAction(daemonA, scopeA, { action: 'dismiss', id: 'A1', note: 'stale' }, fetcher);
 
     should(calls.map(call => call.url)).deepEqual([
-      'https://a.example.test/v1/ferrets/same%2Fsession/agenda',
-      'https://a.example.test/v1/ferrets/same%2Fsession/agenda',
-      'https://a.example.test/v1/ferrets/same%2Fsession/agenda',
+      'https://daemon.test/v1/ferrets/same%2Fsession/agenda',
+      'https://daemon.test/v1/ferrets/same%2Fsession/agenda',
+      'https://daemon.test/v1/ferrets/same%2Fsession/agenda',
     ]);
     should(new Headers(calls[2]?.init.headers).has('authorization')).be.false();
     should(new Headers(calls[2]?.init.headers).get('content-type')).equal('application/json');
@@ -129,8 +181,8 @@ describe('attention transport', () => {
     await applyAgendaAction(daemonA, machine, { action: 'dismiss', id: 'A1' }, fetcher);
 
     should(calls).deepEqual([
-      { url: 'https://a.example.test/v1/machine/agenda', method: 'GET' },
-      { url: 'https://a.example.test/v1/machine/agenda', method: 'POST' },
+      { url: 'https://daemon.test/v1/machine/agenda', method: 'GET' },
+      { url: 'https://daemon.test/v1/machine/agenda', method: 'POST' },
     ]);
   });
 
@@ -160,9 +212,9 @@ describe('DaemonAgendaClient', () => {
     const a = deferred<Response>();
     const b = deferred<Response>();
     let calls = 0;
-    const client = new DaemonAgendaClient(undefined, async input => {
+    const client = new FetchAgendaClient(undefined, async () => {
       calls += 1;
-      return String(input).startsWith('https://a.') ? a.promise : b.promise;
+      return calls === 1 ? a.promise : b.promise;
     });
 
     const first = client.hydrate(daemonA, scopeA);
@@ -183,7 +235,7 @@ describe('DaemonAgendaClient', () => {
   it('revalidates a ready board while coalescing every overlapping full-board read', async () => {
     const refreshed = deferred<Response>();
     let calls = 0;
-    const client = new DaemonAgendaClient(undefined, async () => {
+    const client = new FetchAgendaClient(undefined, async () => {
       calls += 1;
       return calls === 1 ? response(snapshot('same/session')) : refreshed.promise;
     });
@@ -209,7 +261,7 @@ describe('DaemonAgendaClient', () => {
       response(snapshot('same/session', '2026-07-31T00:30:00.000Z', 4)),
       response(snapshot('same/session')),
     ];
-    const client = new DaemonAgendaClient(undefined, async () => {
+    const client = new FetchAgendaClient(undefined, async () => {
       const next = responses.shift();
       if (next === undefined) throw new Error('unexpected request');
       return next;
@@ -222,7 +274,7 @@ describe('DaemonAgendaClient', () => {
     should(client.store.status(scopeA)).equal('ready');
 
     const fresh = daemonSessionScope(daemonA, 'badge-failure');
-    const failed = new DaemonAgendaClient(undefined, async () => response({ error: 'down' }, 503));
+    const failed = new FetchAgendaClient(undefined, async () => response({ error: 'down' }, 503));
     await should(failed.hydrateCount(daemonA, fresh)).be.rejectedWith('down');
     should(failed.store.count(fresh)).be.undefined();
     should(failed.store.status(fresh)).equal('idle');
@@ -230,7 +282,7 @@ describe('DaemonAgendaClient', () => {
 
   it('applies resolve, structured response, and dismiss through authoritative snapshots', async () => {
     const actions: unknown[] = [];
-    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
+    const client = new FetchAgendaClient(undefined, async (_input, init) => {
       actions.push(JSON.parse(String(init?.body)));
       return response(snapshot('same/session'));
     });
@@ -250,7 +302,7 @@ describe('DaemonAgendaClient', () => {
 
   it("sends the gate mark on an answer to a thread's attached gate", async () => {
     const actions: unknown[] = [];
-    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
+    const client = new FetchAgendaClient(undefined, async (_input, init) => {
       actions.push(JSON.parse(String(init?.body)));
       return response(snapshot('same/session'));
     });
@@ -263,7 +315,7 @@ describe('DaemonAgendaClient', () => {
 
   it('names the ask version an answer was given to', async () => {
     const actions: unknown[] = [];
-    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
+    const client = new FetchAgendaClient(undefined, async (_input, init) => {
       actions.push(JSON.parse(String(init?.body)));
       return response(snapshot('same/session'));
     });
@@ -282,7 +334,7 @@ describe('DaemonAgendaClient', () => {
 
   it('names the ask version a Done or a Skip was given from, and none when it names none', async () => {
     const actions: unknown[] = [];
-    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
+    const client = new FetchAgendaClient(undefined, async (_input, init) => {
       actions.push(JSON.parse(String(init?.body)));
       return response(snapshot('same/session'));
     });
@@ -300,7 +352,7 @@ describe('DaemonAgendaClient', () => {
 
   it('names the card ask an answer is to, and only for a gate answer', async () => {
     const actions: unknown[] = [];
-    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
+    const client = new FetchAgendaClient(undefined, async (_input, init) => {
       actions.push(JSON.parse(String(init?.body)));
       return response(snapshot('same/session'));
     });
@@ -318,7 +370,7 @@ describe('DaemonAgendaClient', () => {
 
   it('sends the files of a Not good with its answer, and none when there are none', async () => {
     const actions: unknown[] = [];
-    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
+    const client = new FetchAgendaClient(undefined, async (_input, init) => {
       actions.push(JSON.parse(String(init?.body)));
       return response(snapshot('same/session'));
     });
@@ -332,7 +384,7 @@ describe('DaemonAgendaClient', () => {
 
   it('sends a snooze with its instant and an unsnooze alone', async () => {
     const actions: unknown[] = [];
-    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
+    const client = new FetchAgendaClient(undefined, async (_input, init) => {
       actions.push(JSON.parse(String(init?.body)));
       return response(snapshot('same/session'));
     });
@@ -347,7 +399,7 @@ describe('DaemonAgendaClient', () => {
   });
 
   it('marks a current full load or mutation as errored when its daemon request fails', async () => {
-    const client = new DaemonAgendaClient(undefined, async () => response({ error: 'down' }, 503));
+    const client = new FetchAgendaClient(undefined, async () => response({ error: 'down' }, 503));
 
     await should(client.hydrate(daemonA, scopeA)).be.rejectedWith('down');
     should(client.store.status(scopeA)).equal('error');
@@ -358,7 +410,7 @@ describe('DaemonAgendaClient', () => {
   it('does not let an older load overwrite a later mutation', async () => {
     const load = deferred<Response>();
     const mutation = deferred<Response>();
-    const client = new DaemonAgendaClient(undefined, async (_input, init) =>
+    const client = new FetchAgendaClient(undefined, async (_input, init) =>
       init?.method === 'POST' ? mutation.promise : load.promise,
     );
 
@@ -377,7 +429,7 @@ describe('DaemonAgendaClient', () => {
     const refresh = deferred<Response>();
     const mutation = deferred<Response>();
     let calls = 0;
-    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
+    const client = new FetchAgendaClient(undefined, async (_input, init) => {
       calls += 1;
       if (calls === 1) return response(snapshot('same/session'));
       return init?.method === 'POST' ? mutation.promise : refresh.promise;
@@ -403,7 +455,7 @@ describe('DaemonAgendaClient', () => {
     let mutationCommitted = false;
     let refreshBeforeCommit = false;
     let refreshes = 0;
-    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
+    const client = new FetchAgendaClient(undefined, async (_input, init) => {
       if (init?.method === 'POST') {
         const result = await mutation.promise;
         mutationCommitted = true;
@@ -451,7 +503,7 @@ describe('DaemonAgendaClient', () => {
     const mutation = deferred<Response>();
     let initialized = false;
     let refreshes = 0;
-    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
+    const client = new FetchAgendaClient(undefined, async (_input, init) => {
       if (init?.method === 'POST') return mutation.promise;
       if (!initialized) {
         initialized = true;
@@ -485,7 +537,7 @@ describe('DaemonAgendaClient', () => {
     const mutations = [firstResponse, secondResponse];
     let initialized = false;
     let refreshes = 0;
-    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
+    const client = new FetchAgendaClient(undefined, async (_input, init) => {
       if (init?.method === 'POST') {
         const next = mutations.shift();
         if (next === undefined) throw new Error('unexpected mutation');
@@ -521,7 +573,7 @@ describe('DaemonAgendaClient', () => {
     const firstResponse = deferred<Response>();
     const secondResponse = deferred<Response>();
     let calls = 0;
-    const client = new DaemonAgendaClient(undefined, async () => {
+    const client = new FetchAgendaClient(undefined, async () => {
       calls += 1;
       return calls === 1 ? firstResponse.promise : secondResponse.promise;
     });
@@ -541,7 +593,7 @@ describe('DaemonAgendaClient', () => {
     const count = deferred<Response>();
     const full = deferred<Response>();
     let calls = 0;
-    const client = new DaemonAgendaClient(undefined, async () => {
+    const client = new FetchAgendaClient(undefined, async () => {
       calls += 1;
       return calls === 1 ? count.promise : full.promise;
     });
@@ -562,7 +614,7 @@ describe('DaemonAgendaClient', () => {
     const full = deferred<Response>();
     const count = deferred<Response>();
     let calls = 0;
-    const client = new DaemonAgendaClient(undefined, async () => {
+    const client = new FetchAgendaClient(undefined, async () => {
       calls += 1;
       return calls === 1 ? full.promise : count.promise;
     });
@@ -583,7 +635,7 @@ describe('DaemonAgendaClient', () => {
     const full = deferred<Response>();
     const count = deferred<Response>();
     let calls = 0;
-    const client = new DaemonAgendaClient(undefined, async () => {
+    const client = new FetchAgendaClient(undefined, async () => {
       calls += 1;
       return calls === 1 ? full.promise : count.promise;
     });
@@ -603,7 +655,7 @@ describe('DaemonAgendaClient', () => {
   it('keeps a mutation authoritative when a later count completes first', async () => {
     const mutation = deferred<Response>();
     const count = deferred<Response>();
-    const client = new DaemonAgendaClient(undefined, async (_input, init) =>
+    const client = new FetchAgendaClient(undefined, async (_input, init) =>
       init?.method === 'POST' ? mutation.promise : count.promise,
     );
 
@@ -622,7 +674,7 @@ describe('DaemonAgendaClient', () => {
   it('keeps a mutation authoritative when a later count completes last', async () => {
     const mutation = deferred<Response>();
     const count = deferred<Response>();
-    const client = new DaemonAgendaClient(undefined, async (_input, init) =>
+    const client = new FetchAgendaClient(undefined, async (_input, init) =>
       init?.method === 'POST' ? mutation.promise : count.promise,
     );
 
@@ -638,95 +690,24 @@ describe('DaemonAgendaClient', () => {
     should(client.store.status(scopeA)).equal('ready');
   });
 
-  it('rejects a stale count request after re-pairing without publishing it', async () => {
-    const oldCount = deferred<Response>();
-    const rotated = daemonConnection({
-      daemonId: 'daemon-a',
-      baseUrl: 'https://new-a.example.test',
-      deviceId: 'new-token',
-    });
-    const rotatedScope = daemonSessionScope(rotated, 'same/session');
-    const client = new DaemonAgendaClient(undefined, async input =>
-      String(input).startsWith('https://new-a.')
-        ? response(snapshot('same/session', '2026-07-31T03:00:00.000Z', 2))
-        : oldCount.promise,
-    );
-
-    const stale = client.hydrateCount(daemonA, scopeA);
-    const rejected = should(stale).be.rejectedWith('old count failed');
-    await client.hydrateCount(rotated, rotatedScope);
-    oldCount.reject(new Error('old count failed'));
-    await rejected;
-
-    should(client.store.count(rotatedScope)).equal(2);
-    should(client.store.status(rotatedScope)).equal('idle');
-  });
-
-  it('fences old work across unpair and same-id re-pair without touching another daemon', async () => {
+  it('fences a read still in flight when its machine is cleared, without touching another daemon', async () => {
     const old = deferred<Response>();
-    const fresh = deferred<Response>();
     const other = deferred<Response>();
-    const rotated = daemonConnection({
-      daemonId: 'daemon-a',
-      baseUrl: 'https://new-a.example.test',
-      deviceId: 'new-token',
-    });
-    const rotatedScope = daemonSessionScope(rotated, 'same/session');
-    const client = new DaemonAgendaClient(undefined, async input => {
-      const url = String(input);
-      if (url.startsWith('https://new-a.')) return fresh.promise;
-      if (url.startsWith('https://b.')) return other.promise;
-      return old.promise;
+    let calls = 0;
+    const client = new FetchAgendaClient(undefined, async () => {
+      calls += 1;
+      return calls === 1 ? old.promise : other.promise;
     });
 
     const oldLoad = client.hydrate(daemonA, scopeA);
     const bLoad = client.hydrate(daemonB, scopeB);
-    const newLoad = client.hydrate(rotated, rotatedScope);
+    client.clearDaemon(daemonA.daemonId);
     old.resolve(response(snapshot('same/session', '2026-07-31T01:00:00.000Z')));
     other.resolve(response(snapshot('same/session', '2026-07-31T02:00:00.000Z')));
-    fresh.resolve(response(snapshot('same/session', '2026-07-31T03:00:00.000Z')));
-    await Promise.all([oldLoad, bLoad, newLoad]);
+    await Promise.all([oldLoad, bLoad]);
 
-    should(client.store.agenda(rotatedScope)?.updatedAt).equal('2026-07-31T03:00:00.000Z');
+    should(client.store.agenda(scopeA)).be.undefined();
     should(client.store.agenda(scopeB)?.updatedAt).equal('2026-07-31T02:00:00.000Z');
-    client.clearDaemon(rotated.daemonId);
-    should(client.store.agenda(rotatedScope)).be.undefined();
-    should(client.store.agenda(scopeB)).not.be.undefined();
-  });
-
-  it('clears a mutation-queued revalidation across same-id re-pair before it can issue transport', async () => {
-    const oldMutation = deferred<Response>();
-    const rotated = daemonConnection({
-      daemonId: 'daemon-a',
-      baseUrl: 'https://new-a.example.test',
-      deviceId: 'new-token',
-    });
-    const rotatedScope = daemonSessionScope(rotated, 'same/session');
-    let oldInitialized = false;
-    let oldRefreshes = 0;
-    const client = new DaemonAgendaClient(undefined, async (input, init) => {
-      if (String(input).startsWith('https://new-a.')) {
-        return response(snapshot('same/session', '2026-07-31T04:00:00.000Z', 2));
-      }
-      if (init?.method === 'POST') return oldMutation.promise;
-      if (!oldInitialized) {
-        oldInitialized = true;
-        return response(snapshot('same/session', '2026-07-31T01:00:00.000Z', 1));
-      }
-      oldRefreshes += 1;
-      return response(snapshot('same/session', '2026-07-31T03:00:00.000Z', 1));
-    });
-
-    await client.hydrate(daemonA, scopeA);
-    const mutating = client.dismiss(daemonA, scopeA, 'A1');
-    const queued = client.revalidate(daemonA, scopeA);
-    await client.hydrate(rotated, rotatedScope);
-
-    oldMutation.resolve(response(snapshot('same/session', '2026-07-31T02:00:00.000Z')));
-    await Promise.all([mutating, queued]);
-    should(oldRefreshes).equal(0);
-    should(client.store.agenda(rotatedScope)?.updatedAt).equal('2026-07-31T04:00:00.000Z');
-    should(client.store.count(rotatedScope)).equal(2);
   });
 });
 
@@ -749,10 +730,10 @@ describe('the agenda transport', () => {
     await sendAgendaReplies(daemonA, scopeA, fetcher);
 
     should(calls).deepEqual([
-      { url: 'https://a.example.test/v1/ferrets/same%2Fsession/agenda', method: undefined },
-      { url: 'https://a.example.test/v1/ferrets/same%2Fsession/agenda', method: undefined },
-      { url: 'https://a.example.test/v1/ferrets/same%2Fsession/agenda', method: 'POST' },
-      { url: 'https://a.example.test/v1/ferrets/same%2Fsession/agenda/replies', method: 'POST' },
+      { url: 'https://daemon.test/v1/ferrets/same%2Fsession/agenda', method: 'GET' },
+      { url: 'https://daemon.test/v1/ferrets/same%2Fsession/agenda', method: 'GET' },
+      { url: 'https://daemon.test/v1/ferrets/same%2Fsession/agenda', method: 'POST' },
+      { url: 'https://daemon.test/v1/ferrets/same%2Fsession/agenda/replies', method: 'POST' },
     ]);
   });
 });
@@ -765,9 +746,9 @@ describe('DaemonAgendaClient reading many boards', () => {
     const asked: string[] = [];
     let inFlight = 0;
     let peak = 0;
-    const client = new DaemonAgendaClient(undefined, async input => {
+    const client = new FetchAgendaClient(undefined, async input => {
       const url = String(input);
-      if (url.startsWith('https://b.')) return response(snapshot('same/session'));
+      if (url.includes('same%2Fsession')) return response(snapshot('same/session'));
       asked.push(url);
       inFlight += 1;
       peak = Math.max(peak, inFlight);
@@ -788,13 +769,13 @@ describe('DaemonAgendaClient reading many boards', () => {
     }
     await Promise.all(reads);
     should(peak).equal(AGENDA_READS_PER_DAEMON);
-    should(asked).deepEqual(sessions.map(id => `https://a.example.test/v1/ferrets/${id}/agenda`));
+    should(asked).deepEqual(sessions.map(id => `https://daemon.test/v1/ferrets/${id}/agenda`));
     should(client.store.agenda(daemonSessionScope(daemonA, 's39'))?.sessionId).equal('s39');
   });
 
   it('frees a slot when a board read fails', async () => {
     let calls = 0;
-    const client = new DaemonAgendaClient(undefined, async () => {
+    const client = new FetchAgendaClient(undefined, async () => {
       calls += 1;
       return calls <= AGENDA_READS_PER_DAEMON ? response({ error: 'down' }, 503) : response(snapshot('last'));
     });
@@ -809,7 +790,7 @@ describe('DaemonAgendaClient reading many boards', () => {
   it('sends nothing for a board read still waiting for a slot when its machine is unpaired', async () => {
     const gates: ReturnType<typeof deferred<Response>>[] = [];
     const asked: string[] = [];
-    const client = new DaemonAgendaClient(undefined, async input => {
+    const client = new FetchAgendaClient(undefined, async input => {
       asked.push(String(input));
       const gate = deferred<Response>();
       gates.push(gate);
@@ -849,7 +830,7 @@ describe('item versions', () => {
 
     should(got).deepEqual(list);
     should(asked).deepEqual([
-      { url: 'https://a.example.test/v1/ferrets/same%2Fsession/agenda/A1/versions', method: 'GET' },
+      { url: 'https://daemon.test/v1/ferrets/same%2Fsession/agenda/A1/versions', method: 'GET' },
     ]);
   });
 
@@ -873,7 +854,7 @@ describe('item versions', () => {
 
     should(got.version).equal(2);
     should(mark).equal(3);
-    should(asked.map(each => [each.method, each.url.replace('https://a.example.test', '')])).deepEqual([
+    should(asked.map(each => [each.method, each.url.replace('https://daemon.test', '')])).deepEqual([
       ['GET', '/v1/ferrets/same%2Fsession/agenda/A1/versions/2'],
       ['PUT', '/v1/ferrets/same%2Fsession/agenda/A1/seen'],
     ]);
@@ -884,7 +865,7 @@ describe('item versions', () => {
 describe('merging agendas', () => {
   it('sends a merge', async () => {
     const actions: unknown[] = [];
-    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
+    const client = new FetchAgendaClient(undefined, async (_input, init) => {
       actions.push(JSON.parse(String(init?.body)));
       return response(snapshot('same/session'));
     });
@@ -909,7 +890,7 @@ describe('the whole stored conversation', () => {
 
     const got = await fetchAgendaConversation(daemonA, scopeA, 'A1', undefined, async input => {
       const url = String(input);
-      asked.push(url.replace('https://a.example.test', ''));
+      asked.push(url.replace('https://daemon.test', ''));
       return response(pages[url.split('?')[1] ?? ''] ?? {});
     });
 

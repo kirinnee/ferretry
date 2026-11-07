@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { AgendaCard } from '../../../../app/features/agenda/agenda-card.tsx';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, mount, must, pressKey } from '../../../support/app/dom.ts';
+import { interact, mount, must, pressKey } from '@ferretry/app/testing';
 
 describe('AgendaCard ⋯ menu', () => {
   it('opens the ⋯ menu on Not needed…, closes it on Esc with focus back, and on a press outside it', async () => {

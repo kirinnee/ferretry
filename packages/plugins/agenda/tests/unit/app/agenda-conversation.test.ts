@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgendaConversationEntry } from '../../../app/wire/index.ts';
+import type { AgendaConversationEntry } from '@ferretry/core-asks/contract';
 import {
   conversationEvent,
   hasStoredConversation,

@@ -36,7 +36,11 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
-import { type AgendaId, type AgendaItem, agendaAnswerText, isMachineAgendaId } from '../../wire/index.ts';
+import type { TranscriptEntry } from '../../lib/transcript.ts';
+import { itemCardKind } from '../../lib/card-kind.ts';
+import { GATE_REASON_LENGTH_LIMIT, gateReasonTooLong } from '../../lib/gate-reason.ts';
+import { type ModeFilter, sessionsBarNames } from '../../lib/ferret-names.ts';
+import { agendaAnswerText, type AgendaId, type AgendaItem, isMachineAgendaId } from '@ferretry/core-asks/contract';
 import {
   AlarmClockOff,
   ArrowLeft,
@@ -64,10 +68,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import { DaemonTaskReferences, shellClock } from '../../shell.ts';
 import { Spinner } from '../../shell.ts';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
-import { useDoneClose } from '../../hooks/use-done-close.ts';
 import { CLEAR_ACTION, kindWord, swipeTargets } from '../../lib/agenda-answers.ts';
 import { answerRowLayout, cardModel } from '../../lib/agenda-card-model.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
@@ -106,13 +108,11 @@ import {
   skipSelection,
   stepSelection,
 } from '../../lib/agenda-inbox-list.ts';
-import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
-import { itemCardKind } from '../../shell.ts';
-import type { ModeFilter } from '../../shell.ts';
 import type { DaemonConnection, DaemonId } from '../../shell.ts';
 import { daemonSessionScope } from '../../shell.ts';
-import { escapeCloses } from '../../shell.ts';
+import { composerQuoteTarget, escapeCloses } from '../../shell.ts';
+import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import {
   choiceLabel,
   type GateItem,
@@ -123,25 +123,14 @@ import {
   isGateItem,
   firstOpenGate,
 } from '../../lib/gate-items.ts';
-import { laneEditDestination } from '../../shell.ts';
-import { daemonAgendaPath, daemonSessionPath } from '../../shell.ts';
-import { composerQuoteTarget } from '../../shell.ts';
-import type { TranscriptEntry } from '../../shell.ts';
-import { AgendaCountBadge } from '../../shell.ts';
+import { useAgendaLinks } from '../../lib/agenda-links.ts';
+import { laneEditDestination } from '../../lib/lane-edit.ts';
+import { AgendaCountBadge } from '../../components/unread-badge.tsx';
 import { RouteLink } from '../../shell.ts';
-import { sessionsBarNames } from '../../shell.ts';
-import { BoardSendBack, type SendBack, type SendBackPorts, useSendBackFiles } from '../../shell.ts';
-import { InputCardHost } from '../../shell.ts';
-import { PhoneApprovalHost } from '../../shell.ts';
-import { TwoFactorSeedHost } from '../../shell.ts';
 import { browserClipboardWriter, CopyButton } from '../../shell.ts';
-import { useAnsweredSuggestionSweep } from '../../shell.ts';
-import { CopyPlanHost } from '../../shell.ts';
-import { SignInRuleSuggestionHost } from '../../shell.ts';
-import { TaskPlanHost } from '../../shell.ts';
+import { askFormFor } from './ask-renderers.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
-import { AgendaCardsHost } from './agenda-cards-host.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
 import { agendaProse } from './agenda-prose.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
@@ -197,7 +186,7 @@ const answerCard = (
   action: InboxAction,
 ): void => {
   inbox.deferred.schedule(card, action);
-  const editor = laneEditDestination(card.daemonId, card.item, action);
+  const editor = laneEditDestination(card.item, action, inbox.laneEditor);
   if (editor !== undefined) onNavigate(editor);
 };
 
@@ -213,7 +202,7 @@ const renderInboxCard = (
   card: InboxCard,
   act: (action: InboxAction) => void,
 ) => (
-  <DaemonTaskReferences connection={inbox.connectionFor(card.daemonId)} key={card.key} onNavigate={onNavigate}>
+  <Fragment key={card.key}>
     <AgendaCard
       error={failureFor(inbox.deferredState.failed, card.key)}
       item={card.item}
@@ -224,94 +213,23 @@ const renderInboxCard = (
         : {})}
       origin={inboxCardOrigin(card, onNavigate)}
       swipeHints={false}
-      {...inputFormFor(inbox, card, onNavigate)}
+      {...askFormFor(inbox, card, onNavigate)}
       {...(now === undefined ? {} : { now })}
     />
-  </DaemonTaskReferences>
+  </Fragment>
 );
 
 /**
- * The form an `input` card is answered with, the form of a paste plan's card, or nothing for any other kind
- * (or a machine that is not paired here).
- */
-const inputFormFor = (
-  inbox: AgendaInbox,
-  card: InboxCard,
-  onNavigate: (to: string) => void,
-): { readonly inputForm?: ReactNode; readonly planForm?: ReactNode; readonly cardsForm?: ReactNode } => {
-  const connection = inbox.connectionFor(card.daemonId);
-  if (connection !== undefined && card.item.cards !== undefined)
-    return { cardsForm: <AgendaCardsHost cards={card.item.cards} connection={connection} onNavigate={onNavigate} /> };
-  if (connection !== undefined && card.item.taskPlan !== undefined)
-    return {
-      planForm: (
-        <TaskPlanHost
-          agentName={inboxWho(card).ferret}
-          connection={connection}
-          item={card.item}
-          sessionId={card.view.config.id}
-        />
-      ),
-    };
-  if (connection !== undefined && card.item.signInRuleSuggestion !== undefined)
-    return {
-      planForm: (
-        <SignInRuleSuggestionHost
-          agentName={inboxWho(card).ferret}
-          connection={connection}
-          item={card.item}
-          sessionId={card.view.config.id}
-          {...(card.view.config.projectId === undefined ? {} : { projectId: card.view.config.projectId })}
-        />
-      ),
-    };
-  if (connection !== undefined && card.item.copyPlan !== undefined)
-    return {
-      planForm: (
-        <CopyPlanHost
-          agentName={inboxWho(card).ferret}
-          connection={connection}
-          item={card.item}
-          sessionId={card.view.config.id}
-        />
-      ),
-    };
-  if (connection !== undefined && card.item.phoneApproval !== undefined)
-    return {
-      planForm: (
-        <PhoneApprovalHost
-          approvalId={card.item.phoneApproval.id}
-          connection={connection}
-          sessionId={card.view.config.id}
-        />
-      ),
-    };
-  if (connection !== undefined && card.item.twoFactorSeed !== undefined)
-    return { planForm: <TwoFactorSeedHost connection={connection} item={card.item} /> };
-  return card.item.kind !== 'input' || connection === undefined
-    ? {}
-    : {
-        inputForm: (
-          <InputCardHost
-            agentName={inboxWho(card).ferret}
-            connection={connection}
-            item={card.item}
-            sessionId={card.view.config.id}
-          />
-        ),
-      };
-};
-
-/**
- * The card's own composer, as it registers itself: its ferret's conversation and THIS item's draft slot. The chat
- * box registers under the conversation alone, so a quote or a quick reply here never reads or empties the chat's
- * words, nor another card's.
+ * The card's own composer, as it registers itself with the app's composer targets (`registerComposerQuoteTarget`): its
+ * ferret's conversation and THIS item's draft slot. The chat box registers under the conversation alone, so a quote or a
+ * quick reply here never reads or empties the chat's words, nor another card's.
  */
 const scopeOf = (card: InboxCard) => daemonSessionScope({ daemonId: card.daemonId }, card.view.config.id, card.item.id);
 
 /**
  * Answers the open item: what is typed in the item's own composer rides as the answer's note (the chat's own rule,
- * `withComposerNote`), and the composer is emptied once it is spent.
+ * `withComposerNote`), and the composer is emptied once it is spent. The composer is whoever registered for the item's
+ * scope (Conversation's, in the `agenda.conversation` slot); with none, the answer goes alone.
  */
 const answerWithDraft = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: InboxCard, action: InboxAction) => {
   const composer = composerQuoteTarget(scopeOf(card));
@@ -323,7 +241,7 @@ const answerWithDraft = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card
 
 /**
  * A form item's one Send: the picks on the card and what is typed in the composer go as one answer into the undo
- * window. Throws the sentence the composer shows when Send must wait (empty fields, asked once).
+ * window. Throws the sentence the page shows when Send must wait (empty fields, asked once).
  */
 const answerForm = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: InboxCard): void => {
   const composer = composerQuoteTarget(scopeOf(card));
@@ -427,7 +345,7 @@ function OpenItem({
           progress.progress(connection, daemonSessionScope(connection, card.view.config.id), card.item.id, step, done);
   const machineFerrets = isMachineAgendaId(card.view.config.id) ? ferretsOf(card.item.context) : [];
   return (
-    <DaemonTaskReferences connection={inbox.connectionFor(card.daemonId)} key={card.key} onNavigate={onNavigate}>
+    <Fragment key={card.key}>
       <div
         className="fy-inbox-open"
         data-inbox-gate={isGateItem(card.item) ? '' : undefined}
@@ -463,7 +381,7 @@ function OpenItem({
           {...(canSnooze ? { onSnooze: (until: string) => act(snoozeAction(until)) } : {})}
           position={{ index: place.index, total: place.total }}
           quoteScope={scopeOf(card)}
-          {...inputFormFor(inbox, card, onNavigate)}
+          {...askFormFor(inbox, card, onNavigate)}
           renderProse={agendaProse(copyWriter)}
           // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
           // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.
@@ -472,7 +390,7 @@ function OpenItem({
           {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
         />
       </div>
-    </DaemonTaskReferences>
+    </Fragment>
   );
 }
 
@@ -609,14 +527,56 @@ function CardTools({
   );
 }
 
-/** The words "Not good" waits for, asked where the answer row was; the refusal, if any, shows beside its buttons. */
+/**
+ * How a page takes files with a "Not good" (a picture of what went wrong): whether the card's machine takes them with
+ * an answer, and the upload into the item's own conversation (the daemon carries them to the card's ferret). A host
+ * that can upload hands these in; absent either, the box is words alone.
+ */
+export interface AnswerFilePorts {
+  readonly answerFiles?: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
+  readonly uploadAttachment?:
+    | ((daemon: DaemonConnection, sessionId: string, file: File) => Promise<{ readonly id: string }>)
+    | undefined;
+}
+
+/** Whether this machine takes files with an answer, once it has said. */
+function useAnswerFiles(ports: AnswerFilePorts | undefined, daemon: DaemonConnection | undefined): boolean {
+  const [takes, setTakes] = useState(false);
+  const answerFiles = ports?.answerFiles;
+  const upload = ports?.uploadAttachment;
+  useEffect(() => {
+    let live = true;
+    setTakes(false);
+    if (answerFiles === undefined || upload === undefined || daemon === undefined) return;
+    answerFiles(daemon).then(
+      answer => live && setTakes(answer),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [answerFiles, upload, daemon]);
+  return takes;
+}
+
+/** What a "Not good" (or "Not yet") sends: the owner's words, and the files they attached. */
+interface GateWords {
+  readonly reason: string;
+  readonly attachmentIds: readonly string[];
+}
+
+/**
+ * The words "Not good" waits for, asked where the answer row was; the refusal, if any, shows beside its buttons. The
+ * words box is this half's own: Board's send-back, which also takes files to the card's ferret, is Board's, and this
+ * half imports nothing of Board's, so the answer here is words alone.
+ */
 function GateWhy({
   card,
   daemon,
   error,
   optional,
-  subject,
   ports,
+  subject,
   onSend,
   onCancel,
 }: {
@@ -628,38 +588,107 @@ function GateWhy({
   readonly error: string | null;
   readonly optional: boolean;
   /** What the machine needs to take files with the answer; absent, the box is words alone. */
-  readonly ports: SendBackPorts | undefined;
-  readonly onSend: (sent: SendBack, sessionId: string | null) => void;
+  readonly ports?: AnswerFilePorts | undefined;
+  readonly onSend: (sent: GateWords, sessionId: string | null) => void;
   readonly onCancel: () => void;
 }) {
-  // The files ride the answer to the item's own session; the daemon carries them to the card's ferret.
-  const answerPorts = useMemo(
-    () =>
-      ports?.answerFiles === undefined
-        ? undefined
-        : { sendBackFiles: ports.answerFiles, uploadAttachment: ports.uploadAttachment },
-    [ports?.answerFiles, ports?.uploadAttachment],
-  );
-  const files = useSendBackFiles(answerPorts, daemon, card.view.config.id);
+  const [words, setWords] = useState('');
+  const [attached, setAttached] = useState<readonly string[]>([]);
+  const [tooLong, setTooLong] = useState<string | null>(null);
+  const fieldId = useId();
+  const headingId = useId();
+  const picker = useRef<HTMLInputElement | null>(null);
+  const field = useRef<HTMLTextAreaElement | null>(null);
+  // The box opens with the cursor in it: the words are what it waits for.
+  useEffect(() => {
+    field.current?.focus();
+  }, []);
+  // "Not yet" leaves the card where it is: there is no ferret to show a picture to.
+  const takes = useAnswerFiles(optional ? undefined : ports, daemon);
+  const upload = ports?.uploadAttachment;
   if (daemon === undefined) return null;
+  const sessionId = card.view.config.id;
+  const files = takes && upload !== undefined;
+  const pick = (chosen: FileList | null): void => {
+    if (!files || chosen === null) return;
+    for (const file of [...chosen])
+      upload(daemon, sessionId, file).then(
+        (stored: { readonly id: string }) => setAttached(ids => [...ids, stored.id]),
+        () => undefined,
+      );
+  };
+  const heading = optional
+    ? `Not yet: anything to add about ${subject}?`
+    : `Not good: what went wrong with ${subject}?`;
+  const ready = optional || words.trim() !== '';
   return (
-    <div className="fy-inbox-gate-why" data-inbox-gate-why={card.key}>
-      <BoardSendBack
-        busy={false}
-        error={error}
-        // "Not yet" leaves the card where it is: there is no ferret to show a picture to.
-        files={optional ? null : files}
-        heading={optional ? `Not yet: anything to add about ${subject}?` : `Not good: what went wrong with ${subject}?`}
-        submitLabel={optional ? 'Not yet' : 'Send back'}
-        wordsOptional={optional}
-        placeholder={optional ? 'Optional: add a note' : 'What went wrong?'}
-        onCancel={onCancel}
-        onSubmit={sent => {
-          onSend(sent, files?.sessionId ?? null);
-          return null;
+    <div
+      aria-labelledby={headingId}
+      aria-modal="true"
+      className="fy-inbox-gate-why"
+      data-inbox-gate-why={card.key}
+      onKeyDown={event => {
+        // Esc anywhere in the box, the field and the buttons alike, goes back to the answer row, not out of the deck.
+        if (event.key !== 'Escape' || event.defaultPrevented) return;
+        event.stopPropagation();
+        onCancel();
+      }}
+      role="dialog"
+    >
+      <form
+        className="fy-send-back"
+        onSubmit={event => {
+          event.preventDefault();
+          if (!ready) return;
+          if (words.trim().length > GATE_REASON_LENGTH_LIMIT) {
+            setTooLong(gateReasonTooLong());
+            return;
+          }
+          onSend({ reason: words.trim(), attachmentIds: files ? attached : [] }, files ? sessionId : null);
         }}
-        target={{ daemon, sessionId: card.view.config.id }}
-      />
+      >
+        <label className="fy-send-back__heading" htmlFor={fieldId} id={headingId}>
+          {heading}
+        </label>
+        {(tooLong ?? error) ? (
+          <p className="fy-send-back__error" role="alert">
+            {tooLong ?? error}
+          </p>
+        ) : null}
+        <textarea
+          className="kt-input fy-send-back__words"
+          id={fieldId}
+          onChange={event => {
+            setWords(event.target.value);
+            setTooLong(null);
+          }}
+          placeholder={optional ? 'Optional: add a note' : 'What went wrong?'}
+          ref={field}
+          value={words}
+        />
+        <div className="fy-send-back__actions">
+          {files ? (
+            <>
+              <button
+                aria-label="Attach a file"
+                className="kt-btn"
+                data-composer-attach=""
+                onClick={() => picker.current?.click()}
+                type="button"
+              >
+                +
+              </button>
+              <input hidden multiple onChange={event => pick(event.currentTarget.files)} ref={picker} type="file" />
+            </>
+          ) : null}
+          <button className="kt-btn" onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button className="kt-btn kt-btn--primary" disabled={!ready} type="submit">
+            {optional ? 'Not yet' : 'Send back'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -1077,8 +1106,8 @@ export interface AgendaInboxPageProps {
   readonly renderComposer?: (card: InboxCard, answerForm: (() => void) | undefined) => ReactNode;
   /** How "Clear all from agent ferrets" reaches the machines. Absent: the Agents filter has no such button. */
   readonly clearPort?: ClearPort;
-  /** Uploads files with the unified ask answer, through the item's own conversation. */
-  readonly answerPorts?: SendBackPorts;
+  /** How a "Not good" takes files (`AnswerFilePorts`). Absent: its box is words alone. */
+  readonly answerPorts?: AnswerFilePorts;
   /**
    * An item was opened here (it is the deck's top card): its alerts come down on this device and the owner's others
    * (docs/notifications.md § When an alert is cleared). Called once each time a different item opens. Absent: nothing.
@@ -1206,6 +1235,7 @@ function NoticeRow({ card, env }: { readonly card: InboxCard; readonly env: RowE
 
 /** One ferret: who and where on its header (a link to the chat), its items, then its notifications. */
 function GroupView({ group, env }: { readonly group: FerretGroup; readonly env: RowEnv }) {
+  const links = useAgendaLinks();
   const head = (
     <>
       {group.machine ? (
@@ -1253,7 +1283,7 @@ function GroupView({ group, env }: { readonly group: FerretGroup; readonly env: 
           className="fy-inbox-group__head"
           data-agenda-group-link=""
           onNavigate={env.onNavigate}
-          to={daemonSessionPath(group.daemonId, group.view.config.id)}
+          to={links.chat(group.daemonId, group.view.config.id)}
         >
           {head}
         </RouteLink>
@@ -1380,8 +1410,7 @@ export const agendaRunKeys = (card: InboxCard, doneClose = false): readonly RunK
 
 /** The run's keys for the open agenda card, counting its "Done · closes" as its row does. */
 function AgendaRunKeysHint({ card }: { readonly card: InboxCard }) {
-  const doneClose = useDoneClose(card.daemonId, card.item) !== undefined;
-  return <RunKeysHint keys={agendaRunKeys(card, doneClose)} />;
+  return <RunKeysHint keys={agendaRunKeys(card, false)} />;
 }
 
 /** The keys the desktop run answers to at the page: the deck takes the arrows of an agenda card itself. */
@@ -1449,7 +1478,6 @@ export function AgendaInboxPage({
   const headingId = useId();
   const [resolvedMachine, setResolvedMachine] = useState<InboxResolved | null>(null);
   const resolvedConnection = resolvedMachine === null ? undefined : inbox.connectionFor(resolvedMachine.daemonId);
-  useAnsweredSuggestionSweep(inbox.cards, inbox.connectionFor);
   const [cursor, setCursor] = useState<string | null>(null);
   const [deckAt, setDeckAt] = useState<string | null>(initialOpen ?? null);
   // The card a tapped notification opened: it opens at its ask (a Needs-you push lands on what to do).
@@ -1517,7 +1545,7 @@ export function AgendaInboxPage({
           resolved: inbox.resolved,
         },
         listFilter,
-        now ?? shellClock.nowMs(),
+        now ?? Date.now(),
       )
     : [];
   const choose = (next: InboxFilter): void => {
@@ -1638,7 +1666,8 @@ export function AgendaInboxPage({
       giveUp();
       return;
     }
-    return shellClock.after(giveUp, OPEN_WAIT_MS);
+    const handle = setTimeout(giveUp, OPEN_WAIT_MS);
+    return () => clearTimeout(handle);
   }, [wantedKey, openCardKey, openRecord, openSettled, inbox.reading]);
 
   // Paging away or closing the deck leaves the item the tap was for: opening one from the list starts at its top.
@@ -1680,7 +1709,7 @@ export function AgendaInboxPage({
   const openedCard = cardOpen ? deckSelected : undefined;
   const opened = useRef({ card: openedCard, tell: onItemOpened });
   opened.current = { card: openedCard, tell: onItemOpened };
-  const readClock = clock ?? shellClock.nowMs;
+  const readClock = clock ?? Date.now;
   const lastInput = useRef(readClock());
   const toldKey = useRef<string | null>(null);
   const tellOpened = useRef((): void => undefined);
@@ -1858,13 +1887,11 @@ export function AgendaInboxPage({
   if (resolvedMachine !== null && resolvedConnection !== undefined) {
     return (
       <main aria-label="Inbox" className="fy-attn-inbox" data-agenda-inbox="card">
-        <DaemonTaskReferences connection={resolvedConnection} onNavigate={onNavigate}>
-          <ResolvedItemView
-            row={resolvedMachine}
-            connection={resolvedConnection}
-            onClose={() => setResolvedMachine(null)}
-          />
-        </DaemonTaskReferences>
+        <ResolvedItemView
+          row={resolvedMachine}
+          connection={resolvedConnection}
+          onClose={() => setResolvedMachine(null)}
+        />
         <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
       </main>
     );
@@ -1974,13 +2001,13 @@ export function AgendaInboxPage({
               <AgendaUndoToast inbox={inbox} inline {...(clock === undefined ? {} : { clock })} />
               {deck[0] !== undefined && gateWhy?.key === deck[0].key ? (
                 <GateWhy
-                  ports={answerPorts}
                   card={deck[0]}
                   daemon={inbox.connectionFor(deck[0].daemonId)}
                   optional={gateWordsFor(deck[0].item, gateWhy.action) === 'optional'}
                   subject={gateWhySubject(deck[0].item, gateWhy.action)}
                   error={failureFor(inbox.deferredState.failed, deck[0].key)}
                   onCancel={() => setGateWhy(null)}
+                  ports={answerPorts}
                   onSend={(sent, from) => {
                     const label = choiceLabel(gateWhy.action);
                     if (label === null || deck[0] === undefined) return;
@@ -2096,6 +2123,7 @@ export interface AgendaNeedsYouProps {
  */
 export function AgendaNeedsYou({ inbox, daemonId, onNavigate, now, clock }: AgendaNeedsYouProps) {
   const headingId = useId();
+  const links = useAgendaLinks();
   const toast = <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />;
   if (inbox.cards.length === 0) return toast;
   const host: CardHostProps = { inbox, onNavigate, now };
@@ -2111,7 +2139,7 @@ export function AgendaNeedsYou({ inbox, daemonId, onNavigate, now, clock }: Agen
           className="fy-attn-needs__all"
           data-agenda-see-all=""
           onNavigate={onNavigate}
-          to={daemonAgendaPath(daemonId)}
+          to={links.agenda(daemonId)}
         >
           See all {inbox.cards.length}
           <ArrowRight aria-hidden="true" size={13} />

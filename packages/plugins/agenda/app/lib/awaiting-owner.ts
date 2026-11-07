@@ -8,9 +8,40 @@
  * and the List, and nowhere that asks for an answer.
  */
 
-import { isSubCard, type Lane, type LaneSet, type Opaque } from '../shell.ts';
-import { askedByPerson } from '../shell.ts';
-import type { BoardCardOf } from '../shell.ts';
+// The board, its lanes and its cards are Board's. These are the fields of them this rule reads, structurally, so a
+// Board card fits without this half importing the plugin that owns it.
+
+/** A lane of a project's board, as far as the rule reads it. */
+export interface GateLane {
+  readonly id: string;
+  readonly category: string;
+  readonly ownerGate?: boolean;
+}
+
+/** A project's lanes. */
+export interface GateLaneSet {
+  readonly lanes: readonly GateLane[];
+}
+
+/** A card on the board, as far as the rule reads it. */
+export interface GateCard {
+  readonly task: {
+    readonly laneId: string;
+    readonly dropped: unknown;
+    readonly parent: unknown;
+    readonly askedBy?: string;
+  };
+}
+
+type Lane = GateLane;
+type LaneSet = GateLaneSet;
+type BoardCardOf = GateCard;
+
+/** A sub-card: one with a parent card. */
+const isSubCard = (task: GateCard['task']): boolean => task.parent !== null && task.parent !== undefined;
+
+/** A card a person asked for (`askedBy: person`). */
+const askedByPerson = (task: GateCard['task']): boolean => task.askedBy === 'person';
 
 /** A lane only the owner moves a card on from: a verify lane, or any owner-gated lane that is not the closing one. */
 export const isGateLane = (lane: Pick<Lane, 'category' | 'ownerGate'>): boolean =>
@@ -24,13 +55,13 @@ const gateStageOf = (
   task: Pick<BoardCardOf['task'], 'laneId'>,
   laneSet: Pick<LaneSet, 'lanes'> | null,
 ): GateStage | null => {
-  const lane = laneSet?.lanes.find((candidate: Opaque) => candidate.id === task.laneId);
+  const lane = laneSet?.lanes.find(candidate => candidate.id === task.laneId);
   if (lane === undefined || !isGateLane(lane)) return null;
   return lane.category === 'verify' ? 'try' : 'approve';
 };
 
 /** The gate this card is waiting in for the owner, or `null`: not in a gate lane, dropped, a sub-card, or not asked for by a person. */
 export const awaitingOwner = (card: BoardCardOf, laneSet: Pick<LaneSet, 'lanes'> | null): GateStage | null =>
-  card.task.dropped !== null || isSubCard(card.task) || !askedByPerson(card.task)
+  (card.task.dropped !== null && card.task.dropped !== undefined) || isSubCard(card.task) || !askedByPerson(card.task)
     ? null
     : gateStageOf(card.task, laneSet);

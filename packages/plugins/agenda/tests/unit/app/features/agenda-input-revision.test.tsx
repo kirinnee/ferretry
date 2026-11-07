@@ -1,23 +1,18 @@
 import { expect, test } from 'bun:test';
-import { createElement as h } from 'react';
-import { useAgenda } from '../../../../app/features/agenda/agenda.tsx';
+import { AgendaInputCard, useAgenda } from '../../../../app/features/agenda/agenda.tsx';
+import { AgendaClientContext } from '../../../../app/lib/agenda-client-context.tsx';
 import { daemonConnection } from '../../../../app/shell.ts';
 import { daemonSessionScope } from '../../../../app/shell.ts';
-import { DaemonClientProvider } from '../../../../app/shell.ts';
-import { list as accountList } from '../../../support/app/accounts-fixtures.ts';
 import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
-import { interact, mount } from '../../../support/app/dom.ts';
-import { click, settle } from '../../../support/app/dom-form.ts';
-import { healthOf } from '../../../support/app/health.ts';
-import { offer, saved, withSaved } from '../../../support/app/input-fixtures.ts';
+import { callFromFetch } from '../../../support/app/call-from-fetch.ts';
+import { ensureDom, render, run } from '@ferretry/app/testing';
+
+ensureDom();
 
 // #B147: a version picked in the agenda swaps the input card out within the same opening; a hold it made went with it.
-test('picking an older version while a follow-up holds the view lets the hold go with the card', async () => {
-  const connection = daemonConnection({
-    daemonId: 'review',
-    baseUrl: 'https://review.example.test',
-    deviceId: 'review',
-  });
+// The card itself is the input owner's (`ask:input`, drawn by key); what is the Agenda's is the view it holds open.
+test('picking an older version while the input card holds the view lets the hold go with the card', () => {
+  const connection = daemonConnection({ daemonId: 'review' });
   const scope = daemonSessionScope(connection, 'sess-1');
   const prompt = 'Provide the deploy password';
   const item = agendaItem('A7', {
@@ -53,37 +48,10 @@ test('picking an older version while a follow-up holds the view lets the hold go
       parseErrors: 0,
       updatedAt: '2026-10-30T12:00:00.000Z',
     }) as never;
-  const value = withSaved(
-    saved({
-      match: 'app.clickup.com',
-      project: { id: 'p_ferretry', name: 'ferretry' },
-      offers: [
-        offer({ id: 'WORK', label: 'Work', signIn: 'si_0123456789abcdef' }),
-        offer({ id: 'HOME', label: 'Home', signIn: 'si_fedcba9876543210' }),
-      ],
-    }),
-    { prompt, expiresAt: '2099-01-01T00:00:00.000Z' },
-  );
-  let delivered = false;
-  const client = {
-    request: async (path: string, schema: { parse: (raw: unknown) => unknown }, init?: RequestInit) => {
-      if (path === '/v1/health') return schema.parse(healthOf('9.9.9', []));
-      if (path === '/v1/accounts') return schema.parse(accountList());
-      if (path.endsWith('/deliver')) {
-        delivered = true;
-        return schema.parse({
-          id: value.id,
-          deliveryId: JSON.parse(String(init?.body)).deliveryId,
-          state: 'delivered',
-          submitted: true,
-        });
-      }
-      if (path.includes('/input-requests')) return schema.parse({ requests: delivered ? [] : [value] });
-      throw new Error(`unexpected fake route ${path}`);
-    },
-  };
+  // No machine answers this test's reads: the view is drawn from the board it is handed.
+  const machine = callFromFetch(() => Promise.reject(new Error('no machine in this test')));
   let covered = true;
-  function Host({ snapshot }: { snapshot: never }) {
+  function Chat({ snapshot }: { readonly snapshot: never }) {
     const agenda = useAgenda({
       connection,
       scope,
@@ -96,36 +64,36 @@ test('picking an older version while a follow-up holds the view lets the hold go
       swipeable: false,
     });
     covered = agenda.covered;
-    return h('div', null, agenda.view, agenda.above);
+    return (
+      <div>
+        {agenda.view}
+        {agenda.above}
+      </div>
+    );
   }
-  const tree = (resolved: boolean) =>
-    h(DaemonClientProvider, { client: async () => client as never } as never, h(Host, { snapshot: board(resolved) }));
-  const flush = async () => {
-    for (let n = 0; n < 6; n++) await settle();
-  };
-  const view = await mount(tree(false));
+  function Host({ resolved }: { readonly resolved: boolean }) {
+    return (
+      <AgendaClientContext.Provider value={machine}>
+        <Chat snapshot={board(resolved)} />
+      </AgendaClientContext.Provider>
+    );
+  }
+  const view = render(<Host resolved={false} />);
   try {
-    await flush();
-    await click(view.container.querySelector('[data-input-offer="HOME"]'));
-    await flush();
-    expect(view.container.querySelector('[data-input-always-button]')).not.toBeNull();
-    await interact(() => view.container.querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]')?.click());
-    const picker = view.container.querySelector<HTMLSelectElement>('[data-agenda-version-picker]');
-    if (picker === null) throw new Error('expected the edited input to have a version picker');
-    await interact(() => {
-      picker.value = '1';
-      picker.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    expect(view.container.querySelector('[data-agenda-old-version]')).not.toBeNull();
-    // The older version keeps its own prompt: no card is drawn to say it.
-    expect(view.container.textContent).toContain(prompt);
-    await click(view.container.querySelector('[data-agenda-latest]'));
-    await flush();
-    expect(view.container.querySelector('[data-input-gone]')).not.toBeNull();
-    await view.render(tree(true));
-    await flush();
+    // The owner's card says a follow-up offer is on screen: the view is held.
+    run(() => view.root.findByType(AgendaInputCard).props.onHold(true));
+    run(() => view.root.findByProps({ 'data-agenda-menu-toggle': '' }).props.onClick());
+    const picker = view.root.findByProps({ 'data-agenda-version-picker': '' });
+    run(() => picker.props.onChange({ currentTarget: { value: '1' } }));
+    expect(view.root.findAllByProps({ 'data-agenda-old-version': '' }).length).toBeGreaterThan(0);
+    // The older version keeps its own prompt: no card is drawn to say it, so the card and its hold are gone.
+    expect(view.root.findAllByType(AgendaInputCard)).toHaveLength(0);
+    run(() => view.root.findAllByProps({ 'data-agenda-latest': '' })[0]?.props.onClick());
+    expect(view.root.findAllByType(AgendaInputCard)).toHaveLength(1);
+    // The request ends: nothing holds the view any more, so it closes by itself.
+    run(() => view.update(<Host resolved />));
     expect(covered).toBe(false);
   } finally {
-    await view.unmount();
+    run(() => view.unmount());
   }
 });

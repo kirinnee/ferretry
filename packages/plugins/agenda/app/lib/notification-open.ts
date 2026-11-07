@@ -20,7 +20,6 @@
  * conversation, where it used to leave the reader on whatever the app showed before the tap.
  */
 
-import { shellClock } from '../shell.ts';
 export const NOTIFICATION_OPEN_MESSAGE = 'fy-notification-open';
 export const NOTIFICATION_OPEN_ACK = 'fy-notification-opened';
 
@@ -126,8 +125,8 @@ export interface NotificationOpenEnvironment {
 
 const browserOpenEnvironment: NotificationOpenEnvironment = {
   channel: () => new MessageChannel(),
-  setTimeout: (callback, milliseconds) => shellClock.after(callback, milliseconds),
-  clearTimeout: handle => (handle as () => void)(),
+  setTimeout: (callback, milliseconds) => globalThis.setTimeout(callback, milliseconds),
+  clearTimeout: handle => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>),
 };
 
 /**

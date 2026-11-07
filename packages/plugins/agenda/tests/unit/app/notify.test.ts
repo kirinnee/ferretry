@@ -20,7 +20,7 @@ import {
   showNotification,
   urgentNotificationOptions,
 } from '../../../app/lib/notify.ts';
-import { sessionView } from '../../support/app/sessions.ts';
+import { notifiedView as sessionView } from '../../support/app/notified-views.ts';
 
 const daemonA = daemonId('daemon-a');
 const daemonB = daemonId('daemon-b');

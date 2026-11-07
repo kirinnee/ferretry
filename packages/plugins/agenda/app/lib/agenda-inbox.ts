@@ -14,20 +14,19 @@
  * key is `(daemonId, sessionId, itemId)`: two machines' `A3` in two same-named sessions are unrelated.
  */
 
+import { type SessionAgendaSummary } from '../../contract/wire.ts';
 import { agendaAskPath } from '../../contract/wire.ts';
 import {
-  ASK_LINK_PARAMETER,
   type AgendaBrief,
   type AgendaId,
   AgendaIdSchema,
   type AgendaItem,
+  type AgendaListRecord,
   type AgendaListSnapshot,
   agendaTurn,
-  isMachineAgendaId,
-  type AgendaListRecord,
-  type SessionAgendaSummary,
-} from '../wire/index.ts';
-import { agendaDeepLinkFromFragment, type SessionView, shellClock } from '../shell.ts';
+  ASK_LINK_PARAMETER,
+} from '@ferretry/core-asks/contract';
+import { agendaDeepLinkFromFragment, type SessionView } from '../shell.ts';
 import {
   answerActions,
   type InboxAction,
@@ -37,9 +36,8 @@ import {
 } from './agenda-answers.ts';
 import { clockWords } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
-import { type DaemonId, daemonId as toDaemonId } from '../shell.ts';
+import { type DaemonId, daemonHomeHref, daemonId as toDaemonId } from '../shell.ts';
 import { BOARD_READ_FAILURE_WORDS, type BoardReadFailure } from './inbox-board-reads.ts';
-import { daemonHomePath, daemonSessionPath } from '../shell.ts';
 import { rootViews } from '../shell.ts';
 
 /** One machine's session list, as the inbox reads it. `sessions` is `null` before the first read. */
@@ -240,11 +238,12 @@ export const withFerretSessions = (sources: readonly AgendaInboxSource[]): reado
 export const agendaSummaryKey = (summary: SessionAgendaSummary): string =>
   `${summary.open}\u0000${summary.first}\u0000${summary.latestAt}\u0000${summary.discussing ?? 0}\u0000${summary.stopped === true ? 1 : 0}`;
 
-/** Where a conversation opens AT an item: the session's page, naming the ask (`?ask=A3`). */
+/**
+ * Where a conversation opens AT an item: the ask's own page (`/d/<daemon>/agenda/:ferret/:ask`), which draws the ask with its
+ * ferret's conversation and composer under it (Conversation's panel in the `agenda.conversation` slot).
+ */
 export const agendaConversationPath = (daemonId: DaemonId, sessionId: string, id: AgendaId): string =>
-  isMachineAgendaId(sessionId)
-    ? inboxTargetPath(daemonId, sessionId, id)
-    : `${daemonSessionPath(daemonId, sessionId)}?${ASK_LINK_PARAMETER}=${encodeURIComponent(id)}`;
+  inboxTargetPath(daemonId, sessionId, id);
 
 /** The item a conversation link names (`?ask=A3`), or `null` for none or a malformed one. */
 export const agendaTargetFromSearch = (search: string): AgendaId | null => {
@@ -265,7 +264,7 @@ export interface InboxTarget {
 
 /** Where a tap on a buzz lands: the ask's own page (`/d/<daemon>/agenda/:ferret/:ask`). */
 export const inboxTargetPath = (daemonId: DaemonId, sessionId: string, id: AgendaId): string =>
-  `${daemonHomePath(daemonId)}${agendaAskPath(sessionId, id)}`;
+  `${daemonHomeHref(daemonId)}${agendaAskPath(sessionId, id)}`;
 
 /** The item an Inbox link names, or `null` when it names none (or a malformed one). */
 export const inboxTargetFromSearch = (search: string): InboxTarget | null => {
@@ -560,7 +559,7 @@ export const swipeIntent = (
 };
 
 /** The words an undo toast uses for an action it is holding. */
-export const actionSentence = (action: InboxAction, id: AgendaId, now = shellClock.nowMs()): string => {
+export const actionSentence = (action: InboxAction, id: AgendaId, now = Date.now()): string => {
   if (action.kind === 'snooze') return `Snoozed !${id} until ${clockWords(action.until, now) ?? 'later'}`;
   if (action.kind === 'unsnooze') return `!${id} is back on your list`;
   if (action.kind === 'dismiss') return `Dismissed !${id}`;
@@ -606,9 +605,9 @@ export interface DeferredTimers {
 }
 
 export const browserDeferredTimers: DeferredTimers = {
-  setTimeout: (callback, milliseconds) => shellClock.after(callback, milliseconds),
-  clearTimeout: handle => (handle as () => void)(),
-  now: () => shellClock.nowMs(),
+  setTimeout: (callback, milliseconds) => globalThis.setTimeout(callback, milliseconds),
+  clearTimeout: handle => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>),
+  now: () => Date.now(),
 };
 
 type Commit = (card: InboxCard, action: InboxAction) => Promise<void>;

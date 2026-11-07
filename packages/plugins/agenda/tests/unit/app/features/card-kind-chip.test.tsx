@@ -1,7 +1,7 @@
+import { TASK_CARD_KIND } from '../../../../app/lib/card-kind.ts';
 import { describe, expect, it } from 'bun:test';
 import { CardKindChip } from '../../../../app/features/agenda/card-kind-chip.tsx';
-import { TASK_CARD_KIND } from '../../../../app/shell.ts';
-import { mount, must } from '../../../support/app/dom.ts';
+import { mount, must } from '@ferretry/app/testing';
 
 describe('CardKindChip', () => {
   it('says Test with the check box, and an agenda word with the speech bubble', async () => {

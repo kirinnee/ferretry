@@ -1,6 +1,11 @@
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { AskItemSchema, AskListSnapshotSchema } from '@ferretry/core-asks/contract';
+import {
+  AgendaIdSchema,
+  AskItemSchema,
+  AskListSnapshotSchema,
+  MAX_AGENDA_SUBJECT_LENGTH,
+} from '@ferretry/core-asks/contract';
 import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 /** The id the daemon agenda goes by: the daemon's own ledger for notices that belong to no ferret. */
@@ -166,3 +171,52 @@ export type ModesFile = z.infer<typeof ModesFileSchema>;
 /** The push text limits (a lock screen shows little): title and body are clipped at a word. */
 export const AGENDA_PUSH_TITLE_LENGTH = 40;
 export const AGENDA_PUSH_BODY_LENGTH = 120;
+
+// ─── the open summary a ferret's row carries ──────────────────────────────────────────────────────────────────────
+/**
+ * A ferret's open asks, as its list row carries them: what makes a conversation read as UNREAD until the owner has
+ * dealt with it. It is absent when nothing is open, so its absence means "nothing waits on the owner", never
+ * "unknown". The board itself (`GET /v1/ferrets/:ferretId/agenda`) has every item in full.
+ */
+export const SessionAgendaSummarySchema = z.object({
+  /** How many items are open. */
+  open: z.number().int().positive(),
+  /** The oldest open item — the one a row opens to. */
+  first: AgendaIdSchema,
+  /** That item's one-line ask, for a row's preview. */
+  ask: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MAX_AGENDA_SUBJECT_LENGTH)
+    .regex(/^[^\r\n]*$/u, 'must be a single line'),
+  /** When the NEWEST open item was raised: "newest needing you first" sorts by it. */
+  latestAt: z.iso.datetime({ offset: true }),
+  /**
+   * How many of the `open` items are in discussion (`waitingFor: 'discussion'`): still being talked through in the
+   * ferret's chat, not on the owner's queue, so they are not counted as needing the owner. Absent when none is.
+   */
+  discussing: z.number().int().positive().optional(),
+  /** The ferret works in AGENDA MODE (a switchable instruction section, off by default): the chat draws its agenda. */
+  agendaMode: z.literal(true).optional(),
+  /** The ferret is STOPPED on the owner: idle, with at least one item on the owner's turn. */
+  stopped: z.literal(true).optional(),
+});
+export type SessionAgendaSummary = z.infer<typeof SessionAgendaSummarySchema>;
+
+// ─── what an owner's ask renderer receives ────────────────────────────────────────────────────────────────────────
+/**
+ * The value Agenda hands the renderer that draws part of an ask (`ask:sign-in-approval`, `ask:input`): the ref (its own
+ * kind and ids), the ask's words, and WHO the ask is from — the ferret's id (a plan or an approval is matched by it),
+ * the ferret's spoken name ("{ferretName} wants…") and the board project it works in (the standing rule's scopes).
+ */
+export const AskOnScreenSchema = z.object({
+  ref: z.looseObject({ kind: z.string() }),
+  subject: z.string(),
+  why: z.string().optional(),
+  context: z.string().optional(),
+  ferret: z.string().min(1),
+  ferretName: z.string(),
+  projectId: z.string().optional(),
+});
+export type AskOnScreen = z.infer<typeof AskOnScreenSchema>;

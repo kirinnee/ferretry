@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { agendaListSnapshot } from '../../../app/wire/index.ts';
+import { agendaListSnapshot } from '@ferretry/core-asks/contract';
 import { projectionSnapshot } from '../../support/app/agenda-projection.ts';
 import type { InboxResolved } from '../../../app/lib/agenda-inbox.ts';
 import {

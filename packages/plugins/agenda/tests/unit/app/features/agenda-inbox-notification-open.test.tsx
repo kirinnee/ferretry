@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgendaId } from '../../../../app/wire/index.ts';
+import type { AgendaId } from '@ferretry/core-asks/contract';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import type { InboxCard } from '../../../../app/lib/agenda-inbox.ts';
 import { daemonId } from '../../../../app/shell.ts';
@@ -11,7 +11,7 @@ import {
   InboxHarness,
   inboxCard,
 } from '../../../support/app/agenda-inbox.tsx';
-import { interact, mount, must } from '../../../support/app/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import { sessionView } from '../../../support/app/sessions.ts';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
@@ -34,17 +34,22 @@ const withGate = inboxCard(
   agendaItem('A4', {
     subject: 'Which colour?',
     ask: choices('Blue', 'Green'),
-    gateAttached: {
-      cardId: 'F12',
-      laneId: 'tested',
-      laneName: 'Try it',
-      entry: 3,
-      projectId: 'p1',
-      options: [
-        { id: 'o0', label: 'Done', outcome: 'close' },
-        { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
-      ],
-    },
+    cardAsks: [
+      {
+        at: '2026-08-01T10:00:00.000Z',
+        gate: {
+          cardId: 'F12',
+          laneId: 'tested',
+          laneName: 'Try it',
+          entry: 3,
+          projectId: 'p1',
+          options: [
+            { id: 'o0', label: 'Done', outcome: 'close' },
+            { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
+          ],
+        },
+      },
+    ],
   } as never),
   sessionView('sess-2', { config: { teammate: 'kai', name: 'Release train' } as never }),
   'Laptop',

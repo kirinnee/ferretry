@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgendaItem } from '../../../app/wire/index.ts';
+import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { readTab, writeTab } from '../../../app/lib/agenda-fold.ts';
 import {
   changedTabs,

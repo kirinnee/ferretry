@@ -1,4 +1,4 @@
-import type { AgendaListSnapshot } from '../wire/index.ts';
+import type { AgendaListSnapshot } from '@ferretry/core-asks/contract';
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { DaemonAgendaClient } from '../lib/agenda-client.ts';
 import type { AgendaLoadStatus } from '../lib/agenda-store.ts';

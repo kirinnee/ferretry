@@ -9,7 +9,7 @@
  * - RESOLVED: read-only. How it ended, who ended it and when — the same words the Inbox's Resolved filter uses.
  */
 
-import type { AgendaItem, ResolvedAgendaItem } from '../../wire/index.ts';
+import type { AgendaItem, ResolvedAgendaItem } from '@ferretry/core-asks/contract';
 import { CheckCheck, Clock } from 'lucide-react';
 import { parkedWords } from '../../lib/agenda-status.ts';
 import { describeResponse, resolutionBadge } from './agenda-board.tsx';
