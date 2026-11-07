@@ -239,14 +239,16 @@ pre-commit-lib.run {
       language = "system";
     };
 
-    # A dead-code keep marker (`@pending`, `@public`, a knip `ignore`) must name an open gap of a pending
-    # port, a kept guarantee row or a declared surface, so the knip gates cannot be quieted by a tag.
+    # A dead-code keep marker (`@pending`, `@public`, a knip `ignore`, any other knip setting that keeps code
+    # alive) must name an open gap of a pending port, a kept guarantee row, a declared surface or an
+    # ALLOWED_KNIP reason, so the knip gates cannot be quieted by a tag. A package.json change can make a
+    # package a subsystem, so it runs here too.
     # See scripts/validate/pending-tags.sh.
     a-pending-tags = {
       enable = true;
       name = "Dead-code keep markers name an open fact";
       entry = validator "scripts/validate/pending-tags.sh";
-      files = "^(packages/.*\\.(ts|tsx|mts)|knip(\\.production)?\\.json|ports-pending\\.json|docs/rebuild/guarantees\\.tsv|scripts/validate/pending-tags\\.(sh|ts))$";
+      files = "^((.*/)?package\\.json|packages/.*\\.(ts|tsx|mts)|knip(\\.production)?\\.json|ports-pending\\.json|docs/rebuild/guarantees\\.tsv|scripts/validate/(pending-tags(\\.test)?\\.(sh|ts)|ports-pending\\.ts|guarantees\\.ts)|scripts/gen/lib/(workspace|imports)\\.ts)$";
       pass_filenames = false;
       language = "system";
     };
