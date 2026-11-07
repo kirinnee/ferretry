@@ -62,7 +62,6 @@
  * copy here made a screen reader say the same sentence four times in fullscreen.
  * So the frame is named for the mechanism it is.
  */
-import { outsideFetch } from './outside-fetch.ts';
 import { useEffect, useRef } from 'react';
 import {
   FY_RENDER_SANDBOX_LIBRARIES,
@@ -286,7 +285,7 @@ export function FyRenderSandbox({
          * fetching bytes from somewhere else entirely. `cache: 'no-cache'`
          * revalidates, so a stale bundle cannot be pinned behind a hash change.
          */
-        const response = await outsideFetch(descriptor.url, {
+        const response = await globalThis.fetch(descriptor.url, {
           cache: 'no-cache',
           credentials: 'omit',
           redirect: 'error',
