@@ -4,6 +4,9 @@
  */
 import type { McpOAuthConnection } from '../../../contract/index.ts';
 import {
+  claudeApproval,
+  claudeApprovalKeys,
+  claudeProjectEntry,
   KnownAndFerretFolders,
   McpDocumentUnreadable,
   type McpFerretView,
@@ -13,6 +16,8 @@ import {
   type McpInventoryDeps,
   type McpInventoryFolder,
   mcpProjectKey,
+  type McpProjectApprovals,
+  type McpProjectApprovalsRequest,
 } from '../../../daemon/lib/inventory/index.ts';
 
 export const CLAUDE_HOME = '/fy/fleet/homes/claude-work-id';
@@ -157,3 +162,25 @@ export function inventoryWorld(files?: Map<string, unknown>): InventoryWorld {
     } satisfies McpInventoryDeps,
   });
 }
+
+/**
+ * The launch harness's answer to `approvedProjectServers`, the way the Claude Code plugin reads its own home (today's
+ * rules), over these in-memory documents: a Claude home that is `BROKEN` cannot answer; Codex takes no project server.
+ */
+export const documentApprovals =
+  (files: Map<string, unknown>) =>
+  async ({ account, root, servers }: McpProjectApprovalsRequest): Promise<McpProjectApprovals> => {
+    if (account.harness !== 'claude-code') return { state: 'not-taken', reason: 'Codex takes no project server.' };
+    const home = files.get(`${account.home}/.claude.json`) ?? null;
+    const settings = files.get(`${account.home}/settings.json`) ?? null;
+    if (home === BROKEN || settings === BROKEN) return { state: 'unreadable', reason: 'a home document is not JSON.' };
+    return {
+      state: 'read',
+      servers: Object.fromEntries(
+        servers.map(name => [
+          name,
+          claudeApproval(name, claudeProjectEntry(home, root), [claudeApprovalKeys(settings)]),
+        ]),
+      ),
+    };
+  };

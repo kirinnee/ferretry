@@ -215,6 +215,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     // Binds to the `work` root's `RootHandle.realPath` when kernel item N reaches the base; until then no work folder
     // is answered (fails closed: Accounts gets no folder default).
     realPath: async () => undefined,
+    // The registry the worktrees module keeps (built below); read only, through its own lifecycle chain.
+    managedWorktrees: async () => await worktrees.service.records(),
     vault: needs.vault,
     asks: needs.asks,
   });

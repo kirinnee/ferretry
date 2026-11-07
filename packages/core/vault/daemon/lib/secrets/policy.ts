@@ -9,7 +9,13 @@
  * still masked.
  */
 
-import { type SecretName, secretMask, secretReferencePattern, secretReferencesIn } from '../../../contract/index.ts';
+import {
+  optionalSecretReferenceOf,
+  type SecretName,
+  secretMask,
+  secretReferencePattern,
+  secretReferencesIn,
+} from '../../../contract/index.ts';
 import { UnknownSecretError } from './types.ts';
 
 /** Where a configured recipe lives, spelled the way an operator would go and find it. */
@@ -50,6 +56,40 @@ export function expandSecretReferences(value: string, values: ReadonlyMap<Secret
   });
   if (missing.length > 0) throw new UnknownSecretError(missing);
   return expanded;
+}
+
+/**
+ * A ferret child's environment: every `${secret:NAME}` expanded, or the names that are missing (S62–S64). A variable
+ * whose WHOLE value is an optional reference (`${secret?:NAME}`) is the secret when it is held and is LEFT OUT when it
+ * is not, instead of refusing: MCP names a sign-in token it saw held, and a sign-out landing before the launch opens
+ * the references must not refuse the launch. Read against ONE snapshot of the values, so a variable is either the
+ * whole value or absent — never an empty string.
+ */
+export function launchEnvironment(
+  env: Readonly<Record<string, string>>,
+  values: ReadonlyMap<SecretName, string>,
+):
+  | { readonly ok: true; readonly value: Readonly<Record<string, string>> }
+  | { readonly ok: false; readonly unknown: readonly SecretName[] } {
+  const unknown = [
+    ...new Set(
+      Object.values(env)
+        .filter(value => optionalSecretReferenceOf(value) === undefined)
+        .flatMap(value => secretReferencesIn(value)),
+    ),
+  ].filter(name => !values.has(name));
+  // A missing referenced secret refuses the launch, never an empty string (S64).
+  if (unknown.length > 0) return { ok: false, unknown };
+  const resolved: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    const optional = optionalSecretReferenceOf(value);
+    if (optional === undefined) resolved[key] = expandSecretReferences(value, values);
+    else {
+      const held = values.get(optional);
+      if (held !== undefined) resolved[key] = held;
+    }
+  }
+  return { ok: true, value: resolved };
 }
 
 /**

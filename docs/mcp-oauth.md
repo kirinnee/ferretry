@@ -8,7 +8,20 @@ refresh token and any client secret go into a daemon-internal store nothing else
 A **project's** `.mcp.json` server signs in through this same flow, under a subject naming the server and
 its project, and reaches Claude Code as a local-scope entry for that project — see
 [mcp-scopes.md](mcp-scopes.md#signing-in-to-a-project-server), which also lists every scope a ferret reads
-servers from and how a server is checked.
+servers from and how a server is checked. A ferret in a subfolder of a registered project, in a worktree
+kept inside it, or in a managed worktree of it, uses the project's sign-in, whether or not any ferret works in
+the project's root: Ferretry reads the `.mcp.json` at each registered project root and managed worktree itself,
+read-only, and no other file there. A project registered through a link (the folder or any parent) is not
+read: register its real path. A Codex ferret is handed no project server and renews none, as today.
+Whether the runtime declined the server is the harness's own answer, read from its own home; Ferretry's MCP
+code never reads that home. Claude Code answers it from the ferret's home, where a server the person disabled
+stays disabled across launches; a ferret is handed a project server's token only when Claude approved the
+server or has not answered for it yet, never when it disabled it. A home that exists but cannot be read hands
+nothing; a home not made yet (a ferret's first launch) has answered nothing, so its servers are handed over.
+
+**Declared gap:** "only `.mcp.json`, at a known project root" is enforced by Ferretry's MCP code, not by the
+daemon's file access layer, which would let that code read any folder outside Ferretry's own home. Closing it
+needs a kernel root scoped to one file.
 
 Read [secrets.md](secrets.md) first, and the [threat model](#threat-model) below. The useful property
 here is narrower than "the agent never sees the token" — **an agent CAN read the access token.**
@@ -311,8 +324,9 @@ The materialiser writes, for an `auth: oauth` server named `linear`:
 - **Codex** (`config.toml`): `[mcp_servers.linear] url = "…"` and
   `bearer_token_env_var = "FY_MCP_LINEAR_<HASH>_TOKEN"`.
 
-and binds `FY_MCP_LINEAR_<HASH>_TOKEN` to `${secret:MCP_LINEAR_<HASH>_ACCESS}` in the runtime's launch
-environment, which the launch resolves exactly as it resolves a settings component's `env`. The
+and binds `FY_MCP_LINEAR_<HASH>_TOKEN` to `${secret?:MCP_LINEAR_<HASH>_ACCESS}` in the runtime's launch
+environment. That is the store's optional reference: it is resolved like a settings component's `env`,
+except that a token the store does not hold leaves the variable unset instead of refusing the launch. The
 configuration file holds a variable NAME; the runtime's environment holds the VALUE (see the
 [threat model](#what-this-does-not-protect-against)).
 
@@ -320,13 +334,14 @@ Both harness behaviours are INFERRED from their documentation, like the rest of 
 `packages/fleet/src/lib/account/adapt.ts`.
 
 A server marked `auth: oauth` that has never been signed in — or has moved to another address since —
-**refuses the launch** with the missing secret's name, the store's ordinary rule. A blank
-`Authorization` header would fail twenty minutes later with nothing to point at.
+gets no variable at all, so the harness reports it unauthorised and the component reads **Needs
+sign-in**. The launch still starts. A plain `${secret:NAME}` in a server's own `env` still refuses the
+launch when the secret is missing, the store's ordinary rule.
 
 The launch names each token by reference, and the store opens the references only as the runtime starts.
-So a **sign-out that races a launch refuses that launch**: the token was there when the launch named it
-and is gone when the store opens it. The refusal names the secret, never its value. The window is short,
-and starting the ferret again works.
+So a token can be signed out between the two. A **sign-out that races a launch never refuses it**, as
+before 5.0, when the launch read the value once: the variable is simply left unset, and the server reads as
+signed out. Nothing names the value.
 
 ## Refresh: on use only
 

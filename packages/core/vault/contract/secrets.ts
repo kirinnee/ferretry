@@ -51,6 +51,25 @@ export function malformedSecretReference(value: string): string | undefined {
   return /\$\{secret:[^}]*\}?/u.exec(remainder)?.[0];
 }
 
+/**
+ * AN OPTIONAL REFERENCE, for a ferret child's environment only. A variable whose WHOLE value is `${secret?:NAME}` is
+ * set to the secret when the Vault holds it, and left UNSET when it does not; `${secret:NAME}` refuses the launch
+ * instead (S64), and every other reference keeps that rule.
+ *
+ * It exists for MCP's sign-in variables. MCP names a token it saw HELD, but the Vault opens the references only once
+ * every launch part has answered; a sign-out landing in between must not refuse the launch (today the launch read the
+ * value once into its environment and never refused). It names nothing `${secret:NAME}` could not, and it carries a
+ * name, never a value. Only `childEnvironment` reads it, and only as a whole value: anywhere else, or inside a longer
+ * value, it is plain text.
+ */
+export const OPTIONAL_SECRET_REFERENCE_SOURCE = '^\\$\\{secret\\?:([A-Z][A-Z0-9_]{0,63})\\}$';
+export const optionalSecretReference = (name: SecretName): string => `\${secret?:${name}}`;
+
+/** The secret a variable's whole value optionally names (`${secret?:NAME}`), else `undefined`. */
+export function optionalSecretReferenceOf(value: string): SecretName | undefined {
+  return new RegExp(OPTIONAL_SECRET_REFERENCE_SOURCE, 'u').exec(value)?.[1];
+}
+
 /** What a masked value reads as. */
 export const secretMask = (name: SecretName): string => `[redacted:${name}]`;
 

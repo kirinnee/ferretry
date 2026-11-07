@@ -4,6 +4,7 @@
  */
 import { InstantSchema } from '@ferretry/std';
 import {
+  type FerretId,
   defineConfig,
   defineEvent,
   definePort,
@@ -35,6 +36,29 @@ export const CLAUDE_CODE_WORDS: readonly Word[] = [
   { word: 'transcript', means: "the harness's own record of a conversation", insteadOf: ['jsonl', 'history'] },
 ];
 
+// ─── project servers (what MCP asks before handing a project server's sign-in to a launch) ───────────────────────
+
+/** What a harness decided about one project server for one ferret. Only `disabled` withholds it. */
+export type ProjectServerApproval = 'approved' | 'pending' | 'disabled';
+
+export interface ProjectServerQuery {
+  readonly ferret: FerretId;
+  /** The folder the servers are declared in; the harness keys its per-project decisions by it. */
+  readonly root: string;
+  /** The `.mcp.json` server names to answer for. */
+  readonly servers: readonly string[];
+}
+
+/**
+ * `read`: one decision per asked server. `unreadable`: the harness's own documents could not be read, so nobody can
+ * tell whether a server was declined. `not-taken`: this harness takes no project server's sign-in at all. A reason
+ * names a file or a rule, never a document's contents.
+ */
+export type ProjectServerApprovals =
+  | { readonly state: 'read'; readonly servers: Readonly<Record<string, ProjectServerApproval>> }
+  | { readonly state: 'unreadable'; readonly reason: string }
+  | { readonly state: 'not-taken'; readonly reason: string };
+
 // ─── port ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** What others (Updates, Onboarding, the app) may read about this harness. The harness itself is offered through Ferrets' `harnesses` hook. */
@@ -43,6 +67,14 @@ export interface ClaudeCodeApi {
   view(): Promise<HarnessCliView>;
   /** What discovery last found; `undefined` before the first look. Never reads the harness's sign-in files. */
   discovery(): Promise<Discovery | undefined>;
+  /**
+   * ADDITIVE. Which of a project's `.mcp.json` servers this harness approved, left pending or DISABLED for one
+   * ferret in `root` — read by this plugin from the ferret's OWN home (its `.claude.json` `projects[<root>]` and its
+   * `settings.json`), never handed to anyone as a document. A home it cannot read answers `unreadable`, so a caller
+   * binds nothing it cannot tell was declined (fail closed). MCP asks it before handing a project server's sign-in
+   * to a launch; MCP has no root over the home.
+   */
+  approvedProjectServers?(query: ProjectServerQuery): Promise<ProjectServerApprovals>;
 }
 export const ClaudeCodePort = definePort<ClaudeCodeApi>('claude-code');
 
