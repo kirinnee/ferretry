@@ -118,7 +118,8 @@ fi
 ./scripts/local/gen.sh
 
 # The repository's own Bun scripts (gates, CI helpers, release tooling) are a project of their own.
-projects=(tsconfig.json scripts/tsconfig.json)
+# scripts/gen (the registry generator and the 5.0 checks) is its own project, with its own includes.
+projects=(tsconfig.json scripts/tsconfig.json scripts/gen/tsconfig.json)
 while IFS= read -r project; do
   projects+=("${project}")
 done < <(find packages -path '*/node_modules' -prune -o -name tsconfig.json -print | sort)

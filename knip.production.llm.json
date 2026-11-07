@@ -6,11 +6,11 @@
       "project": []
     },
     "packages/std": {
-      "entry": ["src/index.ts"],
+      "entry": [],
       "project": ["src/**/*.ts"]
     },
     "packages/core/kernel": {
-      "entry": ["host/fyd.ts"],
+      "entry": [],
       "project": ["**/*.{ts,tsx}", "!tests/**", "!testing/**"]
     },
     "packages/core/*": {
