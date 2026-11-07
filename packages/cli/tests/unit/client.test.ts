@@ -27,6 +27,28 @@ describe('the guarded client', () => {
     should(transport.sent).deepEqual([{ method: 'GET', path: '/v1/cards/c%201?full=1' }]);
   });
 
+  it('should read the inventory again after a read failed, so one bad read is not held for ever', async () => {
+    // Arrange
+    let reads = 0;
+    const { deps } = depsOf(registry, () => {
+      reads += 1;
+      if (reads === 1) throw new Error('daemon away');
+      return healthy;
+    });
+
+    // Act
+    const failed = await deps.inventory.current().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    const recovered = await deps.inventory.current();
+
+    // Assert
+    should((failed as Error).message).equal('daemon away');
+    should(recovered).equal(healthy);
+    should(reads).equal(2);
+  });
+
   it('should read the inventory once for any number of calls', async () => {
     const { deps, reads } = depsOf(registry, healthy);
     const client = pluginClient(deps, 'board');

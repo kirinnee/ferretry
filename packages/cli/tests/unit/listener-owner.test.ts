@@ -37,7 +37,23 @@ describe('listener owner (S57)', () => {
     should(foreignListenerRefusal('http://127.0.0.1:7431', 'x', { kind: 'own' })).be.undefined();
   });
 
+  it('should read IPv6 sockets: loopback and v4-mapped loopback are reachable, other addresses are not', () => {
+    const ipv6 = (hex: string, uid = 1001) => [HEADER, line(hex, uid)].join('\n');
+    const loopback = '00000000000000000000000001000000';
+    const mappedLoopback = '0000000000000000FFFF00000100007F';
+    const mappedAny = '0000000000000000FFFF000000000000';
+    const mappedOther = '0000000000000000FFFF000008080808';
+    const global = '20010DB8000000000000000000000001';
+    should(listenerOwnerVerdict(7431, 1000, [ipv6(loopback)]).kind).equal('foreign');
+    should(listenerOwnerVerdict(7431, 1000, [ipv6(mappedLoopback)]).kind).equal('foreign');
+    should(listenerOwnerVerdict(7431, 1000, [ipv6(mappedAny)]).kind).equal('foreign');
+    should(listenerOwnerVerdict(7431, 1000, [ipv6(mappedOther)]).kind).equal('absent');
+    should(listenerOwnerVerdict(7431, 1000, [ipv6(global)]).kind).equal('absent');
+  });
+
   it('should name the port a URL means', () => {
+    should(daemonUrlPort('https://daemon.example')).equal(443);
+    should(daemonUrlPort('ftp://daemon.example')).be.undefined();
     should(daemonUrlPort('http://127.0.0.1:7431')).equal(7431);
     should(daemonUrlPort('http://127.0.0.1')).equal(80);
     should(daemonUrlPort('nope')).be.undefined();
