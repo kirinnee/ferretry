@@ -237,6 +237,109 @@ it('S79 the owner removal-only route needs no passkey while adding a default fro
   }
 });
 
+/** ONE fresh passkey proof (Gate's registry): `claim` takes it in one step, so exactly one claim ever wins. */
+function oneFreshProof() {
+  let held = true;
+  let taken = 0;
+  const claim = (() => {
+    if (!held) return false;
+    held = false;
+    taken += 1;
+    return true;
+  }) as ReturnType<typeof ownerStanding>['claimFreshStepUp'];
+  return { claim, taken: () => taken };
+}
+
+/** A governed device the admission snapshot says is FRESH, sharing `proof` with every other call built on it. */
+function freshDevice(proof: ReturnType<typeof oneFreshProof>) {
+  const base = deviceStanding(DEVICE);
+  return {
+    ...base,
+    presentation: { ...base.presentation, stepUp: true, freshStepUp: true },
+    governance: { governed: true, decide: () => ({ allowed: true as const, refusal: 'granted' as const }) },
+    claimFreshStepUp: proof.claim,
+  };
+}
+
+async function defaultsHost(standing: () => ReturnType<typeof freshDevice> | ReturnType<typeof ownerStanding>) {
+  const gate = Object.assign(new StandInAdmission(standing), { judgeConfigWrite: () => 'apply' as const });
+  const h = await host([], security, gate);
+  await signIn(h);
+  return h;
+}
+
+const defaultLine = (key: string) => ({ scope: 'sites', key, account: 'REVIEW' });
+
+it('S79 two account-default edits admitted on ONE fresh proof, both snapshotted fresh: exactly one is written, the other asks again and writes nothing', async () => {
+  const proof = oneFreshProof();
+  const h = await defaultsHost(() => freshDevice(proof));
+  try {
+    const answers = await Promise.all([
+      h.request('PUT', '/v1/accounts/defaults', { body: defaultLine('example.com') }),
+      h.request('PUT', '/v1/accounts/defaults', { body: defaultLine('example.com') }),
+    ]);
+    expect(answers.map(answer => answer.status).sort()).toEqual([200, 403]);
+    const refused = answers.find(answer => answer.status === 403);
+    expect(refused?.json<{ code: string; demand: { act: string } }>()).toMatchObject({
+      code: STEP_UP_REQUIRED_CODE,
+      demand: { act: 'loosen-config' },
+    });
+    const written = answers.find(answer => answer.status === 200);
+    expect(written?.json<{ defaults: { sites?: Record<string, string> } }>().defaults.sites).toEqual({
+      'example.com': 'REVIEW',
+    });
+    expect(proof.taken()).toBe(1);
+  } finally {
+    await h.stop();
+  }
+});
+
+it('S79 an account-default edit and a config loosening claiming the same fresh proof first: exactly one acts, nothing is written', async () => {
+  const proof = oneFreshProof();
+  const h = await defaultsHost(() => freshDevice(proof));
+  try {
+    // The other act takes the proof through the claim every admitted call carries, as Gate's judge does.
+    const loosening = proof.claim?.() === true ? 'apply' : 'hold';
+    const answer = await h.request('PUT', '/v1/accounts/defaults', { body: defaultLine('example.com') });
+    expect([loosening, answer.status]).toEqual(['apply', 403]);
+    expect(proof.taken()).toBe(1);
+  } finally {
+    await h.stop();
+  }
+});
+
+it('S79 one fresh proof and no race: the edit is written and the proof is gone, so the next edit asks again', async () => {
+  const proof = oneFreshProof();
+  const h = await defaultsHost(() => freshDevice(proof));
+  try {
+    const first = await h.request('PUT', '/v1/accounts/defaults', { body: defaultLine('example.com') });
+    const next = await h.request('PUT', '/v1/accounts/defaults', { body: defaultLine('example.com') });
+    expect([first.status, next.status]).toEqual([200, 403]);
+    expect(proof.taken()).toBe(1);
+  } finally {
+    await h.stop();
+  }
+});
+
+it('S79 the owner at the machine, and a removal from a device, claim no proof at all', async () => {
+  const proof = oneFreshProof();
+  let remote = false;
+  const h = await defaultsHost(() =>
+    remote ? freshDevice(proof) : { ...ownerStanding(), claimFreshStepUp: proof.claim },
+  );
+  try {
+    expect((await h.request('PUT', '/v1/accounts/defaults', { body: defaultLine('example.com') })).status).toBe(200);
+    remote = true;
+    const removal = await h.request('PUT', '/v1/accounts/defaults', {
+      body: { ...defaultLine('example.com'), account: null },
+    });
+    expect(removal.status).toBe(200);
+    expect(proof.taken()).toBe(0);
+  } finally {
+    await h.stop();
+  }
+});
+
 it('S134 a damaged accounts index is shown as damaged and never presented as an empty healthy listing', async () => {
   const h = await host();
   try {
