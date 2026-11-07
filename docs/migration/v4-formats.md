@@ -57,7 +57,7 @@ one-time converter at `migration/v4-to-v5/` and of the runbook [`v4-to-v5-prompt
 10. **A v4 that did not stop cleanly** leaves intents behind (`agenda-*.pending.json`, a `fleet/.fy-fleet-apply.lock/`,
     a `fleet/shared/<harness>/.migration-journal`). The converter refuses such a home; restart and stop v4 cleanly.
 
-## 2. Decisions needed from the lead before Phase B
+## 2. Decisions for Phase B (decided 2026-11-07)
 
 | #   | Question                                                                                                                                                                                                                                                                                                                                                                                                          | Recommendation                                                                                                                                                                                                                                                                                                                                                          |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -69,6 +69,26 @@ one-time converter at `migration/v4-to-v5/` and of the runbook [`v4-to-v5-prompt
 | M6  | **Agenda ids.** v4 item ids `A<n>` are unique per session; v5 Asks are daemon-wide.                                                                                                                                                                                                                                                                                                                               | Asks keeps a per-source id (`<ferret>/A<n>`) so links like `!A3` in old transcripts still resolve inside their ferret.                                                                                                                                                                                                                                                  |
 | M7  | **Runtime uuids.** `fleet/ids.json` has none in §9.2; `routing.json` and usage rows join on them.                                                                                                                                                                                                                                                                                                                 | Converter re-keys to runtime names; Runtimes declares `formerNames` in `runtimes/<name>.yaml` if old `--agent` names must still resolve.                                                                                                                                                                                                                                |
 | M8  | **The refusal sentence** in `packages/core/kernel/contract/home.ts` points at `docs/migration/clean-slate-prompt.md`.                                                                                                                                                                                                                                                                                             | Point it at `docs/migration/v4-to-v5-prompt.md` (kernel contract: lead's edit).                                                                                                                                                                                                                                                                                         |
+
+**Decided by the lead (2026-11-07).** These override the recommendations above where they differ:
+
+- **M1 yes.** Kernel keeps today's identity file layout byte for byte as its v5 format (spine D17). The converter moves
+  `daemon-identity.json` unopened.
+- **M2 yes.** The Vault keeps each sealed document by name under the same key file. No merge.
+- **M3 yes.** Attach keeps the pane and the conversation. The runner then restarts the harness in the same pane, with
+  resume, at its next idle turn.
+- **M4 yes, only because** v5 keeps today's token hash scheme unchanged, so the carried `sessionCapabilityHash` is plain
+  v5 data with no special path. If the scheme ever differs, the ferret gets a new token at that restart instead.
+- **M5 owners:** `pins.json` and `agent-pins.json` → Conversation; `state/learning/sessions.json` → Lessons;
+  `catalog-install-prefs.json` → Catalogs; `mcp-oauth.json` → MCP (its sealed half stays a Vault document by name);
+  `audit-kept*.jsonl`, `grant-audit.jsonl`, `security-audit.jsonl` → Gate `audit.jsonl`; `ids.json` `formerNames`
+  → Ferrets `names.json`.
+- **M6 changed:** the converter **renumbers** asks to v5 global ids, and rewrites every card and agenda link through
+  one old→new map.
+- **M7 yes.** **M8 yes** (the kernel's carry-over prompt constant points at `v4-to-v5-prompt.md`).
+- The `nix/pre-commit.nix` hook entry stays, as that one entry only (build-ci owns `nix/**` and rebases over it).
+- Every test's throwaway repository lives under a temp folder, with `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE`
+  unset. A test never touches the shared `.git`.
 
 ## 3. Kept, rebuilt, not carried — at a glance
 
