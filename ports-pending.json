@@ -9,7 +9,6 @@
     "claude-code",
     "codex",
     "logins",
-    "runtimes",
     "terminals",
     "browsers",
     "accounts",
@@ -27,7 +26,8 @@
     "skills",
     "shells",
     "layouts",
-    "onboarding",
-    "tidy"
+    "tidy",
+    "runtimes",
+    "onboarding"
   ]
 }
