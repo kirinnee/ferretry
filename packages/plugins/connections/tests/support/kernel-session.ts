@@ -163,7 +163,28 @@ export class BrowserEnd {
   #sessionId: session.SessionId | undefined;
   #inbox: Promise<void> = Promise.resolve();
 
+  /** The kernel link this end pulls from while it settles, when its carrier is pull-shaped (a relay, direct). */
+  #link: CarrierLink | undefined;
+
   constructor(private readonly deliver: (bytes: Uint8Array) => void) {}
+
+  /** Read a pull-shaped carrier: every {@link settled} pulls what the kernel has queued for this end. */
+  pullFrom(link: CarrierLink): this {
+    this.#link = link;
+    return this;
+  }
+
+  #pull(): void {
+    const link = this.#link;
+    if (link === undefined || this.end !== undefined) return;
+    for (let next = link.outbound.next(); next !== undefined; next = link.outbound.next()) {
+      if (isSessionEnd(next)) {
+        this.end = next;
+        return;
+      }
+      this.receive(next.bytes);
+    }
+  }
 
   /** The downstream a socket-shaped carrier (a WebRTC channel, the tunnel's socket) writes to. */
   downstream(): SocketDownstream {
@@ -180,25 +201,6 @@ export class BrowserEnd {
     };
   }
 
-  /** Pull everything a {@link CarrierLink} has for this end, as a relay or direct carrier would. */
-  async drain(link: CarrierLink): Promise<void> {
-    for (let idle = 0; idle < 6; ) {
-      await settle(2);
-      const next = link.outbound.next();
-      if (next === undefined) {
-        idle += 1;
-        await new Promise(resolve => setTimeout(resolve, 3));
-        continue;
-      }
-      idle = 0;
-      if (isSessionEnd(next)) {
-        this.end = next;
-        return;
-      }
-      this.receive(next.bytes);
-    }
-  }
-
   receive(bytes: Uint8Array): void {
     const copy = Uint8Array.from(bytes);
     this.wire.push(copy);
@@ -209,6 +211,7 @@ export class BrowserEnd {
   async settled(): Promise<void> {
     for (let round = 0; round < 6; round += 1) {
       await settle(4);
+      this.#pull();
       await this.#inbox;
       await new Promise(resolve => setTimeout(resolve, 3));
     }
@@ -290,7 +293,7 @@ export class BrowserEnd {
   }
 
   last(t: string): Record<string, unknown> | undefined {
-    return [...this.records].reverse().find(record => record['t'] === t);
+    return [...this.records].reverse().find(record => record.t === t);
   }
 
   async #read(bytes: Uint8Array): Promise<void> {
