@@ -3,6 +3,7 @@ import { headersFrom, queryFrom, type ApiRequest, type RouteHandler } from '@fer
 import { device, owner, testArrival, testPrincipal } from '@ferretry/kernel/testing';
 import { instantFromEpochMs } from '@ferretry/std';
 import { createConnectionB, verifiedWebRtcDevice } from '../../../daemon/connection-b.ts';
+import { noConnection, unusedSigner } from '../../support/session-layer-stubs.ts';
 
 function harness() {
   const offers: string[] = [];
@@ -54,10 +55,8 @@ function harness() {
       open: () => {
         throw new Error('no channel has opened');
       },
-      connection: () => {
-        throw new Error('no connection has opened');
-      },
-      signer: undefined as never,
+      connection: noConnection,
+      signer: unusedSigner,
     },
     device: () => ({ deviceId: 'verified-holder', appSession: 'verified-page' }),
     onStop: () => {},

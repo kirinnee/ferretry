@@ -44,7 +44,7 @@ export function isLoopbackHost(host: string): boolean {
   return groups.every((group, index) => group === (index === IPV6_GROUP_COUNT - 1 ? 1 : 0));
 }
 
-/** A rendezvous endpoint: wss/https everywhere, ws/http only on loopback, no query or fragment. */
+/** A rendezvous endpoint: insecure only on the two hosts the published browser CSP admits. */
 export const SocketEndpointSchema = z
   .string()
   .max(2048)
@@ -56,11 +56,14 @@ export const SocketEndpointSchema = z
       context.addIssue({ code: 'custom', message: 'endpoint is not a URL' });
       return z.NEVER;
     }
-    const loopback = isLoopbackHost(url.hostname);
+    const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
     const secure = url.protocol === 'https:' || url.protocol === 'wss:';
     const insecure = url.protocol === 'http:' || url.protocol === 'ws:';
     if (!secure && !(insecure && loopback)) {
-      context.addIssue({ code: 'custom', message: 'endpoint must be wss/https, or ws/http on loopback' });
+      context.addIssue({
+        code: 'custom',
+        message: 'endpoint must be wss/https, or ws/http on localhost or the loopback address',
+      });
       return z.NEVER;
     }
     if (url.search !== '' || url.hash !== '') {
@@ -197,7 +200,35 @@ export type WebRtcRefusalCode = (typeof WEBRTC_REFUSAL_CODES)[number];
 
 const ReconnectSecondsSchema = z.number().int().positive().max(3_600).default(5);
 
-/** Today's `carriers` block, one key per carrier. An explicit relay entry WINS and is never overwritten. */
+const RelayEntrySchema = z.union([
+  z.strictObject({
+    source: z.literal('discovery'),
+    enabled: z.boolean().default(true),
+    reconnectSeconds: ReconnectSecondsSchema,
+  }),
+  z.strictObject({
+    url: SocketEndpointSchema,
+    enabled: z.boolean().default(true),
+    reconnectSeconds: ReconnectSecondsSchema,
+  }),
+]);
+
+/** Today's ordered rendezvous set, bounded before boot and never silently truncated or deduplicated. */
+export const RelayEntriesSchema = z
+  .array(RelayEntrySchema)
+  .max(4)
+  .readonly()
+  .superRefine((relays, context) => {
+    const addresses = new Set<string>();
+    for (const [index, relay] of relays.entries()) {
+      const address = 'url' in relay ? relay.url : 'discovery';
+      if (addresses.has(address))
+        context.addIssue({ code: 'custom', path: [index], message: 'this rendezvous is already declared' });
+      addresses.add(address);
+    }
+  });
+
+/** One block per carrier; the relay block is an ordered list. An explicit list wins over discovery. */
 export const ConnectionsConfigSchema = z.strictObject({
   direct: z
     .strictObject({
@@ -205,22 +236,7 @@ export const ConnectionsConfigSchema = z.strictObject({
       port: z.number().int().min(0).max(65_535).optional(),
     })
     .optional(),
-  relay: z
-    .union([
-      /** Read the hosted relay from the runtime advertisement (the default). */
-      z.strictObject({
-        source: z.literal('discovery'),
-        enabled: z.boolean().default(true),
-        reconnectSeconds: ReconnectSecondsSchema,
-      }),
-      /** The expert path: your own rendezvous (`docs/cloudflare-relay-self-hosting.md`). */
-      z.strictObject({
-        url: SocketEndpointSchema,
-        enabled: z.boolean().default(true),
-        reconnectSeconds: ReconnectSecondsSchema,
-      }),
-    ])
-    .optional(),
+  relay: RelayEntriesSchema.optional(),
   tunnel: z.strictObject({ enabled: z.boolean().default(false) }).optional(),
   webrtc: z
     .strictObject({
@@ -245,12 +261,10 @@ export type ConnectionsConfig = z.infer<typeof ConnectionsConfigSchema>;
 export function connectionsLoosens(before: ConnectionsConfig | undefined, after: ConnectionsConfig): readonly string[] {
   const widened: string[] = [];
   const on = (entry: { readonly enabled?: boolean } | undefined, fallback: boolean) => entry?.enabled ?? fallback;
-  if (on(after.relay, true) && !on(before?.relay, true)) widened.push('the relay is turned on');
-  if (
-    after.relay !== undefined &&
-    'url' in after.relay &&
-    JSON.stringify(after.relay) !== JSON.stringify(before?.relay)
-  )
+  const relayOn = (relays: ConnectionsConfig['relay']) =>
+    relays === undefined || relays.length === 0 || relays.some(entry => entry.enabled);
+  if (relayOn(after.relay) && !relayOn(before?.relay)) widened.push('the relay is turned on');
+  if (after.relay?.some(entry => 'url' in entry) && JSON.stringify(after.relay) !== JSON.stringify(before?.relay))
     widened.push('the relay points at a different rendezvous');
   if (on(after.tunnel, false) && !on(before?.tunnel, false)) widened.push('the tunnel is turned on');
   if (on(after.webrtc, true) && !on(before?.webrtc, true)) widened.push('WebRTC is turned on');
