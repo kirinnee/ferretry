@@ -22,6 +22,7 @@ import {
 import type { FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
+import type { ReferenceCatalogProvider } from '@ferretry/plugin-conversation/contract';
 import { ok } from '@ferretry/std';
 import { buildTerminals, type TerminalsOverrides } from '../../../daemon/index.ts';
 import type { TerminalRecord, TerminalRuntimePort } from '../../../daemon/lib/terminal/contracts.ts';
@@ -166,6 +167,8 @@ export interface Half {
   as(caller: 'ferret' | 'owner'): void;
   /** The `input.targets:terminal` adapter the half provides. */
   inputTarget(): InputTargetAdapter;
+  /** The `reference.catalog:%terminal` provider the half takes (Conversation's references route asks it when Conversation is on). */
+  referenceMenu(): ReferenceCatalogProvider;
 }
 
 export async function terminalsHalf(
@@ -202,6 +205,7 @@ export async function terminalsHalf(
     raised,
     as: next => (caller = next),
     inputTarget: () => built?.hooks['input.targets:terminal'] as InputTargetAdapter,
+    referenceMenu: () => built?.hooks['reference.catalog:%terminal'] as ReferenceCatalogProvider,
   };
 }
 
