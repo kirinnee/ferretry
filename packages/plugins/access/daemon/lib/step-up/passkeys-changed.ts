@@ -34,7 +34,12 @@ export class PasskeysChangedListenerTimedOut extends Error {
 export class PasskeysChangedSignal {
   readonly #listeners = new Set<PasskeysChangedListener>();
 
+  /**
+   * `after` is the kernel clock's timer (`clock.after`): it calls `fn` once `ms` have passed and returns the call
+   * that cancels it. A port rather than `setTimeout`, so the wait is the daemon's clock and a test drives it.
+   */
   constructor(
+    private readonly after: (ms: number, fn: () => void) => () => void,
     private readonly failed: PasskeysChangedFailure = () => undefined,
     private readonly waitMs: number = PASSKEYS_CHANGED_WAIT_MS,
   ) {}
@@ -62,13 +67,12 @@ export class PasskeysChangedSignal {
           return true;
         },
       );
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancel: (() => void) | undefined;
     const waited = new Promise<false>(resolve => {
-      timer = setTimeout(() => resolve(false), this.waitMs);
-      timer.unref?.();
+      cancel = this.after(this.waitMs, () => resolve(false));
     });
     const settled = await Promise.race([running, waited]);
-    clearTimeout(timer);
+    cancel?.();
     if (!settled) this.failed(new PasskeysChangedListenerTimedOut(this.waitMs), change);
   }
 }

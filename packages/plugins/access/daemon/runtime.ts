@@ -62,7 +62,12 @@ import {
   type PairingService,
   PushNewDeviceAlert,
 } from './lib/pairing/index.ts';
-import { DeviceKeySchema, deviceRotateMessage, type Ed25519Verifier, verifyDeviceProof } from './lib/proof/device-proof.ts';
+import {
+  DeviceKeySchema,
+  deviceRotateMessage,
+  type Ed25519Verifier,
+  verifyDeviceProof,
+} from './lib/proof/device-proof.ts';
 import { PairedPushDevices, PushService } from './lib/push/index.ts';
 import { pairingRoutes } from './lib/routes/pairing.ts';
 import { pushRoutes } from './lib/routes/push.ts';
@@ -110,7 +115,11 @@ interface Wired {
 }
 
 const DevicePrincipalSchema = z.object({ deviceId: PairedDeviceIdSchema, appSession: z.string().min(1) });
-const PairRecordSchema = z.object({ code: z.string(), deviceName: PairingDeviceNameSchema, deviceKey: DeviceKeySchema });
+const PairRecordSchema = z.object({
+  code: z.string(),
+  deviceName: PairingDeviceNameSchema,
+  deviceKey: DeviceKeySchema,
+});
 
 const routeKey = (route: Pick<ApiRoute, 'method' | 'path'>): string => `${route.method} ${route.path}`;
 
@@ -173,12 +182,15 @@ export class AccessRuntime {
       { nowMs: () => clock.nowMs() },
       () => this.settings().stepUpWindowMinutes,
     );
-    const passkeysChanged = new PasskeysChangedSignal((error, change) => {
-      kernel.log.warn('a passkeys listener failed', {
-        cause: change.cause,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
+    const passkeysChanged = new PasskeysChangedSignal(
+      (ms, fn) => clock.after(milliseconds(ms), fn),
+      (error, change) => {
+        kernel.log.warn('a passkeys listener failed', {
+          cause: change.cause,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    );
     let pairing: PairingService | undefined;
     const stepUp = new StepUpService({
       store: new StatePasskeyStore(kernel.state),
@@ -204,7 +216,12 @@ export class AccessRuntime {
       rotation: {
         keyIssuedAt: deviceId => pairing?.keyIssuedAt(deviceId),
         verify: async ({ transcriptHash, deviceId, deviceKey, proof }) =>
-          await verifyDeviceProof(host.ed25519, deviceKey, proof, deviceRotateMessage(transcriptHash, deviceId, deviceKey)),
+          await verifyDeviceProof(
+            host.ed25519,
+            deviceKey,
+            proof,
+            deviceRotateMessage(transcriptHash, deviceId, deviceKey),
+          ),
         rotate: async ({ deviceId, deviceKey, appSession }) => {
           if (pairing === undefined || !(await pairing.rotateDeviceKey(deviceId, deviceKey))) return false;
           // Every OTHER session the device holds lapses (4441) and reopens on the new key (R251).
@@ -282,7 +299,8 @@ export class AccessRuntime {
       }
       const handle = wired.routes.get(key);
       // POST /v1/push/seen is answered by Agenda's clearer, which is not ported yet (the lead holds the decision).
-      if (handle === undefined) return errorResponse(503, 'Agenda answers this once it is ported.', 'plugin_unavailable');
+      if (handle === undefined)
+        return errorResponse(503, 'Agenda answers this once it is ported.', 'plugin_unavailable');
       return await handle(call);
     };
   }
@@ -300,10 +318,16 @@ export class AccessRuntime {
       return key === undefined ? undefined : ({ holder: claim.data.deviceId as HolderId, key } satisfies ModeHolder);
     },
     watch: (holder, watch) => {
-      const release = this.#connections.track(holder, () => watch.revoked(), watch.appSession, () => watch.regranted(), {
-        key: watch.session,
-        end: () => watch.lapsed(),
-      });
+      const release = this.#connections.track(
+        holder,
+        () => watch.revoked(),
+        watch.appSession,
+        () => watch.regranted(),
+        {
+          key: watch.session,
+          end: () => watch.lapsed(),
+        },
+      );
       return release;
     },
     seen: holder => this.#current?.pairing.seen(holder),
