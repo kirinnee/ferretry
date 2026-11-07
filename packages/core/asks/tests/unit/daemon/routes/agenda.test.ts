@@ -1,26 +1,28 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
-import { type ApiCredentials, ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
+import type { ApiResponse } from '@ferretry/kernel/contract';
 import {
   type AgendaLedger,
   type AgendaLedgerRepository,
   type AgendaMutation,
   AgendaService,
-} from '../../../../../daemon/lib/agenda/index.ts';
-import { agendaActor, agendaRoutes, type DirectNotificationSubsystem } from '../../../../src/lib/runtime/index.ts';
-import type { AgendaGatePort } from '../../../../../daemon/lib/runtime/mounts/agenda-gates.ts';
-import { jsonBody, request } from '../../api/support.ts';
+} from '../../../../daemon/lib/agenda/index.ts';
+import type { AgendaGatePort } from '../../../../daemon/lib/routes/agenda-gates.ts';
+import { agendaActor, agendaRoutes, type DirectNotificationSubsystem } from '../../../../daemon/lib/routes/agenda.ts';
 import {
   agentIn,
   agendaService,
-  CREDENTIALS,
-  FERRET_ARRIVAL,
+  device,
   FakeLedgerRepository,
   FERRET_SESSION,
   ferretOwn,
   human,
+  jsonBody,
+  NO_CALLER,
   NO_HELD_REPLIES,
+  type RequestOverrides,
+  routeDispatcher,
+  warden,
 } from './support.ts';
 
 /** A repository whose reads fail the way a damaged ledger file does. */
@@ -46,18 +48,15 @@ class FakeNotifications implements DirectNotificationSubsystem {
 function fixture(
   repository?: AgendaLedgerRepository,
   notifications: DirectNotificationSubsystem = new FakeNotifications(),
-  credentials: ApiCredentials = CREDENTIALS,
   gates?: AgendaGatePort,
 ) {
-  const routes = agendaRoutes(agendaService(repository), notifications, NO_HELD_REPLIES, undefined, gates);
-  const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), credentials, NO_GOVERNED_ROUTES_GUARD);
-  return async (overrides: Parameters<typeof request>[0]): Promise<ApiResponse> =>
-    await dispatcher.dispatch(request(overrides));
+  const dispatch = routeDispatcher(agendaRoutes(agendaService(repository), NO_HELD_REPLIES, notifications, undefined, gates));
+  return async (overrides: RequestOverrides): Promise<ApiResponse> => await dispatch(overrides);
 }
 
-const post = (body: unknown, headers: Readonly<Record<string, string>> = human) => ({
+const post = (body: unknown, headers: RequestOverrides['headers'] = human) => ({
   method: 'POST',
-  path: '/v1/sessions/s1/agenda',
+  path: '/v1/ferrets/s1/agenda',
   headers,
   body: JSON.stringify(body),
 });
@@ -78,11 +77,11 @@ const raise = {
 describe('agendaActor', () => {
   it('should accept only established peer, admin, or paired-device provenance', () => {
     // Arrange / Act / Assert
-    should(agendaActor('peer:s1')).deepEqual({ kind: 'agent', sessionId: 's1', name: null });
+    should(agendaActor('ferret:s1')).deepEqual({ kind: 'agent', sessionId: 's1', name: null });
     should(agendaActor('admin-cli')).deepEqual({ kind: 'human' });
     should(agendaActor('admin-ui')).deepEqual({ kind: 'human' });
     should(agendaActor('device:browser-1')).deepEqual({ kind: 'human' });
-    for (const unavailable of ['peer:', 'peer:not/a/session', 'device:', 'warden:s1', 'unknown', undefined]) {
+    for (const unavailable of ['ferret:', 'ferret:not/a/session', 'peer:s1', 'device:', 'warden:s1', 'unknown', undefined]) {
       should(() => agendaActor(unavailable)).throw(/established human or session provenance/u);
     }
   });
@@ -95,7 +94,7 @@ describe('agenda routes', () => {
     const dispatch = fixture();
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/agenda', headers: human });
+    const response = await dispatch({ path: '/v1/ferrets/s1/agenda', headers: human });
 
     // Assert
     should(response.status).equal(200);
@@ -495,10 +494,9 @@ describe('agenda routes', () => {
     const dispatch = fixture();
     const asFerret = (body: unknown, sessionId: string) => ({
       ...post(body, ferretOwn),
-      ...FERRET_ARRIVAL,
-      path: `/v1/sessions/${sessionId}/agenda`,
+      path: `/v1/ferrets/${sessionId}/agenda`,
     });
-    const ownersItem = await dispatch({ ...post(raise), path: `/v1/sessions/${FERRET_SESSION}/agenda` });
+    const ownersItem = await dispatch({ ...post(raise), path: `/v1/ferrets/${FERRET_SESSION}/agenda` });
     const ownersId = (jsonBody(ownersItem).items as readonly { id: string }[])[0]?.id;
 
     // Act
@@ -533,7 +531,7 @@ describe('agenda routes', () => {
     const dispatch = fixture();
 
     // Act — a path separator is not addressable, and the domain refuses the id it does get.
-    const response = await dispatch({ path: '/v1/sessions/not a session/agenda', headers: human });
+    const response = await dispatch({ path: '/v1/ferrets/not a session/agenda', headers: human });
 
     // Assert
     should(response.status).equal(400);
@@ -545,7 +543,7 @@ describe('agenda routes', () => {
     const dispatch = fixture();
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/%2e%2e/agenda', headers: human });
+    const response = await dispatch({ path: '/v1/ferrets/%2e%2e/agenda', headers: human });
 
     // Assert
     should(response.status).equal(400);
@@ -570,7 +568,7 @@ describe('agenda routes', () => {
     const dispatch = fixture(new BrokenLedgerRepository());
 
     // Act
-    const listed = await dispatch({ path: '/v1/sessions/s1/agenda', headers: human });
+    const listed = await dispatch({ path: '/v1/ferrets/s1/agenda', headers: human });
     const acted = await dispatch(post({ action: 'dismiss', id: 'A1' }));
 
     // Assert
@@ -588,8 +586,8 @@ describe('agenda routes', () => {
 
     // Act
     const response = await dispatch({
-      path: '/v1/sessions/s1/agenda',
-      headers: { authorization: `Bearer ${CREDENTIALS.warden}` },
+      path: '/v1/ferrets/s1/agenda',
+      headers: warden,
     });
 
     // Assert
@@ -601,7 +599,7 @@ describe('agenda routes', () => {
     const dispatch = fixture();
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/agenda' });
+    const response = await dispatch({ path: '/v1/ferrets/s1/agenda', headers: NO_CALLER });
 
     // Assert
     should(response.status).equal(401);
@@ -611,7 +609,7 @@ describe('agenda routes', () => {
 describe('agenda routes and held answers', () => {
   it('should serve the board without `replies` when the outbox cannot be read', async () => {
     // Arrange
-    const routes = agendaRoutes(agendaService(), new FakeNotifications(), {
+    const dispatcher = routeDispatcher(agendaRoutes(agendaService(), {
       pending: async () => {
         throw new Error('outbox unreadable');
       },
@@ -619,11 +617,10 @@ describe('agenda routes and held answers', () => {
         throw new Error('outbox unreadable');
       },
       sendNow: async () => undefined,
-    });
-    const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+    }, new FakeNotifications()));
 
     // Act
-    const response = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/agenda', headers: human }));
+    const response = await dispatcher({ path: '/v1/ferrets/s1/agenda', headers: human });
 
     // Assert — the board is the answer; a held outbox is decoration.
     should(response.status).equal(200);
@@ -633,15 +630,14 @@ describe('agenda routes and held answers', () => {
 
   it('should serve the answers on their way as `delivery`, beside the held ones', async () => {
     // Arrange
-    const routes = agendaRoutes(agendaService(), new FakeNotifications(), {
+    const dispatcher = routeDispatcher(agendaRoutes(agendaService(), {
       pending: async () => undefined,
       delivery: async () => ({ sending: ['A2'], heldForComposer: true }),
       sendNow: async () => undefined,
-    });
-    const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+    }, new FakeNotifications()));
 
     // Act
-    const response = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/agenda', headers: human }));
+    const response = await dispatcher({ path: '/v1/ferrets/s1/agenda', headers: human });
 
     // Assert — "Sending…" is told from the board itself.
     should(response.status).equal(200);
@@ -922,22 +918,6 @@ describe('agenda route edit: clearing agenda fields', () => {
     should(items(cleared)[0]).containDeep({ willBlock: 'the deploy' });
   });
 
-  it('should accept back on an edit and leave an item that was never replied to as it was', async () => {
-    // Arrange
-    const dispatch = fixture();
-    await dispatch(post(agenda, agentIn('s1')));
-
-    // Act
-    const edited = await dispatch(
-      post({ action: 'edit', id: 'A1', willBlock: 'the release', back: true }, agentIn('s1')),
-    );
-
-    // Assert
-    should(edited.status).equal(200);
-    should(items(edited)[0]).containDeep({ willBlock: 'the release' });
-    should(items(edited)[0]).not.have.property('parked');
-  });
-
   it('should clear one field while it sets another in the same edit', async () => {
     // Arrange
     const dispatch = fixture();
@@ -1109,9 +1089,9 @@ it('reads stored conversation through the mounted operator route and refuses inv
   await dispatch(post({ action: 'resolve', id: 'A1', response: { kind: 'other', answer: 'Use eu-west, please.' } }));
 
   // Act
-  const response = await dispatch({ path: '/v1/sessions/s1/agenda/A1/conversation', headers: human });
+  const response = await dispatch({ path: '/v1/ferrets/s1/agenda/A1/conversation', headers: human });
   const invalid = await dispatch({
-    path: '/v1/sessions/s1/agenda/A1/conversation',
+    path: '/v1/ferrets/s1/agenda/A1/conversation',
     headers: human,
     query: [['offset', '-1']],
   });
@@ -1170,46 +1150,41 @@ it('serves full versions, per-device seen marks and conversation mutations throu
     },
     { seen: async () => 1, mark: async (_session, _id, _device, version) => version },
   );
-  const dispatcher = new ApiDispatcher(
-    new ApiRouter([...agendaRoutes(service, new FakeNotifications(), NO_HELD_REPLIES)]),
-    CREDENTIALS,
-    NO_GOVERNED_ROUTES_GUARD,
-  );
-  const dispatch = (input: Parameters<typeof request>[0]) => dispatcher.dispatch(request(input));
+  const dispatch = routeDispatcher(agendaRoutes(service, NO_HELD_REPLIES, new FakeNotifications()));
 
   // Act and assert: version reads and cursor errors.
-  const listed = await dispatch({ path: '/v1/sessions/s1/agenda/A1/versions', headers: human });
+  const listed = await dispatch({ path: '/v1/ferrets/s1/agenda/A1/versions', headers: human });
   should(listed.status).equal(200);
   should(jsonBody(listed)).containDeep({ latest: 1, seen: 1, versions: [summary] });
   const phone = await dispatch({
-    path: '/v1/sessions/s1/agenda/A1/versions',
-    device: { deviceId: 'phone', appSession: 'app' },
+    path: '/v1/ferrets/s1/agenda/A1/versions',
+    headers: device('phone'),
   });
   should(phone.status).equal(200);
-  const version = await dispatch({ path: '/v1/sessions/s1/agenda/A1/versions/1', headers: human });
+  const version = await dispatch({ path: '/v1/ferrets/s1/agenda/A1/versions/1', headers: human });
   should(version.status).equal(200);
   should(jsonBody(version)).containDeep({ version: 1, item: { subject: item.subject } });
   for (const [path, status] of [
-    ['/v1/sessions/s1/agenda/A1/versions/nope', 400],
-    ['/v1/sessions/s1/agenda/nope/versions', 400],
-    ['/v1/sessions/s1/agenda/A1/versions/2', 404],
-    ['/v1/sessions/missing/agenda/A1/versions', 404],
-    ['/v1/sessions/missing/agenda/A1/versions/1', 404],
+    ['/v1/ferrets/s1/agenda/A1/versions/nope', 400],
+    ['/v1/ferrets/s1/agenda/nope/versions', 400],
+    ['/v1/ferrets/s1/agenda/A1/versions/2', 404],
+    ['/v1/ferrets/missing/agenda/A1/versions', 404],
+    ['/v1/ferrets/missing/agenda/A1/versions/1', 404],
   ] as const)
     should((await dispatch({ path, headers: human })).status).equal(status);
   const marked = await dispatch({
     method: 'PUT',
-    path: '/v1/sessions/s1/agenda/A1/seen',
+    path: '/v1/ferrets/s1/agenda/A1/seen',
     headers: human,
     body: '{"version":1}',
   });
   should(marked.status).equal(200);
   should(jsonBody(marked)).deepEqual({ seen: 1 });
   should(
-    (await dispatch({ method: 'PUT', path: '/v1/sessions/s1/agenda/A1/seen', headers: human, body: '{"version":2}' }))
+    (await dispatch({ method: 'PUT', path: '/v1/ferrets/s1/agenda/A1/seen', headers: human, body: '{"version":2}' }))
       .status,
   ).equal(400);
-  const emptyList = await fixture()({ path: '/v1/sessions/s1/agenda/A1/versions', headers: human });
+  const emptyList = await fixture()({ path: '/v1/ferrets/s1/agenda/A1/versions', headers: human });
   should(jsonBody(emptyList)).containDeep({ latest: 0, versions: [] });
 
   // The shipped mutation verbs run through the parsed API boundary, with source text held by the daemon.

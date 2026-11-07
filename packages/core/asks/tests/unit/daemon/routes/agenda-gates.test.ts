@@ -4,17 +4,20 @@
  * refusals come back as the route's statuses. The gate items themselves are `tests/unit/board/gate-items.test.ts`.
  */
 import { describe, it } from 'bun:test';
-import type { GrantRefusal } from '@ferretry/protocol';
+import type { AuthenticatedCredential, CallerGovernance, GrantRefusal } from '@ferretry/core-gate/contract';
+import {
+  ApiError,
+  type ApiRequest,
+  type CallContext,
+  type HolderId,
+  type SessionId,
+} from '@ferretry/kernel/contract';
+import { owner, testArrival } from '@ferretry/kernel/testing';
 import should from 'should';
-import type { AuthenticatedCredential } from '../../../../src/lib/api/authentication.ts';
-import type { CallerGovernance } from '../../../../src/lib/api/capability.ts';
-import { ApiError } from '../../../../src/lib/api/error.ts';
-import type { RouteContext } from '../../../../src/lib/api/route.ts';
-import type { AgendaService } from '../../../../../daemon/lib/agenda/index.ts';
-import type { GateAnswer, GateAnswerOutcome } from '../../../../src/lib/board/index.ts';
-import { agendaRoutes } from '../../../../src/lib/runtime/index.ts';
-import { jsonBody, request } from '../../api/support.ts';
-import { agendaService, NO_HELD_REPLIES } from './support.ts';
+import type { AgendaService } from '../../../../daemon/lib/agenda/index.ts';
+import type { GateAnswer, GateAnswerOutcome } from '../../../../daemon/lib/routes/agenda-gates.ts';
+import { agendaRoutes } from '../../../../daemon/lib/routes/agenda.ts';
+import { agendaService, jsonBody, NO_HELD_REPLIES } from './support.ts';
 
 /** The gate items as the route sees them: what each answer is told to come to, and what it was asked. */
 class FakeGates {
@@ -48,10 +51,23 @@ interface Caller {
 const HOST: Caller = { actor: 'admin-cli', credential: { kind: 'authenticated', tokenClass: 'admin' }, governance: {} };
 const DEVICE: Caller = {
   actor: 'device:phone',
-  credential: { kind: 'authenticated', tokenClass: 'device', deviceId: 'phone' },
+  credential: {
+    kind: 'authenticated',
+    tokenClass: 'device',
+    principal: {
+      kind: 'device',
+      holder: 'phone' as HolderId,
+      session: 's-phone' as SessionId,
+      leaseUntil: '2026-11-07T12:00:00.000Z' as never,
+    },
+  },
   governance: {},
 };
-const FERRET: Caller = { actor: 'peer:s1', credential: { kind: 'authenticated', tokenClass: 'admin' }, governance: {} };
+const FERRET: Caller = {
+  actor: 'ferret:s1',
+  credential: { kind: 'authenticated', tokenClass: 'ferret', ferret: 's1' as never },
+  governance: {},
+};
 
 const post = async (gates: FakeGates, caller: Caller, body: unknown) => {
   const service = agendaService();
@@ -66,23 +82,26 @@ const post = async (gates: FakeGates, caller: Caller, body: unknown) => {
             return { allowed: refusal === 'granted', refusal };
           },
         };
-  const context: RouteContext = {
-    request: request({
-      method: 'POST',
-      path: '/v1/sessions/s1/agenda',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    }),
-    params: new Map([['sessionId', 's1']]),
+  const request: ApiRequest = {
+    method: 'POST',
+    path: '/v1/ferrets/s1/agenda',
+    query: new Map(),
+    headers: new Map([['content-type', 'application/json']]),
+    arrival: testArrival(owner()),
+    text: async () => JSON.stringify(body),
+  };
+  const context: CallContext = {
+    request,
+    params: new Map([['ferretId', 's1']]),
     actor: caller.actor,
     credential: caller.credential,
     ...(governance === undefined ? {} : { governance }),
   };
-  const route = agendaRoutes(service, { enrolledDevices: async () => 1 }, NO_HELD_REPLIES, undefined, gates).find(
-    each => each.method === 'POST' && each.path === '/v1/sessions/:sessionId/agenda',
-  );
+  const handle = agendaRoutes(service, NO_HELD_REPLIES, { enrolledDevices: async () => 1 }, undefined, gates)[
+    'POST /v1/ferrets/:ferretId/agenda'
+  ];
   try {
-    const response = await (route as NonNullable<typeof route>).handle(context);
+    const response = await handle(context);
     return { status: response.status, body: jsonBody(response) as Record<string, unknown> };
   } catch (error) {
     if (!(error instanceof ApiError)) throw error;

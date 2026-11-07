@@ -246,7 +246,7 @@ async function apply(
       : undefined;
   // Files belong to a card's gate answer: an answer that is not one has nothing to carry them to.
   if (request.action === 'resolve' && request.attachments !== undefined && gated === undefined) {
-    throw new ApiError(400, 'files can only come with the answer to a try-it or an approval', 'invalid');
+    throw new ApiError(400, 'files can only come with the answer to a card ask', 'invalid');
   }
   // Not needed on a gate item asks the same grant an answer does.
   if (request.action === 'dismiss' && gates !== undefined) {

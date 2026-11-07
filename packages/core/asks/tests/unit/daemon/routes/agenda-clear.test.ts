@@ -1,38 +1,27 @@
 import { describe, it } from 'bun:test';
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
-import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
-import { AgendaAgentClearer } from '../../../../../daemon/lib/agenda/index.ts';
-import { agendaClearRoutes } from '../../../../../daemon/lib/runtime/mounts/agenda-clear.ts';
+import type { ApiRequest, ApiResponse, CallStanding } from '@ferretry/kernel/contract';
+import { ApiError } from '@ferretry/kernel/contract';
+import { owner, testArrival } from '@ferretry/kernel/testing';
 import should from 'should';
-import { jsonBody, request } from '../../api/support.ts';
-import { handleDirectly } from './second-line.ts';
-import { agentIn, CREDENTIALS, fromFerret, human } from './support.ts';
+import { type AgendaAgentClearer, agendaClearRoutes } from '../../../../daemon/lib/routes/agenda-clear.ts';
+import { agentIn, ferretOwn, human, jsonBody, routeDispatcher } from './support.ts';
 
 function fixture() {
   const calls: string[] = [];
-  const clearer = new AgendaAgentClearer(
-    { agentSessionIds: async () => ['w1'] },
-    { read: async () => null },
-    { dismiss: async () => ({ ok: true, changed: true }) as never },
-  );
-  clearer.preview = async () => {
-    calls.push('preview');
-    return { cleared: 4, sessions: 2 };
+  const clearer: AgendaAgentClearer = {
+    preview: async () => {
+      calls.push('preview');
+      return { cleared: 4, sessions: 2 };
+    },
+    clear: async actor => {
+      calls.push(`clear:${actor.kind}`);
+      return { cleared: 4, sessions: 2 };
+    },
   };
-  clearer.clear = async actor => {
-    calls.push(`clear:${actor.kind}`);
-    return { cleared: 4, sessions: 2 };
-  };
-  const dispatcher = new ApiDispatcher(
-    new ApiRouter([...agendaClearRoutes(clearer)]),
-    CREDENTIALS,
-    NO_GOVERNED_ROUTES_GUARD,
-  );
-  const post = async (body: unknown, headers: Readonly<Record<string, string>> = human): Promise<ApiResponse> =>
-    await dispatcher.dispatch(
-      request({ method: 'POST', path: '/v1/agenda/clear-agents', headers, body: JSON.stringify(body) }),
-    );
-  return { calls, post, dispatcher };
+  const dispatch = routeDispatcher(agendaClearRoutes(clearer));
+  const post = async (body: unknown, headers: CallStanding = human): Promise<ApiResponse> =>
+    await dispatch({ method: 'POST', path: '/v1/agenda/clear-agents', headers, body: JSON.stringify(body) });
+  return { calls, post };
 }
 
 describe('POST /v1/agenda/clear-agents', () => {
@@ -63,17 +52,13 @@ describe('POST /v1/agenda/clear-agents', () => {
 
   it('should refuse a ferret’s credential and clear nothing', async () => {
     // Arrange
-    const { calls, post, dispatcher } = fixture();
+    const { calls, post } = fixture();
 
-    // Act — on the admin token naming its session, and on its own session credential.
+    // Act
     const response = await post({}, agentIn('s1'));
-    const own = await dispatcher.dispatch(
-      fromFerret(request({ method: 'POST', path: '/v1/agenda/clear-agents', headers: human, body: '{}' })),
-    );
 
     // Assert
-    should(response.status).equal(403);
-    should([own.status, jsonBody(own).code]).deepEqual([403, 'owner_only']);
+    should([response.status, jsonBody(response).code]).deepEqual([403, 'owner_only']);
     should(calls).deepEqual([]);
   });
 
@@ -88,19 +73,40 @@ describe('POST /v1/agenda/clear-agents', () => {
     should(response.status).equal(400);
     should(calls).deepEqual([]);
   });
+
+  it('should answer 503 when no clearer is wired, and clear nothing', async () => {
+    // Arrange
+    const dispatch = routeDispatcher(agendaClearRoutes(undefined));
+
+    // Act
+    const response = await dispatch({ method: 'POST', path: '/v1/agenda/clear-agents', headers: human, body: '{}' });
+
+    // Assert
+    should([response.status, jsonBody(response).code]).deepEqual([503, 'unavailable']);
+  });
 });
 
 describe('the handler’s own second line', () => {
   it('should still refuse a ferret’s own credential if the boundary ever let one through', async () => {
     // Arrange — the route is `caller: 'person'`; this proves the handler would refuse a ferret on its own.
-    const clearer = new AgendaAgentClearer(
-      { agentSessionIds: async () => [] },
-      { read: async () => null },
-      { dismiss: async () => ({ ok: true, changed: true }) as never },
-    );
+    const handle = agendaClearRoutes({
+      preview: async () => ({ cleared: 0, sessions: 0 }),
+      clear: async () => ({ cleared: 0, sessions: 0 }),
+    })['POST /v1/agenda/clear-agents'];
+    const request: ApiRequest = {
+      method: 'POST',
+      path: '/v1/agenda/clear-agents',
+      query: new Map(),
+      headers: new Map(),
+      arrival: testArrival(owner()),
+      text: async () => '{}',
+    };
 
     // Act
-    const answer = await handleDirectly(agendaClearRoutes(clearer), 'POST', '/v1/agenda/clear-agents', undefined, {});
+    const answer = await handle({ request, params: new Map(), ...ferretOwn }).then(
+      () => ({ status: 200, code: undefined }),
+      (error: ApiError) => ({ status: error.status, code: error.code }),
+    );
 
     // Assert
     should([answer.status, answer.code]).deepEqual([403, 'forbidden']);

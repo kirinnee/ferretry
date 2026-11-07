@@ -5,9 +5,13 @@ import { z } from 'zod';
 /**
  * `@ferretry/core-asks/contract` (§2.2, §7.4): every question for the owner and every answer, with a GENERIC source
  * envelope. No plugin's ids live here: a source registers the schema of its own `ref` through `ask.sources`, and Asks
- * parses `ref` with it on raise and on read ("source unavailable" when that plugin is later off). Answering is
- * owner-only and happens only through Asks' own route; the port has no answer method, so no plugin and no ferret can
- * answer through it (a ferret must never answer its own secret ask).
+ * parses `ref` with it on raise and on read ("source unavailable" when that plugin is later off).
+ *
+ * Answering happens only through Asks' own route; the port has no answer method, so no plugin can answer through it.
+ * Who may answer is today's rule (lead decision 2026-11-07): a ferret may answer an ORDINARY ask on its own board
+ * only. An owner-only ask — an input card, a held configuration change, a task plan, a 2FA seed, a phone approval —
+ * and every ask a source raised through this port are the owner's alone, the ferret's own board included; no ferret
+ * answers an ask on another ferret's board. So every answer {@link AsksApi.answers} hands a source is the owner's.
  *
  * Limits and kinds are today's agenda (`protocol/src/lib/agenda.ts`); the words are §1's (ask, notice, answer).
  */
@@ -149,7 +153,11 @@ export const ANSWER_EFFECTS = [
 export const AnswerEffectSchema = z.enum(ANSWER_EFFECTS);
 export type AnswerEffect = z.infer<typeof AnswerEffectSchema>;
 
-/** Who answered: only ever the owner, at the machine or from a device (never a ferret, never the warden). */
+/**
+ * Who answered an ask a source raised: only ever the owner, at the machine or from a device (never a ferret, never the
+ * warden). A ferret's answer to an ordinary ask on its own board is the ferret's own business and is never handed to a
+ * source.
+ */
 export const AnswererSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('host') }),
   z.strictObject({ kind: z.literal('device'), holder: z.string().min(1).max(128) }),

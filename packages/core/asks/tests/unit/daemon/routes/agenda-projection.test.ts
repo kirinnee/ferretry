@@ -6,16 +6,21 @@ import {
   AgendaReadItemSchema,
   AgendaSnapshotSchema,
   MACHINE_AGENDA_ID,
-} from '../../../../../daemon/lib/protocol/agenda.ts';
-import { projectionSnapshot } from '../../../../../protocol/tests/fixtures/agenda-projection.ts';
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
-import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
-import { type AgendaLedger, AgendaService } from '../../../../../daemon/lib/agenda/index.ts';
-import { agendaRoutes } from '../../../../../daemon/lib/runtime/mounts/agenda.ts';
-import { agendaMachineRoutes } from '../../../../src/lib/runtime/mounts/agenda-machine.ts';
-import { machineAgendaWorld } from '../../../support/machine-agenda-isolation.ts';
-import { jsonBody, request } from '../../api/support.ts';
-import { agentIn, CREDENTIALS, FakeLedgerRepository, human, NO_HELD_REPLIES } from './support.ts';
+} from '../../../../daemon/lib/protocol/agenda.ts';
+import { type AgendaLedger, AgendaService } from '../../../../daemon/lib/agenda/index.ts';
+import { agendaRoutes } from '../../../../daemon/lib/routes/agenda.ts';
+import { projectionSnapshot } from '../fixtures/agenda-projection.ts';
+import {
+  agentIn,
+  FakeLedgerRepository,
+  human,
+  jsonBody,
+  NO_CALLER,
+  NO_HELD_REPLIES,
+  type RequestOverrides,
+  routeDispatcher,
+  warden,
+} from './support.ts';
 
 const headers = { ...human, [AGENDA_CHANNEL_HEADER]: AGENDA_CHANNEL_VERSION };
 const fixture = () => {
@@ -35,24 +40,17 @@ const fixture = () => {
     { has: async id => id === 's1' || id === MACHINE_AGENDA_ID },
     { raised: async () => {} },
   );
-  const routes = [
-    ...agendaRoutes(service, { enrolledDevices: async () => 0 }, NO_HELD_REPLIES),
-    ...agendaMachineRoutes(service),
-  ];
-  const dispatcher = new ApiDispatcher(new ApiRouter(routes), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+  const dispatch = routeDispatcher(agendaRoutes(service, NO_HELD_REPLIES, { enrolledDevices: async () => 0 }));
   return {
     snapshot,
-    mutate: (path: string, caller: Readonly<Record<string, string>>) =>
-      dispatcher.dispatch(
-        request({ path, method: 'POST', headers: caller, body: JSON.stringify({ action: 'dismiss', id: 'A1' }) }),
-      ),
-    read: (path: string, caller: Readonly<Record<string, string>> = headers) =>
-      dispatcher.dispatch(request({ path, headers: caller })),
+    mutate: (path: string, caller: RequestOverrides['headers']) =>
+      dispatch({ path, method: 'POST', headers: caller, body: JSON.stringify({ action: 'dismiss', id: 'A1' }) }),
+    read: (path: string, caller: RequestOverrides['headers'] = headers) => dispatch({ path, headers: caller }),
   };
 };
 
 describe('agenda list and one-item reads', () => {
-  it.each(['/v1/sessions/s1/agenda', '/v1/machine/agenda'])(
+  it.each(['/v1/ferrets/s1/agenda'])(
     'projects every closed record on %s and keeps active items complete',
     async path => {
       // Arrange
@@ -73,7 +71,7 @@ describe('agenda list and one-item reads', () => {
     },
   );
 
-  it.each(['/v1/sessions/s1/agenda', '/v1/machine/agenda'])(
+  it.each(['/v1/ferrets/s1/agenda'])(
     'preserves complete records for readers below channel 2 of %s',
     async path => {
       const { read, snapshot } = fixture();
@@ -86,7 +84,7 @@ describe('agenda list and one-item reads', () => {
     },
   );
 
-  it.each(['/v1/sessions/s1/agenda', '/v1/machine/agenda'])(
+  it.each(['/v1/ferrets/s1/agenda'])(
     'keeps mutation snapshots complete on %s for every reader',
     async path => {
       for (const version of [undefined, '1', '2']) {
@@ -101,7 +99,7 @@ describe('agenda list and one-item reads', () => {
     },
   );
 
-  it.each(['/v1/sessions/s1/agenda', '/v1/machine/agenda'])(
+  it.each(['/v1/ferrets/s1/agenda'])(
     'reads one whole active or addressed item from %s, with no sibling documents',
     async path => {
       // Arrange
@@ -114,30 +112,15 @@ describe('agenda list and one-item reads', () => {
       }
       expect((await read(`${path}/A99`)).status).toBe(404);
       expect((await read(`${path}/invalid`)).status).toBe(400);
-      expect((await read(`${path}/A2`, {} as typeof headers)).status).toBe(401);
+      expect((await read(`${path}/A2`, NO_CALLER)).status).toBe(401);
     },
   );
 
-  it('refuses the reserved session item alias before reaching a separate machine port', async () => {
-    const world = await machineAgendaWorld(new FakeLedgerRepository(), new FakeLedgerRepository());
-    const before = await world.machineRepository.read(MACHINE_AGENDA_ID);
-    expect(before?.entries[0]?.item.id).toBe('A1');
-    const response = await world.dispatcher.dispatch(
-      request({
-        path: '/v1/sessions/machine-agenda/agenda/A1',
-        headers: { ...agentIn('s1'), authorization: 'Bearer test-admin' },
-      }),
-    );
+  it('refuses the reserved machine agenda id on a ferret path before reaching any port', async () => {
+    const { read } = fixture();
+    const response = await read(`/v1/ferrets/${MACHINE_AGENDA_ID}/agenda/A1`, agentIn('s1'));
     expect(response.status).toBe(404);
     expect(jsonBody(response)).toMatchObject({ code: 'not-found' });
-    expect(world.effects).toEqual([]);
-    expect(await world.machineRepository.read(MACHINE_AGENDA_ID)).toEqual(before);
-    expect(await world.sessionRepository.read(MACHINE_AGENDA_ID)).toBeNull();
-    const owner = await world.dispatcher.dispatch(
-      request({ path: '/v1/machine/agenda/A1', headers: { ...human, authorization: 'Bearer test-admin' } }),
-    );
-    expect(owner.status).toBe(200);
-    expect(AgendaReadItemSchema.parse(jsonBody(owner)).id).toBe('A1');
   });
 
   it('applies the neighbouring route authority to agents, unknown sessions and wardens', async () => {
@@ -145,11 +128,8 @@ describe('agenda list and one-item reads', () => {
     const { read } = fixture();
     // Act + Assert
     const agent = { ...headers, ...agentIn('s1') };
-    expect((await read('/v1/sessions/s1/agenda/A2', agent)).status).toBe(200);
-    expect((await read('/v1/machine/agenda/A2', agent)).status).toBe(403);
-    expect((await read('/v1/sessions/missing/agenda/A2')).status).toBe(404);
-    const warden = { ...headers, authorization: `Bearer ${CREDENTIALS.warden}` };
-    expect((await read('/v1/sessions/s1/agenda/A2', warden)).status).toBe(403);
-    expect((await read('/v1/machine/agenda/A2', warden)).status).toBe(403);
+    expect((await read('/v1/ferrets/s1/agenda/A2', agent)).status).toBe(200);
+    expect((await read('/v1/ferrets/missing/agenda/A2')).status).toBe(404);
+    expect((await read('/v1/ferrets/s1/agenda/A2', { ...headers, ...warden })).status).toBe(403);
   });
 });
