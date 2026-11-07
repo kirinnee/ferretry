@@ -1,0 +1,228 @@
+
+
+/**
+ * The frozen vocabulary of the session working-tree viewer.
+ *
+ * This surface is an arbitrary-file-read primitive wearing a viewer costume, so containment is the
+ * feature rather than a precaution. Threat model: the daemon's bearer token is assumed to be in a
+ * visitor's hands, because the PWA reaches the daemon through a tunnel whose local proxy makes every
+ * request arrive from loopback. Nothing in this subsystem may rely on "only the owner has the token".
+ *
+ * The layers a request meets, in order:
+ *
+ *  1. Syntactic gate, before any filesystem call — no absolute paths, no `..`, no backslashes, no
+ *     NUL, no control characters, no empty segments ({@link normalizeRelativePath}).
+ *  2. Containment by DESCRIPTOR, not by string. The root is opened once and held, and each component
+ *     is then opened `O_DIRECTORY|O_NOFOLLOW` from its already-open parent. The walk that validates
+ *     IS the walk that serves, which is what closes the component-level TOCTOU.
+ *  3. Regular files only, read by HANDLE. Symlinks are never served — not at the leaf and not at any
+ *     interior component.
+ *  4. Unconditional denylist by basename/glob, plus all of `.git/` and `node_modules/`, refused in
+ *     content and in diff, and applied to the LEXICAL path as well as the canonical one.
+ *  5. Gitignore gate — content of a gitignored path is refused, and a gitignored DIRECTORY cannot be
+ *     enumerated either, because the filenames inside one are themselves the leak.
+ *  6. Caps — one mebibyte per file, two thousand entries per listing. A NUL inside the sniff window
+ *     means binary and no *text* content; the explicitly requested, policy-gated base64 representation
+ *     is how an isolated client preview can render a permitted image or PDF without a credential in its URL.
+ */
+
+/** Largest file whose bytes are served. Bigger files report their real size and no content. */
+export const MAX_FILE_BYTES = 1024 * 1024;
+
+/** Largest number of entries one listing reports. One dirent past this sets `truncated`. */
+export const MAX_LISTING_ENTRIES = 2_000;
+
+/** How far into a file a NUL byte still means "do not try to render this as text". */
+export const BINARY_SNIFF_BYTES = 8 * 1024;
+
+/**
+ * The bounds on ONE whole-session file index, so a search over a large tree costs a known amount.
+ *
+ * A working tree has no upper size, and an index read is the one call in this surface that walks all of
+ * it. Every bound reports itself as a `truncated` skip and downgrades coverage rather than silently
+ * returning a short list, because a short list nobody was told about reads as "that file does not exist".
+ *
+ * The file count is generous on purpose: it is a name and a basename per row, so twenty thousand of them
+ * is a few hundred kilobytes, and a repository that large is exactly the one a person cannot search by
+ * scrolling. The candidate count prevents ignored, excluded, missing or unsupported entries from making
+ * the daemon inspect an arbitrarily larger set just to find those files. The directory count bounds a
+ * NON-repository walk, which is the only path that opens one descriptor per directory; a Git worktree
+ * asks Git once whatever its depth. The byte cap bounds that answer's size.
+ */
+export const MAX_INDEX_FILES = 20_000;
+export const MAX_INDEX_CANDIDATES = 40_000;
+export const MAX_INDEX_DIRECTORIES = 4_000;
+export const MAX_INDEX_LIST_BYTES = 8 * 1024 * 1024;
+
+/**
+ * The WALL-CLOCK bound, which is the only one of these that bounds what a caller actually waits for.
+ *
+ * The counts above bound how much is looked at; they do not bound how long looking takes, and the two
+ * are not the same fact. Proving a Git candidate is a current regular file is a component-by-component
+ * walk from the pin, so the candidate cap alone admits a request measured in tens of seconds on a large
+ * monorepo — and the server closes an idle connection at thirty, which turns an answer this schema has
+ * exact words for (`coverage: 'partial'`) into a dropped socket the client can say nothing about.
+ *
+ * Fifteen seconds therefore leaves the response room to be built and written inside that window. It is a
+ * budget for the WHOLE call — the Git question and every open and enumeration after it — because a
+ * per-operation timeout multiplied by an unbounded operation count is not a bound at all.
+ */
+export const MAX_INDEX_WALL_MS = 15_000;
+
+/**
+ * Per-side cap for a diff. Both sides are held in memory and staged into a scratch directory before
+ * Git sees them, so this bounds that cost; the rendered diff is separately capped by the runner's
+ * stdout limit.
+ *
+ * Spelled out rather than aliased to {@link MAX_FILE_BYTES}: the two are equal today by coincidence of
+ * judgement, not by a rule, and an alias would make one of them silently follow the other the next time
+ * somebody tunes a viewer limit.
+ */
+export const MAX_DIFF_SIDE_BYTES = 1024 * 1024;
+
+export type FsErrorCode =
+  | 'invalid_path'
+  | 'not_found'
+  | 'not_a_directory'
+  | 'not_a_file'
+  | 'escapes_root'
+  | 'denied'
+  /** The gitignore gate, kept distinct from `denied` the same way the view flags are. */
+  | 'ignored'
+  /**
+   * This daemon cannot confine reads here AT ALL, so the whole surface is closed rather than a
+   * particular path refused.
+   *
+   * Kept distinct from `denied` because the two ask a client for opposite behaviour: a `denied` path is
+   * one refusal among many on a working surface, and retrying a different path is sensible. This is a
+   * property of the machine the daemon runs on, unchanged by any retry — a client that offers one is
+   * offering a control that cannot succeed.
+   */
+  | 'unsupported';
+
+/** Every refusal this subsystem raises. The code is the contract; the message is for a human. */
+export class FsError extends Error {
+  constructor(
+    readonly code: FsErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'FsError';
+  }
+}
+
+/** What a human calls the system they are running, so a refusal reads as a fact about their computer. */
+const PLATFORM_NAMES: Readonly<Record<string, string>> = { darwin: 'macOS', win32: 'Windows' };
+
+/**
+ * The one refusal a viewer shows verbatim, so it is written for BOTH of its readers.
+ *
+ * The first clause is what a person needs: the feature is missing on their machine, and it is neither
+ * their fault nor something they can configure away. The clause after the dash is what a developer
+ * needs, because a surface that only says "unavailable" sends them into the source to find out WHICH
+ * mechanism is absent. A client shows the first and folds the second away.
+ *
+ * The platform is an argument rather than something this layer reads, and an unknown one is named as
+ * the runtime spells it — a wrong-but-honest "sunos" beats inventing a friendly name for a system
+ * nobody here has tested.
+ */
+export function unsupportedPlatform(platform: string): FsError {
+  return new FsError(
+    'unsupported',
+    `file browsing is not available on ${PLATFORM_NAMES[platform] ?? platform} yet — this daemon ` +
+      'confines every read to the session folder by holding that folder open, and it has no way to ' +
+      'do that here',
+  );
+}
+
+/**
+ * The frozen listing contract. Anything else on disk (fifo, socket, device) is omitted from a
+ * listing rather than given a fourth type no viewer can render.
+ */
+export type FsEntryType = 'file' | 'dir' | 'symlink';
+
+export interface FsEntry {
+  readonly name: string;
+  readonly type: FsEntryType;
+  readonly size?: number;
+  readonly mtime?: string;
+  /** Gitignored: listed, never served. */
+  readonly ignored?: boolean;
+  /** On the unconditional denylist: listed, never served. */
+  readonly denied?: boolean;
+  /** A symlink resolving outside the session root, or broken: listed, never served. */
+  readonly escapes?: boolean;
+}
+
+export interface FsListing {
+  /** The session root as PINNED, not as configured. */
+  readonly root: string;
+  /** The listed directory relative to the root; `''` is the root itself. */
+  readonly path: string;
+  readonly entries: readonly FsEntry[];
+  /** The directory held more than {@link MAX_LISTING_ENTRIES} entries. */
+  readonly truncated?: boolean;
+}
+
+/** Why a view carries no bytes. Distinct from the flags so a client can branch without prose. */
+export type FsRefusalReason = 'denylist' | 'ignored' | 'escapes';
+
+export interface FsFileView {
+  readonly path: string;
+  readonly size: number;
+  readonly mtime?: string;
+  /** Present only when content is actually served. */
+  readonly content?: string;
+  /**
+   * Present only after the caller explicitly asks for the bounded byte representation.
+   *
+   * This remains JSON instead of a credential-bearing document URL: the PWA fetches it through the
+   * paired daemon request, creates a short-lived object URL locally, and never hands the rendered
+   * document a daemon token or device grant.
+   */
+  readonly base64?: string;
+  /** A NUL byte inside the first {@link BINARY_SNIFF_BYTES}. */
+  readonly binary?: boolean;
+  /** Larger than the cap; `size` still reports the real size. */
+  readonly tooLarge?: boolean;
+  /** Refused by the HARD denylist only, so a client can say "never served". */
+  readonly denied?: boolean;
+  /** Refused by the gitignore gate, or because we could not prove otherwise. */
+  readonly ignored?: boolean;
+  readonly reason?: FsRefusalReason;
+  /**
+   * WHICH rule refused it, in words a reader can act on: the ignore file, line and pattern Git matched,
+   * the Git failure that stopped the check, or the denied name. Absent when bytes were served.
+   */
+  readonly rule?: string;
+  /** Served from `HEAD` rather than from the working tree. */
+  readonly rev?: 'head';
+}
+
+export interface FsDiffView {
+  readonly path: string;
+  readonly diff: string;
+  readonly kind: 'tracked' | 'untracked' | 'none';
+  readonly truncated?: boolean;
+  /** Hard denylist. */
+  readonly denied?: boolean;
+  /** Gitignore gate. The same split as {@link FsFileView}. */
+  readonly ignored?: boolean;
+  readonly reason?: 'denylist' | 'ignored';
+}
+
+/** Where a validated relative path landed, for callers that only want the location. */
+export interface ResolvedTarget {
+  /** Realpath of the root AS PINNED. */
+  readonly rootReal: string;
+  /** The normalised path relative to the root. */
+  readonly rel: string;
+  /**
+   * The absolute path after the pinned walk, guaranteed inside the root.
+   *
+   * This is a NAME derived from the walk that proved containment. Anything that goes on to read
+   * bytes must use the walk's own handle instead, because a name can be redirected the moment it is
+   * returned.
+   */
+  readonly absolute: string;
+}

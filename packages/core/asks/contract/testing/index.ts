@@ -13,6 +13,7 @@ import {
   AskDraftSchema,
   type AskFilter,
   type AskId,
+  type AskRef,
   type AskSourceSpec,
   type AskSummary,
   type AsksApi,
@@ -25,44 +26,63 @@ const AT = '2026-11-07T12:00:00.000Z';
 export const sourceKey = (key: string): SourceKey => key as SourceKey;
 export const entryId = (id: string): EntryId => id as EntryId;
 
+/** Where an ask lives: its ferret's board, then its id there. */
+const keyOf = (ask: AskRef): string => `${ask.ferret}~${ask.id}`;
+
+/** The board a draft is raised on: the ferret it is about, else the ferret raising it. */
+export function boardOf(draft: Pick<AskDraft, 'ferret' | 'raisedBy'>): string {
+  const ferret = draft.ferret ?? (draft.raisedBy.kind === 'ferret' ? draft.raisedBy.ferret : undefined);
+  if (ferret === undefined) throw new Error("an ask lives on a ferret's board: the draft names no ferret");
+  return ferret;
+}
+
 /** An in-memory Asks port. `answer` is TEST ONLY: the real port has no answer method (owner-only, by route). */
 export class FakeAsks implements AsksApi {
-  readonly #asks = new Map<AskId, AskSummary>();
+  readonly #asks = new Map<string, AskSummary & { readonly ferret: string }>();
   readonly #answers: AskAnswer[] = [];
-  #next = 0;
+  readonly #next = new Map<string, number>();
   #nextAnswer = 0;
 
-  async raise(ask: AskDraft): Promise<AskId> {
+  async raise(ask: AskDraft): Promise<AskRef> {
     const draft = AskDraftSchema.parse(ask);
+    const ferret = boardOf(draft);
     for (const existing of this.#asks.values())
-      if (existing.source === draft.source && existing.entry === draft.entry) return existing.id;
-    this.#next += 1;
-    const id = `A${this.#next}` as AskId;
-    this.#asks.set(id, {
+      if (existing.source === draft.source && existing.entry === draft.entry)
+        return { ferret: existing.ferret, id: existing.id };
+    const next = (this.#next.get(ferret) ?? 0) + 1;
+    this.#next.set(ferret, next);
+    const id = `A${next}` as AskId;
+    this.#asks.set(keyOf({ ferret, id }), {
       id,
       source: draft.source,
       entry: draft.entry,
       kind: draft.kind,
       subject: draft.subject,
       raisedBy: draft.raisedBy,
-      ...(draft.ferret === undefined ? {} : { ferret: draft.ferret }),
+      ferret,
       state: 'open',
       raisedAt: AT as AskSummary['raisedAt'],
     });
-    return id;
+    return { ferret, id };
   }
-  async notify(notice: Omit<AskDraft, 'kind' | 'options'>): Promise<AskId> {
+  async notify(notice: Omit<AskDraft, 'kind' | 'options'>): Promise<AskRef> {
     return await this.raise({ ...notice, kind: 'notice' });
   }
   /** TEST ONLY: the owner answers. */
-  answerAs(id: AskId, effect: AnswerEffect, by: Answerer = { kind: 'host' }, extra: Partial<AskAnswer> = {}): AnswerId {
-    const ask = this.#asks.get(id);
-    if (ask === undefined) throw new Error(`no ask ${id}`);
+  answerAs(
+    ref: AskRef,
+    effect: AnswerEffect,
+    by: Answerer = { kind: 'host' },
+    extra: Partial<AskAnswer> = {},
+  ): AnswerId {
+    const ask = this.#asks.get(keyOf(ref));
+    if (ask === undefined) throw new Error(`no ask ${ref.ferret} ${ref.id}`);
     this.#nextAnswer += 1;
     const answerId = `an_${this.#nextAnswer.toString(16).padStart(24, '0')}` as AnswerId;
     this.#answers.push({
       id: answerId,
-      ask: id,
+      ferret: ask.ferret,
+      ask: ask.id,
       source: ask.source,
       entry: ask.entry,
       effect,
@@ -70,7 +90,7 @@ export class FakeAsks implements AsksApi {
       at: AT as AskAnswer['at'],
       ...extra,
     });
-    this.#asks.set(id, { ...ask, state: 'answered' });
+    this.#asks.set(keyOf(ref), { ...ask, state: 'answered' });
     return answerId;
   }
   async answers(filter: { readonly source: SourceKey; readonly entry?: EntryId }, since?: string) {
@@ -81,9 +101,9 @@ export class FakeAsks implements AsksApi {
         (since === undefined || a.at > since),
     );
   }
-  async close(id: AskId, _reason: CloseReason): Promise<void> {
-    const ask = this.#asks.get(id);
-    if (ask !== undefined) this.#asks.set(id, { ...ask, state: 'closed' });
+  async close(ref: AskRef, _reason: CloseReason): Promise<void> {
+    const ask = this.#asks.get(keyOf(ref));
+    if (ask !== undefined) this.#asks.set(keyOf(ref), { ...ask, state: 'closed' });
   }
   async open(filter: AskFilter): Promise<readonly AskSummary[]> {
     return [...this.#asks.values()].filter(
@@ -94,15 +114,15 @@ export class FakeAsks implements AsksApi {
         (filter.ferret === undefined || a.ferret === filter.ferret),
     );
   }
-  async get(id: AskId) {
-    return this.#asks.get(id);
+  async get(ref: AskRef) {
+    return this.#asks.get(keyOf(ref));
   }
 }
 
 export interface AsksSubject {
   readonly asks: AsksApi;
   /** The owner answers (through the route in the real port). */
-  answer(id: AskId, effect: AnswerEffect): Promise<AnswerId> | AnswerId;
+  answer(ask: AskRef, effect: AnswerEffect): Promise<AnswerId> | AnswerId;
 }
 
 const draft = (entry: string, ferret?: string): AskDraft => ({
@@ -126,8 +146,16 @@ export function asksConformance(name: string, make: () => AsksSubject | Promise<
     test('raise is idempotent by (source, entry)', async () => {
       const { asks } = await make();
       const first = await asks.raise(draft('e1'));
-      expect(await asks.raise(draft('e1'))).toBe(first);
-      expect(await asks.raise(draft('e2'))).not.toBe(first);
+      expect(await asks.raise(draft('e1'))).toEqual(first);
+      expect(await asks.raise(draft('e2'))).not.toEqual(first);
+    });
+    test('ids are numbered per ferret: the same A1 on two boards are two asks', async () => {
+      const subject = await make();
+      const mine = await subject.asks.raise(draft('e1', 'f1'));
+      const theirs = await subject.asks.raise(draft('e2', 'f2'));
+      expect(mine.id).toBe(theirs.id);
+      await subject.asks.close(mine, 'withdrawn');
+      expect((await subject.asks.get(theirs))?.state).toBe('open');
     });
     test('answers come back by source and entry, each with its own id', async () => {
       const subject = await make();
@@ -137,13 +165,14 @@ export function asksConformance(name: string, make: () => AsksSubject | Promise<
       await subject.answer(two, 'reject');
       const answers = await subject.asks.answers({ source: sourceKey('ferret'), entry: entryId('e1') });
       expect(answers.map(a => a.id)).toEqual([a1]);
-      expect(answers[0]?.ask).toBe(one);
+      expect(answers[0]?.ask).toBe(one.id);
+      expect(answers[0]?.ferret).toBe(one.ferret);
     });
     test('open lists by ferret; a closed ask leaves the open list', async () => {
       const { asks } = await make();
       const mine = await asks.raise(draft('e1', 'f1'));
       await asks.raise(draft('e2', 'f2'));
-      expect((await asks.open({ ferret: 'f1' as FerretId })).map(a => a.id)).toEqual([mine]);
+      expect((await asks.open({ ferret: 'f1' as FerretId })).map(a => a.id)).toEqual([mine.id]);
       await asks.close(mine, 'withdrawn');
       expect((await asks.open({ ferret: 'f1' as FerretId })).length).toBe(0);
     });
