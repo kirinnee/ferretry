@@ -19,6 +19,7 @@ afterAll(async () => {
 
 const Moved = defineEvent('board.card-moved', z.strictObject({ card: z.string() }));
 const Secret = defineEvent('voice.heard', z.strictObject({ text: z.string() }));
+const Alarm = defineEvent('gate.alarm', z.strictObject({ level: z.string() }));
 const gate = definePlugin({
   id: 'gate',
   title: 'Gate',
@@ -27,6 +28,7 @@ const gate = definePlugin({
   core: true,
   kinds: [],
   provides: { admission: AdmissionPort },
+  data: { publishes: [Alarm] },
 });
 const board = definePlugin({
   id: 'board',
@@ -66,7 +68,7 @@ async function boot(admission: Admission) {
   const root = await mkdtemp(`${tmpdir()}/bus-socket-`);
   roots.push(root);
   const home = `${root}/home`;
-  const published: Record<string, (event: typeof Moved | typeof Secret, payload: unknown) => void> = {};
+  const published: Record<string, (event: typeof Moved | typeof Secret | typeof Alarm, payload: unknown) => void> = {};
   const outcome = await bootHost({
     home,
     version: '5.0.0',
@@ -76,7 +78,12 @@ async function boot(admission: Admission) {
       homeLock: async () => ({ release: async () => {} }),
     },
     implementations: [
-      implementDaemon(gate, { build: () => ({ provides: { admission } }) }),
+      implementDaemon(gate, {
+        build: ({ kernel }) => {
+          published['gate'] = (event, payload) => kernel.events.publish(event as typeof Alarm, payload as never);
+          return { provides: { admission } };
+        },
+      }),
       implementDaemon(board, {
         build: ({ kernel }) => {
           published['board'] = (event, payload) => kernel.events.publish(event as typeof Moved, payload as never);
@@ -194,6 +201,8 @@ test('V-0452 when Gate is bound and its projection throws, the bus sends no fram
     await handler.open();
     published['board']?.(Moved, { card: 'F1' });
     published['voice']?.(Secret, { text: 'never shown' });
+    // a core plugin's event is held back too: the old fallback (core pieces only) would have sent this one
+    published['gate']?.(Alarm, { level: 'high' });
     await flush();
     expect(feed.sent).toEqual([]);
     handler.close();

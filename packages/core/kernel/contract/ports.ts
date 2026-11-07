@@ -250,6 +250,17 @@ export type ConfigWriteOutcome =
       readonly kind: 'refused';
       readonly reason: 'yaml' | 'raw_secret' | 'schema' | 'not_declared' | 'bad_name' | 'not_a_mapping';
       readonly issues: readonly ConfigWriteIssue[];
+    }
+  /**
+   * Only from {@link ConfigPort.remove} with `refuseIfHeld`: the removal loosens and this call's judge did not let it
+   * into effect, so it would have been held. Nothing was touched: the file is still in effect, nothing is held.
+   */
+  | {
+      readonly kind: 'refused';
+      readonly reason: 'would_hold';
+      /** Always empty: nothing is wrong with the file; `sentences` say what the removal would loosen. */
+      readonly issues: readonly ConfigWriteIssue[];
+      readonly sentences: readonly string[];
     };
 
 /** Its declared config files and collections, parsed, live (§7.2). */
@@ -291,11 +302,15 @@ export interface ConfigPort {
     edit: { readonly patch: Readonly<Record<string, unknown>> },
     options?: { readonly ifMatch?: string },
   ): Promise<ConfigWriteOutcome>;
-  /** Removes one of its own files; removing what loosens (a budget, a rule) is judged and held like a write. */
+  /**
+   * Removes one of its own files; removing what loosens (a budget, a rule) is judged and held like a write.
+   * `refuseIfHeld`: a removal that would be held is refused `would_hold` instead, with the file left untouched and
+   * nothing held. It is the same one judgement as the removal (asked once, in the same act), never a separate dry run.
+   */
   remove(
     def: ConfigFileDef<any> | ConfigCollectionDef<any>,
     name: string | undefined,
-    options?: { readonly ifMatch?: string },
+    options?: { readonly ifMatch?: string; readonly refuseIfHeld?: true },
   ): Promise<ConfigWriteOutcome>;
 }
 

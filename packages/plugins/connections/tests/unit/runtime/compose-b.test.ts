@@ -186,6 +186,7 @@ describe('connections daemon half: tunnel and WebRTC composed', () => {
       },
       daemonId: 'fy_daemon_manifest_check',
       onStop: () => {},
+      stopping: () => false,
     });
     const handle = await listener.open({
       carrier: 'tunnel' as CarrierKey,

@@ -113,6 +113,29 @@ describe('the journals as the stream’s source', () => {
     expect(reads).toHaveLength(4);
   });
 
+  test('the backlog reads each ferret’s tail with the bound for its limit: limit 10 asks for 64 KiB, not 4 MiB', async () => {
+    const { port, append } = world();
+    await append('wren', 3);
+    await append('oak', 2);
+    const asked: number[] = [];
+    const source = new HistoryEventSource(
+      {
+        lines: (file, name) => port.lines(file, name),
+        tail: async (file, options) => {
+          asked.push(options.maxBytes);
+          return await port.tail(file, options);
+        },
+      },
+      () => ['wren', 'oak'],
+    );
+    await source.fleetBacklog(10, new AbortController().signal);
+    expect(asked).toEqual([backlogTailBytes(10), backlogTailBytes(10)]);
+    expect(backlogTailBytes(10)).toBe(64 * 1024);
+    asked.length = 0;
+    await source.fleetBacklog(5_000, new AbortController().signal);
+    expect(asked).toEqual([4 * 1024 * 1024, 4 * 1024 * 1024]);
+  });
+
   test('a pass nobody is waiting for any more reads nothing', async () => {
     const { port, append } = world();
     await append('wren', 3);

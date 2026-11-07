@@ -45,6 +45,7 @@ describe('the composer list', () => {
     const inventory: FerretSkillsInventory = {
       ferretId: 'f1',
       harness: 'claude-code',
+      folder: '/work/app',
       truncated: false,
       skills: [skill('b', 'user'), skill('a', 'ferretry'), skill('b', 'project')],
     };

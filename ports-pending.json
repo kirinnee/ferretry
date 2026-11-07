@@ -5,7 +5,6 @@
     "vault",
     "ferrets",
     "connections",
-    "updates",
     "claude-code",
     "codex",
     "logins",
@@ -27,7 +26,6 @@
     "onboarding"
   ],
   "pendingReasons": {
-    "updates": ["FY_UPDATE_CHECK=off is not honoured: the kernel UpdateHostPort cannot express it (kernel item)"],
     "runtimes": [
       "GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) is not ported into Runtimes; Add runtime and a runtime that needs sign-in link to Logins' tab until Logins' app half draws it",
       "GAP(kernel): Edit as YAML on a profile is not offered, because the kernel's /v1/config/file is not declared yet (renderFileEditor is never supplied)"
@@ -92,7 +90,7 @@
       "conversation app half: all four ports have landed — C1 (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app), C2 (the composer, its menus over reference.catalog, attachments, drafts, the send outbox, Conversation Settings, the attachments panel and the chat-width panel), C3 (the chat screen and transcript) and C4 (the queue, compact-at and hypermedia panels, the question renderer, work search in the command bar, the Conversations screen)",
       "GAP(C3): the Composer takes the ferret's harness as a prop (a Codex ferret's picked skill inserts $name); the chat screen passes it from the Ferrets read",
       "GAP(app-shell): the carrier outage mark, the Agenda item draft stream, the 'machine recovered' moment and clearing drafts on unpair have no hook in the 5.0 client yet (app/composer/NEEDS-APP-SHELL.txt); today's boot drain of every machine's saved messages is not run, a kept message is retried when the chat screen draws it",
-      "GAP(board, agenda, skills, terminals, browsers, ferrets): no plugin takes reference.catalog yet, so every composer menu answers provided:false and is empty; the providers declare their own demand (filesystem for @, terminal for %terminal, browser for %browser) and the route asks it before they run",
+      "GAP(browsers, ferrets): no plugin takes reference.catalog for %browser, : or @ yet, so those composer menus answer provided:false and are empty; the providers declare their own demand (filesystem for @, terminal for %terminal, browser for %browser) and the route asks it before they run",
       "GAP(app-shell): the fy-render sandbox shell and library bundles are built by packages/app/scripts/build-fy-render-libs.ts and served from the app origin; the browser tests that exercise them need playwright and the Vite harness (tests/integration/app, NEEDS-APP-SHELL.txt)",
       "GAP(board): a card or board fence draws each card through the Board reference:& renderer; the mini board and the lane view of today are Board views",
       "GAP(browsers): ExternalLink and useLinkBehaviour keep the default (open in the reader's browser); the \"Open links in\" policy is the Browsers plugin's",
@@ -123,6 +121,16 @@
       "GAP(agenda-composer) and GAP(quote-target): the ask page offers the agenda.conversation slot (Q9); a reply typed there does not mark the Inbox replied, and Quote in composer needs Conversation's composer to register its quote target",
       "GAP(agenda-nav) and GAP(agenda-drawer): the Inbox nav entry, the needs-you group and the in-chat drawer have no 5.0 shell or Conversation slot to mount in",
       "GAP(answer-files), GAP(sign-in-rule-sweep), GAP(push-delivery), GAP(notification-open), GAP(item-opened): answer uploads, the sign-in rule sweep and push delivery/open run through ports Conversation, Accounts and Access must bind (Access's agendaItemOpenedHandler is an app function its contract does not expose, so opening an ask does not yet close this device's own buzz lines); the notification filter's sentence says the switch is that machine's own, as the rows are Access's now; app/NEEDS-APP-SHELL.txt lists every open gap"
+    ],
+    "skills": [
+      "Add skills: the page’s other group, the skills of the catalogs this device subscribes to, and a skill row’s Publish / Uninstall / “installed from” in its ⋯ are Catalogs’ rows; they need Catalogs’ app half and a row contribution, and the half has no Catalogs edge",
+      "Add skills: Install from this machine offers a project and an agent only; a runtime-and-profile target needs Runtimes’ profile list through its contract (the copy routes already take one)",
+      "a /name or $name reference links to Settings › Skills on the daemon it names; opening the Skills tab of the ferret’s context needs Ferrets to offer a way to select a side panel (no screen or address for it yet)"
+    ],
+    "mcp": [
+      "Actions › Add MCP server: the form, its model and the panel’s Add… link are Ferrets’ Actions rows (add-mcp-form, add-mcp-model, session-mcp-api) and wait for the plugin that owns the row to contribute it",
+      "MCP rows in the ferret panel: share / add to a catalog, “installed from” and install from a file need Catalogs’ row host; the half has no Catalogs edge",
+      "Runtimes’ components page MCP rows (today’s ComponentMcpStatus and useMachineMcp) are not drawn: Runtimes cannot import this half, and no contract offers the row yet"
     ]
   },
   "pendingHalves": {

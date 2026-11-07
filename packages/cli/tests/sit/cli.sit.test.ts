@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -20,7 +21,28 @@ afterAll(async () => {
   await rm(home, { recursive: true, force: true });
 });
 
-const PLUGINS = { protocol: 1, plugins: [{ id: 'tiny', on: true, contract: 'x' }] };
+/**
+ * The inventory a daemon of this very build answers: the kernel's own line (the guard requires it before any kernel
+ * call, `doctor`'s `GET /v1/doctor` among them), every plugin line with the hash this `fy` was generated with, read
+ * from the generated registry's text, and one data plugin this build does not know.
+ */
+const generated = readFileSync(join(dirname(import.meta.path), '..', '..', 'src', 'generated', 'commands.ts'), 'utf8');
+const kernelContract = /^\s*kernel: \{ manifest: \w+, contract: "([0-9a-f]+)" \}/mu.exec(generated)?.[1];
+if (kernelContract === undefined) throw new Error('the generated registry has no kernel line: regenerate it');
+const PLUGINS = {
+  protocol: 1,
+  plugins: [
+    { id: 'kernel', on: true, contract: kernelContract },
+    ...[...generated.matchAll(/\{ id: "([^"]+)", manifest: \w+, contract: "([0-9a-f]+)"/gu)].map(
+      ([, id, contract]) => ({
+        id,
+        on: true,
+        contract,
+      }),
+    ),
+    { id: 'tiny', on: true, contract: 'x' },
+  ],
+};
 /** What the daemon's own host checks say when everything is where it should be (`GET /v1/doctor`). */
 const READY_REPORT = { checks: [], harnesses: [], ready: true, limitation: 'presence on PATH only' };
 const daemon = () =>
