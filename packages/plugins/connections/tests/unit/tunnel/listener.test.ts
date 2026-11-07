@@ -1,44 +1,15 @@
 /**
- * The tunnel listener's surface: one route, `404` for everything else, and every peer keyed by the
- * address Cloudflare's edge saw — or one shared bucket when it did not say.
+ * How a tunnel arrival is keyed: by the address Cloudflare's edge saw — or one shared bucket when it did not say.
+ * The listener itself (one route, `404` for everything else, every arrival remote) is the kernel's, tested in
+ * `core/kernel/tests/unit/host/carrier-listener.test.ts` and, wired to this carrier, in `runtime/compose-b.test.ts`.
  */
 
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { headersFrom, queryFrom, type ApiRequest } from '@ferretry/kernel/contract';
-import { testArrival, owner } from '@ferretry/kernel/testing';
-import {
-  TUNNEL_PEER_HEADER,
-  TUNNEL_SHARED_PEER,
-  tunnelListenerSurface,
-  tunnelPeer,
-} from '../../../daemon/lib/tunnel/listener.ts';
+import { headersFrom } from '@ferretry/kernel/contract';
+import { TUNNEL_PEER_HEADER, TUNNEL_SHARED_PEER, tunnelPeer } from '../../../daemon/lib/tunnel/listener.ts';
 
-const DAEMON = 'fy_daemon_tunnel';
-const accepted: string[] = [];
-const request = (input: { path: string; method?: string; loopback?: boolean }): ApiRequest => ({
-  method: input.method ?? 'GET',
-  path: input.path,
-  query: queryFrom([]),
-  headers: headersFrom({}),
-  arrival: testArrival(owner()),
-  text: async () => '',
-});
-const surface = tunnelListenerSurface({
-  sockets: {
-    claims: arrival => arrival.path === '/v1/rendezvous/' + DAEMON + '/client',
-    upgrade: async arrival => {
-      accepted.push(arrival.path + ' loopback=' + String(arrival.arrival.kind === 'local'));
-      return {
-        outcome: 'accepted',
-        attach: async () => ({ open: async () => undefined, fromClient: () => undefined, close: () => undefined }),
-      };
-    },
-  },
-  corsOrigins: ['https://ferretry.pages.dev'],
-});
-
-describe('the tunnel listener', () => {
+describe('the tunnel listener’s peer key', () => {
   it('should key a peer by CF-Connecting-IP, and share one bucket when it is absent or not an address', () => {
     should(TUNNEL_PEER_HEADER).equal('cf-connecting-ip');
     should(tunnelPeer(headersFrom({ 'CF-Connecting-IP': ' 203.0.113.9 ' }))).equal('203.0.113.9');
@@ -71,40 +42,6 @@ describe('the tunnel listener', () => {
       'a.b',
     ])
       should(peer(garbled)).equal(TUNNEL_SHARED_PEER);
-  });
-
-  guarantee(['G16', 'R660'], 'should answer 404 to every request that is not the session upgrade', async () => {
-    // Act
-    const answers = await Promise.all(
-      ['/v1/health', '/v1/carriers', `/v1/rendezvous/${DAEMON}/client`, '/'].map(
-        async path => await surface.http.dispatch(request({ path })),
-      ),
-    );
-
-    // Assert
-    should(answers.map(answer => answer.status)).deepEqual([404, 404, 404, 404]);
-    should(JSON.parse(answers[0]?.body ?? '{}')).deepEqual({
-      error: 'nothing is served at this path',
-      code: 'not_found',
-    });
-  });
-
-  it('should claim only GET on the session route, so another method is the same 404', async () => {
-    should(surface.sockets.claims(request({ path: `/v1/rendezvous/${DAEMON}/client` }))).be.true();
-    should(surface.sockets.claims(request({ method: 'POST', path: `/v1/rendezvous/${DAEMON}/client` }))).be.false();
-    should(surface.sockets.claims(request({ path: '/v1/sessions/abc/terminals/1/stream' }))).be.false();
-    should([...surface.corsOrigins]).deepEqual(['https://ferretry.pages.dev']);
-  });
-
-  it('should admit the session route through the shared socket boundary, as it arrived', async () => {
-    // Act
-    const decision = await surface.sockets.upgrade(
-      request({ path: `/v1/rendezvous/${DAEMON}/client`, loopback: false }),
-    );
-
-    // Assert
-    should(decision.outcome).equal('accepted');
-    should(accepted).deepEqual([`/v1/rendezvous/${DAEMON}/client loopback=false`]);
   });
 });
 

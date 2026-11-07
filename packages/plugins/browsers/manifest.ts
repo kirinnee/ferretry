@@ -3,6 +3,7 @@ import { GatePort } from '@ferretry/core-gate/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
 import { FerretsPort } from '@ferretry/core-ferrets/contract';
 import { InputTargets, VaultPort } from '@ferretry/core-vault/contract';
+import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
 import { TerminalsPort } from '@ferretry/plugin-terminals/contract';
 import {
   AUDIT,
@@ -51,8 +52,9 @@ export default definePlugin({
    * Optional (§7.6): the ferret a page belongs to and the name it is grouped under (Ferrets; off, no ferret has pages),
    * and the one reader of a ferret's own pane (Terminals), for closing the browsers left under it (D2 #19; off, none
    * is closed). Terminals uses neither Browsers nor the Warden, so this edge makes no cycle.
+   * Conversation (lead ruling 2026-11-07): Off, nothing asks Browsers for the composer's `%browser` menu.
    */
-  uses: { ferrets: FerretsPort, terminals: TerminalsPort },
+  uses: { ferrets: FerretsPort, terminals: TerminalsPort, conversation: ConversationPort },
   /**
    * The Vault: input requests raised from a page (`browser_request_input`), and what a ferret did to a page and where
    * page scripts ran, told to its sign-in lock (lead DECISIONS-2 #5, I98–I100).
@@ -321,7 +323,13 @@ export default definePlugin({
     publishes: [PageChanged],
   },
 
-  hooks: { takes: [{ hook: InputTargets, key: 'page' }] },
+  hooks: {
+    takes: [
+      { hook: InputTargets, key: 'page' },
+      /** The composer's `%browser` menu is this plugin's: the pages the ferret's browser holds (reference.catalog). */
+      { hook: ReferenceCatalog, key: '%browser' },
+    ],
+  },
 
   doctor: ['chrome', 'loopback-firewall'],
 

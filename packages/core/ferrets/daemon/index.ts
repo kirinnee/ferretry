@@ -83,6 +83,7 @@ import {
 import { DaemonStorage } from './adapters/storage/session-storage.ts';
 import { buildMoves, MOVE_ROUTE_KEYS } from './moves.ts';
 import { movesDeps } from './moves-deps.ts';
+import { fleetEventsAccept, HistoryEventSource } from './modules/fleet-events.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
@@ -160,6 +161,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
    * Today's journal append (`storage/session-storage.ts` `append`) without its index: the next sequence after the
    * last readable event. One chain per ferret; a journal that cannot be read to its end is not appended to.
    */
+  // The journal stream's source: each ferret's history.jsonl, and the append edge below.
+  const eventSource = new HistoryEventSource(kernel.state, () => registry.list().map(ferret => ferret.id));
   const historyQueue = new KeyedSerialExecutor();
   const appendHistory = async (ferret: FerretId, type: string, data: Readonly<Record<string, unknown>>) =>
     await historyQueue
@@ -171,6 +174,13 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         }
         const event = createSessionEvent(ferret as unknown as SessionId, last, kernel.clock.now(), type, data);
         await kernel.state.append(FerretHistoryFiles, encodeSessionEvent(event), ferret);
+        eventSource.publish({
+          sequence: event.sequence,
+          sessionId: event.sessionId,
+          time: event.time,
+          type: event.type,
+          data: event.data,
+        });
       })
       .catch((error: unknown) =>
         log.warn('a ferret history event could not be recorded', {
@@ -591,6 +601,13 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         },
         generation: () => tokens.generation(),
       },
+    },
+    sockets: {
+      'GET /v1/events': fleetEventsAccept(
+        eventSource,
+        { after: (delay, action) => ({ cancel: kernel.clock.after(milliseconds(delay), action) }) },
+        id => registry.get(id as FerretId) !== undefined,
+      ),
     },
     routes: {
       ...worktrees.routes,

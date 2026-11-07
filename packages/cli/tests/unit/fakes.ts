@@ -88,7 +88,9 @@ const kernelEntry: KernelEntry = {
     api: 5,
     core: true,
     kinds: [],
-    actions: { routes: [route('GET /v1/glossary', { ...SCOPE, caller: 'any' })] },
+    actions: {
+      routes: [route('GET /v1/glossary', { ...SCOPE, caller: 'any' }), route('GET /v1/doctor', { ...SCOPE, caller: 'any' })],
+    },
   }),
   contract: 'h-kernel',
 };
@@ -230,6 +232,9 @@ export function fakeHostInputs() {
     },
     readStdin: async (): Promise<string> => {
       throw new Error('the fake host reads no real standard input: pass readStdin');
+    },
+    pathExists: async (absolute: string): Promise<boolean> => {
+      throw new Error(`the fake host probes no real path (${absolute}): pass pathExists`);
     },
   };
 }

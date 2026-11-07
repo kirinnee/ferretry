@@ -3,7 +3,8 @@
  * package its manifest does not declare it consumes, or reaches a daemon around the generated client.
  *
  * What a manifest declares it consumes: the providers of its `needs` and `uses`, the offerers of the hooks it takes,
- * the registrar of every ask source it renders, and the owners of the routes its app actions call. A route a half
+ * the registrar of every ask source and reference prefix it renders, every taker of an `input.targets` kind it
+ * drives, and the owners of the routes its app actions call. A route a half
  * calls (`client.call('GET /v1/x')`, a literal) must be its own or one of those packages'. `fetch`, `WebSocket`,
  * `EventSource` and `XMLHttpRequest` in a client half bypass the generated client and its hash guard.
  */

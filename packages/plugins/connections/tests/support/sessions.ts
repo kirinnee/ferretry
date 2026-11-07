@@ -46,6 +46,9 @@ export class FakeSessions implements SessionLayer {
     signCatalog: async () => {
       throw new Error('not used by this fixture');
     },
+    signLinkStoreRequest: async () => {
+      throw new Error('not used by this fixture');
+    },
     signSecretOffer: async () => {
       throw new Error('not used by this fixture');
     },

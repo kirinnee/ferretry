@@ -1,41 +1,23 @@
 /**
- * THE TUNNEL'S OWN LISTENER: one route, and every arrival on it remote — `docs/relay-protocol.md` §15.
+ * HOW A TUNNEL ARRIVAL IS KEYED — `docs/relay-protocol.md` §15.
  *
  * `cloudflared` forwards from this daemon's own host, so everything that comes through a tunnel arrives
- * from a loopback peer. Pointing the tunnel at the daemon's API listener would therefore make a phone on
- * the far side of Cloudflare indistinguishable from a browser at the machine. So the tunnel never points
- * there: the daemon binds a SECOND listener on `127.0.0.1`, on an ephemeral port (the `originPort` it
- * provisions with), and that listener
+ * from a loopback peer. The tunnel therefore never points at the daemon's API listener: it points at the
+ * KERNEL'S carrier listener (`kernel.carrierListener`, an ephemeral `127.0.0.1` port — the `originPort` it
+ * provisions with), which serves ONLY this plugin's declared `GET /v1/rendezvous/<daemonId>/client`, answers
+ * `404` to everything else, and stamps every arrival `{ kind: 'carried', carrier: 'tunnel' }` — never local
+ * (G15, G16) — so nothing inside a tunnelled session reaches a `privilegedOnly` route and its requests are
+ * governed by grants exactly as a relayed device's are.
  *
- * - serves ONLY `GET /v1/rendezvous/<its daemonId>/client` — the direct carrier's session route, the
- *   very same {@link SocketRoute} and session, not a fork of either — and answers `404` to everything
- *   else, including that path without an upgrade and any other fingerprint;
- * - stamps every arrival `loopback: false` and not privileged (the adapter applies
- *   `ApiBindOptions.remotePeer`), which is the relay rule of §14 for the same reason. A query-string
- *   token is honoured only from a loopback arrival, so it is never honoured here; a session opened here
- *   carries a remote {@link SessionArrival}, so nothing inside it reaches a `privilegedOnly` route, and
- *   its requests are governed by grants exactly as a relayed device's are;
- * - keys the per-peer admission bounds of §4 by `CF-Connecting-IP` — the address Cloudflare's edge saw —
- *   and falls back to ONE shared key when it is absent or not an address, so a caller that hides it
- *   shares a bucket rather than escaping one.
- *
- * The edge's ingress forwards only that one path too (`tunnelIngress`), so this is the inner of two
- * walls rather than the only one.
+ * What stays here is the one thing only this carrier knows: the per-peer admission bounds of §4 key by
+ * `CF-Connecting-IP` — the address Cloudflare's edge saw — and fall back to ONE shared key when it is
+ * absent or not an address, so a caller that hides it shares a bucket rather than escaping one. The
+ * edge's ingress forwards only that one path too (`tunnelIngress`), so the kernel's listener is the
+ * inner of two walls rather than the only one.
  */
 
-import {
-  errorResponse,
-  type ApiRequest,
-  type ApiResponse,
-  type SocketUpgradeDecision,
-  type CarrierKey,
-} from '@ferretry/kernel/contract';
+import type { ApiRequest } from '@ferretry/kernel/contract';
 type ApiHeaders = ApiRequest['headers'];
-
-export interface TunnelSocketBoundary {
-  claims(request: ApiRequest): boolean;
-  upgrade(request: ApiRequest): Promise<SocketUpgradeDecision>;
-}
 
 /** The header Cloudflare's edge sets to the address it accepted the connection from. */
 export const TUNNEL_PEER_HEADER = 'cf-connecting-ip';
@@ -82,40 +64,4 @@ export function tunnelPeer(headers: ApiHeaders): string {
   if (value === undefined || value.length > 45) return TUNNEL_SHARED_PEER;
   if (IPV4.test(value)) return value;
   return (value.includes(':') ? ipv6Network(value) : undefined) ?? TUNNEL_SHARED_PEER;
-}
-
-/** Everything else on this listener is not served, and says nothing about what is. */
-const NOT_SERVED = errorResponse(404, 'nothing is served at this path', 'not_found');
-
-/**
- * The listener's whole surface: the session route as its ONLY socket route, and `404` for every
- * request that is not an upgrade to it.
- *
- * The socket table is the shared {@link ApiSocketDispatcher} over a router holding that one route, so
- * the upgrade is admitted by the same authorization code the main listener runs — the route is public
- * because its credential is the device proof inside the session, never anything on the upgrade.
- * `route` must be its OWN instance of the direct carrier's route, so tunnel arrivals are counted
- * against their own admission bounds and keyed by their own peers.
- */
-export function tunnelListenerSurface(input: {
-  readonly sockets: TunnelSocketBoundary;
-  readonly corsOrigins: readonly string[];
-}) {
-  const carried = (request: ApiRequest): ApiRequest => ({
-    ...request,
-    arrival: { kind: 'carried', carrier: 'tunnel' as CarrierKey },
-    clientAddress: tunnelPeer(request.headers),
-  });
-  return {
-    http: { dispatch: async (_request: ApiRequest): Promise<ApiResponse> => NOT_SERVED },
-    sockets: {
-      claims: (request: ApiRequest) => request.method === 'GET' && input.sockets.claims(carried(request)),
-      upgrade: async (request: ApiRequest): Promise<SocketUpgradeDecision> => {
-        if (request.method !== 'GET' || !input.sockets.claims(carried(request)))
-          return { outcome: 'refused', response: NOT_SERVED };
-        return await input.sockets.upgrade(carried(request));
-      },
-    },
-    corsOrigins: input.corsOrigins,
-  };
 }

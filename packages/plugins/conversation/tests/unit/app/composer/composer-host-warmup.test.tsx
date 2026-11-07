@@ -92,7 +92,7 @@ interface MenuFrame {
 
 /** What a reader would see in THIS committed frame: the popover's own text and
  *  how many rows of the family it is offering. */
-const sampleMenu = (view: ReactTestRenderer, family: 'Skills' | 'References' | 'Tasks', kind?: string): MenuFrame => {
+const sampleMenu = (view: ReactTestRenderer, family: 'Skills' | 'References' | 'Cards', kind?: string): MenuFrame => {
   const popover = view.root.findAllByProps({ 'data-composer-autocomplete': family })[0];
   return {
     rows: view.root.findAllByProps({ 'data-kind': kind ?? (family === 'Skills' ? 'skill' : 'attention') }).length,
@@ -272,7 +272,7 @@ describe('composer host warm-up handshake', () => {
             extra={{ suggestions: composerSuggestionSwitches('both', true) }}
             onCommit={() => {
               if (holder.view !== undefined)
-                frames.push(sampleMenu(holder.view, draft === '&F1' ? 'Tasks' : 'References', 'task'));
+                frames.push(sampleMenu(holder.view, draft === '&F1' ? 'Cards' : 'References', 'task'));
             }}
             prefix="&"
             read={read}
