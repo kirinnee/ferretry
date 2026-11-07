@@ -35,7 +35,9 @@ export default implementCli(manifest, {
           if (flag(invocation, 'run')) {
             const machine = extras.updateMachine;
             if (machine === undefined) {
-              io.err('This fy cannot drive the package managers and the service on this machine yet, so it cannot run an update.\n');
+              io.err(
+                'This fy cannot drive the package managers and the service on this machine yet, so it cannot run an update.\n',
+              );
               return UNAVAILABLE;
             }
             const built = machine.deps({ view: async () => await view().catch(() => undefined) });

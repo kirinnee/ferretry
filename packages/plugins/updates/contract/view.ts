@@ -77,4 +77,3 @@ export const DaemonUpdateViewSchema = z.strictObject({
   job: UpdateJobSchema.nullable(),
 });
 export type DaemonUpdateView = z.infer<typeof DaemonUpdateViewSchema>;
-

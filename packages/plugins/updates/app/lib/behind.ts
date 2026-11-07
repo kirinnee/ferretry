@@ -20,7 +20,11 @@ export function behindSentence(view: DaemonUpdateView): string | undefined {
 export type UpdateOffer =
   | { readonly kind: 'none' }
   | { readonly kind: 'busy'; readonly sentence: string }
-  | { readonly kind: 'steps'; readonly explanation: string; readonly steps: readonly { command: string; note?: string }[] }
+  | {
+      readonly kind: 'steps';
+      readonly explanation: string;
+      readonly steps: readonly { command: string; note?: string }[];
+    }
   | { readonly kind: 'update'; readonly target: string; readonly midTurn: number };
 
 export function updateOffer(view: DaemonUpdateView): UpdateOffer {

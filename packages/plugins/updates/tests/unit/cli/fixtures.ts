@@ -266,23 +266,23 @@ export class FakeUpdateView implements IDaemonUpdateViewPort {
     if (midTurn === undefined) return Promise.resolve(undefined);
     return Promise.resolve(
       DaemonUpdateViewSchema.parse({
-      current: '1.2.3',
-      method: { kind: 'homebrew', cask: 'ferretry' },
-      plan: {
-        kind: 'self',
-        steps: [{ command: 'brew upgrade --cask ferretry' }, { command: 'fy daemon restart' }],
-        rollback: 'none',
-      },
-      check: {
-        state: 'ok',
-        checkedAt: '2026-10-18T09:00:00.000Z',
-        latest: { version: '1.3.0', url: 'https://github.com/kirinnee/ferretry/releases/tag/v1.3.0' },
-      },
-      available: true,
-      midTurn,
-      autoInstall: false,
-      job: null,
-    }),
+        current: '1.2.3',
+        method: { kind: 'homebrew', cask: 'ferretry' },
+        plan: {
+          kind: 'self',
+          steps: [{ command: 'brew upgrade --cask ferretry' }, { command: 'fy daemon restart' }],
+          rollback: 'none',
+        },
+        check: {
+          state: 'ok',
+          checkedAt: '2026-10-18T09:00:00.000Z',
+          latest: { version: '1.3.0', url: 'https://github.com/kirinnee/ferretry/releases/tag/v1.3.0' },
+        },
+        available: true,
+        midTurn,
+        autoInstall: false,
+        job: null,
+      }),
     );
   }
 }

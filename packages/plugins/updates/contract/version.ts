@@ -56,4 +56,3 @@ export function compareVersions(a: string, b: string): -1 | 0 | 1 | undefined {
   }
   return comparePrerelease(left.prerelease, right.prerelease);
 }
-

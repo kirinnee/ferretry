@@ -168,9 +168,7 @@ export function bundledReleases(): readonly ChangelogRelease[] {
 /** The versions strictly newer than the last one this device viewed. No baseline means nothing is new. */
 export function newVersions(releases: readonly ChangelogRelease[], lastViewed: string | null): ReadonlySet<string> {
   if (lastViewed === null) return new Set();
-  return new Set(
-    releases.filter(release => compareVersions(release.version, lastViewed) === 1).map(r => r.version),
-  );
+  return new Set(releases.filter(release => compareVersions(release.version, lastViewed) === 1).map(r => r.version));
 }
 
 /** The slice of `localStorage` the page uses. */

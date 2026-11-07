@@ -23,7 +23,8 @@ function answering(respond: () => Response | Promise<Response>) {
   return { calls, port };
 }
 
-const source = (port: FetchPort) => new GitHubLatestRelease('ferretry', port, { userAgent: 'fyd/4.28.0', timeoutMs: 1_000 });
+const source = (port: FetchPort) =>
+  new GitHubLatestRelease('ferretry', port, { userAgent: 'fyd/4.28.0', timeoutMs: 1_000 });
 
 describe('the GitHub latest-release read', () => {
   it('asks the release API uncached, with a user agent, and reads the release', async () => {

@@ -57,7 +57,8 @@ const hostUnavailable = (): PlainApiResponse =>
  */
 export function updateRoutes(subsystem: DaemonUpdateSubsystem | undefined, door: ConfigDoor | undefined) {
   return {
-    'GET /v1/daemon/update': async () => (subsystem === undefined ? hostUnavailable() : jsonResponse(await subsystem.view())),
+    'GET /v1/daemon/update': async () =>
+      subsystem === undefined ? hostUnavailable() : jsonResponse(await subsystem.view()),
 
     'POST /v1/daemon/update': async (call: CallContext) => {
       const request = await bodyOf(call.request, DaemonUpdateStartRequestSchema);
@@ -73,11 +74,7 @@ export function updateRoutes(subsystem: DaemonUpdateSubsystem | undefined, door:
       const patch = await bodyOf(call.request, DaemonUpdateSettingsPatchSchema);
       if (subsystem === undefined) return hostUnavailable();
       if (door === undefined)
-        return errorResponse(
-          503,
-          'this daemon cannot change its settings yet',
-          UPDATE_HOST_CODES.configUnavailable,
-        );
+        return errorResponse(503, 'this daemon cannot change its settings yet', UPDATE_HOST_CODES.configUnavailable);
       const written = await door.write(UPDATES_CONFIG, undefined, { patch });
       if (written.kind === 'refused')
         return errorResponse(422, `the setting was refused: ${written.reason}`, UPDATE_HOST_CODES.settingRefused, {

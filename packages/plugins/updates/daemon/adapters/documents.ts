@@ -1,10 +1,5 @@
 import type { Log, StatePort } from '@ferretry/kernel/contract';
-import {
-  type UpdateCheck,
-  UPDATES_LATEST,
-  UPDATES_REPORT,
-  type UpdateReport,
-} from '../../contract/index.ts';
+import { type UpdateCheck, UPDATES_LATEST, UPDATES_REPORT, type UpdateReport } from '../../contract/index.ts';
 import type { UpdateDocuments } from '../lib/ports.ts';
 
 /**
@@ -33,7 +28,9 @@ export class StateUpdateDocuments implements UpdateDocuments {
     await this.state.remove(UPDATES_REPORT);
   }
 
-  async #read<Shape>(file: Parameters<StatePort['read']>[0] & { readonly schema?: unknown }): Promise<Shape | undefined> {
+  async #read<Shape>(
+    file: Parameters<StatePort['read']>[0] & { readonly schema?: unknown },
+  ): Promise<Shape | undefined> {
     const read = await this.state.read(file);
     if (!read.ok) {
       this.log.warn('an update document could not be read; treating it as never written', { file: read.error.file });

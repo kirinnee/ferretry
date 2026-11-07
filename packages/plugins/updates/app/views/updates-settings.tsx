@@ -75,7 +75,9 @@ export const createSettings = (client: PluginClient): AppComponent<SettingsProps
             <button type="button" onClick={() => void start(offer.target, 'when-idle')}>
               Update when no ferret is mid-turn
             </button>
-            {offer.midTurn > 0 ? <span> {offer.midTurn} mid-turn now; they keep running through the restart.</span> : null}
+            {offer.midTurn > 0 ? (
+              <span> {offer.midTurn} mid-turn now; they keep running through the restart.</span>
+            ) : null}
           </p>
         ) : null}
         {offer.kind === 'steps' ? (

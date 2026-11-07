@@ -221,8 +221,7 @@ export class DaemonUpdater {
     intent: UpdateIntent,
     options: DaemonUpdateOptions,
   ): Promise<Omit<UpdateReport, 'from' | 'target' | 'finishedAt'>> {
-    if (compareVersions(intent.target, intent.current) !== 1)
-      return await this.#refreshDefinition(intent, options);
+    if (compareVersions(intent.target, intent.current) !== 1) return await this.#refreshDefinition(intent, options);
     if (intent.plan.kind === 'manual') {
       throw new DaemonUpdateRefusedError(
         [`${intent.plan.explanation}`, ...renderPlan(intent.plan, this.deps.clientName)].join('\n'),

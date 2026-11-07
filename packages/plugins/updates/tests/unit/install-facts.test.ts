@@ -67,7 +67,10 @@ describe('the host install facts', () => {
   });
 
   it('calls a source run a development build', async () => {
-    const facts = await new HostInstallFacts(fakeHost({ main: '/work/packages/daemon/bin/fyd.ts' }), runner({})).facts();
+    const facts = await new HostInstallFacts(
+      fakeHost({ main: '/work/packages/daemon/bin/fyd.ts' }),
+      runner({}),
+    ).facts();
     should(facts.compiled).be.false();
   });
 

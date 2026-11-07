@@ -92,9 +92,11 @@ describe('fy update', () => {
     const h = harness([view({ method: manual, plan: planUpdate(manual, { product: 'ferretry', clientName: 'fy' }) })]);
     expect(await runUpdateVerb(h.deps, { ...options, yes: true })).toBe(0);
     expect(h.started).toEqual([]);
-    expect(viewLines(view({ method: manual, plan: planUpdate(manual, { product: 'ferretry', clientName: 'fy' }) })).join('\n')).toContain(
-      'sudo apt-get update',
-    );
+    expect(
+      viewLines(view({ method: manual, plan: planUpdate(manual, { product: 'ferretry', clientName: 'fy' }) })).join(
+        '\n',
+      ),
+    ).toContain('sudo apt-get update');
   });
 });
 
@@ -106,7 +108,7 @@ describe('the verb on the shell', () => {
   const invocation = (options: VerbInvocation['options']): VerbInvocation => ({ args: [], options });
   const noClient: PluginClient = { call: async () => view() as never, subscribe: () => () => undefined };
 
-  test('--run without the shell\'s machine ports says so and exits 69', async () => {
+  test("--run without the shell's machine ports says so and exits 69", async () => {
     const terminal = io();
     const half = cli.build?.({ manifest, client: noClient, io: terminal });
     expect(await half?.verbs.update(invocation({ run: true }))).toBe(69);

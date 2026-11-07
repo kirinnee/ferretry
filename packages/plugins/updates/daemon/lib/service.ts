@@ -342,7 +342,11 @@ export class DaemonUpdateService implements DaemonUpdateSubsystem {
     }
     this.#check = next;
     const known = knownLatestRelease(next);
-    if (answer.kind === 'ok' && isUpdateAvailable(this.#options.current, known) && known?.version !== knownLatestRelease(previous)?.version) {
+    if (
+      answer.kind === 'ok' &&
+      isUpdateAvailable(this.#options.current, known) &&
+      known?.version !== knownLatestRelease(previous)?.version
+    ) {
       this.#options.onAvailable?.(known?.version ?? '');
     }
     await this.#options.documents.writeLatest(next).catch(() => undefined);

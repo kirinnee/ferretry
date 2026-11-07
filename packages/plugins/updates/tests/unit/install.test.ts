@@ -73,7 +73,11 @@ const cases: SchemaCase[] = [
     value: { target: '4.29.0', when: 'now' },
   },
   { name: 'version', schema: update.VersionSchema, value: '5.0.0' },
-  { name: 'status', schema: update.UpdateStatusSchema, value: { current: '5.0.0', available: false, autoInstall: false, midTurn: 0 } },
+  {
+    name: 'status',
+    schema: update.UpdateStatusSchema,
+    value: { current: '5.0.0', available: false, autoInstall: false, midTurn: 0 },
+  },
   {
     name: 'settings held',
     schema: update.DaemonUpdateSettingsHeldSchema,

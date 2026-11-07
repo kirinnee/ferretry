@@ -16,11 +16,7 @@ const json = (response: { body: string }): any => JSON.parse(response.body);
 
 const LATEST = { version: '4.29.0', url: 'https://github.com/kirinnee/ferretry/releases/tag/v4.29.0' };
 
-function serviceWith(
-  launched: string[],
-  midTurn = 0,
-  checks = true,
-): DaemonUpdateService {
+function serviceWith(launched: string[], midTurn = 0, checks = true): DaemonUpdateService {
   const store = new Map<string, unknown>();
   return new DaemonUpdateService({
     current: '4.28.0',
@@ -123,7 +119,9 @@ describe('update routes', () => {
       door({ kind: 'held', sentences: ['updates install automatically when idle'] }),
     )['PATCH /v1/daemon/update/settings'](call({ autoInstall: true }));
     expect([held.status, json(held).held]).toEqual([202, ['updates install automatically when idle']]);
-    const none = await updateRoutes(service, undefined)['PATCH /v1/daemon/update/settings'](call({ autoInstall: true }));
+    const none = await updateRoutes(service, undefined)['PATCH /v1/daemon/update/settings'](
+      call({ autoInstall: true }),
+    );
     expect([none.status, json(none).code]).toEqual([503, UPDATE_HOST_CODES.configUnavailable]);
   });
 });
