@@ -1,6 +1,7 @@
 import { Credentials, StepUp, GatePort } from '@ferretry/core-gate/contract';
 import { VaultPort, SealedDocumentsPort } from '@ferretry/core-vault/contract';
 import { CatalogLinkKeys, CatalogInstallPrefs } from './contract/storage.ts';
+import { CatalogsConfigFile } from './contract/config.ts';
 import { defineState, SessionModes } from '@ferretry/kernel/contract';
 import { definePlugin, memberRoute, route, screen, verb } from '@ferretry/kernel/manifest';
 import { AccessPort } from '@ferretry/plugin-access/contract';
@@ -521,6 +522,7 @@ export default definePlugin({
   },
 
   data: {
+    config: [CatalogsConfigFile],
     state: [
       defineState({ name: 'catalogs', path: 'catalogs.json', store: 'json', format: 1 }),
       /** Frozen item versions by digest: content-addressed, re-checked against the signed document on read. */

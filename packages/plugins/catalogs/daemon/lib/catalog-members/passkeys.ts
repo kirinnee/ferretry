@@ -107,6 +107,21 @@ const passkeyView = (passkey: StoredPasskey): PasskeyView => ({
 export class MemberPasskeyService {
   /** When each member key last unlocked. Read back by {@link restore}, so a restart does not ask again. */
   readonly #unlockedAt = new Map<string, number>();
+  #generation = 0;
+
+  generation(): number {
+    return this.#generation;
+  }
+
+  /** Gate owns its ceremony and challenge; use the same verifier and counter CAS as a member unlock. */
+  async verifyWitness(
+    keyId: string,
+    assertion: Omit<StepUpAssertion, 'rotation'>,
+    challenge: Uint8Array,
+  ): Promise<boolean> {
+    if ((await this.deps.members.access(keyId)) === undefined) return false;
+    return await this.#verify(keyId, assertion, challenge);
+  }
   #persisting: Promise<unknown> = Promise.resolve();
   /** The registration in flight per key: one key adds its passkeys one at a time. */
   readonly #registering = new Map<string, Promise<void>>();
@@ -126,6 +141,7 @@ export class MemberPasskeyService {
     }
     const now = this.deps.clock.nowMs();
     for (const [keyId, at] of stored) if (at <= now && !this.#unlockedAt.has(keyId)) this.#unlockedAt.set(keyId, at);
+    this.#generation += 1;
     return undefined;
   }
 
@@ -297,6 +313,7 @@ export class MemberPasskeyService {
     if (challenge === undefined) return refuse('not-verified');
     if (!(await this.#verify(access.keyId, assertion, challenge))) return refuse('not-verified');
     this.#unlockedAt.set(access.keyId, now);
+    this.#generation += 1;
     await this.#persist();
     await this.deps.audit
       .record({
@@ -318,7 +335,10 @@ export class MemberPasskeyService {
   /** A key left or was removed: its passkeys, unlock and challenges go with it, and the passkeys-changed signal is told. */
   async forgetKey(keyId: string): Promise<void> {
     this.deps.challenges.forgetDevice(keyId);
-    if (this.#unlockedAt.delete(keyId)) await this.#persist();
+    if (this.#unlockedAt.delete(keyId)) {
+      this.#generation += 1;
+      await this.#persist();
+    }
     await this.deps.store.forgetDevice(keyId);
     await this.deps.passkeysChanged?.emit({ cause: 'member-key-forgotten', keyId });
   }

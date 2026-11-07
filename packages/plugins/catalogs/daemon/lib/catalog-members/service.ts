@@ -752,6 +752,12 @@ export class CatalogMemberService {
   /** One browser as it stands NOW, or `undefined` when its key, its member or the store is gone, or time ended the key. */
   async access(keyId: string): Promise<MemberAccess | undefined> {
     await this.ready();
+    return this.accessNow(keyId);
+  }
+
+  /** Gate and the kernel watch re-read the same loaded member document synchronously. */
+  accessNow(keyId: string): MemberAccess | undefined {
+    if (this.#state === undefined) return undefined;
     const now = this.deps.now();
     for (const member of this.#loaded().members.members) {
       const key = member.keys.find(entry => entry.keyId === keyId);
@@ -769,6 +775,18 @@ export class CatalogMemberService {
         };
     }
     return undefined;
+  }
+
+  #projection: MembersDocument | undefined;
+  #projectionGeneration = 0;
+
+  generation(): number {
+    const current = this.#state?.members;
+    if (current !== this.#projection) {
+      this.#projection = current;
+      this.#projectionGeneration += 1;
+    }
+    return this.#projectionGeneration;
   }
 
   /** The ids of every browser one person holds; none when the person is not here. */

@@ -1,6 +1,7 @@
 /** TODO(kernel contract): IdentitySigner.signCatalog, the approved kernel shape. */
 import { catalogCanonicalText } from '../../contract/wire/index.ts';
-import { utf8Bytes } from './kernel-wire/index.ts';
+import { utf8Bytes, toBase64Url } from './kernel-wire/index.ts';
+import type { LinkStoreRequestContext, SignedLinkStoreRequest } from './catalog-wire/link-store.ts';
 import type { SessionCrypto as RelayCrypto } from './kernel-wire/index.ts';
 import {
   catalogManifestSignedBytes,
@@ -25,7 +26,31 @@ export interface CatalogSigningIdentity {
       readonly kind: 'manifest' | 'versions' | 'link';
       readonly canonical: Uint8Array;
     }): Promise<{ readonly daemonId: string; readonly publicKey: string; readonly signature: string }>;
+    /** TODO(kernel contract): the fixed upload/delete/status labels; the kernel supplies its identity. */
+    signLinkStoreRequest?(input: {
+      readonly host: string;
+      readonly nonce: Uint8Array;
+      readonly canonicalBody: Uint8Array;
+    }): Promise<{ readonly daemonId: string; readonly publicKey: string; readonly signature: string }>;
   };
+}
+
+export async function signLinkStoreRequest(
+  _crypto: RelayCrypto,
+  identity: CatalogSigningIdentity,
+  context: LinkStoreRequestContext,
+): Promise<SignedLinkStoreRequest> {
+  if (context.daemonId !== identity.daemonId) throw new Error('A machine signs only its own link-store requests.');
+  const body = catalogCanonicalText(context.body);
+  if (!body.ok || identity.signer.signLinkStoreRequest === undefined)
+    throw new Error('The link-store request signer is unavailable.');
+  const signed = await identity.signer.signLinkStoreRequest({
+    host: context.host,
+    nonce: context.nonce,
+    canonicalBody: utf8Bytes(body.text),
+  });
+  if (signed.daemonId !== identity.daemonId) throw new Error('The link-store request signer changed identity.');
+  return { ...signed, nonce: toBase64Url(context.nonce) };
 }
 export type CatalogVerificationRefusal =
   | 'signature_invalid'

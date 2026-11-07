@@ -37,5 +37,6 @@ export {
   signCatalogManifest,
   signCatalogItemVersions,
   signCatalogLink,
+  signLinkStoreRequest,
   type CatalogSigningIdentity,
 } from './signatures.ts';
