@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
+import { LoginChangesPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
 import {
   AccountChangeRequestSchema,
   CloneBundleSchema,
@@ -35,7 +36,13 @@ describe('runtimes contract', () => {
       'GET /v1/ferrets/:id/runtime-models',
       'POST /v1/ferrets/:id/runtime',
     ]);
-    expect(Object.keys(manifest.needs)).toEqual(['ferrets', 'logins']);
+    expect(Object.keys(manifest.needs)).toEqual(['ferrets', 'logins', 'loginChanges']);
+  });
+
+  test('Runtimes answers which runtimes use a login (logins.used-by) and is the only plugin that writes logins', () => {
+    expect(manifest.hooks?.takes).toEqual([{ hook: LoginsUsedBy, key: 'runtimes' }]);
+    expect(manifest.needs.loginChanges).toBe(LoginChangesPort);
+    expect(LoginsUsedBy.takers).toEqual(['runtimes']);
   });
 
   test('every route is operator-minimum and no-store, and a ferret may not apply a change', () => {
