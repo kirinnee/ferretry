@@ -24,7 +24,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { newTestDevice, pairOverSession } from './support/pairing/session-client.ts';
+import { deviceSession, newTestDevice, pairOverSession, type TestDevice } from './support/pairing/session-client.ts';
 
 /** The one secret the fixture stores. It is a constant on purpose: a fixture value, not a credential. */
 const FIXTURE_SECRET_NAME = 'FIXTURE_NOT_A_SECRET';
@@ -391,6 +391,7 @@ async function startFerret(
 }
 
 let runtime = 'claude-default';
+let pairedDevice: { daemonId: string; deviceId: string; device: TestDevice } | undefined;
 
 async function build(): Promise<void> {
   await refuseUnlessDisposable();
@@ -516,21 +517,6 @@ async function build(): Promise<void> {
     };
   });
 
-  await step('leave a shared draft for the running ferret', false, async () => {
-    const path = `/v1/sessions/${encodeURIComponent(target)}/shared-draft`;
-    const current = await owner('GET', path);
-    if (current.status !== 200) throw new Error(`GET shared-draft answered ${String(current.status)}`);
-    const snapshot = current.body as { generation: unknown; epoch: number; rev: number };
-    const edited = await owner('POST', path, {
-      generation: snapshot.generation,
-      epoch: snapshot.epoch,
-      base: snapshot.rev,
-      text: ['fixture shared draft'],
-    });
-    if (edited.status >= 300) throw new Error(`POST shared-draft answered ${String(edited.status)}`);
-    made.sharedDraft = { ferret: target };
-  });
-
   await step('pin a note and pin a ferret', false, async () => {
     await fyOk(['pin', '--session', target, 'add', 'fixture pinned note']);
     const pins = parseJson(await fyOk(['pin', '--session', target, 'ls', '--json']));
@@ -558,6 +544,8 @@ async function build(): Promise<void> {
         '--workflow',
         'quick',
         '--public',
+        '--assignee',
+        target,
         '--project',
         'alpha',
         '--json',
@@ -581,9 +569,26 @@ async function build(): Promise<void> {
 
   await step('raise agenda asks: one answered, one open, and a notice', false, async () => {
     const add = async (kind: string, title: string, ask: string): Promise<string> => {
-      const text = await fyOk(['agenda', '--json', 'add', '--title', title, '--kind', kind, '--ask', ask], {
-        as: target,
-      });
+      const text = await fyOk(
+        [
+          'agenda',
+          '--json',
+          'add',
+          '--title',
+          title,
+          '--kind',
+          kind,
+          '--ask',
+          ask,
+          '--premise',
+          'Fixture: a v4 home is being built for the converter.',
+          '--context',
+          'Fixture: nothing here is real.',
+        ],
+        {
+          as: target,
+        },
+      );
       const id = findString(parseJson(text), ['id']) ?? /\bA[1-9][0-9]*\b/u.exec(text)?.[0];
       if (id === undefined) throw new Error('fy agenda add printed no item id');
       return id.replace(/^[!&]/u, '');
@@ -600,9 +605,16 @@ async function build(): Promise<void> {
   });
 
   await step('file a lesson suggestion', false, async () => {
-    const text = await fyOk(['lesson', 'suggest', 'Fixture rule: say what you did.', '--scope', 'global', '--json'], {
-      as: target,
-    });
+    const text = await fyOk([
+      'lesson',
+      'suggest',
+      'Fixture rule: say what you did.',
+      '--scope',
+      'global',
+      '--session',
+      target,
+      '--json',
+    ]);
     made.lessons = [{ ferret: target, scope: 'global', id: findString(parseJson(text), ['id']) ?? null }];
   });
 
@@ -615,14 +627,18 @@ async function build(): Promise<void> {
 
   await step('pair a device with a generated key', false, async () => {
     const minted = await owner('POST', '/v1/pair/code');
-    if (minted.status !== 200) throw new Error(`minting a pairing code answered ${String(minted.status)}`);
+    if (minted.status < 200 || minted.status >= 300)
+      throw new Error(`minting a pairing code answered ${String(minted.status)}`);
     const body = minted.body as { daemonId?: string; code?: string };
     if (typeof body.daemonId !== 'string' || typeof body.code !== 'string')
       throw new Error('the mint answered without a daemon id and code');
     redactions.add(body.code);
+    // Only somebody at the machine may loosen the unlock a new device must pass; the fixture is not measuring passkeys.
+    await owner('PATCH', '/v1/security', { unlockOnOpen: false });
     const device = await newTestDevice();
     const paired = await pairOverSession(baseUrl, body.daemonId, body.code, 'Fixture phone', device);
     if (paired.kind !== 'paired') throw new Error('the daemon refused the fresh pairing code');
+    pairedDevice = { daemonId: body.daemonId, deviceId: paired.response.deviceId, device };
     const spki = Buffer.from(device.publicKey, 'base64url');
     made.device = {
       id: paired.response.deviceId,
@@ -632,6 +648,31 @@ async function build(): Promise<void> {
       publicKey: device.publicKey,
       publicKeySha256: createHash('sha256').update(spki).digest('base64url'),
     };
+  });
+
+  await step('leave a shared draft for the running ferret', false, async () => {
+    if (pairedDevice === undefined)
+      throw new Error('no paired device: a draft belongs to its owner, and only a device may edit it');
+    const session = await deviceSession(baseUrl, pairedDevice.daemonId, pairedDevice.deviceId, pairedDevice.device);
+    try {
+      const path = `/v1/sessions/${encodeURIComponent(target)}/shared-draft`;
+      const current = await session.request('GET', path);
+      if (current.status !== 200) throw new Error(`GET shared-draft answered ${String(current.status)}`);
+      const snapshot = JSON.parse(current.body) as { generation: unknown; epoch: number; rev: number };
+      const edited = await session.request('POST', path, {
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          generation: snapshot.generation,
+          epoch: snapshot.epoch,
+          base: snapshot.rev,
+          text: ['fixture shared draft'],
+        }),
+      });
+      if (edited.status >= 300) throw new Error(`POST shared-draft answered ${String(edited.status)}`);
+    } finally {
+      session.close();
+    }
+    made.sharedDraft = { ferret: target, editedBy: 'the paired device' };
   });
 
   // Capture the running ferret's pane while the daemon and tmux are still up, then stop politely.
