@@ -28,7 +28,8 @@
     "react": "^19.0.0",
     "@ferretry/plugin-board": "workspace:*",
     "@ferretry/plugin-browsers": "workspace:*",
-    "@ferretry/plugin-projects": "workspace:*"
+    "@ferretry/plugin-projects": "workspace:*",
+    "@ferretry/app": "workspace:*"
   },
   "sideEffects": false,
   "devDependencies": {

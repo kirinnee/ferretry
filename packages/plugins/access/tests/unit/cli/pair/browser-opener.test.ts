@@ -9,13 +9,17 @@
 
 import { describe, it } from 'bun:test';
 import type { ChildProcess, spawn } from 'node:child_process';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
 import {
+  createPairingRedirectPage,
   DesktopBrowserOpener,
   type ExitingProcess,
+  holdProcessOpen,
   onProcessExit,
 } from '../../../../cli/adapters/pair/browser-opener.ts';
-import { PAIR_URL } from './fixtures';
+import { PAIRING_REDIRECT_DIRECTORY_PREFIX, PairingRedirectsFile } from '../../../../contract/index.ts';
+import { CODE, PAIR_URL } from './fixtures';
 
 /** Lets every promise already queued settle, the way the event loop would between two events. */
 const drain = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -167,5 +171,136 @@ describe('DesktopBrowserOpener with a state-backed page', () => {
     await opening;
     should(answered).be.false();
     log.should.eql(['discard:start', 'discard:done']);
+  });
+});
+
+/** What the launcher was asked to run: its program and every argument, as the process table would show them. */
+interface Launch {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly options: unknown;
+}
+
+/**
+ * The shipped page store (`createPairingRedirectPage`) over the in-memory Access state, with a launcher that only
+ * records. The page is therefore the real one the CLI writes — its directory, its name, its bytes — minus the disk.
+ */
+function launcherWorld(platform = 'linux') {
+  const folder = new MemoryStateFolder();
+  const state = folder.ownState([PairingRedirectsFile]);
+  const launches: Launch[] = [];
+  const errors: (() => void)[] = [];
+  const timers: { readonly run: () => void; readonly ms: number }[] = [];
+  const exits: (() => Promise<void>)[] = [];
+  const opener = new DesktopBrowserOpener({
+    platform,
+    spawn: ((command: string, args: readonly string[], options: unknown) => {
+      launches.push({ command, args, options });
+      return {
+        on: (event: string, listener: () => void) => {
+          if (event === 'error') errors.push(listener);
+        },
+        unref: () => undefined,
+      } as unknown as ChildProcess;
+    }) as unknown as typeof spawn,
+    stateHome: '/unused',
+    createPage: page => createPairingRedirectPage(state, page),
+    retentionMs: 10_000,
+    schedule: (run, ms) => void timers.push({ run, ms }),
+    onExit: run => void exits.push(run),
+  });
+  /** Every path the folder holds, files and directories: empty means nothing of the page is left. */
+  const held = () => [...folder.bytes.keys(), ...folder.directories.keys()];
+  return { folder, opener, launches, errors, timers, exits, held };
+}
+
+describe('DesktopBrowserOpener keeps the link out of every argument vector', () => {
+  it('P103 uses each platform own launcher, with a path as the argument and never the link', async () => {
+    for (const [platform, command] of [
+      ['darwin', 'open'],
+      ['linux', 'xdg-open'],
+      ['freebsd', 'xdg-open'],
+      ['openbsd', 'xdg-open'],
+    ] as const) {
+      const world = launcherWorld(platform);
+      (await world.opener.open(PAIR_URL)).should.be.true();
+      world.launches[0]?.command.should.equal(command);
+      world.launches[0]?.args.should.have.length(1);
+    }
+    const windows = launcherWorld('win32');
+    (await windows.opener.open(PAIR_URL)).should.be.true();
+    windows.launches[0]?.command.should.equal('cmd');
+    windows.launches[0]?.args.slice(0, 3).should.eql(['/c', 'start', '']);
+  });
+
+  it('P103 never gives the launcher an argument containing the code, the fragment or the link', async () => {
+    // An argument is `/proc/<pid>/cmdline`, which every local user can read.
+    for (const platform of ['darwin', 'linux', 'win32', 'freebsd']) {
+      const world = launcherWorld(platform);
+      await world.opener.open(PAIR_URL);
+      for (const argument of [world.launches[0]?.command ?? '', ...(world.launches[0]?.args ?? [])]) {
+        argument.should.not.containEql(CODE);
+        argument.should.not.containEql('#v1');
+        argument.should.not.containEql(PAIR_URL);
+      }
+    }
+  });
+
+  it('P103 writes the redirect page into a fresh private directory of the state tree, as an owner-only file', async () => {
+    const world = launcherWorld();
+    await world.opener.open(PAIR_URL);
+
+    const [directory] = [...world.folder.directories.keys()];
+    should(directory).startWith(`pairing-redirects/${PAIRING_REDIRECT_DIRECTORY_PREFIX}`);
+    should(world.folder.directories.get(directory ?? '')?.mode).equal(0o700);
+    // The file's declared mode is what the real store applies on creation; it is never wider than owner-only.
+    should(PairingRedirectsFile.mode).equal(0o600);
+    const file = world.launches[0]?.args[0] ?? '';
+    file.should.containEql(directory?.replace('pairing-redirects/', '') ?? '?');
+    // The code is held only inside the page, which is what carries it to the browser.
+    const page = new TextDecoder().decode(world.folder.bytes.get(`${directory}/pairing.html`));
+    page.should.containEql(CODE);
+    page.should.containEql('location.replace(');
+  });
+});
+
+describe('DesktopBrowserOpener removes the redirect page on a short life', () => {
+  it('P104 removes the page once its short life is up, and never before', async () => {
+    const world = launcherWorld();
+    await world.opener.open(PAIR_URL);
+    world.timers.should.have.length(1);
+    world.timers[0]?.ms.should.equal(10_000);
+    world.held().should.not.be.empty();
+
+    world.timers[0]?.run();
+    await drain();
+    // The directory goes with the file, so nothing of the page is left in the state tree.
+    world.held().should.be.empty();
+  });
+
+  it('P104 removes the page when the process exits first, and tolerates the timer firing afterwards', async () => {
+    const world = launcherWorld();
+    await world.opener.open(PAIR_URL);
+    world.exits.should.have.length(1);
+    await world.exits[0]?.();
+    world.held().should.be.empty();
+    should(() => world.timers[0]?.run()).not.throw();
+    await drain();
+    world.held().should.be.empty();
+  });
+
+  it('P104 removes the page at once when the launcher turns out not to exist', async () => {
+    // A missing `xdg-open` fails asynchronously, after `open` has already answered.
+    const world = launcherWorld();
+    (await world.opener.open(PAIR_URL)).should.be.true();
+    world.held().should.not.be.empty();
+    world.errors[0]?.();
+    await drain();
+    world.held().should.be.empty();
+  });
+
+  it('P104 holds the process open until the page has had its seconds, then runs the removal', async () => {
+    const ran = new Promise<void>(resolve => holdProcessOpen(resolve, 1));
+    await ran;
   });
 });

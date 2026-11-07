@@ -8,7 +8,7 @@ import type { FerretId } from '@ferretry/kernel/contract';
 import { ok } from '@ferretry/std';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { realClock } from '../support/ports.ts';
-import { rootsPortFor } from '../../../../core/kernel/host/roots.ts';
+import { ensureInternalRootBases, rootsPortFor } from '../../../../core/kernel/host/roots.ts';
 import { nodeFs } from '../../../../core/kernel/host/adapters/node-fs.ts';
 
 /**
@@ -133,6 +133,41 @@ describe('the Codex harness over the real kernel roots', () => {
       expect(await readFile(join(destination, 'AGENTS.md'), 'utf8')).toBe('other-home-fixture');
       expect((await lstat(linked)).isSymbolicLink()).toBe(true);
     }
+  });
+
+  test('S42 first launch on a fresh FY_HOME: the kernel made the agent-homes base 0700 at boot, the launch makes the ferret home under it', async () => {
+    const fy = join(fixture, 'fy-home');
+    await rm(fy, { recursive: true });
+    await mkdir(fy, { mode: 0o700 });
+    expect(
+      await ensureInternalRootBases(
+        nodeFs(() => 'fixture'),
+        { home: fy, plugin: 'codex' },
+        ['agent-homes', 'harness-history'],
+      ),
+    ).toEqual([]);
+    expect((await lstat(AGENT_HOMES())).mode & 0o777).toBe(0o700);
+    expect(await readdir(AGENT_HOMES())).toEqual([]);
+    const { harness } = build();
+    const home = await harness.homeFor('first' as FerretId);
+    expect(home).toBe(join(AGENT_HOMES(), 'first') as never);
+    const run = recording();
+    expect((await harness.start(spec('first', home), run.runner, ENV)).ok).toBe(true);
+    expect((await lstat(home)).mode & 0o777).toBe(0o700);
+    expect(await readdir(AGENT_HOMES())).toEqual(['first']);
+    expect(run.commands[0]?.command.slice(0, 2)).toEqual(['env', `CODEX_HOME=${home}`]);
+  });
+
+  test('S42 first launch on a fresh FY_HOME whose kernel did not run: the harness refuses and makes no base of its own', async () => {
+    const fy = join(fixture, 'fy-home');
+    await rm(fy, { recursive: true });
+    await mkdir(fy, { mode: 0o700 });
+    const { harness } = build();
+    const home = await harness.homeFor('first' as FerretId);
+    const run = recording();
+    await expect(harness.start(spec('first', home), run.runner, ENV)).rejects.toThrow('root refused');
+    expect(run.commands).toEqual([]);
+    expect(await readdir(fy)).toEqual([]);
   });
 });
 
