@@ -303,7 +303,7 @@ describe('AddDeviceCard', () => {
     expect(text(renderer)).toContain('keeps working until it runs out');
   });
 
-  it('lists each device with what revoking it will do, and marks the caller’s own', () => {
+  it('P127 lists each device with what revoking it will do, and marks the caller’s own', () => {
     // Arrange
     const renderer = card({
       view: view({ devices: [device(), device({ id: OTHER_DEVICE_ID, name: 'iPad' })] }),
@@ -314,6 +314,18 @@ describe('AddDeviceCard', () => {
     should(marked(renderer, 'data-paired-device-self')).have.length(1);
     expect(text(renderer)).toContain('signs this browser out of this machine');
     expect(text(renderer)).toContain('iPad’s access');
+  });
+
+  it('P125 shows, beside each row’s revoke, the note the rules owner gives for that device and no other', () => {
+    // Arrange: the count of standing rules a revoke suspends is Accounts'; Access places it on the right row.
+    const renderer = card({
+      view: view({ devices: [device(), device({ id: OTHER_DEVICE_ID, name: 'iPad' })] }),
+      deviceNote: deviceId => `rules note for ${deviceId}`,
+    });
+
+    // Act, Assert
+    expect(text(renderer)).toContain(`rules note for ${OTHER_DEVICE_ID}`);
+    should(text(renderer).split('rules note for ').length - 1).equal(2);
   });
 
   it('reports each revoke against the device the row is for', () => {
