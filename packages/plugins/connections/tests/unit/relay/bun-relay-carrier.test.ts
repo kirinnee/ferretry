@@ -423,6 +423,30 @@ describe('a carrier that survives a dropped rendezvous', () => {
     carrier.stop();
   });
 
+  it('R158 the supervisor redials at the reset with a one-minute floor, thirty-minute cap and thirty-second jitter', () => {
+    for (const [untilReset, random, wait] of [
+      [5_000, 0, 60_000],
+      [300_000, 0, 300_000],
+      [300_000, 1, 330_000],
+      [72_000_000, 0, 1_800_000],
+      [72_000_000, 1, 1_830_000],
+    ] as const) {
+      const { carrier, clock, fake, socketAt } = redialingCarrier({}, random);
+      carrier.start();
+      socketAt(0).onopen?.(undefined);
+      socketAt(0).onclose?.({
+        code: 4433,
+        reason: hostedBandwidthReason(HOSTED_RELAY_BANDWIDTH_REASONS.daemon.day, clock.now() + untilReset),
+      });
+      should(clock.delays.at(-1)).equal(wait);
+      clock.advance(wait - 1);
+      should(fake.sockets).have.length(1);
+      clock.advance(1);
+      should(fake.sockets).have.length(2);
+      carrier.stop();
+    }
+  });
+
   it('should report a transport error as a disconnect too', () => {
     // Arrange
     const { carrier, clock, lines, socketAt } = redialingCarrier();

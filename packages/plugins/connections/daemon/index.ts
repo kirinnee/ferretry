@@ -7,11 +7,14 @@ import {
   type RouteHandler,
   type KernelPorts,
   type SessionLayer,
+  type DoctorCheck,
 } from '@ferretry/kernel/contract';
 import { implementDaemon, type DaemonContext } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
 import {
   CarriersChanged,
+  HOSTED_RELAY_DIRECTORY_ORIGIN,
+  isLoopbackHost,
   type ConnectionAdvertisement,
   type ConnectionsConfig,
   type TunnelStatusView,
@@ -24,9 +27,11 @@ import { DirectCarrier } from './lib/relay/direct.ts';
 import {
   chooseRelayCarrierSources,
   describeAbsentRelayCarrier,
+  describeRelayCarrierPosture,
   dialledRelayUrl,
   NO_RELAY_DIRECTORY,
   relayCarriersNeedDiscovery,
+  relayCarrierRemedy,
   type RelayCarrierSource,
   type RelayDirectoryPort,
 } from './lib/relay/discovery.ts';
@@ -77,7 +82,9 @@ export function buildConnections(
 ) {
   const config = ctx.kernel.config.file(configFile);
   const relays: readonly DaemonRelayCarrierEntry[] =
-    config?.relay === undefined ? [DISCOVERED_RELAY_CARRIER] : [{ kind: 'relay', ...config.relay }];
+    config?.relay === undefined || config.relay.length === 0
+      ? [DISCOVERED_RELAY_CARRIER]
+      : config.relay.map(entry => ({ kind: 'relay', ...entry }));
   const scheduler = {
     after: (ms: number, fn: () => void) => ({ cancel: ctx.kernel.clock.after(milliseconds(ms), fn) }),
   };
@@ -89,7 +96,7 @@ export function buildConnections(
       const advertisement = relayCarriersNeedDiscovery(relays)
         ? await (
             bindings?.directory ??
-            new HostedRelayDirectory(bindings?.directoryOrigin, {
+            new HostedRelayDirectory(bindings?.directoryOrigin ?? HOSTED_RELAY_DIRECTORY_ORIGIN, {
               fetcher: (url, init) => ctx.kernel.fetch.request(url, init),
             })
           ).read()
@@ -170,7 +177,36 @@ export function buildConnections(
     return published.current();
   };
   const carrierRoute = carrierRoutes({ current: () => published.current() })[0]!;
+  const reachability: DoctorCheck = {
+    id: 'connections.reachability',
+    title: 'How other devices reach this daemon',
+    run: async () => {
+      await initialise();
+      const host = bindings?.host ?? config?.direct?.host ?? '127.0.0.1';
+      const dialled = sources.find(source => dialledRelayUrl(source) !== undefined);
+      const reachable = !isLoopbackHost(host) || dialled !== undefined;
+      const lines = [
+        reachable
+          ? 'reachability other devices can reach this daemon through its own network or a relay'
+          : 'reachability nothing off this host can reach this daemon',
+        ...sources.map(source => describeRelayCarrierPosture(source, configFile.file)),
+      ];
+      // Global absence is said once; an inactive sibling beside an active relay is only its own posture.
+      if (dialled === undefined && sources[0] !== undefined)
+        lines.push(...relayCarrierRemedy(sources[0], configFile.file, host));
+      return { state: reachable ? 'ok' : 'warn', detail: lines.join('\n') };
+    },
+  };
   return {
+    // The Kernel calls this without request data, at each outbound fetch/socket. Only this boot's resolved
+    // configuration and directory advertisement can grant a host; disabled entries grant nothing.
+    resolvers: {
+      relay: (): readonly string[] =>
+        sources.flatMap(source => {
+          const url = dialledRelayUrl(source);
+          return url === undefined ? [] : [new URL(url).host];
+        }),
+    },
     routes: {
       'GET /v1/carriers': async (call: Parameters<RouteHandler>[0]) => {
         carriers();
@@ -207,6 +243,7 @@ export function buildConnections(
       },
     },
     hooks: {
+      'doctor.checks': () => [{ id: reachability.id, order: -100, item: reachability }],
       'carriers:direct': directProvider,
       'carriers:relay': relay,
       'carriers:tunnel': other?.tunnel ?? new UnavailableCarrier('the tunnel carrier is unavailable'),

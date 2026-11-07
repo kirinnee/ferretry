@@ -15,6 +15,9 @@ export interface ConnectionMeasurements {
 }
 const UNKNOWN: ReturnType<ConnectionMeasurements['current']> = { choice: undefined };
 const unmeasured: ConnectionMeasurements = { current: () => UNKNOWN, subscribe: () => () => undefined };
+// TODO: copy today's relay-carrier/session/pairing-unreachable walk into the Connections app half, then bind the
+// shell CarrierDialers and live measurements. The document's hosted directory read must be shared with Access's
+// pairing walk; it must ignore carrier preference and prove the pinned identity before the code leaves the page.
 export function buildConnectionsApp(
   ctx: AppContext<typeof manifest>,
   measurements: ConnectionMeasurements = unmeasured,

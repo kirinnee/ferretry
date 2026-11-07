@@ -1,8 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { KernelPorts, SessionLayer, WebSocketPort } from '@ferretry/kernel/contract';
+import type { SessionLayer, WebSocketPort } from '@ferretry/kernel/contract';
 import { restrictWebSocket } from '../../../../../core/kernel/host/permissions.ts';
-import { RelayCarrier } from '../../../daemon/adapters/relay/bun-relay-carrier.ts';
-import { DaemonRelayConfigSchema } from '../../../daemon/lib/runtime/relay-config.ts';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { testHost } from '../../../../../core/kernel/testing/host.ts';
 import { anonymous, device } from '../../../../../core/kernel/testing/admission.ts';
@@ -85,7 +83,7 @@ describe('published carrier route', () => {
   test('P82 a configured relay is never disclosed as a hosted discovered relay', async () => {
     const host = await testHost({
       plugins: [plugin],
-      config: { 'connections.yaml': { relay: { url: 'https://mine.example' } } },
+      config: { 'connections.yaml': { relay: [{ url: 'https://mine.example' }] } },
     });
     await host.runJob('relay-discovery');
     expect(host.provided(ConnectionsPort).advertisement()).toEqual({
@@ -97,7 +95,7 @@ describe('published carrier route', () => {
   test('R173 a switched-off discovery entry stays off', async () => {
     const host = await testHost({
       plugins: [plugin],
-      config: { 'connections.yaml': { relay: { source: 'discovery', enabled: false } } },
+      config: { 'connections.yaml': { relay: [{ source: 'discovery', enabled: false }] } },
     });
     await host.runJob('relay-discovery');
     expect(host.provided(ConnectionsPort).carriers()).toEqual([{ kind: 'direct', url: 'https://box.example' }]);
@@ -141,6 +139,49 @@ test('R213 directory discovery runs once per boot even when the start job is ret
   await host.runJob('relay-discovery');
   await host.runJob('relay-discovery');
   expect(reads).toBe(1);
+  await host.stop();
+});
+test('an empty relay list keeps today’s hosted discovery default', async () => {
+  const withDirectory = implementDaemon(manifest, {
+    build: ctx =>
+      buildConnections(ctx, {
+        ...bindings,
+        directory: { read: async () => ({ kind: 'available', relayUrl: 'https://hosted.example' }) },
+      }),
+  });
+  const host = await testHost({ plugins: [withDirectory], config: { 'connections.yaml': { relay: [] } } });
+  await host.runJob('relay-discovery');
+  expect(host.provided(ConnectionsPort).carriers()).toEqual([
+    { kind: 'direct', url: 'https://box.example' },
+    { kind: 'relay', url: 'https://hosted.example' },
+  ]);
+  await host.stop();
+});
+test('a configured/discovered collision refuses the list before either relay dials', async () => {
+  let half: ReturnType<typeof buildConnections> | undefined;
+  const dials: string[] = [];
+  const collision = implementDaemon(manifest, {
+    build: ctx => {
+      half = buildConnections(ctx, {
+        ...bindings,
+        directory: { read: async () => ({ kind: 'available', relayUrl: 'https://same.example' }) },
+        socketFactory: url => {
+          dials.push(url);
+          throw new Error('no dial should occur');
+        },
+      });
+      return half;
+    },
+  });
+  const host = await testHost({
+    plugins: [collision],
+    config: { 'connections.yaml': { relay: [{ source: 'discovery' }, { url: 'https://same.example' }] } },
+  });
+  await expect(half!.hooks['carriers:relay'].start(new FakeSessions(), new AbortController().signal)).rejects.toThrow(
+    'same',
+  );
+  expect(dials).toEqual([]);
+  expect(half!.resolvers.relay()).toEqual([]);
   await host.stop();
 });
 test('R14 a withdrawal at runtime takes effect at the next boot without an app release', async () => {
@@ -208,7 +249,7 @@ test('R206 a relay switched off in the configuration names that switch once, wit
   const switchedOff = implementDaemon(manifest, { build: ctx => (half = buildConnections(ctx, bindings)) });
   const host = await testHost({
     plugins: [switchedOff],
-    config: { 'connections.yaml': { relay: { url: 'https://mine.example', enabled: false } } },
+    config: { 'connections.yaml': { relay: [{ url: 'https://mine.example', enabled: false }] } },
   });
   await half!.hooks['carriers:relay'].start({} as SessionLayer, new AbortController().signal);
   const trail = host.logs.map(entry => entry.message);
@@ -220,7 +261,7 @@ test('R206 a relay switched off in the configuration names that switch once, wit
   await host.stop();
 });
 describe('the carrier set is the daemon’s answer', () => {
-  const ownRelay = { 'connections.yaml': { relay: { url: 'https://mine.example' } } };
+  const ownRelay = { 'connections.yaml': { relay: [{ url: 'https://mine.example' }] } };
   test('R4 which carriers a daemon holds is its own answer: nothing a browser sends changes the set', async () => {
     const host = await testHost({ plugins: [plugin], config: ownRelay });
     await host.runJob('relay-discovery');
@@ -296,10 +337,11 @@ describe('the carrier set is the daemon’s answer', () => {
     await host.stop();
   });
 });
-describe('the default relay dial through the Kernel’s restricted WebSocket port', () => {
-  /** The production bindings over a Kernel whose WebSocket port is the real manifest-restricted one. */
-  function restricted() {
+describe('the default relay dial through the Kernel restricted WebSocket port', () => {
+  async function restricted(relay: unknown, directory?: ConnectionBindings['directory']) {
     const dials: string[] = [];
+    let half: ReturnType<typeof buildConnections> | undefined;
+    let websocket: WebSocketPort | undefined;
     const base: WebSocketPort = {
       connect: url => {
         dials.push(String(url));
@@ -314,40 +356,64 @@ describe('the default relay dial through the Kernel’s restricted WebSocket por
         } as unknown as ReturnType<WebSocketPort['connect']>;
       },
     };
-    const kernel = {
-      config: { file: () => undefined },
-      identity: { daemonId: identity.daemonId },
-      signer: { sign: identity.sign },
-      websocket: restrictWebSocket(manifest.id, manifest.permissions?.network ?? [], base),
-    } as unknown as KernelPorts;
-    const production = kernelConnectionBindings(kernel);
-    const carrier = new RelayCarrier({
-      // An explicit relay block: it resolves without discovery, so the missing discovery binding is not in play.
-      config: DaemonRelayConfigSchema.parse({ url: 'https://relay.example' }),
-      identity: production.identity,
-      scheduler: { after: () => ({ cancel: () => undefined }) },
-      now: () => 0,
-      random: () => 0,
-      socketFactory: production.socketFactory!,
+    const production = implementDaemon(manifest, {
+      build: ctx => {
+        websocket = restrictWebSocket(manifest.id, manifest.permissions.network, base, undefined, name =>
+          name === 'relay' ? half?.resolvers.relay : undefined,
+        );
+        const kernel = { ...ctx.kernel, websocket };
+        half = buildConnections(
+          { ...ctx, kernel },
+          {
+            ...kernelConnectionBindings(kernel),
+            ...(directory === undefined ? {} : { directory }),
+          },
+        );
+        return half;
+      },
     });
-    return { dials, carrier };
+    const host = await testHost({ plugins: [production], config: { 'connections.yaml': { relay } } });
+    const controller = new AbortController();
+    await half!.hooks['carriers:relay'].start(new FakeSessions(), controller.signal);
+    return {
+      host,
+      half: half!,
+      dials,
+      websocket: websocket!,
+      stop: async () => {
+        controller.abort();
+        await host.stop();
+      },
+    };
   }
-  // KNOWN GAP, blocked on kernel runtime relay host permission (review finding 2): the manifest declares only
-  // stun.cloudflare.com, and restrictWebSocket refuses every other host before its adapter runs, so a configured or
-  // discovered relay is never dialled. This pins today's refusal; it flips when the kernel admits validated runtime
-  // relay endpoints, and the skipped test below is then un-skipped.
-  test('known gap: a configured relay is refused by the restricted WebSocket port before any dial', async () => {
-    const { dials, carrier } = restricted();
-    await expect(carrier.start(new FakeSessions(), new AbortController().signal)).rejects.toThrow(
-      'connections may not reach relay.example: its manifest does not declare it',
-    );
-    expect(dials).toEqual([]);
+  test('a configured relay is dialled through the real restricted WebSocket port', async () => {
+    const h = await restricted([{ url: 'https://relay.example:8443' }]);
+    expect(h.dials).toHaveLength(1);
+    expect(new URL(h.dials[0]!).host).toBe('relay.example:8443');
+    expect(h.half.resolvers.relay()).toEqual(['relay.example:8443']);
+    expect(() => h.websocket.connect('wss://relay.example:9443/other')).toThrow('manifest does not declare it');
+    expect(() => h.websocket.connect('wss://caller.example/other')).toThrow('manifest does not declare it');
+    expect(h.dials).toHaveLength(1);
+    await h.stop();
   });
-  // blocked on kernel runtime relay host permission (review finding 2): un-skip once the kernel ships it.
-  test.skip('blocked on kernel: a configured relay is dialled through the restricted WebSocket port', async () => {
-    const { dials, carrier } = restricted();
-    await carrier.start(new FakeSessions(), new AbortController().signal);
-    expect(dials).toHaveLength(1);
-    expect(new URL(dials[0]!).hostname).toBe('relay.example');
+  test('the ordered relay list dials every enabled configured or discovered host through the resolver', async () => {
+    const h = await restricted(
+      [
+        { url: 'https://one.example' },
+        { source: 'discovery' },
+        { url: 'https://off.example', enabled: false },
+        { url: 'https://two.example' },
+      ],
+      { read: async () => ({ kind: 'available', relayUrl: 'https://hosted.example' }) },
+    );
+    expect(h.dials.map(url => new URL(url).host)).toEqual(['one.example', 'hosted.example', 'two.example']);
+    expect(h.half.resolvers.relay()).toEqual(['one.example', 'hosted.example', 'two.example']);
+    expect(h.host.provided(ConnectionsPort).carriers()).toEqual([
+      { kind: 'relay', url: 'https://one.example' },
+      { kind: 'relay', url: 'https://hosted.example' },
+      { kind: 'relay', url: 'https://two.example' },
+    ]);
+    expect(() => h.websocket.connect('wss://off.example/other')).toThrow('manifest does not declare it');
+    await h.stop();
   });
 });
