@@ -180,6 +180,7 @@ export class GateAdmission implements Admission {
   }
 
   readmit(request: ApiRequest, descriptor: ScopedRoute): boolean {
+    // No path parameters on a re-ask: only a warden remedy reads them, and readmit re-asks the descriptor, not one call.
     return this.#authorize(descriptor, request, new Map()).outcome === 'admitted';
   }
 

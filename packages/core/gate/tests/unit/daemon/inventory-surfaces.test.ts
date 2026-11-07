@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { InventoryEntry, InventorySurfaces } from '@ferretry/kernel/contract';
 import { CAPABILITIES, LIMITED_DEVICE_GRANTS } from '../../../contract/index.ts';
-import { ADMIN, FERRET_TOKEN, carried, local, request, world } from './support.ts';
+import { ADMIN, FERRET_TOKEN, WARDEN, carried, local, request, world } from './support.ts';
 
 /**
  * `GET /v1/plugins` as Gate projects it for each caller (§9.6), through `Admission.inventory` with the surfaces the
@@ -77,6 +77,27 @@ describe('§9.6 the device inventory is projected through the plugins’ declare
   test('a refused caller (no principal, no bearer) sees nothing', () => {
     const w = world();
     expect(w.gate.inventory(request({ arrival: carried() }), entries, surfaces)).toEqual([]);
+  });
+
+  test('the admin token off the host is governed by the daemon-wide grants, not shown everything', () => {
+    const w = world();
+    const shown = ids(w.gate.inventory(request({ bearer: ADMIN, arrival: carried() }), entries, surfaces));
+    expect(shown).not.toContain('updates');
+    expect(shown).toContain('board');
+  });
+
+  test('a warden token sees the core pieces and Warden only; a member principal sees nothing', () => {
+    const w = world();
+    const withWarden = [...entries, { id: 'warden', on: true, contract: 'h-warden' }];
+    expect(ids(w.gate.inventory(request({ bearer: WARDEN, arrival: local(true) }), withWarden, surfaces))).toEqual([
+      'kernel',
+      'gate',
+      'vault',
+      'ferrets',
+      'asks',
+      'warden',
+    ]);
+    expect(w.gate.inventory(request({ member: 'friend' }), entries, surfaces)).toEqual([]);
   });
 
   test('the owner on the host and a ferret see every package', () => {
