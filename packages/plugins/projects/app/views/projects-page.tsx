@@ -16,6 +16,7 @@
  */
 
 import { useRouter } from '@ferretry/app';
+import { useNow } from '@ferretry/app/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { RegisterProjectRequest } from '../../contract/index.ts';
 import { useProjectsSlice } from '../hooks/use-projects.ts';
@@ -31,6 +32,7 @@ import { ProjectsHub } from './projects-hub.tsx';
 export function ProjectsPage({ client, daemon }: { readonly client: ProjectsClient; readonly daemon: string }) {
   const store = projectsStoreFor(client);
   const { navigate } = useRouter();
+  const now = useNow();
   const slice = useProjectsSlice(store);
   const [ferrets, setFerrets] = useState<{
     readonly rows: readonly FerretRow[] | null;
@@ -115,7 +117,7 @@ export function ProjectsPage({ client, daemon }: { readonly client: ProjectsClie
       onDismiss={() => setStatus(null)}
       projectHref={projectId => projectPath(daemon, projectId)}
       onNavigate={navigate}
-      now={Date.now()}
+      now={now}
     />
   );
 }
