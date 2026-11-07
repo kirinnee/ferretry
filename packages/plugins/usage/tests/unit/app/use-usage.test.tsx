@@ -1,0 +1,113 @@
+import { describe, expect, it } from 'bun:test';
+import type { UsageFeedView } from '../../../contract/index.ts';
+
+import { useMachinesUsage, useUsage } from '../../../app/hooks/use-usage.ts';
+import { daemonConnection } from './support/shell.ts';
+import { type DaemonUsagePort, DaemonUsageStore } from '../../../app/lib/usage-store.ts';
+import { interact, mount } from './support/dom.ts';
+
+const laptop = daemonConnection({
+  daemonId: 'daemon/laptop',
+  baseUrl: 'https://laptop.example.test',
+  deviceId: 'token-laptop',
+});
+const workstation = daemonConnection({
+  daemonId: 'daemon/workstation',
+  baseUrl: 'https://workstation.example.test',
+  deviceId: 'token-workstation',
+});
+
+const feed = (percent: number): UsageFeedView => ({
+  at: '2026-08-01T09:00:00.000Z',
+  stale: false,
+  accounts: [{ agent: 'claude', fiveHourPercent: percent, weeklyPercent: 4, atLimit: false, authOk: true }],
+});
+
+const port = (reads: string[]): DaemonUsagePort => ({
+  usage: async daemon => {
+    reads.push(daemon.daemonId);
+    return feed(daemon.daemonId === laptop.daemonId ? 42 : 91);
+  },
+});
+
+function Percent({ store, daemon }: { readonly store: DaemonUsageStore; readonly daemon: typeof laptop }) {
+  const slice = useUsage(store, daemon);
+  return <output>{`${slice.status}:${slice.feed?.accounts[0]?.fiveHourPercent ?? '—'}`}</output>;
+}
+
+describe('useUsage', () => {
+  it('joins the store’s poll and renders the daemon’s own feed', async () => {
+    const reads: string[] = [];
+    const store = new DaemonUsageStore(port(reads), { pollMs: 60_000, isHidden: () => true });
+    const { container, unmount } = await mount(<Percent store={store} daemon={laptop} />);
+
+    expect(container.textContent).toBe('ready:42');
+    expect(reads).toEqual([laptop.daemonId]);
+    await unmount();
+  });
+
+  it('re-reads for the other daemon and never shows the first one’s percentage', async () => {
+    const reads: string[] = [];
+    const store = new DaemonUsageStore(port(reads), { pollMs: 60_000, isHidden: () => true });
+    const { container, render, unmount } = await mount(<Percent store={store} daemon={laptop} />);
+    expect(container.textContent).toBe('ready:42');
+
+    await render(<Percent store={store} daemon={workstation} />);
+    expect(container.textContent).toBe('ready:91');
+    expect(reads).toEqual([laptop.daemonId, workstation.daemonId]);
+    await unmount();
+  });
+
+  it('shares one poll across several mounted consumers', async () => {
+    const reads: string[] = [];
+    /**
+     * Mounting runs inside `act`, which yields to the event loop, so a live 5ms
+     * poll can slip a tick between the two mounts and make "one read each" a
+     * race the machine's load decides. The store's own gate settles it: the
+     * read after `watch()` is unconditional, every TICK waits for a visible tab.
+     */
+    let hidden = true;
+    const store = new DaemonUsageStore(port(reads), { pollMs: 5, isHidden: () => hidden });
+    const first = await mount(<Percent store={store} daemon={laptop} />);
+    const second = await mount(<Percent store={store} daemon={laptop} />);
+
+    expect(reads).toHaveLength(2);
+    hidden = false;
+    await interact(async () => await new Promise(resolve => setTimeout(resolve, 26)));
+    const polled = reads.length;
+    expect(polled).toBeGreaterThan(2);
+
+    await first.unmount();
+    await second.unmount();
+    const stopped = reads.length;
+    await interact(async () => await new Promise(resolve => setTimeout(resolve, 16)));
+    expect(reads).toHaveLength(stopped);
+  });
+});
+
+describe('useMachinesUsage', () => {
+  function Machines({ store, machines }: { readonly store: DaemonUsageStore; readonly machines: (typeof laptop)[] }) {
+    useMachinesUsage(store, machines);
+    return (
+      <output>
+        {machines.map(machine => store.usage(machine.daemonId).feed?.accounts[0]?.fiveHourPercent ?? '—').join(' ')}
+      </output>
+    );
+  }
+
+  it('joins every listed machine’s feed through its own pairing, and leaves each when it goes', async () => {
+    const reads: string[] = [];
+    const store = new DaemonUsageStore(port(reads), { pollMs: 60_000, isHidden: () => true });
+    const { container, render, unmount } = await mount(<Machines machines={[laptop, workstation]} store={store} />);
+    await interact(async () => {
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    });
+    // Each machine's own quota, never the other's.
+    expect(container.textContent).toBe('42 91');
+    expect([...reads].sort()).toEqual([laptop.daemonId, workstation.daemonId].sort());
+
+    await render(<Machines machines={[laptop]} store={store} />);
+    expect(container.textContent).toBe('42');
+    await unmount();
+  });
+});

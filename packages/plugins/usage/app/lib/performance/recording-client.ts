@@ -43,34 +43,38 @@ export const jsonBytes = (value: unknown): number => {
 const outcomeOf = (error: unknown): RequestOutcome => (error instanceof DaemonCallError ? error.status : 'failed');
 
 /** `client`, with every call it makes recorded on `recorder` by route pattern. */
-export const recordingClient = (client: PluginClient, recorder: PerformanceRecorder): PluginClient => ({
-  ...client,
-  call: async <Answer = unknown>(route: string, init?: Parameters<PluginClient['call']>[1]): Promise<Answer> => {
-    const space = route.indexOf(' ');
-    const pattern = routePattern(route.slice(0, space), route.slice(space + 1));
-    const bytesOut = jsonBytes(init?.body);
-    const at = recorder.clock.now();
-    try {
-      const answer = await client.call<Answer>(route, init);
-      recorder.recordRequest({
-        route: pattern,
-        at,
-        durationMs: recorder.clock.now() - at,
-        outcome: 200,
-        bytesIn: jsonBytes(answer),
-        bytesOut,
-      });
-      return answer;
-    } catch (error) {
-      recorder.recordRequest({
-        route: pattern,
-        at,
-        durationMs: recorder.clock.now() - at,
-        outcome: outcomeOf(error),
-        bytesIn: 0,
-        bytesOut,
-      });
-      throw error;
-    }
-  },
-});
+export const recordingClient = <Client extends Pick<PluginClient, 'call'>>(
+  client: Client,
+  recorder: PerformanceRecorder,
+): Client =>
+  ({
+    ...client,
+    call: async <Answer = unknown>(route: string, init?: Parameters<PluginClient['call']>[1]): Promise<Answer> => {
+      const space = route.indexOf(' ');
+      const pattern = routePattern(route.slice(0, space), route.slice(space + 1));
+      const bytesOut = jsonBytes(init?.body);
+      const at = recorder.clock.now();
+      try {
+        const answer = await client.call<Answer>(route, init);
+        recorder.recordRequest({
+          route: pattern,
+          at,
+          durationMs: recorder.clock.now() - at,
+          outcome: 200,
+          bytesIn: jsonBytes(answer),
+          bytesOut,
+        });
+        return answer;
+      } catch (error) {
+        recorder.recordRequest({
+          route: pattern,
+          at,
+          durationMs: recorder.clock.now() - at,
+          outcome: outcomeOf(error),
+          bytesIn: 0,
+          bytesOut,
+        });
+        throw error;
+      }
+    },
+  }) as Client;

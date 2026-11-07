@@ -1476,7 +1476,7 @@ export function PricingSettings({
             </div>
             <CatalogLedger
               rates={state.view.catalog}
-              catalogPriced={(state.view.modelCatalogRates ?? []).length > 0}
+              catalogPriced={(state.view.modelCatalogRates).length > 0}
               busy={mutationBusy}
               confirmingKey={confirmingKey}
               onEdit={openEdit}
@@ -1488,7 +1488,7 @@ export function PricingSettings({
               onRemove={pricingKey => void removeRate(pricingKey)}
             />
           </section>
-          <ModelCatalogRates rates={state.view.modelCatalogRates ?? []} busy={mutationBusy} onOverride={openOverride} />
+          <ModelCatalogRates rates={state.view.modelCatalogRates} busy={mutationBusy} onOverride={openOverride} />
           <Sources
             sources={state.view.sources}
             selectedSourceId={sourceId}
