@@ -131,6 +131,7 @@ import {
   UNKNOWN_HOLDER_KEY,
   type AccessLeasePolicy,
 } from './limits.ts';
+import { createIdentitySigner, signerFor } from './signer.ts';
 
 /** The kernel's route table, as the one function a session's request needs from it. */
 export type SessionDispatch = (request: ApiRequest) => Promise<ApiResponse>;
@@ -186,6 +187,11 @@ export interface SessionLayerHost extends SessionLayer {
   close(): void;
 }
 
+interface ConnectionState {
+  /** One link-wide seal queue (R555); credit and pending payload remain on each session. */
+  outbox: Promise<void>;
+}
+
 /**
  * Build the session layer.
  *
@@ -196,7 +202,12 @@ export interface SessionLayerHost extends SessionLayer {
 export function createSessionLayer(deps: SessionLayerDeps): SessionLayerHost {
   const shared = new LayerState(deps);
   return {
-    open: (carrier, peer) => shared.open(carrier, peer),
+    open: (carrier, peer) => shared.open(carrier, peer, { outbox: Promise.resolve() }),
+    connection: carrier => {
+      const connection: ConnectionState = { outbox: Promise.resolve() };
+      return { open: peer => shared.open(carrier, peer, connection) };
+    },
+    signer: signerFor('connections', createIdentitySigner(deps.identity)),
     report: () => shared.report(),
     endMode: mode => shared.endMode(mode),
     close: () => shared.close(),
@@ -210,12 +221,16 @@ class LayerState {
 
   constructor(readonly deps: SessionLayerDeps) {}
 
-  open(carrier: CarrierKey, peer: CarrierPeer | undefined): CarrierLink {
-    const session = new SealedSession(this, carrier, peer);
+  /**
+   * `connection` groups the sessions of one transport connection: the pre-credential bound is per connection, as
+   * today's was per `RelayLink` (one per direct socket, one per rendezvous socket), never per carrier key.
+   */
+  open(carrier: CarrierKey, peer: CarrierPeer | undefined, connection: ConnectionState): CarrierLink {
+    const session = new SealedSession(this, carrier, peer, connection);
     // A session that has not presented a credential yet costs this daemon a slot, and anybody who saw a QR
     // knows the fingerprint that addresses it. An arrival past the bound is refused as BUSY rather than as an
     // error: a client opening several at once did nothing wrong and should retry (R232, R233).
-    if (this.preCredential(carrier) >= MAX_PRE_CREDENTIAL_SESSIONS) {
+    if (this.preCredential(connection) >= MAX_PRE_CREDENTIAL_SESSIONS) {
       session.refuseAtOpen(SESSION_CLOSE_CODES.rendezvousBusy, 'too many sessions are awaiting a credential');
       return session;
     }
@@ -224,9 +239,9 @@ class LayerState {
     return session;
   }
 
-  preCredential(carrier: CarrierKey): number {
+  preCredential(connection: ConnectionState): number {
     let pending = 0;
-    for (const session of this.sessions) if (session.carrier === carrier && session.preCredential()) pending += 1;
+    for (const session of this.sessions) if (session.connection === connection && session.preCredential()) pending += 1;
     return pending;
   }
 
@@ -350,14 +365,14 @@ class SealedSession implements CarrierLink {
   #gone = false;
   /** Serialises inbound frames: frame `n+1` is never opened before frame `n` is handled. */
   #inbox: Promise<void> = Promise.resolve();
-  /** Serialises sealing: a record's nonce IS its sequence, and two seals racing would share one. */
-  #outbox: Promise<void> = Promise.resolve();
   readonly #listeners = new Set<() => void>();
 
   constructor(
     private readonly layer: LayerState,
     readonly carrier: CarrierKey,
     private readonly peer: CarrierPeer | undefined,
+    /** The transport connection this session rides; it owns the seal queue and pre-credential bound. */
+    readonly connection: ConnectionState,
   ) {
     this.outbound = {
       next: () => this.#next(),
@@ -701,7 +716,7 @@ class SealedSession implements CarrierLink {
       mode: modeKey,
       proof,
       appSession,
-      principal: { kind, holder: holder.holder, session: sessionId, leaseUntil: instant(0) },
+      principal: { kind, holder: holder.holder, session: sessionId, leaseUntil: instant(0), appSession },
     };
     const watch: HolderWatch = {
       session: sessionId,
@@ -731,6 +746,13 @@ class SealedSession implements CarrierLink {
       return false;
     }
     this.#release = release;
+    // The moment this link stops being an unproven one: a direct carrier frees its unproven slot (today's
+    // `connections.track` / member `open` marking `#proved`). A carrier's throw is the carrier's problem.
+    try {
+      this.peer?.proved?.();
+    } catch {
+      // nothing: the session is proved either way
+    }
     // NOT `seen`: opening a session is something a background tab does by itself (R-presence).
     this.#armLease();
     return true;
@@ -1271,7 +1293,7 @@ class SealedSession implements CarrierLink {
    */
   #conclude(): void {
     this.#owesConclusion = true;
-    this.#outbox = this.#outbox.then(() => this.#settle());
+    this.connection.outbox = this.connection.outbox.then(() => this.#settle());
   }
 
   #settle(): void {
@@ -1378,11 +1400,11 @@ class SealedSession implements CarrierLink {
 
   /**
    * Seal the head record ahead of the pull, when the window allows and nothing is already sealed. One at a time,
-   * on this session's outbox, because the nonce IS the sequence number. The produced ciphertext waits in
+   * on this connection's outbox (R555), because the nonce IS the sequence number. The produced ciphertext waits in
    * `#sealed`; its sequence is committed only when `next()` hands it over after the permit.
    */
   #flush(): void {
-    this.#outbox = this.#outbox.then(async () => {
+    this.connection.outbox = this.connection.outbox.then(async () => {
       if (!this.#live()) return;
       const channel = this.#channel;
       const pending = this.#waiting[0];

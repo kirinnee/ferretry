@@ -54,6 +54,10 @@ function harness() {
       open: () => {
         throw new Error('no channel has opened');
       },
+      connection: () => {
+        throw new Error('no connection has opened');
+      },
+      signer: undefined as never,
     },
     device: () => ({ deviceId: 'verified-holder', appSession: 'verified-page' }),
     onStop: () => {},

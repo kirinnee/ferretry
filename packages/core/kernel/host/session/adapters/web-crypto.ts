@@ -11,8 +11,10 @@
  * the public half; that is noted where it happens.
  */
 
-import type { DaemonIdentity, EphemeralKeyPair, PrivateKeyHandle, SessionCrypto } from '../wire/index.ts';
-import { AEAD_TAG_BYTES, concatBytes, daemonIdFromPublicKey, isAllZero, SHARED_SECRET_BYTES } from '../wire/index.ts';
+import { AEAD_TAG_BYTES, SHARED_SECRET_BYTES } from '../wire/constants.ts';
+import type { DaemonIdentity, EphemeralKeyPair, PrivateKeyHandle, SessionCrypto } from '../wire/crypto.ts';
+import { concatBytes, isAllZero } from '../wire/binary.ts';
+import { daemonIdFromPublicKey } from '../wire/identity.ts';
 
 /** The fixed prefix of an Ed25519 SubjectPublicKeyInfo. The remaining 32 bytes are the key. */
 const ED25519_SPKI_PREFIX = new Uint8Array([0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00]);
