@@ -245,6 +245,35 @@ test('agenda check: attentionNudge carries when agendaNudge is absent, and is no
   expect(report.notCarried.map(item => item.what)).not.toContain('config/machine.yaml attentionNudge');
 });
 
+test('the Global lessons component is dropped and every profile stops layering it (v5 gives lessons to every ferret)', async () => {
+  await yaml('components/instructions/lessons.yaml', 'file: instructions/lessons.md\n');
+  await yaml('components/instructions/house.yaml', 'file: instructions/house.md\n');
+  await mkdir(join(f.from, 'fleet/assets/instructions'), { recursive: true });
+  await writeFile(join(f.from, 'fleet/assets/instructions/lessons.md'), '# Lessons\n- a rule\n');
+  await writeFile(join(f.from, 'fleet/assets/instructions/house.md'), '# House rules\n');
+  await yaml('profiles/main.yaml', '# mine\ncontents:\n  - instructions/house\n  - instructions/lessons # learned\n');
+  await yaml('profiles/bare.yaml', 'contents:\n  - instructions/lessons\n');
+  await yaml('profiles/other.yaml', 'contents:\n  - instructions/house\n');
+
+  const report = await settingsStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect(await exists('instructions/lessons.md')).toBe(false);
+  expect(await exists('instructions/lessons.yaml')).toBe(false);
+  expect(await text('instructions/house.md')).toBe('# House rules\n');
+  expect((await read('profiles/main.yaml', ProfileFileSchema)).contents).toEqual(['instructions/house']);
+  expect(await text('profiles/main.yaml')).toContain('# mine');
+  expect((await read('profiles/bare.yaml', ProfileFileSchema)).contents).toEqual([]);
+  expect((await read('profiles/other.yaml', ProfileFileSchema)).contents).toEqual(['instructions/house']);
+
+  const dropped = report.notCarried.find(item => item.what === 'config/components/instructions/lessons.yaml');
+  expect(dropped?.why).toContain('EVERY ferret');
+  expect(report.kept).toContainEqual({
+    what: 'profiles that no longer layer instructions/lessons (v5 gives lessons to every ferret)',
+    count: 2,
+  });
+  expect(report.kept).toContainEqual({ what: 'instruction documents', count: 1 });
+});
+
 test('an empty home converts to nothing; a dry run writes nothing', async () => {
   expect((await settingsStep.run(f.ctx())).status).toBe('converted');
   await fullHome();

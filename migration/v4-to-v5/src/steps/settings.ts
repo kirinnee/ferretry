@@ -210,6 +210,22 @@ function place(plan: Plan, target: V5ConfigTarget, name: string | undefined, fro
   return created;
 }
 
+/** v4's Global lessons instructions component, which v5 replaces with lessons for every ferret. */
+const LESSONS_COMPONENT = 'lessons';
+const LESSONS_LAYER = `instructions/${LESSONS_COMPONENT}`;
+const LESSONS_STRIPPED = 'profiles that no longer layer instructions/lessons (v5 gives lessons to every ferret)';
+const LESSONS_WHY =
+  'v5 gives the Global lessons document (state/lessons/global.json, from the Lessons step) to EVERY ferret, where v4 gave it only to ferrets on a profile with this layer; carrying it too would give the rules twice (lead decision 2026-11-07). It is dropped and removed from every profile';
+
+/** Removes the `instructions/lessons` layer from a profile's `contents`; says whether it was there. */
+function withoutLessonsLayer(map: YAMLMap): boolean {
+  const layers = pairOf(map, 'contents')?.value;
+  if (!isSeq(layers)) return false;
+  const before = layers.items.length;
+  layers.items = layers.items.filter(item => !(isScalar(item) && item.value === LESSONS_LAYER));
+  return layers.items.length !== before;
+}
+
 const count = (plan: Plan, what: string): void => {
   plan.kept.set(what, (plan.kept.get(what) ?? 0) + 1);
 };
@@ -374,6 +390,7 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
       count(plan, 'runtimes');
       return;
     case 'profile':
+      if (withoutLessonsLayer(map)) count(plan, LESSONS_STRIPPED);
       place(plan, PROFILE_ITEMS, address.name, label, document);
       count(plan, 'profiles');
       return;
@@ -394,6 +411,12 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
       count(plan, 'model sets');
       return;
     case 'instructions': {
+      // v5 gives the Global lessons document to every ferret (the Lessons step carries it as global.json): this
+      // component would give it twice (lead decision 2026-11-07), so it is dropped and every profile stops layering it.
+      if (address.name === LESSONS_COMPONENT) {
+        plan.dropped.push({ what: label, why: LESSONS_WHY });
+        return;
+      }
       const file = pairOf(map, 'file')?.value;
       const source = await instructionsSource(ctx.v4.home, isScalar(file) ? file.value : undefined);
       if (source === undefined) plan.waiting.push(`${label} (its document is not a plain file inside fleet/assets/)`);
