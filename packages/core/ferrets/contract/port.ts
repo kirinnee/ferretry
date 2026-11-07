@@ -1,4 +1,4 @@
-import { defineEvent, definePort, type FerretId } from '@ferretry/kernel/contract';
+import { defineEvent, definePort, type FerretId, type RefusalCode } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
 import { z } from 'zod';
 import {
@@ -11,7 +11,7 @@ import {
   type HarnessKey,
   type PackId,
 } from './ids.ts';
-import type { RunnerHandle, SitrepLine } from './kinds.ts';
+import type { DeliveryOutcome, RunnerDelivery, RunnerHandle, SitrepLine, TranscriptReader } from './kinds.ts';
 import type { AgentControl, LimitsFile } from './state.ts';
 
 /**
@@ -92,6 +92,12 @@ export interface StartRequest {
   readonly runtime?: string;
   readonly login?: string;
   readonly folder: string;
+  /**
+   * The folder the ferret WORKS in, when it is not `folder` (a Warden investigator's own folder): checked through the
+   * same fenced `work` rules as `folder` (a refusal is `{ code: 'folder' }`, as today), and recorded as the ferret's
+   * folder in its place. Its report is read back with `summary(ferret)`. Port-only: no route takes it.
+   */
+  readonly workFolder?: string;
   readonly prompt?: string;
   /** Start bound to an existing harness conversation (§6.2). */
   readonly harnessConversation?: string;
@@ -128,6 +134,60 @@ export interface ManagedWorktreeSummary {
   readonly unresolved?: string;
 }
 
+/**
+ * How a resume differs from a person's plain one (today's `ResumePolicy`, copied). Both default to `false`: an explicit
+ * resume by a person is not automatic and never replaces a live pane; only a move sets `replaceLiveTerminal`.
+ */
+export interface ResumeOptions {
+  /**
+   * Automated recovery rather than a person asking (the Warden's revive, a restart drain): recorded with the
+   * `session.resumed` event so history tells the two apart.
+   */
+  readonly automatic?: boolean;
+  /**
+   * Replace a LIVE pane instead of keeping the ferret running as it is: the pane is stopped and the ferret relaunched
+   * through the ordinary launch (new token, harness home, environment). Only a move sets it.
+   */
+  readonly replaceLiveTerminal?: boolean;
+}
+
+/** Why a harness-seam act did not happen: a hold the act runner applied, or nothing to act on. */
+export type HarnessRefusal = { readonly refused: RefusalCode | 'no_pane' | 'plugin_unavailable' };
+
+/**
+ * The harness seam (decision #18): what Conversation needs to type into a ferret, interrupt it and read its transcript.
+ * Every write goes through `kernel.act(<the ferret's terminal pane>, 'keys')`, so Vault's input holds and the guarded
+ * write apply exactly as for `terminal_send`; there is no raw pane write here. The pane is read when the act is made, so
+ * a ferret that stopped since answers `no_pane`.
+ */
+export interface FerretHarness {
+  deliver(delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessRefusal>>;
+  /** The harness's interrupt (the runner's `signal(handle, 'interrupt')`), as the same kind of act. */
+  interrupt(): Promise<Result<true, HarnessRefusal>>;
+  /** The ferret's transcript through its harness, already masked (rejects with 503 while the harness is off). */
+  readonly transcript: TranscriptReader;
+}
+
+/** Why a move did not happen (today's `SessionMoveFailure` words and sentence). */
+export interface MoveFailure {
+  readonly code: string;
+  readonly reason: string;
+}
+
+/** What a move may carry beyond where it goes (today's move request, minus what only the route sets). */
+export interface MoveOptions {
+  readonly model?: string;
+  readonly allowContextDowngrade?: boolean;
+  readonly forceInflight?: boolean;
+  readonly conversation?: 'resume' | 'fresh' | 'previous' | 'convert';
+  /** Words that open the turn the relaunched ferret is handed: why it was moved. */
+  readonly note?: string;
+  /** `warden` for the Warden's own moves, so the turn is drawn as theirs. */
+  readonly actor?: 'warden';
+  /** Who asked, as history records it: `owner`, `session:<id>`, or `warden`. */
+  readonly movedBy?: string;
+}
+
 /** A ferret's whole status: its state, its turn, what plugins add, and its blockers from the Asks port. */
 export interface Sitrep {
   readonly ferret: FerretSummary;
@@ -162,7 +222,7 @@ export interface FerretsApi {
    * Revives a stopped ferret with its conversation. `message` is recorded in its history; delivering it into the
    * conversation is the Conversation's.
    */
-  resume(ferret: FerretId, message?: string): Promise<Result<FerretId, StartFailure>>;
+  resume(ferret: FerretId, message?: string, options?: ResumeOptions): Promise<Result<FerretId, StartFailure>>;
   /** Adopts a live process by its runner handle without restarting it (spine D15). */
   attach(ferret: FerretId, handle: RunnerHandle): Promise<Result<FerretId, StartFailure>>;
   /**
@@ -201,6 +261,22 @@ export interface FerretsApi {
    * daemon does not know may control nothing.
    */
   agentControl(ferret: FerretId): Promise<AgentControl>;
+  /**
+   * The harness seam (decision #18, additive): deliver, interrupt and the transcript of one ferret. `undefined` for a
+   * ferret this daemon does not know. With `caller` (a ferret acting), only itself and its helpers are reachable, by
+   * the same `mayTouch` rule as stop and resume: anyone else is refused with a 403 `forbidden`.
+   */
+  harness?(ferret: FerretId, caller?: FerretId): Promise<FerretHarness | undefined>;
+  /**
+   * Moves a ferret onto another runtime (decision #19, additive; today's move of a session): the moves module's flow, whose
+   * relaunch is a resume that replaces the live pane through the ordinary launch. Same `mayTouch` rule as above.
+   */
+  move?(
+    ferret: FerretId,
+    runtime: string,
+    options?: MoveOptions,
+    caller?: FerretId,
+  ): Promise<Result<FerretSummary, MoveFailure>>;
 }
 
 export const FerretsPort = definePort<FerretsApi>('ferrets');

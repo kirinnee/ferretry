@@ -80,6 +80,7 @@ import {
 import { DaemonStorage } from './adapters/storage/session-storage.ts';
 import { buildMoves, MOVE_ROUTE_KEYS } from './moves.ts';
 import { movesDeps } from './moves-deps.ts';
+import { ferretsMoveResume } from './lib/ferrets/move-resume.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
@@ -256,6 +257,20 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     // The registry the worktrees module keeps (built below); read only, through its own lifecycle chain.
     managedWorktrees: async () => await worktrees.service.records(),
+    // The harness seam writes only through the act runner, so Vault's input holds apply to it as to terminal_send.
+    act: kernel.act,
+    // Bound below, once the moves are built (the moves resume through this very service).
+    move: async (ferret, runtime, options) =>
+      await moves.move.move(ferret, {
+        agent: runtime,
+        ...(options.model === undefined ? {} : { model: options.model }),
+        allowContextDowngrade: options.allowContextDowngrade ?? false,
+        forceInflight: options.forceInflight ?? false,
+        ...(options.conversation === undefined ? {} : { conversation: options.conversation }),
+        ...(options.note === undefined ? {} : { note: options.note }),
+        ...(options.actor === undefined ? {} : { actor: options.actor }),
+        ...(options.movedBy === undefined ? {} : { movedBy: options.movedBy }),
+      }),
     vault: needs.vault,
     asks: needs.asks,
   });
@@ -408,7 +423,15 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     });
     throw error;
   });
-  const moves = buildMoves(ctx, movesDeps(ctx, { storage: sessionStore, clientName: 'fy' }));
+  const moves = buildMoves(
+    ctx,
+    movesDeps(ctx, {
+      storage: sessionStore,
+      clientName: 'fy',
+      // A move's relaunch is a resume of THIS service, so it goes through the ordinary launch (home, token, environment).
+      resume: ferretsMoveResume(service, ferret => registry.get(ferret)),
+    }),
+  );
   const moveRoutes = Object.fromEntries(
     MOVE_ROUTE_KEYS.map(key => [
       key,
@@ -454,7 +477,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       await kernel.state.write(FerretSummaryFiles, new TextEncoder().encode(text), ferret);
     },
     history: appendHistory,
-    stop: async (ferret, reason) => await service.stop(ferret, 'now', reason),
+    // `signal done` is the ferret ending on its own word: its cause is `completed`, not a stop.
+    stop: async (ferret, reason) => await service.stop(ferret, 'now', reason, { kind: 'completed' }),
   };
   const signalRoutes = sessionSignalRoutes(
     new FerretSignals(
@@ -719,7 +743,9 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         const id = await pathFerret(call);
         mayAct(call, id);
         const { message } = parseResumeBody(await body(call));
-        const resumed = await service.resume(id, message, confirmRestore(call, callerIsAgent(call)));
+        const resumed = await service.resume(id, message, {
+          confirmRestore: confirmRestore(call, callerIsAgent(call)),
+        });
         if (!resumed.ok) return startFailure(resumed.error);
         return jsonResponse({ id: resumed.value });
       },
