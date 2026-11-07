@@ -17,6 +17,7 @@ import { daemonSettingsStep } from './daemon-settings.ts';
 import { ferretsStep } from './ferrets.ts';
 import { gateStep } from './gate.ts';
 import { harnessHomesStep } from './harness-homes.ts';
+import { lessonsStep } from './lessons.ts';
 import { loginsStep } from './logins.ts';
 import { mcpStep } from './mcp.ts';
 import { projectsStep } from './projects.ts';
@@ -68,17 +69,7 @@ export const STEPS: readonly Step[] = [
   boardStep,
   agendaStep,
   projectsStep,
-  pending(
-    {
-      id: 'lessons',
-      title: 'Lessons',
-      owner: ['plugin-lessons'],
-      reads: ['state/learning/**', 'config/learning.yaml'],
-      sealed: [],
-      notCarried: [],
-    },
-    'the Lessons state and config schemas',
-  ),
+  lessonsStep,
   usageStep,
   wardenStep,
   pending(

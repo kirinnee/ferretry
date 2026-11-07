@@ -43,7 +43,7 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 ## State (Phase B)
 
 The preflight, sealed mover, report and ordered step table (`src/steps/index.ts`) exist. Vault, identity, ferrets,
-terminals, harness-homes, conversation, board, asks/agenda, projects, usage, warden, MCP, logins, Gate, settings and daemon settings have real conversions. The other steps remain `pending`, so the default conversion still exits 3. Each step names what it waits for.
+terminals, harness-homes, conversation, board, asks/agenda, projects, lessons, usage, warden, MCP, logins, Gate, settings and daemon settings have real conversions. The other steps remain `pending`, so the default conversion still exits 3. Each step names what it waits for.
 Fixture homes built from the real 4.291.5 release are in
 `fixtures/` (CI-only on shared boxes).
 
@@ -168,6 +168,20 @@ general and kept stores with their rotated halves, `grant-audit.jsonl` and `secu
 `input.hold-*`, `session.credential-*` → `ferret.credential-*`); journal records take v5's actor
 (`admin-*` → host) and keep their change strings in bounded `detail` keys. A record by a ferret's own credential has
 no v5 actor kind and is counted, not carried.
+
+Lessons (`src/steps/lessons.ts`) writes every file `@ferretry/plugin-lessons` declares under `state/lessons/`:
+`state.json` (v4's learning state, with `sessions.json`'s per-ferret switches folded in as `ferrets`, lead decision M5),
+`observations.jsonl` line for line, `suggested.json` (every proposal, whatever its state), `dismissed.json` (the
+tombstones), `runs/<run>.json`, `digests/<run>.json` (unfinished runs only), `patches/<name>.json` and `global.json`
+(the Global lessons document: the file the `lessons` instructions component names, else
+`fleet/assets/instructions/lessons.md`). `config/learning.yaml` becomes `config/lessons.yaml` with comments kept. Ferret
+ids are unchanged, so `sessionId`/`sessionIds`/`minerSessionId`/`minerSessions`/`sessions*` become the same values
+under their `ferret` names, `perHarness.claude` becomes `claude-code` and `maxSessionsPerRun` becomes
+`maxFerretsPerRun`; a Global lesson's `target.path`/`applied.path` (v4's asset file) becomes v5's
+`Global lessons document`. v4 read these files leniently, so the step carries what v4 read and counts what it dropped;
+a miner's raw `observations.json` and finished runs' digests are listed in `notCarried`. v5 gives the Global document to
+every ferret's launch, where v4 gave it only to ferrets whose profile included `instructions/lessons`; the Settings
+step still carries that component as an ordinary instruction item.
 
 ## Tests
 
