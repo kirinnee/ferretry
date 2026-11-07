@@ -25,13 +25,13 @@ import { type RefObject, useEffect, useLayoutEffect, useRef } from 'react';
 import { elementAtPath, elementPath, restorableTop, type ScrollMemory } from './scroll-memory.ts';
 
 /** How long a restore keeps waiting for content to arrive before it settles for the nearest offset. */
-export const SCROLL_RESTORE_PATIENCE_MS = 4_000;
+const SCROLL_RESTORE_PATIENCE_MS = 4_000;
 
 /** How long the region must go without a change before a landed offset stops being held. */
 const SCROLL_RESTORE_QUIET_MS = 500;
 
 /** Scrollers this hook leaves alone: the chat's own follow model, and anything that opts out. */
-export const SCROLL_MEMORY_IGNORED = '.fy-transcript, [data-scroll-memory="off"]';
+const SCROLL_MEMORY_IGNORED = '.fy-transcript, [data-scroll-memory="off"]';
 
 const READER_INPUT = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
 
