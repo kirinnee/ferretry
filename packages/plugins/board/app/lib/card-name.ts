@@ -1,7 +1,6 @@
 /**
- * A session's task, parsed out of `config.name`. Ported from the parsing half of
- * kteam `ui/src/components/TaskName.tsx` — the rendered chip belongs to whoever
- * ports the session row; every surface that merely needs the words takes this.
+ * A card's name, parsed out of a ferret's `name`. The parsing half of
+ * the rendered name (`views/card-name.tsx`); every surface that merely needs the words takes this.
  *
  * `--name` is documented to the CLI's callers as "a succinct summary of what
  * this session is supposed to do", so it is the single most useful string about

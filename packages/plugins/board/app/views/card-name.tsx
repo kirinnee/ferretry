@@ -1,5 +1,5 @@
 /**
- * The rendered task name, ported from kteam's `TaskName.tsx`.
+ * The rendered card name.
  *
  * Keep the parser in the shell: task names also feed the command palette,
  * while this component owns only the task-facing visual treatment.
@@ -8,7 +8,7 @@
 import { cn } from '@ferretry/app/ui';
 import { parseWorkName } from '../lib/card-name.ts';
 
-export interface TaskNameProps {
+export interface CardNameProps {
   readonly name?: string | null;
   readonly teammate?: string;
   readonly className?: string;
@@ -23,13 +23,13 @@ export interface TaskNameProps {
  * context instead of the headline. The stable prefix yields before the task,
  * and the full value remains available as the accessible hover title.
  */
-export function TaskName({ name, teammate, className = '', showPrefix = true, size = 'md' }: TaskNameProps) {
+export function CardName({ name, teammate, className = '', showPrefix = true, size = 'md' }: CardNameProps) {
   const { prefix, task } = parseWorkName(name);
   const title = [prefix ? `[${prefix}]` : null, task].filter(Boolean).join(' ');
 
   if (!task) {
     return (
-      <span className={cn('text-faint', className)} title="this session was launched without a --name">
+      <span className={cn('text-faint', className)} title="this ferret was started without a name">
         —
       </span>
     );

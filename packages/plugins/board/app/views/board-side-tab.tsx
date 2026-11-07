@@ -105,7 +105,7 @@ function Toolbar({
       ) : null}
       {onExpand === undefined ? null : (
         <button
-          aria-label={expanded ? 'Collapse the tasks back to the panel' : 'Expand the tasks to the whole chat'}
+          aria-label={expanded ? 'Collapse the cards back to the panel' : 'Expand the cards to the whole chat'}
           className="fy-board-side__expand"
           data-board-side-expand={expanded ? 'collapse' : 'expand'}
           onClick={onExpand}
