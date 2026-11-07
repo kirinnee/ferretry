@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'bun:test';
-import type { PluginClient } from '@ferretry/kernel/manifest';
+import type { PluginClient, PluginSocketListeners } from '@ferretry/kernel/manifest';
 import type { TerminalDeckHost } from '../../../app/components/session-terminal-deck.tsx';
 import {
   pluginTerminalDeckDependencies,
   pluginTerminalSlotsClient,
-  type SocketPluginClient,
   STREAM_DROPPED_CODE,
 } from '../../../app/lib/plugin-client.ts';
+import { daemonConnection, daemonSessionScope } from '../../../app/shell.ts';
 import { TerminalHoldersViewSchema } from '../../../contract/index.ts';
+import { shouldReopenTerminalStream } from '../../../app/lib/terminal-co-control.ts';
 import { terminalListing, terminalView } from '../../support/app/terminal-deck.ts';
 
 const TERMINAL = '7f0d2c5e0a1b';
@@ -34,34 +35,58 @@ function recording(reply: (route: string) => unknown) {
   return { calls, client };
 }
 
-const DAEMON = { daemonId: 'd' } as never;
-const scope = { daemonId: 'd', sessionId: 'wren' } as never;
+const DAEMON = daemonConnection('d');
+const scope = daemonSessionScope(DAEMON, 'wren');
+const WREN_LISTING = terminalListing([terminalView(TERMINAL, {}, 'wren')], 'wren');
 
 describe('pluginTerminalDeckDependencies', () => {
   it('lists a ferret’s terminals by the manifest route key, parsing the answer', async () => {
-    const listing = terminalListing([terminalView(TERMINAL)]);
-    const { calls, client } = recording(() => listing);
+    const { calls, client } = recording(() => WREN_LISTING);
     const deps = pluginTerminalDeckDependencies(client, HOST);
 
-    expect(await deps.list(DAEMON, scope)).toEqual(listing);
+    expect(await deps.list(DAEMON, scope)).toEqual(WREN_LISTING);
     expect(calls).toEqual([{ route: 'GET /v1/ferrets/:ferretId/terminals', init: { params: { ferretId: 'wren' } } }]);
   });
 
   it('renames and closes one terminal by its parsed id', async () => {
     const { calls, client } = recording(route =>
-      route.startsWith('PATCH') ? terminalView(TERMINAL, { title: 'build' }) : { closed: true },
+      route.startsWith('PATCH') ? terminalView(TERMINAL, { title: 'build' }, 'wren') : { closed: true },
     );
     const deps = pluginTerminalDeckDependencies(client, HOST);
 
     await deps.rename(DAEMON, scope, TERMINAL, 'build');
     await expect(deps.close(DAEMON, scope, 'not an id')).rejects.toThrow();
-    expect(calls).toEqual([
-      {
-        route: 'PATCH /v1/ferrets/:ferretId/terminals/:terminalId',
-        init: { params: { ferretId: 'wren', terminalId: TERMINAL }, body: { title: 'build' } },
-      },
-    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      route: 'PATCH /v1/ferrets/:ferretId/terminals/:terminalId',
+      init: { params: { ferretId: 'wren', terminalId: TERMINAL }, body: { title: 'build' } },
+    });
   });
+
+  const HANDLERS = (seen: { bytes: Uint8Array[]; closed: [number, string][]; opened: number }) => ({
+    onOpen: () => (seen.opened += 1),
+    onBytes: (bytes: Uint8Array) => seen.bytes.push(bytes),
+    onClosed: (code: number, reason: string) => seen.closed.push([code, reason]),
+    onRefused: () => undefined,
+  });
+
+  /** A shell client whose one socket hands the test its listeners, and records what was sent and how it was closed. */
+  const streaming = () => {
+    const sent: (string | Uint8Array)[] = [];
+    const left: { code?: number; reason?: string }[] = [];
+    const opened: { key: string; params: Readonly<Record<string, string>> }[] = [];
+    const heard: { listeners?: PluginSocketListeners } = {};
+    const client: PluginClient = {
+      call: async () => undefined as never,
+      subscribe: () => () => undefined,
+      socket: (key, params, given) => {
+        opened.push({ key, params });
+        heard.listeners = given;
+        return { send: frame => sent.push(frame), close: (code, reason) => left.push({ code, reason }) };
+      },
+    };
+    return { client, sent, left, opened, heard };
+  };
 
   it('streams over the shell socket: bytes reach the pane, text frames are dropped, a drop is retried', async () => {
     const seen: { bytes: Uint8Array[]; closed: [number, string][]; opened: number } = {
@@ -69,30 +94,17 @@ describe('pluginTerminalDeckDependencies', () => {
       closed: [],
       opened: 0,
     };
-    const sent: (string | Uint8Array)[] = [];
-    let listeners: { onFrame(frame: string | Uint8Array): void; onClose(reason: string): void } | undefined;
-    const opened: { key: string; params: Readonly<Record<string, string>> }[] = [];
-    const client: SocketPluginClient = {
-      call: async () => undefined as never,
-      subscribe: () => () => undefined,
-      socket: (key, params, given) => {
-        opened.push({ key, params });
-        listeners = given;
-        return { send: frame => sent.push(frame), close: () => undefined };
-      },
-    };
+    const { client, sent, opened, heard } = streaming();
     const deps = pluginTerminalDeckDependencies(client, HOST);
 
-    const stream = await deps.attach(DAEMON, scope, TERMINAL, {
-      onOpen: () => (seen.opened += 1),
-      onBytes: bytes => seen.bytes.push(bytes),
-      onClosed: (code, reason) => seen.closed.push([code, reason]),
-      onRefused: () => undefined,
-    });
-    listeners?.onFrame(new Uint8Array([104, 105]));
-    listeners?.onFrame('{"daemon":"json"}');
+    const stream = await deps.attach(DAEMON, scope, TERMINAL, HANDLERS(seen));
+    // Not open until the daemon accepts the stream: a frame sent before is dropped.
+    expect(seen.opened).toBe(0);
+    heard.listeners?.onOpen?.();
+    heard.listeners?.onFrame(new Uint8Array([104, 105]));
+    heard.listeners?.onFrame('{"daemon":"json"}');
     stream.control('{"type":"resize","cols":80,"rows":24}');
-    listeners?.onClose('carrier lost');
+    heard.listeners?.onClose('carrier lost');
 
     expect(opened).toEqual([
       {
@@ -104,6 +116,35 @@ describe('pluginTerminalDeckDependencies', () => {
     expect(seen.bytes).toEqual([new Uint8Array([104, 105])]);
     expect(sent).toEqual(['{"type":"resize","cols":80,"rows":24}']);
     expect(seen.closed).toEqual([[STREAM_DROPPED_CODE, 'carrier lost']]);
+    expect(shouldReopenTerminalStream(STREAM_DROPPED_CODE)).toBe(true);
+  });
+
+  for (const code of [1008, 1009]) {
+    it(`a close with the daemon's ${code} reaches the deck as that code, which is final`, async () => {
+      const seen: { bytes: Uint8Array[]; closed: [number, string][]; opened: number } = {
+        bytes: [],
+        closed: [],
+        opened: 0,
+      };
+      const { client, heard } = streaming();
+      await pluginTerminalDeckDependencies(client, HOST).attach(DAEMON, scope, TERMINAL, HANDLERS(seen));
+
+      heard.listeners?.onOpen?.();
+      heard.listeners?.onClose('policy violation', code);
+
+      expect(seen.closed).toEqual([[code, 'policy violation']]);
+      expect(shouldReopenTerminalStream(seen.closed[0]?.[0] ?? 0)).toBe(false);
+    });
+  }
+
+  it('leaves with the code and reason the deck gives, so a deliberate leave is never spelled as a drop', async () => {
+    const seen = { bytes: [], closed: [], opened: 0 };
+    const { client, left } = streaming();
+    const stream = await pluginTerminalDeckDependencies(client, HOST).attach(DAEMON, scope, TERMINAL, HANDLERS(seen));
+
+    stream.close(1000, 'terminal tab detached');
+
+    expect(left).toEqual([{ code: 1000, reason: 'terminal tab detached' }]);
   });
 
   it('refuses to stream through a client that has no sockets', async () => {

@@ -126,25 +126,9 @@
     ]
   },
   "pendingHalves": {
-    "terminals": ["app"],
     "warden": ["app"]
   },
   "pendingAppPorts": [
-    {
-      "plugin": "terminals",
-      "path": "packages/plugins/terminals/app",
-      "reason": "shell daemon-client, grants and browser-link facilities"
-    },
-    {
-      "plugin": "terminals",
-      "path": "packages/plugins/terminals/tests/unit/app",
-      "reason": "shell daemon-client, grants and browser-link facilities"
-    },
-    {
-      "plugin": "terminals",
-      "path": "packages/plugins/terminals/tests/support/app",
-      "reason": "shell daemon-client, grants and browser-link facilities"
-    },
     {
       "plugin": "warden",
       "path": "packages/plugins/warden/app",
