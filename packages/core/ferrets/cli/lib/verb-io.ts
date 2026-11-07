@@ -90,3 +90,23 @@ export function joined(parts: readonly string[]): string | undefined {
   const value = parts.join(' ').trim();
   return value === '' ? undefined : value;
 }
+
+/** Every value a repeatable option was given, in order (`--harness-flag a --harness-flag b`); a switch gives none. */
+export function list(invocation: VerbInvocation, name: string): readonly string[] {
+  const value = invocation.options[name];
+  if (typeof value === 'string') return [value];
+  return Array.isArray(value) ? value : [];
+}
+
+/** A numeric option as a number (`NaN` for a word, which the caller's validator refuses), or undefined when absent. */
+export function count(invocation: VerbInvocation, name: string): number | undefined {
+  const value = text(invocation, name);
+  return value === undefined ? undefined : Number(value);
+}
+
+/** A tri-state switch: `true` for `--name`, `false` for `--no-name`, undefined when neither was typed. */
+export function choice(invocation: VerbInvocation, name: string): boolean | undefined {
+  const value = invocation.options[name];
+  if (value === undefined) return undefined;
+  return value === true || value === 'true';
+}

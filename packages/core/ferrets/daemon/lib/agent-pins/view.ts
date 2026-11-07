@@ -2,7 +2,7 @@ import type { FerretSummary } from '../../../contract/index.ts';
 import type { AgentPinService } from './service.ts';
 
 /** A ferret as a pin-aware reader answers it: its summary, and `pinnedAt` while the owner has it pinned. */
-export type PinnedFerret = FerretSummary & { readonly pinnedAt?: string };
+export type PinnedFerret = Omit<FerretSummary, 'pinnedAt'> & { readonly pinnedAt?: string };
 
 /** The ferret reader the pin mark wraps: the registry's list and its one-reference lookup. */
 export interface FerretReader {

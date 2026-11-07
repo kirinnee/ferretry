@@ -10,7 +10,14 @@ import type { IRestartGateway } from './restart/ports.ts';
 import type { CompactAtChange, ISessionCompactAtGateway, SessionCompactAt } from './session/compact-at.ts';
 import type { ListedFerret } from './session/display.ts';
 import type { PinnedView, ISessionPinGateway } from './session/pin-agent.ts';
-import type { ISessionApi, SignalAnswer, SignalKind, SignalOptions, StartBody } from './session/ports.ts';
+import type {
+  ISessionApi,
+  RenameChange,
+  SignalAnswer,
+  SignalKind,
+  SignalOptions,
+  StartBody,
+} from './session/ports.ts';
 import type { CredentialRevoked, ISessionCredentialGateway } from './session/revoke-credential.ts';
 import type { IStopSessionGateway } from './stop/types.ts';
 
@@ -68,20 +75,28 @@ export class ClientSessionApi
     return await this.client.call<{ id: string }>(FERRET_ROUTES.start, { body });
   }
 
-  async stop(reference: string, how?: 'now' | 'polite'): Promise<{ readonly id: string; readonly state?: string }> {
+  async stop(
+    reference: string,
+    reason?: string,
+    how?: 'now' | 'polite',
+  ): Promise<{ readonly id: string; readonly state?: string }> {
     return await this.client.call<{ id: string; state?: string }>(FERRET_ROUTES.stop, {
       ...at(reference),
       ...(how === undefined ? {} : { query: { how } }),
+      ...(reason === undefined ? {} : { body: { reason } }),
     });
   }
 
-  async resume(reference: string): Promise<{ readonly id: string }> {
-    return await this.client.call<{ id: string }>(FERRET_ROUTES.resume, at(reference));
+  async resume(reference: string, message?: string): Promise<{ readonly id: string }> {
+    return await this.client.call<{ id: string }>(FERRET_ROUTES.resume, {
+      ...at(reference),
+      ...(message === undefined ? {} : { body: { message } }),
+    });
   }
 
-  async rename(reference: string, name: string): Promise<FerretSummary> {
+  async rename(reference: string, change: RenameChange): Promise<FerretSummary> {
     return FerretSummarySchema.parse(
-      await this.client.call<unknown>(FERRET_ROUTES.rename, { ...at(reference), body: { name } }),
+      await this.client.call<unknown>(FERRET_ROUTES.rename, { ...at(reference), body: change }),
     );
   }
 

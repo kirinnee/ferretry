@@ -10,6 +10,7 @@ import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import {
   FerretFiles,
+  FerretHistoryFiles,
   type FerretId,
   type FerretRecord,
   FerretsPort,
@@ -19,6 +20,7 @@ import {
 } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner, ferretId, T0 } from '../../../../contract/testing/index.ts';
 import ferrets from '../../../../daemon/index.ts';
+import { FerretDetailsFiles } from '../../../../daemon/lib/state.ts';
 
 /** Who calls: the `x-test-caller` header names a ferret (`ferret:<id>`), else the owner at the machine. */
 const callerHeader = 'x-test-caller';
@@ -363,6 +365,130 @@ describe('pins', () => {
     const board = await h.request('GET', '/v1/ferrets/lead/pins');
     expect(board.status).toBe(200);
     expect(board.json<{ pins: { text?: string }[] }>().pins.map(pin => pin.text)).toEqual(['ship it']);
+  });
+});
+
+describe('today’s start fields, the title, and the stop and resume words', () => {
+  const started = async (h: TestHost, body: Record<string, unknown>): Promise<FerretId> => {
+    const answer = await h.request('POST', '/v1/ferrets', { body: { folder: '/work/a', ...body } });
+    expect(answer.status).toBe(201);
+    return answer.json<{ id: FerretId }>().id;
+  };
+  const history = (h: TestHost, id: string) =>
+    (h.state('ferrets').raw(FerretHistoryFiles, id) ?? '')
+      .split('\n')
+      .filter(line => line !== '')
+      .map(line => JSON.parse(line) as { sequence: number; type: string; data: Record<string, unknown> });
+
+  test('a start carries today’s flat fields: the summary shows model and card, details.json keeps every option', async () => {
+    const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
+    const id = await started(h, {
+      prompt: 'fix it',
+      mode: 'auto',
+      title: 'Fix the login',
+      label: 'mine',
+      model: 'opus',
+      card: 'F21',
+      intervalSeconds: 30,
+      timeoutSeconds: 3600,
+      nudgeAfterSeconds: 120,
+      killAfterSeconds: 900,
+      harnessFlags: ['--verbose'],
+    });
+    const view = (await h.request('GET', `/v1/ferrets/${id}`)).json<Record<string, unknown>>();
+    expect(view).toMatchObject({ model: 'opus', card: 'F21', title: 'Fix the login' });
+    expect(view.label).toBeUndefined();
+    const details = JSON.parse(h.state('ferrets').raw(FerretDetailsFiles, id) as string);
+    expect(details).toEqual({
+      format: 1,
+      options: {
+        mode: 'auto',
+        label: 'mine',
+        model: 'opus',
+        card: 'F21',
+        intervalSeconds: 30,
+        timeoutSeconds: 3600,
+        nudgeAfterSeconds: 120,
+        killAfterSeconds: 900,
+        harnessFlags: ['--verbose'],
+      },
+      title: 'Fix the login',
+    });
+    // ferret.json is unchanged: who a ferret is, nothing more.
+    expect(JSON.parse(h.state('ferrets').raw(FerretFiles, id) as string).model).toBeUndefined();
+    // A restarted daemon reads the details back with the record.
+    const again = await h.restart();
+    const list = (await again.request('GET', '/v1/ferrets')).json<{ id: string; model?: string }[]>();
+    expect(list.find(ferret => ferret.id === id)?.model).toBe('opus');
+  });
+
+  test('a start with no options writes no details.json', async () => {
+    const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
+    const id = await started(h, {});
+    expect(h.state('ferrets').raw(FerretDetailsFiles, id)).toBeUndefined();
+  });
+
+  test('a title rename shows in the summary and the fleet list, keeping the start options', async () => {
+    const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
+    const id = await started(h, { model: 'opus' });
+    const renamed = await h.request('POST', `/v1/ferrets/${id}/rename`, { body: { title: 'Ship it' } });
+    expect(renamed.status).toBe(200);
+    expect(renamed.json<{ title?: string; model?: string }>()).toMatchObject({ title: 'Ship it', model: 'opus' });
+    expect((await h.request('GET', '/v1/ferrets')).body).toContain('"title":"Ship it"');
+    const both = await h.request('POST', `/v1/ferrets/${id}/rename`, { body: { name: 'piper', title: 'Again' } });
+    expect(both.json<{ name: string; title?: string }>()).toMatchObject({ name: 'piper', title: 'Again' });
+    expect((await h.request('POST', `/v1/ferrets/${id}/rename`, { body: {} })).status).toBe(400);
+  });
+
+  test('the owner’s pin instant rides the summary and the fleet list', async () => {
+    const h = await host([record('lead')]);
+    await h.request('POST', '/v1/ferrets/lead/pin');
+    expect((await h.request('GET', '/v1/ferrets/lead')).json<{ pinnedAt?: string }>().pinnedAt).toBeString();
+    expect((await h.request('GET', '/v1/ferrets')).json<{ pinnedAt?: string }[]>()[0]?.pinnedAt).toBeString();
+  });
+
+  test('a stop with a reason and a resume with a message are accepted and recorded in the ferret history', async () => {
+    const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
+    const id = await started(h, {});
+    const stopped = await h.request('POST', `/v1/ferrets/${id}/stop`, { body: { reason: 'shift over' } });
+    expect(stopped.json<{ state: string }>().state).toBe('stopped');
+    const resumed = await h.request('POST', `/v1/ferrets/${id}/resume`, { body: { message: 'carry on' } });
+    expect(resumed.status).toBe(200);
+    await h.request('POST', `/v1/ferrets/${id}/stop`);
+    expect(history(h, id).map(event => [event.sequence, event.type, event.data])).toEqual([
+      [1, 'session.stopped', { reason: 'shift over' }],
+      [2, 'session.resumed', { message: 'carry on' }],
+      [3, 'session.stopped', { reason: 'stopped by client' }],
+    ]);
+    expect((await h.request('POST', `/v1/ferrets/${id}/stop`, { body: { reason: '' } })).status).toBe(400);
+    expect((await h.request('POST', `/v1/ferrets/${id}/resume`, { body: { note: 'x' } })).status).toBe(400);
+  });
+
+  test('bad timers, an over-long or control-character harness flag, and today’s mode rules are refused 400', async () => {
+    const runner = new FakeRunner();
+    const h = await host([], { harness: new FakeHarness(), runner });
+    for (const body of [
+      { intervalSeconds: 0 },
+      { timeoutSeconds: -1 },
+      { nudgeAfterSeconds: 1.5 },
+      { maxSnapshots: '5' },
+      { harnessFlags: ['x'.repeat(16_385)] },
+      { harnessFlags: ['--a\nb'] },
+      { card: 'F0' },
+      { mode: 'auto' },
+      { auto: true, runtime: 'claude-alpha' },
+      { agent: 'claude-alpha' },
+    ]) {
+      const refused = await h.request('POST', '/v1/ferrets', { body: { folder: '/work/a', ...body } });
+      expect(refused.status).toBe(400);
+      expect(refused.json<{ code: string }>().code).toBe('invalid_request');
+    }
+    expect(runner.starts).toBe(0);
+  });
+
+  test('the port’s work folder answers nothing while no real-path seam is bound (kernel item N)', async () => {
+    const h = await host([record('lead')]);
+    expect(await h.provided(FerretsPort).workFolder(ferretId('lead'))).toBeUndefined();
   });
 });
 

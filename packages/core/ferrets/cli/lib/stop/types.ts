@@ -59,6 +59,7 @@ export interface StopSweepResult {
 }
 
 export interface BulkStopOptions {
+  readonly reason?: string;
   readonly dryRun?: boolean;
   readonly yes?: boolean;
   readonly includeCaller?: boolean;
@@ -79,7 +80,7 @@ export interface IStopSessionGateway {
   list(): Promise<readonly FerretSummary[]>;
   /** One ferret, by id or name: the daemon resolves the name, exactly as a single stop would. */
   get(reference: string): Promise<FerretSummary>;
-  stop(id: string): Promise<{ readonly id: string; readonly state?: string }>;
+  stop(id: string, reason?: string): Promise<{ readonly id: string; readonly state?: string }>;
 }
 
 /** Presentation port: satisfied structurally by the shipped `ConsoleIo` terminal adapter. */

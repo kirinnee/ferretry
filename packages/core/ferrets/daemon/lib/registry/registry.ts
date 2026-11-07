@@ -1,4 +1,5 @@
 import type { FerretId, FerretRecord, FerretState, FerretSummary, PackId } from '../../../contract/index.ts';
+import type { FerretDetails } from '../state.ts';
 
 /**
  * WHO EACH FERRET IS, in memory (§2.2): every `state/ferrets/<ferret>/ferret.json` the daemon holds, and the lineage
@@ -18,16 +19,29 @@ export interface FerretFilter {
   readonly pack?: PackId;
 }
 
-/** What other subsystems and the app read: the record without its format stamp and runner handle. */
-export function summaryOf(record: FerretRecord): FerretSummary {
+/**
+ * What other subsystems and the app read: the record without its format stamp and runner handle, with the model and
+ * card it was started with and its title from `details.json`. The pin instant is the reader's to add.
+ */
+export function summaryOf(record: FerretRecord, details?: FerretDetails): FerretSummary {
   const { format: _format, handle: _handle, ...summary } = record;
-  return summary;
+  if (details === undefined) return summary;
+  const model = details.options?.model;
+  const card = details.options?.card;
+  return {
+    ...summary,
+    ...(model === undefined ? {} : { model }),
+    ...(card === undefined ? {} : { card }),
+    ...(details.title === undefined ? {} : { title: details.title }),
+  };
 }
 
 export class FerretRegistry {
   private readonly records = new Map<FerretId, FerretRecord>();
   /** Each record's summary, kept beside it: the same object while the record has not moved (R501 reuse). */
   private readonly summaries = new Map<FerretId, FerretSummary>();
+  /** Each ferret's `details.json`, held beside its record and loaded with it. */
+  private readonly details = new Map<FerretId, FerretDetails>();
   private moved = 0;
 
   constructor(records: readonly FerretRecord[] = []) {
@@ -62,13 +76,27 @@ export class FerretRegistry {
 
   put(record: FerretRecord): void {
     this.records.set(record.id, record);
-    this.summaries.set(record.id, summaryOf(record));
+    this.summaries.set(record.id, summaryOf(record, this.details.get(record.id)));
     this.moved += 1;
+  }
+
+  /** A ferret's start options and title; its summary is remade when the ferret is known. */
+  putDetails(ferret: FerretId, details: FerretDetails): void {
+    this.details.set(ferret, details);
+    const record = this.records.get(ferret);
+    if (record === undefined) return;
+    this.summaries.set(ferret, summaryOf(record, details));
+    this.moved += 1;
+  }
+
+  detailsOf(ferret: FerretId): FerretDetails | undefined {
+    return this.details.get(ferret);
   }
 
   remove(ferret: FerretId): boolean {
     const had = this.records.delete(ferret);
     this.summaries.delete(ferret);
+    this.details.delete(ferret);
     if (had) this.moved += 1;
     return had;
   }

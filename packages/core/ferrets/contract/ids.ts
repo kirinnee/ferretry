@@ -80,6 +80,60 @@ export const FerretRecordSchema = z.strictObject({
 });
 export type FerretRecord = z.infer<typeof FerretRecordSchema>;
 
-/** What other subsystems and the app read about a ferret. */
-export const FerretSummarySchema = FerretRecordSchema.omit({ format: true, handle: true });
+/**
+ * A board card's id (`F21`, `B3`), copied from today's `protocol/src/lib/board-refs.ts` (`BOARD_TASK_ID_PATTERN`).
+ * Ferrets is core and cannot import the Board's contract, so the shape is kept here: a start names the EXISTING card
+ * the ferret works on, and the summary shows it.
+ */
+export const FERRET_CARD_ID_PATTERN = /^[BFIC][1-9][0-9]{0,8}$/u;
+export const FerretCardIdSchema = z.string().regex(FERRET_CARD_ID_PATTERN);
+
+/**
+ * A ferret's task title (today's `start --name <title>`, `new --name <title>`, `rename --title`): free-form, kept
+ * verbatim. Bounded as today's `PackNewRequestSchema.name` was (120 characters).
+ */
+export const FerretTitleSchema = z.string().trim().min(1).max(120);
+
+// ─── quota (today's `protocol/src/lib/session.ts` QuotaSchema, unchanged) ──────────────────────────────────────────
+
+const NonNegativeFiniteSchema = z.number().finite().nonnegative();
+const AccountAvailabilitySchema = z.enum(['available', 'unavailable']);
+const AccountUnavailableReasonSchema = z.enum(['cooldown', 'spend_limit', 'auth', 'provider', 'no_credentials']);
+
+/**
+ * The account headroom a ferret's summary shows (today's `SessionView.quota`). Ferrets keeps no source for it: the
+ * login and usage owners do, so a core summary leaves it out until a provider fills it.
+ */
+export const FerretQuotaSchema = z.object({
+  usageBased: z.boolean().optional(),
+  availability: AccountAvailabilitySchema.optional(),
+  unavailable: z.boolean().optional(),
+  unavailableReason: AccountUnavailableReasonSchema.optional(),
+  retryAt: NonNegativeFiniteSchema.optional(),
+  atLimit: z.boolean().optional(),
+  authOk: z.boolean().optional(),
+  provider: z.string().optional(),
+  fiveHourPercent: z.number().finite().min(0).max(100).optional(),
+  weeklyPercent: z.number().finite().min(0).max(100).optional(),
+  fiveHourResetAt: NonNegativeFiniteSchema.optional(),
+  weeklyResetAt: NonNegativeFiniteSchema.optional(),
+  resetAt: NonNegativeFiniteSchema.optional(),
+  /** The harness's own words for the limit Ferretry read this session as `rate_limited` on (a pane dialog or a
+   *  transcript record) — present exactly while that reading holds. */
+  limitNotice: z.string().min(1).optional(),
+});
+export type FerretQuota = z.infer<typeof FerretQuotaSchema>;
+
+/**
+ * What other subsystems and the app read about a ferret: its record without the format stamp and runner handle, and
+ * today's view fields Ferrets keeps beside it — the model and card it was started with and its task title (from its
+ * `details.json`), the instant the owner pinned it, and its quota (no core source; see {@link FerretQuotaSchema}).
+ */
+export const FerretSummarySchema = FerretRecordSchema.omit({ format: true, handle: true }).extend({
+  model: z.string().min(1).optional(),
+  card: FerretCardIdSchema.optional(),
+  title: FerretTitleSchema.optional(),
+  pinnedAt: InstantSchema.optional(),
+  quota: FerretQuotaSchema.optional(),
+});
 export type FerretSummary = z.infer<typeof FerretSummarySchema>;

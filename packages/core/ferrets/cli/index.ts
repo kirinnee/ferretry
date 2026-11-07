@@ -19,7 +19,7 @@ import { SessionStatusController } from './lib/session/status-controller.ts';
 import { SessionSubtreeController } from './lib/session/subtree-controller.ts';
 import { BulkStopController } from './lib/stop/controller.ts';
 import type { BulkStopSelector } from './lib/stop/types.ts';
-import { guarded, joined, on, PLAIN, text, typed, VerbIo } from './lib/verb-io.ts';
+import { choice, count, guarded, joined, list as listOf, on, PLAIN, text, typed, VerbIo } from './lib/verb-io.ts';
 import { WorktreeController } from './lib/worktrees/controller.ts';
 import { ClientWorktreeGateway } from './lib/worktrees/gateway.ts';
 
@@ -42,19 +42,13 @@ const SESSION_USAGE = [
   `  ${BINARY} session compact-at <ferret> [tokens|auto|inherit]`,
 ];
 
-/** The flags of `fy new` that are Packs' choice now (model routing, effort, continuing a conversation). */
-const NEW_FLAGS_ELSEWHERE = [
-  'model',
-  'effort',
-  'continue',
-  'since',
-  'auto',
-  'allow-scratch',
-  'card',
-  'compact-at',
-  'prompt-file',
-  'name',
-];
+/**
+ * The flags of `fy new` that are not Ferrets' start: continuing an existing conversation (`--continue`, `--since`)
+ * and where it compacts are the Conversation's, a scratch-folder override is not a field of the start, and a prompt
+ * file is not this CLI half's to read. The model routing (`--model`, `--effort`, `--auto`), `--card` and
+ * `--name <title>` are sent with the start.
+ */
+const NEW_FLAGS_ELSEWHERE = ['continue', 'since', 'allow-scratch', 'compact-at', 'prompt-file'];
 
 /** Refuses, by name, a typed flag whose value has no field in Ferrets' routes. */
 function refuseElsewhere(invocation: VerbInvocation, names: readonly string[], verb: string): void {
@@ -94,7 +88,9 @@ export default implementCli(manifest, {
 
     const list = verb(async (invocation, presenter) => {
       if (typed(invocation, 'label', 'l'))
-        throw new SessionCommandError('a ferret carries no label any more; filter by its pack with --pack <pack>');
+        throw new SessionCommandError(
+          'ps does not filter by label in this version of Ferretry; filter by its pack with --pack <pack>',
+        );
       const pack = text(invocation, 'pack');
       await new ListSessionsController(api, presenter, PLAIN).execute({
         ...(on(invocation, 'all', 'a') ? { all: true } : {}),
@@ -124,8 +120,41 @@ export default implementCli(manifest, {
         const pack = text(invocation, 'pack');
         const cwd = text(invocation, 'cwd');
         const prompt = joined(invocation.args);
+        const auto = role === 'new' && on(invocation, 'auto');
+        // Today's `fy new` refinement: a sub-ferret names its runtime, or lets Ferretry pick one.
+        if (role === 'new' && auto && agent !== undefined)
+          throw new SessionCommandError('--auto picks the runtime; do not name one');
+        if (role === 'new' && !auto && agent === undefined)
+          throw new SessionCommandError('name a --runtime, or pass --auto');
+        const title = text(invocation, 'name');
+        const label = text(invocation, 'label');
+        const card = text(invocation, 'card');
+        const model = text(invocation, 'model');
+        const effort = text(invocation, 'effort');
+        const fast = choice(invocation, 'fast');
+        const remoteControl = choice(invocation, 'rc');
+        const harnessFlags = listOf(invocation, 'harness-flag');
+        const numbers = {
+          interval: count(invocation, 'interval'),
+          turnTimeout: count(invocation, 'turn-timeout'),
+          nudgeAfter: count(invocation, 'nudge-after'),
+          stallKillAfter: count(invocation, 'stall-kill-after'),
+          directMax: count(invocation, 'direct-max'),
+          maxSnapshots: count(invocation, 'max-snapshots'),
+        };
         await new StartSessionController(api, presenter, environment, BINARY).execute({
           mode,
+          ...(on(invocation, 'teammate-fallback') ? { teammateFallback: true } : {}),
+          ...(title === undefined ? {} : { title }),
+          ...(label === undefined ? {} : { label }),
+          ...(card === undefined ? {} : { card }),
+          ...(model === undefined ? {} : { model }),
+          ...(effort === undefined ? {} : { effort }),
+          ...(fast === undefined ? {} : { fast }),
+          ...(remoteControl === undefined ? {} : { remoteControl }),
+          ...(harnessFlags.length === 0 ? {} : { harnessFlags }),
+          ...(auto ? { auto: true } : {}),
+          ...Object.fromEntries(Object.entries(numbers).filter(([, value]) => value !== undefined)),
           ...(agent === undefined ? {} : { agent }),
           ...(teammate === undefined ? {} : { teammate }),
           ...(harness === undefined ? {} : { harness }),
@@ -139,14 +168,14 @@ export default implementCli(manifest, {
 
     const stopBy = (kind: BulkStopSelector['kind']) =>
       verb(async (invocation, _presenter, io) => {
-        if (typed(invocation, 'reason', 'r'))
-          throw new SessionCommandError('--reason: a stop records no reason in this version of Ferretry');
+        const reason = text(invocation, 'reason', 'r');
         const value = first(invocation, kind === 'label' ? 'pack' : 'ferret');
         const selector: BulkStopSelector = kind === 'label' ? { kind, label: value } : { kind, rootId: value };
         const includeCaller = on(invocation, 'include-caller');
         await new BulkStopController(api, io, { ask: async () => '' }, { interactive: false, binaryName: BINARY }).run(
           selector,
           {
+            ...(reason === undefined ? {} : { reason }),
             ...(on(invocation, 'dry-run', 'n') ? { dryRun: true } : {}),
             ...(on(invocation, 'yes', 'y') ? { yes: true } : {}),
             ...(includeCaller ? { includeCaller: true } : {}),

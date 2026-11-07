@@ -1,6 +1,6 @@
 import type { FerretSummary as SessionView } from '../../../contract/index.ts';
 import { buildStopPlan, StopSelectorError } from './plan.ts';
-import { confirmationPhrase, renderStopPlan, renderStopSweep } from './render.ts';
+import { confirmationPhrase, defaultStopReason, renderStopPlan, renderStopSweep } from './render.ts';
 import type {
   BulkStopOptions,
   BulkStopResult,
@@ -22,7 +22,7 @@ export interface BulkStopContext {
   readonly interactive: boolean;
   /** The session issuing the command, when the CLI is running inside one. */
   readonly callerId?: string;
-  /** The shipped binary name. */
+  /** The shipped binary name, used only to phrase the default stop reason. */
   readonly binaryName: string;
 }
 
@@ -42,9 +42,11 @@ export class BulkStopController implements IBulkStopRunner {
 
   async run(selector: BulkStopSelector, options: BulkStopOptions): Promise<BulkStopResult> {
     let plan: StopPlan;
+    let resolved: BulkStopSelector;
     try {
       const resolution = await this.#resolveSelector(selector);
-      plan = buildStopPlan(withResolvedRoot(await this.gateway.list(), resolution.root), resolution.selector, {
+      resolved = resolution.selector;
+      plan = buildStopPlan(withResolvedRoot(await this.gateway.list(), resolution.root), resolved, {
         ...(this.context.callerId ? { callerId: this.context.callerId } : {}),
         ...(options.includeCaller === undefined ? {} : { includeCaller: options.includeCaller }),
       });
@@ -64,8 +66,8 @@ export class BulkStopController implements IBulkStopRunner {
     }
     if (!options.yes && !(await this.#confirm(plan))) return { exitCode: 1, plan, confirmed: false };
 
-
-    const sweep = await this.#sweep(plan, options.includeCaller);
+    const reason = options.reason?.trim() || defaultStopReason(resolved, this.context.binaryName);
+    const sweep = await this.#sweep(plan, reason, options.includeCaller);
     this.io.success(renderStopSweep(sweep));
 
     const failed = sweep.outcomes.some(outcome => !outcome.ok) || sweep.appeared.length > 0 || !!sweep.raceCheckError;
@@ -105,11 +107,11 @@ export class BulkStopController implements IBulkStopRunner {
   }
 
   /** Execute only the already-confirmed ids, then detect — never auto-kill — anything new. */
-  async #sweep(plan: StopPlan, includeCaller?: boolean): Promise<StopSweepResult> {
+  async #sweep(plan: StopPlan, reason: string, includeCaller?: boolean): Promise<StopSweepResult> {
     const outcomes: StopOutcome[] = [];
     for (const target of plan.targets) {
       try {
-        const stopped = await this.gateway.stop(target.id);
+        const stopped = await this.gateway.stop(target.id, reason);
         outcomes.push({ target, ok: true, ...(stopped.state === undefined ? {} : { status: stopped.state }) });
       } catch (error) {
         outcomes.push({ target, ok: false, error: errorText(error) });

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { Instant } from '@ferretry/std';
 import { SessionCompactAtController } from '../../../../cli/lib/session/compact-at.ts';
 import { renderFerret, renderSessionTable } from '../../../../cli/lib/session/display.ts';
 import { SessionCommandError } from '../../../../cli/lib/session/errors.ts';
@@ -60,7 +61,7 @@ describe('fy ps', () => {
     const plain = renderSessionTable(fleet.slice(0, 3), AMBER);
     expect(plain[0]?.startsWith('TEAMMATE')).toBe(true);
     expect(plain[3]).toContain('<-');
-    const pinned = renderSessionTable([{ ...fleet[0]!, pinnedAt: '2026-11-01T10:00:00.000Z' }, fleet[1]!], PLAIN);
+    const pinned = renderSessionTable([{ ...fleet[0]!, pinnedAt: '2026-11-01T10:00:00.000Z' as Instant }, fleet[1]!], PLAIN);
     expect(pinned[0]?.startsWith('PIN')).toBe(true);
     expect(pinned[1]?.startsWith('*')).toBe(true);
   });
@@ -126,18 +127,31 @@ describe('fy rename', () => {
     const api = new RecordingApi();
     const { io, presenter } = capturedPresenter();
     await new RenameSessionController(api, presenter).execute(' wren ', 'mary-jane');
-    expect(api.calls).toEqual([{ method: 'rename', args: ['wren', 'mary-jane'] }]);
+    expect(api.calls).toEqual([{ method: 'rename', args: ['wren', { name: 'mary-jane' }] }]);
     expect(io.out).toEqual(['renamed wren: Mary-Jane']);
   });
 
-  test('V-0371 refuses no name, a bad name and a --title before anything is sent', async () => {
+  test('V-0371 --title sends a new task title, alongside or instead of a name, and shows it', async () => {
+    const api = new RecordingApi();
+    const { io, presenter } = capturedPresenter();
+    const subject = new RenameSessionController(api, presenter);
+    await subject.execute('wren', undefined, { title: ' Fix the login ' });
+    await subject.execute('wren', 'ash', { title: 'New title' });
+    expect(api.calls).toEqual([
+      { method: 'rename', args: ['wren', { title: 'Fix the login' }] },
+      { method: 'rename', args: ['wren', { name: 'ash', title: 'New title' }] },
+    ]);
+    expect(io.out).toEqual(['renamed wren: Wren — Fix the login', 'renamed wren: Ash — New title']);
+  });
+
+  test('V-0371 refuses no name and no title, and a bad name, before anything is sent', async () => {
     const api = new RecordingApi();
     const { presenter } = capturedPresenter();
     const subject = new RenameSessionController(api, presenter);
     for (const attempt of [
       subject.execute('wren', undefined),
+      subject.execute('wren', '  ', { title: '  ' }),
       subject.execute('wren', 'no/slash'),
-      subject.execute('wren', 'ash', { title: 'New title' }),
     ])
       expect(await caught(attempt)).toBeInstanceOf(SessionCommandError);
     expect(api.calls).toEqual([]);
@@ -145,15 +159,16 @@ describe('fy rename', () => {
 });
 
 describe('fy resume', () => {
-  test('V-0376 revives the ferret and shows it; a message is refused (the conversation delivers it)', async () => {
+  test('V-0376 revives the ferret and shows it, sending a message to deliver on revival', async () => {
     const api = new RecordingApi({ get: fleet[0] });
     const { io, presenter } = capturedPresenter();
     await new ResumeSessionController(api, presenter).execute('wren');
-    expect(api.methods()).toEqual(['resume', 'get']);
+    await new ResumeSessionController(api, presenter).execute('wren', { message: ' go on ' });
+    expect(api.calls.filter(call => call.method === 'resume')).toEqual([
+      { method: 'resume', args: ['wren', undefined] },
+      { method: 'resume', args: ['wren', 'go on'] },
+    ]);
     expect(io.out[0]).toContain('wren (lead)');
-    expect(await caught(new ResumeSessionController(api, presenter).execute('wren', { message: 'go on' }))).toBeInstanceOf(
-      SessionCommandError,
-    );
   });
 });
 
@@ -198,15 +213,72 @@ describe('fy start', () => {
     });
     expect(api.calls[0]).toEqual({
       method: 'start',
-      args: [{ folder: '/work/repo/sub', runtime: 'claude-alpha', name: 'wren', prompt: 'fix the bug' }],
+      args: [
+        { folder: '/work/repo/sub', runtime: 'claude-alpha', name: 'wren', prompt: 'fix the bug', mode: 'auto' },
+      ],
     });
     expect(io.err).toEqual(['note: lead is still starting — watch it with `fy ps` or `fy status lead`']);
   });
 
+  test('V-0443 sends today’s start fields with today’s wire names, and a short --turn-timeout earns a note', async () => {
+    const api = new RecordingApi({ get: fleet[0] });
+    const { io, presenter } = capturedPresenter();
+    await new StartSessionController(api, presenter, { cwd: '/w' }, 'fy').execute({
+      mode: 'auto',
+      prompt: 'go',
+      title: 'Fix login',
+      label: 'mine',
+      card: '&f21',
+      model: 'opus',
+      effort: 'high',
+      fast: false,
+      remoteControl: true,
+      harnessFlags: ['--verbose'],
+      teammateFallback: true,
+      interval: 30,
+      turnTimeout: 60,
+      nudgeAfter: 0,
+      stallKillAfter: 900,
+      directMax: 200,
+      maxSnapshots: 5,
+    });
+    expect(api.calls[0]?.args[0]).toEqual({
+      folder: '/w',
+      prompt: 'go',
+      mode: 'auto',
+      teammateFallback: true,
+      title: 'Fix login',
+      label: 'mine',
+      card: 'F21',
+      model: 'opus',
+      effort: 'high',
+      fast: false,
+      remoteControl: true,
+      harnessFlags: ['--verbose'],
+      intervalSeconds: 30,
+      timeoutSeconds: 60,
+      nudgeAfterSeconds: 0,
+      killAfterSeconds: 900,
+      directSendMaxChars: 200,
+      maxSnapshots: 5,
+    });
+    expect(io.err[0]).toContain('--turn-timeout is a hard KILL timer');
+  });
+
+  test('V-0443 a numeric flag that is not a whole number at its floor, or a bad card, is refused before sending', () => {
+    expect(() => buildStartRequest({ mode: 'interactive', interval: 0 }, { cwd: '/w' })).toThrow(
+      '--interval must be an integer of at least 1',
+    );
+    expect(() => buildStartRequest({ mode: 'interactive', nudgeAfter: Number('soon') }, { cwd: '/w' })).toThrow(
+      '--nudge-after must be an integer of at least 0',
+    );
+    expect(() => buildStartRequest({ mode: 'interactive', card: 'F0' }, { cwd: '/w' })).toThrow('&F21');
+  });
+
   test('V-0443 an auto start needs a prompt; an interactive one may start bare; with no folder it says how', () => {
     expect(() => buildStartRequest({ mode: 'auto' }, { cwd: '/w' })).toThrow(SessionCommandError);
-    expect(buildStartRequest({ mode: 'interactive' }, { cwd: '/w' })).toEqual({ folder: '/w' });
-    expect(buildStartRequest({ mode: 'interactive', cwd: '/abs' }, {})).toEqual({ folder: '/abs' });
+    expect(buildStartRequest({ mode: 'interactive' }, { cwd: '/w' })).toEqual({ folder: '/w', mode: 'interactive' });
+    expect(buildStartRequest({ mode: 'interactive', cwd: '/abs' }, {})).toEqual({ folder: '/abs', mode: 'interactive' });
     expect(() => buildStartRequest({ mode: 'interactive', cwd: 'rel' }, {})).toThrow(/--cwd <absolute path>/u);
   });
 });
@@ -243,7 +315,7 @@ describe('fy session', () => {
       {
         pin: async session => {
           asked.push(`pin ${session}`);
-          return { ...fleet[0]!, pinnedAt: '2026-11-01T10:00:00.000Z' };
+          return { ...fleet[0]!, pinnedAt: '2026-11-01T10:00:00.000Z' as Instant };
         },
         unpin: async session => {
           asked.push(`unpin ${session}`);

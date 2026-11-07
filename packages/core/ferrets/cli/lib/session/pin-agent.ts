@@ -3,7 +3,7 @@ import { SessionCommandError } from './errors.ts';
 import type { SessionPresenter } from './presenter.ts';
 
 /** A ferret as the pin routes answer it: carrying `pinnedAt` while pinned. */
-export type PinnedView = FerretSummary & { readonly pinnedAt?: string };
+export type PinnedView = FerretSummary;
 
 /** The two routes `fy session pin` and `fy session unpin` speak. */
 export interface ISessionPinGateway {

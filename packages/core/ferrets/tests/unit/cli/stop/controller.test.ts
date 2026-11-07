@@ -16,7 +16,7 @@ interface Recorded {
   readonly out: string[];
   readonly errors: string[];
   readonly exitCodes: number[];
-  readonly stopped: Array<{ id: string }>;
+  readonly stopped: Array<{ id: string; reason: string }>;
   readonly asked: string[];
 }
 
@@ -65,9 +65,9 @@ function harness(options: HarnessOptions = {}) {
       if (!found) throw new Error(`unknown session "${id}"`);
       return found;
     },
-    stop: async (id: string): Promise<SessionView> => {
+    stop: async (id: string, reason?: string): Promise<SessionView> => {
       if (options.stopFails?.has(id)) throw new Error(`daemon refused ${id}`);
-      recorded.stopped.push({ id });
+      recorded.stopped.push({ id, reason: reason ?? '' });
       return session({ id, status: 'stopped' });
     },
   };
@@ -255,6 +255,31 @@ describe('the sweep', () => {
     should(recorded.stopped.map(entry => entry.id)).deepEqual(['worker-b']);
     should(recorded.out.join('\n')).containEql('FAILED');
     should(recorded.exitCodes).deepEqual([1]);
+  });
+
+  it('should record the default reason naming the shipped binary', async () => {
+    // Arrange
+    const { recorded, run } = harness({ answer: 'stop 2' });
+
+    // Act
+    await run({ kind: 'label', label: 'batch' }, { yes: true });
+
+    // Assert
+    should(recorded.stopped[0]?.reason).equal('stopped by fy stop label batch');
+  });
+
+  it('should prefer an explicit reason and ignore a blank one', async () => {
+    // Arrange
+    const explicit = harness();
+    const blank = harness();
+
+    // Act
+    await explicit.run({ kind: 'label', label: 'batch' }, { yes: true, reason: '  shift over  ' });
+    await blank.run({ kind: 'label', label: 'batch' }, { yes: true, reason: '   ' });
+
+    // Assert
+    should(explicit.recorded.stopped[0]?.reason).equal('shift over');
+    should(blank.recorded.stopped[0]?.reason).equal('stopped by fy stop label batch');
   });
 
   it('should exclude the caller by default and include it last when asked', async () => {

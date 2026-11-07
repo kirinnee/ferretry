@@ -3,10 +3,13 @@ import { z } from 'zod';
 import {
   FerretNameSchema,
   FerretRoleSchema,
+  FerretTitleSchema,
   HarnessKeySchema,
   LoginNameSchema,
   PackIdSchema,
   RuntimeNameSchema,
+  type StartOptions,
+  StartOptionsSchema,
   type StartRequest,
 } from '../../../contract/index.ts';
 
@@ -14,8 +17,12 @@ import {
  * The bodies of `POST /v1/ferrets` and `POST /v1/ferrets/:id/rename`, parsed strictly at the boundary. A body never
  * names the parent: a ferret's start is its own helper (the route sets it from the caller's token), and the owner's
  * start has none.
+ *
+ * A start carries today's start fields FLAT, as today's wire did (`model`, `label`, `intervalSeconds`, …); they are
+ * gathered into the request's `options` ({@link StartOptionsSchema}). Today's task-title field was `name`; in Ferrets
+ * `name` is the ferret's first name, so the title travels as `title`.
  */
-export const StartBodySchema = z.strictObject({
+const StartIdentitySchema = z.strictObject({
   name: FerretNameSchema.optional(),
   pack: PackIdSchema.optional(),
   role: FerretRoleSchema.optional(),
@@ -26,7 +33,29 @@ export const StartBodySchema = z.strictObject({
   prompt: z.string().max(200_000).optional(),
 });
 
-export const RenameBodySchema = z.strictObject({ name: FerretNameSchema });
+export const StartBodySchema = z
+  .strictObject({ ...StartIdentitySchema.shape, ...StartOptionsSchema.shape })
+  .superRefine((value, context) => {
+    // Today's start was a union on `mode`: `auto` carries a prompt, `interactive` may start bare.
+    if (value.mode === 'auto' && (value.prompt === undefined || value.prompt.trim() === ''))
+      context.addIssue({ code: 'custom', message: 'an auto start needs a prompt', path: ['prompt'] });
+    // Today's `fy new` refinement: `--auto` picks the runtime.
+    if (value.auto === true && value.runtime !== undefined)
+      context.addIssue({ code: 'custom', message: '--auto picks the runtime; do not name one', path: ['runtime'] });
+  });
+
+export const RenameBodySchema = z
+  .strictObject({ name: FerretNameSchema.optional(), title: FerretTitleSchema.optional() })
+  .superRefine((value, context) => {
+    if (value.name === undefined && value.title === undefined)
+      context.addIssue({ code: 'custom', message: 'name or title is required' });
+  });
+
+/** Today's `StopSessionRequestSchema`. */
+export const StopBodySchema = z.strictObject({ reason: z.string().min(1).optional() });
+
+/** Today's `ResumeSessionRequestSchema`. */
+export const ResumeBodySchema = z.strictObject({ message: z.string().min(1).optional() });
 
 const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
   const parsed = schema.safeParse(value);
@@ -40,7 +69,22 @@ const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
   return parsed.data;
 };
 
-export const parseStartBody = (value: unknown): Omit<StartRequest, 'by' | 'parent'> =>
-  parse(StartBodySchema, value) as Omit<StartRequest, 'by' | 'parent'>;
+const OPTION_KEYS: ReadonlySet<string> = new Set(Object.keys(StartOptionsSchema.shape));
 
-export const parseRenameBody = (value: unknown): { readonly name: string } => parse(RenameBodySchema, value);
+export const parseStartBody = (value: unknown): Omit<StartRequest, 'by' | 'parent'> => {
+  const identity: Record<string, unknown> = {};
+  const options: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(parse(StartBodySchema, value)))
+    if (field !== undefined) (OPTION_KEYS.has(key) ? options : identity)[key] = field;
+  return {
+    ...(identity as Omit<StartRequest, 'by' | 'parent' | 'options'>),
+    ...(Object.keys(options).length === 0 ? {} : { options: options as StartOptions }),
+  };
+};
+
+export const parseRenameBody = (value: unknown): { readonly name?: string; readonly title?: string } =>
+  parse(RenameBodySchema, value);
+
+export const parseStopBody = (value: unknown): { readonly reason?: string } => parse(StopBodySchema, value);
+
+export const parseResumeBody = (value: unknown): { readonly message?: string } => parse(ResumeBodySchema, value);

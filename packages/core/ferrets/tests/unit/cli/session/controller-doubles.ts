@@ -2,6 +2,7 @@ import type { FerretSummary } from '../../../../contract/index.ts';
 import type {
   ISessionApi,
   ISessionIo,
+  RenameChange,
   SignalAnswer,
   SignalKind,
   SignalOptions,
@@ -86,19 +87,30 @@ export class RecordingApi implements ISessionApi {
     return { id: 'ses-1' };
   }
 
-  async stop(reference: string, how?: 'now' | 'polite'): Promise<{ readonly id: string; readonly state?: string }> {
-    this.record('stop', reference, how);
+  async stop(
+    reference: string,
+    reason?: string,
+    how?: 'now' | 'polite',
+  ): Promise<{ readonly id: string; readonly state?: string }> {
+    this.record('stop', reference, reason, how);
     return { id: reference, state: 'stopped' };
   }
 
-  async resume(reference: string): Promise<{ readonly id: string }> {
-    this.record('resume', reference);
+  async resume(reference: string, message?: string): Promise<{ readonly id: string }> {
+    this.record('resume', reference, message);
     return { id: reference };
   }
 
-  async rename(reference: string, name: string): Promise<FerretSummary> {
-    this.record('rename', reference, name);
-    return this.responses.rename ?? sessionView({ id: reference, name });
+  async rename(reference: string, change: RenameChange): Promise<FerretSummary> {
+    this.record('rename', reference, change);
+    return (
+      this.responses.rename ??
+      sessionView({
+        id: reference,
+        ...(change.name === undefined ? {} : { name: change.name }),
+        ...(change.title === undefined ? {} : { title: change.title }),
+      })
+    );
   }
 
   async signal(reference: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SignalAnswer> {

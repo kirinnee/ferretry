@@ -42,7 +42,7 @@ const TABLE_HEADER = ['TEAMMATE', 'ID', 'STATE', 'HARNESS', 'RUNTIME', 'ROLE', '
 const PINNED_MARK = '*';
 
 /** A listed ferret, with the pin mark the fleet list may carry. */
-export type ListedFerret = FerretSummary & { readonly pinnedAt?: string };
+export type ListedFerret = FerretSummary;
 
 /**
  * The `ps` table.

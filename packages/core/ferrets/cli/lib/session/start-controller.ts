@@ -1,6 +1,6 @@
 import type { ISessionApi, SessionEnvironment } from './ports.ts';
 import type { SessionPresenter } from './presenter.ts';
-import { buildStartRequest, type StartFlags } from './start-request.ts';
+import { buildStartRequest, type StartFlags, startWarnings } from './start-request.ts';
 
 /** `start` flags plus how to print the answer. */
 export interface StartCommandFlags extends StartFlags {
@@ -18,7 +18,9 @@ export class StartSessionController {
   ) {}
 
   async execute(flags: StartCommandFlags): Promise<void> {
-    const started = await this.api.start(buildStartRequest(flags, this.environment));
+    const body = buildStartRequest(flags, this.environment);
+    for (const warning of startWarnings(flags)) this.presenter.note(warning);
+    const started = await this.api.start(body);
     const view = await this.api.get(started.id);
     this.presenter.view(view, flags.json === true);
     // A launch that outran the request is not a failure: the ferret is recorded and keeps coming up, so say where to

@@ -258,6 +258,10 @@ export function loginKindConformance(name: string, make: () => LoginKind | Promi
 /** An in-memory Ferrets port: lineage, `mayTouch`, start through nothing (records only). */
 export class FakeFerrets implements FerretsApi {
   readonly #ferrets = new Map<FerretId, FerretSummary>();
+  /** Every start request, stop and resume, in order, so a test can assert what reached the port. */
+  readonly starts: StartRequest[] = [];
+  readonly stops: { readonly ferret: FerretId; readonly how: 'polite' | 'now'; readonly reason?: string }[] = [];
+  readonly resumes: { readonly ferret: FerretId; readonly message?: string }[] = [];
   #next = 0;
 
   add(summary: Partial<FerretSummary> & { readonly id: FerretId }): FerretSummary {
@@ -301,24 +305,35 @@ export class FakeFerrets implements FerretsApi {
     return [...this.#ferrets.values()].filter(f => f.parent === ferret).map(f => f.id);
   }
   async start(request: StartRequest): Promise<Result<FerretId, StartFailure>> {
+    this.starts.push(request);
     this.#next += 1;
     const id = ferretId(`f${this.#next}`);
+    const { model, card, title } = request.options ?? {};
     this.add({
       id,
       name: request.name ?? id,
       folder: request.folder,
       state: 'starting',
       ...(request.parent === undefined ? {} : { parent: request.parent }),
+      ...(model === undefined ? {} : { model }),
+      ...(card === undefined ? {} : { card }),
+      ...(title === undefined ? {} : { title }),
     });
     return ok(id);
   }
-  async stop(ferret: FerretId) {
+  async stop(ferret: FerretId, how: 'polite' | 'now' = 'polite', reason?: string) {
+    this.stops.push({ ferret, how, ...(reason === undefined ? {} : { reason }) });
     this.setState(ferret, 'stopped');
   }
-  async resume(ferret: FerretId): Promise<Result<FerretId, StartFailure>> {
+  async resume(ferret: FerretId, message?: string): Promise<Result<FerretId, StartFailure>> {
     if (!this.#ferrets.has(ferret)) return err({ code: 'failed', reason: 'no such ferret' });
+    this.resumes.push({ ferret, ...(message === undefined ? {} : { message }) });
     this.setState(ferret, 'starting');
     return ok(ferret);
+  }
+  async workFolder(ferret: FerretId): Promise<{ readonly folder: string } | undefined> {
+    const summary = this.#ferrets.get(ferret);
+    return summary === undefined ? undefined : { folder: summary.folder };
   }
   readonly #handles = new Map<FerretId, RunnerHandle>();
   async attach(ferret: FerretId, handle: RunnerHandle): Promise<Result<FerretId, StartFailure>> {

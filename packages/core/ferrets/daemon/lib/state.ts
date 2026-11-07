@@ -1,5 +1,6 @@
 import { defineState } from '@ferretry/kernel/contract';
 import { z } from 'zod';
+import { FerretTitleSchema, StartOptionsSchema } from '../../contract/index.ts';
 import { AgentPinFileSchema } from './agent-pins/types.ts';
 import { PinSchema } from './protocol/pins.ts';
 import { SessionConfigSchema, SessionStateSchema } from './protocol/session.ts';
@@ -55,4 +56,26 @@ export const FerretPinFiles = defineState({
   format: 1,
   schema: z.strictObject({ pins: z.array(PinSchema) }),
   mode: 0o600,
+});
+
+/**
+ * What a ferret was started with beyond its identity, and its task title: `state/ferrets/<ferret>/details.json`.
+ * `ferret.json` is frozen (who a ferret is); this file holds today's view fields Ferrets keeps beside it — the start
+ * options (`StartOptionsSchema`, the title split out) and the title a start or a rename gave it. Private to Ferrets.
+ * A damaged one reads as no options and no title: it is what the summary shows, never what anything is allowed.
+ */
+export const FerretDetailsSchema = z.strictObject({
+  options: StartOptionsSchema.omit({ title: true }).optional(),
+  title: FerretTitleSchema.optional(),
+});
+export type FerretDetails = z.infer<typeof FerretDetailsSchema>;
+
+export const FerretDetailsFiles = defineState({
+  name: 'details',
+  path: '*/details.json',
+  store: 'json',
+  format: 1,
+  schema: FerretDetailsSchema,
+  mode: 0o600,
+  onDamaged: { narrower: 'a damaged details.json reads as no start options and no title' },
 });

@@ -1,4 +1,4 @@
-import type { FerretSummary } from '../../../contract/index.ts';
+import type { FerretSummary, StartOptions } from '../../../contract/index.ts';
 
 /**
  * Presentation port for the ferret verbs. `success`/`report`/`warn` are stdout, `error` is stderr — which is why every
@@ -22,8 +22,11 @@ export interface ICellColour {
   amber(cell: string): string;
 }
 
-/** `POST /v1/ferrets`'s body: who to start, on what, where, with which prompt (Ferrets' start, §2.2). */
-export interface StartBody {
+/**
+ * `POST /v1/ferrets`'s body: who to start, on what, where, with which prompt (Ferrets' start, §2.2), and today's start
+ * fields flat beside them (the contract's `StartOptions`: the model, the supervision timers, the label, …).
+ */
+export interface StartBody extends StartOptions {
   readonly name?: string;
   readonly pack?: string;
   readonly role?: 'lead' | 'helper';
@@ -32,6 +35,12 @@ export interface StartBody {
   readonly login?: string;
   readonly folder: string;
   readonly prompt?: string;
+}
+
+/** What `fy rename` changes: a new first name, a new task title, or both. */
+export interface RenameChange {
+  readonly name?: string;
+  readonly title?: string;
 }
 
 /** A lifecycle signal (`fy signal`): what the ferret says of its own work. */
@@ -64,9 +73,16 @@ export interface ISessionApi {
   get(reference: string): Promise<FerretSummary>;
   suggestNames(count: number): Promise<string[]>;
   start(body: StartBody): Promise<{ readonly id: string }>;
-  stop(reference: string, how?: 'now' | 'polite'): Promise<{ readonly id: string; readonly state?: string }>;
-  resume(reference: string): Promise<{ readonly id: string }>;
-  rename(reference: string, name: string): Promise<FerretSummary>;
+  /** Stops one ferret; `reason` is recorded in its history. */
+  stop(
+    reference: string,
+    reason?: string,
+    how?: 'now' | 'polite',
+  ): Promise<{ readonly id: string; readonly state?: string }>;
+  /** Revives one ferret; `message` is recorded with the revival. */
+  resume(reference: string, message?: string): Promise<{ readonly id: string }>;
+  /** A new first name, a new task title, or both. */
+  rename(reference: string, change: RenameChange): Promise<FerretSummary>;
   signal(reference: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SignalAnswer>;
 }
 

@@ -75,6 +75,12 @@ export function confirmationPhrase(plan: StopPlan): string {
   return `stop ${plan.targets.length}${orphanImpact}${including}`;
 }
 
+/** The reason recorded against every session when the operator supplied none. */
+export function defaultStopReason(selector: BulkStopSelector, binaryName: string): string {
+  const subject = selector.kind === 'label' ? selector.label : selector.rootId;
+  return `stopped by ${binaryName} stop ${selector.kind} ${subject}`;
+}
+
 export function renderStopSweep(result: StopSweepResult): string {
   const lines = [`Stop outcomes (${result.outcomes.length}):`];
   if (!result.outcomes.length) lines.push('  (no stop calls made)');

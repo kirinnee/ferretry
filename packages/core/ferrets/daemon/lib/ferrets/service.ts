@@ -26,6 +26,7 @@ import type {
 } from '../../../contract/index.ts';
 import { HARNESS_KEYS } from '../../../contract/index.ts';
 import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
+import type { FerretDetails } from '../state.ts';
 import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../tokens/tokens.ts';
 
 /**
@@ -42,6 +43,9 @@ import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../token
 /** Today's launch variables: the ferret's own bearer and id, read by `fy` inside the pane. */
 export const FERRET_TOKEN_VARIABLE = 'FY_SESSION_TOKEN';
 export const FERRET_ID_VARIABLE = 'FY_SESSION_ID';
+
+/** The reason a stop records when its caller gave none (today's lifecycle `defaultStopReason`). */
+export const DEFAULT_STOP_REASON = 'stopped by client';
 
 /** Everything the service reaches outside its own memory. The daemon half binds these to kernel ports. */
 export interface FerretsPorts {
@@ -66,6 +70,17 @@ export interface FerretsPorts {
   /** The folder fenced by the kernel's `work` root, or why not. */
   folder(path: string): Result<FencedPath, string>;
   changed(payload: FerretChangedPayload): void;
+  /** Writes a ferret's `details.json` (its start options and title). */
+  saveDetails?(ferret: FerretId, details: FerretDetails): Promise<void>;
+  /** Appends one event to the ferret's `history.jsonl` (today's journal event shape). */
+  history?(ferret: FerretId, type: string, data: Readonly<Record<string, unknown>>): Promise<void>;
+  /**
+   * The real path of a folder through the fenced `work` root (kernel item N, `RootHandle.realPath`); `undefined` when
+   * it cannot be resolved. Unbound, no work folder is answered.
+   */
+  realPath?(folder: string): Promise<string | undefined>;
+  /** Ferret id → the instant the owner pinned it (`agent-pins.json`). */
+  pinnedAt?(): Promise<ReadonlyMap<string, string>>;
   vault: Pick<VaultApi, 'childEnvironment'>;
   asks: Pick<AsksApi, 'open'>;
 }
@@ -74,6 +89,12 @@ const failed = (code: StartFailure['code'], reason: string): Result<never, Start
   err({ code, reason } as StartFailure);
 
 export class FerretsService implements FerretsApi {
+  /**
+   * The pin-marked summary made from one registry summary, so the same summary with the same pin answers the same
+   * object (R501: the fleet read reuses its body while nothing moved). Held weakly by the input summary.
+   */
+  private readonly marked = new WeakMap<FerretSummary, { readonly pinnedAt: string; readonly summary: FerretSummary }>();
+
   constructor(
     private readonly registry: FerretRegistry,
     private readonly tokens: FerretTokenDirectory,
@@ -81,11 +102,27 @@ export class FerretsService implements FerretsApi {
   ) {}
 
   async get(ferret: FerretId): Promise<FerretSummary | undefined> {
-    return this.registry.summary(ferret);
+    const summary = this.registry.summary(ferret);
+    return summary === undefined ? undefined : this.mark(summary, await this.pins());
   }
 
   async list(filter?: FerretFilter): Promise<readonly FerretSummary[]> {
-    return this.registry.list(filter);
+    const pins = await this.pins();
+    return this.registry.list(filter).map(summary => this.mark(summary, pins));
+  }
+
+  /**
+   * The folder a ferret was started in, as its REAL path (today's `secrets/sign-in-context.ts` `folderOf`). The
+   * recorded folder is already a real path (resolved when the ferret was started), so it must still BE its own real
+   * path now: a folder since swapped for a symlink to another folder resolves elsewhere and answers nothing, as does
+   * a failed resolve or an unknown ferret.
+   */
+  async workFolder(ferret: FerretId): Promise<{ readonly folder: string } | undefined> {
+    await this.ports.ready?.();
+    const record = this.registry.get(ferret);
+    if (record === undefined || this.ports.realPath === undefined) return undefined;
+    const folder = await this.ports.realPath(record.folder).catch(() => undefined);
+    return folder === undefined || folder !== record.folder ? undefined : { folder };
   }
 
   mayTouch(caller: FerretId, target: FerretId): boolean {
@@ -132,6 +169,13 @@ export class FerretsService implements FerretsApi {
       by: request.by,
     });
     if (!decision.allow) return failed('refused', decision.reason);
+    if (request.options !== undefined) {
+      const { title, ...options } = request.options;
+      await this.saveDetails(id, {
+        ...(Object.keys(options).length === 0 ? {} : { options }),
+        ...(title === undefined ? {} : { title }),
+      });
+    }
     const at = this.ports.now();
     const record: FerretRecord = {
       format: 1,
@@ -153,7 +197,7 @@ export class FerretsService implements FerretsApi {
     return await this.launch(record, request.prompt, undefined);
   }
 
-  async stop(ferret: FerretId, how: 'polite' | 'now'): Promise<void> {
+  async stop(ferret: FerretId, how: 'polite' | 'now', reason?: string): Promise<void> {
     const record = this.registry.get(ferret);
     if (record === undefined || record.state === 'stopped') return;
     const harness = this.ports.harness(record.harness);
@@ -161,9 +205,15 @@ export class FerretsService implements FerretsApi {
     if (record.handle !== undefined && harness !== undefined && runner !== undefined)
       await harness.stop(ferret, record.handle as RunnerHandle, runner, how);
     await this.settle(record, 'stopped', 'stopped');
+    // Today's `session.stopped` journal event, with the reason the caller gave or the lifecycle default.
+    await this.ports.history?.(ferret, 'session.stopped', { reason: reason?.trim() || DEFAULT_STOP_REASON });
   }
 
-  async resume(ferret: FerretId): Promise<Result<FerretId, StartFailure>> {
+  /**
+   * Revives a stopped ferret. A `message` is recorded with today's `session.resumed` event; delivering it into the
+   * conversation is the Conversation's (not wired in this build).
+   */
+  async resume(ferret: FerretId, message?: string): Promise<Result<FerretId, StartFailure>> {
     const record = this.registry.get(ferret);
     if (record === undefined) return failed('refused', `no ferret ${ferret}`);
     if (record.state !== 'stopped') return ok(ferret);
@@ -182,7 +232,12 @@ export class FerretsService implements FerretsApi {
     if (!decision.allow) return failed('refused', decision.reason);
     const starting: FerretRecord = { ...record, state: 'starting', stateAt: this.ports.now() };
     await this.write(starting, record.state, 'state');
-    return await this.launch(starting, undefined, record.harnessConversation);
+    const resumed = await this.launch(starting, undefined, record.harnessConversation);
+    if (resumed.ok) {
+      const text = message?.trim();
+      await this.ports.history?.(ferret, 'session.resumed', text === undefined || text === '' ? {} : { message: text });
+    }
+    return resumed;
   }
 
   /**
@@ -221,15 +276,26 @@ export class FerretsService implements FerretsApi {
     return { ferret: summary, lines, blockers };
   }
 
-  /** Renames a ferret (today's `SessionRenameService`, reduced to the record): a running ferret's name is unique. */
-  async rename(ferret: FerretId, name: string): Promise<Result<FerretSummary, string>> {
+  /**
+   * Renames a ferret (today's `SessionRenameService`, reduced to the record and its details): a new first name, a new
+   * task title, or both. A running ferret's name is unique; the title is free-form and kept in `details.json`.
+   */
+  async rename(
+    ferret: FerretId,
+    change: { readonly name?: string; readonly title?: string },
+  ): Promise<Result<FerretSummary, string>> {
     const record = this.registry.get(ferret);
     if (record === undefined) return err(`no ferret ${ferret}`);
-    const trimmed = name.trim();
-    const holder = this.registry.nameHolder(trimmed);
-    if (holder !== undefined && holder !== ferret) return err(`the name ${trimmed} is held by running ferret ${holder}`);
-    await this.write({ ...record, name: trimmed }, record.state, 'renamed');
-    return ok(this.registry.summary(ferret) as FerretSummary);
+    const name = change.name?.trim();
+    if (name !== undefined) {
+      const holder = this.registry.nameHolder(name);
+      if (holder !== undefined && holder !== ferret) return err(`the name ${name} is held by running ferret ${holder}`);
+    }
+    const title = change.title?.trim();
+    if (title !== undefined) await this.saveDetails(ferret, { ...this.registry.detailsOf(ferret), title });
+    if (name !== undefined) await this.write({ ...record, name }, record.state, 'renamed');
+    else this.ports.changed({ ferret, state: record.state, previous: record.state, change: 'renamed' });
+    return ok((await this.get(ferret)) as FerretSummary);
   }
 
   /** Revokes a ferret's token (owner only at the route); it can no longer call the daemon until it restarts. */
@@ -237,6 +303,26 @@ export class FerretsService implements FerretsApi {
     const revoked = this.tokens.revoke(ferret);
     if (revoked) await this.ports.saveTokens(this.tokens.snapshot());
     return revoked;
+  }
+
+  /** The owner's pins; a pin list that cannot be read is "nothing pinned" (the mark is a preference). */
+  private async pins(): Promise<ReadonlyMap<string, string>> {
+    return (await this.ports.pinnedAt?.().catch(() => undefined)) ?? new Map<string, string>();
+  }
+
+  private mark(summary: FerretSummary, pins: ReadonlyMap<string, string>): FerretSummary {
+    const pinnedAt = pins.get(summary.id);
+    if (pinnedAt === undefined) return summary;
+    const known = this.marked.get(summary);
+    if (known !== undefined && known.pinnedAt === pinnedAt) return known.summary;
+    const marked: FerretSummary = { ...summary, pinnedAt: pinnedAt as Instant };
+    this.marked.set(summary, { pinnedAt, summary: marked });
+    return marked;
+  }
+
+  private async saveDetails(ferret: FerretId, details: FerretDetails): Promise<void> {
+    await this.ports.saveDetails?.(ferret, details);
+    this.registry.putDetails(ferret, details);
   }
 
   private async launch(

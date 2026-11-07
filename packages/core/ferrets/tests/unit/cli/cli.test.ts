@@ -73,22 +73,82 @@ describe('the ferrets cli half', () => {
     expect(await verb('start [prompt...]', ['fix', 'it'], { a: 'claude-alpha', cwd: '/abs', teammate: 'wren' })).toBe(0);
     expect(calls[0]).toEqual({
       route: 'POST /v1/ferrets',
-      init: { body: { folder: '/abs', runtime: 'claude-alpha', name: 'wren', prompt: 'fix it' } },
+      init: { body: { folder: '/abs', runtime: 'claude-alpha', name: 'wren', prompt: 'fix it', mode: 'auto' } },
     });
-    expect(await verb('start [prompt...]', ['x'], { model: 'opus', 'turn-timeout': '60' })).toBe(2);
-    expect(err.at(-1)).toContain('--model, --turn-timeout');
+    expect(await verb('start [prompt...]', ['x'], { 'compact-at': '250k', 'prompt-file': 'brief.md' })).toBe(2);
+    expect(err.at(-1)).toContain('--compact-at, --prompt-file');
     expect(await verb('start [prompt...]', ['x'], { mode: 'sideways' })).toBe(2);
     expect(calls).toHaveLength(2);
   });
 
-  test('V-0334 new starts a ferret the same way and refuses the model routing that is Packs’ now', async () => {
-    const { verb, calls } = run({ [FERRET_ROUTES.start]: { id: 'lead' }, [FERRET_ROUTES.get]: ferret });
+  test('V-0443 start sends today’s flags under today’s wire names; --no-fast and a repeated --harness-flag carry', async () => {
+    const { verb, calls, err } = run({ [FERRET_ROUTES.start]: { id: 'lead' }, [FERRET_ROUTES.get]: ferret });
+    expect(
+      await verb('start [prompt...]', ['go'], {
+        cwd: '/abs',
+        name: 'Fix login',
+        label: 'mine',
+        card: 'F21',
+        model: 'opus',
+        fast: false,
+        rc: true,
+        'harness-flag': ['--a', '--b'],
+        'teammate-fallback': true,
+        interval: '30',
+        'turn-timeout': '3600',
+        'nudge-after': '120',
+        'stall-kill-after': '900',
+        'direct-max': '0',
+        'max-snapshots': '5',
+      }),
+    ).toBe(0);
+    expect(calls[0]?.init).toEqual({
+      body: {
+        folder: '/abs',
+        prompt: 'go',
+        mode: 'auto',
+        teammateFallback: true,
+        title: 'Fix login',
+        label: 'mine',
+        card: 'F21',
+        model: 'opus',
+        fast: false,
+        remoteControl: true,
+        harnessFlags: ['--a', '--b'],
+        intervalSeconds: 30,
+        timeoutSeconds: 3600,
+        nudgeAfterSeconds: 120,
+        killAfterSeconds: 900,
+        directSendMaxChars: 0,
+        maxSnapshots: 5,
+      },
+    });
+    expect(await verb('start [prompt...]', ['go'], { cwd: '/abs', interval: 'banana' })).toBe(2);
+    expect(err.at(-1)).toContain('--interval must be an integer of at least 1');
+    expect(calls).toHaveLength(2);
+  });
+
+  test('V-0334 new sends today’s model routing; it names a runtime or passes --auto, never both', async () => {
+    const { verb, calls, err } = run({ [FERRET_ROUTES.start]: { id: 'lead' }, [FERRET_ROUTES.get]: ferret });
     expect(await verb('new [words...]', ['look'], { runtime: 'codex-beta', cwd: '/abs' })).toBe(0);
     expect(calls[0]).toEqual({
       route: 'POST /v1/ferrets',
-      init: { body: { folder: '/abs', runtime: 'codex-beta', prompt: 'look' } },
+      init: { body: { folder: '/abs', runtime: 'codex-beta', prompt: 'look', mode: 'auto' } },
     });
-    expect(await verb('new [words...]', ['look'], { model: 'opus' })).toBe(2);
+    expect(
+      await verb('new [words...]', ['look'], { auto: true, model: 'opus', effort: 'high', name: 'Look', card: '&F3', cwd: '/abs' }),
+    ).toBe(0);
+    expect(calls.at(-2)?.init).toEqual({
+      body: { folder: '/abs', prompt: 'look', mode: 'auto', title: 'Look', card: 'F3', model: 'opus', effort: 'high', auto: true },
+    });
+    const before = calls.length;
+    expect(await verb('new [words...]', ['look'], { auto: true, runtime: 'codex-beta' })).toBe(2);
+    expect(err.at(-1)).toContain('--auto picks the runtime');
+    expect(await verb('new [words...]', ['look'], { cwd: '/abs' })).toBe(2);
+    expect(err.at(-1)).toContain('name a --runtime, or pass --auto');
+    expect(await verb('new [words...]', ['look'], { runtime: 'codex-beta', continue: true })).toBe(2);
+    expect(err.at(-1)).toContain('--continue');
+    expect(calls).toHaveLength(before);
   });
 
   test('V-0447 a bare stop prints its modes and is a usage error', async () => {
@@ -109,7 +169,10 @@ describe('the ferrets cli half', () => {
     const confirmed = run(answers);
     expect(await confirmed.verb('stop children <session>', ['wren'], { yes: true })).toBe(0);
     expect(confirmed.calls.filter(call => call.route === FERRET_ROUTES.stop)).toEqual([
-      { route: 'POST /v1/ferrets/:ferretId/stop', init: { params: { ferretId: 'mid' } } },
+      {
+        route: 'POST /v1/ferrets/:ferretId/stop',
+        init: { params: { ferretId: 'mid' }, body: { reason: 'stopped by fy stop children lead' } },
+      },
     ]);
 
     const dry = run(answers);
@@ -118,9 +181,16 @@ describe('the ferrets cli half', () => {
 
     const byPack = run({ [FERRET_ROUTES.list]: [sessionView({ id: 'p1', pack: 'batch' as never })] });
     expect(await byPack.verb('stop label <label>', ['batch'], { yes: true })).toBe(0);
-    expect(byPack.calls.at(-2)).toEqual({ route: FERRET_ROUTES.stop, init: { params: { ferretId: 'p1' } } });
+    expect(byPack.calls.at(-2)).toEqual({
+      route: FERRET_ROUTES.stop,
+      init: { params: { ferretId: 'p1' }, body: { reason: 'stopped by fy stop label batch' } },
+    });
 
-    expect(await run(answers).verb('stop orphan <session>', ['wren'], { reason: 'done' })).toBe(2);
+    const reasoned = run(answers);
+    expect(await reasoned.verb('stop orphan <session>', ['wren'], { reason: 'shift over', yes: true })).toBe(0);
+    expect(reasoned.calls.filter(call => call.route === FERRET_ROUTES.stop)).toEqual([
+      { route: FERRET_ROUTES.stop, init: { params: { ferretId: 'lead' }, body: { reason: 'shift over' } } },
+    ]);
   });
 
   test('V-0371 V-0333 V-0376 rename, name and resume each call their one route', async () => {
@@ -133,11 +203,22 @@ describe('the ferrets cli half', () => {
     expect(await verb('rename <session> [name]', ['lead', 'wren'])).toBe(0);
     expect(await verb('name', [], { n: '3' })).toBe(0);
     expect(await verb('resume <id> [message...]', ['wren'])).toBe(0);
+    expect(await verb('resume <id> [message...]', ['wren', 'carry', 'on'])).toBe(0);
+    expect(await verb('rename <session> [name]', ['lead'], { title: 'Fix login' })).toBe(0);
     expect(calls).toEqual([
       { route: 'POST /v1/ferrets/:ferretId/rename', init: { params: { ferretId: 'lead' }, body: { name: 'wren' } } },
       { route: 'GET /v1/names', init: { query: { count: '3' } } },
       { route: 'POST /v1/ferrets/:ferretId/resume', init: { params: { ferretId: 'wren' } } },
       { route: 'GET /v1/ferrets/:ferretId', init: { params: { ferretId: 'lead' } } },
+      {
+        route: 'POST /v1/ferrets/:ferretId/resume',
+        init: { params: { ferretId: 'wren' }, body: { message: 'carry on' } },
+      },
+      { route: 'GET /v1/ferrets/:ferretId', init: { params: { ferretId: 'lead' } } },
+      {
+        route: 'POST /v1/ferrets/:ferretId/rename',
+        init: { params: { ferretId: 'lead' }, body: { title: 'Fix login' } },
+      },
     ]);
   });
 
