@@ -65,7 +65,11 @@ describe('theme preference', () => {
     expect(themes.snapshot()).toEqual(DEFAULT_THEME_PREFERENCE);
     themes.setFamily('mission');
     themes.setMode('dark');
-    expect(new ThemePreferenceStore(store).snapshot()).toEqual({ family: 'mission', mode: 'dark', textScale: 'default' });
+    expect(new ThemePreferenceStore(store).snapshot()).toEqual({
+      family: 'mission',
+      mode: 'dark',
+      textScale: 'default',
+    });
   });
 
   test('an unknown family falls back on its own and keeps the other fields', () => {
@@ -105,9 +109,9 @@ describe('theme items', () => {
   });
 
   test('an unknown token or an unsafe value is refused', () => {
-    expect(ThemeItemSchema.safeParse({ id: 'x', label: 'X', base: 'studio', dark: { position: 'fixed' } }).success).toBe(
-      false,
-    );
+    expect(
+      ThemeItemSchema.safeParse({ id: 'x', label: 'X', base: 'studio', dark: { position: 'fixed' } }).success,
+    ).toBe(false);
     for (const value of ['red; } body { display: none', 'url(https://example.com/x.png)', 'expression(alert(1))']) {
       expect(ThemeItemSchema.safeParse({ id: 'x', label: 'X', base: 'studio', dark: { accent: value } }).success).toBe(
         false,

@@ -70,9 +70,13 @@ export const SPACING_TOKENS = [
   'flow-5',
 ] as const;
 
-export type ThemeToken = (typeof COLOUR_TOKENS)[number] | (typeof TYPE_TOKENS)[number] | (typeof SPACING_TOKENS)[number];
+export type ThemeToken =
+  | (typeof COLOUR_TOKENS)[number]
+  | (typeof TYPE_TOKENS)[number]
+  | (typeof SPACING_TOKENS)[number];
 
-const COLOUR_VALUE = /^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla|oklch|oklab)\([0-9.,%\s/a-z-]{1,60}\)|transparent|currentColor)$/u;
+const COLOUR_VALUE =
+  /^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla|oklch|oklab)\([0-9.,%\s/a-z-]{1,60}\)|transparent|currentColor)$/u;
 const LENGTH_VALUE = /^-?\d{1,4}(\.\d{1,3})?(px|rem|em|%)?$/u;
 /** Font stacks: quoted or bare family names separated by commas. No parentheses, no semicolons, no braces. */
 const FONT_VALUE = /^[A-Za-z0-9 ,'"-]{1,160}$/u;
@@ -95,7 +99,10 @@ const TokensSchema = z.strictObject(
 
 /** A theme item (`themes/<id>.yaml`), as the Layouts plugin hands it over. Light and dark override separately. */
 export const ThemeItemSchema = z.strictObject({
-  id: z.string().regex(/^[a-z][a-z0-9-]*$/u).max(40),
+  id: z
+    .string()
+    .regex(/^[a-z][a-z0-9-]*$/u)
+    .max(40),
   label: z.string().min(1).max(60),
   base: z.enum(FAMILY_IDS),
   light: TokensSchema.default({}),

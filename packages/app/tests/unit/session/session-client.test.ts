@@ -856,10 +856,14 @@ describe('a relay session told to rotate its device key', () => {
 });
 
 describe('a relay session whose daemon speaks another dialect', () => {
-  it('should end with the daemon\'s own version refusal, passed through as it said it', async () => {
+  it("should end with the daemon's own version refusal, passed through as it said it", async () => {
     const { session } = await opened();
     await session.receiveBinary(
-      controlFrame(sessionId, { t: 'closed', code: RELAY_CLOSE_CODES.versionUnsupported, reason: 'Reload to get the new app.' }),
+      controlFrame(sessionId, {
+        t: 'closed',
+        code: RELAY_CLOSE_CODES.versionUnsupported,
+        reason: 'Reload to get the new app.',
+      }),
     );
     const reason = await failure(session.ready());
     should(reason.code).equal(RELAY_CLOSE_CODES.versionUnsupported);
