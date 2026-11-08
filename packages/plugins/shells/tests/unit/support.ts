@@ -41,6 +41,7 @@ function configTree(initial: Record<string, unknown> = {}, hold?: readonly strin
       return out;
     },
     watch: () => () => {},
+    watchState: () => () => {},
     fileState: () => ({ state: 'absent', inEffect: false, sentences: [] }),
     async write(def, name, edit): Promise<ConfigWriteOutcome> {
       const where = keyOf(def, name);

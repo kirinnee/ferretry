@@ -1532,7 +1532,7 @@ fy plugin check <path>               runs the data-plugin checks without install
 | Commands on PATH | only with `permissions.which`, through `kernel.paths.which` / `locate` / `whichFor`: bounded lookups that never execute (§7.7)                                                                                                   | `gatedWhich` (refused by name without it); `banned-globals` keeps `process.env` out                           |
 | Other processes  | only with `permissions.processes`, through `kernel.processes`: pids and yes/no answers, SIGTERM to a process running from the plugin's own folder (§7.7)                                                                         | `processesPortFor` (refused by name without it); no member returns a command line or an environment           |
 | Shared folders   | only with `permissions.shareTrees`, one folder of its OWN `work`/`imports` handle or own opaque named tree, through `kernel.roots.share`; the receiver materializes it with `RootHandle.copyShared` into an internal root (§7.7) | the roots port (`host/shared-trees.ts`): a kernel-held table, so a tree cannot be forged or rebuilt from JSON |
-| Secret values    | by name only, through the Vault's `run` and `authorizeFetch`; never a value                                                                                                                                                      | Vault port has no getter                                                                                      |
+| Secret values    | by name only, through the Vault's `run` and `authorizeFetch`, or a plugin's OWN secret through `kernel.secrets` (`send`: the kernel places it on one request to an exactly declared host; never a value)                         | Vault port has no getter; `send` answers facts only                                                           |
 | Output           | every route and frame through the Gate and the final check; reads of pane or page text through `Redaction` (§7.3)                                                                                                                | descriptor `guard`; `plugin-graph` check                                                                      |
 | Tool acts        | only through `kernel.act(target, op, fn)`, which asks the holds per operation and actor (§4.7)                                                                                                                                   | act runner type; tool conformance suite                                                                       |
 | Hooks            | only declared hooks; bounded time                                                                                                                                                                                                | hooks engine                                                                                                  |
@@ -2356,6 +2356,12 @@ config: [
 - `axis` is the grant axis a remote editor needs; Gate applies it to `fy config write` and the app's editor exactly
   as to a route.
 - The generator refuses two entries that could claim one path. §9.2 lists every file and its owner.
+- A plugin hears its OWN files two ways: `ConfigPort.watch` when the version in effect moves, and
+  `ConfigPort.watchState` when a file moves on disk or in state (written, held, confirmed, discarded, broken, fixed,
+  removed), with its state and disk etag and never a value. An app hears every file it may read through the kernel's
+  `kernel.config-changed` event on `GET /v1/bus` (plugin, path, state, etag), which replaces today's
+  `/v1/events?topic=config`: each frame reaches only a caller `GET /v1/config/file` would let read that file, and no
+  plugin hears it in-process.
 
 ### 7.3 What may leave: masking first, then one synchronous final check
 

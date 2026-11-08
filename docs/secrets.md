@@ -1140,6 +1140,40 @@ What it does NOT protect against: the provider. A key you hand Groq is a key Gro
 the daemon sends (a transcript, or the Warden's redacted snapshot) is text that provider receives — the
 Speed-ups screen says what leaves the machine for each one.
 
+## A plugin's own key, placed by the kernel
+
+In 5.0 a plugin that only ever spends a key on an HTTP request asks the kernel to place it:
+`kernel.secrets.send(name, request, placement?)` (`packages/core/kernel/host/secrets.ts`). The Warden's Jev guard is
+the first caller. It is the holder above with the same rules, held by the kernel. The plugin never holds the value.
+
+- **The name passes `kernel.secrets.resolve`'s rule, in that order.** It is in the plugin's manifest `secrets`. The
+  plugin's OWN configuration in effect names it as `${secret:NAME}`. The Vault knows it. A plugin can never put another
+  plugin's secret on a request, because its config would have to name it, and adding a reference is held for the owner.
+- **Only to an exactly declared host.** The URL must be `https:`, or `http:` to this machine. Its host must be a plain
+  host entry of the plugin's `permissions.network`. A wildcard, `'*'`, an installed-item entry or a resolver entry lets
+  no key out. The request goes through the plugin's own `kernel.fetch` guard, so a redirect is answered, never followed.
+- **Read once.** The request and the placement are parsed once into plain data, and only that copy is checked and
+  sent. A getter cannot show the check one host and the send another.
+- **The plugin cannot place a credential itself.** A request that already carries the placement header is refused.
+- **Facts only come back.** The answer is a 2xx reply's parsed JSON, a status, `timeout`, `network`, `too_large`,
+  `unreadable`, `vault_damaged` or a refusal. A reply that echoes the value is `unreadable`. A thrown error becomes a
+  kind, so its message never leaves. The Vault is asked last, after every other check.
+- **Logged by name and host only.**
+
+The Warden names its key in `warden.yaml`, as the owner writes it:
+
+```yaml
+jev:
+  key: ${secret:JEV_API_KEY}
+```
+
+`jev.key` takes only that one reference. An agent's write that adds it is held for the owner, like any new secret
+reference. Without it the guard answers `not_set` and nothing leaves the machine. It is not a setting: the settings
+screen neither shows it nor saves it, and a save keeps the line as it is.
+
+GAP: a send writes no `secrets.used` entry to the security log, and the Warden's settings card still says whether the
+key is set from Speed-ups, not whether `warden.yaml` names it.
+
 ## Device-held speed-up keys
 
 Settings › This device › **Speed-up keys** takes a Groq and/or a Cerebras key that lives in **one

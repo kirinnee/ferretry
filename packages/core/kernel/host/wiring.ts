@@ -129,6 +129,7 @@ export function configService(home: string, fs: StateFs, clock: Clock, log: Log,
       status: () => service.status(),
       reload: () => service.reload(),
       startWatching: () => service.startWatching(),
+      onStateChange: listener => service.onStateChange(listener),
     };
   };
 }

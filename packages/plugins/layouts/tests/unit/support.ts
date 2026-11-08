@@ -47,6 +47,7 @@ export function configTree(initial: Record<string, Record<string, unknown>> = {}
       return out;
     },
     watch: () => () => {},
+    watchState: () => () => {},
     fileState: () => ({ state: 'absent', inEffect: false, sentences: [] }),
     async write(def, name, edit): Promise<ConfigWriteOutcome> {
       calls.push({ op: 'write', where: keyOf(def, name), edit });

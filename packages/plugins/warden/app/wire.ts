@@ -19,7 +19,7 @@ import {
   type WardenActionKindSchema,
   type WardenClearedBySchema,
   type WardenConfig,
-  type WardenFileSchema,
+  type WardenSettingsPatchSchema,
   type WardenConfigView,
   type WardenFailoverPolicySchema,
   type WardenLayersSchema,
@@ -48,7 +48,7 @@ export type { WardenConfig, WardenConfigView };
 export type WardenAnomalyKind = z.infer<typeof WardenAnomalyKindSchema>;
 
 // ─── settings ────────────────────────────────────────────────────────────────────────────────────────────────────
-export type WardenConfigPatch = z.infer<typeof WardenFileSchema>;
+export type WardenConfigPatch = z.infer<typeof WardenSettingsPatchSchema>;
 export type WardenAccount = z.infer<typeof WardenAccountSchema>;
 export type WardenLayers = z.infer<typeof WardenLayersSchema>;
 export type WardenMayActAlone = z.infer<typeof WardenMayActAloneSchema>;

@@ -219,6 +219,16 @@ export interface ConfigFileStatus {
   readonly sentences: readonly string[];
 }
 
+/**
+ * One file's move, as {@link ConfigPort.watchState} hears it: which collection item (`undefined` for a file), the
+ * state it is in now, and its disk etag now (`'absent'` when there is no file). Never a value, never a sentence.
+ */
+export interface ConfigStateChange {
+  readonly name?: string;
+  readonly state: ConfigFileStatus['state'];
+  readonly etag: string;
+}
+
 /** A whole new YAML text, or a patch of top-level keys (`undefined` removes a key); a patch keeps comments. */
 export type ConfigEdit = string | { readonly patch: Readonly<Record<string, unknown>> };
 
@@ -273,6 +283,16 @@ export interface ConfigPort {
   file<Shape>(def: ConfigFileDef<Shape>): Shape | undefined;
   collection<Shape>(def: ConfigCollectionDef<Shape>): ReadonlyMap<string, Shape>;
   watch(def: ConfigFileDef<any> | ConfigCollectionDef<any>, listener: () => void): Cancel;
+  /**
+   * Fires when one of THIS def's files moves on DISK or in state, which {@link watch} does not hear unless the version
+   * in effect moved too: an edit written or held for the owner, a held edit confirmed or discarded, a file that broke
+   * (`invalid`, its last good version still in effect) or was fixed, one removed (`absent`). One call per file that
+   * moved (a collection's item named by `name`), after the reload that saw it; the first load is the baseline, never a
+   * change. The change carries the file's state and its disk etag (the etag a write answers), NEVER its text, a value
+   * or a sentence ({@link ConfigFileStatus.sentences} stay with {@link fileState}). Another plugin's def throws, as
+   * {@link watch} does. A listener that throws is logged and never reaches the writer.
+   */
+  watchState(def: ConfigFileDef<any> | ConfigCollectionDef<any>, listener: (change: ConfigStateChange) => void): Cancel;
   /** Tells an absent file from an invalid one (and a held one); `name` picks a collection item. */
   fileState(def: ConfigFileDef<any> | ConfigCollectionDef<any>, name?: string): ConfigFileStatus;
   /**

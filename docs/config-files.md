@@ -810,6 +810,17 @@ on a timer. The revision is per boot (`epoch`), and it is how the app learns wha
 whenever the app returns to the foreground or the network comes back, and if the first frame's revision moved —
 or names another boot — every screen reads again.
 
+**In the 5.0 kernel** a file's own moves are their own signal. `ConfigPort.watch` still fires only when the version
+in effect moves; `ConfigPort.watchState` fires when one of the plugin's OWN files moves on disk or in state — an edit
+written or held for the owner, a held edit confirmed or discarded, a file broken or fixed, one removed — with the
+file's state (`absent`, `valid`, `invalid`, `held`) and its disk etag, never its text, a value or a sentence. The same
+moves reach an open app as one `kernel.config-changed` frame each on `GET /v1/bus` — `{ plugin, path, state, etag }`,
+the etag the one `GET /v1/config/file` answers — so a held edit arriving or a broken file wakes a settings card or a
+file editor at once. A frame reaches only a caller `GET /v1/config/file` would let read that file (that route's
+admission, then the per-file read judge, so `warden.yaml` asks for `warden`, and anything undetermined shows nothing),
+and no plugin hears the event in-process. Like every bus event it is a wake-up, at most once: the reader still reads
+the file.
+
 ## Declared gaps
 
 - The fleet's own files apply as written; a component or profile change is not judged for loosening,

@@ -16,7 +16,7 @@ import {
 } from '../host/shared-trees.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { failureResponse } from '../host/responses.ts';
-import type { ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
+import type { ContractSurface, FetchPort, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
 import { gatedOverrides, gatedPaths, gatedWhich } from '../host/paths.ts';
 import { handleReaders, locateCommand, whichCommand, whichForCommand } from '../host/which.ts';
@@ -26,7 +26,13 @@ import { PRODUCT_BINARIES } from '../host/binaries.ts';
 import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
 import type { DaemonTimings } from '../contract/ports.ts';
 import { DEFAULT_DAEMON_TIMINGS } from '../host/session/timings.ts';
-import { addedSecretReferenceSentences, ownSecretsPort, secretReferencesIn } from '../host/secrets.ts';
+import {
+  addedSecretReferenceSentences,
+  exactNetworkHosts,
+  ownSecretsPort,
+  secretReferencesIn,
+} from '../host/secrets.ts';
+import { outboundSecretTransport } from '../host/adapters/outbound-secret.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { err, hours, instantFromEpochMs, ok } from '@ferretry/std';
 import type { Actor, HoldDecision, RefusalCode, TargetRef } from '../contract/act.ts';
@@ -59,7 +65,9 @@ import { ApiError, errorResponse, finalised, headersFrom, queryFrom } from '../c
 import type {
   ChildHandle,
   ConfigDocumentRef,
+  ConfigFileStatus,
   ConfigPort,
+  ConfigStateChange,
   KernelPorts,
   Log,
   LogFields,
@@ -75,6 +83,13 @@ import type {
 } from '../contract/ports.ts';
 import { readConfigText } from '../host/config/yaml-text.ts';
 import { isWithinList, patchedValue } from '../host/config/patch.ts';
+import {
+  ABSENT_STAMP,
+  type ConfigFileStamp,
+  configChangedPayload,
+  configFileMoves,
+  type StampedConfigFile,
+} from '../host/config/state-change.ts';
 import {
   type DocumentVerdict,
   DUPLICATE_ISSUE,
@@ -198,7 +213,7 @@ export interface TestHostOptions {
   readonly updateHost?: UpdateHostPort;
   /** What `kernel.timings` answers. Default: the shipped numbers (`DEFAULT_DAEMON_TIMINGS`). */
   readonly timings?: DaemonTimings;
-  /** The Vault stand-in for `kernel.secrets.resolve`: name to value. Absent, every declared and configured name is `unknown`. */
+  /** The Vault stand-in for `kernel.secrets` (`resolve` and `send`): name to value. Absent, every declared and configured name is `unknown`. */
   readonly vault?: Readonly<Record<string, string>>;
   /** The contract hash per package, as `kernel.contract.hash()` answers its own plugin (`surface` is `'member'` for the member-surface hash). Default: `unhashed`. */
   readonly contractHash?: (id: string, surface?: ContractSurface) => string;
@@ -234,6 +249,16 @@ export interface TestHost {
   readonly acts: readonly ActRecord[];
   /** Every event a half published, in order. */
   readonly published: readonly { readonly event: string; readonly payload: unknown }[];
+  /**
+   * Every `kernel.config-changed` the real host would publish on `GET /v1/bus`, in order: each declared file that moved
+   * in state or etag (the shared rule, `host/config/state-change.ts`). The same moves `ConfigPort.watchState` hears.
+   */
+  readonly configChanges: readonly {
+    readonly plugin: string;
+    readonly path: string;
+    readonly state: ConfigFileStatus['state'];
+    readonly etag: string;
+  }[];
   readonly logs: readonly {
     readonly level: string;
     readonly scope: string;
@@ -398,6 +423,75 @@ async function start(world: World): Promise<TestHost> {
   const stopController = new AbortController();
   const jobs = new Map<string, (signal: AbortSignal) => Promise<void>>();
   const configListeners = new Map<string, Set<() => void>>();
+  // `watchState` over the in-memory world: by file or collection key, the moves the shared rule finds there. The world
+  // holds values, not texts, so a file's etag is its value's JSON (as this host's writes answer) and a held edit (which
+  // the world never holds) is a stamp kept for its path until that path is written, removed or set again.
+  const stateListeners = new Map<string, Set<(change: ConfigStateChange) => void>>();
+  const configChanges: { plugin: string; path: string; state: ConfigFileStatus['state']; etag: string }[] = [];
+  const configOwners = new Map<
+    string,
+    { readonly plugin: string; readonly def: ConfigFileDef<any> | ConfigCollectionDef<any> }
+  >();
+  for (const plugin of options.plugins)
+    for (const def of plugin.manifest.data?.config ?? [])
+      configOwners.set(def.shape === 'file' ? def.file : def.collection, { plugin: plugin.manifest.id, def });
+  const configStamps = new Map<string, Map<string, StampedConfigFile>>();
+  /** Where every file of one key stands in the world now: valid or invalid by its schema, absent when not there. */
+  const worldStamps = (key: string): Map<string, StampedConfigFile> => {
+    const found = new Map<string, StampedConfigFile>();
+    const owner = configOwners.get(key);
+    if (owner === undefined) return found;
+    const { def } = owner;
+    const stampOf = (value: unknown): ConfigFileStamp =>
+      value === undefined
+        ? ABSENT_STAMP
+        : { state: def.schema.safeParse(value).success ? 'valid' : 'invalid', etag: JSON.stringify(value) };
+    const raw = world.config.get(key);
+    if (def.shape === 'file') {
+      if (raw !== undefined) found.set(def.file, { stamp: stampOf(raw) });
+      return found;
+    }
+    for (const [name, value] of Object.entries((raw ?? {}) as Record<string, unknown>))
+      if (def.name.test(name)) found.set(`${def.collection}/${name}.yaml`, { name, stamp: stampOf(value) });
+    return found;
+  };
+  for (const key of configOwners.keys()) configStamps.set(key, worldStamps(key));
+  /**
+   * The world moved under `key` (a write, a removal, a set, or an edit held at `held.path`): tell every file of it that
+   * moved. `subject` names the one path this act touched; another path's held stamp is kept. No subject: all of them.
+   */
+  const restamp = (
+    key: string,
+    subject?: { readonly path: string; readonly name?: string; readonly held?: string },
+  ): void => {
+    const owner = configOwners.get(key);
+    if (owner === undefined) return;
+    const before = configStamps.get(key) ?? new Map<string, StampedConfigFile>();
+    const after = worldStamps(key);
+    if (subject !== undefined)
+      for (const [path, stamped] of before)
+        if (path !== subject.path && stamped.stamp.state === 'held') after.set(path, stamped);
+    if (subject?.held !== undefined)
+      after.set(subject.path, {
+        ...(subject.name === undefined ? {} : { name: subject.name }),
+        stamp: { state: 'held', etag: subject.held },
+      });
+    configStamps.set(key, after);
+    for (const move of configFileMoves(before, after)) {
+      configChanges.push(configChangedPayload(owner.plugin, move));
+      for (const listener of [...(stateListeners.get(key) ?? [])]) {
+        try {
+          listener(move.change);
+        } catch (error) {
+          logs.push({
+            level: 'warn',
+            scope: 'test-host',
+            message: `a config listener failed: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+      }
+    }
+  };
   const callers = new WeakMap<ApiRequest, TestCaller>();
   for (const state of world.states.values()) state.revive();
 
@@ -674,10 +768,14 @@ async function start(world: World): Promise<TestHost> {
       const added = addedSecretReferenceSentences(priorValue, checked.data);
       const sentences = [...judgeLoosening(def, priorValue, checked.data), ...added];
       const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
-      if (added.length > 0 || (sentences.length > 0 && !judged(manifest.id, path, false, sentences)))
+      const subject = { path, ...(name === undefined ? {} : { name }) };
+      if (added.length > 0 || (sentences.length > 0 && !judged(manifest.id, path, false, sentences))) {
+        restamp(key, { ...subject, held: etag });
         return { kind: 'held', etag, id: `${path}@held`, sentences };
+      }
       world.config.set(key, def.shape === 'file' ? next : { ...(all ?? {}), [name as string]: next });
       for (const listener of configListeners.get(key) ?? []) listener();
+      restamp(key, subject);
       return { kind: 'written', etag, loosened: sentences };
     };
     return {
@@ -701,6 +799,15 @@ async function start(world: World): Promise<TestHost> {
         set.add(listener);
         configListeners.set(key, set);
         return () => set.delete(listener);
+      },
+      watchState(def, listener) {
+        assertDeclared(def);
+        const key = keyOf(def);
+        const set = stateListeners.get(key) ?? new Set();
+        stateListeners.set(key, set);
+        const entry = (change: ConfigStateChange): void => listener(change);
+        set.add(entry);
+        return () => void set.delete(entry);
       },
       fileState(def, name) {
         assertDeclared(def);
@@ -747,16 +854,20 @@ async function start(world: World): Promise<TestHost> {
         const sentences =
           prior?.success === true ? judgeLoosening(def, prior.data, defaults.success ? defaults.data : undefined) : [];
         const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
-        if (sentences.length > 0 && !judged(manifest.id, path, true, sentences))
-          return writeOptions.refuseIfHeld === true
-            ? { kind: 'refused', reason: 'would_hold', issues: [], sentences }
-            : { kind: 'held', etag: 'absent', id: `${path}@held`, sentences };
+        const subject = { path, ...(name === undefined ? {} : { name }) };
+        if (sentences.length > 0 && !judged(manifest.id, path, true, sentences)) {
+          if (writeOptions.refuseIfHeld === true)
+            return { kind: 'refused', reason: 'would_hold', issues: [], sentences };
+          restamp(key, { ...subject, held: ABSENT_STAMP.etag });
+          return { kind: 'held', etag: 'absent', id: `${path}@held`, sentences };
+        }
         if (def.shape === 'file') world.config.delete(key);
         else if (all !== undefined) {
           const { [name as string]: _gone, ...rest } = all;
           world.config.set(key, rest);
         }
         for (const listener of configListeners.get(key) ?? []) listener();
+        restamp(key, subject);
         return { kind: 'written', etag: 'absent', loosened: sentences };
       },
       // The real writer's set over the in-memory values: each document checked as `write` checks one, every one before
@@ -843,6 +954,8 @@ async function start(world: World): Promise<TestHost> {
           world.config.set(key, next === undefined ? rest : { ...rest, [name as string]: next });
         }
         for (const key of touched) for (const listener of configListeners.get(key) ?? []) listener();
+        for (const ref of refs)
+          restamp(ref.path.includes('/') ? ref.path.slice(0, ref.path.lastIndexOf('/')) : ref.path, ref);
         return {
           kind: 'written',
           documents: ready.map((document, index) => ({
@@ -1183,6 +1296,29 @@ async function start(world: World): Promise<TestHost> {
       world.states.set(manifest.id, state);
     }
     const publishes = new Set((manifest.data?.publishes ?? []).map(event => event.name));
+    const declaredNetwork = effectivePermissions(manifest.id, manifest.permissions?.network ?? []);
+    const mayReach = (hostname: string, host: string): boolean =>
+      hostPermitted(
+        declaredNetwork,
+        options.items ?? NO_ITEMS,
+        hostname,
+        name =>
+          (
+            built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
+              | Readonly<Record<string, (() => readonly string[]) | undefined>>
+              | undefined
+          )?.[name],
+        host,
+      );
+    const fetchPort: FetchPort = {
+      async request(url, init) {
+        const parsed = new URL(url);
+        if (!mayReach(parsed.hostname, parsed.host))
+          throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
+        if (options.fetch === undefined) throw new Error(`${manifest.id}: fetch ${parsed.host} with no fetch fake`);
+        return options.fetch(parsed, init);
+      },
+    };
     return {
       clock,
       log: logFor(manifest.id),
@@ -1243,28 +1379,7 @@ async function start(world: World): Promise<TestHost> {
           );
         },
       },
-      fetch: {
-        async request(url, init) {
-          const parsed = new URL(url);
-          if (
-            !hostPermitted(
-              effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
-              options.items ?? NO_ITEMS,
-              parsed.hostname,
-              name =>
-                (
-                  built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
-                    | undefined
-                )?.[name],
-              parsed.host,
-            )
-          )
-            throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
-          if (options.fetch === undefined) throw new Error(`${manifest.id}: fetch ${parsed.host} with no fetch fake`);
-          return options.fetch(parsed, init);
-        },
-      },
+      fetch: fetchPort,
       scratch: options.scratch ?? scratchPort('fy-test-'),
       websocket: {
         connect(url) {
@@ -1380,11 +1495,18 @@ async function start(world: World): Promise<TestHost> {
         options.processes ?? NO_PROCESS_TABLE,
       ),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
-      // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in
+      // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in;
+      // `send` places the value through this plugin's own fetch guard and `options.fetch`, as the real host does
       secrets: ownSecretsPort(
         manifest.permissions?.secrets ?? [],
         () => ownedReferences(manifest),
         () => (options.vault === undefined ? undefined : { resolve: async name => options.vault?.[name] }),
+        {
+          hosts: exactNetworkHosts(declaredNetwork),
+          mayReach,
+          transport: outboundSecretTransport(fetchPort, clock),
+          log: logFor(manifest.id),
+        },
       ),
       signer: signerFor(manifest.id, identitySigner),
       act: testActRunner({
@@ -1593,6 +1715,7 @@ async function start(world: World): Promise<TestHost> {
     minted: world.minted,
     acts,
     published,
+    configChanges,
     logs,
     async request(method, path, init = {}) {
       const request = makeRequest(method, path, init);
@@ -1768,6 +1891,7 @@ async function start(world: World): Promise<TestHost> {
     setConfig(key, value) {
       world.config.set(key, value);
       for (const listener of configListeners.get(key) ?? []) listener();
+      restamp(key);
     },
     async runJob(id) {
       const run = jobs.get(id);

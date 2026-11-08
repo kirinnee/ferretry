@@ -80,6 +80,55 @@ describe('readNotificationFilterDocument', () => {
     expect(readNotificationFilterDocument(stored(v1))).toBe(DEFAULT_NOTIFICATION_FILTER_DOCUMENT);
   });
 
+  test('a document text over 64 KiB reads as the default without being parsed, and the cap is the exact bound', () => {
+    // Arrange: a valid document padded with whitespace to exactly the cap, then one character over it
+    const text = stored(doc({ hiddenKinds: ['failed'] }));
+    const atCap = text + ' '.repeat(65_536 - text.length);
+    const overCap = `${atCap} `;
+    const parse = JSON.parse;
+    let parsed = 0;
+    JSON.parse = (...args: Parameters<typeof JSON.parse>) => {
+      parsed += 1;
+      return parse(...args);
+    };
+
+    // Act
+    try {
+      const over = readNotificationFilterDocument(overCap);
+      const huge = readNotificationFilterDocument(`[${'0,'.repeat(1_000_000)}0]`);
+      const deep = readNotificationFilterDocument('['.repeat(200_000));
+
+      // Assert: over the cap it is the default and JSON.parse was never reached
+      expect(over).toBe(DEFAULT_NOTIFICATION_FILTER_DOCUMENT);
+      expect(huge).toBe(DEFAULT_NOTIFICATION_FILTER_DOCUMENT);
+      expect(deep).toBe(DEFAULT_NOTIFICATION_FILTER_DOCUMENT);
+      expect(parsed).toBe(0);
+    } finally {
+      JSON.parse = parse;
+    }
+    // at the cap the document still reads
+    expect(readNotificationFilterDocument(atCap).hiddenKinds).toEqual(['failed']);
+  });
+
+  test('a __proto__ or constructor key reads as the default or a clean object, and pollutes nothing', () => {
+    // Arrange
+    const base = JSON.stringify(doc());
+    const texts = [
+      `{"__proto__":{"polluted":true},${base.slice(1)}`,
+      `{"constructor":{"prototype":{"polluted":true}},${base.slice(1)}`,
+      base.replace('"quietHours":{', '"quietHours":{"__proto__":{"polluted":true},'),
+    ];
+
+    // Act / Assert
+    for (const text of texts) {
+      const read = readNotificationFilterDocument(text);
+      expect(Object.getPrototypeOf(read)).toBe(Object.prototype);
+      expect(Object.keys(read).sort()).toEqual(['hiddenKinds', 'mutedDaemons', 'quietHours', 'version']);
+      expect(Object.keys(read.quietHours).sort()).toEqual(['enabled', 'endMinute', 'startMinute']);
+      expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+    }
+  });
+
   test('garbage, an unknown key, and ONE over-bound field anywhere reset the whole document to the default', () => {
     for (const raw of ['', 'not json', '{', 'null', '42', '[]', '{}', '"text"'])
       expect(readNotificationFilterDocument(raw)).toBe(DEFAULT_NOTIFICATION_FILTER_DOCUMENT);

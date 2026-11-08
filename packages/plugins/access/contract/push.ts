@@ -177,6 +177,12 @@ export type PushNotificationPayload = z.infer<typeof PushNotificationPayloadSche
 export const fittingPushTag = (tag: string): string | undefined => (PUSH_TAG_PATTERN.test(tag) ? tag : undefined);
 
 /**
+ * The show count a push goes out with: a larger one is CLAMPED to the kernel bound (`PUSH_COUNT_MAX`, 999), never thrown
+ * on at the sender, since a refused push is a lost alert. A grouping sender hands its raw count through this.
+ */
+export const fittingPushCount = (count: number): number => Math.min(count, PUSH_COUNT_MAX);
+
+/**
  * The most tags one clear may name: an item's own tag, its approval's, the ferret's stop tag, and room to spare. A
  * tighter SENDER bound than the kernel's `PUSH_CLEAR_MAX_TAGS` (32), which is what the worker reads; each tag is the
  * kernel's `PushTagSchema` (an un-namespaced daemon tag: `attention-<sessionId>:<itemId>`, `pa-<id>`).

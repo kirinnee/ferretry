@@ -27,10 +27,19 @@ import type { ConfigDef, PortToken } from '../contract/define.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError, errorResponse } from '../contract/http.ts';
 import type { ConfigStatus } from './config/service.ts';
+import { type ConfigFileMove, configChangedPayload } from './config/state-change.ts';
+import { configFrameShown } from './config/bus-frame.ts';
 import { CORE_IDS, type PluginId } from '../contract/ids.ts';
 import { beforeListen } from './before-listen.ts';
 import { type HomeLockLease, StateHomeLockedError } from './state/home-lock.ts';
-import { Carriers, type DoctorCheck, DoctorChecks, PluginsChanged, SessionModes } from '../contract/kernel.ts';
+import {
+  Carriers,
+  ConfigChanged,
+  type DoctorCheck,
+  DoctorChecks,
+  PluginsChanged,
+  SessionModes,
+} from '../contract/kernel.ts';
 import type {
   Clock,
   ConfigFilesWriter,
@@ -94,7 +103,8 @@ import { KERNEL_NEEDER, neederOf, ProvidedPerNeeder } from './needer.ts';
 import { guardedToolResult } from './tool-result.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import { noWebSockets } from './adapters/process.ts';
-import { ownSecretsPort } from './secrets.ts';
+import { outboundSecretTransport } from './adapters/outbound-secret.ts';
+import { exactNetworkHosts, ownSecretsPort } from './secrets.ts';
 import { NO_HOST_FACTS } from './no-host-facts.ts';
 import { undeclaredHostFacts } from './adapters/host-facts.ts';
 import { type UpdateHostFiles, undeclaredUpdateHost } from './adapters/update-host.ts';
@@ -161,11 +171,23 @@ export interface HostConfig {
   status?(): ConfigStatus;
   reload(): Promise<void>;
   startWatching?(): () => void;
+  /**
+   * Every declared file of every plugin that moved on disk or in state at a reload, with its plugin: what the host
+   * publishes as `kernel.config-changed`. Absent: the event is never published. Answers the cancel.
+   */
+  onStateChange?(listener: (plugin: string, move: ConfigFileMove) => void): () => void;
   /** The `${secret:NAME}` names a plugin's own files in effect name. Absent: none, so `kernel.secrets` refuses. */
   secretReferences?(plugin: string): ReadonlySet<string>;
   /** The same names, from the plugin's credential-record defs alone (what a provider counts as its own). Absent: none. */
   credentialRecordReferences?(plugin: string): ReadonlySet<string>;
 }
+
+/** The kernel's own `GET /v1/config/file` declaration: what a `kernel.config-changed` frame is asked about as. */
+const CONFIG_FILE_READ = (() => {
+  const found = kernelManifest.actions?.routes?.find(declared => declared.key === 'GET /v1/config/file');
+  if (found === undefined) throw new Error('the kernel manifest declares no GET /v1/config/file');
+  return found;
+})();
 
 /** Gate's judge of a plugin's own loosening config write, as the config service asks it. */
 export type ConfigJudge = (input: {
@@ -578,8 +600,18 @@ async function bootLocked(
     }
   }
 
-  // Shared kernel machinery.
-  const events = new EventBus(log);
+  // Shared kernel machinery. `kernel.config-changed` is the app's (`GET /v1/bus`): no plugin subscribes to it in-process,
+  // because it names every plugin's files; a plugin hears its own through `ConfigPort.watchState`.
+  const events = new EventBus(log, new Set([ConfigChanged.name]));
+  const stopConfigFeed = config.onStateChange?.((plugin, move) => {
+    try {
+      events.publish(ConfigChanged, configChangedPayload(plugin, move));
+    } catch {
+      // A path the event's bounds do not carry is a wake-up nobody gets; the file's own state is still read by status.
+      log.warn('a config change was not published on the bus', { plugin });
+    }
+  });
+  if (stopConfigFeed !== undefined) own(stopConfigFeed);
   const jobs = new JobRunner(
     clock,
     log,
@@ -781,10 +813,17 @@ async function bootLocked(
         adapters.processTable ?? NO_PROCESS_TABLE,
       ),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
+      // `send` goes through this plugin's OWN guarded fetch, to the exact hosts its manifest names (`./secrets.ts`).
       secrets: ownSecretsPort(
         manifest.permissions?.secrets ?? [],
         () => config.secretReferences?.(manifest.id) ?? new Set<string>(),
         () => bound.secretResolver,
+        {
+          hosts: exactNetworkHosts(declaredNetwork),
+          mayReach: (hostname, host) => hostPermitted(declaredNetwork, items, hostname, resolversOf(manifest.id), host),
+          transport: outboundSecretTransport(fetchPort, clock),
+          log: scopedLog(adapters.logSink, manifest.id),
+        },
       ),
       signer: signerFor(manifest.id, sessionSigner),
       ...(manifest.id === 'gate' && configWriter !== undefined ? { configFiles: configWriter } : {}),
@@ -1038,6 +1077,9 @@ async function bootLocked(
           return false;
         }
       },
+      // A config change names one file: shown only to a caller `GET /v1/config/file` would let read it.
+      frame: (request, name, payload) =>
+        name !== ConfigChanged.name || configFrameShown(bound.admission, request, payload, CONFIG_FILE_READ),
     },
     snapshot: () => frozen as PostBuildSnapshot,
     config: { writer: () => configWriter, admission: () => bound.admission, home },
