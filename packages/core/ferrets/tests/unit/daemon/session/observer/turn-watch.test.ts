@@ -29,6 +29,8 @@ function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', t
   const failed: SessionId[] = [];
   let yields = 0;
   const broken = new Set<SessionId>();
+  /** A session whose writer throws a failure carrying this key (a damaged document, named by its damage). */
+  const damaged = new Map<SessionId, string>();
   const ports: PacedTurnPorts = {
     sessions: async () => [...state].map(([id, each]) => ({ id, state: each })),
     transcript: async () => undefined,
@@ -38,6 +40,8 @@ function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', t
       return panes.has(id) ? panes.get(id) : IDLE;
     },
     record: async (id, change) => {
+      const damage = damaged.get(id);
+      if (damage !== undefined) throw Object.assign(new Error('the document is damaged'), { damage });
       recorded.push({ id, change });
       state.set(id, { ...(state.get(id) as TurnFacts), turnState: change.to });
       return true;
@@ -47,6 +51,7 @@ function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', t
       yields += 1;
     },
     failed: id => void failed.push(id),
+    failureKey: error => (error as { damage?: string }).damage,
   };
   const watcher = new PacedTurnWatcher(ports);
   const tick = async () => {
@@ -63,6 +68,7 @@ function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', t
     recorded,
     failed,
     broken,
+    damaged,
     yields: () => yields,
     id: (raw: string) => parseSessionId(raw),
   };
@@ -241,6 +247,31 @@ describe('PacedTurnWatcher', () => {
     should(subject.looked).have.length(2);
     should([...due.failures.keys()]).deepEqual([subject.id('bad-2')]);
     should(subject.watcher.delayOf(subject.id('bad-2'))).equal(TURN_WATCH_QUIET_MAX_MS);
+  });
+
+  it('should tell a keyed failure once, again only when its key changes or after the ferret recorded a turn', async () => {
+    // Arrange: the pane says the turn ended, but the writer meets a damaged document every time it is due.
+    const subject = fleet(['damaged-7'], { status: 'running', turn: 1, turnState: 'working' });
+    const id = subject.id('damaged-7');
+    subject.damaged.set(id, 'damage-a');
+
+    // Act + Assert: a minute of ticks (six due looks, each meeting the same damage) is told once.
+    for (let at = 0; at < 30; at += 1) await subject.tick();
+    should(subject.failed).deepEqual([id]);
+
+    // Act + Assert: the damage changes: told once more, at its next due look, and not again.
+    subject.damaged.set(id, 'damage-b');
+    for (let at = 0; at < 30; at += 1) await subject.tick();
+    should(subject.failed).deepEqual([id, id]);
+
+    // Act + Assert: mended (the turn is recorded), then damaged again the same way: told again.
+    subject.damaged.delete(id);
+    for (let at = 0; at < 6; at += 1) await subject.tick();
+    should(subject.recorded.map(each => each.change.to)).deepEqual(['your-turn']);
+    subject.state.set(id, { status: 'running', turn: 2, turnState: 'working' });
+    subject.damaged.set(id, 'damage-b');
+    for (let at = 0; at < 6; at += 1) await subject.tick();
+    should(subject.failed).deepEqual([id, id, id]);
   });
 
   it('should clear a stopped ferret without looking at its pane', async () => {

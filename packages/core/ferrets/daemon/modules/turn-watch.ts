@@ -74,6 +74,16 @@ export function turnWatchFailureFields(error: unknown): Readonly<Record<string, 
   return { error: error instanceof Error ? error.name : 'unknown' };
 }
 
+/**
+ * What makes one damaged state document the SAME damage: its file and a digest of what the parser said is wrong with it
+ * (the account can quote the document, so only its digest is kept, and it is never logged). Any other failure has no
+ * key, so it is told every time.
+ */
+function turnWatchFailureKey(error: unknown): string | undefined {
+  if (!(error instanceof InvalidStateDocumentError)) return undefined;
+  return `${error.file}\u0000${createHash('sha256').update(error.reason, 'utf8').digest('hex')}`;
+}
+
 /** The inline host over the turn part, unarmed: `arm()` starts the 2 s tick, `close()` stops it. */
 export function buildTurnWatch(deps: TurnWatchDeps): {
   readonly host: InlineObserverHost;
@@ -162,6 +172,8 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
                 : { ...session, state: { ...session.state, status: 'stopped' as const } };
             }),
           yieldToLoop: deps.yieldToLoop,
+          // A damaged document is said ONCE, not on every look that meets it again (until its damage changes).
+          failureKey: turnWatchFailureKey,
           failed: (id, error) =>
             deps.log.warn("a ferret's turn could not be watched this time", {
               ferret: id,
