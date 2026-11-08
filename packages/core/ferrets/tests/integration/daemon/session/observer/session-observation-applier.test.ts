@@ -21,6 +21,7 @@ import {
   SCRIPTED_QUESTIONS,
   scriptedPaneLimits as storagePaneLimits,
 } from '../../../../support/daemon/observer-stand-ins.ts';
+import { FerretConfigFile, FerretStateFile } from '../../../../../contract/index.ts';
 import { memoryStorage } from '../../../../support/daemon/storage.ts';
 
 const NOW = '2026-10-22T08:00:00.000Z';
@@ -31,10 +32,14 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
+async function openFolder() {
+  const opened = await memoryStorage({ clock: { now: () => NOW } });
+  cleanups.push(async () => await opened.storage.close());
+  return opened;
+}
+
 async function openStorage(): Promise<DaemonStorage> {
-  const { storage } = await memoryStorage({ clock: { now: () => NOW } });
-  cleanups.push(async () => await storage.close());
-  return storage;
+  return (await openFolder()).storage;
 }
 
 const question: TranscriptEvent = {
@@ -156,7 +161,7 @@ describe('SessionObservationApplier', () => {
   it('should re-decide under the lock: nothing to write once the document holds it, nothing over a damaged one', async () => {
     // Arrange — the look saw an open question nobody had recorded; by the time the patch is applied a
     // writer has recorded that picker already. Later the document is damaged.
-    const storage = await openStorage();
+    const { storage, folder } = await openFolder();
     const subject = new SessionObservationApplier(
       storage,
       { all: noReceipts, append: async () => undefined },
@@ -168,18 +173,19 @@ describe('SessionObservationApplier', () => {
       id: ID,
       status: 'awaiting_question',
       turn: 1,
-      pendingQuestion: { toolUseId: 'tool-1', questions: [] },
+      pendingQuestion: { toolUseId: 'tool-1', questions: [{ question: 'Which one?' }] },
     });
 
     // Act
     const decidedAgain = await subject.apply(ID, patch, NOW);
-    await storage.writeState(ID, { id: ID, status: 'not-a-status' });
+    const damagedText = JSON.stringify({ format: 1, id: ID, status: 'not-a-status' });
+    folder.plant(FerretStateFile, damagedText, ID);
     const damaged = await subject.apply(ID, patch, NOW);
 
     // Assert
     should(decidedAgain).be.false();
     should(damaged).be.false();
-    should(await storage.readState(ID)).deepEqual({ id: ID, status: 'not-a-status' });
+    should(folder.raw(FerretStateFile, ID)).equal(damagedText);
   });
 
   it('should not settle again a receipt the answer drive settled after the look', async () => {
@@ -209,7 +215,7 @@ describe('SessionObservationApplier', () => {
     const storage = await openStorage();
     const midDrive = {
       status: 'awaiting_question',
-      pendingQuestion: { toolUseId: 'tool-1', questions: [] },
+      pendingQuestion: { toolUseId: 'tool-1', questions: [{ question: 'Which one?' }] },
     } satisfies Partial<SessionState>;
     await storage.writeState(ID, { id: ID, turn: 1, ...midDrive });
     const { ledger, outcomes } = ledgerFor(storage);
@@ -321,8 +327,8 @@ describe('a session parked on the usage-limit dialog, over real storage', () => 
 
   it('should skip a limited session whose documents cannot be read', async () => {
     // Arrange
-    const storage = await openStorage();
-    await storage.writeConfig(ID, { id: ID });
+    const { storage, folder } = await openFolder();
+    folder.plant(FerretConfigFile, JSON.stringify({ format: 1, id: ID }), ID);
     await storage.writeState(ID, { id: ID, status: 'rate_limited', turn: 1 });
 
     // Act

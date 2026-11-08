@@ -36,6 +36,11 @@ test('the worker entry uses its host metadata peer and performs no filesystem IO
     }),
     transcripts: { claude: unwiredTranscriptSource('claude'), codex: unwiredTranscriptSource('codex') },
     frames: () => ({ state: async () => undefined, invalidate: () => {}, forget: () => {} }),
+    clock: { now: () => new Date().toISOString() },
+    schedule: (delayMs, run) => {
+      const timer = setTimeout(run, delayMs);
+      return () => clearTimeout(timer);
+    },
     tail: UNWIRED_TAIL,
     sendEvidence: UNWIRED_SEND_EVIDENCE,
     paneParsers: INERT_PANE_PARSERS,

@@ -1,11 +1,13 @@
 /**
- * The voice plugin's surfaces: the Voice and Speed-ups settings tabs and the dictation control that sits in the
- * composer's tools slot. Each is wrapped in a boundary that gives it the plugin client and this device's voice stores.
+ * The voice plugin's surfaces: the Voice and Speed-ups settings tabs, the dictation control that sits in the
+ * composer's tools slot and Read aloud in an assistant message's footer. Each is wrapped in a boundary that gives it the plugin client and this device's voice stores.
  */
 
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { type ReactNode, useMemo } from 'react';
+import type { ConversationRowProps } from '@ferretry/plugin-conversation/contract';
 import { DictationControl } from './components/dictation-control.tsx';
+import { ReadAloudControl } from './components/read-aloud.tsx';
 import { AutoReadSettings } from './features/settings/auto-read-settings.tsx';
 import { DictationDebugSettings } from './features/settings/dictation-debug-settings.tsx';
 import { DictationSettings } from './features/settings/dictation-settings.tsx';
@@ -114,5 +116,16 @@ export function voiceSurfaces(client: PluginClient) {
     </Boundary>
   );
 
-  return { VoiceTab, SpeedupsTab, DictationPanel };
+  /**
+   * "Read aloud" on an assistant message (`conversation.row-actions`): the chat hands the row, and only an assistant's own
+   * words are read. The text is the daemon's redacted reading of the transcript, which is what the voice speaks.
+   */
+  const ReadAloudPanel = ({ entry }: { readonly subject?: string } & Partial<ConversationRowProps>) =>
+    entry === undefined || entry.kind !== 'assistant' ? null : (
+      <Boundary>
+        <ReadAloudControl entryId={entry.id} text={entry.text} />
+      </Boundary>
+    );
+
+  return { VoiceTab, SpeedupsTab, DictationPanel, ReadAloudPanel };
 }

@@ -218,7 +218,13 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
   const systemCallsigns = new SystemCallsignIssuer({
     counters: new StateCallsignCounters(kernel.state),
-    held: async () => registry.nameClaims().map(claim => claim.callsign),
+    held: async () => {
+      const nowMs = kernel.clock.nowMs();
+      return registry
+        .nameClaims()
+        .filter(claim => claim.expiresAtMs > nowMs)
+        .map(claim => claim.callsign);
+    },
     serial: callsignSerial,
   });
 
@@ -844,7 +850,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         if (!Number.isInteger(count) || count < 1)
           throw new ApiError(400, 'count must be a whole number of at least one', 'invalid_count');
         const nowMs = kernel.clock.nowMs();
-        // A suggestion, not a reservation: the names the running fleet holds, the same set the start's ledger reads.
+        // A suggestion, not a reservation: the names the fleet holds (a stopped ferret's inside its window), as today.
         const start = Math.floor(nowMs / 1000) % DEFAULT_CALLSIGN_POOL.length;
         return jsonResponse([...suggestCallsigns(DEFAULT_CALLSIGN_POOL, registry.nameClaims(), nowMs, count, start)]);
       },

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { FileSystemPort } from '../../../lib/ports.ts';
 import { FIXED_SETTINGS_FILE, type HarnessKind, RUNTIME_STATE_DIRECTORY } from '../../../lib/session/peers/fleet.ts';
 import { type HarnessWrapperSource, harnessHomeFromWrapper } from '../../../lib/session/peers/transcript-launch.ts';
 
@@ -22,6 +22,12 @@ export class FileLaunchSettingsDigest {
     private readonly wrappers: HarnessWrapperSource,
     /** The environment the wrapper runs in, which is the daemon's, so its home expands the same way. */
     private readonly environment: Readonly<Record<string, string | undefined>>,
+    /**
+     * Reads the fixed settings file in the HARNESS home the wrapper exports — outside the state home, so a host binds this
+     * to a reader of that home, not to the state file system. Absent is `undefined` (a runtime with no fixed layer); any
+     * other failure throws.
+     */
+    private readonly fileSystem: Pick<FileSystemPort, 'readText'>,
   ) {}
 
   /**
@@ -33,9 +39,11 @@ export class FileLaunchSettingsDigest {
     if (wrapper === undefined) return undefined;
     const home = harnessHomeFromWrapper(wrapper, harness, this.environment);
     if (home === undefined) return '';
-    return await readFile(join(home, RUNTIME_STATE_DIRECTORY, FIXED_SETTINGS_FILE), 'utf8').catch(
-      (failure: NodeJS.ErrnoException) => (failure.code === 'ENOENT' ? '' : undefined),
-    );
+    try {
+      return (await this.fileSystem.readText(join(home, RUNTIME_STATE_DIRECTORY, FIXED_SETTINGS_FILE))) ?? '';
+    } catch {
+      return undefined;
+    }
   }
 
   async digest(executable: string, harness: HarnessKind): Promise<string | undefined> {
@@ -45,7 +53,8 @@ export class FileLaunchSettingsDigest {
     const fixed =
       home === undefined
         ? ''
-        : await readFile(join(home, RUNTIME_STATE_DIRECTORY, FIXED_SETTINGS_FILE), 'utf8').catch(() => '');
+        : ((await this.fileSystem.readText(join(home, RUNTIME_STATE_DIRECTORY, FIXED_SETTINGS_FILE)).catch(() => '')) ??
+          '');
     return createHash('sha256')
       .update(JSON.stringify([wrapper, fixed]), 'utf8')
       .digest('hex');

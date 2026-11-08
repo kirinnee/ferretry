@@ -9,7 +9,8 @@ import type { SystemCallsignCounters, SystemCallsignCounterStore } from '../../l
  *
  * READING IS TOTAL. A missing or damaged document means "nothing issued yet": the counter only decides where to start
  * looking, and the fleet's own held names (not this file) keep an issued id unique, so a lost counter costs a few
- * skipped-over ids and never a collision. WRITING IS ATOMIC (the state port), so a crash leaves no half a document.
+ * skipped-over ids and never a collision. WRITING IS ATOMIC (the state port), so a crash leaves no half a document. A damaged file is never written over (the
+ * kernel refuses), so the next issue starts again from what the fleet holds.
  */
 export class StateCallsignCounters implements SystemCallsignCounterStore {
   constructor(private readonly state: Pick<StatePort, 'read' | 'write'>) {}
@@ -26,6 +27,12 @@ export class StateCallsignCounters implements SystemCallsignCounterStore {
   }
 
   async write(counters: SystemCallsignCounters): Promise<void> {
-    await this.state.write(SystemCallsignsFile, { ...counters });
+    try {
+      await this.state.write(SystemCallsignsFile, { ...counters });
+    } catch (error) {
+      // The kernel never writes over a damaged file. The counter is a hint, so a refused write costs a few skipped ids
+      // on the next issue and never a collision; any other fault is real.
+      if (!(error instanceof Error && error.name === 'StoreDamagedError')) throw error;
+    }
   }
 }

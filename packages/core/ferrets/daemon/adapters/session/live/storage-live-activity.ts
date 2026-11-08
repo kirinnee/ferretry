@@ -1,4 +1,3 @@
-import { stat } from 'node:fs/promises';
 import type { SessionCompactionState, SessionLiveActivity } from '../../../lib/protocol/session-live.ts';
 import { SessionStateSchema } from '../../../lib/protocol/session.ts';
 import type { ClockPort } from '../../../lib/ports.ts';
@@ -35,6 +34,11 @@ export interface LiveActivityReads {
   paneState(id: SessionId): Promise<PaneState | undefined>;
   /** The transcript file proved to be this session's, or `undefined` before one is. */
   transcriptFile(id: SessionId): Promise<string | undefined>;
+  /**
+   * The size and modification time of that transcript file — one confined `stat` the host owns (the same lookup a
+   * session worker is handed), or `undefined` when it cannot be read. Never throws for a missing file.
+   */
+  transcriptStat(file: string): Promise<{ readonly size: number; readonly mtimeMs: number } | undefined>;
 }
 
 interface CachedTail {
@@ -165,7 +169,7 @@ export class StorageLiveActivitySource implements LiveActivitySource {
   private async transcript(id: SessionId): Promise<CachedTail | undefined> {
     const file = await this.reads.transcriptFile(id).catch(() => undefined);
     if (file === undefined) return undefined;
-    const stats = await stat(file).catch(() => undefined);
+    const stats = await this.reads.transcriptStat(file).catch(() => undefined);
     if (stats === undefined) return undefined;
     const cached = this.tails.get(id);
     if (cached?.file === file && cached.size === stats.size && cached.mtimeMs === stats.mtimeMs) return cached;

@@ -3,7 +3,7 @@ import type { TestHost } from '@ferretry/kernel/testing';
 import { FerretFiles, NamesFile } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner } from '../../../../contract/testing/index.ts';
 import { DEFAULT_CALLSIGN_POOL } from '../../../../daemon/lib/names/index.ts';
-import { host } from './route-fixture.ts';
+import { as, host } from './route-fixture.ts';
 
 /**
  * A start and a rename take their callsign through the claim ledger (`names.json`, F-0232), with the registry the one
@@ -133,5 +133,87 @@ describe('GET /v1/names (R-0114)', () => {
       expect(answer.status).toBe(400);
       expect(answer.json<{ code: string }>().code).toBe('invalid_count');
     }
+  });
+});
+
+const DAY_MS = 24 * 60 * 60 * 1_000;
+
+describe('a name is held for the window after the STOP, as today (F-0232)', () => {
+  test('a ferret that ran past the window and then stopped keeps its name for five days after the stop', async () => {
+    const h = await fresh();
+    const wren = await running(h, 'wren');
+    // It runs longer than the ledger row lives (five days from the claim), then stops.
+    await h.clock.advance(6 * DAY_MS);
+    expect((await h.request('POST', `/v1/ferrets/${wren}/stop`, { body: {} })).status).toBeLessThan(300);
+    const refused = await start(h, { name: 'wren', folder: '/work/b' });
+    expect(refused.status).toBeGreaterThanOrEqual(400);
+    await h.clock.advance(4 * DAY_MS);
+    expect((await start(h, { name: 'wren', folder: '/work/b' })).status).toBeGreaterThanOrEqual(400);
+    await h.clock.advance(DAY_MS + 1_000);
+    expect((await start(h, { name: 'wren', folder: '/work/b' })).status).toBeLessThan(300);
+  });
+
+  test('R-0114 GET /v1/names does not suggest the name of a ferret stopped inside the window', async () => {
+    const taken = DEFAULT_CALLSIGN_POOL[0]!;
+    const h = await fresh();
+    const id = await running(h, taken);
+    await h.clock.advance(6 * DAY_MS);
+    await h.request('POST', `/v1/ferrets/${id}/stop`, { body: {} });
+    const many = (await h.request('GET', '/v1/names', { query: { count: '5' } })).json<string[]>();
+    expect(many).not.toContain(taken);
+  });
+});
+
+describe('an automatic start the ledger cannot reserve never takes a pool name (F-0232)', () => {
+  test('two concurrent automatic starts over a damaged ledger end with two different names, neither from the pool', async () => {
+    const h = await fresh();
+    h.state('ferrets').plant(NamesFile, '{not json');
+    const [a, b] = await Promise.all([start(h, {}), start(h, { folder: '/work/b' })]);
+    expect(a.status).toBeLessThan(300);
+    expect(b.status).toBeLessThan(300);
+    const names = (await h.request('GET', '/v1/ferrets')).json<{ name: string }[]>().map(summary => summary.name);
+    expect(names).toHaveLength(2);
+    expect(new Set(names).size).toBe(2);
+    for (const name of names) expect(DEFAULT_CALLSIGN_POOL).not.toContain(name);
+  });
+});
+
+describe('a rename always goes through the ledger (F-0232)', () => {
+  test('a name that is not a callsign is refused and never written', async () => {
+    const h = await fresh();
+    const lead = await running(h, 'lead');
+    const refused = await h.request('POST', `/v1/ferrets/${lead}/rename`, { body: { name: 'Not A Callsign!' } });
+    expect(refused.status).toBeGreaterThanOrEqual(400);
+    expect(JSON.parse(h.state('ferrets').raw(FerretFiles, lead) as string).name).toBe('lead');
+  });
+
+  test('the claimed canonical callsign is what is written, not the raw request', async () => {
+    const h = await fresh();
+    const lead = await running(h, 'lead');
+    const renamed = await h.request('POST', `/v1/ferrets/${lead}/rename`, { body: { name: '  Finch ' } });
+    expect(renamed.status).toBeLessThan(300);
+    expect(JSON.parse(h.state('ferrets').raw(FerretFiles, lead) as string).name).toBe('finch');
+  });
+
+  test('R-0114 a ferret cannot rename a ferret that is neither itself nor its helper (403)', async () => {
+    const h = await fresh();
+    const lead = await running(h, 'lead');
+    const other = await running(h, 'wing');
+    const refused = await h.request('POST', `/v1/ferrets/${other}/rename`, { ...as(lead), body: { name: 'finch' } });
+    expect(refused.status).toBe(403);
+    expect(JSON.parse(h.state('ferrets').raw(FerretFiles, other) as string).name).toBe('wing');
+    const own = await h.request('POST', `/v1/ferrets/${lead}/rename`, { ...as(lead), body: { name: 'finch' } });
+    expect(own.status).toBeLessThan(300);
+  });
+});
+
+describe('a start that throws gives its claim back (F-0232)', () => {
+  test('a start whose admission throws leaves the name free for the next start', async () => {
+    const h = await fresh();
+    const lead = await running(h, 'lead');
+    // A helper start throws at admission (Packs admission is not bound), after the name was claimed.
+    const thrown = await start(h, { name: 'wren', parent: lead });
+    expect(thrown.status).toBeGreaterThanOrEqual(400);
+    expect(ledger(h).claims.map(claim => claim.callsign)).not.toContain('wren');
   });
 });

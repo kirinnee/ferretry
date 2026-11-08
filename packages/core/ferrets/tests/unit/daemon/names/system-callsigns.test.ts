@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { SystemCallsignsFile } from '../../../../contract/state.ts';
 import { StateCallsignCounters } from '../../../../daemon/adapters/names/state-callsign-counters.ts';
 import { SYSTEM_CALLSIGN_MAX_SEQUENCE } from '../../../../daemon/lib/protocol/system-callsigns.ts';
 import { issuerOver, MemoryCounters } from './system-callsigns-support.ts';
@@ -102,5 +103,40 @@ describe('the persisted counters', () => {
     state.damaged = false;
     state.document = { learning: 7 };
     should(await counters.read()).deepEqual({ learning: 7 });
+  });
+});
+
+describe('a damaged system-callsigns.json (F-0349)', () => {
+  it('should be a narrower file that never flags the subsystem, as today read it as nothing issued', () => {
+    // Act + Assert
+    should(typeof SystemCallsignsFile.onDamaged).equal('object');
+  });
+
+  it('should cost a skipped id and never a collision when the kernel refuses to write over it', async () => {
+    // Arrange
+    const refusing = {
+      read: async () => ({ ok: true, value: undefined }),
+      write: async () => {
+        throw Object.assign(new Error('damaged'), { name: 'StoreDamagedError' });
+      },
+    } as never;
+    const counters = new StateCallsignCounters(refusing);
+
+    // Act + Assert
+    await counters.write({ pack: 3 });
+    should(await counters.read()).deepEqual({});
+  });
+
+  it('should still raise any other write fault', async () => {
+    // Arrange
+    const failing = {
+      read: async () => ({ ok: true, value: undefined }),
+      write: async () => {
+        throw new Error('disk full');
+      },
+    } as never;
+
+    // Act + Assert
+    await new StateCallsignCounters(failing).write({ pack: 3 }).should.be.rejectedWith('disk full');
   });
 });

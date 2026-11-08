@@ -7,7 +7,7 @@ import type {
   PackId,
 } from '../../../contract/index.ts';
 import { type FerretDetails } from '../../../contract/index.ts';
-import { normalizeCallsign } from '../../../contract/state.ts';
+import { sessionNameClaim } from '../names/session-names.ts';
 import type { NameClaim } from '../names/types.ts';
 
 /**
@@ -236,15 +236,21 @@ export class FerretRegistry {
   }
 
   /**
-   * The names the running fleet holds, as claims that never expire while the ferret runs: the live half of "is this
-   * name taken" beside the ledger, decided by the same predicate as {@link nameHolder}.
+   * The names the fleet holds, as today's `sessionNameClaim` reads them: a running ferret holds its name while it
+   * runs, a STOPPED one for the callsign window after its stop (`stateAt`), so `fy send <name>` still means it. The
+   * live half of "is this name taken" beside the ledger; {@link nameHolder} stays the running-only sentence.
    */
   nameClaims(): readonly NameClaim[] {
     const claims: NameClaim[] = [];
     for (const record of this.records.values()) {
-      const callsign = normalizeCallsign(record.name);
-      if (record.state === 'stopped' || callsign === null) continue;
-      claims.push({ callsign, ownerId: record.id, claimedAtMs: 0, expiresAtMs: Number.MAX_SAFE_INTEGER });
+      const claim = sessionNameClaim({
+        id: record.id,
+        teammate: record.name,
+        createdAt: record.createdAt,
+        updatedAt: record.stateAt,
+        status: record.state === 'stopped' ? 'stopped' : 'running',
+      });
+      if (claim !== undefined) claims.push(claim);
     }
     return claims;
   }

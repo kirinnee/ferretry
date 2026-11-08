@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, it } from 'bun:test';
-import { appendFile, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SessionLiveActivitySchema } from '../../../../../daemon/lib/protocol/session-live.ts';
@@ -118,6 +118,7 @@ function subject(initial: Partial<Script> = {}, durations: readonly number[] = [
       if (script.file === 'reject') throw new Error('lookup failed');
       return script.file;
     },
+    transcriptStat: statTranscript,
   };
   const tail: SessionTranscriptTail = {
     tail: async (_session, limit) => {
@@ -151,6 +152,12 @@ function subject(initial: Partial<Script> = {}, durations: readonly number[] = [
     history: recorded,
     sample: () => source.sample('s1', signal.signal),
   };
+}
+
+/** The host's confined `stat` of a transcript, on the real file: size and modification time, nothing when absent. */
+async function statTranscript(file: string): Promise<{ readonly size: number; readonly mtimeMs: number } | undefined> {
+  const info = await stat(file).catch(() => undefined);
+  return info === undefined ? undefined : { size: info.size, mtimeMs: info.mtimeMs };
 }
 
 /** A real, empty transcript file the subject's stat cache can key on. */
@@ -653,6 +660,7 @@ describe('the live readout of a compaction', () => {
         readState: async () => idleState(),
         paneState: async () => pane(COMPACTING_PANE),
         transcriptFile: async () => file,
+        transcriptStat: statTranscript,
       },
       { tail: async () => ({ kind: 'read', events: [events[0] as TranscriptEvent] }) },
       { now: () => at30 },

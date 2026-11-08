@@ -76,17 +76,17 @@ describe('app parity, rendered', () => {
 describe('app parity', () => {
   test('S-0069 S-0168 S-0169 S-0170 the connected settings, panel, surface and view are the one Pack mode tab', () => {
     expect(manifest.ui?.settings?.map(tab => [tab.id, tab.label])).toEqual([['pack', 'Pack mode']]);
-    expect(typeof half?.settings['pack']).toBe('function');
+    expect(typeof half?.settings.pack).toBe('function');
     expect(settingsSource).toContain('function PackSettingsView');
     expect(settingsSource).toContain('function PackPanel');
     expect(settingsSource).toContain('export function PackSettingsSurface');
     expect(settingsSource).toContain('function ConnectedPackSettings');
   });
 
-  test('S-0315 the pack feature folder is this app half: the tab and the helpers panel', () => {
+  test('S-0315 the pack feature folder is this app half: the tab, the helpers panel and the Pack card', () => {
     expect(Object.keys(half?.settings ?? {})).toEqual(['pack']);
-    expect(manifest.ui?.panels?.map(panel => panel.id)).toEqual(['helpers']);
-    expect(Object.keys(half?.panels ?? {})).toEqual(['helpers']);
+    expect(manifest.ui?.panels?.map(panel => panel.id)).toEqual(['helpers', 'pack-call']);
+    expect(Object.keys(half?.panels ?? {})).toEqual(['helpers', 'pack-call']);
   });
 
   test('S-0422 S-0521 S-0522 the settings entry, navigation and catalog link resolve to the tab this half draws', () => {

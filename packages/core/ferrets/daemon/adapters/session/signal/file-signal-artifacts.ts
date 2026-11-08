@@ -1,7 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { appendFile, mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { ClockPort } from '../../../lib/ports.ts';
+import type { ClockPort, FileSystemPort } from '../../../lib/ports.ts';
 import { DEFAULT_COMPLETION_SUMMARY } from '../../../lib/session/signal/policy.ts';
 import type { SignalArtifacts } from '../../../lib/session/signal/types.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
@@ -23,7 +21,7 @@ export class FileSignalArtifacts implements SignalArtifacts {
   constructor(
     private readonly sessionDirectory: (id: SessionId) => string,
     private readonly clock: ClockPort,
-    private readonly uniqueId: () => string = randomUUID,
+    private readonly fileSystem: Pick<FileSystemPort, 'ensureDirectory' | 'writeTextAtomic' | 'appendLineDurable'>,
   ) {}
 
   async writeSummary(id: SessionId, message: string | undefined): Promise<void> {
@@ -51,16 +49,15 @@ export class FileSignalArtifacts implements SignalArtifacts {
     const directory = this.sessionDirectory(id);
     const at = this.clock.now();
     const outbox = join(directory, 'channel', 'outbox.jsonl');
-    await mkdir(dirname(outbox), { recursive: true, mode: 0o700 });
-    await appendFile(outbox, `${JSON.stringify({ at, type: 'question', message })}\n`, { mode: 0o600 });
+    await this.fileSystem.ensureDirectory(dirname(outbox), 0o700);
+    // The port ends the line itself, so none is added here.
+    await this.fileSystem.appendLineDurable(outbox, JSON.stringify({ at, type: 'question', message }));
     await this.write(join(directory, 'needs-help.marker'), `${JSON.stringify({ at, type: 'question', message })}\n`);
   }
 
   /** Written through a temporary file and renamed, so no reader ever sees a half-written marker. */
   private async write(file: string, document: string): Promise<void> {
-    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
-    const temporary = `${file}.${this.uniqueId()}.tmp`;
-    await writeFile(temporary, document, { encoding: 'utf8', mode: 0o600 });
-    await rename(temporary, file);
+    await this.fileSystem.ensureDirectory(dirname(file), 0o700);
+    await this.fileSystem.writeTextAtomic(file, document);
   }
 }

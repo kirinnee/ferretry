@@ -76,18 +76,18 @@ const RECONCILE_SETTLE_MS = 250;
  */
 const RECONCILE_BACKSTOP_MS = 30_000;
 
-/** `promise`, or a rejection once `ms` have passed. */
-async function within<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+/** `promise`, or a rejection once `ms` have passed, timed by the host's own `schedule`. */
+async function within<T>(promise: Promise<T>, ms: number, schedule: WorkerObserverPorts['schedule']): Promise<T> {
+  let cancel: (() => void) | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(`no answer within ${String(ms)} ms`)), ms);
+        cancel = schedule(ms, () => reject(new Error(`no answer within ${String(ms)} ms`)));
       }),
     ]);
   } finally {
-    clearTimeout(timer);
+    cancel?.();
   }
 }
 
@@ -226,7 +226,7 @@ export class WorkerObserverHost implements SessionObserverHost {
     }
     if (this.ports.supervisor.hosts(id))
       try {
-        await within(this.ports.supervisor.request(id, { kind: 'observe' }), this.ports.barrierMs);
+        await within(this.ports.supervisor.request(id, { kind: 'observe' }), this.ports.barrierMs, this.ports.schedule);
         await this.applying.get(id);
         return;
       } catch {

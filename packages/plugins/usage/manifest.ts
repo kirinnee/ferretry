@@ -152,6 +152,8 @@ export default definePlugin({
       // The quota readout in the top bar, and a ferret's own insights next to it.
       panel('top', { id: 'quota', order: 70 }),
       panel('ferret.side', { id: 'insights', order: 70 }),
+      // The account's quota on the composer's context row.
+      panel('composer.tools', { id: 'composer-quota', order: 90 }),
     ],
     settings: [
       settingsTab('budgets', { label: 'Budgets', order: 70 }),

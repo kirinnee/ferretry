@@ -56,16 +56,11 @@ const SECTIONS: readonly string[] = [
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
-/** Structural equality over plain JSON-shaped values. */
+/** Equality over the settings' values: a primitive, or an array of them (no default holds an object inside a section). */
 function sameValue(left: unknown, right: unknown): boolean {
   if (left === right) return true;
   if (Array.isArray(left) && Array.isArray(right))
     return left.length === right.length && left.every((item, index) => sameValue(item, right[index]));
-  if (isPlainObject(left) && isPlainObject(right)) {
-    const leftKeys = Object.keys(left).filter(key => left[key] !== undefined);
-    const rightKeys = Object.keys(right).filter(key => right[key] !== undefined);
-    return leftKeys.length === rightKeys.length && leftKeys.every(key => sameValue(left[key], right[key]));
-  }
   return false;
 }
 

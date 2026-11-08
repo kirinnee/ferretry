@@ -301,11 +301,18 @@ export class FerretsService implements FerretsApi {
     const id = this.ports.newId();
     const named = await this.takeName(id, request);
     if (!named.ok) return named;
-    const result = await this.startNamed(id, named.value, request);
-    // A start that never wrote its record gives the reservation back; a written one keeps it, as today.
-    if (!result.ok && this.registry.get(id) === undefined)
-      await this.ports.claims?.release(named.value, id).catch(() => undefined);
-    return result;
+    const giveBack = async () => {
+      // A start that never wrote its record gives the reservation back; a written one keeps it, as today.
+      if (this.registry.get(id) === undefined) await this.ports.claims?.release(named.value, id).catch(() => undefined);
+    };
+    try {
+      const result = await this.startNamed(id, named.value, request);
+      if (!result.ok) await giveBack();
+      return result;
+    } catch (error) {
+      await giveBack();
+      throw error;
+    }
   }
 
   /**
@@ -344,6 +351,9 @@ export class FerretsService implements FerretsApi {
       const claim = await claimStartName(this.ports.claims, id, {}, this.nowMs());
       if (claim.ok && claim.callsign !== undefined) return ok(claim.callsign);
     }
+    // The ledger could not reserve (damaged, spent or a failed draw): start UNNAMED as today, answering to its id. A
+    // pool name here would be unreserved and two starts could pick the same one.
+    if (this.ports.claims !== undefined) return ok(`ferret-${id}`);
     const name = this.ports.newName(candidate => this.registry.nameHolder(candidate) !== undefined);
     const holder = this.registry.nameHolder(name);
     if (holder !== undefined) return failed('refused', `the name ${name} is held by running ferret ${holder}`);
@@ -612,11 +622,16 @@ export class FerretsService implements FerretsApi {
     if (record === undefined) return err(`no ferret ${ferret}`);
     const name = change.name?.trim();
     let claimed: string | undefined;
+    let keep = false;
     if (name !== undefined) {
       const holder = this.registry.nameHolder(name);
       if (holder !== undefined && holder !== ferret) return err(`the name ${name} is held by running ferret ${holder}`);
-      // Renaming to the name the ferret already answers to is a no-op claim; any other goes through the ledger.
-      if (this.ports.claims !== undefined && normalizeCallsign(name) !== normalizeCallsign(record.name)) {
+      // Renaming to the callsign the ferret already answers to is a no-op claim (it keeps its current name); any other
+      // name, a non-canonical one included, goes through the ledger, which refuses an invalid one.
+      const canonical = normalizeCallsign(name);
+      const unchanged = canonical !== null && canonical === normalizeCallsign(record.name);
+      if (unchanged) keep = true;
+      else if (this.ports.claims !== undefined) {
         const allocated = await this.ports.claims.allocate({ ownerId: ferret, nowMs: this.nowMs(), requested: name });
         if (!allocated.ok)
           return err(
@@ -631,7 +646,7 @@ export class FerretsService implements FerretsApi {
     if (title !== undefined) await this.saveDetails(ferret, { ...this.registry.detailsOf(ferret), title });
     if (name !== undefined) {
       try {
-        await this.write({ ...record, name }, record.state, 'renamed');
+        await this.write({ ...record, name: claimed ?? (keep ? record.name : name) }, record.state, 'renamed');
       } catch (error) {
         // The reservation was taken for a rename that never landed; holding it would park the name.
         if (claimed !== undefined) await this.ports.claims?.release(claimed, ferret).catch(() => undefined);

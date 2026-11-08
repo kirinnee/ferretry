@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import type { FileSystemPort } from '../../../lib/ports.ts';
 import type { WaitHeartbeat, WaitHeartbeatSink } from '../../../lib/session/monitor/types.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
 import { writeJsonAtomic } from './atomic-json.ts';
@@ -23,24 +23,20 @@ import { writeJsonAtomic } from './atomic-json.ts';
 export class FileWaitHeartbeat implements WaitHeartbeatSink {
   constructor(
     private readonly sessionDirectory: (id: SessionId) => string,
-    private readonly uniqueId: () => string = randomUUID,
+    private readonly fileSystem: Pick<FileSystemPort, 'ensureDirectory' | 'writeTextAtomic'>,
   ) {}
 
   async publish(id: SessionId, beat: WaitHeartbeat): Promise<void> {
     // Absent rather than null, for the reason the state document uses: a reader should see a field
     // that was not applicable, not one that was explicitly emptied.
-    await writeJsonAtomic(
-      join(this.sessionDirectory(id), 'checks', 'waiting.json'),
-      {
-        at: beat.at,
-        since: beat.since,
-        elapsedSeconds: beat.elapsedSeconds,
-        ...(beat.until === undefined ? {} : { until: beat.until }),
-        ...(beat.condition === undefined ? {} : { condition: beat.condition }),
-        ...(beat.expiresAt === undefined ? {} : { expiresAt: beat.expiresAt }),
-        ...(beat.remainingSeconds === undefined ? {} : { remainingSeconds: beat.remainingSeconds }),
-      },
-      this.uniqueId,
-    );
+    await writeJsonAtomic(this.fileSystem, join(this.sessionDirectory(id), 'checks', 'waiting.json'), {
+      at: beat.at,
+      since: beat.since,
+      elapsedSeconds: beat.elapsedSeconds,
+      ...(beat.until === undefined ? {} : { until: beat.until }),
+      ...(beat.condition === undefined ? {} : { condition: beat.condition }),
+      ...(beat.expiresAt === undefined ? {} : { expiresAt: beat.expiresAt }),
+      ...(beat.remainingSeconds === undefined ? {} : { remainingSeconds: beat.remainingSeconds }),
+    });
   }
 }

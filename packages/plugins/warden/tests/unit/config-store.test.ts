@@ -1,7 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { ConfigEdit, ConfigPort, ConfigWriteOutcome } from '@ferretry/kernel/contract';
-import { ConfigWardenConfigStore, WardenConfigHeld } from '../../daemon/adapters/config-store.ts';
+import { DEFAULT_WARDEN_CONFIG } from '../../contract/index.ts';
+import {
+  ConfigWardenConfigStore,
+  WardenConfigHeld,
+  WardenConfigMoved,
+  WardenConfigRefused,
+} from '../../daemon/adapters/config-store.ts';
 import type { WardenConfig, WardenConfigPatch } from '../../daemon/lib/index.ts';
 
 const written: ConfigWriteOutcome = { kind: 'written', etag: 'e', loosened: [] };
@@ -99,5 +105,75 @@ describe('warden.yaml changes in flight', () => {
       },
     );
     should(writes()).equal(0);
+  });
+});
+
+describe('warden.yaml refused or moved by the kernel', () => {
+  const storeAnswering = (result: unknown) => {
+    const port = {
+      file: () => undefined,
+      fileState: () => ({ state: 'valid', inEffect: true, sentences: [] }),
+      write: async () => result,
+    } as unknown as ConfigPort;
+    return new ConfigWardenConfigStore(port);
+  };
+
+  it('should say the kernel’s issues when it refuses the save, or its reason when it names none', async () => {
+    const issues = storeAnswering({ kind: 'refused', reason: 'invalid', issues: [{ message: 'a' }, { message: 'b' }] });
+    const bare = storeAnswering({ kind: 'refused', reason: 'a raw secret', issues: [] });
+
+    await issues.write(anyConfig, {} as WardenConfigPatch).then(
+      () => should.fail('', '', 'should have been refused'),
+      (error: unknown) => {
+        should(error).be.instanceOf(WardenConfigRefused);
+        should((error as Error).message).equal('a; b');
+      },
+    );
+    await bare.write(anyConfig, {} as WardenConfigPatch).then(
+      () => should.fail('', '', 'should have been refused'),
+      (error: unknown) => should((error as Error).message).equal('a raw secret'),
+    );
+  });
+
+  it('should tell the owner to save again when the file moved since the kernel last read it', async () => {
+    await storeAnswering({ kind: 'conflict' })
+      .write(anyConfig, {} as WardenConfigPatch)
+      .then(
+        () => should.fail('', '', 'should have been refused'),
+        (error: unknown) => should(error).be.instanceOf(WardenConfigMoved),
+      );
+  });
+
+  it('should write the whole settings, naming only a key the owner changed from its default', async () => {
+    const sent: unknown[] = [];
+    const port = {
+      file: () => undefined,
+      fileState: () => ({ state: 'valid', inEffect: true, sentences: [] }),
+      write: async (_def: unknown, _name: unknown, edit: { patch: unknown }) => {
+        sent.push(edit.patch);
+        return written;
+      },
+    } as unknown as ConfigPort;
+
+    await new ConfigWardenConfigStore(port).write(
+      { ...DEFAULT_WARDEN_CONFIG, enabled: false, accounts: [{ agent: 'a' }] },
+      {} as WardenConfigPatch,
+    );
+
+    const patch = sent[0] as Record<string, unknown>;
+    should(patch.enabled).equal(false);
+    should(patch.accounts).eql([{ agent: 'a' }]);
+    should(patch.intervalMinutes).be.undefined();
+  });
+});
+
+describe('warden.yaml as read', () => {
+  const storeHolding = (file: unknown) => new ConfigWardenConfigStore({ file: () => file } as unknown as ConfigPort);
+
+  it('should read the defaults for a missing file, and the file’s keys laid over them', async () => {
+    should(await storeHolding(undefined).read()).eql(DEFAULT_WARDEN_CONFIG);
+    const read = (await storeHolding({ enabled: false }).read()) as { enabled: boolean; intervalMinutes: number };
+    should(read.enabled).equal(false);
+    should(read.intervalMinutes).equal(DEFAULT_WARDEN_CONFIG.intervalMinutes);
   });
 });
