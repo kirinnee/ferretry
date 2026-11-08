@@ -24,11 +24,18 @@
     "packages/cli": {
       "entry": ["bin/*.ts"],
       "project": ["src/**/*.ts", "bin/**/*.ts"],
-      "ignore": ["src/lib/tool-client.ts"]
+      "ignore": ["src/lib/tool-client.ts", "src/lib/update/status.ts"]
     },
     "packages/app": {
       "entry": ["src/main.tsx"],
-      "project": ["src/**/*.{ts,tsx,css}"]
+      "project": ["src/**/*.{ts,tsx,css}"],
+      "ignore": [
+        "src/worker/service-worker.ts",
+        "src/worker/notifications.ts",
+        "src/release/keeper.ts",
+        "src/release/loopback.ts",
+        "src/release/storage.ts"
+      ]
     },
     "packages/core/ferrets": {
       "entry": ["app/views/*.tsx"],
@@ -242,7 +249,8 @@
       "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/shells": {
-      "entry": ["app/views/*.tsx"]
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/layouts": {
       "entry": ["app/views/*.tsx"]
@@ -272,6 +280,40 @@
         "daemon/proxy/firewall/state.ts",
         "daemon/proxy/wire/firewall.ts"
       ]
+    },
+    "packages/plugins/onboarding": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/command-block.tsx",
+        "app/command-syntax.ts",
+        "app/connection-disclosure.ts",
+        "app/copy-button.tsx",
+        "app/device-kind.ts",
+        "app/first-run-entry.ts",
+        "app/landing-geometry.ts",
+        "app/link-costs.ts",
+        "app/onboarding-brand.tsx",
+        "app/onboarding-chooser.tsx",
+        "app/onboarding-connection-note.tsx",
+        "app/onboarding-doer-chooser.tsx",
+        "app/onboarding-model.ts",
+        "app/onboarding-page.tsx",
+        "app/onboarding-progress.ts",
+        "app/onboarding-stages.tsx",
+        "app/onboarding-target-chooser.tsx",
+        "app/onboarding-track.tsx",
+        "app/pending-connections.ts",
+        "app/setup-diagram.tsx",
+        "app/setup-handoff-panel.tsx",
+        "app/setup-handoff.ts",
+        "app/setup-qr.ts"
+      ]
+    },
+    "packages/plugins/codex": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": ["daemon/adapters/app-server-catalog.ts"]
     }
   },
   "bun": false,

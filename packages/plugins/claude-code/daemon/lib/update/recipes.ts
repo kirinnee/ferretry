@@ -22,7 +22,7 @@ import {
   VersionSchema,
 } from '../../../contract/index.ts';
 
-export type UpdateStep = z.infer<typeof UpdateStepSchema>;
+type UpdateStep = z.infer<typeof UpdateStepSchema>;
 export type LatestRelease = z.infer<typeof LatestReleaseSchema>;
 export type UpdateCheck = z.infer<typeof UpdateCheckSchema>;
 export type HarnessInstalledVersion = z.infer<typeof HarnessInstalledVersionSchema>;
@@ -34,10 +34,10 @@ export type HarnessUpdateReport = z.infer<typeof HarnessUpdateReportSchema>;
 export const CLAUDE_CODE_LABEL = 'Claude Code';
 
 /** Where the product's releases are published, for the verification link. */
-export const RELEASE_OWNER = 'kirinnee';
+const RELEASE_OWNER = 'kirinnee';
 
 /** THE one place the harness's package names are spelled: its npm package, its Homebrew cask, and its nixpkgs attribute. */
-export const CLAUDE_CODE_PACKAGES = {
+const CLAUDE_CODE_PACKAGES = {
   npm: '@anthropic-ai/claude-code',
   cask: 'claude-code',
   nixpkgs: 'claude-code',
@@ -58,7 +58,7 @@ export const verificationUrl = (product: string): string =>
 export const npmLatestUrl = (): string => `https://registry.npmjs.org/${CLAUDE_CODE_PACKAGES.npm}/latest`;
 
 /** Where a person reads what changed in a version. */
-export const changelogUrl = (): string => 'https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md';
+const changelogUrl = (): string => 'https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md';
 
 // ─── versions ────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -171,14 +171,14 @@ const userProfileRoots = (home: string): readonly string[] => {
 type NixMethod = Extract<HarnessInstallMethod, { kind: 'nix-profile' | 'nix-shell' | 'nix-module' | 'unknown' }>;
 
 /** Whether a resolved executable lives in the Nix store, which {@link classifyNixStorePath} then decides. */
-export const isNixStoreFile = (resolvedPath: string): boolean => resolvedPath.startsWith(STORE_PREFIX);
+const isNixStoreFile = (resolvedPath: string): boolean => resolvedPath.startsWith(STORE_PREFIX);
 
 /**
  * How an executable in the Nix store was installed — decided by HOW it was reached: launched as the store
  * path itself is an ephemeral `nix shell`; reached through a system profile is a module; reached through the
  * user's profile is that profile's element, or home-manager's generation.
  */
-export function classifyNixStorePath(facts: InstallFacts): NixMethod {
+function classifyNixStorePath(facts: InstallFacts): NixMethod {
   const launched = facts.launchedPath;
   if (isStorePath(launched)) {
     const storePath = launched.slice(0, launched.indexOf('/', STORE_PREFIX.length));
@@ -274,7 +274,7 @@ export function installLabel(method: HarnessInstallMethod): string {
 // ─── what updating takes ─────────────────────────────────────────────────────────────────────────────────────────
 
 /** The programs an update runs. `harness` is `claude` itself (`claude update`). */
-export type UpdateProgram = 'npm' | 'pnpm' | 'bun' | 'volta' | 'brew' | 'nix' | 'harness';
+type UpdateProgram = 'npm' | 'pnpm' | 'bun' | 'volta' | 'brew' | 'nix' | 'harness';
 
 /** One command an update runs: a program and its arguments, never a shell string. */
 export interface UpdateCommand {
@@ -320,7 +320,7 @@ function nodeInstall(method: Extract<HarnessInstallMethod, { kind: 'npm-global' 
  * The manual steps for anything a home-manager, nix-darwin or NixOS module installed: bump the flake input,
  * then the ONE switch command for that flavour ("home-manager inside nix-darwin has no separate switch").
  */
-export function nixModuleUpdate(method: Extract<HarnessInstallMethod, { kind: 'nix-module' }>): {
+function nixModuleUpdate(method: Extract<HarnessInstallMethod, { kind: 'nix-module' }>): {
   readonly explanation: string;
   readonly steps: readonly UpdateStep[];
 } {

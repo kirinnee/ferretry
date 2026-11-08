@@ -230,7 +230,7 @@ export interface ConfigFiles {
 }
 
 /** A write result as the contract says it: never thrown, `conflict` on its own. */
-export function writeOutcome(result: ConfigWriteResult): ConfigWriteOutcome {
+function writeOutcome(result: ConfigWriteResult): ConfigWriteOutcome {
   if (result.kind === 'applied')
     return {
       kind: 'written',

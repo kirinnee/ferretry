@@ -64,7 +64,7 @@ export interface PickerDrivePolicy {
   readonly maxStartupWaitObservations?: number;
 }
 
-export const defaultPickerDrivePolicy: PickerDrivePolicy = { settleMs: 50, maxObservations: 80 };
+const defaultPickerDrivePolicy: PickerDrivePolicy = { settleMs: 50, maxObservations: 80 };
 
 /**
  * How many frames of "Codex is still starting" a drive sits through before it counts them.
@@ -79,7 +79,7 @@ export const defaultPickerDrivePolicy: PickerDrivePolicy = { settleMs: 50, maxOb
  * to outlast that: 400 frames at the default 50 ms settle is at least twenty seconds, and a loaded host
  * only makes each frame slower, never the ceiling shorter.
  */
-export const CODEX_STARTUP_WAIT_OBSERVATIONS = 400;
+const CODEX_STARTUP_WAIT_OBSERVATIONS = 400;
 
 /** Sleeping is a capability, not a decision. */
 export interface PickerSleeper {

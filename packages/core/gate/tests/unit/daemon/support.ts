@@ -177,7 +177,7 @@ export function world(initial: Partial<Pick<World, 'policy'>> = {}): World {
 }
 
 /** The status and code a decision answers with, or `admitted`. */
-export function outcome(decision: ReturnType<GateAdmission['admit']>): string {
+function outcome(decision: ReturnType<GateAdmission['admit']>): string {
   if (decision.outcome === 'admitted') return 'admitted';
   const body = JSON.parse(String(decision.response.body)) as { code?: string };
   return `${decision.response.status} ${body.code ?? ''}`.trim();

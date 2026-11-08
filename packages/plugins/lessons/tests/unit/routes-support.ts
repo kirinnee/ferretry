@@ -9,7 +9,7 @@ import manifest from '../../manifest.ts';
 import { AT, type FakeLessonsStore, type LessonsWorld, LESSONS_CONFIG, lessonsWorld } from './support.ts';
 
 /** The parsed JSON body of a response. */
-export function jsonBody(response: ApiResponse): Record<string, unknown> {
+function jsonBody(response: ApiResponse): Record<string, unknown> {
   return JSON.parse(String(response.body)) as Record<string, unknown>;
 }
 

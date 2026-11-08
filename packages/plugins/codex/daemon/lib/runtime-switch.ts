@@ -22,12 +22,12 @@
  */
 export const ADVANCED_EFFORTS: readonly string[] = ['max', 'ultra'];
 
-export interface CodexReasoningChoice {
+interface CodexReasoningChoice {
   readonly value: string;
 }
 
 /** One model as the live Codex account advertises it. */
-export interface CodexModelChoice {
+interface CodexModelChoice {
   readonly value: string;
   /** The name Codex's own picker renders the model under — its `displayName`, which is not its id. */
   readonly label?: string;

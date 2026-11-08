@@ -4,7 +4,7 @@
  * @ferretry/std would carry a Ferretry noun. Pure and linear.
  */
 /** Longest text, in UTF-16 units, that is read at all; a longer one may hold a secret by definition. */
-export const MAX_SCANNED = 2 * 1024 * 1024;
+const MAX_SCANNED = 2 * 1024 * 1024;
 
 /** A name that announces a secret, wherever it stands in a word (`api_key`, `apikey`, `X-Auth`, `passphrase`). */
 const SECRET_WORDS = [
@@ -121,10 +121,10 @@ function hasCredentialFlag(text: string): boolean {
 }
 
 /** `text` with its invisible format characters (and the `⟨U+00AD⟩` marks the review writes for them) taken out. */
-export const withoutInvisible = (text: string): string => text.replace(INVISIBLE, '');
+const withoutInvisible = (text: string): string => text.replace(INVISIBLE, '');
 
 /** `text` with its line breaks taken out, so a name or a value a line break split reads whole again. */
-export const joinedLines = (text: string): string => text.replace(LINE_BREAKS, '');
+const joinedLines = (text: string): string => text.replace(LINE_BREAKS, '');
 
 /** `text` as the scans read it: invisible characters out, and look-alike forms (full-width letters) folded to plain ones. */
 export const foldedForScan = (text: string): string => withoutInvisible(text).normalize('NFKC');

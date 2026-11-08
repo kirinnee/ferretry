@@ -26,7 +26,8 @@
     },
     "packages/app": {
       "entry": ["src/main.tsx", "src/worker/service-worker.ts", "scripts/**/*.ts", "tests/**/*.test.{ts,tsx}"],
-      "project": ["**/*.{ts,tsx,css}"]
+      "project": ["**/*.{ts,tsx,css}"],
+      "ignore": ["tests/integration/fixtures/chat-tail-scene.tsx", "tests/support/dom-leak-guard.ts"]
     },
     "packages/core/gate": {
       "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
@@ -116,6 +117,23 @@
     "packages/plugins/voice": {
       "entry": ["tests/**/*.test.{ts,tsx}", "tests/realworld/dev/**/*.ts"],
       "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/shells": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/mcp": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/skills": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/onboarding": {
+      "entry": ["tests/**/*.test.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx}"],
+      "ignore": ["app/landing-geometry.ts"]
     }
   },
   "rules": {

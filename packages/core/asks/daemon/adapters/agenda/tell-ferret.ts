@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { type AgendaAdded, type AgendaReplyQueue, isAgendaSessionId, tellReplyKey } from '../../lib/agenda/index.ts';
 
 /** The longest text a tell carries. */
-export const MAX_TELL_CHARS = 4_096;
+const MAX_TELL_CHARS = 4_096;
 /** The longest send id a tell is keyed by. */
 const MAX_TELL_SEND_ID_CHARS = 256;
 

@@ -70,7 +70,7 @@ function HelperRow({ item }: { readonly item: HelperItem }) {
 }
 
 /** The helpers still at work: starting, working, waiting or waiting on you. */
-export const activeHelpers = (rows: readonly PackRow[]): readonly PackRow[] =>
+const activeHelpers = (rows: readonly PackRow[]): readonly PackRow[] =>
   rows.filter(row => helperLive(helperState(row)));
 
 export function HelperList({ items }: { readonly items: readonly HelperItem[] }) {

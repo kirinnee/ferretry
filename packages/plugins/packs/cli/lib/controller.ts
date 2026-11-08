@@ -21,7 +21,7 @@ export interface IPackIo {
 }
 
 /** The exit status of a refused clean-up start: distinct from a failure. */
-export const PACK_REFUSED_EXIT_CODE = 2;
+const PACK_REFUSED_EXIT_CODE = 2;
 
 export interface PackRecommendOptions {
   readonly json?: boolean;

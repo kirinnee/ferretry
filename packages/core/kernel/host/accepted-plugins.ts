@@ -5,7 +5,7 @@
  */
 import type { HostFs } from './adapters/node-fs.ts';
 
-export const PLUGINS_ACCEPTED_FILE = 'state/kernel/plugins-accepted.json';
+const PLUGINS_ACCEPTED_FILE = 'state/kernel/plugins-accepted.json';
 const PLUGINS_YAML = 'config/plugins.yaml';
 
 /** The set as it was last accepted, or `undefined` when there is none or it cannot be read. */

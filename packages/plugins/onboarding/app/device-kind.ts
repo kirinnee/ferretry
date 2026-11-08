@@ -34,6 +34,8 @@ export type DeviceKind = 'mobile' | 'desktop';
  * A record rather than a `Navigator`, because two of the three fields are needed
  * only to catch iPadOS and neither suite nor harness should have to forge a
  * whole navigator to say "this is an iPad".
+ *
+ * @pending onboarding: the app half waits on the shell
  */
 export interface DeviceEvidence {
   readonly userAgent?: string | undefined;
@@ -81,6 +83,8 @@ const isDesktopClassIpad = (agent: string, platform: string, maxTouchPoints: num
  *
  * Total: no input can fail, and the absent-evidence answer is `desktop` for the
  * reason the module comment gives.
+ *
+ * @pending onboarding: the app half waits on the shell
  */
 export const detectDeviceKind = (evidence: DeviceEvidence = {}): DeviceKind => {
   const agent = (evidence.userAgent ?? '').toLowerCase();

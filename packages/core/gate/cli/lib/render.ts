@@ -93,7 +93,7 @@ const eventWords = (event: string): string => (EVENT_WORDS as Readonly<Record<st
 const pad = (value: number): string => String(value).padStart(2, '0');
 
 /** Local wall-clock time, to the second. */
-export function localTime(at: string): string {
+function localTime(at: string): string {
   const date = new Date(at);
   return `${String(date.getFullYear())}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
@@ -116,7 +116,7 @@ function describeDetail(record: AuditRecordView): string {
   return pairs.length === 0 ? '' : `  [${pairs.join(' ')}]`;
 }
 
-export function renderAuditRecord(record: AuditRecordView): string {
+function renderAuditRecord(record: AuditRecordView): string {
   const subject = record.subject === undefined ? '' : ` (${record.subject})`;
   return `${localTime(record.at)}  ${eventWords(record.event)}${subject}  by ${describeActor(record.actor)}  ${record.outcome}${describeDetail(record)}`;
 }
@@ -152,7 +152,7 @@ function withGaps(lines: string[], view: AuditView): string {
 }
 
 /** One setting's value as a person types it back: `on`/`off` for a switch, the number otherwise. */
-export function formatSettingValue(field: SecuritySettingField, settings: SecuritySettings): string {
+function formatSettingValue(field: SecuritySettingField, settings: SecuritySettings): string {
   if (isSecuritySwitch(field)) return settings[field] ? 'on' : 'off';
   return String(settings[field]);
 }
@@ -216,7 +216,7 @@ export interface GrantHistoryReport {
 const AXES = ['use', 'configure'] as const;
 
 /** The one sentence every step-up refusal is explained with, wherever it is shown. */
-export const STEP_UP_NOTE = 'needs a passkey confirmation from a paired device';
+const STEP_UP_NOTE = 'needs a passkey confirmation from a paired device';
 
 /** The grant report, with the ORIGIN column, and who the rows apply to said once at the top (today's `renderGrants`). */
 export function renderGrants(view: GrantsReport, clientName: string): string {

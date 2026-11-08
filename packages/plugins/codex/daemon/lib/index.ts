@@ -18,5 +18,4 @@ export * from './startup.ts';
 export * from './launch.ts';
 export * from './update/index.ts';
 export * from './routes.ts';
-export * from './default-instructions.ts';
 export * from './toml.ts';

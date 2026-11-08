@@ -53,7 +53,8 @@
     ],
     "codex": [
       "GAP(kernel): skill launch parts are not materialized into the Codex home: RootHandle.copyTree (with link) exists, but its source must be one of Codex's own roots and no root Codex may declare reaches a skill part's folder (LaunchPart.path); needs a lead decision on that root",
-      "GAP(kernel): the five `fy harness codex settings` verbs refuse with exit 69, because a CLI half has no config/item service route to call yet"
+      "GAP(kernel): the five `fy harness codex settings` verbs refuse with exit 69, because a CLI half has no config/item service route to call yet",
+      "GAP(runtimes): daemon/adapters/app-server-catalog.ts is ported and tested (the model list read from a Codex account's own app-server) but nothing composes it until the model catalog read is wired to a catalog probe"
     ],
     "logins": [
       "S176 and S177 (the credential worker guarantees) are skipped as unproved, not ported",
@@ -166,7 +167,8 @@
     ],
     "onboarding": [
       "10 parity rows have no test files: tests/unit/parity/app.test.tsx, commands.test.ts and storage.test.ts do not exist, and R-0092 is not proved yet",
-      "the app half waits on the shell: about 12 components and 7 app tests are listed in app/NEEDS-APP-SHELL.txt"
+      "the app half waits on the shell: about 12 components and 7 app tests are listed in app/NEEDS-APP-SHELL.txt",
+      "GAP(shell): app/command-block.tsx, app/command-syntax.ts, app/connection-disclosure.ts, app/copy-button.tsx, app/device-kind.ts, app/first-run-entry.ts, app/landing-geometry.ts, app/link-costs.ts, app/onboarding-brand.tsx, app/onboarding-chooser.tsx, app/onboarding-connection-note.tsx, app/onboarding-doer-chooser.tsx, app/onboarding-model.ts, app/onboarding-page.tsx, app/onboarding-progress.ts, app/onboarding-stages.tsx, app/onboarding-target-chooser.tsx, app/onboarding-track.tsx, app/pending-connections.ts, app/setup-diagram.tsx, app/setup-handoff-panel.tsx, app/setup-handoff.ts, app/setup-qr.ts are ported and tested but nothing mounts them until the app shell builds the onboarding page (listed in app/NEEDS-APP-SHELL.txt)"
     ],
     "layouts": [
       "the default layout (and compact) names views no installed manifest declares: nav item `ferrets` and `side.holds: ferret` (Ferrets declares no `ferrets` or `ferret` screen) and the ferret.side panels `sitrep` and `usage` (Conversation's is `queue`, Usage's is `insights`), so the shell refuses the layout as served and draws the built-in default, and the Layout tab says so under In use",

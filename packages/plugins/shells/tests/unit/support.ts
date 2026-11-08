@@ -26,11 +26,7 @@ export const REV_B = 'b'.repeat(40);
  * held for the owner with these sentences (written, not in effect, nothing stored here). `forced`: every write and
  * remove answers with exactly this outcome and stores nothing. Neither: a write is stored and answers `written`.
  */
-export function configTree(
-  initial: Record<string, unknown> = {},
-  hold?: readonly string[],
-  forced?: ConfigWriteOutcome,
-) {
+function configTree(initial: Record<string, unknown> = {}, hold?: readonly string[], forced?: ConfigWriteOutcome) {
   const documents = new Map<string, unknown>(Object.entries(initial));
   const calls: { op: 'write' | 'remove'; where: string; text?: string }[] = [];
   const keyOf = (def: Def, name: string | undefined): string =>
@@ -68,7 +64,7 @@ export function configTree(
   return { port, documents, calls };
 }
 
-export function memoryState() {
+function memoryState() {
   const files = new Map<string, unknown>();
   const at = (def: { path: string }, name?: string): string => def.path.replace('*', name ?? '');
   const port = {
@@ -98,7 +94,7 @@ export interface FakeNix extends NixTool {
   asked: string[];
 }
 
-export function fakeNix(): FakeNix {
+function fakeNix(): FakeNix {
   const fake: FakeNix = {
     facts_: { present: true, version: '2.24.1', path: 'nix' },
     metadata: new Map(),

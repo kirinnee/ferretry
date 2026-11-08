@@ -13,7 +13,7 @@ import { projectPackCalls } from './pack-calls.ts';
 import type { ToolCall, TranscriptEntry } from './shell-ports.ts';
 
 /** The name of the CLI a ferret runs the Pack commands with. */
-export const CLIENT_NAME = 'fy';
+const CLIENT_NAME = 'fy';
 
 const toolCallOf = (call: ConversationRowToolCall): ToolCall => ({
   key: call.key,
