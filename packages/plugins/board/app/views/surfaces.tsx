@@ -16,7 +16,7 @@ import type {
 } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { CARD_ID_PATTERN, type CardAskRef, formatCardRef, writtenProgressParts } from '../../contract/index.ts';
-import { useBoardCard } from '../hooks/use-board.ts';
+import { useBoardCard, useCardReferenceProof } from '../hooks/use-board.ts';
 import { useChatCard } from '../hooks/use-chat-card.ts';
 import { readChatTasksUrl } from '../lib/board-chat-url.ts';
 import { ferretNamer } from '../lib/board-present.ts';
@@ -250,10 +250,13 @@ const cardReferenceRenderer = (runtime: BoardRuntime): AppComponent<RendererProp
       .toUpperCase();
     const known = CARD_ID_PATTERN.test(written);
     const state = useBoardCard(runtime.store, THIS_MACHINE, known ? written : 'F1', { beat: false });
+    const read = useMemo(() => (state.task === null ? [] : [state.task]), [state.task]);
+    const proves = useCardReferenceProof(runtime.store, THIS_MACHINE, read);
     if (!known) return <>{`&${written}`}</>;
-    if (state.task === null) return <>{formatCardRef({ id: written })}</>;
+    // Syntax is not proof: it links only when the card is one of this machine's, and reads as plain text otherwise.
+    if (!proves(written)) return <>{formatCardRef({ id: written })}</>;
     return (
-      <RouteLink title={state.task.title} to={cardPagePath(written)}>
+      <RouteLink title={state.task?.title} to={cardPagePath(written)}>
         {formatCardRef({ id: written })}
       </RouteLink>
     );

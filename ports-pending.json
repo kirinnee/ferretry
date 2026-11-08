@@ -238,11 +238,9 @@
       "GAP(access): daemon/adapters/push/index.ts is not reached by the daemon composition (daemon/index.ts imports the adapter files directly, only tests import this index) (owner: nelly)"
     ],
     "board": [
-      "GAP(board): app/lib/board-done.ts is not reached by the agenda answer handlers (no Board panel calls them) (owner: board port)",
-      "GAP(board): app/lib/board-move.ts is not reached by the agenda answer handlers (no Board panel calls them) (owner: board port)",
-      "GAP(board): app/lib/card-reference-context.ts is not reached by the card reference proof (no Board view mounts it) (owner: board port)",
-      "GAP(board): app/lib/lane-proposal-link.ts is not reached by the lane-proposal ask (no view opens the lane editor from it) (owner: board port)",
-      "GAP(board): cli/lib/lane-guide.ts is not reached by `task move --help` (no CLI verb prints it) (owner: board port)",
+      "GAP(board): app/lib/board-done.ts (the Done / Reopen lane choice) is called only by Agenda (agenda-done-close.ts, the cards-to-try inbox), which has no edge to Board and keeps its own closePlan copy; it stays unreached in Board until Agenda is given a need on Board or Board contributes the DoneCloseBoard (owner: board port)",
+      "GAP(board): app/lib/board-move.ts (the forward / backward move plan) is called only by the send-back flow of Agenda's cards-to-try inbox, which has no edge to Board; Board's own cards are read-only (#1552), so no Board view moves a card (owner: board port)",
+      "GAP(board): app/lib/lane-proposal-link.ts (the Edit choice of a lane-proposal ask opens the lane editor) is called only from Agenda's ask surfaces, which keep their own copy in agenda/app/lib/lane-edit.ts; Agenda has no edge to Board and no parity row ticks that copy, so it is neither wired nor deleted (owner: board port)",
       "GAP(board): linkNudgePullRequests in app/lib/board-nudge.ts is imported by the unmerged branch rebuild/port-ferrets-b (core/ferrets/app/components/agent-message-rows.tsx), so it stays until that branch lands (owner: nelly)"
     ],
     "voice": [

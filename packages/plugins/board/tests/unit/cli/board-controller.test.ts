@@ -807,6 +807,30 @@ describe('the action verbs', () => {
     should(gateway.actCalls).eql([]);
   });
 
+  it('should teach which lane a card belongs in when the move names a lane the board does not have', async () => {
+    // Arrange
+    const { controller, gateway } = harness();
+
+    // Act
+    const message = await refusal(() => controller.move('F1', 'nowhere', {}));
+
+    // Assert
+    should(message).containEql('Pick the lane by what the work is, not by its name; `fy board lanes show` lists');
+    should(message).containEql('Blocked is not a lane: `fy card block` or `fy card depend`.');
+    should(gateway.actCalls).eql([]);
+  });
+
+  it('should teach the same lane guide when the move names no lane at all', async () => {
+    // Arrange
+    const { controller } = harness();
+
+    // Act
+    const message = await refusal(() => controller.move('F1', '', {}));
+
+    // Assert
+    should(message).containEql('Pick the lane by what the work is');
+  });
+
   it('should send a move on as typed when the project has no lane set', async () => {
     // Arrange
     const { controller, gateway } = harness();
