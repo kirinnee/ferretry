@@ -11,12 +11,7 @@ import {
   type PinnedWorkingDirectory,
   queryValue,
 } from '@ferretry/kernel/contract';
-import {
-  type DaemonContext,
-  type DaemonHalf,
-  type DaemonImplementation,
-  implementDaemon,
-} from '@ferretry/kernel/manifest';
+import { type DaemonContext, type DaemonHalf, implementDaemon } from '@ferretry/kernel/manifest';
 import { err, milliseconds, ok } from '@ferretry/std';
 import {
   type FerretId,
@@ -52,12 +47,7 @@ import { SubtreeService } from './lib/session/pack/subtree.ts';
 import manifest from '../manifest.ts';
 import { ConditionalFleetList } from './lib/fleet-list/conditional.ts';
 import { FerretsService, RENAME_HTTP } from './lib/ferrets/service.ts';
-import {
-  type HelperAdmission,
-  needsHelperAdmission,
-  askHelperAdmission,
-  unboundHelperAdmission,
-} from './lib/ferrets/helper-admission.ts';
+import { helperDecision, noHelperAdmission } from './lib/ferrets/helper-admission.ts';
 import { parseRenameBody, parseResumeBody, parseStartBody, parseStopBody } from './lib/ferrets/wire.ts';
 import { createSessionEvent, encodeSessionEvent, parseSessionEvent } from './lib/storage/journal.ts';
 import { type SessionId, tryParseSessionId } from './lib/session-id.ts';
@@ -147,10 +137,7 @@ function resumeActorOf(call: CallContext): ResumeActor {
 /** A random ferret id: base-36 time + 8 hex characters (today's `TimeSessionIdFactory`). */
 const mintId = (nowMs: number): FerretId => `${nowMs.toString(36)}-${randomBytes(4).toString('hex')}` as FerretId;
 
-function build(
-  ctx: DaemonContext<typeof manifest>,
-  helperAdmission: HelperAdmission | undefined,
-): DaemonHalf<typeof manifest> {
+function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest> {
   const { kernel, hooks, needs } = ctx;
   const log = kernel.log.child('ferrets');
   let generation = 0;
@@ -349,19 +336,14 @@ function build(
       return found === 'unavailable' ? undefined : found;
     },
     decide: async input => {
-      // Today's pack.admit is mandatory for an ordinary child, a start or a resume alike. The optional start.decide
-      // hook returns allow with no takers and cannot prove Packs admitted it, so a child is asked of the definite
-      // admission first (unbound: 503 `helper_admission_unavailable`, nothing launched), then of start.decide. A bound
-      // one is asked as the kernel asks a start.decide taker: within StartDecide's own bound, allow === true only.
-      if (needsHelperAdmission(input)) {
-        if (helperAdmission === undefined) throw unboundHelperAdmission();
-        const admitted = await askHelperAdmission(helperAdmission, input, {
-          timeoutMs: StartDecide.timeoutMs,
-          after: (ms, fn) => kernel.clock.after(milliseconds(ms), fn),
-        });
-        if (!admitted.allow) return admitted;
-      }
-      return await hooks.decide(StartDecide, input);
+      // RULING #43: today's pack.admit was mandatory for a child start, and Packs owns that answer on start.decide. A
+      // child start or resume is admitted only when Packs ITSELF answered (its yes, or its no with its reason); no
+      // answer from Packs (absent, failed, a hang, a throw, garbage) is 503 `helper_admission_unavailable`, before
+      // anything is written or launched. The kernel bounds and normalizes every taker, Packs included. `by: 'resume'`
+      // is set here by Ferrets' own resume, never by a caller (a start's `by` cannot name it).
+      const decision = helperDecision(input, await hooks.decideAnswered(StartDecide, input));
+      if (decision === 'unanswered') throw noHelperAdmission();
+      return decision;
     },
     launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),
     sitrepSources: () => hooks.contributions(SitrepLines).map(contribution => contribution.item),
@@ -968,16 +950,5 @@ function build(
   };
 }
 
-/** What Ferrets' daemon half is built with, beyond its context. */
-export interface FerretsDaemonOptions {
-  /** The definite helper admission; absent, every helper start answers `unboundHelperAdmission` (fail closed). */
-  readonly helperAdmission?: HelperAdmission;
-}
-
-/** Ferrets' daemon half (§2.2), built with the seams it is given. */
-export function ferretsDaemon(options: FerretsDaemonOptions = {}): DaemonImplementation<typeof manifest> {
-  return implementDaemon(manifest, { build: ctx => build(ctx, options.helperAdmission) });
-}
-
-/** Ferrets' daemon half (§2.2) as every daemon builds it: helper admission unbound (GAP(provenance)). */
-export default ferretsDaemon();
+/** Ferrets' daemon half (§2.2). */
+export default implementDaemon(manifest, { build });

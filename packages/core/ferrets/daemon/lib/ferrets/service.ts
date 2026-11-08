@@ -251,6 +251,17 @@ function tellDecided(options: ServiceResumeOptions | undefined, disposition: 'ru
   }
 }
 
+/**
+ * Who may ask for a START (`StartRequest.by`), as a closed table checked at run time. A resume is not here: it goes
+ * through `resume()`, which asks `start.decide` itself with `by: 'resume'`.
+ */
+const START_ASKERS = { owner: true, ferret: true, pack: true, board: true } as const satisfies Record<
+  StartRequest['by'],
+  true
+>;
+const START_ASKER_REFUSAL =
+  'a start is asked for by the owner, a ferret, a pack or the board; a resume is asked for through resume';
+
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
   err({ code, reason } as StartFailure);
 
@@ -448,6 +459,9 @@ export class FerretsService implements FerretsApi {
   }
 
   async start(request: StartRequest): Promise<Result<FerretId, StartFailure>> {
+    // `by` is closed by the port's type only, and a plugin's cast is not checked by it. A start that reached
+    // `start.decide` as `by: 'resume'` would be answered without Packs' limits, so any other `by` is refused here.
+    if (!Object.hasOwn(START_ASKERS, request.by)) return failed('refused', START_ASKER_REFUSAL);
     if (!FerretRecordSchema.shape.harnessConversation.safeParse(request.harnessConversation).success)
       return failed('refused', 'the harness conversation id must contain between 1 and 256 characters');
     if (request.parent !== undefined && this.registry.get(request.parent) === undefined)

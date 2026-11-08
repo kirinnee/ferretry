@@ -5,7 +5,9 @@ import {
   applyTextOp,
   SHARED_DRAFT_HISTORY_LIMIT,
   SHARED_DRAFT_ITEMS_BUDGET,
+  SHARED_DRAFT_MAX_CHARS,
   SHARED_DRAFT_MAX_ITEM_DRAFTS,
+  SHARED_DRAFT_MAX_ITEMS,
   type SharedDraftItem,
   type SharedDraftSnapshot,
   sharedDraftFrameBytes,
@@ -623,6 +625,22 @@ describe('SharedDraftService', () => {
     await should(
       service.edit('s1', { generation: G, epoch: 0, base: 4, text: [1, '?'] }, undefined, { author: 'device:phone' }),
     ).be.rejectedWith({ code: 'rate-limited' });
+  });
+
+  it('refuses a draft that would hold more files and places than it may', async () => {
+    const { service } = subject();
+    const tooMany = Array.from({ length: SHARED_DRAFT_MAX_ITEMS + 1 }, (_, index) => photo(`a${index}`));
+    await should(service.edit('s1', { generation: G, epoch: 0, base: 0, add: tooMany })).be.rejectedWith({
+      name: 'SharedDraftError',
+      code: 'too-many-items',
+    });
+  });
+
+  it('refuses an edit that would make the draft longer than it may be, before building it', async () => {
+    const { service } = subject();
+    await should(
+      service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['x'.repeat(SHARED_DRAFT_MAX_CHARS + 1)] }),
+    ).be.rejectedWith({ name: 'SharedDraftError', code: 'too-long' });
   });
 
   it('L2: refuses files and places whose names together would not fit one frame', async () => {

@@ -6,10 +6,17 @@ import type { ApiRequest, CallStanding } from '@ferretry/kernel/contract';
 import { definePlugin } from '@ferretry/kernel/manifest';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
-import { FerretFiles, type FerretId, type FerretRecord, Harnesses, Runners } from '../../../../contract/index.ts';
+import {
+  FerretFiles,
+  type FerretId,
+  type FerretRecord,
+  Harnesses,
+  Runners,
+  StartDecide,
+  type StartDecideInput,
+} from '../../../../contract/index.ts';
 import { type FakeHarness, type FakeRunner, ferretId, T0 } from '../../../../contract/testing/index.ts';
-import ferrets, { ferretsDaemon } from '../../../../daemon/index.ts';
-import type { HelperAdmission } from '../../../../daemon/lib/ferrets/helper-admission.ts';
+import ferrets from '../../../../daemon/index.ts';
 
 /** Who calls: the `x-test-caller` header names a ferret (`ferret:<id>`), else the owner at the machine. */
 const callerHeader = 'x-test-caller';
@@ -61,6 +68,37 @@ const runnerPlugin = (runner: FakeRunner) =>
     { build: () => ({ hooks: { 'runners:tmux': runner } }) },
   );
 
+/**
+ * A stand-in for Packs: a plugin with Packs' real id that takes `start.decide` and answers `answer` (anything, garbage
+ * included), recording what it was asked. Its own yes on `start.decide` is what admits a child (RULING #43).
+ */
+export const fakePacks = (answer: (input: StartDecideInput) => unknown = () => ({ allow: true })) => {
+  const asked: StartDecideInput[] = [];
+  const plugin = implementDaemon(
+    definePlugin({
+      // Packs' manifest id, written out rather than read from the constant under test: a wrong answerer id goes red.
+      id: 'packs',
+      title: 'Packs (fake)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: StartDecide }] },
+    }),
+    {
+      build: () => ({
+        hooks: {
+          'start.decide': async (input: StartDecideInput) => {
+            asked.push(input);
+            return (await answer(input)) as never;
+          },
+        },
+      }),
+    },
+  );
+  return { asked, plugin };
+};
+
 export async function host(
   records: readonly FerretRecord[] = [],
   extra: {
@@ -72,14 +110,12 @@ export async function host(
     readonly pinner?: Parameters<typeof testHost>[0]['pinner'];
     /** Answers the Git the file browser runs. */
     readonly spawn?: Parameters<typeof testHost>[0]['spawn'];
-    /** The definite helper admission Ferrets is built with; absent, the unbound one (503). */
-    readonly helperAdmission?: HelperAdmission;
     /** More plugins on the host (a fake taker of a Ferrets hook). */
     readonly plugins?: Parameters<typeof testHost>[0]['plugins'];
   } = {},
 ): Promise<TestHost> {
   const plugins = [
-    extra.helperAdmission === undefined ? ferrets : ferretsDaemon({ helperAdmission: extra.helperAdmission }),
+    ferrets,
     ...(extra.harness === undefined ? [] : [harnessPlugin(extra.harness)]),
     ...(extra.runner === undefined ? [] : [runnerPlugin(extra.runner)]),
     ...(extra.plugins ?? []),

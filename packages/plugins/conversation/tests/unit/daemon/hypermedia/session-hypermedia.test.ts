@@ -2,6 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import { HypermediaResultSchema } from '../../../../contract/index.ts';
 import daemon from '../../../../daemon/index.ts';
+import { SessionHypermediaError } from '../../../../daemon/hypermedia/lib/service.ts';
+import { sessionHypermediaRoutes } from '../../../../daemon/hypermedia/lib/mounts/session-hypermedia.ts';
+import { refusalOf } from '../../../support/mount-call.ts';
 
 /** The switch a ferret's hypermedia is changed through: the real route, descriptor and state, over fake Ferrets. */
 
@@ -92,5 +95,35 @@ describe('PATCH /v1/ferrets/:ferretId/hypermedia', () => {
     expect(await launched(AUTO)).toEqual([{ kind: 'env', env: { FY_HYPERMEDIA: '1' } }]);
     expect(await launched(RUNNING)).toEqual([{ kind: 'env', env: { FY_HYPERMEDIA: '0' } }]);
     expect(await launched(STOPPED)).toEqual([{ kind: 'env', env: {} }]);
+  });
+});
+
+describe('the hypermedia mount', () => {
+  const PATH = '/v1/ferrets/:ferretId/hypermedia';
+
+  test('passes an unusable ferret id back as a 400 before it reads the body', async () => {
+    const routes = sessionHypermediaRoutes({ set: async () => ({ restartRequired: false, note: 'n' }) });
+    const refusal = await refusalOf(routes, 'PATCH', PATH, { params: { ferretId: '' }, body: { enabled: true } });
+    expect(refusal.status).toBe(400);
+    expect(refusal.code).toBe('invalid_session_id');
+  });
+
+  test('answers 404 for a ferret the service does not know, and lets any other failure through', async () => {
+    const unknown = sessionHypermediaRoutes({
+      set: async () => {
+        throw new SessionHypermediaError('not-found', 'no such ferret');
+      },
+    });
+    const missing = await refusalOf(unknown, 'PATCH', PATH, { params: { ferretId: 'f1' }, body: { enabled: true } });
+    expect(missing.status).toBe(404);
+    expect(missing.code).toBe('not-found');
+
+    const broken = sessionHypermediaRoutes({
+      set: async () => {
+        throw new TypeError('boom');
+      },
+    });
+    const error = await refusalOf(broken, 'PATCH', PATH, { params: { ferretId: 'f1' }, body: { enabled: true } });
+    expect(error.message).toBe('boom');
   });
 });

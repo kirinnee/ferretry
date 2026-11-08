@@ -11,7 +11,9 @@ const result = (overrides: Partial<SendResult> = {}): SendResult =>
 const record = (fate: SendRecord['fate']): SendRecord =>
   ({ sendId: 's1', fate, acceptedAt: at('2026-11-06T09:00:00.000Z') }) as SendRecord;
 
-function parts(options: { statuses?: (SendRecord | undefined)[]; result?: SendResult; parkFails?: boolean } = {}) {
+function parts(
+  options: { statuses?: (SendRecord | undefined)[]; result?: SendResult; parkFails?: boolean; after?: SendRecord } = {},
+) {
   const sent: SendRequest[] = [];
   const parked: unknown[] = [];
   const lines: string[] = [];
@@ -22,7 +24,7 @@ function parts(options: { statuses?: (SendRecord | undefined)[]; result?: SendRe
       sent.push(request);
       return options.result ?? result();
     },
-    sendStatus: async () => statuses.shift(),
+    sendStatus: async () => (statuses.length > 0 ? statuses.shift() : options.after),
     upload: async () => ({ id: 'a1' }),
     parkUntilReply: async (caller, details) => {
       if (options.parkFails) throw new Error('daemon said no');
@@ -85,5 +87,25 @@ describe('SendMessageController', () => {
     const unconfirmed = parts({ statuses: [record('unaccounted')] });
     await unconfirmed.controller().execute('hadi', { message: 'hi', wait: true });
     should(unconfirmed.lines.some(line => line.includes('unconfirmed'))).be.true();
+  });
+
+  it('should say a send with no id cannot be waited on', async () => {
+    const { lines, controller } = parts({ result: result({ sendId: undefined }) });
+    await controller().execute('hadi', { message: 'hi', wait: true });
+    should(lines.some(line => line.includes('this send has no id, so it cannot be waited on'))).be.true();
+  });
+
+  it('should stop waiting on a message still in the queue, say it is safe, and not fail', async () => {
+    const { lines, controller } = parts();
+    await controller().execute('hadi', { message: 'hi', wait: true });
+    should(
+      lines.some(line => line.includes('still not typed into the agent after 5m') && line.includes('do not resend')),
+    ).be.true();
+  });
+
+  it('should stop waiting on a message that never settles, and say where it stands', async () => {
+    const { lines, controller } = parts({ after: record('queued') });
+    await controller().execute('hadi', { message: 'hi', wait: true });
+    should(lines.some(line => line.startsWith('note: still queued') && line.includes('after 5m of waiting'))).be.true();
   });
 });

@@ -946,3 +946,41 @@ describe('the whole stored conversation', () => {
     should(got.entries).deepEqual([]);
   });
 });
+
+describe('an ask of one ferret changed', () => {
+  it('re-reads the machine ledger when the machine agenda changed, even before it was ever read', async () => {
+    const urls: string[] = [];
+    const client = new FetchAgendaClient(undefined, async input => {
+      urls.push(String(input));
+      return response(snapshot('machine-agenda'));
+    });
+    client.noteEvent(daemonA, { ferret: 'machine-agenda' });
+    await tick();
+    should(urls).deepEqual(['https://daemon.test/v1/machine/agenda']);
+  });
+
+  it('swallows a failed re-read of the machine ledger', async () => {
+    const client = new FetchAgendaClient(undefined, async () => {
+      throw new Error('offline');
+    });
+    client.noteEvent(daemonA, { ferret: 'machine-agenda' });
+    await tick();
+  });
+
+  it('revalidates a board that is already drawn, and leaves a board nobody has read alone', async () => {
+    let calls = 0;
+    const client = new FetchAgendaClient(undefined, async () => {
+      calls += 1;
+      return response(snapshot('same/session'));
+    });
+    client.noteEvent(daemonA, { ferret: 'same/session' });
+    await tick();
+    should(calls).equal(0);
+
+    await client.hydrate(daemonA, scopeA);
+    should(calls).equal(1);
+    client.noteEvent(daemonA, { ferret: 'same/session' });
+    await tick();
+    should(calls).equal(2);
+  });
+});

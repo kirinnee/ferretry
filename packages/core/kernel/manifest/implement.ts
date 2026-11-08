@@ -3,6 +3,7 @@ import type {
   ApiOf,
   ContributeHook,
   Contribution,
+  DecideAnswer,
   DecideHook,
   EventDef,
   HookDecision,
@@ -122,6 +123,12 @@ type Section<Name extends string, T> = [keyof T] extends [never]
 export interface HookInvoker {
   observe<P>(hook: ObserveHook<string, P>, payload: P): void;
   decide<I>(hook: DecideHook<string, I>, input: I): Promise<HookDecision>;
+  /**
+   * `decide`, by the same rule and with the same decision, plus how each live taker answered on the way (ADDITIVE). It
+   * is how an offerer learns that a NAMED taker said yes, rather than that nobody said no: Ferrets' helper admission
+   * is Packs' own `allowed` on `start.decide`, and no answer from Packs refuses the child.
+   */
+  decideAnswered<I>(hook: DecideHook<string, I>, input: I): Promise<DecideAnswer>;
   transform<V>(hook: TransformHook<string, V>, value: V): Promise<Result<V, string>>;
   provider<K extends string, V>(hook: ProvideHook<string, K, V>, key: K): V | 'unavailable';
   /** The declaring plugin id, even when off, failed or skeleton; undefined when nobody declares that key. */

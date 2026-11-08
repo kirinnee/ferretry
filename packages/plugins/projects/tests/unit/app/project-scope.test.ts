@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   applyScopeFromLocation,
+  browserScopeNavigation,
   enterProjectScope,
   exitProjectScope,
   parseRouteScope,
@@ -326,5 +327,95 @@ describe('recoverScopeAddress', () => {
 
     expect(recoverScopeAddress(routes, laptop, navigation)).toBe(false);
     expect(navigation.entries).toEqual([]);
+  });
+});
+
+describe('browserScopeNavigation', () => {
+  /** A window that writes down what the machine does to it; the app shell's own DOM is not this package's. */
+  const installWindow = () => {
+    const log: string[] = [];
+    const listeners = new Set<() => void>();
+    const fakeWindow = {
+      location: { pathname: '/d/daemon%2Flaptop/ferrets', search: '?project=%2Frepo' },
+      history: {
+        state: { projectScope: '/repo', projectScopeDaemonId: laptop },
+        pushState: (state: unknown, title: string, url: string) =>
+          log.push(`push ${JSON.stringify(state)} ${title} ${url}`),
+        replaceState: (state: unknown, title: string, url: string) =>
+          log.push(`replace ${JSON.stringify(state)} ${title} ${url}`),
+      },
+      dispatchEvent: (event: unknown) => {
+        log.push(`dispatch ${(event as { type: string }).type}`);
+        for (const listener of listeners) listener();
+        return true;
+      },
+      addEventListener: (type: string, listener: () => void) => {
+        log.push(`listen ${type}`);
+        listeners.add(listener);
+      },
+      removeEventListener: (type: string, listener: () => void) => {
+        log.push(`unlisten ${type}`);
+        listeners.delete(listener);
+      },
+    };
+    class FakePopStateEvent {
+      constructor(readonly type: string) {}
+    }
+    const host = globalThis as unknown as Record<string, unknown>;
+    const had = { window: 'window' in host, PopStateEvent: 'PopStateEvent' in host };
+    const saved = { window: host.window, PopStateEvent: host.PopStateEvent };
+    host.window = fakeWindow;
+    host.PopStateEvent = FakePopStateEvent;
+    const restore = () => {
+      for (const name of ['window', 'PopStateEvent'] as const) {
+        if (had[name]) host[name] = saved[name];
+        else delete host[name];
+      }
+    };
+    return { log, restore };
+  };
+
+  test('is one instance for the life of the page, so an effect keyed on it is not rebuilt', () => {
+    expect(browserScopeNavigation()).toBe(browserScopeNavigation());
+  });
+
+  test('reads the window’s own history state and writes through its history, then announces', () => {
+    const { log, restore } = installWindow();
+    try {
+      const navigation = browserScopeNavigation();
+      expect(navigation.snapshot()).toEqual({
+        pathname: '/d/daemon%2Flaptop/ferrets',
+        search: '?project=%2Frepo',
+        state: { projectScope: '/repo', projectScopeDaemonId: laptop },
+      });
+      navigation.push(projectScopeState(laptop, null), '/d/daemon%2Flaptop/ferrets');
+      navigation.replace(projectScopeState(laptop, '/repo'), '/d/daemon%2Flaptop/ferrets?project=%2Frepo');
+      navigation.announce();
+      expect(log).toEqual([
+        'push {"projectScope":null,"projectScopeDaemonId":"daemon/laptop"}  /d/daemon%2Flaptop/ferrets',
+        'replace {"projectScope":"/repo","projectScopeDaemonId":"daemon/laptop"}  /d/daemon%2Flaptop/ferrets?project=%2Frepo',
+        'dispatch popstate',
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  test('a listener hears the announcement until it is removed', () => {
+    const { log, restore } = installWindow();
+    try {
+      const navigation = browserScopeNavigation();
+      let heard = 0;
+      const stop = navigation.listen(() => {
+        heard += 1;
+      });
+      navigation.announce();
+      stop();
+      navigation.announce();
+      expect(heard).toBe(1);
+      expect(log).toEqual(['listen popstate', 'dispatch popstate', 'unlisten popstate', 'dispatch popstate']);
+    } finally {
+      restore();
+    }
   });
 });

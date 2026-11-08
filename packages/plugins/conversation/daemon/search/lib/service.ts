@@ -161,11 +161,7 @@ export class WorkSearchService {
 
   /** A piece of work as its source last handed it over. */
   private rawOf(key: string): RawWork | undefined {
-    for (const pieces of this.seen.values()) {
-      const raw = pieces.get(key);
-      if (raw !== undefined) return raw;
-    }
-    return undefined;
+    return [...this.seen.values()].map(pieces => pieces.get(key)).find(raw => raw !== undefined);
   }
 
   /** A source changed: it is re-read before the next answer. */
