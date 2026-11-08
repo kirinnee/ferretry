@@ -129,16 +129,26 @@ export function findRawSecrets(document: unknown): readonly SecretFinding[] {
 /** A line's `key: value`, the key and the value without quotes or a list dash: enough to ask {@link looksLikeRawSecret}. */
 const KEY_VALUE_LINE = /^\s*(?:-\s+)?["']?([^:"'#]+?)["']?\s*:\s*["']?(.+?)["']?\s*$/u;
 
+/** What a secret found only in the raw text is, in one sentence that never includes it: a comment or a tag counts. */
+export const RAW_TEXT_SECRET_MESSAGE =
+  'this line looks like it holds a raw secret (an API key or token) — a comment or a tag counts';
+
 /**
- * Whether the RAW TEXT of a file holds anything shaped like a secret, for a file that does not parse (so
- * {@link findRawSecrets} has no document to walk). Line by line: a known key shape anywhere on the line, or a
- * high-entropy value under a key that names a credential. It never says WHERE or WHAT: a caller that gets `true`
- * withholds the text.
+ * The first line (1-based) of the RAW TEXT of a file that holds anything shaped like a secret, or `undefined`. It
+ * scans what {@link findRawSecrets} cannot: a file that does not parse, and a comment or a tag of one that does (the
+ * parsed walk sees values only). Line by line: a known key shape anywhere on the line, or a high-entropy value under a
+ * key that names a credential. It answers a line number and nothing else: never WHAT is there.
  */
-export function rawTextHoldsSecret(text: string): boolean {
-  return text.split(/\r?\n/u).some(line => {
+export function rawTextSecretLine(text: string): number | undefined {
+  const index = text.split(/\r?\n/u).findIndex(line => {
     if (looksLikeRawSecret(undefined, line)) return true;
     const pair = KEY_VALUE_LINE.exec(line);
     return pair?.[1] !== undefined && pair[2] !== undefined && looksLikeRawSecret(pair[1], pair[2]);
   });
+  return index < 0 ? undefined : index + 1;
+}
+
+/** Whether {@link rawTextSecretLine} finds a line: a caller that gets `true` withholds the text. */
+export function rawTextHoldsSecret(text: string): boolean {
+  return rawTextSecretLine(text) !== undefined;
 }

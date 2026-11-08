@@ -8,7 +8,14 @@
  */
 import type { z } from 'zod';
 import type { AnyConfigDef as ConfigDef } from './claims.ts';
-import { findRawSecrets, RAW_SECRET_KEY_MESSAGE, RAW_SECRET_MESSAGE, rawSecretFix } from './secrets.ts';
+import {
+  findRawSecrets,
+  RAW_SECRET_KEY_MESSAGE,
+  RAW_SECRET_MESSAGE,
+  RAW_TEXT_SECRET_MESSAGE,
+  rawSecretFix,
+  rawTextSecretLine,
+} from './secrets.ts';
 import { readConfigText, type TextPosition } from './yaml-text.ts';
 
 /** A located finding. */
@@ -120,6 +127,17 @@ export function checkConfigText(
             : `${describePath(finding.path) || 'the top of the file'}: ${RAW_SECRET_KEY_MESSAGE}`,
         fix: rawSecretFix(binary),
       })),
+    };
+  }
+  // The walk above sees parsed VALUES only, so a key left in a comment or a tag is found on the raw text: refused the same.
+  const line = rawTextSecretLine(text);
+  if (line !== undefined) {
+    return {
+      ok: false,
+      reason: 'raw_secret',
+      issues: [
+        { path, line, column: 1, severity: 'error', message: RAW_TEXT_SECRET_MESSAGE, fix: rawSecretFix(binary) },
+      ],
     };
   }
   const parsed = def.schema.safeParse(read.read.value);

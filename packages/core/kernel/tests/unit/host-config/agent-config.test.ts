@@ -652,6 +652,58 @@ describe('a file that does not parse is scanned on its raw text (M1)', () => {
   });
 });
 
+describe('a key in a comment or a tag is a raw secret too (R4 m1; tightened by design)', () => {
+  const COMMENTED = `limit: 5\n# the old key ${FAKE_SECRET}\n`;
+  const TAGGED = `limit: 5\nnote: !${FAKE_SECRET} x\n`;
+
+  for (const [label, text] of [
+    ['a comment', COMMENTED],
+    ['a tag', TAGGED],
+  ] as const) {
+    test(`T-0032 a hand-written file with a key in ${label} is refused, its text never returned, the last good in effect`, async () => {
+      const { agent, fs, files } = world();
+      fs.seed(UPDATES, 'limit: 7\n');
+      await files.reload();
+      fs.seed(UPDATES, text);
+      await files.reload();
+      const answer = await agent.run(call({ tool: 'config.read', path: 'voice.yaml' }), ferretStanding);
+      expect(answer.text).toBe('');
+      expect(answer.summary).toContain('its text is not shown because it holds a raw secret');
+      expect(answer.issues?.[0]?.line).toBe(2);
+      expect(JSON.stringify(answer)).not.toContain(FAKE_SECRET);
+      expect(files.status().files.find(file => file.path === 'voice.yaml')?.state).toBe('invalid');
+      expect(files.port('voice').file(voiceDef)?.limit).toBe(7);
+      const listing = await agent.run(call({ tool: 'config.read' }), ferretStanding);
+      expect(JSON.stringify(listing)).not.toContain(FAKE_SECRET);
+    });
+
+    test(`T-0033 validate refuses a key in ${label}, located to its line, never repeating it`, async () => {
+      const { agent } = world();
+      const answer = await agent.run(call({ tool: 'config.validate', path: 'voice.yaml', text }), ferretStanding);
+      expect(answer.summary).toBe('voice.yaml does not check: 1 problem. Fix each and validate again.');
+      expect(answer.issues?.[0]).toMatchObject({ line: 2, severity: 'error' });
+      expect(answer.issues?.[0]?.fix).toContain('fy secret set NAME');
+      expect(JSON.stringify(answer)).not.toContain(FAKE_SECRET);
+    });
+
+    test(`T-0034 an agent's write of a key in ${label} is refused and nothing is written`, async () => {
+      const { agent, fs } = world();
+      const answer = await agent.run(call({ tool: 'config.write', path: 'voice.yaml', text }), ferretStanding);
+      expect(answer.summary).toBe('Nothing was written: voice.yaml does not check. Fix each issue and try again.');
+      expect(JSON.stringify(answer)).not.toContain(FAKE_SECRET);
+      expect(await fs.readText(UPDATES).catch(() => undefined)).toBeUndefined();
+    });
+  }
+
+  test('T-0032 a file whose comments hold no key is still returned as written', async () => {
+    const { agent, fs, files } = world();
+    fs.seed(UPDATES, '# the key lives in the secret store\nlimit: 5\napiKey: ${secret:WORK_KEY}\n');
+    await files.reload();
+    const answer = await agent.run(call({ tool: 'config.read', path: 'voice.yaml' }), ferretStanding);
+    expect(answer.text).toBe('# the key lives in the secret store\nlimit: 5\napiKey: ${secret:WORK_KEY}\n');
+  });
+});
+
 describe('GET /v1/config/status', () => {
   test('R-0073 answers today’s view: the directory, files, issues, pending and when it was checked', async () => {
     const { fs, files } = world();

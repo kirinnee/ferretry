@@ -67,13 +67,15 @@ export interface KernelHalfSources {
   admitTool(name: string, request: ApiRequest): AdmissionDecision;
   /**
    * Tells Gate about one call to a kernel tool made through `POST /v1/agent/config`, as the tool door tells it
-   * (`Admission.recorded`, table `tool`), with the standing `admitTool` gave: the record names the ferret. Never
-   * the body. Never changes the answer.
+   * (`Admission.recorded`, table `tool`), with the standing `admitTool` gave: the record names the ferret. A call
+   * `admitTool` REFUSED (no credential, an unknown or revoked one) is told too, with no standing, as today's audited
+   * route recorded every answer of that route: the record then names nobody, only the status. Never the body. Never
+   * changes the answer.
    */
   recordTool(
     name: string,
     request: ApiRequest,
-    decision: Extract<AdmissionDecision, { readonly outcome: 'admitted' }>,
+    admitted: Extract<AdmissionDecision, { readonly outcome: 'admitted' }> | undefined,
     status: number,
   ): void;
 }
@@ -124,8 +126,13 @@ export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<Kernel
       // credential 401, an unknown one 403, whatever the body). The tool is known only from the body, but the three share
       // one declaration shape (a test pins it), so `config_read`'s declaration admits for all of them.
       const decision = sources.admitTool(AGENT_CONFIG_TOOL_OF['config.read'], call.request);
-      // Gate's refusal, with today's code and words for a call that carries no credential (round-2 m-c).
-      if (decision.outcome === 'refused') return agentDoorRefusal(decision.response);
+      // Gate's refusal, with today's code and words for a call that carries no credential (round-2 m-c). Recorded, as
+      // today's audited route recorded it (R4 m2): a revoked ferret token still trying the door is what the log is for.
+      if (decision.outcome === 'refused') {
+        const response = agentDoorRefusal(decision.response);
+        sources.recordTool(AGENT_CONFIG_TOOL_OF['config.read'], call.request, undefined, response.status);
+        return response;
+      }
       // Recorded here, not by the Dispatcher (which admitted the route with no standing): as the tool the body names
       // (`config_read`'s until the body is read), with the standing that admitted the caller (round-3 review N2b).
       let tool: AgentConfigToolName = AGENT_CONFIG_TOOL_OF['config.read'];

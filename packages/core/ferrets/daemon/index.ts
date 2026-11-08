@@ -234,6 +234,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   // GAP(ports-pending: Agenda): no `launch.parts` contribution of FY_AGENDA yet.
   // GAP(ports-pending: Lessons): no `launch.parts` contribution of FY_LEARNING_PASSIVE yet.
   // Until each lands its section is not recorded, and `instructions` says the pane was not handed the switches: no stand-in.
+  // Each is one line in ports-pending.json (conversation, agenda, and ferrets for Lessons, which is no longer pending).
   const launchEnvironment = new LaunchEnvironmentStore(
     {
       read: async ferret => {

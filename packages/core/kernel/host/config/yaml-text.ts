@@ -10,7 +10,18 @@
  *
  * Pure: text in, text out.
  */
-import { type Document, isMap, isNode, isScalar, isSeq, LineCounter, type Node, parseDocument } from 'yaml';
+import {
+  type Alias,
+  type Document,
+  isMap,
+  isNode,
+  isScalar,
+  isSeq,
+  LineCounter,
+  type Node,
+  parseDocument,
+  visit,
+} from 'yaml';
 
 /** A 1-based place in a file. */
 export interface TextPosition {
@@ -34,7 +45,53 @@ export interface ConfigSyntaxError {
 /** Read with YAML 1.2's core schema: `off` and `no` are strings, not booleans, wherever they are read. */
 const PARSE_OPTIONS = { version: '1.2', uniqueKeys: true, prettyErrors: false } as const;
 
-/** Parse one file. A document that does not parse answers its syntax errors and nothing else. */
+/** What an alias that cannot be read is, in words that never name the alias: a name can be anything a person typed. */
+const ALIAS_UNRESOLVED = 'an alias (*name) names an anchor (&name) that is not set before it';
+const ALIAS_LOOP = 'an alias (*name) sits inside the anchor (&name) it names, so its value never ends';
+const ALIAS_EXCESSIVE = 'the aliases (*name) in this file expand too far to read';
+
+/** The first alias `wrong` says cannot be read, or `undefined`. */
+function firstAlias(document: Document, wrong: (alias: Alias, target: Node | undefined) => boolean): Alias | undefined {
+  let found: Alias | undefined;
+  visit(document, {
+    Alias: (_key, alias) => {
+      let target: Node | undefined;
+      try {
+        target = alias.resolve(document);
+      } catch {
+        target = undefined;
+      }
+      if (!wrong(alias, target)) return undefined;
+      found = alias;
+      return visit.BREAK;
+    },
+  });
+  return found;
+}
+
+/** An alias error, at the alias when there is one, else at the top of the file. */
+function aliasError(lineCounter: LineCounter, message: string, alias: Alias | undefined): ConfigSyntaxError {
+  const start = alias?.range?.[0];
+  const position = start === undefined ? { line: 1, col: 1 } : lineCounter.linePos(start);
+  return { message, position: { line: position.line, column: position.col } };
+}
+
+/** Whether `value` reaches itself: an alias inside its own anchor reads as a value that never ends. */
+function holdsCycle(value: unknown, ancestors: Set<object> = new Set()): boolean {
+  if (value === null || typeof value !== 'object') return false;
+  if (ancestors.has(value)) return true;
+  ancestors.add(value);
+  const children = Array.isArray(value) ? value : Object.values(value);
+  const cycles = children.some(child => holdsCycle(child, ancestors));
+  ancestors.delete(value);
+  return cycles;
+}
+
+/**
+ * Parse one file. A document that does not parse answers its syntax errors and nothing else — and so does one whose
+ * aliases cannot be read (an alias to an anchor that is not set, an alias inside its own anchor, or too many): a
+ * broken file is refused and its last good version stays in effect, it never throws into a reload.
+ */
 export function readConfigText(
   text: string,
 ):
@@ -60,11 +117,30 @@ export function readConfigText(
     const position = lineCounter.linePos(node.range[0]);
     return { line: position.line, column: position.col };
   };
+  let value: unknown;
+  try {
+    // An empty file is an empty mapping: every setting left at its default.
+    value = document.toJS() ?? {};
+  } catch {
+    // The library's message names the alias; ours never does. No unresolved alias: the library's alias count ran out.
+    const unresolved = firstAlias(document, (_alias, target) => target === undefined);
+    return {
+      ok: false,
+      errors: [aliasError(lineCounter, unresolved === undefined ? ALIAS_EXCESSIVE : ALIAS_UNRESOLVED, unresolved)],
+    };
+  }
+  if (holdsCycle(value)) {
+    const inside = (alias: Alias, target: Node | undefined): boolean => {
+      const [start] = alias.range ?? [];
+      const range = target?.range;
+      return start !== undefined && range !== undefined && range !== null && range[0] <= start && start < range[1];
+    };
+    return { ok: false, errors: [aliasError(lineCounter, ALIAS_LOOP, firstAlias(document, inside))] };
+  }
   return {
     ok: true,
     read: {
-      // An empty file is an empty mapping: every setting left at its default.
-      value: document.toJS() ?? {},
+      value,
       locate: path => {
         for (let depth = path.length; depth > 0; depth -= 1) {
           const prefix = path.slice(0, depth);

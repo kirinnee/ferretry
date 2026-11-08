@@ -12,8 +12,9 @@
  *   trusted than a plugin's own write). There is no confirm and no discard here: an agent never confirms its own edit.
  * - The files the door NAMES are today's reach and no more (`agent-reach.ts`): a person-only file (`gate.yaml`,
  *   `plugins.yaml`) or anything outside the list is refused on read, validate AND write, with today's words.
- * - A raw secret is refused by the writer like a file that does not parse, and no issue repeats the value. A read
- *   never returns the text of a file that holds one, parsed or not.
+ * - A raw secret is refused by the writer like a file that does not parse, and no issue repeats the value; one in a
+ *   YAML comment or tag counts (the check scans the raw text too). A read never returns the text of a file that holds
+ *   one, parsed or not.
  */
 import type { AgentConfigAnswer, AgentConfigCall } from '../../contract/agent-config.ts';
 import { type AgentControlReader, agentControlRefusal } from '../../contract/bound.ts';

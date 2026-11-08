@@ -4,7 +4,10 @@ import {
   findRawSecrets,
   looksLikeRawSecret,
   RAW_SECRET_MESSAGE,
+  RAW_TEXT_SECRET_MESSAGE,
   rawSecretFix,
+  rawTextHoldsSecret,
+  rawTextSecretLine,
   shannonEntropy,
 } from '../../../host/config/secrets.ts';
 
@@ -308,5 +311,43 @@ describe('the sentences a finding is reported with', () => {
     should(rawSecretFix('fy')).containEql('fy secret set NAME');
     should(rawSecretFix('fy')).containEql(`${DOLLAR}{secret:NAME}`);
     should(RAW_SECRET_MESSAGE).containEql('raw secret');
+  });
+});
+
+describe('rawTextSecretLine — the raw text, comments and tags included', () => {
+  it('should find a key in a comment, by its line and nothing else', () => {
+    // Arrange
+    const text = `limit: 5\n# the old key ${KNOWN_SHAPES[0]?.[1] ?? ''}\n`;
+
+    // Act / Assert
+    should(rawTextSecretLine(text)).equal(2);
+    should(rawTextHoldsSecret(text)).be.true();
+  });
+
+  it('should find a key written as a tag or after a value on the same line', () => {
+    // Act / Assert
+    should(rawTextSecretLine(`note: !${KNOWN_SHAPES[0]?.[1] ?? ''} x\n`)).equal(1);
+    should(rawTextSecretLine(`limit: 5\nnote: ok # ${KNOWN_SHAPES[6]?.[1] ?? ''}\n`)).equal(2);
+  });
+
+  it('should find nothing in a file of references, a modeline and ordinary comments', () => {
+    // Arrange
+    const text = [
+      '# yaml-language-server: $schema=../.schema/voice.json',
+      '# the key lives in the secret store',
+      `apiKey: ${DOLLAR}{secret:WORK_KEY}`,
+      'limit: 5',
+      '',
+    ].join('\n');
+
+    // Act / Assert
+    should(rawTextSecretLine(text)).be.undefined();
+    should(rawTextHoldsSecret(text)).be.false();
+  });
+
+  it('should say what was found without the value', () => {
+    // Assert
+    should(RAW_TEXT_SECRET_MESSAGE).containEql('a comment or a tag counts');
+    should(RAW_TEXT_SECRET_MESSAGE).not.containEql('sk-');
   });
 });

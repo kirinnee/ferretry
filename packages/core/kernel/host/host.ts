@@ -970,7 +970,7 @@ async function bootLocked(
         new Map(),
       );
     },
-    recordTool: (name, request, decision, status) => {
+    recordTool: (name, request, admitted, status) => {
       const entry = tools.get(`kernel/${name}`);
       if (entry === undefined || !('record' in entry.decl.audit)) return;
       try {
@@ -979,8 +979,8 @@ async function bootLocked(
           descriptor: { ...entry.decl, method: 'POST', path: `/v1/tools/kernel/${name}` },
           request,
           params: new Map(),
-          standing: decision.standing,
-          actor: decision.actor,
+          // A call admission refused has no standing: the record names nobody (today's anonymous actor).
+          ...(admitted === undefined ? {} : { standing: admitted.standing, actor: admitted.actor }),
           ...(request.principal === undefined ? {} : { principal: request.principal }),
           status,
         });

@@ -79,6 +79,69 @@ describe('readConfigText', () => {
   });
 });
 
+describe('readConfigText — aliases it cannot read are syntax errors, never a throw', () => {
+  /** An alias NAME a person could have typed anything into; no message may repeat it. */
+  const NAME = 'private-anchor-name';
+
+  const errorsOf = (text: string) => {
+    const read = readConfigText(text);
+    if (read.ok) throw new Error('expected the text to be refused');
+    return read.errors;
+  };
+
+  it('should refuse an alias to an anchor that is not set, at the alias, without naming it', () => {
+    // Act
+    const errors = errorsOf(`limit: 5\nnote: *${NAME}\n`);
+
+    // Assert
+    should(errors).have.length(1);
+    should(errors[0]?.message).containEql('not set before it');
+    should(errors[0]?.position).deepEqual({ line: 2, column: 7 });
+    should(JSON.stringify(errors)).not.containEql(NAME);
+  });
+
+  it('should refuse an alias to an anchor set only AFTER it', () => {
+    // Act
+    const errors = errorsOf(`b: *${NAME}\na: &${NAME} 1\n`);
+
+    // Assert
+    should(errors[0]?.position).deepEqual({ line: 1, column: 4 });
+    should(JSON.stringify(errors)).not.containEql(NAME);
+  });
+
+  it('should refuse an alias loop (an alias inside its own anchor) rather than read a value that never ends', () => {
+    // Act
+    const inFlow = errorsOf(`a: &${NAME} [*${NAME}]\n`);
+    const inBlock = errorsOf(`limit: 5\na: &${NAME}\n  b: *${NAME}\n`);
+
+    // Assert
+    should(inFlow[0]?.message).containEql('sits inside the anchor');
+    should(inBlock[0]?.message).containEql('sits inside the anchor');
+    should(inBlock[0]?.position).deepEqual({ line: 3, column: 6 });
+    should(JSON.stringify([inFlow, inBlock])).not.containEql(NAME);
+  });
+
+  it("should refuse aliases that expand too far (the library's alias count)", () => {
+    // Arrange
+    const many = (alias: string) => Array.from({ length: 12 }, () => `*${alias}`).join(', ');
+    const text = `a: &a [1, 2, 3]\nb: &b [${many('a')}]\nc: &c [${many('b')}]\nd: [${many('c')}]\n`;
+
+    // Act
+    const errors = errorsOf(text);
+
+    // Assert
+    should(errors[0]?.message).containEql('expand too far');
+  });
+
+  it('should still read an alias that resolves', () => {
+    // Act
+    const actual = meaningOf(`a: &${NAME} { x: 1 }\nb: *${NAME}\n`);
+
+    // Assert
+    should(actual).deepEqual({ a: { x: 1 }, b: { x: 1 } });
+  });
+});
+
 describe('readConfigText — locate', () => {
   const read = (text: string) => {
     const actual = readConfigText(text);
