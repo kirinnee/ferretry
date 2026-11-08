@@ -508,3 +508,23 @@ describe('TransferArtifactDurability', () => {
     should((error as { code?: string }).code).equal('ENOTDIR');
   });
 });
+
+describe('TransferArtifactDurability when another writer keeps changing a name that still proves', () => {
+  it('answers false after the bounded re-proofs, so the caller publishes its own frozen bytes', async () => {
+    // Arrange: every republication is followed by another writer appending to the name. The bytes still satisfy the
+    // proof each time, but never the bytes this call made durable, so there is nothing it may honestly vouch for.
+    const log: string[] = [];
+    const artifact = memoryArtifact(log, 'brief', bytes => decode(bytes)?.startsWith('frozen') === true, 'frozen');
+    artifact.afterWrite = () => {
+      artifact.held = encode(`${decode(artifact.held)}!`);
+    };
+
+    // Act
+    const durable = await new TransferArtifactDurability().proveDurable([artifact]);
+
+    // Assert: two prove-write-confirm rounds, then it stops chasing the other writer.
+    should(durable).equal(false);
+    should(log.filter(entry => entry === 'write brief')).have.length(2);
+    should(decode(artifact.held)).equal('frozen!!');
+  });
+});

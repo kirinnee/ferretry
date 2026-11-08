@@ -6,6 +6,7 @@
  * and exits 0 when every step WOULD convert, 3 when one would not.
  */
 import { writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { convert } from './convert.ts';
@@ -44,6 +45,11 @@ async function main(argv: readonly string[]): Promise<number> {
     dryRun,
     lock: hostLockProbe(),
     now: () => new Date(),
+    host: {
+      homeDirectory: homedir(),
+      ...(process.env.XDG_CONFIG_HOME === undefined ? {} : { configHome: process.env.XDG_CONFIG_HOME }),
+      env: process.env,
+    },
   });
   if (result.kind === 'refused') {
     console.error(`refused; nothing was written:\n${result.problems.map(p => `  - ${p}`).join('\n')}`);

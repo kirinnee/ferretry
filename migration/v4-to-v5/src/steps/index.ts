@@ -11,6 +11,7 @@ import type { V5Writer } from '../v5/write.ts';
 import type { NotCarried, StepReport } from '../report.ts';
 import { accessStep } from './access.ts';
 import { accountsStep } from './accounts.ts';
+import { archiveSettingStep } from './archive-setting.ts';
 import { agendaStep } from './agenda.ts';
 import { boardStep } from './board.ts';
 import { acceptedConfigStep } from './accepted-config.ts';
@@ -32,10 +33,20 @@ import { identityStep, vaultStep } from './secrets.ts';
 import { usageStep } from './usage.ts';
 import { wardenStep } from './warden.ts';
 
+/** What the converter may read about the machine it runs on, beyond the v4 home: injected so tests never touch a real home. */
+export interface HostFacts {
+  readonly homeDirectory: string;
+  /** `XDG_CONFIG_HOME` when set. */
+  readonly configHome?: string;
+  readonly env: Readonly<Record<string, string | undefined>>;
+}
+
 export interface StepContext {
   readonly v4: V4Paths;
   readonly v5: V5Writer;
   readonly dryRun: boolean;
+  /** Absent in tests that do not read the host: a step needing it then reads nothing and says so. */
+  readonly host?: HostFacts;
 }
 
 export interface Step {
@@ -83,6 +94,7 @@ export const STEPS: readonly Step[] = [
   skillFoldersStep,
   settingsStep,
   daemonSettingsStep,
+  archiveSettingStep,
   // After Settings and Daemon settings: config/pack.yaml, models-guide.yaml and routing.json are this step's alone.
   packsStep,
   loginsStep,
