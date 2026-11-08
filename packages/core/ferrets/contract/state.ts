@@ -1,4 +1,4 @@
-import { defineConfig, defineState } from '@ferretry/kernel/contract';
+import { defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { JsonValueSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { FerretIdSchema, FerretRecordSchema } from './ids.ts';
@@ -544,3 +544,32 @@ export const LimitsConfigFile = defineConfig({
 
 /** `config/instructions/<name>.md` are instruction items (§4.2), read as text; listed here for ownership only. */
 export const INSTRUCTION_ITEMS_FOLDER = 'instructions' as const;
+
+// ─── archive.yaml (the session archive's one setting) ─────────────────────────────────────────────────────────────
+
+/**
+ * `archive.yaml` (docs/session-archive.md): how long a finished autonomous ferret stays live before the archive pass
+ * takes it out of the live set. ABSENT, `off` or no key is OFF: nothing more is archived (what is already archived stays
+ * readable and revivable). Today this was the `FYD_SESSION_ARCHIVE_AFTER_HOURS` variable; no plugin reads the environment.
+ * Archiving only hides a session from the live list, and only a write brings it back, so no edit of this file widens
+ * authority or spend.
+ */
+export const ArchiveSettingsSchema = z.strictObject({
+  afterHours: z
+    .union([
+      z.literal('off'),
+      z
+        .number()
+        .int()
+        .min(1)
+        .max(24 * 365),
+    ])
+    .optional(),
+});
+export type ArchiveSettings = z.infer<typeof ArchiveSettingsSchema>;
+export const ArchiveConfigFile = defineConfig({
+  file: 'archive.yaml',
+  schema: ArchiveSettingsSchema,
+  axis: 'configure',
+  loosens: neverLoosens,
+});

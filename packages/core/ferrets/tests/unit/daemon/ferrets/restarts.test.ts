@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { TestHost } from '@ferretry/kernel/testing';
 import {
   FerretHistoryFiles,
+  FerretLaunchSectionsFiles,
   type FerretSummary,
   type RestartResult,
   type RestartStatus,
@@ -106,12 +107,88 @@ describe('restarting ferrets', () => {
     await h.stop();
   });
 
-  test('R-0323 a restart that matched nothing out of date says it cannot look, rather than that nothing was', async () => {
-    const { h } = await running();
-    const answer = await ask(h, { scope: 'outdated' });
-    expect(answer.status).toBe(503);
-    expect(answer.json<{ code: string }>().code).toBe('plugin_unavailable');
-    await h.stop();
+  describe('R-0323 R-0128 scope outdated (U6)', () => {
+    /** Plants what a launch recorded of the sections it told: a fingerprint the snapshot of this host does not hold. */
+    const stale = (h: TestHost, id: string) =>
+      h
+        .state('ferrets')
+        .plant(FerretLaunchSectionsFiles, JSON.stringify({ format: 1, sections: { board: 'aaaa1111' } }), id);
+    const waiting = async (h: TestHost, id: string) =>
+      await h.request('POST', `/v1/ferrets/${id}/signal`, { body: { kind: 'waiting', condition: 'CI' } });
+
+    test('restart scope outdated restarts only ferrets whose launch sections differ', async () => {
+      const { h, runner, start } = await running();
+      const old = await start('aniya');
+      const current = await start('bodhi');
+      // Both launched under this snapshot; only aniya's record says it was told a section the snapshot no longer holds.
+      expect(h.state('ferrets').raw(FerretLaunchSectionsFiles, old)).toBeDefined();
+      stale(h, old);
+      await waiting(h, old);
+      await waiting(h, current);
+      expect(runner.starts).toBe(2);
+
+      const answer = await ask(h, { scope: 'outdated' });
+      expect(answer.status).toBe(200);
+      expect(answer.json<RestartResult>()).toMatchObject({
+        restarted: [{ id: old, name: 'aniya' }],
+        queued: [],
+        failed: [],
+      });
+      // One fresh process, and it is the stale ferret's: the current one was never touched.
+      expect(runner.starts).toBe(3);
+      expect(history(h, current)).toEqual(['session.waiting']);
+      expect(history(h, old)).toEqual(['session.waiting', 'session.stopped', 'session.resumed', 'session.restarted']);
+      // The relaunch recorded what it told, so the ferret is current now and a second request has nothing to do.
+      const status = (await h.request('GET', '/v1/restarts')).json<RestartStatus>();
+      expect(status.outdated).toEqual([]);
+      await h.stop();
+    });
+
+    test('R-0128 GET /v1/restarts lists the outdated ferrets with the sections that differ, and no ferret it cannot prove', async () => {
+      const { h, start } = await running();
+      const old = await start('aniya');
+      const current = await start('bodhi');
+      const unrecorded = await start('cyra');
+      const damaged = await start('dara');
+      const stopped = await start('emre');
+      stale(h, old);
+      h.state('ferrets').plant(FerretLaunchSectionsFiles, '{ not json', damaged);
+      h.state('ferrets').plant(
+        FerretLaunchSectionsFiles,
+        JSON.stringify({ format: 1, sections: { board: 'bbbb2222' } }),
+        stopped,
+      );
+      await h.request('POST', `/v1/ferrets/${stopped}/stop`, { body: {} });
+      // A ferret that never recorded what it was told (launched before records were kept) is not outdated.
+      expect(h.state('ferrets').files.delete(`${unrecorded}/launch-sections.json`)).toBe(true);
+      const status = (await h.request('GET', '/v1/restarts')).json<RestartStatus>();
+      expect(status.outdated).toEqual([{ id: old, name: 'aniya', sections: ['board'] }]);
+      expect(status.outdated.map(entry => entry.id)).not.toContain(current);
+      await h.stop();
+    });
+
+    test('R-0323 a busy outdated ferret is queued for its next idle moment and restarted only while it is still outdated', async () => {
+      const { h, runner, start } = await running();
+      const old = await start('aniya');
+      stale(h, old);
+      const answer = await ask(h, { scope: 'outdated' });
+      expect(answer.json<RestartResult>().queued).toEqual([{ id: old, name: 'aniya', reason: 'mid-turn' }]);
+      // It becomes current by some other path before it idles: the drain drops the entry and restarts nothing.
+      h.state('ferrets').plant(FerretLaunchSectionsFiles, JSON.stringify({ format: 1, sections: {} }), old);
+      await waiting(h, old);
+      await h.runJob('restart-drain');
+      expect(runner.starts).toBe(1);
+      expect((await h.request('GET', '/v1/restarts')).json<RestartStatus>().queued).toEqual([]);
+      await h.stop();
+    });
+
+    test('R-0323 a ferret caller may not restart the whole outdated fleet', async () => {
+      const { h, start } = await running();
+      const id = await start('aniya');
+      const answer = await ask(h, { scope: 'outdated' }, id);
+      expect(answer.status).toBe(403);
+      await h.stop();
+    });
   });
 
   test('R-0323 all restarts every running ferret that is at a wait and queues the rest', async () => {

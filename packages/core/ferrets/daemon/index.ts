@@ -27,6 +27,9 @@ import {
   FerretTokensFile,
   type HarnessKey,
   LimitsConfigFile,
+  ArchiveConfigFile,
+  ArchiveKeeps,
+  FerretLaunchSectionsFiles,
   Harnesses,
   LaunchParts,
   Runners,
@@ -53,6 +56,8 @@ import { parseRenameBody, parseResumeBody, parseStartBody, parseStopBody } from 
 import { createSessionEvent, encodeSessionEvent, parseSessionEvent } from './lib/storage/journal.ts';
 import { type SessionId, tryParseSessionId } from './lib/session-id.ts';
 import { DEFAULT_CALLSIGN_POOL, NameAllocator, SystemCallsignIssuer, suggestCallsigns } from './lib/names/index.ts';
+import type { NameClaim } from './lib/names/types.ts';
+import { archivedNameClaims } from './lib/names/session-names.ts';
 import { LedgerNameClaimStore, stateClaimLedger } from './adapters/names/name-claim-store.ts';
 import { StateCallsignCounters } from './adapters/names/state-callsign-counters.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from './lib/protocol/agent-address.ts';
@@ -79,7 +84,8 @@ import { AgentPinService, AgentPinSubsystem, withPinned } from './lib/agent-pins
 import { PinService } from './lib/pins/index.ts';
 import { pinRoutes } from './lib/runtime/mounts/pins.ts';
 import { sessionPinRoutes } from './lib/runtime/mounts/session-pin.ts';
-import { type SessionArchiveSubsystem, sessionArchiveRoutes } from './lib/runtime/mounts/session-archive.ts';
+import { sessionArchiveRoutes } from './lib/runtime/mounts/session-archive.ts';
+import { ARCHIVE_PASS_JOB, ARCHIVE_TICK_MS, buildArchive } from './modules/archive.ts';
 import { sessionRestartRoutes } from './lib/runtime/mounts/session-restart.ts';
 import { FerretRestarts, restartService } from './lib/ferrets/restarts.ts';
 import { sessionSignalRoutes } from './lib/runtime/mounts/session-signal.ts';
@@ -104,7 +110,9 @@ import { promptOf } from './lib/ferrets/prompt.ts';
 import { buildTurnWatch, turnWatchFailureFields } from './modules/turn-watch.ts';
 import { buildLiveEvents } from './modules/live-events.ts';
 import { HarnessTranscript } from './adapters/session/live/harness-transcript.ts';
-import { lifecycleStatus } from './lib/ferrets/session-document.ts';
+import { applicableInstructions, outdatedSectionIds, sectionDigests } from './lib/ferrets/launch-sections.ts';
+import type { LaunchInstructionSectionId } from './lib/protocol/session.ts';
+import { lifecycleStatus, withLifecycleStatus } from './lib/ferrets/session-document.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
@@ -234,11 +242,25 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     return read.ok && read.value !== undefined ? read.value : {};
   };
 
+  // The session store and the ferret's private session files. Everything a session keeps that is a credential or an
+  // irreversible-act record sits on the internal `sessions` root (one minted ferret folder per handle), never on `work`.
+  // The archive the store keeps is read before the first move or fork route answers.
+  const sessionStore = new DaemonStorage(kernel.state, { now: () => kernel.clock.now() }, log);
+  const storeLoaded = sessionStore.loadArchive().catch((error: unknown) => {
+    log.warn('the session store could not load its archive', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  });
   // ONE executor for the callsign ledger: what makes a claim atomic across concurrent starts and renames.
   const callsignSerial = new KeyedSerialExecutor();
-  const claimStore = new LedgerNameClaimStore(stateClaimLedger(kernel.state), callsignSerial, () =>
-    registry.nameClaims(),
-  );
+  // What the fleet holds: its records, and the sessions the archive took out of the live set (they keep their name for the
+  // same window, so `fy send <name>` never meets a second session of that name).
+  const heldClaims = (): readonly NameClaim[] => [
+    ...registry.nameClaims(),
+    ...archivedNameClaims(sessionStore.listArchivedSessions()),
+  ];
+  const claimStore = new LedgerNameClaimStore(stateClaimLedger(kernel.state), callsignSerial, heldClaims);
   const claims = {
     allocate: async (request: Parameters<NameAllocator['allocate']>[0]) =>
       await new NameAllocator(claimStore, {
@@ -251,20 +273,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     counters: new StateCallsignCounters(kernel.state),
     // Every callsign the fleet holds or has held, expired claims included, as today's `held`: a stopped ferret's id is
     // never issued again.
-    held: async () => registry.nameClaims().map(claim => claim.callsign),
+    held: async () => heldClaims().map(claim => claim.callsign),
     serial: callsignSerial,
   });
 
-  // The session store and the ferret's private session files. Everything a session keeps that is a credential or an
-  // irreversible-act record sits on the internal `sessions` root (one minted ferret folder per handle), never on `work`.
-  // The archive the store keeps is read before the first move or fork route answers.
-  const sessionStore = new DaemonStorage(kernel.state, { now: () => kernel.clock.now() }, log);
-  const storeLoaded = sessionStore.loadArchive().catch((error: unknown) => {
-    log.warn('the session store could not load its archive', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  });
   const sessionFiles = new SessionFiles({
     roots: kernel.roots,
     storage: sessionStore,
@@ -334,7 +346,9 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         await sessionStore.updateState(id, raw => {
           const current = SessionStateSchema.safeParse(raw);
           const next = current.success ? lifecycleStatus(current.data.status, state) : undefined;
-          return next === undefined ? raw : { ...(raw as Record<string, unknown>), status: next };
+          return next === undefined
+            ? raw
+            : withLifecycleStatus(raw as Record<string, unknown>, next, kernel.clock.now());
         });
       })
       .catch((error: unknown) =>
@@ -351,6 +365,9 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   let forgetTranscript: ((ferret: FerretId) => void) | undefined;
   const service = new FerretsService(registry, tokens, {
     launchEnvironment,
+    launchSections: {
+      write: async (ferret, sections) => await kernel.state.write(FerretLaunchSectionsFiles, { sections }, ferret),
+    },
     ready,
     session: sessionFiles.port,
     claims,
@@ -625,16 +642,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
   const body = async (call: CallContext): Promise<unknown> => parseJson(await call.request.text());
 
-  /**
-   * A session service whose ports (terminals, harness, runtimes) are not bound in this build yet: every call answers
-   * the spine's 503 skeleton (D10) instead of a route that is missing. Signal, restarts and the archive list.
-   */
-  const notBuilt = <T extends object>(what: string): T =>
-    new Proxy({} as T, {
-      get: () => () => {
-        throw new ApiError(503, `${what} is not built yet in this version of Ferretry.`, 'plugin_unavailable');
-      },
-    });
   // Moves and forks (ferrets-c): today's fork, handover and move modules, built once. The archive the session store
   // keeps is read before the first of their routes answers; the handover's reconcile loop is armed once the daemon
   // serves (today: beside the warden sweep) and disarmed when it stops.
@@ -733,11 +740,25 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return await signalRoutes['POST /v1/ferrets/:ferretId/signal'](call);
     },
   };
+  // What a launch now would tell a RUNNING ferret, against what its own launch told it (U6): the same entries a launch
+  // narrows by role and harness, compared by fingerprint. Nothing recorded, a stopped ferret or a damaged record answers
+  // nothing: a restart is only ever taken on proof.
+  const outdatedFor = async (ferret: FerretId): Promise<readonly LaunchInstructionSectionId[]> => {
+    const record = registry.get(ferret);
+    if (record === undefined || record.state === 'stopped') return [];
+    const told = await kernel.state.read(FerretLaunchSectionsFiles, ferret);
+    if (!told.ok || told.value === undefined) return [];
+    return outdatedSectionIds(
+      told.value.sections,
+      sectionDigests(applicableInstructions(kernel.snapshot.current().instructions, record)),
+    );
+  };
   const restartSubsystem = new FerretRestarts(
     restartService({
       ready,
       ferrets: () => registry.list(),
       waitingOf: ferret => registry.waitingOf(ferret),
+      outdated: outdatedFor,
       stop: async (ferret, reason) => await service.stop(ferret, 'polite', reason),
       // The daemon's own restart: its turn is drawn as Ferretry's Restart, never as the owner's words.
       resume: async ferret => await service.resume(ferret, undefined, { actor: 'daemon' }),
@@ -775,7 +796,30 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     schedule: { every: milliseconds(10_000) },
     run: async () => await restartSubsystem.drain(),
   });
-  const archived = sessionArchiveRoutes(notBuilt<SessionArchiveSubsystem>('The archived ferret list'));
+  // The archive (U6): finished autonomous ferrets leave the live set when `archive.yaml` says so and Board and Agenda have
+  // both said what keeps a ferret live. Nothing moves, only a write revives, and the list below reads and writes nothing.
+  const archive = buildArchive({
+    storage: sessionStore,
+    settings: () => kernel.config.file(ArchiveConfigFile),
+    nowMs: () => kernel.clock.nowMs(),
+    pinned: async () => await agentPins.pinnedAt(),
+    keeps: () => hooks.contributions(ArchiveKeeps).map(contribution => contribution.item),
+    isLive: ferret => {
+      const record = registry.get(ferret as FerretId);
+      return record !== undefined && record.state !== 'stopped';
+    },
+    loaded: async () => await storeLoaded,
+    yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
+    // A view names its session's folder, and 5.0 names no state folder to any caller: the ferret's own id stands for it.
+    directory: id => `sessions/${id}`,
+    log,
+  });
+  kernel.jobs.add({
+    id: ARCHIVE_PASS_JOB,
+    schedule: { every: milliseconds(ARCHIVE_TICK_MS) },
+    run: async () => await archive.tick(),
+  });
+  const archived = sessionArchiveRoutes(archive.subsystem);
 
   // Pins (a3's handlers): the owner's sidebar pins (agent-pins.json) and each ferret's note board (<ferret>/pins.json).
   const pinnedReader = withPinned(
@@ -1057,7 +1101,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         const nowMs = kernel.clock.nowMs();
         // A suggestion, not a reservation: the names the fleet holds (a stopped ferret's inside its window), as today.
         const start = Math.floor(nowMs / 1000) % DEFAULT_CALLSIGN_POOL.length;
-        return jsonResponse([...suggestCallsigns(DEFAULT_CALLSIGN_POOL, registry.nameClaims(), nowMs, count, start)]);
+        return jsonResponse([...suggestCallsigns(DEFAULT_CALLSIGN_POOL, heldClaims(), nowMs, count, start)]);
       },
     },
   };

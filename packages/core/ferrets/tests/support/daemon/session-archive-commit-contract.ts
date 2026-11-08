@@ -6,7 +6,7 @@ import { DaemonStorage } from '../../../daemon/adapters/storage/session-storage.
 import { KeyedSerialExecutor } from '../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import { createSessionArchive } from '../../../daemon/adapters/session/archive/session-archive.ts';
 import { StorageSessionLifecycleRepository } from '../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
-import { createFoundationPaths } from '../../../daemon/lib/paths.ts';
+import { createFoundationPaths, createSessionPaths } from '../../../daemon/lib/paths.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
 import { RecordingLog } from './storage.ts';
 
@@ -136,7 +136,7 @@ export function fixture(
     rows.set(id, { id: parseSessionId(id), status: 'completed', lastSequence: 0, journalLine: 1, journal: null });
   };
   const archive = createSessionArchive({
-    paths,
+    directory: id => createSessionPaths(paths, id).directory,
     storage,
     clock: { nowMs: () => Date.parse(NOW) },
     afterMs: 24 * 3600000,

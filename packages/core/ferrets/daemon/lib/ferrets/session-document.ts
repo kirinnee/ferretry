@@ -120,3 +120,19 @@ export function sessionStateDocument(seed: SessionDocumentSeed): {
 } {
   return { id: seed.record.id, status: sessionStatusOf(seed.record.state), turn: seed.turn };
 }
+
+/**
+ * The state document after its status moved to `next` (U6): a ferret that STOPS is stamped with when it ended
+ * (`finishedAt`, which the session archive measures its age from, as today's lifecycle stamped it), and one that starts
+ * again drops that stamp, so a revived ferret never carries an old end. Any other status leaves the stamp as it is.
+ * Pure; the document's other keys are kept as they are.
+ */
+export function withLifecycleStatus(
+  document: Readonly<Record<string, unknown>>,
+  next: SessionStatus,
+  now: string,
+): Readonly<Record<string, unknown>> {
+  if (next === 'stopped') return { ...document, status: next, finishedAt: now };
+  const { finishedAt: _ended, ...kept } = document;
+  return next === 'starting' || next === 'running' ? { ...kept, status: next } : { ...document, status: next };
+}

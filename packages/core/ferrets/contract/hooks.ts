@@ -1,4 +1,4 @@
-import { defineHook } from '@ferretry/kernel/contract';
+import { defineHook, type FerretId } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import {
   FerretIdSchema,
@@ -117,3 +117,34 @@ export type FerretStartedPayload = z.infer<typeof FerretStartedPayloadSchema>;
 
 /** Board hears that a ferret started, after Ferrets wrote its record (observe; a taker never fails a start). */
 export const FerretStarted = defineHook('ferret.started', { mode: 'observe', payload: FerretStartedPayloadSchema });
+
+// ─── what keeps a finished ferret live (the session archive, docs/session-archive.md) ──────────────────────────────
+
+/**
+ * One card as the archive's keep rule reads it (Board's answer): who owns and holds it, whether it was dropped, and
+ * the category of its lane as Board resolved it. A category Ferrets does not know, or none, reads as "in flight".
+ */
+export interface ArchiveCardStanding {
+  readonly owner: string;
+  readonly assignee: string | null;
+  readonly dropped: boolean;
+  readonly category: string | undefined;
+}
+
+/**
+ * A fact another plugin owns that keeps a finished ferret in the live set. Ferrets imports no plugin, so each owner
+ * contributes its half: Board says which ferrets own or hold a card still in flight, Agenda says whether a ferret's own
+ * board holds an item still open. A source that throws, or that nobody contributes, keeps every ferret live.
+ */
+export type ArchiveKeepSource =
+  | { readonly kind: 'board'; cards(): Promise<readonly ArchiveCardStanding[]> }
+  | { readonly kind: 'agenda'; hasOpenItem(ferret: FerretId): Promise<boolean> };
+
+/**
+ * Board and Agenda add what keeps a ferret live. FAIL SAFE: the archive runs only while BOTH kinds are contributed
+ * (an absent answer is "keep live"), and a source that fails keeps every ferret it was asked about.
+ */
+export const ArchiveKeeps = defineHook('session.archive-keeps', {
+  mode: 'contribute',
+  item: z.custom<ArchiveKeepSource>(),
+});

@@ -3,6 +3,7 @@ import type { AsksApi } from '@ferretry/core-asks/contract';
 import type { ChildEnvironment, VaultApi } from '@ferretry/core-vault/contract';
 import type { FencedPath, HookDecision, InstructionEntry } from '@ferretry/kernel/contract';
 import { ApiError } from '@ferretry/kernel/contract';
+import { applicableInstructions, sectionDigests } from './launch-sections.ts';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { KeyedSerialExecutor } from './serial.ts';
 import type {
@@ -146,6 +147,12 @@ export interface FerretsPorts {
   realPath?(ferret: FerretId, folder: string): Promise<string | undefined>;
   /** Where a launch records the switches it handed the pane (`instructions` reads them back). Unbound: none is kept. */
   launchEnvironment?: Pick<LaunchEnvironmentRecord, 'write'>;
+  /**
+   * Where a launch records the instruction sections it told the pane, by id and fingerprint, so a ferret whose words
+   * changed since can be told apart (`outdated`). Unbound, or a write that fails: none is kept and the ferret is never
+   * marked out of date.
+   */
+  launchSections?: { write(ferret: FerretId, sections: Readonly<Record<string, string>>): Promise<void> };
   /** `limits.yaml` as it is now (the kernel's config port), read fresh for every agent-control answer. */
   limits?(): LimitsFile | undefined;
   /** Ferret id → the instant the owner pinned it (`agent-pins.json`). */
@@ -1286,13 +1293,7 @@ export class FerretsService implements FerretsApi {
       ...launchOptions(this.registry.detailsOf(record.id)?.options),
       folder: record.folder as FencedPath,
       home: home.value,
-      instructions: this.ports
-        .instructions()
-        .filter(
-          entry =>
-            (entry.when.role === undefined || entry.when.role === 'any' || entry.when.role === record.role) &&
-            (entry.when.harness === undefined || entry.when.harness === record.harness),
-        ),
+      instructions: applicableInstructions(this.ports.instructions(), record),
       ...(prompt === undefined ? {} : { prompt }),
       ...(conversation === undefined ? {} : { harnessConversation: conversation }),
       ...(readable.length === 0 ? {} : { readable }),
@@ -1324,6 +1325,8 @@ export class FerretsService implements FerretsApi {
       const code = started.error === 'unavailable' ? 'runner_unavailable' : 'failed';
       return failed(code, `the harness could not start: ${started.error}`);
     }
+    // What this launch told the ferret, kept for the out-of-date check; only once the harness really started.
+    await this.ports.launchSections?.write(record.id, sectionDigests(base.instructions)).catch(() => undefined);
     const working: FerretRecord = {
       ...record,
       state: 'working',

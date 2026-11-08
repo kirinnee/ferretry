@@ -278,3 +278,33 @@ export class SessionRenameService {
     );
   }
 }
+
+/** What the archive registry kept of an archived session's name (`DaemonStorage.listArchivedSessions`). */
+export interface ArchivedSessionName {
+  readonly id: string;
+  readonly name?: string;
+  /** The configuration times the callsign window is measured from. */
+  readonly configTimes?: { readonly createdAt: string; readonly updatedAt: string };
+  readonly status?: string;
+}
+
+/**
+ * The claims archived sessions still hold. An archived session left the live list, not the callsign's window: `fy send
+ * <name>` still resolves to it, so the name must not be handed to a new session while the window runs (today's
+ * `liveCallsigns`). A row with no recorded configuration times holds nothing: its window cannot be measured, and a
+ * guess would shrink the pool where nobody can see it.
+ */
+export function archivedNameClaims(archived: readonly ArchivedSessionName[]): readonly NameClaim[] {
+  return archived.flatMap(entry => {
+    if (entry.configTimes === undefined) return [];
+    const claim = sessionNameClaim({
+      id: entry.id,
+      ...(entry.name === undefined ? {} : { teammate: entry.name }),
+      createdAt: entry.configTimes.createdAt,
+      updatedAt: entry.configTimes.updatedAt,
+      // An archived session has ended by the rule that archived it: no status means the window, never "held while live".
+      status: entry.status ?? 'stopped',
+    });
+    return claim === undefined ? [] : [claim];
+  });
+}

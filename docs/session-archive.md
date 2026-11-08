@@ -89,12 +89,12 @@ the pin document or changing its place or time.
 The following schedule runs only after explicitly enabling the automatic pass (see **Setting**). The owner plans to
 enable it on **2026-11-07**, after a clean day; that is a rollout plan, not a scheduled or automatic activation.
 
-- **Once at boot**, as a job of the housekeeping lane, so it waits until the daemon is serving and takes its turn
-  behind the other housekeeping.
-- **Hourly after that**, as the same job. The timer is armed after a pass finishes, so a pass can never be overtaken
-  by its own next tick.
-- **Bounded**: at most 200 sessions a pass. A pass that left qualifying sessions behind is followed in a minute, not
-  an hour, so a first run over two thousand sessions finishes in a few passes without holding the event loop.
+- **One kernel job**, `ferrets.archive-pass`, ticks every 60 seconds and runs a pass only when one is **due**: at once the
+  first time, an hour after a pass that finished everything, and an hour after a pass that failed (every session it did not
+  finish stays live). There is no dynamic timer: a pass can never be overtaken by its own next tick, and a tick that is
+  not due reads nothing.
+- **Bounded**: at most 200 sessions a pass. A pass that left qualifying sessions behind is followed one tick (a minute) later, not
+  an hour later, so a first run over two thousand sessions finishes in a few passes without holding the event loop.
 - Documents are read paced (25 at a time, the loop handed back between batches) and through the storage's document
   cache. The registry is normally written once per pass; a canceled commit or late revival writes its correction.
 - Archiving holds the lineage root gates and sessions' lanes and re-reads each one as it is **now** before it goes, so a session revived
@@ -138,31 +138,34 @@ enable it on **2026-11-07**, after a clean day; that is a rollout plan, not a sc
 
 ## Setting
 
-| Variable                          | Meaning                                                                                                          |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `FYD_SESSION_ARCHIVE_AFTER_HOURS` | Whole hours a finished autonomous session stays live; set `24` to enable the daily age.                          |
-|                                   | Default **off** (unset, empty or `off`): no boot pass or timer; existing archives remain readable and revivable. |
+One file, `config/archive.yaml` (the app and `fy config` edit it like any other config file):
 
-This is the existing daemon **environment** switch, not a key in `machine.yaml` or `config/daemon.json`.
-Changing it takes effect at the **next daemon start**; a release update restarts the daemon anyway.
-A malformed value stops the daemon at boot naming the variable.
-
-On Linux, create `~/.config/systemd/user/fyd.service.d/archive.conf` (or
-`$XDG_CONFIG_HOME/systemd/user/fyd.service.d/archive.conf` when set):
-
-```ini
-[Service]
-Environment="FYD_SESSION_ARCHIVE_AFTER_HOURS=24"
+```yaml
+afterHours: 24
 ```
 
-Then run `systemctl --user daemon-reload` and `fy daemon restart`. The drop-in survives `fy daemon install`.
-To disable it again, set the same variable to `off` and reload/restart.
+| Value           | Meaning                                                                                 |
+| --------------- | --------------------------------------------------------------------------------------- |
+| `afterHours: N` | Whole hours (1 or more) a finished autonomous ferret stays live; `24` is the daily age. |
+| absent, `off`   | **Default off**: no pass runs; existing archives remain readable and revivable.         |
 
-On macOS, run `launchctl setenv FYD_SESSION_ARCHIVE_AFTER_HOURS 24`, then `fy daemon restart`.
-This lasts until logout or reboot; a login item can reapply it. Set it to `off` and restart to disable it.
-For a foreground daemon, start it with `FYD_SESSION_ARCHIVE_AFTER_HOURS=24 fyd`.
+It is read at every tick of the archive job, so an edit takes effect within a minute, and a bad value is refused by the
+config writer (the last good file stays in effect). No edit of it widens authority or spend, so none is held for the owner.
+It replaces the `FYD_SESSION_ARCHIVE_AFTER_HOURS` variable: no plugin reads the environment.
+
+**Board and Agenda must both have answered.** A pass runs only while Board (which ferrets own or hold a card still in
+flight) and Agenda (which ferrets have an open agenda item) have each contributed their half of the `session.archive-keeps`
+hook. While either is missing no pass runs, and a half that fails keeps every ferret it was asked about: an absent answer is
+"keep live", never "archive". A ferret the daemon still holds as running is kept too, whatever its state document says.
 
 ## Declared gaps
+
+- **A ferret that stopped before it was stamped is kept.** A stop writes `finishedAt` on the ferret's state document, which
+  is what its age is measured from; a ferret stopped by an earlier build has none, so its age is not known and it stays
+  live (an ended session with no end time is always kept).
+- **Switch and account sections are not compared.** `restart --outdated` compares the instruction entries a launch tells a
+  ferret (the words, by fingerprint); a section a switch turns on (hypermedia, Pack, Agenda, Lessons) or an account's own
+  variables are not, and the per-ferret `outdated` mark on the list is not served: read it from `GET /v1/restarts`.
 
 - **Forking from an archived session** reads it and writes only the new one, so the source stays archived. It is
   still readable, which is all a fork needs.
@@ -181,13 +184,13 @@ For a foreground daemon, start it with `FYD_SESSION_ARCHIVE_AFTER_HOURS=24 fyd`.
 
 ## Where it is in the code
 
-| Part                              | File                                                        |
-| --------------------------------- | ----------------------------------------------------------- |
-| The rule (pure)                   | `packages/daemon/src/lib/session/archive/policy.ts`         |
-| Keep signals                      | `.../archive/keeps.ts`, `.../archive/open-cards.ts`         |
-| The pass                          | `.../archive/service.ts`                                    |
-| The registry document             | `.../archive/registry.ts`                                   |
-| Archive, revive, fallback reads   | `packages/daemon/src/adapters/storage/session-storage.ts`   |
-| The session ports and the factory | `packages/daemon/src/adapters/session/archive/`             |
-| `GET /v1/archived-sessions`       | `packages/daemon/src/lib/runtime/mounts/session-archive.ts` |
-| The timer                         | `packages/daemon/bin/fyd.ts` (beside the housekeeping lane) |
+| Part                              | File                                                               |
+| --------------------------------- | ------------------------------------------------------------------ |
+| The rule (pure)                   | `packages/daemon/src/lib/session/archive/policy.ts`                |
+| Keep signals                      | `.../archive/keeps.ts`, `.../archive/open-cards.ts`                |
+| The pass                          | `.../archive/service.ts`                                           |
+| The registry document             | `.../archive/registry.ts`                                          |
+| Archive, revive, fallback reads   | `packages/daemon/src/adapters/storage/session-storage.ts`          |
+| The session ports and the factory | `packages/daemon/src/adapters/session/archive/`                    |
+| `GET /v1/archived-sessions`       | `packages/daemon/src/lib/runtime/mounts/session-archive.ts`        |
+| The job and the keep hook         | `packages/core/ferrets/daemon/modules/archive.ts` (`ArchiveKeeps`) |

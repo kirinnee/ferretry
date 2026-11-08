@@ -1,7 +1,6 @@
 import type { SessionView } from '../../../lib/protocol/session.ts';
 import type { OpenCardStanding } from '../../../lib/session/peers/board.ts';
-import { createSessionPaths } from '../../../lib/paths.ts';
-import type { FoundationPaths } from '../../../lib/paths.ts';
+import type { SessionId } from '../../../lib/session-id.ts';
 import type { SessionArchiveSubsystem } from '../../../lib/runtime/mounts/session-archive.ts';
 import { createSessionDirectory } from '../../../lib/session/directory/index.ts';
 import {
@@ -24,6 +23,11 @@ export interface SessionArchiveSources {
   board?(): Promise<readonly OpenCardStanding[]>;
   /** Whether a session's agenda board holds an item that is still open. */
   hasOpenAgendaItem(sessionId: string): Promise<boolean>;
+  /**
+   * Whether the daemon still holds this ferret as running. The session document's status is a copy that follows the
+   * registry; a ferret the registry holds live is never archived, whatever the copy says (never archive what runs).
+   */
+  isLive?(sessionId: string): boolean;
 }
 
 export interface SessionArchive {
@@ -40,7 +44,8 @@ export interface SessionArchive {
  * from view) but never archives anything more.
  */
 export function createSessionArchive(input: {
-  readonly paths: FoundationPaths;
+  /** What an archived session's view names as its directory (read only; nothing is created or touched there). */
+  readonly directory: (id: SessionId) => string;
   readonly storage: DaemonStorage;
   readonly clock: { nowMs(): number };
   readonly afterMs: number | undefined;
@@ -48,7 +53,7 @@ export function createSessionArchive(input: {
   readonly sources: SessionArchiveSources;
   readonly yieldToLoop: () => Promise<void>;
 }): SessionArchive {
-  const { storage, paths, sources } = input;
+  const { storage, sources } = input;
   const subsystem: { -readonly [K in keyof SessionArchiveSubsystem]: SessionArchiveSubsystem[K] } = {
     count: () => storage.archivedCount(),
     list: async limit => {
@@ -64,7 +69,7 @@ export function createSessionArchive(input: {
         find: id => storage.findSession(id),
         readConfig: async id => await storage.readConfig(id),
         readState: async id => await storage.readState(id),
-        directory: id => createSessionPaths(paths, id).directory,
+        directory: input.directory,
         // An archived session is shown as it was left: nothing here may write into it.
         project: undefined,
         ended: () => true,
@@ -86,18 +91,18 @@ export function createSessionArchive(input: {
     },
     hasOpenAgendaItem: sources.hasOpenAgendaItem,
   };
-  const reads = new StorageArchiveSessions(
-    storage,
-    input.clock,
-    input.afterMs,
-    input.yieldToLoop,
-    async ids => await sessionKeeps(keeps, ids),
-  );
+  // A ferret the daemon still holds running is kept as well, besides what Board, Agenda and the pins say.
+  const kept = async (ids: readonly string[]): Promise<ReadonlyMap<string, string>> => {
+    const answers = new Map(await sessionKeeps(keeps, ids));
+    for (const id of ids) if (sources.isLive?.(id) === true && !answers.has(id)) answers.set(id, 'still running');
+    return answers;
+  };
+  const reads = new StorageArchiveSessions(storage, input.clock, input.afterMs, input.yieldToLoop, kept);
   const service = new SessionArchiveService(
     {
       clock: input.clock,
       sessions: async () => await reads.sessions(),
-      kept: async ids => await sessionKeeps(keeps, ids),
+      kept,
       archive: async (ids, roster) => await reads.archive(ids, roster),
     },
     { afterMs: input.afterMs, passLimit: input.passLimit },

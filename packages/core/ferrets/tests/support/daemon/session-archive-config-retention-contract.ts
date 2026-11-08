@@ -3,7 +3,7 @@ import { fixture, ended } from './session-archive-commit-contract.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
 import { StorageSessionLifecycleRepository } from '../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
 import { createSessionArchive } from '../../../daemon/adapters/session/archive/session-archive.ts';
-import { createFoundationPaths } from '../../../daemon/lib/paths.ts';
+import { createFoundationPaths, createSessionPaths } from '../../../daemon/lib/paths.ts';
 import { parseArchiveAfter } from '../../../daemon/lib/session/archive/policy.ts';
 
 function deferred() {
@@ -49,7 +49,7 @@ export function sessionArchiveConfigRetentionContract(): void {
     const world = fixture();
     const archive = (raw: string | undefined) =>
       createSessionArchive({
-        paths: createFoundationPaths('/tmp/review-only-no-io' as never),
+        directory: id => createSessionPaths(createFoundationPaths('/tmp/review-only-no-io' as never), id).directory,
         storage: world.storage,
         clock: { nowMs: () => Date.parse('2026-11-06T12:00:00.000Z') },
         afterMs: parseArchiveAfter(raw),

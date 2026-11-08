@@ -5,7 +5,9 @@ import type { ConfigDef } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { definePlugin, panel, route, screen, socket, tool, verb } from '@ferretry/kernel/manifest';
 import {
+  ArchiveConfigFile,
   ArchiveFile,
+  ArchiveKeeps,
   AutoResumeFile,
   FerretChanged,
   FerretStopping,
@@ -39,6 +41,7 @@ import {
   FerretConfigFile,
   FerretDetailsFile,
   FerretLaunchEnvironmentFiles,
+  FerretLaunchSectionsFiles,
   FerretPinsFile,
   FerretStateFile,
   StartRequestsFile,
@@ -350,7 +353,7 @@ export default definePlugin({
         audit: { skip: 'clearing the restart queue records nothing, as today' },
         guard: { none: 'how many waiting restarts were cleared' },
       }),
-      // R-0047 (today's mounts/session-archive.ts, path unchanged). 503 until the session services are bound.
+      // R-0047 (today's mounts/session-archive.ts, path unchanged): how many are archived and the newest, read-only.
       route('GET /v1/archived-sessions', {
         minimum: 'operator',
         caller: 'any',
@@ -489,10 +492,11 @@ export default definePlugin({
       MoveInflightFiles,
       FerretWaitFiles,
       FerretLaunchEnvironmentFiles,
+      FerretLaunchSectionsFiles,
     ],
     // Cast: see packages/core/gate/manifest.ts (leaf `ConfigDef<unknown>` variance; reported to the lead).
     // biome-ignore lint/suspicious/noExplicitAny: the leaf cast named above
-    config: [LimitsConfigFile as ConfigDef<any>],
+    config: [LimitsConfigFile as ConfigDef<any>, ArchiveConfigFile as ConfigDef<any>],
     publishes: [FerretsChanged],
   },
   hooks: {
@@ -502,6 +506,7 @@ export default definePlugin({
       { hook: Logins },
       { hook: LaunchParts },
       { hook: StartDecide },
+      { hook: ArchiveKeeps },
       { hook: SitrepLines },
       { hook: FerretChanged },
       { hook: FerretStopping },
