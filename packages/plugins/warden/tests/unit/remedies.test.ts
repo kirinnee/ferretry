@@ -189,12 +189,58 @@ describe('the auto-revive resume', () => {
   });
 });
 
-describe('a resume that started the ferret but whose notice cannot be typed', () => {
-  it('should answer a revive as ok (so it is recorded and the loop limits apply), saying it could not tell the ferret', async () => {
+/** Every send the Warden asked Conversation for, refused as 5.0 still refuses them. */
+const recordRefusedSends = (conversation: ConversationApi): string[] => {
+  const asked: string[] = [];
+  (conversation as { send: ConversationApi['send'] }).send = async ferret => {
+    asked.push(ferret);
+    return err({ code: 'unavailable', message: 'This needs the ferret’s terminal' } as never);
+  };
+  return asked;
+};
+
+describe('M2 a Warden resume hands its message over once: as the relaunch’s turn, or said to a running ferret', () => {
+  it('M2 should give a stopped ferret the message as its relaunch’s turn, never say it again, and journal no false "not delivered"', async () => {
+    // Arrange
+    const { ferrets, conversation, undelivered, resume } = subject();
+    const asked = recordRefusedSends(conversation);
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+
+    // Act
+    const revived = await resume('f1', 'carry on');
+
+    // Assert: Ferrets writes it as the turn and types its pointer; nothing is sent a second time.
+    should(revived).eql({ ok: true });
+    should(ferrets.resumes).eql([{ ferret: 'f1', message: 'carry on' }]);
+    should(asked).eql([]);
+    should(undelivered).eql([]);
+  });
+
+  it('M2 should report a resume and a restart done with nothing said again, and journal a refused notice only for a running ferret', async () => {
+    // Arrange
+    const { ferrets, conversation, acted, undelivered, remedies } = subject();
+    const asked = recordRefusedSends(conversation);
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.add({ id: ferretId('f2'), state: 'working' });
+    ferrets.add({ id: ferretId('f3'), state: 'working' });
+
+    // Act: a resume of a stopped ferret and a restart both relaunch; a resume of a running one relaunches nothing.
+    await remedies.resume('f1', 'carry on');
+    await remedies.restart('f2', 'carry on');
+    await remedies.resume('f3', 'carry on');
+
+    // Assert
+    should(acted).eql(['f1 resume done', 'f2 restart done', 'f3 resume done']);
+    should(asked).eql(['f3']);
+    should(undelivered).have.length(1);
+    should(undelivered[0]).startWith('f3: ');
+  });
+
+  it('should answer a revive of a running ferret as ok, saying it could not be told why when the notice is refused', async () => {
     // Arrange
     const { ferrets, conversation, undelivered, resume } = subject();
     refuseSends(conversation);
-    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.add({ id: ferretId('f1'), state: 'working' });
 
     // Act
     const revived = await resume('f1', 'carry on');
@@ -202,26 +248,11 @@ describe('a resume that started the ferret but whose notice cannot be typed', ()
     // Assert
     should(revived.ok).be.true();
     should((revived as { caveat?: string }).caveat).startWith('It could not be told why');
-    should(ferrets.resumes).eql([{ ferret: 'f1', message: 'carry on' }]);
     should(undelivered).have.length(1);
   });
+});
 
-  it('should still report a resume and a restart done, with the notice failure journalled apart', async () => {
-    // Arrange
-    const { ferrets, conversation, acted, undelivered, remedies } = subject();
-    refuseSends(conversation);
-    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
-    ferrets.add({ id: ferretId('f2'), state: 'working' });
-
-    // Act
-    await remedies.resume('f1', 'carry on');
-    await remedies.restart('f2', 'carry on');
-
-    // Assert
-    should(acted).eql(['f1 resume done', 'f2 restart done']);
-    should(undelivered).have.length(2);
-  });
-
+describe('a resume Ferrets did not answer cleanly', () => {
   it('should count a revive as done when Ferrets threw instead of answering (whether it started cannot be told)', async () => {
     // Arrange
     const { ferrets, resume } = subject();
@@ -250,8 +281,8 @@ describe('a resume that started the ferret but whose notice cannot be typed', ()
   });
 });
 
-describe('the Warden’s resumes are automatic (ResumeOptions.automatic)', () => {
-  it('should mark a resume, a restart and a revive as automated recovery, not a person asking', async () => {
+describe('the Warden’s resumes are automatic and its own (ResumeOptions.automatic, ResumeOptions.actor)', () => {
+  it('M2 should mark a resume, a restart and a revive as automated recovery by the Warden, so its turn is from the Warden', async () => {
     // Arrange
     const { ferrets, remedies, resume } = subject();
     ferrets.add({ id: ferretId('f1'), state: 'stopped' });
@@ -264,7 +295,11 @@ describe('the Warden’s resumes are automatic (ResumeOptions.automatic)', () =>
     await resume('f3', 'carry on');
 
     // Assert
-    should(ferrets.resumeOptions).eql([{ automatic: true }, { automatic: true }, { automatic: true }]);
+    should(ferrets.resumeOptions).eql([
+      { automatic: true, actor: 'warden' },
+      { automatic: true, actor: 'warden' },
+      { automatic: true, actor: 'warden' },
+    ]);
   });
 });
 

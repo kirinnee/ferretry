@@ -1,5 +1,6 @@
 import { dirname } from 'node:path';
 import type { FencedPath, RootHandle } from '@ferretry/kernel/contract';
+import { FERRET_TURNS_FOLDER, ferretTurnFile } from '../../../../contract/sessions-root.ts';
 import { type QueueAuthor, QueueAuthorSchema } from '../../../lib/protocol/session.ts';
 import type { ResumeTurnStore } from '../../../lib/session/resume/types.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
@@ -8,8 +9,8 @@ import { assertOwnSession, assertSessionsRoot, OwnFolder } from '../sessions-roo
 /** Completion markers a previous turn may have left behind, as `{marker}.marker` in the ferret's own folder. */
 export const TURN_MARKERS = ['done', 'needs-help', 'process-exit'] as const;
 
-/** The directory a session's turn documents live in, beneath the session's own directory. */
-const TURNS_DIRECTORY = 'turns';
+/** The directory a session's turn documents live in, beneath the session's own directory (the contract's fact). */
+const TURNS_DIRECTORY = FERRET_TURNS_FOLDER;
 
 /** `turn-001.md`, `turn-012.md`, `turn-1000.md`: a numbered turn document, at least three digits. */
 const TURN_FILE = /^turn-(\d{3,})\.md$/u;
@@ -43,6 +44,16 @@ export interface StoredTurn {
 /** `turn-008.md` → `turn-008.by.json`. */
 const authorName = (turnName: string): string => turnName.replace(/\.md$/u, '.by.json');
 
+/** The bytes of an author record, exactly as {@link FileResumeTurnStore.writeTurn} writes them. */
+const authorRecord = (by: QueueAuthor): string => `${JSON.stringify(QueueAuthorSchema.parse(by))}\n`;
+
+/** The kernel's refusal word, read structurally: this plugin may not import the kernel's host. */
+function refusalOf(error: unknown): string | undefined {
+  if (!(error instanceof Error) || error.name !== 'RootError') return undefined;
+  const refusal = (error as { readonly refusal?: unknown }).refusal;
+  return typeof refusal === 'string' ? refusal : undefined;
+}
+
 /**
  * Turn documents inside the ferret's own private folder on the internal `sessions` root
  * (`state/ferrets/sessions/<ferret>/turns/turn-NNN.md`, the author beside it as `turn-NNN.by.json`).
@@ -71,19 +82,39 @@ export class FileResumeTurnStore implements ResumeTurnStore {
   /** The turn document for `turn` (`turns/turn-NNN.md`), as the absolute path an agent opens. */
   file(id: SessionId, turn: number): FencedPath {
     assertOwnSession(this.ferret, id, 'the resume turn store');
-    if (!Number.isInteger(turn) || turn < 1) throw new Error(`a turn number is a whole number from one (got ${turn})`);
-    return this.path(`${TURNS_DIRECTORY}/turn-${String(turn).padStart(3, '0')}.md`);
+    return this.path(ferretTurnFile(turn));
   }
 
   async writeTurn(id: SessionId, turn: number, document: string, by?: QueueAuthor): Promise<string> {
     const file = this.file(id, turn);
     await this.folder.ensure();
+    const author = authorName(file) as FencedPath;
     // Who the turn is from sits BESIDE it, never in it: the agent reads the document, the app reads this. It lands
-    // first, so a document is never on disk with an author that a crash then failed to record.
-    if (by !== undefined)
-      await this.durably(authorName(file) as FencedPath, `${JSON.stringify(QueueAuthorSchema.parse(by))}\n`);
+    // first, so a document is never on disk with an author that a crash then failed to record. A turn with no author
+    // first removes any record already at its number (one a crash left before its document landed): an author is
+    // never left beside words it did not write. The leaf is never followed, as for the markers.
+    if (by !== undefined) await this.durably(author, authorRecord(by));
+    else if ((await this.root.lstat(author)) !== undefined) await this.root.remove(author);
     await this.durably(file, document);
     return file;
+  }
+
+  /**
+   * Whether `turn`'s document on disk is EXACTLY `document` from exactly `by` (no author record when `by` is absent):
+   * the one case a revive may hand the same number over again, proved in place by {@link writeTurn}. Anything it
+   * cannot read is not a match, so a revive numbers past it and never writes over it.
+   */
+  async matches(id: SessionId, turn: number, document: string, by?: QueueAuthor): Promise<boolean> {
+    const file = this.file(id, turn);
+    if (!(await this.present())) return false;
+    const author = authorName(file) as FencedPath;
+    try {
+      if ((await this.root.readText(file, TURN_READ_LIMIT_BYTES)) !== document) return false;
+      if (by === undefined) return (await this.root.lstat(author)) === undefined;
+      return (await this.root.readText(author, TURN_READ_LIMIT_BYTES)) === authorRecord(by);
+    } catch {
+      return false;
+    }
   }
 
   async clearMarkers(id: SessionId): Promise<void> {
@@ -103,7 +134,9 @@ export class FileResumeTurnStore implements ResumeTurnStore {
    */
   async list(id: SessionId, options: { readonly strict: boolean }): Promise<readonly StoredTurn[]> {
     assertOwnSession(this.ferret, id, 'the resume turn store');
-    await this.folder.ensure();
+    // A READ never makes the folder: a ferret with none has no turns, and making it here would race a launch's own
+    // `prepare` of the same folder (the loser is refused as `changed`).
+    if (!(await this.present())) return [];
     const directory = this.path(TURNS_DIRECTORY);
     if ((await this.root.lstat(directory)) === undefined) return [];
     const names = new Set(await this.root.list(directory));
@@ -141,6 +174,22 @@ export class FileResumeTurnStore implements ResumeTurnStore {
     } catch (error) {
       if (strict) throw error instanceof Error ? error : new Error(`turn author record ${name} could not be read`);
       return undefined;
+    }
+  }
+
+  /**
+   * Whether the ferret's own folder is there yet, asked without making it. The kernel answers every call through a
+   * scoped handle whose folder does not exist with `outside` (read structurally: this plugin may not import the
+   * kernel's host), so that refusal to look at a name directly inside it means "not made yet"; every other refusal,
+   * and anything that is not a folder there, is raised by the read that follows, never softened into "no turns".
+   */
+  private async present(): Promise<boolean> {
+    try {
+      await this.root.lstat(this.path(TURNS_DIRECTORY));
+      return true;
+    } catch (error) {
+      if (refusalOf(error) === 'outside') return false;
+      throw error;
     }
   }
 

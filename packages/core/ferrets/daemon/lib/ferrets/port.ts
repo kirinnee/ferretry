@@ -6,7 +6,8 @@ import type { FerretsService } from './service.ts';
  * only the parameters the port declares. Whatever else the service has — a stop's end `cause`, a move's
  * `replaceLiveTerminal` and `target`, a route's `confirmRestore`, `revokeToken`, `rename`, the launch and its tokens —
  * is for this plugin's own callers and is not reachable here at runtime, not just refused by the types. `resume`
- * forwards only `{ automatic: true }`. `effectiveLimits` is optional on the port and the service has none, so it is
+ * forwards only `automatic` and an `actor` of `warden` (attribution only). `effectiveLimits` is optional on the port
+ * and the service has none, so it is
  * absent.
  */
 export function ferretsPort(service: FerretsService): FerretsApi {
@@ -18,8 +19,14 @@ export function ferretsPort(service: FerretsService): FerretsApi {
     harnesses: () => service.harnesses(),
     start: request => service.start(request),
     stop: (ferret, how, reason) => service.stop(ferret, how, reason),
-    resume: (ferret, message, options) =>
-      service.resume(ferret, message, options?.automatic === true ? { automatic: true } : undefined),
+    resume: (ferret, message, options) => {
+      // Only what the port declares: automated recovery, and the Warden's attribution for the turn's author.
+      const forwarded = {
+        ...(options?.automatic === true ? { automatic: true } : {}),
+        ...(options?.actor === 'warden' ? { actor: 'warden' as const } : {}),
+      };
+      return service.resume(ferret, message, Object.keys(forwarded).length === 0 ? undefined : forwarded);
+    },
     attach: (ferret, handle) => service.attach(ferret, handle),
     handle: ferret => service.handle(ferret),
     workFolder: ferret => service.workFolder(ferret),

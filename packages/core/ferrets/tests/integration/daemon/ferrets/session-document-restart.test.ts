@@ -5,9 +5,8 @@ import { FakeGate, ownerStanding, StandInAdmission } from '@ferretry/core-gate/c
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
-import { FerretFiles, FerretHistoryFiles, type FerretRecord, Harnesses, Runners } from '../../../../contract/index.ts';
-import { createSessionEvent, encodeSessionEvent } from '../../../../daemon/lib/storage/journal.ts';
-import { FakeHarness, FakeRunner, ferretId, T0 } from '../../../../contract/testing/index.ts';
+import { Harnesses, Runners } from '../../../../contract/index.ts';
+import { FakeHarness, FakeRunner } from '../../../../contract/testing/index.ts';
 import ferrets from '../../../../daemon/index.ts';
 import { SessionConfigSchema } from '../../../../daemon/lib/protocol/session.ts';
 
@@ -80,27 +79,21 @@ describe('ruling #31b: the session-document writer, across a daemon restart', ()
     expect(document(first, lead)?.provenance).toBeDefined();
     expect((await first.request('POST', `/v1/ferrets/${lead}/stop?how=now`, { body: {} })).status).toBeLessThan(300);
 
-    // A ferret from before the writer: its record and journal, no document.
-    const older: FerretRecord = {
-      format: 1,
-      id: ferretId('mw7bp88g-01d00001'),
-      name: 'older',
-      role: 'lead',
-      harness: 'claude-code',
-      runner: 'tmux',
-      folder: '/work/older',
-      state: 'stopped',
-      createdAt: T0,
-      stateAt: T0,
-    };
-    first.state('ferrets').plant(FerretFiles, JSON.stringify(older), older.id);
-    first
-      .state('ferrets')
-      .plant(
-        FerretHistoryFiles,
-        `${encodeSessionEvent(createSessionEvent(older.id as never, 0, T0, 'session.stopped', { reason: 'fixture' }))}\n`,
-        older.id,
-      );
+    // A ferret from before the writer, INDEXED: started and stopped through the real routes (so the session store
+    // indexed its journal as it wrote it), then its session document taken away, leaving the journal alone — exactly
+    // what a ferret that ran before the writer is. Today's strict ancestry refuses every stamp while such a ferret
+    // has no document (the unit test shows the refusal); only the boot backfill can lift that here.
+    const made = await start(first, { folder: '/work/older', prompt: 'Older work.' });
+    expect(made.status).toBeLessThan(300);
+    const { id: olderId } = made.json<{ id: string }>();
+    await first.settle();
+    expect((await first.request('POST', `/v1/ferrets/${olderId}/stop?how=now`, { body: {} })).status).toBeLessThan(300);
+    await first.settle();
+    const files = first.state('ferrets').files;
+    files.delete(`${olderId}/config.json`);
+    files.delete(`${olderId}/state.json`);
+    expect(document(first, olderId)).toBeUndefined();
+    const older = { id: olderId };
 
     // Act: restart the daemon, then start again.
     const second = await first.restart();
@@ -109,11 +102,12 @@ describe('ruling #31b: the session-document writer, across a daemon restart', ()
     const child = await start(second, { folder: '/work/a', prompt: 'Help.', parent: lead });
 
     // Assert: the backfill documented the older ferret; the strict ancestry accepted the fleet and stamped the start.
-    expect(document(second, older.id)).toMatchObject({ id: older.id, name: 'older', cwd: '/work/older' });
+    expect(document(second, older.id)).toMatchObject({ id: older.id, cwd: '/work/older' });
     expect(next.status).toBeLessThan(300);
     const { id: other } = next.json<{ id: string }>();
     expect(document(second, other)?.provenance).toBeDefined();
-    // The child reaches Packs' admission, which is not bound, and is refused there, not by its stamp.
+    // The child reaches Packs' admission, which is not bound, and is refused there, not by its stamp. GAP(provenance):
+    // when Packs binds helper admission, this flips to "stamped" (the child's document carries the lead as parent).
     expect(child.status).toBe(503);
     expect(child.json<{ code: string }>().code).toBe('helper_admission_unavailable');
   });

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { ActRunner, RootHandle } from '@ferretry/kernel/contract';
 import { diskPaths, diskSessionsRoot, type MemoryStateFolder } from '@ferretry/kernel/testing';
@@ -12,6 +12,7 @@ import {
   type StartRefusal,
 } from '../../../../contract/index.ts';
 import { emptyChildEnvironment, FakeHarness, FakeRunner, fenced, T0 } from '../../../../contract/testing/index.ts';
+import { ferretsPort } from '../../../../daemon/lib/ferrets/port.ts';
 import { FerretsService, type FerretsPorts } from '../../../../daemon/lib/ferrets/service.ts';
 import { FerretRegistry } from '../../../../daemon/lib/registry/registry.ts';
 import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
@@ -186,40 +187,156 @@ const revive = async (w: World, id: string, message?: string, actor?: ResumeActo
   await w.service.resume(id as never, message, actor === undefined ? undefined : { actor });
 
 describe('GAP(deliver) a revive writes the numbered turn, clears the markers and types its pointer', () => {
-  test('GAP(deliver) a revive writes turn-NNN.md once and a retried relaunch re-delivers the same one', async () => {
+  test('GAP(deliver) a revive writes its turn and counts it BEFORE the relaunch, so a failed relaunch keeps its document and the retry takes the next number', async () => {
     const w = await world();
     const id = await started(w, 'Build the thing.');
     // The start's prompt is the assigned task: turn one, so the first revive is turn two.
     expect(await readFile(turnFile(w, id, 1), 'utf8')).toBe('# Assigned task\n\nBuild the thing.\n');
     await w.service.stop(id as never, 'now');
+    const typed = w.runner.deliveries.length;
 
-    // A relaunch that fails leaves its turn written but uncounted.
+    // Today's order: write the turn, clear the markers, save the counter, relaunch. A relaunch that fails leaves the
+    // document on disk, counted, as the evidence of what the agent was about to be handed.
     w.runner.refuseStarts = 1;
     expect((await revive(w, id, 'Carry on with the tests.')).ok).toBe(false);
-    const written = await stat(turnFile(w, id, 2));
-    expect(w.runner.deliveries).toEqual([]);
-    expect(SessionStateSchema.parse(await w.storage.readState(parseSessionId(id))).turn).toBe(1);
+    expect(w.runner.deliveries).toHaveLength(typed);
+    expect(SessionStateSchema.parse(await w.storage.readState(parseSessionId(id))).turn).toBe(2);
 
-    // The retry hands the ferret the SAME document: same number, same file, not rewritten.
-    const retried = await revive(w, id, 'Carry on with the tests.');
-    expect(retried.ok).toBe(true);
-    expect((await stat(turnFile(w, id, 2))).ino).toBe(written.ino);
-    expect(await readFile(turnFile(w, id, 2), 'utf8')).toBe(
+    // The retry is a NEW attempt with a new number; the failed attempt's document is never rewritten.
+    const kept = await stat(turnFile(w, id, 2));
+    expect((await revive(w, id, 'Carry on with the tests.')).ok).toBe(true);
+    expect((await stat(turnFile(w, id, 2))).ino).toBe(kept.ino);
+    expect(await readFile(turnFile(w, id, 3), 'utf8')).toBe(
       `Carry on with the tests.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
     );
-    expect(w.runner.deliveries.map(delivery => delivery.delivery.text)).toEqual([
-      turnFileInstruction(turnFile(w, id, 2)),
+    expect(w.runner.deliveries.slice(typed).map(delivery => delivery.delivery.text)).toEqual([
+      turnFileInstruction(turnFile(w, id, 3)),
     ]);
-    // Typed into the NEW pane, and counted once it landed.
-    expect(w.runner.deliveries[0]?.handle).toBe(w.registry.get(id as never)?.handle as never);
-    expect(SessionStateSchema.parse(await w.storage.readState(parseSessionId(id))).turn).toBe(2);
+    // Typed into the NEW pane.
+    expect(w.runner.deliveries.at(-1)?.handle).toBe(w.registry.get(id as never)?.handle as never);
+    expect(SessionStateSchema.parse(await w.storage.readState(parseSessionId(id))).turn).toBe(3);
 
     // The next revive numbers after it, and an auto ferret with no message is given the default prompt.
     await w.service.stop(id as never, 'now');
     expect((await revive(w, id)).ok).toBe(true);
-    expect(await readFile(turnFile(w, id, 3), 'utf8')).toBe(
+    expect(await readFile(turnFile(w, id, 4), 'utf8')).toBe(
       `${defaultSessionResumeSettings.defaultResumePrompt}\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
     );
+  });
+
+  test('GAP(deliver) a revive writes turn-NNN.md once: a turn written but never counted is handed over again only as an exact replay, proved in place', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.');
+    await w.service.stop(id as never, 'now');
+    const starts = w.runner.starts;
+    // The counter cannot be saved once: the relaunch is refused before any pane, the document stays uncounted.
+    const update = w.storage.updateState.bind(w.storage);
+    let failures = 1;
+    w.storage.updateState = async (...args) => {
+      if (failures-- > 0) throw new Error('FIXTURE_SECRET state refused');
+      return await update(...args);
+    };
+    const refused = await revive(w, id, 'Carry on with the tests.', 'admin-ui');
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error.reason).not.toContain('FIXTURE_SECRET');
+    expect(w.runner.starts).toBe(starts);
+    const written = await stat(turnFile(w, id, 2));
+
+    // The same words from the same author: the SAME number and file, not rewritten.
+    expect((await revive(w, id, 'Carry on with the tests.', 'admin-ui')).ok).toBe(true);
+    expect((await stat(turnFile(w, id, 2))).ino).toBe(written.ino);
+    expect(w.runner.deliveries.at(-1)?.delivery.text).toBe(turnFileInstruction(turnFile(w, id, 2)));
+    expect(SessionStateSchema.parse(await w.storage.readState(parseSessionId(id))).turn).toBe(2);
+  });
+
+  test('GAP(deliver) M1 P1: a later revive with other words and no author never rewrites the owner’s undelivered turn or takes its author', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.');
+    await w.service.stop(id as never, 'now');
+    // The owner resumes with "Do X." and the relaunch fails.
+    w.runner.refuseStarts = 1;
+    expect((await revive(w, id, 'Do X.', 'admin-ui')).ok).toBe(false);
+
+    // Then an automatic revive with no message and no actor (the Warden's in-process path before it named itself).
+    expect((await revive(w, id)).ok).toBe(true);
+
+    const turns = await w.files.port.turns?.(id as never, { strict: true });
+    expect(turns?.map(turn => turn.turn)).toEqual([1, 2, 3]);
+    // The owner's words stay theirs, and Ferretry's default prompt is never drawn as the owner's.
+    expect(turns?.[1]).toEqual({
+      turn: 2,
+      text: `Do X.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+      by: { kind: 'owner' },
+    });
+    expect(turns?.[2]).toEqual({
+      turn: 3,
+      text: `${defaultSessionResumeSettings.defaultResumePrompt}\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+    });
+  });
+
+  test('GAP(deliver) M1 P1: other words after an uncounted turn take the next number, never the uncounted one', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.');
+    await w.service.stop(id as never, 'now');
+    const update = w.storage.updateState.bind(w.storage);
+    let failures = 1;
+    w.storage.updateState = async (...args) => {
+      if (failures-- > 0) throw new Error('state refused');
+      return await update(...args);
+    };
+    expect((await revive(w, id, 'Do X.', 'admin-ui')).ok).toBe(false);
+
+    expect((await revive(w, id, 'Something else.')).ok).toBe(true);
+
+    const turns = await w.files.port.turns?.(id as never, { strict: true });
+    expect(turns?.[1]).toEqual({
+      turn: 2,
+      text: `Do X.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+      by: { kind: 'owner' },
+    });
+    expect(turns?.[2]).toEqual({
+      turn: 3,
+      text: `Something else.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+    });
+  });
+
+  test('GAP(deliver) M1 P2: a turn whose pointer was typed is never rewritten by the next revive, and the pane is told each file once', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.');
+    await w.service.stop(id as never, 'now');
+    const typed = w.runner.deliveries.length;
+    expect((await revive(w, id, 'First revive words.')).ok).toBe(true);
+    await w.service.stop(id as never, 'now');
+
+    expect((await revive(w, id, 'Second revive words.')).ok).toBe(true);
+
+    expect(await readFile(turnFile(w, id, 2), 'utf8')).toBe(
+      `First revive words.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+    );
+    expect(await readFile(turnFile(w, id, 3), 'utf8')).toBe(
+      `Second revive words.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+    );
+    expect(w.runner.deliveries.slice(typed).map(delivery => delivery.delivery.text)).toEqual([
+      turnFileInstruction(turnFile(w, id, 2)),
+      turnFileInstruction(turnFile(w, id, 3)),
+    ]);
+  });
+
+  test('GAP(deliver) an author record a crash left at a fresh number is removed before a turn with no author is written there', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.');
+    await w.service.stop(id as never, 'now');
+    // The author lands first, so a crash between the two leaves a record with no document beside it.
+    await mkdir(`${w.folderOf(id)}/turns`, { recursive: true });
+    await writeFile(turnFile(w, id, 2).replace(/\.md$/u, '.by.json'), '{"kind":"owner"}\n');
+
+    expect((await revive(w, id, 'Again.')).ok).toBe(true);
+
+    await expect(stat(turnFile(w, id, 2).replace(/\.md$/u, '.by.json'))).rejects.toThrow();
+    expect((await w.files.port.turns?.(id as never, { strict: true }))?.[1]).toEqual({
+      turn: 2,
+      text: `Again.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+    });
   });
 
   test('GAP(deliver) markers are cleared before relaunch, and the new turn is on disk when the pane starts', async () => {
@@ -298,7 +415,22 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
       expect(await readFile(turnFile(w, id, 1), 'utf8')).not.toContain(by.kind);
     });
 
-  test('GAP(deliver) a delivery that does not land says so, leaves the ferret running and the turn uncounted', async () => {
+  test('M2 F-0002 the Warden’s in-process resume, through the Ferrets port, writes a turn from the Warden; no other caller can name an author there', async () => {
+    const w = await world();
+    const id = await started(w);
+    const port = ferretsPort(w.service);
+    await w.service.stop(id as never, 'now');
+
+    expect((await port.resume(id as never, 'Carry on.', { automatic: true, actor: 'warden' })).ok).toBe(true);
+    await w.service.stop(id as never, 'now');
+    // Only `warden` is forwarded: anything else a caller puts there names nobody.
+    expect((await port.resume(id as never, 'Again.', { actor: 'admin-ui' } as never)).ok).toBe(true);
+
+    const turns = await w.files.port.turns?.(id as never, { strict: true });
+    expect(turns?.map(turn => turn.by)).toEqual([{ kind: 'ferretry', feature: 'Warden' }, undefined]);
+  });
+
+  test('GAP(deliver) a delivery that does not land says so, leaves the ferret running and its turn counted (today’s order)', async () => {
     const w = await world();
     const id = await started(w, 'Build the thing.');
     await w.service.stop(id as never, 'now');
@@ -312,8 +444,99 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
     expect(resumed.ok).toBe(false);
     if (!resumed.ok) expect(resumed.error.reason).not.toContain('FIXTURE_SECRET');
     expect(w.registry.get(id as never)?.state).toBe('working');
-    expect(SessionStateSchema.parse(await w.storage.readState(parseSessionId(id))).turn).toBe(1);
+    // Counted before the relaunch: the next revive takes turn three, and turn two stays on disk as it was written.
+    expect(SessionStateSchema.parse(await w.storage.readState(parseSessionId(id))).turn).toBe(2);
     w.runner.deliver = deliver;
+  });
+});
+
+describe('F-0344 today’s deliverFirstTurn: a start types its assigned task’s pointer once, under the effect ledger', () => {
+  const firstTurn = (w: World, id: string) => turnFileInstruction(turnFile(w, id, 1));
+
+  test('F-0344 a start with a prompt types the pointer to turns/turn-001.md into its new pane exactly once, and settles it', async () => {
+    const w = await world();
+
+    const id = await started(w, 'Build the thing.');
+
+    expect(w.runner.deliveries.map(delivery => delivery.delivery.text)).toEqual([firstTurn(w, id)]);
+    expect(w.runner.deliveries[0]?.handle).toBe(w.registry.get(id as never)?.handle as never);
+    // Settled: the ledger now answers a replay of this start as one that must type nothing.
+    expect(await w.files.port.admitFirstTurn?.(id as never, 'Build the thing.')).toBe('settled');
+    // Not wrapped in an act of the seam's own: the runner acts per write itself.
+    expect(w.acts).toEqual([]);
+  });
+
+  test('a start with no prompt has no first turn: nothing is typed and no turn document is written', async () => {
+    const w = await world();
+
+    const id = await started(w);
+
+    expect(w.runner.deliveries).toEqual([]);
+    expect(await w.files.port.turns?.(id as never, { strict: true })).toEqual([]);
+  });
+
+  test('F-0344 a settled first turn is a replay: the ledger is asked before the first key, and nothing is typed', async () => {
+    const w = await world();
+    const id = IDS[0];
+    await w.files.port.prepare(id as never);
+    expect(await w.files.port.admitFirstTurn?.(id as never, 'Build the thing.')).toBe('perform');
+    await w.files.port.settleFirstTurn?.(id as never, 'Build the thing.');
+
+    expect(await started(w, 'Build the thing.')).toBe(id);
+
+    expect(w.runner.deliveries).toEqual([]);
+    expect(w.registry.get(id as never)?.state).toBe('working');
+  });
+
+  for (const [standing, prepare, reason] of [
+    [
+      'conflict',
+      async (w: World) => {
+        await w.files.port.admitFirstTurn?.(IDS[0] as never, 'A different task.');
+      },
+      "the ferret's first-turn record is held for a different task, so it was not started",
+    ],
+    [
+      'unsettled',
+      async (w: World) => {
+        await w.files.port.admitFirstTurn?.(IDS[0] as never, 'Build the thing.');
+      },
+      "the ferret's first turn began but never settled; it was not typed again, so the ferret was not started",
+    ],
+  ] as const)
+    test(`F-0344 a first turn the ledger answers ${standing} is never typed, and the start fails with its pane stopped`, async () => {
+      const w = await world();
+      await w.files.port.prepare(IDS[0] as never);
+      await prepare(w);
+
+      const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.reason).toBe(reason);
+      expect(w.runner.deliveries).toEqual([]);
+      expect(w.registry.get(IDS[0] as never)?.state).toBe('stopped');
+      // The pane this start opened was stopped: no agent is left sitting at an idle prompt.
+      expect(w.runner.starts).toBe(1);
+      expect(await w.runner.alive('%1' as never)).toBe(false);
+    });
+
+  test('F-0344 a first turn that cannot be typed fails the start, stops its pane and quotes nothing', async () => {
+    const w = await world();
+    w.runner.deliver = async () => {
+      throw new Error('FIXTURE_SECRET pane refused');
+    };
+
+    const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.reason).toBe(
+        "the ferret's assigned task could not be typed into its pane, so it was not started",
+      );
+      expect(result.error.reason).not.toContain('FIXTURE_SECRET');
+    }
+    expect(await w.runner.alive('%1' as never)).toBe(false);
+    expect(w.registry.get(IDS[0] as never)?.state).toBe('stopped');
   });
 });
 

@@ -153,6 +153,12 @@ export interface ResumeOptions {
    * `session.resumed` event so history tells the two apart.
    */
   readonly automatic?: boolean;
+  /**
+   * Additive (U3 fix1): who asked, for the author recorded beside the revive's turn document — the Warden's revive is
+   * Ferretry's Warden (today's `resumeTurnAuthor('warden')`), so its words are never drawn as the owner's. ATTRIBUTION
+   * only, never authority: it changes no policy, admission or refusal. Absent: the turn names no author.
+   */
+  readonly actor?: 'warden';
 }
 
 /** Why a harness-seam act did not happen: a hold the act runner applied, or nothing to act on. */

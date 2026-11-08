@@ -59,6 +59,7 @@ import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import { resumeTurnAuthor } from '../session/resume/policy.ts';
 import type { ResumeActor } from '../session/resume/types.ts';
+import type { SessionEffectAdmission } from '../session/effects/types.ts';
 import { SessionMoveError } from '../runtime/mounts/session-move.ts';
 import {
   type AgentControl,
@@ -179,19 +180,29 @@ export interface FerretSessionPort {
   carry(ferret: FerretId): Promise<void>;
   /**
    * A start's prompt, written as the ferret's assigned task (`turns/turn-001.md`), after `prepare` and before the stamp,
-   * so the ferret's session document counts the turn it already holds. Unbound: no turn document is written.
+   * so the ferret's session document counts the turn it already holds. Answers the pointer typed into the new pane once
+   * it is up (today's `firstTurnInstruction`). Unbound: no turn document is written and nothing is typed.
    */
-  assign?(ferret: FerretId, prompt: string): Promise<void>;
+  assign?(ferret: FerretId, prompt: string): Promise<string>;
+  /**
+   * The effect ledger's admission of the ONE first turn a start may type (today's `turn-1` effect, keyed beneath the
+   * ferret and fingerprinted by its assigned task), asked by the runner immediately before its first write into the
+   * pane: `perform` types it, `settled` is a replay that types nothing, `conflict` or `unsettled` refuses. Bound
+   * together with {@link settleFirstTurn}.
+   */
+  admitFirstTurn?(ferret: FerretId, prompt: string): Promise<SessionEffectAdmission>;
+  /** The first turn landed: its effect is settled, so a replay of this start never types it again. */
+  settleFirstTurn?(ferret: FerretId, prompt: string): Promise<void>;
   /**
    * A revive's new turn (today's revive, U3): the numbered turn document (`turns/turn-NNN.md`, its author beside it as
-   * `turn-NNN.by.json`) written durably, then the completion markers a previous turn left (`done`, `needs-help`,
-   * `process-exit`) cleared, all BEFORE the relaunch. Answers the pointer to type into the new pane, or `undefined` when
-   * the revive invents no turn (an interactive ferret resumed with no message). A turn already written for this number
-   * and never delivered is re-delivered as it is, so a retried relaunch hands the ferret the same document.
+   * `turn-NNN.by.json`) written durably, the completion markers a previous turn left (`done`, `needs-help`,
+   * `process-exit`) cleared, and the session document's turn counter saved — all BEFORE the relaunch, in today's
+   * order. Answers the pointer to type into the new pane, or `undefined` when the revive invents no turn (an
+   * interactive ferret resumed with no message). Every attempt takes a fresh number, after the higher of the counter
+   * and the documents on disk; only a turn written but never counted, whose words and author are exactly the new ones,
+   * is handed over again as it is (proved in place).
    */
   revive?(ferret: FerretId, request: ReviveTurnRequest): Promise<ReviveTurn | undefined>;
-  /** The revive's turn reached the new pane: the next revive numbers after it. */
-  delivered?(ferret: FerretId, turn: number): Promise<void>;
   /** The ferret's turn documents, oldest first (`FerretsApi.turns`). */
   turns?(ferret: FerretId, options: { readonly strict: boolean }): Promise<readonly FerretTurnDocument[]>;
 }
@@ -208,6 +219,14 @@ export interface ReviveTurn {
   readonly turn: number;
   readonly instruction: string;
 }
+
+/** What a launch types into the new pane once it is up: a start's assigned task, or a revive's new turn. */
+type PendingTurn =
+  | { readonly kind: 'first'; readonly prompt: string; readonly instruction: string }
+  | { readonly kind: 'revive'; readonly turn: ReviveTurn };
+
+/** The ledger did not admit the first turn's write; thrown from `beforeWrite`, so the runner types no key. */
+class FirstTurnNotPerformed extends Error {}
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
   err({ code, reason } as StartFailure);
@@ -279,7 +298,7 @@ export interface ResumeTarget {
  * route supplies for a cut-off ferret, and what a MOVE sets — replacing a live pane, and the {@link ResumeTarget} the
  * relaunch is on.
  */
-export interface ServiceResumeOptions extends ResumeOptions {
+export interface ServiceResumeOptions extends Omit<ResumeOptions, 'actor'> {
   readonly confirmRestore?: () => void;
   /**
    * Replace a LIVE pane instead of keeping the ferret running as it is: the pane is stopped and the ferret relaunched
@@ -1028,7 +1047,7 @@ export class FerretsService implements FerretsApi {
     const created = new Set<RunnerHandle>();
     let runner: Runner | undefined;
     let failure: StartFailure;
-    let turn: ReviveTurn | undefined;
+    let turn: PendingTurn | undefined;
     try {
       const session = await this.sessionStep(record, kind, prompt, revive);
       if (!session.ok) return await this.abandon(record, session.error.code, session.error.reason);
@@ -1048,8 +1067,16 @@ export class FerretsService implements FerretsApi {
         },
       });
       const result = await this.launchAttempt(record, prompt, conversation, tracked);
-      if (result.ok) return turn === undefined ? result : await this.deliverTurn(record.id, runner, turn);
-      failure = result.error;
+      if (!result.ok) failure = result.error;
+      else if (turn === undefined) return result;
+      else if (turn.kind === 'revive') return await this.deliverTurn(record.id, runner, turn.turn);
+      else {
+        // Today's `deliverFirstTurn`: a start whose task never arrives is an agent sitting at an idle prompt, so a
+        // first turn that does not land fails the start (the pane is stopped and the credential revoked below).
+        const first = await this.deliverFirstTurn(record.id, runner, turn);
+        if (first.ok) return first;
+        failure = first.error;
+      }
     } catch {
       // Port errors can contain launch environment values: never return their text to a caller.
       failure = { code: 'failed', reason: 'a launch dependency failed before the ferret could start' };
@@ -1066,7 +1093,9 @@ export class FerretsService implements FerretsApi {
     }
     for (const handle of created) {
       try {
-        await runner!.stop(handle, 'now');
+        // A handle is only ever tracked through a runner, so one is always here; none is a cleanup that cannot run.
+        if (runner === undefined) throw new Error('no runner to stop the failed launch with');
+        await runner.stop(handle, 'now');
       } catch {
         // Keep the handle recoverable by stop; a failed cleanup never claims the process stopped.
         await this.write({ ...record, handle }, record.state, 'state');
@@ -1164,7 +1193,7 @@ export class FerretsService implements FerretsApi {
     kind: 'start' | 'resume',
     prompt: string | undefined,
     revive: ReviveTurnRequest | undefined,
-  ): Promise<Result<ReviveTurn | undefined, StartFailure>> {
+  ): Promise<Result<PendingTurn | undefined, StartFailure>> {
     const session = this.ports.session;
     if (session === undefined) return ok(undefined);
     try {
@@ -1174,9 +1203,10 @@ export class FerretsService implements FerretsApi {
     }
     if (kind === 'start') {
       // The assigned task is on disk before the stamp, so the session document counts the turn the ferret holds.
+      let first: PendingTurn | undefined;
       if (prompt !== undefined && prompt.trim() !== '' && session.assign !== undefined)
         try {
-          await session.assign(record.id, prompt);
+          first = { kind: 'first', prompt, instruction: await session.assign(record.id, prompt) };
         } catch {
           return failed('failed', "this ferret's assigned task could not be written, so it was not started");
         }
@@ -1193,6 +1223,7 @@ export class FerretsService implements FerretsApi {
       } catch {
         return failed('failed', 'where this ferret came from could not be recorded, so it was not started');
       }
+      return ok(first);
     } else {
       // A resume that cannot bring the stamp forward leaves the one on disk exactly as it was (it only ever strengthens).
       await session.carry(record.id).catch(() => undefined);
@@ -1200,7 +1231,8 @@ export class FerretsService implements FerretsApi {
       // by the previous turn would end the new one the moment it started.
       if (revive !== undefined && session.revive !== undefined)
         try {
-          return ok(await session.revive(record.id, revive));
+          const turn = await session.revive(record.id, revive);
+          return ok(turn === undefined ? undefined : { kind: 'revive', turn });
         } catch {
           return failed('failed', 'a new turn could not be written for this ferret, so it was not relaunched');
         }
@@ -1210,9 +1242,9 @@ export class FerretsService implements FerretsApi {
 
   /**
    * Types the revive's pointer into the new pane (today's revive delivers after the relaunch). Through the runner's own
-   * `deliver`, which acts on the pane for each write itself, so it is NOT wrapped in a second act. Only a delivery that
-   * landed is recorded, so the next revive numbers after it; one that did not leaves the turn to be handed over again,
-   * the same document, by the next relaunch. The ferret is running either way, and the failure is said, never quoted.
+   * `deliver`, which acts on the pane for each write itself, so it is NOT wrapped in a second act. The turn was counted
+   * before the relaunch (today's order), so a delivery that does not land leaves the ferret running with its turn
+   * counted and its document on disk; the next revive takes the next number. The failure is said, never quoted.
    */
   private async deliverTurn(
     ferret: FerretId,
@@ -1226,12 +1258,60 @@ export class FerretsService implements FerretsApi {
     } catch {
       return failed(
         'failed',
-        'the ferret was relaunched, but its new turn could not be typed into its pane; stop and resume it to hand it the same turn again',
+        'the ferret was relaunched, but its new turn could not be typed into its pane; stop and resume it to hand it a turn again',
       );
     }
-    // The turn is in the pane, so the resume DID happen: a failure to count it is not the caller's to retry. The port
-    // says so in the daemon log; the next revive then numbers this turn again and replaces its document.
-    await this.ports.session?.delivered?.(ferret, turn.turn).catch(() => undefined);
+    return ok(ferret);
+  }
+
+  /**
+   * Today's `deliverFirstTurn`: the start's pointer to its assigned task is typed into the new pane, for EVERY
+   * harness (today put no prompt on any harness's argv), through the runner's own `deliver` (not wrapped in a second
+   * act). The effect ledger admits the write at the runner's last step before its first composer write: `perform`
+   * types it and is then settled; a `settled` replay aborts before any key and is a success; `conflict` and
+   * `unsettled` refuse. Any other failure fails the start. Nothing a port says is quoted.
+   */
+  private async deliverFirstTurn(
+    ferret: FerretId,
+    runner: Runner,
+    turn: Extract<PendingTurn, { kind: 'first' }>,
+  ): Promise<Result<FerretId, StartFailure>> {
+    const session = this.ports.session;
+    const admit = session?.admitFirstTurn;
+    const handle = this.registry.get(ferret)?.handle as RunnerHandle | undefined;
+    const notTyped = failed(
+      'failed',
+      "the ferret's assigned task could not be typed into its pane, so it was not started",
+    );
+    if (session === undefined || admit === undefined || session.settleFirstTurn === undefined)
+      return failed('failed', "the ferret's first turn has no durable effect record, so it was not started");
+    if (handle === undefined) return notTyped;
+    let admission: SessionEffectAdmission | undefined;
+    try {
+      await runner.deliver(handle, {
+        text: turn.instruction,
+        beforeWrite: async () => {
+          admission = await admit(ferret, turn.prompt);
+          // `settled` aborts this delivery at the exact pre-write boundary: a replay, never a second typing.
+          if (admission !== 'perform') throw new FirstTurnNotPerformed();
+        },
+      });
+      // A runner that typed without asking first has typed a turn no ledger admitted: refused, never counted.
+      if (admission !== 'perform') return notTyped;
+      await session.settleFirstTurn(ferret, turn.prompt);
+    } catch {
+      // Any admission but `perform` threw from `beforeWrite`, so the runner typed no key (it is read from the
+      // admission, not the error, which a runner may wrap).
+      if (admission === 'settled') return ok(ferret);
+      if (admission !== undefined && admission !== 'perform')
+        return failed(
+          'failed',
+          admission === 'conflict'
+            ? "the ferret's first-turn record is held for a different task, so it was not started"
+            : "the ferret's first turn began but never settled; it was not typed again, so the ferret was not started",
+        );
+      return notTyped;
+    }
     return ok(ferret);
   }
 

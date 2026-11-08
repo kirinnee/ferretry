@@ -3,7 +3,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { FerretHistoryFiles, FerretConfigFile, FerretStateFile } from '../../../../contract/index.ts';
-import { TransferBriefFiles, TransferPlanFiles } from '../../../../contract/transfer-state.ts';
+import { TransferPlanFiles } from '../../../../contract/transfer-state.ts';
 import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import { SessionConfigSchema, SessionStateSchema, type SessionView } from '../../../../daemon/lib/protocol/session.ts';
 import type { JsonValue } from '@ferretry/std';
@@ -136,7 +136,7 @@ async function harness(
   let environment: Readonly<Record<string, string>> = {};
 
   const plans = new FileSessionTransferTargetPlanStore(opened.state);
-  const briefWriter = new FileSessionTransferBriefWriter(opened.state);
+  const briefWriter = new FileSessionTransferBriefWriter(opened.briefs);
   const attachments = new MemoryAttachmentStore();
   const attachmentCopier = new FileSessionAttachmentCopier(attachments);
 
@@ -297,11 +297,8 @@ async function harness(
     plans,
     folder: opened.folder,
     attachments,
-    brief: () => {
-      const held = opened.folder.rawBytes(TransferBriefFiles, TARGET_ID);
-      return held === undefined ? undefined : new TextDecoder().decode(held);
-    },
-    plantBrief: next => opened.folder.plantBytes(TransferBriefFiles, new TextEncoder().encode(next), TARGET_ID),
+    brief: () => opened.briefText(TARGET_ID),
+    plantBrief: next => opened.plantBrief(TARGET_ID, next),
     restart: async options => {
       if (options?.forgetIndex === true)
         for (const database of opened.folder.databases.keys()) opened.folder.databases.delete(database);

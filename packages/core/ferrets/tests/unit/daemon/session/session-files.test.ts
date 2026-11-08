@@ -421,6 +421,8 @@ describe('unbuilt adapters: provenance', () => {
     });
     await storage.writeConfig(OTHER, sessionConfig(OTHER, parentDocument));
     await storage.writeConfig(FERRET, sessionConfig(FERRET, childDocument));
+    // A session's state document is written with its config (a revive counts its turn there, before the relaunch).
+    await storage.upsertState(FERRET, () => ({ id: FERRET, status: 'stopped', turn: 0 }));
     const harness = new FakeHarness();
     const runner = new FakeRunner();
     const service = new FerretsService(registry, new FerretTokenDirectory(), {

@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { ApiError, type Log, type RootHandle, type RootsPort } from '@ferretry/kernel/contract';
+import { FERRET_SESSIONS_ROOT } from '../../contract/sessions-root.ts';
 import { type Duration, milliseconds } from '@ferretry/std';
 import { FileSessionEffectLedger } from '../adapters/session/effects/file-session-effect-ledger.ts';
 import {
@@ -23,11 +25,13 @@ import { KeyedSerialExecutor } from '../adapters/storage/keyed-serial-executor.t
 import type { FerretSessionPort, ReviveTurn, ReviveTurnRequest } from '../lib/ferrets/service.ts';
 import { type SessionDocumentSeed, sessionDocument, sessionStateDocument } from '../lib/ferrets/session-document.ts';
 import { assignedTaskDocument } from '../lib/protocol/turn-handoff.ts';
+import { firstTurnInstruction } from '../lib/session/lifecycle/policy.ts';
+import type { SessionEffectKey } from '../lib/session/effects/types.ts';
 import { defaultSessionResumeSettings } from '../lib/session/resume/settings.ts';
 import { resumeTurnDocument, resumeTurnInstruction } from '../lib/session/resume/policy.ts';
 import type { ClockPort } from '../lib/ports.ts';
 import type { SessionProtocolEnvelope } from '../adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
-import { type SessionId, parseSessionId } from '../lib/session-id.ts';
+import { type SessionId, parseSessionId, tryParseSessionId } from '../lib/session-id.ts';
 import {
   defaultSessionLifecycleSettings,
   SessionCredentialRotation,
@@ -56,6 +60,20 @@ const NO_LAUNCHER = new Proxy({} as SessionLifecycleLauncher, {
           );
         },
 });
+
+/**
+ * The one initial turn a start may type, keyed beneath the ferret it acts on: today's lifecycle `firstTurnEffect`, word
+ * for word (`turn-1`, fingerprinted by the SHA-256 of the assigned task document).
+ */
+function firstTurnEffect(
+  id: SessionId,
+  prompt: string,
+): { readonly key: SessionEffectKey; readonly fingerprint: string } {
+  return {
+    key: { sessionId: id, effectId: 'turn-1' },
+    fingerprint: createHash('sha256').update(assignedTaskDocument(prompt), 'utf8').digest('hex'),
+  };
+}
 
 /** What the ferret's private session files are built from. */
 export interface SessionFilesDeps {
@@ -132,10 +150,19 @@ export class SessionFiles {
       carry: async ferret => await this.carryOnResume(ferret),
       assign: async (ferret, prompt) => {
         const id = parseSessionId(ferret);
-        await this.taskStore(id).writeAssignedTask(id, assignedTaskDocument(prompt));
+        return firstTurnInstruction(await this.taskStore(id).writeAssignedTask(id, assignedTaskDocument(prompt)));
+      },
+      admitFirstTurn: async (ferret, prompt) => {
+        const id = parseSessionId(ferret);
+        const { key, fingerprint } = firstTurnEffect(id, prompt);
+        return await this.effectLedger(id).begin(key, fingerprint, this.deps.clock.now());
+      },
+      settleFirstTurn: async (ferret, prompt) => {
+        const id = parseSessionId(ferret);
+        const { key, fingerprint } = firstTurnEffect(id, prompt);
+        await this.effectLedger(id).settle(key, fingerprint, this.deps.clock.now());
       },
       revive: async (ferret, request) => await this.revive(parseSessionId(ferret), request),
-      delivered: async (ferret, turn) => await this.delivered(parseSessionId(ferret), turn),
       turns: async (ferret, options) => {
         const id = parseSessionId(ferret);
         return await this.turnStore(id).list(id, options);
@@ -156,7 +183,13 @@ export class SessionFiles {
   backfill(ferrets: () => Promise<readonly string[]>): Promise<void> {
     this.documented = (async () => {
       for (const ferret of await ferrets()) {
-        const id = parseSessionId(ferret);
+        // Parsed INSIDE the per-ferret catch: one id the session store refuses (upper case is a valid ferret id but
+        // not a stored session id) is named and skipped, never the end of the pass for every ferret after it.
+        const id = tryParseSessionId(ferret);
+        if (id === undefined) {
+          this.deps.log.warn('a ferret id is not a session id, so it was given no session document', { ferret });
+          continue;
+        }
         await this.ensureDocument(id).catch(() =>
           this.deps.log.warn('a ferret session document could not be made', { ferret: id }),
         );
@@ -197,9 +230,9 @@ export class SessionFiles {
   /**
    * A revive's turn (today's `SessionResumeService.relaunch`, the turn half): the markers the previous turn left are
    * cleared, and unless the revive invents no turn (an interactive ferret resumed with no message, today's `bare`) the
-   * numbered document is written durably first. The number is the one after the turn the session document last saw
-   * DELIVERED, so a relaunch that failed before its turn reached the pane is retried with the same number, and the same
-   * words are the same document, proved in place rather than rewritten.
+   * numbered document is written durably first, then counted, all before the relaunch (today's order). Each attempt
+   * takes a fresh number ({@link nextTurn}), so a document is never rewritten with other words or left with another
+   * turn's author; only an exact replay of a turn written but never counted hands the same document over again.
    */
   private async revive(id: SessionId, request: ReviveTurnRequest): Promise<ReviveTurn | undefined> {
     // A document that cannot be made or read does not stop the revive: the number then comes from the files on disk.
@@ -209,41 +242,55 @@ export class SessionFiles {
     const bare = request.mode === 'interactive' && !trimmed;
     let turn: ReviveTurn | undefined;
     if (!bare) {
-      // The session document's counter; a ferret with none numbers after the documents already on disk, so a revive
-      // never writes over a turn it cannot account for (its assigned task above all).
-      const counted =
-        (await new StorageResumeRepository(this.deps.storage).read(id).catch(() => undefined))?.turn ??
-        (await store.latest(id));
-      const number = counted + 1;
       const settings = defaultSessionResumeSettings;
-      const file = await store.writeTurn(
-        id,
-        number,
-        resumeTurnDocument(trimmed ?? settings.defaultResumePrompt, settings),
-        request.by,
-      );
+      const document = resumeTurnDocument(trimmed ?? settings.defaultResumePrompt, settings);
+      const number = await this.nextTurn(id, store, document, request.by);
+      const file = await store.writeTurn(id, number, document, request.by);
       turn = { turn: number, instruction: resumeTurnInstruction(file) };
     }
     await store.clearMarkers(id);
+    // Today's order: the counter is saved BEFORE the relaunch (today's `session.resuming` transition carries the
+    // turn), so every attempt that wrote a turn holds its own number, and a relaunch that then fails leaves its
+    // document on disk as the evidence of what the agent was about to be handed. A counter that cannot be saved
+    // refuses the relaunch, as today's transition did; the document stays, and only an exact replay reuses it.
+    if (turn !== undefined) await this.count(id, turn.turn);
     return turn;
   }
 
-  /** The revive's turn reached the pane: the session document counts it, so the next revive numbers after it. */
-  private async delivered(id: SessionId, turn: number): Promise<void> {
+  /**
+   * The number a revive's turn takes: the one after the HIGHER of the counter the session document holds and the
+   * documents on disk, so a turn is never numbered onto a document that is already there, whoever wrote it. The one
+   * exception is an exact replay — the highest document is above the counter (written, never counted) and its words
+   * and author record are exactly the new ones — which hands that same document over again, proved in place.
+   */
+  private async nextTurn(
+    id: SessionId,
+    store: FileResumeTurnStore,
+    document: string,
+    by: ReviveTurnRequest['by'],
+  ): Promise<number> {
+    const counted = (await new StorageResumeRepository(this.deps.storage).read(id).catch(() => undefined))?.turn ?? 0;
+    const latest = await store.latest(id);
+    if (latest > counted && (await store.matches(id, latest, document, by))) return latest;
+    return Math.max(counted, latest) + 1;
+  }
+
+  /** The session document counts `turn`, so the next revive numbers after it. */
+  private async count(id: SessionId, turn: number): Promise<void> {
     try {
       await this.deps.storage.updateState(id, current => ({
         ...(typeof current === 'object' && current !== null && !Array.isArray(current) ? current : {}),
         turn,
       }));
     } catch (error) {
-      this.deps.log.warn('a delivered turn could not be counted, so the next revive numbers it again', { ferret: id });
+      this.deps.log.warn('a revive turn could not be counted, so the ferret was not relaunched', { ferret: id });
       throw error;
     }
   }
 
   /** The ferret's own `sessions` handle: one minted folder, internal, private. */
   root(ferret: string): RootHandle {
-    return this.deps.roots.root('sessions', { subfolder: ferret });
+    return this.deps.roots.root(FERRET_SESSIONS_ROOT, { subfolder: ferret });
   }
 
   environmentStore(id: SessionId): FileSessionEnvironmentStore {

@@ -1,9 +1,9 @@
-import { describe, it } from 'bun:test';
+import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import type { StatePort } from '@ferretry/kernel/contract';
-import { MemoryStateFolder, SimulatedCrash } from '@ferretry/kernel/testing';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { diskSessionsRoot, SimulatedCrash } from '@ferretry/kernel/testing';
 import should from 'should';
-import { TransferBriefFiles } from '../../../../contract/transfer-state.ts';
 import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import { FileSessionAttachmentCopier } from '../../../../daemon/adapters/transfer/attachment-copier.ts';
 import { FileSessionTransferBriefWriter } from '../../../../daemon/adapters/transfer/brief-writer.ts';
@@ -13,7 +13,7 @@ import {
 } from '../../../../daemon/adapters/transfer/durable-artifact.ts';
 import type { TranscriptProvenance } from '../../../../daemon/lib/protocol/session.ts';
 import { SessionTransferImporter } from '../../../../daemon/lib/transfer/import.ts';
-import type { SessionTransferEnvelope } from '../../../../daemon/lib/transfer/types.ts';
+import type { SessionTransferEnvelope, TransferBriefWriter } from '../../../../daemon/lib/transfer/types.ts';
 import { MemoryAttachmentStore } from './memory-attachment-store.ts';
 
 /**
@@ -26,12 +26,17 @@ import { MemoryAttachmentStore } from './memory-attachment-store.ts';
  * manifest — has been written through its port (which flushes before it resolves) and confirmed under its
  * final name.
  *
- * The two writers are the REAL adapters over the kernel's state folder and the attachment store fake; what is
- * injected is the observation point, and the crash (`armCrash`) is the state folder's own.
+ * The two writers are the REAL adapters: the brief writer over the target's own folder on the kernel's `sessions`
+ * root (a real disk) and the attachment copier over the attachment store fake; what is injected is the observation
+ * point, and the crash is modelled right after the brief's write returned.
  */
 
 const SOURCE = 'source-session';
 const TARGET = 'target-session';
+const parents: string[] = [];
+afterEach(async () => {
+  for (const parent of parents.splice(0)) await rm(parent, { recursive: true, force: true });
+});
 const AT = '2026-08-06T07:00:00.000Z';
 const CUT = { v: 1, byteOffset: 512, blockIndex: 0 } as const;
 
@@ -137,20 +142,29 @@ function plan(attachment: SourceAttachment): SessionTransferPlan {
   };
 }
 
-/** A brief writer over a state folder whose every write is observed (and may be slowed), plus the folder. */
-function briefOver(
-  folder: MemoryStateFolder,
+/**
+ * A brief writer over the TARGET's own `sessions` folder on a real disk (the brief is its `turns/turn-001.md`), whose
+ * every write is observed (and may be slowed) before it lands and may be followed by `after` once it has landed.
+ */
+async function briefOver(
   observe: (event: string) => Promise<void> = async () => undefined,
-): FileSessionTransferBriefWriter {
-  const real = folder.port([TransferBriefFiles]);
-  const state: StatePort = {
-    ...real,
-    write: async (file, value, name) => {
-      await observe(`brief:write`);
-      await real.write(file, value, name);
+  after: () => void = () => undefined,
+): Promise<{ readonly writer: TransferBriefWriter; readonly stored: () => Promise<string> }> {
+  const parent = await mkdtemp(`${tmpdir()}/fy-brief-durability-`);
+  parents.push(parent);
+  const disk = await diskSessionsRoot(parent, TARGET);
+  const real = new FileSessionTransferBriefWriter(() => disk.root);
+  return {
+    writer: {
+      write: async (newSessionId, document) => {
+        await observe('brief:write');
+        const file = await real.write(newSessionId, document);
+        after();
+        return file;
+      },
     },
+    stored: async () => await readFile(`${disk.folder}/turns/turn-001.md`, 'utf8'),
   };
-  return new FileSessionTransferBriefWriter(state);
 }
 
 describe('transfer artifact durability before receipt advancement', () => {
@@ -159,7 +173,6 @@ describe('transfer artifact durability before receipt advancement', () => {
     // ports. `settled` flips the instant `importPlan` resolves, and every write asserts it is still false AFTER
     // handing the event loop back: a write the adapter forgot to await would let import resolve inside that
     // yield, which is exactly the window a receipt would commit in.
-    const folder = new MemoryStateFolder();
     const store = new MemoryAttachmentStore();
     const attachment = mintSourceAttachment(store);
     const journal: string[] = [];
@@ -169,6 +182,7 @@ describe('transfer artifact durability before receipt advancement', () => {
       await yieldLoop();
       should(settled.value).equal(false);
     };
+    const brief = await briefOver(hold);
     const writeThrough = store.write.bind(store);
     store.write = async (sessionId, attachmentId, file, bytes) => {
       await hold(`attachment:${file}`);
@@ -190,7 +204,7 @@ describe('transfer artifact durability before receipt advancement', () => {
           },
         },
         attachments: new FileSessionAttachmentCopier(store),
-        brief: briefOver(folder, hold),
+        brief: brief.writer,
       },
       'fork',
     );
@@ -219,17 +233,23 @@ describe('transfer artifact durability before receipt advancement', () => {
     // And the artifacts the receipt now vouches for are the plan's, complete, with nothing half-written.
     should(outcome.copiedAttachmentIds).deepEqual([attachment.id]);
     should(outcome.briefPath.endsWith(`${TARGET}/turns/turn-001.md`)).be.true();
-    should(decode(folder.rawBytes(TransferBriefFiles, TARGET))).containEql('carried.pdf');
+    should(await brief.stored()).containEql('carried.pdf');
     should(store.bytes(TARGET, attachment.id, 'original')).deepEqual(attachment.bytes);
     should(store.bytes(TARGET, attachment.id, 'manifest')).deepEqual(store.bytes(SOURCE, attachment.id, 'manifest'));
   });
 
   it('survives a crash right after the brief landed: the replay of the import completes and vouches for it', async () => {
     // Arrange — the brief is the LAST import step. The process dies after its write landed, before importPlan could
-    // return, so no receipt advanced; the replay must accept what the first attempt left and finish.
-    const folder = new MemoryStateFolder();
+    // return, so no receipt advanced; the replay must accept what the first attempt left and finish. The brief is on
+    // the target's own `sessions` folder, so the death is modelled right after its write returned, once.
     const store = new MemoryAttachmentStore();
     const attachment = mintSourceAttachment(store);
+    let crash = true;
+    const brief = await briefOver(undefined, () => {
+      if (!crash) return;
+      crash = false;
+      throw new SimulatedCrash();
+    });
     const importer = (): SessionTransferImporter =>
       new SessionTransferImporter(
         {
@@ -243,25 +263,18 @@ describe('transfer artifact durability before receipt advancement', () => {
           },
           envelope: { apply: async () => undefined },
           attachments: new FileSessionAttachmentCopier(store),
-          brief: briefOver(folder),
+          brief: brief.writer,
         },
         'fork',
       );
-    store.afterWrite = written => {
-      // the attachment manifest is the last attachment write; arm the crash for the very next write the port lands
-      if (written.file === 'manifest') folder.armCrash();
-    };
-
     // Act
     const crashed = await reject(importer().importPlan(plan(attachment), TARGET));
-    folder.revive();
-    store.afterWrite = () => undefined;
     const replayed = await importer().importPlan(plan(attachment), TARGET);
 
     // Assert
     should(crashed).be.instanceOf(SimulatedCrash);
     should(replayed.copiedAttachmentIds).deepEqual([attachment.id]);
-    should(decode(folder.rawBytes(TransferBriefFiles, TARGET))).containEql('carried.pdf');
+    should(await brief.stored()).containEql('carried.pdf');
   });
 });
 

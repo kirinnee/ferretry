@@ -88,7 +88,6 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
         ...(resume === undefined ? {} : { resume }),
         ...(spec.model === undefined ? {} : { model: spec.model }),
         ...(spec.effort === undefined ? {} : { effort: spec.effort }),
-        ...(spec.prompt === undefined ? {} : { prompt: spec.prompt }),
       }),
     ]);
   };
