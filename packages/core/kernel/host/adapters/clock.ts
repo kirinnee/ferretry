@@ -33,3 +33,22 @@ export function systemClock(): Clock {
       }),
   };
 }
+
+/**
+ * The clock `fyd --check` hands the plugin checks: it runs on the timer functions and `Date.now` the caller copied
+ * BEFORE any plugin was loaded, never on the globals, so a selftest that patches `setTimeout` cannot switch off the
+ * timeout of the next one.
+ */
+export function copiedClock(
+  arm: (fn: () => void, delay: number) => unknown,
+  disarm: (timer: never) => void,
+  nowMs: () => number,
+): Pick<Clock, 'after' | 'nowMs'> {
+  return {
+    nowMs,
+    after: (delay: Duration, fn: () => void) => {
+      const timer = arm(fn, delay);
+      return () => (disarm as (timer: unknown) => void)(timer);
+    },
+  };
+}
