@@ -19,7 +19,7 @@ import type { DaemonTimings } from '../../contract/ports.ts';
 import { DEFAULT_ACCESS_LEASE_POLICY } from './limits.ts';
 
 /** The variable a test sets; read once, at boot. */
-export const TEST_TIMINGS_VARIABLE = 'FYD_TEST_TIMINGS';
+const TEST_TIMINGS_VARIABLE = 'FYD_TEST_TIMINGS';
 
 const DAY_SECONDS = 24 * 60 * 60;
 

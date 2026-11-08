@@ -11,7 +11,7 @@ import {
   protectedResourceFrom,
   protectedResourceMetadataUrls,
   requestedScope,
-} from '../../../daemon/lib/oauth/index.ts';
+} from '../../../daemon/lib/oauth/discovery.ts';
 
 const SERVER = 'https://mcp.example.com/v1/mcp';
 

@@ -6,10 +6,8 @@
 export * from '../../contract/index.ts';
 export {
   ApiError,
-  type ApiRequest,
   type ApiResponse,
   arrivedOnHost,
-  type CallContext,
   type CapabilityAxis,
   type CapabilityDemand,
   decodeParameter,
@@ -19,12 +17,10 @@ export {
 export {
   asksStepUpPerAction,
   type CallerGovernance,
-  CAPABILITY_NAMES,
   CAPABILITY_NAMES as DAEMON_CAPABILITIES,
   type CapabilityGrant,
   type CapabilityGrants,
   CapabilityGrantsSchema,
-  type CapabilityName,
   type CapabilityName as DaemonCapability,
   type CapabilityPresentation,
   DEVICE_ACTOR_PREFIX,
@@ -54,13 +50,11 @@ export {
 } from '@ferretry/core-gate/contract';
 export {
   type PublishedCarrier as DaemonCarrier,
-  type PublishedCarriers as DaemonCarriers,
   PublishedCarriersSchema,
 } from '@ferretry/plugin-connections/contract';
-export { type Instant, InstantSchema, instantFromEpochMs } from '@ferretry/std';
+export { type Instant, instantFromEpochMs } from '@ferretry/std';
 export type { CapabilityGuard } from './grants/types.ts';
 export { parseBody, parseOptionalBody } from './body.ts';
-export { DeviceKeySchema } from './proof/device-proof.ts';
 
 /** Today's `RouteContext`: the call as a handler sees it (Gate fills the standing). */
 export type RouteContext = import('@ferretry/kernel/contract').CallContext;

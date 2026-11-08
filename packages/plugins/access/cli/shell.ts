@@ -291,18 +291,18 @@ export const BINARY_NAME = 'fy';
 export const PRODUCT_NAME = 'ferretry';
 
 /** Today's `SystemMillisecondClock`, over the clock and timer the shell hands every half. */
-export interface HostClock {
+interface HostClock {
   now(): number;
   sleep(milliseconds: number): Promise<void>;
 }
 
 /** Today's `world.prompt.ask`. REPLACE WITH: a CliContext prompt. */
-export interface HostPrompt {
+interface HostPrompt {
   ask(message: string): Promise<string>;
 }
 
 /** Today's ora spinner: one live line on stderr. REPLACE WITH: a CliContext progress line. */
-export interface HostProgress {
+interface HostProgress {
   start(text: string): void;
   succeed(text: string): void;
   fail(text: string): void;

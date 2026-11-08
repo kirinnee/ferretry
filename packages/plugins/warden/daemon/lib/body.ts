@@ -40,20 +40,7 @@ const ENVELOPE_BYTES = 4 * 1024 * 1024;
  * pass `maxBytes` and bound it near its own contract — a fleet proposal's asset edits, for one, are
  * bounded at 256 KiB by the time they are parsed, and the read that precedes them should say so.
  */
-export const MAX_REQUEST_BODY_BYTES = ENCODED_PAYLOAD_BYTES + ENVELOPE_BYTES;
-
-/**
- * The bound for a route whose payload is bulk caller-supplied TEXT rather than an attachment.
- *
- * Sized on the largest such route: a fleet proposal's asset edits are bounded at 256 KiB across at
- * most 32 files by the time they are parsed, and the read that precedes them has no business being
- * a hundred times more generous. Twice the contract leaves room for the JSON envelope, the escaping
- * every quote and newline in a configuration file costs, and the mutation the edits travel with.
- *
- * Stated here, once, so the route that adopts it inherits the reasoning rather than a number: pass
- * `{ maxBytes: MAX_TEXT_BODY_BYTES }`.
- */
-export const MAX_TEXT_BODY_BYTES = 512 * 1024;
+const MAX_REQUEST_BODY_BYTES = ENCODED_PAYLOAD_BYTES + ENVELOPE_BYTES;
 
 /** How much of a body a route is willing to read. Injected rather than assumed, for the reason every
  *  limit in this daemon is: a test that had to allocate the shipped ceiling to prove the refusal

@@ -38,7 +38,7 @@ import { instantMs } from './time.ts';
 import { isTerminalStatus, type WardenSessionView } from './types.ts';
 
 /** Every board's lanes, by project id. */
-export type LaneSets = ReadonlyMap<string, LaneSet>;
+type LaneSets = ReadonlyMap<string, LaneSet>;
 
 /** Every card as the board derives it, with every board's lanes: one read per sweep. */
 export interface WardenBoardRead {
@@ -137,7 +137,7 @@ export interface WardenCardNotice {
   readonly waitingSince: string;
 }
 
-export type OrphanTell =
+type OrphanTell =
   | {
       readonly kind: 'message';
       readonly taskId: CardId;
@@ -216,7 +216,7 @@ const CARD_LINE_TAIL = (lane: string): string =>
  * notice's subject and the machine list's row say, so it has to fit a push body: a long title gives way, never
  * the ending.
  */
-export function orphanCardLine(view: CardView, board: WardenBoardRead): string {
+function orphanCardLine(view: CardView, board: WardenBoardRead): string {
   const ref = formatCardRef(view);
   const tail = CARD_LINE_TAIL(laneName(board, view));
   const room = Math.max(24, AGENDA_PUSH_BODY_LENGTH - ref.length - 1 - tail.length);
@@ -224,7 +224,7 @@ export function orphanCardLine(view: CardView, board: WardenBoardRead): string {
 }
 
 /** The queued message to the card's owner ferret. */
-export function orphanOwnerMessage(
+function orphanOwnerMessage(
   view: CardView,
   board: WardenBoardRead,
   fleet: ReadonlyMap<string, WardenSessionView>,
@@ -243,7 +243,7 @@ export const orphanTitle = (count: number): string =>
   count === 1 ? 'A card has nobody working on it' : `${String(count)} cards have nobody working on them`;
 
 /** The notice to the owner, when no ferret that owns the card is alive to be told. */
-export function orphanNotice(
+function orphanNotice(
   view: CardView,
   board: WardenBoardRead,
   fleet: ReadonlyMap<string, WardenSessionView>,

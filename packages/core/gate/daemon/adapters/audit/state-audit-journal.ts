@@ -3,7 +3,7 @@ import type { AuditRecord } from '../../../contract/index.ts';
 import type { AuditJournalPort, AuditReading, AuditRotation, AuditStore } from '../../lib/audit/service.ts';
 
 /** Each live file's bound (today's `AUDIT_FILE_MAX_BYTES`). A line that would carry it past this rotates first. */
-export const AUDIT_FILE_MAX_BYTES = 1024 * 1024;
+const AUDIT_FILE_MAX_BYTES = 1024 * 1024;
 
 /** The four files: each store's live file and its rotated one (`audit.jsonl`, `audit.1.jsonl`, `audit-kept…`). */
 export interface AuditFiles {

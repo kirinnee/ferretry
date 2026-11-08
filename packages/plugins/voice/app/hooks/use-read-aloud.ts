@@ -7,7 +7,7 @@
  * at once. Nothing here touches the reply text beyond passing it to the controller.
  */
 
-import { createContext, createElement, type ReactNode, useContext, useEffect, useSyncExternalStore } from 'react';
+import { createContext, createElement, type ReactNode, useContext, useSyncExternalStore } from 'react';
 import { readOptionsOf } from '../lib/voice-chat/live-settings.ts';
 import { createReadAloud, IDLE, type ReadAloudController, type ReadAloudState } from '../lib/voice-chat/read-aloud.ts';
 import { browserSpeaker } from '../lib/voice-chat/speech-synthesis.ts';
@@ -70,11 +70,4 @@ export function useReadAloud(key: string): RowReadAloud {
     read: markdown => controller.read(key, markdown, settings === null ? {} : readOptionsOf(settings.get())),
     stop: () => controller.stop(),
   };
-}
-
-/** Silence the page's reading when the surface that started it goes away. */
-export function useStopReadingOnLeave(scope: string): void {
-  const controller = useReadAloudController();
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `scope` is the cleanup's trigger: leaving one conversation silences it.
-  useEffect(() => () => controller.dismiss(), [controller, scope]);
 }

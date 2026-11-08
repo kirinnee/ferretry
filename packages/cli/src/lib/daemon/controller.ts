@@ -121,7 +121,7 @@ class DaemonShutdownFailedError extends Error {
 }
 
 /** What the shell's launcher came to. */
-export type DaemonLaunchOutcome = { readonly started: true } | { readonly started: false; readonly why: string };
+type DaemonLaunchOutcome = { readonly started: true } | { readonly started: false; readonly why: string };
 
 /** The two reads that need a connection to the daemon, supplied by the verb that runs. */
 export interface DaemonControlReads {

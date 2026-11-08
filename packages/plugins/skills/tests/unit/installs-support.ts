@@ -33,7 +33,7 @@ type Marker = 'symlink' | 'other' | 'deep' | 'hardlink';
  * skipped problem and carries the rest; when given a boundary a folder whose RESOLVED place (set with `resolveTo`) is
  * outside it is not read. `swapAfterList` moves the folder outside once it has been read once.
  */
-export class MemoryTree implements SkillFolderReader {
+class MemoryTree implements SkillFolderReader {
   readonly folders = new Map<string, Map<string, string | Marker>>();
   readonly boundaries: { readonly manifest: string; readonly confinedTo?: string }[] = [];
   readonly #resolved = new Map<string, string>();
@@ -73,7 +73,7 @@ export class MemoryTree implements SkillFolderReader {
 }
 
 /** A folder store that hashes like the real adapter, so the service compares real hashes. */
-export class FakeFolders {
+class FakeFolders {
   readonly folders = new Map<string, Map<string, string>>();
   refuse: string | undefined;
   fail: Error | undefined;
@@ -108,7 +108,7 @@ interface FakeComponent {
   provenance?: unknown;
 }
 
-export class FakeFleet implements RuntimeSkillTarget {
+class FakeFleet implements RuntimeSkillTarget {
   readonly proposed: Record<string, unknown>[] = [];
   readonly components = new Map<'mcp' | 'skills', FakeComponent[]>([
     ['mcp', []],

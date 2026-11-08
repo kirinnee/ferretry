@@ -4,7 +4,7 @@ export interface FerretParents {
 }
 
 /** Deeper than any real Pack tree; a bound so a damaged chain can never walk forever. */
-export const MAX_LINEAGE_DEPTH = 64;
+const MAX_LINEAGE_DEPTH = 64;
 
 /**
  * The ferrets above `ferretId`, nearest first, walked up the parent. A parent that resolves nowhere ends the walk:

@@ -218,6 +218,18 @@ describe('ports-pending', () => {
       'usage is back in "pending" by a one-time ruling but states no "pendingReasons" line',
     );
 
+    const unwired = ws([{ id: 'alpha' }, { id: 'access' }], {
+      pending: ['alpha', 'access'],
+      pendingReasons: { access: ['GAP(access): app/x.tsx is not reached by any screen (owner: nelly)'] },
+      pendingHalves: { alpha: ALL, access: ALL },
+    });
+    unwired.write('base.json', base);
+    const unwiredFound = messages(
+      await run(portsPending, unwired, { base: `file:${join(unwired.root, 'base.json')}` }),
+    );
+    expect(unwiredFound).not.toContain('access was added');
+    expect(unwiredFound).not.toContain('access is back in "pending"');
+
     const other = ws([{ id: 'alpha' }, { id: 'beta' }], {
       pending: ['alpha', 'beta'],
       pendingReasons: { beta: ['GAP(x): still open'] },
@@ -1098,6 +1110,17 @@ describe('guarantees: a kept row needs a test that PASSES (redesign §10.5)', ()
       expect(messages(await run(guarantees, f, { tier: 'unit', results: ['coverage/unit'] }))).toContain(
         'no test named',
       );
+      expect(messages(await run(guarantees, f, { tier: 'int', results: ['coverage/int'] }))).toBe('');
+    });
+
+    test("an integration test in another package that reuses the id does not make the integration job judge the owner's row", async () => {
+      const elsewhere = 'packages/plugins/beta/tests/integration/b.test.ts';
+      const f = planted(row('G1', 'kept'), titled('G1 holds'), {
+        'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A }),
+        'coverage/int/junit.xml': junit({ name: 'G1 a different fixture label', file: elsewhere }),
+      });
+      f.write(elsewhere, titled('G1 a different fixture label'));
+      expect(messages(await run(guarantees, f, { tier: 'unit', results: ['coverage/unit'] }))).toBe('');
       expect(messages(await run(guarantees, f, { tier: 'int', results: ['coverage/int'] }))).toBe('');
     });
 

@@ -93,7 +93,7 @@ export const notificationUrl = (raw: unknown, origin: string, machine: PushMachi
 /** How long the worker waits for the page to say it took the open before it navigates the window instead. */
 export const NOTIFICATION_OPEN_ACK_MS = 1_000;
 
-export interface NotificationOpenMessage {
+interface NotificationOpenMessage {
   readonly type: typeof NOTIFICATION_OPEN_MESSAGE;
   readonly url: string;
 }

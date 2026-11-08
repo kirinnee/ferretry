@@ -21,7 +21,7 @@ import { automaticOrder, availableModels, type PackFleetFacts } from './recommen
 import { defaultPrompt, effectiveRouting, fleetModels, routingLine } from './routing.ts';
 
 /** The settings in effect, read fresh for every request. */
-export interface PackSettings {
+interface PackSettings {
   readonly config: PackConfig;
   readonly routingFile: RoutingFile;
 }

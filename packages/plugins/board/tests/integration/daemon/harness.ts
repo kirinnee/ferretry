@@ -10,7 +10,7 @@ import type { AskAnswer } from '@ferretry/core-asks/contract';
  * ferret on an `operator` route, which Gate does not, so these tests bring a gate of their own: it admits everyone
  * and stands the caller in Gate's own fields (`actor`, `credential`), read from the `x-test-caller` header.
  */
-export const gate: Admission = {
+const gate: Admission = {
   admit: input => {
     const header = input.request.headers.get('x-test-caller') ?? (input.table === 'tool' ? 'ferret:f1' : 'owner');
     const [kind, id = ''] = header.split(':');

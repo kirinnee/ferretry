@@ -3,7 +3,7 @@ import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
 import type { GateTokens } from '../../lib/api/authentication.ts';
 
 /** 32 bytes of CSPRNG output, base64url so it survives a header and a shell (today's `mintToken`). */
-export function mintToken(): string {
+function mintToken(): string {
   return randomBytes(32).toString('base64url');
 }
 

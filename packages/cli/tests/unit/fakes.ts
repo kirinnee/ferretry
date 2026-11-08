@@ -228,7 +228,7 @@ export interface FakeWorldOptions {
 }
 
 /** The default fake host: an in-memory home, a fixed working directory, and readers that THROW, so no unit test reads the real disk or stdin. */
-export function fakeHostInputs() {
+function fakeHostInputs() {
   return {
     home: '/fake-home',
     fs: state.createMemoryHostFs(),

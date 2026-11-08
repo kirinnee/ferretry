@@ -1,4 +1,4 @@
-import { ApiError, jsonResponse, type RouteHandler } from '@ferretry/kernel/contract';
+import { ApiError, type RouteHandler } from '@ferretry/kernel/contract';
 import { callerIsAgent, parseActor } from '@ferretry/core-gate/contract';
 import {
   type BoardProject,
@@ -13,7 +13,7 @@ import {
   type LaneSetChangeResponse,
 } from '../../contract/index.ts';
 import { describeLaneSetFailure, type LaneActor, type LaneSetFailure } from '../lib/lanes/index.ts';
-import { answer, parseBody, pathParameter, reraiseBoardError } from './http.ts';
+import { answer, parseBody, pathParameter } from './http.ts';
 
 /** The board's projects and their lanes, as the routes need them. */
 export interface BoardProjectsSubsystem {
@@ -148,5 +148,3 @@ export function boardProjectRoutes(
     },
   };
 }
-
-export { jsonResponse, reraiseBoardError };

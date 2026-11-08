@@ -21,7 +21,7 @@ export interface HarnessPaths {
 }
 
 /** A `~` path as the operator means it. Absolute paths are returned untouched. */
-export function expandedHome(value: string, homeDirectory: string): string {
+function expandedHome(value: string, homeDirectory: string): string {
   if (value === '~') return homeDirectory;
   if (!value.startsWith('~/')) return value;
   return `${homeDirectory.replace(/\/+$/u, '')}/${value.slice(2)}`;
@@ -29,8 +29,8 @@ export function expandedHome(value: string, homeDirectory: string): string {
 
 const candidateIn = (directory: string, name: string): string => `${directory.replace(/\/+$/u, '')}/${name}`;
 
-export const BINARY_KEY = 'harness-codex.yaml binary';
-export const SEARCH_PATHS_KEY = 'harness-codex.yaml searchPaths';
+const BINARY_KEY = 'harness-codex.yaml binary';
+const SEARCH_PATHS_KEY = 'harness-codex.yaml searchPaths';
 
 export async function locateCodex(
   paths: HarnessPaths,

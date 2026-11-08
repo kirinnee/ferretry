@@ -1,5 +1,5 @@
 /**
- * Request-body parsing for Skills' routes (today's `daemon/src/lib/api/body.ts`, `parseBody` / `parseOptionalBody`, verbatim).
+ * Request-body parsing for Skills' routes (today's `daemon/src/lib/api/body.ts`, `parseBody`, verbatim).
  * Placement gives `api/` to Gate; until a contract exports these, each plugin keeps this copy. The kernel's
  * `ApiRequest.text(limit)` bounds the read.
  */
@@ -40,20 +40,7 @@ const ENVELOPE_BYTES = 4 * 1024 * 1024;
  * pass `maxBytes` and bound it near its own contract — a fleet proposal's asset edits, for one, are
  * bounded at 256 KiB by the time they are parsed, and the read that precedes them should say so.
  */
-export const MAX_REQUEST_BODY_BYTES = ENCODED_PAYLOAD_BYTES + ENVELOPE_BYTES;
-
-/**
- * The bound for a route whose payload is bulk caller-supplied TEXT rather than an attachment.
- *
- * Sized on the largest such route: a fleet proposal's asset edits are bounded at 256 KiB across at
- * most 32 files by the time they are parsed, and the read that precedes them has no business being
- * a hundred times more generous. Twice the contract leaves room for the JSON envelope, the escaping
- * every quote and newline in a configuration file costs, and the mutation the edits travel with.
- *
- * Stated here, once, so the route that adopts it inherits the reasoning rather than a number: pass
- * `{ maxBytes: MAX_TEXT_BODY_BYTES }`.
- */
-export const MAX_TEXT_BODY_BYTES = 512 * 1024;
+const MAX_REQUEST_BODY_BYTES = ENCODED_PAYLOAD_BYTES + ENVELOPE_BYTES;
 
 /** How much of a body a route is willing to read. Injected rather than assumed, for the reason every
  *  limit in this daemon is: a test that had to allocate the shipped ceiling to prove the refusal
@@ -80,23 +67,6 @@ export async function parseBody<Schema extends z.ZodType>(
   limits: BodyLimits = {},
 ): Promise<z.output<Schema>> {
   return parseJson(schema, await readText(request, limits), 'body');
-}
-
-/**
- * Parses a body whose payload is entirely optional: an absent or whitespace-only body is the
- * no-fields case, not a client error. Malformed JSON is still rejected — silently downgrading it to
- * `{}` would drop a field the caller meant to send.
- *
- * Optional is not unbounded: a route that needs no body at all still refuses an oversized one, so
- * `POST` with nothing to say cannot be turned into an upload.
- */
-export async function parseOptionalBody<Schema extends z.ZodType>(
-  request: ApiRequest,
-  schema: Schema,
-  limits: BodyLimits = {},
-): Promise<z.output<Schema>> {
-  const text = await readText(request, limits);
-  return text.trim() === '' ? parseValue(schema, {}, 'body') : parseJson(schema, text, 'body');
 }
 
 /**

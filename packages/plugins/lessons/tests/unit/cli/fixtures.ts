@@ -31,7 +31,7 @@ export class CapturingOutput implements ILessonsOutput {
   }
 }
 
-export function evidence(overrides: Partial<EvidenceView> = {}): EvidenceView {
+function evidence(overrides: Partial<EvidenceView> = {}): EvidenceView {
   return {
     observationId: 'obs-1',
     ferretId: 'ms8kkfyd-95b7037e',

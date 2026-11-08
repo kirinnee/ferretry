@@ -44,7 +44,7 @@ import { instantMs, isoFromMs } from './time.ts';
 import { WARDEN_LABEL, type WardenSessionView } from './types.ts';
 
 /** What the revive needs of the session journal, per session. */
-export interface WardenReviveEvents {
+interface WardenReviveEvents {
   /** A session's events, oldest first. Total: an unreadable journal is no events. */
   read(sessionId: string): Promise<readonly ReviveEvent[]>;
   /** Append one Warden event to a session's own journal. */
@@ -99,7 +99,7 @@ export interface WardenReviveResult {
 
 /** How long, and how often, a fleet-wide death waits for the tmux server. */
 export const REVIVE_TMUX_WAIT_TRIES = 12;
-export const REVIVE_TMUX_WAIT_MS = 5_000;
+const REVIVE_TMUX_WAIT_MS = 5_000;
 
 /** Candidates are read from sessions that failed within this many windows: older ones are not read at all. */
 const CANDIDATE_WINDOWS = 2;

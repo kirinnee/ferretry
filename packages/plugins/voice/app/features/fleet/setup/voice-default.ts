@@ -15,20 +15,11 @@ import { readConfigFile } from '../../../shell-voice.ts';
 
 export const VOICE_FILE = 'voice.yaml';
 
-const DEFAULT_ENGINE_LINE = /^defaultEngine:[^\n]*$/mu;
-
 /** The engine `voice.yaml` names, or `null` when it names none (or names one this app does not know). */
-export const machineVoiceEngine = (text: string): VoiceEngine | null => {
+const machineVoiceEngine = (text: string): VoiceEngine | null => {
   const value = /^defaultEngine:\s*["']?([\w-]+)["']?\s*(?:#.*)?$/mu.exec(text)?.[1];
   const parsed = VoiceEngineSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
-};
-
-/** `voice.yaml` with its default engine set: the line replaced where it is, or added at the end. */
-export const withMachineVoiceEngine = (text: string, engine: VoiceEngine): string => {
-  const line = `defaultEngine: ${engine}`;
-  if (DEFAULT_ENGINE_LINE.test(text)) return text.replace(DEFAULT_ENGINE_LINE, line);
-  return `${text}${text === '' || text.endsWith('\n') ? '' : '\n'}${line}\n`;
 };
 
 /**

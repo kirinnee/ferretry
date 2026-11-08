@@ -15,9 +15,9 @@ import {
 import type { ApiRequest } from '../contract/http.ts';
 
 /** A slow reader may hold at most this much in the host socket (the Ferrets event stream's bound). */
-export const BUS_MAX_BUFFER_BYTES = 1_024 * 1_024;
+const BUS_MAX_BUFFER_BYTES = 1_024 * 1_024;
 
-export const BUS_CLOSES = {
+const BUS_CLOSES = {
   clientFrame: { code: 1008, reason: 'event feed is server-only' },
   slowReader: { code: 1013, reason: 'event feed reader fell behind' },
 } as const;

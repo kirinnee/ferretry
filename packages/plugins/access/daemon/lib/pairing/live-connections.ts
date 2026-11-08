@@ -26,7 +26,7 @@
 export const DEVICE_UNPAIRED_CLOSE = { code: 1008, reason: 'this device is no longer paired' } as const;
 
 /** What a transport tells the registry about one live connection. */
-export interface DeviceConnectionTracker {
+interface DeviceConnectionTracker {
   /**
    * Registers one live connection, authorized for `deviceId`, with the way to end it.
    *

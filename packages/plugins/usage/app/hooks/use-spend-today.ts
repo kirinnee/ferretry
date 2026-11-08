@@ -18,7 +18,7 @@ const realNow = browserClock.now;
 const SPEND_REFRESH_MS = 5 * 60 * 1000;
 
 /** Dollars the priced sessions of one day cost; an unpriced-only day is unknown, an empty day is a true zero. */
-export const spendToday = (rows: readonly AnalyticsRawSession[]): number | null => {
+const spendToday = (rows: readonly AnalyticsRawSession[]): number | null => {
   if (rows.length === 0) return 0;
   const priced = rows.flatMap(row => (row.equivalentApiCostUsdMicros === null ? [] : [row.equivalentApiCostUsdMicros]));
   return priced.length === 0 ? null : priced.reduce((sum, micros) => sum + micros, 0) / 1_000_000;

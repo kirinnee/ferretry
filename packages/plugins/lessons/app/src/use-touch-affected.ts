@@ -38,7 +38,7 @@ const MEDIA_QUERIES = {
  * a DOM. Note every comparison is against an explicit `true`/`false`: a `null`
  * signal is not "no", it is "nobody said", and it lands on touch-affected.
  */
-export const touchAffectedFrom = (signals: TouchModalitySignals): boolean =>
+const touchAffectedFrom = (signals: TouchModalitySignals): boolean =>
   signals.finePrimary !== true ||
   signals.coarsePrimary !== false ||
   signals.hoverPrimary !== true ||
@@ -46,7 +46,7 @@ export const touchAffectedFrom = (signals: TouchModalitySignals): boolean =>
   signals.anyCoarse !== false;
 
 /** The slice of `MediaQueryList` this needs, so a test never fakes a whole DOM. */
-export interface MediaQueryListLike {
+interface MediaQueryListLike {
   readonly matches: boolean;
   addEventListener?(type: 'change', listener: () => void): void;
   removeEventListener?(type: 'change', listener: () => void): void;
@@ -82,14 +82,14 @@ const signalsFrom = (matcher: MediaMatcher | null): TouchModalitySignals => {
 };
 
 /** Reads the ambient environment once. Absent `matchMedia` ⇒ touch-affected. */
-export const readTouchAffected = (): boolean => touchAffectedFrom(signalsFrom(ambientMatcher()));
+const readTouchAffected = (): boolean => touchAffectedFrom(signalsFrom(ambientMatcher()));
 
 /**
  * Re-reads when a query flips — a tablet gaining a keyboard, a laptop losing a
  * mouse. Listener registration is best-effort: a matcher without
  * `addEventListener` still reports its current value, it just will not update.
  */
-export const subscribeToTouchAffected = (onChange: () => void): (() => void) => {
+const subscribeToTouchAffected = (onChange: () => void): (() => void) => {
   const matcher = ambientMatcher();
   if (matcher === null) return () => undefined;
   const detach: Array<() => void> = [];
@@ -105,7 +105,7 @@ export const subscribeToTouchAffected = (onChange: () => void): (() => void) => 
 };
 
 /** Prerender snapshot: nothing has been measured yet, so assume touch. */
-export const serverTouchAffected = (): boolean => true;
+const serverTouchAffected = (): boolean => true;
 
 /**
  * `useSyncExternalStore` rather than an effect, because the answer is needed by

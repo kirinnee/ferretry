@@ -16,7 +16,7 @@ import {
 /** How long repeats of one refusal, or of one act of activity, are folded into a single count. */
 export const AUDIT_FOLD_WINDOW_MS = 60_000;
 /** At most this many windows are open at once; a full table closes every window first. */
-export const AUDIT_MAX_OPEN_FOLDS = 1_024;
+const AUDIT_MAX_OPEN_FOLDS = 1_024;
 const DAY_MS = 86_400_000;
 const DETAIL_TEXT_MAX = 160;
 

@@ -19,7 +19,7 @@ import type {
 } from '../../contract/index.ts';
 
 /** Whether a limit still holds at `nowMs`: one with a reset time ends there, one without ends with its ferrets. */
-export const paneLimitHolds = (limit: PaneLimit, nowMs: number): boolean =>
+const paneLimitHolds = (limit: PaneLimit, nowMs: number): boolean =>
   limit.retryAt === undefined || limit.retryAt > nowMs;
 
 /** At or above this share left, a login has plenty; below {@link LOW_LEFT_PERCENT}, it is low. */

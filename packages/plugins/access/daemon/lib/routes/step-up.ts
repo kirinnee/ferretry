@@ -70,9 +70,7 @@ const STAGE_REFUSALS = {
  * The device and page a session's principal names: the kernel-stamped holder, and the session as the step-up's app
  * session (the kernel's `SessionPrincipal` carries no separate app-session id yet).
  */
-export function sessionDevice(
-  context: RouteContext,
-): { readonly deviceId: string; readonly appSession: string } | undefined {
+function sessionDevice(context: RouteContext): { readonly deviceId: string; readonly appSession: string } | undefined {
   const principal = context.request.principal;
   return principal?.kind === 'device' ? { deviceId: principal.holder, appSession: principal.session } : undefined;
 }
@@ -112,7 +110,7 @@ const refusal = (reason: StepUpRefusal): ApiResponse => {
 const caller = (context: RouteContext): StepUpCaller => callerOf(context);
 
 /** Who is asking, from the session and the carrier only (never a body). */
-export const callerOf = (context: RouteContext): StepUpCaller => {
+const callerOf = (context: RouteContext): StepUpCaller => {
   const { request, credential, actor } = context;
   const device = sessionDevice(context);
   return {

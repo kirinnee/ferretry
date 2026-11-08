@@ -25,7 +25,7 @@ export interface FeedSocket {
 }
 
 /** Opens the feed's (and a stream's) socket. Production passes `new WebSocket`; tests pass a fake, so no test opens a connection. */
-export type FeedSocketOpener = (url: string, headers: Readonly<Record<string, string>>) => FeedSocket;
+type FeedSocketOpener = (url: string, headers: Readonly<Record<string, string>>) => FeedSocket;
 
 /** Bun's `WebSocket` takes request headers as a second argument, which the DOM type does not know. */
 const bunSocket: FeedSocketOpener = (url, headers) =>
