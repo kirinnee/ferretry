@@ -144,7 +144,7 @@ export async function startDaemon(release: Release, options: { readonly version:
 
 const LOG_TAIL = 6000;
 
-/** Every plugin's status and failure, and the tail of the daemon's log with the admin token masked. */
+/** Every plugin's status and failure, and the tail of the daemon's log with both Gate tokens masked. */
 function describeDaemon(host: RunningHost, home: string): string {
   const plugins = [...host.plugins]
     .map(([id, record]) => `${id}: ${record.status}${record.failure === undefined ? '' : ` (${record.failure})`}`)
@@ -156,8 +156,14 @@ function describeDaemon(host: RunningHost, home: string): string {
       return '';
     }
   };
-  const token = read(join(home, 'state', 'gate', 'admin-token')).trim();
+  const admin = read(join(home, 'state', 'gate', 'admin-token')).trim();
+  const warden = read(join(home, 'state', 'gate', 'warden-token')).trim();
   const log = read(join(home, 'logs', 'fyd.log'));
-  const masked = token === '' ? log : log.split(token).join('<admin-token>');
+  let masked = log;
+  for (const [secret, label] of [
+    [admin, '<admin-token>'],
+    [warden, '<warden-token>'],
+  ] as const)
+    if (secret !== '') masked = masked.split(secret).join(label);
   return `plugins:\n${plugins}\nfyd.log (tail):\n${masked.slice(-LOG_TAIL)}`;
 }
