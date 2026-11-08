@@ -20,27 +20,27 @@ import {
 } from '../../contract/index.ts';
 import { type LoginsClient, refusalSentence } from './client.ts';
 
-export const STAGE_ROUTE = 'POST /v1/logins/changes' as const;
-export const APPLY_ROUTE = 'POST /v1/logins/changes/:changeId/apply' as const;
+const STAGE_ROUTE = 'POST /v1/logins/changes' as const;
+const APPLY_ROUTE = 'POST /v1/logins/changes/:changeId/apply' as const;
 
 /** Stage one change. Nothing is written: the answer is the preview a person approves. */
-export const stageLoginChange = async (client: LoginsClient, change: LoginChange): Promise<LoginChangeView> =>
+const stageLoginChange = async (client: LoginsClient, change: LoginChange): Promise<LoginChangeView> =>
   LoginChangeViewSchema.parse(await client.call(STAGE_ROUTE, { body: LoginChangeSchema.parse(change) }));
 
 /** Apply exactly the change that was previewed. */
-export const applyLoginChange = async (client: LoginsClient, changeId: string): Promise<LoginChangeOutcome> =>
+const applyLoginChange = async (client: LoginsClient, changeId: string): Promise<LoginChangeOutcome> =>
   LoginChangeOutcomeSchema.parse(await client.call(APPLY_ROUTE, { params: { changeId }, body: {} }));
 
-export type ChangeResult =
+type ChangeResult =
   | { readonly kind: 'applied'; readonly staged: LoginChangeView; readonly outcome: LoginChangeOutcome }
   | { readonly kind: 'refused'; readonly sentence: string };
 
-export type StageResult =
+type StageResult =
   | { readonly kind: 'staged'; readonly staged: LoginChangeView }
   | Extract<ChangeResult, { kind: 'refused' }>;
 
 /** What a finished change says to the person: nothing for a plain apply, the owner's hold or a failed sign-out otherwise. */
-export function outcomeSentence(outcome: LoginChangeOutcome): string | null {
+function outcomeSentence(outcome: LoginChangeOutcome): string | null {
   switch (outcome.outcome) {
     case 'applied':
     case 'signed-out':

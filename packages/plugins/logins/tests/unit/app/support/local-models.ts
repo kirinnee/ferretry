@@ -9,7 +9,7 @@ import { type LocalModels, LocalModelsSchema } from '../../../../contract/index.
 export type LocalModel = LocalModels['models'][number];
 export type LocalModelsState = LocalModels['state'];
 
-export const PULL = 'ollama pull gpt-oss:20b';
+const PULL = 'ollama pull gpt-oss:20b';
 
 export const GPT_OSS: LocalModel = {
   id: 'gpt-oss:20b',

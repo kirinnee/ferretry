@@ -13,15 +13,13 @@ import type {
   ProviderPresetView,
 } from '../../contract/index.ts';
 
-export const HARNESS_LABEL: Record<HarnessKey, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+const HARNESS_LABEL: Record<HarnessKey, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
 
 /** Two spaces per level, so nested facts read as belonging to the line above. */
-export const indent = (lines: readonly string[], depth = 1): string[] =>
-  lines.map(line => `${'  '.repeat(depth)}${line}`);
+const indent = (lines: readonly string[], depth = 1): string[] => lines.map(line => `${'  '.repeat(depth)}${line}`);
 
 /** A list in a sentence, or the word for nothing. */
-export const listOrNone = (items: readonly string[], none = 'none'): string =>
-  items.length === 0 ? none : items.join(', ');
+const listOrNone = (items: readonly string[], none = 'none'): string => (items.length === 0 ? none : items.join(', '));
 
 const usdWords = (amount: number): string => `$${amount.toFixed(2)}`;
 
@@ -33,7 +31,7 @@ const untilWords = (until: string): string => {
 };
 
 /** "disabled (spend limit reached) until 2026-11-01" for a switch that is off, or nothing when it is on. */
-export const disabledWords = (disabled: LoginDisabled | undefined): string | undefined => {
+const disabledWords = (disabled: LoginDisabled | undefined): string | undefined => {
   if (disabled === undefined) return undefined;
   const why = disabled.reason === undefined ? '' : ` (${disabled.reason})`;
   const until = disabled.until === undefined ? '' : ` until ${untilWords(disabled.until)}`;
@@ -149,7 +147,7 @@ export function renderLoginList(list: LoginList, binaryName: string): string {
 }
 
 /** The harnesses a preset is offered for, Claude Code first. */
-export const offeredHarnesses = (preset: ProviderPresetView): readonly HarnessKey[] =>
+const offeredHarnesses = (preset: ProviderPresetView): readonly HarnessKey[] =>
   (['claude-code', 'codex'] as const).filter(harness =>
     preset.halves.some(half => half.harness === harness && half.offered.available),
   );
@@ -157,7 +155,7 @@ export const offeredHarnesses = (preset: ProviderPresetView): readonly HarnessKe
 const SCOPE_WORD: Record<HarnessKey, string> = { 'claude-code': 'Claude', codex: 'Codex' };
 
 /** The scope chip `login presets` shows: "Claude + Codex", "Claude only", "Codex only", or "not offered". */
-export function presetScopeChip(preset: ProviderPresetView): string {
+function presetScopeChip(preset: ProviderPresetView): string {
   const offered = offeredHarnesses(preset);
   if (offered.length === 2) return `${SCOPE_WORD['claude-code']} + ${SCOPE_WORD.codex}`;
   const [only] = offered;

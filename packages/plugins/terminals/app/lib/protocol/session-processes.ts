@@ -25,6 +25,7 @@ import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, Posit
  *   Codex's app server, a browser an MCP server drives.
  */
 const SessionProcessKindSchema = z.enum(['command', 'background', 'server', 'helper']);
+export type SessionProcessKind = z.infer<typeof SessionProcessKindSchema>;
 
 /**
  * Where the process is in its life. `running` is on a CPU, `sleeping` is waiting on something (most
@@ -33,6 +34,7 @@ const SessionProcessKindSchema = z.enum(['command', 'background', 'server', 'hel
  * be read.
  */
 const SessionProcessStateSchema = z.enum(['running', 'sleeping', 'stopped', 'zombie', 'exited']);
+export type SessionProcessState = z.infer<typeof SessionProcessStateSchema>;
 
 /**
  * Where the process's output can be read from.

@@ -6,14 +6,14 @@ import type { InputRequestService } from '../../inputs/service.ts';
 import { AgendaIdSchema, type InputAgentView } from '../../inputs/wire.ts';
 
 /** Today's agent-tool wait bounds (`AGENT_TOOL_DEFAULT_WAIT_MS`, `AGENT_TOOL_MAX_WAIT_MS`). */
-export const INPUT_WAIT_DEFAULT_MS = 10_000;
-export const INPUT_WAIT_MAX_MS = 25_000;
+const INPUT_WAIT_DEFAULT_MS = 10_000;
+const INPUT_WAIT_MAX_MS = 25_000;
 
 /**
  * Today's `input.wait` call, less the phone approval's `pa_` id (Accounts' now): the card raised by
  * `*.request_input`, written `!A7` or `A7`, and how long to wait in this call.
  */
-export const InputWaitInputSchema = z.strictObject({
+const InputWaitInputSchema = z.strictObject({
   id: z
     .string()
     .trim()
@@ -23,7 +23,7 @@ export const InputWaitInputSchema = z.strictObject({
 });
 
 /** Today's `inputSummary`, word for word: where the card stands, never the value. */
-export function inputSummary(view: InputAgentView): string {
+function inputSummary(view: InputAgentView): string {
   const card = `!${view.id}`;
   switch (view.state) {
     case 'pending':

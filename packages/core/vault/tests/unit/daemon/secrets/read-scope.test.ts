@@ -16,15 +16,11 @@ import {
 import { Dispatcher, localArrival, type MountedRoute } from '@ferretry/kernel/host';
 import should from 'should';
 import { CloneableSecretNameSchema, SecretNameSchema } from '../../../../contract/index.ts';
-import {
-  ChildEnvironments,
-  HoldRegistry,
-  maskGrid,
-  maskLines,
-  SecretDirectory,
-  SecretStoreError,
-  VaultRedaction,
-} from '../../../../daemon/lib/secrets/index.ts';
+import { ChildEnvironments } from '../../../../daemon/lib/secrets/child-environments.ts';
+import { HoldRegistry } from '../../../../daemon/lib/secrets/output-guard.ts';
+import { maskGrid, maskLines, VaultRedaction } from '../../../../daemon/lib/secrets/read-scope.ts';
+import { SecretDirectory } from '../../../../daemon/lib/secrets/vault.ts';
+import { SecretStoreError } from '../../../../daemon/lib/secrets/types.ts';
 
 /**
  * The parts vault-a added around today's code: the kernel-bound `Redaction` (today's `SecretRedactor.batch` as one

@@ -32,7 +32,7 @@ import type { InputTargetFacts } from '@ferretry/core-vault/contract';
  */
 
 /** What a grant was pinned to when the owner approved it: part of the bytes the passkey was bound to. */
-export interface GrantPins {
+interface GrantPins {
   /** Login domains, or `tool@host`; never a site's `match` hosts. */
   readonly placeKeys: readonly PlaceKey[];
   readonly recipeVersion: number | undefined;
@@ -41,7 +41,7 @@ export interface GrantPins {
 }
 
 /** What a standing rule pinned of its account, beside the key: its handle, its username and its 2FA keys' fingerprint. */
-export interface GrantAccountPins {
+interface GrantAccountPins {
   readonly id: AccountId;
   readonly username: string | undefined;
   readonly factors: string;
@@ -172,7 +172,7 @@ const sameKeys = (left: readonly string[], right: readonly string[]): boolean =>
   left.length === right.length && left.every(key => right.includes(key)) && right.every(key => left.includes(key));
 
 /** The field set a card fills, as pins are kept: its roles, sorted and joined (`password`, `username+password`). */
-export const fieldSetOf = (roles: readonly LoginFieldRole[]): string => [...new Set(roles)].sort().join('+');
+const fieldSetOf = (roles: readonly LoginFieldRole[]): string => [...new Set(roles)].sort().join('+');
 
 /**
  * The roles a card's fields take under a grant, or why it can't: a `private` value is never covered, a code needs the

@@ -25,7 +25,7 @@ export interface AccountListing {
  * THE ACCOUNT STORE, as the recipe policy needs it: where a proposal is filed (on one sign-in) and where the owner
  * answers one. accounts-a's `AccountDirectory` (today's `lib/secrets/accounts.ts`) is this, method for method.
  */
-export interface RecipeAccounts {
+interface RecipeAccounts {
   list(): Promise<AccountListing>;
   proposeSignIn(
     id: SignInId,
@@ -58,7 +58,7 @@ export interface RecipeAccounts {
 export type RecipeProposalTarget = { readonly signIn: SignInId };
 
 /** Whether a text holds any value the daemon masks: the redactor would change it. Rejects when it cannot tell. */
-export interface RecipeValueCheck {
+interface RecipeValueCheck {
   redact(text: string): Promise<string>;
 }
 
@@ -101,7 +101,7 @@ interface RecipeBearing {
   readonly proposals?: readonly LoginRecipeProposal[] | undefined;
 }
 
-export class RecipeValueError extends Error {
+class RecipeValueError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'RecipeValueError';
@@ -264,7 +264,7 @@ function placeName(place: Place): string {
 }
 
 /** The lines that change, `- ` and `+ `, and the ferret's reason, cut to fit a card; the app shows the whole diff. */
-export function cardContext(base: string | undefined, next: string, why: string): string {
+function cardContext(base: string | undefined, next: string, why: string): string {
   const reason = `The ferret says: ${why}`;
   const changed = recipeDiff(base, next)
     .filter(line => line.op !== ' ')

@@ -35,7 +35,7 @@ import { type ProviderPreset, ProviderPresetFileSchema, presetFromFile } from '.
  * the clouds, the providers that serve both CLIs and the other Anthropic-compatible ones, the gateways —
  * then what serves Codex alone.
  */
-export const BUILT_IN_PRESET_TEXTS: Readonly<Record<string, string>> = Object.freeze({
+const BUILT_IN_PRESET_TEXTS: Readonly<Record<string, string>> = Object.freeze({
   'anthropic-api-key': anthropicApiKey,
   'amazon-bedrock': amazonBedrock,
   'amazon-bedrock-api-key': amazonBedrockApiKey,
@@ -58,7 +58,7 @@ export const BUILT_IN_PRESET_TEXTS: Readonly<Record<string, string>> = Object.fr
 });
 
 /** A built-in preset that does not check: a defect in this repository, never a person's mistake. */
-export class BuiltInPresetError extends Error {
+class BuiltInPresetError extends Error {
   constructor(id: string, problem: string) {
     super(`built-in preset ${id} does not check: ${problem}`);
     this.name = 'BuiltInPresetError';
@@ -66,7 +66,7 @@ export class BuiltInPresetError extends Error {
 }
 
 /** One preset file's text, checked: the preset, or every problem in one sentence. */
-export function parsePresetText(
+function parsePresetText(
   id: string,
   text: string,
   origin: ProviderPreset['origin'],

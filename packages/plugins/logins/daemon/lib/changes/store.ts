@@ -10,11 +10,11 @@
  */
 
 /** How many changes one daemon holds for review at once, across every client. */
-export const MAX_OPEN_CHANGES = 8;
+const MAX_OPEN_CHANGES = 8;
 /** How many applied changes are remembered, so a repeat apply is told it already happened. */
 const MAX_CONSUMED = 16;
 /** How long a reviewed change stays applicable: long enough to read, short enough to be current. */
-export const CHANGE_TTL_MS = 15 * 60 * 1000;
+const CHANGE_TTL_MS = 15 * 60 * 1000;
 const ID_MINT_ATTEMPTS = 4;
 
 export type LoginChangeProblem = 'unknown' | 'expired' | 'consumed' | 'exhausted';

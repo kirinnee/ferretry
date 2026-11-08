@@ -48,17 +48,17 @@ export function parseReason(text: string | undefined): string | undefined {
 }
 
 /** What one staged change would do, for the person deciding whether to apply it. */
-export function renderChangeView(view: LoginChangeView): string {
+function renderChangeView(view: LoginChangeView): string {
   return [view.summary, ...view.consequences.map(sentence => `  • ${sentence}`)].join('\n');
 }
 
 /** How an applied change ended, and whether a script should trust it as done. */
-export interface RenderedOutcome {
+interface RenderedOutcome {
   readonly text: string;
   readonly ok: boolean;
 }
 
-export function renderChangeOutcome(outcome: LoginChangeOutcome): RenderedOutcome {
+function renderChangeOutcome(outcome: LoginChangeOutcome): RenderedOutcome {
   switch (outcome.outcome) {
     case 'applied':
       return { ok: true, text: 'Done.' };
@@ -83,7 +83,7 @@ export function renderChangeOutcome(outcome: LoginChangeOutcome): RenderedOutcom
  * Off a terminal nobody can answer, so a destructive step without --yes is refused with a non-zero exit rather than
  * hanging or assuming yes.
  */
-export async function confirmStep(deps: LoginsCommandDeps, question: string, yes: boolean): Promise<boolean> {
+async function confirmStep(deps: LoginsCommandDeps, question: string, yes: boolean): Promise<boolean> {
   if (yes) return true;
   if (deps.prompt === undefined) {
     deps.out.error('Nothing was changed: this needs a yes. Re-run with --yes to go ahead without being asked.');

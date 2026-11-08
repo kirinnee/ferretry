@@ -28,10 +28,10 @@ import { SECRET_REFERENCE_SOURCE, type SecretName } from '@ferretry/core-vault/c
 import type { CredentialPlacement, OutboundHttpRequest } from '@ferretry/core-vault/contract';
 
 /** How long a Test waits for the provider. */
-export const PROVIDER_PROBE_TIMEOUT_MS = 10_000;
+const PROVIDER_PROBE_TIMEOUT_MS = 10_000;
 
 /** A model list or a balance is a few kilobytes; a 2xx past this still proves the key. */
-export const PROVIDER_PROBE_MAX_BYTES = 512 * 1_024;
+const PROVIDER_PROBE_MAX_BYTES = 512 * 1_024;
 
 /** One Test, ready to send. */
 export type ProviderProbePlan =

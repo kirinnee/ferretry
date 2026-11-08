@@ -9,7 +9,7 @@ import {
   SignInRuleSuggestionAsksAdapter,
   signInApprovalSource,
   TaskPlanAsksAdapter,
-} from '../../../../daemon/lib/index.ts';
+} from '../../../../daemon/lib/sign-in-approval/asks.ts';
 
 /**
  * THE SIGN-IN-APPROVAL ASK SOURCE (F640 re-cut): every question Accounts puts to the owner is raised by the daemon under

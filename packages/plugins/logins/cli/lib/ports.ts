@@ -59,7 +59,7 @@ export interface ILoginsOutput {
 }
 
 /** Asking a person something. Never used off a terminal. */
-export interface ILoginsPrompt {
+interface ILoginsPrompt {
   ask(message: string): Promise<string>;
 }
 

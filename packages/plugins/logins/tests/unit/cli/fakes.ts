@@ -75,12 +75,12 @@ export interface FakeAnswers {
   apply: () => LoginChangeOutcome;
 }
 
-export interface Call {
+interface Call {
   readonly name: string;
   readonly args: readonly unknown[];
 }
 
-export class FakeGateway implements ILoginsGateway {
+class FakeGateway implements ILoginsGateway {
   readonly calls: Call[] = [];
   readonly #answers: Partial<FakeAnswers>;
 
@@ -149,7 +149,7 @@ export class FakeGateway implements ILoginsGateway {
 
 type Channel = 'success' | 'report' | 'warn' | 'error';
 
-export class FakeOutput {
+class FakeOutput {
   readonly lines: { channel: Channel; text: string }[] = [];
   exitCode = 0;
   success = (text: string) => void this.lines.push({ channel: 'success', text });
@@ -167,7 +167,7 @@ export class FakeOutput {
   }
 }
 
-export class FakePrompt {
+class FakePrompt {
   readonly questions: string[] = [];
   readonly #answers: string[];
   constructor(answers: string[] = []) {

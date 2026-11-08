@@ -20,16 +20,3 @@ export const assertRejects = (cases: readonly SchemaCase[]): void => {
     should(entry.schema.safeParse(entry.value).success).be.false();
   }
 };
-
-export const assertCoversEverySchema = (
-  module: Readonly<Record<string, unknown>>,
-  cases: readonly SchemaCase[],
-): void => {
-  const covered = new Set(cases.map(entry => entry.schema));
-  const missing = Object.entries(module)
-    .filter(([name]) => name.endsWith('Schema'))
-    .filter(([, schema]) => !covered.has(schema as z.ZodType))
-    .map(([name]) => name)
-    .sort();
-  should(missing).deepEqual([]);
-};

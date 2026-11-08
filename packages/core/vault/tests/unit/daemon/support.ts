@@ -4,18 +4,16 @@
  */
 import type { ChildEnvironmentOpener } from '@ferretry/kernel/contract';
 import type { OutboundHttpRequest, SecretName } from '../../../contract/index.ts';
+import type { OutboundOutcome, OutboundTransport, SecretValueSource } from '../../../daemon/lib/secrets/authorizer.ts';
 import {
-  type OutboundOutcome,
-  type OutboundTransport,
   type SecretChildOutcome,
   type SecretChildRunner,
   type SecretChildSpec,
   type SecretCipherPort,
   type SecretDocumentStore,
   SecretStoreError,
-  type SecretValueSource,
   type SecretVaultDocument,
-} from '../../../daemon/lib/secrets/index.ts';
+} from '../../../daemon/lib/secrets/types.ts';
 
 /** A cipher that reverses the text and files the name as the iv: enough to prove AAD and round trips. */
 export class FakeSecretCipher implements SecretCipherPort {
