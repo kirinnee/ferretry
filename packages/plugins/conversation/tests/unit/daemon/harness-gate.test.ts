@@ -56,7 +56,7 @@ describe('the harness gate is OPEN, and the mapping it opened on cannot drift fr
         '}',
       ].join('\n'),
       '  deliver(delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessDeliveryFailure>>;',
-      '  queue(text: string): Promise<Result<QueueOutcome, HarnessDeliveryFailure>>;',
+      '  queue(text: string, options?: HarnessQueueOptions): Promise<Result<QueueOutcome, HarnessDeliveryFailure>>;',
       '  interrupt(): Promise<Result<HarnessInterrupted, HarnessRefusal>>;',
     ])
       expect(port).toContain(line);
