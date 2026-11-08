@@ -5959,7 +5959,6 @@ const SOURCE_CALLSIGN_POOL: readonly string[] = [
   'leena',
   'leeroy',
   'leesa',
-  'legacy',
   'legend',
   'leia',
   'leiah',
