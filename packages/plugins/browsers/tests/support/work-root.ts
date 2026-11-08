@@ -84,6 +84,7 @@ export function workRoots(folder: string, stateHome: string): RootsPort {
     fileIdentity: unused('fileIdentity'),
     linkTo: unused('linkTo'),
     setMode: unused('setMode'),
+    rename: unused('rename'),
   };
   return {
     root: () => handle,
