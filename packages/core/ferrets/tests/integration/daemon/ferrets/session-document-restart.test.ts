@@ -9,7 +9,6 @@ import type { HookDecision } from '@ferretry/kernel/contract';
 import { FerretsPort, Harnesses, Runners, StartDecide, type StartDecideInput } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner, ferretId } from '../../../../contract/testing/index.ts';
 import ferrets from '../../../../daemon/index.ts';
-import { HELPER_ADMISSION_ANSWERER } from '../../../../daemon/lib/ferrets/helper-admission.ts';
 import { SessionConfigSchema } from '../../../../daemon/lib/protocol/session.ts';
 
 /**
@@ -59,7 +58,8 @@ const admitting = () => {
   const asked: StartDecideInput[] = [];
   const plugin = implementDaemon(
     definePlugin({
-      id: HELPER_ADMISSION_ANSWERER,
+      // Packs' manifest id, written out rather than read from the constant under test.
+      id: 'packs',
       title: 'Packs (fake)',
       version: '5.0.0',
       api: 5,

@@ -45,12 +45,15 @@ export function pluginRegistryFor(entry: string, exists: (path: string) => boole
 /**
  * Every declared worker program, in a stable order. Throws one error naming every problem: a declared id the half does
  * not implement, an implemented id nobody declared, a module that is not a file on disk, and two programs (or one and
- * the entry) that would embed under one name.
+ * the entry, or one and a worker program beside the entry) that would embed under one name. `siblings` are the
+ * embedded names of those workers beside the entry (`<stem>.js` of each `*.worker.ts` there): they land flat in the same
+ * place, so a plugin worker with one of their stems would collide with it silently inside Bun.
  */
 export function pluginWorkers(
   halves: readonly WorkerHalf[],
   entryFile: string,
   exists: (path: string) => boolean = existsSync,
+  siblings: readonly string[] = [],
 ): readonly PluginWorker[] {
   const problems: string[] = [];
   const found: PluginWorker[] = [];
@@ -75,10 +78,30 @@ export function pluginWorkers(
         problems.push(`${plugin} worker "${id}" names ${source}, which does not exist`);
         continue;
       }
-      found.push({ plugin, id, source, file: embeddedWorkerFile(url) });
+      let file: string;
+      try {
+        file = embeddedWorkerFile(url);
+      } catch {
+        problems.push(
+          `${plugin} worker "${id}" has a file name that is not valid text, so no program can be found by it`,
+        );
+        continue;
+      }
+      // The kernel finds the program by building a URL from this name: a `#` or `?` there would start a fragment or a
+      // query, and a `%` can break the decoding, so the program would be found at the wrong path or not at all.
+      if (/[#?%]/u.test(file)) {
+        problems.push(
+          `${plugin} worker "${id}" is a file whose name has a #, ? or % in it; the embedded program is found by that name, so rename the file`,
+        );
+        continue;
+      }
+      found.push({ plugin, id, source, file });
     }
   }
-  const owners = new Map<string, string>([[entryFile, 'the entry']]);
+  const owners = new Map<string, string>([
+    ...siblings.map((file): [string, string] => [file, 'a worker program beside the entry']),
+    [entryFile, 'the entry'],
+  ]);
   for (const worker of found) {
     const earlier = owners.get(worker.file);
     if (earlier !== undefined)
