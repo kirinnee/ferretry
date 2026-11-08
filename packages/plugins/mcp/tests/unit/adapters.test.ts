@@ -15,6 +15,7 @@ function memoryRoot(
   const outside = options.outside ?? [];
   const handle: RootHandle = {
     name: 'work',
+    internal: false,
     resolve: given => {
       const absolute = given === '' ? '/w' : `/w/${given}`;
       return outside.some(prefix => absolute === prefix || absolute.startsWith(`${prefix}/`))
