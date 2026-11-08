@@ -11,9 +11,23 @@ export class EventBus {
   private readonly subscribers = new Map<string, Subscriber[]>();
   private readonly listeners = new Set<(name: string, payload: unknown) => void>();
 
-  constructor(private readonly log: Log) {}
+  /**
+   * `busOnly`: events the kernel delivers on `GET /v1/bus` and to {@link onAny} alone. A plugin's subscription to one
+   * is never made (it is said once in the log), so what it names reaches no plugin in-process.
+   */
+  constructor(
+    private readonly log: Log,
+    private readonly busOnly: ReadonlySet<string> = new Set(),
+  ) {}
 
   subscribe(plugin: string, event: EventDef, fn: (payload: unknown) => void | Promise<void>): void {
+    if (this.busOnly.has(event.name)) {
+      this.log.warn('a plugin subscribed to an event only the bus carries; it is not delivered to it', {
+        event: event.name,
+        plugin,
+      });
+      return;
+    }
     const list = this.subscribers.get(event.name) ?? [];
     list.push({ plugin, fn });
     this.subscribers.set(event.name, list);

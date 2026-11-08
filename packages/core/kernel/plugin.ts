@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { Carriers, DoctorChecks, defineConfig, PluginsChanged, policyRef, SessionModes } from './contract/index.ts';
+import {
+  Carriers,
+  ConfigChanged,
+  DoctorChecks,
+  defineConfig,
+  PluginsChanged,
+  policyRef,
+  SessionModes,
+} from './contract/index.ts';
 import { definePlugin, route, socket, tool } from './manifest/index.ts';
 import { AgentConfigCallSchemas, AGENT_CONFIG_TOOLS } from './contract/agent-config.ts';
 
@@ -198,7 +206,7 @@ export default definePlugin({
       }),
     ],
   },
-  data: { publishes: [PluginsChanged], config: [PluginsConfig] },
+  data: { publishes: [PluginsChanged, ConfigChanged], config: [PluginsConfig] },
   hooks: {
     offers: [{ hook: Carriers }, { hook: SessionModes }, { hook: DoctorChecks }],
   },
