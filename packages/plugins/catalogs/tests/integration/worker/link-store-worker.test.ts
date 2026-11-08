@@ -295,6 +295,23 @@ describe('link store worker: who it serves', () => {
   });
 });
 
+describe('link store worker: a daemon it does not serve', () => {
+  it('should refuse a signed upload from a daemon the deployment does not carry, after its nonce was issued', async () => {
+    const me = await newDaemonIdentity();
+    const world = await linkStoreWorld({ mode: 'self-hosted', daemonIds: me.daemonId });
+    const client = new LinkStoreClient(world, me);
+    const nonce = await client.nonce();
+    const carried = (await newDaemonIdentity()).daemonId;
+
+    const up = await client.upload({ nonce, environment: world.environment({ daemonIds: carried }) });
+
+    should(up.response.status).equal(404);
+    should(await refusal(up.response)).equal('link_unknown');
+    should(world.control.keys('link:')).deepEqual([]);
+    finish(world);
+  });
+});
+
 describe('link store worker: ids that were never created', () => {
   it('should answer an unknown id with the bytes of a wrong token and create no bundle object', async () => {
     const { world, client } = await plain();
@@ -706,6 +723,30 @@ describe('link store worker: the operator', () => {
     }
   });
 
+  it('should answer 401 naming the Bearer scheme to a request with no bearer or the wrong one', async () => {
+    const { world } = await plain({ relaxed: false });
+    for (const token of [null, 'not-the-operator-bearer', '']) {
+      const response = await world.operator('GET', undefined, token);
+      should(response.status).equal(401);
+      should(response.headers.get('WWW-Authenticate')).equal('Bearer');
+      should(response.headers.get('Cache-Control')).equal('no-store, max-age=0');
+      should(await json(response)).deepEqual({ error: 'unauthorized' });
+    }
+    const basic = await world.operator('GET', undefined, null, { headers: { Authorization: 'Basic abc' } });
+    should(basic.status).equal(401);
+  });
+
+  it('should answer 503, not 401, when the deployment has no operator bearer configured', async () => {
+    const { world } = await plain({ relaxed: false });
+    for (const operatorToken of [undefined, '']) {
+      const response = await world.operator('GET', undefined, 'anything', {
+        environment: world.environment({ operatorToken }),
+      });
+      should(response.status).equal(503);
+      should(await json(response)).deepEqual({ error: 'relay operator authentication is not configured' });
+    }
+  });
+
   it('should answer 405 with the methods it takes to any other method', async () => {
     const { world } = await plain({ relaxed: false });
     const response = await world.operator('DELETE');
@@ -833,6 +874,20 @@ describe('link store worker: an object that fails', () => {
     should((await client.upload({})).response.status).equal(503);
     // Only the garbled reserve committed before its answer was lost; its lease is settled by the control alarm.
     should(world.control.keys('link:')).have.length(1);
+    finish(world);
+  });
+
+  it('should say 503 and give the reservation back when the bundle object cannot take the upload', async () => {
+    const { world, client } = await plain();
+    world.faults.push({ target: 'bundle', route: '/upload', mode: 'throw' });
+
+    const up = await client.upload({});
+
+    should(up.response.status).equal(503);
+    should(await refusal(up.response)).equal('link_store_unavailable');
+    world.faults.length = 0;
+    should(world.control.keys('link:')).deepEqual([]);
+    should(await client.states([up.bundleId])).deepEqual({ [up.bundleId]: 'unknown' });
     finish(world);
   });
 
