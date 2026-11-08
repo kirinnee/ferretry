@@ -6,7 +6,7 @@
  */
 
 import type { AgendaItem, AgendaListRecord } from '@ferretry/core-asks/contract';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AGENDA_TAB_EMPTY,
   type AgendaTabFilter,
@@ -25,7 +25,17 @@ export interface AgendaTabProps {
   readonly lead?: { readonly name: string; readonly open: () => void };
   /** The first filter to show; the first with anything in it when absent. */
   readonly initial?: AgendaTabFilter;
+  /**
+   * The ask a link asked for (`?ask=A3`, `useAskFocus`). When it is one of this ferret's, its filter opens and its row is
+   * rung; one that is not here asks for nothing. A new `seq` is a new request, so tapping the same ask's notification
+   * again rings it again.
+   */
+  readonly focus?: { readonly target: AgendaItem['id']; readonly seq: number } | null;
 }
+
+/** The filter that holds the ask, or `undefined` when it is not among this ferret's. */
+const filterOf = (model: AgendaTabModel, target: AgendaItem['id']): AgendaTabFilter | undefined =>
+  model.chips.find(chip => model.rows[chip.key].some(row => row.id === target))?.key;
 
 const firstFilled = (model: AgendaTabModel): AgendaTabFilter =>
   model.chips.find(chip => chip.count > 0)?.key ?? 'needs-you';
@@ -35,13 +45,29 @@ const toneOf = (row: AgendaTabRow): string => {
   return 'parked';
 };
 
-function TabRow({ row, onOpen }: { readonly row: AgendaTabRow; readonly onOpen: AgendaTabProps['onOpen'] }) {
+function TabRow({
+  row,
+  onOpen,
+  rung,
+}: {
+  readonly row: AgendaTabRow;
+  readonly onOpen: AgendaTabProps['onOpen'];
+  /** The request that rang this row, or `null` for a row nobody asked for. */
+  readonly rung: number | null;
+}) {
   const ask = 'resolvedAt' in row.item ? null : agendaAsk(row.item);
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (rung !== null) ref.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [rung]);
   return (
     <button
+      aria-current={rung === null ? undefined : 'true'}
       className="fy-agenda-row"
       data-agenda-dimmed={row.filter === 'needs-you' ? undefined : true}
+      data-agenda-focused={rung === null ? undefined : ''}
       data-agenda-row={row.id}
+      ref={ref}
       data-agenda-tab-row={row.filter}
       onClick={() => onOpen(row.item)}
       type="button"
@@ -72,8 +98,19 @@ function TabRow({ row, onOpen }: { readonly row: AgendaTabRow; readonly onOpen: 
   );
 }
 
-export function AgendaTab({ model, onOpen, lead, initial }: AgendaTabProps) {
-  const [chosen, setChosen] = useState<AgendaTabFilter>(initial ?? firstFilled(model));
+export function AgendaTab({ model, onOpen, lead, initial, focus = null }: AgendaTabProps) {
+  const asked = focus === null ? undefined : filterOf(model, focus.target);
+  const [chosen, setChosen] = useState<AgendaTabFilter>(asked ?? initial ?? firstFilled(model));
+  // Each request opens the filter its ask sits in once (the reader may move to another after); the row is rung meanwhile.
+  // `seq` is the request: a new one re-opens the filter even when the ask has not moved, and a board that lands after
+  // the request still opens it.
+  const seq = focus?.seq ?? null;
+  const handled = useRef<number | null>(null);
+  useEffect(() => {
+    if (seq === null || asked === undefined || handled.current === seq) return;
+    handled.current = seq;
+    setChosen(asked);
+  }, [asked, seq]);
   const rows = model.rows[chosen];
   return (
     <div className="fy-agenda-info" data-agenda-tab={chosen}>
@@ -94,7 +131,7 @@ export function AgendaTab({ model, onOpen, lead, initial }: AgendaTabProps) {
         <ul className="fy-agenda-rows">
           {rows.map(row => (
             <li className="fy-agenda-rows__item" key={row.id}>
-              <TabRow onOpen={onOpen} row={row} />
+              <TabRow onOpen={onOpen} row={row} rung={focus !== null && focus.target === row.id ? focus.seq : null} />
             </li>
           ))}
         </ul>

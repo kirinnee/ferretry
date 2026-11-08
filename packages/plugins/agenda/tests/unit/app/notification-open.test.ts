@@ -306,12 +306,12 @@ describe('NotificationOpenInbox', () => {
 
     // Act
     inbox.receive(event(notificationOpenMessage('/d/a/session/s1'), acks));
-    inbox.receive(event(notificationOpenMessage('/d/b/session/s2?attention=A3'), acks));
+    inbox.receive(event(notificationOpenMessage('/d/b/ferrets/s2/chat?ask=A3'), acks));
     inbox.subscribe(path => routed.push(path));
 
     // Assert
     expect(acks).toEqual([NOTIFICATION_OPEN_ACK, NOTIFICATION_OPEN_ACK]);
-    expect(routed).toEqual(['/d/b/session/s2?attention=A3']);
+    expect(routed).toEqual(['/d/b/ferrets/s2/chat?ask=A3']);
   });
 
   it('routes through the latest subscriber, and holds again once it has gone', () => {

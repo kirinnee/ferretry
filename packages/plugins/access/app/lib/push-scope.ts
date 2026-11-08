@@ -23,18 +23,7 @@
  * Pure: the page and the worker both call these, and neither reads a global here.
  */
 
-import type { PushNotificationPayload } from '../../contract/index.ts';
-import {
-  agendaTargetFromSearch,
-  type DaemonId,
-  daemonAgendaPath,
-  daemonHomePath,
-  daemonSessionPath,
-  inboxTargetPath,
-  isMachineAgendaId,
-  notificationBrand,
-  parseRoute,
-} from '../shell-pairing.ts';
+import { type DaemonId, daemonHomePath, notificationBrand, type PushMachine, pushMachineOf } from '../shell-pairing.ts';
 
 /** The path every per-machine push registration lives under. Never a page the app serves. */
 export const PUSH_SCOPE_ROOT = '/push/';
@@ -49,137 +38,17 @@ export const pushScopePath = (daemon: DaemonId): string => `${PUSH_SCOPE_ROOT}${
 export const pushWorkerUrl = (workerUrl: string, label: string): string =>
   `${workerUrl}?${LABEL_PARAMETER}=${encodeURIComponent(label)}`;
 
-/** The machine one push registration serves, as this browser registered it. */
-export interface PushMachine {
-  readonly daemonId: string;
-  /** The reader's label for it; the daemon id when the script named none. */
-  readonly label: string;
-}
+export { type PushMachine, pushMachineOf };
 
-/**
- * Which machine a registration serves, from its scope URL and its script URL — or `null` for the
- * app's own registration (scope `/`) and anything else that is not a per-machine push scope.
- */
-export const pushMachineOf = (scope: string, scriptUrl: string): PushMachine | null => {
-  const path = URL.parse(scope)?.pathname ?? '';
-  if (!path.startsWith(PUSH_SCOPE_ROOT)) return null;
-  const segment = path.slice(PUSH_SCOPE_ROOT.length).replace(/\/$/u, '');
-  if (segment === '' || segment.includes('/')) return null;
-  let daemonId: string;
-  try {
-    daemonId = decodeURIComponent(segment);
-  } catch {
-    return null;
-  }
-  const label = URL.parse(scriptUrl)?.searchParams.get(LABEL_PARAMETER)?.trim() ?? '';
-  return { daemonId, label: label === '' ? daemonId : label };
-};
+/** Where a quiet line's tap goes: the machine's home, or — for the app-wide registration — the app. */
+export const machineHomeUrl = (machine: PushMachine | null, origin: string): string =>
+  new URL(machine === null ? '/app/' : daemonHomePath(machine.daemonId as DaemonId), origin).href;
 
 /** Whether a registration scope URL is a per-machine push scope. */
 export const isPushScope = (scope: string): boolean => pushMachineOf(scope, scope) !== null;
 
-/** The pages one machine may open: its own sessions page and everything under it. */
-const machinePath = (machine: PushMachine): string => daemonHomePath(machine.daemonId as DaemonId);
-
-const withinMachine = (pathname: string, machine: PushMachine): boolean => {
-  const root = machinePath(machine);
-  return pathname === root || pathname.startsWith(`${root}/`);
-};
-
-/**
- * A push as THIS machine's worker shows it: titled with the reader's label for the machine, tagged
- * inside its namespace, and pointing only at its own pages. The daemon's own words stay in the body.
- */
-export const machineNotification = (
-  payload: PushNotificationPayload,
-  machine: PushMachine,
-  origin: string,
-): PushNotificationPayload => ({
-  ...payload,
-  title: `${machine.label} · ${payload.title}`,
-  tag: `fy-push:${encodeURIComponent(machine.daemonId)}:${payload.tag}`,
-  url: notificationUrl(payload.url, origin, machine, 'sessionId' in payload ? payload.sessionId : undefined),
-});
-
 /** What a push that reached the app-wide registration says it is: from no machine this browser can name. */
 const UNVERIFIED = 'Unverified';
-
-/** What a push nobody composed is shown as, so a subscription is never punished for a silent push. */
-export const unreadablePushTitle = (machine: PushMachine | null): string =>
-  machine === null ? `${UNVERIFIED} · Ferretry` : `${machine.label} · Ferretry`;
-
-/**
- * A push that reached the APP-WIDE registration: the old shared subscription, before it was dropped
- * (docs/cross-daemon.md §4b). Nothing says which machine sent it, so it is titled "Unverified", kept out
- * of every machine's tag namespace, and opens only the app itself — never one machine's pages.
- */
-export const unverifiedNotification = (payload: PushNotificationPayload, origin: string): PushNotificationPayload => ({
-  ...payload,
-  title: `${UNVERIFIED} · ${payload.title}`,
-  tag: `fy-push-unverified:${payload.tag}`,
-  url: new URL('/app/', origin).href,
-});
-
-/**
- * Where a notification click may go (docs/cross-daemon.md §4a, §4c): only this site, and — for a
- * machine's own worker — only that machine's pages. Anything else opens that machine's own copy of
- * the conversation the push is about (`sessionId`), else its sessions, else — when the notification
- * belongs to no machine — the app itself.
- *
- * A daemon names a conversation RELATIVE TO ITS OWN PAGES — `/session/<id>?attention=A3`
- * (`agendaNotificationPath`), since it never knows which name this browser files it under — so a
- * machine's worker reads `/session/…` as under that machine. The app-wide worker knows no machine, and
- * such a path falls through to the app itself.
- *
- * THE `sessionId` FALLBACK IS FOR DAEMONS THAT NAME NO PAGE. A daemon older than #768 sent every push —
- * an ask included — with `url: '/'`, and `fy attention notify` still did: the tap opened the machine's
- * session list and left the reader to find the conversation. The payload's own `sessionId` says which
- * one it is about, so the tap opens it there.
- */
-export const notificationUrl = (
-  raw: unknown,
-  origin: string,
-  machine: PushMachine | null,
-  sessionId?: string,
-): string => {
-  const fallback = new URL(fallbackPath(machine, sessionId), origin);
-  const target = typeof raw === 'string' ? URL.parse(machineRelative(raw, machine), origin) : null;
-  if (target === null || target.origin !== origin) return fallback.href;
-  if (machine === null && target.pathname.startsWith(SESSION_RELATIVE)) return fallback.href;
-  if (machine !== null && !withinMachine(target.pathname, machine)) return fallback.href;
-  return target.href;
-};
-
-/**
- * Where a TAP lands, given the page `notificationUrl` allowed: an Agenda push names its conversation AT
- * an item (`/d/<id>/session/<sid>?attention=A3`), and the item is a card the owner answers in the Inbox, so
- * the tap opens the Inbox at that card. The Inbox sends the reader on to the conversation itself when the
- * item is no longer open (answered elsewhere, snoozed, on the ferret's turn). Every other page — a
- * conversation with no item, settings — is returned untouched.
- * @pending access: notificationTapUrl in app/lib/push-scope.ts is rewritten by the unmerged branch rebuild/fix-notification-tap, so it stays until that branch lands
- */
-export const notificationTapUrl = (allowed: string, origin: string): string => {
-  const url = URL.parse(allowed, origin);
-  if (url === null || url.origin !== origin) return allowed;
-  const route = parseRoute(url.pathname);
-  const item = agendaTargetFromSearch(url.search);
-  if (route.kind !== 'session' || item === null) return allowed;
-  return new URL(inboxTargetPath(route.daemonId, route.sessionId, item), origin).href;
-};
-
-/** Where a tap goes when the push named no page this worker may open. */
-const fallbackPath = (machine: PushMachine | null, sessionId: string | undefined): string => {
-  if (machine === null) return '/app/';
-  if (sessionId === undefined || sessionId.trim() === '') return machinePath(machine);
-  if (isMachineAgendaId(sessionId)) return daemonAgendaPath(machine.daemonId as DaemonId);
-  return daemonSessionPath(machine.daemonId as DaemonId, sessionId);
-};
-
-/** The page prefix a daemon names its own conversations by, relative to its machine's pages. */
-const SESSION_RELATIVE = '/session/';
-
-const machineRelative = (raw: string, machine: PushMachine | null): string =>
-  machine !== null && raw.startsWith(SESSION_RELATIVE) ? `${machinePath(machine)}${raw}` : raw;
 
 /** The fixed, per-machine tag every filtered push collapses into — see `filteredPushNotification`. */
 export const FILTERED_PUSH_TAG_PREFIX = 'fy-quiet:';
@@ -200,8 +69,7 @@ export const FILTERED_PUSH_TAG_PREFIX = 'fy-quiet:';
  * - ONE FIXED TAG PER MACHINE (`renotify: false`), so ten filtered pushes in a row collapse into one
  *   persistent line rather than ten, in the SAME namespace a machine's ordinary pushes use
  *   (`fy-quiet:<daemonId>`, never clashing with `fy-push:<daemonId>:<tag>`).
- * - Opens that machine's own pages on a tap, same as any other push — `notificationUrl` with no
- *   `raw` URL always falls through to the fallback, so this reuses it rather than re-deriving it.
+ * - Opens that machine's home on a tap (the app, for the app-wide registration).
  */
 export const filteredPushNotification = (
   machine: PushMachine | null,
@@ -214,6 +82,6 @@ export const filteredPushNotification = (
     tag: `${FILTERED_PUSH_TAG_PREFIX}${machine === null ? 'app' : encodeURIComponent(machine.daemonId)}`,
     silent: true,
     renotify: false,
-    data: { url: notificationUrl(undefined, origin, machine) },
+    data: { url: machineHomeUrl(machine, origin) },
   },
 });

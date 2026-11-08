@@ -13,6 +13,7 @@
  * GAP(agenda-nav): the 5.0 shell offers no navigation-column slot yet, so nothing mounts these until it does.
  */
 
+import { ASK_LINK_PARAMETER } from '@ferretry/core-asks/contract';
 import { Inbox } from 'lucide-react';
 import { RouteLink } from '../../shell.ts';
 import type { DaemonId, SessionView } from '../../shell.ts';
@@ -113,7 +114,7 @@ export function NeedsYouGroup({
           const to =
             summary === undefined
               ? chat
-              : `${chat}${chat.includes('?') ? '&' : '?'}agenda=${encodeURIComponent(summary.first)}`;
+              : `${chat}${chat.includes('?') ? '&' : '?'}${ASK_LINK_PARAMETER}=${encodeURIComponent(summary.first)}`;
           return (
             <li key={`${row.daemonId}:${row.view.config.id}`}>
               <RouteLink
