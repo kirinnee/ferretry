@@ -1,4 +1,6 @@
 import {
+  type Buzz,
+  fittingPushTag,
   type PushDeviceView,
   PushDeviceViewSchema,
   type PushNotificationPayload,
@@ -59,6 +61,26 @@ export function enrolmentConfirmation(deviceName: string): PushNotificationPaylo
     body: `${deviceName} will be told when this machine needs you.`,
     tag: 'push-enrolment',
     url: '/',
+    count: 1,
+  });
+}
+
+/**
+ * The push one buzz goes out as (another plugin's words, handed to Access's `buzz` port).
+ *
+ * PARSED HERE, NOT TRUSTED: an over-cap title, body or url throws at the sender instead of reaching a phone as an
+ * unreadable push. A TAG IS NEVER A REASON TO REFUSE: one the worker could not read (`fittingPushTag`) is left off,
+ * so the buzz is shown untagged — not replaced or cleared by tag — rather than lost. The tag still names the event.
+ */
+export function buzzPayload(message: Buzz): PushNotificationPayload {
+  const tag = fittingPushTag(message.tag);
+  return PushNotificationPayloadSchema.parse({
+    version: 1,
+    eventKey: message.tag,
+    title: message.title,
+    body: message.body,
+    ...(tag === undefined ? {} : { tag }),
+    url: message.url,
     count: 1,
   });
 }
