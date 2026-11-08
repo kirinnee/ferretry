@@ -3,7 +3,7 @@ import should from 'should';
 import { LoginEntryError } from '../../../../daemon/lib/inputs/borrowed.ts';
 import { identityOf } from '../../../../daemon/lib/inputs/login-observer.ts';
 import { padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
-import { account, page, ruleGrant, SESSION, SIGN_IN, site, terminal } from './grant-fixtures.ts';
+import { account, page, pageField, ruleGrant, SESSION, SIGN_IN, site, terminal } from './grant-fixtures.ts';
 import { OWNER, PAGE_LOGIN, PASSWORD, planLine, refusal, SUDO_RAISE, world } from './world.ts';
 
 /**
@@ -516,3 +516,196 @@ describe('a saved value that is typed or kept', () => {
     should(result.state).equal('delivered');
   });
 });
+
+describe('a grant that is revoked, a store that fails, and a card that is kept', () => {
+  it('should type nothing when the line ends between the last look and the write, leaving the card the owner’s', async () => {
+    const w = world({ facts: page(), grants: [planLine()], accounts: github() });
+    w.state.holdsSeq = [true, false];
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
+    should(w.events.at(-1)?.type).equal('surface.input_requested');
+  });
+
+  it('should leave the owner’s card as it is when a fill could not even be tried', async () => {
+    const plan = world({ facts: page(), grants: [planLine()], accounts: github() });
+    plan.state.keyOfFails = true;
+    const rule = world({ facts: page(), grants: [ruleGrant()], accounts: github() });
+    rule.state.keyOfFails = true;
+    const broken = world({ facts: page(), grants: [planLine({ plan: undefined })], accounts: github() });
+    Object.assign(broken.ledger, {
+      release: () => {
+        throw new Error('the ledger fell over');
+      },
+    });
+
+    const planView = await plan.service.raise(SESSION, PAGE_LOGIN);
+    const ruleView = await rule.service.raise(SESSION, PAGE_LOGIN);
+    const brokenView = await broken.service.raise(SESSION, PAGE_LOGIN);
+
+    should([planView.state, ruleView.state, brokenView.state]).eql(['pending', 'pending', 'pending']);
+    should(plan.notes).eql(["A task plan line didn't apply here, so you're asked as usual."]);
+    should(rule.rebuzzed).eql([SESSION]);
+    should([plan.writes, rule.writes, broken.writes]).eql([[], [], []]);
+  });
+
+  it('should refuse a card with no picture, a card that is not pending, and a card that is not there', async () => {
+    const w = world({ facts: page() });
+    await w.service.raise(SESSION, PAGE_LOGIN);
+    const request = await w.pending();
+    await w.service.cancel(SESSION, request.id, OWNER);
+
+    const ended = await refusal(Promise.resolve().then(() => w.service.shot(OWNER, SESSION, request.id)));
+    const unknown = await refusal(Promise.resolve().then(() => w.service.shot(OWNER, SESSION, 'f'.repeat(32))));
+
+    should([ended.code, unknown.code]).eql(['not_found', 'not_found']);
+    should(ended.message).equal('no picture for that input request');
+  });
+
+  it('should take a picture of the page again when a card is opened again for a code', async () => {
+    const w = world({
+      facts: page({}, [pageField('code')]),
+      accounts: { accounts: [account({ factors: [SEEDED] })], signIns: [site()] },
+    });
+    w.state.shot = { pngBase64: 'c2hvdA', clip: { x: 0, y: 0, w: 400, h: 200 } };
+    w.state.codeWorked = false;
+    await w.service.raise(SESSION, {
+      target: { kind: 'page', key: 'app' },
+      prompt: 'GitHub asks for the code',
+      fields: [{ id: 'code', sensitivity: 'code', element: { kind: 'selector', selector: '#otp' } }],
+      submit: 'owner-default',
+    });
+    const request = await w.pending();
+    await w.service.deliver(SESSION, request.id, w.send(request, { entry: 'GITHUB', factor: SEEDED.id }), OWNER);
+    await tick();
+    w.state.shot = undefined;
+
+    const [again] = await w.service.list(OWNER, SESSION);
+
+    should(again?.pictured).be.true();
+    should(w.service.shot(OWNER, SESSION, request.id)).eql({
+      pngBase64: 'c2hvdA',
+      clip: { x: 0, y: 0, w: 400, h: 200 },
+    });
+  });
+
+  it('should refuse to keep a value when the daemon keeps no accounts', async () => {
+    const w = world({ facts: terminal(), withLogins: false });
+    await w.service.raise(SESSION, SUDO_RAISE);
+    const request = await w.pending();
+
+    const error = await refusal(
+      w.service.deliver(
+        SESSION,
+        request.id,
+        w.send(request, { padded: padInputValue('a-long-enough-password'), save: { entry: 'SUDO', label: 'sudo' } }),
+        OWNER,
+      ),
+    );
+
+    should(error.message).equal('this daemon keeps no accounts; send without saving');
+  });
+
+  it('should refuse to keep a card of two passwords, or of a code, as one account', async () => {
+    const two = world({ facts: page(), accounts: github() });
+    await two.service.raise(SESSION, {
+      target: { kind: 'page', key: 'app' },
+      prompt: 'change the password',
+      fields: [
+        { id: 'user', sensitivity: 'secret', element: { kind: 'selector', selector: '#a' } },
+        { id: 'pass', sensitivity: 'secret', element: { kind: 'selector', selector: '#b' } },
+      ],
+      submit: 'owner-default',
+    });
+    const card = await two.pending();
+    const code = world({ facts: page({}, [pageField('code')]), accounts: github() });
+    await code.service.raise(SESSION, {
+      target: { kind: 'page', key: 'app' },
+      prompt: 'GitHub asks for the code',
+      fields: [{ id: 'code', sensitivity: 'code', element: { kind: 'selector', selector: '#otp' } }],
+      submit: 'owner-default',
+    });
+    const otp = await code.pending();
+    const save = { entry: 'NEW_ACCOUNT', label: 'GitHub' };
+
+    const twice = await refusal(
+      two.service.deliver(
+        SESSION,
+        card.id,
+        two.send(card, {
+          fields: [
+            { field: 'user', padded: padInputValue('a-long-enough-password') },
+            { field: 'pass', padded: padInputValue('another-long-password') },
+          ],
+          save,
+        }),
+        OWNER,
+      ),
+    );
+    const once = await refusal(
+      code.service.deliver(
+        SESSION,
+        otp.id,
+        code.send(otp, { fields: [{ field: 'code', padded: padInputValue('123456') }], save }),
+        OWNER,
+      ),
+    );
+
+    should(twice.message).containEql('it has two usernames or two passwords');
+    should(once.message).containEql('a one-time code is not saved');
+  });
+
+  it('should keep a username sent beside the password on a card that types no username', async () => {
+    const w = world({ facts: terminal() });
+    await w.service.raise(SESSION, SUDO_RAISE);
+    const request = await w.pending();
+
+    const result = await w.service.deliver(
+      SESSION,
+      request.id,
+      w.send(request, {
+        padded: padInputValue('a-long-enough-password'),
+        save: { entry: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box', username: 'kirin' },
+      }),
+      OWNER,
+    );
+
+    should(result.saved).match({ entry: 'SUDO_KIRIN_BOX', ok: true });
+    should((w.saves[0] as unknown[])[3]).match({ username: 'kirin', password: 'a-long-enough-password' });
+  });
+
+  it('should update the account the card offers to update when the owner chose Update', async () => {
+    const w = world({ facts: page(), accounts: github() });
+    await w.service.raise(SESSION, PAGE_LOGIN);
+    const request = await w.pending();
+
+    const result = await w.service.deliver(
+      SESSION,
+      request.id,
+      w.send(request, {
+        fields: [
+          { field: 'user', padded: padInputValue('kirinnee') },
+          { field: 'pass', padded: padInputValue('a-long-enough-password') },
+        ],
+        save: { entry: 'GITHUB', label: 'GitHub', mode: 'update' },
+      }),
+      OWNER,
+    );
+
+    should(result.saved).match({ entry: 'GITHUB', ok: true });
+    should((w.saves[0] as unknown[])[4]).equal('update');
+  });
+});
+
+const AT = '2026-10-01T00:00:00.000Z';
+const SEEDED = {
+  id: 'tf_0000000000a1',
+  kind: 'totp',
+  label: 'App',
+  addedAt: AT,
+  addedBy: 'owner',
+  automatic: true,
+  params: { algorithm: 'SHA1', digits: 6, period: 30 },
+} as const;

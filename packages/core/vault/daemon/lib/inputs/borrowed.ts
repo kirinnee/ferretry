@@ -457,14 +457,9 @@ export const ruleMissSuspends = (reason: GrantMissReason): boolean =>
  * agenda card closes in the words a tap fill closes with, because every ferret can read every agenda (C26): this line
  * is drawn on the owner's input card only.
  */
-export function grantFilledLineFor(
-  note: { readonly by: 'plan'; readonly line: number } | { readonly by: 'rule' },
-  place?: string,
-): string {
+export function grantFilledLineFor(note: { readonly by: 'plan'; readonly line: number }, place?: string): string {
   const at = place === undefined || place === '' ? '' : ` on ${place}`;
-  return note.by === 'plan'
-    ? `Filled under your task plan (line ${String(note.line + 1)})${at}.`
-    : `Filled under your standing sign-in rule${at}.`;
+  return `Filled under your task plan (line ${String(note.line + 1)})${at}.`;
 }
 
 /** What the FERRET is told when a plan did not fill a card: the same sentence for every reason. */
@@ -1296,7 +1291,7 @@ const SignInSummarySchema = z.strictObject({
 export type SignInSummary = z.infer<typeof SignInSummarySchema>;
 
 /** `GET /v1/accounts`. A damaged store says so; it is never an empty list. */
-const AccountListSchema = z.strictObject({
+export const AccountListSchema = z.strictObject({
   v: z.literal(1),
   health: SecretStoreHealthSchema,
   diagnosis: z.string().min(1).optional(),
@@ -1495,70 +1490,22 @@ export type PushSubject = 'one-time-code' | 'approve-on-phone' | 'other';
 
 // ─── from two-factor.ts ───
 
-/** What the mismatch check reads of the account a key is being saved to. */
-export interface FactorMismatchAccount {
-  readonly label: string;
-  readonly username?: string | undefined;
-}
-
-/** "GitHub · kirinnee": how an account is named on a card. */
-const accountWords = (account: FactorMismatchAccount): string =>
-  account.username === undefined ? account.label : `${account.label} · ${account.username}`;
-
-const twoDots = '••';
-
-/** One key on its own: "Code sent to ••42 (SMS)", "Code sent to kirin@… (email)", "Code from Authenticator app". */
-function oneKeyWords(key: TwoFactorKeySummary): string {
-  switch (key.kind) {
-    case 'sms':
-      return key.endsWith === undefined
-        ? `Code sent by SMS (${key.label})`
-        : `Code sent to ${twoDots}${key.endsWith} (SMS)`;
-    case 'email':
-      return key.to === undefined ? `Code sent by email (${key.label})` : `Code sent to ${key.to} (email)`;
-    default:
-      return `Code from ${key.label}`;
-  }
-}
-
-/** One key in a list: "SMS ••42", "email to kirin@…", "Authenticator app". */
-function shortKeyWords(key: TwoFactorKeySummary): string {
-  switch (key.kind) {
-    case 'sms':
-      return key.endsWith === undefined ? `SMS (${key.label})` : `SMS ${twoDots}${key.endsWith}`;
-    case 'email':
-      return key.to === undefined ? `email (${key.label})` : `email to ${key.to}`;
-    default:
-      return key.label;
-  }
-}
-
 /** A code key by its kind alone, for agenda text: no label, address or digits the owner wrote. */
 const KEY_KIND_WORDS = { totp: 'authenticator app', sms: 'SMS', email: 'email' } as const;
 
 /**
- * THE TITLE OF A CODE CARD, from the account's keys: the one a ferret named (`factor`) when the caller passes only
- * that one, else every key that ends in a code. One: where its code went ("Code sent to ••42 (SMS)"). Several: each
- * ("One-time code: SMS ••42 or Authenticator app"). None known: the account ("One-time code for GitHub · kirinnee") where
- * the caller may name it (the app, from the accounts it reads), and the PLACE alone ("One-time code for github.com")
- * where the words reach the agenda: agenda text is readable by every ferret, so it never names an account label or a
- * username. On that path the keys are said by KIND only ("One-time code for github.com, by email"): a key's label and
- * the address an email key goes to are the owner's words, and an address is often the username (secrev-1329a L6).
- * Every word is the OWNER's (the key's label and plain facts) or Ferretry's, never a ferret's.
+ * THE TITLE OF A CODE CARD, from the account's keys: the PLACE alone ("One-time code for github.com"), and the keys said
+ * by KIND only ("One-time code for github.com, by email"). The words reach the agenda, which every ferret can read, so
+ * they never name an account label, a username, a key's label or the address an email key goes to: an address is often
+ * the username (secrev-1329a L6). Every word is Ferretry's, never a ferret's.
  */
-export function factorAskWords(
-  keys: readonly TwoFactorKeySummary[],
-  named: FactorMismatchAccount | { readonly place: string },
-): string {
-  const codes = keys.filter(key => isCodeFactor(key.kind));
-  const [only] = codes;
-  if ('place' in named) {
-    const kinds = [...new Set(codes.map(key => KEY_KIND_WORDS[key.kind as keyof typeof KEY_KIND_WORDS]))];
-    return `One-time code for ${named.place}${kinds.length === 0 ? '' : `, by ${kinds.join(' or ')}`}`;
-  }
-  if (only === undefined) return `One-time code for ${accountWords(named)}`;
-  if (codes.length === 1) return oneKeyWords(only);
-  return `One-time code: ${codes.map(shortKeyWords).join(' or ')}`;
+export function factorAskWords(keys: readonly TwoFactorKeySummary[], named: { readonly place: string }): string {
+  const kinds = [
+    ...new Set(
+      keys.filter(key => isCodeFactor(key.kind)).map(key => KEY_KIND_WORDS[key.kind as keyof typeof KEY_KIND_WORDS]),
+    ),
+  ];
+  return `One-time code for ${named.place}${kinds.length === 0 ? '' : `, by ${kinds.join(' or ')}`}`;
 }
 
 // ─── from daemon/src/lib/secrets/accounts.ts ───

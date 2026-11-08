@@ -123,6 +123,9 @@ export function world(options: WorldOptions = {}) {
     saveFails: undefined as Error | undefined,
     verify: { ok: true } as { ok: true } | { ok: false; reason?: string },
     holds: true,
+    /** Answers of the next calls to the grant's last check, in order; then `holds`. */
+    holdsSeq: [] as boolean[],
+    keyOfFails: false,
     ruleId: undefined as string | undefined,
     journalFails: false,
     agendaFails: false,
@@ -178,12 +181,15 @@ export function world(options: WorldOptions = {}) {
   const grantSource: SignInGrantSource = {
     enabled: () => options.grantsEnabled ?? true,
     of: () => grants,
-    keyOf: async (_accountId: AccountId): Promise<AccountKey | undefined> => KEY,
+    keyOf: async (_accountId: AccountId): Promise<AccountKey | undefined> => {
+      if (state.keyOfFails) throw new Error('the account keys cannot be read');
+      return KEY;
+    },
     ledger,
     used: (each, _at, sessionId) => void grantLog.used.push(`${each.id}@${sessionId}`),
     stopped: async (each, because) => void grantLog.stopped.push({ id: each.id, because }),
     verify: async () => state.verify as never,
-    holds: () => state.holds,
+    holds: () => (state.holdsSeq.length > 0 ? (state.holdsSeq.shift() as boolean) : state.holds),
     projectOf: async () => 'ferretry',
     scriptedOrigins: () => ({ hosts: new Map() }),
   };

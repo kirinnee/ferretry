@@ -364,3 +364,33 @@ describe('a code that did not go through', () => {
     should(w.cards).have.length(1);
   });
 });
+
+describe('a code that did not go through on a terminal', () => {
+  it('should open the terminal card again without a picture: only a page is pictured', async () => {
+    const w = world({
+      facts: terminal({
+        foreground: { pid: 11, pgid: 11, comm: 'ssh', argv: 'ssh bastion' },
+        program: 'ssh',
+        promptLine: 'Verification code:',
+      }),
+      accounts: { accounts: [account({ factors: [SEEDED] })], signIns: [sudoSignIn()] },
+    });
+    w.state.codeProgram = true;
+    w.state.codeWorked = false;
+    await w.service.raise(SESSION, {
+      target: { kind: 'terminal', key: 'dev' },
+      prompt: 'the bastion wants the 2FA code',
+      sensitivity: 'code',
+      submit: 'owner-default',
+    });
+    const request = await w.pending();
+
+    await w.service.deliver(SESSION, request.id, w.send(request, useCode()), OWNER);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const [again] = await w.service.list(OWNER, SESSION);
+
+    should(again?.state).equal('pending');
+    should(again?.agendaItemId).equal('A2');
+    should(again?.pictured).be.undefined();
+  });
+});
