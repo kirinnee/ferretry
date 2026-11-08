@@ -214,3 +214,63 @@ describe('m1 a turn file that is a link is never read: no launch value reaches a
     expect(JSON.stringify(best)).not.toContain(FAKE);
   });
 });
+
+describe('what the store proves before it hands a turn over again, and what it will not soften', () => {
+  test('matches is true only for the same words from the same author, and a turn with no author must have no record', async () => {
+    const { store } = await subject();
+    await store.writeTurn(FERRET, 2, 'words\n');
+    await store.writeTurn(FERRET, 3, 'more\n', { kind: 'owner' });
+
+    expect(await store.matches(FERRET, 2, 'words\n')).toBe(true);
+    expect(await store.matches(FERRET, 2, 'other\n')).toBe(false);
+    expect(await store.matches(FERRET, 2, 'words\n', { kind: 'owner' })).toBe(false);
+    expect(await store.matches(FERRET, 3, 'more\n', { kind: 'owner' })).toBe(true);
+    expect(await store.matches(FERRET, 3, 'more\n')).toBe(false);
+    expect(await store.matches(FERRET, 3, 'more\n', { kind: 'ferretry', feature: 'Warden' })).toBe(false);
+    expect(await store.matches(FERRET, 9, 'never written\n')).toBe(false);
+  });
+
+  test('an author record that is valid JSON of the wrong shape names nobody in a best-effort read', async () => {
+    const { store, folder } = await subject();
+    await store.writeTurn(FERRET, 2, 'two\n');
+    await writeFile(`${folder}/turns/turn-002.by.json`, '{"kind":"nobody-we-know"}');
+
+    expect(await store.list(FERRET, { strict: false })).toEqual([{ turn: 2, text: 'two\n' }]);
+  });
+
+  test('a refusal other than "the folder is not made yet" is raised, never softened into "no turns"', async () => {
+    const { store, root } = await subject();
+    const broken = new FileResumeTurnStore(
+      { ...root, lstat: async () => await Promise.reject(new Error('disk on fire')) } as unknown as RootHandle,
+      FERRET,
+    );
+    await store.writeTurn(FERRET, 2, 'two\n');
+
+    await expect(broken.list(FERRET, { strict: false })).rejects.toThrow('disk on fire');
+  });
+
+  test('a replay whose path stopped naming the proved file is an error, and nothing is overwritten', async () => {
+    const { store, root, folder } = await subject();
+    await store.writeTurn(FERRET, 2, 'The same words.\n');
+    const swapped = new FileResumeTurnStore(
+      {
+        ...root,
+        readDurable: (file: string, limit: number, use: (held: unknown) => Promise<unknown>) =>
+          root.readDurable(
+            file as never,
+            limit,
+            held =>
+              use(
+                new Proxy(held, {
+                  get: (target, key) => (key === 'stillNames' ? async () => false : Reflect.get(target, key)),
+                }),
+              ) as never,
+          ),
+      } as unknown as RootHandle,
+      FERRET,
+    );
+
+    await expect(swapped.writeTurn(FERRET, 2, 'The same words.\n')).rejects.toThrow('stopped naming the turn document');
+    expect(await readFile(`${folder}/turns/turn-002.md`, 'utf8')).toBe('The same words.\n');
+  });
+});
