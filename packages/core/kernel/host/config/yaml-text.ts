@@ -285,33 +285,64 @@ export function readConfigText(
 ):
   | { readonly ok: true; readonly read: ReadConfigText }
   | { readonly ok: false; readonly errors: readonly ConfigSyntaxError[] } {
+  return readText(text).read;
+}
+
+type ConfigTextRead = ReturnType<typeof readConfigText>;
+
+/**
+ * A file read to be edited: its read, and the text an edit of it starts from — `undefined` when
+ * {@link editConfigText} would replace it whole (over the cap, not YAML, or a key written twice), so the edit need
+ * not parse it a second time to find that out. One parse, where reading then editing a broken file took two.
+ */
+export function readConfigTextToEdit(text: string): {
+  readonly read: ConfigTextRead;
+  readonly base: string | undefined;
+} {
+  const { read, whole } = readText(text);
+  return { read, base: whole ? undefined : text };
+}
+
+/** One read; `whole` says the text has no structure an edit could keep. */
+function readText(text: string): { readonly read: ConfigTextRead; readonly whole: boolean } {
   // Bounded before anything reads it: every cost below is linear in a text this size.
-  if (configTextTooLarge(text)) return { ok: false, errors: [{ message: CONFIG_TOO_LARGE }] };
+  if (configTextTooLarge(text)) return { read: { ok: false, errors: [{ message: CONFIG_TOO_LARGE }] }, whole: true };
   const lineCounter = new LineCounter();
   const document = parseDocument(text, { ...PARSE_OPTIONS, lineCounter });
   if (document.errors.length > 0) {
     return {
-      ok: false,
-      errors: document.errors.map(error => {
-        const position = lineCounter.linePos(error.pos[0]);
-        // Never the parser's own message: it quotes the file.
-        return {
-          message: SYNTAX_SENTENCES[error.code] ?? SYNTAX_UNKNOWN,
-          position: { line: position.line, column: position.col },
-        };
-      }),
+      whole: true,
+      read: {
+        ok: false,
+        errors: document.errors.map(error => {
+          const position = lineCounter.linePos(error.pos[0]);
+          // Never the parser's own message: it quotes the file.
+          return {
+            message: SYNTAX_SENTENCES[error.code] ?? SYNTAX_UNKNOWN,
+            position: { line: position.line, column: position.col },
+          };
+        }),
+      },
     };
   }
   const duplicates = duplicateKeys(document);
   if (duplicates.length > 0) {
     return {
-      ok: false,
-      errors: duplicates.map(key => {
-        const position = lineCounter.linePos(key.range?.[0] ?? 0);
-        return { message: SYNTAX_SENTENCES.DUPLICATE_KEY, position: { line: position.line, column: position.col } };
-      }),
+      whole: true,
+      read: {
+        ok: false,
+        errors: duplicates.map(key => {
+          const position = lineCounter.linePos(key.range?.[0] ?? 0);
+          return { message: SYNTAX_SENTENCES.DUPLICATE_KEY, position: { line: position.line, column: position.col } };
+        }),
+      },
     };
   }
+  return { whole: false, read: readParsed(document, lineCounter, text) };
+}
+
+/** The value of a document that parsed, its aliases resolved within the budget, and how to locate a path in it. */
+function readParsed(document: Document, lineCounter: LineCounter, text: string): ConfigTextRead {
   const located = (node: unknown): TextPosition | undefined => {
     if (!isNode(node) || node.range === undefined || node.range === null) return undefined;
     const position = lineCounter.linePos(node.range[0]);
