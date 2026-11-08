@@ -112,6 +112,7 @@
       "entry": [
         "tests/**/*.test.{ts,tsx}",
         "tests/integration/app/*.harness.tsx",
+        "tests/**/fixtures/**/*.{ts,tsx}",
         "worker/src/adapters/link-store-worker.ts"
       ],
       "project": ["**/*.{ts,tsx}"]

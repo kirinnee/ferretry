@@ -32,6 +32,7 @@ import postcss from 'postcss';
 import tailwindcss from 'tailwindcss';
 import tailwindConfig from '../../../tailwind.config.ts';
 import { cachedText, cacheRootFor, hashFixtureInputs, sceneInputEnv, sceneInputPatterns } from './fixture-inputs.ts';
+import { contentFromPackage } from './scene-tailwind.ts';
 
 const packageRoot = resolve(import.meta.dir, '../../..');
 const workspace = resolve(packageRoot, '../..');
@@ -88,7 +89,9 @@ const cached = async (name: string, make: () => Promise<string>): Promise<string
 const css = await cached('app.css', async () => {
   const index = resolve(packageRoot, 'src/styles/index.css');
   const imported = await stylesheet(index, 'the app stylesheet');
-  const processed = (await postcss([tailwindcss(tailwindConfig)]).process(imported, { from: index })).css;
+  const processed = (
+    await postcss([tailwindcss(contentFromPackage(tailwindConfig, packageRoot))]).process(imported, { from: index })
+  ).css;
   const designSystem = await stylesheet(
     resolve(packageRoot, 'src/ui/design-system.css'),
     'the design system stylesheet',
