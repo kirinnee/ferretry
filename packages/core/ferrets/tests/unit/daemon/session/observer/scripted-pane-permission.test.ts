@@ -5,7 +5,13 @@ import type { PaneState } from '../../../../../daemon/lib/session/peers/tmux.ts'
 import { SCRIPTED_PANE_PARSERS } from '../../../../support/daemon/observer-stand-ins.ts';
 
 const PERMISSION = ' Do you want to proceed?\n ❯ 1. Yes\n   2. No, and tell Claude what to do differently';
-const paneShowing = (visible: string): PaneState => ({ alive: true, promptReady: false, history: '', visible });
+const paneShowing = (visible: string): PaneState => ({
+  alive: true,
+  dead: false,
+  promptReady: false,
+  history: '',
+  visible,
+});
 
 // No guarantees row covers the permission phase (docs/rebuild/guarantees.tsv names none); the parity test pins it.
 describe('the scripted pane parsers, read through the turn evidence (no guarantees row)', () => {
