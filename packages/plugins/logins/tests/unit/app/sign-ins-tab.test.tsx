@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { AddLoginPanel } from '../../../app/features/add-login-panel.tsx';
 import { LoginSignInPanel } from '../../../app/features/login-sign-in-panel.tsx';
 import { SignInsTab } from '../../../app/features/sign-ins-tab.tsx';
@@ -6,6 +6,16 @@ import { login, loginList } from '../cli/fakes.ts';
 import { interact, mount, must } from '../support/dom.ts';
 import { type Call, scripted } from './support/client.ts';
 import { CLAUDE_URL, claudeFlow } from './support/harness-login.ts';
+
+// Opening a login writes its address, so the window's hash is reset around every test here: the
+// tab must never start on a page a previous test happened to leave behind, nor leave one behind.
+beforeEach(() => {
+  window.history.pushState({}, '', '/');
+});
+afterEach(() => {
+  window.location.hash = '';
+  window.history.pushState({}, '', '/');
+});
 
 const LIST = 'GET /v1/logins';
 const START = 'POST /v1/logins/sign-in';
@@ -138,6 +148,64 @@ describe('the Sign-ins tab', () => {
     expect(calls.find(call => call.route === SUBMIT)?.body).toEqual({ code: 'the-pasted-code' });
     // The code is never left in what the tree renders.
     expect(view.container.innerHTML).not.toContain('the-pasted-code');
+    await view.unmount();
+  });
+});
+
+describe('the page the address names', () => {
+  /** Set the address the way a browser does, and tell the tab it changed. */
+  const address = async (hash: string): Promise<void> => {
+    await interact(() => {
+      window.location.hash = hash;
+      window.dispatchEvent(new Event('hashchange'));
+    });
+  };
+
+  it('opens on the login a #machines/<m>/sign-ins/<loginId> link names, when the tab mounts', async () => {
+    window.location.hash = '#machines/box/sign-ins/claude-you';
+    const view = await mount(<SignInsTab client={scripted({ [LIST]: loginList(login()) })} />);
+    await until(() => view.container.querySelector('[data-login-page="claude-you"]') !== null, 'the page');
+    expect(view.container.querySelector('[data-login-page]')?.getAttribute('data-login-page')).toBe('claude-you');
+    expect(view.container.querySelector('[data-logins-tab]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('follows the address while it is open, and a bare sign-ins address opens the list', async () => {
+    window.location.hash = '#machines/box/sign-ins';
+    const view = await mount(<SignInsTab client={scripted({ [LIST]: loginList(login()) })} />);
+    await until(() => view.container.querySelector('[data-logins-tab]') !== null, 'the list');
+    await address('#machines/box/sign-ins/claude-you');
+    await until(() => view.container.querySelector('[data-login-page="claude-you"]') !== null, 'the page');
+    await address('#machines/box/sign-ins');
+    await until(() => view.container.querySelector('[data-logins-tab]') !== null, 'the list');
+    expect(view.container.querySelector('[data-login-missing]')).toBeNull();
+    // Another tab's address names no login: the list stays, and says nothing.
+    await address('#machines/box/runtimes/claude-default');
+    await until(() => view.container.querySelector('[data-login-page]') === null, 'no page');
+    expect(view.container.querySelector('[data-logins-tab]')).not.toBeNull();
+    expect(view.container.querySelector('[data-login-missing]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('keeps today’s notice when the address names a login that is not on the machine', async () => {
+    window.location.hash = '#machines/box/sign-ins/claude-gone';
+    const view = await mount(<SignInsTab client={scripted({ [LIST]: loginList(login()) })} />);
+    await until(() => view.container.querySelector('[data-login-missing]') !== null, 'the notice');
+    expect(view.container.querySelector('[data-login-missing]')?.textContent).toBe(
+      'There is no login claude-gone on box any more.',
+    );
+    expect(view.container.querySelectorAll('[data-login-row]')).toHaveLength(1);
+    await view.unmount();
+  });
+
+  it('writes the address when the tab itself opens a page, and closes it back to the list', async () => {
+    window.location.hash = '#machines/box/sign-ins';
+    const view = await mount(<SignInsTab client={scripted({ [LIST]: loginList(login()) })} />);
+    await until(() => view.container.querySelector('[data-login-row]') !== null, 'the row');
+    await click(view.container.querySelector('[data-login-row="claude-you"]'), 'the row');
+    expect(window.location.hash).toBe('#machines/box/sign-ins/claude-you');
+    await click(view.container.querySelector('[data-page-back]'), 'back');
+    expect(window.location.hash).toBe('#machines/box/sign-ins');
     await view.unmount();
   });
 });
