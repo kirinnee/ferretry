@@ -242,8 +242,10 @@ export interface FerretHarness {
    * `C-c`, which quits an idle Codex), pressed by the runner's `stopTurn` only under {@link shouldPressStopKey}: at a
    * pane that shows active work, or an interactive ferret whose harness's key is harmless when idle. Refused
    * `plugin_unavailable` when the harness names no stop or the runner cannot stop a turn; `no_pane` when the ferret has
-   * no live pane; a hold as its `RefusalCode`, pressing nothing. The caller still owns what only it knows: a pending
-   * structured question (a stop would answer it by accident) is refused BEFORE this is called.
+   * no live pane, or a pane that changed between the read and the press (nothing pressed); a hold as its `RefusalCode`,
+   * pressing nothing. The caller owns the refusals only it can make, and makes them BEFORE this is called (today's
+   * `interruptLocked`): a session whose last stop was never confirmed (`kill_failed`, the session layer's status), a
+   * pending structured question (a stop would answer it by accident), and a session with no running turn.
    */
   interrupt(): Promise<Result<HarnessInterrupted, HarnessRefusal>>;
   /**

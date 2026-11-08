@@ -138,6 +138,14 @@ export interface RunnerSubject {
   adoptable(): Promise<RunnerHandle>;
   /** How many processes this runner has started (attach must not add one). */
   starts(): number;
+  /**
+   * Required of a runner that offers `stopTurn`: lets the suite set whether the pane behind a handle shows active work,
+   * and see every key that actually reached it, so "only under the rule" is checked against the pane, not the answer.
+   */
+  readonly stopPane?: {
+    working(handle: RunnerHandle, working: boolean): void | Promise<void>;
+    keys(handle: RunnerHandle): readonly string[] | Promise<readonly string[]>;
+  };
 }
 
 /** The `runners` conformance suite, with spine D15: `attach` adopts a live handle WITHOUT restarting it. */
@@ -200,19 +208,39 @@ export function runnerConformance(name: string, make: () => RunnerSubject | Prom
     });
     test('harness-refusals shouldPressStopKey: a turn stop presses only a harness stop key, and only under the rule', async () => {
       const subject = await make();
-      if (subject.runner.stopTurn === undefined) return;
+      const stopTurn = subject.runner.stopTurn?.bind(subject.runner);
+      if (stopTurn === undefined) return;
+      const pane = subject.stopPane;
+      if (pane === undefined) throw new Error('a runner with stopTurn must give the suite stopPane to check the rule');
       const started = await subject.runner.start(subject.spec);
       if (!started.ok) throw new Error('start refused');
-      const stopped = await subject.runner.stopTurn(started.value.handle, { key: 'Escape', whenIdle: false });
-      expect(typeof stopped.pressed).toBe('boolean');
-      // Pressed means the pane showed work, which is the only way an idle-unsafe key may be pressed.
-      if (stopped.pressed && stopped.working !== undefined) expect(typeof stopped.working).toBe('boolean');
-      const gone = await subject.runner.stopTurn('%99999' as RunnerHandle, { key: 'Escape', whenIdle: true }).then(
+      const handle = started.value.handle;
+      // Idle, with a key that is not harmless there (Codex quits on it): never pressed, and the pane got no key.
+      await pane.working(handle, false);
+      expect(await stopTurn(handle, { key: 'Escape', whenIdle: false })).toMatchObject({ pressed: false });
+      expect(await pane.keys(handle)).toEqual([]);
+      // Idle, with a key harmless there: pressed once.
+      expect(await stopTurn(handle, { key: 'Escape', whenIdle: true })).toMatchObject({ pressed: true });
+      expect(await pane.keys(handle)).toEqual(['Escape']);
+      // Working: pressed once even when the key is not harmless at an idle prompt.
+      await pane.working(handle, true);
+      expect(await stopTurn(handle, { key: 'Escape', whenIdle: false })).toMatchObject({ pressed: true });
+      const keys = await pane.keys(handle);
+      expect(keys).toEqual(['Escape', 'Escape']);
+      for (const key of keys) expect(HARNESS_STOP_KEYS).toContain(key as (typeof HARNESS_STOP_KEYS)[number]);
+      await subject.runner.stop(handle, 'now');
+    });
+    test('harness-refusals: a turn stop at a handle with nothing behind it is not_ready/exited and starts nothing', async () => {
+      const subject = await make();
+      const stopTurn = subject.runner.stopTurn?.bind(subject.runner);
+      if (stopTurn === undefined) return;
+      const before = subject.starts();
+      const gone = await stopTurn('%99999' as RunnerHandle, { key: 'Escape', whenIdle: true }).then(
         () => 'resolved' as const,
         (error: unknown) => runnerDeliveryFailure(error),
       );
       expect(gone).toEqual({ kind: 'not_ready', why: 'exited' });
-      await subject.runner.stop(started.value.handle, 'now');
+      expect(subject.starts()).toBe(before);
     });
     test('a queue into a live ferret answers held, typed or left; to a handle with nothing behind it, rejects', async () => {
       const subject = await make();

@@ -6,36 +6,7 @@ import { TmuxRunner } from '../../../../daemon/adapters/tmux/tmux-runner.ts';
 import { ComposerUnconfirmedError } from '../../../../daemon/adapters/tmux/composer-fill.ts';
 import { PaneNotReadyError, PaneStrandedError } from '../../../../daemon/adapters/tmux/pane-delivery.ts';
 import { FakeTmuxServer } from '../../../integration/daemon/support/fake-tmux-server.ts';
-
-/** Decode the quoted arguments of scriptLine for the in-memory server; never run a shell or tmux. */
-function scriptWords(script: string): string[] {
-  const words: string[] = [];
-  let word = '';
-  let quote = '';
-  let started = false;
-  for (let i = 0; i < script.length; i++) {
-    const char = script[i] ?? '';
-    if (quote !== '') {
-      if (char === quote) quote = '';
-      else if (quote === '"' && char === '\\') {
-        const next = script[++i];
-        word += next === 'n' ? '\n' : next === 'r' ? '\r' : next;
-      } else word += char;
-    } else if (char === "'" || char === '"') {
-      quote = char;
-      started = true;
-    } else if (/\s/u.test(char)) {
-      if (started) words.push(word);
-      word = '';
-      started = false;
-    } else {
-      word += char;
-      started = true;
-    }
-  }
-  if (started) words.push(word);
-  return words;
-}
+import { scriptWords } from '../../../integration/daemon/support/script-words.ts';
 
 // This fixture is an in-memory composer; no tmux process or real sleep is used.
 function subject(options: { readonly unguarded?: boolean } = {}) {
@@ -47,6 +18,10 @@ function subject(options: { readonly unguarded?: boolean } = {}) {
   let holdAfterBuffer = false;
   let holdAfterPayload = false;
   let beforeGuard: ((write: readonly string[]) => void) | undefined;
+  /** No cursor in the pane's metadata: a composer no frame can place. */
+  let blindCursor = false;
+  /** A tmux command whose call throws (the command port itself failed), for a read that cannot be made. */
+  let throwOn: string | undefined;
   const guards: Array<readonly string[]> = [];
   const cursorRow = () =>
     server.transcript.split('\n').length +
@@ -60,6 +35,11 @@ function subject(options: { readonly unguarded?: boolean } = {}) {
   const runner = new TmuxRunner({
     tmux: {
       execute: async (args, stdin) => {
+        if (throwOn !== undefined && args[0] === throwOn) throw new Error(`tmux ${throwOn} failed`);
+        if (blindCursor && args[0] === 'display-message' && !args.at(-1)?.startsWith('#{pane_id}|')) {
+          server.calls.push(args);
+          return { code: 0, stdout: '0||||24|80\n', stderr: '' };
+        }
         if (args[0] === 'display-message' && args.at(-1)?.startsWith('#{pane_id}|')) {
           return server.alive
             ? {
@@ -147,6 +127,12 @@ function subject(options: { readonly unguarded?: boolean } = {}) {
     replace: (change: Partial<typeof pane>) => {
       pane = { ...pane, ...change };
     },
+    blindCursor: () => {
+      blindCursor = true;
+    },
+    throwOn: (command: string) => {
+      throwOn = command;
+    },
   };
 }
 
@@ -176,7 +162,20 @@ describe('tmux runner message delivery', () => {
 
         const delivery = world.runner.deliver(world.handle, { text });
         if (stage === 'Enter') await expect(delivery).rejects.toBeInstanceOf(ComposerUnconfirmedError);
-        else await expect(delivery).rejects.toThrow();
+        // harness-refusals: nothing of the payload typed, so a closed not_ready — a moved cursor row is a redrawing
+        // (busy) pane, any other change a gone one — never an unclassified rejection a retry would read as maybe-typed.
+        else
+          expect(
+            runnerDeliveryFailure(
+              await delivery.then(
+                () => undefined,
+                (error: unknown) => error,
+              ),
+            ),
+          ).toEqual({
+            kind: 'not_ready',
+            why: change === 'prompt' ? 'busy' : 'exited',
+          });
         expect(world.server.submitted).toEqual([]);
         expect(world.server.heldBuffers()).toEqual([]);
         const writes = world.server.calls.filter(call => call[0] === 'send-keys' || call[0] === 'paste-buffer');
@@ -562,5 +561,142 @@ describe('harness-refusals: stopTurn presses the harness’s stop key under shou
       );
       expect(world.server.calls).toEqual([]);
     }
+  });
+});
+
+/** Whether any payload write (a buffer load, a paste or a literal) reached the pane's server. */
+const payloadWritten = (world: ReturnType<typeof subject>): boolean =>
+  world.server.calls.some(call => call[0] === 'load-buffer' || call[0] === 'paste-buffer' || call.includes('-l'));
+
+describe('harness-refusals: each refusal kind at the tmux runner itself, with no payload key reaching the pane', () => {
+  it('harness-refusals composer_occupied: a person’s draft is answered with the draft, and nothing is typed onto it', async () => {
+    const world = subject();
+    world.server.composer = 'go ahead with all three';
+    world.server.cursorHome = true;
+
+    expect(await failureOf(world.runner.deliver(world.handle, { text: 'hello' }))).toEqual({
+      kind: 'composer_occupied',
+      draft: 'go ahead with all three',
+    });
+    expect(payloadWritten(world)).toBe(false);
+    expect(world.server.composer).toBe('go ahead with all three');
+    expect(world.server.submitted).toEqual([]);
+  });
+
+  it('harness-refusals composer_occupied: a queue into a busy pane with a draft types nothing', async () => {
+    const world = subject();
+    world.server.working = true;
+    world.server.composer = 'hi';
+
+    expect(await failureOf(world.runner.queue(world.handle, 'hello'))).toEqual({
+      kind: 'composer_occupied',
+      draft: 'hi',
+    });
+    expect(typedAnything(world)).toBe(false);
+    expect(world.server.composer).toBe('hi');
+  });
+
+  it('harness-refusals composer_unreadable: a composer no frame can place types nothing', async () => {
+    const world = subject();
+    world.server.working = true;
+    world.server.composer = 'half a question';
+    // No cursor and no colour attributes: neither the cursor nor the ink can tell a draft from a placeholder.
+    world.server.attributes = false;
+    world.blindCursor();
+
+    expect(await failureOf(world.runner.queue(world.handle, 'read the queued brief'))).toEqual({
+      kind: 'composer_unreadable',
+    });
+    expect(typedAnything(world)).toBe(false);
+    expect(world.server.composer).toBe('half a question');
+  });
+
+  it('harness-refusals not_ready/busy: a pane that never comes to a prompt gets no payload key', async () => {
+    const world = subject();
+    world.server.bootCaptures = Number.MAX_SAFE_INTEGER;
+
+    expect(await failureOf(world.runner.deliver(world.handle, { text: 'work' }))).toEqual({
+      kind: 'not_ready',
+      why: 'busy',
+    });
+    expect(payloadWritten(world)).toBe(false);
+    expect(world.server.submitted).toEqual([]);
+  });
+
+  for (const change of ['pid', 'redraw'] as const) {
+    it(`harness-refusals a ${change === 'pid' ? 'replaced pane' : 'cursor that moved'} before the first queue write is not_ready, with nothing typed`, async () => {
+      const world = subject();
+      world.server.working = true;
+      world.beforeGuard(() => {
+        if (change === 'pid') world.replace({ pid: 9999 });
+        else world.server.transcript = `${world.server.transcript}\nmore output`;
+      });
+
+      expect(await failureOf(world.runner.queue(world.handle, 'hello'))).toEqual({
+        kind: 'not_ready',
+        why: change === 'pid' ? 'exited' : 'busy',
+      });
+      expect(typedAnything(world)).toBe(false);
+      expect(world.server.composer).toBe('');
+    });
+  }
+});
+
+describe('harness-refusals: stopTurn answers a failure before the press as not_ready/exited, with nothing pressed', () => {
+  const pressed = (world: ReturnType<typeof subject>) => world.server.calls.filter(call => call[0] === 'send-keys');
+
+  for (const change of ['foreground', 'pid', 'owner', 'redraw'] as const) {
+    it(`harness-refusals a pane whose ${change === 'redraw' ? 'cursor row' : change} changed between the read and the press is not_ready/exited, and no key reaches it`, async () => {
+      const world = subject();
+      world.server.working = true;
+      world.beforeGuard(() => {
+        if (change === 'foreground') world.replace({ command: 'shell' });
+        if (change === 'pid') world.replace({ pid: 9999 });
+        if (change === 'owner') world.replace({ session: 'fy-webterm-person' });
+        // A working pane streaming output: its cursor row moves under the press, and the server guard refuses it.
+        if (change === 'redraw') world.server.transcript = `${world.server.transcript}\nmore output`;
+      });
+
+      expect(await failureOf(world.runner.stopTurn(world.handle, { key: 'Escape', whenIdle: true }))).toEqual({
+        kind: 'not_ready',
+        why: 'exited',
+      });
+      expect(pressed(world)).toEqual([]);
+      expect(world.guards).toHaveLength(1);
+    });
+  }
+
+  it('harness-refusals a pane replaced before the press is refused by the binding itself, before the server guard', async () => {
+    const world = subject();
+    world.server.working = true;
+    // Changed after the first read and before the write's own re-check: the binding refuses it, no guard is sent.
+    let reads = 0;
+    const capture = world.server.execute.bind(world.server);
+    world.server.execute = async (argv, stdin) => {
+      const answer = await capture(argv, stdin);
+      if (argv[0] === 'capture-pane' && ++reads === 1) world.replace({ created: 2000 });
+      return answer;
+    };
+
+    expect(await failureOf(world.runner.stopTurn(world.handle, { key: 'Escape', whenIdle: true }))).toEqual({
+      kind: 'not_ready',
+      why: 'exited',
+    });
+    expect(pressed(world)).toEqual([]);
+    expect(world.guards).toEqual([]);
+  });
+
+  it('harness-refusals a first read that fails is not_ready/exited, and nothing is pressed or acted', async () => {
+    const world = subject();
+    world.server.working = true;
+    world.throwOn('capture-pane');
+
+    expect(await failureOf(world.runner.stopTurn(world.handle, { key: 'Escape', whenIdle: true }))).toEqual({
+      kind: 'not_ready',
+      why: 'exited',
+    });
+    expect(pressed(world)).toEqual([]);
+    expect(world.acts).toEqual([]);
+    expect(world.guards).toEqual([]);
   });
 });

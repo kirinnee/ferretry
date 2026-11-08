@@ -40,6 +40,12 @@ runnerConformance('FakeRunner', () => {
     spec: { ferret: ferretId('f1'), command: ['true'], cwd: fenced('/work'), env: emptyChildEnvironment() },
     adoptable: async () => runner.adoptable(ferretId('f1')),
     starts: () => runner.starts,
+    stopPane: {
+      working: (_handle, working) => {
+        runner.working = working;
+      },
+      keys: handle => runner.pressed.filter(press => press.handle === handle).map(press => press.key),
+    },
   };
 });
 
