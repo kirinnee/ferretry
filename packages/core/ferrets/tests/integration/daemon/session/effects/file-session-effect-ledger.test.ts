@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { diskRoot } from '@ferretry/kernel/testing';
+import { diskSessionsRoot } from '@ferretry/kernel/testing';
 import should from 'should';
 import {
   effectFileName,
@@ -45,9 +45,9 @@ async function ledger(label: string): Promise<{
   const parent = await mkdtemp(join(tmpdir(), `fy-effects-${label}-`));
   directories.add(parent);
   const synced: string[] = [];
-  const { root, folder: home } = await diskRoot(parent, recordingSyncs(synced));
-  const sessions = join(home, 'state', 'sessions');
-  return { subject: new FileSessionEffectLedger(root, sessionId => join(sessions, sessionId)), sessions, home, synced };
+  const { root, folder } = await diskSessionsRoot(parent, SESSION, recordingSyncs(synced));
+  const sessions = dirname(folder);
+  return { subject: new FileSessionEffectLedger(root, SESSION), sessions, home: join(parent, 'home'), synced };
 }
 
 /**
@@ -65,7 +65,7 @@ async function failingLedger(label: string): Promise<{
   const parent = await mkdtemp(join(tmpdir(), `fy-effects-${label}-`));
   directories.add(parent);
   let failNext = false;
-  const { root, folder: home } = await diskRoot(parent, disk => ({
+  const { root, folder } = await diskSessionsRoot(parent, SESSION, disk => ({
     ...disk,
     link: async (existing, destination) => {
       if (failNext) {
@@ -75,9 +75,9 @@ async function failingLedger(label: string): Promise<{
       await disk.link(existing, destination);
     },
   }));
-  const sessions = join(home, 'state', 'sessions');
+  const sessions = dirname(folder);
   return {
-    subject: new FileSessionEffectLedger(root, sessionId => join(sessions, sessionId)),
+    subject: new FileSessionEffectLedger(root, SESSION),
     sessions,
     failNextSync: () => {
       failNext = true;
@@ -112,7 +112,7 @@ describe('FileSessionEffectLedger', () => {
 
     // Assert: an inspection is a question, so it must not create the directory it asks about.
     should(standing).equal('unclaimed');
-    should(await stat(sessions).catch(() => undefined)).equal(undefined);
+    should(await stat(join(sessions, SESSION, 'effects')).catch(() => undefined)).equal(undefined);
   });
 
   it('should admit the first attempt and record the whole act before it is performed', async () => {
@@ -142,9 +142,8 @@ describe('FileSessionEffectLedger', () => {
   it('should persist each created directory own entry in its parent, parent first', async () => {
     // Arrange: nothing of this session exists yet, so the mkdir creates the whole chain and every
     // link of it has its name in the link above.
-    const { subject, sessions, home, synced } = await ledger('parents');
-    // Only the temporary home exists, so the mkdir creates four levels beneath it.
-    const state = dirname(sessions);
+    const { subject, sessions, synced } = await ledger('parents');
+    // The kernel made the `sessions` base at boot, so the only directory this attempt creates is `effects`.
     const session = join(sessions, SESSION);
     const effects = join(session, 'effects');
 
@@ -152,11 +151,10 @@ describe('FileSessionEffectLedger', () => {
     await subject.begin(key, FINGERPRINT, BEGUN_AT);
 
     // Assert: an entry lives in its PARENT, so syncing the leaf persists the record inside it and
-    // says nothing about the leaf's own name. `home` is synced although the mkdir did not create it,
-    // because `state` — which it DID create — is named inside it. Oldest ancestor first, because a
-    // child's fsync is only well defined once its own entry is durable, and every one of them lands
-    // BEFORE the record's own directory sync, which is last and is what persists the record itself.
-    should(synced).eql([home, state, sessions, session, effects]);
+    // says nothing about the leaf's own name. The session folder is synced because `effects` — which this attempt
+    // DID create — is named inside it, BEFORE the record's own directory sync, which is last and is what persists
+    // the record itself.
+    should(synced).eql([session, effects]);
     should(synced.at(-1)).equal(effects);
   });
 
@@ -404,9 +402,9 @@ describe('FileSessionEffectLedger', () => {
     await written.subject.begin(key, FINGERPRINT, BEGUN_AT);
 
     const restartedSyncs: string[] = [];
-    const parentOf = dirname(dirname(dirname(written.sessions)));
-    const restartedDisk = await diskRoot(parentOf, recordingSyncs(restartedSyncs));
-    const restarted = new FileSessionEffectLedger(restartedDisk.root, sessionId => join(written.sessions, sessionId));
+    const parentOf = dirname(dirname(dirname(dirname(written.sessions))));
+    const restartedDisk = await diskSessionsRoot(parentOf, SESSION, recordingSyncs(restartedSyncs));
+    const restarted = new FileSessionEffectLedger(restartedDisk.root, SESSION);
     written.synced.length = 0;
 
     // Act: inspect, then a begin that loses the compare-and-set, then a settle.
@@ -575,8 +573,9 @@ describe('FileSessionEffectLedger', () => {
     let plantedDuringSync = false;
     let planted: string | undefined;
     let recordPath = '';
-    const { root, folder: home } = await diskRoot(
+    const { root, folder } = await diskSessionsRoot(
       parent,
+      SESSION,
       recordingSyncs([], async () => {
         if (!settling || plantedDuringSync) return;
         // GATED ON THE PUBLISHED RECORD, not on being the first sync of the call. `settle` persists
@@ -593,7 +592,7 @@ describe('FileSessionEffectLedger', () => {
         await writeFile(planted as string, 'another attempt\n', { encoding: 'utf8', mode: 0o600 });
       }),
     );
-    const sessions = join(home, 'state', 'sessions');
+    const sessions = dirname(folder);
     const effects = join(sessions, SESSION, 'effects');
     const record = join(effects, `${effectFileName(EFFECT)}.json`);
     // `t2` IS DELIBERATE: it is the exact name this `settle` owned and then freed by renaming its temporary onto the
@@ -602,7 +601,7 @@ describe('FileSessionEffectLedger', () => {
     const reused = join(effects, `.${effectFileName(EFFECT)}.json.t2.tmp`);
     recordPath = record;
     planted = reused;
-    const subject = new FileSessionEffectLedger(root, sessionId => join(sessions, sessionId));
+    const subject = new FileSessionEffectLedger(root, SESSION);
     await subject.begin(key, FINGERPRINT, BEGUN_AT);
     settling = true;
 

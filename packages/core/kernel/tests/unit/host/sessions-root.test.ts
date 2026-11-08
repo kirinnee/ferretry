@@ -441,6 +441,48 @@ describe('K1 the sessions root stays private: nothing widens past the owner', ()
     expect(await modeOf(`${f.home}/state/ferrets/sessions/f1/effects/e.json`)).toBe(0o600);
   });
 
+  test('K1 u2 a handle holds ITS OWN ferret folder private: an existing 0755 folder is narrowed to 0700', async () => {
+    const f = await fresh();
+    await ensureInternalRootBases(f.fs, { home: f.home, plugin: 'ferrets' }, ['sessions']);
+    await mkdir(`${f.home}/state/ferrets/sessions/f1`, { mode: 0o755 });
+    await chmod(`${f.home}/state/ferrets/sessions/f1`, 0o755);
+    const root = f.port('ferrets').root('sessions', { subfolder: 'f1' });
+
+    await root.ensurePrivateDirectory(resolved(root, '.'));
+
+    expect(await modeOf(`${f.home}/state/ferrets/sessions/f1`)).toBe(0o700);
+    // and only that folder: a sibling ferret's folder is not this handle's to touch
+    await mkdir(`${f.home}/state/ferrets/sessions/f2`, { mode: 0o755 });
+    await chmod(`${f.home}/state/ferrets/sessions/f2`, 0o755);
+    await root.ensurePrivateDirectory(resolved(root, '.'));
+    expect(await modeOf(`${f.home}/state/ferrets/sessions/f2`)).toBe(0o755);
+  });
+
+  test('K1 u2 a handle makes its own missing ferret folder 0700, and a read below one that is not there is refused first', async () => {
+    const f = await fresh();
+    await ensureInternalRootBases(f.fs, { home: f.home, plugin: 'ferrets' }, ['sessions']);
+    const root = f.port('ferrets').root('sessions', { subfolder: 'f1' });
+    // nothing there yet: the kernel refuses the read rather than answering "absent" (why the stores make the folder first)
+    await expect(root.readBytes(resolved(root, 'environment.json'))).rejects.toEqual(new RootError('outside'));
+
+    await root.ensurePrivateDirectory(resolved(root, '.'));
+
+    expect(await modeOf(`${f.home}/state/ferrets/sessions/f1`)).toBe(0o700);
+    await expect(root.readBytes(resolved(root, 'environment.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('K1 u2 a link at the ferret folder is refused when the handle holds it private, never followed', async () => {
+    const f = await fresh();
+    await ensureInternalRootBases(f.fs, { home: f.home, plugin: 'ferrets' }, ['sessions']);
+    const elsewhere = `${f.parent}/elsewhere`;
+    await mkdir(elsewhere, { mode: 0o755 });
+    await symlink(elsewhere, `${f.home}/state/ferrets/sessions/f1`);
+    const root = f.port('ferrets').root('sessions', { subfolder: 'f1' });
+
+    await expect(root.ensurePrivateDirectory(resolved(root, '.'))).rejects.toBeInstanceOf(RootError);
+    expect(await modeOf(elsewhere)).toBe(0o755);
+  });
+
   test('K1 n-a copyTree into a sessions handle: a 0644 file and a 0755 folder land 0600 and 0700', async () => {
     const f = await fresh();
     await ensureInternalRootBases(f.fs, { home: f.home, plugin: 'ferrets' }, ['sessions']);

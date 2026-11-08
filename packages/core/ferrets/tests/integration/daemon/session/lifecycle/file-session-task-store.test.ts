@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { diskRoot } from '@ferretry/kernel/testing';
+import { diskSessionsRoot } from '@ferretry/kernel/testing';
 import should from 'should';
 import { FileSessionTaskStore } from '../../../../../daemon/adapters/session/lifecycle/file-session-task-store.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
@@ -26,8 +26,8 @@ afterEach(async () => {
 async function subject(): Promise<{ readonly store: FileSessionTaskStore; readonly file: string }> {
   const home = await mkdtemp(join(tmpdir(), 'fy-task-store-'));
   homes.add(home);
-  const { root, folder } = await diskRoot(home);
-  const store = new FileSessionTaskStore(root, () => join(folder, SESSION));
+  const { root } = await diskSessionsRoot(home, SESSION);
+  const store = new FileSessionTaskStore(root, SESSION);
   const file = store.file(SESSION);
   await mkdir(join(file, '..'), { recursive: true, mode: 0o700 });
   return { store, file };

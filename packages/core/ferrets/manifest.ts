@@ -498,7 +498,7 @@ export default definePlugin({
   // pane's process tree through `ps` and procfs (tmux joins when the pane preflight is bound, through Terminals' runner).
   // `git`: the file browser's status, listing and diff, and the managed worktrees (today's Git runner).
   permissions: {
-    roots: ['worktrees', 'work', 'harness-history'],
+    roots: ['worktrees', 'work', 'harness-history', 'sessions'],
     spawn: ['git', 'ps'],
     hostFacts: true,
     checkDirectory: true,

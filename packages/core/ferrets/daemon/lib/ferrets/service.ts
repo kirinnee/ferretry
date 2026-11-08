@@ -54,6 +54,7 @@ import {
   NO_AGENT_CONTROL,
 } from '../../../contract/index.ts';
 import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../tokens/tokens.ts';
+import type { SessionSpawnRequest } from '../session/provenance/types.ts';
 
 /**
  * THE FERRETS PORT (§2.2): who each ferret is and its state, and the launch pipeline. Starting and stopping are
@@ -134,8 +135,28 @@ export interface FerretsPorts {
    * with `replaceLiveTerminal`. Unbound, a move answers `plugin_unavailable`.
    */
   move?(ferret: FerretId, runtime: string, options: MoveOptions): Promise<unknown>;
+  /**
+   * The ferret's private session folder on the internal `sessions` root and its spawn stamp (U2). Unbound, neither
+   * is done and a launch goes on as before.
+   */
+  session?: FerretSessionPort;
   vault: Pick<VaultApi, 'childEnvironment'>;
   asks: Pick<AsksApi, 'open'>;
+}
+
+/**
+ * What a launch asks of the ferret's private session files, before the harness is asked for anything.
+ *
+ * `prepare` makes the ferret's folder on the `sessions` root and narrows an existing one to `0700`; a refusal stops
+ * the launch, because the credential and the effect ledger would then land in a folder others can read. `stamp`
+ * records WHO CAUSED the ferret (provenance) at a start, and `carry` brings that stamp forward at a resume: a start
+ * that cannot record it is refused (a ferret nobody can place is the one the warden shield exists for), while a
+ * resume that cannot leaves the stamp already on disk exactly as it was.
+ */
+export interface FerretSessionPort {
+  prepare(ferret: FerretId): Promise<void>;
+  stamp(request: SessionSpawnRequest): Promise<void>;
+  carry(request: SessionSpawnRequest): Promise<void>;
 }
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
@@ -456,7 +477,7 @@ export class FerretsService implements FerretsApi {
         ...(request.options?.label === undefined ? {} : { label: request.options.label }),
         ...(request.options?.card === undefined ? {} : { card: request.options.card }),
       });
-      return await this.launch(record, request.prompt, record.harnessConversation);
+      return await this.launch(record, request.prompt, record.harnessConversation, 'start');
     });
   }
 
@@ -587,7 +608,7 @@ export class FerretsService implements FerretsApi {
     // it, as the moves module leaves its own document: a plain resume or Restart relaunches on the target.
     if (target !== undefined) await this.moveOptions(ferret, target);
     await this.write(starting, settled.state, 'state');
-    const resumed = await this.launch(starting, undefined, record.harnessConversation);
+    const resumed = await this.launch(starting, undefined, record.harnessConversation, 'resume');
     if (resumed.ok) {
       const text = message?.trim();
       await this.ports.history?.(ferret, 'session.resumed', {
@@ -908,11 +929,14 @@ export class FerretsService implements FerretsApi {
     record: FerretRecord,
     prompt: string | undefined,
     conversation: string | undefined,
+    kind: 'start' | 'resume',
   ): Promise<Result<FerretId, StartFailure>> {
     const created = new Set<RunnerHandle>();
     let runner: Runner | undefined;
     let failure: StartFailure;
     try {
+      const session = await this.sessionStep(record, kind);
+      if (!session.ok) return await this.abandon(record, session.error.code, session.error.reason);
       runner = this.ports.runner();
       if (runner === undefined) return await this.abandon(record, 'runner_unavailable', 'no runner plugin is on');
       const tracked = new Proxy(runner, {
@@ -1030,6 +1054,40 @@ export class FerretsService implements FerretsApi {
     };
     await this.write(working, record.state, 'state');
     return ok(record.id);
+  }
+
+  /**
+   * The ferret's private session files and spawn stamp, settled before the harness is asked for anything. The folder
+   * is made (or narrowed to `0700`) first, so nothing written for this launch lands in a readable one. Port errors are
+   * never quoted: they can sit beside a credential.
+   */
+  private async sessionStep(record: FerretRecord, kind: 'start' | 'resume'): Promise<Result<void, StartFailure>> {
+    const session = this.ports.session;
+    if (session === undefined) return ok(undefined);
+    try {
+      await session.prepare(record.id);
+    } catch {
+      return failed('failed', "the ferret's private session folder could not be made private, so it was not started");
+    }
+    const request: SessionSpawnRequest = {
+      id: record.id,
+      ...(this.registry.detailsOf(record.id)?.options?.label === undefined
+        ? {}
+        : { label: this.registry.detailsOf(record.id)?.options?.label }),
+      ...(record.parent === undefined ? {} : { parent: record.parent }),
+      requestedByHuman: record.parent === undefined,
+    };
+    if (kind === 'start') {
+      try {
+        await session.stamp(request);
+      } catch {
+        return failed('failed', 'where this ferret came from could not be recorded, so it was not started');
+      }
+    } else {
+      // A resume that cannot bring the stamp forward leaves the one on disk exactly as it was (it only ever strengthens).
+      await session.carry(request).catch(() => undefined);
+    }
+    return ok(undefined);
   }
 
   /**

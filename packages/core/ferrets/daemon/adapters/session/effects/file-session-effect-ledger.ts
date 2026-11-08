@@ -63,20 +63,29 @@ import {
   settleSessionEffect,
 } from '../../../lib/session/effects/index.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
+import { assertOwnSession, assertSessionsRoot, OwnFolder } from '../sessions-root.ts';
 
 /** The directory each session's effect records live in, beneath the session's own directory. */
 const EFFECTS_DIRECTORY = 'effects';
 
 /** What this ledger asks of the kernel's root. */
-export type LedgerRoot = Pick<RootHandle, 'resolve' | 'publish' | 'readDurable' | 'syncDirectory'>;
+export type LedgerRoot = Pick<
+  RootHandle,
+  'name' | 'internal' | 'ensurePrivateDirectory' | 'resolve' | 'publish' | 'readDurable' | 'syncDirectory'
+>;
 
 export class FileSessionEffectLedger implements SessionEffectLedger {
+  private readonly folder: OwnFolder;
+
   constructor(
     /** The kernel's root the records live in: every step of a write is its durable publish. */
     private readonly root: LedgerRoot,
-    /** Where one session's own private directory is. Every path this writes is beneath it. */
-    private readonly sessionDirectory: (sessionId: SessionId) => string,
-  ) {}
+    /** The one session this ledger is for: its root is that session's own folder, so every path is beneath it. */
+    private readonly ferret: SessionId,
+  ) {
+    assertSessionsRoot(root, 'the session effect ledger');
+    this.folder = new OwnFolder(root);
+  }
 
   async inspect(key: SessionEffectKey, fingerprint: string): Promise<SessionEffectStanding> {
     const held = await this.held(key);
@@ -84,6 +93,7 @@ export class FileSessionEffectLedger implements SessionEffectLedger {
   }
 
   async begin(key: SessionEffectKey, fingerprint: string, at: string): Promise<SessionEffectAdmission> {
+    await this.folder.ensure();
     // The kernel's exclusive publish IS the compare-and-set: ancestors synced parent first, a synced temp file,
     // `link(2)` (EEXIST means somebody else holds the key), the folder synced last, the temp name released.
     const published = await this.root.publish(this.file(key), recordBytes(beginSessionEffect(key, fingerprint, at)), {
@@ -101,6 +111,7 @@ export class FileSessionEffectLedger implements SessionEffectLedger {
   }
 
   async settle(key: SessionEffectKey, fingerprint: string, at: string): Promise<void> {
+    await this.folder.ensure();
     const held = await this.held(key);
     if (held === undefined)
       throw new SessionEffectLedgerError(key, 'was never begun, so there is nothing that could have finished');
@@ -116,9 +127,8 @@ export class FileSessionEffectLedger implements SessionEffectLedger {
 
   /** Where one effect's record lives. Public so a caller can name it in a report. */
   file(key: SessionEffectKey): FencedPath {
-    const resolved = this.root.resolve(
-      join(this.sessionDirectory(key.sessionId), EFFECTS_DIRECTORY, `${effectFileName(key.effectId)}.json`),
-    );
+    assertOwnSession(this.ferret, key.sessionId, 'the session effect ledger');
+    const resolved = this.root.resolve(join(EFFECTS_DIRECTORY, `${effectFileName(key.effectId)}.json`));
     if (!resolved.ok) throw new SessionEffectLedgerError(key, `has a record outside its root (${resolved.error})`);
     return resolved.value;
   }
@@ -140,6 +150,7 @@ export class FileSessionEffectLedger implements SessionEffectLedger {
    * clean directory; nothing on disk says which of the two it is.
    */
   private async held(key: SessionEffectKey): Promise<SessionEffectRecord | undefined> {
+    await this.folder.ensure();
     const file = this.file(key);
     const read = await this.root.readDurable(file);
     if (read === undefined) return undefined;
