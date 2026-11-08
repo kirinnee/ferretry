@@ -1,5 +1,6 @@
 [test]
 root = "packages"
+preload = ["./packages/app/tests/support/browser/chromium.ts"]
 pathIgnorePatterns = ["**/tests/unit/**", "**/tests/sit/**", "**/tests/realworld/**"]
 # THE PER-TEST TIMEOUT IS NOT SET HERE, and it is not an omission.
 #

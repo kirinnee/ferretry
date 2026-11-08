@@ -15,9 +15,10 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
-import { sharedChromium } from './support/hromium.ts';
+import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 
-const packageRoot = resolve(import.meta.dir, '../..');
+/** This file's folder: the scene paths below are relative to it, and the builder runs here. */
+const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_AGENDA_TAB_SHOTS_DIR ?? '';
 
 let browser: Browser;
@@ -28,17 +29,11 @@ const scenes = new Map<string, string>();
 const build = async (entry: string): Promise<{ readonly css: string; readonly js: string }> => {
   const directory = await mkdtemp(join(tmpdir(), 'ferretry-agenda-tab-'));
   directories.push(directory);
-  const child = Bun.spawn(
-    [
-      process.execPath,
-      resolve(packageRoot, 'scripts/build-composer-integration-fixture.ts'),
-      '--out',
-      directory,
-      '--entry',
-      entry,
-    ],
-    { cwd: packageRoot, stderr: 'pipe', stdout: 'pipe' },
-  );
+  const child = Bun.spawn([process.execPath, sceneBuilder, '--out', directory, '--entry', entry], {
+    cwd: packageRoot,
+    stderr: 'pipe',
+    stdout: 'pipe',
+  });
   const [stdout, stderr, code] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
@@ -54,8 +49,8 @@ const pageOf = (css: string, script: string): string =>
 
 beforeAll(async () => {
   browser = await sharedChromium();
-  const tab = await build('tests/integration/fixtures/agenda-tab-scene.tsx');
-  const inbox = await build('tests/integration/fixtures/inbox-card-asks-scene.tsx');
+  const tab = await build('fixtures/agenda-tab-scene.tsx');
+  const inbox = await build('fixtures/inbox-card-asks-scene.tsx');
   scenes.set('/tab', pageOf(tab.css, '/tab.js'));
   scenes.set('/inbox', pageOf(inbox.css, '/inbox.js'));
   server = Bun.serve({
