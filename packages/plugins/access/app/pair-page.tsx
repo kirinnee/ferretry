@@ -7,20 +7,22 @@
  * shell opens over the carriers Connections' walk gives (the daemon's own address first, then the one discovered
  * rendezvous; protocol §14). Today's `ConnectionPicker` (`pwa/src/App.tsx`), moved.
  *
- * THE CODE: read from the address (`location()`) when the page opens and again whenever a SECOND link reaches the open
- * page (a `hashchange`, or the router's new entry for the same path), then the entry is REPLACED with its bare path so
- * history, a bookmark or the share sheet never hold it; kept only in this screen's state; never logged, never in a
- * live region, never in an error sentence, never stored. A second link restarts the screen for that link. A sealed
- * refusal ends the attempt: nothing here retries.
+ * THE CODE: Access declares the `/pair` fragment (`{ form: 'path', screen: 'pair' }`), so the SHELL takes it off the
+ * address bar and the history entry before the first render and before this chunk loads (shell contract S3) and holds
+ * it in memory; this screen takes it once (`useFragment('pair').take()`, in an effect), drawing "Opening link…" until
+ * then. A SECOND link opened on the open page (a `hashchange`, or the router's new entry for the same path) bumps the
+ * arrival and restarts the screen for that link; the old code is not kept. The code lives only in this screen's state:
+ * never logged, never in a live region, never in an error sentence, never stored. A sealed refusal ends the attempt:
+ * nothing here retries.
  */
 import {
   type DaemonlessPorts,
   type DaemonlessScreenProps,
   daemonHomeHref,
   distinctDaemonName,
-  useOptionalRouter,
+  useFragment,
 } from '@ferretry/app';
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { accessClaims, accessKeyStore } from './connect.ts';
 import { DeviceRefusedNotice } from './features/pairing/device-refused-notice.tsx';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
@@ -67,6 +69,21 @@ function browserQrScan(loadDecoder?: () => Promise<DecodePixels>): QrScanHost | 
   return host.supported ? host : null;
 }
 
+/** What `/pair` draws while a link arrived and its code is not taken yet: never the code itself. */
+export const OPENING_LINK = 'Opening link…';
+
+/** The screen id the pairing fragment is declared for (the manifest's `pair`). */
+export const PAIR_SCREEN_ID = 'pair';
+
+const NO_LINK: PairingArrival = Object.freeze({ kind: 'none' });
+
+/** The arrival a taken fragment reads as, on this page's own (already stripped) address. */
+const arrivalOf = (location: string, fragment: string): PairingArrival => {
+  const url = new URL(location);
+  url.hash = fragment;
+  return pairingArrival(url.href);
+};
+
 /** The per-machine slot of a daemon-less screen: never drawn (its route is under no `/d/<machine>/`), so it draws nothing. */
 export const daemonlessPlaceholder = (): null => null;
 
@@ -75,43 +92,31 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
   const store = environment.store ?? accessKeyStore(ports);
   const claims = accessClaims(ports, { store });
   return function PairPage({ navigate, location }: DaemonlessScreenProps) {
-    // Read at mount, and again only when a new link arrives (below). A plain render must not re-read an address the
-    // screen has already emptied, and must not resurrect a code the reader declined.
-    const [link, setLink] = useState<{ readonly arrival: PairingArrival; readonly nonce: number }>(() => ({
-      arrival: pairingArrival(location()),
-      nonce: 0,
-    }));
-    // A second link opened on this page reloads nothing: it is a fragment-only navigation, so the page is read again
-    // from the router's new entry or from `hashchange`. The screen restarts for it (the new key); its own mount
-    // effect then takes the fragment out of the address, replacing the entry.
-    const readSecondLink = useCallback((): void => {
-      if (new URL(location()).hash === '') return;
-      const arrival = pairingArrival(location());
-      setLink(held => ({ arrival, nonce: held.nonce + 1 }));
-    }, [location]);
-    const entryKey = useOptionalRouter()?.entryKey;
-    const seenEntry = useRef(entryKey);
+    // The code is taken once per arrival, never re-read from an address the shell already emptied, so a plain render
+    // cannot resurrect a code the reader declined. Each new arrival restarts the screen (the new key) for that link.
+    const fragment = useFragment(PAIR_SCREEN_ID);
+    const { take } = fragment;
+    const [link, setLink] = useState<{ readonly arrival: PairingArrival; readonly nonce: number } | null>(null);
     useEffect(() => {
-      if (seenEntry.current === entryKey) return;
-      seenEntry.current = entryKey;
-      readSecondLink();
-    }, [entryKey, readSecondLink]);
-    useEffect(() => {
-      window.addEventListener('hashchange', readSecondLink);
-      return () => window.removeEventListener('hashchange', readSecondLink);
-    }, [readSecondLink]);
+      if (fragment.arrival === 0) return;
+      const taken = take();
+      // Nothing to take (it expired, or this effect ran again): keep what is open, or open the cold page.
+      if (taken === undefined) setLink(held => held ?? { arrival: NO_LINK, nonce: 0 });
+      else setLink(held => ({ arrival: arrivalOf(location(), taken), nonce: (held?.nonce ?? 0) + 1 }));
+    }, [fragment.arrival, take, location]);
     // `/pair?refused=<machine>`: that machine no longer accepts this browser (it was removed, or went unused too long).
     // A machine id is not a secret; the code never rides the query.
     const [refusedBy, setRefusedBy] = useState<string | null>(() => new URL(location()).searchParams.get('refused'));
     const scanHost = useMemo(() => (environment.scanHost ?? (() => browserQrScan(environment.loadDecoder)))(), []);
     const snapshot = useSyncExternalStore(ports.daemons.subscribe, ports.daemons.snapshot);
     const connections = useMemo(() => snapshot.daemons.map(connectionRecord), [snapshot]);
-    const takeArrival = useCallback(() => {
-      // `replace`, not push: a back button that restored the code would undo exactly this.
-      const here = new URL(location());
-      navigate(`${here.pathname}${here.search}`, { replace: true });
-    }, [location, navigate]);
     const refused = refusedBy === null ? undefined : snapshot.daemons.find(entry => entry.daemon === refusedBy);
+    if (link === null && fragment.arrival > 0)
+      return (
+        <p role="status" className="m-0 p-4 text-cell text-muted" data-pair-opening="">
+          {OPENING_LINK}
+        </p>
+      );
     return (
       <>
         {refused === undefined ? null : (
@@ -121,10 +126,9 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
           />
         )}
         <PairingScreen
-          key={link.nonce}
-          arrival={link.arrival}
+          key={link?.nonce ?? 0}
+          arrival={link?.arrival ?? NO_LINK}
           scanHost={scanHost}
-          onArrivalTaken={takeArrival}
           connections={connections}
           selectedDaemonId={snapshot.selected === null ? null : daemonId(snapshot.selected)}
           {...(environment.defaultName === undefined ? {} : { defaultName: environment.defaultName })}

@@ -32,7 +32,7 @@ import {
 } from './login-entries.ts';
 import { LOGIN_OBSERVED_MAX } from './login-recipes.ts';
 import { sha256Hex } from './sha256.ts';
-import { type DaemonId, PairedDeviceIdSchema } from './foreign.ts';
+import { type DaemonId, DaemonIdSchema, PairedDeviceIdSchema } from './foreign.ts';
 import { PASSKEY_CHALLENGE_TTL_SECONDS, StoredStepUpProofSchema } from './foreign.ts';
 import {
   type GrantMissReason,
@@ -952,6 +952,29 @@ const ruleDeepLinkFragment = (stage: SignInRuleStageId, machine?: DaemonId): str
 /** The whole link on an app address (trailing slashes dropped): what `fy rules add` prints and opens. */
 export const ruleDeepLink = (origin: string, stage: SignInRuleStageId, machine?: DaemonId): string =>
   `${origin.replace(/\/+$/u, '')}/${ruleDeepLinkFragment(stage, machine)}`;
+
+/**
+ * The stage (and the machine) a {@link ruleDeepLink} fragment names, as the app reads it: `null` for any other fragment,
+ * a stage that is not one, or a machine that is not a daemon id. It only picks which row to show.
+ */
+export const ruleDeepLinkFromFragment = (
+  fragment: string,
+): { readonly stage: SignInRuleStageId; readonly machine?: DaemonId } | null => {
+  const match = /^#?rules\/([^/?]+)(?:\?(.*))?$/u.exec(fragment);
+  if (match === null) return null;
+  let raw: string;
+  try {
+    raw = decodeURIComponent(match[1] ?? '');
+  } catch {
+    return null;
+  }
+  const stage = SignInRuleStageIdSchema.safeParse(raw);
+  if (!stage.success) return null;
+  const named = new URLSearchParams(match[2] ?? '').get(RULE_LINK_MACHINE_PARAMETER);
+  if (named === null) return { stage: stage.data };
+  const machine = DaemonIdSchema.safeParse(named);
+  return machine.success ? { stage: stage.data, machine: machine.data } : null;
+};
 
 /** The longest reason of a ferret's suggestion the owner's sheet shows (redacted, one line). */
 export const SIGN_IN_RULE_SUGGESTION_WHY_MAX_CHARS = 300;

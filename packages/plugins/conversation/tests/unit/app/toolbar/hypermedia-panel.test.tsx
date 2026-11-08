@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { DaemonCallError } from '@ferretry/app';
-import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/testing';
+import type { Authority, ViewPlace } from '@ferretry/app';
+import { interact, type Mounted, mount, must, settleUntil, WithViewPlace } from '@ferretry/app/testing';
 import { hypermediaOn, patchFerretHypermedia, readFerretHypermedia } from '../../../../app/toolbar/hypermedia-api.ts';
 import { HypermediaPanel } from '../../../../app/toolbar/hypermedia-panel.tsx';
 import { type CallHandler, fakeClient, refusal } from '../../../support/app/fake-client.ts';
@@ -28,6 +29,16 @@ const answering: CallHandler = call => {
   };
 };
 
+/** A per-daemon view's place (shell contract S1) whose every route reads `authority`; `press` runs `unlock` first. */
+const placeOf = (authority: Authority, unlock: () => Promise<boolean> = async () => true): ViewPlace => ({
+  daemon: 'd1',
+  machine: 'laptop',
+  online: true,
+  authority: () => authority,
+  authorityOf: () => authority,
+  press: async act => (authority.kind === 'locked' && !(await unlock()) ? undefined : await act()),
+});
+
 let mounted: Mounted | undefined;
 afterEach(async () => {
   await mounted?.unmount();
@@ -40,9 +51,51 @@ const switchOf = (root: HTMLElement) => root.querySelector<HTMLButtonElement>('[
 describe('Hypermedia in the ferret toolbar', () => {
   it('offers nothing to a reader who cannot control this ferret, and asks the daemon nothing', async () => {
     const client = fakeClient({ [READ_ROUTE]: () => SUMMARY, [PATCH_ROUTE]: answering });
-    mounted = await mount(withClient(client, <HypermediaPanel subject="ferret-hadi" canControl={false} />));
+    mounted = await mount(
+      withClient(
+        client,
+        <WithViewPlace place={placeOf({ kind: 'refused', refusal: 'not-granted' })}>
+          <HypermediaPanel subject="ferret-hadi" />
+        </WithViewPlace>,
+      ),
+    );
     expect(switchOf(mounted.container)).toBeNull();
     expect(client.calls).toEqual([]);
+  });
+
+  it('is off with the reason while this device does not know what it may do', async () => {
+    const client = fakeClient({ [READ_ROUTE]: () => SUMMARY, [PATCH_ROUTE]: answering });
+    mounted = await mount(
+      withClient(
+        client,
+        <WithViewPlace place={placeOf({ kind: 'unreadable' })}>
+          <HypermediaPanel subject="ferret-hadi" />
+        </WithViewPlace>,
+      ),
+    );
+    const root = mounted.container;
+    await settle(() => switchOf(root)?.getAttribute('data-hypermedia-switch') === 'on', 'the switch to read on');
+    expect(switchOf(root)?.disabled).toBe(true);
+    expect(switchOf(root)?.title).toContain('could not read what it may do');
+  });
+
+  it('on a locked machine the switch asks for the unlock first, and a dismissed one switches nothing', async () => {
+    const client = fakeClient({ [READ_ROUTE]: () => SUMMARY, [PATCH_ROUTE]: answering });
+    mounted = await mount(
+      withClient(
+        client,
+        <WithViewPlace place={placeOf({ kind: 'locked' }, async () => false)}>
+          <HypermediaPanel subject="ferret-hadi" />
+        </WithViewPlace>,
+      ),
+    );
+    const root = mounted.container;
+    await settle(() => switchOf(root)?.getAttribute('data-hypermedia-switch') === 'on', 'the switch to read on');
+    await interact(() => must(switchOf(root), 'the switch').click());
+    await settle(() => root.querySelector('[data-hypermedia-action-note]') !== null, 'the note');
+    expect(root.querySelector('[data-hypermedia-action-note]')?.textContent).toContain('wants your passkey first');
+    expect(client.callsTo(PATCH_ROUTE)).toEqual([]);
+    expect(switchOf(root)?.getAttribute('data-hypermedia-switch')).toBe('on');
   });
 
   it('reads an untouched interactive ferret as on, switches it off for the next launch, and says so', async () => {

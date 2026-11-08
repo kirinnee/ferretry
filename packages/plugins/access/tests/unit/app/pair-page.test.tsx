@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { useLayoutEffect } from 'react';
 import {
   type DaemonlessPorts,
   type DaemonlessScreenProps,
@@ -7,19 +8,34 @@ import {
   type PairedOver,
   RelayPairingRefusedError,
 } from '@ferretry/app';
-import { pairPage } from '../../../app/pair-page.tsx';
+import { deviceViewHarness } from '@ferretry/app/testing';
+import half from '../../../app/index.ts';
+import { OPENING_LINK, pairPage } from '../../../app/pair-page.tsx';
 import { MemoryDeviceKeyStore, testDeviceKeyCrypto } from '../../support/app/device-keys.ts';
 import { interact, type Mounted, mount, must } from '../../support/app/dom.ts';
 
 /**
  * ACCESS'S DAEMON-LESS `/pair` PAGE (D2 #26): the QR link a machine shows lands here on a device with no daemon yet,
  * and the exchange rides the `pair` carriers the shell hands it. The code is a FIXED FAKE; a real one is never used.
+ *
+ * The link arrives through the shell's REAL fragment taker (`deviceViewHarness`, over Access's own declaration): the
+ * shell takes it off the address before the page draws (shell contract S3), and the page takes it from the shell.
  */
 
 const FAKE_CODE = '7F3K-Q2ND';
 const DAEMON = `fy_daemon_${'d'.repeat(43)}`;
 const DEVICE = `fy_device_id_${'b'.repeat(22)}`;
-const LINK = `https://pwa.example.test/pair#v1;url=${encodeURIComponent('https://daemon.example.test')};code=${FAKE_CODE};fp=${DAEMON}`;
+const FRAGMENT = `#v1;url=${encodeURIComponent('https://daemon.example.test')};code=${FAKE_CODE};fp=${DAEMON}`;
+const PAGE = 'https://pwa.example.test/pair';
+
+/** The shell's fragment taker over Access's own declaration, with the app opened at `href`. */
+const shellAt = (href: string) =>
+  deviceViewHarness({
+    plugin: 'access',
+    fragments: half.shell.fragments ?? [],
+    screens: [{ id: 'pair', path: '/pair' }],
+    href,
+  });
 
 const answer = {
   deviceId: DEVICE,
@@ -173,13 +189,20 @@ describe('the /pair page', () => {
       } as PairedOver;
     });
     const moves: Navigation[] = [];
+    const shell = shellAt(`/pair${FRAGMENT}`);
+    // The address lost the fragment before the page was drawn: the shell took it.
+    expect(shell.address()).toBe('/pair');
     const { leaks } = await watching(async () => {
-      view = await mount(<Page {...props(LINK, moves)} />);
+      view = await mount(
+        <shell.Harness place="daemonless" screen="pair">
+          <Page {...props(PAGE, moves)} />
+        </shell.Harness>,
+      );
       // The arrival is a confirmation, not a form; the code is not on the screen.
       expect(view.container.textContent).toContain('daemon.example.test');
       expect(view.container.textContent).not.toContain(FAKE_CODE);
-      // The address loses the fragment at once: replace the entry with its bare path, never push.
-      expect(moves[0]).toEqual({ to: '/pair', replace: true });
+      expect(view.container.textContent).not.toContain(OPENING_LINK);
+      expect(moves).toEqual([]);
       await interact(() => button('Pair this device').click());
       await interact(() => new Promise(resolve => setTimeout(resolve, 0)));
     });
@@ -206,8 +229,13 @@ describe('the /pair page', () => {
       throw new RelayPairingRefusedError();
     });
     const moves: Navigation[] = [];
+    const shell = shellAt(`/pair${FRAGMENT}`);
     const { leaks } = await watching(async () => {
-      view = await mount(<Page {...props(LINK, moves)} />);
+      view = await mount(
+        <shell.Harness place="daemonless" screen="pair">
+          <Page {...props(PAGE, moves)} />
+        </shell.Harness>,
+      );
       await interact(() => button('Pair this device').click());
       await interact(() => new Promise(resolve => setTimeout(resolve, 20)));
     });
@@ -217,6 +245,35 @@ describe('the /pair page', () => {
     expect(leaks).toEqual([]);
     // Nothing navigated to a machine: the refusal ends the attempt.
     expect(moves.every(move => !move.to.startsWith('/d/'))).toBe(true);
+  });
+
+  it('declares its fragment as a path fragment of its own daemon-less /pair screen', () => {
+    expect(half.shell.fragments).toEqual([{ form: 'path', screen: 'pair' }]);
+  });
+
+  it('draws "Opening link…" while a link arrived and is not taken yet, never the code', async () => {
+    const { Page } = setup(async () => {
+      throw new Error('not used');
+    });
+    const shell = shellAt(`/pair${FRAGMENT}`);
+    // What the first draw committed, read by a sibling's layout effect: after the DOM commit, before the page's own
+    // effect took the code.
+    const drawn: string[] = [];
+    const FirstDraw = () => {
+      useLayoutEffect(() => {
+        drawn.push(document.querySelector('[data-pair-opening]')?.textContent ?? '');
+      }, []);
+      return null;
+    };
+    view = await mount(
+      <shell.Harness place="daemonless" screen="pair">
+        <Page {...props(PAGE, [])} />
+        <FirstDraw />
+      </shell.Harness>,
+    );
+    expect(drawn.some(text => text.includes(OPENING_LINK))).toBe(true);
+    expect(drawn.every(text => !text.includes(FAKE_CODE))).toBe(true);
+    expect(view.container.textContent).toContain('daemon.example.test');
   });
 
   it('a cold open offers the paste path and holds no code', async () => {
@@ -234,21 +291,29 @@ describe('the /pair page', () => {
       throw new Error('not used');
     });
     const moves: Navigation[] = [];
-    let href = 'https://pwa.example.test/pair';
+    const shell = shellAt('/pair');
     const { leaks } = await watching(async () => {
-      view = await mount(<Page {...props('https://pwa.example.test/pair', moves)} location={() => href} />);
+      view = await mount(
+        <shell.Harness place="daemonless" screen="pair">
+          <Page {...props(PAGE, moves)} />
+        </shell.Harness>,
+      );
       // A cold open: the paste path, no code, no navigation.
       expect(view.container.textContent).toContain('Connect a daemon');
       expect(moves).toEqual([]);
       // A fragment-only navigation (the OS hands the scanned link to the open window): the page is not reloaded.
-      href = LINK;
-      await interact(() => {
-        window.dispatchEvent(new Event('hashchange'));
-      });
+      await interact(() => shell.arrive(`/pair${FRAGMENT}`));
     });
+    expect(shell.address()).toBe('/pair');
     expect(must(view, 'the page').container.textContent).toContain('daemon.example.test');
     expect(must(view, 'the page').container.textContent).not.toContain(FAKE_CODE);
-    expect(moves).toEqual([{ to: '/pair', replace: true }]);
+    // And a THIRD link restarts it for that one: the old code is not kept.
+    await interact(() =>
+      shell.arrive(`/pair#v1;url=${encodeURIComponent('https://other.example.test')};code=${FAKE_CODE};fp=${DAEMON}`),
+    );
+    expect(must(view, 'the page').container.textContent).toContain('other.example.test');
+    expect(must(view, 'the page').container.textContent).not.toContain('daemon.example.test');
+    expect(moves).toEqual([]);
     expect(moves.some(move => move.to.includes('#') || move.to.includes(FAKE_CODE))).toBe(false);
     expect(leaks).toEqual([]);
   });
@@ -258,10 +323,13 @@ describe('the /pair page', () => {
       throw new Error('not used');
     });
     const moves: Navigation[] = [];
-    view = await mount(<Page {...props('https://pwa.example.test/pair', moves)} />);
-    await interact(() => {
-      window.dispatchEvent(new Event('hashchange'));
-    });
+    const shell = shellAt('/pair');
+    view = await mount(
+      <shell.Harness place="daemonless" screen="pair">
+        <Page {...props(PAGE, moves)} />
+      </shell.Harness>,
+    );
+    await interact(() => shell.arrive('/pair'));
     expect(view.container.textContent).toContain('Connect a daemon');
     expect(moves).toEqual([]);
   });
