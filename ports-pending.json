@@ -163,7 +163,6 @@
     ],
     "onboarding": [
       "10 parity rows have no test files: tests/unit/parity/app.test.tsx, commands.test.ts and storage.test.ts do not exist, and R-0092 is not proved yet",
-      "2 context-imports findings stay open in tests/unit/app/get-started-document.test.ts, which imports another package past its contract",
       "the app half waits on the shell: about 12 components and 7 app tests are listed in app/NEEDS-APP-SHELL.txt"
     ],
     "board": [
