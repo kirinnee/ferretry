@@ -7,11 +7,12 @@ import type {
   SessionLayer,
   SocketDownstream,
 } from '@ferretry/kernel/contract';
+import { sessionIdFromBytes } from '@ferretry/kernel/wire';
 import { encodeFrame, FRAME_KINDS } from '../../../worker/src/lib/index.ts';
 import { noConnection, unusedSigner } from '../../support/session-layer-stubs.ts';
 import { sealedWebRtcSessions } from '../../../daemon/lib/webrtc/session.ts';
 
-function harness() {
+function harness(options: { sendResult?: number; randomFill?: number } = {}) {
   const queue: (SealedFrame | SessionEnd)[] = [];
   const sent: (string | Uint8Array)[] = [];
   const received: Uint8Array[] = [];
@@ -52,7 +53,7 @@ function harness() {
   const downstream: SocketDownstream = {
     send: frame => {
       sent.push(frame);
-      return typeof frame === 'string' ? frame.length : frame.length;
+      return options.sendResult ?? frame.length;
     },
     close: (code, reason) => ends.push({ code, reason }),
     bufferedBytes: () => buffer,
@@ -70,7 +71,7 @@ function harness() {
         };
       },
     },
-    length => new Uint8Array(length).fill(7),
+    length => new Uint8Array(length).fill(options.randomFill ?? 7),
   )({ kind: 'carried', carrier: 'webrtc', address: 'webrtc-peer:minted-by-daemon' }, downstream, () => {
     released++;
   })!;
@@ -158,4 +159,51 @@ it('R692 a refused kernel device proof becomes the same closed 4403 on WebRTC', 
   h.ready();
   expect(h.ends).toEqual([{ code: 4403, reason: 'credential refused' }]);
   expect(h.released()).toBe(1);
+});
+it('refuses to mint a session whose identifier the generator left unusable', () => {
+  expect(() => harness({ randomFill: 0 })).toThrow('the session identifier generator produced an unusable identifier');
+});
+it('ends the session when the channel refuses a write', async () => {
+  const h = harness({ sendResult: -1 });
+  await h.session.open();
+  h.queue.push({ sequence: 1, bytes: Uint8Array.of(9) });
+  h.ready();
+  expect(h.closed()).toBe(1);
+  expect(h.released()).toBe(1);
+});
+it('reads a frame that arrives as an ArrayBuffer, and answers a ping with a pong', async () => {
+  const h = harness();
+  await h.session.open();
+  const bytes = encodeFrame({
+    kind: FRAME_KINDS.handshake,
+    sessionId: h.session.sessionId,
+    sequence: 0,
+    payload: Uint8Array.of(4),
+  });
+  h.session.fromClient(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+  expect(h.received).toHaveLength(1);
+  expect(Array.from(h.received[0] ?? [])).toEqual(Array.from(bytes));
+  h.session.fromClient('fy-ping');
+  expect(h.sent).toContain('fy-pong');
+});
+it('closes the channel with the reason a frame could not be read', async () => {
+  const h = harness();
+  await h.session.open();
+  h.session.fromClient(Uint8Array.of(1, 2, 3));
+  expect(h.ends).toHaveLength(1);
+  expect(h.ends[0]?.code).toBeGreaterThanOrEqual(4400);
+  expect(h.closed()).toBe(1);
+});
+it('closes the channel for a frame that names a session it did not announce', async () => {
+  const h = harness();
+  await h.session.open();
+  const other = encodeFrame({
+    kind: FRAME_KINDS.handshake,
+    sessionId: sessionIdFromBytes(new Uint8Array(16).fill(9))!,
+    sequence: 0,
+    payload: Uint8Array.of(1),
+  });
+  h.session.fromClient(other);
+  expect(h.ends[0]?.reason).toBe('a frame named no live session');
+  expect(h.received).toHaveLength(0);
 });

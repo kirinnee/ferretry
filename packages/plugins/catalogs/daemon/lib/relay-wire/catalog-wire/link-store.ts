@@ -15,20 +15,9 @@
 import { CatalogLinkKindSchema, LinkBundleIdSchema } from '../../../../contract/wire/index.ts';
 import { InstantSchema } from '../../../../contract/wire/foreign.ts';
 import { z } from 'zod';
-import {
-  concatBytes,
-  fromBase64UrlFixed,
-  lengthPrefixed,
-  toBase64Url,
-  utf8Bytes,
-  writeUint32,
-} from '../kernel-wire/index.ts';
-import { ED25519_SIGNATURE_BYTES, ED25519_SPKI_BYTES, NONCE_BYTES } from '../kernel-wire/index.ts';
-import type { DaemonIdentity, SessionCrypto } from '../kernel-wire/index.ts';
-import { parseDaemonId } from '../kernel-wire/index.ts';
-import { LINK_ENVELOPE_MAX_BYTES } from './link-bundle.ts';
+import { concatBytes, fromBase64UrlFixed, utf8Bytes, writeUint32 } from '../kernel-wire/index.ts';
+import { NONCE_BYTES } from '../kernel-wire/index.ts';
 
-const LINK_STORE_PROTOCOL_ID = 'ferretry-link-store/1' as const;
 const LINK_STORE_VERSION = 1 as const;
 
 /** `GET`, public, no-store, CORS `*`: whether this store takes new links at all. */
@@ -53,8 +42,6 @@ const LINK_GONE_SENTENCE =
 const base64UrlOfLength = (bytes: number) =>
   z.string().refine(value => fromBase64UrlFixed(value, bytes) !== null, `must be ${bytes} bytes of base64url`);
 
-const DaemonIdField = z.string().refine(value => parseDaemonId(value) !== null, 'not a daemon fingerprint');
-
 /** `GET /v1/link-store`. `available: false` is "not taking new links", never an error. */
 export const LinkStoreAdvertisementSchema = z.strictObject({
   version: z.literal(LINK_STORE_VERSION),
@@ -67,55 +54,30 @@ export const LinkStoreChallengeSchema = z.strictObject({
   nonce: base64UrlOfLength(NONCE_BYTES),
   deadlineSeconds: z.number().int().min(1).max(LINK_STORE_CHALLENGE_SECONDS),
 });
-const SignedFields = {
-  daemonId: DaemonIdField,
-  publicKey: base64UrlOfLength(ED25519_SPKI_BYTES),
-  nonce: base64UrlOfLength(NONCE_BYTES),
-  signature: base64UrlOfLength(ED25519_SIGNATURE_BYTES),
-};
-
-const LINK_UPLOAD_ACTIONS = ['create', 'replace'] as const;
-const LinkUploadActionSchema = z.enum(LINK_UPLOAD_ACTIONS);
-type LinkUploadAction = z.infer<typeof LinkUploadActionSchema>;
+type LinkUploadAction = 'create' | 'replace';
 
 /**
  * The JSON half of an upload. `installCap` is the store's to enforce and is NOT in the signed link
  * document, so changing it needs no re-sign; it is in the signed transcript, so nobody on the road can.
+ * The store checks it; the daemon only writes it.
  */
-const LinkUploadMetadataSchema = z
-  .strictObject({
-    ...SignedFields,
-    action: LinkUploadActionSchema,
-    kind: CatalogLinkKindSchema,
-    sequence: z.number().int().min(1).max(0xffffffff),
-    /** Required for a replace: compare-and-swap against the stored sequence. */
-    expectSequence: z.number().int().min(1).max(0xffffffff).optional(),
-    notAfter: InstantSchema,
-    expiresAt: InstantSchema.optional(),
-    installCap: z.number().int().min(1).max(10_000).optional(),
-    fetchVerifier: base64UrlOfLength(32),
-    envelopeSha256: base64UrlOfLength(32),
-    envelopeBytes: z.number().int().min(1).max(LINK_ENVELOPE_MAX_BYTES),
-  })
-  .check(ctx => {
-    const upload = ctx.value;
-    const issue = (message: string, path: string) =>
-      ctx.issues.push({ code: 'custom', message, input: upload, path: [path] });
-    if (upload.action === 'create' && upload.expectSequence !== undefined)
-      issue('a create expects no earlier sequence', 'expectSequence');
-    if (upload.action === 'replace') {
-      if (upload.expectSequence === undefined) issue('a replace names the sequence it replaces', 'expectSequence');
-      else if (upload.sequence <= upload.expectSequence) issue('a replace goes up', 'sequence');
-      if (upload.kind !== 'public') issue('only a public link is replaced', 'kind');
-    }
-    if (upload.kind === 'one-time') {
-      if (upload.sequence !== 1) issue('a one-time link is uploaded once', 'sequence');
-      if (upload.installCap !== undefined) issue('a one-time link has no install cap', 'installCap');
-    }
-    if (upload.expiresAt !== undefined && Date.parse(upload.notAfter) > Date.parse(upload.expiresAt))
-      issue('notAfter is after expiresAt', 'notAfter');
-  });
-export type LinkUploadMetadata = z.infer<typeof LinkUploadMetadataSchema>;
+export interface LinkUploadMetadata {
+  readonly daemonId: string;
+  readonly publicKey: string;
+  readonly nonce: string;
+  readonly signature: string;
+  readonly action: LinkUploadAction;
+  readonly kind: z.infer<typeof CatalogLinkKindSchema>;
+  readonly sequence: number;
+  /** Required for a replace: compare-and-swap against the stored sequence. */
+  readonly expectSequence?: number;
+  readonly notAfter: string;
+  readonly expiresAt?: string;
+  readonly installCap?: number;
+  readonly fetchVerifier: string;
+  readonly envelopeSha256: string;
+  readonly envelopeBytes: number;
+}
 
 const LINK_STORE_LINK_STATES = ['live', 'used', 'ended', 'lapsed', 'unknown'] as const;
 const LinkStoreLinkStateSchema = z.enum(LINK_STORE_LINK_STATES);
@@ -205,72 +167,11 @@ export interface LinkStoreRequestContext {
   readonly body: LinkStoreRequestBody;
 }
 
-const field = (text: string | number | undefined): Uint8Array =>
-  lengthPrefixed(utf8Bytes(text === undefined ? '' : String(text)));
-
-/**
- * The signed message, one shape per action:
- *
- *   upload  label ‖ LP(protocolId) ‖ LP(daemonId) ‖ LP(host) ‖ LP(nonce) ‖ LP(bundleId) ‖ LP(action) ‖ LP(kind)
- *           ‖ LP(sequence) ‖ LP(expectSequence | "") ‖ LP(notAfter) ‖ LP(expiresAt | "") ‖ LP(installCap | "")
- *           ‖ LP(fetchVerifier) ‖ LP(envelopeSha256) ‖ LP(envelopeBytes)
- *   delete  label ‖ LP(protocolId) ‖ LP(daemonId) ‖ LP(host) ‖ LP(nonce) ‖ LP(bundleId)
- *   status  label ‖ LP(protocolId) ‖ LP(daemonId) ‖ LP(host) ‖ LP(nonce) ‖ LP(bundleIds sorted, joined by ",")
- *
- * Numbers are decimal text and an absent optional is the empty string, so no two requests share bytes.
- */
-function linkStoreTranscript(context: LinkStoreRequestContext): Uint8Array {
-  const { body } = context;
-  const head = [
-    field(LINK_STORE_PROTOCOL_ID),
-    field(context.daemonId),
-    field(context.host),
-    lengthPrefixed(context.nonce),
-  ];
-  switch (body.request) {
-    case 'upload':
-      return concatBytes([
-        utf8Bytes(LINK_STORE_UPLOAD_LABEL),
-        ...head,
-        field(body.bundleId),
-        field(body.action),
-        field(body.kind),
-        field(body.sequence),
-        field(body.expectSequence),
-        field(body.notAfter),
-        field(body.expiresAt),
-        field(body.installCap),
-        field(body.fetchVerifier),
-        field(body.envelopeSha256),
-        field(body.envelopeBytes),
-      ]);
-    case 'delete':
-      return concatBytes([utf8Bytes(LINK_STORE_DELETE_LABEL), ...head, field(body.bundleId)]);
-    case 'status':
-      return concatBytes([utf8Bytes(LINK_STORE_STATUS_LABEL), ...head, field([...body.bundleIds].sort().join(','))]);
-  }
-}
-
 export interface SignedLinkStoreRequest {
   readonly daemonId: string;
   readonly publicKey: string;
   readonly nonce: string;
   readonly signature: string;
-}
-
-/** The daemon half: sign one request with the identity pairing minted. */
-export async function signLinkStoreRequest(
-  crypto: SessionCrypto,
-  identity: DaemonIdentity,
-  context: LinkStoreRequestContext,
-): Promise<SignedLinkStoreRequest> {
-  const signature = await crypto.signEd25519(identity.privateKey, linkStoreTranscript(context));
-  return {
-    daemonId: context.daemonId,
-    publicKey: toBase64Url(identity.publicKeySpki),
-    nonce: toBase64Url(context.nonce),
-    signature: toBase64Url(signature),
-  };
 }
 
 // ── The upload body ──────────────────────────────────────────────────────────────────────────────

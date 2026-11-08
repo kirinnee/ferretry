@@ -19,22 +19,7 @@
  *
  * Pure and `SessionCrypto` only, so the daemon, the PWA and the CLI run the same code.
  */
-import {
-  catalogCanonicalText,
-  type SharedCatalogLinkBundle,
-  SharedCatalogLinkBundleSchema,
-} from '../../../../contract/wire/index.ts';
-import {
-  bytesEqual,
-  concatBytes,
-  fromBase64UrlFixed,
-  isAllZero,
-  readUint32,
-  toBase64Url,
-  utf8Bytes,
-  utf8Text,
-  writeUint32,
-} from '../kernel-wire/index.ts';
+import { concatBytes, fromBase64UrlFixed, toBase64Url, utf8Bytes, writeUint32 } from '../kernel-wire/index.ts';
 import type { SessionCrypto } from '../kernel-wire/index.ts';
 
 /** First four bytes of every envelope: the format and its version. */
@@ -58,7 +43,6 @@ const NONCE_BYTES = 12;
 const TAG_BYTES = 16;
 const HEADER_BYTES = LINK_ENVELOPE_MAGIC.length + 4 + NONCE_BYTES;
 /** The least an envelope can be: header, one padding bucket and the tag. */
-const MIN_ENVELOPE_BYTES = HEADER_BYTES + LINK_PADDING_BUCKET_BYTES + TAG_BYTES;
 
 /** What a link is made of that only its holders know: the key and the store's name for the bundle. */
 export interface LinkSecrets {
@@ -90,7 +74,6 @@ export type LinkEnvelopeResult<T> =
 const refuse = (refusal: LinkEnvelopeRefusal, reason: string) => ({ ok: false as const, refusal, reason });
 
 const TOO_BIG = 'This is too large to share as a link. Export it as a file instead.';
-const NOT_A_LINK = 'This is not a Ferretry link, or it has been damaged.';
 
 function decodeSecrets(key: string, bundleId: string): { key: Uint8Array; bundleId: Uint8Array } | null {
   const keyBytes = fromBase64UrlFixed(key, LINK_SECRET_BYTES);
@@ -165,58 +148,4 @@ export function linkEnvelopeSize(bundleCanonicalText: string): number | null {
   const framed = 4 + utf8Bytes(bundleCanonicalText).length;
   const size = HEADER_BYTES + Math.ceil(framed / LINK_PADDING_BUCKET_BYTES) * LINK_PADDING_BUCKET_BYTES + TAG_BYTES;
   return size > LINK_ENVELOPE_MAX_BYTES ? null : size;
-}
-
-/** The sequence an envelope declares in the clear, or `null` when it is not an envelope. Authenticated by {@link openLinkEnvelope}. */
-function linkEnvelopeSequence(bytes: Uint8Array): number | null {
-  if (bytes.length < MIN_ENVELOPE_BYTES || bytes.length > LINK_ENVELOPE_MAX_BYTES) return null;
-  if (!bytesEqual(bytes.subarray(0, LINK_ENVELOPE_MAGIC.length), utf8Bytes(LINK_ENVELOPE_MAGIC))) return null;
-  const sequence = readUint32(bytes, LINK_ENVELOPE_MAGIC.length);
-  return isSequence(sequence) ? sequence : null;
-}
-
-/**
- * Open an envelope: the magic, the bounds, the authentication, the padding, and the bundle's shape.
- * Answers the declared sequence and the bundle. Whether the bundle is TRUE is `verifyLinkBundle`'s question.
- */
-async function openLinkEnvelope(
-  crypto: SessionCrypto,
-  key: string,
-  bundleId: string,
-  bytes: Uint8Array,
-): Promise<LinkEnvelopeResult<{ readonly sequence: number; readonly bundle: SharedCatalogLinkBundle }>> {
-  const secrets = decodeSecrets(key, bundleId);
-  if (secrets === null)
-    return refuse('malformed_secret', 'This link is damaged: its key or its id is not the size it must be.');
-  if (bytes.length > LINK_ENVELOPE_MAX_BYTES) return refuse('link_too_big', TOO_BIG);
-  const sequence = linkEnvelopeSequence(bytes);
-  if (sequence === null) return refuse('malformed_envelope', NOT_A_LINK);
-  const plaintext = await crypto.open(
-    await envelopeKey(crypto, secrets, sequence),
-    bytes.subarray(LINK_ENVELOPE_MAGIC.length + 4, HEADER_BYTES),
-    associatedData(secrets.bundleId, sequence),
-    bytes.subarray(HEADER_BYTES),
-  );
-  if (plaintext === null) return refuse('authentication_failed', NOT_A_LINK);
-  if (plaintext.length === 0 || plaintext.length % LINK_PADDING_BUCKET_BYTES !== 0)
-    return refuse('malformed_envelope', NOT_A_LINK);
-  const length = readUint32(plaintext, 0);
-  const end = 4 + length;
-  // The padding is exact: the least that reaches a bucket, all zero. Anything else is a second spelling.
-  if (length === 0 || end > plaintext.length || plaintext.length - end >= LINK_PADDING_BUCKET_BYTES)
-    return refuse('malformed_envelope', NOT_A_LINK);
-  if (!isAllZero(plaintext.subarray(end))) return refuse('malformed_envelope', NOT_A_LINK);
-  const text = utf8Text(plaintext.subarray(4, end));
-  if (text === null) return refuse('bundle_invalid', NOT_A_LINK);
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    return refuse('bundle_invalid', NOT_A_LINK);
-  }
-  const parsed = SharedCatalogLinkBundleSchema.safeParse(json);
-  if (!parsed.success) return refuse('bundle_invalid', NOT_A_LINK);
-  const canonical = catalogCanonicalText(parsed.data);
-  if (!canonical.ok || canonical.text !== text) return refuse('not_canonical', NOT_A_LINK);
-  return { ok: true, value: { sequence, bundle: parsed.data } };
 }
