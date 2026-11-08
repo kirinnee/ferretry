@@ -70,16 +70,38 @@ interface RuntimeBlockOf extends DisabledBlockOf {
   readonly login: string;
 }
 
-/** The earliest `until` (ms) still ahead of `now` among the runtimes and the logins, or `undefined` when none will fall due. */
+/**
+ * The earliest `until` (ms) after `after` among the runtimes and the logins, or `undefined` when none will fall due.
+ * `after` is the instant published up to, so an `until` already past but not yet published is still named.
+ */
 export function earliestExpiry(
   runtimes: ReadonlyMap<string, DisabledBlockOf>,
   logins: ReadonlyMap<string, DisabledBlockOf>,
-  now: number,
+  after: number,
 ): number | undefined {
   return nextDisableExpiry(
     [...runtimes.values(), ...logins.values()].map(file => file.disabled),
-    now,
+    after,
   );
+}
+
+/**
+ * A newer reading of the logins, with every login the earlier reading saw switched off until a time in (`after`,
+ * `upTo`] put back where the newer one no longer names a block: that expiry has passed but was not yet published, and
+ * Logins drops a block from its view once its `until` passes, so without this a re-read in that window would lose it.
+ * A login the newer reading still names as off (again, or until later) keeps the newer block.
+ */
+export function keepUnpublished<View extends DisabledBlockOf>(
+  earlier: ReadonlyMap<string, View>,
+  newer: ReadonlyMap<string, View>,
+  after: number,
+  upTo: number,
+): ReadonlyMap<string, View> {
+  const due = expiredBetween(earlier, after, upTo).filter(name => newer.get(name)?.disabled === undefined);
+  if (due.length === 0) return newer;
+  const kept = new Map(newer);
+  for (const name of due) kept.set(name, earlier.get(name) as View);
+  return kept;
 }
 
 /** The names whose `until` fell due after `after` and by `upTo` (ms): the switches that just came back on. Sorted. */
