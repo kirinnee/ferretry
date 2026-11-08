@@ -14,7 +14,6 @@
     "catalogs",
     "mcp",
     "skills",
-    "shells",
     "layouts",
     "runtimes",
     "onboarding"
@@ -175,7 +174,6 @@
   },
   "pendingHalves": {
     "catalogs": ["app"],
-    "shells": ["app"],
     "layouts": ["app"],
     "gate": ["app"],
     "vault": ["app", "cli"],
