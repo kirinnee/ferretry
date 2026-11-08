@@ -21,6 +21,8 @@ export const MAX_GRANT_IN_FLIGHT = 32;
 /** More refused requests than this in one window end the channel: a worker that floods it is not asking for anything. */
 export const MAX_GRANT_REFUSALS_PER_WINDOW = 1000;
 export const GRANT_REFUSAL_WINDOW_MS = 1000;
+/** More messages of any kind (cancels and served reads included) than this in one window end the channel too. */
+export const MAX_GRANT_MESSAGES_PER_WINDOW = 10_000;
 
 export interface WorkerFetchInit {
   readonly method?: string;
@@ -39,6 +41,11 @@ export type WorkerGrantRequest =
   | { readonly id: number; readonly kind: 'fetch'; readonly url: string; readonly init?: WorkerFetchInit }
   | { readonly kind: 'cancel'; readonly id: number };
 
+/** The last thing the kernel posts before it closes the channel: every wait still pending on it is over. */
+export interface WorkerGrantClosed {
+  readonly closed: true;
+}
+
 export interface WorkerFetchAnswer {
   readonly status: number;
   readonly statusText: string;
@@ -48,5 +55,6 @@ export interface WorkerFetchAnswer {
 
 /** A refusal is a fixed word and a fixed sentence the kernel wrote: never what a lower layer threw. */
 export type WorkerGrantResponse =
+  | WorkerGrantClosed
   | { readonly id: number; readonly ok: true; readonly value: unknown }
   | { readonly id: number; readonly ok: false; readonly refusal: string; readonly message: string };
