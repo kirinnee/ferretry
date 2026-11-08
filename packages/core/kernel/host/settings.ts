@@ -35,7 +35,11 @@ export function resolveSettings(
   overrides: RunOverrides,
   userHome: string,
 ): SettingsOutcome {
-  const pick = <T>(flag: [string, T | undefined], variable: [string, string | undefined, (text: string) => T], fallback: T): Setting<T> =>
+  const pick = <T>(
+    flag: [string, T | undefined],
+    variable: [string, string | undefined, (text: string) => T],
+    fallback: T,
+  ): Setting<T> =>
     flag[1] !== undefined
       ? { value: flag[1], origin: 'flag', source: flag[0] }
       : variable[1] !== undefined
@@ -47,7 +51,11 @@ export function resolveSettings(
   return {
     kind: 'settings',
     settings: {
-      home: pick<string>(['', undefined], ['FY_HOME', env.FY_HOME, text => text.replace(/\/+$/, '')], `${userHome}/.ferretry`),
+      home: pick<string>(
+        ['', undefined],
+        ['FY_HOME', env.FY_HOME, text => text.replace(/\/+$/, '')],
+        `${userHome}/.ferretry`,
+      ),
       port,
       host:
         overrides.host === undefined

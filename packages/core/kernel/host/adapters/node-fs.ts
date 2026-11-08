@@ -3,6 +3,7 @@ import {
   access,
   chmod,
   type FileHandle,
+  link,
   lstat,
   mkdir,
   open,
@@ -47,6 +48,8 @@ export interface OpenedFile {
    * descriptor.
    */
   readWindow(offset: number, length: number): Promise<{ readonly bytes: Uint8Array; readonly size: number }>;
+  /** `fsync` of THIS descriptor: what was read from it is on the disk, not only in the page cache. */
+  sync(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -57,6 +60,13 @@ export interface OpenedDirectory {
   entryPath(leaf: string): string | undefined;
   /** Sets this folder's permission bits through the descriptor (`fchmod`), never by name. */
   chmod(mode: number): Promise<void>;
+  /**
+   * `fsync` of THIS folder's entries, through the descriptor that was proven to be the folder (never by name).
+   * Tolerates exactly the three errnos a filesystem that cannot sync a directory answers (`EINVAL`, `ENOTSUP`,
+   * `EPERM`, as the state filesystem does); every other failure propagates, because a directory entry that could not
+   * be made durable for any other reason is not durable.
+   */
+  sync(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -86,6 +96,11 @@ export interface HostFs {
    * `data`, syncs it; answers what was created.
    */
   writeNew(path: string, data: string | Uint8Array, mode: number): Promise<FileIdentity>;
+  /**
+   * A hard link at `destination` to the file at `existing`, refused with `EEXIST` when anything is already at
+   * `destination` (`link(2)`: create-if-absent in the kernel, atomically). Neither end is followed.
+   */
+  link(existing: string, destination: string): Promise<void>;
   /** Makes ONE folder (no parents). */
   mkdir(path: string, mode: number): Promise<void>;
   /** A link at `path` whose text is `target`; refused when anything is already there. */
@@ -114,6 +129,10 @@ export interface HostFs {
 const codeOf = (error: unknown): string | undefined => (error as { code?: string }).code;
 const isMissing = (error: unknown): boolean => codeOf(error) === 'ENOENT';
 const isGone = (error: unknown): boolean => codeOf(error) === 'ENOENT' || codeOf(error) === 'ENOTDIR';
+
+/** Whether an error means this filesystem cannot sync a directory at all (the three the state filesystem tolerates). */
+const unsupportedDirectorySync = (error: unknown): boolean =>
+  codeOf(error) === 'EINVAL' || codeOf(error) === 'ENOTSUP' || codeOf(error) === 'EPERM';
 
 // NONBLOCK on every open: a pipe put where a file was must not hang the daemon waiting for a writer or reader.
 const READ_FILE = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
@@ -145,7 +164,17 @@ async function opened(path: string, flags: number, mode?: number): Promise<[File
     identity = fileIdentityOf(await handle.stat({ bigint: true }));
     return [handle, identity];
   } finally {
-    if (identity === undefined) await handle.close();
+    if (identity === undefined) {
+      const made = await handle.stat({ bigint: true }).catch(() => undefined);
+      await handle.close().catch(() => undefined);
+      // An exclusive create made this name, so a file this call cannot describe is one only this call can remove.
+      if ((flags & constants.O_EXCL) !== 0) {
+        // Only while the name still reaches what this call opened: another writer may have replaced it since.
+        const named = await lstat(path, { bigint: true }).catch(() => undefined);
+        if (named !== undefined && made !== undefined && named.dev === made.dev && named.ino === made.ino)
+          await unlink(path).catch(() => undefined);
+      }
+    }
   }
 }
 
@@ -244,6 +273,7 @@ export function nodeFs(
             buffer.length === 0 ? { bytesRead: 0 } : await handle.read(buffer, 0, buffer.length, from);
           return { bytes: buffer.subarray(0, bytesRead), size };
         },
+        sync: async () => await handle.sync(),
         close: async () => await handle.close(),
       };
     },
@@ -254,6 +284,13 @@ export function nodeFs(
         identity,
         entryPath: leaf => (reached ? `${descriptorFolder}/${String(handle.fd)}/${leaf}` : undefined),
         chmod: async mode => await handle.chmod(mode),
+        sync: async () => {
+          try {
+            await handle.sync();
+          } catch (error) {
+            if (!unsupportedDirectorySync(error)) throw error;
+          }
+        },
         close: async () => await handle.close(),
       };
     },
@@ -264,10 +301,22 @@ export function nodeFs(
         await handle.chmod(mode);
         await handle.writeFile(data);
         await handle.sync();
-      } finally {
-        await handle.close();
+      } catch (error) {
+        // The exclusive create above is what made this name ours, so a failure after it leaves a partial private
+        // file that only this call can remove. A create that LOST (EEXIST) never reaches here and removes nothing.
+        await handle.close().catch(() => undefined);
+        // Only while the name still reaches the file this call created: a concurrent replacing write may have
+        // renamed its own file over it, and that one belongs to its publisher.
+        const named = await lstat(path, { bigint: true }).catch(() => undefined);
+        if (named !== undefined && named.dev === identity.device && named.ino === identity.inode)
+          await unlink(path).catch(() => undefined);
+        throw error;
       }
+      await handle.close();
       return identity;
+    },
+    link: async (existing, destination) => {
+      await link(existing, destination);
     },
     mkdir: async (path, mode) => {
       await mkdir(path, { mode });

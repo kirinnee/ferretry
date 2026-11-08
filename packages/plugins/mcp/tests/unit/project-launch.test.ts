@@ -124,6 +124,10 @@ function kernelRoots(
         list: missing('list a folder'),
         entries: missing('list a folder'),
         pin: missing('hold a folder'),
+        publish: missing('publish'),
+        readDurable: missing('readDurable'),
+        syncDirectory: missing('syncDirectory'),
+        fileIdentity: missing('fileIdentity'),
         remove: missing('remove a file'),
       };
     },

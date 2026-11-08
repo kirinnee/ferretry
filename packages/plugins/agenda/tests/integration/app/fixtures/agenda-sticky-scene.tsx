@@ -6,8 +6,8 @@
  *   ?kind=choice|reply         a one-row answer (default), or an answer in words (the composer is the answer)
  *   ?touch=1                   the card is swipeable
  *
- * The chat at its tail (Conversation's `Transcript` beside this half's `AgendaLine`) is not drawn here: Agenda imports
- * nothing of Conversation's app.
+ * The chat at its tail (Conversation's `Transcript` beside this half's `AgendaLine`) is not drawn here: the shell
+ * composes the two (`packages/app/tests/integration/fixtures/chat-tail-scene.tsx`).
  */
 
 import { createRoot } from 'react-dom/client';

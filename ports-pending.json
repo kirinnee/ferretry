@@ -14,7 +14,6 @@
     "catalogs",
     "mcp",
     "skills",
-    "shells",
     "layouts",
     "runtimes",
     "onboarding"
@@ -76,6 +75,7 @@
       "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" (and \"This machine will ask you to confirm with your passkey\") where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\""
     ],
     "ferrets": [
+      "GAP(composition): the session environment store (a session's plaintext credential file), the task store and the effect ledger (its exclusive `begin` publish leaves a second name after a crash, and only an internal root adopts and removes it, so on an owner root the record is wedged) are not constructed by any 5.0 route yet; when the Ferrets daemon half wires them, their root must be an INTERNAL, daemon-owned root, never the owner-visible `work` root (daemon/adapters/session/lifecycle/file-session-environment-store.ts, daemon/adapters/session/lifecycle/file-session-task-store.ts, daemon/adapters/session/effects/file-session-effect-ledger.ts); when wired, a composition test must prove each root is internal",
       "Info tabs Agenda, Tasks, Usage, Context, Surfaces and Warden are not ported in Ferrets: each is a `ferret.side` panel its owning plugin contributes (Agenda, Board, Usage, Conversation, Warden track theirs; Surfaces is Terminals' and Browsers' own panels), and the contract types they read stay in Ferrets until those panels take them (contract/view/agenda.ts, contract/view/board-refs.ts, contract/view/fleet-credentials.ts, contract/view/session-live.ts)",
       "Actions rows still to port: add MCP server, compact-at and the Warden action are contributions to `ferrets.actions-row` by MCP, Conversation and Warden (each tracks its own line); the compact-at limits stay in Ferrets until Conversation takes them (contract/view/compact-at.ts)",
       "Session search inside the files tab is not ported in Ferrets: Conversation contributes it to the `ferrets.files-search` slot (its own line), and the search wire's limits stay here until then (contract/view/session-search.ts)",
@@ -170,13 +170,12 @@
       "GAP(ferrets): the Info tab Tasks (the ferret's cards) is Board's `ferret.side` panel; not contributed yet"
     ],
     "layouts": [
-      "GAP(ferrets): the Files side tab (Ferrets' `files` panel on `ferret.side`, order 40) is hidden until the ferret.side panel layout lists it"
+      "the default layout (and compact) names views no installed manifest declares: nav item `ferrets` and `side.holds: ferret` (Ferrets declares no `ferrets` or `ferret` screen) and the ferret.side panels `sitrep` and `usage` (Conversation's is `queue`, Usage's is `insights`), so the shell refuses the layout as served and draws the built-in default, and the Layout tab says so under In use",
+      "the Layout tab edits the wide layout only: the `phone.*` keys (`fy layout set phone.nav.side bottom`) have no row in either scope"
     ]
   },
   "pendingHalves": {
     "catalogs": ["app"],
-    "shells": ["app"],
-    "layouts": ["app"],
     "gate": ["app"],
     "vault": ["app", "cli"],
     "browsers": ["cli"],
