@@ -104,6 +104,27 @@ describe('snapshotAnalyticsUsagePricing', () => {
     should(actual.rate.lastSyncedAt).equal('2026-07-20T09:30:00.000Z');
   });
 
+  it('should snapshot model-catalog provenance with the catalog and its address', () => {
+    // Arrange
+    const catalogued: AnalyticsPricingRate = {
+      ...openAiRate,
+      source: { kind: 'model_catalog', catalog: 'openai', sourceUrl: 'https://catalog.example/openai' },
+    };
+
+    // Act
+    const actual = snapshotAnalyticsUsagePricing(usage, [catalogued]);
+
+    // Assert
+    should(actual).have.property('kind', 'priced');
+    if (actual.kind !== 'priced') throw new Error('expected priced usage');
+    should(actual.rate.source).deepEqual({
+      kind: 'model_catalog',
+      catalog: 'openai',
+      sourceUrl: 'https://catalog.example/openai',
+    });
+    should(actual.rate.source).not.equal(catalogued.source);
+  });
+
   it('should copy provenance onto the snapshot rather than sharing the catalog entry', () => {
     // A stored row is a FROZEN record of what priced it. `readonly` binds one reference at compile
     // time; it does not stop the caller who still owns the catalog object from editing the thing both
