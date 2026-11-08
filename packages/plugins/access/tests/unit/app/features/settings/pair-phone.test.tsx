@@ -1,43 +1,51 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { CAPABILITY_NAMES, type GrantRefusal } from '@ferretry/core-gate/contract';
-import type { CapabilityGrantView, GrantsView, PairedDevicesView } from '../../../../../contract/index.ts';
+import { CAPABILITY_NAMES, type CapabilityGrants } from '@ferretry/core-gate/contract';
+import type { PairedDevicesView } from '../../../../../contract/index.ts';
+import { InstantSchema } from '@ferretry/std';
 import { useState } from 'react';
 import type { PairingClientFactory } from '../../../../../app/features/settings/add-device-settings.tsx';
 import {
   mayPairPhone,
   PAIR_PHONE_DESCRIPTION,
-  type PairingGrantsClientFactory,
   type PairPhonePresentation,
   PairPhoneSheet,
   pairPhoneLabel,
-  usePairPhoneAllowed,
 } from '../../../../../app/features/settings/pair-phone.tsx';
 import { type DaemonConnection, daemonConnection } from '../../../../../app/shell-pairing.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../../../../support/app/dom.ts';
 
 const ALPHA = `fy_daemon_${'a'.repeat(43)}`;
-const BETA = `fy_daemon_${'b'.repeat(43)}`;
 const connection = (id: string): DaemonConnection =>
   daemonConnection({ daemonId: id, baseUrl: 'https://workstation.example.test', deviceId: `token-${id}` });
 
-const entry = (capability: CapabilityGrantView['capability'], useRefusal: GrantRefusal): CapabilityGrantView => ({
-  capability,
-  use: useRefusal === 'granted',
-  configure: false,
-  granted: { use: useRefusal !== 'not-granted', configure: false },
-  mayGrant: false,
-  useRefusal,
-  configureRefusal: 'not-granted',
-  origin: 'default',
-});
+const OWN_ID = `fy_device_id_${'Dd'.repeat(11)}`;
+const grantsWith = (pairingUse: boolean): CapabilityGrants =>
+  Object.fromEntries(
+    CAPABILITY_NAMES.map(capability => [
+      capability,
+      { use: capability === 'pairing' ? pairingUse : true, configure: false },
+    ]),
+  ) as CapabilityGrants;
 
-const grants = (pairing: GrantRefusal | null): GrantsView => ({
-  capabilities: CAPABILITY_NAMES.filter(capability => pairing !== null || capability !== 'pairing').map(capability =>
-    entry(capability, capability === 'pairing' && pairing !== null ? pairing : 'granted'),
-  ),
-  governed: true,
-  hostLocal: false,
-  steppedUp: false,
+/** A device list as one caller reads it: the caller's own grant is the one `thisDeviceId` names. */
+const listFor = (own: { readonly pairingUse: boolean } | null, hostLocal = false): PairedDevicesView => ({
+  devices:
+    own === null
+      ? []
+      : [
+          {
+            id: OWN_ID,
+            name: 'This laptop',
+            platform: 'browser',
+            createdAt: InstantSchema.parse('2025-12-20T18:22:00.000Z'),
+            lastSeenAt: InstantSchema.parse('2025-12-31T22:04:00.000Z'),
+            idleExpiresAt: InstantSchema.parse('2026-12-31T00:00:00.000Z'),
+            grants: grantsWith(own.pairingUse),
+          },
+        ],
+  hostLocal,
+  ...(own === null ? {} : { thisDeviceId: OWN_ID }),
+  mayWiden: grantsWith(false),
 });
 
 /** The FAKE code every committed capture uses; nothing here mints a real one. */
@@ -56,94 +64,17 @@ const settle = async (): Promise<void> => {
 };
 
 describe('who is offered "Pair a phone"', () => {
-  it('P58 offers it when pairing is open, or waits only on a passkey, and never otherwise', () => {
-    expect(mayPairPhone(grants('granted'))).toBe(true);
-    expect(mayPairPhone(grants('step-up-required'))).toBe(true);
-    expect(mayPairPhone(grants('not-granted'))).toBe(false);
-    expect(mayPairPhone(grants('device-not-granted'))).toBe(false);
-    expect(mayPairPhone(grants('undetermined'))).toBe(false);
-    // A view that does not mention pairing at all is not a yes.
-    expect(mayPairPhone(grants(null))).toBe(false);
+  it('P58 offers it to the host, and to a device whose own grant holds pairing, and never otherwise', () => {
+    expect(mayPairPhone(listFor(null, true))).toBe(true);
+    expect(mayPairPhone(listFor({ pairingUse: true }))).toBe(true);
+    expect(mayPairPhone(listFor({ pairingUse: false }))).toBe(false);
+    // A caller that is not on its own list (nothing names it) is not a yes.
+    expect(mayPairPhone(listFor(null))).toBe(false);
   });
 
   it('words the act apart from "Add a machine"', () => {
     expect(pairPhoneLabel('studio')).toBe('Pair a phone with studio');
     expect(PAIR_PHONE_DESCRIPTION).toContain('Settings › Devices');
-  });
-});
-
-function AllowedProbe({
-  target,
-  createClient,
-}: {
-  readonly target: DaemonConnection | undefined;
-  readonly createClient?: PairingGrantsClientFactory;
-}) {
-  const allowed = usePairPhoneAllowed(target, createClient);
-  return <p data-allowed={String(allowed)}>{String(allowed)}</p>;
-}
-
-const allowedText = (): string | null | undefined => view?.container.querySelector('[data-allowed]')?.textContent;
-
-describe('usePairPhoneAllowed', () => {
-  it('reads this machine’s grants, and keys the answer by machine', async () => {
-    const asked: string[] = [];
-    const answers: Record<string, GrantsView> = { [ALPHA]: grants('granted'), [BETA]: grants('not-granted') };
-    const factory: PairingGrantsClientFactory = async target => {
-      asked.push(`${target.daemonId}`);
-      return {
-        request: (async (path: string) => {
-          expect(path).toBe('/v1/grants');
-          return answers[`${target.daemonId}`];
-        }) as never,
-      };
-    };
-    const alpha = connection(ALPHA);
-    view = await mount(<AllowedProbe createClient={factory} target={alpha} />);
-    await settle();
-    expect(allowedText()).toBe('true');
-
-    // The same machine through a re-created connection object is not asked again.
-    await view.render(<AllowedProbe createClient={factory} target={connection(ALPHA)} />);
-    await settle();
-    expect(asked).toEqual([ALPHA]);
-
-    // Another machine is asked for itself, and its no is not overridden by the first machine's yes.
-    await view.render(<AllowedProbe createClient={factory} target={connection(BETA)} />);
-    await settle();
-    expect(allowedText()).toBe('false');
-    expect(asked).toEqual([ALPHA, BETA]);
-  });
-
-  it('reads false with no machine, and when the machine cannot be asked', async () => {
-    view = await mount(<AllowedProbe target={undefined} />);
-    await settle();
-    expect(allowedText()).toBe('false');
-    await view.unmount();
-
-    view = await mount(
-      <AllowedProbe
-        createClient={async () => {
-          throw new Error('offline');
-        }}
-        target={connection(ALPHA)}
-      />,
-    );
-    await settle();
-    expect(allowedText()).toBe('false');
-  });
-
-  it('drops a late answer for a machine that is no longer on screen', async () => {
-    let release: (view: GrantsView) => void = () => undefined;
-    const factory: PairingGrantsClientFactory = async () => ({
-      request: (async () => await new Promise<GrantsView>(resolve => (release = resolve))) as never,
-    });
-    view = await mount(<AllowedProbe createClient={factory} target={connection(ALPHA)} />);
-    await settle();
-    await view.render(<AllowedProbe createClient={factory} target={undefined} />);
-    await interact(() => release(grants('granted')));
-    await settle();
-    expect(allowedText()).toBe('false');
   });
 });
 

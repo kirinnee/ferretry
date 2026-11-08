@@ -24,6 +24,7 @@ export {
   type PairDirectInput,
   type PairingKey,
   provideToShell,
+  registeredDaemonless,
   type ShellAppImplementation,
   type ShellProvides,
 } from './connect/provides.ts';
