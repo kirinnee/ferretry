@@ -73,7 +73,7 @@
     "packages/plugins/board": {
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}"],
-      "ignore": ["app/lib/card-reference-context.ts", "app/lib/lane-proposal-link.ts"]
+      "ignore": ["app/lib/lane-proposal-link.ts"]
     },
     "packages/plugins/claude-code": {
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
