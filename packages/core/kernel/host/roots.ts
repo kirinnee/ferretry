@@ -128,7 +128,7 @@ export interface RootLayout {
 /**
  * Why a root refused, host-side: the contract's {@link FolderRefusal}, plus today's guard rules a handle's caller
  * meets only as this error — `hard_link` (a file with another name that could be anywhere), `changed` (what was
- * opened is not what was checked), `not_a_file`, and `no_descriptor_reach` (a remove outside daemon folders on a host
+ * opened is not what was checked), `not_a_file`, and `no_descriptor_reach` (a remove on a host
  * that cannot reach an entry through its checked folder, S44).
  */
 export type RootRefusal =
@@ -687,14 +687,10 @@ async function removeChecked(scope: Scope, full: string): Promise<void> {
       : await openCheckedFolder(scope, parent);
   try {
     const through = folder.entryPath(leaf);
-    if (through === undefined) {
-      // Without descriptor reach nothing outside the daemon's own folders is removed (S44).
-      if (scope.ownerRoot) refuse('no_descriptor_reach');
-      const problem = await folderProblem(scope, parent, folder.identity);
-      if (problem !== undefined) refuse(problem);
-      await scope.fs.remove(join(parent, leaf));
-      return;
-    }
+    // Without descriptor reach nothing is removed, owner root or internal (S44): a by-path remove after one re-proof of
+    // the parent deletes an outside tree when the parent is swapped for a link in between. Refused (macOS) until the
+    // descriptor bracket lands.
+    if (through === undefined) return refuse('no_descriptor_reach');
     const identity = await scope.fs.identity(through);
     if (identity === undefined) return;
     await removeWithin(scope, through, identity);

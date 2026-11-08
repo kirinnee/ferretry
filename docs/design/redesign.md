@@ -2542,6 +2542,7 @@ scoped handle:
     `harness-home` only) reads ONE file beside a harness home (`~/.claude.json` sits beside `~/.claude`), read-only.
     Its folder is never listable. The leaf is never a link, never a second hard link, never a device, and the name
     is checked again after the open. A hard link (`GuardedFolder.link`) stays refused: copy, or `linkTo`.
+- `remove(path)` on a root: Remove of a folder needs descriptor reach; refused without it (macOS until the descriptor bracket lands), [own] BEFORE-GREEN(runtimes). An owner root already refused (S44); an internal root (`fleet`, `agent-homes`) now refuses too, because a by-path remove after one re-proof of the parent deletes an outside tree if the parent is swapped for a link in between. The code is `no_descriptor_reach`.
 - A plugin that must know whether a command is installed asks `kernel.paths.which(name, { directories? })`
   (`permissions.which`): one plain command name, the caller's absolute folders then the daemon's `PATH`, empty and
   relative entries dropped, at most 64 folders, the first regular executable file wins. No shell, nothing executed;

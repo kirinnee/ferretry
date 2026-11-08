@@ -146,8 +146,8 @@ describe('the fence (§7.7, §9.3), unit tier', () => {
     const internal = rootOf(home, 'agent-homes', { subfolder: 'F1' }, { fs: blind });
     const own = internal.resolve('own.txt');
     if (!own.ok) throw new Error('resolve');
-    await internal.remove(own.value);
-    expect(await readdir(`${home}/state/codex/agent-homes/F1`)).toEqual([]);
+    await expect(internal.remove(own.value)).rejects.toMatchObject({ refusal: 'no_descriptor_reach' });
+    expect(await readdir(`${home}/state/codex/agent-homes/F1`)).toEqual(['own.txt']);
   });
 
   test('S44 a folder tree is removed one name at a time through descriptors, never following a link out', async () => {

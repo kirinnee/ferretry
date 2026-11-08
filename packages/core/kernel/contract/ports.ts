@@ -776,6 +776,9 @@ export interface RootHandle {
    * `policyCwd` is the only cwd `kernel.spawn` accepts as a pin, and only from the plugin whose root minted it.
    */
   pin(path: FencedPath, options?: PinOptions): Promise<HeldRoot>;
+  /**
+   * Removes the name, a folder one entry at a time through descriptors. Remove of a folder needs descriptor reach; refused without it (macOS until the descriptor bracket lands), [own] BEFORE-GREEN(runtimes).
+   */
   remove(path: FencedPath): Promise<void>;
   /**
    * A symlink at `at` (today's "stored once, never copied" link from a runtime home to the host's credential or
