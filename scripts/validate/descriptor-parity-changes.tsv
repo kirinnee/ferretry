@@ -11,6 +11,7 @@ member	POST /v1/shared/unlock/options	changed	today's member dispatcher wraps ev
 route	DELETE /v1/fleet/login/:flowId	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/fleet/mcp-auth/:component	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/fleet/mcp-auth/flows/:flowId	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+route	DELETE /v1/secrets/logins/:id	removed	today's one-release shim over the account store; 5.0 counterpart DELETE /v1/accounts/:id; zero backward compatibility, S84, ruling #33
 route	GET /v1/fleet/components	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/fleet/credentials	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/fleet/export	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
@@ -21,6 +22,8 @@ route	GET /v1/fleet/presets	removed	moved to the owning plugin's route prefix /v
 route	GET /v1/fleet/profiles	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/fleet/proposals/:proposalId	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/fleet/runtimes	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+route	GET /v1/secrets/logins	removed	today's one-release shim over the account store; 5.0 counterpart GET /v1/accounts; zero backward compatibility, S84, ruling #33
+route	GET /v1/secrets/logins/hint	removed	today's one-release shim over the account store; 5.0 counterpart GET /v1/accounts/hint; zero backward compatibility, S84, ruling #33
 route	GET /v1/fleet/setup/scan	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/harnesses/update	removed	harness update split per harness plugin (fy harness <key> update, design §1.4); descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/mcp	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
@@ -42,6 +45,9 @@ route	POST /v1/fleet/proposals	removed	moved to the owning plugin's route prefix
 route	POST /v1/fleet/proposals/:proposalId/apply	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/harnesses/update	removed	harness update split per harness plugin (fy harness <key> update, design §1.4); descriptor fields unchanged
 route	POST /v1/recommend	removed	fy recommend is Packs' verb (D2 #14, served by POST /v1/pack/recommend); Runtimes no longer declares it
+route	POST /v1/secrets/logins/:id/recipe/proposals/:proposalId	removed	today's one-release shim over the account store; 5.0 counterpart POST /v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId; zero backward compatibility, S84, ruling #33
+route	POST /v1/secrets/logins/:id/rename	removed	today's one-release shim over the account store; 5.0 counterpart POST /v1/accounts/:id/rename; zero backward compatibility, S84, ruling #33
+route	PUT /v1/secrets/logins/:id	removed	today's one-release shim over the account store; 5.0 counterpart PUT /v1/accounts/:id; zero backward compatibility, S84, ruling #33
 route	POST /v1/sessions/:sessionId/dialog	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/mcp/login	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/mcp/login/preview	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
