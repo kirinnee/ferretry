@@ -8,7 +8,7 @@ import {
 } from '../../../../daemon/adapters/inputs/asks.ts';
 import type { InputCaller, InputCard } from '../../../../daemon/lib/inputs/ports.ts';
 import type { AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
-import { inputRequestService, RAISE, SESSION } from './support.ts';
+import { inputRequestService, RAISE, SESSION } from '../../../unit/daemon/inputs/support.ts';
 
 const card = (requestId: string): InputCard => ({
   requestId,
@@ -103,5 +103,29 @@ describe('InputAgentNotifierAdapter', () => {
     await service.raise(SESSION, RAISE);
     await service.sessionEnded(SESSION);
     expect(asks.told).toEqual([]);
+  });
+});
+
+describe('InputAsksAdapter when Asks keeps no card', () => {
+  it('answers the refusal’s own sentence, or a plain one when it is not an Error', async () => {
+    const refusing = (thrown: unknown) =>
+      new InputAsksAdapter(
+        {
+          raise: async () => {
+            throw thrown;
+          },
+          close: async () => undefined,
+          get: async () => undefined,
+        },
+        { promptOf: async () => undefined },
+      );
+    expect(await refusing(new Error('the board is full')).raise('f1', card('request1'))).toEqual({
+      ok: false,
+      message: 'the board is full',
+    });
+    expect(await refusing('no card').raise('f1', card('request1'))).toEqual({
+      ok: false,
+      message: 'Asks kept no card for this request',
+    });
   });
 });

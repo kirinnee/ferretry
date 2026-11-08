@@ -80,3 +80,41 @@ describe('kernelFolders', () => {
     );
   });
 });
+
+describe('kernelFolders and the imports root', () => {
+  const rooted = (handle: Partial<RootHandle>) =>
+    kernelFolders({
+      spawn: {
+        run: async () => {
+          throw new Error('Executable not found in $PATH');
+        },
+      },
+      roots: { root: () => handle as RootHandle },
+    } as unknown as Pick<KernelPorts, 'roots' | 'spawn'>);
+
+  test('a folder the root will not name is neither a directory nor a name the owner may give', async () => {
+    const folders = rooted({ resolve: () => ({ ok: false, reason: 'outside' }) as never });
+    expect(await folders.isDirectory('/etc')).toBe(false);
+    expect(await folders.mayName('/etc')).toBe(false);
+  });
+
+  test('a folder the root names is a name the owner may give', async () => {
+    const folders = rooted({ resolve: () => ({ ok: true, value: '/work/alpha' }) as never });
+    expect(await folders.mayName('/work/alpha')).toBe(true);
+  });
+
+  test('a stat that fails is not a directory', async () => {
+    const folders = rooted({
+      resolve: () => ({ ok: true, value: '/work/alpha' }) as never,
+      stat: async () => {
+        throw new Error('EACCES');
+      },
+    });
+    expect(await folders.isDirectory('/work/alpha')).toBe(false);
+  });
+
+  test('a host that cannot start mkdir at all says the same one sentence as a refusal', async () => {
+    const folders = rooted({});
+    await expect(folders.makeDirectory('/work/new')).rejects.toThrow('project folder could not be created');
+  });
+});

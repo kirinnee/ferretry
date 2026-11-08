@@ -293,3 +293,55 @@ describe('sealed documents: nothing logged, no value in a failure', () => {
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe('sealed documents: a document that is not what it was declared to be', () => {
+  const PATH = `${HOME}/state/mcp/oauth-secrets.json`;
+
+  test('a document not declared as a secret file is refused before anything is read', () => {
+    const w = world();
+    const plain = { ...MCP_SECRETS, state: { ...MCP_SECRETS.state, store: 'json' } } as unknown as typeof MCP_SECRETS;
+    expect(() => w.port.open(w.plugin('mcp', MCP_SECRETS), plain)).toThrow(
+      "sealed document oauth-secrets is not declared with store: 'secret'",
+    );
+  });
+
+  test('a file that is not JSON is unreadable, and says so without quoting it', async () => {
+    const w = world();
+    await w.fs.writeAtomic(PATH, 'sk-live-not-json-at-all', 0o600);
+    const own = w.port.open(w.plugin('mcp', MCP_SECRETS), MCP_SECRETS);
+    const error = await own.names().catch((thrown: unknown) => thrown as SecretStoreError);
+    expect(error).toBeInstanceOf(SecretStoreError);
+    expect(error).toMatchObject({ failure: 'unreadable' });
+    expect(String((error as Error).message)).toBe('oauth-secrets.json is not JSON');
+    expect(String((error as Error).message)).not.toContain('sk-live');
+  });
+
+  test('JSON of another shape is unreadable too, never an empty document', async () => {
+    const w = world();
+    await w.fs.writeAtomic(PATH, '{"format":2,"cipher":"ROT13","entries":{}}', 0o600);
+    const own = w.port.open(w.plugin('mcp', MCP_SECRETS), MCP_SECRETS);
+    await expect(own.names()).rejects.toMatchObject({
+      failure: 'unreadable',
+      message: 'oauth-secrets.json is not a sealed document of format 1 and AES-256-GCM',
+    });
+  });
+
+  test('an entry whose key goes missing between the document check and the open is key_missing, not nothing', async () => {
+    const w = world();
+    const own = w.port.open(w.plugin('mcp', MCP_SECRETS), MCP_SECRETS);
+    await own.put('MCP_X_REFRESH' as SealedName, 'refresh-value-123');
+    let reads = 0;
+    const vanishing = {
+      ensure: async () => await w.key.ensure(),
+      // The first read is the document's own "is the key still there" check; the open finds it gone.
+      read: async () => (++reads === 1 ? await w.key.read() : undefined),
+    } as unknown as FileSecretKey;
+    const port = new KernelSealedDocuments(vanishing, CLOCK);
+    await expect(
+      port.open(w.plugin('mcp', MCP_SECRETS), MCP_SECRETS).get('MCP_X_REFRESH' as SealedName),
+    ).rejects.toMatchObject({
+      failure: 'key_missing',
+      message: 'the vault key is gone, so oauth-secrets.json entry MCP_X_REFRESH cannot be opened',
+    });
+  });
+});
