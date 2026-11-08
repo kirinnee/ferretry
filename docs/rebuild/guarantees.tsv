@@ -5,19 +5,19 @@ G3	kept	gate	-	admin token	grants	G3
 G4	kept	gate	-	behaviour as written	grants	G4
 G5	kept	gate	-	behaviour as written	grants	G5
 G6	kept	gate	-	behaviour as written	grants	G6
-G7	kept	gate	-	`FY_SESSION_TOKEN`	grants	G7
+G7	kept	gate	-	`isFerretToken`, `OWNER_ONLY_CODE`	grants	G7
 G8	kept	gate	-	behaviour as written	grants	G8
 G9	kept	gate	-	`GrantsView`	grants	G9
 G10	kept	gate	-	`decideCapability`	grants	G10
 G11	kept	gate	-	`caller` declaration	grants	G11
-G12	kept	gate	-	`parent_mismatch`	grants	G12
+G12	kept	gate	-	`callerIsAgent`; Ferrets raises parent_mismatch (packages/core/ferrets/daemon/index.ts)	grants	G12
 G13	kept	gate	-	behaviour as written	grants	G13
 G14	kept	kernel	-	`ApiRequest.loopback`	grants	G14
 G15	kept	kernel	-	`carrierListenerPort`	grants	G15
 G16	kept	connections	-	tunnel listener	grants	G16
 G17	kept	gate	-	`packages/daemon/tests/unit/grants/policy.test.ts`	grants	G17
 G18	kept	gate	-	`arrivedOnHost` (`packages/daemon/src/lib/api/http.ts`)	grants	G18
-G19	kept	gate	-	`privilegedLoopback`, `mayTrustDirectLoopback`, `arrivedPrivileged`	grants	G19
+G19	kept	gate	-	`privilegedLoopback`, `arrivedPrivileged`	grants	G19
 G20	kept	catalogs	gate	behaviour as written	grants	G20
 G21	kept	gate	-	behaviour as written	grants	G21
 G22	kept	gate	-	behaviour as written	grants	G22
@@ -35,7 +35,7 @@ G33	kept	conversation	terminals,gate	behaviour as written	grants	G33
 G34	kept	terminals	gate	behaviour as written	grants	G34
 G35	kept	gate	-	behaviour as written	grants	G35
 G36	kept	gate	-	`tests/unit/runtime/mounts/shared-drafts.test.ts`	grants	G36
-G37	kept	gate	-	`state/agent-pins.json`, `pinnedAt`, `session-pin.test.ts`	grants	G37
+G37	kept	gate	-	`OWNER_ONLY_CODE`; Ferrets keeps `state/agent-pins.json` with pinnedAt (packages/core/ferrets/daemon/lib/agent-pins)	grants	G37
 G38	kept	gate	-	behaviour as written	grants	G38
 G39	kept	gate	-	`arrivedOnHost`, `renders.test.ts`	grants	G39
 G40	kept	gate	-	`caller: 'person'`	grants	G40
@@ -276,7 +276,7 @@ P86	kept	access	-	behaviour as written	pairing	P86
 P87	kept	access	-	behaviour as written	pairing	P87
 P88	kept	connections	-	`advertisesForeignAddress`	pairing	P88
 P89	kept	kernel	-	`recordedBindAddress`	pairing	P89
-P90	kept	gate	fy-shell	`FY_URL`, `FY_TOKEN`	pairing	P90
+P90	kept	gate	fy-shell	`authenticate`; the shell reads FY_URL and FY_TOKEN	pairing	P90
 P91	kept	access	-	`ApiRequest.loopback`	pairing	P91
 P92	kept	access	kernel	behaviour as written	pairing	P92
 P93	kept	access	kernel	relay-protocol.md §14	pairing	P93
@@ -618,14 +618,14 @@ S48	kept	kernel	-	`POST /v1/sessions`, `fy new --cwd`	secrets	S48
 S49	kept	kernel	-	behaviour as written	secrets	S49
 S50	kept	kernel	-	behaviour as written	secrets	S50
 S51	kept	browsers	kernel	`browser_upload`	secrets	S51
-S52	kept	gate	fy-shell	`fy mcp serve`, `FY_SESSION_TOKEN`	secrets	S52
+S52	kept	gate	fy-shell	`fy mcp serve`, `isFerretToken`	secrets	S52
 S53	split	gate	fy-shell	-	secrets	S53
 S54	split	gate	fy-shell	-	secrets	S54
 S55	removed	gate	-	-	secrets	-
 S56	removed	gate	-	-	secrets	-
 S57	kept	gate	fy-shell	behaviour as written	secrets	S57
 S58	kept	gate	fy-shell	`x-ferretry-session-id`	secrets	S58
-S59	kept	gate	fy-shell	`FY_SESSION_ID` env check	secrets	S59
+S59	kept	gate	fy-shell	`OWNER_ONLY_CODE`; the shell checks FY_SESSION_ID	secrets	S59
 S60	split	gate	fy-shell	-	secrets	S60
 S61	kept	gate	fy-shell	`caller: 'person'`	secrets	S61
 S62	kept	vault	-	behaviour as written	secrets	S62
