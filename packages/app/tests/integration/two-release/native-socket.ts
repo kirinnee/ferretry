@@ -9,3 +9,5 @@ export const NativeWebSocket = globalThis.WebSocket;
 export const nativeCrypto = globalThis.crypto;
 export const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
 export const nativeFetch = globalThis.fetch.bind(globalThis);
+/** Bun's own Response: `Bun.serve` refuses any other, and the daemon in this process builds every answer with the global. */
+export const NativeResponse = globalThis.Response;
