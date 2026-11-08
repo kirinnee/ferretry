@@ -77,6 +77,13 @@ function validatePath(def: StateFileDef): void {
     wildcards > 1
   )
     throw new UndeclaredStateFileError(`state ${def.name}: "${def.path}" is not a path inside the plugin's folder`);
+  // A fixed file under a folder the kernel makes for a root (`sessions/`, `credentials/`, `downloads/`,
+  // `agent-homes/`) would mix state-port files into that root's base, written by the state port's rules rather than the
+  // root's. Refused for every plugin, the owner of the root included. (A collection is judged name by name instead.)
+  if (wildcards === 0 && isInternalRootFolder(segments[0] ?? ''))
+    throw new UndeclaredStateFileError(
+      `state ${def.name}: "${def.path}" sits under "${segments[0]}", a folder the kernel makes for a root`,
+    );
 }
 
 export function createStatePort(options: StatePortOptions): HostStatePort {
