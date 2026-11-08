@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { chmod, lstat, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { diskSessionsRoot } from '@ferretry/kernel/testing';
 import { FakeHarness, FakeRunner } from '../../../contract/testing/index.ts';
@@ -12,6 +12,7 @@ import {
 } from '../../../daemon/adapters/session/effects/file-session-effect-ledger.ts';
 import { FileSessionEnvironmentStore } from '../../../daemon/adapters/session/lifecycle/index.ts';
 import { OwnFolder } from '../../../daemon/adapters/session/sessions-root.ts';
+import { FileResumeTurnStore } from '../../../daemon/adapters/session/resume/file-resume-turn-store.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
 
 const fresh = async () => await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
@@ -87,6 +88,28 @@ describe('session-private files parity (the internal sessions root, state/ferret
     expect(await mode(`${folder}/effects/${effectFileName(key.effectId)}.json`)).toBe(0o600);
     expect(await mode(`${folder}/effects`)).toBe(0o700);
   });
+
+  test('F-0002 who a turn is from is FY_HOME/state/ferrets/sessions/{ferret}/turns/turn-NNN.by.json, beside the document and 0600', async () => {
+    const { root, folder } = await sessionsRoot();
+    const file = await new FileResumeTurnStore(root, FERRET).writeTurn(FERRET, 2, 'Again.\n', { kind: 'owner' });
+    expect(file).toBe(`${folder}/turns/turn-002.md`);
+    expect(JSON.parse(await readFile(`${folder}/turns/turn-002.by.json`, 'utf8'))).toEqual({ kind: 'owner' });
+    expect(await mode(`${folder}/turns/turn-002.by.json`)).toBe(0o600);
+    expect(await readFile(file, 'utf8')).toBe('Again.\n');
+  });
+
+  for (const [row, marker] of [
+    ['F-0305 F-0322', 'done'],
+    ['F-0305 F-0329', 'needs-help'],
+    ['F-0305', 'process-exit'],
+  ] as const)
+    test(`${row} FY_HOME/state/ferrets/sessions/{ferret}/${marker}.marker is cleared before every relaunch`, async () => {
+      const { root, folder } = await sessionsRoot();
+      await mkdir(folder, { recursive: true, mode: 0o700 });
+      await writeFile(`${folder}/${marker}.marker`, `${marker}\n`);
+      await new FileResumeTurnStore(root, FERRET).clearMarkers(FERRET);
+      await expect(lstat(`${folder}/${marker}.marker`)).rejects.toThrow();
+    });
 
   test('F-0303 the per-ferret folder is state/ferrets/sessions/{ferret}, held 0700 when the ferret starts even if it was wider', async () => {
     const { root, folder } = await sessionsRoot();

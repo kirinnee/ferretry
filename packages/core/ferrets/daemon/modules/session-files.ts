@@ -16,9 +16,15 @@ import {
 } from '../adapters/session/provenance/storage-session-ancestry.ts';
 import { StorageSessionProvenanceStore } from '../adapters/session/provenance/storage-session-provenance-store.ts';
 import { InMemoryLaunchGate } from '../adapters/session/resume/in-memory-launch-gate.ts';
+import { FileResumeTurnStore } from '../adapters/session/resume/file-resume-turn-store.ts';
+import { StorageResumeRepository } from '../adapters/session/resume/storage-resume-repository.ts';
 import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import { KeyedSerialExecutor } from '../adapters/storage/keyed-serial-executor.ts';
-import type { FerretSessionPort } from '../lib/ferrets/service.ts';
+import type { FerretSessionPort, ReviveTurn, ReviveTurnRequest } from '../lib/ferrets/service.ts';
+import { type SessionDocumentSeed, sessionDocument, sessionStateDocument } from '../lib/ferrets/session-document.ts';
+import { assignedTaskDocument } from '../lib/protocol/turn-handoff.ts';
+import { defaultSessionResumeSettings } from '../lib/session/resume/settings.ts';
+import { resumeTurnDocument, resumeTurnInstruction } from '../lib/session/resume/policy.ts';
 import type { ClockPort } from '../lib/ports.ts';
 import type { SessionProtocolEnvelope } from '../adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
 import { type SessionId, parseSessionId } from '../lib/session-id.ts';
@@ -67,13 +73,19 @@ export interface SessionFilesDeps {
   readonly fleet: () => readonly RegisteredAncestor[];
   /** What opens a pane: Terminals' to bind. Without it a lifecycle refuses at the launch, before anything is typed. */
   readonly launcher?: SessionLifecycleLauncher;
+  /**
+   * The registry's record of a ferret and its start options, which its session document is made from (ruling #31b).
+   * `undefined` for a ferret the registry does not hold: no document can be made for it.
+   */
+  readonly seed?: (ferret: SessionId) => Omit<SessionDocumentSeed, 'turn'> | undefined;
   readonly log: Pick<Log, 'warn'>;
 }
 
 /**
  * Ferrets' per-ferret private session files, all on the internal `sessions` root (`state/ferrets/sessions/<ferret>/`):
- * the environment (the plaintext credential, `environment.json`, `0600`), the assigned task (`turns/turn-001.md`) and
- * the effect ledger (`effects/`). Every handle is scoped to ONE minted ferret folder, and every store asserts it was
+ * the environment (the plaintext credential, `environment.json`, `0600`), the assigned task (`turns/turn-001.md`), every
+ * revive's numbered turn (`turns/turn-NNN.md`, its author beside it) and completion markers (`{marker}.marker`), and
+ * the effect ledger (`effects/`). It is also the ferret's session-document writer (`config.json`, ruling #31b). Every handle is scoped to ONE minted ferret folder, and every store asserts it was
  * handed that root, so none of them can be built on `work` or on any owner's tree.
  *
  * One launch gate and one serial queue for the whole process: a second of either would not see the first one's launches.
@@ -98,6 +110,8 @@ export class SessionFiles {
   readonly environment: SessionEnvironmentStore;
   /** The spawn stamp and the private folder, as a launch asks for them. */
   readonly port: FerretSessionPort;
+  /** Settles once every held ferret has a session document (`backfill`); a stamp and a carry wait for it. */
+  private documented: Promise<void> = Promise.resolve();
 
   constructor(private readonly deps: SessionFilesDeps) {
     this.launchGate = new InMemoryLaunchGate(async ms => await deps.sleep(milliseconds(ms)));
@@ -116,7 +130,115 @@ export class SessionFiles {
       prepare: async ferret => await this.prepare(ferret),
       stamp: async request => await this.stampAtStart(request),
       carry: async ferret => await this.carryOnResume(ferret),
+      assign: async (ferret, prompt) => {
+        const id = parseSessionId(ferret);
+        await this.taskStore(id).writeAssignedTask(id, assignedTaskDocument(prompt));
+      },
+      revive: async (ferret, request) => await this.revive(parseSessionId(ferret), request),
+      delivered: async (ferret, turn) => await this.delivered(parseSessionId(ferret), turn),
+      turns: async (ferret, options) => {
+        const id = parseSessionId(ferret);
+        return await this.turnStore(id).list(id, options);
+      },
     };
+  }
+
+  /**
+   * Gives every ferret the registry holds a session document, once, before any stamp or carry reads the fleet's lineage
+   * (ruling #31b). A ferret started or resumed before the writer existed holds only `history.jsonl`, which the session
+   * store indexes; today's strict ancestry refuses every stamp while an indexed session has no document, so without this
+   * pass the first documented start would be refused fleet-wide. A ferret whose document cannot be made is named in the
+   * log (its id only) and left as it was: its ancestry still refuses, as today's does.
+   *
+   * The gate is set the moment this is CALLED, before the ferret list is known, so the daemon half calls it while it
+   * builds: a stamp can never run between the build and the pass and see the gate still open.
+   */
+  backfill(ferrets: () => Promise<readonly string[]>): Promise<void> {
+    this.documented = (async () => {
+      for (const ferret of await ferrets()) {
+        const id = parseSessionId(ferret);
+        await this.ensureDocument(id).catch(() =>
+          this.deps.log.warn('a ferret session document could not be made', { ferret: id }),
+        );
+      }
+    })();
+    return this.documented;
+  }
+
+  /**
+   * THE SESSION-DOCUMENT WRITER (ruling #31b): makes the ferret's `config.json` (and the `state.json` beside it) from
+   * the registry's record when it has none, and never touches one that is there. `false` when the registry holds no
+   * record to make it from. A document that cannot be read throws (no catch): "unreadable" is never taken for "absent",
+   * so a damaged document is never written over.
+   */
+  private async ensureDocument(id: SessionId): Promise<boolean> {
+    if ((await this.deps.storage.readConfig(id)) !== undefined) return true;
+    const seed = this.deps.seed?.(id);
+    if (seed === undefined) return false;
+    const full: SessionDocumentSeed = { ...seed, turn: await this.turnStore(id).latest(id) };
+    const document = SessionConfigSchema.parse(sessionDocument(full, this.deps.clock.now()));
+    const write = async () => {
+      // Upserts: another writer that made it first wins, exactly as it wrote it.
+      await this.deps.storage.upsertConfig(id, current => current ?? document);
+      await this.deps.storage.upsertState(id, current => current ?? sessionStateDocument(full));
+    };
+    // A child's first write retains its lead first, as the lifecycle's create does.
+    const parent = seed.record.parent;
+    if (parent === undefined) await write();
+    else await this.deps.storage.publishChild(parseSessionId(parent), write);
+    return true;
+  }
+
+  /** The ferret's turn documents and completion markers, on its own folder. */
+  turnStore(id: SessionId): FileResumeTurnStore {
+    return new FileResumeTurnStore(this.root(id), id);
+  }
+
+  /**
+   * A revive's turn (today's `SessionResumeService.relaunch`, the turn half): the markers the previous turn left are
+   * cleared, and unless the revive invents no turn (an interactive ferret resumed with no message, today's `bare`) the
+   * numbered document is written durably first. The number is the one after the turn the session document last saw
+   * DELIVERED, so a relaunch that failed before its turn reached the pane is retried with the same number, and the same
+   * words are the same document, proved in place rather than rewritten.
+   */
+  private async revive(id: SessionId, request: ReviveTurnRequest): Promise<ReviveTurn | undefined> {
+    // A document that cannot be made or read does not stop the revive: the number then comes from the files on disk.
+    await this.ensureDocument(id).catch(() => false);
+    const store = this.turnStore(id);
+    const trimmed = request.message?.trim();
+    const bare = request.mode === 'interactive' && !trimmed;
+    let turn: ReviveTurn | undefined;
+    if (!bare) {
+      // The session document's counter; a ferret with none numbers after the documents already on disk, so a revive
+      // never writes over a turn it cannot account for (its assigned task above all).
+      const counted =
+        (await new StorageResumeRepository(this.deps.storage).read(id).catch(() => undefined))?.turn ??
+        (await store.latest(id));
+      const number = counted + 1;
+      const settings = defaultSessionResumeSettings;
+      const file = await store.writeTurn(
+        id,
+        number,
+        resumeTurnDocument(trimmed ?? settings.defaultResumePrompt, settings),
+        request.by,
+      );
+      turn = { turn: number, instruction: resumeTurnInstruction(file) };
+    }
+    await store.clearMarkers(id);
+    return turn;
+  }
+
+  /** The revive's turn reached the pane: the session document counts it, so the next revive numbers after it. */
+  private async delivered(id: SessionId, turn: number): Promise<void> {
+    try {
+      await this.deps.storage.updateState(id, current => ({
+        ...(typeof current === 'object' && current !== null && !Array.isArray(current) ? current : {}),
+        turn,
+      }));
+    } catch (error) {
+      this.deps.log.warn('a delivered turn could not be counted, so the next revive numbers it again', { ferret: id });
+      throw error;
+    }
   }
 
   /** The ferret's own `sessions` handle: one minted folder, internal, private. */
@@ -171,16 +293,16 @@ export class SessionFiles {
   }
 
   /**
-   * A START records who caused the ferret, in its session document. The document is made by the lifecycle's create
-   * (`createLifecycle`), which this build does not drive yet, so a ferret started by Ferrets' own service has none to
-   * merge into: nothing is created for it and the start goes on (a session with no stamp is the answer "nobody has
-   * decided", which every reader already handles). A document that is there and cannot take the stamp refuses the start.
-   * Because the ancestry snapshot is not taken for a start with no document, a damaged, unreadable or vanished ancestor
-   * does not refuse it, which today's start does (GAP(provenance)).
+   * A START records who caused the ferret, in its session document, which the session-document writer makes first from
+   * the registry's record (ruling #31b), after the boot's backfill has given every held ferret one. The ancestry is then
+   * read STRICTLY, as today's start reads it, so a damaged, unreadable or vanished ancestor refuses the start. Only a
+   * ferret the registry does not hold (none in this build reaches here) has no document to make; it records nothing and
+   * says so. A document that is there and cannot take the stamp refuses the start.
    */
   private async stampAtStart(request: SessionSpawnRequest): Promise<void> {
     const id = parseSessionId(request.id);
-    if ((await this.deps.storage.readConfig(id)) === undefined) {
+    await this.documented.catch(() => undefined);
+    if (!(await this.ensureDocument(id))) {
       this.deps.log.warn('a ferret has no session document yet, so its spawn stamp was not recorded', { ferret: id });
       return;
     }
@@ -203,11 +325,13 @@ export class SessionFiles {
    *
    * The document is read STRICTLY, as today's `sessions.get` reads it: one that cannot be read, or fails
    * `SessionConfigSchema`, throws, so the resume writes nothing and the stamp on disk stays as it was. The error names
-   * the id only. A ferret with no document has nothing to carry (GAP(provenance)).
+   * the id only. A ferret that ran before the writer existed is given its document first (ruling #31b).
    */
   private async carryOnResume(ferret: string): Promise<void> {
     const id = parseSessionId(ferret);
-    // No catch: an unreadable document is a resume that brings nothing forward.
+    await this.documented.catch(() => undefined);
+    // A ferret that ran before the writer existed gets its document now; no catch: an unreadable one brings nothing.
+    await this.ensureDocument(id);
     const document = await this.deps.storage.readConfig(id);
     if (document === undefined) return;
     const parsed = SessionConfigSchema.safeParse(document);

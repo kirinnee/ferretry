@@ -1,0 +1,448 @@
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import type { ActRunner, RootHandle } from '@ferretry/kernel/contract';
+import { diskPaths, diskSessionsRoot, type MemoryStateFolder } from '@ferretry/kernel/testing';
+import { err, ok, type Result } from '@ferretry/std';
+import {
+  FerretConfigFile,
+  type FerretRecord,
+  type RunningFerret,
+  type RunSpec,
+  type StartRefusal,
+} from '../../../../contract/index.ts';
+import { emptyChildEnvironment, FakeHarness, FakeRunner, fenced, T0 } from '../../../../contract/testing/index.ts';
+import { FerretsService, type FerretsPorts } from '../../../../daemon/lib/ferrets/service.ts';
+import { FerretRegistry } from '../../../../daemon/lib/registry/registry.ts';
+import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
+import { SessionFiles } from '../../../../daemon/modules/session-files.ts';
+import { SessionConfigSchema, SessionStateSchema } from '../../../../daemon/lib/protocol/session.ts';
+import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
+import { turnFileInstruction } from '../../../../daemon/lib/protocol/turn-handoff.ts';
+import { defaultSessionResumeSettings } from '../../../../daemon/lib/session/resume/settings.ts';
+import type { ResumeActor } from '../../../../daemon/lib/session/resume/types.ts';
+import { memoryStorage } from '../../../support/daemon/storage.ts';
+
+/**
+ * The deliver seam (U3) end to end on the service: the start's assigned task, a revive's numbered turn and its markers,
+ * the pointer typed into the new pane, `turns()` and the session document the start now writes (ruling #31b). The
+ * session store is the real one over a memory state folder; the ferret folders are real ones on the internal
+ * `sessions` root of a temporary home. Fixture values only.
+ */
+
+const NOW = '2026-11-08T10:00:00.000Z';
+const IDS = ['mw7bp88g-00000001', 'mw7bp88g-00000002', 'mw7bp88g-00000003', 'mw7bp88g-00000004'] as const;
+const parents: string[] = [];
+afterEach(async () => {
+  for (const parent of parents.splice(0)) await rm(parent, { recursive: true, force: true });
+});
+
+/** A runner whose next starts can be refused, and that tells a test what it saw at the moment of each start. */
+class ScriptedRunner extends FakeRunner {
+  refuseStarts = 0;
+  onStart: ((spec: RunSpec) => Promise<void>) | undefined;
+  override async start(spec: RunSpec): Promise<Result<RunningFerret, StartRefusal>> {
+    await this.onStart?.(spec);
+    if (this.refuseStarts > 0) {
+      this.refuseStarts -= 1;
+      return err('failed');
+    }
+    return await super.start(spec);
+  }
+}
+
+interface World {
+  readonly service: FerretsService;
+  readonly registry: FerretRegistry;
+  readonly files: SessionFiles;
+  readonly runner: ScriptedRunner;
+  readonly storage: Awaited<ReturnType<typeof memoryStorage>>['storage'];
+  readonly state: MemoryStateFolder;
+  readonly folderOf: (id: string) => string;
+  readonly acts: string[];
+  readonly warnings: string[];
+}
+
+/** One daemon over ferret folders that outlive it: `restart` builds the next one on the same state and disk. */
+async function world(
+  records: readonly FerretRecord[] = [],
+  reuse?: {
+    readonly state: MemoryStateFolder;
+    readonly handles: Readonly<Record<string, RootHandle>>;
+    readonly folders: Readonly<Record<string, string>>;
+  },
+  backfill = true,
+): Promise<World & { readonly reuse: NonNullable<typeof reuse> }> {
+  let handles = reuse?.handles;
+  let folders = reuse?.folders;
+  if (handles === undefined || folders === undefined) {
+    const parent = await mkdtemp(`${tmpdir()}/fy-deliver-`);
+    parents.push(parent);
+    const made: Record<string, RootHandle> = {};
+    const where: Record<string, string> = {};
+    for (const id of IDS) {
+      const disk = await diskSessionsRoot(parent, id);
+      made[id] = disk.root;
+      where[id] = disk.folder;
+    }
+    handles = made;
+    folders = where;
+  }
+  const { storage, folder: state } = await memoryStorage({
+    clock: { now: () => NOW },
+    ...(reuse === undefined ? {} : { folder: reuse.state }),
+  });
+  const registry = new FerretRegistry(records);
+  const warnings: string[] = [];
+  const files = new SessionFiles({
+    roots: {
+      root: (_name, scope) => {
+        const handle = handles[scope?.subfolder ?? ''];
+        if (handle === undefined) throw new Error(`no fixture folder for ${scope?.subfolder ?? ''}`);
+        return handle;
+      },
+    },
+    storage,
+    clock: { now: () => NOW },
+    sleep: async () => undefined,
+    paths: diskPaths(),
+    fleet: () =>
+      registry
+        .list()
+        .map(ferret => ({ id: ferret.id, ...(ferret.parent === undefined ? {} : { parent: ferret.parent }) })),
+    seed: id => {
+      const record = registry.get(id as never);
+      return record === undefined ? undefined : { record, details: registry.detailsOf(record.id) };
+    },
+    log: { warn: message => void warnings.push(message) },
+  });
+  const runner = new ScriptedRunner();
+  const harness = new FakeHarness();
+  const acts: string[] = [];
+  const act: ActRunner = async (target, op, run) => {
+    acts.push(`${op} ${target.key}`);
+    return ok(await run({} as never));
+  };
+  let next = records.length;
+  const ports: FerretsPorts = {
+    now: () => T0,
+    newId: () => {
+      const id = IDS[next];
+      next += 1;
+      if (id === undefined) throw new Error('the fixture has no more ferret folders');
+      return id as never;
+    },
+    newName: taken => {
+      for (let n = 1; ; n += 1) if (!taken(`fern${n}`)) return `fern${n}`;
+    },
+    save: async () => {},
+    saveTokens: async () => {},
+    harness: () => harness,
+    harnessKeys: () => [harness.key],
+    runner: () => runner,
+    // Packs' admission stands in here: this fixture lets a helper start, so the stamp's ancestry is what decides.
+    decide: async () => ({ allow: true }),
+    launchParts: () => [],
+    sitrepSources: () => [],
+    instructions: () => [],
+    folder: path => ok(fenced(path)),
+    changed: () => {},
+    act,
+    vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },
+    asks: { open: async () => [] },
+    session: files.port,
+  };
+  const service = new FerretsService(registry, new FerretTokenDirectory(), ports);
+  if (backfill) await files.backfill(async () => registry.list().map(ferret => ferret.id));
+  return {
+    service,
+    registry,
+    files,
+    runner,
+    storage,
+    state,
+    folderOf: id => folders[id] ?? '',
+    acts,
+    warnings,
+    reuse: { state, handles, folders },
+  };
+}
+
+const turnFile = (w: World, id: string, turn: number) =>
+  `${w.folderOf(id)}/turns/turn-${String(turn).padStart(3, '0')}.md`;
+
+async function started(w: World, prompt?: string, extra: Record<string, unknown> = {}): Promise<string> {
+  const result = await w.service.start({
+    folder: '/work',
+    by: 'owner',
+    ...(prompt === undefined ? {} : { prompt }),
+    ...extra,
+  });
+  if (!result.ok) throw new Error(`start refused: ${result.error.reason}`);
+  return result.value;
+}
+
+const revive = async (w: World, id: string, message?: string, actor?: ResumeActor) =>
+  await w.service.resume(id as never, message, actor === undefined ? undefined : { actor });
+
+describe('GAP(deliver) a revive writes the numbered turn, clears the markers and types its pointer', () => {
+  test('GAP(deliver) a revive writes turn-NNN.md once and a retried relaunch re-delivers the same one', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.');
+    // The start's prompt is the assigned task: turn one, so the first revive is turn two.
+    expect(await readFile(turnFile(w, id, 1), 'utf8')).toBe('# Assigned task\n\nBuild the thing.\n');
+    await w.service.stop(id as never, 'now');
+
+    // A relaunch that fails leaves its turn written but uncounted.
+    w.runner.refuseStarts = 1;
+    expect((await revive(w, id, 'Carry on with the tests.')).ok).toBe(false);
+    const written = await stat(turnFile(w, id, 2));
+    expect(w.runner.deliveries).toEqual([]);
+    expect(SessionStateSchema.parse(await w.storage.readState(parseSessionId(id))).turn).toBe(1);
+
+    // The retry hands the ferret the SAME document: same number, same file, not rewritten.
+    const retried = await revive(w, id, 'Carry on with the tests.');
+    expect(retried.ok).toBe(true);
+    expect((await stat(turnFile(w, id, 2))).ino).toBe(written.ino);
+    expect(await readFile(turnFile(w, id, 2), 'utf8')).toBe(
+      `Carry on with the tests.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+    );
+    expect(w.runner.deliveries.map(delivery => delivery.delivery.text)).toEqual([
+      turnFileInstruction(turnFile(w, id, 2)),
+    ]);
+    // Typed into the NEW pane, and counted once it landed.
+    expect(w.runner.deliveries[0]?.handle).toBe(w.registry.get(id as never)?.handle as never);
+    expect(SessionStateSchema.parse(await w.storage.readState(parseSessionId(id))).turn).toBe(2);
+
+    // The next revive numbers after it, and an auto ferret with no message is given the default prompt.
+    await w.service.stop(id as never, 'now');
+    expect((await revive(w, id)).ok).toBe(true);
+    expect(await readFile(turnFile(w, id, 3), 'utf8')).toBe(
+      `${defaultSessionResumeSettings.defaultResumePrompt}\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+    );
+  });
+
+  test('GAP(deliver) markers are cleared before relaunch, and the new turn is on disk when the pane starts', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.');
+    await w.service.stop(id as never, 'now');
+    for (const marker of ['done', 'needs-help', 'process-exit'])
+      await writeFile(`${w.folderOf(id)}/${marker}.marker`, `${marker}\n`);
+    const seen: string[] = [];
+    w.runner.onStart = async () => {
+      for (const marker of ['done', 'needs-help', 'process-exit'])
+        seen.push(
+          `${marker} ${await stat(`${w.folderOf(id)}/${marker}.marker`).then(
+            () => 'still there',
+            () => 'gone',
+          )}`,
+        );
+      seen.push(
+        `turn-002 ${await stat(turnFile(w, id, 2)).then(
+          () => 'written',
+          () => 'missing',
+        )}`,
+      );
+    };
+
+    expect((await revive(w, id, 'Again.')).ok).toBe(true);
+
+    expect(seen).toEqual(['done gone', 'needs-help gone', 'process-exit gone', 'turn-002 written']);
+  });
+
+  test('GAP(deliver) a turn that cannot be written refuses the relaunch before any pane exists, quoting nothing', async () => {
+    const w = await world();
+    const id = await started(w);
+    await w.service.stop(id as never, 'now');
+    const starts = w.runner.starts;
+    // A folder where the turn document must go makes the write fail.
+    await writeFile(`${w.folderOf(id)}/turns`, 'FIXTURE_SECRET in the way\n');
+
+    const resumed = await revive(w, id, 'Again.');
+
+    expect(resumed.ok).toBe(false);
+    if (!resumed.ok) {
+      expect(resumed.error.reason).toBe('a new turn could not be written for this ferret, so it was not relaunched');
+      expect(resumed.error.reason).not.toContain('FIXTURE_SECRET');
+    }
+    expect(w.runner.starts).toBe(starts);
+  });
+
+  test('GAP(deliver) an interactive ferret resumed with no message is relaunched with no invented turn, its markers cleared', async () => {
+    const w = await world();
+    const id = await started(w, undefined, { options: { mode: 'interactive' } });
+    await w.service.stop(id as never, 'now');
+    await writeFile(`${w.folderOf(id)}/done.marker`, 'done\n');
+
+    expect((await revive(w, id)).ok).toBe(true);
+
+    expect(await w.files.port.turns?.(id as never, { strict: true })).toEqual([]);
+    expect(w.runner.deliveries).toEqual([]);
+    await expect(stat(`${w.folderOf(id)}/done.marker`)).rejects.toThrow();
+  });
+
+  for (const [actor, by] of [
+    ['warden', { kind: 'ferretry', feature: 'Warden' }],
+    ['daemon', { kind: 'ferretry', feature: 'Restart' }],
+    ['admin-ui', { kind: 'owner' }],
+    ['peer', { kind: 'ferret' }],
+  ] as const)
+    test(`F-0002 a revive asked by ${actor} records who the turn is from beside it, never in it`, async () => {
+      const w = await world();
+      const id = await started(w);
+      await w.service.stop(id as never, 'now');
+
+      expect((await revive(w, id, 'Again.', actor)).ok).toBe(true);
+
+      expect(JSON.parse(await readFile(turnFile(w, id, 1).replace(/\.md$/u, '.by.json'), 'utf8'))).toEqual(by);
+      expect(await readFile(turnFile(w, id, 1), 'utf8')).not.toContain(by.kind);
+    });
+
+  test('GAP(deliver) a delivery that does not land says so, leaves the ferret running and the turn uncounted', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.');
+    await w.service.stop(id as never, 'now');
+    const deliver = w.runner.deliver.bind(w.runner);
+    w.runner.deliver = async () => {
+      throw new Error('FIXTURE_SECRET pane refused');
+    };
+
+    const resumed = await revive(w, id, 'Again.');
+
+    expect(resumed.ok).toBe(false);
+    if (!resumed.ok) expect(resumed.error.reason).not.toContain('FIXTURE_SECRET');
+    expect(w.registry.get(id as never)?.state).toBe('working');
+    expect(SessionStateSchema.parse(await w.storage.readState(parseSessionId(id))).turn).toBe(1);
+    w.runner.deliver = deliver;
+  });
+});
+
+describe('FerretsApi.turns: a ferret’s turn documents, behind the mayTouch caller rule', () => {
+  test('turns lists the start’s task and every revive’s turn, oldest first, with who each is from', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.');
+    await w.service.stop(id as never, 'now');
+    await revive(w, id, 'Again.', 'admin-ui');
+
+    const turns = await w.service.turns(id as never);
+
+    expect(await turns?.list()).toEqual([
+      { turn: 1, text: '# Assigned task\n\nBuild the thing.\n' },
+      { turn: 2, text: `Again.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`, by: { kind: 'owner' } },
+    ]);
+    expect(await w.service.turns('mw7bp88g-0000ffff' as never)).toBeUndefined();
+  });
+
+  test('a ferret reads its own and its helpers’ turns, and is refused anyone else’s with a 403', async () => {
+    const w = await world();
+    const lead = await started(w, 'Lead the work.');
+    const helper = await started(w, 'Help.', { parent: lead });
+    const stranger = await started(w, 'Something else.');
+
+    expect((await (await w.service.turns(helper as never, lead as never))?.list())?.length).toBe(1);
+    expect((await (await w.service.turns(lead as never, lead as never))?.list())?.length).toBe(1);
+    await expect(w.service.turns(lead as never, stranger as never)).rejects.toMatchObject({
+      status: 403,
+      code: 'forbidden',
+    });
+    await expect(w.service.turns(lead as never, helper as never)).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe('FerretHarness.queue: the runner’s own queue, never wrapped in a second act', () => {
+  test('#23 pane-queue: the seam hands the text to the runner’s queue on the ferret’s pane and acts nothing itself', async () => {
+    const w = await world();
+    const id = await started(w);
+    const seam = await w.service.harness(id as never);
+
+    expect(await seam?.queue('FIXTURE queued words')).toEqual(ok('held'));
+
+    expect(w.runner.queued).toEqual([
+      { handle: w.registry.get(id as never)?.handle as never, text: 'FIXTURE queued words' },
+    ]);
+    // The runner acts per write itself; an outer act here would wait on the inner one forever.
+    expect(w.acts).toEqual([]);
+    // Contrast: an interrupt IS acted on by the seam, because the runner's signal is a raw key.
+    await seam?.interrupt();
+    expect(w.acts).toHaveLength(1);
+  });
+
+  test('a stopped ferret has no pane to queue into, and a runner that cannot queue answers plugin_unavailable', async () => {
+    const w = await world();
+    const id = await started(w);
+    const seam = await w.service.harness(id as never);
+    (w.runner as { queue?: unknown }).queue = undefined;
+
+    expect(await seam?.queue('x')).toEqual(err({ refused: 'plugin_unavailable' }));
+    await w.service.stop(id as never, 'now');
+    expect(await seam?.queue('x')).toEqual(err({ refused: 'no_pane' }));
+  });
+});
+
+describe('ruling #31b: the start writes the session document, and strict ancestry stays strict', () => {
+  test('a start writes config.json the protocol accepts, with the stamp of who caused it, before its first history event', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.', { options: { label: 'batch-1', model: 'opus' } });
+
+    const config = SessionConfigSchema.parse(await w.storage.readConfig(parseSessionId(id)));
+    expect(config).toMatchObject({
+      id,
+      name: 'fern1',
+      label: 'batch-1',
+      cwd: '/work',
+      mode: 'auto',
+      turn: 1,
+      model: 'opus',
+    });
+    expect(config.provenance).toBeDefined();
+    expect(SessionStateSchema.parse(await w.storage.readState(parseSessionId(id)))).toMatchObject({ id, turn: 1 });
+  });
+
+  test('a ferret that ran before the writer (journal only, indexed) is given its document at boot, so a child of it is stamped', async () => {
+    const lead = IDS[0];
+    const leadId = parseSessionId(lead);
+    const record: FerretRecord = {
+      format: 1,
+      id: lead as never,
+      name: 'wren',
+      role: 'lead',
+      harness: 'claude-code',
+      runner: 'tmux',
+      folder: '/work',
+      state: 'stopped',
+      createdAt: T0,
+      stateAt: T0,
+    };
+    // Before the writer: the lead holds only history.jsonl, which the session store indexes.
+    const before = await world([record], undefined, false);
+    await before.storage.append(leadId, 'session.stopped', { reason: 'fixture' });
+    expect(before.storage.findSession(leadId)).toBeDefined();
+    expect(await before.storage.readConfig(leadId)).toBeUndefined();
+    // Today's rule, kept: with an indexed ferret holding no document, a child's stamp cannot be proved.
+    const refused = await before.service.start({ folder: '/work', by: 'owner', parent: lead as never });
+    expect(refused.ok).toBe(false);
+
+    // A daemon restart: the boot backfill documents the lead, and the strict ancestry then accepts a child of it.
+    const restarted = await world([record], before.reuse);
+    expect(SessionConfigSchema.safeParse(await restarted.storage.readConfig(leadId)).success).toBe(true);
+    const child = await started(restarted, 'Help.', { parent: lead });
+    const stamped = SessionConfigSchema.parse(await restarted.storage.readConfig(parseSessionId(child)));
+    expect(stamped.parent).toBe(lead);
+    expect(stamped.provenance).toBeDefined();
+  });
+
+  test('strict ancestry stays strict: a damaged ancestor document still refuses a child’s start, quoting none of it', async () => {
+    const w = await world();
+    const lead = await started(w);
+    // Damaged on disk as a crash or a hand edit would leave it (the store itself refuses to write such a document).
+    w.state.plant(FerretConfigFile, '{"format": 1, "label": "FIXTURE_SECRET-', lead);
+
+    const child = await w.service.start({ folder: '/work', by: 'owner', parent: lead as never });
+
+    expect(child.ok).toBe(false);
+    if (!child.ok) {
+      expect(child.error.reason).toBe('where this ferret came from could not be recorded, so it was not started');
+      expect(child.error.reason).not.toContain('FIXTURE_SECRET');
+    }
+  });
+});

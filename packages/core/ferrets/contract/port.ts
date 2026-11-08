@@ -11,7 +11,14 @@ import {
   type HarnessKey,
   type PackId,
 } from './ids.ts';
-import type { DeliveryOutcome, RunnerDelivery, RunnerHandle, SitrepLine, BoundTranscriptReader } from './kinds.ts';
+import type {
+  DeliveryOutcome,
+  QueueOutcome,
+  RunnerDelivery,
+  RunnerHandle,
+  SitrepLine,
+  BoundTranscriptReader,
+} from './kinds.ts';
 import type { AgentControl, LimitsFile } from './state.ts';
 
 /**
@@ -161,6 +168,12 @@ export type HarnessRefusal = { readonly refused: RefusalCode | 'no_pane' | 'plug
  */
 export interface FerretHarness {
   deliver(delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessRefusal>>;
+  /**
+   * Additive (U3): puts `text` into the ferret's BUSY pane's own queue (the runner's `queue`). Exactly like `deliver`, it
+   * is NOT wrapped in a second act here: the runner acts on the pane for each write it makes, and an outer act would
+   * wait on the inner one so that neither ever settled. A runner that cannot queue answers `plugin_unavailable`.
+   */
+  queue(text: string): Promise<Result<QueueOutcome, HarnessRefusal>>;
   /** The harness's interrupt (the runner's `signal(handle, 'interrupt')`), as the same kind of act. */
   interrupt(): Promise<Result<true, HarnessRefusal>>;
   /**
@@ -168,6 +181,33 @@ export interface FerretHarness {
    * It is bound to that ferret and names no other.
    */
   readonly transcript: BoundTranscriptReader;
+}
+
+/**
+ * Who a turn document is from, as Ferretry recorded it BESIDE the document (`turn-NNN.by.json`, today's `QueueAuthor`):
+ * the owner, a ferret (by callsign) or a part of Ferretry (by feature). Metadata only; the document never carries it.
+ */
+export interface FerretTurnAuthor {
+  readonly kind: 'owner' | 'ferret' | 'ferretry';
+  readonly name?: string;
+  readonly feature?: string;
+  readonly sections?: string[];
+}
+
+/** One of a ferret's turn documents (`turns/turn-NNN.md`) and, when Ferretry wrote one beside it, who it is from. */
+export interface FerretTurnDocument {
+  readonly turn: number;
+  readonly text: string;
+  readonly by?: FerretTurnAuthor;
+}
+
+/**
+ * A ferret's turn documents, read back by the store that writes them (additive, U3; Conversation's `TurnDocuments`).
+ * Bound to the one ferret it was opened for, so it can read no other's. A STRICT read rejects anything unreadable (a
+ * document that vanished mid-read, an author record that does not parse); a best-effort one skips what it cannot read.
+ */
+export interface FerretTurns {
+  list(options?: { readonly strict?: boolean }): Promise<readonly FerretTurnDocument[]>;
 }
 
 /** Why a move did not happen (today's `SessionMoveFailure` words and sentence). */
@@ -275,6 +315,12 @@ export interface FerretsApi {
    * the same `mayTouch` rule as stop and resume: anyone else is refused with a 403 `forbidden`.
    */
   harness?(ferret: FerretId, caller?: FerretId): Promise<FerretHarness | undefined>;
+  /**
+   * A ferret's turn documents (additive, U3): what a start and every revive handed it, oldest first. `undefined` for a
+   * ferret this daemon does not know. With `caller` (a ferret acting), only itself and its helpers are reachable, by the
+   * same `mayTouch` rule as `harness`: anyone else is refused with a 403 `forbidden`, so no agent reads another's turns.
+   */
+  turns?(ferret: FerretId, caller?: FerretId): Promise<FerretTurns | undefined>;
   /**
    * Moves a ferret onto another runtime (decision #19, additive; today's move of a session): the moves module's flow, whose
    * relaunch is a resume that replaces the live pane through the ordinary launch. Same `mayTouch` rule as above.

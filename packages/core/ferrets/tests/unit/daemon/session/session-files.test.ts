@@ -536,12 +536,13 @@ describe('unbuilt adapters: provenance', () => {
 
   /**
    * GAP(provenance), pinned. Today's start always takes the spawn ancestry snapshot, so a damaged, unreadable or
-   * vanished ancestor refuses EVERY start. In 5.0 a start with no session document returns before the snapshot is
-   * taken, so the ancestry is never checked and such a start goes on unstamped. That is the declared trade (nothing
-   * is written, so no false `wardenLineage: false` lands, and taking the snapshot here would lock out every start
-   * while a journal-only ferret is indexed); the same ancestry DOES refuse once the child has a document.
+   * vanished ancestor refuses EVERY start. The session-document writer (ruling #31b) now makes a document for every
+   * ferret the registry holds before its stamp, so the daemon's starts take that snapshot as today's do
+   * (`deliver-turns.test.ts`). This pins the one branch left: a start for a ferret the registry holds NO record of
+   * (this fixture binds no `seed`) has no document to make, returns before the snapshot and records nothing; the same
+   * ancestry DOES refuse once the child has a document.
    */
-  test("GAP(provenance) a start with no session document is not refused for a damaged, unreadable or vanished ancestor, which today's start is: the ancestry is never checked", async () => {
+  test('GAP(provenance) a start the registry holds no record for has no document to make, so it records nothing and its ancestry is never checked; once it has a document the same ancestry refuses', async () => {
     for (const damage of ['damaged', 'unreadable', 'vanished'] as const) {
       // Arrange: the child (FERRET) has no document; its registered parent (OTHER) is damaged, or indexed with none
       const kernel = await wired();

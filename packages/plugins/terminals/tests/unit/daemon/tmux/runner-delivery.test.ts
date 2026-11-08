@@ -294,3 +294,53 @@ describe('tmux runner message delivery', () => {
     expect(server.composer).toContain('one send');
   });
 });
+
+describe('#23 pane-queue: a queued message is typed only through kernel.act and a held target types nothing', () => {
+  /** A fake fixture value standing in for whatever a person would not want typed into the wrong pane. */
+  const FIXTURE_SECRET = 'fixture-not-a-secret-7f3a';
+
+  it('#23 pane-queue: every write the queue makes is an act on the exact pane, and it answers what the pane proves', async () => {
+    const { runner, server, acts, guards, handle } = subject();
+
+    const outcome = await runner.queue(handle, `queue this ${FIXTURE_SECRET}`);
+
+    expect(['held', 'typed', 'left']).toContain(outcome);
+    // The fixture's pane is idle, so Enter submitted it: it left the composer and no queue shows it.
+    expect(outcome).toBe('left');
+    expect(server.submitted).toEqual([`queue this ${FIXTURE_SECRET}`]);
+    // Every keystroke went through the act runner on THIS pane, and through the server-side guard; none raw.
+    expect(acts.length).toBeGreaterThan(0);
+    expect(acts.every(act => act.op === 'keys' && act.target.key === handle && act.outcome === 'ran')).toBe(true);
+    expect(guards.length).toBe(acts.length);
+    expect(
+      server.calls.filter(call => call.includes('-t')).every(call => call[call.indexOf('-t') + 1] === handle),
+    ).toBe(true);
+  });
+
+  it('#23 pane-queue: a held target types nothing, and the refusal quotes nothing of the message', async () => {
+    const { runner, server, acts, handle, hold } = subject();
+    hold();
+
+    const queued = runner.queue(handle, `queue this ${FIXTURE_SECRET}`);
+
+    await expect(queued).rejects.toThrow('input card');
+    await queued.catch((error: unknown) => {
+      expect(String(error instanceof Error ? error.message : error)).not.toContain(FIXTURE_SECRET);
+    });
+    expect(
+      server.calls.some(call => call[0] === 'send-keys' || call[0] === 'load-buffer' || call[0] === 'paste-buffer'),
+    ).toBe(false);
+    expect(server.composer).toBe('');
+    expect(server.submitted).toEqual([]);
+    expect(acts.every(act => act.outcome !== 'ran')).toBe(true);
+  });
+
+  it('#23 pane-queue: a handle with nothing behind it rejects without a key or an act', async () => {
+    const world = subject();
+    world.server.alive = false;
+
+    await expect(world.runner.queue(world.handle, 'work')).rejects.toBeInstanceOf(PaneNotReadyError);
+    expect(world.server.calls).toEqual([]);
+    expect(world.acts).toEqual([]);
+  });
+});

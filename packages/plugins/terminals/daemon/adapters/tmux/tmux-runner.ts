@@ -1,6 +1,7 @@
 import type {
   AttachRefusal,
   DeliveryOutcome,
+  QueueOutcome,
   Runner,
   RunnerDelivery,
   RunnerHandle,
@@ -23,6 +24,17 @@ import { LaunchGuardRefusal, RealHarnessRefusedError, type TmuxLaunchGuard } fro
 import { TMUX_PROGRAM } from './kernel-tmux-process.ts';
 import { ComposerUnconfirmedError, type DeliverySleep } from './composer-fill.ts';
 import { PaneDeliveryError, PaneNotReadyError, PaneStrandedError, TmuxPaneDelivery } from './pane-delivery.ts';
+import { TmuxPaneQueue } from './pane-queue.ts';
+
+/**
+ * A failure after something was typed is reported as typed-but-unconfirmed, never as a loss a retry should re-type;
+ * `ComposerUnconfirmedError` and `PaneStrandedError` already say so and pass through unchanged.
+ */
+function typedNotLost(error: unknown, typings: number): unknown {
+  if (typings > 0 && !(error instanceof ComposerUnconfirmedError) && !(error instanceof PaneStrandedError))
+    return new ComposerUnconfirmedError('the payload was typed but delivery could not be confirmed', typings);
+  return error;
+}
 
 /**
  * The `runners:tmux` provider (§2.3): a ferret's harness runs in its own tmux session, `fy-<ferret>`, on Terminals'
@@ -152,6 +164,44 @@ export class TmuxRunner implements Runner {
   }
 
   async deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome> {
+    const pane = await this.guardedPane(handle);
+    // In particular, ComposerUnconfirmedError and PaneStrandedError propagate without a retry: typed is not lost.
+    try {
+      return await new TmuxPaneDelivery(new TmuxController(pane.port), pane.sleep).deliver(
+        pane.session,
+        delivery.text,
+        { resumeMenuChoice: delivery.resumeMenuChoice },
+        delivery.beforeWrite,
+      );
+    } catch (error) {
+      throw typedNotLost(error, pane.typings());
+    }
+  }
+
+  /**
+   * Puts one message into a BUSY ferret pane's own queue (today's `TmuxPaneQueue`, unchanged), through the SAME guarded
+   * binding `deliver` uses: every write is acted on under `kernel.act(terminal %n, 'keys')` by this runner itself (a hold
+   * types nothing), re-checked against the exact live pane in the write, and never raw. A caller must not wrap it again.
+   */
+  async queue(handle: RunnerHandle, text: string): Promise<QueueOutcome> {
+    const pane = await this.guardedPane(handle);
+    try {
+      return await new TmuxPaneQueue(new TmuxController(pane.port), pane.sleep).queue(pane.session, text);
+    } catch (error) {
+      throw typedNotLost(error, pane.typings());
+    }
+  }
+
+  /**
+   * The exact live ferret pane behind `handle`, bound for writing: every target is rebound to this handle, every read
+   * re-proves the pane is the one first seen, and every write is acted on under `kernel.act` and guarded in the server.
+   */
+  private async guardedPane(handle: RunnerHandle): Promise<{
+    readonly port: TmuxCommandPort;
+    readonly session: string;
+    readonly sleep: DeliverySleep;
+    readonly typings: () => number;
+  }> {
     const gone = (): PaneNotReadyError => new PaneNotReadyError('the ferret pane is no longer live', 'exited');
     if (!PANE_ID.test(handle)) throw gone();
     const original = await this.facts(handle, true);
@@ -230,19 +280,7 @@ export class TmuxRunner implements Runner {
         return result;
       },
     };
-    // In particular, ComposerUnconfirmedError and PaneStrandedError propagate without a retry: typed is not lost.
-    try {
-      return await new TmuxPaneDelivery(new TmuxController(bound), guard.sleep).deliver(
-        original.session,
-        delivery.text,
-        { resumeMenuChoice: delivery.resumeMenuChoice },
-        delivery.beforeWrite,
-      );
-    } catch (error) {
-      if (typings > 0 && !(error instanceof ComposerUnconfirmedError) && !(error instanceof PaneStrandedError))
-        throw new ComposerUnconfirmedError('the payload was typed but delivery could not be confirmed', typings);
-      throw error;
-    }
+    return { port: bound, session: original.session, sleep: guard.sleep, typings: () => typings };
   }
 
   async stop(handle: RunnerHandle, how: 'polite' | 'now'): Promise<void> {

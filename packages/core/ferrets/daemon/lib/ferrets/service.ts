@@ -11,6 +11,9 @@ import type {
   FerretChangedPayload,
   FerretEndCause,
   FerretHarness,
+  FerretTurnAuthor,
+  FerretTurnDocument,
+  FerretTurns,
   HarnessRefusal,
   MoveFailure,
   MoveOptions,
@@ -30,6 +33,7 @@ import type {
   LaunchSpec,
   ManagedWorktreeSummary,
   PackId,
+  QueueOutcome,
   Runner,
   RunnerHandle,
   Sitrep,
@@ -53,6 +57,8 @@ import {
 } from '../../../contract/index.ts';
 import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
+import { resumeTurnAuthor } from '../session/resume/policy.ts';
+import type { ResumeActor } from '../session/resume/types.ts';
 import { SessionMoveError } from '../runtime/mounts/session-move.ts';
 import {
   type AgentControl,
@@ -171,6 +177,36 @@ export interface FerretSessionPort {
   prepare(ferret: FerretId): Promise<void>;
   stamp(request: SessionSpawnRequest): Promise<void>;
   carry(ferret: FerretId): Promise<void>;
+  /**
+   * A start's prompt, written as the ferret's assigned task (`turns/turn-001.md`), after `prepare` and before the stamp,
+   * so the ferret's session document counts the turn it already holds. Unbound: no turn document is written.
+   */
+  assign?(ferret: FerretId, prompt: string): Promise<void>;
+  /**
+   * A revive's new turn (today's revive, U3): the numbered turn document (`turns/turn-NNN.md`, its author beside it as
+   * `turn-NNN.by.json`) written durably, then the completion markers a previous turn left (`done`, `needs-help`,
+   * `process-exit`) cleared, all BEFORE the relaunch. Answers the pointer to type into the new pane, or `undefined` when
+   * the revive invents no turn (an interactive ferret resumed with no message). A turn already written for this number
+   * and never delivered is re-delivered as it is, so a retried relaunch hands the ferret the same document.
+   */
+  revive?(ferret: FerretId, request: ReviveTurnRequest): Promise<ReviveTurn | undefined>;
+  /** The revive's turn reached the new pane: the next revive numbers after it. */
+  delivered?(ferret: FerretId, turn: number): Promise<void>;
+  /** The ferret's turn documents, oldest first (`FerretsApi.turns`). */
+  turns?(ferret: FerretId, options: { readonly strict: boolean }): Promise<readonly FerretTurnDocument[]>;
+}
+
+/** What a revive's turn is made from: the message (none: the mode's default), the ferret's mode and who asked. */
+export interface ReviveTurnRequest {
+  readonly message?: string;
+  readonly mode: 'auto' | 'interactive';
+  readonly by?: FerretTurnAuthor;
+}
+
+/** A revive's turn, written: its number and the one line typed into the new pane so the agent reads it. */
+export interface ReviveTurn {
+  readonly turn: number;
+  readonly instruction: string;
 }
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
@@ -255,6 +291,11 @@ export interface ServiceResumeOptions extends ResumeOptions {
    * their one owner), so the start gate and the launch both see the target and never the previous runtime.
    */
   readonly target?: ResumeTarget;
+  /**
+   * Who asked, for the author recorded beside the revive's turn document (today's `resumeTurnAuthor`): ATTRIBUTION only,
+   * never authority. Absent: `unknown`, so the turn names no author.
+   */
+  readonly actor?: ResumeActor;
 }
 
 class ResumeRefusal extends Error {
@@ -634,7 +675,12 @@ export class FerretsService implements FerretsApi {
     // it, as the moves module leaves its own document: a plain resume or Restart relaunches on the target.
     if (target !== undefined) await this.moveOptions(ferret, target);
     await this.write(starting, settled.state, 'state');
-    const resumed = await this.launch(starting, undefined, record.harnessConversation, 'resume');
+    const author = resumeTurnAuthor(options?.actor ?? 'unknown');
+    const resumed = await this.launch(starting, undefined, record.harnessConversation, 'resume', {
+      ...(message === undefined ? {} : { message }),
+      mode: starting.mode ?? 'auto',
+      ...(author === undefined ? {} : { by: author }),
+    });
     if (resumed.ok) {
       const text = message?.trim();
       await this.ports.history?.(ferret, 'session.resumed', {
@@ -887,6 +933,14 @@ export class FerretsService implements FerretsApi {
         // The runner guards each write with kernel.act on this pane itself; a hold it meets rejects the delivery.
         return ok(await found.value.runner.deliver(found.value.handle, delivery));
       },
+      queue: async (text: string): Promise<Result<QueueOutcome, HarnessRefusal>> => {
+        const found = pane();
+        if (!found.ok) return found;
+        const { handle, runner } = found.value;
+        if (runner.queue === undefined) return err({ refused: 'plugin_unavailable' });
+        // As `deliver`: the runner acts on this pane for each write it makes, so it is NOT wrapped in a second act here.
+        return ok(await runner.queue(handle, text));
+      },
       interrupt: async () => {
         const interrupted = await act((handle, runner) => runner.signal(handle, 'interrupt'));
         return interrupted.ok ? ok(true as const) : interrupted;
@@ -897,6 +951,19 @@ export class FerretsService implements FerretsApi {
         follow: signal => reader().follow(ferret, signal),
         find: async entry => await reader().find(ferret, entry),
       },
+    };
+  }
+
+  /**
+   * A ferret's turn documents, bound to that ferret (`FerretsApi.turns`). The same `mayTouch` rule as `harness`: a
+   * ferret reads only its own and its helpers', so no agent reads another's turns. Unbound session files: none.
+   */
+  async turns(ferret: FerretId, caller?: FerretId): Promise<FerretTurns | undefined> {
+    await this.ports.ready?.();
+    if (this.registry.get(ferret) === undefined) return undefined;
+    this.requireMayTouch(caller, ferret);
+    return {
+      list: async options => (await this.ports.session?.turns?.(ferret, { strict: options?.strict === true })) ?? [],
     };
   }
 
@@ -956,13 +1023,16 @@ export class FerretsService implements FerretsApi {
     prompt: string | undefined,
     conversation: string | undefined,
     kind: 'start' | 'resume',
+    revive?: ReviveTurnRequest,
   ): Promise<Result<FerretId, StartFailure>> {
     const created = new Set<RunnerHandle>();
     let runner: Runner | undefined;
     let failure: StartFailure;
+    let turn: ReviveTurn | undefined;
     try {
-      const session = await this.sessionStep(record, kind);
+      const session = await this.sessionStep(record, kind, prompt, revive);
       if (!session.ok) return await this.abandon(record, session.error.code, session.error.reason);
+      turn = session.value;
       runner = this.ports.runner();
       if (runner === undefined) return await this.abandon(record, 'runner_unavailable', 'no runner plugin is on');
       const tracked = new Proxy(runner, {
@@ -978,7 +1048,7 @@ export class FerretsService implements FerretsApi {
         },
       });
       const result = await this.launchAttempt(record, prompt, conversation, tracked);
-      if (result.ok) return result;
+      if (result.ok) return turn === undefined ? result : await this.deliverTurn(record.id, runner, turn);
       failure = result.error;
     } catch {
       // Port errors can contain launch environment values: never return their text to a caller.
@@ -1089,7 +1159,12 @@ export class FerretsService implements FerretsApi {
    * is made (or narrowed to `0700`) first, so nothing written for this launch lands in a readable one. Port errors are
    * never quoted: they can sit beside a credential.
    */
-  private async sessionStep(record: FerretRecord, kind: 'start' | 'resume'): Promise<Result<void, StartFailure>> {
+  private async sessionStep(
+    record: FerretRecord,
+    kind: 'start' | 'resume',
+    prompt: string | undefined,
+    revive: ReviveTurnRequest | undefined,
+  ): Promise<Result<ReviveTurn | undefined, StartFailure>> {
     const session = this.ports.session;
     if (session === undefined) return ok(undefined);
     try {
@@ -1098,6 +1173,13 @@ export class FerretsService implements FerretsApi {
       return failed('failed', "the ferret's private session folder could not be made private, so it was not started");
     }
     if (kind === 'start') {
+      // The assigned task is on disk before the stamp, so the session document counts the turn the ferret holds.
+      if (prompt !== undefined && prompt.trim() !== '' && session.assign !== undefined)
+        try {
+          await session.assign(record.id, prompt);
+        } catch {
+          return failed('failed', "this ferret's assigned task could not be written, so it was not started");
+        }
       // A start is the one moment the request IS the fact: what was asked for, before any document says otherwise.
       const label = this.registry.detailsOf(record.id)?.options?.label;
       const request: SessionSpawnRequest = {
@@ -1114,8 +1196,43 @@ export class FerretsService implements FerretsApi {
     } else {
       // A resume that cannot bring the stamp forward leaves the one on disk exactly as it was (it only ever strengthens).
       await session.carry(record.id).catch(() => undefined);
+      // The new turn is durable and the old turn's markers are gone BEFORE the relaunch (today's revive): a `done` left
+      // by the previous turn would end the new one the moment it started.
+      if (revive !== undefined && session.revive !== undefined)
+        try {
+          return ok(await session.revive(record.id, revive));
+        } catch {
+          return failed('failed', 'a new turn could not be written for this ferret, so it was not relaunched');
+        }
     }
     return ok(undefined);
+  }
+
+  /**
+   * Types the revive's pointer into the new pane (today's revive delivers after the relaunch). Through the runner's own
+   * `deliver`, which acts on the pane for each write itself, so it is NOT wrapped in a second act. Only a delivery that
+   * landed is recorded, so the next revive numbers after it; one that did not leaves the turn to be handed over again,
+   * the same document, by the next relaunch. The ferret is running either way, and the failure is said, never quoted.
+   */
+  private async deliverTurn(
+    ferret: FerretId,
+    runner: Runner,
+    turn: ReviveTurn,
+  ): Promise<Result<FerretId, StartFailure>> {
+    const handle = this.registry.get(ferret)?.handle as RunnerHandle | undefined;
+    try {
+      if (handle === undefined) throw new Error('no pane');
+      await runner.deliver(handle, { text: turn.instruction });
+    } catch {
+      return failed(
+        'failed',
+        'the ferret was relaunched, but its new turn could not be typed into its pane; stop and resume it to hand it the same turn again',
+      );
+    }
+    // The turn is in the pane, so the resume DID happen: a failure to count it is not the caller's to retry. The port
+    // says so in the daemon log; the next revive then numbers this turn again and replaces its document.
+    await this.ports.session?.delivered?.(ferret, turn.turn).catch(() => undefined);
+    return ok(ferret);
   }
 
   /**
