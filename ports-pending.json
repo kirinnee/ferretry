@@ -38,9 +38,6 @@
       "[kernel: fleet and harness-home roots] GAP(kernel): the fleet publication gate (S67: an apply publishes exclusively, a read waits) has no apply to guard until the fleet's catalogue is composed over the host (the provisioner's roots, above), so its seam stays unplugged: daemon/lib/service/publication.ts",
       "[kernel: fleet and harness-home roots] GAP(kernel): the host's harness homes have no root a plugin may declare, so the scan of them waits: daemon/adapters/host-harness-scan.ts",
       "[kernel: account model reach] GAP(kernel): the machine's Auto-resume after restart switch (machine.yaml autoResume) is not reachable from the Runtimes plugin (the host assembly does not reach the account model), so Runtimes answers auto-resume.decide's switch question no and nothing is auto-resumed until RuntimesAssembly.autoResume is supplied: daemon/lib/service/auto-resume-answer.ts",
-      "[cross: logins] GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) is not ported into Runtimes; Add runtime and a runtime that needs sign-in link to Logins' tab until Logins' app half draws it",
-      "[cross: logins] GAP(logins): preset detection and a login made from a preset wait for Logins' add-login surface to ask for them: daemon/lib/presets/detect.ts, daemon/lib/presets/login.ts, daemon/lib/presets/catalog.ts",
-      "[cross: logins] GAP(logins): a shared provider login and what a credential store held are drawn by Logins' sign-in, which does not ask for them yet: daemon/lib/identity.ts, daemon/lib/account/store-inspection.ts",
       "[cross: ferrets] GAP(ferrets): the start path that defaults a first account, strips a launch environment and resolves secret-backed variables, and the session records a runtime rename re-points, are Ferrets', which calls none of these yet: daemon/lib/harness.ts, daemon/lib/harness-env.ts, daemon/lib/env-profiles.ts, daemon/adapters/runtime-session-records.ts"
     ],
     "warden": [

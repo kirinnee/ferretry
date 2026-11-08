@@ -317,7 +317,7 @@ const CredentialHalfSchema = z.strictObject({
  * the top-level `env` is then shared by both, each half adds its own, and `codexProvider` lives in
  * `codex:`. `harness` names the half a runtime on it runs when nothing else says.
  */
-export const CredentialSchema = z
+const CredentialSchema = z
   .strictObject({
     harness: HarnessKindSchema,
     store: CredentialStoreSchema.default('ferretry'),
