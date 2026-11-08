@@ -281,17 +281,32 @@ describe('the diff route', () => {
     should(internal.content === text).be.true();
   });
 
-  it('R-0151 a denied file is still its badge when the vault cannot open, and an allowed one serves nothing', async () => {
-    const broken: Pick<Redaction, 'read'> = {
-      read: async () => {
-        throw new Error('the vault could not open');
-      },
-    };
+  const brokenVault: Pick<Redaction, 'read'> = {
+    read: async () => {
+      throw new Error('the vault could not open');
+    },
+  };
+
+  it('R-0151 a denied file is still its badge when the vault cannot open', async () => {
+    const { ask } = fixture(
+      { tree: treeOf(['.env', textFile('TOKEN=1')]) },
+      { isTracked: () => true },
+      person,
+      brokenVault,
+    );
+
+    const response = await ask(FILE, { query: { path: '.env' } });
+
+    should(response.status).eql(200);
+    should(jsonOf(response)).have.property('denied', true);
+  });
+
+  it('R-0151 an allowed file serves nothing when the vault cannot open', async () => {
     const { ask } = fixture(
       { tree: treeOf(['a.ts', textFile(FIXTURE_SECRET)]) },
       { isTracked: () => true },
       person,
-      broken,
+      brokenVault,
     );
 
     const outcome = await ask(FILE, { query: { path: 'a.ts' } }).then(
@@ -303,20 +318,31 @@ describe('the diff route', () => {
     should(outcome).eql('the vault could not open');
   });
 
-  it('R-0151 a masked read is NOT a way to overwrite the file: no fs write route exists, so the masked body cannot be saved back', async () => {
-    const { ask } = fixture(
-      { tree: treeOf(['a.ts', textFile(FIXTURE_SECRET)]) },
-      { isTracked: () => true },
-      person,
-      withSecret(),
-    );
-    const { sessionFilesystemRoutes: routes } = await import(
-      '../../../../../daemon/lib/runtime/mounts/session-filesystem.ts'
-    );
-    const keys = Object.keys(routes({ filesystem: undefined, reach: person, redaction: noSecrets() }));
+  it('R-0151 the vault is opened only after the gates pass', async () => {
+    let opened = 0;
+    const counting: Pick<Redaction, 'read'> = {
+      read: async fn => {
+        opened += 1;
+        return await withSecret().read(fn);
+      },
+    };
+    const make = (files: FakeRootOptions) => fixture(files, { isTracked: () => true }, person, counting);
+
+    await refusalOf(make({ tree: tree() }).ask(FILE));
+    await refusalOf(make({ tree: tree() }).ask(FILE, { query: { path: 'missing.ts' } }));
+    await make({ tree: treeOf(['.env', textFile('TOKEN=1')]) }).ask(FILE, { query: { path: '.env' } });
+    const refused = opened;
+    const served = await make({ tree: tree() }).ask(FILE, { query: { path: 'a.ts' } });
+
+    should(refused).eql(0);
+    should(served.status).eql(200);
+    should(opened).eql(1);
+  });
+
+  it('R-0151 the file browser mount has no write route (every key is a GET)', async () => {
+    const keys = Object.keys(sessionFilesystemRoutes({ filesystem: undefined, reach: person, redaction: noSecrets() }));
 
     should(keys.every(key => key.startsWith('GET '))).be.true();
-    await ask(FILE, { query: { path: 'a.ts' } });
   });
 
   it('R-0150 a vault that cannot open serves no diff at all', async () => {

@@ -204,6 +204,8 @@ async function file(filesystem: SessionFilesystem, deps: FileBrowserDeps, contex
   } catch (error) {
     return refuse(error);
   }
+  // A flag-only view (denied, ignored, too large, binary) carries no bytes: it is served without the vault.
+  if (view.content === undefined && view.base64 === undefined) return jsonResponse(view);
   // The vault opens HERE and only here (after every gate); a vault that cannot open serves no bytes (fail closed).
   return await deps.redaction.read(scope => fileResponse(view, scope));
 }

@@ -96,4 +96,30 @@ describe('the outbound diff projection (R-0150)', () => {
     should(out.split('\n').length === raw.split('\n').length).be.true();
     should(out.includes('redacted')).be.false();
   });
+
+  it('R-0150 a "\\ No newline at end of file" line does not split a multi-line value (old side lacked the newline)', async () => {
+    const raw = `@@ -1,2 +1,3 @@\n ${BEGIN}\n-${BODY}\n\\ No newline at end of file\n+${BODY}\n+${END}\n`;
+    const out = await projectKey(raw);
+    should(out.includes(BEGIN)).be.false();
+    should(out.includes(`+${BODY}`)).be.false(); // the old side alone shows only part of the value
+    should(out.includes(END)).be.false();
+    should(out.includes('\\ No newline at end of file')).be.true();
+    should(out.split('\n').length === raw.split('\n').length).be.true();
+  });
+
+  it('R-0150 a "\\ No newline at end of file" line after a value that ends the old file masks the added last line', async () => {
+    const raw = `@@ -1,3 +1,4 @@\n-${BEGIN}\n-${BODY}\n-${END}\n\\ No newline at end of file\n+${BEGIN}\n+${BODY}\n+${END}\n+tail\n`;
+    const out = await projectKey(raw);
+    should(out.includes(BEGIN)).be.false();
+    should(out.includes(BODY)).be.false();
+    should(out.includes(END)).be.false();
+    should(out.includes('+tail')).be.true();
+  });
+
+  it('R-0150 header lines are masked with the same stars as the body, never a name', async () => {
+    const out = await project(`diff --git a/${ONE_LINE} b/${ONE_LINE}\n--- a/${ONE_LINE}\n+++ b/${ONE_LINE}\n`);
+    should(out.includes(ONE_LINE)).be.false();
+    should(out.includes('redacted')).be.false();
+    should(out.includes('*'.repeat(ONE_LINE.length))).be.true();
+  });
 });

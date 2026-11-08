@@ -35,15 +35,27 @@ export function redactedDiffText(diff: string, scope: RedactionScope): string {
       body.push({ line, marker: line === '' ? ' ' : (lead as Marker), text: line.slice(1) });
       continue;
     }
+    // A `\ No newline at end of file` line sits inside the hunk at its position: it is not content, so it never
+    // splits the run and is left out of every look, but it is still carried through the scope.
+    if (inHunk && lead === '\\') {
+      body.push({ line, marker: '\\', text: '' });
+      continue;
+    }
     flush();
     if (line.startsWith('@@')) inHunk = true;
-    out.push(scope.text(line));
+    out.push(maskLine(line, scope));
   }
   flush();
   return out.join('\n');
 }
 
-type Marker = ' ' | '+' | '-';
+type Marker = ' ' | '+' | '-' | '\\';
+
+/** One header line masked the way the body is: a positional `*` per covered character, same length. */
+function maskLine(line: string, scope: RedactionScope): string {
+  const [masked] = scope.lines([line + '\n']);
+  return masked === undefined ? line : masked.slice(0, line.length);
+}
 interface Body {
   readonly line: string;
   readonly marker: Marker;
@@ -67,7 +79,8 @@ function look(entries: readonly number[], body: readonly Body[], scope: Redactio
 function maskHunk(body: readonly Body[], scope: RedactionScope): string[] {
   if (body.length === 0) return [];
   const covered = body.map(entry => Array.from<boolean>({ length: entry.text.length }).fill(false));
-  const all = body.map((_, at) => at);
+  // The no-newline marker is not content: it takes no part in any look.
+  const all = body.flatMap((entry, at) => (entry.marker === '\\' ? [] : [at]));
   // The same-marker runs, the old side and the new side.
   let run: number[] = [];
   for (const at of all) {
@@ -92,6 +105,7 @@ function maskHunk(body: readonly Body[], scope: RedactionScope): string[] {
   );
   return body.map((entry, at) => {
     const row = covered[at] ?? [];
+    if (entry.marker === '\\') return maskLine(entry.line, scope);
     if (!row.includes(true)) return entry.line;
     return entry.line.charAt(0) + [...entry.text].map((char, index) => (row[index] === true ? '*' : char)).join('');
   });
