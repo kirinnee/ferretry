@@ -30,12 +30,23 @@ export interface SessionWorkerScope {
  * client: anything that is not an allowlisted read is refused without running — that refusal is what keeps a worker
  * from typing; `no-output`, so the pane's bytes are never streamed, only a subscription to its
  * `#{pane_dead} #{window_activity}` says when it drew. `stat` is the host-provided confined metadata lookup;
- * the worker never opens an arbitrary host path itself.
+ * the worker never opens an arbitrary host path itself. `clock` and `schedule` are the host's too — the kernel's
+ * clock and its `after`, handed across the thread boundary as functions — because a worker reads the time and sets
+ * timers only through what it is given.
  */
 export interface SessionWorkerPeers
   extends Pick<
     SessionWorkerDeps,
-    'tmux' | 'transcripts' | 'stat' | 'asked' | 'frames' | 'tail' | 'sendEvidence' | 'paneParsers'
+    | 'tmux'
+    | 'transcripts'
+    | 'stat'
+    | 'asked'
+    | 'frames'
+    | 'tail'
+    | 'sendEvidence'
+    | 'paneParsers'
+    | 'clock'
+    | 'schedule'
   > {
   readonly questions: QuestionStepPolicy;
 }
@@ -55,12 +66,9 @@ export function serveSessionWorker(
     transcripts: peers.transcripts,
     stat: peers.stat,
     ...(peers.asked === undefined ? {} : { asked: peers.asked }),
-    clock: { now: () => new Date().toISOString() },
+    clock: peers.clock,
     nowMs,
-    schedule: (delayMs, run) => {
-      const timer = setTimeout(run, delayMs);
-      return () => clearTimeout(timer);
-    },
+    schedule: peers.schedule,
     children,
     observer: new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex'), peers.questions),
     frames: peers.frames,

@@ -41,6 +41,11 @@ serveSessionWorker(scope, message => scope.postMessage(message), {
     const info = await stat(file).catch(() => undefined);
     return info === undefined ? undefined : { size: info.size, mtimeMs: info.mtimeMs };
   },
+  clock: { now: () => new Date().toISOString() },
+  schedule: (delayMs, run) => {
+    const timer = setTimeout(run, delayMs);
+    return () => clearTimeout(timer);
+  },
   asked: scriptedReadAskedQuestion,
   frames: SCRIPTED_PANE_FRAMES,
   tail: SCRIPTED_TAIL,

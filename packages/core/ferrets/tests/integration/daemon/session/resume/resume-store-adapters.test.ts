@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
+import { DiskFileSystem } from '../../../../support/daemon/disk-file-system.ts';
 import { FileResumeTurnStore } from '../../../../../daemon/adapters/session/resume/file-resume-turn-store.ts';
 import { StorageResumeRepository } from '../../../../../daemon/adapters/session/resume/storage-resume-repository.ts';
 import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
@@ -36,7 +37,7 @@ describe('resume turn store', () => {
   it('should write a numbered turn document atomically inside the session directory', async () => {
     // Arrange
     const home = await temporaryDirectory();
-    const store = new FileResumeTurnStore(() => join(home, 'sessions', 'session-1'));
+    const store = new FileResumeTurnStore(() => join(home, 'sessions', 'session-1'), new DiskFileSystem());
 
     // Act
     const file = await store.writeTurn(ID, 4, 'Continue the assigned task.\n');
@@ -51,7 +52,7 @@ describe('resume turn store', () => {
     // Arrange — a `done` marker from the previous turn would end the new turn the moment it starts.
     const home = await temporaryDirectory();
     const directory = join(home, 'sessions', 'session-1');
-    const store = new FileResumeTurnStore(() => directory);
+    const store = new FileResumeTurnStore(() => directory, new DiskFileSystem());
     await store.writeTurn(ID, 4, 'anything');
     await writeFile(join(directory, 'done.marker'), 'done', 'utf8');
 

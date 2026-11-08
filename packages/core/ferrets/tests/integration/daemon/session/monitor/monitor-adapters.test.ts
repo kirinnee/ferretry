@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
+import { DiskFileSystem } from '../../../../support/daemon/disk-file-system.ts';
 import {
   FileWaitHeartbeat,
   MonitorTickRunner,
@@ -264,7 +265,7 @@ describe('the heartbeat file a park publishes', () => {
     };
 
     // Act
-    await new FileWaitHeartbeat(() => home).publish(ONE, beat);
+    await new FileWaitHeartbeat(() => home, new DiskFileSystem()).publish(ONE, beat);
     const written = JSON.parse(await readFile(join(home, 'checks', 'waiting.json'), 'utf8')) as Record<string, unknown>;
 
     // Assert
@@ -287,7 +288,7 @@ describe('the heartbeat file a park publishes', () => {
     homes.add(home);
 
     // Act
-    await new FileWaitHeartbeat(() => home).publish(ONE, {
+    await new FileWaitHeartbeat(() => home, new DiskFileSystem()).publish(ONE, {
       at: NOW,
       since: NOW,
       until: undefined,
@@ -355,7 +356,7 @@ describe('the record the loop leaves about itself', () => {
     homes.add(home);
     const file = join(home, 'monitor.json');
     const { service } = monitorOver({ parked: async () => [] });
-    const runner = new MonitorTickRunner(service, file, SETTINGS);
+    const runner = new MonitorTickRunner(service, file, SETTINGS, new DiskFileSystem());
     runner.arm();
 
     // Act
@@ -383,7 +384,7 @@ describe('the record the loop leaves about itself', () => {
         throw new Error('the session index is unreadable');
       },
     });
-    const runner = new MonitorTickRunner(service, file, SETTINGS);
+    const runner = new MonitorTickRunner(service, file, SETTINGS, new DiskFileSystem());
     runner.arm();
 
     // Act
@@ -410,7 +411,7 @@ describe('the record the loop leaves about itself', () => {
         return [];
       },
     });
-    const runner = new MonitorTickRunner(service, file, SETTINGS);
+    const runner = new MonitorTickRunner(service, file, SETTINGS, new DiskFileSystem());
     runner.arm();
     await runner.run();
 
@@ -432,7 +433,7 @@ describe('the record the loop leaves about itself', () => {
     // A path whose parent is a FILE: the directory cannot be created, so the publish must fail.
     const blocked = join(home, 'monitor.json', 'monitor.json');
     await Bun.write(join(home, 'monitor.json'), 'not a directory');
-    const runner = new MonitorTickRunner(service, blocked, SETTINGS);
+    const runner = new MonitorTickRunner(service, blocked, SETTINGS, new DiskFileSystem());
 
     // Act & Assert
     should(await runner.run()).not.be.undefined();
