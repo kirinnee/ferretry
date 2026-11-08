@@ -20,8 +20,6 @@ import type {
   SkillScope,
 } from '../../contract/index.ts';
 
-export type { ContextChip } from '@ferretry/app/ui';
-
 // ── Scopes ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const SKILL_SCOPE_LABEL: Readonly<Record<SkillScope, string>> = {
@@ -232,7 +230,7 @@ const normalizedPath = (path: string): string => {
 };
 
 /** The registered project that holds `folder`, the longest root winning, so a nested project finds its own. */
-export function projectHolding(folder: string, options: TargetOptions): TargetOptions['projects'][number] | undefined {
+function projectHolding(folder: string, options: TargetOptions): TargetOptions['projects'][number] | undefined {
   const target = normalizedPath(folder);
   let best: TargetOptions['projects'][number] | undefined;
   let bestLength = -1;
@@ -258,8 +256,8 @@ export const initialDraft = (
   return { harness: ferret.harness, ...(project === undefined ? {} : { projectRoot: project.root }) };
 };
 
-export const NO_PLACE_YET = 'Pick a project.';
-export const NO_AGENT_YET = 'Pick Claude or Codex for this project.';
+const NO_PLACE_YET = 'Pick a project.';
+const NO_AGENT_YET = 'Pick Claude or Codex for this project.';
 
 export function targetProblem(draft: TargetDraft, options: TargetOptions): string | null {
   if (!options.projects.some(project => project.root === draft.projectRoot)) return NO_PLACE_YET;
@@ -306,7 +304,7 @@ const STEP_UP =
   'Nothing was installed: the passkey wasn’t confirmed. Press Install and confirm again. Each install needs its own passkey.';
 
 /** The machine's sentence for any other refusal, or a plain line when it gave none. */
-export const refusalSentence = (error: unknown): string => {
+const refusalSentence = (error: unknown): string => {
   if (error instanceof DaemonCallError)
     return error.message.trim() === '' ? `This machine refused the change (${String(error.status)}).` : error.message;
   return error instanceof Error && error.message.trim() !== '' ? error.message : 'This machine didn’t answer.';

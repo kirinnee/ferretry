@@ -11,7 +11,7 @@
 import type { AccountDefaultsFile, SignInChoiceContext } from '../../contract/routes/index.ts';
 
 /** A board project's id; the Unfiled board is {@link UNFILED_PROJECT_ID}. */
-export type BoardProjectId = string;
+type BoardProjectId = string;
 /** The board every session outside a registered project works on. */
 export const UNFILED_PROJECT_ID = 'unfiled';
 /** A registered project, as the order needs it: its id and its name. */
@@ -20,7 +20,7 @@ export interface ProjectInfo {
   readonly name: string;
 }
 /** A session's recorded facts: the folder it was started in, as a real path. */
-export interface SessionProjectFactSource {
+interface SessionProjectFactSource {
   read(sessionId: string): Promise<{ readonly cwd: string } | null>;
 }
 

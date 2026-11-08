@@ -186,6 +186,7 @@ test('selecting a saved theme the app cannot read is refused before changing the
       collection: () => new Map([['dusk', { id: 'dusk', label: 'Dusk', base: 'neo', light, dark: {} }]]) as never,
     };
     const service = createLayoutsService(port);
+    // biome-ignore lint/correctness/useHookAtTopLevel: `useTheme` is the Layouts service's own method (select a saved theme), not a React hook
     const result = await service.useTheme('dusk');
     expect(!result.ok && result.refusal.kind).toBe('invalid');
     expect(tree.calls).toEqual([]);

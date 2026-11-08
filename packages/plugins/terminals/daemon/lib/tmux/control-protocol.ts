@@ -275,7 +275,7 @@ export const PANE_WATCH_FORMAT = '#{pane_dead} #{window_activity}';
  * session releases first (`TmuxController.stop`, `killPaneExact`): tmux 3.6a crashes the whole server when
  * a client still subscribed outlives its session by one tick of the subscription timer.
  */
-export const PANE_WATCH = 'fy-pane';
+const PANE_WATCH = 'fy-pane';
 
 /** Every subscription name a client of this daemon may hold, so a release misses none. */
 export const CONTROL_SUBSCRIPTION_NAMES: readonly string[] = [PANE_WATCH];

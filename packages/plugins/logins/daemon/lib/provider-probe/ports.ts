@@ -14,11 +14,6 @@ export interface ProviderProbePort {
   probe(plan: ProviderProbePlan): Promise<AuthorizedOutcome>;
 }
 
-/** The secret names the store holds. `SecretDirectory.list()` satisfies it; names only, never values. */
-export interface ProviderSecretNames {
-  list(): Promise<readonly { readonly name: string }[]>;
-}
-
 /** Monotonic milliseconds for latency, and the wall-clock instant a result is stamped with. */
 export interface ProviderProbeClock {
   monotonicMs(): number;

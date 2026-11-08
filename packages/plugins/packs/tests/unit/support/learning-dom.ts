@@ -12,9 +12,6 @@ export const byText = <T extends HTMLElement = HTMLElement>(root: ParentNode, se
     `${selector} with text "${text}"`,
   );
 
-export const maybeByText = (root: ParentNode, selector: string, text: string): HTMLElement | undefined =>
-  [...root.querySelectorAll<HTMLElement>(selector)].find(element => (element.textContent ?? '').includes(text));
-
 export const click = async (element: Element): Promise<void> => {
   await interact(() => {
     element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -26,13 +23,6 @@ export const typeInto = async (field: HTMLInputElement | HTMLTextAreaElement, va
   await interact(() => {
     Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(field, value);
     field.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-};
-
-export const choose = async (select: HTMLSelectElement, value: string): Promise<void> => {
-  await interact(() => {
-    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
   });
 };
 

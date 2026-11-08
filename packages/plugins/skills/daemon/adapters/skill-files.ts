@@ -1,4 +1,3 @@
-import { dirname } from 'node:path';
 import type { FencedPath, RootHandle } from '@ferretry/kernel/contract';
 import type { SkillDirectoryEntry, SkillFilesPort } from '../lib/inventory.ts';
 
@@ -48,5 +47,3 @@ export class RootSkillFiles implements SkillFilesPort {
     return resolved.ok ? resolved.value : undefined;
   }
 }
-
-export const skillFolderOf = (manifestPath: string): string => dirname(manifestPath);

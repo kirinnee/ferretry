@@ -10,13 +10,13 @@ import { z } from 'zod';
 export type LoginsClient = Pick<PluginClient, 'call'>;
 
 /** The failure fields a shell client puts on what it throws (`DaemonCallError`): read structurally, never by class. */
-export interface CallFailure {
+interface CallFailure {
   readonly status?: unknown;
   readonly code?: unknown;
   readonly message?: unknown;
 }
 
-export const callFailure = (failure: unknown): CallFailure | null =>
+const callFailure = (failure: unknown): CallFailure | null =>
   typeof failure === 'object' && failure !== null ? (failure as CallFailure) : null;
 
 const NO_ANSWER = 'This machine didn’t answer. Check it is awake and try again.';

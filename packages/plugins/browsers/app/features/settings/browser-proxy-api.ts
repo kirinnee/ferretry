@@ -15,8 +15,8 @@ import {
 } from '../../../contract/index.ts';
 import type { CallClient } from '../../lib/clients.ts';
 
-export const BROWSER_STATE_ROUTE = 'GET /v1/browser/state';
-export const BROWSER_PROXY_TEST_ROUTE = 'POST /v1/browser/proxy/test';
+const BROWSER_STATE_ROUTE = 'GET /v1/browser/state';
+const BROWSER_PROXY_TEST_ROUTE = 'POST /v1/browser/proxy/test';
 
 /** Whether the machine's shared browser runs, and which proxy it started with. */
 export async function readBrowserState(client: CallClient): Promise<BrowserStateView> {

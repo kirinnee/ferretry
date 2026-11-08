@@ -36,7 +36,7 @@ export class GrantError extends Error {
 }
 
 /** Applying a patch: an axis the patch does not name keeps its value (today's `applyGrantPatch`). */
-export function applyGrantPatch(current: CapabilityGrants, patch: GrantsPatch): CapabilityGrants {
+function applyGrantPatch(current: CapabilityGrants, patch: GrantsPatch): CapabilityGrants {
   const next: Record<CapabilityName, CapabilityGrant> = { ...current };
   for (const name of CAPABILITY_NAMES) {
     const change = patch[name];
@@ -47,7 +47,7 @@ export function applyGrantPatch(current: CapabilityGrants, patch: GrantsPatch): 
 }
 
 /** Which axes a change turns ON (today's `widenedBy`). */
-export function widenedBy(current: CapabilityGrants, next: CapabilityGrants): readonly string[] {
+function widenedBy(current: CapabilityGrants, next: CapabilityGrants): readonly string[] {
   const widened: string[] = [];
   for (const name of CAPABILITY_NAMES) {
     if (!current[name].use && next[name].use) widened.push(`${name}.use`);
@@ -57,7 +57,7 @@ export function widenedBy(current: CapabilityGrants, next: CapabilityGrants): re
 }
 
 /** Every axis a change moves, for the history (today's `grantChanges`). */
-export function grantChanges(current: CapabilityGrants, next: CapabilityGrants): readonly string[] {
+function grantChanges(current: CapabilityGrants, next: CapabilityGrants): readonly string[] {
   const changes: string[] = [];
   for (const name of CAPABILITY_NAMES)
     for (const axis of ['use', 'configure'] as const)
@@ -65,7 +65,7 @@ export function grantChanges(current: CapabilityGrants, next: CapabilityGrants):
   return changes;
 }
 
-export interface GrantDocumentPort {
+interface GrantDocumentPort {
   /** The daemon-wide half in effect, or `undefined` when undetermined. */
   read(): CapabilityGrants | undefined;
   /** Which capabilities `gate.yaml` actually names (the provenance column, per capability, G155). */

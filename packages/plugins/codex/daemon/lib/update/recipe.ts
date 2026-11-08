@@ -11,7 +11,7 @@ import type { HarnessUpdatePlan } from './types.ts';
 import { CODEX_LABEL, CODEX_PACKAGES } from './version.ts';
 
 /** The programs an update runs. `harness` is Codex's own binary. */
-export type HarnessUpdateProgram = 'npm' | 'pnpm' | 'bun' | 'volta' | 'brew' | 'nix' | 'harness';
+type HarnessUpdateProgram = 'npm' | 'pnpm' | 'bun' | 'volta' | 'brew' | 'nix' | 'harness';
 
 /** One command an update runs: a program and its arguments, never a shell string. */
 export interface HarnessCommand {

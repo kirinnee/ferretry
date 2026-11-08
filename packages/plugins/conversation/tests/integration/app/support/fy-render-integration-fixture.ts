@@ -46,6 +46,8 @@ import { isAbsolute, join, resolve } from 'node:path';
 /** The app shell's package (`packages/app`), whose scripts build the fy-render fixture. */
 const packageRoot = resolve(import.meta.dir, '../../../../../../app');
 const builder = resolve(packageRoot, 'scripts/build-fy-render-integration-fixture.ts');
+/** Conversation's own visual scene, handed to the app's builder (it never guesses a path in this package). */
+const scene = resolve(import.meta.dir, '../fixtures/fy-render-visual-scene.tsx');
 
 /**
  * Generous, because it bounds a real Mermaid bundle on a loaded shared machine — but
@@ -202,7 +204,7 @@ const buildFyRenderFixtureOnce = async (): Promise<FyRenderFixtureBytes> => {
   try {
     // `process.execPath` is THIS Bun, so the child cannot be a different runtime from
     // the one running the tests.
-    const child = Bun.spawn([process.execPath, builderOverride ?? builder, '--out', directory], {
+    const child = Bun.spawn([process.execPath, builderOverride ?? builder, '--out', directory, '--scene', scene], {
       cwd: packageRoot,
       stderr: 'pipe',
       stdout: 'pipe',

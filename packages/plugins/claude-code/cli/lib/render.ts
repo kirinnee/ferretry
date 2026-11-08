@@ -3,7 +3,7 @@ import type { HarnessCliView } from '../../contract/index.ts';
 const LABEL = 'Claude Code';
 
 /** Where a version stands against the one Ferretry verified, in words. */
-export function verificationWords(view: HarnessCliView): string {
+function verificationWords(view: HarnessCliView): string {
   switch (view.verification) {
     case 'verified':
       return `${view.installed?.state === 'ok' ? view.installed.version : ''} is the version Ferretry verified`.trim();

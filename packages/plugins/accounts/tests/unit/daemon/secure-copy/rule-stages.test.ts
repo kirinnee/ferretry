@@ -17,14 +17,14 @@ import {
   profileTargetsApprovalSubject,
 } from '../../../../contract/routes/index.ts';
 import should from 'should';
+import { type PasteRuleCaller } from '../../../../daemon/lib/secure-copy/rules.ts';
 import {
-  type PasteRuleCaller,
   PasteRuleProofMissing,
   PasteRuleStageGone,
   PasteRuleStages,
   PasteRuleStagesFull,
   ProfileTargetsChanged,
-} from '../../../../daemon/lib/index.ts';
+} from '../../../../daemon/lib/secure-copy/rule-stages.ts';
 
 const HOST: PasteRuleCaller = { kind: 'owner', actor: { kind: 'host' } };
 const PHONE: PasteRuleCaller = { kind: 'owner', actor: { kind: 'device', deviceId: 'd1' } };

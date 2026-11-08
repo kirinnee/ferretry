@@ -27,7 +27,7 @@ export type JevProbeFailureCode =
   | 'unreachable'
   | 'malformed';
 
-export const JEV_PROBE_TIMEOUT_MS = 3_000;
+const JEV_PROBE_TIMEOUT_MS = 3_000;
 const JEV_PROBE_MAX_RESPONSE_BYTES = 64 * 1_024;
 
 const PROBE_INSTRUCTIONS = [
@@ -81,7 +81,7 @@ const OUTCOME_FAILURE: Readonly<
 };
 
 /** A provider status, as the failure a screen can act on (back off, fix the key, or just retry). */
-export function jevFailureForStatus(status: number): JevProbeFailureCode {
+function jevFailureForStatus(status: number): JevProbeFailureCode {
   if (status === 401 || status === 403) return 'rejected';
   if (status === 413) return 'too_large';
   if (status === 429) return 'rate_limited';
@@ -90,7 +90,7 @@ export function jevFailureForStatus(status: number): JevProbeFailureCode {
 }
 
 /** What a Test proved about the Jev key: `undefined` when the key worked, else why not. */
-export function jevProbeFailure(outcome: AuthorizedOutcome): JevProbeFailureCode | undefined {
+function jevProbeFailure(outcome: AuthorizedOutcome): JevProbeFailureCode | undefined {
   if (outcome.kind === 'status') return jevFailureForStatus(outcome.status);
   if (outcome.kind !== 'completion') return OUTCOME_FAILURE[outcome.kind];
   return readsAsAChoice(outcome.payload) ? undefined : 'malformed';

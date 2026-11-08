@@ -432,7 +432,7 @@ function configWritten(outcome: ConfigWriteOutcome, inEffect: LessonsConfig): Ap
  * patch the held disk text and wait behind it (or, were the held edit one a judge could confirm, put it into effect
  * with the owner's save); refusing says so instead, until the kernel offers that write.
  */
-export const LESSONS_CONFIG_HELD =
+const LESSONS_CONFIG_HELD =
   'lessons.yaml has a change waiting for your approval; confirm or discard it first, then save again.';
 
 /** The capability ref a demand names; Gate owns the vocabulary and these two are core names. */

@@ -12,7 +12,7 @@ import { CLEANUP_PROVIDERS, type SpeedupProvider } from '../../../contract/index
  * GROQ AND CEREBRAS ARE CLEAN-UP ONLY. Speech recognition happens in the browser; what these two see
  * is the recognised TEXT, after the owner stopped dictating, and only when the owner chose them.
  */
-export interface SpeedupProviderDefinition {
+interface SpeedupProviderDefinition {
   readonly id: SpeedupProvider;
   readonly label: string;
   readonly secretName: SecretName;
@@ -25,23 +25,23 @@ export interface SpeedupProviderDefinition {
 }
 
 /** A provider whose Test is a free, authenticated `GET` of its model list: no inference, no spend. */
-export interface ModelListProbe {
+interface ModelListProbe {
   readonly kind: 'model-list';
   readonly url: string;
 }
 
 /** A provider with no free authenticated read, whose Test is one deliberately tiny decision. */
-export interface DecisionProbe {
+interface DecisionProbe {
   readonly kind: 'decision';
 }
 
-export type SpeedupProbe = ModelListProbe | DecisionProbe;
+type SpeedupProbe = ModelListProbe | DecisionProbe;
 
 export interface SpeedupCatalogEntry extends SpeedupProviderDefinition {
   readonly probe: SpeedupProbe;
 }
 
-export const JEV_HOST = 'api.typesafe.ai';
+const JEV_HOST = 'api.typesafe.ai';
 export const JEV_DEFAULT_ENDPOINT = `https://${JEV_HOST}/v1/systemone`;
 export const JEV_DEFAULT_MODEL = 'jev-latest';
 

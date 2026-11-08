@@ -27,19 +27,19 @@ import {
 export const BLANK_PAGE_URL = 'about:blank';
 /** Above the machine's own page cap, so a listing is never what hides a page. */
 export const MAX_WORKER_PAGES = 200;
-export const MAX_WORKER_URL_CHARS = 4_096;
-export const MAX_WORKER_TITLE_CHARS = 500;
-export const MAX_WORKER_ERROR_CHARS = 200;
-export const MAX_SCREENSHOT_BASE64_CHARS = 24 * 1024 * 1024;
-export const MAX_FRAME_BASE64_CHARS = 16 * 1024 * 1024;
-export const MAX_READ_TEXT_CHARS = 200_000;
+const MAX_WORKER_URL_CHARS = 4_096;
+const MAX_WORKER_TITLE_CHARS = 500;
+const MAX_WORKER_ERROR_CHARS = 200;
+const MAX_SCREENSHOT_BASE64_CHARS = 24 * 1024 * 1024;
+const MAX_FRAME_BASE64_CHARS = 16 * 1024 * 1024;
+const MAX_READ_TEXT_CHARS = 200_000;
 /** A body of 64 KiB plus its headers and log lines, with room for multi-byte text. */
-export const MAX_LIFECYCLE_TEXT_CHARS = 300_000;
+const MAX_LIFECYCLE_TEXT_CHARS = 300_000;
 /**
  * A screenshot reply is the largest legitimate record. Anything past it plus JSON overhead is a
  * worker that has lost the protocol, and there is no resynchronization point before the newline.
  */
-export const MAX_WORKER_PROTOCOL_LINE_CHARS = MAX_SCREENSHOT_BASE64_CHARS + 2 * 1024 * 1024;
+const MAX_WORKER_PROTOCOL_LINE_CHARS = MAX_SCREENSHOT_BASE64_CHARS + 2 * 1024 * 1024;
 
 /** A transport failure with the wire error code and HTTP status the API surface should report. */
 export class BrowserTransportError extends Error {

@@ -1,5 +1,5 @@
 import type { DaemonImplementation } from '../manifest/implement.ts';
-import { systemClock } from './adapters/clock.ts';
+import { copiedClock } from './adapters/clock.ts';
 import { nodeFs } from './adapters/node-fs.ts';
 import { bunWorkers } from './adapters/process.ts';
 import { nodeTempDirs } from './adapters/temp-dir.ts';
@@ -31,6 +31,7 @@ export async function runCheck(run: CheckRun): Promise<number> {
   const arm = globalThis.setTimeout;
   const disarm = globalThis.clearTimeout;
   const exit = process.exit.bind(process);
+  const nowMs = Date.now.bind(Date);
   const tempDirs = nodeTempDirs(home);
   const stopAt = (ms: number, code: number, message?: string, say?: (line: string) => void): (() => void) => {
     const timer = arm(() => {
@@ -74,12 +75,15 @@ export async function runCheck(run: CheckRun): Promise<number> {
           facts: { home, host, port, version: run.version, platform: process.platform, arch: process.arch },
           workers: bunWorkers(),
           tempDirs,
-          clock: systemClock(),
+          clock: copiedClock(arm, disarm, nowMs),
         },
         say,
       );
     },
   });
+  // A selftest that timed out may recreate its directory after the kernel removed it: remove what is left on the normal
+  // exit path too, where no timer would run.
+  await tempDirs.removeAll().catch(() => {});
   // A selftest that timed out may still hold a native thread or recreate its directory: stop it shortly after the verdict.
   stopAt(LINGER_MS, code);
   return code;

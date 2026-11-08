@@ -43,7 +43,7 @@ import { SkillFileSheet } from './skill-file-sheet.tsx';
 const MACHINE = 'This machine';
 
 /** Puts one invocation at the end of this ferret's draft. `false` when no composer is mounted for it. */
-export function insertIntoComposer(
+function insertIntoComposer(
   target: Pick<ComposerQuoteTarget, 'draft' | 'replaceDraft'> | null,
   invocation: string,
 ): boolean {
@@ -99,7 +99,7 @@ function SkillRow({
   );
 }
 
-export function SkillsList({
+function SkillsList({
   read,
   query,
   onQueryChange,

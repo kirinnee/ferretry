@@ -92,6 +92,13 @@ describe('manifest-match', () => {
     expect(found).toContain('misses routes "GET /v1/alpha"');
     expect(found).toContain('skeleton but beta is not in ports-pending.json');
   });
+  test('a skeleton half that pendingHalves names passes though its package is not in pending (gate, vault)', async () => {
+    const f = ws([withRoute('alpha', { daemon: implementedDaemon(['GET /v1/alpha']) }), withRoute('beta')], {
+      pending: ['alpha'],
+      pendingHalves: { beta: ['daemon', 'app', 'cli'] },
+    });
+    expect(messages(await run(manifestMatch, f))).not.toContain('beta is not in ports-pending.json');
+  });
 });
 
 const ALL = ['daemon', 'app', 'cli'];
@@ -189,6 +196,49 @@ describe('ports-pending', () => {
     const found = messages(await run(portsPending, f, { base: `file:${join(f.root, 'base.json')}` }));
     expect(found).toContain('pendingHalves alpha app was added; pendingHalves may only shrink');
     expect(found).not.toContain('pendingHalves catalogs app was added');
+  });
+  test('pending only shrinks: a ruled id may re-enter only with a reason; any other new id fails', async () => {
+    const base = JSON.stringify({ format: 1, pending: ['alpha'], pendingHalves: { alpha: ALL } });
+    const stated = ws([{ id: 'alpha' }, { id: 'terminals' }], {
+      pending: ['alpha', 'terminals'],
+      pendingReasons: { terminals: ['GAP(ferrets): the tmux runner is not wired yet'] },
+      pendingHalves: { alpha: ALL, terminals: ALL },
+    });
+    stated.write('base.json', base);
+    const passing = messages(await run(portsPending, stated, { base: `file:${join(stated.root, 'base.json')}` }));
+    expect(passing).not.toContain('terminals was added');
+    expect(passing).not.toContain('terminals is back in "pending"');
+
+    const silent = ws([{ id: 'alpha' }, { id: 'usage' }], {
+      pending: ['alpha', 'usage'],
+      pendingHalves: { alpha: ALL, usage: ALL },
+    });
+    silent.write('base.json', base);
+    expect(messages(await run(portsPending, silent, { base: `file:${join(silent.root, 'base.json')}` }))).toContain(
+      'usage is back in "pending" by a one-time ruling but states no "pendingReasons" line',
+    );
+
+    const unwired = ws([{ id: 'alpha' }, { id: 'access' }], {
+      pending: ['alpha', 'access'],
+      pendingReasons: { access: ['GAP(access): app/x.tsx is not reached by any screen (owner: nelly)'] },
+      pendingHalves: { alpha: ALL, access: ALL },
+    });
+    unwired.write('base.json', base);
+    const unwiredFound = messages(
+      await run(portsPending, unwired, { base: `file:${join(unwired.root, 'base.json')}` }),
+    );
+    expect(unwiredFound).not.toContain('access was added');
+    expect(unwiredFound).not.toContain('access is back in "pending"');
+
+    const other = ws([{ id: 'alpha' }, { id: 'beta' }], {
+      pending: ['alpha', 'beta'],
+      pendingReasons: { beta: ['GAP(x): still open'] },
+      pendingHalves: { alpha: ALL, beta: ALL },
+    });
+    other.write('base.json', base);
+    expect(messages(await run(portsPending, other, { base: `file:${join(other.root, 'base.json')}` }))).toContain(
+      'beta was added; the list may only shrink',
+    );
   });
   test('a shrinking list of skeletons passes', async () => {
     const f = ws([{ id: 'beta' }], { pending: ['beta'], pendingHalves: { beta: ALL } });

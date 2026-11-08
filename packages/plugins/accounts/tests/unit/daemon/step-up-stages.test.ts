@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { stepUpStages } from '../../../daemon/lib/index.ts';
+import { stepUpStages } from '../../../daemon/lib/step-up-stages.ts';
 
 /**
  * WHAT ACCESS ASKS FOR A STAGED ACT'S CHALLENGE (G83, G84): each act's provider reads only its own stage store, with

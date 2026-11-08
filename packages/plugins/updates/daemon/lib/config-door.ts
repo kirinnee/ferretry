@@ -7,7 +7,7 @@
 import type { ConfigCollectionDef, ConfigFileDef, ConfigPort } from '@ferretry/kernel/contract';
 
 /** A whole new text, or a patch of top-level keys (an `undefined` value removes the key). */
-export type ConfigEdit = string | { readonly patch: Readonly<Record<string, unknown>> };
+type ConfigEdit = string | { readonly patch: Readonly<Record<string, unknown>> };
 
 export type DoorResult =
   | { readonly kind: 'applied' }

@@ -27,6 +27,13 @@ const release = JSON.parse(readFileSync(fileURLToPath(new URL('../../release.jso
 };
 
 /**
+ * THE GET-STARTED PAGE (`/get-started/`) is Onboarding's own static document. Vite names an HTML input by its path
+ * under this package, so a page outside it cannot be an input that lands at `get-started/index.html`: the build emits
+ * it there instead, with the release version stamped in exactly as `fy-release-version` stamps the app's pages.
+ */
+const getStartedPage = fileURLToPath(new URL('../plugins/onboarding/app/get-started/index.html', import.meta.url));
+
+/**
  * THE RELAY DIRECTORY ORIGIN this bundle discovers the hosted rendezvous from (R580), copied from today's PWA build:
  * Connections' shared `HOSTED_RELAY_DIRECTORY_ORIGIN`, overridden by `FY_RELAY_DIRECTORY_ORIGIN` exactly as the daemon
  * honours it, so both ends of a session read the same advertisement. A blank value is not an override; `off` (CI)
@@ -48,6 +55,17 @@ export default defineConfig({
       transformIndexHtml: {
         order: 'pre',
         handler: html => html.replaceAll('%FY_RELEASE_VERSION%', release.version),
+      },
+    },
+    {
+      name: 'fy-get-started-page',
+      apply: 'build',
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'get-started/index.html',
+          source: readFileSync(getStartedPage, 'utf8').replaceAll('%FY_RELEASE_VERSION%', release.version),
+        });
       },
     },
   ],

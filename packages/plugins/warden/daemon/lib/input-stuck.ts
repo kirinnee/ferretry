@@ -115,7 +115,7 @@ export function stuckSendOf(
 }
 
 /** The episode a stuck send is: that send, for that ferret. */
-export function stuckInputEpisode(sessionId: string, sendId: string): string {
+function stuckInputEpisode(sessionId: string, sendId: string): string {
   return `input:${sessionId}:${sendId}`;
 }
 

@@ -14,9 +14,9 @@ import {
   type SecretChildOutcome,
   type SecretChildRunner,
   type SecretChildSpec,
-  SecureCopyError,
-  SecureCopyService,
-} from '../../../../daemon/lib/index.ts';
+} from '../../../../daemon/lib/local-ports.ts';
+import { SecureCopyError } from '../../../../daemon/lib/secure-copy/errors.ts';
+import { SecureCopyService } from '../../../../daemon/lib/secure-copy/service.ts';
 
 const TOKEN = 'vcp_SEALED-UNIQUE-7f3a';
 

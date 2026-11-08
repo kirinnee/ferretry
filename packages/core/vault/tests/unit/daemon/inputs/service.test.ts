@@ -545,7 +545,7 @@ describe('InputRequestService.deliver', () => {
     ['prompt line', f => ({ ...f, promptLineDigest: 'f'.repeat(64) })],
   ];
   for (const [name, mutate] of mutations) {
-    it(`should refuse with target_changed and write nothing when the ${name} changed`, async () => {
+    it(`I55 should refuse with target_changed and write nothing when the ${name} changed`, async () => {
       const { w, service, id, digest } = await raised();
       w.facts = mutate(FACTS as InputTargetFacts & { kind: 'terminal' });
       const error = await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));

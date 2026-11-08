@@ -19,6 +19,13 @@ export function createAgendaPanel(runtime: AgendaRuntime) {
     const links = useAgendaLinks();
     const shown = useFerretAgenda(runtime, subject);
     if (shown === null || subject === undefined) return null;
+    // A refused read is said, never drawn as an empty agenda: "nothing asked" and "could not read" are different facts.
+    if (shown.failed)
+      return (
+        <p className="fy-agenda-panel__empty" data-agenda-tab-failed="" role="alert">
+          Couldn’t read this ferret’s agenda.
+        </p>
+      );
     const lead = shown.lead;
     return (
       <AgendaClientContext.Provider value={runtime.client}>

@@ -2,7 +2,7 @@ import type { BrowserProxySetting, BrowserProxyStatus } from '../../contract/ind
 import { secretReferencePattern, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { BrowserControlError } from '../worker/control/policy.ts';
 
-export type ProxyScheme = 'http' | 'https' | 'socks5';
+type ProxyScheme = 'http' | 'https' | 'socks5';
 
 /** Where a proxy listens, read from its configured address. */
 export interface ProxyEndpoint {

@@ -59,10 +59,6 @@ export function describeWebRtcEngine(report: WebRtcEngineReport): string {
   return `engine unavailable — ${report.reason}; devices reach this daemon directly or through the relay instead`;
 }
 
-/** What the boot trail says after `webrtc` for a carrier that is switched on: nothing was started. */
-export const WEBRTC_ENGINE_ON_DEMAND =
-  'engine starts on the first peer-to-peer offer and stops once no peer needs it; `fyd --check` proves it on this machine';
-
 /**
  * One data channel, as the carrier sees it: frames in, frames out, and an end.
  *

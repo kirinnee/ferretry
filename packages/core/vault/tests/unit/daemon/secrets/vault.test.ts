@@ -2,19 +2,15 @@ import { describe, it } from 'bun:test';
 import { MAX_SECRETS_PER_DAEMON } from '../../../../contract/index.ts';
 import type { Clock } from '@ferretry/kernel/contract';
 import should from 'should';
+import { combinedReferences, NO_REFERENCES, secretListView } from '../../../../daemon/lib/secrets/view.ts';
+import { NO_REDACTION, SecretRedactor } from '../../../../daemon/lib/secrets/redaction.ts';
+import { SecretDirectory, SecretVault } from '../../../../daemon/lib/secrets/vault.ts';
 import {
-  combinedReferences,
-  NO_REDACTION,
-  NO_REFERENCES,
-  SecretDirectory,
   type SecretDocumentStore,
-  SecretRedactor,
   type SecretReferenceSource,
   SecretStoreError,
-  SecretVault,
   type SecretVaultDocument,
-  secretListView,
-} from '../../../../daemon/lib/secrets/index.ts';
+} from '../../../../daemon/lib/secrets/types.ts';
 import { FakeSecretCipher, MemorySecretDocuments } from '../support.ts';
 
 const CLOCK = { now: () => '2026-01-01T00:00:00.000Z' } as unknown as Clock;

@@ -22,7 +22,7 @@ import {
   type McpTransport,
 } from '../../../contract/index.ts';
 /** Scrubs a secret out of a check's own words (the kernel's redaction window, bound in the half). */
-export interface TextRedactor {
+interface TextRedactor {
   redact(text: string): Promise<string>;
 }
 import { expandVariables } from './json-rpc.ts';

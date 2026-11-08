@@ -13,7 +13,7 @@ import type { DaemonContext } from '@ferretry/kernel/manifest';
 import { type Instant, ok } from '@ferretry/std';
 import { MCP_OAUTH_SECRETS, MCP_OAUTH_STATE, mcpOAuthSecretNames, mcpProjectSubject } from '../../contract/index.ts';
 import daemon from '../../daemon/index.ts';
-import { mcpProjectKey } from '../../daemon/lib/inventory/index.ts';
+import { mcpProjectKey } from '../../daemon/lib/inventory/folders.ts';
 import manifest from '../../manifest.ts';
 import { leaks, PWA_REDIRECT, world, type World } from './oauth/support.ts';
 

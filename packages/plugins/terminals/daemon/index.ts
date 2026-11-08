@@ -94,6 +94,7 @@ import { decideTerminalOpener } from './lib/terminal/ownership.ts';
 import type { TerminalRuntimePort } from './lib/terminal/contracts.ts';
 import type { TmuxCommandPort } from './lib/tmux/contracts.ts';
 import { TerminalsReferenceMenu } from './lib/reference-menu.ts';
+import { snapshotRoute } from './lib/runtime/mounts/session-snapshot.ts';
 import { buildProcesses, type ProcessHostReads, type RunnerPane } from './processes.ts';
 import { processIncarnationFor } from './adapters/session/processes/process-incarnation.ts';
 
@@ -544,6 +545,25 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     routes: {
       ...routes,
       ...processes.routes,
+      // The ferret's pane as text, redacted inside one read of the pane's target (a hold refuses it).
+      'GET /v1/ferrets/:ferretId/snapshot': async (call: CallContext) =>
+        await snapshotRoute(call, ferrets, {
+          capture: async (ferret, extent) => {
+            const pane = await panes.of(ferret as FerretId);
+            if (pane === undefined) return undefined;
+            const answer = await kernel.act(targetRef('terminal', pane.paneId), 'read', async () => {
+              const args = extent === 'screen' ? ['capture-pane', '-p'] : ['capture-pane', '-p', '-S', '-'];
+              const captured = await tmux.execute([...args, '-t', pane.paneId]);
+              if (captured.code !== 0) throw new Error(captured.stderr.trim() || `tmux exited ${captured.code}`);
+              return await kernel.redaction.read(scope => ({
+                kind: 'content' as const,
+                text: scope.text(captured.stdout),
+              }));
+            });
+            if (!answer.ok) throw new ApiError(423, 'the pane is held; it cannot be read now', 'held');
+            return answer.value.text;
+          },
+        }),
       'GET /v1/ferrets/:ferretId/surfaces/terminals/control': async (call: CallContext) =>
         jsonResponse(await tools.controlView(pathFerret(call))),
       'POST /v1/ferrets/:ferretId/surfaces/terminals/control': async (call: CallContext) => {

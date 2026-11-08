@@ -105,7 +105,7 @@ export interface ProcessHostReads {
 }
 
 /** The six routes, by manifest key. */
-export interface ProcessRoutes {
+interface ProcessRoutes {
   readonly 'GET /v1/ferrets/:ferretId/processes': (call: CallContext) => Promise<ApiResponse>;
   readonly 'GET /v1/ferrets/:ferretId/processes/:processId/output': (call: CallContext) => Promise<ApiResponse>;
   readonly 'POST /v1/ferrets/:ferretId/processes/:processId/stop': (call: CallContext) => Promise<ApiResponse>;
@@ -115,7 +115,7 @@ export interface ProcessRoutes {
 }
 
 /** What the tmux runner asks of the limits before it starts a pane (docs/ferret-limits.md). */
-export interface LaunchLimits {
+interface LaunchLimits {
   /** The argv this pane must exec: the harness's command wrapped in the ferret's scope, or as it is. */
   command(ferret: string, command: readonly string[], kind?: LaunchKind): Promise<readonly string[]>;
   /** The shared agent browser's argv (Browsers): one bounded slice. */

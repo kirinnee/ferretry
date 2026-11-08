@@ -104,23 +104,7 @@ export function provenByFacts(
  * The programs whose prompt is a local password read (getpass): echo off in line mode, nothing drawn. A relay (ssh,
  * docker, kubectl) or a readline program (psql, mysql) turns echo off and draws what is typed, so it is never one.
  */
-export const GETPASS_PROGRAMS: ReadonlySet<string> = new Set(['sudo', 'sudoedit', 'su', 'doas', 'passwd']);
-
-/**
- * The programs whose echo-off prompt may be a one-time code: remote shells and cloud CLIs that ask for a 2FA code. A
- * bare shell's `read -s` is never one, whatever its line says. Matched against the REAL executable a process runs, and
- * only one this account cannot replace (`CodeProgramPort`): a name in `ps` can be rewritten or copied.
- */
-export const CODE_PROGRAMS: ReadonlySet<string> = new Set([
-  'ssh',
-  'scp',
-  'sftp',
-  'mosh-client',
-  'aws',
-  'gcloud',
-  'az',
-  'vault',
-]);
+const GETPASS_PROGRAMS: ReadonlySet<string> = new Set(['sudo', 'sudoedit', 'su', 'doas', 'passwd']);
 
 /**
  * Text as it is matched: NFKC-normalised, with combining marks and invisible format characters taken

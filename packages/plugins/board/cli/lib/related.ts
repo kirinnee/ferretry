@@ -10,7 +10,7 @@ const MAX_WEAK_LISTED = 3;
 const MAX_TEXT_LENGTH = 4000;
 const MATCH_WIDTH = 100;
 
-export interface RelatedHit {
+interface RelatedHit {
   readonly kind: string;
   readonly id: string;
   readonly title: string;
@@ -47,14 +47,14 @@ const clip = (text: string, width: number): string => (text.length <= width ? te
 const flat = (text: string): string => text.replace(/\s+/gu, ' ').trim();
 
 /** Strong matches first, then at most {@link MAX_WEAK_LISTED} weak ones; the daemon's order within each. */
-export function listedMatches(response: RelatedResponse): readonly RelatedMatch[] {
+function listedMatches(response: RelatedResponse): readonly RelatedMatch[] {
   const strong = response.matches.filter(match => match.strength === 'strong');
   const weak = response.matches.filter(match => match.strength === 'weak').slice(0, MAX_WEAK_LISTED);
   return [...strong, ...weak];
 }
 
 /** The matches as aligned lines: `&F303  card  In progress  Title — the matching line`. */
-export function relatedLines(matches: readonly RelatedMatch[], own: string | undefined): string[] {
+function relatedLines(matches: readonly RelatedMatch[], own: string | undefined): string[] {
   const rows = matches.map(({ hit }) => ({ hit, ref: `${hit.kind === 'card' ? '&' : '!'}${hit.id}` }));
   const refWidth = Math.max(0, ...rows.map(row => row.ref.length));
   const standingWidth = Math.max(0, ...rows.map(row => row.hit.standing.length));

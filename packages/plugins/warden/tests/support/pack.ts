@@ -22,14 +22,6 @@ export function credential(id: string, overrides: Partial<FleetCredentialView> =
   };
 }
 
-export function choice(
-  id: string,
-  label: string,
-  extra: Partial<FleetRuntimeModelChoice> = {},
-): FleetRuntimeModelChoice {
-  return { id, label, efforts: [], available: true, ...extra };
-}
-
 export function runtime(
   name: string,
   overrides: Partial<FleetRuntimeView> & {

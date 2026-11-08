@@ -119,6 +119,11 @@ export interface SessionKeyRotation {
 
 /** A stream this side ends on purpose is a normal closure, never a drop. */
 const NORMAL_CLOSE = 1000;
+/**
+ * The kernel's event BUS socket (`GET /v1/bus`, declared in the kernel manifest): one `{ name, payload }` frame per event
+ * the caller's admission lets it discover. `/v1/events` is Ferrets' session journal stream and carries no plugin event.
+ */
+export const BUS_PATH = '/v1/bus';
 
 /** `4403` is the one code that means this device is not accepted (today's `deviceRefusal`). */
 const deviceRefusal = (reason: unknown): boolean =>
@@ -152,7 +157,7 @@ export interface SessionTransportOptions {
  */
 export type RequestLane = 'request' | 'bulk';
 
-export const requestLane = (body: string | undefined): RequestLane =>
+const requestLane = (body: string | undefined): RequestLane =>
   body !== undefined && body.length > MAX_PLAINTEXT_BYTES / 2 ? 'bulk' : 'request';
 
 /** A body sent as JSON text; an answer read back as JSON when it parses, else kept as text. */
@@ -381,7 +386,7 @@ export class SessionTransport implements DaemonTransport {
   }
 
   events(listener: (event: RawEvent) => void, onClose: (reason: string) => void, onOpen?: () => void): () => void {
-    const path = this.#options.eventsPath ?? '/v1/events';
+    const path = this.#options.eventsPath ?? BUS_PATH;
     const stream = this.socket(path, {
       ...(onOpen === undefined ? {} : { onOpen }),
       onFrame: frame => {

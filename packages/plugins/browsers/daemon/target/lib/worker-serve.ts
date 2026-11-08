@@ -115,7 +115,7 @@ async function inputArm(
 }
 
 /** A clear job as the daemon sent it, checked field by field: a frame and a node each, and nothing else. */
-export function clearJobParam(raw: unknown): BrowserInputClearJob {
+function clearJobParam(raw: unknown): BrowserInputClearJob {
   const job = (raw ?? {}) as Record<string, unknown>;
   if (typeof job.navigationId !== 'string' || job.navigationId === '' || !Array.isArray(job.fields))
     throw new Error('a clear job needs a document and fields');

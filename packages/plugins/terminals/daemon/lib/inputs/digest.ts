@@ -28,7 +28,7 @@ export function digestFacts(facts: InputTargetFacts): string {
 }
 
 /** Keyed sha-256 (lowercase hex) of any JSON value with every object's keys sorted. */
-export function digestValue(value: unknown): string {
+function digestValue(value: unknown): string {
   return keyed(JSON.stringify(sorted(value)));
 }
 

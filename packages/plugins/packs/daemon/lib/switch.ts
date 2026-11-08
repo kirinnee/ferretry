@@ -19,7 +19,7 @@ export interface PackSwitchOutcome {
 }
 
 /** The answer's sentence, said as what the ferret will be told and when. */
-export function packSwitchNote(enabled: boolean, changed: boolean, running: boolean): string {
+function packSwitchNote(enabled: boolean, changed: boolean, running: boolean): string {
   const state = enabled ? 'on' : 'off';
   if (!changed) return `Pack mode was already ${state}.`;
   return running

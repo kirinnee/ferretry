@@ -69,7 +69,7 @@ export type AssertionResult =
   | { readonly ok: false; readonly reason: PasskeyRefusal };
 
 /** A closed set of machine reasons; never carries an input value. */
-export type PasskeyRefusal =
+type PasskeyRefusal =
   | 'malformed'
   | 'wrong-type'
   | 'challenge-mismatch'
@@ -83,7 +83,7 @@ export type PasskeyRefusal =
   | 'attestation-unsupported';
 
 /** Input bounds: far above anything a real authenticator sends, far below anything that costs. */
-export const PASSKEY_LIMITS = {
+const PASSKEY_LIMITS = {
   clientDataJSON: 4096,
   attestationObject: 16 * 1024,
   authenticatorData: 4096,

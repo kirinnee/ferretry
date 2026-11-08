@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { FERRET_ACCOUNT_SLOTS, FERRET_SLOTS } from '../../../../core/ferrets/contract/slots.ts';
+import { ACTIONS_ROW_SLOT, FERRET_ACCOUNT_SLOTS, FERRET_SLOTS } from '../../../../core/ferrets/contract/slots.ts';
 import { generated } from '../../../src/generated/surfaces.ts';
 import { viewsOf } from '../../../src/layout/engine.ts';
 import { isSlotName } from '../../../src/layout/slots.ts';
@@ -31,7 +31,8 @@ describe('the slots Ferrets offers', () => {
     const contributed = entries.flatMap(entry =>
       (entry.manifest.ui?.panels ?? []).map(panel => panel.slot as string).filter(slot => slot.startsWith('ferrets.')),
     );
-    expect(contributed.length).toBe(FERRET_ACCOUNT_SLOTS.length);
+    // Runtimes' two account pickers and the Warden's one row in the Actions ▾ menu.
+    expect([...contributed].sort()).toEqual([...FERRET_ACCOUNT_SLOTS, ACTIONS_ROW_SLOT].sort());
     for (const slot of contributed) expect(named).toContain(slot);
   });
 

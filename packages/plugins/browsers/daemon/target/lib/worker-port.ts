@@ -26,7 +26,7 @@ import {
 export type WorkerRequest = (method: string, params: Readonly<Record<string, unknown>>) => Promise<unknown>;
 
 /** A worker answer the daemon does not believe. Its message is fixed: it quotes nothing the worker said. */
-export class InputAnswerRefused extends Error {
+class InputAnswerRefused extends Error {
   readonly code = 'upstream_failed' as const;
   readonly status = 502 as const;
 }
@@ -35,7 +35,7 @@ export class InputAnswerRefused extends Error {
 const READ_LIMITS = { origin: 256, navigationId: 128 } as const;
 
 /** What the worker saw of a page's fields, checked against the Vault's `page` facts before it is believed. */
-export function parseObservation(raw: unknown): BrowserInputObservation {
+function parseObservation(raw: unknown): BrowserInputObservation {
   const observation = (raw as { observation?: unknown } | null)?.observation as Record<string, unknown> | undefined;
   if (observation?.ok === false && typeof observation.missing === 'string')
     return { ok: false, missing: observation.missing.slice(0, 64) };
@@ -92,7 +92,7 @@ export function parsePushNumberRead(raw: unknown): BrowserPushNumberRead {
 const MAX_INPUT_SHOT_CHARS = 4_000_000;
 
 /** A field shot: a bounded PNG and a finite clip, or a refusal. */
-export function parseShot(raw: unknown): BrowserInputShot {
+function parseShot(raw: unknown): BrowserInputShot {
   const shot = (raw as { shot?: unknown } | null)?.shot as Record<string, unknown> | undefined;
   const clip = shot?.clip as Record<string, unknown> | undefined;
   const numbers = ['x', 'y', 'w', 'h'].map(key => clip?.[key]);

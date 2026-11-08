@@ -28,13 +28,13 @@ export interface StackSamplerPort {
 }
 
 /** One distinct stack a stall spent its samples in, and the share of the samples it holds. */
-export interface StallStack {
+interface StallStack {
   readonly stack: string;
   readonly share: number;
 }
 
 /** The disk's pressure as a stall was recorded, where the host reports it. */
-export interface IoPressureView {
+interface IoPressureView {
   readonly someAvg10: number;
   readonly saturated: boolean;
 }

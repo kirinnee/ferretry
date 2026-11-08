@@ -6,7 +6,7 @@ import { AskOwnerMessageSchema, SurfaceNameSchema } from '../../../contract/inde
  * Who drives, holds or was handed a terminal (today's `protocol/src/lib/agent-tools.ts` surface control schemas, the
  * terminal side). `surface` stays a field so the stored events and the control view keep today's shape.
  */
-export const SurfaceKindSchema = z.enum(['terminal', 'browser']);
+const SurfaceKindSchema = z.enum(['terminal', 'browser']);
 export type SurfaceKind = z.infer<typeof SurfaceKindSchema>;
 
 /**
@@ -15,7 +15,7 @@ export type SurfaceKind = z.infer<typeof SurfaceKindSchema>;
  * `until` is when the marker lapses unless the agent acts again: the daemon republishes before it
  * does, so a reader shows the marker while `now < until` and needs no second event to clear it.
  */
-export const SurfaceDrivingSchema = z.strictObject({
+const SurfaceDrivingSchema = z.strictObject({
   surface: SurfaceKindSchema,
   /** The terminal id or browser page id — stable for the surface's life. */
   id: z.string().min(1).max(128),
@@ -53,7 +53,7 @@ export const SurfaceAskedSchema = z.strictObject({
 });
 export type SurfaceAsked = z.infer<typeof SurfaceAskedSchema>;
 /** Who took a surface over: a paired device (a person holding it), or somebody at this machine. */
-export const SurfaceControllerSchema = z.discriminatedUnion('by', [
+const SurfaceControllerSchema = z.discriminatedUnion('by', [
   z.strictObject({ by: z.literal('human'), deviceId: z.string().min(1).max(128) }),
   z.strictObject({ by: z.literal('local') }),
 ]);
@@ -81,7 +81,7 @@ export type SurfaceHanded = z.infer<typeof SurfaceHandedSchema>;
  * `GET /v1/ferrets/:ferretId/surfaces/terminals/control` and `…/surfaces/browser/control` — one kind
  * each, so each is governed by that kind's grant — and the answer to every control change.
  */
-export const SurfaceControlViewSchema = z.strictObject({
+const SurfaceControlViewSchema = z.strictObject({
   sessionId: z.string().min(1),
   driving: z.array(SurfaceDrivingSchema),
   takeovers: z.array(SurfaceTakeoverSchema),
@@ -115,4 +115,3 @@ export const SurfaceHandbackSchema = z.strictObject({
   name: SurfaceNameSchema.optional(),
   at: InstantSchema,
 });
-export type SurfaceHandback = z.infer<typeof SurfaceHandbackSchema>;

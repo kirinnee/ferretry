@@ -57,7 +57,7 @@ export type LaneSetProblem =
   /** Another ferret's proposal waits for the owner: only it, a lead above it or the owner replaces it. */
   | { readonly code: 'proposal-waiting'; readonly version: number; readonly proposedBy: string };
 
-export { type LaneGateProblem, laneGateProblems } from './model.ts';
+export { laneGateProblems } from './model.ts';
 
 /** What a lane change decided ({@link decideLaneChange}): the set to store, and the cards that move. */
 export interface LaneSetDecision {

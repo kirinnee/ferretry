@@ -29,17 +29,15 @@ import {
 import type { ModelCatalogRefreshResult } from '../../../contract/index.ts';
 
 /** The signed release list and its signature, at the hosted app's root (docs/pwa-release-signing.md). */
-export const RELEASE_LIST_FILE = 'release-manifest.json';
-export const RELEASE_SIGNATURE_FILE = 'release-manifest.sig';
-
+const RELEASE_LIST_FILE = 'release-manifest.json';
+const RELEASE_SIGNATURE_FILE = 'release-manifest.sig';
 /** The hosted app's origin, which serves the published catalog beside the app itself (one address, owned by the protocol). */
-export { HOSTED_APP_ORIGIN } from '../shared/hosted.ts';
 
 /** Bytes as the hosted app answered them, over a plain buffer WebCrypto accepts. */
 export type Bytes = Uint8Array<ArrayBuffer>;
 
 /** How long a check stands before a read asks again. */
-export const MODEL_CATALOG_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const MODEL_CATALOG_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /** One read of the hosted app: its status and bytes, or `undefined` when it could not be reached. */
 export interface ModelCatalogFetchPort {

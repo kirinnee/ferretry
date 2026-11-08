@@ -10,7 +10,7 @@ import {
   registrationMetadata,
   registrationRefusal,
   unreachableSentence,
-} from '../../../daemon/lib/oauth/index.ts';
+} from '../../../daemon/lib/oauth/registration.ts';
 
 type Rejected = Extract<RegistrationAnswer, { readonly kind: 'rejected' }>;
 

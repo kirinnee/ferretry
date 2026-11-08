@@ -9,7 +9,7 @@ import { compactNumber, DASH, duration, measure, percent, renderTable, usdMicros
  * to match. What the sentence must never stop saying is that this is not a bill: fleet accounts are
  * commonly subscriptions, where marginal token cost is not what the human actually pays.
  */
-export const EQUIVALENT_API_COST_CAVEAT =
+const EQUIVALENT_API_COST_CAVEAT =
   'Equivalent API cost is what this usage would cost at the rates this daemon’s operator configured — a comparison, not a bill.';
 
 const COVERAGE_LEGEND =

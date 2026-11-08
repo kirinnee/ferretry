@@ -3,14 +3,13 @@ import { type McpInventoryServer, mcpProjectSubject } from '../../../contract/in
 import should from 'should';
 import {
   McpCheckService,
-  type McpInventoryRefusal,
-  McpInventoryService,
   type McpProbe,
   type McpProbeAnswer,
   McpProbeFailure,
   type McpProbeSpec,
   mcpCheckBaseEnvironment,
-} from '../../../daemon/lib/inventory/index.ts';
+} from '../../../daemon/lib/inventory/check.ts';
+import { type McpInventoryRefusal, McpInventoryService } from '../../../daemon/lib/inventory/service.ts';
 import { inventoryWorld, PROJECT, PROJECT_KEY, session } from './support.ts';
 
 const TOKEN = 'project-access-token-value';

@@ -5,6 +5,7 @@ import type { EventDef } from '@ferretry/kernel/contract';
 import { type StartedDaemon, startDaemon } from '../../../../../scripts/test/two-release/daemon.ts';
 import { builds, hits, hitTotal, resetCounters } from '../../../../../scripts/test/two-release/hits.ts';
 import { buildReleases, type Release } from '../../../../../scripts/test/two-release/releases.ts';
+import { UPDATE_DAEMON_COMMAND } from '../../../src/client/sentences.ts';
 import { DaemonCallError } from '../../../src/client/transport.ts';
 import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
@@ -30,11 +31,13 @@ import { type AppSession, openApp } from './session.ts';
  * stream route. They turn green when the gap lands; none is skipped. G4 (Catalogs' member table) is a `todo`.
  */
 
-const CORE_IDS = ['kernel', 'gate', 'asks', 'vault', 'ferrets', 'access'] as const;
+/** The packages every release carries unchanged: the core pieces, Access, and Connections (its direct carrier serves the paired session). */
+const CORE_IDS = ['kernel', 'gate', 'asks', 'vault', 'ferrets', 'access', 'connections'] as const;
 const FIXTURE_IDS = ['alpha', 'beta', 'gamma', 'delta'] as const;
 const OLDER = '4.9.0';
 const NEWER = '5.1.0';
-const UPDATE = '`fy daemon update`';
+/** The remedy the app names for an older daemon: its own constant, the one fact (redesign §9.6: `fy update`). */
+const UPDATE = `\`${UPDATE_DAEMON_COMMAND}\``;
 
 let A: Release;
 let Bb: Release;
@@ -495,7 +498,7 @@ describe('(e) a limited device reads the inventory: daemon A', () => {
   });
   afterAll(stopAll);
 
-  test('G1 the limited device’s inventory is the core pieces, Access and the one plugin its grants admit', () => {
+  test('G1 the limited device’s inventory is the core pieces, Access, Connections (`GET /v1/carriers` asks no capability) and the one plugin its grants admit', () => {
     const connection = limited.session.runtime.connection(limited.session.daemonId);
     if (connection.kind !== 'connected' || connection.client.inventory?.kind !== 'read')
       throw new Error('no inventory');

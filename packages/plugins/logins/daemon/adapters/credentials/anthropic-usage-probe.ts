@@ -67,10 +67,10 @@ import {
 } from '../../lib/credentials/usage.ts';
 
 export const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
-export const ANTHROPIC_VERSION = '2023-06-01';
+const ANTHROPIC_VERSION = '2023-06-01';
 
 /** The provider label every row from this probe carries. */
-export const ANTHROPIC_PROVIDER = 'anthropic';
+const ANTHROPIC_PROVIDER = 'anthropic';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const FORBIDDEN_STATUS = 403;

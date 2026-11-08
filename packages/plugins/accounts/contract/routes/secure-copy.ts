@@ -36,13 +36,13 @@ export const COPY_VALUE_MAX_BYTES = 16_384;
 export const COPY_VALUE_MIN_CHARS = 4;
 /** A command capture: at most this many arguments, each this long, and this long to run. */
 export const COPY_COMMAND_MAX_ARGS = 64;
-export const COPY_COMMAND_MAX_ARG_CHARS = 4_096;
+const COPY_COMMAND_MAX_ARG_CHARS = 4_096;
 export const COPY_COMMAND_DEFAULT_TIMEOUT_SECONDS = 30;
-export const COPY_COMMAND_MAX_TIMEOUT_SECONDS = 60;
+const COPY_COMMAND_MAX_TIMEOUT_SECONDS = 60;
 /** What a command printed on stderr, masked, that the agent is handed back so it can tell why it failed. */
 export const COPY_STDERR_MAX_CHARS = 2_048;
 /** The prefix a handle is written with. */
-export const COPY_HANDLE_PREFIX = 'sealed:';
+const COPY_HANDLE_PREFIX = 'sealed:';
 
 const boundedLine = (maximum: number) =>
   z
@@ -52,7 +52,7 @@ const boundedLine = (maximum: number) =>
     .regex(/^[^\p{Cc}\p{Cf}]*$/u, 'must be one line with no control characters');
 
 /** A copy's name, chosen by the agent: a lowercase letter, then lowercase letters, digits, `_` or `-`. */
-export const COPY_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,39}$/u;
+const COPY_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,39}$/u;
 export const CopyNameSchema = z
   .string()
   .regex(COPY_NAME_PATTERN, 'a copy name is a lowercase letter, then up to 39 lowercase letters, digits, _ or -');
@@ -69,7 +69,7 @@ export const CopyHandleSchema = z
 export const copyHandle = (name: CopyName): string => `${COPY_HANDLE_PREFIX}${name}`;
 
 /** What part of an element is read: its visible text, a form field's current value, or one attribute. */
-export const CopyElementPartSchema = z.enum(['text', 'value', 'attribute']);
+const CopyElementPartSchema = z.enum(['text', 'value', 'attribute']);
 export type CopyElementPart = z.infer<typeof CopyElementPartSchema>;
 
 /**
@@ -114,7 +114,6 @@ export const CopySourceSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 export type CopySource = z.infer<typeof CopySourceSchema>;
-export type CopySourceKind = CopySource['kind'];
 
 /** `secure.copy`: capture a value under a name. */
 export const CopyCaptureSchema = z.strictObject({
@@ -161,14 +160,14 @@ export type CopyOrigin = z.infer<typeof CopyOriginSchema>;
  *   the transcript the daemon read; `unknown` means the transcript could not be read.
  * - `pageReadBeforeCapture`: the agent read, screenshotted or evaluated this page since it last navigated.
  */
-export const CopyExposureSchema = z.strictObject({
+const CopyExposureSchema = z.strictObject({
   transcript: z.enum(['clean', 'found', 'unknown']),
   pageReadBeforeCapture: z.boolean().optional(),
 });
 export type CopyExposure = z.infer<typeof CopyExposureSchema>;
 
 /** Where a copy stands. Only `live` can be pasted. A daemon restart lets go of every copy: it is then not listed at all. */
-export const CopyStateSchema = z.enum(['live', 'discarded', 'expired']);
+const CopyStateSchema = z.enum(['live', 'discarded', 'expired']);
 export type CopyState = z.infer<typeof CopyStateSchema>;
 
 /**
@@ -205,8 +204,8 @@ export const copyMask = (name: CopyName): string => `[sealed:${name}]`;
 // ── Pasting, and approving pastes in advance ───────────────────────────────────────────────────────────
 
 /** How long a pre-approval rule may live, how many pastes one may allow, and how many rules the daemon keeps. */
-export const COPY_RULE_MAX_LIFETIME_SECONDS = 30 * 24 * 3_600;
-export const COPY_RULE_MAX_COUNT = 100;
+const COPY_RULE_MAX_LIFETIME_SECONDS = 30 * 24 * 3_600;
+const COPY_RULE_MAX_COUNT = 100;
 export const COPY_MAX_RULES = 50;
 /** A plan card: at most this many planned pastes, each said in at most this many characters, waiting this long. */
 export const COPY_PLAN_MAX_ITEMS = 10;
@@ -252,7 +251,6 @@ export const RuleOwnerSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('host') }),
   z.strictObject({ kind: z.literal('device'), deviceId: boundedLine(128) }),
 ]);
-export type RuleOwner = z.infer<typeof RuleOwnerSchema>;
 
 const RuleIdSchema = z.string().regex(/^[0-9a-f]{32}$/u, 'a 128-bit hex id');
 export const CopyPlanIdSchema = z.string().regex(/^[0-9a-f]{32}$/u, 'a 128-bit hex id');
@@ -391,7 +389,7 @@ export const PASTE_RULES_SCREEN_PATH = 'Settings › Secure copy › Pastes appr
  */
 export const PASTE_RULE_STAGES_MAX = 8;
 /** At most this many stages are listed at once: every stager's cap together. */
-export const PASTE_RULE_STAGES_LISTED_MAX = 64;
+const PASTE_RULE_STAGES_LISTED_MAX = 64;
 
 /** Where a value comes from, in plain words: "what gh prints", "text on https://github.com". */
 export const pasteFromWords = (from: CopyRouteFrom): string =>
@@ -410,7 +408,7 @@ export const pasteToWords = (to: CopyRouteTo): string =>
       : `the secret ${to.name}`;
 
 /** Who a paste rule covers: any ferret, or one session. */
-export const pasteWhoWords = (sessionId: string | undefined): string =>
+const pasteWhoWords = (sessionId: string | undefined): string =>
   sessionId === undefined ? 'Any ferret on this machine' : `Session ${sessionId}`;
 
 /** A rule's life in words: "30 days", "2 hours", "45 minutes". */
@@ -430,9 +428,9 @@ const lifetimeWords = (seconds: number): string => {
  * The rows a stage is shown with, by the daemon: a rule's From, To, Who, Pastes and Until; for turning on programs in
  * your own profile, one Widens row per rule it widens; then, on every stage, who staged it and when (Staged).
  */
-export const PasteRuleRowLabelSchema = z.enum(['From', 'To', 'Who', 'Pastes', 'Until', 'Widens', 'Staged']);
-export type PasteRuleRowLabel = z.infer<typeof PasteRuleRowLabelSchema>;
-export const PasteRuleRowSchema = z.strictObject({ label: PasteRuleRowLabelSchema, value: boundedLine(320) });
+const PasteRuleRowLabelSchema = z.enum(['From', 'To', 'Who', 'Pastes', 'Until', 'Widens', 'Staged']);
+
+const PasteRuleRowSchema = z.strictObject({ label: PasteRuleRowLabelSchema, value: boundedLine(320) });
 export type PasteRuleRow = z.infer<typeof PasteRuleRowSchema>;
 
 /**
@@ -529,7 +527,7 @@ export const pasteRuleApprovalSubject = (stage: PasteRuleStageId, canonical: str
   sha256Hex(`${PASTE_RULE_DOMAIN}\0${stage}\0${sha256Hex(canonical)}`);
 
 /** What a stage makes: a paste rule (`approve-paste-rule`), or programs in your own profile turned on (`allow-profile-targets`). */
-export const PasteRuleStageKindSchema = z.enum(['rule', 'profile-targets']);
+const PasteRuleStageKindSchema = z.enum(['rule', 'profile-targets']);
 export type PasteRuleStageKind = z.infer<typeof PasteRuleStageKindSchema>;
 
 /**
@@ -551,7 +549,7 @@ export const PasteRuleStagedSchema = z.strictObject({
 });
 export type PasteRuleStaged = z.infer<typeof PasteRuleStagedSchema>;
 
-export const PasteRuleStageStateSchema = z.enum(['waiting', 'approved', 'denied', 'expired']);
+const PasteRuleStageStateSchema = z.enum(['waiting', 'approved', 'denied', 'expired']);
 export type PasteRuleStageState = z.infer<typeof PasteRuleStageStateSchema>;
 
 /** `GET /v1/copy-rules/stages/:stage`: where a staged rule stands, and the rule it made once approved. */
@@ -612,9 +610,8 @@ export const CopyPlanItemSchema = z.strictObject({
     .max(COPY_PLAN_WHY_MAX_CHARS)
     .regex(/^[^\p{Cc}\p{Cf}]*$/u),
 });
-export type CopyPlanItem = z.infer<typeof CopyPlanItemSchema>;
 
-export const CopyPlanStateSchema = z.enum(['pending', 'approved', 'declined', 'expired']);
+const CopyPlanStateSchema = z.enum(['pending', 'approved', 'declined', 'expired']);
 
 /**
  * A FERRET'S PLAN of pastes, on one card: the owner ticks the ones it allows, and each becomes a rule for THIS
@@ -643,7 +640,7 @@ export const CopyPlanSchema = z.strictObject({
 export type CopyPlan = z.infer<typeof CopyPlanSchema>;
 
 /** `GET /v1/copy-plans`: the plans still waiting. */
-export const CopyPlanListSchema = z.strictObject({ plans: z.array(CopyPlanSchema).max(100) });
+const CopyPlanListSchema = z.strictObject({ plans: z.array(CopyPlanSchema).max(100) });
 export type CopyPlanList = z.infer<typeof CopyPlanListSchema>;
 
 /** `POST /v1/sessions/:sessionId/copy-plans/:planId/approve`: which items, by index. An empty list declines. */
@@ -658,4 +655,3 @@ export const CopyPlanApproveSchema = z.strictObject({
     )
     .max(COPY_PLAN_MAX_ITEMS),
 });
-export type CopyPlanApprove = z.infer<typeof CopyPlanApproveSchema>;

@@ -115,7 +115,7 @@ let
     outputHashAlgo = "sha256";
     # When a build reports a hash mismatch here, the install inputs changed what it installs: take the
     # `got:` hash. It is the same on every builder, so a mismatch is never fixed by rerunning.
-    outputHash = "sha256-vXk82QZ+lf/379Ktx8zpQiAZe04cvCg83ftmQuEI9pE=";
+    outputHash = "sha256-k/DzaDYcJNSuk7c81VSwexrfxpKEhlcrLkS+Yxx+Tmw=";
     dontFixup = true;
 
     buildPhase = ''

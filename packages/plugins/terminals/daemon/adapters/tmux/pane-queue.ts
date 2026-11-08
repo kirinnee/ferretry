@@ -58,7 +58,7 @@ const DEFAULTS = {
   queueKeySettleMs: 300,
 } as const;
 
-/** A message could not be put into the pane's queue, and the message says which half failed. */
+/** A message could not be put into the pane's queue, and the message says which half failed. @pending terminals: GAP(ferrets): the tmux adapters daemon/adapters/tmux/pane-queue.ts, daemon/adapters/tmux/harness-launch-guard.ts, daemon/adapters/tmux/forget-ferret-identity.ts and daemon/adapters/tmux/tmux-release-reader.ts are ported and tested but nothing composes them until Ferrets wires the deliver and runner seams and reads FERRETRY_TEST (scripts/test/swept.sh) to arm it (gustavo) */
 export class PaneQueueError extends Error {
   constructor(message: string) {
     super(message);

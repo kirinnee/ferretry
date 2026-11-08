@@ -7,7 +7,7 @@ import {
   type McpProjectApprovalsRequest,
   ProjectMcpLaunch,
   ProjectMcpOAuthServers,
-} from '../../../daemon/lib/inventory/index.ts';
+} from '../../../daemon/lib/inventory/project-sign-in.ts';
 import {
   ACCOUNTS,
   BROKEN,

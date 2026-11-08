@@ -52,7 +52,7 @@ export interface SkillFilesPort {
 }
 
 /** A runtime home the fleet owns. */
-export interface SkillRuntimeHome {
+interface SkillRuntimeHome {
   /** The wrapper names that launch into this home. */
   readonly runtimes: readonly string[];
   readonly harness: Harness;
@@ -84,7 +84,7 @@ function shadowingScope(harness: Harness, scope: SkillScope, homeHas: ReadonlyMa
 }
 
 /** Codex reads `<root>/.agents/skills`; Claude reads `<root>/.claude/skills`. */
-export function projectSkillsDirectory(harness: Harness, root: string): string {
+function projectSkillsDirectory(harness: Harness, root: string): string {
   return join(root, harness === 'claude-code' ? '.claude' : '.agents', 'skills');
 }
 

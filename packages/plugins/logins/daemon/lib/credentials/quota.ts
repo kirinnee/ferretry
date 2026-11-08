@@ -17,7 +17,7 @@ import type { FleetCredentialSignal, FleetUsageWindow } from './usage.ts';
 import { clampUsagePercent, normalizeResetAt } from './usage.ts';
 
 /** A pair of quota windows, shortest reset horizon first. */
-export interface QuotaWindows {
+interface QuotaWindows {
   readonly shortWindow?: FleetUsageWindow;
   readonly longWindow?: FleetUsageWindow;
 }

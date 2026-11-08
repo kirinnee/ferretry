@@ -218,7 +218,7 @@ export interface RawEvent {
 }
 
 /** The package that owns an event: the words before its first dot (`ferrets.changed` is Ferrets'). */
-export const eventOwner = (eventName: string): string => {
+const eventOwner = (eventName: string): string => {
   const dot = eventName.indexOf('.');
   return dot === -1 ? eventName : eventName.slice(0, dot);
 };

@@ -14,7 +14,7 @@ import type { FerretView } from '../lib/callsign.ts';
 import type { DaemonConnection } from '../lib/machine.ts';
 import { useDaemonReach } from '../lib/warden-client-context.tsx';
 
-export const FERRETS_ROUTE = 'GET /v1/ferrets' as const;
+const FERRETS_ROUTE = 'GET /v1/ferrets' as const;
 
 const FerretsSchema = z.array(FerretSummarySchema);
 

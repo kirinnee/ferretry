@@ -246,10 +246,13 @@ async function probeWorker(name: string, url: URL, deps: PluginCheckDeps): Promi
   try {
     return await new Promise<WorkerReport>(resolve => {
       const settle = (report: WorkerReport): void => resolve(report);
+      // each cancel is kept as soon as it exists, so a later throw still disarms the timers made before it
       cancels.push(
         deps.clock.after(milliseconds(timeoutMs), () =>
           settle({ name, ready: false, reason: `no answer within ${String(timeoutMs)} ms` }),
         ),
+      );
+      cancels.push(
         handle.onMessage(message => {
           const answer = message as { ok?: unknown; probe?: unknown } | null;
           settle(
@@ -258,6 +261,8 @@ async function probeWorker(name: string, url: URL, deps: PluginCheckDeps): Promi
               : { name, ready: false, reason: 'it started but did not answer the probe' },
           );
         }),
+      );
+      cancels.push(
         handle.onExit(exit =>
           settle({
             name,
@@ -282,7 +287,12 @@ async function probeWorker(name: string, url: URL, deps: PluginCheckDeps): Promi
 /** The `workers` line of `fyd --check`: every worker that started, or the first that did not and why (today's sentence). */
 function describeWorkerProbes(reports: readonly WorkerReport[]): string {
   const failed = reports.find(report => !report.ready);
-  if (failed !== undefined) return `! ${failed.name} did not start — ${failed.reason ?? 'no reason was given'}`;
+  // The kernel owns the sentence: a failure ends in a full stop, so a reason that ends in " ready" can never satisfy the
+  // smoke's `ready$` check for a worker that did not start.
+  if (failed !== undefined) {
+    const reason = (failed.reason ?? 'no reason was given').replace(/[.\s]+$/u, '');
+    return `! ${failed.name} did not start — ${reason}.`;
+  }
   return `${reports.map(report => report.name).join(', ')} ready`;
 }
 

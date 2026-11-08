@@ -12,7 +12,7 @@ import {
   gateTypedPlaceholder,
   previewUrlOf,
   tryItText,
-} from '../../../../daemon/lib/protocol/agenda-gate-wording.ts';
+} from '../../../../contract/snapshot/agenda-gate-wording.ts';
 
 const DONE: AgendaGateOption = { id: 'done', label: 'Done', outcome: 'close' };
 const NOT_GOOD: AgendaGateOption = { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' };

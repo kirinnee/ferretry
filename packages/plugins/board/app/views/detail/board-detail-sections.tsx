@@ -52,8 +52,6 @@ export function Avatar({ name }: { readonly name: string }) {
   );
 }
 
-export { cardProse };
-
 export function Prose({ text }: { readonly text: string }) {
   return <div className="fy-board-detail__prose">{cardProse(text)}</div>;
 }

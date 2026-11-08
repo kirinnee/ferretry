@@ -48,6 +48,26 @@ export const ALLOWED_PUBLIC: ReadonlyMap<string, string> = new Map([]);
  */
 export const ALLOWED_KNIP: ReadonlyMap<string, string> = new Map([
   [
+    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:@huggingface/transformers',
+    'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
+  ],
+  [
+    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:@lichess-org/vosk-browser',
+    'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
+  ],
+  [
+    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:@sherpaw/asr',
+    'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
+  ],
+  [
+    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:onnxruntime-web',
+    'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
+  ],
+  [
+    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:parakeet.js',
+    'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
+  ],
+  [
     'knip.production.json#workspaces["packages/plugins/mcp"].entry:app/views/surfaces.tsx',
     'loaded lazily by `import(`./views/${"surfaces"}.tsx`)` in app/index.ts, a template import knip cannot follow.',
   ],

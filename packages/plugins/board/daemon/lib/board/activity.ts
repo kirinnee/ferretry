@@ -38,10 +38,10 @@ import type { ActivityDeriver, ActivityInputs, BoardClock, CardActivityFacts } f
 export type FerretStatus = 'starting' | 'working' | 'idle' | 'stopped';
 
 /** Whose turn it is in a ferret's conversation. */
-export type FerretTurnState = 'working' | 'your-turn' | 'needs-input';
+type FerretTurnState = 'working' | 'your-turn' | 'needs-input';
 
 /** Statuses a ferret never leaves without being resumed. */
-export const isTerminalStatus = (status: FerretStatus): boolean => status === 'stopped';
+const isTerminalStatus = (status: FerretStatus): boolean => status === 'stopped';
 
 /** A strong signal this recent makes its card `active` even between turns. */
 export const ACTIVE_WINDOW_MS = 2 * 60_000;

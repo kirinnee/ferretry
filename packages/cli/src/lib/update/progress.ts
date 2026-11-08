@@ -9,18 +9,6 @@ export function formatElapsed(milliseconds: number): string {
   return `${String(minutes)}m${String(seconds % 60).padStart(2, '0')}s`;
 }
 
-/** What a step's clock reads: the elapsed time, or `12s of 60s` for a step that knows its length. */
-export function formatClock(elapsedMs: number, expectedSeconds: number | undefined): string {
-  if (expectedSeconds === undefined) return formatElapsed(elapsedMs);
-  const elapsed = Math.min(Math.floor(Math.max(0, elapsedMs) / 1_000), expectedSeconds);
-  return `${String(elapsed)}s of ${String(expectedSeconds)}s`;
-}
-
-/** The text of a step line without its marker or clock: `label — detail`. */
-export function stepText(label: string, detail: string | undefined): string {
-  return detail === undefined || detail === '' ? label : `${label} — ${detail}`;
-}
-
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, 'gu');
 
 /** A tool's output line with escape sequences and control characters removed, so it is safe to print as detail. */
@@ -33,7 +21,7 @@ export function plainLine(text: string): string {
 }
 
 /** Bytes in the unit a download reads in: whole megabytes while large, one decimal while small. */
-export function formatMegabytes(bytes: number): string {
+function formatMegabytes(bytes: number): string {
   const megabytes = bytes / 1_000_000;
   return megabytes < 10 ? megabytes.toFixed(1) : String(Math.round(megabytes));
 }

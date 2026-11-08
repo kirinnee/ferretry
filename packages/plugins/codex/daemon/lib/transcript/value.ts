@@ -17,10 +17,6 @@ export function transcriptString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-export function transcriptNullableString(value: unknown): string | null | undefined {
-  return value === null || typeof value === 'string' ? value : undefined;
-}
-
 export function transcriptNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 }

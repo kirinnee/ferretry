@@ -41,7 +41,7 @@ import type { AccountApiClient, IAccountGateway } from './account-ports.ts';
  * What the daemon's `403 owner_only` means for a ferret on a person route, in the owner's words. Neutral on purpose:
  * a read (`account ls`) is refused there as well as a change. No other credential is tried.
  */
-export const OWNER_ONLY_MESSAGE =
+const OWNER_ONLY_MESSAGE =
   "the daemon refused this: this is the owner's command, and it ran with a ferret's credential. Run it yourself at your own shell (or in the Ferretry app). Nothing was changed, and no other credential was tried";
 
 /** The one answer every account route can give regardless of what was asked, said once. */

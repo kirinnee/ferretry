@@ -2,19 +2,20 @@ import { describe, it } from 'bun:test';
 import type { Clock } from '@ferretry/kernel/contract';
 import should from 'should';
 import { SecretUseRequestSchema } from '../../../../contract/index.ts';
+import { ChildEnvironments } from '../../../../daemon/lib/secrets/child-environments.ts';
 import {
-  ChildEnvironments,
   NO_RECIPES,
-  SecretDirectory,
   SecretUseError,
   SecretUseService,
-  SecretVault,
+  type SecretRecipes,
+} from '../../../../daemon/lib/secrets/use.ts';
+import { SecretDirectory, SecretVault } from '../../../../daemon/lib/secrets/vault.ts';
+import {
   UnknownSecretError,
   type SecretChildOutcome,
   type SecretChildRunner,
   type SecretChildSpec,
-  type SecretRecipes,
-} from '../../../../daemon/lib/secrets/index.ts';
+} from '../../../../daemon/lib/secrets/types.ts';
 import { EchoSecretChildRunner, FakeSecretCipher, MemorySecretDocuments } from '../support.ts';
 import { MaskSourceUnavailableError } from '../../../../daemon/lib/secrets/mask-source.ts';
 import { combinedValues, SecretRedactor } from '../../../../daemon/lib/secrets/redaction.ts';

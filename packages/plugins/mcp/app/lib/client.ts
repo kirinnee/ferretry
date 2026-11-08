@@ -34,14 +34,14 @@ import {
 /** The slice of the per-daemon client this half uses; a test hands a scripted one. */
 export type McpClient = Pick<PluginClient, 'call'>;
 
-export const FERRET_SERVERS_ROUTE = 'GET /v1/ferrets/:ferretId/mcp/servers' as const;
-export const MACHINE_SERVERS_ROUTE = 'GET /v1/mcp' as const;
-export const CHECK_ROUTE = 'POST /v1/mcp/check' as const;
-export const SIGN_INS_ROUTE = 'GET /v1/mcp/auth' as const;
-export const START_ROUTE = 'POST /v1/mcp/auth/:component' as const;
-export const SIGN_OUT_ROUTE = 'DELETE /v1/mcp/auth/:component' as const;
-export const FINISH_ROUTE = 'POST /v1/mcp/auth/flows/:flowId' as const;
-export const CANCEL_ROUTE = 'DELETE /v1/mcp/auth/flows/:flowId' as const;
+const FERRET_SERVERS_ROUTE = 'GET /v1/ferrets/:ferretId/mcp/servers' as const;
+const MACHINE_SERVERS_ROUTE = 'GET /v1/mcp' as const;
+const CHECK_ROUTE = 'POST /v1/mcp/check' as const;
+const SIGN_INS_ROUTE = 'GET /v1/mcp/auth' as const;
+const START_ROUTE = 'POST /v1/mcp/auth/:component' as const;
+const SIGN_OUT_ROUTE = 'DELETE /v1/mcp/auth/:component' as const;
+const FINISH_ROUTE = 'POST /v1/mcp/auth/flows/:flowId' as const;
+const CANCEL_ROUTE = 'DELETE /v1/mcp/auth/flows/:flowId' as const;
 
 /** Every MCP server one ferret sees, from every scope. */
 export const readFerretMcpServers = async (client: McpClient, ferretId: string): Promise<McpInventory> =>

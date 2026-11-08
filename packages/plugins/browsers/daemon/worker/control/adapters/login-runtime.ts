@@ -111,7 +111,7 @@ export interface BrowserDisplayPort {
 
 /** How long a readiness wait may take, and how often it looks. Both are injected so a test can drive
  *  the deadline with a fake clock rather than sleeping through it. */
-export interface BrowserLoginTiming {
+interface BrowserLoginTiming {
   readonly readinessTimeoutMs?: number;
   readonly pollIntervalMs?: number;
   /** How long a terminated child is given to exit on SIGTERM before it is killed. */

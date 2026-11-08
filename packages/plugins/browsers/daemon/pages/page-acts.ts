@@ -25,7 +25,7 @@ import {
 /** How long one act may wait for its element before it is refused. */
 export const BROWSER_ACT_TIMEOUT_MS = 30_000;
 /** How long a look at an element's own attributes may take: the element is already there. */
-export const BROWSER_PROBE_TIMEOUT_MS = 2_000;
+const BROWSER_PROBE_TIMEOUT_MS = 2_000;
 /** The most a read hands back; the daemon clips again to its own wire bound. */
 export const BROWSER_MAX_READ_CHARS = 200_000;
 /** The most matching lines a `find` hands back. */
@@ -65,7 +65,7 @@ export interface ActableLocator {
 }
 
 /** The file dialog a click opened. */
-export interface ActableFileChooser {
+interface ActableFileChooser {
   setFiles(files: string[], options: { readonly timeout: number }): Promise<void>;
 }
 
@@ -174,7 +174,7 @@ async function documentHostOf(element: ActableLocator, inputOnly: boolean): Prom
  * a@x.com"), with the host of its document; `undefined` otherwise. Page text: it only ever names who a page is signing
  * in, never chooses an account.
  */
-export async function clickedIdentityOf(element: ActableLocator): Promise<BrowserClickOutcome['clickedIdentity']> {
+async function clickedIdentityOf(element: ActableLocator): Promise<BrowserClickOutcome['clickedIdentity']> {
   const text = await element.innerText({ timeout: BROWSER_PROBE_TIMEOUT_MS }).catch(() => '');
   const emails = [...new Set((text.slice(0, CLICKED_TEXT_CHARS).match(EMAIL) ?? []).map(each => each.toLowerCase()))];
   const [only] = emails;

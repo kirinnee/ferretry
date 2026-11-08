@@ -71,7 +71,7 @@ export interface SignInGrantSource {
 const grantIdOf = (planId: string, line: number): string => `plan:${planId}:${String(line)}`;
 
 /** One ticked line as a grant: its own session, its pinned account, place, recipe and form, and its uses left. */
-export function planGrantOf(line: ApprovedSignInLine): SignInGrant {
+function planGrantOf(line: ApprovedSignInLine): SignInGrant {
   return {
     id: grantIdOf(line.planId, line.line),
     source: 'plan',

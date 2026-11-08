@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
 import { type McpInventoryServer, mcpProjectSubject } from '../../../contract/index.ts';
 import should from 'should';
-import { McpInventoryRefusal, McpInventoryService, mcpInventoryFolders } from '../../../daemon/lib/inventory/index.ts';
+import { McpInventoryRefusal, McpInventoryService } from '../../../daemon/lib/inventory/service.ts';
+import { mcpInventoryFolders } from '../../../daemon/lib/inventory/folders.ts';
 import {
   BROKEN,
   CLAUDE_HOME,

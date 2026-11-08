@@ -14,7 +14,7 @@ import { type SurfaceControlView, SurfaceControlViewSchema } from '../protocol/s
 /** The longest a `terminal wait` may wait in all; the daemon is asked in slices it can hold open. */
 export const TERMINAL_MAX_TOTAL_WAIT_MS = 120_000;
 
-export const ROUTES = {
+const ROUTES = {
   tools: 'POST /v1/ferrets/:ferretId/surfaces/terminals/tools',
   controlView: 'GET /v1/ferrets/:ferretId/surfaces/terminals/control',
   control: 'POST /v1/ferrets/:ferretId/surfaces/terminals/control',
@@ -37,7 +37,7 @@ export interface ToolCaller {
 const callsTools = (client: PluginClient): client is PluginClient & ToolCaller =>
   typeof (client as Partial<ToolCaller>).tool === 'function';
 
-export class TerminalToolsError extends Error {
+class TerminalToolsError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'TerminalToolsError';
@@ -68,7 +68,7 @@ const ToolAnswerSchema = z.looseObject({
 });
 
 /** One answer, as a report the verbs can render, read from either a `ToolResult` or a bare report. */
-export function readAnswer(answer: unknown): { readonly report: ToolReport; readonly isError: boolean } {
+function readAnswer(answer: unknown): { readonly report: ToolReport; readonly isError: boolean } {
   const kernel = ToolAnswerSchema.safeParse(answer);
   if (kernel.success) {
     const data = ToolReportSchema.safeParse(kernel.data.data);
