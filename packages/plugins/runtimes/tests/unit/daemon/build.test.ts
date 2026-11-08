@@ -11,6 +11,7 @@ import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import type { DaemonImplementation } from '@ferretry/kernel/manifest';
 import { type DrivenClock, fixedClock, type TestHost, testHost } from '@ferretry/kernel/testing';
+import type { Instant } from '@ferretry/std';
 import should from 'should';
 import {
   type CatalogInstallChange,
@@ -22,8 +23,8 @@ import {
 import { runtimesConformance } from '../../../contract/testing/index.ts';
 import { type RuntimesAssembly, runtimesDaemon } from '../../../daemon/index.ts';
 import { UNAVAILABLE } from '../../../daemon/lib/service/assembly.ts';
-import type { LoginView } from '@ferretry/plugin-logins/contract';
-import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import { LoginChanged, type LoginView } from '@ferretry/plugin-logins/contract';
+import { type FakeLogins, fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import manifest from '../../../manifest.ts';
 
 const login = sampleLogin;
@@ -40,6 +41,7 @@ interface Built {
   readonly host: TestHost;
   readonly ferrets: FakeFerrets;
   readonly installs: CatalogInstallChange[];
+  readonly logins: FakeLogins;
 }
 
 async function build(
@@ -52,7 +54,7 @@ async function build(
 ): Promise<Built> {
   const ferrets = new FakeFerrets();
   const installs: CatalogInstallChange[] = [];
-  const logins = options.logins ?? [login('claude-you'), login('codex-work', { harness: 'codex' })];
+  const logins = fakeLogins(options.logins ?? [login('claude-you'), login('codex-work', { harness: 'codex' })]);
   const assembly = (): RuntimesAssembly => ({
     catalog: {
       installCatalogItem: async (change: CatalogInstallChange) => {
@@ -81,12 +83,12 @@ async function build(
   ) as DaemonImplementation<any>;
   const host = await testHost({
     plugins: [daemon],
-    fakes: { ferrets, logins: fakeLogins(logins), loginChanges: fakeLoginChanges() },
+    fakes: { ferrets, logins, loginChanges: fakeLoginChanges() },
     gate: new StandInAdmission(() => ownerStanding()),
     config: options.config ?? FILES,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
   });
-  return { host, ferrets, installs };
+  return { host, ferrets, installs, logins };
 }
 
 describe('the runtimes daemon', () => {
@@ -308,5 +310,113 @@ describe('the runtimes daemon', () => {
     should(changed()).deepEqual([
       { event: RuntimesChanged.name, payload: { runtimes: ['codex-work'], profiles: [], modelSets: [] } },
     ]);
+  });
+
+  /** Every `runtimes.changed` published after the mark, so a test reads only what its act caused. */
+  const changesSince = (host: TestHost) => {
+    const before = host.published.length;
+    return () => host.published.slice(before).filter(entry => entry.event === RuntimesChanged.name);
+  };
+  const offUntil = (until: string) => ({ disabled: { reason: 'cooling off', until } });
+  const loginOffUntil = (until: string) => ({
+    disabled: { reason: 'cooling off', until: until as Instant, source: 'login' as const },
+  });
+  /** The timer is set after an async read (the logins): a real turn of the event loop lets it land. */
+  const quiet = async (host: TestHost) => {
+    await host.settle();
+    await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const named = (...runtimes: string[]) => [
+    { event: RuntimesChanged.name, payload: { runtimes, profiles: [], modelSets: [] } },
+  ];
+
+  it('should wake the views for every runtime on a login switched off until a time, at that instant', async () => {
+    // Arrange: the login codex-work is off until 09:30; the clock reads 09:00.
+    const clock = fixedClock('2026-11-08T09:00:00.000Z');
+    const { host } = await build({
+      clock,
+      logins: [
+        login('claude-you'),
+        login('codex-work', { harness: 'codex', ...loginOffUntil('2026-11-08T09:30:00Z') }),
+      ],
+    });
+    await quiet(host);
+    const changed = changesSince(host);
+
+    // Act
+    await clock.advance(29 * 60_000);
+    should(changed()).deepEqual([]);
+    await clock.advance(60_000);
+    await quiet(host);
+
+    // Assert
+    should(changed()).deepEqual(named('codex-work'));
+  });
+
+  it('should move the timer when a runtime file changes its until', async () => {
+    // Arrange: codex-work is off until 09:30, then the owner moves it to 09:10.
+    const clock = fixedClock('2026-11-08T09:00:00.000Z');
+    const runtimesWith = (until: string) => ({
+      ...FILES.runtimes,
+      'codex-work': { ...FILES.runtimes['codex-work'], ...offUntil(until) },
+    });
+    const { host } = await build({ clock, config: { ...FILES, runtimes: runtimesWith('2026-11-08T09:30:00Z') } });
+    await quiet(host);
+    host.setConfig('runtimes', runtimesWith('2026-11-08T09:10:00Z'));
+    await quiet(host);
+    const changed = changesSince(host);
+
+    // Act
+    await clock.advance(10 * 60_000);
+    await quiet(host);
+
+    // Assert: it came back at 09:10, and 09:30 brings nothing more.
+    should(changed()).deepEqual(named('codex-work'));
+    await clock.advance(20 * 60_000);
+    await quiet(host);
+    should(changed()).deepEqual(named('codex-work'));
+  });
+
+  it('should set the timer again when Logins says a login changed', async () => {
+    // Arrange: nothing is off at start; then the login codex-work is switched off until 09:30.
+    const clock = fixedClock('2026-11-08T09:00:00.000Z');
+    const { host, logins } = await build({ clock });
+    await quiet(host);
+    logins.setLogins([
+      login('claude-you'),
+      login('codex-work', { harness: 'codex', ...loginOffUntil('2026-11-08T09:30:00Z') }),
+    ]);
+    host.emit(LoginChanged, { loginId: 'codex-work' as LoginView['id'], change: 'disabled' });
+    await quiet(host);
+    const changed = changesSince(host);
+
+    // Act
+    await clock.advance(30 * 60_000);
+    await quiet(host);
+
+    // Assert
+    should(changed()).deepEqual(named('codex-work'));
+  });
+
+  it('should publish nothing once the daemon stops, and set no timer for a file change after it', async () => {
+    // Arrange: codex-work is off until 09:30.
+    const clock = fixedClock('2026-11-08T09:00:00.000Z');
+    const runtimesWith = (until: string) => ({
+      ...FILES.runtimes,
+      'codex-work': { ...FILES.runtimes['codex-work'], ...offUntil(until) },
+    });
+    const { host } = await build({ clock, config: { ...FILES, runtimes: runtimesWith('2026-11-08T09:30:00Z') } });
+    await quiet(host);
+
+    // Act: stop; a file change still arrives during shutdown (moving the until to 09:20); then the hour passes.
+    await host.stop();
+    host.setConfig('runtimes', runtimesWith('2026-11-08T09:20:00Z'));
+    await quiet(host);
+    const changed = changesSince(host);
+    await clock.advance(60 * 60_000);
+    await quiet(host);
+
+    // Assert: no timer survived the stop, and the late change set none.
+    should(changed()).deepEqual([]);
   });
 });

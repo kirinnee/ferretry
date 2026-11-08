@@ -1,5 +1,5 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
-import { LoginChangesPort, LoginsPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
+import { LoginChanged, LoginChangesPort, LoginsPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
 import { UsagePort } from '@ferretry/plugin-usage/contract';
 import {
   AutoResumeDecide,
@@ -243,7 +243,8 @@ export default definePlugin({
     readModels: RUNTIMES_READ_MODELS,
     publishes: [RuntimesChanged, RuntimesDefaultChanged, RuntimesLaunchFailed],
     // An ended Codex ferret's runtime has its app-server pair stopped, and a Codex that could not start offline says so.
-    subscribes: [FerretsChanged],
+    // A login switched off or on moves the disable-until timer (docs/disabling.md).
+    subscribes: [FerretsChanged, LoginChanged],
     // `items` stays empty: it lists items this package SHIPS. Runtimes are items the owner (or a catalog) installs.
   },
 

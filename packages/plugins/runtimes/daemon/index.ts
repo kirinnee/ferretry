@@ -42,7 +42,7 @@ import manifest from '../manifest.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
 import { autoResumeAnswer } from './lib/service/auto-resume-answer.ts';
-import { DisableExpiryWatch, earliestUntil, expiredBetween } from './lib/service/disable-expiry.ts';
+import { DisableExpiryWatch, earliestExpiry, runtimesBackOn } from './lib/service/disable-expiry.ts';
 import { loginUsers } from './lib/service/login-users.ts';
 import { createRuntimesApi } from './lib/service/runtimes-api.ts';
 import { RuntimeEndSupervision, type RuntimeEndSeams } from './lib/service/runtime-end-supervision.ts';
@@ -168,24 +168,30 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
         );
       });
 
-      // A runtime switched off `until` a time reads as on once that time passes (the port judges the block at now), so
-      // the views are told AT that instant rather than at their next read (docs/disabling.md). One timer, for the
-      // earliest `until` ahead, set again whenever a runtime file moves.
+      // A runtime, or the login it runs on, switched off `until` a time reads as on once that time passes (the port
+      // judges both blocks at now), so the views are told AT that instant rather than at their next read
+      // (docs/disabling.md). One timer, for the earliest `until` ahead among the runtime files and the logins (read
+      // through the Logins port), set again whenever a runtime file moves or Logins says a login changed.
+      const loginBlocks = async () =>
+        new Map((await ctx.needs.logins.list()).logins.map(view => [view.id as string, view]));
       let expiredUpTo = clock.nowMs();
       const expiry = new DisableExpiryWatch({
-        next: async () => earliestUntil(config.collection(runtimeItems), clock.nowMs()),
+        next: async () => earliestExpiry(config.collection(runtimeItems), await loginBlocks(), clock.nowMs()),
         now: () => clock.nowMs(),
         republish: async () => {
           const now = clock.nowMs();
-          const back = expiredBetween(config.collection(runtimeItems), expiredUpTo, now);
+          const back = runtimesBackOn(config.collection(runtimeItems), await loginBlocks(), expiredUpTo, now);
           expiredUpTo = now;
           if (back.length > 0) events.publish(RuntimesChanged, { runtimes: [...back], profiles: [], modelSets: [] });
         },
         setTimer: (run, ms) => clock.after(milliseconds(ms), run),
       });
       void expiry.rearm();
-      config.watch(RUNTIME_ITEMS, () => void expiry.rearm());
-      ctx.kernel.lifecycle.onStop(() => expiry.stop());
+      const unwatchExpiry = config.watch(RUNTIME_ITEMS, () => void expiry.rearm());
+      ctx.kernel.lifecycle.onStop(() => {
+        unwatchExpiry();
+        expiry.stop();
+      });
 
       // Ferrets never calls a plugin (§2.1): Runtimes hears that a ferret stopped and looks after its own runtime.
       const ending = new RuntimeEndSupervision({
@@ -210,7 +216,11 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
             resolve: async id => await api.resolve(id),
           }),
         },
-        subscribers: { 'ferrets.changed': async change => await ending.onChanged(change) },
+        subscribers: {
+          'ferrets.changed': async change => await ending.onChanged(change),
+          // A login switched off or on, or its `until` moved: the expiry timer reads the logins again.
+          'logins.changed': async () => await expiry.rearm(),
+        },
       };
     },
   });
