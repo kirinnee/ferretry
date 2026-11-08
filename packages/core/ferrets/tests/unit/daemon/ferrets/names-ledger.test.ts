@@ -12,17 +12,20 @@ import { as, host } from './route-fixture.ts';
  */
 
 let sequence = 0;
-const start = async (h: TestHost, body: Record<string, unknown>) =>
-  await h.request('POST', '/v1/ferrets', {
-    headers: { 'x-fy-request-id': `names-${(sequence += 1)}` },
+const start = async (h: TestHost, body: Record<string, unknown>) => {
+  sequence += 1;
+  return await h.request('POST', '/v1/ferrets', {
+    headers: { 'x-fy-request-id': `names-${sequence}` },
     body: { folder: '/work/a', ...body },
   });
+};
 const fresh = async () => await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
 /** Starts a ferret answering to `name` and gives its server-minted id. */
 const running = async (h: TestHost, name: string) => (await start(h, { name })).json<{ id: string }>().id;
-const ledger = (h: TestHost) => JSON.parse(h.state('ferrets').raw(NamesFile) ?? '{"claims":[]}') as {
-  claims: { callsign: string; ownerId: string }[];
-};
+const ledger = (h: TestHost) =>
+  JSON.parse(h.state('ferrets').raw(NamesFile) ?? '{"claims":[]}') as {
+    claims: { callsign: string; ownerId: string }[];
+  };
 
 describe('the start takes its name through the ledger (F-0232)', () => {
   test('a requested name is claimed on names.json for the new ferret and a second start for it is refused', async () => {
