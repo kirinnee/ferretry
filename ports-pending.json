@@ -29,7 +29,6 @@
   "pendingReasons": {
     "runtimes": [
       "GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) is not ported into Runtimes; Add runtime and a runtime that needs sign-in link to Logins' tab until Logins' app half draws it",
-      "GAP(kernel): Edit as YAML on a profile is not offered, because the kernel's /v1/config/file is not declared yet (renderFileEditor is never supplied)",
       "GAP(kernel): Runtimes hears ferrets.changed and runs afterSessionEnded / codexLaunchFailure for an ended Codex ferret, but the host offers no process port (list, read, signal) or dead-pane read, so RuntimesAssembly.ended stays unwired and an ended Codex session still leaves its app-server pair running (the supervisor that stops that pair waits here: daemon/lib/service/codex-runtime.ts)",
       "GAP(kernel): plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host: fileFleetCatalogDeps and fileFleetSetupDeps wait for it, in daemon/adapters/account-model-files.ts and daemon/adapters/setup-files.ts, beside daemon/adapters/manifest-file.ts, daemon/adapters/runtime-ids-file.ts, daemon/adapters/file-provisioner.ts and daemon/adapters/ports.ts",
       "GAP(kernel): the fleet publication gate (S67: an apply publishes exclusively, a read waits) has no apply to guard until the config write port exists, so its seam stays unplugged: daemon/lib/service/publication.ts",

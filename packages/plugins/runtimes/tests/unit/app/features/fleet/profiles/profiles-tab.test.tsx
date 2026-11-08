@@ -429,7 +429,7 @@ describe('ProfilesTab — the profile page', () => {
     expect(text(root, '[data-profile-item="mcp/unknown"]')).toContain('MCPunknown');
   });
 
-  it('names the profile’s file, and offers no Edit as YAML while the kernel has no config file route', async () => {
+  it('names the profile’s file, and offers no Edit as YAML when its host supplies no file editor', async () => {
     const machine = scriptedMachine({ preview: defaultPreview() });
     const root = await open(machine);
     await click(root, '[data-profile-row="Default"]');
@@ -437,8 +437,6 @@ describe('ProfilesTab — the profile page', () => {
     expect(root.querySelector('[data-profile-yaml]')).toBeNull();
     expect(machine.calls.some(call => call.route.includes('/v1/config/file'))).toBe(false);
   });
-
-  it.skip('opens the profile’s file as YAML and reads the catalogue again after an edit there … pending port: kernel /v1/config/file', () => {});
 });
 
 describe('ProfilesTab — a new profile', () => {
