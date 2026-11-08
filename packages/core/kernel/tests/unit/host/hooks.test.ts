@@ -153,6 +153,87 @@ describe('the hooks engine (§3.5)', () => {
     expect((await engine.decide(Decide, undefined)).allow).toBe(false);
   });
 
+  test('G12 decideAnswered: the same decision as decide, and each live taker reached with how it answered', async () => {
+    const deadline = manualDeadline();
+    const high = plugin('p2', { takes: [{ hook: Decide, priority: 90 }] });
+    const low = plugin('p1', { takes: [{ hook: Decide, priority: 10 }] });
+    const skeleton = plugin('p3', { takes: [{ hook: Decide, priority: 50 }] });
+    const { engine } = HookEngine.plan([offerer, high, low, skeleton], silentLog, deadline);
+    const invoker = engine.invokerFor('gate');
+    engine.attach('p3', undefined, 'skeleton');
+    const answerWith = (p1: unknown, p2: unknown = { allow: true }) => {
+      engine.attach('p2', { 't.decide': () => p2 as never }, 'live');
+      engine.attach('p1', { 't.decide': () => p1 as never }, 'live');
+    };
+
+    // Both say yes: both listed in the order asked; the skeleton taker is not listed.
+    answerWith({ allow: true });
+    expect(await invoker.decideAnswered(Decide, undefined)).toEqual({
+      decision: { allow: true },
+      answers: [
+        { plugin: 'p2', outcome: 'allowed' },
+        { plugin: 'p1', outcome: 'allowed' },
+      ],
+    });
+    // Its own no is `refused`; garbage is `unanswered` with the fixed sentence.
+    answerWith({ allow: false, reason: 'p1 says no', code: 'c' });
+    expect(await invoker.decideAnswered(Decide, undefined)).toEqual({
+      decision: { allow: false, reason: 'p1 says no', code: 'c' },
+      answers: [
+        { plugin: 'p2', outcome: 'allowed' },
+        { plugin: 'p1', outcome: 'refused' },
+      ],
+    });
+    for (const garbage of [{ allow: 'yes' }, {}, undefined, null, 'allow']) {
+      answerWith(garbage);
+      const answer = await invoker.decideAnswered(Decide, undefined);
+      expect(answer.decision).toEqual({ allow: false, reason: 'p1 refused.' });
+      expect(answer.answers.at(-1)).toEqual({ plugin: 'p1', outcome: 'unanswered' });
+      expect(await invoker.decide(Decide, undefined)).toEqual(answer.decision);
+    }
+    // An earlier no: the later taker is never reached, so it is not listed.
+    answerWith({ allow: true }, { allow: false, reason: 'p2 says no' });
+    expect((await invoker.decideAnswered(Decide, undefined)).answers).toEqual([{ plugin: 'p2', outcome: 'refused' }]);
+    // A throw, a timeout and a failed taker are `unanswered`.
+    answerWith(undefined);
+    engine.attach(
+      'p1',
+      {
+        't.decide': () => {
+          throw new Error('x');
+        },
+      },
+      'live',
+    );
+    expect((await invoker.decideAnswered(Decide, undefined)).answers.at(-1)).toEqual({
+      plugin: 'p1',
+      outcome: 'unanswered',
+    });
+    engine.attach('p1', { 't.decide': () => new Promise(() => {}) }, 'live');
+    const waiting = invoker.decideAnswered(Decide, undefined);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    deadline.fire();
+    expect(await waiting).toEqual({
+      decision: { allow: false, reason: 'p1 did not answer in time.' },
+      answers: [
+        { plugin: 'p2', outcome: 'allowed' },
+        { plugin: 'p1', outcome: 'unanswered' },
+      ],
+    });
+    engine.markFailed('p1');
+    expect((await invoker.decideAnswered(Decide, undefined)).answers.at(-1)).toEqual({
+      plugin: 'p1',
+      outcome: 'unanswered',
+    });
+    // Nobody takes it: allow, and nobody is listed (why an offerer that needs a named taker's yes asks this).
+    const { engine: empty } = HookEngine.plan([offerer], silentLog, manualDeadline());
+    expect(await empty.invokerFor('gate').decideAnswered(Decide, undefined)).toEqual({
+      decision: { allow: true },
+      answers: [],
+    });
+    await expect(engine.invokerFor('p1').decideAnswered(Decide, undefined)).rejects.toThrow();
+  });
+
   test('decide: a skeleton taker is a no-op', async () => {
     const taker = plugin('p1', { takes: [{ hook: Decide }] });
     const { engine } = HookEngine.plan([offerer, taker], silentLog, manualDeadline());

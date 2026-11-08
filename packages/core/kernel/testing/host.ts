@@ -30,6 +30,8 @@ import type {
   ConfigCollectionDef,
   ConfigFileDef,
   Contribution,
+  DecideAnswer,
+  DecideTakerAnswer,
   EventDef,
   HookDecision,
   PortToken,
@@ -428,6 +430,50 @@ async function start(world: World): Promise<TestHost> {
           setTimeout(() => reject(new Error('hook timed out')), ms);
         }),
       ]);
+    /** The real host's decide walk (`host/hooks.ts` `decideAnswered`): the first no wins; each taker reached is listed. */
+    const decideAnswered = async (
+      hook: { readonly name: string; readonly timeoutMs: number },
+      input: unknown,
+    ): Promise<DecideAnswer> => {
+      own(hook.name);
+      const answers: DecideTakerAnswer[] = [];
+      for (const taker of hookTakers(hook.name)) {
+        if (typeof taker.impl !== 'function') continue; // a skeleton take is a no-op
+        try {
+          const answer = (await timed((taker.impl as (i: unknown) => unknown)(input), hook.timeoutMs)) as {
+            readonly allow?: unknown;
+            readonly reason?: unknown;
+            readonly code?: unknown;
+          } | null;
+          // The real host's rule (`host/hooks.ts` decide), exactly: anything but an object with `allow: true` is a
+          // refusal; a string `reason` is kept, else the plugin "refused"; a string `code` passes through, any other
+          // type is dropped. Only an `allow: false` is the taker's own no; anything else is unanswered.
+          if (answer === null || typeof answer !== 'object' || answer.allow !== true) {
+            const refusal = answer !== null && typeof answer === 'object' && answer.allow === false;
+            const reason = refusal && typeof answer.reason === 'string' ? answer.reason : `${taker.id} refused.`;
+            answers.push({ plugin: taker.id, outcome: refusal ? 'refused' : 'unanswered' });
+            return {
+              decision:
+                refusal && typeof answer.code === 'string'
+                  ? { allow: false, reason, code: answer.code }
+                  : { allow: false, reason },
+              answers,
+            };
+          }
+          answers.push({ plugin: taker.id, outcome: 'allowed' });
+        } catch (error) {
+          answers.push({ plugin: taker.id, outcome: 'unanswered' });
+          return {
+            decision: {
+              allow: false,
+              reason: `${taker.id}: ${error instanceof Error ? error.message : String(error)}`,
+            },
+            answers,
+          };
+        }
+      }
+      return { decision: { allow: true }, answers };
+    };
     return {
       observe(hook, payload) {
         own(hook.name);
@@ -436,31 +482,9 @@ async function start(world: World): Promise<TestHost> {
             track(Promise.resolve().then(() => (taker.impl as (p: unknown) => unknown)(payload)));
       },
       async decide(hook, input): Promise<HookDecision> {
-        own(hook.name);
-        for (const taker of hookTakers(hook.name)) {
-          if (typeof taker.impl !== 'function') continue; // a skeleton take is a no-op
-          try {
-            const answer = (await timed((taker.impl as (i: unknown) => unknown)(input), hook.timeoutMs)) as {
-              readonly allow?: unknown;
-              readonly reason?: unknown;
-              readonly code?: unknown;
-            } | null;
-            // The real host's rule (`host/hooks.ts` decide), exactly: anything but an object with `allow: true` is a
-            // refusal; a string `reason` is kept, else the plugin "refused"; a string `code` passes through, any other
-            // type is dropped.
-            if (answer === null || typeof answer !== 'object' || answer.allow !== true) {
-              const refusal = answer !== null && typeof answer === 'object' && answer.allow === false;
-              const reason = refusal && typeof answer.reason === 'string' ? answer.reason : `${taker.id} refused.`;
-              return refusal && typeof answer.code === 'string'
-                ? { allow: false, reason, code: answer.code }
-                : { allow: false, reason };
-            }
-          } catch (error) {
-            return { allow: false, reason: `${taker.id}: ${error instanceof Error ? error.message : String(error)}` };
-          }
-        }
-        return { allow: true };
+        return (await decideAnswered(hook, input)).decision;
       },
+      decideAnswered,
       async transform(hook, value) {
         own(hook.name);
         let current = value;
