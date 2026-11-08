@@ -14,6 +14,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { connector, type DirectDial, pairOverCarriers, pairOverDirect } from './connect/connector.ts';
 import { directoryFetch } from './connect/directory.ts';
+import { setMemberCarriers } from './connect/member.ts';
 import { registeredConnect, registeredDaemonless, registeredPasskey } from './connect/provides.ts';
 import { DaemonList } from './daemons/daemon-list.ts';
 import { generated } from './generated/surfaces.ts';
@@ -97,11 +98,10 @@ const registered = registeredConnect(generated.surfaces, {
   openSocket,
   ...(directory === undefined ? {} : { directory }),
 });
-// Daemon-less screens (a pairing link's page): the same session and pairing ports, and no daemon client.
-const daemonless = registeredDaemonless(generated.surfaces, sessionPorts);
+setMemberCarriers(registered.member); // only this composition may install them: the barrel has no setter
+const daemonless = registeredDaemonless(generated.surfaces, sessionPorts); // pairing ports only, no daemon client
 for (const failure of [...registered.failures, ...daemonless.failures])
   console.warn(`${failure.plugin} could not set up its connect part: ${failure.reason}`);
-
 // The one passkey prompt (Access's): its ceremony rides Access's own guarded client, read from the runtime per call.
 const passkey = registeredPasskey(generated.surfaces, {
   clientOf: (daemon, plugin) => runtime.packageClient(daemon, plugin),
