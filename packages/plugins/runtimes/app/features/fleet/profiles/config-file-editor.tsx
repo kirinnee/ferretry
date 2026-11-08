@@ -36,9 +36,9 @@ import { BottomSheet, Button } from '../../../ui.ts';
 import type { FileEditorProps } from './profile-editor.tsx';
 
 /** The command that stores a key, and the reference a file names it by — each shown as code. */
-export const CONFIG_SECRET_COMMAND = 'fy secret set NAME';
+const CONFIG_SECRET_COMMAND = 'fy secret set NAME';
 // biome-ignore lint/suspicious/noTemplateCurlyInString: the reference grammar, written out for a person to type
-export const CONFIG_SECRET_REFERENCE = '${secret:NAME}';
+const CONFIG_SECRET_REFERENCE = '${secret:NAME}';
 
 export const CONFLICT_SENTENCE =
   'This file changed on the machine since you opened it, so nothing was saved. Reload to edit the newer version.';
