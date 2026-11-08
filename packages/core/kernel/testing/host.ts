@@ -8,6 +8,7 @@ import type { ContractSurface, HostFactsPort, UpdateHostPort } from '../contract
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
 import { gatedPaths, gatedWhich } from '../host/paths.ts';
 import { whichCommand } from '../host/which.ts';
+import { NO_PROCESS_TABLE, type ProcessTable, processesPortFor } from '../host/processes.ts';
 import { undeclaredUpdateHost } from '../host/adapters/update-host.ts';
 import { PRODUCT_BINARIES } from '../host/binaries.ts';
 import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
@@ -153,6 +154,11 @@ export interface TestHostOptions {
   readonly secrets?: readonly string[];
   /** What `kernel.hostFacts` answers to a plugin that declared `permissions.hostFacts`. Absent: every read refuses. */
   readonly hostFacts?: HostFactsPort;
+  /**
+   * The process table `kernel.processes` asks for a plugin that declared `permissions.processes` (`testProcessTable`).
+   * Absent: nothing is listed or signalled. The rule over it is the real host's (`host/processes.ts`).
+   */
+  readonly processes?: ProcessTable;
   /** What `kernel.updateHost` answers to a plugin that declared `permissions.updateHost`. */
   readonly updateHost?: UpdateHostPort;
   /** What `kernel.timings` answers. Default: the shipped numbers (`DEFAULT_DAEMON_TIMINGS`). */
@@ -826,6 +832,28 @@ async function start(world: World): Promise<TestHost> {
   /** The test roots' stand-in inodes, so `fileIdentity` can tell two publishes of one name apart. */
   const inodes = new Map<string, bigint>();
   let nextInode = 0n;
+  /** Every test root handle made, with its plugin and its scope's prefix (`kernel.processes`' own-root check). */
+  const testHandles = new WeakMap<object, { readonly plugin: string; readonly prefix: string }>();
+  /**
+   * The test world's own-root check: a folder of a handle made for `plugin`, inside its scope, that exists (a file is
+   * beneath it). The world has no links, so its one spelling is the path itself.
+   */
+  const testFolderSpellings = async (
+    plugin: string,
+    folder: { readonly root: RootHandle; readonly path: string },
+  ): Promise<readonly string[] | undefined> => {
+    const known = testHandles.get(folder.root);
+    if (known === undefined || known.plugin !== plugin) return undefined;
+    const path = folder.path;
+    if (
+      typeof path !== 'string' ||
+      path.split('/').includes('..') ||
+      (path !== known.prefix && !path.startsWith(`${known.prefix}/`))
+    )
+      throw new Error(`${path} is outside the root`);
+    if (![...world.roots.keys()].some(key => key.startsWith(`${path}/`))) throw new Error(`no such folder ${path}`);
+    return [path];
+  };
   const rootsFor = (manifest: Manifest): KernelPorts['roots'] => ({
     root(name, scope) {
       if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name))
@@ -935,6 +963,7 @@ async function start(world: World): Promise<TestHost> {
           return Object.freeze({ ...held, fenced: async (rels: readonly string[]) => rels.map(() => false) });
         },
       };
+      if (prefix !== undefined) testHandles.set(handle, { plugin: manifest.id, prefix });
       return handle;
     },
   });
@@ -1103,6 +1132,12 @@ async function start(world: World): Promise<TestHost> {
         manifest.permissions?.hostFacts === true && options.hostFacts !== undefined
           ? options.hostFacts
           : undeclaredHostFacts(manifest.id, options.hostFacts ?? NO_HOST_FACTS),
+      processes: processesPortFor(
+        manifest.id,
+        manifest.permissions?.processes,
+        testFolderSpellings,
+        options.processes ?? NO_PROCESS_TABLE,
+      ),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
       // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in
       secrets: ownSecretsPort(

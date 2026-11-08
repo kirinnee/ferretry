@@ -1522,19 +1522,20 @@ fy plugin check <path>               runs the data-plugin checks without install
 
 ### 3.7 Isolation: what a plugin may touch
 
-| Thing            | Rule                                                                                                              | Enforced by                                                                         |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Other subsystems | only through contracts and the ports it declared; no lookup by name                                               | package exports + `context-imports` check                                           |
-| Its own state    | `state/<id>/` through the `state` port; nobody else's folder                                                      | kernel `state` port; `roots` check                                                  |
-| Other folders    | only its declared `roots`, through the `roots` port, fenced (§7.7)                                                | kernel `roots` port, `banned-globals` check (no `fs`, `os.homedir`, `process.env`)  |
-| Network          | only its declared hosts, through `kernel.fetch`                                                                   | `banned-globals` (no `fetch`, sockets)                                              |
-| Processes        | only its declared programs, through `kernel.spawn` (inside a ferret's limits when it acts for one)                | `banned-globals` (no `Bun.spawn`)                                                   |
-| Commands on PATH | only with `permissions.which`, through `kernel.paths.which`: a bounded lookup that never executes (§7.7)          | `gatedWhich` (refused by name without it); `banned-globals` keeps `process.env` out |
-| Secret values    | by name only, through the Vault's `run` and `authorizeFetch`; never a value                                       | Vault port has no getter                                                            |
-| Output           | every route and frame through the Gate and the final check; reads of pane or page text through `Redaction` (§7.3) | descriptor `guard`; `plugin-graph` check                                            |
-| Tool acts        | only through `kernel.act(target, op, fn)`, which asks the holds per operation and actor (§4.7)                    | act runner type; tool conformance suite                                             |
-| Hooks            | only declared hooks; bounded time                                                                                 | hooks engine                                                                        |
-| Data plugins     | run nothing; their items are inert until installed into a ferret's launch                                         | loader (no code path)                                                               |
+| Thing            | Rule                                                                                                                                                     | Enforced by                                                                                         |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Other subsystems | only through contracts and the ports it declared; no lookup by name                                                                                      | package exports + `context-imports` check                                                           |
+| Its own state    | `state/<id>/` through the `state` port; nobody else's folder                                                                                             | kernel `state` port; `roots` check                                                                  |
+| Other folders    | only its declared `roots`, through the `roots` port, fenced (§7.7)                                                                                       | kernel `roots` port, `banned-globals` check (no `fs`, `os.homedir`, `process.env`)                  |
+| Network          | only its declared hosts, through `kernel.fetch`                                                                                                          | `banned-globals` (no `fetch`, sockets)                                                              |
+| Processes        | only its declared programs, through `kernel.spawn` (inside a ferret's limits when it acts for one)                                                       | `banned-globals` (no `Bun.spawn`)                                                                   |
+| Commands on PATH | only with `permissions.which`, through `kernel.paths.which`: a bounded lookup that never executes (§7.7)                                                 | `gatedWhich` (refused by name without it); `banned-globals` keeps `process.env` out                 |
+| Other processes  | only with `permissions.processes`, through `kernel.processes`: pids and yes/no answers, SIGTERM to a process running from the plugin's own folder (§7.7) | `processesPortFor` (refused by name without it); no member returns a command line or an environment |
+| Secret values    | by name only, through the Vault's `run` and `authorizeFetch`; never a value                                                                              | Vault port has no getter                                                                            |
+| Output           | every route and frame through the Gate and the final check; reads of pane or page text through `Redaction` (§7.3)                                        | descriptor `guard`; `plugin-graph` check                                                            |
+| Tool acts        | only through `kernel.act(target, op, fn)`, which asks the holds per operation and actor (§4.7)                                                           | act runner type; tool conformance suite                                                             |
+| Hooks            | only declared hooks; bounded time                                                                                                                        | hooks engine                                                                                        |
+| Data plugins     | run nothing; their items are inert until installed into a ferret's launch                                                                                | loader (no code path)                                                                               |
 
 ### 3.8 Packaging
 
@@ -2525,6 +2526,15 @@ scoped handle:
   (`permissions.which`): one plain command name, the caller's absolute folders then the daemon's `PATH`, empty and
   relative entries dropped, at most 64 folders, the first regular executable file wins. No shell, nothing executed;
   the answer is a path or absent, never the `PATH`.
+- A plugin that must stop what a child it started left behind (Runtimes: an ended Codex ferret's app-server pair)
+  asks `kernel.processes` (`permissions.processes`, listing by exact name the environment variables it may match).
+  Today's Codex stopper's rules, held by the kernel: `usersOf(variable, folder)` answers the pids of this user's
+  processes whose environment holds exactly `variable=<the folder's real path>`, the folder being one of the plugin's
+  OWN root handles (never free text, so no guessing oracle); `runsFrom(pid, folder)` answers yes/no; `terminate` sends
+  SIGTERM, and only SIGTERM, after reading the command line again and finding it still starts with the folder's path
+  plus `/`. Never pid 0 or 1, the daemon or its ancestors, never another uid; `environ` and `cmdline` are read by the
+  kernel (`/proc`, or an absolute `ps` run with an empty environment) and never returned. A pid reused between that
+  check and the signal is the declared residual (no pidfd binding in Bun).
 - An owner's root refuses everything inside **the fence**: the live `FY_HOME`, every `<FY_HOME>-before-*` folder and
   every `state/<id>-before-*` folder (§9.3), for every caller including the owner's own `fy` imports. An internal
   root reaches its own subtree only.
