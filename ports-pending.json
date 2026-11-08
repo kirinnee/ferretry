@@ -17,6 +17,7 @@
     "layouts",
     "runtimes",
     "onboarding",
+    "terminals",
     "usage",
     "board",
     "access",
@@ -201,6 +202,9 @@
     ],
     "layouts": [
       "the Layout tab edits the wide layout only: the `phone.*` keys (`fy layout set phone.nav.side bottom`) have no row in either scope"
+    ],
+    "terminals": [
+      "GAP(kernel): an armed launch guard cannot judge a launch whose environment handle sets PATH (every ferret with a Shells launch part), because the PATH value is opened only inside the kernel adapter at exec time; until the kernel or Vault resolves claude/codex on that PATH and hands Terminals the answer, such a launch is refused 409 real_harness (daemon/adapters/tmux/harness-launch-guard.ts)"
     ],
     "catalogs": [
       "GAP(connections): a publisher this browser is not paired with is unreachable: the shell offers no member transport yet. @ferretry/app declares MemberCarriers (connect/member.ts: the discovered rendezvous address, dial(kind, address) and drive(...) ONLY) and ShellProvides.member, Connections-only and not implemented; with none the join, join-options and member session walks answer unreachable and send nothing, so a share code is never spent. The walk order, deadlines, tunnel record and device key are fixed in @ferretry/app (memberWalk, memberTunnelRequest/Response, DIRECT/RELAY_MEMBER_DEADLINE_MS); Catalogs enforces each deadline itself with its own timer (R2-S1), so a carrier that ignores the value cannot hang a walk. FOR THE CONNECTIONS PORT: implement dial/drive (today's relay-carrier.ts driveRelaySession l.508, browserHeartbeat l.189, browserRelayDial) and port these real-socket tests, which need the real carrier and stay as todo in tests/unit/app/member-transport.test.ts: the carrier's own dial timeout closes a dial that never opens; the relay carrier's heartbeat grace; a rendezvous that closes before accepting is a transport failure; the heartbeat keeps a member session alive; a session that the carrier drops is not live",

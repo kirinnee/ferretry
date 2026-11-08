@@ -274,6 +274,8 @@ async function runSelftest(
     return `! ${firstLine(error)}`;
   } finally {
     cancel?.();
+    // Answered or not, its children end with it: a child the probe started and left running is aborted here too.
+    abort.abort();
     if (tempDir !== undefined) await deps.tempDirs.remove(tempDir).catch(() => {});
   }
 }

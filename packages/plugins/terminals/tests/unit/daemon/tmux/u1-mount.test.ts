@@ -157,6 +157,28 @@ describe('terminals #23 launch guard armed by hostFacts.launchGuard() (U1 mount)
     expect(started).toEqual({ ok: false, error: 'real_harness' });
     expect(launched(calls)).toEqual([]);
   });
+
+  test('terminals #23 launch guard armed refuses on resume too, with no tmux spawn', async () => {
+    // Warden revive, auto-resume and ferrets.resume all reach the runner through `resume`: it is a launch like start.
+    const tmux = freshServer();
+    const { calls, spawn } = recordingSpawn();
+    const half = await terminalsHalf({ tmux, socketPath: SOCKET }, undefined, {
+      hostFacts: guardFacts(true, realBin),
+      spawn,
+    });
+
+    const booted = calls.length;
+
+    const resumed = await half.runner().resume(spec(), 'conv-1');
+
+    expect(resumed).toEqual({ ok: false, error: 'real_harness' });
+    expect(launched(calls)).toEqual([]);
+    expect(calls.slice(booted).filter(call => call.program === 'tmux')).toEqual([]);
+    expect(tmux.calls).toEqual([]);
+    const refusal = half.host.logs.find(entry => entry.level === 'warn' && entry.message.includes('real harness'));
+    expect(refusal?.message).toContain(`claude resolves to ${join(realBin, 'claude')}`);
+    expect(refusal?.fields).toEqual({ ferret: FERRET, harness: 'claude' });
+  });
 });
 
 describe('terminals #23 forget-ferret-identity at boot (U1 mount)', () => {
@@ -179,6 +201,18 @@ describe('terminals #23 forget-ferret-identity at boot (U1 mount)', () => {
     expect(cleared[0]?.fields).toEqual({ count: 3 });
     // No variable NAME reaches the log, let alone a value.
     expect(JSON.stringify(half.host.logs)).not.toContain('FY_SESSION');
+  });
+
+  test('#23 forget-ferret-identity kills each scrub client at its bound, so a wedged server keeps no client past boot', async () => {
+    const { calls, spawn } = recordingSpawn();
+
+    const half = await terminalsHalf({ tmux: freshServer(), socketPath: SOCKET }, undefined, { spawn });
+
+    const scrub = calls.filter(call => scriptOf(call.options).includes('set-environment'));
+    expect(scrub).toHaveLength(3);
+    // The kernel kills the child at this bound; the scrub stops waiting at the same one.
+    expect(scrub.every(call => Number(call.options?.timeout) === 2_000)).toBe(true);
+    expect(half.host.logs.some(entry => entry.message.includes('did not answer the identity scrub'))).toBe(false);
   });
 
   test('#23 forget-ferret-identity with no server running says nothing and never fails boot', async () => {
