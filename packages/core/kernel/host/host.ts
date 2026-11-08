@@ -93,7 +93,8 @@ import { KERNEL_NEEDER, neederOf, ProvidedPerNeeder } from './needer.ts';
 import { guardedToolResult } from './tool-result.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import { noWebSockets } from './adapters/process.ts';
-import { ownSecretsPort } from './secrets.ts';
+import { outboundSecretTransport } from './adapters/outbound-secret.ts';
+import { exactNetworkHosts, ownSecretsPort } from './secrets.ts';
 import { NO_HOST_FACTS } from './no-host-facts.ts';
 import { undeclaredHostFacts } from './adapters/host-facts.ts';
 import { type UpdateHostFiles, undeclaredUpdateHost } from './adapters/update-host.ts';
@@ -722,10 +723,17 @@ async function bootLocked(
         adapters.processTable ?? NO_PROCESS_TABLE,
       ),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
+      // `send` goes through this plugin's OWN guarded fetch, to the exact hosts its manifest names (`./secrets.ts`).
       secrets: ownSecretsPort(
         manifest.permissions?.secrets ?? [],
         () => config.secretReferences?.(manifest.id) ?? new Set<string>(),
         () => bound.secretResolver,
+        {
+          hosts: exactNetworkHosts(declaredNetwork),
+          mayReach: (hostname, host) => hostPermitted(declaredNetwork, items, hostname, resolversOf(manifest.id), host),
+          transport: outboundSecretTransport(fetchPort, clock),
+          log: scopedLog(adapters.logSink, manifest.id),
+        },
       ),
       signer: signerFor(manifest.id, sessionSigner),
       ...(manifest.id === 'gate' && configWriter !== undefined ? { configFiles: configWriter } : {}),
