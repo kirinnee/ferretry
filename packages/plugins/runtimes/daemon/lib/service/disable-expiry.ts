@@ -6,8 +6,10 @@
  * The clock and the timer are injected, so a test drives time by hand.
  */
 
+import { disabledUntilMs } from '../account/disabled.ts';
+
 /** The longest a timer may be set for (a 32-bit signed millisecond count); a later expiry re-arms on the way. */
-export const MAX_TIMER_MS = 2_147_483_647;
+const MAX_TIMER_MS = 2_147_483_647;
 
 export interface DisableExpiryDeps {
   /** The earliest `until` still ahead (ms), or `undefined` when none will fall due. */
@@ -48,4 +50,34 @@ export class DisableExpiryWatch {
     await this.deps.republish().catch(() => undefined);
     await this.rearm();
   }
+}
+
+/** A runtime file's `disabled` block, as much of it as the timer reads. */
+interface DisabledBlockOf {
+  readonly disabled?: { readonly until?: string | undefined } | undefined;
+}
+
+/** The earliest `until` (ms) still ahead of `now` among the files, or `undefined` when none will fall due. */
+export function earliestUntil(files: ReadonlyMap<string, DisabledBlockOf>, now: number): number | undefined {
+  let earliest: number | undefined;
+  for (const file of files.values()) {
+    const until = disabledUntilMs(file.disabled?.until);
+    if (until !== undefined && until > now && (earliest === undefined || until < earliest)) earliest = until;
+  }
+  return earliest;
+}
+
+/** The names whose `until` fell due after `after` and by `upTo` (ms): the switches that just came back on. Sorted. */
+export function expiredBetween(
+  files: ReadonlyMap<string, DisabledBlockOf>,
+  after: number,
+  upTo: number,
+): readonly string[] {
+  return [...files]
+    .filter(([, file]) => {
+      const until = disabledUntilMs(file.disabled?.until);
+      return until !== undefined && until > after && until <= upTo;
+    })
+    .map(([name]) => name)
+    .toSorted((left, right) => left.localeCompare(right));
 }

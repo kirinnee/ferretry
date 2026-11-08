@@ -10,7 +10,7 @@ import { describe, it } from 'bun:test';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import type { DaemonImplementation } from '@ferretry/kernel/manifest';
-import { type TestHost, testHost } from '@ferretry/kernel/testing';
+import { type DrivenClock, fixedClock, type TestHost, testHost } from '@ferretry/kernel/testing';
 import should from 'should';
 import {
   type CatalogInstallChange,
@@ -47,6 +47,7 @@ async function build(
     readonly config?: Record<string, unknown>;
     readonly logins?: readonly LoginView[];
     readonly assembled?: boolean;
+    readonly clock?: DrivenClock;
   } = {},
 ): Promise<Built> {
   const ferrets = new FakeFerrets();
@@ -83,6 +84,7 @@ async function build(
     fakes: { ferrets, logins: fakeLogins(logins), loginChanges: fakeLoginChanges() },
     gate: new StandInAdmission(() => ownerStanding()),
     config: options.config ?? FILES,
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
   });
   return { host, ferrets, installs };
 }
@@ -273,6 +275,38 @@ describe('the runtimes daemon', () => {
     should(installs).deepEqual([change]);
     should(host.published.slice(before)).deepEqual([
       { event: RuntimesChanged.name, payload: { runtimes: [], profiles: ['work'], modelSets: [] } },
+    ]);
+  });
+
+  it('should wake the views at the instant a runtime switched off until a time comes back on (docs/disabling.md)', async () => {
+    // Arrange: codex-work is off until 09:30; the clock reads 09:00.
+    const clock = fixedClock('2026-11-08T09:00:00.000Z');
+    const { host } = await build({
+      clock,
+      config: {
+        ...FILES,
+        runtimes: {
+          ...FILES.runtimes,
+          'codex-work': {
+            ...FILES.runtimes['codex-work'],
+            disabled: { reason: 'cooling off', until: '2026-11-08T09:30:00Z' },
+          },
+        },
+      },
+    });
+    await host.settle();
+    const before = host.published.length;
+    const changed = () => host.published.slice(before).filter(entry => entry.event === RuntimesChanged.name);
+
+    // Act: a minute short, nothing; at 09:30 it is on again and the views hear it.
+    await clock.advance(29 * 60_000);
+    should(changed()).deepEqual([]);
+    await clock.advance(60_000);
+    await host.settle();
+
+    // Assert
+    should(changed()).deepEqual([
+      { event: RuntimesChanged.name, payload: { runtimes: ['codex-work'], profiles: [], modelSets: [] } },
     ]);
   });
 });

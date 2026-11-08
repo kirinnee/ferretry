@@ -95,7 +95,7 @@ export async function skillItemsIn(
  *
  * GAP(kernel): that service is the kernel's config layer; plugins have no config write port.
  *
- * @pending runtimes: plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host
+ * @pending runtimes: the fleet's catalogue and setup cannot be composed over the host
  */
 export function cloneConfigFilesOver(service: ConfigFileService): CloneConfigFiles {
   return {
@@ -121,7 +121,7 @@ export function cloneConfigFilesOver(service: ConfigFileService): CloneConfigFil
 }
 
 /** What the composition root hands the setup service: its own collaborators, never a second copy. *
- * @pending runtimes: plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host
+ * @pending runtimes: the fleet's catalogue and setup cannot be composed over the host
  */
 export interface FileFleetSetupOptions {
   /** The host: its files, command lookup, record store and the provisioner's apply claim (`./ports.ts`). */
@@ -153,7 +153,7 @@ const sha256 = (text: string): string => new Bun.CryptoHasher('sha256').update(t
 const MAX_HOST_DOCUMENT_BYTES = 1024 * 1024;
 
 /** The setup service's collaborators over this machine's files. *
- * @pending runtimes: plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host
+ * @pending runtimes: the fleet's catalogue and setup cannot be composed over the host
  */
 export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupServiceDeps {
   const { catalog, host } = options;

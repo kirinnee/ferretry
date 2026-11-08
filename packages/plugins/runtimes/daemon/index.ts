@@ -11,8 +11,10 @@
  * kernel's ports; the default builds the one that refuses in a sentence, because host collaborators are not yet reachable
  * from a plugin:
  *
- *  - GAP(kernel): a config WRITE port. The apply pipeline writes through {@link RuntimeConfigWriter}
- *    (`lib/service/ports.ts`); until the kernel offers one it is `refusingConfigWriter`.
+ *  - GAP(kernel): an all-or-none write of a change's several configuration documents. The kernel's config write port
+ *    (`ConfigPort.write`) writes one declared file per call; the apply pipeline writes through
+ *    {@link RuntimeConfigWriter} (`lib/service/ports.ts`), which stays `refusingConfigWriter` until the catalogue is
+ *    composed over the host (below) and the documents can land together.
  *  - GAP(kernel): `permissions.roots` is empty and `RootName` is a fixed set, so the state home's `fleet/` folder and
  *    the harnesses' own homes are out of reach; the adapters (`daemon/adapters`) are written against narrow host ports
  *    and take their real answers from the kernel when it opens those.
@@ -20,6 +22,7 @@
  */
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon, type DaemonContext } from '@ferretry/kernel/manifest';
+import { milliseconds } from '@ferretry/std';
 import {
   MODEL_SET_ITEMS,
   PROFILE_ITEMS,
@@ -39,6 +42,7 @@ import manifest from '../manifest.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
 import { autoResumeAnswer } from './lib/service/auto-resume-answer.ts';
+import { DisableExpiryWatch, earliestUntil, expiredBetween } from './lib/service/disable-expiry.ts';
 import { loginUsers } from './lib/service/login-users.ts';
 import { createRuntimesApi } from './lib/service/runtimes-api.ts';
 import { RuntimeEndSupervision, type RuntimeEndSeams } from './lib/service/runtime-end-supervision.ts';
@@ -163,6 +167,25 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
           () => events.publish(RuntimesDefaultChanged, { defaultRuntime: null }),
         );
       });
+
+      // A runtime switched off `until` a time reads as on once that time passes (the port judges the block at now), so
+      // the views are told AT that instant rather than at their next read (docs/disabling.md). One timer, for the
+      // earliest `until` ahead, set again whenever a runtime file moves.
+      let expiredUpTo = clock.nowMs();
+      const expiry = new DisableExpiryWatch({
+        next: async () => earliestUntil(config.collection(runtimeItems), clock.nowMs()),
+        now: () => clock.nowMs(),
+        republish: async () => {
+          const now = clock.nowMs();
+          const back = expiredBetween(config.collection(runtimeItems), expiredUpTo, now);
+          expiredUpTo = now;
+          if (back.length > 0) events.publish(RuntimesChanged, { runtimes: [...back], profiles: [], modelSets: [] });
+        },
+        setTimer: (run, ms) => clock.after(milliseconds(ms), run),
+      });
+      void expiry.rearm();
+      config.watch(RUNTIME_ITEMS, () => void expiry.rearm());
+      ctx.kernel.lifecycle.onStop(() => expiry.stop());
 
       // Ferrets never calls a plugin (§2.1): Runtimes hears that a ferret stopped and looks after its own runtime.
       const ending = new RuntimeEndSupervision({
