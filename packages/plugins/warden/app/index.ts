@@ -3,7 +3,7 @@ import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { lazyComponent } from './lazy.ts';
 
-type ViewName = 'warden-screen' | 'warden-settings' | 'warden-dashboard';
+type ViewName = 'warden-screen' | 'warden-settings' | 'warden-dashboard' | 'warden-ferret';
 
 /**
  * A view module (React), loaded on first use. The specifier is a Vite dynamic-import variable (`./views/*.tsx`), which
@@ -20,8 +20,9 @@ const viewOf = <Props>(name: ViewName, factory: string, client: PluginClient): A
 /**
  * Warden's app half: the `warden` page (live status, flags, verdicts, the report dialog, action statistics, "leave it
  * alone" and "investigate"), the `warden` Settings tab, and the ferrets dashboard's pack-health strip and recent
- * verdicts (`daemon.status` panels). "Ask the Warden" is the manifest's `ask-warden` ferret action. The views are React
- * and load on first use (`./lazy.ts`).
+ * verdicts (`daemon.status` panels), and its two contributions to Ferrets' pages: what the Warden said about a ferret
+ * (`ferret-warden`, a `ferret.side` panel) and "Ask the Warden to investigate now…" (`ask-warden-row`, a
+ * `ferrets.actions-row` panel). The views are React and load on first use (`./lazy.ts`).
  */
 export default implementApp(manifest, {
   build: ({ client }) => ({
@@ -29,6 +30,8 @@ export default implementApp(manifest, {
     panels: {
       'warden-strip': viewOf<PanelProps>('warden-dashboard', 'createWardenStripPanel', client),
       'warden-verdicts': viewOf<PanelProps>('warden-dashboard', 'createWardenVerdictsPanel', client),
+      'ferret-warden': viewOf<PanelProps>('warden-ferret', 'createWardenFerretPanel', client),
+      'ask-warden-row': viewOf<PanelProps>('warden-ferret', 'createAskWardenPanel', client),
     },
     settings: { warden: viewOf<SettingsProps>('warden-settings', 'createWardenSettings', client) },
   }),
