@@ -12,6 +12,7 @@ import {
   type AttachRefusal,
   type DeliveryOutcome,
   HARNESS_STOP_KEYS,
+  type HarnessLaunchSettings,
   type HarnessStop,
   type HarnessTailRecord,
   type HarnessTranscriptStamp,
@@ -317,6 +318,19 @@ export class FakeHarness implements Harness {
   /** How many times each half of the transcript was asked for, so a test sees what a sample cost. */
   readonly stamped: FerretId[] = [];
   readonly tailed: FerretId[] = [];
+  /**
+   * What `launchSettings` answers for a ferret (W2-c): a test sets one, or an `Error` to make the harness throw. A ferret
+   * with none is `unknown`. Set `launchSettings` itself to `undefined` for a harness that offers no comparison.
+   */
+  readonly launchAnswers = new Map<FerretId, HarnessLaunchSettings | Error>();
+  /** Every ferret `launchSettings` was asked about, in order. */
+  readonly launchAsked: FerretId[] = [];
+  launchSettings: Harness['launchSettings'] = async (ferret: FerretId): Promise<HarnessLaunchSettings> => {
+    this.launchAsked.push(ferret);
+    const answer = this.launchAnswers.get(ferret);
+    if (answer instanceof Error) throw answer;
+    return answer ?? { kind: 'unknown' };
+  };
   async transcriptStamp(ferret: FerretId): Promise<HarnessTranscriptStamp | undefined> {
     this.stamped.push(ferret);
     return this.transcripts.get(ferret)?.stamp;

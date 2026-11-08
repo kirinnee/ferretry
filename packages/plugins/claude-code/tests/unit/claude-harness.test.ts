@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { LaunchSpec, Runner } from '@ferretry/core-ferrets/contract';
 import { FakeRunner, harnessConformance } from '@ferretry/core-ferrets/contract/testing';
-import type { FerretId, SpawnResult } from '@ferretry/kernel/contract';
+import type { FerretId, SpawnResult, StatePort } from '@ferretry/kernel/contract';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
+import { CLAUDE_CODE_HOOKS, CLAUDE_CODE_LAUNCH_SETTINGS, CLAUDE_CODE_SETTINGS } from '../../contract/index.ts';
 import { type Instant, ok } from '@ferretry/std';
 import { ClaudeHarness } from '../../daemon/adapters/claude-harness.ts';
 import { API_KEY_SEED_NAME, API_KEY_SEED_SCRIPT, API_KEY_SEED_SHELL } from '../../daemon/lib/harness/api-key-seed.ts';
@@ -30,7 +32,14 @@ afterEach(async () => {
 });
 const T = '2026-11-01T10:00:00.000Z' as Instant;
 
-function build(options: { located?: boolean; tmux?: (args: readonly string[]) => number } = {}) {
+function build(
+  options: {
+    located?: boolean;
+    tmux?: (args: readonly string[]) => number;
+    state?: StatePort;
+    config?: { file: () => unknown; collection: (definition: unknown) => unknown };
+  } = {},
+) {
   const roots = rootsPortFor(
     nodeFs(() => crypto.randomUUID()),
     {
@@ -51,7 +60,11 @@ function build(options: { located?: boolean; tmux?: (args: readonly string[]) =>
   const panes = new PaneDirectory();
   const harness = new ClaudeHarness({
     roots,
-    config: { file: () => ({ searchPaths: [], permissionMode: 'auto' }), collection: () => new Map() } as never,
+    config: (options.config ?? {
+      file: () => ({ searchPaths: [], permissionMode: 'auto' }),
+      collection: () => new Map(),
+    }) as never,
+    state: options.state ?? new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]),
     spawn: {
       run: async (_program: string, args: readonly string[]): Promise<SpawnResult> => {
         tmux.push([...args]);
@@ -621,4 +634,146 @@ harnessConformance('Claude Code (real kernel roots)', () => {
     // Each delivery that reaches the ferret types its text into the pane once (`send-keys -l`).
     deliveredCount: () => tmux.filter(args => args[0] === 'send-keys' && args.includes('-l')).length,
   };
+});
+
+// ─── W2-c: what a launch ran under (Harness.launchSettings; today's FileLaunchSettingsDigest, F-0422) ──────────────
+
+describe('F-0422 Claude Code records what a launch ran under and compares it with its settings now', () => {
+  /** A setting value and a path: neither may be kept in the record or leave in an answer. */
+  const SECRET = 'sk-live-W2C-claude-0123456789';
+  type Config = { permissionMode: 'auto' | 'skip'; settings: Map<string, unknown>; hooks: Map<string, unknown> };
+  const configured = (): Config => ({
+    permissionMode: 'auto',
+    settings: new Map([['base', { settings: { env: { API_TOKEN: SECRET }, model: 'opus' } }]]),
+    hooks: new Map([['audit', { hooks: { PostToolUse: [{ command: `echo ${SECRET}` }] } }]]),
+  });
+  const over = (config: Config, state: StatePort) =>
+    build({
+      state,
+      config: {
+        file: () => ({ searchPaths: [], permissionMode: config.permissionMode }),
+        collection: definition =>
+          definition === CLAUDE_CODE_SETTINGS
+            ? config.settings
+            : definition === CLAUDE_CODE_HOOKS
+              ? config.hooks
+              : new Map(),
+      },
+    });
+  const launchOf = async (config: Config, folder = new MemoryStateFolder()) => {
+    const state = folder.port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+    const built = over(config, state);
+    expect((await built.harness.start(spec(), runner({}), {} as never)).ok).toBe(true);
+    return { ...built, folder, state };
+  };
+
+  test('F-0422 a start records one fingerprint per section in state/claude-code/launch-settings/<ferret>.json, values-free', async () => {
+    const { folder } = await launchOf(configured());
+
+    const raw = folder.raw(CLAUDE_CODE_LAUNCH_SETTINGS, FERRET) ?? '';
+    const record = JSON.parse(raw) as { format: number; sections: Record<string, string> };
+
+    expect(record.format).toBe(1);
+    expect(Object.keys(record.sections).toSorted()).toEqual(['fixed-layer', 'hooks', 'permission-mode', 'settings']);
+    for (const digest of Object.values(record.sections)) expect(digest).toMatch(/^[0-9a-f]{64}$/u);
+    for (const value of [SECRET, '/work', 'auto', 'opus', 'API_TOKEN', HOME]) expect(raw).not.toContain(value);
+  });
+
+  test('F-0422 nothing changed since the launch is current; the effort a launch asked for is not a setting', async () => {
+    const config = configured();
+    const folder = new MemoryStateFolder();
+    const state = folder.port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+    const { harness } = over(config, state);
+    await harness.start(spec({ effort: 'high' }), runner({}), {} as never);
+
+    expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
+  });
+
+  test('F-0422 each change since the launch names its section, and only its section', async () => {
+    const config = configured();
+    const { harness } = await launchOf(config);
+
+    config.hooks = new Map([['audit', { hooks: { PostToolUse: [{ command: 'echo changed' }] } }]]);
+    const hooks = await harness.launchSettings(FERRET);
+    config.settings = new Map([['base', { settings: { model: 'sonnet' } }]]);
+    const both = await harness.launchSettings(FERRET);
+    config.settings = configured().settings;
+    config.hooks = configured().hooks;
+    config.permissionMode = 'skip';
+    const mode = await harness.launchSettings(FERRET);
+
+    expect(hooks).toEqual({ kind: 'drifted', sections: ['hooks'] });
+    expect(both).toEqual({ kind: 'drifted', sections: ['settings', 'hooks'] });
+    // The permission mode is in the fixed layer too, so a mode change moves both.
+    expect(mode).toEqual({ kind: 'drifted', sections: ['permission-mode', 'fixed-layer'] });
+  });
+
+  test('F-0422 a resume records afresh, so a ferret relaunched on the new settings is current again', async () => {
+    const config = configured();
+    const { harness } = await launchOf(config);
+    config.permissionMode = 'skip';
+    expect((await harness.launchSettings(FERRET)).kind).toBe('drifted');
+
+    await harness.resume(spec(), runner({}), {} as never, 'conv-1');
+
+    expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
+  });
+
+  test('F-0422 no record, a damaged one, one too large to be a record, or an id that is not a plain name is unknown', async () => {
+    const folder = new MemoryStateFolder();
+    const reads: string[] = [];
+    const port = folder.port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+    const state: StatePort = {
+      ...port,
+      read: async (file, name) => (reads.push(name ?? ''), await port.read(file, name)),
+      version: async (file, name) => (reads.push(`version:${name ?? ''}`), await port.version(file, name)),
+    };
+    const { harness } = over(configured(), state);
+    const never = await harness.launchSettings(FERRET);
+    folder.plant(CLAUDE_CODE_LAUNCH_SETTINGS, `{"format":1,"sections":{"settings":"${SECRET}"}}`, FERRET);
+    const damaged = await harness.launchSettings(FERRET);
+    folder.plant(CLAUDE_CODE_LAUNCH_SETTINGS, `{"format":1,"pad":"${'x'.repeat(8 * 1024)}"}`, FERRET);
+    const readsBefore = reads.length;
+    const oversized = await harness.launchSettings(FERRET);
+    const crooked = await harness.launchSettings('../f2' as FerretId);
+
+    for (const answer of [never, damaged, oversized, crooked]) expect(answer).toEqual({ kind: 'unknown' });
+    expect(JSON.stringify(damaged)).not.toContain(SECRET);
+    // Bounded: the oversized record is sized by one lstat and never read; a crooked id never reaches the state port.
+    expect(reads.slice(readsBefore)).toEqual([`version:${FERRET}`]);
+  });
+
+  test('F-0422 a state port that faults while reading is unknown, and what it threw is dropped unread', async () => {
+    const port = new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+    const { harness } = over(configured(), {
+      ...port,
+      version: async () => {
+        throw new Error(`EIO at ${HOME}: ${SECRET}`);
+      },
+    });
+
+    const answer = await harness.launchSettings(FERRET);
+
+    expect(answer).toEqual({ kind: 'unknown' });
+    expect(JSON.stringify(answer)).not.toContain(SECRET);
+  });
+
+  test('F-0422 a record that cannot be written never fails the launch, and an older launch’s record is not left to answer', async () => {
+    const config = configured();
+    const { harness, folder } = await launchOf(config);
+    config.permissionMode = 'skip';
+    const port = folder.port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+    const failing = over(config, {
+      ...port,
+      write: async () => {
+        throw new Error(`disk full at ${HOME} ${SECRET}`);
+      },
+    });
+
+    const started = await failing.harness.start(spec(), runner({}), {} as never);
+
+    expect(started.ok).toBe(true);
+    expect(folder.raw(CLAUDE_CODE_LAUNCH_SETTINGS, FERRET)).toBeUndefined();
+    expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'unknown' });
+  });
 });

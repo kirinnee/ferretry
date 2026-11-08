@@ -122,6 +122,27 @@ export const CODEX_ROLLOUTS = defineState({
   schema: CodexRolloutBindingSchema,
 });
 
+/** One section's fingerprint: a SHA-256 in hex, never the value it was taken of. */
+const SectionDigestSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * What one ferret was last launched under (W2-c, `Harness.launchSettings`): one fingerprint per section of this
+ * plugin's own launch settings, written at every start and resume. Hashes only — no setting value, path or environment
+ * value is kept — and in the daemon's state, never in the ferret's home, where its agent could rewrite it.
+ */
+export const CodexLaunchSettingsRecordSchema = z.strictObject({
+  format: z.literal(1),
+  sections: z.strictObject({ 'permission-mode': SectionDigestSchema, 'fixed-layer': SectionDigestSchema }),
+});
+export type CodexLaunchSettingsRecord = z.infer<typeof CodexLaunchSettingsRecordSchema>;
+export const CODEX_LAUNCH_SETTINGS = defineState({
+  name: 'launchSettings',
+  path: 'launch-settings/*.json',
+  store: 'json',
+  format: 1,
+  schema: CodexLaunchSettingsRecordSchema,
+});
+
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────
 
 /** Today's `machineLoosening` rule for the permission mode, kept word for word. */

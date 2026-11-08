@@ -139,8 +139,3 @@ export function harnessHomeFromWrapper(
   const declared = assignedValue(source, HOME_VARIABLE[harness]);
   return declared === undefined ? undefined : expand(declared, environment);
 }
-
-/** Reads the text of a launched wrapper. Absent when this host has no readable script there. */
-export interface HarnessWrapperSource {
-  read(executable: string): Promise<string | undefined>;
-}

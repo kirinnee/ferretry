@@ -93,6 +93,7 @@ export default implementDaemon(manifest, {
     const harness = new ClaudeHarness({
       roots: kernel.roots,
       config: kernel.config,
+      state: kernel.state,
       spawn: kernel.spawn,
       clock: kernel.clock,
       redaction: kernel.redaction,
