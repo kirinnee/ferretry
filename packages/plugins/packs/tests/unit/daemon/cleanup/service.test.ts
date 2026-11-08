@@ -510,6 +510,62 @@ describe('CleanUpService.job', () => {
     should(gone?.job.message).equal('The clean-up ended without writing a prompt.');
   });
 
+  it('should fail a run whose rewrite cannot be read for any reason but the secret check, as one that wrote nothing', async () => {
+    // Arrange
+    const subject = build();
+    await subject.service.start({});
+    subject.results.set('cleanup-1', new Error('the result is unreadable'));
+    subject.statuses.set('cleanup-1', 'stopped');
+
+    // Act
+    const failed = await subject.service.job('run-1');
+
+    // Assert
+    should(failed?.job).containEql({
+      status: 'failed',
+      message: 'The clean-up stopped without writing a prompt.',
+    });
+  });
+
+  it('should stop a ferret that came back to work after its rewrite was read, saying what was read, and carry on if it cannot', async () => {
+    // Arrange: the ferret reads as finished when the job is judged, then as working again when the run is settled.
+    for (const stopFails of [false, true]) {
+      const subject = build({ stopFails });
+      await subject.service.start({});
+      subject.statuses.set('cleanup-1', 'stopped');
+      subject.results.get = () => {
+        subject.statuses.set('cleanup-1', 'working');
+        return DRAFT;
+      };
+
+      // Act
+      const done = await subject.service.job('run-1');
+
+      // Assert
+      should(done?.job.status).equal('suggested');
+      should(subject.stops).deepEqual(
+        stopFails ? [] : [['cleanup-1', 'the routing prompt it cleaned up has been read']],
+      );
+    }
+  });
+
+  it('should say a generate writer was stopped for the prompt it wrote', async () => {
+    // Arrange
+    const subject = build();
+    await subject.service.start({ mode: 'generate', idea: 'cheap models' });
+    subject.statuses.set('cleanup-1', 'stopped');
+    subject.results.get = () => {
+      subject.statuses.set('cleanup-1', 'working');
+      return DRAFT;
+    };
+
+    // Act
+    await subject.service.job('run-1');
+
+    // Assert
+    should(subject.stops).deepEqual([['cleanup-1', 'the routing prompt it wrote has been read']]);
+  });
+
   it('should fail closed, keeping no suggestion, when the rewrite could not be checked for secrets', async () => {
     // Arrange
     const subject = build();
