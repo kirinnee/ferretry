@@ -222,6 +222,7 @@ export function wardenLoosens(before: WardenFile | undefined, after: WardenFile)
   if (!was.autoMove.enabled && now.autoMove.enabled) out.push('the warden may move ferrets between logins');
   if (now.autoMove.maxMovesPerHour > was.autoMove.maxMovesPerHour) out.push('more moves per hour are allowed');
   if (now.maxAssignedWardens > was.maxAssignedWardens) out.push('more wardens may run at once');
+  out.push(...spendPaceLoosens(was, now), ...autoMoveLoosens(was, now));
   if (
     now.accounts.some(
       account => !was.accounts.some(known => known.agent === account.agent && known.model === account.model),
@@ -229,6 +230,62 @@ export function wardenLoosens(before: WardenFile | undefined, after: WardenFile)
   )
     out.push('a login is added to the warden’s failover list');
   return out;
+}
+
+const goesDown = (before: number, after: number, what: string): readonly string[] =>
+  after < before ? [`${what} goes down from ${String(before)} to ${String(after)}`] : [];
+
+/**
+ * A lower Jev price makes the dollar cap count less than is really spent; a shorter sweep or spawn gap makes the
+ * warden spend more often. Each is held for the owner, in the words the owner confirmed them in before 5.0.
+ */
+function spendPaceLoosens(was: WardenConfig, now: WardenConfig): readonly string[] {
+  return [
+    ...goesDown(
+      was.guard.usdPerMillionInputTokens,
+      now.guard.usdPerMillionInputTokens,
+      'the Jev price the cap counts with',
+    ),
+    ...goesDown(was.intervalMinutes, now.intervalMinutes, 'the minutes between Warden sweeps'),
+    ...goesDown(was.minSpawnGapMinutes, now.minSpawnGapMinutes, 'the minutes between two Warden investigations'),
+  ];
+}
+
+/** Moving a ferret acts only while the warden is on AND moving is. */
+const movesOn = (config: WardenConfig): boolean => config.enabled && config.autoMove.enabled;
+
+const AUTO_MOVE_TRIGGER_WORDS: Readonly<Record<(typeof WARDEN_AUTO_MOVE_TRIGGERS)[number], string>> = {
+  rate_limited: 'whose login hit a usage limit',
+  budget_exceeded: 'whose login passed its hard spend budget',
+};
+
+/**
+ * A move destroys a ferret's pane and starts it again elsewhere, so whatever lets the warden move in more cases is
+ * held: letting it stop background jobs, a new trigger, a newly named login (it may be another provider's, which
+ * "any ready login" never reaches), going from a list to any ready login, and a lower headroom floor.
+ */
+function autoMoveLoosens(was: WardenConfig, now: WardenConfig): readonly string[] {
+  const before = was.autoMove;
+  const after = now.autoMove;
+  return [
+    ...(!(movesOn(was) && before.forceStopBackground) && movesOn(now) && after.forceStopBackground
+      ? ["the Warden may now stop a ferret's own background jobs to move it"]
+      : []),
+    ...after.when
+      .filter(trigger => !before.when.includes(trigger))
+      .map(trigger => `the Warden now also moves a ferret ${AUTO_MOVE_TRIGGER_WORDS[trigger]}`),
+    ...after.targets
+      .filter(target => !before.targets.includes(target))
+      .map(target => `the Warden may now move ferrets onto ${target}`),
+    ...(before.targets.length > 0 && after.targets.length === 0
+      ? ['the Warden may now move ferrets onto any ready login of the same harness and provider']
+      : []),
+    ...goesDown(
+      before.minHeadroomPercent,
+      after.minHeadroomPercent,
+      'the share a login must have left to be moved onto',
+    ),
+  ];
 }
 
 // ─── detection ───────────────────────────────────────────────────────────────────────────────────────────────────

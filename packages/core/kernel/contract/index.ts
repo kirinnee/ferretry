@@ -4,6 +4,7 @@
  */
 export * from './accepted.ts';
 export * from './act.ts';
+export * from './agent-config.ts';
 export * from './body.ts';
 export * from './bound.ts';
 export * from './compare.ts';

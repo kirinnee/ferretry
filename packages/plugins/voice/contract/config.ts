@@ -1,4 +1,4 @@
-import { defineConfig, neverLoosens } from '@ferretry/kernel/contract';
+import { defineConfig } from '@ferretry/kernel/contract';
 import { NonEmptyStringSchema } from '@ferretry/std';
 import { z } from 'zod';
 
@@ -91,10 +91,31 @@ export type VoiceConfig = z.infer<typeof VoiceConfigSchema>;
 /** The voice settings a state home with no `voice.yaml` behaves as: no post-processing. */
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = VoiceConfigSchema.parse({});
 
-/** `config/voice.yaml`. Writes go through Gate's config route; nothing here loosens what a credential could already do. */
+/**
+ * Which edits of `voice.yaml` LOOSEN where the owner's words go (docs/config-files.md rule 2, today's `voiceLoosening`,
+ * copied rule for rule): a loosening edit is HELD for the owner and the tighter version stays in effect. Dictated text
+ * newly sent to a cleanup provider, or to a different one (another provider, another login), spends and sends the
+ * owner's words somewhere new; so does letting recent conversation messages ride along. Turning cleanup off, a model,
+ * a prompt and fewer conversation messages never loosen.
+ */
+export function voiceLoosens(before: VoiceConfig | undefined, after: VoiceConfig | undefined): readonly string[] {
+  const from = (before ?? DEFAULT_VOICE_CONFIG).postProcessing;
+  const to = (after ?? DEFAULT_VOICE_CONFIG).postProcessing;
+  const destination = to.provider === 'login' ? `the login ${to.login ?? ''}`.trim() : to.provider;
+  const sends = to.provider !== 'off' && to.style !== 'off';
+  const wasSending = from.provider !== 'off' && from.style !== 'off';
+  const moved = sends && (!wasSending || from.provider !== to.provider || from.login !== to.login);
+  const context = to.useConversation && !from.useConversation && to.style !== 'off';
+  return [
+    ...(moved ? [`dictated text now goes to ${destination} to be cleaned up`] : []),
+    ...(context ? ['recent conversation messages may now go to the cleanup provider to help clean up dictation'] : []),
+  ];
+}
+
+/** `config/voice.yaml`. Writes go through Gate's config route; an edit that loosens ({@link voiceLoosens}) is held. */
 export const VOICE_CONFIG = defineConfig({
   file: 'voice.yaml',
   schema: VoiceConfigSchema,
   axis: 'configure',
-  loosens: neverLoosens,
+  loosens: voiceLoosens,
 });

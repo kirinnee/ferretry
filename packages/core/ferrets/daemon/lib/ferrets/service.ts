@@ -60,6 +60,7 @@ import {
   NO_AGENT_CONTROL,
 } from '../../../contract/index.ts';
 import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../tokens/tokens.ts';
+import { type LaunchEnvironmentRecord, recordedSwitches } from '../agent-control/launch-environment.ts';
 
 /**
  * THE FERRETS PORT (§2.2): who each ferret is and its state, and the launch pipeline. Starting and stopping are
@@ -122,6 +123,8 @@ export interface FerretsPorts {
    * cannot be resolved. Unbound, no work folder is answered.
    */
   realPath?(ferret: FerretId, folder: string): Promise<string | undefined>;
+  /** Where a launch records the switches it handed the pane (`instructions` reads them back). Unbound: none is kept. */
+  launchEnvironment?: Pick<LaunchEnvironmentRecord, 'write'>;
   /** `limits.yaml` as it is now (the kernel's config port), read fresh for every agent-control answer. */
   limits?(): LimitsFile | undefined;
   /** Ferret id → the instant the owner pinned it (`agent-pins.json`). */
@@ -1112,7 +1115,11 @@ export class FerretsService implements FerretsApi {
     env[FERRET_ID_VARIABLE] = ferret;
     env[FERRET_TOKEN_VARIABLE] = token;
     const resolved = await this.ports.vault.childEnvironment(ferret, env);
-    return resolved.ok ? ok(resolved.value) : err(`unknown secrets: ${resolved.error.unknown.join(', ')}`);
+    if (!resolved.ok) return err(`unknown secrets: ${resolved.error.unknown.join(', ')}`);
+    // What this launch told the ferret, kept for `instructions` (persisted, so a restart changes no answer): only the
+    // switches, after the launch can no longer be refused. A store that fails never fails the launch.
+    await this.ports.launchEnvironment?.write(ferret, recordedSwitches(env)).catch(() => undefined);
+    return ok(resolved.value);
   }
 
   private async abandon(
