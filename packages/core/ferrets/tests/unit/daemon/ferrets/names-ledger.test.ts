@@ -244,7 +244,7 @@ describe('a start that throws gives its claim back (F-0232)', () => {
   test('a start whose admission throws leaves the name free for the next start', async () => {
     const h = await fresh();
     const lead = await running(h, 'lead');
-    // A helper start throws at admission (Packs admission is not bound), after the name was claimed.
+    // A helper start throws at admission (Packs did not answer for it), after the name was claimed.
     const thrown = await start(h, { name: 'wren', parent: lead });
     expect(thrown.status).toBeGreaterThanOrEqual(400);
     expect(ledger(h).claims.map(claim => claim.callsign)).not.toContain('wren');

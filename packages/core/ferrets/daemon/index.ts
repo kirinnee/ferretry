@@ -47,7 +47,7 @@ import { SubtreeService } from './lib/session/pack/subtree.ts';
 import manifest from '../manifest.ts';
 import { ConditionalFleetList } from './lib/fleet-list/conditional.ts';
 import { FerretsService, RENAME_HTTP } from './lib/ferrets/service.ts';
-import { helperDecision, unboundHelperAdmission } from './lib/ferrets/helper-admission.ts';
+import { helperDecision, noHelperAdmission } from './lib/ferrets/helper-admission.ts';
 import { parseRenameBody, parseResumeBody, parseStartBody, parseStopBody } from './lib/ferrets/wire.ts';
 import { createSessionEvent, encodeSessionEvent, parseSessionEvent } from './lib/storage/journal.ts';
 import { type SessionId, tryParseSessionId } from './lib/session-id.ts';
@@ -342,7 +342,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       // anything is written or launched. The kernel bounds and normalizes every taker, Packs included. `by: 'resume'`
       // is set here by Ferrets' own resume, never by a caller (a start's `by` cannot name it).
       const decision = helperDecision(input, await hooks.decideAnswered(StartDecide, input));
-      if (decision === 'unanswered') throw unboundHelperAdmission();
+      if (decision === 'unanswered') throw noHelperAdmission();
       return decision;
     },
     launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),

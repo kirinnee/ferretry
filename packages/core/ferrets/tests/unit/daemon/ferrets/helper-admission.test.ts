@@ -146,6 +146,29 @@ test('G12 a lead start needs no helper admission: it starts with Packs absent', 
   expect(answer.status).toBeLessThan(300);
 });
 
+test('G12 R-0332 a parentless role:helper start needs Packs too: 503 with Packs absent, started on its yes', async () => {
+  // Arrange: no parent, only `role: 'helper'` (the owner route takes `role`; Packs' clean-up builder starts this way).
+  const request = { headers: { 'x-fy-request-id': 'helper-role' }, body: { role: 'helper', folder: '/work/role' } };
+  const absentRunner = new FakeRunner();
+  const absent = await host([], { harness: new FakeHarness(), runner: absentRunner });
+  const runner = new FakeRunner();
+  const packs = fakePacks();
+  const present = await host([], { harness: new FakeHarness(), runner, plugins: [packs.plugin] });
+
+  // Act
+  const refused = await absent.request('POST', '/v1/ferrets', request);
+  const admitted = await present.request('POST', '/v1/ferrets', request);
+
+  // Assert
+  expectUnanswered(refused);
+  expect(absentRunner.starts).toBe(0);
+  expect((await absent.request('GET', '/v1/ferrets')).json<unknown[]>()).toHaveLength(0);
+  expect(admitted.status).toBeLessThan(300);
+  expect(packs.asked[0]).toMatchObject({ role: 'helper', folder: '/work/role' });
+  expect(packs.asked[0]?.parent).toBeUndefined();
+  expect(runner.starts).toBe(1);
+});
+
 test('G12 a Warden resume of a child goes through the same admission (Packs absent: 503; present: asked, then relaunched)', async () => {
   // Arrange: a stopped child under a lead, once with no Packs and once with an admitting one.
   const child = { ...record('child', 'lead'), state: 'stopped' as const };
