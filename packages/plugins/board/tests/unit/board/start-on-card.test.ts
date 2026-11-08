@@ -595,6 +595,31 @@ describe('the brief of a ferret started on a card', () => {
     should(brief).containEql('`fy card note`');
   });
 
+  it('should carry the owner’s clarifications and name the ferrets in the history it shows', () => {
+    // Arrange
+    const row = card({
+      clarifications: [{ text: 'only the phone layout', source: 'owner', at: '2026-10-30T10:00:00.000Z' }] as never,
+      history: [
+        {
+          seq: 1,
+          at: '2026-10-30T10:00:00.000Z',
+          actor: { kind: 'daemon' },
+          type: 'assigned',
+          from: 'lead',
+          to: 'lead',
+          returnedFrom: 'child',
+        },
+      ] as never,
+    });
+
+    // Act
+    const brief = startOnCardBrief(row as unknown as CardView, lanes(), 'fy');
+
+    // Assert
+    should(brief).containEql('Clarified, verbatim (owner):\nonly the phone layout');
+    should(brief).containEql('returned to lead: child finished');
+  });
+
   it('should leave out a section the card does not have', () => {
     // Arrange / Act
     const brief = startOnCardBrief(card() as unknown as CardView, lanes(), 'fy');

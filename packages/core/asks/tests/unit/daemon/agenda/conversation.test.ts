@@ -7,11 +7,7 @@ import {
   needsInfoMessage,
   ownerAnswerMessage,
 } from '../../../../daemon/lib/agenda/conversation.ts';
-import {
-  type AgendaItem,
-  type AgendaResponse,
-  type ResolvedAgendaItem,
-} from '../../../../daemon/lib/protocol/agenda.ts';
+import type { AgendaItem, AgendaResponse, ResolvedAgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
 
 const AT = '2026-10-26T09:00:00.000Z';
 
