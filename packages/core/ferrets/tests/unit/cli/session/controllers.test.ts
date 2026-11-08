@@ -166,7 +166,7 @@ describe('fy status', () => {
 });
 
 describe('fy name', () => {
-  test('V-0333 prints the suggested callsigns, as lines or JSON, and refuses a count that is not whole', async () => {
+  test('V-0333 fy name prints the suggested callsigns, as lines or JSON, and refuses a count that is not whole', async () => {
     const api = new RecordingApi({ suggestNames: ['ash', 'elm'] });
     const { io, presenter } = capturedPresenter();
     await new SuggestNamesController(api, presenter).execute({ count: 2 });

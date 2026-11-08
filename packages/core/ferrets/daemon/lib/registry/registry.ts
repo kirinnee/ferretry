@@ -7,6 +7,8 @@ import type {
   PackId,
 } from '../../../contract/index.ts';
 import { type FerretDetails } from '../../../contract/index.ts';
+import { normalizeCallsign } from '../../../contract/state.ts';
+import type { NameClaim } from '../names/types.ts';
 
 /**
  * WHO EACH FERRET IS, in memory (§2.2): every `state/ferrets/<ferret>/ferret.json` the daemon holds, and the lineage
@@ -231,6 +233,20 @@ export class FerretRegistry {
       }
     }
     return depths;
+  }
+
+  /**
+   * The names the running fleet holds, as claims that never expire while the ferret runs: the live half of "is this
+   * name taken" beside the ledger, decided by the same predicate as {@link nameHolder}.
+   */
+  nameClaims(): readonly NameClaim[] {
+    const claims: NameClaim[] = [];
+    for (const record of this.records.values()) {
+      const callsign = normalizeCallsign(record.name);
+      if (record.state === 'stopped' || callsign === null) continue;
+      claims.push({ callsign, ownerId: record.id, claimedAtMs: 0, expiresAtMs: Number.MAX_SAFE_INTEGER });
+    }
+    return claims;
   }
 
   /** Whether a name is held by a ferret that is not stopped (a running ferret's name is not reused). */

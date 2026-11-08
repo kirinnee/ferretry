@@ -39,6 +39,9 @@ import type {
   StartFailure,
   StartRequest,
 } from '../../../contract/index.ts';
+import { claimStartName, displayAgentName, type SessionNameClaims } from '../names/session-names.ts';
+import { normalizeCallsign } from '../names/policy.ts';
+import type { SystemCallsignPrefix } from '../protocol/system-callsigns.ts';
 import { FerretDetailsSchema, FerretRecordSchema, HARNESS_KEYS, type FerretDetails } from '../../../contract/index.ts';
 import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
@@ -76,6 +79,13 @@ export interface FerretsPorts {
   now(): Instant;
   /** A fresh, server-minted ferret id; a request never names one (today's `TimeSessionIdFactory`). */
   newId(): FerretId;
+  /**
+   * The callsign claim ledger (`names.json`): a start and a rename take their name through it. Unbound, names are
+   * checked against the running fleet alone.
+   */
+  claims?: SessionNameClaims;
+  /** Issues the callsign of a session Ferretry starts itself; unbound, none can be issued. */
+  systemCallsign?(prefix: SystemCallsignPrefix): Promise<string>;
   /** A name nobody running holds, when the request named none. */
   newName(taken: (name: string) => boolean): string;
   save(record: FerretRecord): Promise<void>;
@@ -288,10 +298,63 @@ export class FerretsService implements FerretsApi {
       return failed('refused', 'the harness conversation id must contain between 1 and 256 characters');
     if (request.parent !== undefined && this.registry.get(request.parent) === undefined)
       return failed('refused', `no ferret ${request.parent} to be the lead of this one`);
-    const name =
-      request.name?.trim() || this.ports.newName(candidate => this.registry.nameHolder(candidate) !== undefined);
+    const id = this.ports.newId();
+    const named = await this.takeName(id, request);
+    if (!named.ok) return named;
+    const result = await this.startNamed(id, named.value, request);
+    // A start that never wrote its record gives the reservation back; a written one keeps it, as today.
+    if (!result.ok && this.registry.get(id) === undefined)
+      await this.ports.claims?.release(named.value, id).catch(() => undefined);
+    return result;
+  }
+
+  /**
+   * The callsign a start answers to, taken through the claim ledger BEFORE the record exists (today's
+   * `claimStartName`). The registry stays the one owner of "a running ferret holds this name"; the ledger adds the
+   * reservations of starts in flight and the window a stopped ferret's name is kept. A REQUESTED name is refused when
+   * taken; an AUTOMATIC one never costs the start: a spent pool or an unreadable ledger falls back to the pool scan.
+   */
+  async systemCallsign(prefix: SystemCallsignPrefix): Promise<string> {
+    await this.ports.ready?.();
+    if (this.ports.systemCallsign === undefined) throw new Error('system callsigns are not bound');
+    return await this.ports.systemCallsign(prefix);
+  }
+
+  private nowMs(): number {
+    const parsed = Date.parse(String(this.ports.now()));
+    return Number.isFinite(parsed) ? parsed : Date.now();
+  }
+
+  private async takeName(id: FerretId, request: StartRequest): Promise<Result<string, StartFailure>> {
+    const requested = request.name?.trim();
+    if (requested) {
+      const holder = this.registry.nameHolder(requested);
+      if (holder !== undefined) return failed('refused', `the name ${requested} is held by running ferret ${holder}`);
+      if (this.ports.claims === undefined) return ok(requested);
+      const claim = await claimStartName(
+        this.ports.claims,
+        id,
+        { teammate: requested },
+        this.nowMs(),
+      );
+      if (claim.ok) return ok(claim.callsign ?? requested);
+      return failed('refused', claim.error.message);
+    }
+    if (this.ports.claims !== undefined) {
+      const claim = await claimStartName(this.ports.claims, id, {}, this.nowMs());
+      if (claim.ok && claim.callsign !== undefined) return ok(claim.callsign);
+    }
+    const name = this.ports.newName(candidate => this.registry.nameHolder(candidate) !== undefined);
     const holder = this.registry.nameHolder(name);
     if (holder !== undefined) return failed('refused', `the name ${name} is held by running ferret ${holder}`);
+    return ok(name);
+  }
+
+  private async startNamed(
+    id: FerretId,
+    name: string,
+    request: StartRequest,
+  ): Promise<Result<FerretId, StartFailure>> {
     // A work folder replaces the folder the ferret works in; it is canonical and goes through the same folder check.
     const anchor = this.ports.folder(request.folder);
     if (!anchor.ok) return failed('folder', anchor.error);
@@ -302,7 +365,6 @@ export class FerretsService implements FerretsApi {
     const harnessKey = request.harness ?? this.ports.harnessKeys()[0];
     if (harnessKey === undefined || !(HARNESS_KEYS as readonly string[]).includes(harnessKey))
       return failed('harness_unavailable', 'no harness plugin is on');
-    const id = this.ports.newId();
     const role = request.role ?? (request.parent === undefined ? 'lead' : 'helper');
     const decision = await this.ports.decide({
       ferret: id,
@@ -549,13 +611,33 @@ export class FerretsService implements FerretsApi {
     const record = this.registry.get(ferret);
     if (record === undefined) return err(`no ferret ${ferret}`);
     const name = change.name?.trim();
+    let claimed: string | undefined;
     if (name !== undefined) {
       const holder = this.registry.nameHolder(name);
       if (holder !== undefined && holder !== ferret) return err(`the name ${name} is held by running ferret ${holder}`);
+      // Renaming to the name the ferret already answers to is a no-op claim; any other goes through the ledger.
+      if (this.ports.claims !== undefined && normalizeCallsign(name) !== normalizeCallsign(record.name)) {
+        const allocated = await this.ports.claims.allocate({ ownerId: ferret, nowMs: this.nowMs(), requested: name });
+        if (!allocated.ok)
+          return err(
+            allocated.error.code === 'callsign_taken'
+              ? `another agent on this machine is already called ${displayAgentName(normalizeCallsign(name) ?? name)} — choose a different name`
+              : allocated.error.message,
+          );
+        claimed = allocated.claim.callsign;
+      }
     }
     const title = change.title?.trim();
     if (title !== undefined) await this.saveDetails(ferret, { ...this.registry.detailsOf(ferret), title });
-    if (name !== undefined) await this.write({ ...record, name }, record.state, 'renamed');
+    if (name !== undefined) {
+      try {
+        await this.write({ ...record, name }, record.state, 'renamed');
+      } catch (error) {
+        // The reservation was taken for a rename that never landed; holding it would park the name.
+        if (claimed !== undefined) await this.ports.claims?.release(claimed, ferret).catch(() => undefined);
+        throw error;
+      }
+    }
     else this.ports.changed({ ferret, state: record.state, previous: record.state, change: 'renamed' });
     return ok((await this.get(ferret)) as FerretSummary);
   }

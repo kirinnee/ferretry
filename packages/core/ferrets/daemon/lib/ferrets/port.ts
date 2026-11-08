@@ -26,6 +26,7 @@ export function ferretsPort(service: FerretsService): FerretsApi {
     sitrep: ferret => service.sitrep(ferret),
     summary: ferret => service.summary(ferret),
     managedWorktrees: () => service.managedWorktrees(),
+    systemCallsign: prefix => service.systemCallsign(prefix),
     agentControl: ferret => service.agentControl(ferret),
     harness: (ferret, caller) => service.harness(ferret, caller),
     move: (ferret, runtime, options, caller) => service.move(ferret, runtime, options, caller),

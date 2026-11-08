@@ -103,6 +103,25 @@ export const NamesFile = defineState({
   schema: NamesDocumentSchema,
 });
 
+/**
+ * `system-callsigns.json` (today's `FY_HOME/state/system-callsigns.json`, `FileSystemCallsignCounters`): the last
+ * sequence issued for each system prefix, so a restart carries on instead of starting again from 1. A prefix never
+ * issued is absent. Reading is total at the adapter: a damaged document is "nothing issued yet".
+ */
+const SystemCallsignSequence = z.number().int().min(0).max(0xff_ff_ff);
+export const SystemCallsignsDocumentSchema = z.object({
+  warden: SystemCallsignSequence.optional(),
+  learning: SystemCallsignSequence.optional(),
+  pack: SystemCallsignSequence.optional(),
+});
+export const SystemCallsignsFile = defineState({
+  name: 'system-callsigns',
+  path: 'system-callsigns.json',
+  store: 'json',
+  format: 1,
+  schema: SystemCallsignsDocumentSchema,
+});
+
 // ─── archive.json (today's archive registry, `lib/session/archive/registry.ts`) ────────────────────────────────
 
 /** What stands in for a journal file's identity, as the index and the archive record it. */

@@ -6,6 +6,7 @@ import {
   type FerretSummary,
   type RestartResult,
   type RestartStatus,
+  NamesFile,
   RestartsFile,
 } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner } from '../../../../contract/testing/index.ts';
@@ -170,6 +171,8 @@ describe('who may restart', () => {
     const { h, runner, start } = await running();
     const first = await start('aniya');
     await h.request('POST', `/v1/ferrets/${first}/stop`, { body: {} });
+    // Its reservation aged out of the callsign window, so the name is free for the next start.
+    h.state('ferrets').plant(NamesFile, JSON.stringify({ format: 1, claims: [] }));
     const second = await start('aniya');
     // A stopped ferret may be resumed under a name another now holds, so two are running on one footing.
     expect((await h.request('POST', `/v1/ferrets/${first}/resume`)).status).toBe(200);

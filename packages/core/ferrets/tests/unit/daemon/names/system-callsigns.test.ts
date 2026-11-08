@@ -1,19 +1,25 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { StateCallsignCounters } from '../../../../daemon/adapters/names/state-callsign-counters.ts';
 import { SYSTEM_CALLSIGN_MAX_SEQUENCE } from '../../../../daemon/lib/protocol/system-callsigns.ts';
-import { FileSystemCallsignCounters } from '../../../../daemon/adapters/names/file-system-callsign-counters.ts';
-import type { FileSystemPort } from '../../../../daemon/lib/ports.ts';
 import { issuerOver, MemoryCounters } from './system-callsigns-support.ts';
 
-function memoryFiles(): { readonly files: FileSystemPort; readonly text: Map<string, string> } {
-  const text = new Map<string, string>();
-  const files = {
-    readText: async (path: string) => text.get(path),
-    writeTextAtomic: async (path: string, value: string) => {
-      text.set(path, value);
-    },
-  } as unknown as FileSystemPort;
-  return { files, text };
+/** A state port holding the one `system-callsigns.json` document, or reporting it damaged. */
+function memoryState() {
+  const state = {
+    document: undefined as Record<string, number> | undefined,
+    damaged: false,
+    port: {
+      read: async () =>
+        state.damaged
+          ? { ok: false, error: { file: 'system-callsigns.json', reason: 'unparsable', sentence: 'damaged' } }
+          : { ok: true, value: state.document },
+      write: async (_file: unknown, value: Record<string, number>) => {
+        state.document = value;
+      },
+    } as never,
+  };
+  return state;
 }
 
 describe('issuing system callsigns', () => {
@@ -67,35 +73,34 @@ describe('issuing system callsigns', () => {
 });
 
 describe('the persisted counters', () => {
-  it('should carry on after a restart, through the file', async () => {
+  it('should carry on after a restart, through system-callsigns.json (F-0349)', async () => {
     // Arrange
-    const { files, text } = memoryFiles();
-    const first = issuerOver(new FileSystemCallsignCounters('/state/system-callsigns.json', files));
+    const state = memoryState();
+    const first = issuerOver(new StateCallsignCounters(state.port));
     await first.next('learning');
     await first.next('learning');
     await first.next('pack');
 
     // Act
-    const second = issuerOver(new FileSystemCallsignCounters('/state/system-callsigns.json', files));
+    const second = issuerOver(new StateCallsignCounters(state.port));
 
     // Assert
-    should(JSON.parse(text.get('/state/system-callsigns.json') ?? '{}')).deepEqual({ learning: 2, pack: 1 });
+    should(state.document).deepEqual({ learning: 2, pack: 1 });
     should(await second.next('learning')).equal('learning-000003');
     should(await second.next('pack')).equal('pack-000002');
   });
 
-  it('should start again from nothing when the file is damaged or says nonsense', async () => {
+  it('should start again from nothing when the document is damaged (F-0349)', async () => {
     // Arrange
-    const { files, text } = memoryFiles();
-    const counters = new FileSystemCallsignCounters('/c.json', files);
+    const state = memoryState();
+    const counters = new StateCallsignCounters(state.port);
 
     // Act + Assert
     should(await counters.read()).deepEqual({});
-    text.set('/c.json', '{not json');
+    state.damaged = true;
     should(await counters.read()).deepEqual({});
-    text.set('/c.json', JSON.stringify({ learning: -4, pack: 'x', other: 9 }));
-    should(await counters.read()).deepEqual({});
-    text.set('/c.json', JSON.stringify({ learning: 7 }));
+    state.damaged = false;
+    state.document = { learning: 7 };
     should(await counters.read()).deepEqual({ learning: 7 });
   });
 });
