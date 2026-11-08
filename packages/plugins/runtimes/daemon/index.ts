@@ -23,6 +23,7 @@
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon, type DaemonContext } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
+import type { LoginView } from '@ferretry/plugin-logins/contract';
 import {
   MODEL_SET_ITEMS,
   PROFILE_ITEMS,
@@ -172,15 +173,30 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
       // judges both blocks at now), so the views are told AT that instant rather than at their next read
       // (docs/disabling.md). One timer, for the earliest `until` ahead among the runtime files and the logins (read
       // through the Logins port), set again whenever a runtime file moves or Logins says a login changed.
-      const loginBlocks = async () =>
-        new Map((await ctx.needs.logins.list()).logins.map(view => [view.id as string, view]));
+      //
+      // Logins drops a login's `disabled` from its view once the `until` has passed, so the list read when the timer
+      // fires no longer names the block that expired: the fire judges the logins' `until`s as the arming read saw them.
+      // A login list that cannot be read counts as no login blocks, so the runtimes' own `until`s still arm and publish.
+      const loginBlocks = async (): Promise<ReadonlyMap<string, LoginView>> =>
+        await ctx.needs.logins.list().then(
+          list => new Map(list.logins.map(view => [view.id as string, view])),
+          () => new Map(),
+        );
       let expiredUpTo = clock.nowMs();
+      let armedLogins: ReadonlyMap<string, LoginView> = new Map();
+      let loginReads = 0;
       const expiry = new DisableExpiryWatch({
-        next: async () => earliestExpiry(config.collection(runtimeItems), await loginBlocks(), clock.nowMs()),
+        next: async () => {
+          const read = ++loginReads;
+          const logins = await loginBlocks();
+          // An older read landing after a newer one never replaces what the newer one saw.
+          if (read === loginReads) armedLogins = logins;
+          return earliestExpiry(config.collection(runtimeItems), logins, clock.nowMs());
+        },
         now: () => clock.nowMs(),
         republish: async () => {
           const now = clock.nowMs();
-          const back = runtimesBackOn(config.collection(runtimeItems), await loginBlocks(), expiredUpTo, now);
+          const back = runtimesBackOn(config.collection(runtimeItems), armedLogins, expiredUpTo, now);
           expiredUpTo = now;
           if (back.length > 0) events.publish(RuntimesChanged, { runtimes: [...back], profiles: [], modelSets: [] });
         },

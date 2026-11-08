@@ -25,6 +25,8 @@ import { type RuntimesAssembly, runtimesDaemon } from '../../../daemon/index.ts'
 import { UNAVAILABLE } from '../../../daemon/lib/service/assembly.ts';
 import { LoginChanged, type LoginView } from '@ferretry/plugin-logins/contract';
 import { type FakeLogins, fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import loginsDaemon from '@ferretry/plugin-logins/daemon';
+import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import manifest from '../../../manifest.ts';
 
 const login = sampleLogin;
@@ -41,7 +43,38 @@ interface Built {
   readonly host: TestHost;
   readonly ferrets: FakeFerrets;
   readonly installs: CatalogInstallChange[];
-  readonly logins: FakeLogins;
+  readonly logins: ProjectedLogins;
+}
+
+interface ProjectedLogins extends FakeLogins {
+  /** Make every list read throw (a Logins that cannot answer), or answer again. */
+  failReads(failing: boolean): void;
+}
+
+/**
+ * The contract's fake, read the way the real Logins projects its list: a login's `disabled` is dropped once its
+ * `until` has passed (`activeDisable` in Logins' credentials service), so a read at the expiry instant no longer names
+ * the block that just ended. A read can also be made to throw.
+ */
+function projectedLogins(inner: FakeLogins, nowMs: () => number): ProjectedLogins {
+  let failing = false;
+  const active = (view: LoginView): LoginView => {
+    const until = view.disabled?.until;
+    if (until === undefined || Date.parse(until) > nowMs()) return view;
+    const { disabled: _expired, ...rest } = view;
+    return rest as LoginView;
+  };
+  return {
+    ...inner,
+    list: async () => {
+      if (failing) throw new Error('the logins cannot be read right now');
+      const list = await inner.list();
+      return { ...list, logins: list.logins.map(active) };
+    },
+    failReads: next => {
+      failing = next;
+    },
+  };
 }
 
 async function build(
@@ -54,7 +87,10 @@ async function build(
 ): Promise<Built> {
   const ferrets = new FakeFerrets();
   const installs: CatalogInstallChange[] = [];
-  const logins = fakeLogins(options.logins ?? [login('claude-you'), login('codex-work', { harness: 'codex' })]);
+  const logins = projectedLogins(
+    fakeLogins(options.logins ?? [login('claude-you'), login('codex-work', { harness: 'codex' })]),
+    () => options.clock?.nowMs() ?? Date.now(),
+  );
   const assembly = (): RuntimesAssembly => ({
     catalog: {
       installCatalogItem: async (change: CatalogInstallChange) => {
@@ -396,6 +432,60 @@ describe('the runtimes daemon', () => {
 
     // Assert
     should(changed()).deepEqual(named('codex-work'));
+  });
+
+  it('should still wake the views for a runtime switched off until a time while the logins cannot be read', async () => {
+    // Arrange: codex-work's own file is off until 09:30, and every read of the logins throws.
+    const clock = fixedClock('2026-11-08T09:00:00.000Z');
+    const runtimes = {
+      ...FILES.runtimes,
+      'codex-work': { ...FILES.runtimes['codex-work'], ...offUntil('2026-11-08T09:30:00Z') },
+    };
+    const { host, logins } = await build({ clock, config: { ...FILES, runtimes }, logins: [] });
+    logins.failReads(true);
+    host.setConfig('runtimes', { ...runtimes });
+    await quiet(host);
+    const changed = changesSince(host);
+
+    // Act
+    await clock.advance(30 * 60_000);
+    await quiet(host);
+
+    // Assert
+    should(changed()).deepEqual(named('codex-work'));
+  });
+
+  it('should wake the views at the until a hand edit of a login file wrote, through the real Logins', async () => {
+    // Arrange: the real Logins beside Runtimes; nothing is off at start. Then the owner edits logins/codex-work.yaml by
+    // hand (no Logins change) to switch it off until 09:30.
+    const clock = fixedClock('2026-11-08T09:00:00.000Z');
+    const loginFiles = (extra: Record<string, unknown> = {}) => ({
+      'claude-you': { harness: 'claude-code', store: 'host' },
+      'codex-work': { harness: 'codex', store: 'host', ...extra },
+    });
+    const host = await testHost({
+      // Logins first: the host builds in order, and Runtimes needs the port Logins provides.
+      plugins: [loginsDaemon as DaemonImplementation<any>, runtimesDaemon() as DaemonImplementation<any>],
+      fakes: { ferrets: new FakeFerrets(), vault: new FakeVault() },
+      gate: new StandInAdmission(() => ownerStanding()),
+      config: { ...FILES, logins: loginFiles() },
+      clock,
+    });
+    await quiet(host);
+    host.setConfig('logins', loginFiles({ disabled: { reason: 'cooling off', until: '2026-11-08T09:30:00Z' } }));
+    await quiet(host);
+    const changed = changesSince(host);
+
+    // Act
+    await clock.advance(29 * 60_000);
+    await quiet(host);
+    should(changed()).deepEqual([]);
+    await clock.advance(60_000);
+    await quiet(host);
+
+    // Assert
+    should(changed()).deepEqual(named('codex-work'));
+    await host.stop();
   });
 
   it('should publish nothing once the daemon stops, and set no timer for a file change after it', async () => {
