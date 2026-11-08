@@ -138,7 +138,7 @@ async function startWorker(options: { readonly scope?: string; readonly script?:
   return { signed, listeners, order, shown, opened, dispatch, inputs, state: () => state };
 }
 
-test('the guarded release worker has exactly its shell inputs plus zod, with no plugin import graph', async () => {
+test('the guarded release worker has exactly its shell inputs, the kernel contract’s push envelope and zod, with no plugin import graph', async () => {
   const worker = await startWorker();
   const app = realpathSync(join(root, 'packages/app'));
   const zod = realpathSync(resolve(Bun.resolveSync('zod/package.json', app), '..'));
@@ -151,14 +151,17 @@ test('the guarded release worker has exactly its shell inputs plus zod, with no 
     'src/release/storage.ts',
     'src/release/verification.ts',
     'src/router/routes.ts',
+    'src/router/tap-target.ts',
     'src/storage/names.ts',
     'src/worker/facts.ts',
     'src/worker/notifications.ts',
+    'src/worker/push-envelope.ts',
     'src/worker/service-worker.ts',
   ]);
+  const envelope = realpathSync(Bun.resolveSync('@ferretry/kernel/contract/push-envelope', app));
   const libraries = [...worker.inputs].filter(path => !shell.includes(path));
-  expect(libraries.length).toBeGreaterThan(0);
-  expect(libraries.every(path => path.startsWith(`${zod}/`))).toBe(true);
+  expect(libraries).toContain(envelope);
+  expect(libraries.every(path => path === envelope || path.startsWith(`${zod}/`))).toBe(true);
 });
 
 test('the release worker guard refuses a transitive non-worker import even without a plugin worker file', async () => {
@@ -250,7 +253,12 @@ test('a push is shown plainly, titled for the machine whose registration receive
 
 test('a notification tap opens only this site, and only the machine’s own pages', async () => {
   const machine = await startWorker({ scope: `${APP_ORIGIN}/push/abc/` });
-  for (const url of ['https://evil.example/', '/d/other/board', '/d/abc/board', undefined]) {
+  for (const url of [
+    'https://evil.example/',
+    `${APP_ORIGIN}/d/other/ferrets/f1/chat?ask=A3`,
+    `${APP_ORIGIN}/d/abc/ferrets/f1/chat?ask=A3`,
+    undefined,
+  ]) {
     let closed = false;
     await machine.dispatch('notificationclick', {
       notification: {
@@ -263,10 +271,10 @@ test('a notification tap opens only this site, and only the machine’s own page
     expect(closed).toBe(true);
   }
   expect(machine.opened).toEqual([
-    `${APP_ORIGIN}/d/abc`,
-    `${APP_ORIGIN}/d/abc`,
-    `${APP_ORIGIN}/d/abc/board`,
-    `${APP_ORIGIN}/d/abc`,
+    `${APP_ORIGIN}/app/`,
+    `${APP_ORIGIN}/app/`,
+    `${APP_ORIGIN}/d/abc/ferrets/f1/chat?ask=A3`,
+    `${APP_ORIGIN}/app/`,
   ]);
 });
 
@@ -294,4 +302,92 @@ test('the release build refuses any plugin app/worker.ts, so no probe variant ca
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+const SENT = {
+  version: 1,
+  eventKey: 'e1',
+  title: 'Deploy approval',
+  body: 'Ship the build?',
+  tag: 'agenda-A3',
+  url: '/ferrets/f1/chat?ask=A3',
+  count: 1,
+};
+
+test('a machine’s push carries the page it named, and its tap opens exactly that chat at the ask', async () => {
+  const machine = await startWorker({
+    scope: `${APP_ORIGIN}/push/abc/`,
+    script: `${APP_ORIGIN}/sw.verified.js?machine=Beta`,
+  });
+  await machine.dispatch('push', { data: { json: () => SENT } });
+  expect(machine.shown).toEqual([
+    {
+      title: 'Beta · Deploy approval',
+      options: {
+        icon: '/icons/icon-any-192.png',
+        badge: '/icons/badge-96.png',
+        body: 'Ship the build?',
+        data: { url: `${APP_ORIGIN}/d/abc/ferrets/f1/chat?ask=A3` },
+      },
+    },
+  ]);
+  await machine.dispatch('notificationclick', {
+    notification: { data: machine.shown[0]!.options.data, close: () => {} },
+  });
+  expect(machine.opened).toEqual([`${APP_ORIGIN}/d/abc/ferrets/f1/chat?ask=A3`]);
+});
+
+test('the app-wide registration’s push always opens /app/, whatever page it named', async () => {
+  const appWide = await startWorker();
+  for (const url of [
+    '/ferrets/f1/chat?ask=A3',
+    '/d/laptop/settings/access',
+    '/ferrets/../../../d/other/ferrets/x/chat',
+  ]) {
+    await appWide.dispatch('push', { data: { json: () => ({ ...SENT, url }) } });
+  }
+  expect(appWide.shown.map(notification => notification.options.data)).toEqual([
+    { url: `${APP_ORIGIN}/app/` },
+    { url: `${APP_ORIGIN}/app/` },
+    { url: `${APP_ORIGIN}/app/` },
+  ]);
+  expect(appWide.shown.map(notification => notification.title)).toEqual(Array(3).fill('Unverified · Deploy approval'));
+});
+
+test('S2 a line the page itself showed under the app-wide registration opens its chat; a hostile stored address opens /app/', async () => {
+  const appWide = await startWorker();
+  const tap = async (url: unknown): Promise<void> =>
+    appWide.dispatch('notificationclick', { notification: { data: { url }, close: () => {} } });
+  // The page watcher’s “needs input” line for a machine’s ferret: absolute, or relative to the site.
+  await tap(`${APP_ORIGIN}/d/abc/ferrets/f1/chat?ask=A3`);
+  await tap('/d/abc/ferrets/f1/chat?ask=A3');
+  // Whatever else is stored: not this site, not a machine’s closed list, not an address at all.
+  for (const hostile of [
+    'https://evil.test/d/abc/ferrets/f1/chat',
+    '//evil.test/d/abc',
+    'javascript:alert(1)',
+    `${APP_ORIGIN}/d/abc/ferrets/../../d/other`,
+    `${APP_ORIGIN}/ferrets/f1/chat`,
+    7,
+  ])
+    await tap(hostile);
+  expect(appWide.opened).toEqual([
+    `${APP_ORIGIN}/d/abc/ferrets/f1/chat?ask=A3`,
+    `${APP_ORIGIN}/d/abc/ferrets/f1/chat?ask=A3`,
+    ...Array(6).fill(`${APP_ORIGIN}/app/`),
+  ]);
+});
+
+test('a push whose payload is not readable JSON, or has no envelope, is shown plainly with no page', async () => {
+  const machine = await startWorker({ scope: `${APP_ORIGIN}/push/abc/` });
+  await machine.dispatch('push', {
+    data: {
+      json: () => {
+        throw new Error('not json');
+      },
+    },
+  });
+  await machine.dispatch('push', { data: { json: () => ({ kind: 'clear', tags: ['x'] }) } });
+  expect(machine.shown.map(notification => notification.title)).toEqual(['abc · Ferretry', 'abc · Ferretry']);
+  expect(machine.shown.every(notification => !('data' in notification.options))).toBe(true);
 });
