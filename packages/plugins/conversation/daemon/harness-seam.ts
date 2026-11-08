@@ -98,9 +98,10 @@ interface BoundTerminal {
   /**
    * Puts one message into the BUSY pane's own queue (Ferrets' `queue`, the runner's `TmuxPaneQueue`), which the
    * harness submits at its next turn boundary. Answers what the pane proved, or `undefined` when this runner cannot
-   * queue (nothing typed). Throws exactly as {@link deliver} does.
+   * queue (nothing typed). Throws exactly as {@link deliver} does. `sendId` is the send's own id: a message long enough
+   * to go by file is written as `queued-<sendId>.md`, so the app can link it to the send's row and a retype rewrites it.
    */
-  queue(text: string): Promise<QueueOutcome | undefined>;
+  queue(text: string, sendId: string): Promise<QueueOutcome | undefined>;
   /** Presses the harness's stop under its own rule and says what it did. Throws the answer for a refusal. */
   interrupt(): Promise<TurnStopped>;
 }
@@ -208,8 +209,8 @@ export function terminalSeam(ferrets: Pick<FerretsApi, 'harness'>): TerminalSeam
           const busy = 'refused' in delivered.error && delivered.error.refused === 'not_ready';
           throw busy && delivered.error.why === 'busy' ? new PaneBusy(answer) : answer;
         },
-        queue: async text => {
-          const queued = await harness.queue(text).catch(uncertain);
+        queue: async (text, sendId) => {
+          const queued = await harness.queue(text, { sendId }).catch(uncertain);
           if (queued.ok) return queued.value;
           if ('refused' in queued.error && queued.error.refused === 'plugin_unavailable') return undefined;
           throw deliveryAnswer(ferret, queued.error);

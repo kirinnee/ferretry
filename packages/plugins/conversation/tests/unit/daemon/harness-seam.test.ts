@@ -71,6 +71,8 @@ class HarnessFerrets extends FakeFerrets {
   readonly delivered: RunnerDelivery[] = [];
   /** What was put in the busy pane's own queue. */
   readonly queued: string[] = [];
+  /** The send id each queue was handed (the name of its file, for a long one). */
+  readonly queuedIds: (string | undefined)[] = [];
   interrupts = 0;
   script: Script = {};
   /** Set when `harness()` itself refuses, as Ferrets' mayTouch rule does. */
@@ -85,8 +87,9 @@ class HarnessFerrets extends FakeFerrets {
         this.delivered.push(delivery);
         return await (this.script.deliver?.() ?? Promise.resolve(ok('turn-started' as const)));
       },
-      queue: async text => {
+      queue: async (text, options) => {
         this.queued.push(text);
+        this.queuedIds.push(options?.sendId);
         if (this.script.queue === undefined) throw new Error('this test did not expect a send to be queued');
         return await this.script.queue();
       },
@@ -498,6 +501,8 @@ describe('a send to a ferret still working on its turn goes to the harness’s o
     expect(response.json()).toMatchObject({ disposition: 'queued', sendId: 'req-1', fate: 'queued' });
     expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
     expect(ferrets.queued).toEqual(['hello there']);
+    // The queue is handed the send's OWN id, so a long message's file is `queued-req-1.md`, linked to this row.
+    expect(ferrets.queuedIds).toEqual(['req-1']);
     expect(await rows(api)).toEqual([
       { sendId: 'req-1', fate: 'queued', path: 'native-inline', typedNotSent: undefined, unaccountedReason: undefined },
     ]);

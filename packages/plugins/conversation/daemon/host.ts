@@ -367,6 +367,7 @@ export function buildConversationA(deps: {
   const deliverOrQueue = async (
     bound: Awaited<ReturnType<typeof terminal.bind>>,
     text: string,
+    sendId: string,
     onQueue: () => void,
   ): Promise<QueueOutcome | undefined> => {
     try {
@@ -375,7 +376,7 @@ export function buildConversationA(deps: {
     } catch (error) {
       if (!(error instanceof PaneBusy)) throw error;
       onQueue();
-      const outcome = await bound.queue(text);
+      const outcome = await bound.queue(text, sendId);
       if (outcome === undefined) throw error.answer;
       return outcome;
     }
@@ -422,7 +423,7 @@ export function buildConversationA(deps: {
     const busyPath = { path: 'native-inline', busyTyped: true } as const;
     let queued: QueueOutcome | undefined;
     try {
-      queued = await deliverOrQueue(bound, text, () => {
+      queued = await deliverOrQueue(bound, text, request.sendId, () => {
         viaQueue = true;
       });
       // Still in the composer after the submit and queue keys: the TUI will not send it at the turn's end by itself.
