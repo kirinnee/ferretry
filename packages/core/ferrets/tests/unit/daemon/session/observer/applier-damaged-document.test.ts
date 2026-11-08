@@ -58,3 +58,56 @@ describe('SessionObservationApplier over a damaged state document (no guarantees
     should(folder.raw(FerretStateFile, ID)).equal(damaged);
   });
 });
+
+const openQuestion = (text: string) => ({ toolUseId: 'tool-1', questions: [{ question: text }] });
+
+async function applyOver(state: Record<string, unknown>) {
+  const { storage } = await memoryStorage({ clock: { now: () => AT } });
+  cleanups.push(async () => await storage.close());
+  const patch = stepQuestion(
+    { state: { id: ID, status: 'running', turn: 1 } as SessionState, events: [asked], answers: new Map() },
+    SCRIPTED_QUESTIONS,
+  );
+  if (patch === undefined) throw new Error('the look implied nothing');
+  const subject = new SessionObservationApplier(
+    storage,
+    { all: async () => new Map(), append: async () => undefined },
+    new KeyedSerialExecutor(),
+    SCRIPTED_QUESTIONS,
+  );
+  await storage.writeState(ID, state as never);
+  const written = await subject.apply(ID, patch, AT);
+  return { written, state: (await storage.readState(ID)) as Record<string, unknown> };
+}
+
+// No guarantees row covers this rule either; today's rule is that only an answered-stamped form is "already held".
+describe('SessionObservationApplier re-deciding a question patch under the lock (no guarantees row)', () => {
+  it('should write nothing when the document already stamps that very form as answered', async () => {
+    // Act
+    const { written, state } = await applyOver({
+      id: ID,
+      status: 'running',
+      turn: 1,
+      lastAnsweredQuestionToolUseId: 'tool-1',
+    });
+
+    // Assert
+    should(written).be.false();
+    should(state.pendingQuestion).be.undefined();
+    should(state.status).equal('running');
+  });
+
+  it('should lay the projected form over a valid document that holds the same tool id with other text', async () => {
+    // Act: the projection, not the document, is what the policy keeps — a refreshed form is a write.
+    const { written, state } = await applyOver({
+      id: ID,
+      status: 'awaiting_question',
+      turn: 1,
+      pendingQuestion: openQuestion('Which one?'),
+    });
+
+    // Assert
+    should(written).be.true();
+    should((state.pendingQuestion as { questions: Array<{ question: string }> }).questions[0]?.question).equal('Ship?');
+  });
+});
