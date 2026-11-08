@@ -7,7 +7,7 @@
  * them. A notice's cards are drawn by {@link AgendaCardsHost}, its Start and Close through a host's board.
  *
  * - `ask:sign-in-approval` is Accounts': the value names the ref's kind (`two-factor-seed`, `phone-approval`,
- *   `task-plan`, `copy-plan`, `sign-in-rule-suggestion`) with the ask's words, the shape Accounts' renderer reads.
+ *   `task-plan`, `copy-plan`, `rule-suggestion`) with the ask's words, the shape Accounts' renderer reads.
  * - `ask:input` is the owner of input requests (Vault): no plugin contributes it yet, so an input card shows its
  *   words and the answer row only, as a machine without that owner would.
  *
@@ -59,11 +59,7 @@ export const askRendererFor = (
     return {
       key: SIGN_IN_APPROVAL_RENDERER,
       slot: 'plan',
-      value: onScreen(
-        item,
-        { kind: 'sign-in-rule-suggestion', suggestion: item.signInRuleSuggestion.suggestion },
-        from,
-      ),
+      value: onScreen(item, { kind: 'rule-suggestion', suggestion: item.signInRuleSuggestion.suggestion }, from),
     };
   if (item.copyPlan !== undefined)
     return {
