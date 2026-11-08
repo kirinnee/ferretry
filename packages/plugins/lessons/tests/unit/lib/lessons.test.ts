@@ -73,6 +73,28 @@ describe('LessonsService', () => {
     });
   });
 
+  // ── directory ────────────────────────────────────────────────────────────────────────────────
+
+  describe('directory', () => {
+    it('should name each ferret by its teammate name and folder, leaving the name out when it has none', async () => {
+      // Arrange
+      const world = lessonsWorld();
+      world.sessions.sessions = [
+        lessonFacts({ ferretId: 's1', teammate: 'Ada', cwd: '/work/a' }),
+        lessonFacts({ ferretId: 's2', cwd: '/work/b' }),
+      ];
+
+      // Act
+      const directory = await world.service.directory();
+
+      // Assert
+      should(directory).deepEqual([
+        { ferretId: 's1', name: 'Ada', folder: '/work/a' },
+        { ferretId: 's2', folder: '/work/b' },
+      ]);
+    });
+  });
+
   // ── adopt ────────────────────────────────────────────────────────────────────────────────────
 
   describe('adopt', () => {
