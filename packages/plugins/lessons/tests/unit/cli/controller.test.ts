@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { LessonsController } from '../../../cli/lib/controller.ts';
-import { applyPreview, CapturingOutput, proposal, RecordingLessonsGateway } from './fixtures.ts';
+import { applyPreview, CapturingOutput, proposal, RecordingLessonsGateway, scanEstimate } from './fixtures.ts';
 
 function controller(gateway = new RecordingLessonsGateway()): {
   subject: LessonsController;
@@ -57,6 +57,17 @@ describe('learning listing', () => {
     await should(subject.list({ all: true, state: 'accepted' })).be.rejectedWith(
       '--all and --state contradict each other; pass one',
     );
+  });
+
+  it('should forward a state the protocol defines, untouched', async () => {
+    // Arrange
+    const { subject, gateway } = controller();
+
+    // Act
+    await subject.list({ state: 'accepted' });
+
+    // Assert
+    should(gateway.listed).eql(['accepted']);
   });
 
   it('should treat a blank --state as absent', async () => {
@@ -257,6 +268,30 @@ describe('learning scan', () => {
     should(gateway.estimated).eql([{ scope: { kind: 'not-passive' } }]);
     should(gateway.scanned).be.empty();
     should(out.text).containEql('re-run with --start');
+  });
+
+  it('should say how many ferrets lie beyond the scan limit, so the owner knows to scan again', async () => {
+    // Arrange
+    const beyond = scanEstimate({ beyondLimit: 7 });
+    const { subject, out } = controller(
+      new RecordingLessonsGateway(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        beyond,
+      ),
+    );
+
+    // Act
+    await subject.scan({});
+
+    // Assert
+    should(out.text).containEql('7 more beyond this scan’s limit — scan again afterwards');
   });
 
   it('should narrow the scope to the named ferrets, trimmed and de-blanked', async () => {

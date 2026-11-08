@@ -132,6 +132,26 @@ describe('TidyService.plan', () => {
     expect(result.ok && result.plan.keep.map(k => k.code)).toEqual(['needs-owner']);
   });
 
+  test('leaves a closed ask out of the plan', async () => {
+    const asks = new FakeAsks();
+    await asks.raise({
+      source: sourceKey('ferret'),
+      ref: {},
+      entry: entryId('track'),
+      kind: 'task',
+      subject: 'track',
+      why: 'w',
+      raisedBy: { kind: 'ferret', ferret: ME },
+      ferret: ME,
+    });
+    const open = await asks.open({ ferret: ME });
+    asks.open = async () => open.map(each => ({ ...each, state: 'closed' as const }));
+    const ferrets = new FakeFerrets();
+    ferrets.add({ id: ME });
+    const result = await new TidyService({ ferrets, asks, board: () => board() }).plan(ME);
+    expect(result.ok && [result.plan.close, result.plan.keep]).toEqual([[], []]);
+  });
+
   test('leaves the cards out of a helper’s plan', async () => {
     const { service, makeCard } = await setup();
     await makeCard(OTHER, 'Helper card');
