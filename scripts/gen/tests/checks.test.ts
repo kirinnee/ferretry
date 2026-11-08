@@ -1113,6 +1113,17 @@ describe('guarantees: a kept row needs a test that PASSES (redesign §10.5)', ()
       expect(messages(await run(guarantees, f, { tier: 'int', results: ['coverage/int'] }))).toBe('');
     });
 
+    test("an integration test in another package that reuses the id does not make the integration job judge the owner's row", async () => {
+      const elsewhere = 'packages/plugins/beta/tests/integration/b.test.ts';
+      const f = planted(row('G1', 'kept'), titled('G1 holds'), {
+        'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A }),
+        'coverage/int/junit.xml': junit({ name: 'G1 a different fixture label', file: elsewhere }),
+      });
+      f.write(elsewhere, titled('G1 a different fixture label'));
+      expect(messages(await run(guarantees, f, { tier: 'unit', results: ['coverage/unit'] }))).toBe('');
+      expect(messages(await run(guarantees, f, { tier: 'int', results: ['coverage/int'] }))).toBe('');
+    });
+
     test('--tier takes unit or int only', () => {
       expect(parseArgs(['--tier', 'int']).tier).toBe('int');
       expect(() => parseArgs(['--tier', 'sit'])).toThrow('--tier is unit or int');
