@@ -157,9 +157,8 @@
     ],
     "agenda": [
       "GAP(agenda-inbox-machines): the Inbox reads the one machine this half is built for (runtime.client), where today's hook read every paired machine's list; the cross-machine count, machine filter and per-machine notes need a shell-level reader over every daemon's Agenda half, which is not built",
-      "GAP(agenda-references): references in an ask's prose (&F12, !A3, :agent, …) render as plain text: @ferretry/app offers the ReferenceSurfaceProvider but the surface builder reads other plugins' resolvers and openers (Board's reference:&, Ferrets, Files), which Agenda may not import",
+      "GAP(agenda-references): &F12 in an ask's prose proves and opens through Board's agenda.card-reference hook; the other references (!A3, :agent, @file, …) still render as plain text: their resolvers and openers are Agenda's own ledger, Ferrets' and Files', which no hook or slot hands this half yet",
       "GAP(agenda-history-conversation): an open ask's History shows the words stored on the item, not the chat messages that name it: readConversation is not bound, because it would read Conversation's transcript through an Agenda-to-Conversation edge that is not approved; the receipt badges (Cancelled, Unconfirmed, Held for revive, Typed-not-sent, Saved) return with that read",
-      "GAP(done-close-board) and GAP(cards-board): Done · closes and a notice's Start/Close write through Board ports (DoneCloseBoard, AgendaCardsBoard) that no host provides until Board contributes them or Agenda is given a need on Board",
       "GAP(agenda-composer) and GAP(quote-target): the ask page offers the agenda.conversation slot (Q9); a reply typed there does not mark the Inbox replied, and Quote in composer needs Conversation's composer to register its quote target",
       "GAP(agenda-nav) and GAP(agenda-drawer): the Inbox nav entry, the needs-you group and the in-chat drawer have no 5.0 shell or Conversation slot to mount in",
       "GAP(answer-files), GAP(sign-in-rule-sweep), GAP(push-delivery), GAP(notification-open), GAP(item-opened): answer uploads, the sign-in rule sweep and push delivery/open run through ports Conversation, Accounts and Access must bind (Access's agendaItemOpenedHandler is an app function its contract does not expose, so opening an ask does not yet close this device's own buzz lines); the notification filter's sentence says the switch is that machine's own, as the rows are Access's now; app/NEEDS-APP-SHELL.txt lists every open gap",
@@ -246,9 +245,6 @@
       "GAP(access): daemon/adapters/push/index.ts is not reached by the daemon composition (daemon/index.ts imports the adapter files directly, only tests import this index) (owner: nelly)"
     ],
     "board": [
-      "GAP(board): app/lib/board-done.ts (the Done / Reopen lane choice) is called only by Agenda (agenda-done-close.ts, the cards-to-try inbox), which has no edge to Board and keeps its own closePlan copy; it stays unreached in Board until Agenda is given a need on Board or Board contributes the DoneCloseBoard (owner: board port)",
-      "GAP(board): app/lib/board-move.ts (the forward / backward move plan) is called only by the send-back flow of Agenda's cards-to-try inbox, which has no edge to Board; Board's own cards are read-only (#1552), so no Board view moves a card (owner: board port)",
-      "GAP(board): app/lib/lane-proposal-link.ts (the Edit choice of a lane-proposal ask opens the lane editor) is called only from Agenda's ask surfaces, which keep their own copy in agenda/app/lib/lane-edit.ts; Agenda has no edge to Board and no parity row ticks that copy, so it is neither wired nor deleted (owner: board port)",
       "GAP(board): linkNudgePullRequests in app/lib/board-nudge.ts is imported by the unmerged branch rebuild/port-ferrets-b (core/ferrets/app/components/agent-message-rows.tsx), so it stays until that branch lands (owner: nelly)"
     ],
     "voice": [

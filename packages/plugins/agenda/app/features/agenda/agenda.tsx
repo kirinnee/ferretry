@@ -53,7 +53,7 @@ import { sortAgenda } from '../../lib/agenda-status.ts';
 import type { AgendaLoadStatus } from '../../lib/agenda-store.ts';
 import type { DaemonConnection } from '../../shell.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../../shell.ts';
-import { laneEditDestination } from '../../lib/lane-edit.ts';
+import type { AgendaLaneEditor as LaneEditor } from '../../../contract/app-hooks.ts';
 import { composerQuoteTarget } from '../../shell.ts';
 import type { TranscriptEntry } from '../../lib/transcript.ts';
 import { RendererView, useOptionalRouter } from '../../shell.ts';
@@ -202,10 +202,10 @@ export interface UseAgendaInput {
    */
   readonly onItemOpened?: (daemon: DaemonConnection, sessionId: string, agendaId: string) => unknown;
   /**
-   * Where Edit on a lane-proposal card goes: Board's lane editor for a project, spelt by the host (this half hard-codes
+   * Where Edit on a lane-proposal card goes: Board's lane editor (its `agenda.lane-proposal` hook; this half hard-codes
    * no Board path). Absent: the answer is sent and the page stays.
    */
-  readonly laneEditor?: (projectId: string) => string | undefined;
+  readonly laneEditor?: LaneEditor;
   readonly now?: number;
 }
 
@@ -363,7 +363,7 @@ export const useAgenda = ({
         update(current => (current.card === item.id ? { card: null } : {}));
         onAnswered?.();
         // Edit on a lane proposal: the answer is sent, now the editor opens.
-        const editor = laneEditDestination(item, action, laneEditor);
+        const editor = laneEditor?.(item, action);
         if (editor !== undefined) router?.navigate(editor);
       },
       (reason: unknown) => setCard(item.id, failure(reason)),

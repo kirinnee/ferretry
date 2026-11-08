@@ -4,3 +4,4 @@ export * from './port.ts';
 export * from './state.ts';
 export * from './wire.ts';
 export * from './slots.ts';
+export * from './app-hooks.ts';
