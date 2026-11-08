@@ -663,13 +663,16 @@ describe('resolvedEntries — a credential nested inside a value (ruling #40)', 
     // Arrange — a long value of secret-named keys with short values, and a long run with no separator.
     const keys = `--set=${'token=ab,'.repeat(20_000)}`;
     const run = `--set=${'a'.repeat(200_000)}`;
+    // Quoted short values (each walked to its closing quote once), and keys in a glued flag's own part.
+    const quoted = `--set=${'token="ab",'.repeat(20_000)}`;
+    const flagPart = `--hdr,${'token:ab,'.repeat(20_000)} x`;
     const started = performance.now();
 
     // Act
-    const actual = shownFlags([keys, run]);
+    const actual = shownFlags([keys, run, quoted, flagPart]);
 
     // Assert
-    should(actual.map(word => word.value)).deepEqual([keys, run]);
+    should(actual.map(word => word.value)).deepEqual([keys, run, quoted, flagPart]);
     should(performance.now() - started).be.below(2_000);
   });
 });
@@ -707,5 +710,97 @@ describe('resolvedEntries — every nested credential shape (ruling #40, generat
 
     // Assert
     should(breaches).deepEqual([]);
+  });
+});
+
+// ── Review r1 of the #40 rule (F2, F3, and what the broadened generator found in r2) ──────────────────
+
+describe('resolvedEntries — the #40 rule after review r1 (F2, F3)', () => {
+  const NESTED = 'nested-fake-value-0000';
+
+  it('should hide at least what #37 hid when a token is stuck to -H before a nested key: -H<token> KEY=v, -H<token>=KEY=v (F2)', () => {
+    // Arrange
+    const words = [`-H${FAKE_TOKEN} API_KEY=${NESTED}`, `-H${FAKE_TOKEN}=API_KEY=${NESTED}`, `-H${FAKE_TOKEN} model=m`];
+
+    // Act
+    const flags = shownFlags(words);
+    const line = shownServer(words);
+
+    // Assert
+    should(flags).deepEqual([hid(`-H${HIDDEN}`), hid(`-H${HIDDEN}`), hid(`-H${HIDDEN}`)]);
+    should(line).equal(`run-server -H${HIDDEN} -H${HIDDEN} -H${HIDDEN}`);
+  });
+
+  it("should cut a URL user's password holding a raw @ up to the last @ before the host, keeping the user and host (F3)", () => {
+    // Act
+    const actual = shownFlags([
+      `https://person:p@ss${FAKE_SECRET}@db.example.invalid/x`,
+      `--url=postgres://person:a@b@${FAKE_SECRET}@db.example.invalid?token=${FAKE_SECRET}&model=m`,
+    ]);
+
+    // Assert
+    should(actual).deepEqual([
+      hid(`https://person:${HIDDEN}@db.example.invalid/x`),
+      hid(`--url=postgres://person:${HIDDEN}@db.example.invalid?token=${HIDDEN}&model=m`),
+    ]);
+  });
+
+  it('should cut a quoted nested value holding a separator up to its closing quote, keeping what follows (F3)', () => {
+    // Act
+    const actual = shownFlags([
+      `--set=API_KEY="${FAKE_SECRET},more${FAKE_SECRET}",b=2`,
+      `--set=api_key='${FAKE_SECRET};${FAKE_SECRET}'&model=m`,
+      `--set=API_KEY=a:'${FAKE_SECRET},${FAKE_SECRET}',b=2`,
+      `--set=ACCESS_TOKEN=api_key: '${FAKE_SECRET},${FAKE_SECRET}'`,
+    ]);
+
+    // Assert
+    should(actual).deepEqual([
+      hid(`--set=API_KEY=${HIDDEN},b=2`),
+      hid(`--set=api_key=${HIDDEN}&model=m`),
+      hid(`--set=API_KEY=${HIDDEN},b=2`),
+      hid(`--set=ACCESS_TOKEN=${HIDDEN}`),
+    ]);
+  });
+
+  it("should hide a secret-named key in a glued flag's own part: --hdr,api_key:<v> more, --x&X-Api-Key=<v>,${secret:Y}, --x&API_KEY:<v>;Bearer <token>, and with a cut value", () => {
+    // Act
+    const actual = shownFlags([
+      `--hdr,api_key:${NESTED} more`,
+      `--hdr;password:${NESTED} x`,
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
+      `--x&X-Api-Key=${NESTED},\${secret:API_TOKEN}`,
+      `--name&?API_KEY:a${NESTED};Bearer ${FAKE_TOKEN}`,
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
+      `--hdr,api_key:${NESTED} x=\${secret:Y},token=${FAKE_SECRET}`,
+    ]);
+
+    // Assert
+    should(actual).deepEqual([
+      hid(`--hdr,api_key:${HIDDEN}`),
+      hid(`--hdr;password:${HIDDEN}`),
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
+      hid(`--x&X-Api-Key=${HIDDEN},\${secret:API_TOKEN}`),
+      hid(`--name&?API_KEY:${HIDDEN};Bearer ${HIDDEN}`),
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
+      hid(`--hdr,api_key:${HIDDEN} x=\${secret:Y},token=${HIDDEN}`),
+    ]);
+  });
+
+  it('should keep a raw @ outside a password, a quoted harmless value and a flag part with no secret key as written (control)', () => {
+    // Arrange
+    const words = [
+      'https://h.example.invalid/x?redirect=a@b',
+      'https://person@h.example.invalid/x@y',
+      `--set=model="${FAKE_SECRET},${FAKE_SECRET}",b=2`,
+      '--hdr,model:claude-opus-5-5 more',
+      '--api-key:ab cd',
+    ];
+
+    // Act
+    const actual = shownFlags(words);
+
+    // Assert
+    should(actual).deepEqual(words.map(as));
   });
 });

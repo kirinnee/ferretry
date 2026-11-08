@@ -8,6 +8,10 @@
  * secret-named query parameters. Each secret must be gone, while the key, the flag, the user, the host and every
  * other parameter stay; each control (a harmless key, a pointer, a value too short to be a secret) is exact.
  *
+ * Review r1 (r2 round) added: a key in a glued flag's OWN part (`--hdr;API_KEY:v`), a quoted value holding a `,`
+ * (`API_KEY="v,v"`, F3), a URL password holding a raw `@` (F3), and a token stuck to `-H` before a nested key
+ * (`-H<token> KEY=v`, `-H<token>=KEY=v`, F2), which must stay as hidden as ruling #37 left it: `-H‹hidden›`.
+ *
  * Also the oracle the differentials share: what "hides at least what today hides" means for one word and one line.
  *
  * Every secret here is an obviously fake one.
@@ -48,6 +52,8 @@ const VALUES: readonly { readonly value: string; readonly secret: boolean; reado
   { value: FAKE, secret: true, body: FAKE },
   { value: `Bearer ${FAKE}`, secret: true, body: FAKE },
   { value: 'Basic bm90LWEtcmVhbC0wMDAw==', secret: true, body: 'bm90LWEtcmVhbC0wMDAw' },
+  // A `,` inside a quoted value is the value's, not a list's (F3): both copies must go.
+  { value: `"${FAKE},${FAKE}"`, secret: true, body: FAKE },
   { value: '$API_TOKEN', secret: false, body: '' },
   // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
   { value: '${secret:API_TOKEN}', secret: false, body: '' },
@@ -57,8 +63,16 @@ const QUOTES = ['', "'", '"'];
 const BEFORE = '--print';
 const AFTER = '--verbose';
 
-type Position = 'next word' | 'glued =' | 'glued space' | 'stuck' | 'own word' | 'list middle';
-const POSITIONS: readonly Position[] = ['next word', 'glued =', 'glued space', 'stuck', 'own word', 'list middle'];
+type Position = 'next word' | 'glued =' | 'glued space' | 'stuck' | 'own word' | 'list middle' | 'flag part';
+const POSITIONS: readonly Position[] = [
+  'next word',
+  'glued =',
+  'glued space',
+  'stuck',
+  'own word',
+  'list middle',
+  'flag part',
+];
 
 /** The words a nested `text` makes at `position`, the index of the one holding it, and what of it must stay. */
 function placed(text: string, position: Position): { words: string[]; at: number; kept: string[] } {
@@ -73,6 +87,9 @@ function placed(text: string, position: Position): { words: string[]; at: number
       return { words: [`-H${text}`], at: 1, kept: ['-H'] };
     case 'own word':
       return { words: [text], at: 1, kept: [] };
+    case 'flag part':
+      // The key sits in the flag's own part, before any `=` or space: `--hdr;API_KEY:v`, `--hdr;API_KEY: Bearer v`.
+      return { words: [`--hdr;${text}`], at: 1, kept: ['--hdr;'] };
     default:
       return { words: [`--set=a=1,${text},b=2`], at: 1, kept: ['--set=a=1,', ',b=2'] };
   }
@@ -89,11 +106,14 @@ function nestedKeyCases(): NestedCase[] {
       for (const separator of SEPARATORS) {
         for (const { value, secret, body } of VALUES) {
           for (const position of POSITIONS) {
-            // `-H<key> = v` is a flag `-H<key>` with a value after a space: #37's name rule, already hidden whole.
-            if (position === 'stuck' && separator.startsWith(' ')) continue;
+            // `-H<key> = v` and `--hdr;<key> = v` are a flag with a value after a space: #37's name rule, already hidden
+            // whole.
+            if ((position === 'stuck' || position === 'flag part') && separator.startsWith(' ')) continue;
             // A list item is unquoted inside its list, and a value stuck to `-H` reaches argv with the shell's quotes
             // gone (a quote left in the word makes `-H'API_KEY` a flag of its own, which #37's name rule already hides).
-            for (const quote of position === 'list middle' || position === 'stuck' ? [''] : QUOTES) {
+            for (const quote of position === 'list middle' || position === 'stuck' || position === 'flag part'
+              ? ['']
+              : QUOTES) {
               for (const last of [true, false]) {
                 const text = `${quote}${key}${separator}${value}${quote}`;
                 const shape = placed(text, position);
@@ -135,6 +155,13 @@ function urlCases(): NestedCase[] {
       kept: ['person:', '@db.example.invalid'],
     },
     { text: s => `${s}://:${FAKE}@db.example.invalid`, secret: true, body: FAKE, kept: ['@db.example.invalid'] },
+    // A raw `@` in the password: it runs to the LAST `@` before the host (F3).
+    {
+      text: s => `${s}://person:p@ss${FAKE}@db.example.invalid/x`,
+      secret: true,
+      body: FAKE,
+      kept: ['person:', '@db.example.invalid/x'],
+    },
     {
       text: s => `${s}://h.example.invalid/x?token=${FAKE}&model=m`,
       secret: true,
@@ -171,8 +198,31 @@ function urlCases(): NestedCase[] {
   return cases;
 }
 
+const STUCK_TOKEN = 'sk-not-a-real-key-0000';
+
+/**
+ * A token stuck to `-H` and then a nested key, glued by a space or `=` (F2): ruling #37 hid the whole value
+ * (`-H‹hidden›`), so every key, separator and value here — harmless or not, a pointer or not — must keep it hidden.
+ */
+function stuckTokenCases(): NestedCase[] {
+  const cases: NestedCase[] = [];
+  for (const key of [...SECRET_KEYS, ...HARMLESS_KEYS]) {
+    for (const separator of SEPARATORS) {
+      for (const { value } of VALUES) {
+        for (const join of [' ', '=']) {
+          for (const last of [true, false]) {
+            const words = [BEFORE, `-H${STUCK_TOKEN}${join}${key}${separator}${value}`, ...(last ? [] : [AFTER])];
+            cases.push({ label: JSON.stringify(words), words, at: 1, secret: true, body: STUCK_TOKEN, kept: ['-H'] });
+          }
+        }
+      }
+    }
+  }
+  return cases;
+}
+
 /** Every generated case of ruling #40. */
-export const nestedFamily = (): readonly NestedCase[] => [...nestedKeyCases(), ...urlCases()];
+export const nestedFamily = (): readonly NestedCase[] => [...nestedKeyCases(), ...urlCases(), ...stuckTokenCases()];
 
 /** What is wrong with what was shown, word by word, for one case; or nothing. */
 export function nestedBreach(
@@ -239,4 +289,15 @@ export function hidesAtLeast(word: string, today: Shown, five: Shown): boolean {
   if (today.hidden === true) return five.hidden === true && five.value === HIDDEN;
   if (five.hidden !== true) return five.value === word;
   return five.value.includes(HIDDEN) && lineHidesAtLeast(word, five.value);
+}
+
+/**
+ * Whether `five` shows nothing of a word that ruling #37 hides (`command-line-37.ts`, the second floor): a word #37
+ * hid stays hidden, and every piece 5.0 shows stands, in order, in what #37 showed — so #40 may cut more, inside the
+ * word or at its end, but never shows a byte #37 cut (review r1 F2: `-H<token> KEY=v` must stay `-H‹hidden›`).
+ */
+export function hidesAtLeast37(word37: Shown, five: Shown): boolean {
+  if (word37.hidden === true && five.hidden !== true) return false;
+  if (five.hidden !== true) return five.value === word37.value;
+  return five.value.includes(HIDDEN) && lineHidesAtLeast(word37.value, five.value);
 }

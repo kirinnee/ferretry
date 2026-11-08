@@ -11,16 +11,22 @@
  *   need no stripping); the value is unquoted first, so `--token="$TOKEN"` stays the pointer it is; and a token is
  *   looked for at the start of every piece of the value, so `--header=Bearer sk-…` is caught under a harmless name;
  * - a secret-named key NESTED inside a value (ruling #40): `-c mcp_servers.x.env.API_KEY=v`,
- *   `--header=Authorization: Bearer v`, `X-Api-Key: v`, and a URL's secret-named query parameter (`?token=v`);
- * - the password of a URL's user (`scheme://user:PASS@host`).
+ *   `--header=Authorization: Bearer v`, `X-Api-Key: v`, and a URL's secret-named query parameter (`?token=v`); a
+ *   quoted nested value runs to its closing quote (`API_KEY="v,w"`), and a key in a glued flag's own part counts too
+ *   (`--hdr,api_key:v more`);
+ * - the password of a URL's user (`scheme://user:PASS@host`), up to the LAST `@` before the host.
  *
  * Only the VALUE is replaced: the flag's own spelling, a nested key's name, a URL's user and host and every other
  * parameter stay, because that is what tells a person which word it is. Every word today hid is still hidden: such a
  * word starts with a token prefix, so it is no flag and reaches the last test, whose `looksSecret` under any name
- * hides at least what it hides under none.
+ * hides at least what it hides under none. And every word ruling #37 hid is still hidden as much: #37's three tests
+ * run first, whole, and a nested cut only ever cuts more of a word they would show (`-H<token> KEY=v` stays
+ * `-H‹hidden›`).
  *
  * NOT handled (declared GAPs): a JSON document inside a flag (`--settings '{"env":{"API_KEY":"v"}}'`, its keys are
- * quoted) and a plain password stuck to a one-letter flag (`-p<password>`: a single letter is no secret name).
+ * quoted) and a plain password stuck to a one-letter flag (`-p<password>`: a single letter is no secret name). Also
+ * a key glued into the value of a secret-named key whose value is a pointer, with no list separator between
+ * (`password=${secret:X}?password:v`): that value is passed over whole, which keeps the scan linear.
  *
  * Pure.
  */
@@ -62,14 +68,33 @@ function secretValue(name: string, value: string): boolean {
  */
 const NESTED_NAME = /(?<![A-Za-z0-9_.-]|\$\{)[0-9.-]*([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*[:=][ \t]*/gu;
 
-/** Where a nested value ends: the next parameter separator (`a=1,b=2`, `?a=1&b=2`, `a=1; b=2`), or the text's end. */
-const NESTED_VALUE_END = /[,;&]/gu;
+/** What ends a nested value: a parameter separator (`a=1,b=2`, `?a=1&b=2`, `a=1; b=2`). */
+const NESTED_VALUE_END = new Set([',', ';', '&']);
+
+/**
+ * The index just past a nested value starting at `start`: the next parameter separator that is not between a pair of
+ * quotes, or the text's end. A quote runs to its matching one (`API_KEY="v,w"`, `KEY=a:'v,w'`), or to the text's end
+ * when it has none, so a `,` inside a quoted value never ends it early (review r1 F3).
+ */
+function nestedValueEnd(text: string, start: number): number {
+  for (let at = start; at < text.length; at++) {
+    const char = text[at] as string;
+    if (NESTED_VALUE_END.has(char)) return at;
+    if (char === '"' || char === "'") {
+      const close = text.indexOf(char, at + 1);
+      if (close < 0) return text.length;
+      at = close;
+    }
+  }
+  return text.length;
+}
 
 /**
  * The password of a URL's user, `scheme://user:PASS@`: the part before it, and it. A scheme starts only where a run
- * of scheme characters starts, and neither the user nor the password can hold the character that ends it.
+ * of scheme characters starts; the user holds no `:` or `@`, and the password runs to the LAST `@` before the host's
+ * path, query or fragment, as curl and a browser split it, so a raw `@` inside it (`u:p@ss@host`) is cut with it.
  */
-const URL_PASSWORD = /(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#@\s:]*:)([^/?#@\s]*)@/gu;
+const URL_PASSWORD = /(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#@\s:]*:)([^/?#\s]*)@/gu;
 
 /** A text with each URL user's password cut, unless it only points at one. */
 const withoutUrlPasswords = (text: string): string =>
@@ -86,8 +111,7 @@ function withoutNestedValues(text: string): string {
     const name = found[1] ?? '';
     if (!secretNamed(name)) continue;
     const start = found.index + found[0].length;
-    NESTED_VALUE_END.lastIndex = start;
-    const end = NESTED_VALUE_END.exec(text)?.index ?? text.length;
+    const end = nestedValueEnd(text, start);
     // A secret-named key whose value is no secret (a pointer, too short) is passed over whole, so a run of keys is
     // read once.
     NESTED_NAME.lastIndex = Math.max(end, start + 1);
@@ -96,6 +120,18 @@ function withoutNestedValues(text: string): string {
     from = end;
   }
   return `${out}${text.slice(from)}`;
+}
+
+/**
+ * Whether a word holds a secret-named key, with its separator, that starts before `limit`: in a glued flag's own part
+ * (`--hdr,api_key:v more`), or as its last name, whose separator is the glued one (`--x&X-Api-Key=v,${secret:Y}`).
+ */
+function keyStartsBefore(word: string, limit: number): boolean {
+  NESTED_NAME.lastIndex = 0;
+  for (let found = NESTED_NAME.exec(word); found !== null && found.index < limit; found = NESTED_NAME.exec(word)) {
+    if (secretNamed(found[1] ?? '')) return true;
+  }
+  return false;
 }
 
 /** A value with every nested credential cut (inside one pair of quotes, kept), or `undefined` when it holds none. */
@@ -118,23 +154,28 @@ export interface ShownWord {
 export function shownWord(word: string, before: string | undefined): ShownWord {
   const hidden = (text: string): ShownWord => ({ text, hidden: true });
   const glued = GLUED_VALUE.exec(word);
-  if (glued !== null) {
-    const [, flag = '', separator = '', value = ''] = glued;
-    if (secretValue(flag, value)) return hidden(`${flag}${separator}${HIDDEN_WORD_TEXT}`);
-    const cut = withoutNested(value);
-    if (cut !== undefined) return hidden(`${flag}${separator}${cut}`);
-  }
   const stuck = STUCK_VALUE.exec(word);
-  if (stuck !== null) {
-    const [, flag = '', value = ''] = stuck;
-    if (secretValue('', value)) return hidden(`${flag}${HIDDEN_WORD_TEXT}`);
-    const cut = withoutNested(value);
-    if (cut !== undefined) return hidden(`${flag}${cut}`);
-  }
+  // #37 first, whole: a value glued on or stuck to its flag, then the word under the flag before it. A nested cut
+  // (#40) is only ever a FURTHER cut of a word #37 would show, so it never shows what #37 hid: `-H<token> KEY=v` is a
+  // flag `-H<token>` with a value after a space, and stays `-H‹hidden›`.
+  const [, gluedFlag = '', separator = '', gluedValue = ''] = glued ?? [];
+  // A glued flag's own part may hold a nested key of its own (`--x&API_KEY:v;Bearer sk-…`): whatever cuts the value
+  // cuts that too.
+  const flagPart = (): string => withoutNested(gluedFlag) ?? gluedFlag;
+  if (glued !== null && secretValue(gluedFlag, gluedValue))
+    return hidden(`${flagPart()}${separator}${HIDDEN_WORD_TEXT}`);
+  const [, stuckFlag = '', stuckValue = ''] = stuck ?? [];
+  if (stuck !== null && secretValue('', stuckValue)) return hidden(`${stuckFlag}${HIDDEN_WORD_TEXT}`);
   const name = before !== undefined && FLAG_WORD.test(before) && !word.startsWith('-') ? before : '';
   if (secretValue(name, word)) return hidden(HIDDEN_WORD_TEXT);
-  // A flag's own value was searched above; only a word that is no flag with a value is searched whole.
-  const cut = glued === null && stuck === null ? withoutNested(word) : undefined;
+  // #40: a flag's own value is searched (glued, else stuck); a word that is no flag with a value is searched whole, and
+  // so is one whose flag part itself holds a secret-named key (`--hdr,api_key:v more`, `--x&Api-Key=v,${secret:Y}`).
+  const gluedCut = glued === null ? undefined : withoutNested(gluedValue);
+  if (gluedCut !== undefined) return hidden(`${flagPart()}${separator}${gluedCut}`);
+  const stuckCut = stuck === null ? undefined : withoutNested(stuckValue);
+  if (stuckCut !== undefined) return hidden(`${stuckFlag}${stuckCut}`);
+  const whole = (glued === null && stuck === null) || keyStartsBefore(word, gluedFlag.length);
+  const cut = whole ? withoutNested(word) : undefined;
   return cut === undefined ? { text: word, hidden: false } : hidden(cut);
 }
 

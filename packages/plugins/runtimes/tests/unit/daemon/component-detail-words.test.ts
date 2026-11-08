@@ -182,6 +182,37 @@ describe('componentDetail — a credential nested inside a value (R-0082, ruling
   });
 });
 
+describe('componentDetail — the #40 rule after review r1 (R-0082, F2, F3)', () => {
+  const NESTED = 'nested-fake-value-0000';
+
+  it('R-0082 should hide at least what #37 hid when a token is stuck to -H before a nested key, in flags and arguments (F2)', () => {
+    // Arrange
+    const words = [`-H${FAKE_TOKEN} API_KEY=${NESTED}`, `-H${FAKE_TOKEN}=API_KEY=${NESTED}`];
+
+    // Assert
+    should(flagsOf(words)).deepEqual([hid(`-H${HIDDEN}`), hid(`-H${HIDDEN}`)]);
+    should(argsOf(words)).deepEqual([hid(`-H${HIDDEN}`), hid(`-H${HIDDEN}`)]);
+  });
+
+  it("R-0082 should cut a URL password with a raw @ and a quoted nested value with a separator whole, and a key in a flag's own part (F3)", () => {
+    // Arrange
+    const words = [
+      `https://person:p@ss${FAKE_SECRET}@db.example.invalid/x`,
+      `--set=API_KEY="${FAKE_SECRET},more${FAKE_SECRET}",b=2`,
+      `--hdr,api_key:${NESTED} more`,
+    ];
+    const expected = [
+      hid(`https://person:${HIDDEN}@db.example.invalid/x`),
+      hid(`--set=API_KEY=${HIDDEN},b=2`),
+      hid(`--hdr,api_key:${HIDDEN}`),
+    ];
+
+    // Assert
+    should(flagsOf(words)).deepEqual(expected);
+    should(argsOf(words)).deepEqual(expected);
+  });
+});
+
 describe('componentDetail — one rule with the Resolved view (rulings #39, #40)', () => {
   it('R-0082 should show every launch flag word for word as the Resolved view does (the #37 and #40 families)', () => {
     // Arrange
