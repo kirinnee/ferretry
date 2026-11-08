@@ -13,9 +13,21 @@ import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import { SessionConfigSchema } from '../../../../daemon/lib/protocol/session.ts';
 import type { RegisteredAncestor } from '../../../../daemon/adapters/session/provenance/storage-session-ancestry.ts';
 import { WARDEN_LABEL } from '../../../../daemon/lib/session/peers/warden-lifecycle.ts';
-import { FerretConfigFile } from '../../../../contract/index.ts';
-import { ferretId } from '../../../../contract/testing/index.ts';
 import { memoryStorage, sessionConfig } from '../../../support/daemon/storage.ts';
+import { ok } from '@ferretry/std';
+import { FerretConfigFile, FerretHistoryFiles, type FerretRecord } from '../../../../contract/index.ts';
+import {
+  emptyChildEnvironment,
+  FakeHarness,
+  FakeRunner,
+  fenced,
+  ferretId,
+  T0,
+} from '../../../../contract/testing/index.ts';
+import { FerretsService } from '../../../../daemon/lib/ferrets/service.ts';
+import { FerretRegistry } from '../../../../daemon/lib/registry/registry.ts';
+import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
+import { createSessionEvent, encodeSessionEvent } from '../../../../daemon/lib/storage/journal.ts';
 
 const NOW = '2026-11-08T10:00:00.000Z';
 const FERRET = parseSessionId('mw7bp88g-50e00159');
@@ -208,10 +220,10 @@ describe('unbuilt adapters: provenance', () => {
     // Arrange
     const { subject, storage } = await started();
 
-    // Act: a start with a person behind it, then a resume whose request names a parent and a machine origin
+    // Act: a start with a person behind it, then a resume
     await subject.port.stamp({ id: FERRET, requestedByHuman: true });
     const atStart = await provenanceOf(storage);
-    await subject.port.carry({ id: FERRET, parent: 'someone-else', requestedByHuman: false });
+    await subject.port.carry(ferretId(FERRET));
     const afterResume = await provenanceOf(storage);
 
     // Assert: stamped at the start; the resume left every spawn fact exactly as the stored stamp had it
@@ -238,8 +250,8 @@ describe('unbuilt adapters: provenance', () => {
     const { subject, storage } = await started('team');
     await subject.port.stamp({ id: FERRET, label: 'team', requestedByHuman: true });
 
-    // Act: the resume request does not repeat the label
-    await subject.port.carry({ id: FERRET, requestedByHuman: true });
+    // Act: the resume is handed the id and nothing else; the label is the document's
+    await subject.port.carry(ferretId(FERRET));
 
     // Assert
     expect((await provenanceOf(storage)).label).toBe('team');
@@ -253,18 +265,21 @@ describe('unbuilt adapters: provenance', () => {
 
     // Act
     await subject.port.stamp({ id: FERRET, requestedByHuman: true });
-    await subject.port.carry({ id: FERRET, requestedByHuman: true });
+    await subject.port.carry(ferretId(FERRET));
 
     // Assert: no document was invented for it
     expect(await storage.readConfig(FERRET)).toBeUndefined();
     expect(warnings).toEqual(['a ferret has no session document yet, so its spawn stamp was not recorded']);
   });
 
-  /** The child (FERRET) has a document; its parent (OTHER) is registered under a NON-warden requested label. */
+  /**
+   * The child (FERRET) has a document naming its parent (OTHER), which is what a resume restamps from; the parent is
+   * registered under a NON-warden requested label.
+   */
   async function underParent(parentDocument: 'damaged' | 'unreadable' | 'missing' | Record<string, unknown>) {
     const kernel = await wired();
     const { subject, storage, folder } = await files(kernel.roots, [], [{ id: OTHER, label: 'team' }]);
-    await storage.writeConfig(FERRET, sessionConfig(FERRET));
+    await storage.writeConfig(FERRET, sessionConfig(FERRET, { parent: OTHER }));
     if (parentDocument === 'unreadable') folder.plant(FerretConfigFile, '{"format": 1, "label": "fleet-', OTHER);
     // Valid JSON the session schema refuses: the stamp the parent carried is no longer a stamp.
     else if (parentDocument === 'damaged')
@@ -302,7 +317,7 @@ describe('unbuilt adapters: provenance', () => {
       const before = await storage.readConfig(FERRET);
 
       // Act
-      const refused = await subject.port.carry(childOf).then(
+      const refused = await subject.port.carry(ferretId(FERRET)).then(
         () => false,
         () => true,
       );
@@ -339,7 +354,7 @@ describe('unbuilt adapters: provenance', () => {
     const { subject, storage } = await underParent({ label: 'team', provenance: wardenStamp });
 
     // Act
-    await subject.port.carry(childOf);
+    await subject.port.carry(ferretId(FERRET));
 
     // Assert
     expect((await provenanceOf(storage)).provenance).toMatchObject({
@@ -362,6 +377,161 @@ describe('unbuilt adapters: provenance', () => {
     // Assert: stamped, never refused; the registry's label is what decides, for lack of a document
     expect((await provenanceOf(plain.storage)).provenance).toMatchObject({ wardenLineage: false });
     expect((await provenanceOf(warden.storage)).provenance).toMatchObject({ wardenLineage: true, warden: OTHER });
+  });
+
+  /**
+   * Ferrets' own service over the real session files, so a resume is driven by exactly the request it builds in the
+   * daemon. The registry knows the child (FERRET) as it was ASKED to be: label `team`, no parent. Its session document
+   * may say otherwise; the parent (OTHER) is not registered, only indexed through its document.
+   */
+  async function resumedByTheService(childDocument: Record<string, unknown>, parentDocument: Record<string, unknown>) {
+    const kernel = await wired();
+    const { storage } = await memoryStorage({ clock: { now: () => NOW } });
+    const child: FerretRecord = {
+      format: 1,
+      id: ferretId(FERRET),
+      name: 'child',
+      role: 'lead',
+      harness: 'claude-code',
+      runner: 'tmux',
+      folder: '/work',
+      state: 'stopped',
+      createdAt: T0,
+      stateAt: T0,
+    };
+    const registry = new FerretRegistry([child]);
+    registry.putDetails(child.id, { options: { label: 'team' } });
+    const subject = new SessionFiles({
+      roots: kernel.roots,
+      storage,
+      clock: { now: () => NOW },
+      sleep: async () => undefined,
+      paths: diskPaths(),
+      // The daemon's own wiring (daemon/index.ts): the registry's requested label and its parent link.
+      fleet: () =>
+        registry.list().map(ferret => {
+          const label = registry.detailsOf(ferret.id)?.options?.label;
+          return {
+            id: ferret.id,
+            ...(label === undefined ? {} : { label }),
+            ...(ferret.parent === undefined ? {} : { parent: ferret.parent }),
+          };
+        }),
+      log: { warn: () => undefined },
+    });
+    await storage.writeConfig(OTHER, sessionConfig(OTHER, parentDocument));
+    await storage.writeConfig(FERRET, sessionConfig(FERRET, childDocument));
+    const harness = new FakeHarness();
+    const runner = new FakeRunner();
+    const service = new FerretsService(registry, new FerretTokenDirectory(), {
+      now: () => T0,
+      newId: () => ferretId('never-minted'),
+      newName: () => 'never-named',
+      save: async () => {},
+      saveTokens: async () => {},
+      harness: () => harness,
+      harnessKeys: () => [harness.key],
+      runner: () => runner,
+      decide: async () => ({ allow: true }),
+      launchParts: () => [],
+      sitrepSources: () => [],
+      instructions: () => [],
+      folder: path => ok(fenced(path)),
+      changed: () => {},
+      vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },
+      asks: { open: async () => [] },
+      session: subject.port,
+    });
+    return { resumed: await service.resume(child.id), storage };
+  }
+
+  test('unbuilt adapters: a resume takes label and parent from the session document, so a warden parent the registry does not name still shields the child', async () => {
+    // Arrange: the document names a warden parent and an owner's label; the registry names neither
+    const { resumed, storage } = await resumedByTheService(
+      { parent: OTHER, label: 'edited-by-owner' },
+      { label: WARDEN_LABEL },
+    );
+
+    // Assert: today's recorder restamps from the document, so the child is warden offspring for good
+    expect(resumed.ok).toBe(true);
+    const stamped = await provenanceOf(storage);
+    expect(stamped.provenance).toMatchObject({ origin: 'warden', wardenLineage: true, warden: OTHER, parent: OTHER });
+    // The label is the one the warden stamp forces (today's), and never the registry's `team`.
+    expect(stamped.label).toBe(WARDEN_LABEL);
+  });
+
+  test('unbuilt adapters: a resume keeps the label the owner gave the session document, not the label the registry was asked for', async () => {
+    // Arrange: an ordinary parent, an owner's edited label, and a registry that still says `team` with no parent
+    const { resumed, storage } = await resumedByTheService(
+      { parent: OTHER, label: 'edited-by-owner' },
+      { label: 'crew' },
+    );
+
+    // Assert
+    expect(resumed.ok).toBe(true);
+    const stamped = await provenanceOf(storage);
+    expect(stamped.label).toBe('edited-by-owner');
+    expect(stamped.provenance).toMatchObject({ origin: 'session', wardenLineage: false, parent: OTHER });
+  });
+
+  test("unbuilt adapters: a resume over the session's own damaged document writes nothing and quotes none of it", async () => {
+    // Arrange: valid JSON the session schema refuses (today's `sessions.get` throws on it)
+    const kernel = await wired();
+    const { subject, folder } = await files(kernel.roots);
+    const damaged = JSON.stringify({
+      format: 1,
+      ...sessionConfig(FERRET, { label: 'FIXTURE_SECRET' }),
+      provenance: { v: 99 },
+    });
+    folder.plant(FerretConfigFile, damaged, FERRET);
+
+    // Act
+    const failure = await subject.port.carry(ferretId(FERRET)).then(
+      () => undefined,
+      (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+    );
+
+    // Assert: refused, named by id only, and the document is byte-for-byte as it was
+    expect(failure?.message).toContain(FERRET);
+    expect(failure?.message).not.toContain('FIXTURE_SECRET');
+    expect(folder.raw(FerretConfigFile, FERRET)).toBe(damaged);
+  });
+
+  /**
+   * GAP(provenance), pinned. In 5.0 every ferret Ferrets' own service has stopped or resumed holds ONLY history.jsonl
+   * (daemon/index.ts `appendHistory` writes it; nothing writes config.json), and DaemonStorage indexes a folder holding
+   * only a journal on any sweep, replay or append. Today's strict rule then refuses every stamp. The read stays STRICT
+   * (relaxing it brings back the fail-open for a vanished document); the document writer that closes GAP(provenance)
+   * must write config.json before the first history event and give every ferret that already has a journal a
+   * document, or the first documented start after it lands is refused fleet-wide.
+   */
+  test('GAP(provenance) an indexed session with no config.json refuses every stamp: a ferret holding only history.jsonl, once indexed, refuses a documented start and its resume writes nothing', async () => {
+    // Arrange: OTHER is a registered service ferret whose folder holds only a journal, written as appendHistory does
+    const kernel = await wired();
+    const { subject, storage, folder } = await files(kernel.roots, [], [{ id: OTHER, label: 'team' }]);
+    await folder
+      .port([FerretHistoryFiles])
+      .append(FerretHistoryFiles, encodeSessionEvent(createSessionEvent(OTHER, 0, NOW, 'ferret.stopped', {})), OTHER);
+    await storage.rebuildIndex();
+    expect(storage.listSessions().map(session => session.id)).toContain(OTHER);
+    expect(await storage.readConfig(OTHER)).toBeUndefined();
+    await storage.writeConfig(FERRET, sessionConfig(FERRET));
+    const before = await storage.readConfig(FERRET);
+
+    // Act
+    const start = await subject.port.stamp({ id: FERRET, requestedByHuman: true }).then(
+      () => undefined,
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    const resume = await subject.port.carry(ferretId(FERRET)).then(
+      () => undefined,
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+
+    // Assert: both refused by today's "disappeared" rule, and the documented ferret was stamped neither way
+    expect(start).toBe(`indexed session ${OTHER} disappeared while its spawn ancestry was being read`);
+    expect(resume).toBe(start);
+    expect(await storage.readConfig(FERRET)).toEqual(before);
   });
 });
 

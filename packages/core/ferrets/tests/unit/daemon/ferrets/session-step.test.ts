@@ -70,8 +70,8 @@ const recorder = (log: string[], failing?: 'prepare' | 'stamp' | 'carry'): Ferre
     log.push(`stamp ${request.id}${request.parent === undefined ? '' : ` parent=${request.parent}`}`);
     if (failing === 'stamp') throw new Error('FIXTURE_SECRET stamp failed');
   },
-  carry: async request => {
-    log.push(`carry ${request.id}`);
+  carry: async ferret => {
+    log.push(`carry ${ferret}`);
     if (failing === 'carry') throw new Error('FIXTURE_SECRET carry failed');
   },
 });

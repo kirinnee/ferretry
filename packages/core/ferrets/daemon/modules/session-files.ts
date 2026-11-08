@@ -32,6 +32,7 @@ import {
 import { SessionProvenanceRecorder, type SessionAncestry } from '../lib/session/provenance/recorder.ts';
 import { SessionProvenanceStamper } from '../lib/session/provenance/stamper.ts';
 import type { SessionSpawnRequest } from '../lib/session/provenance/types.ts';
+import { SessionConfigSchema } from '../lib/protocol/session.ts';
 
 /**
  * A lifecycle launcher that opens nothing: every member answers the spine's 503 when CALLED, so a launch through a
@@ -114,7 +115,7 @@ export class SessionFiles {
     this.port = {
       prepare: async ferret => await this.prepare(ferret),
       stamp: async request => await this.stampAtStart(request),
-      carry: async request => await this.carryOnResume(request),
+      carry: async ferret => await this.carryOnResume(ferret),
     };
   }
 
@@ -189,14 +190,31 @@ export class SessionFiles {
 
   /**
    * A RESUME brings the stamp forward: the recorder re-resolves lineage and only ever strengthens it, the stored
-   * document winning on every spawn fact. The request carries the session's CURRENT label, so a resume never drops
-   * the group the session belongs to.
+   * document winning on every spawn fact. A copy of today's `recordRelaunchProvenance`: the label and parent are the
+   * ones the session's OWN document holds, never the registry's, because a move, a handover or an owner's edit may
+   * have changed either there since the record was written, and a registry label written over the document's would
+   * both drop the owner's edit and restamp a warden's child as nobody's.
+   *
+   * The document is read STRICTLY, as today's `sessions.get` reads it: one that cannot be read, or fails
+   * `SessionConfigSchema`, throws, so the resume writes nothing and the stamp on disk stays as it was. The error names
+   * the id only. A ferret with no document has nothing to carry (GAP(provenance)).
    */
-  private async carryOnResume(request: SessionSpawnRequest): Promise<void> {
-    const id = parseSessionId(request.id);
-    if ((await this.deps.storage.readConfig(id)) === undefined) return;
-    const stored = await this.provenance.read(id);
-    const label = request.label ?? stored.label;
-    await this.recorder.recordRelaunch({ ...request, ...(label === undefined ? {} : { label }) });
+  private async carryOnResume(ferret: string): Promise<void> {
+    const id = parseSessionId(ferret);
+    // No catch: an unreadable document is a resume that brings nothing forward.
+    const document = await this.deps.storage.readConfig(id);
+    if (document === undefined) return;
+    const parsed = SessionConfigSchema.safeParse(document);
+    if (!parsed.success)
+      throw new Error(`session ${id}'s configuration is damaged, so its spawn stamp was not brought forward`);
+    const { label, parent } = parsed.data;
+    await this.recorder.recordRelaunch({
+      id,
+      ...(label === undefined ? {} : { label }),
+      ...(parent === undefined ? {} : { parent }),
+      // A resume is not a spawn: `restamp` recovers the origin from the stored stamp when there is one, and a session
+      // with no stamp and no parent was a root start, which is the human case (today's rule, word for word).
+      requestedByHuman: parent === undefined,
+    });
   }
 }

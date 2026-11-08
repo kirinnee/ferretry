@@ -162,11 +162,15 @@ export interface FerretsPorts {
  * records WHO CAUSED the ferret (provenance) at a start, and `carry` brings that stamp forward at a resume: a start
  * that cannot record it is refused (a ferret nobody can place is the one the warden shield exists for), while a
  * resume that cannot leaves the stamp already on disk exactly as it was.
+ *
+ * `carry` is handed the ferret's id and NOTHING the registry says about it: the label and parent a resume restamps
+ * from are the ones the ferret's own session document holds (today's `recordRelaunchProvenance`), because a move, a
+ * handover or an owner's edit may have changed either there since the record was written.
  */
 export interface FerretSessionPort {
   prepare(ferret: FerretId): Promise<void>;
   stamp(request: SessionSpawnRequest): Promise<void>;
-  carry(request: SessionSpawnRequest): Promise<void>;
+  carry(ferret: FerretId): Promise<void>;
 }
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
@@ -1093,15 +1097,15 @@ export class FerretsService implements FerretsApi {
     } catch {
       return failed('failed', "the ferret's private session folder could not be made private, so it was not started");
     }
-    const request: SessionSpawnRequest = {
-      id: record.id,
-      ...(this.registry.detailsOf(record.id)?.options?.label === undefined
-        ? {}
-        : { label: this.registry.detailsOf(record.id)?.options?.label }),
-      ...(record.parent === undefined ? {} : { parent: record.parent }),
-      requestedByHuman: record.parent === undefined,
-    };
     if (kind === 'start') {
+      // A start is the one moment the request IS the fact: what was asked for, before any document says otherwise.
+      const label = this.registry.detailsOf(record.id)?.options?.label;
+      const request: SessionSpawnRequest = {
+        id: record.id,
+        ...(label === undefined ? {} : { label }),
+        ...(record.parent === undefined ? {} : { parent: record.parent }),
+        requestedByHuman: record.parent === undefined,
+      };
       try {
         await session.stamp(request);
       } catch {
@@ -1109,7 +1113,7 @@ export class FerretsService implements FerretsApi {
       }
     } else {
       // A resume that cannot bring the stamp forward leaves the one on disk exactly as it was (it only ever strengthens).
-      await session.carry(request).catch(() => undefined);
+      await session.carry(record.id).catch(() => undefined);
     }
     return ok(undefined);
   }
