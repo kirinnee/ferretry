@@ -160,6 +160,22 @@ describe('Edit as YAML over the kernel’s /v1/config/file', () => {
     expect(root.querySelector('[data-config-save="applied"]')).toBeNull();
   });
 
+  it('says why a confirm did not take, in the machine’s words, when the confirm call is refused', async () => {
+    const { root } = await editor({
+      put: {
+        path: PATH,
+        etag: 'e2',
+        outcome: 'pending',
+        pending: { path: PATH, etag: 'e2', changes: ['adds a skill'] },
+      },
+      confirm: refusal(403, 'forbidden', 'this device may not confirm a held edit'),
+    });
+    await click(root, '[data-config-submit]');
+    await click(root, `[data-config-confirm="${PATH}"]`);
+    expect(text(root, '[data-config-confirm-failed]')).toContain('this device may not confirm a held edit');
+    expect(root.querySelector('[data-config-save="applied"]')).toBeNull();
+  });
+
   it('shows a refused file’s located issues and its sentence, and nothing is in effect', async () => {
     const { root } = await editor({
       put: refusal(422, 'config_invalid', 'the file does not check (1 problem); nothing was written', {

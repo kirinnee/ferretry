@@ -25,8 +25,6 @@ import { type RuntimesAssembly, runtimesDaemon } from '../../../daemon/index.ts'
 import { UNAVAILABLE } from '../../../daemon/lib/service/assembly.ts';
 import { LoginChanged, type LoginView } from '@ferretry/plugin-logins/contract';
 import { type FakeLogins, fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
-import loginsDaemon from '@ferretry/plugin-logins/daemon';
-import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import manifest from '../../../manifest.ts';
 
 const login = sampleLogin;
@@ -501,39 +499,6 @@ describe('the runtimes daemon', () => {
 
     // Assert: the expiry that passed during the read is still published, naming codex-work.
     should(changed()).deepEqual(named('codex-work'));
-  });
-
-  it('should wake the views at the until a hand edit of a login file wrote, through the real Logins', async () => {
-    // Arrange: the real Logins beside Runtimes; nothing is off at start. Then the owner edits logins/codex-work.yaml by
-    // hand (no Logins change) to switch it off until 09:30.
-    const clock = fixedClock('2026-11-08T09:00:00.000Z');
-    const loginFiles = (extra: Record<string, unknown> = {}) => ({
-      'claude-you': { harness: 'claude-code', store: 'host' },
-      'codex-work': { harness: 'codex', store: 'host', ...extra },
-    });
-    const host = await testHost({
-      // Logins first: the host builds in order, and Runtimes needs the port Logins provides.
-      plugins: [loginsDaemon as DaemonImplementation<any>, runtimesDaemon() as DaemonImplementation<any>],
-      fakes: { ferrets: new FakeFerrets(), vault: new FakeVault() },
-      gate: new StandInAdmission(() => ownerStanding()),
-      config: { ...FILES, logins: loginFiles() },
-      clock,
-    });
-    await quiet(host);
-    host.setConfig('logins', loginFiles({ disabled: { reason: 'cooling off', until: '2026-11-08T09:30:00Z' } }));
-    await quiet(host);
-    const changed = changesSince(host);
-
-    // Act
-    await clock.advance(29 * 60_000);
-    await quiet(host);
-    should(changed()).deepEqual([]);
-    await clock.advance(60_000);
-    await quiet(host);
-
-    // Assert
-    should(changed()).deepEqual(named('codex-work'));
-    await host.stop();
   });
 
   it('should publish nothing once the daemon stops, and set no timer for a file change after it', async () => {

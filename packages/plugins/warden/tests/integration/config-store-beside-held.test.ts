@@ -10,7 +10,7 @@ import type { Log } from '@ferretry/kernel/contract';
 import { config, state } from '@ferretry/kernel/host';
 import { fixedClock } from '@ferretry/kernel/testing';
 import { effectiveWardenConfig, WARDEN_CONFIG, type WardenFile } from '../../contract/index.ts';
-import { ConfigWardenConfigStore } from '../../daemon/adapters/config-store.ts';
+import { ConfigWardenConfigStore, WardenConfigHeld } from '../../daemon/adapters/config-store.ts';
 import type { WardenConfigPatch } from '../../daemon/lib/index.ts';
 
 const HOME = '/home/fy';
@@ -71,5 +71,32 @@ describe('an owner’s section save beside a held edit of warden.yaml, through t
       inEffect: true,
       sentences: ['the Jev price the cap counts with goes down from 2 to 0.042'],
     });
+  });
+
+  it('should save a top-level key to both versions whole, the held price kept and still held', async () => {
+    const { port, disk } = await heldPrice();
+    const store = new ConfigWardenConfigStore(port);
+    const inEffect = effectiveWardenConfig(port.file(WARDEN_CONFIG) ?? {});
+
+    const waiting = await store.write({ ...inEffect, enabled: false }, { enabled: false } as WardenConfigPatch);
+
+    should(waiting).eql([]);
+    should((port.file(WARDEN_CONFIG) as WardenFile).enabled).equal(false);
+    should(disk()).match(/enabled: false/);
+    should(disk()).match(/usdPerMillionInputTokens: 0\.042 # per million/);
+    should(port.fileState(WARDEN_CONFIG).state).equal('held');
+  });
+
+  it('should refuse a save that names nothing while an edit is held, writing neither version', async () => {
+    const { port, disk } = await heldPrice();
+    const store = new ConfigWardenConfigStore(port);
+    const before = disk();
+
+    await should(
+      store.write(effectiveWardenConfig(port.file(WARDEN_CONFIG) ?? {}), {} as WardenConfigPatch),
+    ).be.rejectedWith(WardenConfigHeld);
+
+    should(disk()).equal(before);
+    should(port.fileState(WARDEN_CONFIG).state).equal('held');
   });
 });
