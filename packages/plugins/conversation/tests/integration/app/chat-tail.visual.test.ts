@@ -3,13 +3,10 @@
  *
  * The owner (2026-10-31): "… also why is there such a big gap in the convo and the composer".
  *
- * The scene is the REAL `Transcript` (Conversation's app) with the REAL `AgendaLine` (Agenda's app)
- * (`fixtures/chat-tail-scene.tsx`). At the tail the gap between the last message and the composer is the one agenda
- * row (the Jump pill lives IN it), not that row plus a second, invisible one; and that row's height does not change
- * when the pill comes and goes (the #1180 flicker).
- *
- * It lives here, in the shell's tests, because only the shell composes the two plugins: Agenda imports nothing of
- * Conversation's app and Conversation nothing of Agenda's.
+ * The scene is the REAL `Transcript` above a stand-in for Agenda's row (`fixtures/chat-tail-scene.tsx` says why it is
+ * a stand-in: Conversation imports nothing of Agenda's app). At the tail the gap between the last message and the
+ * composer is the one agenda row (the Jump pill lives IN it), not that row plus a second, invisible one; and that
+ * row's height does not change when the pill comes and goes (the #1180 flicker).
  *
  * Set `FY_CHAT_TAIL_SHOTS_DIR` to keep `<viewport>-<scheme>-<scene>.png`.
  */
@@ -29,6 +26,11 @@ const SCENE_CSS = `
   html, body, #root { height: 100%; margin: 0; }
   .scene-chat { box-sizing: border-box; display: flex; flex-direction: column; inset: 0; position: fixed; }
   .scene-chat .fy-chat-log { flex: 1 1 0; }
+  .scene-agenda-row { align-items: center; box-sizing: border-box; display: flex; gap: 8px; min-height: 40px; padding: 0 8px; }
+  .scene-agenda-row__jump { display: flex; flex: 0 0 auto; }
+  .scene-agenda-row__jump:empty { display: none; }
+  .scene-agenda-row__live { flex: 1 1 auto; min-width: 0; }
+  .scene-agenda-row__main { background: none; border: 0; color: inherit; font: inherit; margin-left: auto; padding: 8px; }
   .scene-composer { border: 1px solid var(--fy-border, #888); border-radius: 12px; box-sizing: border-box; height: 56px; padding: 16px; }
 `;
 
@@ -135,7 +137,7 @@ describe('the chat at its tail', () => {
         const { tab, close } = await open(name, scheme, '');
         try {
           await tab.waitForSelector('.fy-transcript-content > :last-child');
-          await tab.waitForSelector('.fy-agenda-line');
+          await tab.waitForSelector('.scene-agenda-row');
           await framesSettled(tab);
           await tab.evaluate(() => {
             const scroller = document.querySelector('.fy-transcript') as HTMLElement;
@@ -145,7 +147,7 @@ describe('the chat at its tail', () => {
           const gap = await tab.evaluate(() => {
             const last = document.querySelector('.fy-transcript-content > :last-child') as HTMLElement;
             const composer = document.querySelector('.scene-composer') as HTMLElement;
-            const row = document.querySelector('.fy-agenda-line') as HTMLElement;
+            const row = document.querySelector('.scene-agenda-row') as HTMLElement;
             return {
               gap: composer.getBoundingClientRect().top - last.getBoundingClientRect().bottom,
               row: row.getBoundingClientRect().height,
@@ -190,11 +192,11 @@ describe('the chat at its tail', () => {
   it('draws the Jump pill in the agenda row without changing that row or the transcript', async () => {
     const { tab, close } = await open('phone', 'light', '');
     try {
-      await tab.waitForSelector('.fy-agenda-line');
+      await tab.waitForSelector('.scene-agenda-row');
       await tab.waitForSelector('.fy-transcript-content > :last-child');
       await framesSettled(tab);
       const atTail = {
-        row: await box(tab, '.fy-agenda-line'),
+        row: await box(tab, '.scene-agenda-row'),
         scroller: await box(tab, '.fy-transcript'),
         pill: await tab.locator('.fy-jump-latest').count(),
       };
@@ -206,7 +208,7 @@ describe('the chat at its tail', () => {
       await tab.waitForSelector('.fy-jump-latest');
       await framesSettled(tab);
       const away = {
-        row: await box(tab, '.fy-agenda-line'),
+        row: await box(tab, '.scene-agenda-row'),
         scroller: await box(tab, '.fy-transcript'),
         pill: await box(tab, '.fy-jump-latest'),
       };
@@ -217,10 +219,10 @@ describe('the chat at its tail', () => {
       expect(away.pill.top).toBeGreaterThanOrEqual(away.row.top - 1);
       expect(away.pill.bottom).toBeLessThanOrEqual(away.row.bottom + 1);
       // Jump on the left, the Agenda button on its right, and they do not overlap.
-      const toggle = await box(tab, '.fy-agenda-line__main');
+      const toggle = await box(tab, '.scene-agenda-row__main');
       const horizontal = await tab.evaluate(() => {
         const pill = (document.querySelector('.fy-jump-latest') as HTMLElement).getBoundingClientRect();
-        const main = (document.querySelector('.fy-agenda-line__main') as HTMLElement).getBoundingClientRect();
+        const main = (document.querySelector('.scene-agenda-row__main') as HTMLElement).getBoundingClientRect();
         return { pillRight: pill.right, mainLeft: main.left };
       });
       expect(horizontal.pillRight).toBeLessThanOrEqual(horizontal.mainLeft + 1);
@@ -234,7 +236,7 @@ describe('the chat at its tail', () => {
   it('never resizes anything while the reader scrolls down past the pill', async () => {
     const { tab, close } = await open('phone', 'dark', '&busy=1');
     try {
-      await tab.waitForSelector('.fy-agenda-line');
+      await tab.waitForSelector('.scene-agenda-row');
       await tab.waitForSelector('.fy-transcript-content > :last-child');
       await framesSettled(tab);
       const scroller = await tab.locator('.fy-transcript').boundingBox();
@@ -245,7 +247,7 @@ describe('the chat at its tail', () => {
       await framesSettled(tab);
       await tab.evaluate(() => {
         const element = document.querySelector('.fy-transcript') as HTMLElement;
-        const row = document.querySelector('.fy-agenda-line') as HTMLElement;
+        const row = document.querySelector('.scene-agenda-row') as HTMLElement;
         const samples: { height: number; row: number; top: number; pill: boolean }[] = [];
         let running = true;
         const tick = (): void => {

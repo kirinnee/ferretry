@@ -104,7 +104,7 @@ for (const failure of [...registered.failures, ...daemonless.failures])
 
 // The one passkey prompt (Access's): its ceremony rides Access's own guarded client, read from the runtime per call.
 const passkey = registeredPasskey(generated.surfaces, {
-  client: daemon => runtime.packageClient(daemon, 'access'),
+  clientOf: (daemon, plugin) => runtime.packageClient(daemon, plugin),
   daemons,
   origin: window.location.origin,
   credentials: {

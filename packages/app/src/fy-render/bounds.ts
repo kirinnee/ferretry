@@ -17,7 +17,7 @@
  * the sandbox-frame numbers below stay here beside the shells that read them.
  */
 
-export { FY_RENDER_LIMITS } from '../../contract/fy-render-caps.ts';
+export { FY_RENDER_LIMITS } from '@ferretry/plugin-conversation/contract';
 
 /**
  * The bounds on the sandbox frame — every number the parent and the shell must

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { implementApp, type Manifest, type PluginClient } from '@ferretry/kernel/manifest';
-import { provideToShell, registeredPasskey } from '../../../src/connect/provides.ts';
+import { type PasskeyHostPorts, provideToShell, registeredPasskey } from '../../../src/connect/provides.ts';
 import type { TransportRequest } from '../../../src/client/transport.ts';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
@@ -114,8 +114,8 @@ function setup(made: PasskeyProvision | undefined) {
   const daemons = new DaemonList({ storage, now: () => 1 });
   daemons.add({ daemon: 'd1', machine: 'laptop', deviceId: 'dev', address: 'http://127.0.0.1:40245' });
   daemons.add({ daemon: 'd2', machine: 'desk', deviceId: 'dev', address: 'http://127.0.0.1:40246' });
-  const ports: PasskeyPorts = {
-    client: () => undefined,
+  const ports: PasskeyHostPorts = {
+    clientOf: () => undefined,
     daemons,
     origin: 'https://app.example',
     credentials: { create: async () => null, get: async () => null },
@@ -183,12 +183,34 @@ describe('G105 the one passkey prompt is mounted by the shell', () => {
     const intruder = provideToShell(implementApp(intruderManifest, { build: () => ({}) }), { passkey: () => made });
     const daemons = new DaemonList({ storage: memoryStore(), now: () => 1 });
     const registered = registeredPasskey([...CORE, entry(intruderManifest, intruder)], {
-      client: () => undefined,
+      clientOf: () => undefined,
       daemons,
       origin: 'https://app.example',
       credentials: { create: async () => null, get: async () => null },
     });
     expect(registered.passkey).toBeUndefined();
+  });
+
+  test('G105 the host asks for the client by the provider the registry found, never by a name of its own', () => {
+    const asked: string[] = [];
+    let seen: PasskeyPorts | undefined;
+    const spy = provideToShell(implementApp(accessManifest, { build: () => ({}) }), {
+      passkey: ports => {
+        seen = ports;
+        return provision().made;
+      },
+    });
+    registeredPasskey([...CORE, entry(accessManifest, spy)], {
+      clientOf: (daemon, plugin) => {
+        asked.push(`${daemon}:${plugin}`);
+        return undefined;
+      },
+      daemons: new DaemonList({ storage: memoryStore(), now: () => 1 }),
+      origin: 'https://app.example',
+      credentials: { create: async () => null, get: async () => null },
+    });
+    seen?.client('d1');
+    expect(asked).toEqual(['d1:access']);
   });
 
   test('G105 a provision that throws is left out and said, never thrown', () => {
@@ -198,7 +220,7 @@ describe('G105 the one passkey prompt is mounted by the shell', () => {
       },
     });
     const registered = registeredPasskey([...CORE, entry(accessManifest, broken)], {
-      client: () => undefined,
+      clientOf: () => undefined,
       daemons: new DaemonList({ storage: memoryStore(), now: () => 1 }),
       origin: 'https://app.example',
       credentials: { create: async () => null, get: async () => null },

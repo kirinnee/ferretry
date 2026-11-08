@@ -16,7 +16,7 @@
  */
 
 import { parse } from 'yaml';
-import { FY_RENDER_LIMITS } from './fy-render-bounds.ts';
+import { FY_RENDER_LIMITS } from '@ferretry/app';
 
 export interface MapPoint {
   readonly lat: number;

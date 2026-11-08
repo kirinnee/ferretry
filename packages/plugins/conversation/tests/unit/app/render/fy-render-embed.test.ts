@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { FY_RENDER_LIMITS } from '../../../../app/render/fy-render-bounds.ts';
+import { FY_RENDER_LIMITS } from '@ferretry/app';
 import { parseFyRenderEmbed } from '../../../../app/render/fy-render-embed.ts';
 
 const refused = (type: 'card' | 'board', payload: string): string => {

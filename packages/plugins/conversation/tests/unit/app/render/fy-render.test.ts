@@ -19,10 +19,7 @@ import {
   parseFyRender,
   remarkFyRenderFences,
 } from '../../../../app/render/fy-render.ts';
-import {
-  FY_RENDER_LIMITS as BOUNDS_LIMITS,
-  FY_RENDER_SANDBOX_LIMITS as BOUNDS_SANDBOX_LIMITS,
-} from '../../../../app/render/fy-render-bounds.ts';
+import { FY_RENDER_LIMITS as BOUNDS_LIMITS, FY_RENDER_SANDBOX_LIMITS as BOUNDS_SANDBOX_LIMITS } from '@ferretry/app';
 
 /**
  * The fence reader, read as a grammar: every assertion here is about what
