@@ -14,6 +14,7 @@ import { type Fetcher, HttpTransport, type RestartWaiting } from './daemon/http-
 import { DAEMON_BINARY, type LaunchPorts, launchDaemon } from './daemon/launcher.ts';
 import { assertOwnLoopbackListener } from './daemon/listener-guard.ts';
 import { probeHealth } from './daemon/probe.ts';
+import { sleepUnlessAborted } from './daemon/sleep.ts';
 import { readDaemonRunDocument } from './daemon/run-file.ts';
 import { readAdminToken } from './daemon/token-file.ts';
 import { createPluginHost } from './plugin-host.ts';
@@ -189,19 +190,4 @@ export function createWorld(inputs: WorldInputs): CliWorld {
       return { baseUrl: address, transport, inventory };
     },
   };
-}
-
-/** A pause that ends at once, quietly, when the signal aborts: the restart backoff must not outlast a caller who left. */
-function sleepUnlessAborted(milliseconds: number, signal?: AbortSignal): Promise<void> {
-  if (signal === undefined) return Bun.sleep(milliseconds);
-  if (signal.aborted) return Promise.resolve();
-  return new Promise<void>(resolve => {
-    const timer = setTimeout(done, milliseconds);
-    signal.addEventListener('abort', done, { once: true });
-    function done(): void {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', done);
-      resolve();
-    }
-  });
 }

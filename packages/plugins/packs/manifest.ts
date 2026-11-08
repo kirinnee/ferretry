@@ -1,6 +1,7 @@
 import { AUDIT_KINDS } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts, StartDecide } from '@ferretry/core-ferrets/contract';
 import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import { CONVERSATION_ROW_SLOT, ConversationPort } from '@ferretry/plugin-conversation/contract';
 import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
 import {
   PACK_REPLACED,
@@ -43,7 +44,8 @@ export default definePlugin({
   words: PACKS_WORDS,
 
   needs: { ferrets: FerretsPort },
-  uses: { usage: UsagePort, runtimes: RuntimesPort },
+  // Conversation is optional: the Pack card is drawn in its transcript, and with Conversation off there is no transcript.
+  uses: { usage: UsagePort, runtimes: RuntimesPort, conversation: ConversationPort },
   provides: { packs: PacksPort },
 
   actions: {
@@ -161,7 +163,11 @@ export default definePlugin({
     // Settings › Agents › Pack mode: the switch, who decides, the limits, the probe and the routing prompt.
     settings: [settingsTab('pack', { label: 'Pack mode', order: 40 })],
     // A parent's view of the helpers it started, beside the ferret.
-    panels: [panel('ferret.side', { id: 'helpers', order: 40 })],
+    panels: [
+      panel('ferret.side', { id: 'helpers', order: 40 }),
+      // The Pack card, beside a transcript row that holds a Pack command (Conversation's `conversation.row` slot).
+      panel(CONVERSATION_ROW_SLOT, { id: 'pack-call', order: 40 }),
+    ],
   },
 
   data: {

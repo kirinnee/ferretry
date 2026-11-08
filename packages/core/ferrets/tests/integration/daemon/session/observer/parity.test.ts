@@ -50,7 +50,7 @@ import {
   SCRIPTED_QUESTIONS,
   scriptedTranscriptSource,
 } from '../../../../support/daemon/observer-stand-ins.ts';
-import { memoryStorage } from '../../../../support/daemon/storage.ts';
+import { memoryStorage, sessionConfig, sessionState } from '../../../../support/daemon/storage.ts';
 import { FileEventHub } from '../../support/file-event-hub.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
@@ -193,8 +193,8 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
   const source = scriptedTranscriptSource(harness);
   const side = async (name: string): Promise<Side> => {
     const storage = await openStorage(join(root, name));
-    await storage.writeConfig(id, { id, name: 'Parity', tmuxSession, harness, mode: 'interactive' });
-    await storage.writeState(id, { id, status: 'running', turn: 1 });
+    await storage.writeConfig(id, sessionConfig(id, { name: 'Parity', tmuxSession, harness, mode: 'interactive' }));
+    await storage.writeState(id, sessionState(id, { turn: 1 }));
     const transcript = join(root, `${name}.jsonl`);
     await writeFile(transcript, '');
     return {

@@ -1,4 +1,5 @@
-import { implementApp } from '@ferretry/kernel/manifest';
+import { implementApp, type PanelProps } from '@ferretry/kernel/manifest';
+import type { ComposerToolsProps } from '@ferretry/plugin-conversation/contract';
 import { createElement } from 'react';
 import manifest from '../manifest.ts';
 import { browserLongTaskObserver, observeLongTasks } from './lib/performance/main-thread.ts';
@@ -8,6 +9,7 @@ import { daemonUsagePort } from './lib/usage-store.ts';
 import { DaemonUsageStore } from './lib/usage-store.ts';
 import {
   BudgetsTab,
+  ComposerQuotaPanel,
   FerretInsightsPanel,
   InsightsScreen,
   ModelPricingTab,
@@ -36,6 +38,11 @@ export default implementApp(manifest, {
       panels: {
         quota: ({ subject }) =>
           createElement(QuotaPanel, { store: usage, ...(subject === undefined ? {} : { subject }) }),
+        'composer-quota': (props: PanelProps & Partial<ComposerToolsProps>) =>
+          createElement(ComposerQuotaPanel, {
+            store: usage,
+            ...(props.account === undefined ? {} : { account: props.account }),
+          }),
         insights: ({ subject }) =>
           createElement(FerretInsightsPanel, { client, ...(subject === undefined ? {} : { subject }) }),
       },

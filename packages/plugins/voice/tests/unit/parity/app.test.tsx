@@ -103,14 +103,14 @@ const trace: CleanupTrace = {
 const noop = (): void => undefined;
 
 describe('the Voice app half', () => {
-  test('S-0473 S-0330 S-0429 settings Voice and Speed-ups are the half’s two settings tabs and one panel', () => {
+  test('S-0473 S-0330 S-0429 settings Voice and Speed-ups are the half’s two settings tabs and two panels', () => {
     expect(manifest.ui.settings).toEqual([
       expect.objectContaining({ id: 'voice', label: 'Voice' }),
       expect.objectContaining({ id: 'speedups', label: 'Speed-ups' }),
     ]);
     const half = halfOver();
     expect(Object.keys(half.settings)).toEqual(['voice', 'speedups']);
-    expect(Object.keys(half.panels)).toEqual(['dictation']);
+    expect(Object.keys(half.panels)).toEqual(['dictation', 'read-aloud']);
   });
 
   test('S-0096 S-0472 S-0558 S-0572 the Voice tab mounts dictation, speed-up keys, transcription log and debug', async () => {

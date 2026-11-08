@@ -43,6 +43,40 @@ describe('GET /v1/events following an archived ferret', () => {
     expect((await follow(h, 'mi4zzz-00000000')).response?.status).toBe(404);
   });
 
+  test('a stream asked for while the archive is still loading waits for it, then accepts the archived ferret', async () => {
+    const first = await host([record('lead')], { harness: new FakeHarness(), runner: new FakeRunner() });
+    const folder = first.state('ferrets');
+    folder.plant(ArchiveFile, JSON.stringify({ format: 1, sessions: { [ARCHIVED]: entry } }));
+    // Hold the archive read open until the test lets it go, as a start-up that is still reading the file would.
+    let release: () => void = () => {};
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const realPort = folder.port.bind(folder);
+    folder.port = declared => {
+      const port = realPort(declared);
+      return {
+        ...port,
+        read: (async (file: Parameters<typeof port.read>[0], name?: string) => {
+          if (file.name === ArchiveFile.name) await held;
+          return await port.read(file, name);
+        }) as typeof port.read,
+      };
+    };
+    const h = await first.restart();
+    let settled = false;
+    const following = follow(h, ARCHIVED).then(result => {
+      settled = true;
+      return result;
+    });
+    await Bun.sleep(20);
+    expect(settled).toBe(false);
+    release();
+    const archived = await following;
+    expect(archived.response).toBeUndefined();
+    expect(archived.handler).toBeDefined();
+  });
+
   test('an archive that cannot be read leaves the live ferret followable and the archived id a 404', async () => {
     const h = await withArchive('{ not a registry');
     expect((await follow(h, 'lead')).response).toBeUndefined();

@@ -375,7 +375,6 @@ describe('runtime control and lifecycle stop share one mutation fence', () => {
           reason: `${STOP_REASON}: ${STOP_FAILURE}`,
           finishedAt: TERMINATED_AT,
           exitCode: 137,
-          terminationSignal: 'SIGKILL',
         }));
       };
       const request = {
@@ -398,7 +397,6 @@ describe('runtime control and lifecycle stop share one mutation fence', () => {
         reason: `${STOP_REASON}: ${STOP_FAILURE}`,
         finishedAt: TERMINATED_AT,
         exitCode: 137,
-        terminationSignal: 'SIGKILL',
         health: 'crashed',
         promptReady: false,
       });
