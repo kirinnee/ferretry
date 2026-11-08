@@ -33,7 +33,7 @@ const snapshot = (dir: string): string[] =>
     entry => `${join(entry.parentPath, entry.name)}:${statSync(join(entry.parentPath, entry.name)).mtimeMs}`,
   );
 
-test('R689 --check on a missing home reports it would create one, creates nothing and leaves the port free', () => {
+test('V-0506 R689 --check on a missing home reports it would create one, creates nothing and leaves the port free', () => {
   const parent = mkdtempSync(join(tmpdir(), 'fyd-check-'));
   parents.push(parent);
   const home = join(parent, 'home');
