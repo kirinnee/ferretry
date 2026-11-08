@@ -8,7 +8,8 @@
  * otherwise be reading a stale card. The card also reads on mount and after its own save.
  *
  * Only the `warden` kind has a stream here; the other kinds the card names (Speed-ups, the machine, its runtimes and
- * logins) are other plugins' facts and are heard on return to the tab.
+ * logins) are other plugins' facts and are heard on return to the tab. The event fires only when the version in effect
+ * moves, so a held edit arriving or discarded, or a broken file, is also heard only on return to the tab.
  */
 
 import { useDocumentVisible } from '@ferretry/app';

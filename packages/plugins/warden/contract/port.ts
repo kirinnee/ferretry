@@ -53,8 +53,9 @@ export const WardenActed = defineEvent(
 );
 
 /**
- * Published when `warden.yaml` moved — the owner's save, `fy`, an agent's config tool, a hand edit, a confirmed or
- * discarded held edit — as the kernel's config `watch` hears it. It carries nothing: the truth is
- * `GET /v1/warden/config`, which a settings screen reads again.
+ * Published when the version of `warden.yaml` in effect moved — the owner's save, `fy`, an agent's config tool, a
+ * hand edit, a held edit confirmed — as the kernel's config `watch` hears it. An edit held for the owner arriving, a
+ * held edit discarded, or the file going broken leaves the version in effect where it was, so none of them publishes
+ * this. It carries nothing: the truth is `GET /v1/warden/config`, which a settings screen reads again.
  */
 export const WardenConfigChanged = defineEvent('warden.config-changed', z.strictObject({}));

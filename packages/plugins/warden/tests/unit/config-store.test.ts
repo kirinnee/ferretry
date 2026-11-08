@@ -251,4 +251,15 @@ describe('an owner’s save while warden.yaml holds another edit (docs/config-fi
     should(owner).have.length(0);
     should(plain).have.length(0);
   });
+
+  it('should refuse a save naming no key, writing nothing to either version', async () => {
+    const { store, owner, plain } = heldPort({ kind: 'written', etag: 'e', loosened: [] });
+
+    await store.write(DEFAULT_WARDEN_CONFIG, {} as WardenConfigPatch).then(
+      () => should.fail('', '', 'should have been refused'),
+      (error: unknown) => should(error).be.instanceOf(WardenConfigHeld),
+    );
+    should(owner).have.length(0);
+    should(plain).have.length(0);
+  });
 });
