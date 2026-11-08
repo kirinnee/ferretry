@@ -1234,10 +1234,11 @@ export class FerretsService implements FerretsApi {
         const stop = record === undefined ? undefined : this.ports.harness(record.harness)?.turnStop;
         const stopActive = runner.stopActiveTurn?.bind(runner);
         if (stop === undefined || stopActive === undefined) return err({ refused: 'plugin_unavailable' });
-        // The same rule as `interrupt`: an interactive pane whose harness's key is harmless when idle may be pressed idle.
-        const whenIdle = record?.mode === 'interactive' && stop.safeWhenIdle;
+        // NEVER pressed idle (unlike `interrupt`, whose idle rule is the person's own Stop): a send-now's stop is for an
+        // ACTIVE turn only. An idle press would answer a permission prompt or dismiss a question the person has not
+        // decided; the runner presses only while the pane it reads shows work (`shouldPressStopKey`).
         try {
-          return ok(await stopActive(handle, { key: stop.key, whenIdle }));
+          return ok(await stopActive(handle, { key: stop.key, whenIdle: false }));
         } catch (error) {
           const failure = runnerDeliveryFailure(error);
           if (failure?.kind === 'held') return err({ refused: failure.code });

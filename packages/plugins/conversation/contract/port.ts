@@ -47,9 +47,13 @@ export interface ConversationRefusal {
 }
 
 /**
- * Who is calling a write: the owner, a ferret (named), or the Warden. Gate stamped it; Conversation never decides it.
+ * Who is calling a write: the owner, a ferret (named), or the Warden. Gate stamps the caller of a ROUTE; a caller of
+ * THIS port is trusted in-process: the kernel hands a provider no consumer id, so Conversation cannot prove which plugin
+ * is calling, and any plugin holding the conversation need could pass `warden` (declared in ports-pending as an open
+ * GAP; binding it to the Warden's consumer id waits for the kernel). The port's `cancelSend`, `enterSend` and
+ * `composer` take no caller at all, and the port's draft action has no `terminal.use` gate (the route does).
  * `warden` (additive, D2 #19) is Ferretry's own watchdog speaking: its words are typed bare, recorded as the DAEMON's
- * (`senderKind: 'daemon'`, authored by Ferretry's Warden), never as the owner's own message and never as a ferret's:
+ * (`senderKind: 'daemon'`, `by` Ferretry's Warden), never as the owner's own message and never as a ferret's:
  * a notice is not kept, retried or counted as the owner's.
  */
 export type ConversationCaller =

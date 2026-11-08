@@ -58,6 +58,7 @@ import {
   terminalSeam,
   Unconfirmed,
 } from './harness-seam.ts';
+import { startupParkedPending } from './delivery/lib/service.ts';
 import { harnessSendTerminal } from './send-terminal.ts';
 import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
 import { type MountRoute, routeTable, socketTable } from './seams/api.ts';
@@ -127,6 +128,12 @@ const sendActRefusal = (error: unknown): never => {
   if (error instanceof SendDraftRefused) throw new SessionSendError('refused', error.message, error.draft);
   return sendRefusal(error);
 };
+
+/**
+ * The journal fields that reach the log: ids and outcome words only. The queue-wait events carry the refusal's sentence
+ * in `reason`, and a sentence may quote a prompt or a person's words, so it is not here.
+ */
+const JOURNAL_LOG_KEYS = ['sendId', 'outcome', 'effect', 'from', 'by', 'turn', 'direct', 'proof'] as const;
 
 /** A ferret's lifecycle state, as the session status the interrupt's refusals are written against. */
 const statusOf = (ferret: FerretSummary): SessionStatus => {
@@ -295,6 +302,12 @@ export function buildConversationA(deps: {
    * own stop key under its own rule, and says whether the pane still shows work, which decides `awaiting_user` (an
    * interactive pane handed back) from `interrupted`.
    */
+  /**
+   * THE ONE LANE PER FERRET (as today's `serial.run(id, …)`): a typed send, a send-now's stop, cancel, Enter, the person's
+   * draft, the tracker's re-submit and an interrupt all run one at a time on a ferret, so a Cancel can never clear a
+   * message while its typing is still between paste and Enter, and a stop never lands between two keys of a send.
+   */
+  const lane = new KeyedSerialExecutor();
   /** One ferret as the send path reads it; a ferret Ferrets does not know is 404. */
   const readTarget = async (id: SessionId): Promise<SendTarget> => {
     const ferret = await ferrets.get(id);
@@ -311,7 +324,7 @@ export function buildConversationA(deps: {
     };
   };
   const interrupts = new SessionInterrupt({
-    serial: new KeyedSerialExecutor(),
+    serial: lane,
     repository: {
       read: readTarget,
       transition: async (id, change) => {
@@ -326,35 +339,40 @@ export function buildConversationA(deps: {
   /**
    * TODAY'S SEND-PATH ACTS on a send already made (`SessionSendService`: cancel, Enter, the person's draft, the tracker's
    * re-submit), over the ferret's terminal through the harness seam (`harnessSendTerminal`, so every key is the runner's
-   * own act on the exact pane). They share the ledger the send writes and one lane per ferret. What is NOT wired is what
+   * own act on the exact pane). They share the ledger the send writes and the one lane per ferret (`lane`, above). What is NOT wired is what
    * only a TYPING send needs — the turn documents, the revive and the declared wait — so those ports refuse; the
    * service's `send` and `reattempt` are not called from here (a send is `typeMessage`, below).
    */
   const unwiredTyping = (): never => pending(SEND_EXTRAS_UNAVAILABLE);
+  /** The send path's pane look and composer acts over the harness seam; the send-now reads the pane through it. */
+  const lookAtPane = harnessSendTerminal(ferrets);
   const sendActs = new SessionSendService(
     {
       repository: {
         read: async id => await readTarget(id).catch(() => undefined),
         resolveSender: async () => undefined,
-        // Names and ids only: an act's outcome, never a message's words or a person's draft.
+        // Names and ids only: an act's outcome, never a message's words, a refusal's sentence or a person's draft. Only
+        // the keys of JOURNAL_LOG_KEYS are kept, so a field a later event adds is never logged by default.
         journal: async (id, event, data) => {
           const fields: Record<string, string | number | boolean> = { ferret: id };
-          for (const [key, value] of Object.entries(data))
+          for (const key of JOURNAL_LOG_KEYS) {
+            const value = data[key];
             if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
               fields[key] = value;
+          }
           kernel.log.info(event, fields);
         },
         // Ferrets' turn watch owns whose turn it is; an act here changes no state of its own.
         transition: readTarget,
       },
       ledger,
-      terminal: harnessSendTerminal(ferrets),
+      terminal: lookAtPane,
       turns: { writeTurn: unwiredTyping, writeQueuedPayload: unwiredTyping, clearMarkers: unwiredTyping },
       channel,
       gate: { launching: () => false, awaitSettled: async () => true },
       reviver: { revive: unwiredTyping },
       peerWaits: { endPeerWait: async () => undefined },
-      serial: new KeyedSerialExecutor(),
+      serial: lane,
       clock,
       // The tracker that looks for a send's true fate is not ticked from here yet (the BEFORE-GREEN #45(c) line).
       tracking: { track: () => undefined },
@@ -372,13 +390,16 @@ export function buildConversationA(deps: {
   };
   /**
    * Whether a send may be typed at all, before its text is prepared, opened or kept (a repeat of a kept id is answered
-   * without it). A closed gate refuses it. And refuses what the harness seam does not type yet: files, an fyi message
-   * (held to the turn's end), the send-now flag and a reply request would be dropped, and the send answered `sent` all
-   * the same (U3 carries them). A field is refused only when it asks for something: the CLI always sends `now: false`
+   * without it). A closed gate refuses it. And refuses what the harness seam does not type yet: files or an fyi message
+   * (held to the turn's end) would be dropped, and the send answered `sent` all the same. A send-now is refused while the
+   * interrupt gate is closed, as it presses a stop key. A field is refused only when it asks for something: the CLI always sends `now: false`
    * and a label (`action` by default), and those type exactly as the seam types.
    */
   const mayGo = (request: UnwiredSend): void => {
     if (!gate.send) pending(SEND_UNAVAILABLE);
+    // A send-now presses a stop key: with the interrupt gate closed (a stop could quit the agent) it presses nothing, so
+    // it types nothing either.
+    if (request.now === true && !gate.interrupt) pending(INTERRUPT_UNAVAILABLE);
     if ((request.attachmentIds?.length ?? 0) > 0 || request.label === 'fyi') pending(SEND_EXTRAS_UNAVAILABLE);
   };
   /**
@@ -439,6 +460,22 @@ export function buildConversationA(deps: {
     }
   };
   /**
+   * TODAY'S SEND-NOW STOP (`locked`: `request.now === true && first.activeWork`, after `observe` and `refuseWhileParked`).
+   * The pane is READ before any key, and the stop key is pressed only for a pane that is busy and nothing else:
+   *  - a pane Codex holds a submission on until startup ends is PENDING (nothing pressed, nothing typed);
+   *  - an idle pane is not pressed: nothing is running, and the pane may be parked on a prompt the stop would answer;
+   *  - a pane behind a blocking prompt (a permission, a picker) is not pressed: Escape would answer it for the person;
+   *  - a ferret with a pending structured question is not pressed: Escape would dismiss the form.
+   * Where it does not press, the send goes on as any send does, and the delivery decides (type, queue, or refuse).
+   */
+  const stopForNow = async (ferret: SessionId, bound: Awaited<ReturnType<typeof terminal.bind>>): Promise<void> => {
+    const [pane, target] = await Promise.all([lookAtPane.observe(ferret), readTarget(ferret)]);
+    // Pending, as the route and the port answer a launch still in flight (503 `session_launching`).
+    if (pane.startupParked === true) throw new SessionSendError('pending', startupParkedPending(ferret).message);
+    if (!pane.activeWork || pane.blockingPrompt !== undefined || target.pendingQuestion !== undefined) return;
+    await bound.stopActive();
+  };
+  /**
    * Types one message. The send is ledgered as accepted BEFORE a key goes (the same id twice is one message), and a
    * refusal that typed nothing takes the record back so the id may start over. A send that was typed and not proven is
    * settled `unaccounted` and answered `send_unconfirmed` with its id, never typed again; a runner failure nobody could
@@ -446,23 +483,24 @@ export function buildConversationA(deps: {
    * the tracker's, so a delivered send's fate stays `accepted` here. A send to a ferret still working on its turn goes
    * to the harness's own queue ({@link deliverOrQueue}): `queued` once the pane shows it held there.
    */
-  const typeMessage = async (
-    ferret: SessionId,
-    request: UnwiredSend & {
-      readonly message: string;
-      readonly sendId: string;
-      readonly senderSessionId?: string | undefined;
-      /** The Warden is speaking (`ConversationCaller` `warden`): typed bare, recorded as the daemon's own. */
-      readonly warden?: true;
-    },
-  ): Promise<SendResult> => {
+  type TypedSend = UnwiredSend & {
+    readonly message: string;
+    readonly sendId: string;
+    readonly senderSessionId?: string | undefined;
+    /** The Warden is speaking (`ConversationCaller` `warden`): typed bare, recorded as the daemon's own. */
+    readonly warden?: true;
+  };
+  /** One typed send on the ferret's one lane ({@link lane}): nothing else presses a key on this ferret meanwhile. */
+  const typeMessage = async (ferret: SessionId, request: TypedSend): Promise<SendResult> =>
+    await lane.run(ferret, async () => await typeLocked(ferret, request));
+  const typeLocked = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
     // Opened BEFORE the record: an unknown ferret or a seam that is off types nothing and keeps nothing. No caller goes
     // to Ferrets: a send has no target rule (the path names where it goes, as for every caller); a ferret is a SENDER.
     const bound = await terminal.bind(ferret);
     const { text, fromName } = await typedText(ferret, request);
-    // SEND-NOW: the turn is stopped FIRST, under the harness's own stop rule, and BEFORE the record exists: a stop that is
-    // refused (a hold, a gone pane, a runner that cannot stop) types nothing and keeps nothing, so the id starts over.
-    if (request.now === true) await bound.stopActive();
+    // SEND-NOW: the turn is stopped FIRST and BEFORE the record exists: a stop that is refused (a hold, a gone pane, a
+    // runner that cannot stop) types nothing and keeps nothing, so the id starts over. The pane is READ before any key.
+    if (request.now === true) await stopForNow(ferret, bound);
     const at = kernel.clock.now();
     const accepted = await ledger.accept(ferret, {
       sendId: request.sendId,
@@ -476,6 +514,8 @@ export function buildConversationA(deps: {
       attempt: 1,
       attemptAt: at,
       senderKind: request.warden === true ? 'daemon' : request.senderSessionId === undefined ? 'human' : 'agent',
+      // The Warden's words are Ferretry's own, shown as such (the sender chip reads `by`), as today's remedies were.
+      ...(request.warden === true ? { by: { kind: 'ferretry' as const, feature: 'Warden' } } : {}),
       ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
       ...(fromName === undefined ? {} : { fromName }),
     });

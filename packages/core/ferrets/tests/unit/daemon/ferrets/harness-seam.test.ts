@@ -437,7 +437,17 @@ describe('send path: the seam reaches the pane look and the composer acts throug
     ]);
     expect(working.runner.pressed).toEqual([{ handle: working.handle, key: 'Escape' }]);
     expect(working.runner.signals).toEqual([]);
-    // Interactive Claude is pressed idle too; an idle Codex never is.
+  });
+
+  test('send path stopActive NEVER presses an idle pane, interactive Claude (whose key is harmless idle) included', async () => {
+    // The interrupt may press an idle interactive Claude pane (the person's own Stop); a send-now's stop may not: an
+    // idle pane may be parked on a permission prompt or a question, and Escape would answer it.
+    const claude = await running({}, 'interactive');
+    claude.harness.turnStop = { key: 'Escape', safeWhenIdle: true };
+    claude.runner.working = false;
+    expect((await claude.seam.stopActive!()).ok).toBe(true);
+    expect(claude.runner.stoppedActive[0]?.stop).toEqual({ key: 'Escape', whenIdle: false });
+    expect(claude.runner.pressed).toEqual([]);
     const codex = await running({}, 'interactive');
     codex.harness.turnStop = { key: 'Escape', safeWhenIdle: false };
     codex.runner.working = false;

@@ -362,8 +362,9 @@ export interface RunnerLook {
 
 /**
  * What one {@link Runner.observe} read of a ferret's pane (today's `SendPaneObservation`), as plain data. Every text in it
- * was read from a masked screen: `blockingPrompt` is masked again by the runner, and `draft` is the person's own
- * unsent words. None is ever logged, stored or journalled by a caller.
+ * was read from a masked screen: `blockingPrompt` is masked again by the runner. `draft` is NOT masked: it is the
+ * person's own unsent words exactly as the pane shows them (as today's 409 `composer_occupied` carries them), so a
+ * secret the person pasted there is in it. It must never be logged, stored or journalled by a caller.
  */
 export interface RunnerPaneObservation {
   readonly alive: boolean;

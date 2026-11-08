@@ -292,9 +292,12 @@ export interface FerretHarness {
    */
   submitComposer?(text: string, strict?: boolean): Promise<Result<RunnerComposerSubmitted, HarnessDeliveryFailure>>;
   /**
-   * Additive (send path, the send-now's stop): the harness's stop key under the same rule as {@link interrupt}, then the
+   * Additive (send path, the send-now's stop): the harness's stop key, pressed ONLY while the pane the runner reads shows
+   * active work, and NEVER at an idle pane, whichever harness or mode (unlike {@link interrupt}, whose idle rule is the
+   * person's own Stop): an idle pane may be parked on a permission prompt or a question that Escape would answer. Then the
    * pane read once it settled (the runner's `stopActiveTurn`). `plugin_unavailable` when the harness names no stop or the
-   * runner cannot. The pane read is `undefined` when it could not be read.
+   * runner cannot. The pane read is `undefined` when it could not be read. The caller reads the pane first and presses
+   * only for a send-now that is busy with a pane it proved free of a prompt and of a pending question.
    */
   stopActive?(): Promise<Result<RunnerPaneObservation | undefined, HarnessRefusal>>;
   /**

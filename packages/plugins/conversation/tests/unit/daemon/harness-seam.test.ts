@@ -45,6 +45,9 @@ const OPEN: HarnessGate = HARNESS_OPEN;
 /** Both actions held back: what a gate that is not open answers. */
 const CLOSED: HarnessGate = { send: false, interrupt: false };
 
+/** A pane that is visibly mid-turn and shows no prompt: the only pane a send-now's stop key may be pressed at. */
+const BUSY_PANE = ok({ alive: true, dead: false, promptReady: false, activeWork: true });
+
 const F1 = ferretId('f1');
 const CALLER = ferretId('lead');
 /** The calling ferret's name, apart from its id so a banner that names the wrong one shows. */
@@ -831,6 +834,8 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
       ['s-w', 'daemon', undefined],
     ]);
+    // m5: shown as Ferretry's own Warden (the sender chip reads `by`), as today's remedies were.
+    expect((await api().sends(F1)).sends.map(row => row.by)).toEqual([{ kind: 'ferretry', feature: 'Warden' }]);
     await host.stop();
   });
 
@@ -1390,6 +1395,7 @@ describe('send path: the send-now and reply flags are carried', () => {
   test('now stops the active turn BEFORE the message is typed, once, and the message is then delivered', async () => {
     const order: string[] = [];
     const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () => BUSY_PANE;
     ferrets.script.stopActive = async () => {
       order.push('stop');
       return ok(undefined);
@@ -1416,6 +1422,7 @@ describe('send path: the send-now and reply flags are carried', () => {
       }
     }
     const ferrets = new NoStop();
+    ferrets.script.observe = async () => BUSY_PANE;
     const { host, api } = await conversation(ferrets);
 
     const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
@@ -1433,12 +1440,128 @@ describe('send path: the send-now and reply flags are carried', () => {
     await host.stop();
   });
 
+  test('C1 now at an IDLE pane presses no stop key: nothing is running, and the message is simply typed', async () => {
+    const { host, ferrets, api } = await conversation();
+    // The default pane is idle at its prompt (promptReady, no active work).
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent.ok).toBe(true);
+    expect(ferrets.stopsActive).toBe(0);
+    expect(ferrets.delivered).toEqual([{ text: 'now!' }]);
+    await host.stop();
+  });
+
+  test('C1 now at an idle INTERACTIVE Claude pane presses no stop key either (the interrupt’s idle rule is not the send-now’s)', async () => {
+    const { host, ferrets, api } = await conversation(new HarnessFerrets(), OPEN, { mode: 'interactive' });
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent.ok).toBe(true);
+    expect(ferrets.stopsActive).toBe(0);
+    await host.stop();
+  });
+
+  test('C1 now behind a blocking prompt (a permission, a picker) presses no stop key: Escape would answer it', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () =>
+      ok({
+        alive: true,
+        dead: false,
+        promptReady: false,
+        activeWork: true,
+        blockingPrompt: 'Allow Bash? 1 Yes 2 No',
+      });
+    const { host, api } = await conversation(ferrets);
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(ferrets.stopsActive).toBe(0);
+    expect(sent.ok).toBe(true);
+    await host.stop();
+  });
+
+  test('C1 now with a structured question pending presses no stop key: Escape would dismiss the form', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () => BUSY_PANE;
+    const { host, api, asking } = await conversation(ferrets);
+    await asking();
+
+    await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(ferrets.stopsActive).toBe(0);
+    await host.stop();
+  });
+
+  test('C1 now at a pane Codex holds a submission on until startup ends is PENDING: nothing pressed, typed or kept', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () =>
+      ok({ alive: true, dead: false, promptReady: false, activeWork: true, startupParked: true });
+    const { host, api } = await conversation(ferrets);
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent).toMatchObject({ ok: false, error: { code: 'session_launching' } });
+    expect(ferrets.stopsActive).toBe(0);
+    expect(ferrets.delivered).toEqual([]);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    await host.stop();
+  });
+
+  test('C1 now through a pane that cannot be read presses nothing and keeps nothing', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () => err({ refused: 'input_pending' });
+    const { host, api } = await conversation(ferrets);
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent).toMatchObject({ ok: false, error: { code: 'input_pending' } });
+    expect(ferrets.stopsActive).toBe(0);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    await host.stop();
+  });
+
+  test('n4 now to a gone pane answers the SEND’S no-pane words, not the interrupt’s', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () => BUSY_PANE;
+    ferrets.script.stopActive = async () => err({ refused: 'no_pane' });
+    const { host, api } = await conversation(ferrets);
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent).toMatchObject({
+      ok: false,
+      error: { code: 'send_refused', message: 'session f1 has no live agent to type into; revive it first' },
+    });
+    await host.stop();
+  });
+
+  test('m3 now with the interrupt gate closed presses nothing and types nothing; a plain send still goes', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () => BUSY_PANE;
+    const { host, api } = await conversation(ferrets, { send: true, interrupt: false });
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent).toMatchObject({
+      ok: false,
+      error: { code: 'conversation_terminal_unavailable', message: INTERRUPT_UNAVAILABLE },
+    });
+    expect(ferrets.opens).toEqual([]);
+    expect(ferrets.stopsActive).toBe(0);
+    expect(ferrets.delivered).toEqual([]);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    expect((await api().send(F1, { kind: 'owner' }, { message: 'plain', sendId: 's-2', now: false })).ok).toBe(true);
+    await host.stop();
+  });
+
   test.each<[string, Result<undefined, HarnessRefusal>, string]>([
     ['a hold', err({ refused: 'input_pending' }), 'input_pending'],
     ['a gone pane', err({ refused: 'no_pane' }), 'send_refused'],
     ['a runner that cannot stop', err({ refused: 'plugin_unavailable' }), 'plugin_unavailable'],
   ])('now with %s types NOTHING and keeps nothing: the id starts over', async (_name, stop, code) => {
     const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () => BUSY_PANE;
     ferrets.script.stopActive = async () => stop;
     const { host, api } = await conversation(ferrets);
 
@@ -1468,6 +1591,78 @@ describe('send path: the send-now and reply flags are carried', () => {
       `[question from ferret ${LEAD_NAME} (session lead) — not from the owner] ${LEAD_NAME} is waiting for your answer. Reply with: fy send ${LEAD_NAME} "<reply>"\nwhat do you think?`,
       `${banner('message')}fyi only`,
     ]);
+    await host.stop();
+  });
+});
+
+describe('m2 one lane per ferret: typing, the acts and an interrupt press keys one at a time (as today’s serial.run)', () => {
+  /** A deliver that waits for the test to let it finish, so a second call can be tried while a send is mid-typing. */
+  const slowDeliver = (ferrets: HarnessFerrets) => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    ferrets.script.deliver = async () => {
+      await gate;
+      return ok('turn-started' as const);
+    };
+    return release;
+  };
+  const settle = async () => await new Promise(resolve => setTimeout(resolve, 20));
+
+  test('m2 an interrupt waits for a send that is mid-typing, then presses', async () => {
+    const ferrets = new HarnessFerrets();
+    const release = slowDeliver(ferrets);
+    const { host, api } = await conversation(ferrets);
+
+    const typing = api().send(F1, { kind: 'owner' }, { message: 'slow one', sendId: 's-1' });
+    await settle();
+    const stopping = api().interrupt(F1, {});
+    await settle();
+    expect(ferrets.interrupts).toBe(0);
+
+    release();
+    await typing;
+    await stopping;
+    expect(ferrets.interrupts).toBe(1);
+    await host.stop();
+  });
+
+  test('m2 a Cancel waits for the send it cancels while that send is mid-typing, so it never clears half a message', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.heldAt = async () => ok('composer');
+    const { host, api } = await conversation(ferrets);
+    await api().send(F1, { kind: 'owner' }, { message: 'first', sendId: 's-1' });
+    const release = slowDeliver(ferrets);
+
+    const typing = api().send(F1, { kind: 'owner' }, { message: 'slow one', sendId: 's-2' });
+    await settle();
+    const cancelling = api().cancelSend(F1, 's-1');
+    await settle();
+    expect(ferrets.composerKeys).toEqual([]);
+
+    release();
+    await typing;
+    await cancelling;
+    expect(ferrets.composerKeys).toEqual(['clear:first']);
+    await host.stop();
+  });
+
+  test('m2 two sends to one ferret type one at a time', async () => {
+    const ferrets = new HarnessFerrets();
+    const release = slowDeliver(ferrets);
+    const { host, api } = await conversation(ferrets);
+
+    const first = api().send(F1, { kind: 'owner' }, { message: 'one', sendId: 's-1' });
+    await settle();
+    const second = api().send(F1, { kind: 'owner' }, { message: 'two', sendId: 's-2' });
+    await settle();
+    expect(ferrets.delivered).toEqual([{ text: 'one' }]);
+
+    release();
+    await first;
+    await second;
+    expect(ferrets.delivered).toEqual([{ text: 'one' }, { text: 'two' }]);
     await host.stop();
   });
 });
@@ -1698,12 +1893,18 @@ describe('send path: the Warden’s one verified Enter and the taken-back pointe
   test('the warden’s Enter presses only when the box holds exactly that send’s text, and an empty box is absent', async () => {
     const ferrets = new HarnessFerrets();
     const { host, api } = await conversation(ferrets);
-    await api().send(F1, { kind: 'owner' }, { message: 'one send', sendId: 's-1' });
-    // The send was typed and its Enter never took (the ledger says the text is still in the box).
+    const message = 'please look at the failing build and report back';
+    await api().send(F1, { kind: 'owner' }, { message, sendId: 's-1' });
+    // A box that holds OTHER text (the person's own draft) is never pressed.
     ferrets.script.observe = async () =>
-      ok({ alive: true, dead: false, promptReady: true, activeWork: false, draft: 'one send' });
-    const first = await api().resubmitStuck!(F1, { kind: 'warden' }, 's-1');
-    expect(first.ok).toBe(true);
+      ok({ alive: true, dead: false, promptReady: true, activeWork: false, draft: 'something the person typed here' });
+    expect(await api().resubmitStuck!(F1, { kind: 'warden' }, 's-1')).toEqual({ ok: true, value: 'refused' });
+    expect(ferrets.composerKeys).toEqual([]);
+    // The send was typed and its Enter never took (the box holds exactly its text): ONE Enter, for exactly that text.
+    ferrets.script.observe = async () =>
+      ok({ alive: true, dead: false, promptReady: true, activeWork: false, draft: message });
+    expect(await api().resubmitStuck!(F1, { kind: 'warden' }, 's-1')).toEqual({ ok: true, value: 'submitted' });
+    expect(ferrets.composerKeys).toEqual([`submit:${message}`]);
 
     ferrets.script.observe = async () => ok({ alive: true, dead: false, promptReady: true, activeWork: false });
     expect(await api().resubmitStuck!(F1, { kind: 'warden' }, 's-1')).toEqual({ ok: true, value: 'absent' });

@@ -107,8 +107,10 @@ interface BoundTerminal {
   /** Presses the harness's stop under its own rule and says what it did. Throws the answer for a refusal. */
   interrupt(): Promise<TurnStopped>;
   /**
-   * The send-now's stop: the harness's stop key under the same rule as {@link interrupt}, then a wait for the pane to
-   * come back to a prompt. Throws the answer for a refusal (nothing pressed), and `plugin_unavailable` when the runner
+   * The send-now's stop: the harness's stop key, pressed ONLY while the pane shows active work and NEVER at an idle one
+   * (Ferrets' rule for this member; the interrupt's idle rule is the person's own Stop), then a wait for the pane to come
+   * back to a prompt. The CALLER reads the pane first and calls this only for a busy pane free of a prompt and of a
+   * pending question. Throws the answer for a refusal (nothing pressed), and `plugin_unavailable` when the runner
    * cannot, so a send-now that cannot stop the turn types NOTHING.
    */
   stopActive(): Promise<void>;
@@ -227,7 +229,9 @@ export function terminalSeam(ferrets: Pick<FerretsApi, 'harness'>): TerminalSeam
           const stopped = await harness.stopActive?.();
           if (stopped === undefined)
             throw new ApiError(503, "the runner that owns this ferret's terminal is off", 'plugin_unavailable');
-          if (!stopped.ok) throw refusalAnswer(stopped.error, INTERRUPT_NO_PANE);
+          // A send's own no-pane words (nothing was typed or pressed), not the interrupt's.
+          if (!stopped.ok)
+            throw refusalAnswer(stopped.error, `session ${ferret} has no live agent to type into; revive it first`);
         },
         interrupt: async () => {
           const interrupted = await harness.interrupt();
