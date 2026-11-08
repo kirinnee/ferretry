@@ -21,7 +21,6 @@
  * An internal card (its lead's bookkeeping) never asks: its owner ferret or a lead passes its gate itself. Nor does a
  * sub-card at a lane the owner tries things in: the owner tests the parent.
  */
-import { createHash } from 'node:crypto';
 import type { AskDraft } from '@ferretry/core-asks/contract';
 import {
   type BoardReopenAttachments,
@@ -567,21 +566,6 @@ type Decision =
     }
   | { readonly kind: 'not-yet'; readonly note: string | null; readonly words?: string };
 
-/**
- * Everything an answer says, as the daemon reads it: the choice, the owner's normalized words and the files as sent,
- * as a digest, so two answers are the same only when they say the same.
- */
-export const receiptOf = (answer: GateAnswer, decision: Pick<Decision, 'words'>): string =>
-  createHash('sha256')
-    .update(
-      JSON.stringify([
-        answer.choice ?? null,
-        decision.words ?? '',
-        answer.attachments === undefined ? null : [answer.attachments.from, answer.attachments.ids],
-      ]),
-    )
-    .digest('hex');
-
 const refused = (code: GateRefusal['code'], message: string): GateAnswerOutcome => ({
   handled: true,
   refused: { code, message },
@@ -591,7 +575,7 @@ const refused = (code: GateRefusal['code'], message: string): GateAnswerOutcome 
  * Reads the answer against the gate: a chosen label is its option (or "Not yet"); the owner's own words alone (no
  * choice) are the gate's Not good. Reopen-with-ask needs words, from the note or the answer.
  */
-export const decide = (gate: CardGate, answer: GateAnswer): Decision | GateRefusal => {
+const decide = (gate: CardGate, answer: GateAnswer): Decision | GateRefusal => {
   const note = answer.text?.trim() ?? '';
   const words = (text: string): { readonly words?: string } => (text === '' ? {} : { words: text });
   if (answer.choice === undefined) {
@@ -617,5 +601,3 @@ export const decide = (gate: CardGate, answer: GateAnswer): Decision | GateRefus
   }
   return { kind: 'option', option: choice.option, note: note === '' ? null : note, ...words(note) };
 };
-
-export { receiptOf as gateAnswerReceipt };

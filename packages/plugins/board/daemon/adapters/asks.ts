@@ -82,7 +82,7 @@ const labelsOf = (ask: AskSummary): readonly string[] => (ask.kind === 'yesno' ?
  * What the opt-in rule reads of an answered ask: who raised it, what it asked, and how it was answered. The summary
  * does not carry a choice's own labels (GAP), so only a yes/no reads as one.
  */
-export const answeredAsk = (ask: AskSummary, answer: AskAnswer | undefined): AnsweredAsk => ({
+const answeredAsk = (ask: AskSummary, answer: AskAnswer | undefined): AnsweredAsk => ({
   raisedBy: ask.raisedBy.kind,
   ...(ask.raisedBy.kind === 'ferret' ? { raisedByFerret: ask.raisedBy.ferret } : {}),
   subject: ask.subject,

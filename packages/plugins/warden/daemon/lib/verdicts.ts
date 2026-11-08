@@ -22,7 +22,7 @@ export type WardenVerdictKind = 'killed' | 'revived' | 'nudged' | 'cleared' | 'n
 
 /** A concrete next step lifted from the report. `move` carries the account
  *  the report named so the UI never has to guess a target. */
-export type WardenRecommendedAction = 'nudge' | 'stop' | 'resume' | 'restart' | 'move' | 'leave';
+type WardenRecommendedAction = 'nudge' | 'stop' | 'resume' | 'restart' | 'move' | 'leave';
 
 export interface WardenRecommendation {
   readonly action: WardenRecommendedAction;

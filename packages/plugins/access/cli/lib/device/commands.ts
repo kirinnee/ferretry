@@ -66,17 +66,17 @@ export function deviceRevokeHelp(bin: string): string {
 }
 
 /** `--json`: print the protocol document instead of the human report. */
-export const DEVICE_LS_SHAPE: VerbShape = { command: 'ls', args: [], switches: ['json'] };
+const DEVICE_LS_SHAPE: VerbShape = { command: 'ls', args: [], switches: ['json'] };
 
 /** `--use`/`--no-use` and `--configure`/`--no-configure`; absent leaves that axis alone. */
-export const DEVICE_GRANT_SHAPE: VerbShape = {
+const DEVICE_GRANT_SHAPE: VerbShape = {
   command: 'grant',
   args: ['device', 'capability'],
   switches: ['use', 'no-use', 'configure', 'no-configure'],
 };
 
 /** `-y, --yes`: skip the typed confirmation; required when not on a terminal. */
-export const DEVICE_REVOKE_SHAPE: VerbShape = {
+const DEVICE_REVOKE_SHAPE: VerbShape = {
   command: 'revoke',
   args: ['device'],
   switches: ['yes'],

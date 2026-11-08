@@ -30,7 +30,6 @@ const pkg = JSON.parse(readFileSync(join(cliPackage, 'package.json'), 'utf8')) a
   readonly bin: Readonly<Record<string, string>>;
 };
 
-export const binaryName = Object.keys(pkg.bin)[0] ?? pkg.name;
 const binEntry = Object.values(pkg.bin)[0] ?? 'bin/fy.ts';
 
 /** The ambient environment minus every `FY_*` variable: a journey must not inherit this machine's daemon or credential. */

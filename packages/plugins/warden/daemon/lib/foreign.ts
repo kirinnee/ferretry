@@ -25,7 +25,7 @@ export const SessionStatusSchema = z.enum([
   'stopped',
 ]);
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
-export const SessionTurnStateSchema = z.enum(['working', 'your-turn', 'needs-input']);
+const SessionTurnStateSchema = z.enum(['working', 'your-turn', 'needs-input']);
 export type SessionTurnState = z.infer<typeof SessionTurnStateSchema>;
 export const SessionStateSchema = z.looseObject({
   status: SessionStatusSchema,
@@ -78,7 +78,6 @@ export const MAX_AGENDA_DETAIL_LENGTH = 2_048;
 export const MAX_AGENDA_REASON_LENGTH = 1_024;
 export const AGENDA_PUSH_TITLE_LENGTH = 40;
 export const AGENDA_PUSH_BODY_LENGTH = 120;
-export const MACHINE_AGENDA_ID = 'machine-agenda';
 export type AgendaSource = 'task' | 'question' | 'agent-raised';
 export type AgendaBy = 'human' | 'agent' | 'daemon';
 export interface AgendaTerm {

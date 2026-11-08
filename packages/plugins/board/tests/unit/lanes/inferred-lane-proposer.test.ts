@@ -8,9 +8,9 @@ import {
   type ProjectGitFactSource,
   type ProposalLaneSets,
 } from '../../../daemon/lib/lanes/index.ts';
-import { lanes, PROJECT } from './support.ts';
+import { lanes, FERRETRY_ID } from './support.ts';
 
-const project = (path: string | null): ProjectBoard => ({ id: PROJECT, name: 'p', path, laneSet: null });
+const project = (path: string | null): ProjectBoard => ({ id: FERRETRY_ID, name: 'p', path, laneSet: null });
 
 class FakeLanes implements ProposalLaneSets {
   readonly applied: { request: LaneSetActionRequest; actor: LaneActor }[] = [];
@@ -24,8 +24,8 @@ class FakeLanes implements ProposalLaneSets {
   async apply(_id: string, request: LaneSetActionRequest, actor: LaneActor) {
     this.applied.push({ request, actor });
     return this.outcome === 'ok'
-      ? ok({ laneSet: lanes(PROJECT, 'pr'), ask: 'raised' as const })
-      : err({ code: 'not-found' as const, projectId: PROJECT });
+      ? ok({ laneSet: lanes(FERRETRY_ID, 'pr'), ask: 'raised' as const })
+      : err({ code: 'not-found' as const, projectId: FERRETRY_ID });
   }
 }
 
@@ -49,10 +49,10 @@ describe('InferredLaneProposer', () => {
     const facts = new FakeFacts(found);
 
     // Act
-    const proposed = await new InferredLaneProposer(fake, facts).propose(PROJECT, 'lead');
+    const proposed = await new InferredLaneProposer(fake, facts).propose(FERRETRY_ID, 'lead');
 
     // Assert
-    should(proposed?.projectId).equal(PROJECT);
+    should(proposed?.projectId).equal(FERRETRY_ID);
     should(facts.inspected).eql(['/repo']);
     should(fake.applied).eql([
       {
@@ -68,7 +68,7 @@ describe('InferredLaneProposer', () => {
     const facts = new FakeFacts();
 
     // Act
-    await new InferredLaneProposer(fake, facts).propose(PROJECT, 'lead');
+    await new InferredLaneProposer(fake, facts).propose(FERRETRY_ID, 'lead');
 
     // Assert
     should(facts.inspected).eql([]);
@@ -80,7 +80,7 @@ describe('InferredLaneProposer', () => {
     const fake = new FakeLanes(undefined);
 
     // Act
-    const proposed = await new InferredLaneProposer(fake, new FakeFacts()).propose(PROJECT, 'lead');
+    const proposed = await new InferredLaneProposer(fake, new FakeFacts()).propose(FERRETRY_ID, 'lead');
 
     // Assert
     should(proposed).be.null();
@@ -92,7 +92,7 @@ describe('InferredLaneProposer', () => {
     const proposed = await new InferredLaneProposer(
       new FakeLanes(project('/repo'), 'refused'),
       new FakeFacts(),
-    ).propose(PROJECT, 'lead');
+    ).propose(FERRETRY_ID, 'lead');
 
     // Assert
     should(proposed).be.null();

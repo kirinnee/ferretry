@@ -174,7 +174,7 @@ export interface DictationBundle {
   readonly stage: DictationStage;
 }
 
-export function useDictationBundle(props: DictationControlProps): DictationBundle {
+function useDictationBundle(props: DictationControlProps): DictationBundle {
   const {
     draft,
     onDraftChange,

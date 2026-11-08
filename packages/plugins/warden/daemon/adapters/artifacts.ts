@@ -12,7 +12,7 @@ import type { WardenReportReader } from './report-reader.ts';
 /** How many leading lines of a report the status surface shows. Enough to carry
  *  the verdict line and the recommendation under it, which is what an operator
  *  glancing at `warden status` actually needs. */
-export const REPORT_HEAD_LINES = 12;
+const REPORT_HEAD_LINES = 12;
 
 /**
  * Where a warden's evidence lives on disk.

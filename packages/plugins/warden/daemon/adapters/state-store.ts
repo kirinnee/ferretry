@@ -5,7 +5,7 @@ import type { AutoMoveMemory, WardenRuntimeState, WardenStateStore } from '../li
 const AUTO_MOVE_KEY = 'autoMoveMemory';
 
 /** A file the kernel found damaged is never read as empty: the sweep fails and says so. */
-export class WardenStateDamaged extends Error {
+class WardenStateDamaged extends Error {
   constructor(sentence: string) {
     super(sentence);
     this.name = 'WardenStateDamaged';

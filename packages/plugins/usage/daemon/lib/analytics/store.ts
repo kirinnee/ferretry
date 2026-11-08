@@ -99,11 +99,6 @@ export interface OpenedAnalyticsIndexStore {
   readonly rebuildRequired: boolean;
 }
 
-/** Where the analytics store comes from. Implemented only by adapters. */
-export interface AnalyticsIndexStoreFactory {
-  open(): OpenedAnalyticsIndexStore;
-}
-
 /** What the store remembers about a session it has already ingested. */
 export interface AnalyticsIngestedMarker {
   readonly signature: string;

@@ -13,7 +13,7 @@ import { GrantError } from './service.ts';
 import type { EnforcedGrants, GrantAuditPort, GrantClock } from './types.ts';
 
 /** Where each paired device's own grants are held. `PairingService` satisfies it structurally. */
-export interface DeviceGrantStore {
+interface DeviceGrantStore {
   /** The device's grants now, or nothing for a device that is unknown or revoked. */
   deviceGrants(deviceId: string): CapabilityGrants | undefined;
   /** Records a change, reporting whether the device was still there to change. */

@@ -27,12 +27,12 @@ export interface DaemonConnection {
 }
 
 /** The id a view uses before the router says which daemon it is under (a test, a screenshot harness). */
-export const THIS_DAEMON_ID: DaemonId = 'this-daemon';
+const THIS_DAEMON_ID: DaemonId = 'this-daemon';
 
 /** The name the views give the one daemon a half talks to. */
 export const THIS_MACHINE_NAME = 'this machine';
 
-export const daemonConnection = (daemonId: DaemonId): DaemonConnection => ({ daemonId });
+const daemonConnection = (daemonId: DaemonId): DaemonConnection => ({ daemonId });
 
 /**
  * The daemon the current route is under, or {@link THIS_DAEMON_ID} without a router or a daemon in the route. The SAME
@@ -51,9 +51,9 @@ export function useDaemonConnection(): DaemonConnection {
 const daemonBase = (id: DaemonId): string => `/d/${encodeURIComponent(id)}`;
 
 /** `insights` (the overview). */
-export const INSIGHTS_PATH = '/insights';
+const INSIGHTS_PATH = '/insights';
 /** `insights-query`. */
-export const INSIGHTS_QUERY_PATH = '/insights/query';
+const INSIGHTS_QUERY_PATH = '/insights/query';
 
 export type InsightsView = 'overview' | 'query';
 

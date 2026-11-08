@@ -16,10 +16,10 @@ import {
  */
 
 /** What a pairing record goes to: Gate's audit port. It never throws (a failed write is Gate's to report). */
-export type AuditSink = (draft: AuditDraft) => Promise<void>;
+type AuditSink = (draft: AuditDraft) => Promise<void>;
 
 /** Who hears that a new device was paired: every OTHER enrolled browser, by push. */
-export interface NewDeviceAlertPort {
+interface NewDeviceAlertPort {
   newDevicePaired(device: PairingGrant): Promise<void>;
 }
 
@@ -111,8 +111,8 @@ async function granted(audit: PairingAuditOptions, grant: PairingGrant): Promise
   });
 }
 
-export const DEVICE_PAIRED_EVENT_PREFIX = 'device-paired:';
-export const DEVICE_PAIRED_TITLE = 'A new device was paired';
+const DEVICE_PAIRED_EVENT_PREFIX = 'device-paired:';
+const DEVICE_PAIRED_TITLE = 'A new device was paired';
 
 /**
  * What every other enrolled device reads when a new one is paired.
@@ -131,7 +131,7 @@ export const DEVICE_PAIRED_TITLE = 'A new device was paired';
  * `url` is the application root, like every other notification here: the client owns its own route
  * table, and the app shows its new-device notice — with the one-tap removal — wherever it opens.
  */
-export function newDeviceAlert(device: PairingGrant, machineName: string): PushNotificationPayload {
+function newDeviceAlert(device: PairingGrant, machineName: string): PushNotificationPayload {
   const over = device.carrier === 'relay' ? 'over the relay' : 'on the local network';
   return PushNotificationPayloadSchema.parse({
     version: 1,

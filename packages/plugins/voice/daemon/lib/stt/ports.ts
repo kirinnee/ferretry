@@ -18,9 +18,6 @@ export type { AuthorizedOutcome };
 /** One outbound chat-completion call, fully described so the transport decides nothing. */
 export type EnhancementHttpRequest = OutboundHttpRequest;
 
-/** What the transport observed, before the enhancer decides what it means. */
-export type EnhancementOutcome = AuthorizedOutcome;
-
 /** The authenticated call the enhancer makes — the Vault's outbound holder, or a fake in a test. */
 export interface OutboundAuthorizerPort {
   send(

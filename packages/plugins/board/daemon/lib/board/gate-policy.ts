@@ -38,7 +38,7 @@ const MAX_ASK_SUBJECT_LENGTH = 240;
 const MAX_ASK_BODY_LENGTH = 64_000;
 
 /** What a card's ask asks of the owner beside its buttons: the buttons move the card; the ferret closes it. */
-export const CARD_ASK_HOW_TO_RESOLVE = "Answer the card's ask here (its buttons move the card); reply to talk it over.";
+const CARD_ASK_HOW_TO_RESOLVE = "Answer the card's ask here (its buttons move the card); reply to talk it over.";
 import { cardVisibility } from './visibility.ts';
 
 /** Where an option leads, or why it leads nowhere on this board. */
@@ -158,7 +158,7 @@ const gateSubject = (gate: CardGate, task: Pick<Card, 'title' | 'summary'>): str
  * where to try it for real; the card's How to test as written; the shipped version and the PR. Never a cut-off copy: too
  * long for a body, the steps are a pointer to the card.
  */
-export const howToTestOf = (
+const howToTestOf = (
   task: Pick<Card, 'id' | 'howToTest' | 'links'>,
   gate: Pick<CardGate, 'options'>,
   product?: GuideProduct,

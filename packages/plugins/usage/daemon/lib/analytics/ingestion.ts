@@ -13,7 +13,7 @@ import {
 import { type AnalyticsTranscriptFold, foldAnalyticsTurns } from './turn-fold.ts';
 
 /** Wakes the ingestion loop: a pass follows in `delayMs`. The kernel's job runner is the only timer. */
-export interface IngestTrigger {
+interface IngestTrigger {
   nudge(delayMs: number): void;
 }
 
@@ -34,11 +34,11 @@ export type AnalyticsIngestCandidate = Omit<
 
 /** Every session the daemon holds durable documents for, parsed but unjudged. */
 /** A session's transcript, read and folded off the event loop: the fold alone comes back. */
-export interface AnalyticsTranscriptFoldSource {
+interface AnalyticsTranscriptFoldSource {
   foldFor(sessionId: string, aliasGroups: readonly AnalyticsModelAliasGroup[]): Promise<AnalyticsTranscriptFold>;
 }
 
-export interface AnalyticsIngestCandidateSource {
+interface AnalyticsIngestCandidateSource {
   listCandidates(): Promise<readonly AnalyticsIngestCandidate[]>;
   /**
    * The sessions the archive has taken out of the live list (docs/session-archive.md). They are finished, so the rows
@@ -50,7 +50,7 @@ export interface AnalyticsIngestCandidateSource {
   candidate?(sessionId: string): Promise<AnalyticsIngestCandidate | undefined>;
 }
 
-export interface AnalyticsIngestClock {
+interface AnalyticsIngestClock {
   now(): string;
 }
 
@@ -127,7 +127,7 @@ export const ANALYTICS_BACKSTOP_MS = 15 * 60_000;
  * subsystem ships unmounted — so this is a mounted subsystem in its own right rather than a timer the
  * read surface happens to own.
  */
-export interface AnalyticsIngestionLoop {
+interface AnalyticsIngestionLoop {
   /** Whether the first pass must be a rebuild rather than an incremental one. */
   readonly rebuildRequired: boolean;
   ingest(): Promise<AnalyticsIngestSummary>;

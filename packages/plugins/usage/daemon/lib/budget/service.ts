@@ -42,9 +42,6 @@ import {
   meterSinceMs,
 } from './state.ts';
 
-/** How often the budgets are checked. The same minimum the provider quota reads keep. */
-export const BUDGET_TICK_MS = 60_000;
-
 /** What the configuration says about budgets now. */
 export interface BudgetConfig {
   /** The zone written in machine.yaml, or `undefined` for the host's own. */

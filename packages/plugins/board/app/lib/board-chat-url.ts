@@ -24,24 +24,3 @@ export const readChatTasksUrl = (search: string): ChatTasksUrl => {
   const params = new URLSearchParams(search);
   return { expanded: params.get(TASKS_PARAM) === FULL, agents: params.get(AGENTS_PARAM) === '1' };
 };
-
-/** `search` with the Tasks tab's two parameters set to `next`; the result has its `?`, or is empty. */
-export const withChatTasksUrl = (search: string, next: Partial<ChatTasksUrl>): string => {
-  const params = new URLSearchParams(search);
-  if (next.expanded !== undefined) {
-    if (next.expanded) params.set(TASKS_PARAM, FULL);
-    else params.delete(TASKS_PARAM);
-  }
-  if (next.agents !== undefined) {
-    if (next.agents) params.set(AGENTS_PARAM, '1');
-    else params.delete(AGENTS_PARAM);
-  }
-  const text = params.toString();
-  return text === '' ? '' : `?${text}`;
-};
-
-/** The Tasks tab's view and the two ways to change it; the app wires it to the address, a harness to state. */
-export interface ChatTasksView extends ChatTasksUrl {
-  readonly setExpanded: (expanded: boolean) => void;
-  readonly setAgents: (agents: boolean) => void;
-}

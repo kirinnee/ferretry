@@ -1,7 +1,7 @@
 import cli from '../../../cli/index.ts';
 import manifest from '../../../manifest.ts';
 
-export interface Call {
+interface Call {
   readonly route: string;
   readonly init?: { params?: Record<string, string>; query?: Record<string, string>; body?: unknown } | undefined;
 }
@@ -59,5 +59,3 @@ export async function run(verb: string, given: RunOptions = {}): Promise<RunResu
   const code = await handler({ args: given.args ?? [], options: given.options ?? {} });
   return { code, out, err, calls };
 }
-
-export { cli, manifest };
