@@ -575,7 +575,7 @@ describe('ClaudeHarness', () => {
     expect(JSON.stringify(tail)).not.toContain('SECRET');
   });
 
-  test('U5 a newest record larger than the first tail window is still read: wider, and if even that is cut, as a turn at work', async () => {
+  test('U5 a newest record larger than the tail window reads as a turn at work, with no wider read', async () => {
     const { harness, writeHome } = build();
     await harness.start(spec(), runner({}), {} as never);
     const done = JSON.stringify({
@@ -592,17 +592,15 @@ describe('ClaudeHarness', () => {
         message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'x'.repeat(bytes) }] },
       });
 
-    // 600 KB: past the 512 KB first window, whole inside the wider one. The turn is at work, not "no transcript".
+    // 600 KB: past the 512 KB window. The window is never widened (one wider parse is a >5 ms slice on the main thread),
+    // so the older end-of-turn record behind it is NOT seen: the turn is at work, never "no transcript".
     await writeHome('projects/-work/conv-1.jsonl', `${done}\n${bigResult(600 * 1024)}\n`);
-    const wide = await harness.transcriptTail(FERRET, 10);
-    if (wide.kind !== 'read') throw new Error('the tail reads');
-    expect(wide.records.map(record => record.kind)).toEqual(['message', 'turn', 'work']);
-
-    // 5 MB: larger than the widest window the roots allow. Never an empty tail: the record is a turn at work.
-    await writeHome('projects/-work/conv-1.jsonl', `${done}\n${bigResult(5 * 1024 * 1024)}\n`);
     const cut = await harness.transcriptTail(FERRET, 10);
-    if (cut.kind !== 'read') throw new Error('the tail reads');
-    expect(cut.records).toEqual([{ kind: 'work' }]);
+    expect(cut).toEqual({ kind: 'read', records: [{ kind: 'work' }] });
+
+    // 5 MB: the same answer.
+    await writeHome('projects/-work/conv-1.jsonl', `${done}\n${bigResult(5 * 1024 * 1024)}\n`);
+    expect(await harness.transcriptTail(FERRET, 10)).toEqual({ kind: 'read', records: [{ kind: 'work' }] });
   });
 
   test('dialogs.current finds nothing on an empty pane and answer refuses a prompt that is gone', async () => {

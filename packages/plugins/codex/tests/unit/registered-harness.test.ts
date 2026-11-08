@@ -243,6 +243,28 @@ describe('the registered Codex harness', () => {
     expect((await box.build().transcript.read(spec.ferret)).length).toBe(entries.length);
   });
 
+  test('U5 a newest record larger than the tail window reads as a turn at work, never as no records', async () => {
+    const box = fixture();
+    const harness = box.build();
+    const spec = box.spec();
+    await harness.start(spec, box.runner, ENV);
+    const file = `${spec.home}/sessions/2026/10/20/rollout-native.jsonl`;
+    const big = (bytes: number) =>
+      line('response_item', { type: 'function_call_output', call_id: 'c1', output: 'x'.repeat(bytes) });
+    box.files.set(file, header('native-id', spec.home) + message('done') + big(600 * 1024));
+
+    const tail = await harness.transcriptTail?.(spec.ferret, 50);
+
+    // 600 KB: past the 512 KB window, so no whole record is read. The turn is at work, not "no transcript".
+    expect(tail).toEqual({ kind: 'read', records: [{ kind: 'work' }] });
+
+    // A small record after it brings the window back to ordinary records.
+    box.files.set(file, `${box.files.get(file)}${message('next')}`);
+    const after = await harness.transcriptTail?.(spec.ferret, 50);
+    if (after?.kind !== 'read') throw new Error('the tail reads');
+    expect(after.records).not.toEqual([{ kind: 'work' }]);
+  });
+
   test('refuses the baseline, same-folder strangers and ambiguous ownership; resumes only the native id after restart', async () => {
     const box = fixture();
     const harness = box.build();

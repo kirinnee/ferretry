@@ -189,7 +189,11 @@ export class CodexRollouts {
       chosen = selected === undefined ? undefined : candidates.find(candidate => candidate.file === selected.file);
     }
     if (chosen === undefined) return undefined;
-    this.#proved.set(ferret, { rollout: chosen, provedAtMs: Date.parse(this.kernel.clock.now()) });
+    const nowMs = Date.parse(this.kernel.clock.now());
+    // A proof older than PROOF_REUSE_MS is proved again before it is used, so it is dead weight: dropped here.
+    for (const [other, entry] of this.#proved)
+      if (nowMs - entry.provedAtMs >= PROOF_REUSE_MS) this.#proved.delete(other);
+    this.#proved.set(ferret, { rollout: chosen, provedAtMs: nowMs });
     return { root, rollout: chosen };
   }
 
@@ -214,8 +218,13 @@ export class CodexRollouts {
     const read = await found.root.readTail(found.rollout.file, TAIL_READ_BYTES).catch(() => undefined);
     if (read === undefined) return { kind: 'unreadable' };
     const lines = decoder.decode(read.bytes).split('\n');
+    const partial = read.size > read.bytes.length;
+    // The newest record is larger than the window and none of it is whole: something big is being written, which is a
+    // turn at work (never "no records", so one idle-looking frame cannot end it). The window is never widened.
+    if (partial && lines.slice(1).every(line => line.trim() === ''))
+      return { kind: 'read', records: [{ kind: 'work' }] };
     // The window may start mid-record, and the last line may be one the harness has not finished: neither is read.
-    if (read.size > read.bytes.length) lines.shift();
+    if (partial) lines.shift();
     lines.pop();
     // The one sentence a record may carry is masked whole, then cut, before it leaves the harness.
     const records = await this.kernel.redaction.read(scope => {
