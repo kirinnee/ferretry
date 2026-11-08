@@ -67,6 +67,7 @@ Generator typecheck: it is part of the repository typecheck (`scripts/tsconfig.j
 - Jobs count source sites, including adapter schedulers, one-shot/backoff timers and lifecycle arming calls. Multiple sites can participate in one runtime job.
 - Files are source declarations and parameterized path families, never a scan of a real home. Relative families retain their symbolic root and confinement-review note. Several modules may declare the same file.
 - Removed rows cite a section that explicitly deletes the old behavior/file. A rename or moved feature remains required. No converter is authorized by this list (§9.1).
+- R-0150 (the session file diff) and R-0151 (the session file read) are a deliberate 5.0 hardening, not a parity break: the text a caller receives now has every vault value found whole in the text (the diff, hunk-header section heading included and joined to the hunks around it; a heading git cut to 80 bytes is a partial, the file, or the bytes of a non-UTF-8 file) masked; a value shown only in part, a non-ASCII value in bytes that are not UTF-8, or a value inside compressed bytes, is not, on top of the unchanged secrets-policy gates; an agent loses a read it had today (a file, or a diff of a file whose HEAD or working side holds a vault value, is refused with `holds_secret`), and a person is told the bytes are masked (`redacted: true`).
 
 ## Unplaced rows
 

@@ -487,3 +487,105 @@ describe('the secret routes', () => {
     should(error.code).equal('identity_unavailable');
   });
 });
+
+describe('the secret routes: a domain failure answers as its HTTP status, never a 500', () => {
+  it('S6 should answer a use of a secret this daemon does not hold as 404 unknown_secret, naming only the name', async () => {
+    const { handlers } = subsystem();
+
+    const error = await refusal(
+      handlers['POST /v1/secrets/use'](call(FERRET, { command: ['env'], cwd: '/srv/app', secrets: ['MISSING'] })),
+    );
+
+    should(error.status).equal(404);
+    should(error.code).equal('unknown_secret');
+    should(error.message).containEql('MISSING');
+  });
+
+  it('S141 should answer a store that fails a write or a delete with the status its failure maps to', async () => {
+    const { directory, handlers } = subsystem();
+    Object.assign(directory, {
+      put: async () => {
+        throw new SecretStoreError('full', 'the store is full');
+      },
+      remove: async () => {
+        throw new SecretStoreError('unreadable', 'the store could not be read');
+      },
+    });
+
+    const put = await refusal(handlers['POST /v1/secrets'](call(ownerStanding(), { name: 'TOKEN', value: TOKEN })));
+    const removed = await refusal(
+      handlers['DELETE /v1/secrets/:name'](call(ownerStanding(), undefined, { name: 'TOKEN' })),
+    );
+
+    should([put.status, put.code]).eql([409, 'full']);
+    should([removed.status, removed.code]).eql([500, 'unreadable']);
+  });
+
+  it('S141 should let a failure that is not a domain failure through as itself', async () => {
+    const { directory, handlers } = subsystem();
+    const broken = new Error('a genuine bug');
+    Object.assign(directory, {
+      put: async () => {
+        throw broken;
+      },
+    });
+
+    await handlers['POST /v1/secrets'](call(ownerStanding(), { name: 'TOKEN', value: TOKEN })).then(
+      () => should.fail('', '', 'a genuine bug must not be dressed as an answer'),
+      (error: unknown) => should(error).equal(broken),
+    );
+  });
+
+  it('S156 should refuse filing the same bundle twice (409 import_spent), and an unknown import (404)', async () => {
+    const [sourceIdentity, targetIdentity] = await Promise.all([makeIdentity(), makeIdentity()]);
+    const source = subsystem(new MemorySecretDocuments(), sourceIdentity);
+    const target = subsystem(new MemorySecretDocuments(), targetIdentity);
+    await source.directory.put('API_KEY', TOKEN);
+    const offer = JSON.parse((await target.handlers['POST /v1/secrets/imports'](call(ownerStanding()))).body) as {
+      readonly importId: string;
+    };
+    const sealed = await source.handlers['POST /v1/secrets/exports/:importId'](
+      call(ownerStanding(), { offer, names: ['API_KEY'] }, { importId: offer.importId }),
+    );
+    const { bundle } = JSON.parse(sealed.body) as { readonly bundle: { readonly importId: string } };
+    const params = { importId: offer.importId };
+
+    await target.handlers['POST /v1/secrets/imports/:importId'](call(ownerStanding(), { bundle }, params));
+    const again = await refusal(
+      target.handlers['POST /v1/secrets/imports/:importId'](call(ownerStanding(), { bundle }, params)),
+    );
+    const stranger = await refusal(
+      source.handlers['POST /v1/secrets/imports/:importId'](call(ownerStanding(), { bundle }, params)),
+    );
+
+    should([again.status, again.code]).eql([409, 'import_spent']);
+    should([stranger.status, stranger.code]).eql([404, 'import_unknown']);
+  });
+
+  it('S159 should refuse sealing a secret this machine does not hold (404), and an offer that names this machine (400)', async () => {
+    const [sourceIdentity, targetIdentity] = await Promise.all([makeIdentity(), makeIdentity()]);
+    const source = subsystem(new MemorySecretDocuments(), sourceIdentity);
+    const target = subsystem(new MemorySecretDocuments(), targetIdentity);
+    await source.directory.put('API_KEY', TOKEN);
+    const offered = async (machine: ReturnType<typeof subsystem>) =>
+      JSON.parse((await machine.handlers['POST /v1/secrets/imports'](call(ownerStanding()))).body) as {
+        readonly importId: string;
+      };
+    const there = await offered(target);
+    const here = await offered(source);
+
+    const missing = await refusal(
+      source.handlers['POST /v1/secrets/exports/:importId'](
+        call(ownerStanding(), { offer: there, names: ['MISSING'] }, { importId: there.importId }),
+      ),
+    );
+    const sameMachine = await refusal(
+      source.handlers['POST /v1/secrets/exports/:importId'](
+        call(ownerStanding(), { offer: here, names: ['API_KEY'] }, { importId: here.importId }),
+      ),
+    );
+
+    should([missing.status, missing.code]).eql([404, 'unknown_secret']);
+    should([sameMachine.status, sameMachine.code]).eql([400, 'same_machine']);
+  });
+});

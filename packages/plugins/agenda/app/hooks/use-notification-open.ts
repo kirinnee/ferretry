@@ -9,7 +9,8 @@
  * as long as it is mounted.
  */
 
-import { createContext, useContext, useEffect } from 'react';
+import { createContext, useContext, useEffect, useRef } from 'react';
+import { notificationTapTarget, type RouteTable } from '../shell.ts';
 import {
   NotificationOpenInbox,
   type NotificationOpenSource as NotificationOpenListenable,
@@ -23,18 +24,40 @@ export interface NotificationOpenSource extends NotificationOpenListenable {
   removeEventListener(type: 'message', listener: (event: MessageEvent) => void): void;
 }
 
+/**
+ * What decides where an open lands: the shell's route table and the machines this browser has paired. A page that is
+ * shown a notification by the page itself (the app-wide registration) names its address in a `data.url` the worker
+ * can only shape-check — it holds no pairings — so THIS is where a machine this browser never paired is refused.
+ */
+export interface NotificationTap {
+  readonly routes: Pick<RouteTable, 'parse'>;
+  readonly isPaired: (daemon: string) => boolean;
+}
+
 export function useNotificationOpen(
   source: NotificationOpenSource | null,
   origin: string,
   navigate: (to: string) => void,
+  tap: NotificationTap,
 ): void {
   const provided = useContext(NotificationOpenContext);
+  const deciding = useRef(tap);
+  deciding.current = tap;
   useEffect(() => {
-    if (provided !== null) return provided.subscribe(navigate);
+    // Every open, from the entry point's inbox or this hook's own, goes through the shell's rule: an address the route
+    // table does not draw under a paired machine opens the app's home instead (`notificationTapTarget`).
+    const open = (path: string): void => {
+      const landing = new URL(
+        notificationTapTarget(path, origin, deciding.current.routes, deciding.current.isPaired),
+        origin,
+      );
+      navigate(`${landing.pathname}${landing.search}${landing.hash}`);
+    };
+    if (provided !== null) return provided.subscribe(open);
     if (source === null) return;
     const inbox = new NotificationOpenInbox(origin);
     source.addEventListener('message', inbox.receive);
-    const stop = inbox.subscribe(navigate);
+    const stop = inbox.subscribe(open);
     return () => {
       stop();
       source.removeEventListener('message', inbox.receive);

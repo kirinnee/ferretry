@@ -43,7 +43,13 @@ import { claimStartName, displayAgentName, type SessionNameClaims } from '../nam
 import { normalizeCallsign } from '../names/policy.ts';
 import type { NameAllocationErrorCode } from '../names/types.ts';
 import type { SystemCallsignPrefix } from '../protocol/system-callsigns.ts';
-import { FerretDetailsSchema, FerretRecordSchema, HARNESS_KEYS, type FerretDetails } from '../../../contract/index.ts';
+import {
+  FerretDetailsSchema,
+  FerretRecordSchema,
+  HARNESS_KEYS,
+  StartRefusalCodeSchema,
+  type FerretDetails,
+} from '../../../contract/index.ts';
 import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import { SessionMoveError } from '../runtime/mounts/session-move.ts';
@@ -140,6 +146,15 @@ export interface FerretsPorts {
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
   err({ code, reason } as StartFailure);
+
+/**
+ * A `start.decide` taker's `no` as a start failure. The taker's `code` is read through Ferrets' own closed list; an
+ * unknown one (or none) is a plain `refused`, never passed through.
+ */
+const refusedBy = (decision: { readonly reason: string; readonly code?: string }): Result<never, StartFailure> => {
+  const code = StartRefusalCodeSchema.safeParse(decision.code);
+  return failed(code.success ? code.data : 'refused', decision.reason);
+};
 
 /** Every code unit is ASCII, so no Unicode normalization form can make two spellings name one folder. */
 const isAscii = (text: string): boolean => {
@@ -414,8 +429,11 @@ export class FerretsService implements FerretsApi {
       ...(request.login === undefined ? {} : { login: request.login }),
       folder: folder.value,
       by: request.by,
+      ...(request.options?.model === undefined ? {} : { model: request.options.model }),
+      ...(request.options?.fast === undefined ? {} : { fast: request.options.fast }),
     });
-    if (!decision.allow) return failed('refused', decision.reason);
+    // A refusal here is BEFORE the first write (details, record, token): `start()` gives the name back.
+    if (!decision.allow) return refusedBy(decision);
     if (request.options !== undefined) {
       const { title, ...options } = request.options;
       await this.saveDetails(id, {
@@ -572,7 +590,7 @@ export class FerretsService implements FerretsApi {
       folder: retargeted.folder,
       by: 'resume',
     });
-    if (!decision.allow) return failed('refused', decision.reason);
+    if (!decision.allow) return refusedBy(decision);
     if (replacing) {
       const ready = await this.launchable(retargeted);
       if (!ready.ok) return ready;

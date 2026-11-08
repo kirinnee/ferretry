@@ -4,12 +4,14 @@
  * does); the panel reads only through that client and the ferret it is handed.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { interact, type Mounted, mount, RouterProvider, settleUntil } from '@ferretry/app/testing';
+import { ensureDom, interact, type Mounted, mount, RouterProvider, settleUntil } from '@ferretry/app/testing';
 import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import { createElement, Suspense } from 'react';
 import app from '../../../app/index.ts';
 import manifest from '../../../manifest.ts';
 import { projectionSnapshot } from '../../support/app/agenda-projection.ts';
+
+ensureDom();
 
 const FERRET = 'session';
 
@@ -36,7 +38,12 @@ let view: Mounted | null = null;
 afterEach(async () => {
   await view?.unmount();
   view = null;
+  window.history.replaceState({}, '', '/');
 });
+
+/** Where a notification tap lands: the ferret's chat AT the ask. */
+const tappedAt = (query: string): void =>
+  window.history.replaceState({}, '', `/d/laptop/ferrets/${FERRET}/chat${query}`);
 
 const draw = async (
   client: PluginClient,
@@ -86,5 +93,37 @@ describe('the ferret-agenda panel', () => {
     const root = await draw(client, FERRET, node => node.querySelector('[data-agenda-tab-failed]') !== null);
     expect(root.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t read this ferret’s agenda');
     expect(root.querySelector('[data-agenda-tab-row], [data-agenda-tab-empty]')).toBeNull();
+  });
+
+  describe('B1 a notification tap opens the chat AT the ask (`?ask=`), through the panel the chat mounts', () => {
+    const focused = (root: HTMLElement): string[] =>
+      [...root.querySelectorAll('[data-agenda-focused]')].map(row => row.getAttribute('data-agenda-row') ?? '');
+    const snapshot = () => daemon(() => ({ ...projectionSnapshot(3, 2), sessionId: FERRET }));
+
+    it('rings the row of the ask the address names, and only that one', async () => {
+      tappedAt('?ask=A2');
+      const root = await draw(snapshot(), FERRET, node => node.querySelector('[data-agenda-tab-row]') !== null);
+      expect(focused(root)).toEqual(['A2']);
+      expect(root.querySelector('[data-agenda-row="A2"]')?.getAttribute('aria-current')).toBe('true');
+      expect(root.querySelector('[data-agenda-row="A1"]')?.getAttribute('aria-current')).toBeNull();
+    });
+
+    it('opens the filter the ask sits in: a resolved ask shows under Resolved, not under Needs you', async () => {
+      tappedAt('?ask=A4');
+      const root = await draw(snapshot(), FERRET, node => node.querySelector('[data-agenda-tab-row]') !== null);
+      expect(root.querySelector('[data-agenda-tab]')?.getAttribute('data-agenda-tab')).toBe('resolved');
+      expect(focused(root)).toEqual(['A4']);
+    });
+
+    it('rings nothing for an ask that is not this ferret’s, for junk, and for no ask', async () => {
+      for (const query of ['?ask=A9', '?ask=../x', '?ask=a2', '']) {
+        tappedAt(query);
+        const root = await draw(snapshot(), FERRET, node => node.querySelector('[data-agenda-tab-row]') !== null);
+        expect(focused(root)).toEqual([]);
+        expect(root.querySelector('[data-agenda-tab]')?.getAttribute('data-agenda-tab')).toBe('needs-you');
+        await view?.unmount();
+        view = null;
+      }
+    });
   });
 });

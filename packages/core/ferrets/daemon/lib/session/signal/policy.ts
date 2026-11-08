@@ -77,6 +77,7 @@ export function composeWait(
 }
 
 /** The one-line account of a park, for the status every other surface reads. */
+// read-scoped: none — the ferret's own declared text, shown back to that ferret and its owner
 export function waitDetail(wait: DeclaredWait, message: string | undefined): string {
   const subject = wait.peer === undefined ? (wait.condition ?? message) : `reply from ${wait.peerName ?? wait.peer}`;
   return [subject, wait.until === undefined ? 'open-ended' : `until ${wait.until}`].filter(Boolean).join(' — ');

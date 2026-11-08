@@ -39,6 +39,7 @@ export function waitDeadline(wait: DeclaredWait, settings: SessionMonitorSetting
 }
 
 /** The account of an ended park: what the journal records, and what the teammate is told. */
+// read-scoped: none — the ferret's own declared text, shown back to that ferret and its owner
 export function waitExpiry(wait: DeclaredWait, deadline: WaitDeadline, nowMs: number): WaitExpiry {
   const detail = condition(wait);
   const reason =
@@ -58,6 +59,7 @@ export function waitExpiry(wait: DeclaredWait, deadline: WaitDeadline, nowMs: nu
 }
 
 /** The heartbeat a still-running park publishes, carrying the deadline it will be woken at. */
+// read-scoped: none — the ferret's own declared text, shown back to that ferret and its owner
 export function waitHeartbeat(wait: DeclaredWait, deadline: WaitDeadline, nowMs: number): WaitHeartbeat {
   return {
     at: isoFromMs(nowMs),

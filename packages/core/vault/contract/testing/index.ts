@@ -308,7 +308,9 @@ export class FakeRedaction implements Redaction {
         const masked = ranges(lines.join(''));
         let at = 0;
         return lines.map(line => {
-          const out = [...line].map((ch, i) => (masked[at + i] === true ? '*' : ch)).join('');
+          // UTF-16 units, as Vault's own starring walks them.
+          let out = '';
+          for (let i = 0; i < line.length; i++) out += masked[at + i] === true ? '*' : line.charAt(i);
           at += line.length;
           return out;
         });

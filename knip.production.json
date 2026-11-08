@@ -50,6 +50,7 @@
         "daemon/adapters/session/provenance/storage-session-provenance-store.ts",
         "daemon/adapters/session/effects/file-session-effect-ledger.ts",
         "daemon/adapters/session/resume/in-memory-launch-gate.ts",
+        "daemon/adapters/session/lifecycle/process-incarnation.ts",
         "daemon/adapters/session/resume/tmux-resume-launcher.ts",
         "daemon/adapters/session/resume/file-resume-turn-store.ts",
         "daemon/adapters/session/resume/storage-resume-repository.ts",
@@ -171,8 +172,7 @@
     },
     "packages/plugins/claude-code": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["daemon/lib/harness/fast-mode.ts"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/packs": {
       "entry": ["app/views/*.tsx"],
@@ -274,19 +274,13 @@
       "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/layouts": {
-      "entry": ["app/views/*.tsx"]
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/terminals": {
       "entry": [],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": [
-        "daemon/adapters/tmux/pane-queue.ts",
-        "app/components/terminal-snapshot.tsx",
-        "app/components/terminal-snapshot-model.ts",
-        "app/features/workspace/phone/terminal-key-bar.tsx",
-        "app/features/workspace/phone/terminal-keys.ts",
-        "app/lib/session-processes.ts"
-      ]
+      "ignore": ["daemon/adapters/tmux/pane-queue.ts"]
     },
     "packages/plugins/browsers": {
       "entry": [],
@@ -407,8 +401,7 @@
     },
     "packages/plugins/codex": {
       "entry": [],
-      "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["daemon/adapters/app-server-catalog.ts"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     }
   },
   "bun": false,

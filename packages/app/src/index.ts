@@ -12,6 +12,10 @@ export {
   type CarrierDialer,
   type CarrierControl,
   type ConnectPorts,
+  type DaemonlessPorts,
+  type PairedList,
+  type DaemonlessScreenProps,
+  type DaemonlessViews,
   type DeviceClaims,
   type DirectoryFetch,
   type PairedOver,
@@ -21,6 +25,7 @@ export {
   type PairDirectInput,
   type PairingKey,
   provideToShell,
+  registeredDaemonless,
   type ShellAppImplementation,
   type ShellProvides,
 } from './connect/provides.ts';
@@ -162,7 +167,25 @@ export {
 } from './daemons/machine-names.ts';
 export { type DaemonClientOf, useDaemonClients, usePairedDaemons } from './shell/daemon-access.ts';
 
-export { DEVICE_SETTINGS_HREF, daemonHomeHref, daemonSettingsHref, HOME_HREF } from './router/routes.ts';
+export {
+  DEVICE_SETTINGS_HREF,
+  daemonHomeHref,
+  daemonSettingsHref,
+  HOME_HREF,
+  type Route,
+  type RouteTable,
+  routeTable,
+} from './router/routes.ts';
+export { notificationTapTarget, PUSH_TAP_SCREENS } from './router/tap-target.ts';
+export {
+  notificationClickUrl,
+  notificationUrl,
+  presentPush,
+  PUSH_ASK_PATTERN,
+  PUSH_FERRET_PATTERN,
+  type PushMachine,
+  pushMachineOf,
+} from './worker/notifications.ts';
 
 // ─── the reference grammar (docs/reference-standard.md) ───────────────────────────────────────────────────────────
 export * from './references/grammar.ts';

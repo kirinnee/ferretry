@@ -4,6 +4,8 @@ import {
   type CallContext,
   jsonResponse,
   queryValue,
+  type Redaction,
+  type RedactionScope,
   type RouteHandler,
   textResponse,
 } from '@ferretry/kernel/contract';
@@ -12,6 +14,12 @@ import {
   FsError,
   type FsErrorCode,
   MAX_FILE_BYTES,
+  type FsDiffView,
+  type FsFileView,
+  redactedDiff,
+  redactedFileBase64,
+  fileHoldsValue,
+  redactedFile,
   type SessionFilesystem,
   type SessionReadFence,
 } from '../../session/filesystem/index.ts';
@@ -138,12 +146,17 @@ async function changes(
 }
 
 /**
- * One path's unified diff, as text.
+ * One path's unified diff, as text, with every vault secret masked.
+ *
+ * The service's diff bytes are the real ones (they stay unchanged so nothing consuming a diff is corrupted); this
+ * route is the OUTBOUND projection, and it masks them through the read's `scope` as the last step before they leave.
+ * The secrets-policy refusal below runs first and is untouched: redaction adds to the gate, it does not replace it.
  *
  * A refused diff is a 403 rather than a badge: the body of this route is diff bytes and has nowhere to
  * carry a flag. A TRUNCATED diff is a 413 for a stronger reason — a partial diff is actively misleading in
  * a review surface, because the missing tail renders as content that was never removed.
  */
+// read-scoped: none — gates and git only; the diff text leaves through diffResponse(scope), never from here
 async function diff(filesystem: SessionFilesystem, deps: FileBrowserDeps, context: RouteContext): Promise<ApiResponse> {
   const { cwd, fence } = await deps.reach(context);
   const target = requiredPath(context);
@@ -159,7 +172,35 @@ async function diff(filesystem: SessionFilesystem, deps: FileBrowserDeps, contex
   if (view.truncated) {
     throw new ApiError(413, `diff exceeds the ${MAX_FILE_BYTES}-byte response limit`, 'too_large');
   }
-  return textResponse(view.diff);
+  // The vault opens HERE and only here: every refusal above was decided without it, and a vault that cannot open
+  // serves no diff at all (it fails closed).
+  return await deps.redaction.read(scope => diffResponse(view, scope, fence !== undefined));
+}
+
+/** The one place diff text leaves the daemon: masked through the read's scope. */
+function diffResponse(view: FsDiffView, scope: RedactionScope, agent: boolean): ApiResponse {
+  const { text: masked, covered } = redactedDiff(view.diff, scope);
+  // The refusal rests on what the scope reported, never on whether the masked text differs from the original.
+  if (agent && covered) throw holdsSecret(view.path);
+  // An agent is also refused a file that holds a value, as fs/file does: a diff can show only part of a value, so the
+  // two sides the service already read (HEAD and working) are asked too. A person's diff is masked, never refused.
+  if (agent && sidesHoldValue(view, scope)) throw holdsSecret(view.path);
+  return textResponse(masked);
+}
+
+function sidesHoldValue(view: FsDiffView, scope: RedactionScope): boolean {
+  const { head, working } = view.sides ?? {};
+  return (
+    (head !== undefined && fileHoldsValue(head, scope)) || (working !== undefined && fileHoldsValue(working, scope))
+  );
+}
+
+/**
+ * An agent is never handed a file that holds a vault value, masked or not: a masked copy looks like ordinary content
+ * and an agent could write it back over the real file. ONE sentence for any count of values; it names the path only.
+ */
+function holdsSecret(path: string): ApiError {
+  return new ApiError(403, `${path} holds a private value, so it is not served to an agent.`, 'holds_secret');
 }
 
 /**
@@ -167,6 +208,7 @@ async function diff(filesystem: SessionFilesystem, deps: FileBrowserDeps, contex
  * folder, which this daemon keeps in its own state and does not serve through the working-tree walk: it answers
  * 404, as today's daemon did when it kept no media folder. `rev=head` reads the committed bytes.
  */
+// read-scoped: none — gates and file reads only; the bytes leave through fileResponse(scope), never from here
 async function file(filesystem: SessionFilesystem, deps: FileBrowserDeps, context: RouteContext): Promise<ApiResponse> {
   fileQuery(context);
   if (queryValue(context.request, 'scope') === 'media')
@@ -175,17 +217,37 @@ async function file(filesystem: SessionFilesystem, deps: FileBrowserDeps, contex
   const target = requiredPath(context);
   const rev = queryValue(context.request, 'rev');
   const format = queryValue(context.request, 'format');
+  let view: Awaited<ReturnType<SessionFilesystem['readFile']>>;
   try {
-    return jsonResponse(
-      await filesystem.readFile(cwd, target, {
-        ...(rev === 'head' ? { rev: 'head' as const } : {}),
-        ...(format === 'base64' ? { base64: true } : {}),
-        ...(fence === undefined ? {} : { fence }),
-      }),
-    );
+    view = await filesystem.readFile(cwd, target, {
+      ...(rev === 'head' ? { rev: 'head' as const } : {}),
+      ...(format === 'base64' ? { base64: true } : {}),
+      ...(fence === undefined ? {} : { fence }),
+    });
   } catch (error) {
     return refuse(error);
   }
+  // A flag-only view (denied, ignored, too large, binary) carries no bytes: it is served without the vault.
+  if (view.content === undefined && view.base64 === undefined) return jsonResponse(view);
+  // The vault opens HERE and only here (after every gate); a vault that cannot open serves no bytes (fail closed).
+  return await deps.redaction.read(scope => fileResponse(view, scope, fence !== undefined));
+}
+
+/** The one place file bytes leave the daemon: text masked through the read's scope, character for character. */
+function fileResponse(view: FsFileView, scope: RedactionScope, agent: boolean): ApiResponse {
+  const text = view.content === undefined ? undefined : redactedFile(view.content, scope);
+  const bytes = view.base64 === undefined ? undefined : redactedFileBase64(view.base64, scope);
+  const content = text?.text;
+  const base64 = bytes?.base64;
+  // The refusal rests on what the scope REPORTED, never on how the masked text compares to the original.
+  const redacted = text?.covered === true || bytes?.covered === true;
+  if (redacted && agent) throw holdsSecret(view.path);
+  return jsonResponse({
+    ...view,
+    ...(content === undefined ? {} : { content }),
+    ...(base64 === undefined ? {} : { base64 }),
+    ...(redacted ? { redacted: true } : {}),
+  });
 }
 
 /**
@@ -211,6 +273,11 @@ export interface FileBrowserDeps {
   reach(
     context: RouteContext,
   ): Promise<{ readonly id: string; readonly cwd: string; readonly fence?: SessionReadFence }>;
+  /**
+   * The vault's read-scoped redaction. The diff route opens ONE read and masks the diff text through it before it
+   * leaves; a vault that cannot open fails the read, so nothing unmasked is served (S19).
+   */
+  readonly redaction: Pick<Redaction, 'read'>;
 }
 
 /** The four route keys, as `manifest.ts` declares them (today's `/v1/sessions/:sessionId/fs…`, renamed). */

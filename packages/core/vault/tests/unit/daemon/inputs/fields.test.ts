@@ -1145,3 +1145,86 @@ describe('a deliver types a saved account only as the card offers it now (secrev
     should(writes).eql([]);
   });
 });
+
+describe('InputTargetRouter to the other adapters', () => {
+  const dev: InputTarget = { kind: 'terminal', key: 'dev' };
+  const app: InputTarget = { kind: 'page', key: 'app' };
+  const store: InputTarget = { kind: 'secret', key: 'TOKEN' };
+  const terminal = {
+    observe: async () => ({ ok: true, facts: FACTS }) as ObserveResult,
+    type: async () => 'typed' as const,
+  };
+  const value: InputFieldValue = { field: 'value', text: 'only' };
+
+  it('should answer the secret store’s routes target_gone or unsupported when no store is wired, and use it when wired', async () => {
+    const bare = new InputTargetRouter(terminal);
+    should(await bare.observe(SESSION, store, [{ id: 'value' }])).eql({ ok: false, reason: 'unsupported' });
+    should(await bare.type(SESSION, store, [value], false, FACTS)).equal('target_gone');
+
+    const calls: string[] = [];
+    const wired = new InputTargetRouter(terminal, undefined, {
+      observe: async () => {
+        calls.push('observe');
+        return { ok: false, reason: 'target_gone' } as ObserveResult;
+      },
+      type: async () => {
+        calls.push('type');
+        return 'typed' as const;
+      },
+    });
+    should(await wired.observe(SESSION, store, [{ id: 'value' }])).eql({ ok: false, reason: 'target_gone' });
+    should(await wired.type(SESSION, store, [value], false, FACTS)).equal('typed');
+    should(calls).eql(['observe', 'type']);
+  });
+
+  it('should send a page’s writes, document, picture, probe and clear to the browser adapter, and refuse each when it cannot', async () => {
+    const asked: string[] = [];
+    const browser = {
+      observe: async () => ({ ok: true, facts: PAGE }) as ObserveResult,
+      type: async () => {
+        asked.push('type');
+        return 'typed' as const;
+      },
+      document: async (_s: string, key: string) => `doc:${key}`,
+      shoot: async () => ({ mime: 'image/png', base64: 'AA==' }) as never,
+      probe: async () => 'hidden' as const,
+      clear: async () => 'cleared' as const,
+    };
+    const router = new InputTargetRouter(terminal, browser);
+    const bare = new InputTargetRouter(terminal, { observe: browser.observe, type: browser.type });
+    const job = { navigationId: 'loader-1', fields: [] } as never;
+
+    should(await router.type(SESSION, app, [value], false, PAGE)).equal('typed');
+    should(await router.document(SESSION, 'app')).equal('doc:app');
+    should(await router.shoot(SESSION, app, PAGE)).eql({ mime: 'image/png', base64: 'AA==' });
+    should(await router.probe(SESSION, app, PAGE, ['value'])).equal('hidden');
+    should(await router.clear(SESSION, app, job)).equal('cleared');
+
+    should(await bare.document(SESSION, 'app')).be.undefined();
+    should(await bare.shoot(SESSION, app, PAGE)).be.undefined();
+    should(await bare.probe(SESSION, app, PAGE, ['value'])).equal('aborted');
+    should(await bare.clear(SESSION, app, job)).equal('unknown');
+  });
+
+  it('should never probe, clear or picture a terminal: a program could count a wrong password', async () => {
+    const browser = {
+      observe: async () => ({ ok: true, facts: PAGE }) as ObserveResult,
+      type: async () => 'typed' as const,
+      shoot: async () => ({ mime: 'image/png', base64: 'AA==' }) as never,
+      probe: async () => 'shown' as const,
+      clear: async () => 'cleared' as const,
+    };
+    const router = new InputTargetRouter(terminal, browser);
+
+    should(await router.probe(SESSION, dev, FACTS, ['value'])).equal('aborted');
+    should(await router.clear(SESSION, dev, { navigationId: 'x', fields: [] } as never)).equal('unknown');
+    should(await router.shoot(SESSION, dev, FACTS)).be.undefined();
+  });
+
+  it('should refuse more than one terminal field at observe', async () => {
+    should(await new InputTargetRouter(terminal).observe(SESSION, dev, [{ id: 'a' }, { id: 'b' }])).eql({
+      ok: false,
+      reason: 'unsupported',
+    });
+  });
+});

@@ -128,9 +128,13 @@
     "packages/plugins/access": {
       "entry": ["tests/**/*.test.{ts,tsx}"],
       "project": ["**/*.{ts,tsx}"],
-      "ignore": ["app/features/pairing/device-refused-notice.tsx", "app/lib/device-preference.ts"]
+      "ignore": ["app/lib/device-preference.ts"]
     },
     "packages/plugins/shells": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/layouts": {
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}"]
     },
