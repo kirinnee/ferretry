@@ -4,11 +4,14 @@ import type { HookInvoker } from '@ferretry/kernel/manifest';
 import daemon from '../../../daemon/index.ts';
 import { StateDraftRepository } from '../../../daemon/drafts/adapters/index.ts';
 import { KeyedSerialExecutor } from '../../../daemon/seams/keyed-serial-executor.ts';
-import { HARNESS_PENDING } from '../../../daemon/harness-seam.ts';
+import type { HarnessGate } from '../../../daemon/harness-seam.ts';
 import { buildConversationA } from '../../../daemon/host.ts';
 import { TurnBoundaries } from '../../../daemon/turns/lib/index.ts';
 import { AskIdSchema } from '@ferretry/core-asks/contract';
 import { ferretId } from '@ferretry/core-ferrets/contract/testing';
+
+/** Neither action of the harness seam is used here, so both are held back. */
+const CLOSED: HarnessGate = { send: false, interrupt: false };
 
 const summary = (state: string) => ({ id: 'f1', state });
 
@@ -133,7 +136,7 @@ describe('an answered ask', () => {
         observe: () => undefined,
         transform: async (_hook: unknown, value: unknown) => ({ ok: true, value }),
       } as never,
-      gate: HARNESS_PENDING,
+      gate: CLOSED,
     });
 
   test('takes the draft of its item with it, and leaves the chat draft and other items alone', async () => {

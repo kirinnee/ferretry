@@ -5,7 +5,7 @@ import manifest from '../manifest.ts';
 import { PDF_WORKER_URL } from './attachments/adapters/decrypt-pdf.ts';
 import { followFerretChanges, followFerretStopping } from './ferret-changes.ts';
 import { buildConversationA } from './host.ts';
-import { type HarnessGate, HARNESS_PENDING } from './harness-seam.ts';
+import { type HarnessGate, HARNESS_OPEN } from './harness-seam.ts';
 import { hypermediaLaunchEnvironment } from './hypermedia/lib/launch.ts';
 import { buildReading } from './reading.ts';
 import { maskedBody } from './seams/masked-body.ts';
@@ -158,4 +158,4 @@ export const conversationDaemon = (gate: HarnessGate) =>
     },
   });
 
-export default conversationDaemon(HARNESS_PENDING);
+export default conversationDaemon(HARNESS_OPEN);

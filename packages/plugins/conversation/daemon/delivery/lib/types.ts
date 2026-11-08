@@ -394,8 +394,6 @@ export interface SendTerminal {
   queue(id: SessionId, text: string): Promise<SendQueueOutcome>;
   /** Sends the safe stop key, waits for the turn to wind down, and re-reads the pane. */
   stopActiveTurn(id: SessionId): Promise<SendPaneObservation>;
-  /** Sends the safe stop key once, with no readiness wait. Exactly one keystroke per call. */
-  pressStopKey(id: SessionId): Promise<void>;
   /**
    * Where the pane still shows `text` held — typed in the composer, or in the harness's visible queue —
    * read from those places only, never from the payload's words appearing elsewhere on screen.
