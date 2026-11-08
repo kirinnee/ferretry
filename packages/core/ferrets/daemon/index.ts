@@ -470,6 +470,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     run: async () => {
       await ready();
       await storeLoaded.catch(() => undefined);
+      // Once per arm, every held ferret's document is brought to its registry state: one left `starting` by a crash
+      // between the registry's write and the status lane's (or written before U4) would otherwise never be given a
+      // turn, and no registry change would come to repair it. The same lane and rule as every later edge.
+      for (const record of registry.list()) followStatus(record.id, record.state);
       turnWatch.host.arm();
       kernel.lifecycle.onStop(async () => await turnWatch.host.close());
     },
