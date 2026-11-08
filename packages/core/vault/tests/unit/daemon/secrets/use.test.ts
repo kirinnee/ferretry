@@ -394,3 +394,36 @@ describe('a value the output limit cut in half', () => {
     should(unrelatedResult.stdout).equal('nothing secret here�');
   });
 });
+
+describe('use when the masks fail for another reason', () => {
+  it('S19 should let a failure that is not an unavailable mask source through as itself, not as a refusal', async () => {
+    // Arrange
+    const vault = await vaultHolding({ TOKEN });
+    let spawned = 0;
+    const runner: SecretChildRunner = {
+      run: async () => {
+        spawned += 1;
+        return { outcome: 'exited', exitCode: 0, stdout: '', stderr: '', truncated: false };
+      },
+    };
+    const broken = new Error('the mask store fell over');
+    const masks = {
+      scoped: async () => {
+        throw broken;
+      },
+    } as unknown as ConstructorParameters<typeof SecretUseService>[4];
+
+    // Act
+    const failure = await new SecretUseService(vault, runner, ENVS, NO_RECIPES, masks)
+      .run(request({ secrets: ['TOKEN'] }))
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    // Assert
+    should(failure).equal(broken);
+    should(failure).not.be.instanceof(SecretUseError);
+    should(spawned).equal(0);
+  });
+});

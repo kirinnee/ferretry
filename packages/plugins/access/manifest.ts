@@ -1,5 +1,5 @@
 import { SessionModes } from '@ferretry/kernel/contract';
-import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, panel, route, screen, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { Credentials, GatePort, StepUp } from '@ferretry/core-gate/contract';
 import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
 import {
@@ -196,8 +196,11 @@ export default definePlugin({
   },
 
   ui: {
+    // Daemon-less on purpose: the page a pairing link opens on a device that has no daemon yet (first contact is direct).
+    screens: [screen('pair', { path: '/pair', daemonless: true })],
     settings: [settingsTab('devices', { label: 'Devices', order: 20 })],
     panels: [
+      panel('daemon.status', { id: 'new-devices', order: 5 }),
       panel('daemon.status', { id: 'unlock', order: 10 }),
       panel('daemon.status', { id: 'notifications-off', order: 20 }),
       panel('device.settings', { id: 'notifications', order: 30 }),

@@ -70,3 +70,11 @@ test('I74 page and terminal aliases stay separate, and global/session replay loc
     expect(guard.stillShowable(stamped)).toBe(false);
   }
 });
+
+test('I74 the guard reports its generation, which every moved target advances by one', () => {
+  const guard = new HoldRegistry();
+  expect(guard.generation()).toBe(0);
+  expect(guard.moved(terminal)).toBe(1);
+  expect(guard.moved(page)).toBe(2);
+  expect(guard.generation()).toBe(2);
+});

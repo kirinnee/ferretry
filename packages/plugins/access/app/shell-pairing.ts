@@ -214,7 +214,6 @@ export type { PrivateKeyHandle } from '@ferretry/app';
 
 /**
  * Said when this machine no longer accepts this browser's device. COPY of today's sentence (parity).
- * @pending access: app/features/pairing/device-refused-notice.tsx is not reached by the app shell page shown to a refused device
  */
 export const DEVICE_NOT_ACCEPTED_SENTENCE =
   'This machine no longer accepts this browser — it was removed, or went unused for too long. Pair it again to keep using it.';

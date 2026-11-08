@@ -905,3 +905,15 @@ describe('an input card’s context without the agent’s prompt', () => {
     should(inputContextLines('Ferretry types it there.')).equal('Ferretry types it there.');
   });
 });
+
+describe('InputDeliverBodySchema: a sealed paste', () => {
+  const head = { deliveryId: DELIVERY, observedDigest: DIGEST, submit: true };
+  const typed = { field: 'value', padded: padInputValue('a-password-1') };
+
+  it('should take a sealed paste alone, and refuse it beside any typed value', () => {
+    should(InputDeliverBodySchema.safeParse({ ...head, sealed: true }).success).be.true();
+    should(InputDeliverBodySchema.safeParse({ ...head, sealed: true, padded: typed.padded }).success).be.false();
+    should(InputDeliverBodySchema.safeParse({ ...head, sealed: true, fields: [typed] }).success).be.false();
+    should(InputDeliverBodySchema.safeParse({ ...head, sealed: true, entry: 'GOOGLE_COM' }).success).be.false();
+  });
+});
