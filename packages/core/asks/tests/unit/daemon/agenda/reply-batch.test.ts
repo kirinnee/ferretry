@@ -650,6 +650,72 @@ describe('the agenda reply batcher and the ferret’s composer', () => {
     should(sends.sent[0]?.sendId).not.equal(sends.sent[1]?.sendId);
     should(unstamped(sends.sent).map(each => each.sendId)).deepEqual(['agenda-session-1-A1', 'agenda-session-1-A1']);
   });
+
+  it('should never type on "Send now" into a composer that holds text, and keep the answers queued in order', async () => {
+    // Arrange
+    const { batcher, sends, outboxes, timers, composer } = delivering();
+    composer.state = 'occupied';
+    await batcher.add(SESSION, 'A1', 'one');
+    await batcher.add(SESSION, 'A2', 'two');
+
+    // Act
+    await batcher.sendNow(SESSION);
+    await settled();
+
+    // Assert — nothing typed, nothing dropped or reordered, and it is looked at again.
+    should(sends.sent).be.empty();
+    should(outboxes.files.get(SESSION)?.pending.map(each => each.id)).deepEqual(['A1', 'A2']);
+    should(outboxes.files.get(SESSION)?.sending).be.empty();
+    should(await batcher.delivery(SESSION)).deepEqual({ sending: [], heldForComposer: true });
+    should(timers.tasks.get(SESSION)?.delayMs).equal(AGENDA_REPLY_RECHECK_MS);
+  });
+
+  it('should not type on "Send now" when the composer cannot be read', async () => {
+    // Arrange
+    const { batcher, sends, outboxes, composer } = delivering();
+    composer.throws = true;
+    await batcher.add(SESSION, 'A1', 'one');
+
+    // Act
+    await batcher.sendNow(SESSION);
+    await settled();
+
+    // Assert
+    should(sends.sent).be.empty();
+    should(outboxes.files.get(SESSION)?.pending.map(each => each.id)).deepEqual(['A1']);
+  });
+
+  it('should type once, with the held answers, when the composer empties after a refused "Send now"', async () => {
+    // Arrange
+    const { batcher, sends, composer, time, timers } = delivering();
+    composer.state = 'occupied';
+    await batcher.add(SESSION, 'A1', 'one');
+    await batcher.sendNow(SESSION);
+
+    // Act — the person sends their draft; the recheck runs, and the owner presses "Send now" again.
+    composer.state = 'empty';
+    time.ms += timers.tasks.get(SESSION)?.delayMs ?? 0;
+    await batcher.flush(SESSION);
+    await batcher.sendNow(SESSION);
+    await settled();
+
+    // Assert
+    should(unstamped(sends.sent)).deepEqual([{ message: 'one', sendId: 'agenda-session-1-A1' }]);
+    should(await batcher.delivery(SESSION)).deepEqual({ sending: ['A1'] });
+  });
+
+  it('should type once on "Send now" into an empty composer', async () => {
+    // Arrange
+    const { batcher, sends } = delivering();
+    await batcher.add(SESSION, 'A1', 'one');
+
+    // Act
+    await batcher.sendNow(SESSION);
+    await settled();
+
+    // Assert
+    should(unstamped(sends.sent)).deepEqual([{ message: 'one', sendId: 'agenda-session-1-A1' }]);
+  });
 });
 
 describe('the agenda reply batcher on receipt', () => {
