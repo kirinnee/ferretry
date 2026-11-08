@@ -295,11 +295,19 @@ export interface ConfigPort {
    * what it changes in the version in effect), never about the held edit that rode along: a save can neither discard
    * a held edit nor put one into effect that nobody confirmed. When the judge holds the patch itself, the version in
    * effect is untouched and the patch waits with the held version.
+   *
+   * `within` (optional) names TOP-LEVEL keys whose mapping the patch MERGES into instead of replacing, in both
+   * versions, each into its own mapping — ONE level deep: each sub-key the patch names is replaced whole (`undefined`
+   * removes it), and every sub-key it does not name is kept, so a section saved beside a held edit never puts the held
+   * version's other sub-keys back to what is in effect (the 2026-10-29 price incident). A named key whose new or
+   * current value is not a mapping is replaced as a plain patch replaces it; a key not named is replaced as before.
+   * Without `within` the patch is exactly what it was. The schema, the loosening judgement, Gate's judge and the
+   * conflict check all run on the MERGED versions, and both are written or neither, as for any patch.
    */
   writeAsOwner(
     def: ConfigFileDef<any> | ConfigCollectionDef<any>,
     name: string | undefined,
-    edit: { readonly patch: Readonly<Record<string, unknown>> },
+    edit: { readonly patch: Readonly<Record<string, unknown>>; readonly within?: readonly string[] },
     options?: { readonly ifMatch?: string },
   ): Promise<ConfigWriteOutcome>;
   /**

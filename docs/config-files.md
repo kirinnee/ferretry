@@ -83,7 +83,13 @@ that is not there). Three rules, in order:
    BOTH versions — the held edit, changed, stays in the file and stays held; the version in effect, changed,
    is what is recorded as accepted — and the form sends only the keys that changed, never a whole section.
    (On 2026-10-29 a save of the daily caps rendered the version in effect over the file and put a held price
-   correction, $2 → $0.042, back to $2 a minute after it was written.)
+   correction, $2 → $0.042, back to $2 a minute after it was written.) In the kernel this is
+   `ConfigPort.writeAsOwner`, and a section save names its section in `within`: for each top-level key named
+   there, the owner's mapping is merged into the mapping already in each version **one level deep** — a sub-key
+   it names is replaced whole (`undefined` removes it), and every sub-key it does not name is kept, so the held
+   version's own sub-keys survive. A named key whose new or current value is not a mapping is replaced, as any
+   patch replaces a key. The schema, the loosening hold and the judge see the merged versions, and both are
+   written or neither.
 
 What is in effect is recorded in the state home (`state/config-accepted.json`), file by file with its text,
 so a last good version survives a restart and a confirmed loosening is not asked about again. A missing or
