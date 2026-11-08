@@ -197,3 +197,141 @@ describe('component.put — keeping a hidden flag or argument (R-0294, ruling #3
     should(none.model.components.mcp.gh?.args).deepEqual(['a', 'b']);
   });
 });
+
+// ── No keep moves a hidden value into sight (R-0294, ruling #39, review r1 F1) ─────────────────────────
+//
+// Whether a value is hidden can turn on the word before it (`--token`, `v`) or on an MCP server's command, and a keep
+// carries the value without that word. So every kept word that was hidden as read must be hidden, and shown the same,
+// where the edit puts it; otherwise the next `GET /v1/runtimes/components` would show it to every `fleet.use` caller.
+
+describe('component.put — a keep never lands a hidden value where it would show (R-0294, ruling #39)', () => {
+  const NEXT_FLAGS = ['--token', FAKE_SECRET];
+  const NEXT_ARGS = ['srv', '--token', FAKE_SECRET];
+  const nextModel = (): AccountModel => modelOf(NEXT_FLAGS, NEXT_ARGS);
+  const FLAG_REFUSAL = 'settings base has no value for flag 2 to keep; type one';
+  const ARG_REFUSAL = 'MCP server gh has no value for argument 3 to keep; type one';
+
+  /** The app's own form for the MCP server, with its command line as a person edited it. */
+  const editedLine = (model: AccountModel, edit: (line: string) => string) => {
+    const draft = draftFromComponent(viewOf(model, 'mcp/gh'));
+    return componentChange({ ...draft, body: edit(draft.body) }, false);
+  };
+
+  /** What the components read shows of the settings flags and the MCP arguments after an edit. */
+  const shownAfter = (model: AccountModel): string =>
+    JSON.stringify([viewOf(model, 'settings/base').detail, viewOf(model, 'mcp/gh').detail]);
+
+  it('R-0294 should refuse a keep moved after a harmless flag, where the next read would show it (P1)', () => {
+    // Arrange
+    const model = nextModel();
+
+    // Act
+    const refusal = refusalOf(model, putFlags(['--model', { keep: true, at: 1 }], etagOf(model, 'settings/base')));
+
+    // Assert
+    should(refusal).equal(FLAG_REFUSAL);
+  });
+
+  it('R-0294 should refuse a duplicate keep whose copy would show, and take one whose copies all stay hidden (P2)', () => {
+    // Arrange
+    const model = nextModel();
+    const etag = etagOf(model, 'settings/base');
+
+    // Act
+    const copied = refusalOf(model, putFlags(['--token', { keep: true, at: 1 }, { keep: true, at: 1 }], etag));
+    const twice = derive(model, putFlags(['--token', { keep: true, at: 1 }, '--api-key', { keep: true, at: 1 }], etag));
+
+    // Assert
+    should(copied).equal(FLAG_REFUSAL);
+    should(twice.model.components.settings.base?.flags).deepEqual(['--token', FAKE_SECRET, '--api-key', FAKE_SECRET]);
+    should(shownAfter(twice.model)).not.containEql(FAKE_SECRET);
+  });
+
+  it('R-0294 should refuse the edit form deleting or renaming the flag in front of a hidden argument (P3, P4)', () => {
+    // Arrange
+    const model = nextModel();
+
+    // Act — the app's own model: `npx srv --token ‹hidden›` edited as a person would.
+    const deleted = editedLine(model, line => line.replace('--token ', ''));
+    const renamed = editedLine(model, line => line.replace('--token', '--model'));
+
+    // Assert — the form keeps the hidden word by position; the daemon refuses where it would land.
+    should(deleted).containDeep({ component: { args: ['srv', { keep: true, at: 2 }] } });
+    should(refusalOf(model, deleted)).equal(ARG_REFUSAL);
+    should(refusalOf(model, renamed)).equal(ARG_REFUSAL);
+  });
+
+  it('R-0294 should refuse a word inserted between a secret-named flag and its kept value, flags and arguments', () => {
+    // Arrange
+    const model = nextModel();
+
+    // Act
+    const flag = refusalOf(
+      model,
+      putFlags(['--token', '--verbose', { keep: true, at: 1 }], etagOf(model, 'settings/base')),
+    );
+    const arg = refusalOf(
+      model,
+      editedLine(model, line => line.replace('--token', '--token --verbose')),
+    );
+
+    // Assert
+    should([flag, arg]).deepEqual([FLAG_REFUSAL, ARG_REFUSAL]);
+  });
+
+  it('R-0294 should refuse a first argument kept under a new command, which it was hidden by', () => {
+    // Arrange — the first argument is judged with the command before it.
+    const model = parseAccountModel({
+      version: 1,
+      components: { mcp: { gh: { command: '--token', args: [FAKE_SECRET] } } },
+      profiles: { p: { layers: ['mcp/gh'] } },
+    });
+    const etag = etagOf(model, 'mcp/gh');
+    const keep = (command: string) => ({
+      ...putArgs([]),
+      component: { kind: 'mcp', command, args: [{ keep: true, at: 0 }], argsEtag: etag },
+    });
+
+    // Act
+    const refusal = refusalOf(model, keep('npx'));
+    const kept = derive(model, keep('--token'));
+
+    // Assert
+    should(refusal).equal('MCP server gh has no value for argument 1 to keep; type one');
+    should(kept.model.components.mcp.gh?.args).deepEqual([FAKE_SECRET]);
+  });
+
+  it('R-0294 should refuse a keep that would show part of what was hidden whole, even with a cut left in it', () => {
+    // Arrange — after `--token` the whole word is hidden; after `--model` only its nested key's value would be.
+    const model = modelOf(['--token', `a=1,api_key=${FAKE_SECRET}`]);
+    const etag = etagOf(model, 'settings/base');
+
+    // Act
+    const refusal = refusalOf(model, putFlags(['--model', { keep: true, at: 1 }], etag));
+
+    // Assert
+    should(refusal).equal(FLAG_REFUSAL);
+  });
+
+  it('R-0294 should take a self-contained hidden word moved anywhere, and an untouched keep, as before (P5, control)', () => {
+    // Arrange
+    const model = modelOf([`--token=${FAKE_SECRET}`, '--token', FAKE_SECRET]);
+    const etag = etagOf(model, 'settings/base');
+
+    // Act
+    const moved = derive(
+      model,
+      putFlags(['--model', { keep: true, at: 0 }, '--token', { keep: true, at: 2 }, { keep: true, at: 1 }], etag),
+    );
+
+    // Assert
+    should(moved.model.components.settings.base?.flags).deepEqual([
+      '--model',
+      `--token=${FAKE_SECRET}`,
+      '--token',
+      FAKE_SECRET,
+      '--token',
+    ]);
+    should(shownAfter(moved.model)).not.containEql(FAKE_SECRET);
+  });
+});

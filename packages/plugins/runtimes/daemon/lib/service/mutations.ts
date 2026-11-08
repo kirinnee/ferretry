@@ -31,7 +31,7 @@ import { HARNESS_DISPLAY_NAMES, resolveProfile } from '../account/layering.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
 import { skillSourceReference } from '../account/adapt.ts';
-import { shownWords, shownWordsEtag } from './command-line.ts';
+import { type ShownWord, shownWords, shownWordsEtag } from './command-line.ts';
 import { slugName } from '../account/document.ts';
 import type {
   AccountChange as WireAccountChange,
@@ -270,24 +270,40 @@ function resolvedEnv(
  * in the list as READ, so moving words in the edit moves no value; when the list has changed since (the etag no longer
  * matches) or holds no word there, it is refused in the environment's words. A typed word can never be the hidden
  * marker (the contract refuses it), so the marker is never saved as a value.
+ *
+ * NO KEEP MOVES A SECRET INTO SIGHT. A keep carries a word's value, not the word before it, and whether a value is
+ * hidden can turn on that word (`--token`, `v`) or on the command before the first argument. So the words the edit
+ * leaves are judged again by the same rule, and every kept word that was hidden as read must still be hidden where it
+ * now stands, and shown the same; otherwise the keep is refused in the same words. A copy of a hidden word is held to
+ * it too, so a duplicate keep stays hidden or is refused.
  */
 function resolvedWords(
   input: readonly (string | KeptWord)[] | undefined,
   etag: string | undefined,
-  existing: unknown,
+  existing: { readonly words: unknown; readonly first: unknown },
   first: unknown,
   owner: string,
   what: 'flag' | 'argument',
 ): string[] | undefined {
   if (input === undefined) return undefined;
-  const stored = Array.isArray(existing) ? (existing as readonly string[]) : [];
-  const current = shownWordsEtag(shownWords(stored, typeof first === 'string' ? first : undefined));
-  return input.map(word => {
+  const nothingToKeep = (at: number): never =>
+    refuse(`${owner} has no value for ${what} ${String(at + 1)} to keep; type one`);
+  const stored = Array.isArray(existing.words) ? (existing.words as readonly string[]) : [];
+  const read = shownWords(stored, typeof existing.first === 'string' ? existing.first : undefined);
+  const current = shownWordsEtag(read);
+  const words = input.map(word => {
     if (typeof word === 'string') return word;
     const kept = etag === current ? stored[word.at] : undefined;
-    if (kept === undefined) refuse(`${owner} has no value for ${what} ${String(word.at + 1)} to keep; type one`);
-    return kept as string;
+    return kept ?? nothingToKeep(word.at);
   });
+  const now = shownWords(words, typeof first === 'string' ? first : undefined);
+  for (const [index, word] of input.entries()) {
+    if (typeof word === 'string') continue;
+    const was = read[word.at] as ShownWord;
+    const is = now[index] as ShownWord;
+    if (was.hidden && (!is.hidden || is.text !== was.text)) nothingToKeep(word.at);
+  }
+  return words;
 }
 
 /** A parsed settings or hooks document, or a refusal naming what is wrong with it. */
@@ -351,7 +367,14 @@ function componentBody(
       return { component: { file, ...harness }, ...(written === undefined ? {} : { file: written }) };
     case 'mcp': {
       const env = resolvedEnv(input.env, existingEnv, owner);
-      const args = resolvedWords(input.args, input.argsEtag, existing?.args, existing?.command, owner, 'argument');
+      const args = resolvedWords(
+        input.args,
+        input.argsEtag,
+        { words: existing?.args, first: existing?.command },
+        input.command,
+        owner,
+        'argument',
+      );
       return {
         component: {
           ...(input.command === undefined ? {} : { command: input.command }),
@@ -370,7 +393,14 @@ function componentBody(
     case 'settings': {
       if (content !== undefined) assertDocument(content, SETTINGS_FORMAT[input.harness], owner);
       const env = resolvedEnv(input.env, existingEnv, owner);
-      const flags = resolvedWords(input.flags, input.flagsEtag, existing?.flags, undefined, owner, 'flag');
+      const flags = resolvedWords(
+        input.flags,
+        input.flagsEtag,
+        { words: existing?.flags, first: undefined },
+        undefined,
+        owner,
+        'flag',
+      );
       return {
         component: {
           harness: input.harness,
