@@ -145,6 +145,8 @@ export { PanelSlot, useSlotHasPanels } from './shell/views.tsx';
 export type { PluginCommandContext, PluginCommandSource } from './shell/command-sources.ts';
 /** @public An app hook another half offers (`<offerer>.<name>`): the provider's `shell.hooks`, the offerer's `useAppHook` (§5.2). */
 export { type AppHookContext, type AppHookProvider, type AppHookProviders, useAppHook } from './shell/app-hooks.ts';
+/** @public This device's theme, read on any screen, daemon-less ones included (§5.2: a device setting; shell contract S9). */
+export { type DeviceTheme, useDeviceTheme } from './shell/device-context.tsx';
 export {
   COLOUR_TOKENS,
   SPACING_TOKENS,

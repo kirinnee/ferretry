@@ -14,7 +14,7 @@ import type { InstallMachine } from '../shared/shared-item-sheet.tsx';
 import type { DaemonConnection } from '../../lib/machine.ts';
 import { daemonSharingPath, SHARING_TABS, type SharingTab } from '../../lib/routes.ts';
 import { useDaemonClient } from '../../lib/client-context.tsx';
-import { UnderlineTabs } from '@ferretry/app/ui';
+import { PageThemeSwitch, UnderlineTabs } from '@ferretry/app/ui';
 import { CatalogMembersPanel } from '../catalogs/catalog-members.tsx';
 import { FailureLine, SharingOffPanel } from '../catalogs/catalog-parts.tsx';
 import type { CatalogClientFactory } from '../catalogs/catalogs-api.ts';
@@ -80,6 +80,7 @@ export function SharingPage({
           onSelect={id => onNavigate(daemonSharingPath(connection.daemonId, id))}
           tabs={TABS}
         />
+        <PageThemeSwitch />
       </div>
       <div className={`min-h-0 flex-1 overflow-y-auto scroll-thin py-3 ${GUTTER_CLASS}`} data-sharing-body="">
         <div className={COLUMN_CLASS}>
