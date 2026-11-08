@@ -16,6 +16,7 @@ import {
   WARDEN_LEFT_ALONE_AUDIT,
   WARDEN_RAN_AUDIT,
   WardenActed,
+  WardenConfigChanged,
   WardenFlagged,
   WardenPort,
   WARDEN_CONFIG,
@@ -178,7 +179,7 @@ export default definePlugin({
     state: [WARDEN_STATE, WARDEN_REPORTS, WARDEN_JEV_CHECKS, WARDEN_REMEMBERED],
     config: [WARDEN_CONFIG],
     readModels: ['flags', 'verdicts', 'agenda', 'config'],
-    publishes: [WardenFlagged, WardenActed],
+    publishes: [WardenFlagged, WardenActed, WardenConfigChanged],
   },
 
   hooks: { takes: [{ hook: FerretChanged }, { hook: TurnEnded }] },

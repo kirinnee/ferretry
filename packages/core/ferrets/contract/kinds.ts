@@ -267,6 +267,15 @@ export interface Runner {
    * watched, and the ferret's turn is decided from what else is known.
    */
   look?(handle: RunnerHandle): Promise<RunnerLook | undefined>;
+  /**
+   * Additive (W2-a, today's `TmuxSessionExitObserver.exitOf` `gone` proof): whether the runner PROVES that `ferret`'s own
+   * terminal is not there at all (tmux: the ferret's session cannot be found, or the private server is not running,
+   * which takes every pane with it). `false` for a live terminal, one tmux kept dead with an exit status (an agent that
+   * ended on its own), and for ANY answer that proves nothing (a refused socket, a server that went away mid-request).
+   * Asked by the ferret, never by a handle, because a handle can name another pane after the server restarted. It only
+   * asks: nothing is started, typed or killed. Absent: nothing is ever proven gone, so nothing is auto-resumed.
+   */
+  gone?(ferret: FerretId): Promise<boolean>;
 }
 
 /**
@@ -485,6 +494,28 @@ export type HarnessTranscriptTail =
   | { readonly kind: 'unreadable' }
   | { readonly kind: 'read'; readonly records: readonly HarnessTailRecord[] };
 
+// ─── launch settings (W2-c): whether a relaunch would run a ferret on other harness settings ──────────────────────────
+
+/**
+ * The parts of a harness's own launch settings it compares, by NAME only: the permission mode, the fixed layer it adds
+ * to every launch, and (Claude Code) the settings and hooks items it writes into the home. A closed list, so an answer
+ * can never carry anything but one of these words.
+ */
+export const HARNESS_LAUNCH_SECTIONS = ['permission-mode', 'fixed-layer', 'settings', 'hooks'] as const;
+export type HarnessLaunchSection = (typeof HARNESS_LAUNCH_SECTIONS)[number];
+
+/**
+ * Whether the settings the harness launched a ferret under differ from the ones it would launch it under now (today's
+ * `FileLaunchSettingsDigest` comparison, taken by the harness over its OWN files and configuration). Values-free by
+ * construction: `drifted` names sections and nothing else; no setting value, hash, path or environment value leaves
+ * the harness. `unknown` when nothing was recorded at the launch, or what was recorded cannot be read: a stale-settings
+ * claim made without evidence would be a guess.
+ */
+export type HarnessLaunchSettings =
+  | { readonly kind: 'current' }
+  | { readonly kind: 'drifted'; readonly sections: readonly HarnessLaunchSection[] }
+  | { readonly kind: 'unknown' };
+
 /** The value of `harnesses:<key>` (§4.3). */
 export interface Harness {
   readonly key: HarnessKey;
@@ -544,6 +575,13 @@ export interface Harness {
    * instants, never message text. Ferrets asks only when the stamp moved. Absent: see {@link transcriptStamp}.
    */
   transcriptTail?(ferret: FerretId, limit: number): Promise<HarnessTranscriptTail>;
+  /**
+   * Additive (W2-c, RULING #27 Q9): whether a relaunch of this ferret would run on other settings of this harness's own
+   * than its last start or resume did. The harness records what it launched under (in its own state, never in the
+   * ferret's home) and compares it with its configuration now; Ferrets never reads a harness's files. Total: a damaged
+   * or missing record is `unknown`, never a throw. Absent: Ferrets claims nothing about this harness's settings.
+   */
+  launchSettings?(ferret: FerretId): Promise<HarnessLaunchSettings>;
   readonly transcript: TranscriptReader;
   readonly usage: UsageReader;
   readonly dialogs?: DialogReader;

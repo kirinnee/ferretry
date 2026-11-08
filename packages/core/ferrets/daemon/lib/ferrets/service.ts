@@ -100,6 +100,20 @@ export const QUESTION_FILE_VARIABLE = 'FY_QUESTION_FILE';
 /** The reason a stop records when its caller gave none (today's lifecycle `defaultStopReason`). */
 const DEFAULT_STOP_REASON = 'stopped by client';
 
+/**
+ * The end causes of today's `failed` phase (the Warden's `FAILED_ENDS`, the same five): an end NOBODY CHOSE (the
+ * terminal vanished, a signal, a non-zero exit) or a launch that never ran. Only the daemon itself writes one, never a
+ * caller's stop, and the auto-resume and the Warden read the first four as a death still owed a revive. A stop of a
+ * ferret stopped for one of these is written over it, as today's stop of a `failed` session went through.
+ */
+const FAILED_ENDS: ReadonlySet<FerretEndCause['kind']> = new Set([
+  'tmux_crashed',
+  'terminal_gone',
+  'signal',
+  'agent_crashed',
+  'start_failed',
+]);
+
 /** Everything the service reaches outside its own memory. The daemon half binds these to kernel ports. */
 export interface FerretsPorts {
   /** Resolves once the held ferret records are loaded (a read before then would see no ferret). */
@@ -150,9 +164,13 @@ export interface FerretsPorts {
   /**
    * Where a launch records the instruction sections it told the pane, by id and fingerprint, so a ferret whose words
    * changed since can be told apart (`outdated`). Unbound, or a write that fails: none is kept and the ferret is never
-   * marked out of date.
+   * marked out of date — a failed write `forget`s the PREVIOUS launch's record, so a resumed ferret is never compared
+   * against what an earlier launch told it.
    */
-  launchSections?: { write(ferret: FerretId, sections: Readonly<Record<string, string>>): Promise<void> };
+  launchSections?: {
+    write(ferret: FerretId, sections: Readonly<Record<string, string>>): Promise<void>;
+    forget(ferret: FerretId): Promise<void>;
+  };
   /** `limits.yaml` as it is now (the kernel's config port), read fresh for every agent-control answer. */
   limits?(): LimitsFile | undefined;
   /** Ferret id → the instant the owner pinned it (`agent-pins.json`). */
@@ -401,7 +419,16 @@ export interface ServiceResumeOptions extends Omit<ResumeOptions, 'actor'> {
    * never authority. Absent: `unknown`, so the turn names no author.
    */
   readonly actor?: ResumeActor;
+  /**
+   * The state the ferret must STILL be in, judged under its own queue before anything is decided (today's auto-resume
+   * `expectedStatus: 'failed'`): false refuses the resume with nothing written or launched. The auto-resume sets it, so
+   * a person who stopped, resumed or archived the ferret in the meantime wins (W2-a).
+   */
+  readonly expect?: (record: FerretRecord) => boolean;
 }
+
+/** Why a resume that found the ferret no longer in the state its caller expected was refused (W2-a). */
+const NO_LONGER_OWED = 'it is no longer owed this resume: it was stopped, resumed or ended by something else first';
 
 class ResumeRefusal extends Error {
   constructor(readonly failure: StartFailure) {
@@ -674,7 +701,8 @@ export class FerretsService implements FerretsApi {
   ): Promise<void> {
     await this.ports.ready?.();
     const record = this.registry.get(ferret);
-    if (record === undefined || record.state === 'stopped') return;
+    if (record === undefined) return;
+    if (record.state === 'stopped') return await this.restateStop(record, reason, cause);
     this.ports.stopping?.(ferret);
     const harness = this.ports.harness(record.harness);
     const runner = this.ports.runner();
@@ -685,6 +713,48 @@ export class FerretsService implements FerretsApi {
     await this.settle(record, 'stopped', 'stopped', cause);
     // Today's `session.stopped` journal event, with the reason the caller gave or the lifecycle default.
     await this.ports.history?.(ferret, 'session.stopped', { reason: reason?.trim() || DEFAULT_STOP_REASON });
+  }
+
+  /**
+   * A stop of a ferret that is already stopped. When it ended FAILED ({@link FAILED_ENDS}: the boot pass's
+   * `terminal_gone`, a crash, a launch that never ran), this stop is the caller's decision and its cause is written over
+   * that one, with today's `session.stopped` event: today's stop of a `failed` session went through and left it
+   * `stopped`. Otherwise the auto-resume (during its pass, or from a ledger that outlived a crash mid-pass) and the Warden
+   * would still read the death as owed a revive and relaunch the ferret against the stop. Nothing is killed (there is no
+   * pane) and no token is left to revoke. An end somebody already decided (`stopped`, `completed`), a clean exit and a
+   * stopped record with no cause stand: nothing is written, as today's stop of a `stopped` session changed nothing.
+   */
+  private async restateStop(record: FerretRecord, reason: string | undefined, cause: FerretEndCause): Promise<void> {
+    if (record.cause === undefined || !FAILED_ENDS.has(record.cause.kind)) return;
+    await this.settle(record, 'stopped', 'stopped', cause);
+    await this.ports.history?.(record.id, 'session.stopped', { reason: reason?.trim() || DEFAULT_STOP_REASON });
+  }
+
+  /**
+   * Settles a ferret whose terminal the runner PROVED gone (W2-a, today's `TmuxSessionExitObserver.settle` for a `gone`
+   * pane): stopped, its end cause `terminal_gone`, and today's `session.exited` journal event after the record is
+   * durable. A COMPARE-AND-SET under the ferret's own queue: only while it is still live on exactly `handle`. Anything
+   * that moved in between (a stop, a resume that relaunched it on another pane) wins, and false is answered. Nothing is
+   * killed or launched: the pane is already gone. Its attachments are released as a stop releases them.
+   */
+  async settleGone(ferret: FerretId, handle: string, exited: { readonly from: string; readonly reason: string }) {
+    return await this.serial.run(ferret, async () => {
+      await this.ports.ready?.();
+      const record = this.registry.get(ferret);
+      if (record === undefined || (record.state !== 'working' && record.state !== 'idle') || record.handle !== handle)
+        return false;
+      this.ports.stopping?.(ferret);
+      await this.settle(record, 'stopped', 'stopped', { kind: 'terminal_gone' });
+      await this.ports.history?.(ferret, 'session.exited', {
+        reason: exited.reason,
+        from: exited.from,
+        status: 'failed',
+        pane: 'gone',
+        exitCode: null,
+        signal: null,
+      });
+      return true;
+    });
   }
 
   /**
@@ -746,6 +816,7 @@ export class FerretsService implements FerretsApi {
     await this.ports.ready?.();
     const found = this.registry.get(ferret);
     if (found === undefined) return failed('refused', `no ferret ${ferret}`);
+    if (options?.expect !== undefined && !options.expect(found)) return failed('refused', NO_LONGER_OWED);
     // A plain resume of a running ferret is the send shortcut: nothing to relaunch. Only a move gives it up, and then
     // the live pane is stopped first (never a second pane beside it).
     const replacing = found.state !== 'stopped';
@@ -1326,7 +1397,12 @@ export class FerretsService implements FerretsApi {
       return failed(code, `the harness could not start: ${started.error}`);
     }
     // What this launch told the ferret, kept for the out-of-date check; only once the harness really started.
-    await this.ports.launchSections?.write(record.id, sectionDigests(base.instructions)).catch(() => undefined);
+    // A write that fails leaves no record at all (never the previous launch's), so nothing is compared against it.
+    const told = this.ports.launchSections;
+    await told
+      ?.write(record.id, sectionDigests(base.instructions))
+      .catch(async () => await told.forget(record.id))
+      .catch(() => undefined);
     const working: FerretRecord = {
       ...record,
       state: 'working',

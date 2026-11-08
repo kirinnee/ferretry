@@ -71,6 +71,7 @@ import {
 import { configJsonSchemaText, schemaFileName, schemaModeline } from './schemas.ts';
 import { type ConfigTreeEvents, watchConfigFiles } from './watcher.ts';
 import { CONFIG_FILE_MAX_BYTES, configTextTooLarge, editConfigText, readConfigTextToEdit } from './yaml-text.ts';
+import { isWithinList, patchedValue } from './patch.ts';
 
 /** The most a configuration file may hold; a larger one is not read, and keeps its last good version. */
 export { CONFIG_FILE_MAX_BYTES };
@@ -198,12 +199,15 @@ export interface ConfigFiles {
     edit: ConfigEdit,
     options?: ConfigWriteOptions,
   ): Promise<ConfigWriteResult>;
-  /** The owner's own patch, made to BOTH the version in effect and an edit held for the owner (`ConfigPort.writeAsOwner`). */
+  /**
+   * The owner's own patch, made to BOTH the version in effect and an edit held for the owner (`ConfigPort.writeAsOwner`);
+   * a top-level key named in `within` merges into its mapping one level deep (`./patch.ts`).
+   */
   writeAsOwner(
     plugin: string,
     def: ConfigDef,
     name: string | undefined,
-    edit: { readonly patch: Readonly<Record<string, unknown>> },
+    edit: { readonly patch: Readonly<Record<string, unknown>>; readonly within?: readonly string[] },
     options?: ConfigWriteOptions,
   ): Promise<ConfigWriteResult>;
   /** Removes a file. Removing what loosens (a budget, a rule) is held like any loosening edit. */
@@ -678,11 +682,16 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     acknowledged.set(path, { etag: digest(text), text, at: options.clock.nowMs() });
   };
 
-  /** The text a patch makes of the file: only the changed keys are rewritten, so comments and order survive. */
+  /**
+   * The text a patch makes of the file: only the changed keys are rewritten, so comments and order survive. `within`
+   * names the top-level keys whose mapping the patch merges into one level deep (`./patch.ts`); none, for every
+   * caller but the owner's `writeAsOwner`.
+   */
   const patched = (
     slot: Slot,
     existing: string | undefined,
     patch: Readonly<Record<string, unknown>>,
+    within?: readonly string[],
   ): string | undefined => {
     const { def } = slot.declaration;
     // One parse: a file that does not parse is replaced whole, and the edit is told so rather than parsing it again.
@@ -691,8 +700,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (typeof written !== 'object' || written === null || Array.isArray(written)) return undefined;
     const meaning = def.schema.safeParse(written);
     const current = (meaning.success ? meaning.data : written) as Record<string, unknown>;
-    const target: Record<string, unknown> = { ...current, ...patch };
-    for (const [key, value] of Object.entries(patch)) if (value === undefined) delete target[key];
+    const target = patchedValue(current, patch, within, written as Record<string, unknown>);
     return editConfigText(existing === undefined ? undefined : base, target, current, schemaModeline(def, slot.path));
   };
 
@@ -730,12 +738,16 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     };
   };
 
-  /** One write, inside the queue. The disk is read fresh and must be the disk the last reload saw. */
+  /**
+   * One write, inside the queue. The disk is read fresh and must be the disk the last reload saw. `within` is passed by
+   * the owner's `writeAsOwner` only: a plain write's patch replaces whole top-level keys.
+   */
   const writeLocked = async (
     slot: Slot,
     def: ConfigDef,
     edit: ConfigEdit,
     writeOptions: ConfigWriteOptions,
+    within?: readonly string[],
   ): Promise<ConfigWriteResult> => {
     const absolute = `${root}/${slot.path}`;
     const disk = await readDisk(slot.path);
@@ -743,7 +755,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     const found = existing === undefined ? ABSENT_CONFIG_ETAG : digest(existing);
     const moved = conflictOf(slot, found, writeOptions.ifMatch);
     if (moved !== undefined) return moved;
-    const text = typeof edit === 'string' ? edit : patched(slot, existing, edit.patch);
+    const text = typeof edit === 'string' ? edit : patched(slot, existing, edit.patch, within);
     if (text === undefined) return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
     const checked = check(def, slot.path, text);
     if (!checked.ok) return { kind: 'refused', reason: checked.reason, issues: checked.issues };
@@ -783,22 +795,39 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   /**
    * The owner's patch, made to both versions of a file with an edit held (docs/config-files.md rule 3). The judge is
    * asked about the sentences of the owner's OWN patch against the version in effect, never about the held edit.
+   * `within` merges the named top-level mappings one level deep in BOTH versions, each into its own mapping, so a
+   * sub-key only the held version has survives; the schema, the loosening judgement and the judge see the merged texts.
    */
   const writeAsOwner = async (
     plugin: string,
     def: ConfigDef,
     name: string | undefined,
-    edit: { readonly patch: Readonly<Record<string, unknown>> },
+    edit: { readonly patch: Readonly<Record<string, unknown>>; readonly within?: readonly string[] },
     writeOptions: ConfigWriteOptions = {},
   ): Promise<ConfigWriteResult> => {
     const declaration = declared(plugin, def);
     if (declaration === undefined) return { kind: 'refused', reason: 'not_declared', issues: [] };
     const slot = slotFor(declaration, name);
     if (slot === undefined) return { kind: 'refused', reason: 'bad_name', issues: [] };
+    // Never guessed at: a `within` that is not a list would otherwise replace a section the caller meant to merge.
+    if (!isWithinList(edit.within))
+      return {
+        kind: 'refused',
+        reason: 'schema',
+        issues: [
+          {
+            path: slot.path,
+            severity: 'error',
+            message: '`within` must be a list of top-level key names',
+            fix: 'name the sections to merge as a list',
+          },
+        ],
+      };
     return await serial(async () => {
       const entry = settled.get(slot.path);
       const heldNow = entry?.evaluated.held;
-      if (heldNow === undefined || entry === undefined) return await writeLocked(slot, def, edit, writeOptions);
+      if (heldNow === undefined || entry === undefined)
+        return await writeLocked(slot, def, { patch: edit.patch }, writeOptions, edit.within);
       const absolute = `${root}/${slot.path}`;
       const disk = await readDisk(slot.path);
       const existing = disk.kind === 'text' ? disk.text : undefined;
@@ -807,12 +836,12 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       if (moved !== undefined) return moved;
       const inEffect = entry.evaluated.inEffect;
       // The version in effect, patched: what the owner's act means today.
-      const effectiveText = patched(slot, inEffect?.text, edit.patch);
+      const effectiveText = patched(slot, inEffect?.text, edit.patch, edit.within);
       if (effectiveText === undefined) return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
       const effective = check(def, slot.path, effectiveText);
       if (!effective.ok) return { kind: 'refused', reason: effective.reason, issues: effective.issues };
       // The held version (the file on disk), patched. A held REMOVAL has no text to carry the patch.
-      const heldText = existing === undefined ? undefined : patched(slot, existing, edit.patch);
+      const heldText = existing === undefined ? undefined : patched(slot, existing, edit.patch, edit.within);
       if (existing !== undefined && heldText === undefined)
         return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
       const checkedHeld = heldText === undefined ? undefined : check(def, slot.path, heldText);

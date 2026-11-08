@@ -1,6 +1,14 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { DisableExpiryWatch, MAX_TIMER_MS } from '../../../daemon/lib/service/disable-expiry.ts';
+import {
+  DisableExpiryWatch,
+  earliestExpiry,
+  expiredBetween,
+  runtimesBackOn,
+} from '../../../daemon/lib/service/disable-expiry.ts';
+
+/** The longest timer a host may set (a 32-bit signed millisecond count), as the watch clamps to it. */
+const MAX_TIMER_MS = 2_147_483_647;
 
 /** A clock and timers the test moves by hand. */
 function rig(next: () => Promise<number | undefined>) {
@@ -123,9 +131,93 @@ describe('DisableExpiryWatch', () => {
     should(timers).have.length(2);
   });
 
+  it('should set no timer after stop, even from a timer that was firing when it stopped', async () => {
+    const dues = [2_000, 9_000];
+    let release: (() => void) | undefined;
+    const timers: (() => void)[] = [];
+    let now = 1_000;
+    const watch = new DisableExpiryWatch({
+      next: async () => dues.shift(),
+      now: () => now,
+      republish: () =>
+        new Promise<void>(resolve => {
+          release = resolve;
+        }),
+      setTimer: run => {
+        timers.push(run);
+        return () => undefined;
+      },
+    });
+    await watch.rearm();
+    now = 2_000;
+    timers[0]?.();
+    await flush();
+
+    watch.stop();
+    release?.();
+    await flush();
+    await watch.rearm();
+
+    should(timers).have.length(1);
+  });
+
   it('should fire at once for an expiry already behind it', async () => {
     const { watch, timers } = rig(async () => 500);
     await watch.rearm();
     should(timers[0]?.ms).equal(0);
+  });
+});
+
+describe('which runtime switches fall due', () => {
+  const at = (iso: string) => Date.parse(iso);
+  const files = new Map<string, { disabled?: { until?: string } }>([
+    ['a', { disabled: { until: '2026-11-08T10:00:00Z' } }],
+    ['b', { disabled: { until: '2026-11-09' } }],
+    ['c', { disabled: {} }],
+    ['d', {}],
+    ['e', { disabled: { until: 'not a time' } }],
+  ]);
+
+  const none = new Map<string, { disabled?: { until?: string } }>();
+
+  it('should name the earliest until still ahead, a calendar date meaning the start of that day in UTC', () => {
+    should(earliestExpiry(files, none, at('2026-11-08T09:00:00Z'))).equal(at('2026-11-08T10:00:00Z'));
+    should(earliestExpiry(files, none, at('2026-11-08T10:00:00Z'))).equal(at('2026-11-09T00:00:00Z'));
+    should(earliestExpiry(files, none, at('2026-11-09T00:00:00Z'))).be.undefined();
+  });
+
+  it("should count a login's until as well as a runtime's", () => {
+    const logins = new Map([['work', { disabled: { until: '2026-11-08T09:30:00Z' } }]]);
+    should(earliestExpiry(files, logins, at('2026-11-08T09:00:00Z'))).equal(at('2026-11-08T09:30:00Z'));
+    should(earliestExpiry(none, logins, at('2026-11-08T09:30:00Z'))).be.undefined();
+  });
+
+  it('should name every runtime on a login that came back on, beside those whose own until fell due', () => {
+    const runtimes = new Map([
+      ['own', { login: 'home', disabled: { until: '2026-11-08T10:00:00Z' } }],
+      ['on-work', { login: 'work' }],
+      ['also-work', { login: 'work', disabled: { until: '2026-11-08T10:00:00Z' } }],
+      ['other', { login: 'home' }],
+    ]);
+    const logins = new Map([
+      ['work', { disabled: { until: '2026-11-08T09:30:00Z' } }],
+      ['home', {}],
+    ]);
+    should(runtimesBackOn(runtimes, logins, at('2026-11-08T09:00:00Z'), at('2026-11-08T09:30:00Z'))).eql([
+      'also-work',
+      'on-work',
+    ]);
+    should(runtimesBackOn(runtimes, logins, at('2026-11-08T09:30:00Z'), at('2026-11-08T10:00:00Z'))).eql([
+      'also-work',
+      'own',
+    ]);
+    should(runtimesBackOn(runtimes, logins, at('2026-11-08T10:00:00Z'), at('2026-11-08T11:00:00Z'))).eql([]);
+  });
+
+  it('should name only the switches that fell due in the window, never one already announced', () => {
+    should(expiredBetween(files, at('2026-11-08T09:00:00Z'), at('2026-11-08T10:00:00Z'))).eql(['a']);
+    should(expiredBetween(files, at('2026-11-08T10:00:00Z'), at('2026-11-09T00:00:00Z'))).eql(['b']);
+    should(expiredBetween(files, at('2026-11-08T09:00:00Z'), at('2026-11-09T01:00:00Z'))).eql(['a', 'b']);
+    should(expiredBetween(files, at('2026-11-09T00:00:00Z'), at('2026-11-10T00:00:00Z'))).eql([]);
   });
 });

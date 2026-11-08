@@ -17,6 +17,9 @@ export function registeredCodex() {
   /** Every bounded read: `offset`/`length` windows only. */
   const windows: { path: string; offset: number; length: number }[] = [];
   const state = new Map<string, unknown>();
+  /** A single file is keyed by its name; a collection's member by its file and the member's name. */
+  const stateKey = (def: { name: string }, name?: string): string =>
+    name === undefined ? def.name : `${def.name}/${name}`;
   const rootsUsed: { name: string; subfolder?: string }[] = [];
   const commands: RunSpec[] = [];
   /** Every folder made (or narrowed) private through a root, as the kernel's ensurePrivateDirectory would. */
@@ -116,10 +119,11 @@ export function registeredCodex() {
     roots: { root },
     jobs: { add: (job: (typeof jobs)[number]) => void jobs.push(job), kick: (id: string) => void kicks.push(id) },
     log: { warn: (message: string) => void warnings.push(message) },
+    // One entry per declared file and name, as the kernel keeps them: two files never share a name's entry.
     state: {
-      read: async (def: { name: string }, name?: string) => ok(state.get(name ?? def.name)),
+      read: async (def: { name: string }, name?: string) => ok(state.get(stateKey(def, name))),
       write: async (def: { name: string }, value: unknown, name?: string) => {
-        state.set(name ?? def.name, structuredClone(value));
+        state.set(stateKey(def, name), structuredClone(value));
       },
     },
     config: { file: () => ({ permissionMode, searchPaths: [] }) },

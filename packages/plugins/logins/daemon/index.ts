@@ -288,6 +288,26 @@ export function buildLoginsDaemon() {
         mintId: () => String(kernel.ids.mint('change')),
       });
 
+      // The files are the source of truth (docs/config-files.md): a login file that moved in effect by ANY editor — a
+      // hand edit, `fy config`, an agent's config tool, or this plugin's own changes — is announced, so whoever reads
+      // the logins (the views, Runtimes' disable-until timer) reads them again. A change made through the changes
+      // service is announced by it too; a second word for the same move is one more read, never a wrong one.
+      let inEffect = files();
+      const unwatchFiles = config.watch(LOGINS_CONFIG, () => {
+        const next = files();
+        for (const id of new Set([...inEffect.keys(), ...next.keys()])) {
+          const before = inEffect.get(id);
+          const after = next.get(id);
+          if (JSON.stringify(before) === JSON.stringify(after)) continue;
+          const change = before === undefined ? 'added' : after === undefined ? 'removed' : 'edited';
+          events.publish(LoginChanged, { loginId: id as LoginId, change });
+        }
+        inEffect = next;
+      });
+      lifecycle.onStop(() => {
+        unwatchFiles();
+      });
+
       const kinds = loginKinds({
         clock,
         files,

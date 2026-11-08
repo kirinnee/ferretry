@@ -163,7 +163,7 @@ export function sessionStatusOf(raw: unknown): SessionStatus | undefined {
 const SessionStatusSchema = z.enum(SESSION_STATUSES);
 
 /** What the composition root hands the catalogue: its own collaborators, and nothing it would build twice. *
- * @pending runtimes: plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host
+ * @pending runtimes: the fleet's catalogue and setup cannot be composed over the host
  */
 export interface FileFleetCatalogOptions {
   /** The host: its files, command lookup, provisioner calls and clock (`./ports.ts`). */
@@ -257,7 +257,7 @@ async function wrappersCurrent(
  * Its own provisioner, over this daemon's state home and the user's home: the apply claim is a file
  * beside the manifest, so two provisioners in one daemon still apply one at a time.
  *
- * @pending runtimes: plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host
+ * @pending runtimes: the fleet's catalogue and setup cannot be composed over the host
  */
 export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCatalogServiceDeps {
   const { host, paths, userHome, sessionRecords: records } = options;

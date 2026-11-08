@@ -28,7 +28,7 @@ import type { SessionId } from './lib/session-id.ts';
  *             harness — Conversation / the harness plugins; gateway — the managed worktree host (unbound in `index.ts`);
  *             accounts, planner, runtime, view, readableHandoffs — Ferrets' session services (`environment` and `createLifecycle` are bound by `index.ts` on the `sessions` root; the lifecycle's pane launcher is Terminals' and still unbound).
  *   handover: sessions, startAccount, planner — Ferrets' session services / Runtimes.
- *   move:     resume, launch, preflight, askAgent, sessions, planner — Ferrets' session services; accounts,
+ *   move:     preflight, askAgent, sessions, planner (resume and launch are bound by `index.ts`) — Ferrets' session services; accounts,
  *             accountResolver, transcripts, transcriptProvenance, codexRollouts, toolkit, conversionCheck,
  *             harnessVersion, rolloutFormat, locateHarness, fixedSettings, persistedReasoningEffort,
  *             contextWindowForSession — Runtimes / Conversation / the harness plugins; paneIdentity — Terminals;
@@ -64,6 +64,8 @@ export interface MovesOwn {
   readonly clientName: string;
   /** The move's relaunch, bound by Ferrets to its own resume; unbound, a move refuses before it writes anything. */
   readonly resume?: SessionMoveNeeds['resume'];
+  /** The relaunch-settings read, over the ferret's own harness (W2-c); unbound, the read answers 503. */
+  readonly launch?: SessionMoveNeeds['launch'];
   /** The session environment on each ferret's own folder of the `sessions` root; unbound, a fork refuses before it writes. */
   readonly environment?: SessionForkNeeds['environment'];
   /** One lifecycle for one session on its own folder; unbound, a fork refuses before it writes. */
@@ -141,7 +143,7 @@ export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): M
       storage,
       sessions: unbound('The session directory'),
       resume: own.resume ?? unbound('Resuming a ferret'),
-      launch: unbound('Launching a ferret'),
+      launch: own.launch ?? unbound('Launching a ferret'),
       preflight: unbound('The move preflight'),
       askAgent: unboundFn('Queueing a message'),
       planner: unbound('The session planner'),

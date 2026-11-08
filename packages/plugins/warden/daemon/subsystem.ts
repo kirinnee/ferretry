@@ -8,7 +8,7 @@ import type { BrowsersApi } from '@ferretry/plugin-browsers/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import type { TerminalsApi } from '@ferretry/plugin-terminals/contract';
 import type { UsageHeadroomApi } from '../contract/others.ts';
-import { WardenActed, WardenFlagged } from '../contract/index.ts';
+import { WARDEN_CONFIG, WardenActed, WardenConfigChanged, WardenFlagged } from '../contract/index.ts';
 import { AsksWardenAgenda, NoticeEntries } from './asks.ts';
 import { boardReader } from './board.ts';
 import {
@@ -118,6 +118,8 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   const reader = new WardenReportReader(files, REPORTS_DIRECTORY);
   const artifacts = new FileWardenArtifacts(files, reader, REPORTS_DIRECTORY);
   const configStore = new ConfigWardenConfigStore(kernel.config);
+  // A settings screen hears warden.yaml move the moment the kernel reloads it, from any editor (not only on mount).
+  kernel.config.watch(WARDEN_CONFIG, () => kernel.events.publish(WardenConfigChanged, {}));
 
   const acted: Parameters<typeof createWardenRemedies>[0]['acted'] = (ferret, action, outcome, leftAlone) =>
     kernel.events.publish(WardenActed, {

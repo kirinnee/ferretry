@@ -36,6 +36,7 @@ import {
   SitrepLines,
   SubtreeViewSchema,
   StartDecide,
+  AutoResumeDecide,
   AgentPinsFile,
   FerretDetailsFile,
   FerretPinsFile,
@@ -50,8 +51,10 @@ import {
 import { SubtreeService } from './lib/session/pack/subtree.ts';
 import manifest from '../manifest.ts';
 import { ConditionalFleetList } from './lib/fleet-list/conditional.ts';
+import { outdatedMark } from './lib/fleet-list/outdated-mark.ts';
 import { FerretsService, RENAME_HTTP } from './lib/ferrets/service.ts';
 import { helperDecision, noHelperAdmission } from './lib/ferrets/helper-admission.ts';
+import { boundedReason } from './lib/ferrets/auto-resume.ts';
 import { parseRenameBody, parseResumeBody, parseStartBody, parseStopBody } from './lib/ferrets/wire.ts';
 import { createSessionEvent, encodeSessionEvent, parseSessionEvent } from './lib/storage/journal.ts';
 import { type SessionId, tryParseSessionId } from './lib/session-id.ts';
@@ -85,7 +88,7 @@ import { PinService } from './lib/pins/index.ts';
 import { pinRoutes } from './lib/runtime/mounts/pins.ts';
 import { sessionPinRoutes } from './lib/runtime/mounts/session-pin.ts';
 import { sessionArchiveRoutes } from './lib/runtime/mounts/session-archive.ts';
-import { ARCHIVE_PASS_JOB, ARCHIVE_TICK_MS, buildArchive } from './modules/archive.ts';
+import { ARCHIVE_PASS_JOB, ARCHIVE_TICK_MS, buildArchive, hiddenFromLiveList } from './modules/archive.ts';
 import { sessionRestartRoutes } from './lib/runtime/mounts/session-restart.ts';
 import { FerretRestarts, restartService } from './lib/ferrets/restarts.ts';
 import { sessionSignalRoutes } from './lib/runtime/mounts/session-signal.ts';
@@ -113,6 +116,8 @@ import { HarnessTranscript } from './adapters/session/live/harness-transcript.ts
 import { applicableInstructions, outdatedSectionIds, sectionDigests } from './lib/ferrets/launch-sections.ts';
 import type { LaunchInstructionSectionId } from './lib/protocol/session.ts';
 import { lifecycleStatus, withLifecycleStatus } from './lib/ferrets/session-document.ts';
+import { AUTO_RESUME_JOB, buildAutoResume } from './modules/auto-resume.ts';
+import { relaunchSettings } from './modules/relaunch-settings.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
@@ -261,19 +266,29 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     ...archivedNameClaims(sessionStore.listArchivedSessions()),
   ];
   const claimStore = new LedgerNameClaimStore(stateClaimLedger(kernel.state), callsignSerial, heldClaims);
+  // The archived half of what is held is known only once the store's archive is loaded: every allocation and every
+  // "what is held" answer waits for it (a load that failed holds no archived name, as a store with no archive).
+  const archiveRead = async (): Promise<void> => {
+    await storeLoaded.catch(() => undefined);
+  };
   const claims = {
-    allocate: async (request: Parameters<NameAllocator['allocate']>[0]) =>
-      await new NameAllocator(claimStore, {
+    allocate: async (request: Parameters<NameAllocator['allocate']>[0]) => {
+      await archiveRead();
+      return await new NameAllocator(claimStore, {
         // Rotating the pick so two starts racing for the pool do not both begin at its first entry.
         nextIndex: upperExclusive => Math.floor(Math.random() * upperExclusive),
-      }).allocate(request),
+      }).allocate(request);
+    },
     release: async (callsign: string, ownerId: string) => await claimStore.release(callsign, ownerId),
   };
   const systemCallsigns = new SystemCallsignIssuer({
     counters: new StateCallsignCounters(kernel.state),
     // Every callsign the fleet holds or has held, expired claims included, as today's `held`: a stopped ferret's id is
     // never issued again.
-    held: async () => heldClaims().map(claim => claim.callsign),
+    held: async () => {
+      await archiveRead();
+      return heldClaims().map(claim => claim.callsign);
+    },
     serial: callsignSerial,
   });
 
@@ -367,6 +382,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     launchEnvironment,
     launchSections: {
       write: async (ferret, sections) => await kernel.state.write(FerretLaunchSectionsFiles, { sections }, ferret),
+      forget: async ferret => await kernel.state.remove(FerretLaunchSectionsFiles, ferret),
     },
     ready,
     session: sessionFiles.port,
@@ -658,6 +674,16 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         ferret => registry.get(ferret),
         async ferret => await movedTarget(async () => await sessionStore.readConfig(ferret as unknown as SessionId)),
       ),
+      // The relaunch-settings read (W2-c, RULING #27 Q9): the ferret's own harness compares what it launched under with
+      // its settings now; Ferrets reads no harness file. The caller check is `mayAct` below, as for every move route.
+      launch: relaunchSettings({
+        harnessOf: ferret => registry.get(ferret)?.harness,
+        harness: key => {
+          const found = hooks.provider(Harnesses, key);
+          return found === 'unavailable' ? undefined : found;
+        },
+        after: (delayMs, fire) => kernel.clock.after(milliseconds(delayMs), fire),
+      }),
     }),
   );
   // These routes fork, hand over, move or read the conversation of the ferret they name, so — like resume and stop — a
@@ -682,6 +708,58 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       },
     ]),
   ) as typeof moves.routes;
+  // Auto-resume after a host restart (W2-a, today's `createAutoResume` + `BootExitRecorder`): once the daemon serves, the
+  // ferrets whose terminal the runner PROVES gone are settled `terminal_gone` and written to the ledger, then resumed
+  // through the ordinary resume, staggered, two at a time, each only on Runtimes' OWN yes (RULING #27 Q5: no answer, no
+  // resume, no spend). A person's stop, resume or archive in between wins (`expect`, judged under the ferret's queue).
+  const autoResume = buildAutoResume({
+    state: kernel.state,
+    // The held records (with the runner handle the list view leaves out): the handle is what the settle compares.
+    records: () =>
+      registry.list().flatMap(ferret => {
+        const held = registry.get(ferret.id);
+        return held === undefined ? [] : [held];
+      }),
+    record: ferret => registry.get(ferret),
+    status: async ferret => {
+      const state = SessionStateSchema.safeParse(await sessionStore.readState(ferret as unknown as SessionId));
+      return state.success ? state.data.status : undefined;
+    },
+    gone: async ferret => {
+      const runner = hooks.provider(Runners, 'tmux');
+      return runner !== 'unavailable' && runner.gone !== undefined && (await runner.gone(ferret)) === true;
+    },
+    settle: async (ferret, handle, exited) => await service.settleGone(ferret, handle, exited),
+    decide: async input => await hooks.decideAnswered(AutoResumeDecide, input),
+    // Why a resume was refused (a start.decide taker's sentence, a launch's message) is kept in the journal and the
+    // summary, so it is bounded as Runtimes' own refusal is.
+    resume: async (ferret, message, expect) => {
+      const resumed = await service
+        .resume(ferret, message, { actor: 'daemon', automatic: true, expect })
+        .catch((error: unknown) => {
+          throw new Error(boundedReason(error instanceof Error ? error.message : String(error)));
+        });
+      if (!resumed.ok) throw new Error(boundedReason(resumed.error.reason));
+    },
+    history: appendHistory,
+    clock: { now: () => kernel.clock.now(), nowMs: () => kernel.clock.nowMs() },
+    sleep: async delay => await kernel.clock.sleep(milliseconds(delay)),
+    log,
+  });
+  kernel.jobs.add({
+    id: AUTO_RESUME_JOB,
+    schedule: { onceAfterStart: true },
+    run: async () => {
+      await ready();
+      await storeLoaded.catch(() => undefined);
+      await autoResume
+        .run()
+        .catch((error: unknown) =>
+          log.warn('the auto-resume pass stopped early', { error: error instanceof Error ? error.name : 'unknown' }),
+        );
+    },
+  });
+
   kernel.jobs.add({
     id: 'ferrets.handover-reconcile',
     schedule: { onceAfterStart: true },
@@ -753,6 +831,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       sectionDigests(applicableInstructions(kernel.snapshot.current().instructions, record)),
     );
   };
+  // The same answer as a MARK on the list and the view (today's `withOutdated`, 5 s): advice, never a restart decision.
+  const outdatedMarks = outdatedMark({ outdated: outdatedFor, nowMs: () => kernel.clock.nowMs(), ttlMs: 5_000 });
   const restartSubsystem = new FerretRestarts(
     restartService({
       ready,
@@ -804,22 +884,32 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     nowMs: () => kernel.clock.nowMs(),
     pinned: async () => await agentPins.pinnedAt(),
     keeps: () => hooks.contributions(ArchiveKeeps).map(contribution => contribution.item),
+    // Kept by the record whatever the session document says: a ferret still running, and one the record does not say is
+    // autonomous (a record with no `mode` is read as interactive, as the signal path reads it).
     isLive: ferret => {
       const record = registry.get(ferret as FerretId);
-      return record !== undefined && record.state !== 'stopped';
+      return record !== undefined && (record.state !== 'stopped' || record.mode !== 'auto');
     },
     loaded: async () => await storeLoaded,
     yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
     // A view names its session's folder, and 5.0 names no state folder to any caller: the ferret's own id stands for it.
     directory: id => `sessions/${id}`,
+    after: (delayMs, fire) => kernel.clock.after(milliseconds(delayMs), fire),
     log,
   });
   kernel.jobs.add({
     id: ARCHIVE_PASS_JOB,
     schedule: { every: milliseconds(ARCHIVE_TICK_MS) },
-    run: async () => await archive.tick(),
+    run: async signal => await archive.tick(signal),
   });
   const archived = sessionArchiveRoutes(archive.subsystem);
+  /** Whether the archive took this ferret out of the live set (a read: it writes nothing and revives nothing). */
+  const isArchived = (ferret: string): boolean => sessionStore.isArchived(ferret as unknown as SessionId);
+  /** Brings an archived ferret back into the live set; nothing for one that is live. */
+  const reviveArchived = async (ferret: string): Promise<void> => {
+    if (!isArchived(ferret)) return;
+    await sessionStore.retainSession(ferret as unknown as SessionId);
+  };
 
   // Pins (a3's handlers): the owner's sidebar pins (agent-pins.json) and each ferret's note board (<ferret>/pins.json).
   const pinnedReader = withPinned(
@@ -842,7 +932,18 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     agentPins,
   );
-  const sidebarPins = sessionPinRoutes(new AgentPinSubsystem(pinnedReader, agentPins));
+  // A pin is a keep the owner wrote: pinning an archived ferret brings it back into the live set (the store's own
+  // idempotent revival, ancestors included). A revival that fails answers the failure; pinning again retries it, since
+  // the pin is already saved and the ferret is still archived.
+  const pinSubsystem = new AgentPinSubsystem(pinnedReader, agentPins);
+  const sidebarPins = sessionPinRoutes({
+    pin: async reference => {
+      const pinned = await pinSubsystem.pin(reference);
+      await reviveArchived(pinned.id);
+      return pinned;
+    },
+    unpin: async reference => await pinSubsystem.unpin(reference),
+  });
   const noteBoard = pinRoutes({
     pins: new PinService(
       new RegistryPinSessionDirectory(ferret => registry.get(ferret as FerretId) !== undefined),
@@ -952,9 +1053,17 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       'POST /v1/ferrets/:ferretId/unpin': sidebarPins.unpin,
       'GET /v1/ferrets/:ferretId/pins': noteBoard.list,
       'POST /v1/ferrets/:ferretId/pins': noteBoard.apply,
+      // The LIVE list: a ferret the archive took out of the live set is left out (nothing is deleted: its record, its
+      // documents and `GET /v1/ferrets/:id` stay, and a write brings it back); `GET /v1/archived-sessions` lists it.
       'GET /v1/ferrets': async call => {
         await ready();
-        return fleetList.answer(await service.list(), headerValue(call.request, 'if-none-match'));
+        await storeLoaded.catch(() => undefined);
+        // Hidden only while ARCHIVED AND STOPPED: a ferret the record holds in any other state is live whatever the archive
+        // flag says (an adopted live pane writes only the record, and a revival's document write may still be on its way).
+        const live = (await service.list()).filter(
+          summary => !hiddenFromLiveList(summary.state, isArchived(summary.id)),
+        );
+        return fleetList.answer(await outdatedMarks.list(live), headerValue(call.request, 'if-none-match'));
       },
       'GET /v1/ferrets/:ferretId/subtree': async call => {
         const id = await pathFerret(call);
@@ -965,7 +1074,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       },
       'GET /v1/ferrets/:ferretId': async call => {
         const id = await pathFerret(call);
-        return jsonResponse(await service.get(id));
+        const summary = await service.get(id);
+        return jsonResponse(summary === undefined ? summary : await outdatedMarks.one(summary));
       },
       'POST /v1/ferrets': async call => {
         await ready();
@@ -1098,6 +1208,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         const count = raw === undefined ? 1 : Number(raw);
         if (!Number.isInteger(count) || count < 1)
           throw new ApiError(400, 'count must be a whole number of at least one', 'invalid_count');
+        await archiveRead();
         const nowMs = kernel.clock.nowMs();
         // A suggestion, not a reservation: the names the fleet holds (a stopped ferret's inside its window), as today.
         const start = Math.floor(nowMs / 1000) % DEFAULT_CALLSIGN_POOL.length;

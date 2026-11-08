@@ -6,6 +6,7 @@ import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import type { IndexedSession } from '../../../../../daemon/lib/storage-types.ts';
 import type { OpenCardStanding } from '../../../../../daemon/lib/session/peers/board.ts';
 import { sessionView } from '../../../../support/daemon/session-view.ts';
+import { archiveDeadline } from '../../../../support/daemon/archive-deadline.ts';
 
 const NOW = Date.parse('2026-11-06T12:00:00.000Z');
 const HOUR = 3_600_000;
@@ -48,6 +49,7 @@ function make(afterMs: number | undefined, archived = [row('older-1', ago(90)), 
       hasOpenAgendaItem: async () => false,
     },
     yieldToLoop: async () => undefined,
+    ...archiveDeadline(),
   });
 }
 
@@ -119,6 +121,7 @@ describe('a pass of the session archive as the daemon builds it', () => {
         hasOpenAgendaItem: async id => openAgenda.includes(id),
       },
       yieldToLoop: async () => undefined,
+      ...archiveDeadline(),
     });
     return { archive, archived };
   }
@@ -171,6 +174,7 @@ describe('a whole pass over a family of sessions', () => {
         hasOpenAgendaItem: async () => false,
       },
       yieldToLoop: async () => undefined,
+      ...archiveDeadline(),
     });
     return { archive, left };
   }

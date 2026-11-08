@@ -12,6 +12,7 @@ import {
   type AttachRefusal,
   type DeliveryOutcome,
   HARNESS_STOP_KEYS,
+  type HarnessLaunchSettings,
   type HarnessStop,
   type HarnessTailRecord,
   type HarnessTranscriptStamp,
@@ -139,6 +140,23 @@ export class FakeRunner implements Runner {
     this.looked.push(handle);
     if (!this.#live.has(handle)) return undefined;
     return this.screens.get(handle) ?? { frame: 'idle', working: false, atPrompt: true, permission: false };
+  }
+  /**
+   * What `gone` answers for a ferret with nothing live: `true` (proven gone), `false` (nothing proven), or a throw, set by
+   * a test. A ferret with a live pane is never gone.
+   */
+  goneAnswer: boolean | 'throw' = true;
+  /** Every ferret `gone` was asked about, in order. */
+  readonly goneAsked: FerretId[] = [];
+  async gone(ferret: FerretId): Promise<boolean> {
+    this.goneAsked.push(ferret);
+    if ([...this.#live.values()].some(live => live.ferret === ferret)) return false;
+    if (this.goneAnswer === 'throw') throw new Error('the fake runner could not ask');
+    return this.goneAnswer;
+  }
+  /** TEST ONLY: the host went down and took the runner's server with it: every pane is gone. */
+  reboot(): void {
+    this.#live.clear();
   }
   #fail(): void {
     const failure = this.fail;
@@ -300,6 +318,19 @@ export class FakeHarness implements Harness {
   /** How many times each half of the transcript was asked for, so a test sees what a sample cost. */
   readonly stamped: FerretId[] = [];
   readonly tailed: FerretId[] = [];
+  /**
+   * What `launchSettings` answers for a ferret (W2-c): a test sets one, or an `Error` to make the harness throw. A ferret
+   * with none is `unknown`. Set `launchSettings` itself to `undefined` for a harness that offers no comparison.
+   */
+  readonly launchAnswers = new Map<FerretId, HarnessLaunchSettings | Error>();
+  /** Every ferret `launchSettings` was asked about, in order. */
+  readonly launchAsked: FerretId[] = [];
+  launchSettings: Harness['launchSettings'] = async (ferret: FerretId): Promise<HarnessLaunchSettings> => {
+    this.launchAsked.push(ferret);
+    const answer = this.launchAnswers.get(ferret);
+    if (answer instanceof Error) throw answer;
+    return answer ?? { kind: 'unknown' };
+  };
   async transcriptStamp(ferret: FerretId): Promise<HarnessTranscriptStamp | undefined> {
     this.stamped.push(ferret);
     return this.transcripts.get(ferret)?.stamp;

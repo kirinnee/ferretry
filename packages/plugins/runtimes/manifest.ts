@@ -1,7 +1,12 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
-import { LoginChangesPort, LoginsPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
+import { LoginChanged, LoginChangesPort, LoginsPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
 import { UsagePort } from '@ferretry/plugin-usage/contract';
-import { FerretsChanged, MOVE_ACCOUNT_SLOT, NEW_FERRET_ACCOUNT_SLOT } from '@ferretry/core-ferrets/contract';
+import {
+  AutoResumeDecide,
+  FerretsChanged,
+  MOVE_ACCOUNT_SLOT,
+  NEW_FERRET_ACCOUNT_SLOT,
+} from '@ferretry/core-ferrets/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import {
   FerretsPort,
@@ -238,12 +243,14 @@ export default definePlugin({
     readModels: RUNTIMES_READ_MODELS,
     publishes: [RuntimesChanged, RuntimesDefaultChanged, RuntimesLaunchFailed],
     // An ended Codex ferret's runtime has its app-server pair stopped, and a Codex that could not start offline says so.
-    subscribes: [FerretsChanged],
+    // A login switched off or on moves the disable-until timer (docs/disabling.md).
+    subscribes: [FerretsChanged, LoginChanged],
     // `items` stays empty: it lists items this package SHIPS. Runtimes are items the owner (or a catalog) installs.
   },
 
   // Logins asks which runtimes use a login before it removes one; Runtimes is the only plugin that knows.
-  hooks: { takes: [{ hook: LoginsUsedBy, key: 'runtimes' }] },
+  // Ferrets asks whether an automatic resume may spend (W2-a); only this plugin's own yes resumes anything.
+  hooks: { takes: [{ hook: LoginsUsedBy, key: 'runtimes' }, { hook: AutoResumeDecide }] },
 
   onboarding: [{ id: 'runtimes', title: 'Name your runtimes', order: 40 }],
   doctor: ['runtimes-config'],

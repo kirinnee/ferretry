@@ -76,9 +76,14 @@ export const DisabledConfigSchema = z.strictObject({
 });
 export type DisabledConfig = z.infer<typeof DisabledConfigSchema>;
 
-/** `config/runtimes.yaml`: the one runtime a start uses when nobody names one. */
+/** `config/runtimes.yaml`: the one runtime a start uses when nobody names one, and the auto-resume switch. */
 export const RuntimesFileSchema = z.strictObject({
   defaultRuntime: RuntimeNameSchema.optional(),
+  /**
+   * "Auto-resume after restart" (today's machine.yaml `autoResume`): when the daemon boots it resumes the
+   * ferrets that were running when the host went down. Left out = on, as today. Not a held loosening, as today.
+   */
+  autoResume: z.boolean().optional(),
 });
 export type RuntimesFile = z.infer<typeof RuntimesFileSchema>;
 

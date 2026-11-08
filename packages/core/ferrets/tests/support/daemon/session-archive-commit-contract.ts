@@ -9,6 +9,7 @@ import { StorageSessionLifecycleRepository } from '../../../daemon/adapters/sess
 import { createFoundationPaths, createSessionPaths } from '../../../daemon/lib/paths.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
 import { RecordingLog } from './storage.ts';
+import { archiveDeadline } from './archive-deadline.ts';
 
 const NOW = '2026-11-06T12:00:00.000Z';
 const OLD = '2026-11-01T00:00:00.000Z';
@@ -142,6 +143,7 @@ export function fixture(
     afterMs: 24 * 3600000,
     passLimit: 200,
     yieldToLoop: async () => {},
+    ...archiveDeadline(),
     sources: {
       pinned: async () => {
         keepReads++;

@@ -7,6 +7,10 @@
  *   - Board and Agenda each say what keeps a ferret live (`ArchiveKeeps`, a hook Ferrets offers because core imports no
  *     plugin). While EITHER has not contributed its half, no pass runs; and a source that fails keeps every ferret it was
  *     asked about. An absent answer is "keep live", never "archive".
+ *   - EVERY ANSWER IS PARSED HERE, at the Ferrets boundary: an answer of the wrong shape (a card list that is not a list,
+ *     an owner that is not a ferret id, a `dropped` that is not a boolean, an open-item answer that is not a boolean),
+ *     one that throws, and one that does not come within {@link ARCHIVE_ANSWER_TIMEOUT_MS} all read as "unreadable",
+ *     which keeps every ferret it was asked about. Nothing a source says is coerced.
  *   - A ferret the daemon still holds running is never archived, and the rule itself keeps every interactive ferret, every
  *     unfinished one, every one with no end time and every lead with a child still live.
  *   - Nothing moves: archiving writes one registry document, and only a WRITE to a session revives it. A read here
@@ -16,7 +20,14 @@
  * last one, or a minute after a pass that left qualifying sessions behind (the per-pass bound), as today. No dynamic timer.
  */
 import type { Log } from '@ferretry/kernel/contract';
-import type { ArchiveCardStanding, ArchiveKeepSource, ArchiveSettings, FerretId } from '../../contract/index.ts';
+import { z } from 'zod';
+import {
+  ArchiveCardStandingsSchema,
+  type ArchiveKeepSource,
+  type ArchiveSettings,
+  type FerretId,
+  type FerretState,
+} from '../../contract/index.ts';
 import { createSessionArchive, type SessionArchive } from '../adapters/session/archive/session-archive.ts';
 import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import type { SessionArchiveSubsystem } from '../lib/runtime/mounts/session-archive.ts';
@@ -30,6 +41,13 @@ export const ARCHIVE_PASS_JOB = 'ferrets.archive-pass';
 export const ARCHIVE_TICK_MS = 60_000;
 /** The gap after a pass that finished everything that qualified. */
 export const ARCHIVE_PASS_EVERY_MS = 60 * 60_000;
+/** How long Board or Agenda has to answer one question; an answer that does not come in time keeps the ferret. */
+export const ARCHIVE_ANSWER_TIMEOUT_MS = 10_000;
+/** How long ONE whole keeps check has, however many ferrets it asks about; past it every ferret asked about is kept. */
+export const ARCHIVE_KEEPS_DEADLINE_MS = 10_000;
+
+/** Agenda's answer: a boolean, and nothing that merely reads as one. */
+const OpenItemAnswerSchema = z.boolean();
 
 const HOUR_MS = 60 * 60_000;
 const LANES: ReadonlySet<string> = new Set<LaneCategory>([
@@ -47,11 +65,18 @@ export function archiveAfterMs(settings: ArchiveSettings | undefined): number | 
   return typeof hours === 'number' ? hours * HOUR_MS : undefined;
 }
 
+/**
+ * Whether the LIVE list leaves a ferret out: only one the archive took AND the record holds stopped. A ferret in any
+ * other state (starting, working, idle) is running, so it is listed whatever the archive flag says: an adopted live pane
+ * writes only the record, and a revival's document write may still be on its way.
+ */
+export const hiddenFromLiveList = (state: FerretState, archived: boolean): boolean => archived && state === 'stopped';
+
 /** A card as the keep rule reads it. A lane category Ferrets does not know reads as unknown, which is "in flight". */
-const standing = (card: ArchiveCardStanding): OpenCardStanding => ({
+const standing = (card: z.output<typeof ArchiveCardStandingsSchema>[number]): OpenCardStanding => ({
   owner: card.owner,
   assignee: card.assignee,
-  dropped: card.dropped ? 'dropped' : null,
+  dropped: card.dropped === true ? 'dropped' : null,
   category: card.category !== undefined && LANES.has(card.category) ? (card.category as LaneCategory) : undefined,
 });
 
@@ -70,6 +95,8 @@ export interface ArchiveDeps {
   readonly loaded: () => Promise<unknown>;
   readonly yieldToLoop: () => Promise<void>;
   readonly directory: (id: SessionId) => string;
+  /** Runs `fire` once after `delayMs` (the kernel clock), and answers how to cancel it: the bound on each answer. */
+  readonly after: (delayMs: number, fire: () => void) => () => void;
   readonly log: Log;
   /** The most ferrets one pass archives; default {@link ARCHIVE_PASS_LIMIT_DEFAULT}. */
   readonly passLimit?: number;
@@ -78,8 +105,32 @@ export interface ArchiveDeps {
 export interface MountedArchive {
   /** The routes' view: count and list always, and `run` only while a pass may run. */
   readonly subsystem: SessionArchiveSubsystem;
-  /** What the kernel job calls every {@link ARCHIVE_TICK_MS}: runs a pass only when one is due. */
-  tick(): Promise<void>;
+  /** What the kernel job calls every {@link ARCHIVE_TICK_MS}: runs a pass only when one is due; `signal` stops it. */
+  tick(signal?: AbortSignal): Promise<void>;
+}
+
+/**
+ * One answer from a source, parsed and time-boxed: a throw, a parse failure and a late answer all REJECT, which the keep
+ * rule reads as "unreadable, keep". The timer is cancelled as soon as the answer settles.
+ */
+async function answer<T>(
+  deps: Pick<ArchiveDeps, 'after'>,
+  what: string,
+  schema: z.ZodType<T>,
+  ask: () => Promise<unknown>,
+): Promise<T> {
+  let cancel: (() => void) | undefined;
+  const late = new Promise<never>((_resolve, reject) => {
+    cancel = deps.after(ARCHIVE_ANSWER_TIMEOUT_MS, () => reject(new Error(`${what} did not answer in time`)));
+  });
+  try {
+    const raw = await Promise.race([Promise.resolve().then(ask), late]);
+    const parsed = schema.safeParse(raw);
+    if (!parsed.success) throw new Error(`${what} answered something that is not an answer`);
+    return parsed.data;
+  } finally {
+    cancel?.();
+  }
 }
 
 export function buildArchive(deps: ArchiveDeps): MountedArchive {
@@ -91,12 +142,27 @@ export function buildArchive(deps: ArchiveDeps): MountedArchive {
       const asked = boards();
       // Nobody answers for the cards: the archive reads that as "board unreadable" and keeps every ferret.
       if (asked.length === 0) throw new Error('no board is wired to say which ferrets are on an open card');
-      return (await Promise.all(asked.map(async source => await source.cards()))).flat().map(standing);
+      const answers = await Promise.all(
+        asked.map(
+          async source => await answer(deps, 'the board', ArchiveCardStandingsSchema, async () => await source.cards()),
+        ),
+      );
+      return answers.flat().map(standing);
     },
     hasOpenAgendaItem: async (id: string): Promise<boolean> => {
       const asked = agendas();
       if (asked.length === 0) throw new Error('no agenda is wired to say which ferrets have an open item');
-      const answers = await Promise.all(asked.map(async source => await source.hasOpenItem(id as FerretId)));
+      const answers = await Promise.all(
+        asked.map(
+          async source =>
+            await answer(
+              deps,
+              'the agenda',
+              OpenItemAnswerSchema,
+              async () => await source.hasOpenItem(id as FerretId),
+            ),
+        ),
+      );
       return answers.some(open => open);
     },
     isLive: deps.isLive,
@@ -110,6 +176,9 @@ export function buildArchive(deps: ArchiveDeps): MountedArchive {
       passLimit: deps.passLimit ?? ARCHIVE_PASS_LIMIT_DEFAULT,
       sources,
       yieldToLoop: deps.yieldToLoop,
+      after: deps.after,
+      keepsDeadlineMs: ARCHIVE_KEEPS_DEADLINE_MS,
+      log: deps.log,
     });
   // The read side never archives: it is built with archiving off, so the routes can neither start nor revive a thing.
   const reading = build(undefined).subsystem;
@@ -126,7 +195,8 @@ export function buildArchive(deps: ArchiveDeps): MountedArchive {
 
   return {
     subsystem: reading,
-    tick: async () => {
+    tick: async signal => {
+      if (signal?.aborted === true) return;
       const afterMs = archiveAfterMs(deps.settings());
       if (afterMs === undefined) return;
       if (deps.nowMs() < dueAtMs) return;
@@ -134,11 +204,12 @@ export function buildArchive(deps: ArchiveDeps): MountedArchive {
         deps.log.debug('the archive pass waits: Board and Agenda have not both said what keeps a ferret live');
         return;
       }
-      await deps.loaded();
       const run = archiving(afterMs).subsystem.run;
       if (run === undefined) return;
       try {
-        const result = await run();
+        // A store whose archive could not be loaded fails the pass like any other failure: tried again an hour later.
+        await deps.loaded();
+        const result = await run(signal);
         // Another pass is still running: its own end decides the next one.
         if (result === undefined) return;
         dueAtMs = deps.nowMs() + (result.deferred > 0 ? ARCHIVE_TICK_MS : ARCHIVE_PASS_EVERY_MS);

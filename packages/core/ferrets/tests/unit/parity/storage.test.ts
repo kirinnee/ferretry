@@ -3,7 +3,15 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/p
 import { tmpdir } from 'node:os';
 import { diskSessionsRoot } from '@ferretry/kernel/testing';
 import { FakeHarness, FakeRunner } from '../../../contract/testing/index.ts';
-import { FerretsPort } from '../../../contract/index.ts';
+import {
+  AutoResumeDecide,
+  type AutoResumeDecideInput,
+  AutoResumeFile,
+  AutoResumeSummaryFile,
+  FerretsPort,
+} from '../../../contract/index.ts';
+import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
+import { AUTO_RESUME_JOB } from '../../../daemon/modules/auto-resume.ts';
 import manifest from '../../../manifest.ts';
 import { host } from '../daemon/ferrets/route-fixture.ts';
 import {
@@ -143,6 +151,84 @@ describe('archive parity (U6)', () => {
     expect(Object.keys(stored.sessions)).toEqual([id]);
     expect(stored.sessions[id]?.name).toBe('aniya');
     expect(stored.sessions[id]?.archivedAt).toBe(h.clock.now());
+    await h.stop();
+  });
+});
+
+describe('auto-resume state parity (W2-a: FY_HOME/auto-resume*.json moved under state/ferrets/)', () => {
+  const runtimesAnswering = (seen: (input: AutoResumeDecideInput) => void) =>
+    implementDaemon(
+      definePlugin({
+        id: 'runtimes',
+        title: 'Runtimes (fake)',
+        version: '5.0.0',
+        api: 5,
+        core: false,
+        kinds: [],
+        hooks: { takes: [{ hook: AutoResumeDecide }] },
+      }),
+      {
+        build: () => ({
+          hooks: {
+            'auto-resume.decide': (input: AutoResumeDecideInput) => {
+              seen(input);
+              return { allow: true };
+            },
+          },
+        }),
+      },
+    );
+
+  test('F-0109 the ferrets a host restart took down are in state/ferrets/auto-resume.json before any is resumed, and removed once worked off', async () => {
+    let h!: Awaited<ReturnType<typeof host>>;
+    const owedWhenAsked: (string | undefined)[] = [];
+    const runner = new FakeRunner();
+    h = await host([], {
+      harness: new FakeHarness(),
+      runner,
+      plugins: [
+        runtimesAnswering(input => {
+          if (input.ask === 'runtime') owedWhenAsked.push(h.state('ferrets').raw(AutoResumeFile));
+        }),
+      ],
+    });
+    const started = await h.request('POST', '/v1/ferrets', {
+      headers: { 'x-fy-request-id': 'parity-auto-resume-1' },
+      body: { folder: '/work/a', name: 'wren', runtime: 'claude-work' },
+    });
+    const { id } = started.json<{ id: string }>();
+    await h.settle();
+    runner.reboot();
+    h = await h.restart();
+    await h.runJob(AUTO_RESUME_JOB);
+    await h.settle();
+    expect(owedWhenAsked).toHaveLength(1);
+    const owed = JSON.parse(owedWhenAsked[0] ?? '{}') as {
+      format: number;
+      candidates: { id: string; status: string }[];
+    };
+    expect(owed.format).toBe(1);
+    expect(owed.candidates.map(candidate => [candidate.id, candidate.status])).toEqual([[id, 'running']]);
+    expect(h.state('ferrets').raw(AutoResumeFile)).toBeUndefined();
+    expect(manifest.data.state.map(file => file.path)).toContain('auto-resume.json');
+    await h.stop();
+  });
+
+  test('F-0108 what the last pass did lands in state/ferrets/auto-resume-summary.json as { format: 1, at, resumed, skipped }', async () => {
+    const runner = new FakeRunner();
+    let h = await host([], { harness: new FakeHarness(), runner, plugins: [runtimesAnswering(() => undefined)] });
+    await h.request('POST', '/v1/ferrets', {
+      headers: { 'x-fy-request-id': 'parity-auto-resume-2' },
+      body: { folder: '/work/a', name: 'wren', runtime: 'claude-work' },
+    });
+    await h.settle();
+    runner.reboot();
+    h = await h.restart();
+    await h.runJob(AUTO_RESUME_JOB);
+    await h.settle();
+    const stored = JSON.parse(h.state('ferrets').raw(AutoResumeSummaryFile) ?? '{}') as Record<string, unknown>;
+    expect(stored).toEqual({ format: 1, at: h.clock.now(), resumed: 1, skipped: [] });
+    expect(manifest.data.state.map(file => file.path)).toContain('auto-resume-summary.json');
     await h.stop();
   });
 });

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { LoginChangesPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
+import { AutoResumeDecide } from '@ferretry/core-ferrets/contract';
 import {
   AccountChangeRequestSchema,
   CloneBundleSchema,
@@ -39,8 +40,8 @@ describe('runtimes contract', () => {
     expect(Object.keys(manifest.needs)).toEqual(['ferrets', 'logins', 'loginChanges']);
   });
 
-  test('Runtimes answers which runtimes use a login (logins.used-by) and is the only plugin that writes logins', () => {
-    expect(manifest.hooks?.takes).toEqual([{ hook: LoginsUsedBy, key: 'runtimes' }]);
+  test('Runtimes answers which runtimes use a login (logins.used-by) and whether an auto-resume may spend, and is the only plugin that writes logins', () => {
+    expect(manifest.hooks?.takes).toEqual([{ hook: LoginsUsedBy, key: 'runtimes' }, { hook: AutoResumeDecide }]);
     expect(manifest.needs.loginChanges).toBe(LoginChangesPort);
     expect(LoginsUsedBy.takers).toEqual(['runtimes']);
   });

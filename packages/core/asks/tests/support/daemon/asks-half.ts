@@ -65,11 +65,15 @@ export async function asksHalf(
   const stops: (() => void | Promise<void>)[] = [];
   const stored = asksStateAt(home);
   const pending = new Set<Promise<unknown>>();
+  // Once closed, a state call never starts: work a send let go of after the drain would otherwise write into the
+  // removed home and fail the NEXT test with ENOENT.
+  let closed = false;
   const tracked = new Proxy(options.wrapState?.(stored) ?? stored, {
     get(target, key) {
       const value = Reflect.get(target, key);
       if (typeof value !== 'function') return value;
       return (...args: unknown[]) => {
+        if (closed) return new Promise<never>(() => undefined);
         const result = Reflect.apply(value, target, args);
         if (result instanceof Promise) {
           pending.add(result);
@@ -170,6 +174,7 @@ export async function asksHalf(
     close: async () => {
       for (const stop of stops) await stop();
       await drain();
+      closed = true;
       await rm(home, { recursive: true, force: true });
     },
   };

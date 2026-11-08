@@ -3,7 +3,8 @@
  * starts a daemon, and the daemon may start a tmux server).
  *
  * 1. Starts this repository's v5 `fyd` from source on the converter's real output (`FY_HOME=<home> bun …/fyd.ts --port
- *    0`), with a disposable `HOME`, and waits for its "ready" line and a 200 from `/healthz`. The home must be complete
+ *    <free port>`; fyd refuses 0, like v4), with a disposable `HOME`, and waits for its "ready" line and a 200 from
+ *    `/healthz`. The home must be complete
  *    (report `complete: true`, `home.json` written) and carry the tree v5 makes for a new home (`config`, `state`,
  *    `state/kernel`, `run`, `logs`): v5 makes it only for a NEW home, and without `logs/` it writes no log at all.
  * 2. Proves every plugin came up. The kernel says a plugin is down in four places, all read here: the doctor lines `fyd`
@@ -32,6 +33,7 @@ import { ProjectListSchema } from '@ferretry/plugin-projects/contract';
 import { spawn, type Subprocess } from 'bun';
 import { appendFileSync, existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { parse as parseYaml } from 'yaml';
@@ -203,7 +205,7 @@ async function bootHome(at: string, dir: string, data: boolean): Promise<readonl
   await writeFile(stderrFile, '', { mode: 0o600 });
 
   const child: Subprocess<'ignore', 'pipe', 'pipe'> = spawn({
-    cmd: [process.execPath, FYD, '--port', '0'],
+    cmd: [process.execPath, FYD, '--port', String(await freePort())],
     cwd: REPO,
     env: {
       PATH: process.env.PATH ?? '/usr/bin:/bin',
@@ -574,4 +576,17 @@ async function killTmux(at: string): Promise<void> {
   const killed = spawn({ cmd: [tmux, '-S', socket, 'kill-server'], stdout: 'ignore', stderr: 'ignore' });
   await killed.exited;
   say(`tmux server on ${socket}: ${(await killed.exited) === 0 ? 'killed' : 'not running'}`);
+}
+
+/** A loopback port nothing holds right now. fyd refuses `--port 0` (as v4 did), so the fixture reserves one itself. */
+async function freePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolveListen, rejectListen) => {
+    server.once('error', rejectListen);
+    server.listen({ host: '127.0.0.1', port: 0, exclusive: true }, () => resolveListen());
+  });
+  const address = server.address();
+  if (address === null || typeof address === 'string') throw new Error('could not reserve a loopback port');
+  await new Promise<void>(resolveClose => server.close(() => resolveClose()));
+  return address.port;
 }

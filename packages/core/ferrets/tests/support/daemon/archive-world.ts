@@ -46,6 +46,8 @@ class FakeBoard {
 class FakeAgenda {
   open = new Set<string>();
   broken = false;
+  /** Answers instead of the set when present (a look that hangs, or one that changes with the call). */
+  answer: ((ferret: string) => boolean | Promise<boolean>) | undefined;
   asked: string[] = [];
   source(): ArchiveKeepSource {
     return {
@@ -53,13 +55,13 @@ class FakeAgenda {
       hasOpenItem: async ferret => {
         this.asked.push(ferret);
         if (this.broken) throw new Error('the agenda could not be read');
-        return this.open.has(ferret);
+        return this.answer === undefined ? this.open.has(ferret) : await this.answer(ferret);
       },
     };
   }
 }
 
-const keeper = (id: 'board' | 'agenda', source: ArchiveKeepSource) =>
+const keeper = (id: 'board' | 'agenda', source: unknown) =>
   implementDaemon(
     definePlugin({
       id,
@@ -70,7 +72,7 @@ const keeper = (id: 'board' | 'agenda', source: ArchiveKeepSource) =>
       kinds: [],
       hooks: { takes: [{ hook: ArchiveKeeps }] },
     }),
-    { build: () => ({ hooks: { 'session.archive-keeps': () => [{ id, item: source }] } }) },
+    { build: () => ({ hooks: { 'session.archive-keeps': () => [{ id, item: source as ArchiveKeepSource }] } }) },
   );
 
 const harnessPlugin = (harness: FakeHarness) =>
@@ -107,6 +109,8 @@ export interface ArchiveWorldOptions {
   readonly noBoard?: boolean;
   /** Leave Agenda's half out. */
   readonly noAgenda?: boolean;
+  /** What Board contributes INSTEAD of its keep source (a garbage item the hook must refuse). */
+  readonly boardItem?: unknown;
   /** Packs stands in, admitting every helper (a child start needs its yes, ruling #43). */
   readonly packs?: boolean;
 }
@@ -121,7 +125,9 @@ export async function archiveWorld(options: ArchiveWorldOptions = {}) {
       ferrets,
       harnessPlugin(harness),
       runnerPlugin(runner),
-      ...(options.noBoard === true ? [] : [keeper('board', board.source())]),
+      ...(options.noBoard === true
+        ? []
+        : [keeper('board', 'boardItem' in options ? options.boardItem : board.source())]),
       ...(options.noAgenda === true ? [] : [keeper('agenda', agenda.source())]),
       ...(options.packs === true ? [fakePacks().plugin] : []),
     ],
