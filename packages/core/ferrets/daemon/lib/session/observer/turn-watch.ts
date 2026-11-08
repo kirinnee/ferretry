@@ -119,6 +119,8 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
   readonly intervalMs = TURN_WATCH_INTERVAL_MS;
   private readonly previous = new Map<SessionId, TurnObservation | undefined>();
   private readonly paces = new Map<SessionId, Pace>();
+  /** How many times each session was woken: a look compares it across itself, so a wake it overlapped is kept. */
+  private readonly wakes = new Map<SessionId, number>();
   /** The key of the failure last told per session (see {@link tell}). */
   private readonly told = new Map<SessionId, string>();
   private running = false;
@@ -157,6 +159,7 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
     for (const id of this.previous.keys()) if (!roster.has(id)) this.previous.delete(id);
     for (const id of this.paces.keys()) if (!roster.has(id)) this.paces.delete(id);
     for (const id of this.told.keys()) if (!roster.has(id)) this.told.delete(id);
+    for (const id of this.wakes.keys()) if (!roster.has(id)) this.wakes.delete(id);
     return { changed, failures };
   }
 
@@ -196,10 +199,13 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
 
   /**
    * Something the watch did not see happened to this session's pane (Ferrets typed into it): forget its pace, so its next
-   * look is due on the next tick and the wait starts over at 2 s. A session never seen is left as it is.
+   * look is due on the next tick and the wait starts over at 2 s. A session never seen is left as it is. A wake that lands
+   * while that session's look is in flight is not lost: that look's pace was decided before the delivery, so it keeps
+   * no frame and is due again on the next tick.
    */
   wake(id: SessionId): void {
     this.paces.delete(id);
+    this.wakes.set(id, (this.wakes.get(id) ?? 0) + 1);
   }
 
   /** How long the session waits between looks now (for the live readout and tests); `undefined` before its first. */
@@ -214,6 +220,7 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
     const pace = this.paces.get(session.id);
     // Not due yet, and nothing recorded about it moved: this tick leaves it alone.
     if (live && pace !== undefined && pace.facts === facts && nowMs < pace.dueMs) return undefined;
+    const woken = this.wakes.get(session.id);
     let look: TurnLook | undefined;
     if (live) {
       const [transcript, pane] = await Promise.all([this.ports.transcript(session.id), this.ports.pane(session.id)]);
@@ -231,9 +238,18 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
       pace.facts === facts &&
       change === undefined &&
       settled(step.observation, session.state.turnState);
-    const delayMs = nextLookDelayMs(pace?.delayMs ?? TURN_WATCH_INTERVAL_MS, quiet);
+    // Woken while this look was out: what it saw is from before the delivery, so the next tick looks again, afresh.
+    const wokenSince = this.wakes.get(session.id) !== woken;
+    const delayMs = wokenSince
+      ? TURN_WATCH_INTERVAL_MS
+      : nextLookDelayMs(pace?.delayMs ?? TURN_WATCH_INTERVAL_MS, quiet);
     // Due half a tick early, so a timer that fires a little late never costs a pane a whole extra tick.
-    this.paces.set(session.id, { delayMs, dueMs: nowMs + delayMs - TURN_WATCH_INTERVAL_MS / 2, frame, facts });
+    this.paces.set(session.id, {
+      delayMs,
+      dueMs: nowMs + delayMs - TURN_WATCH_INTERVAL_MS / 2,
+      frame: wokenSince ? undefined : frame,
+      facts,
+    });
     if (change === undefined) return undefined;
     const recorded = await this.ports.record(session.id, change, this.ports.clock.now());
     // The writer read the document under its lock and did not throw: whatever was wrong with it has been mended.

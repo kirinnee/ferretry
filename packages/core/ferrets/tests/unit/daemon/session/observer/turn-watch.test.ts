@@ -31,11 +31,16 @@ function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', t
   const broken = new Set<SessionId>();
   /** A session whose writer throws a failure carrying this key (a damaged document, named by its damage). */
   const damaged = new Map<SessionId, string>();
+  /** The next look waits for this before it answers (a look in flight). */
+  let gate: Promise<void> | undefined;
   const ports: PacedTurnPorts = {
     sessions: async () => [...state].map(([id, each]) => ({ id, state: each })),
     transcript: async () => undefined,
     pane: async id => {
       looked.push(id);
+      const waiting = gate;
+      gate = undefined;
+      await waiting;
       if (broken.has(id)) throw new Error('the pane could not be read');
       return panes.has(id) ? panes.get(id) : IDLE;
     },
@@ -69,6 +74,12 @@ function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', t
     failed,
     broken,
     damaged,
+    /** Holds the next look open until the answer is called. */
+    holdNextLook: () => {
+      let release = () => {};
+      gate = new Promise<void>(resolve => (release = resolve));
+      return () => release();
+    },
     yields: () => yields,
     id: (raw: string) => parseSessionId(raw),
   };
@@ -171,6 +182,37 @@ describe('PacedTurnWatcher', () => {
     // Assert
     should(backedOff).equal(TURN_WATCH_QUIET_MAX_MS);
     should(subject.looked.length).equal(lookedBefore + 1);
+    should(subject.watcher.delayOf(id)).equal(TURN_WATCH_INTERVAL_MS);
+  });
+
+  it('should not lose a wake that lands while that pane’s look is in flight: the next tick looks again', async () => {
+    // Arrange: a quiet pane, backed off to 10 s, its due look held open.
+    const subject = fleet(['woken-2']);
+    for (let at = 0; at < 16; at += 1) await subject.tick();
+    const id = subject.id('woken-2');
+    while (subject.watcher.delayOf(id) === TURN_WATCH_QUIET_MAX_MS) {
+      const before = subject.looked.length;
+      const release = subject.holdNextLook();
+      const ticking = subject.tick();
+      await Bun.sleep(0);
+      if (subject.looked.length === before) {
+        // Not due on this tick: nothing was held.
+        release();
+        await ticking;
+        continue;
+      }
+
+      // Act: Ferrets typed into the pane while the look was out, then the look lands.
+      subject.watcher.wake(id);
+      release();
+      await ticking;
+      break;
+    }
+    const lookedAfter = subject.looked.length;
+    await subject.tick();
+
+    // Assert: the wake was kept: the wait starts over at 2 s and the very next tick looks.
+    should(subject.looked.length).equal(lookedAfter + 1);
     should(subject.watcher.delayOf(id)).equal(TURN_WATCH_INTERVAL_MS);
   });
 
