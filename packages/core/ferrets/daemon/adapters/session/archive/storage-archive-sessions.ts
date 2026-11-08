@@ -39,7 +39,7 @@ export class StorageArchiveSessions implements Pick<SessionArchivePorts, 'sessio
     private readonly afterMs: number,
     private readonly yieldToLoop: () => Promise<void>,
     /** The keep signals asked again at the commit boundary: a pin, a card or an agenda item may have appeared since. */
-    private readonly keepsNow: (ids: readonly string[]) => Promise<ReadonlyMap<string, string>>,
+    private readonly keepsNow: (ids: readonly string[], signal?: AbortSignal) => Promise<ReadonlyMap<string, string>>,
   ) {}
 
   async sessions(): Promise<readonly ArchiveSession[]> {
@@ -100,14 +100,14 @@ export class StorageArchiveSessions implements Pick<SessionArchivePorts, 'sessio
    * revived, or was started, between the decision and the locks therefore keeps its lead live, and so does any session
    * whose lineage is unknown.
    */
-  async archive(ids: readonly string[], _roster: readonly ArchiveSession[]): Promise<number> {
+  async archive(ids: readonly string[], _roster: readonly ArchiveSession[], signal?: AbortSignal): Promise<number> {
     const nowMs = this.clock.nowMs();
     const facts: ArchiveFacts = { nowMs, afterMs: this.afterMs, kept: new Map<string, string>(), limit: ids.length };
     const leaving = new Set<string>();
     let boundary:
       | Promise<{ live: readonly ArchiveSession[]; kept: ReadonlyMap<string, string>; blocked: boolean }>
       | undefined;
-    const settle = (): NonNullable<typeof boundary> => (boundary ??= this.boundary(ids));
+    const settle = (): NonNullable<typeof boundary> => (boundary ??= this.boundary(ids, signal));
     const left = await this.storage.archiveSessions(
       ids.map(parseSessionId),
       // Re-read as it is NOW, with the session's lane held: a session that was revived since the decision stays.
@@ -123,7 +123,7 @@ export class StorageArchiveSessions implements Pick<SessionArchivePorts, 'sessio
     );
     // Reconcile a signal published during the registry IO, including an outside file edit without a publication hook.
     // No session lane is held here: agenda and card writers can finish before these reads and revivals.
-    const late = await this.keepsNow(left);
+    const late = await this.keepsNow(left, signal);
     const restored = new Set(late.keys());
     const live = (await boundary)?.live ?? [];
     const parents = new Map(live.map(session => [session.id, session.parent]));
@@ -138,8 +138,9 @@ export class StorageArchiveSessions implements Pick<SessionArchivePorts, 'sessio
   /** The roster, the keep signals and the lineage verdict as they are at the commit boundary. */
   private async boundary(
     ids: readonly string[],
+    signal?: AbortSignal,
   ): Promise<{ live: readonly ArchiveSession[]; kept: ReadonlyMap<string, string>; blocked: boolean }> {
-    const kept = await this.keepsNow(ids);
+    const kept = await this.keepsNow(ids, signal);
     const listed = this.storage.listSessions();
     const live: ArchiveSession[] = [];
     for (let at = 0; at < listed.length; at += READ_BATCH) {

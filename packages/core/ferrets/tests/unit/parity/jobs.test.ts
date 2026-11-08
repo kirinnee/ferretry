@@ -34,6 +34,16 @@ import {
 import { FakeHarness, FakeRunner } from '../../../contract/testing/index.ts';
 import ferrets, { TURN_WATCH_JOB } from '../../../daemon/index.ts';
 import { QUESTION_FILE_VARIABLE } from '../../../daemon/lib/ferrets/service.ts';
+import { ARCHIVE_PASS_JOB } from '../../../daemon/modules/archive.ts';
+import {
+  archiveWorld,
+  archived,
+  finishFerret,
+  HOUR_MS,
+  pass,
+  startFerret,
+  tickArchive,
+} from '../../support/daemon/archive-world.ts';
 
 const SECRET = 'sk-live-u4prompt';
 
@@ -447,6 +457,32 @@ describe('the live readout and the transcript signal (U5, G161)', () => {
       expect(framesOf(seen)).toBeGreaterThan(0);
       seen.handler?.close({ code: 1000, reason: 'done' } as never);
     }
+    await h.stop();
+  });
+});
+
+describe('the archive pass (U6)', () => {
+  test('J-0185 the archive pass is a kernel job, and a tick runs a pass only when one is due (an hour after the last)', async () => {
+    const { h } = await archiveWorld({ afterHours: 24 });
+    expect(h.jobIds()).toContain(ARCHIVE_PASS_JOB);
+    const first = await startFerret(h, 'aniya');
+    await finishFerret(h, first);
+    await pass(h, 60_000);
+    const second = await startFerret(h, 'bodhi');
+    await finishFerret(h, second);
+
+    // A day later the first has been finished for a day and the second for a minute less: only the first leaves.
+    await pass(h, 24 * HOUR_MS - 30_000);
+    await tickArchive(h);
+    expect((await archived(h)).sessions.map(view => view.config.id)).toEqual([first]);
+    // The second is old enough half an hour on, but the pass is not due for an hour: the tick does nothing.
+    await pass(h, 30 * 60_000);
+    await tickArchive(h);
+    expect((await archived(h)).count).toBe(1);
+    // Past the hour the next tick runs the pass and it leaves too.
+    await pass(h, 31 * 60_000);
+    await tickArchive(h);
+    expect((await archived(h)).sessions.map(view => view.config.id).sort()).toEqual([first, second].sort());
     await h.stop();
   });
 });

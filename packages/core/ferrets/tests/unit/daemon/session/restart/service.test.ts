@@ -295,15 +295,17 @@ describe('RestartService.drain', () => {
     should(w.queue).eql([]);
   });
 
-  it('should treat an unreadable outdated check as still outdated, and share overlapping passes', async () => {
-    const w = world([idle('throws')]);
-    w.queue = [entry('throws', true)];
+  it('should drop an outdated-only entry whose check is unreadable, never restarting on a guess, and share overlapping passes', async () => {
+    const w = world([idle('throws'), idle('a')]);
+    w.queue = [entry('throws', true), entry('a')];
     const service = make(w);
     const first = service.drain();
     const second = service.drain();
     should(second).equal(first);
     await first;
-    should(w.restarted).eql(['throws']);
+    // The unreadable one is not restarted and not kept; an entry that is not outdated-only is restarted as asked.
+    should(w.restarted).eql(['a']);
+    should(w.queue).eql([]);
     await service.drain();
   });
 });

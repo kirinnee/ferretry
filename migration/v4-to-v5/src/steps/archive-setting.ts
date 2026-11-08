@@ -26,14 +26,14 @@
  * default is off too) and says why in the summary, so the default stays off. A whole number v5 cannot hold
  * (over a year) is not carried either. Only the whole number is ever echoed.
  *
- * SCHEMA: `archive.yaml` is Ferrets' (U6, branch `rebuild/mount-ferrets-archive-restarts`:
- * `ArchiveConfigFile` in `packages/core/ferrets/contract/state.ts`); it is NOT on `rebuild/5.0` yet, so the schema is
- * restated below, key for key, until U6 lands; then replace {@link ARCHIVE_CONFIG} with that export.
+ * SCHEMA: `archive.yaml` is Ferrets' (`ArchiveConfigFile` and `ARCHIVE_MAX_HOURS` in
+ * `packages/core/ferrets/contract/state.ts`). It is IMPORTED, never restated, so what this step writes is checked by the
+ * very schema the daemon reads it with (one fact, one owner).
  */
 import { readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { ARCHIVE_MAX_HOURS, ArchiveConfigFile } from '@ferretry/core-ferrets/contract';
 import { Document } from 'yaml';
-import { z } from 'zod';
 import type { KeptItem, NotCarried, StepReport } from '../report.ts';
 import {
   type ArchiveAfter,
@@ -47,12 +47,12 @@ import { YAML_OPTIONS } from '../v4/config.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
 
-/** U6's `ArchiveSettingsSchema`, restated: `afterHours` is `off` or a whole number of hours, 1 to 8760. */
-export const ARCHIVE_MAX_HOURS = 24 * 365;
-const ArchiveSettingsSchema = z.strictObject({
-  afterHours: z.union([z.literal('off'), z.number().int().min(1).max(ARCHIVE_MAX_HOURS)]).optional(),
-});
-export const ARCHIVE_CONFIG: V5ConfigTarget = { shape: 'file', file: 'archive.yaml', schema: ArchiveSettingsSchema };
+/** Ferrets' own `archive.yaml`: its file name and the schema the daemon reads it with. */
+export const ARCHIVE_CONFIG: V5ConfigTarget = {
+  shape: 'file',
+  file: ArchiveConfigFile.file,
+  schema: ArchiveConfigFile.schema,
+};
 
 /** What a source said: where, and the raw value (`undefined` = it does not name the variable). */
 interface Found {
