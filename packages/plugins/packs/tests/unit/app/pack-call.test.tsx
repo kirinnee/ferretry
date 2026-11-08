@@ -7,8 +7,8 @@ import type { TranscriptEntry } from '../../../app/lib/shell-ports.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { mockUi } from '../support/ui-doubles.tsx';
 
-// The shell's primitives (`app/ui.ts`, PENDING.md) stand in for what the app shell will offer: a Markdown that
-// reads bold, a proved name that links to its ferret, a footer, and a tool group that shows the command.
+// The seam's parts (`app/ui.ts`) stand in as the smallest honest doubles: a Markdown that reads bold, a proved name
+// that links to its ferret, a footer, and a tool group that shows the command.
 mockUi({
   Markdown: ({ text, className }: { text: string; className?: string }): ReactNode => (
     <div className={className}>
@@ -23,13 +23,13 @@ mockUi({
     </a>
   ),
   MessageFooter: (): ReactNode => <span className="fy-message-footer" />,
-  ToolGroup: ({ entry }: { entry: TranscriptEntry }): ReactNode => <pre>{entry.tools?.[0]?.use.name}</pre>,
+  ToolGroup: ({ calls }: { calls: readonly { use: { name?: string } }[] }): ReactNode => (
+    <pre>{calls[0]?.use.name}</pre>
+  ),
   useReferenceSurface: () => ({}),
   cn: (...parts: unknown[]) => parts.filter(Boolean).join(' '),
 });
-// PENDING PORT (ports-pending.json pendingAppPorts: packs pack-call): the card draws with the chat's reference-proved
-// Markdown, PeerName, MessageFooter and ToolGroup, which `@ferretry/app/ui` does not offer yet, and Conversation's
-// transcript row is what hosts it. The card is loaded only inside the skipped cases; each keeps every assertion.
+// The card is loaded after the seam is mocked.
 const card = async () => await import('../../../app/components/pack-call.tsx');
 
 let view: Mounted | null = null;
@@ -84,7 +84,7 @@ const show = async (pack: PackCall, rows?: readonly PackRow[]) => {
   const { PackCallRow, PackRowsProvider } = await card();
   view = await mount(
     <PackRowsProvider rows={rows}>
-      <PackCallRow entry={row(pack)} pack={pack} rhythm={{}} />
+      <PackCallRow entry={row(pack)} pack={pack} rhythm={{ 'data-transcript-density': 'message' }} />
     </PackRowsProvider>,
   );
   return must(view.container.querySelector<HTMLElement>('.fy-message-pack'), 'the card');
@@ -93,12 +93,12 @@ const show = async (pack: PackCall, rows?: readonly PackRow[]) => {
 const lines = (card: HTMLElement): string[] =>
   [...card.querySelectorAll('.fy-pack-line')].map(line => line.textContent ?? '');
 
-describe.skip('a helper start in the lead’s chat — pending port: pack-call (ports-pending: packs)', () => {
+describe('a helper start in the lead’s chat', () => {
   test('is a "Started helper" card: the proved name, what it runs on, the probe, its live state and brief', async () => {
     const card = await show(start(), [child]);
-    expect(card.dataset['packKind']).toBe('start');
-    expect(card.dataset['packState']).toBe('started');
-    expect(card.dataset['transcriptDensity']).toBe('message');
+    expect(card.dataset.packKind).toBe('start');
+    expect(card.dataset.packState).toBe('started');
+    expect(card.dataset.transcriptDensity).toBe('message');
     expect(card.querySelector('header')?.textContent).toContain('Started helper');
     expect(must(card.querySelector('header a'), 'the link').getAttribute('href')).toBe('/ferret/mvnadia-1');
     expect(lines(card)).toEqual([
@@ -219,7 +219,7 @@ describe.skip('a helper start in the lead’s chat — pending port: pack-call (
         progress: { state: 'failed', reason: 'the daemon is not running' },
       }),
     );
-    expect(card.dataset['packState']).toBe('failed');
+    expect(card.dataset.packState).toBe('failed');
     expect(card.querySelector('header')?.textContent).toBe('Could not start a helper');
     expect(must(card.querySelector('[role="alert"]'), 'the alert').textContent).toBe('the daemon is not running');
     expect(lines(card)[0]).toBe('chosen by Ferretry');
@@ -244,7 +244,7 @@ describe.skip('a helper start in the lead’s chat — pending port: pack-call (
   });
 });
 
-describe.skip('a refused start — pending port: pack-call (ports-pending: packs)', () => {
+describe('a refused start', () => {
   test('names the code and message out loud, the remedy, every attempt, and that it tried again', async () => {
     const card = await show(
       start({
@@ -270,7 +270,7 @@ describe.skip('a refused start — pending port: pack-call (ports-pending: packs
         },
       }),
     );
-    expect(card.dataset['packState']).toBe('refused');
+    expect(card.dataset.packState).toBe('refused');
     expect(card.querySelector('header')?.textContent).toBe('Helper not startedprobe_failed');
     expect(must(card.querySelector('[role="alert"]'), 'the alert').textContent).toBe(
       'codex-auto-work did not answer a "reply OK" check.',
@@ -305,7 +305,7 @@ describe.skip('a refused start — pending port: pack-call (ports-pending: packs
   });
 });
 
-describe.skip('a wait no card started, and a recommendation — pending port: pack-call (ports-pending: packs)', () => {
+describe('a wait no card started, and a recommendation', () => {
   test('a standalone wait names the ferret, how it is doing, and the result', async () => {
     const card = await show(
       {
@@ -315,8 +315,8 @@ describe.skip('a wait no card started, and a recommendation — pending port: pa
       },
       [child],
     );
-    expect(card.dataset['packKind']).toBe('wait');
-    expect(card.dataset['packState']).toBe('done');
+    expect(card.dataset.packKind).toBe('wait');
+    expect(card.dataset.packState).toBe('done');
     expect(card.querySelector('header')?.textContent).toContain('Waited for');
     expect(card.querySelector('[data-pack-live]')?.textContent).toBe('Needs you — Trust this folder?');
     expect(card.querySelector('.fy-pack-section-title')?.textContent).toBe('Result collected');
@@ -353,7 +353,7 @@ describe.skip('a wait no card started, and a recommendation — pending port: pa
         },
       },
     });
-    expect(card.dataset['packKind']).toBe('recommend');
+    expect(card.dataset.packKind).toBe('recommend');
     expect(card.querySelector('header')?.textContent).toBe('Asked which model suits');
     expect(card.querySelector('.fy-pack-task')?.textContent).toBe('review the auth change');
     const [routing, models] = [...card.querySelectorAll<HTMLDetailsElement>('.fy-pack-fold')];

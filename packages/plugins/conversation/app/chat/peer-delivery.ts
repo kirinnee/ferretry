@@ -278,7 +278,7 @@ const isClient = (word: string, clientName: string): boolean => word === clientN
  * Where the client starts in one simple command, or -1 when the command is not the client's. Only
  * `direnv exec <dir> fy …` may stand in front of it, so a command that merely mentions it is not one.
  */
-const clientAt = (words: readonly Word[], clientName: string): number => {
+export const clientAt = (words: readonly Word[], clientName: string): number => {
   const start = words.findIndex(word => isClient(word.text, clientName));
   const launcher = words.slice(0, start).map(word => word.text);
   const launched = start === 0 || (start === 3 && launcher[0] === 'direnv' && launcher[1] === 'exec');

@@ -18,6 +18,7 @@ import { type ChatScrollSlot, LiveStreamIndicator, type LiveStreamIndicatorProps
 import { ReferenceSurfaceProvider, TERMINAL_STATUSES, statusMark, useLiveActivity } from '@ferretry/app';
 import type { LiveActivityFeed } from '@ferretry/app';
 import type { FerretLiveActivity, FerretView } from '@ferretry/core-ferrets/contract';
+import type { ComposerAccount } from '../../contract/index.ts';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AttachmentGalleryProvider } from '../composer/attachment-gallery.tsx';
@@ -97,6 +98,20 @@ export interface SessionChatPageProps {
   /** This ferret's live readout, for the working line's token counts and the compaction card. Absent: none. */
   readonly liveActivity?: LiveActivityFeed<FerretLiveActivity>;
 }
+
+/** The account a ferret runs on, as the composer's tools may read it: its name and the usage its monitor stamped. */
+export const composerAccountOf = (session: FerretView): ComposerAccount => {
+  const { state } = session;
+  const usage = {
+    ...(state.usageAuthOk === undefined ? {} : { usageAuthOk: state.usageAuthOk }),
+    ...(state.usage5hPercent === undefined ? {} : { usage5hPercent: state.usage5hPercent }),
+    ...(state.usageWeeklyPercent === undefined ? {} : { usageWeeklyPercent: state.usageWeeklyPercent }),
+    ...(state.usageAtLimit === undefined ? {} : { usageAtLimit: state.usageAtLimit }),
+    ...(state.usage5hResetAt === undefined ? {} : { usage5hResetAt: state.usage5hResetAt }),
+    ...(state.usageWeeklyResetAt === undefined ? {} : { usageWeeklyResetAt: state.usageWeeklyResetAt }),
+  };
+  return { agent: session.config.agent, ...(Object.keys(usage).length === 0 ? {} : { usage }) };
+};
 
 /** A ferret as its words name it: the callsign, else the task's name, else the id (today's `sessionDisplayName`). */
 const ferretDisplayName = (session: FerretView): string =>
@@ -304,6 +319,7 @@ export function SessionChatPage({
               {...composerPreferences}
               disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
               ferretId={ferretId}
+              account={composerAccountOf(session)}
               onSent={onSent}
             />
           )}

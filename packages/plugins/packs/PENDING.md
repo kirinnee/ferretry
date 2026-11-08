@@ -47,9 +47,13 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
 
 ## App
 
-- **The transcript card** (`app/components/pack-call.tsx`) draws with the chat's reference-proved Markdown, PeerName,
-  MessageFooter and ToolGroup, which `@ferretry/app/ui` does not offer, and Conversation's transcript row hosts it
-  (`ports-pending.json` `pendingAppPorts`).
+- **The transcript card** (`app/components/pack-call.tsx`) is a panel in Conversation's `conversation.row` slot
+  (`pack-call`, an optional `uses` of Conversation). The slot hands it a tool row's shell calls whose whole script is one plain `fy` command (no `cd … &&`, pipe or
+  redirect) and what they printed (masked as the daemon masked the transcript; never the device outbox, never a refused send's text). The card
+  sees one row at a time: a `wait` folds into its start only in the same row (otherwise it is its own "Waited for"
+  card), and "retried" is marked only within a row. Conversation's tool group still draws the raw call in the row; the
+  card is beside it. Its PeerName, MessageFooter and command list are the card's own (`components/card-parts.tsx`):
+  the chat's are Conversation's files, which another half may not import.
 - **Settings › Pack mode** reads and saves `packs.yaml` through a configuration-file port the shell does not hand a
   plugin half yet (and the kernel write port, D2 #16); until then the tab says to edit the file by hand.
 - **One ferret's own switch**: no read of a single ferret's Pack switch exists, so the panel's switch shows ON until the

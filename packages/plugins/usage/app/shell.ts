@@ -13,6 +13,7 @@
  */
 import { DaemonCallError, useOptionalRouter } from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { useMemo } from 'react';
 
 /** What a view reads and writes through: this daemon's client, already guarded by the inventory (§9.6). */
 export type UsageClient = Pick<PluginClient, 'call'>;
@@ -33,11 +34,16 @@ export const THIS_MACHINE_NAME = 'this machine';
 
 export const daemonConnection = (daemonId: DaemonId): DaemonConnection => ({ daemonId });
 
-/** The daemon the current route is under, or {@link THIS_DAEMON_ID} without a router or a daemon in the route. */
+/**
+ * The daemon the current route is under, or {@link THIS_DAEMON_ID} without a router or a daemon in the route. The SAME
+ * object while the daemon is the same: the feed store joins its poll keyed on it, so a new object per render would leave
+ * and rejoin the poll on every render.
+ */
 export function useDaemonConnection(): DaemonConnection {
   const route = useOptionalRouter()?.route;
   const daemon = route !== undefined && 'daemon' in route ? route.daemon : undefined;
-  return daemonConnection(daemon ?? THIS_DAEMON_ID);
+  const id = daemon ?? THIS_DAEMON_ID;
+  return useMemo(() => daemonConnection(id), [id]);
 }
 
 // ── The addresses of this plugin's screens and of the ferret chat (manifest `ui.screens` paths) ────────────────────
