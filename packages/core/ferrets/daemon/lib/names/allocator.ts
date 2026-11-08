@@ -18,6 +18,7 @@ import {
  * the boundary that scrubs it: the diagnostic stays internal to the adapter, and the public result
  * states only that persistence failed.
  */
+// read-scoped: none — returns one fixed failure sentence that carries no ledger path, decode detail or user text
 function storeFailure(): NameAllocationResult {
   return { ok: false, error: { code: 'claim_store_failed', message: 'callsign persistence failed' } };
 }
