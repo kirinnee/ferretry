@@ -5,7 +5,7 @@
  * The publisher signs each manifest with its daemon identity — the Ed25519 key whose fingerprint IS
  * the daemon id — and the manifest lists every item version by the SHA-256 of its canonical JSON. Here
  * because the identity lives here: the same key signs handshakes, rendezvous claims and secret-import
- * offers, each under its own label, and {@link CATALOG_MANIFEST_SIGNATURE_LABEL} keeps a manifest
+ * offers, each under its own label, and the catalog label keeps a manifest
  * signature from ever standing in for one of those.
  *
  * WHO CHECKS. The subscriber's app checks before it shows anything, and the subscriber's own daemon
@@ -16,11 +16,6 @@
  * does not prove that machine is the person the reader meant (trust on first use, gap G5).
  */
 import {
-  catalogLinkSignedBytes,
-  type SharedCatalogLink,
-  SharedCatalogLinkSchema,
-  type SignedCatalogLink,
-  CATALOG_MANIFEST_SIGNATURE_LABEL,
   type CatalogDigest,
   catalogCanonicalText,
   catalogDigestOf,
@@ -29,16 +24,14 @@ import {
   type SharedCatalogFile,
   type SharedCatalogItem,
   type SharedCatalogItemVersions,
-  SharedCatalogItemVersionsSchema,
   type SharedCatalogManifest,
-  SharedCatalogManifestSchema,
   type SharedCatalogManifestEntry,
   type SignedCatalogItemVersions,
   type SignedCatalogManifest,
 } from '../../../../contract/wire/index.ts';
-import { fromBase64UrlFixed, toBase64Url, utf8Bytes } from '../kernel-wire/index.ts';
+import { fromBase64UrlFixed, utf8Bytes } from '../kernel-wire/index.ts';
 import { ED25519_SIGNATURE_BYTES, ED25519_SPKI_BYTES } from '../kernel-wire/index.ts';
-import type { DaemonIdentity, SessionCrypto } from '../kernel-wire/index.ts';
+import type { SessionCrypto } from '../kernel-wire/index.ts';
 import { publicKeyMatchesDaemonId } from '../kernel-wire/index.ts';
 
 /** Why a catalog did not verify. Each is a different sentence for the person. */
@@ -90,32 +83,6 @@ export async function catalogItemDigest(
 async function manifestSignedBytes(crypto: SessionCrypto, manifest: SharedCatalogManifest): Promise<Uint8Array | null> {
   const bytes = canonicalBytes(manifest);
   return bytes === null ? null : catalogManifestSignedBytes(await crypto.sha256(bytes));
-}
-
-/**
- * Sign a manifest as this daemon. Refused when the manifest names another publisher: a daemon signs
- * only for itself, so a manifest it signs always hashes back to it.
- */
-export async function signCatalogManifest(
-  crypto: SessionCrypto,
-  identity: DaemonIdentity,
-  manifest: SharedCatalogManifest,
-): Promise<CatalogVerification<SignedCatalogManifest>> {
-  // Parsed here, so a typed object carrying anything the schema refuses is never signed: every reader
-  // would refuse it, and the publisher would have signed something it cannot show anyone.
-  const parsed = SharedCatalogManifestSchema.safeParse(manifest);
-  if (!parsed.success)
-    return refuse(
-      'manifest_invalid',
-      `This catalog cannot be signed: ${parsed.error.issues[0]?.message ?? 'it is malformed'}.`,
-    );
-  if (manifest.publisher !== identity.daemonId)
-    return refuse('signature_invalid', 'A machine signs only catalogs it publishes itself.');
-  const signed = await manifestSignedBytes(crypto, manifest);
-  if (signed === null)
-    return refuse('not_canonical', 'This catalog has no one canonical spelling, so it cannot be signed.');
-  const sig = await crypto.signEd25519(identity.privateKey, signed);
-  return { ok: true, value: { manifest, spki: toBase64Url(identity.publicKeySpki), sig: toBase64Url(sig) } };
 }
 
 /**
@@ -195,30 +162,6 @@ async function versionsSignedBytes(
 }
 
 /**
- * Sign a version list as this daemon, under the version-list label. Refused when the list names another
- * publisher, as a manifest is.
- */
-export async function signCatalogItemVersions(
-  crypto: SessionCrypto,
-  identity: DaemonIdentity,
-  versions: SharedCatalogItemVersions,
-): Promise<CatalogVerification<SignedCatalogItemVersions>> {
-  const parsed = SharedCatalogItemVersionsSchema.safeParse(versions);
-  if (!parsed.success)
-    return refuse(
-      'manifest_invalid',
-      `This version list cannot be signed: ${parsed.error.issues[0]?.message ?? 'it is malformed'}.`,
-    );
-  if (versions.publisher !== identity.daemonId)
-    return refuse('signature_invalid', 'A machine signs only version lists for catalogs it publishes itself.');
-  const signed = await versionsSignedBytes(crypto, versions);
-  if (signed === null)
-    return refuse('not_canonical', 'This version list has no one canonical spelling, so it cannot be signed.');
-  const sig = await crypto.signEd25519(identity.privateKey, signed);
-  return { ok: true, value: { versions, spki: toBase64Url(identity.publicKeySpki), sig: toBase64Url(sig) } };
-}
-
-/**
  * Check a signed version list on its own: its key hashes to the publisher it names, and the signature
  * holds over its canonical JSON under the version-list label (a manifest signature never does).
  */
@@ -289,37 +232,4 @@ export async function verifyCatalogItemAgainstVersions(
     return refuse('not_canonical', `${item.name} has no one canonical spelling, so it cannot be checked.`);
   if (measured.digest !== offered.digest || measured.size !== offered.size) return refuse('item_mismatch', mismatch);
   return { ok: true, value: offered };
-}
-
-// ── A link: one signed item, shared as a URL ─────────────────────────────────────────────────────
-
-/** What a link signature signs, for this document. */
-async function linkSignedBytes(crypto: SessionCrypto, link: SharedCatalogLink): Promise<Uint8Array | null> {
-  const bytes = canonicalBytes(link);
-  return bytes === null ? null : catalogLinkSignedBytes(await crypto.sha256(bytes));
-}
-
-/**
- * Sign a link document as this daemon, under the link label. The document is parsed first, so a typed
- * object the schema refuses is never signed, and it is refused when it names another publisher: a daemon
- * signs only for itself.
- */
-export async function signCatalogLink(
-  crypto: SessionCrypto,
-  identity: DaemonIdentity,
-  link: SharedCatalogLink,
-): Promise<CatalogVerification<SignedCatalogLink>> {
-  const parsed = SharedCatalogLinkSchema.safeParse(link);
-  if (!parsed.success)
-    return refuse(
-      'manifest_invalid',
-      `This link cannot be signed: ${parsed.error.issues[0]?.message ?? 'it is malformed'}.`,
-    );
-  if (link.publisher !== identity.daemonId)
-    return refuse('signature_invalid', 'A machine signs only links it publishes itself.');
-  const signed = await linkSignedBytes(crypto, link);
-  if (signed === null)
-    return refuse('not_canonical', 'This link has no one canonical spelling, so it cannot be signed.');
-  const sig = await crypto.signEd25519(identity.privateKey, signed);
-  return { ok: true, value: { link, spki: toBase64Url(identity.publicKeySpki), sig: toBase64Url(sig) } };
 }

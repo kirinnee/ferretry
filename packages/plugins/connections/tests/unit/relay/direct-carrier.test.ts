@@ -250,3 +250,37 @@ describe('direct carrier', () => {
     expect(JSON.stringify(ends[0])).not.toContain('203.0.113.9');
   });
 });
+
+describe('direct carrier: when a socket or a reason goes wrong', () => {
+  test('a reason longer than a close frame may carry is cut on a character boundary', async () => {
+    const h = harness(),
+      s = h.make();
+    await s.open();
+    h.layer.links[0]!.offer({ code: 4441, reason: 'é'.repeat(100) });
+    const reason = h.closes[0]?.reason ?? '';
+    expect(new TextEncoder().encode(reason).byteLength).toBeLessThanOrEqual(123);
+    expect(reason.length).toBeGreaterThan(0);
+    expect(reason).toBe('é'.repeat(reason.length));
+    expect(h.closes[0]?.code).toBe(4441);
+  });
+
+  test('a reason that fits is passed on as it is', async () => {
+    const h = harness(),
+      s = h.make();
+    await s.open();
+    h.layer.links[0]!.offer({ code: 4441, reason: 'short' });
+    expect(h.closes).toEqual([{ code: 4441, reason: 'short' }]);
+  });
+
+  test('a socket that fails a write ends the session with the daemon-internal code, and releases it', async () => {
+    const h = harness(),
+      s = h.make();
+    await s.open();
+    h.downstream.send = () => {
+      throw new Error('socket write failed');
+    };
+    h.layer.links[0]!.offer({ sequence: 1, bytes: new Uint8Array([1]) });
+    expect(h.closes).toEqual([{ code: 4500, reason: 'the daemon could not carry this frame' }]);
+    expect(h.released()).toBe(1);
+  });
+});
