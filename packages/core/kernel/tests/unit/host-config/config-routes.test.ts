@@ -297,6 +297,21 @@ describe('PUT /v1/config/file', () => {
     expect(w.fs.snapshot().has(UPDATES)).toBe(false);
   });
 
+  test('R-0419 a file with more problems than an answer lists: 50 located, one sentence counts the rest, the count is all', async () => {
+    const w = world();
+    await w.files.reload();
+    // `limit` written 301 times: 300 duplicate keys, each a problem.
+    const text = 'limit: 1\n'.repeat(301);
+    const response = await w.handlers['PUT /v1/config/file'](call(request('PUT', [], { path: 'updates.yaml', text })));
+    expect(response.status).toBe(422);
+    const body = json(response) as { error: string; issues: { message: string; line?: number }[] };
+    expect(body.issues).toHaveLength(51);
+    expect(body.issues[0]?.line).toBe(2);
+    expect(body.issues.at(-1)).toMatchObject({ message: 'and 250 more problems not listed here' });
+    expect(body.issues.at(-1)?.line).toBeUndefined();
+    expect(body.error).toBe('the file does not check (300 problems); nothing was written');
+  });
+
   test('R-0419 a stale etag, from If-Match or from the body, is 409 config_conflict; the right one writes', async () => {
     const w = world();
     await w.files.reload();

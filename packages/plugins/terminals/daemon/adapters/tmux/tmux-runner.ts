@@ -1,16 +1,28 @@
-import type {
-  AttachRefusal,
-  DeliveryOutcome,
-  QueueOutcome,
-  Runner,
-  RunnerDelivery,
-  RunnerHandle,
-  RunningFerret,
-  RunSpec,
-  StartRefusal,
+import {
+  type AttachRefusal,
+  type DeliveryOutcome,
+  HARNESS_STOP_KEYS,
+  type QueueOutcome,
+  type Runner,
+  type RunnerDelivery,
+  type RunnerDeliveryFailure,
+  type RunnerHandle,
+  type RunnerStop,
+  type RunnerStopOutcome,
+  runnerDeliveryFailure,
+  type RunningFerret,
+  type RunSpec,
+  shouldPressStopKey,
+  type StartRefusal,
 } from '@ferretry/core-ferrets/contract';
 import type { RunnerKey } from '@ferretry/core-ferrets/contract';
-import { type ActRunner, type Log, REFUSAL_SENTENCES, type SpawnPort } from '@ferretry/kernel/contract';
+import {
+  type ActRunner,
+  type Log,
+  type RefusalCode,
+  REFUSAL_SENTENCES,
+  type SpawnPort,
+} from '@ferretry/kernel/contract';
 import { targetRef } from '@ferretry/core-vault/contract';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { sessionTarget } from '../../lib/tmux/address.ts';
@@ -22,19 +34,75 @@ import { guardedWriteArguments, GUARD_REFUSED } from '../../lib/tmux/write-guard
 import { TERMINAL_TMUX_PREFIX } from '../../lib/terminal/runtime-policy.ts';
 import { LaunchGuardRefusal, RealHarnessRefusedError, type TmuxLaunchGuard } from '../../lib/tmux/harness-guard.ts';
 import { TMUX_PROGRAM } from './kernel-tmux-process.ts';
-import { ComposerUnconfirmedError, type DeliverySleep } from './composer-fill.ts';
-import { PaneDeliveryError, PaneNotReadyError, PaneStrandedError, TmuxPaneDelivery } from './pane-delivery.ts';
+import { captureFrame, ComposerUnconfirmedError, type DeliverySleep } from './composer-fill.ts';
+import { paneShowsActiveWork } from '../../lib/tmux/pane.ts';
+import {
+  PaneDeliveryError,
+  type PaneNotReadyCause,
+  PaneNotReadyError,
+  PaneStrandedError,
+  TmuxPaneDelivery,
+} from './pane-delivery.ts';
 import { TmuxPaneQueue } from './pane-queue.ts';
 
 /**
- * A failure after something was typed is reported as typed-but-unconfirmed, never as a loss a retry should re-type;
- * `ComposerUnconfirmedError` and `PaneStrandedError` already say so and pass through unchanged.
+ * Why the binding itself wrote nothing for one write: the pane behind the handle is not the one first bound (it died,
+ * or its session, process, birth or foreground program changed) — `gone` — or it is, but its cursor row moved between
+ * the frame read and the write, so the screen was redrawing under the write — `moved`.
  */
-function typedNotLost(error: unknown, typings: number): unknown {
+type BindingBlock = 'gone' | 'moved';
+
+/** What a binding block means for a write that typed nothing: a gone pane exited; a redrawing one was busy. */
+const BLOCKED_WHY: Readonly<Record<BindingBlock, PaneNotReadyCause>> = { gone: 'exited', moved: 'busy' };
+
+/** What the guarded binding knows about why a write did not happen (read when a delivery or a stop fails). */
+interface WriteRecord {
+  readonly typings: number;
+  /** The closed code of the first write this binding's act refused, if any. */
+  readonly refused: RefusalCode | undefined;
+  /** The first write the binding itself refused because the pane changed, if any. */
+  readonly blocked: BindingBlock | undefined;
+}
+
+/**
+ * A failure after something was typed is reported as typed-but-unconfirmed, never as a loss a retry should re-type;
+ * `ComposerUnconfirmedError` and `PaneStrandedError` already say so and pass through unchanged. With nothing typed, a
+ * hold that refused a write is the answer, then a failure that already knows its cause, then a write the binding
+ * refused because the pane changed: that one is `not_ready` (nothing typed), never an unclassified rejection.
+ */
+function typedNotLost(error: unknown, written: WriteRecord): unknown {
+  const { typings, refused, blocked } = written;
   if (typings > 0 && !(error instanceof ComposerUnconfirmedError) && !(error instanceof PaneStrandedError))
     return new ComposerUnconfirmedError('the payload was typed but delivery could not be confirmed', typings);
+  if (typings > 0) return error;
+  // Nothing typed and a hold refused a write: the hold is why, said as its closed code (never the tmux error's text).
+  if (refused !== undefined) return new PaneHeldError(refused);
+  if (runnerDeliveryFailure(error) !== undefined) return error;
+  if (blocked !== undefined) return new PaneNotReadyError(BLOCKED_SENTENCES[blocked], BLOCKED_WHY[blocked]);
   return error;
 }
+
+/** The fixed sentence for a write the binding refused (never the tmux error's text). */
+const BLOCKED_SENTENCES: Readonly<Record<BindingBlock, string>> = {
+  gone: 'the ferret pane is no longer live',
+  moved: 'the ferret pane changed before the write, so nothing was typed',
+};
+
+/**
+ * A write the runner's own act was refused (a Vault hold, a quarantine, an input card, or no hold check at all), with
+ * NOTHING of the payload typed: the kernel's closed code, carried as the runner contract's `held` failure and said in
+ * the kernel's fixed sentence.
+ */
+class PaneHeldError extends PaneDeliveryError {
+  readonly deliveryFailure: RunnerDeliveryFailure;
+  constructor(readonly code: RefusalCode) {
+    super(REFUSAL_SENTENCES[code]);
+    this.name = 'PaneHeldError';
+    this.deliveryFailure = { kind: 'held', code };
+  }
+}
+
+const STOP_KEYS: ReadonlySet<string> = new Set(HARNESS_STOP_KEYS);
 
 /**
  * The `runners:tmux` provider (§2.3): a ferret's harness runs in its own tmux session, `fy-<ferret>`, on Terminals'
@@ -95,6 +163,21 @@ function parsePaneFacts(line: string): PaneFacts | undefined {
     ...(command === undefined ? {} : { command }),
     ...(cursorRow !== undefined && /^(?:0|[1-9][0-9]*)$/u.test(cursorRow) ? { cursorRow: Number(cursorRow) } : {}),
   };
+}
+
+/**
+ * Whether the pane read now is still the exact pane a binding was made for: live, same session, process, birth and
+ * foreground program, with a cursor row to compare. The row itself may differ; the write's own guard compares it.
+ */
+function sameBinding(current: PaneFacts, original: PaneFacts): boolean {
+  return (
+    !current.dead &&
+    current.session === original.session &&
+    current.pid === original.pid &&
+    current.created === original.created &&
+    current.command === original.command &&
+    current.cursorRow !== undefined
+  );
 }
 
 /** Whether a tmux session is a ferret's: `fy-…`, and not one of Terminals' own shells (`fy-webterm-…`). */
@@ -176,7 +259,7 @@ export class TmuxRunner implements Runner {
         delivery.beforeWrite,
       );
     } catch (error) {
-      throw typedNotLost(error, pane.typings());
+      throw typedNotLost(error, pane.written());
     }
   }
 
@@ -190,7 +273,44 @@ export class TmuxRunner implements Runner {
     try {
       return await new TmuxPaneQueue(new TmuxController(pane.port), pane.sleep).queue(pane.session, text);
     } catch (error) {
-      throw typedNotLost(error, pane.typings());
+      throw typedNotLost(error, pane.written());
+    }
+  }
+
+  /**
+   * Today's interrupt (`SessionSendService.interruptLocked` over `TmuxSendTerminal.pressStopKey`): reads the exact
+   * ferret pane once, and presses the HARNESS's stop key — one keystroke, no retry — only when `shouldPressStopKey`
+   * says so for what it read; then reads the pane again so the caller can tell a turn interrupted from a pane handed
+   * back. Through the same guarded binding `deliver` uses: the keystroke is acted on under
+   * `kernel.act(terminal %n, 'keys')` by this runner itself (a hold presses nothing) and re-checked against the live
+   * pane in the write. NEVER `C-c`: that is `signal`'s raw interrupt, which quits Codex at an idle prompt.
+   *
+   * Every failure before the press is answered as `not_ready`/`exited` with NOTHING pressed: a first read that
+   * failed, a pane not live, or a press the binding refused because the pane changed (a stop at a pane that is no
+   * longer the one bound is a stop at a gone ferret pane). A hold that refused the press is its closed code.
+   */
+  async stopTurn(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerStopOutcome> {
+    // Closed by the contract's type; refused here as well, so no caller can make this press another key.
+    if (!STOP_KEYS.has(stop.key)) throw new PaneDeliveryError('that is not a harness stop key');
+    const pane = await this.guardedPane(handle);
+    const tmux = new TmuxController(pane.port);
+    try {
+      const before = await captureFrame(tmux, pane.session).catch(() => undefined);
+      if (before === undefined || !before.alive || before.dead)
+        throw new PaneNotReadyError('the ferret pane is no longer live', 'exited');
+      const working = paneShowsActiveWork(before.visible);
+      if (!shouldPressStopKey(working, stop)) return { pressed: false, working };
+      await tmux.sendKey(pane.session, stop.key);
+      const after = await captureFrame(tmux, pane.session).catch(() => undefined);
+      return {
+        pressed: true,
+        ...(after === undefined || !after.alive || after.dead ? {} : { working: paneShowsActiveWork(after.visible) }),
+      };
+    } catch (error) {
+      const written = pane.written();
+      if (written.refused === undefined && written.blocked !== undefined && runnerDeliveryFailure(error) === undefined)
+        throw new PaneNotReadyError('the ferret pane changed before the stop key, so nothing was pressed', 'exited');
+      throw typedNotLost(error, { ...written, typings: 0 });
     }
   }
 
@@ -234,7 +354,8 @@ export class TmuxRunner implements Runner {
     readonly port: TmuxCommandPort;
     readonly session: string;
     readonly sleep: DeliverySleep;
-    readonly typings: () => number;
+    /** What this binding's writes did so far: payload typings, an act's refusal, a write the binding refused. */
+    readonly written: () => WriteRecord;
   }> {
     const gone = (): PaneNotReadyError => new PaneNotReadyError('the ferret pane is no longer live', 'exited');
     if (!PANE_ID.test(handle)) throw gone();
@@ -248,10 +369,18 @@ export class TmuxRunner implements Runner {
     )
       throw gone();
     const guard = this.options.delivery;
-    if (guard === undefined) throw new PaneDeliveryError('terminal delivery is not configured');
+    // No act runner bound: nothing may write here (fail closed), said as the kernel's own code for it.
+    if (guard === undefined) throw new PaneHeldError('holds_unavailable');
     const command = original.command;
     let observed = original;
     let typings = 0;
+    let refused: RefusalCode | undefined;
+    let blocked: BindingBlock | undefined;
+    /** After the server's guard refused a write: `moved` when only the cursor row differs from the bound pane. */
+    const whyRefused = async (): Promise<BindingBlock> => {
+      const now = await this.facts(handle, true).catch(() => undefined);
+      return now !== undefined && sameBinding(now, original) ? 'moved' : 'gone';
+    };
     // Reuse today's delivery unchanged. Its commands use a validated session name, but every target is rebound to
     // this exact live handle, so a changed active pane or a replacement session cannot receive the message.
     const bound: TmuxCommandPort = {
@@ -261,16 +390,10 @@ export class TmuxRunner implements Runner {
           // Cleanup must still work after a disappearing pane or a refused paste.
           if (args[0] === 'delete-buffer') return await this.options.tmux.execute(args, stdin);
           const current = await this.facts(handle, true);
-          if (
-            current === undefined ||
-            current.dead ||
-            current.session !== original.session ||
-            current.pid !== original.pid ||
-            current.created !== original.created ||
-            current.command !== original.command ||
-            current.cursorRow === undefined
-          )
+          if (current === undefined || !sameBinding(current, original)) {
+            if (writing) blocked ??= 'gone';
             return { code: 1, stdout: '', stderr: 'the ferret pane is no longer live' };
+          }
           if (args[0] === 'has-session') return { code: 0, stdout: '', stderr: '' };
           const rebound = args.map((arg, i) => (args[i - 1] === '-t' ? handle : arg));
           if (!writing) {
@@ -297,8 +420,10 @@ export class TmuxRunner implements Runner {
           );
           if (guarded === undefined) return { code: 1, stdout: '', stderr: 'the ferret pane binding changed' };
           const result = await this.options.tmux.execute(guarded);
-          if (result.stdout.includes(GUARD_REFUSED))
+          if (result.stdout.includes(GUARD_REFUSED)) {
+            blocked ??= await whyRefused();
             return { code: 1, stdout: '', stderr: 'the ferret pane binding changed' };
+          }
           if (result.code === 0 && (args[0] === 'paste-buffer' || (args[0] === 'send-keys' && args.includes('-l'))))
             typings++;
           return result;
@@ -309,12 +434,20 @@ export class TmuxRunner implements Runner {
           result = await run();
           return { status: 'done' };
         });
-        if (!acted.ok) return { code: 1, stdout: '', stderr: REFUSAL_SENTENCES[acted.error.refused] };
+        if (!acted.ok) {
+          refused ??= acted.error.refused;
+          return { code: 1, stdout: '', stderr: REFUSAL_SENTENCES[acted.error.refused] };
+        }
         if (result === undefined) throw new PaneDeliveryError('terminal delivery did not run');
         return result;
       },
     };
-    return { port: bound, session: original.session, sleep: guard.sleep, typings: () => typings };
+    return {
+      port: bound,
+      session: original.session,
+      sleep: guard.sleep,
+      written: () => ({ typings, refused, blocked }),
+    };
   }
 
   async stop(handle: RunnerHandle, how: 'polite' | 'now'): Promise<void> {

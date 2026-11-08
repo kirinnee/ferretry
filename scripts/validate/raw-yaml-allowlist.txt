@@ -1,0 +1,16 @@
+# Product files that parse YAML with a reader of their own, each with why that is safe.
+#
+# Enforced by scripts/validate/no-raw-yaml.sh. Every daemon-side reader of text a person or an agent can write goes
+# through the kernel's bounded reader (packages/core/kernel/host/config/yaml-text.ts) or the value the kernel already
+# checked; a file belongs here only when it IS that reader, or when what it parses can never be such a text in the
+# daemon. Exact both ways: an unlisted parse fails, and so does a line whose file no longer parses.
+
+packages/core/kernel/host/config/yaml-text.ts  # the kernel's bounded reader itself: size cap, alias budget by length, no YAML 1.1 tags, duplicate keys in one pass
+packages/plugins/logins/daemon/lib/shared/yaml-text.ts  # parses only the built-in catalog and preset texts shipped in the repo (catalog.ts, presets/catalog.ts call it with origin 'built-in'), never a file on disk
+packages/plugins/board/cli/lib/patch-document.ts  # CLI side: a patch document the person hands their own `fy card patch` process, never read by the daemon
+packages/plugins/usage/cli/lib/config-text.ts  # CLI side: edits usage.yaml text in the person's own process; the daemon reads that file through the kernel's check
+packages/plugins/usage/app/lib/config-text.ts  # app side: runs in the person's own browser on a text the daemon already checked and served
+packages/plugins/voice/app/lib/config-text.ts  # app side: runs in the person's own browser on a text the daemon already checked and served
+packages/plugins/browsers/app/lib/browsers-config.ts  # app side: runs in the person's own browser on a text the daemon already checked and served
+packages/plugins/conversation/app/render/fy-render-chart-model.ts  # app side: a chart fence in a message, parsed in the viewer's own browser; never a file the daemon reads
+packages/plugins/conversation/app/render/fy-render-map-model.ts  # app side: a map fence in a message, parsed in the viewer's own browser; never a file the daemon reads

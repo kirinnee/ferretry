@@ -4,6 +4,7 @@ import type {
   DeliveryOutcome,
   FerretHarness,
   FerretId,
+  HarnessInterrupted,
   HarnessRefusal,
   RunnerDelivery,
 } from '@ferretry/core-ferrets/contract';
@@ -30,7 +31,7 @@ const CALLER = ferretId('lead');
 /** What one scripted harness does when Conversation uses it. */
 interface Script {
   deliver?: () => Promise<Result<DeliveryOutcome, HarnessRefusal>>;
-  interrupt?: () => Promise<Result<true, HarnessRefusal>>;
+  interrupt?: () => Promise<Result<HarnessInterrupted, HarnessRefusal>>;
 }
 
 /** Ferrets with the harness seam: every open is recorded with the caller it was given. */
@@ -56,7 +57,7 @@ class HarnessFerrets extends FakeFerrets {
       },
       interrupt: async () => {
         this.interrupts += 1;
-        return await (this.script.interrupt?.() ?? Promise.resolve(ok(true as const)));
+        return await (this.script.interrupt?.() ?? Promise.resolve(ok({ pressed: true })));
       },
       transcript: {
         read: async () => {

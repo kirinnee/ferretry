@@ -58,6 +58,7 @@ import {
   SCHEMA_FOLDER,
 } from './claims.ts';
 import { checkConfigText, type ConfigIssue, type ConfigRefusal } from './check.ts';
+import { type ConfigCheckMemo, createConfigCheckMemo } from './check-memo.ts';
 import {
   type AcceptedConfig,
   ABSENT_CONFIG_ETAG,
@@ -69,10 +70,10 @@ import {
 } from './evaluate.ts';
 import { configJsonSchemaText, schemaFileName, schemaModeline } from './schemas.ts';
 import { type ConfigTreeEvents, watchConfigFiles } from './watcher.ts';
-import { editConfigText, readConfigText } from './yaml-text.ts';
+import { CONFIG_FILE_MAX_BYTES, configTextTooLarge, editConfigText, readConfigTextToEdit } from './yaml-text.ts';
 
 /** The most a configuration file may hold; a larger one is not read, and keeps its last good version. */
-export const CONFIG_FILE_MAX_BYTES = 256 * 1024;
+export { CONFIG_FILE_MAX_BYTES };
 
 /** How long an acknowledged write may take to land before the acknowledgement lapses. */
 export const ACKNOWLEDGEMENT_TTL_MS = 10 * 60_000;
@@ -124,6 +125,8 @@ export interface ConfigWriteOptions {
 const untrustedWrite = (writeOptions: ConfigWriteOptions): boolean =>
   writeOptions.byPlugin === true || writeOptions.byAgent === true;
 
+type Checked = ReturnType<typeof checkConfigText>;
+
 export type ConfigWriteRefusal = ConfigRefusal | 'not_declared' | 'bad_name' | 'conflict' | 'not_a_mapping';
 
 export type ConfigWriteResult =
@@ -171,6 +174,8 @@ export interface ConfigFilesOptions {
   readonly binary: string;
   /** The kernel's state port, which must declare {@link acceptedConfigFile}; absent, one is made over `fs`. */
   readonly state?: StatePort;
+  /** Where the checks the loads make are kept; absent, a fresh one. A test hands one in to see what is kept. */
+  readonly checks?: ConfigCheckMemo;
   /**
    * Gate's judge of a plugin's OWN loosening write (`Admission.judgeConfigWrite`, read live, with the call's actor):
    * true puts it into effect. Absent or throwing: held for the owner.
@@ -326,6 +331,34 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   const acknowledged = new Map<string, { readonly etag: string; readonly text: string; readonly at: number }>();
   const acknowledgedRemovals = new Map<string, number>();
 
+  /**
+   * The checks the last load made ({@link ConfigCheckMemo}). The check is pure in the definition, the path and the
+   * text, and every load evaluates every file — its accepted text and its disk text, which are most often the same —
+   * so without this one read, write or reload of any file parsed every declared file twice: seconds once a few of them
+   * are near the size cap. Only a load keeps a check, and only for a file it settled: a write that is refused leaves
+   * nothing here (an agent writing a refused text under a new name each call once grew this without end).
+   */
+  const checks: ConfigCheckMemo = options.checks ?? createConfigCheckMemo();
+  /**
+   * The checks of the texts the write in progress is about to put on disk, handed to the load that follows it so that
+   * load does not parse them again. Only texts that passed their check, at most two (the owner's patch of a held file
+   * writes the version in effect and the held one), and emptied by that load whatever happens.
+   */
+  let landing: readonly { readonly path: string; readonly digest: string; readonly checked: Checked }[] = [];
+  /** A check outside a load: one the last load kept answers, and nothing new is kept. */
+  const check = (def: ConfigDef, path: string, text: string): Checked =>
+    checks.get(path, digest(text)) ?? checkConfigText(def, path, text, binary);
+  /** A check inside a load: kept, since this load settles the file. */
+  const checkInLoad = (def: ConfigDef, path: string, text: string): Checked => {
+    const key = digest(text);
+    const checked =
+      checks.get(path, key) ??
+      landing.find(item => item.path === path && item.digest === key)?.checked ??
+      checkConfigText(def, path, text, binary);
+    checks.keep(path, key, checked);
+    return checked;
+  };
+
   // ── slots ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   const declared = (plugin: string, def: ConfigDef): ConfigDeclaration | undefined =>
@@ -373,8 +406,13 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (info === undefined) return { kind: 'absent' };
     if (!info.regularFile || info.size > CONFIG_FILE_MAX_BYTES) return { kind: 'unreadable' };
     try {
-      const text = await fs.readText(absolute);
-      return text === undefined ? { kind: 'absent' } : { kind: 'text', text };
+      // Read with a hard bound, at most one byte past the cap: the size above was read before the bytes, and a file
+      // that grew in between is never read whole — only far enough to see it is over the cap.
+      const read = await fs.readTail(absolute, CONFIG_FILE_MAX_BYTES + 1);
+      if (read === undefined) return { kind: 'absent' };
+      if (read.from > 0 || read.bytes.byteLength > CONFIG_FILE_MAX_BYTES) return { kind: 'unreadable' };
+      const text = new TextDecoder().decode(read.bytes);
+      return configTextTooLarge(text) ? { kind: 'unreadable' } : { kind: 'text', text };
     } catch {
       return { kind: 'unreadable' };
     }
@@ -472,6 +510,14 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   // ── load ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   const load = async (): Promise<void> => {
+    try {
+      await loadAll();
+    } finally {
+      landing = [];
+    }
+  };
+
+  const loadAll = async (): Promise<void> => {
     const extra: ConfigIssue[] = [];
     const slots = await gatherSlots(extra);
     const now = options.clock.nowMs();
@@ -503,6 +549,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         accepted,
         digest,
         binary,
+        check: text => checkInLoad(slot.declaration.def, slot.path, text),
       });
       // Compared with this plugin's own record, so another plugin's record is never removed by a load that accepts nothing.
       if (JSON.stringify(evaluated.accepted) !== JSON.stringify(mine))
@@ -519,6 +566,8 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     const wasLoaded = loaded;
     settled = next;
     loaded = true;
+    // Only the files that are there keep their checks: one removed (or never written) is forgotten.
+    checks.keepOnly(next);
     const held = heldOf(next);
     issues = [...[...next.values()].flatMap(item => item.evaluated.issues), ...extra, ...(await strayFiles())];
     report(issues, held);
@@ -636,14 +685,15 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     patch: Readonly<Record<string, unknown>>,
   ): string | undefined => {
     const { def } = slot.declaration;
-    const read = readConfigText(existing ?? '');
+    // One parse: a file that does not parse is replaced whole, and the edit is told so rather than parsing it again.
+    const { read, base } = readConfigTextToEdit(existing ?? '');
     const written = read.ok ? read.read.value : {};
     if (typeof written !== 'object' || written === null || Array.isArray(written)) return undefined;
     const meaning = def.schema.safeParse(written);
     const current = (meaning.success ? meaning.data : written) as Record<string, unknown>;
     const target: Record<string, unknown> = { ...current, ...patch };
     for (const [key, value] of Object.entries(patch)) if (value === undefined) delete target[key];
-    return editConfigText(existing, target, current, schemaModeline(def, slot.path));
+    return editConfigText(existing === undefined ? undefined : base, target, current, schemaModeline(def, slot.path));
   };
 
   const askJudge = (writeOptions: ConfigWriteOptions, sentences: readonly string[], removal: boolean): boolean => {
@@ -695,7 +745,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (moved !== undefined) return moved;
     const text = typeof edit === 'string' ? edit : patched(slot, existing, edit.patch);
     if (text === undefined) return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
-    const checked = checkConfigText(def, slot.path, text, binary);
+    const checked = check(def, slot.path, text);
     if (!checked.ok) return { kind: 'refused', reason: checked.reason, issues: checked.issues };
     const etag = digest(text);
     const before = settled.get(slot.path)?.evaluated.value;
@@ -707,6 +757,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       added.length === 0 &&
       (writeOptions.confirmedLoosening === true || (loosens.length > 0 && askJudge(writeOptions, loosens, false)));
     if (loosens.length === 0 || confirmed) acknowledge(slot.path, text);
+    landing = [{ path: slot.path, digest: etag, checked }];
     await fs.writeAtomic(absolute, text, PRIVATE_FILE_MODE);
     await load();
     const held = settled.get(slot.path)?.evaluated.held;
@@ -758,16 +809,22 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       // The version in effect, patched: what the owner's act means today.
       const effectiveText = patched(slot, inEffect?.text, edit.patch);
       if (effectiveText === undefined) return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
-      const effective = checkConfigText(def, slot.path, effectiveText, binary);
+      const effective = check(def, slot.path, effectiveText);
       if (!effective.ok) return { kind: 'refused', reason: effective.reason, issues: effective.issues };
       // The held version (the file on disk), patched. A held REMOVAL has no text to carry the patch.
       const heldText = existing === undefined ? undefined : patched(slot, existing, edit.patch);
       if (existing !== undefined && heldText === undefined)
         return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
-      if (heldText !== undefined) {
-        const checkedHeld = checkConfigText(def, slot.path, heldText, binary);
-        if (!checkedHeld.ok) return { kind: 'refused', reason: checkedHeld.reason, issues: checkedHeld.issues };
-      }
+      const checkedHeld = heldText === undefined ? undefined : check(def, slot.path, heldText);
+      if (checkedHeld !== undefined && !checkedHeld.ok)
+        return { kind: 'refused', reason: checkedHeld.reason, issues: checkedHeld.issues };
+      // Both passed: the load after the write is handed their checks.
+      landing = [
+        { path: slot.path, digest: digest(effectiveText), checked: effective },
+        ...(heldText === undefined || checkedHeld === undefined
+          ? []
+          : [{ path: slot.path, digest: digest(heldText), checked: checkedHeld }]),
+      ];
       const before = entry.evaluated.value;
       const unchanged = digest(effectiveText) === inEffect?.etag;
       const added =
@@ -994,6 +1051,9 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         if (view === undefined) return undefined;
         const declaration = declared(target.plugin, target.def as ConfigDef) as ConfigDeclaration;
         const slot = slotFor(declaration, target.name) as Slot;
+        const inEffect = settled.get(slot.path)?.evaluated.inEffect;
+        // The load the read made has just checked the text in effect, so this is the check it kept, not a parse.
+        const checked = inEffect === undefined ? undefined : check(declaration.def, slot.path, inEffect.text);
         return {
           path: view.path,
           exists: view.exists,
@@ -1001,6 +1061,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
           etag: view.etag,
           status: statusOf(settled.get(slot.path)?.evaluated),
           ...(view.issues.length === 0 ? {} : { issues: view.issues }),
+          ...(checked?.ok === true ? { written: checked.written } : {}),
         };
       },
       write: async (target, edit, writeOptions = {}) =>

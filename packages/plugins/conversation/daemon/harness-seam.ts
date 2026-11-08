@@ -1,4 +1,10 @@
-import type { DeliveryOutcome, FerretHarness, FerretsApi, HarnessRefusal } from '@ferretry/core-ferrets/contract';
+import type {
+  DeliveryOutcome,
+  FerretHarness,
+  FerretsApi,
+  HarnessDeliveryFailure,
+  HarnessRefusal,
+} from '@ferretry/core-ferrets/contract';
 import { ApiError, REFUSAL_SENTENCES } from '@ferretry/kernel/contract';
 import { SessionSendError } from './delivery/lib/mounts/session-send.ts';
 import { tryParseSessionId } from './seams/ferret-id.ts';
@@ -94,6 +100,26 @@ function refusalAnswer(ferret: string, refusal: HarnessRefusal): Error {
   }
 }
 
+/**
+ * BRIDGE, until the gate opens (the Conversation merge replaces it with the real 409 mapping): Ferrets' deliver now
+ * answers a closed failure where it used to throw — typed-but-unconfirmed, a pane not ready, a composer holding a draft
+ * or unreadable. Each is answered exactly as the throw it replaces was: the maybe-typed failure, whose record stays.
+ * Only the closed kind is said, never the draft. A {@link HarnessRefusal} passes on to {@link refusalAnswer} as before.
+ */
+function deliveryRefusal(failure: HarnessDeliveryFailure): HarnessRefusal | MaybeTyped {
+  if ('unconfirmed' in failure)
+    return new MaybeTyped(new SessionSendError('failed', 'the message was typed but its landing was not confirmed'));
+  if (
+    failure.refused === 'not_ready' ||
+    failure.refused === 'composer_occupied' ||
+    failure.refused === 'composer_unreadable'
+  )
+    return new MaybeTyped(
+      new SessionSendError('failed', `the ferret's terminal did not take the message (${failure.refused})`),
+    );
+  return failure;
+}
+
 export function terminalSeam(ferrets: Pick<FerretsApi, 'harness'>): TerminalSeam {
   /** The ferret's harness, or the answer for why there is none. */
   const open = async (ferret: string): Promise<FerretHarness> => {
@@ -116,7 +142,10 @@ export function terminalSeam(ferrets: Pick<FerretsApi, 'harness'>): TerminalSeam
                 : new SessionSendError('failed', error instanceof Error ? error.message : String(error)),
             );
           });
-          if (!delivered.ok) throw refusalAnswer(ferret, delivered.error);
+          if (!delivered.ok) {
+            const refusal = deliveryRefusal(delivered.error);
+            throw refusal instanceof MaybeTyped ? refusal : refusalAnswer(ferret, refusal);
+          }
           return delivered.value;
         },
         interrupt: async () => {

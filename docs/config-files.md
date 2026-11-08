@@ -58,7 +58,14 @@ that is not there). Three rules, in order:
 1. **Last good wins.** A file that fails a check is reported with its path, line, column and a plain fix
    (`GET /v1/config/status`, `fy config check`, the daemon log, the app's Files panel), and the version the
    daemon accepted before stays in effect. Nothing half-applies. When the fleet does not assemble, every
-   fleet change of that round is held back and the machine keeps the fleet it had.
+   fleet change of that round is held back and the machine keeps the fleet it had. A YAML problem is said in
+   a fixed sentence with its line — never the parser's own words, which quote the file. A YAML alias (`*name`)
+   that names no anchor set before it, sits inside its own anchor, or reads out too large is such a problem:
+   read out in full, the file may weigh no more than 10 000 plus two per character of its text, where each value
+   weighs 1 and a string weighs its length more (an alias bomb, or one long string aliased many times, does not
+   fit). So is a key that is a mapping or a list, and a YAML 1.1 tag (`!!omap`, `!!set`, `!!binary`, …) is not
+   resolved: its value reads as the plain list, mapping or string it is written as. Every file is read in one pass
+   whatever its aliases do. One answer lists at most 50 problems, and one more sentence counts the rest.
 2. **Loosening waits for the owner.** An edit that loosens what the machine may spend or what agents may do
    is HELD and the tighter version stays in effect: a Warden layer that spends switched on (Jev, LLM),
    a cap raised, something it may now do alone, its concurrency raised or its cadence shortened; lesson mining turned on or its caps raised; Pack mode switched on, Jev choosing sub-ferret models, a sub-ferret limit or depth raised; an agent control turned on (Ferretry
@@ -99,7 +106,9 @@ so a tightening is in effect the moment it is saved and an edit made just before
 
 A link is never followed — not by the daemon, not by `fy config check`. `GET /v1/config/file` returns a
 file's text to a caller off the machine, so a link planted in the directory would otherwise read any file
-the user can. A link, or a file over 256 KiB, is reported as unreadable and keeps its last good version.
+the user can. A link, or a file over 256 KiB, is reported as unreadable and keeps its last good version; a
+text over 256 KiB from an agent (`config_validate`, `config_write`) is refused in one fixed sentence before any
+of it is read.
 
 ## Secrets never go in a file
 
@@ -107,7 +116,9 @@ A secret lives in the secret store (`fy secret set NAME`) and a file names it as
 ([secrets.md](secrets.md)). A file holding anything that looks like a raw key — a known provider prefix
 (`sk-`, `sk-ant-`, `sk-or-`, `AKIA…`, `ghp_`, `github_pat_`, `xox…-`, `gsk_`, `csk-`, `AIza…`, `glpat-`)
 anywhere, or a high-entropy value under a key ending `KEY`, `TOKEN`, `SECRET`, `PASSWORD` or `CREDENTIALS`
-— is refused like a file that does not parse, and the issue never repeats the value.
+— is refused like a file that does not parse, and the issue never repeats the value. The text is scanned
+line by line as well as by value, so a key left in a YAML comment or a tag is refused the same way, its issue
+naming only the line. Before 5.0 a comment was not scanned and such a file was accepted.
 
 ## Editing
 
@@ -725,19 +736,18 @@ The tools reach the files that now hold what they always reached, and no more:
 | `components/modelSets/`                          | `model-sets/`                                                           |
 
 Any other file, and every person-only one (`gate.yaml`, `plugins.yaml`, `catalogs.yaml`), is refused on read,
-check and write. A file that does not parse is never shown if its text holds anything shaped like a secret. Not
-reached yet, each a declared GAP:
+check and write. A file whose text holds anything shaped like a secret — parsed or not, in a comment or a tag
+included — is never shown, and an agent's text that holds one is refused. Not reached yet, each a declared GAP:
 
 - `browsers.yaml` (the browser mode, proxy and ports): a new or re-aimed proxy is not held yet; before 5.0 it was.
 - `usage.yaml` (the time zone and the public feed): a time-zone change is not held yet; before 5.0 it was.
-
-`agenda.yaml` also holds `deadlineWarnHours`, which before 5.0 lived in `daemon.json`, out of an agent's reach. It
-only moves when a deadline warning buzzes: no spend and no authority, so an agent may change it.
-
 - `harness-claude-code.yaml`, `harness-codex.yaml` (the agent permission mode): each also holds the harness
   binary and search paths, which no agent reached before, and only the permission mode is judged.
 - `components/instructions/` (now `instructions/<name>.md`, not a declared YAML file) and `presets/` (no
   successor declared yet).
+
+`agenda.yaml` also holds `deadlineWarnHours`, which before 5.0 lived in `daemon.json`, out of an agent's reach. It
+only moves when a deadline warning buzzes: no spend and no authority, so an agent may change it.
 
 The built-in **Set up Ferretry** skill teaches any agent the layout, the schemas, the commands and the rules.
 Every agent runtime's system prompt carries its short form (where the files are, no secret values,

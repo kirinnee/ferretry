@@ -13,6 +13,7 @@ import {
 } from './ids.ts';
 import type {
   DeliveryOutcome,
+  PaneNotReadyReason,
   QueueOutcome,
   RunnerDelivery,
   RunnerHandle,
@@ -170,27 +171,83 @@ export interface ResumeOptions {
   readonly decided?: (disposition: 'running' | 'relaunching') => void;
 }
 
-/** Why a harness-seam act did not happen: a hold the act runner applied, or nothing to act on. */
+/**
+ * Why a harness-seam action did NOTHING, CLOSED: a hold the act runner applied (the kernel's `RefusalCode`: `held`,
+ * `quarantined`, `input_pending`, …), nothing to act on (`no_pane`), or no plugin able to do it (`plugin_unavailable`).
+ */
 export type HarnessRefusal = { readonly refused: RefusalCode | 'no_pane' | 'plugin_unavailable' };
+
+/**
+ * Why a delivery or queue typed NOTHING of the message, CLOSED, so the same message may go again (today's
+ * `SendPaneNotReady`, `SendComposerOccupied` and `SendComposerUnreadable`): every {@link HarnessRefusal}, a pane that never
+ * came to a prompt (`not_ready`: still at work, behind a dialog, or gone), a composer that already held the person's
+ * own text (`composer_occupied`, with that `draft`, which today's refusal shows back to the person and nothing else
+ * does), or a composer that could not be read to prove it empty (`composer_unreadable`). None quotes the screen.
+ */
+export type HarnessDeliveryRefusal =
+  | HarnessRefusal
+  | { readonly refused: 'not_ready'; readonly why: PaneNotReadyReason }
+  | { readonly refused: 'composer_occupied'; readonly draft: string }
+  | { readonly refused: 'composer_unreadable' };
+
+/**
+ * The message WAS typed and nothing proved it landed (today's `SendLandingUnconfirmed`): neither a refusal nor a loss,
+ * so it must never be typed again. `stranded`: it is still in the composer after every Enter. A DIFFERENT SHAPE from a
+ * refusal on purpose (no `refused`), so no `switch` over refusals can treat it as one.
+ */
+export interface HarnessUnconfirmed {
+  readonly unconfirmed: true;
+  readonly stranded: boolean;
+}
+
+/** Everything a delivery or queue can answer instead of an outcome. A rejection is a failure nobody could classify. */
+export type HarnessDeliveryFailure = HarnessDeliveryRefusal | HarnessUnconfirmed;
+
+/**
+ * What an interrupt did (today's `interruptLocked`): whether the harness's stop key was pressed — it is NOT at a pane
+ * that shows no active work unless the key is harmless there ({@link shouldPressStopKey}) — and whether the pane
+ * still showed active work afterwards (absent when it could not be read), so the caller can tell a pane handed back
+ * to its person from a turn that was interrupted.
+ */
+export interface HarnessInterrupted {
+  readonly pressed: boolean;
+  readonly working?: boolean;
+}
 
 /**
  * The harness seam (decision #18): what Conversation needs to type into a ferret, interrupt it and read its transcript.
  * Every write goes through `kernel.act(<the ferret's terminal pane>, 'keys')`, so Vault's input holds and the guarded
- * write apply exactly as for `terminal_send`; there is no raw pane write here. `deliver` is the runner's own delivery,
- * which acts on that pane for each write it makes (a hold it meets rejects the delivery before any keys); `interrupt` is
- * acted on by this seam, because the runner's signal is a raw key. The pane is read when the write is made, so a ferret
- * that stopped since answers `no_pane`.
+ * write apply exactly as for `terminal_send`; there is no raw pane write here. `deliver`, `queue` and `interrupt` are
+ * the runner's own, which acts on that pane for each write it makes, so none of them is wrapped in a second act here
+ * (an outer act would wait on the inner one and neither would settle); a hold the runner meets types NOTHING and is
+ * answered as its `RefusalCode`. The pane is read when the write is made, so a ferret that stopped since answers
+ * `no_pane`. Every answer is a closed code or a fixed shape: none carries pane text, a credential or an environment
+ * value — only `composer_occupied` carries the person's own draft, as today's refusal does.
  */
 export interface FerretHarness {
-  deliver(delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessRefusal>>;
+  /**
+   * Types one message. Answers its outcome, a {@link HarnessDeliveryRefusal} (nothing typed), or
+   * {@link HarnessUnconfirmed} (typed, not proven); rejects only for a failure the runner could not classify.
+   */
+  deliver(delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessDeliveryFailure>>;
   /**
    * Additive (U3): puts `text` into the ferret's BUSY pane's own queue (the runner's `queue`). Exactly like `deliver`, it
    * is NOT wrapped in a second act here: the runner acts on the pane for each write it makes, and an outer act would
-   * wait on the inner one so that neither ever settled. A runner that cannot queue answers `plugin_unavailable`.
+   * wait on the inner one so that neither ever settled. A runner that cannot queue answers `plugin_unavailable`; its
+   * other answers are `deliver`'s.
    */
-  queue(text: string): Promise<Result<QueueOutcome, HarnessRefusal>>;
-  /** The harness's interrupt (the runner's `signal(handle, 'interrupt')`), as the same kind of act. */
-  interrupt(): Promise<Result<true, HarnessRefusal>>;
+  queue(text: string): Promise<Result<QueueOutcome, HarnessDeliveryFailure>>;
+  /**
+   * Stops the current turn with the HARNESS's stop key (its `turnStop.key`, today's `Escape`; never the runner's raw
+   * `C-c`, which quits an idle Codex), pressed by the runner's `stopTurn` only under {@link shouldPressStopKey}: at a
+   * pane that shows active work, or an interactive ferret whose harness's key is harmless when idle. Refused
+   * `plugin_unavailable` when the harness names no stop or the runner cannot stop a turn; `no_pane` when the ferret has
+   * no live pane, or a pane that changed between the read and the press (nothing pressed); a hold as its `RefusalCode`,
+   * pressing nothing. The caller owns the refusals only it can make, and makes them BEFORE this is called (today's
+   * `interruptLocked`): a session whose last stop was never confirmed (`kill_failed`, the session layer's status), a
+   * pending structured question (a stop would answer it by accident), and a session with no running turn.
+   */
+  interrupt(): Promise<Result<HarnessInterrupted, HarnessRefusal>>;
   /**
    * The seam's own ferret's transcript through its harness, already masked (rejects with 503 while the harness is off).
    * It is bound to that ferret and names no other.

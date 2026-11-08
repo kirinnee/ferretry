@@ -1,8 +1,7 @@
 import { posix } from 'node:path';
 import type { AsksApi } from '@ferretry/core-asks/contract';
 import type { ChildEnvironment, VaultApi } from '@ferretry/core-vault/contract';
-import { targetRef } from '@ferretry/core-vault/contract';
-import type { ActRunner, FencedPath, HookDecision, InstructionEntry } from '@ferretry/kernel/contract';
+import type { FencedPath, HookDecision, InstructionEntry } from '@ferretry/kernel/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { KeyedSerialExecutor } from './serial.ts';
@@ -14,7 +13,10 @@ import type {
   FerretTurnAuthor,
   FerretTurnDocument,
   FerretTurns,
+  HarnessDeliveryFailure,
+  HarnessInterrupted,
   HarnessRefusal,
+  RunnerDeliveryFailure,
   MoveFailure,
   MoveOptions,
   ResumeOptions,
@@ -53,6 +55,7 @@ import {
   FerretRecordSchema,
   HARNESS_KEYS,
   REAL_HARNESS_REFUSED,
+  runnerDeliveryFailure,
   StartRefusalCodeSchema,
   type FerretDetails,
 } from '../../../contract/index.ts';
@@ -143,11 +146,6 @@ export interface FerretsPorts {
   summaryText?(ferret: FerretId): Promise<string | undefined>;
   /** The managed worktree registry's durable facts (`ManagedWorktreeService.records()`). Unbound: none. */
   managedWorktrees?(): Promise<readonly ManagedWorktreeSummary[]>;
-  /**
-   * `kernel.act` (§4.7): every write the harness seam makes goes through it, so Vault's input holds apply. Unbound,
-   * the seam refuses every write (`holds_unavailable`): it never writes around the act runner.
-   */
-  act?: ActRunner;
   /**
    * The moves module's flow (today's move of a session) for one ferret onto `runtime`. Its relaunch is a resume of this service
    * with `replaceLiveTerminal`. Unbound, a move answers `plugin_unavailable`.
@@ -943,25 +941,19 @@ export class FerretsService implements FerretsApi {
       return ok({ handle, runner });
     };
     /**
-     * An interrupt, as an act on the ferret's terminal pane (op `keys`, the target `terminal_send` uses), so Vault's
-     * input holds apply. Only `interrupt` is guarded here: `TmuxRunner.signal` sends `C-c` raw. A delivery is NOT
-     * wrapped again: the runner's own `deliver` acts on that same target and queue for each write, so an outer act would
-     * wait on the inner one and neither would ever settle.
+     * One of the runner's own writes (deliver, queue), answered as the closed failure its rejection carries. None is
+     * wrapped in an act here: the runner acts on the ferret's pane (op `keys`) for each write it makes, so an outer act
+     * would wait on the inner one and neither would ever settle. A rejection that carries no closed failure is a failure
+     * nobody could classify, and it rejects as it came.
      */
-    const act = async <T>(
-      write: (handle: RunnerHandle, runner: Runner) => Promise<T>,
-    ): Promise<Result<T, HarnessRefusal>> => {
-      const found = pane();
-      if (!found.ok) return found;
-      const { handle, runner } = found.value;
-      if (this.ports.act === undefined) return err({ refused: 'holds_unavailable' });
-      let done: { readonly value: T } | undefined;
-      const acted = await this.ports.act(targetRef('terminal', handle), 'keys', async () => {
-        done = { value: await write(handle, runner) };
-        return { status: 'done' as const };
-      });
-      if (!acted.ok) return err(acted.error);
-      return done === undefined ? err({ refused: 'target_gone' }) : ok(done.value);
+    const written = async <T>(write: () => Promise<T>): Promise<Result<T, HarnessDeliveryFailure>> => {
+      try {
+        return ok(await write());
+      } catch (error) {
+        const failure = runnerDeliveryFailure(error);
+        if (failure === undefined) throw error;
+        return err(harnessDeliveryFailure(failure));
+      }
     };
     const reader = (): TranscriptReader => {
       const record = this.registry.get(ferret);
@@ -971,23 +963,41 @@ export class FerretsService implements FerretsApi {
       return harness.transcript;
     };
     return {
-      deliver: async (delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessRefusal>> => {
+      deliver: async (delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessDeliveryFailure>> => {
         const found = pane();
         if (!found.ok) return found;
-        // The runner guards each write with kernel.act on this pane itself; a hold it meets rejects the delivery.
-        return ok(await found.value.runner.deliver(found.value.handle, delivery));
+        // The runner guards each write with kernel.act on this pane itself; a hold it meets types nothing.
+        return await written(async () => await found.value.runner.deliver(found.value.handle, delivery));
       },
-      queue: async (text: string): Promise<Result<QueueOutcome, HarnessRefusal>> => {
+      queue: async (text: string): Promise<Result<QueueOutcome, HarnessDeliveryFailure>> => {
         const found = pane();
         if (!found.ok) return found;
         const { handle, runner } = found.value;
-        if (runner.queue === undefined) return err({ refused: 'plugin_unavailable' });
+        const queue = runner.queue?.bind(runner);
+        if (queue === undefined) return err({ refused: 'plugin_unavailable' });
         // As `deliver`: the runner acts on this pane for each write it makes, so it is NOT wrapped in a second act here.
-        return ok(await runner.queue(handle, text));
+        return await written(async () => await queue(handle, text));
       },
-      interrupt: async () => {
-        const interrupted = await act((handle, runner) => runner.signal(handle, 'interrupt'));
-        return interrupted.ok ? ok(true as const) : interrupted;
+      interrupt: async (): Promise<Result<HarnessInterrupted, HarnessRefusal>> => {
+        const found = pane();
+        if (!found.ok) return found;
+        const { handle, runner } = found.value;
+        const record = this.registry.get(ferret);
+        // The harness names its own stop key; the runner's raw signal (`C-c`) is never the fallback: it quits Codex.
+        const stop = record === undefined ? undefined : this.ports.harness(record.harness)?.turnStop;
+        const stopTurn = runner.stopTurn?.bind(runner);
+        if (stop === undefined || stopTurn === undefined) return err({ refused: 'plugin_unavailable' });
+        // Today's `shouldPressStopKey`: idle, the key is pressed only at an interactive pane whose harness it cannot harm.
+        const whenIdle = record?.mode === 'interactive' && stop.safeWhenIdle;
+        try {
+          // As `deliver`: the runner acts on this pane for its one keystroke, so it is NOT wrapped in a second act here.
+          return ok(await stopTurn(handle, { key: stop.key, whenIdle }));
+        } catch (error) {
+          const failure = runnerDeliveryFailure(error);
+          if (failure?.kind === 'held') return err({ refused: failure.code });
+          if (failure?.kind === 'not_ready' && failure.why === 'exited') return err({ refused: 'no_pane' });
+          throw error;
+        }
       },
       // Bound to the ferret this seam was opened for: there is no target to name, so it cannot read another ferret's.
       transcript: {
@@ -1490,6 +1500,25 @@ export class FerretsService implements FerretsApi {
       ...(previous === undefined ? {} : { previous }),
       change,
     });
+  }
+}
+
+/**
+ * A runner's closed failure in the harness seam's words: a refusal (nothing typed) keeps its kind and fields, and a
+ * typed-but-unproven write becomes {@link HarnessUnconfirmed}, a different shape, so it is never read as a refusal.
+ */
+function harnessDeliveryFailure(failure: RunnerDeliveryFailure): HarnessDeliveryFailure {
+  switch (failure.kind) {
+    case 'not_ready':
+      return { refused: 'not_ready', why: failure.why };
+    case 'composer_occupied':
+      return { refused: 'composer_occupied', draft: failure.draft };
+    case 'composer_unreadable':
+      return { refused: 'composer_unreadable' };
+    case 'held':
+      return { refused: failure.code };
+    case 'unconfirmed':
+      return { unconfirmed: true, stranded: failure.stranded };
   }
 }
 
