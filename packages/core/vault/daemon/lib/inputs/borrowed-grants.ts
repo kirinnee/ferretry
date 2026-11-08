@@ -139,7 +139,7 @@ function followsPassword(password: PasswordWrite | undefined, target: GrantTarge
   );
 }
 
-class SignInGrantLedger {
+export class SignInGrantLedger {
   /** Per grant, per session: a standing rule fills for many sessions, and one session's steps never join another's. */
   readonly #attempts = new Map<string, Map<string, Attempt>>();
   readonly #pins = new Map<string, Map<string, string>>();

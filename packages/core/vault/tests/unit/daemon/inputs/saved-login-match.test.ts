@@ -5,6 +5,7 @@ import should from 'should';
 import {
   codeCardKeys,
   codeTargetProblem,
+  signInOfAt,
   remoteHostOf,
   type SavedListing,
   savedFieldFor,
@@ -649,5 +650,41 @@ describe('an account saved for ANOTHER site is only a second step, never the def
     should(saved.offers.map(offer => [offer.id, offer.matched, offer.elsewhere])).deepEqual([
       ['LIFTOFF_OKTA_COM', false, ['liftoff.okta.com']],
     ]);
+  });
+});
+
+describe('the sign-in an account has at a matched key', () => {
+  it('should find the account’s own sign-in at the key, and nothing for another account, another key or no key', () => {
+    const mine = site('GITHUB', ['github.com']);
+    const theirs = site('GITLAB', ['github.com']);
+    const world = listing([account('GITHUB'), account('GITLAB')], [mine, theirs]);
+
+    should(signInOfAt('GITHUB', 'github.com', world)).equal(mine);
+    should(signInOfAt('GITLAB', 'github.com', world)).equal(theirs);
+    should(signInOfAt('GITHUB', 'gitlab.com', world)).be.undefined();
+    should(signInOfAt('GITHUB', undefined, world)).be.undefined();
+    should(signInOfAt('UNKNOWN', 'github.com', world)).be.undefined();
+  });
+});
+
+describe('what a code button says about a key checked by use', () => {
+  it('should carry a worked or failed check on the key that has one, and nothing on a key never checked', () => {
+    const here = site('GITHUB', ['github.com']);
+    const worked = { ...SEEDED_KEY, id: 'tf_0000000000b1', label: 'Worked', verified: { worked: true, at: AT } };
+    const failed = { ...SEEDED_KEY, id: 'tf_0000000000b2', label: 'Failed', verified: { worked: false, at: AT } };
+    const fresh = { ...SEEDED_KEY, id: 'tf_0000000000b3', label: 'Fresh' };
+    const saved = savedFor(
+      'code',
+      'github.com',
+      listing([account('GITHUB', { factors: [worked, failed, fresh] })], [here]),
+      { codesHere: true },
+    );
+
+    const codes = saved.offers[0]?.codes ?? [];
+    should(Object.fromEntries(codes.map(key => [key.label, key.checked]))).eql({
+      Worked: 'worked',
+      Fresh: undefined,
+      Failed: 'failed',
+    });
   });
 });

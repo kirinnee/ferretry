@@ -686,3 +686,69 @@ describe('checked by use: did a code Ferretry made go through?', () => {
     ).be.undefined();
   });
 });
+
+describe('a terminal write that counts toward a standing rule’s history', () => {
+  const proved = (over: Record<string, unknown> = {}): InputTargetFacts =>
+    ({
+      ...terminal(),
+      program: 'sudo',
+      canonical: true,
+      trustedProgram: true,
+      ...over,
+    }) as InputTargetFacts;
+  const tapOn = async (facts: InputTargetFacts, extra: Partial<LoginDelivery> = {}) => {
+    const w = world({ shows: false });
+    await w.observer.delivered(
+      delivery({
+        target: { kind: 'terminal', key: 'dev' },
+        facts,
+        matchKey: 'sudo@kirin-box',
+        domains: [],
+        submitted: false,
+        by: 'device',
+        ...extra,
+      }),
+    );
+    return w.seen[0]?.observation;
+  };
+
+  it('should call the owner’s tap on a proved sudo prompt a tap', async () => {
+    should((await tapOn(proved()))?.tapped).equal(true);
+  });
+
+  it('should not call it a tap when any fact the matcher asks of a terminal grant fill is missing', async () => {
+    for (const facts of [
+      proved({ program: undefined }),
+      proved({ canonical: false }),
+      proved({ echo: 'on' }),
+      proved({ recognisedConsumer: false }),
+      proved({ trustedProgram: false }),
+      proved({ program: 'vim' }),
+    ])
+      should((await tapOn(facts))?.tapped).equal(false);
+  });
+
+  it('should say nothing about a tap for a write that is not the owner’s device, or that carries no password', async () => {
+    for (const by of ['plan', 'rule', 'host'] as const)
+      should(await tapOn(proved(), { by })).not.have.property('tapped');
+    should(await tapOn(proved(), { by: undefined })).not.have.property('tapped');
+    should(await tapOn(proved(), { fields: [field('code')] })).not.have.property('tapped');
+  });
+
+  it('should say nothing about a tap when the ferret acted on a terminal after the card was raised', async () => {
+    const w = world({ shows: false });
+    w.observer.acted('s1', 'terminal');
+    await w.observer.delivered(
+      delivery({
+        target: { kind: 'terminal', key: 'dev' },
+        facts: proved(),
+        matchKey: 'sudo@kirin-box',
+        domains: [],
+        submitted: false,
+        by: 'device',
+        since: 0,
+      }),
+    );
+    should(w.seen[0]?.observation).not.have.property('tapped');
+  });
+});
