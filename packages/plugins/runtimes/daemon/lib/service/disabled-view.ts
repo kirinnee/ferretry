@@ -8,7 +8,7 @@ import { type Disabled, disabledUntilMs } from '../account/disabled.ts';
 import type { RuntimeDisable } from '../account/disabled-runtime.ts';
 
 /** One block as the wire shows it, from the switch `source` it sits on. */
-export function disabledOf(block: Disabled, source: DisabledView['source']): DisabledView {
+function disabledOf(block: Disabled, source: DisabledView['source']): DisabledView {
   const until = disabledUntilMs(block.until);
   return {
     ...(block.reason === undefined ? {} : { reason: block.reason }),

@@ -18,6 +18,10 @@ export const PHRASE_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
   ['browser proxy', 'a real HTTP proxy the browser goes through; not a relay (docs/browser-proxy.md)'],
   ['routing prompt', 'the one text Pack mode picks helper models with (docs/pack-mode.md); not a message to a ferret'],
   ['firewall timer', 'a systemd .timer unit that runs the loopback-firewall verify unit; not a job'],
+  [
+    'its own credential',
+    "the ferret's own session credential that `fy session revoke-credential` (V-0434, R-0364) cuts off, today's verb name kept by parity; not a Vault secret (use, never read)",
+  ],
 ]);
 
 const BOUNDARY_BEFORE = '(^|[^\\p{L}\\p{N}_-])';

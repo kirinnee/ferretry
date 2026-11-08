@@ -132,7 +132,7 @@ export const LINK_TOO_BIG_SENTENCE = 'This is too large to share as a link. Expo
 // ── Expiry and caps ──────────────────────────────────────────────────────────────────────────────
 
 export const CATALOG_LINK_EXPIRIES = ['15m', '1h', '3h', '8h', '1d', '7d', '30d', 'never'] as const;
-export const CatalogLinkExpirySchema = z.enum(CATALOG_LINK_EXPIRIES);
+const CatalogLinkExpirySchema = z.enum(CATALOG_LINK_EXPIRIES);
 export type CatalogLinkExpiry = z.infer<typeof CatalogLinkExpirySchema>;
 
 /** A one-time link ends within a day, as a share code does; the default is an hour. */
@@ -189,8 +189,6 @@ export const CATALOG_LINK_REFUSALS = [
   'signing_unavailable',
 ] as const;
 export const CatalogLinkRefusalSchema = z.enum(CATALOG_LINK_REFUSALS);
-export type CatalogLinkRefusal = z.infer<typeof CatalogLinkRefusalSchema>;
-
 /** What a link serves: one exact version of one item, by the digest the preview showed. */
 const ItemByVersionSchema = z.strictObject({
   itemId: SharedCatalogItemIdSchema,
@@ -264,8 +262,6 @@ export type UpdateCatalogLinkRequest = z.infer<typeof UpdateCatalogLinkRequestSc
 
 export const CATALOG_LINK_STATES = ['pending', 'live', 'ending', 'used', 'expired', 'ended'] as const;
 export const CatalogLinkStateSchema = z.enum(CATALOG_LINK_STATES);
-export type CatalogLinkState = z.infer<typeof CatalogLinkStateSchema>;
-
 /**
  * One link as its owner sees it. NO URL, NO KEY, NO BUNDLE ID and no store address: the only wire that
  * carries a URL is {@link CreatedCatalogLinkSchema} (once) and {@link CatalogLinkUrlSchema} (Copy). `opens` is

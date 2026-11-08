@@ -27,9 +27,9 @@ import { z } from 'zod';
 /** Directly under the fleet directory. */
 export const EXPORT_KEYS_FILE = 'setup/export-keys.json';
 
-export const EXPORT_KEYS_VERSION = 1 as const;
+const EXPORT_KEYS_VERSION = 1 as const;
 
-export const ExportKeysSchema = z.strictObject({
+const ExportKeysSchema = z.strictObject({
   version: z.literal(EXPORT_KEYS_VERSION),
   /** `<kind>/<name>`, `profile/<name>` or `login/<id>` → the key it was given and what it held then. */
   items: z.record(

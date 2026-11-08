@@ -24,7 +24,7 @@ export interface RuntimeConfigWriter {
 }
 
 /** A write the host refused, in words a person can act on. Nothing was written. */
-export class RuntimeConfigRefusal extends Error {
+class RuntimeConfigRefusal extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'RuntimeConfigRefusal';

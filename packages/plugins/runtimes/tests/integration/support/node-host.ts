@@ -6,15 +6,7 @@
  */
 import { closeSync, constants, fchmodSync, fstatSync, openSync, readSync, writeSync } from 'node:fs';
 import { cp, lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
-import type {
-  CommandLocator,
-  FileIdentity,
-  HostEntry,
-  HostFiles,
-  ProvisionerDisk,
-  TextStore,
-} from '../../../daemon/adapters/ports.ts';
-import { atomicTextWrite } from './text-write.ts';
+import type { FileIdentity, HostEntry, HostFiles, ProvisionerDisk } from '../../../daemon/adapters/ports.ts';
 
 const missing = (error: unknown): boolean => {
   const code = (error as { code?: unknown } | undefined)?.code;
@@ -69,19 +61,6 @@ export const nodeHostFiles: HostFiles = {
     }
   },
 };
-
-/** {@link TextStore} over the real disk: a rename-into-place write. */
-export const nodeTextStore: TextStore = {
-  read: async path => (await nodeHostFiles.readText(path)) ?? null,
-  write: async (path, text) => {
-    await atomicTextWrite(path, text);
-  },
-};
-
-/** {@link CommandLocator} that finds the named commands and nothing else. */
-export const fixedCommands = (found: Readonly<Record<string, string>>): CommandLocator => ({
-  which: name => found[name],
-});
 
 const READ_PROOF = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 

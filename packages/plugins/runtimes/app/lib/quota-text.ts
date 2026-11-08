@@ -32,7 +32,7 @@ export function quotaResetsIn(at: number | undefined, now: number): string | nul
   return `${Math.round(hours / 24)}d`;
 }
 
-export type QuotaTone = 'muted' | 'warn' | 'err';
+type QuotaTone = 'muted' | 'warn' | 'err';
 
 /** One fact of a runtime's quota: the words on the chip and, on hover, when it resets. */
 export interface QuotaPart {

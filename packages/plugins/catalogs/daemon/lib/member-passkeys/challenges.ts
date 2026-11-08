@@ -12,7 +12,7 @@ export interface StepUpSubject {
 
 const key = (subject: StepUpSubject): string => `${subject.deviceId}\u0000${subject.appSession}`;
 
-export type SpentProofStepUpAct = Exclude<EveryCallerStepUpAct, StoredProofStepUpAct>;
+type SpentProofStepUpAct = Exclude<EveryCallerStepUpAct, StoredProofStepUpAct>;
 
 export type ChallengeStamp =
   | { readonly kind: 'act'; readonly act: MachineSkippableStepUpAct }

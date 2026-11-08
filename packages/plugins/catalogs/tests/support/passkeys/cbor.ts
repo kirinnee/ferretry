@@ -19,7 +19,7 @@ export type CborValue = number | string | boolean | null | Uint8Array | readonly
 export type CborMap = ReadonlyMap<number | string, CborValue>;
 
 /** Deeper nesting than this is refused; neither document the verifier reads nests past three. */
-export const MAX_CBOR_DEPTH = 8;
+const MAX_CBOR_DEPTH = 8;
 
 /** A decoded item and the offset of the first byte after it. */
 export interface CborItem {

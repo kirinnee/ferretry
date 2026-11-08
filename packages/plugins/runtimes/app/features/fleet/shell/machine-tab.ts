@@ -1,3 +1,4 @@
+import type { FileEditorProps } from '../profiles/profile-editor.tsx';
 import type { MachineView } from '../../../../contract/index.ts';
 import type { LiveRuntimesClient } from '../../../lib/client.ts';
 
@@ -18,7 +19,5 @@ export interface MachineTabProps {
   /** Read the machine again after a change that moved what it says about itself (its default runtime). */
   readonly onRefresh?: () => void;
   /** The editor for a config file, drawn by whoever owns it; absent: a profile's file is named but not editable here. */
-  readonly renderFileEditor?: (
-    editor: import('../profiles/profile-editor.tsx').FileEditorProps,
-  ) => import('react').ReactNode;
+  readonly renderFileEditor?: (editor: FileEditorProps) => import('react').ReactNode;
 }

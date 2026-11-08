@@ -37,7 +37,7 @@ import type { MemberAuditSink } from './ports.ts';
 import type { LiveMemberSessions } from './sessions.ts';
 import { CATALOG_MEMBER_STATUS, CatalogMemberRefusal } from './refusal.ts';
 import type { CatalogMemberService, MemberAccess } from './service.ts';
-export interface SharedCatalogReader {
+interface SharedCatalogReader {
   catalogs(): Promise<readonly { readonly id: string; readonly name: string; readonly revision: number }[]>;
   signedManifest(catalogId: string): Promise<SignedCatalogManifest>;
   versionsRevision(catalogId: string, itemId: string): Promise<number>;
@@ -45,7 +45,7 @@ export interface SharedCatalogReader {
   frozenItem(catalogId: string, itemId: string, version: number): Promise<SharedCatalogItem>;
 }
 
-export type SharedPublisher = Pick<MemberJoinedResponse, 'daemonId' | 'daemonName' | 'carriers'>;
+type SharedPublisher = Pick<MemberJoinedResponse, 'daemonId' | 'daemonName' | 'carriers'>;
 
 export interface SharedRouteDeps {
   readonly members: Pick<
@@ -62,7 +62,7 @@ export interface SharedRouteDeps {
   readonly now: () => number;
 }
 
-export interface SharedRouteContext {
+interface SharedRouteContext {
   readonly request: ApiRequest;
   readonly params: RouteParameters;
   readonly access: MemberAccess;

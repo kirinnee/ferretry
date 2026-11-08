@@ -19,7 +19,7 @@
  */
 
 /** A preset's clues, as a preset file declares them under `detect:`. */
-export interface DetectClues {
+interface DetectClues {
   readonly hosts: readonly string[];
   readonly variables: readonly string[];
   readonly keyPrefixes: readonly string[];
@@ -32,10 +32,10 @@ export interface DetectablePreset {
 }
 
 /** Which CLI a variable speaks to. */
-export type DetectedHarness = 'claude' | 'codex';
+type DetectedHarness = 'claude' | 'codex';
 
 /** One thing that pointed at the provider: a variable by its NAME, and how. */
-export type DetectionClue =
+type DetectionClue =
   | { readonly kind: 'host'; readonly variable: string; readonly host: string }
   | { readonly kind: 'variable'; readonly variable: string }
   | { readonly kind: 'key-prefix'; readonly variable: string };

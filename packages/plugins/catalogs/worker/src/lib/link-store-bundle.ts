@@ -28,7 +28,7 @@ import { bundleLimits, chunkEnvelope } from './link-store-shards.ts';
 
 type Row = NonNullable<ReturnType<LinkStoreState['bundles']['get']>>;
 /** The row as persisted: the envelope is chunked into rows of its own. */
-export type StoredRow = Omit<Row, 'envelope'>;
+type StoredRow = Omit<Row, 'envelope'>;
 
 export interface BundleDoc {
   readonly row: StoredRow;

@@ -70,7 +70,7 @@ import {
  * - `unreadable` — something is there that could not be read (a locked keychain, a damaged file).
  * - `not-shareable` — a login may exist but cannot be shared in place (Codex on a keyring, G5).
  */
-export type HostLoginState = 'signed-in' | 'refresh-due' | 'not-signed-in' | 'unreadable' | 'not-shareable' | 'unknown';
+type HostLoginState = 'signed-in' | 'refresh-due' | 'not-signed-in' | 'unreadable' | 'not-shareable' | 'unknown';
 
 export interface HostLogin {
   readonly state: HostLoginState;
@@ -117,13 +117,13 @@ export interface HostHarnessScan {
 }
 
 /** The format each harness writes its settings in. */
-export const HOST_SETTINGS_FORMAT: Readonly<Record<HarnessKind, SettingsFormat>> = {
+const HOST_SETTINGS_FORMAT: Readonly<Record<HarnessKind, SettingsFormat>> = {
   claude: 'json',
   codex: 'toml',
 };
 
 /** What each harness calls its instructions document. */
-export const HOST_INSTRUCTIONS_NAME: Readonly<Record<HarnessKind, string>> = {
+const HOST_INSTRUCTIONS_NAME: Readonly<Record<HarnessKind, string>> = {
   claude: 'CLAUDE.md',
   codex: 'AGENTS.md',
 };
@@ -131,7 +131,7 @@ export const HOST_INSTRUCTIONS_NAME: Readonly<Record<HarnessKind, string>> = {
 // ── What comes out ───────────────────────────────────────────────────────────────────────────────
 
 /** A file the setup executor writes into the asset tree, relative to `<FY_HOME>/fleet/assets`. */
-export type ImportFile =
+type ImportFile =
   | { readonly kind: 'write'; readonly path: string; readonly content: string }
   /** A whole folder copied from the host (a skill). `from` is absolute. */
   | { readonly kind: 'copy-directory'; readonly path: string; readonly from: string };
@@ -140,7 +140,7 @@ export type ImportFile =
  * One value moved into Ferretry's secret store. THE ONLY place a value travels; it is never in a
  * preview, a note, a warning, a record or a component.
  */
-export interface ImportedSecret {
+interface ImportedSecret {
   readonly name: string;
   readonly value: string;
   /** Where it was found, as `<reference> · <key>` — names only. */
@@ -148,13 +148,13 @@ export interface ImportedSecret {
 }
 
 /** A sentence about one harness's import, for the result screen (E4–E9). */
-export interface ImportNote {
+interface ImportNote {
   readonly harness: HarnessKind;
   readonly text: string;
 }
 
 /** What one import made a component from, so Import again can tell whether its source changed. */
-export interface ImportRecordEntry {
+interface ImportRecordEntry {
   readonly sources: readonly string[];
   readonly digest: string;
 }
@@ -178,7 +178,7 @@ export interface ImportRecord {
 export const EMPTY_IMPORT_RECORD: ImportRecord = { version: 1, components: {} };
 
 /** One component whose source changed since the last import (O6). Offered, never applied. */
-export interface ImportUpdate {
+interface ImportUpdate {
   readonly reference: LayerReferenceText;
   readonly sources: readonly string[];
   /** The component as the source says now, and the files it needs. */
@@ -189,7 +189,7 @@ export interface ImportUpdate {
 }
 
 /** A runtime the import did not create because one already uses that login and profile (E15). */
-export interface ImportDuplicate {
+interface ImportDuplicate {
   readonly harness: HarnessKind;
   readonly existing: string;
   /** The name it would have had, so "Add another anyway" can create it. */
@@ -197,7 +197,7 @@ export interface ImportDuplicate {
 }
 
 /** One component of any kind, as the plan carries it. */
-export type ImportedComponent =
+type ImportedComponent =
   | { readonly kind: 'instructions'; readonly name: string; readonly value: InstructionsComponent }
   | { readonly kind: 'mcp'; readonly name: string; readonly value: McpComponent }
   | { readonly kind: 'skills'; readonly name: string; readonly value: SkillsComponent }
@@ -206,7 +206,7 @@ export type ImportedComponent =
   | { readonly kind: 'modelSets'; readonly name: string; readonly value: ModelSetComponent };
 
 /** The value-free preview the scan route serves (§7 `/v1/fleet/setup/scan`). */
-export interface HarnessImportPreview {
+interface HarnessImportPreview {
   readonly harness: HarnessKind;
   readonly installed: boolean;
   readonly account: HostLogin;
@@ -222,7 +222,7 @@ export interface HarnessImportPreview {
   readonly problems: readonly string[];
 }
 
-export interface ImportPreview {
+interface ImportPreview {
   readonly harnesses: readonly HarnessImportPreview[];
   /**
    * Whether `CLAUDE.md` and `AGENTS.md` say the same thing: `undefined` unless both were found.
@@ -269,7 +269,7 @@ export interface ImportOptions {
 // ── Names ────────────────────────────────────────────────────────────────────────────────────────
 
 /** The names an import gives what it makes. */
-export const IMPORT_NAMES = {
+const IMPORT_NAMES = {
   /** One generic instructions component, when `CLAUDE.md` and `AGENTS.md` match (E9). */
   sharedInstructions: 'main',
   /** The profile that matches the person's setup. */
@@ -287,7 +287,7 @@ const harnessNamed = (harness: HarnessKind, what: string): string => `${harness}
  * setup was found, before any `-2` a clash adds. Exported because help text names it as the example,
  * and an example spelled by hand drifted to a name no import ever created.
  */
-export const importedRuntimeName = (harness: HarnessKind, profile: string): string => harnessNamed(harness, profile);
+const importedRuntimeName = (harness: HarnessKind, profile: string): string => harnessNamed(harness, profile);
 
 /** The asset-tree path of a component's file (§5.3). */
 export const componentFilePath = (kind: ComponentKind, name: string, extension: string): string =>

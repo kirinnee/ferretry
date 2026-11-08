@@ -4,7 +4,7 @@
  * Worker is deployed apart from the relay and imports no code from it; these are the Cloudflare shapes, typed.
  */
 
-export interface HostedRelayControlStorageRead {
+interface HostedRelayControlStorageRead {
   get<T>(key: string): Promise<T | undefined>;
   list<T>(options: {
     readonly prefix: string;

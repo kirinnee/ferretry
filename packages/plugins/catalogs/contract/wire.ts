@@ -32,7 +32,6 @@ export const CatalogShareCodeSchema = z
 export type CatalogShareCode = z.infer<typeof CatalogShareCodeSchema>;
 
 export const CatalogLinkIdSchema = z.string().regex(/^lnk_[A-Za-z0-9_-]{22}$/u, 'invalid link id');
-export type CatalogLinkId = z.infer<typeof CatalogLinkIdSchema>;
 export const LinkBundleIdSchema = z.string().regex(/^[A-Za-z0-9_-]{22}$/u, 'invalid link bundle id');
 
 export const CatalogInstallPreviewIdSchema = z.string().regex(/^cip_[A-Za-z0-9_-]{22}$/u, 'invalid install preview id');

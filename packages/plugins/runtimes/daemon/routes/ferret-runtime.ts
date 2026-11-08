@@ -34,7 +34,7 @@ export interface FerretRuntimeSubsystem {
   models(id: string): Promise<unknown>;
   control(id: string, request: RuntimeControlRequest, requestId: string): Promise<unknown>;
 }
-export const unavailableFerretRuntime: FerretRuntimeSubsystem = {
+const unavailableFerretRuntime: FerretRuntimeSubsystem = {
   models: async () => {
     throw new SessionRuntimeError('catalog_unavailable', 'Runtime model discovery is not connected to Ferrets yet.');
   },

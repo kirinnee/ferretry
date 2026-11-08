@@ -42,7 +42,7 @@ const InstantSchema = z.iso.datetime({ offset: true });
 /** Directly under the fleet directory, beside `setup/import.json`. */
 export const CLONE_BASE_FILE = 'setup/clone-base.json';
 
-export const CLONE_BASE_VERSION = 1 as const;
+const CLONE_BASE_VERSION = 1 as const;
 /** Machines this one remembers. */
 export const CLONE_BASE_SOURCES_LIMIT = 32;
 /** Items remembered per source. */
@@ -59,14 +59,12 @@ const Sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/u, 'a sha256 digest');
 export const CloneSourceIdSchema = NonEmptyStringSchema.max(200).refine(id => id !== '__proto__', 'not an id');
 
 const CloneBaseKindSchema = z.enum([...COMPONENT_KINDS, 'profile', 'runtime', 'login']);
-export type CloneBaseKind = z.infer<typeof CloneBaseKindSchema>;
-
 const CloneBaseFileSchema = z.strictObject({
   digest: Sha256HexSchema,
   bytes: z.number().int().nonnegative(),
 });
 
-export const CloneBaseItemSchema = z.strictObject({
+const CloneBaseItemSchema = z.strictObject({
   kind: CloneBaseKindSchema,
   /** What the source called it. A hint for the screen; nothing is matched against it. */
   sourceName: NonEmptyStringSchema.max(200),
@@ -86,7 +84,7 @@ export const CloneBaseItemSchema = z.strictObject({
 });
 export type CloneBaseItem = z.infer<typeof CloneBaseItemSchema>;
 
-export const CloneBaseSourceSchema = z.strictObject({
+const CloneBaseSourceSchema = z.strictObject({
   /** Display only. */
   name: z.string().max(120),
   /** Whether the id was verified by the browser that did the copy, or is only what the source said of itself. */
@@ -122,7 +120,7 @@ export const CloneBaseSourceSchema = z.strictObject({
 });
 export type CloneBaseSource = z.infer<typeof CloneBaseSourceSchema>;
 
-export const CloneBaseSchema = z.strictObject({
+const CloneBaseSchema = z.strictObject({
   version: z.literal(CLONE_BASE_VERSION),
   sources: z
     .record(CloneSourceIdSchema, CloneBaseSourceSchema)

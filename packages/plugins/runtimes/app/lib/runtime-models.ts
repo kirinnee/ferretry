@@ -37,7 +37,7 @@ export interface RuntimeModelCatalog {
   readonly catalog?: { readonly id: string; readonly label: string; readonly customIds: boolean };
 }
 
-export class DaemonResponseError extends Error {
+class DaemonResponseError extends Error {
   constructor(
     readonly status: number,
     message: string,

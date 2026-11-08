@@ -12,7 +12,7 @@
 import { join } from 'node:path';
 import type { HarnessKind } from './manifest.ts';
 
-export type SharedHistoryEntryType = 'directory' | 'file';
+type SharedHistoryEntryType = 'directory' | 'file';
 
 export interface SharedHistoryHome {
   /** Stable, path-safe account identity used only to partition preserved conflicts. */
@@ -28,7 +28,7 @@ export interface SharedHistoryRequest {
   readonly homes: readonly SharedHistoryHome[];
 }
 
-export type SharedHistoryChange =
+type SharedHistoryChange =
   | {
       readonly kind: 'create-pooled-entry';
       readonly path: string;
@@ -53,7 +53,7 @@ export type SharedHistoryChange =
   | { readonly kind: 'already-shared'; readonly path: string; readonly target: string };
 
 /** One account home that could not be observed, and therefore has no plan of its own. */
-export interface SharedHistoryRefusal {
+interface SharedHistoryRefusal {
   readonly account: string;
   /** The account home exactly as it was configured. */
   readonly home: string;
@@ -91,7 +91,7 @@ export interface SharedHistoryPreview {
 }
 
 /** `<fleet>/shared`, the directory every harness pool lives under. */
-export function sharedHistoryPoolRoot(fleetDirectory: string): string {
+function sharedHistoryPoolRoot(fleetDirectory: string): string {
   return join(fleetDirectory, 'shared');
 }
 

@@ -53,10 +53,10 @@ import { crypto, publish, type Published } from '../../support/catalog-fixtures.
 export const GOVERNANCE = { governed: false } as unknown as CallerGovernance;
 export const STEP_UP: FreshStepUpContext = { claim: () => false, agent: false };
 export const ROOT = '/work/app';
-export const CALLER: CatalogCaller = { id: 'device:dev_a', mayListSecrets: true };
+const CALLER: CatalogCaller = { id: 'device:dev_a', mayListSecrets: true };
 
 /** The service as ONE caller sees it: the caller is fixed, so a case reads as the two steps it is. */
-export class AsCaller {
+class AsCaller {
   constructor(
     private readonly inner: CatalogInstallService,
     readonly caller: CatalogCaller,
@@ -144,7 +144,7 @@ class FakeMcpFiles implements McpProjectFiles {
 }
 
 /** A folder store that hashes like the real adapter, so the service compares real hashes. */
-export class FakeFolders {
+class FakeFolders {
   readonly folders = new Map<string, Map<string, string>>();
   refuse: string | undefined;
   fail: Error | undefined;
@@ -234,7 +234,7 @@ const asStored = (component: FakeComponent | undefined): unknown =>
         ...(component.installedFrom === undefined ? {} : { installedFrom: component.installedFrom }),
       };
 
-export class FakeFleet {
+class FakeFleet {
   readonly proposed: (FleetAccountChange | FleetCatalogInstallChange)[] = [];
   readonly applied: string[] = [];
   readonly components = new Map<'mcp' | 'skills', FakeComponent[]>([

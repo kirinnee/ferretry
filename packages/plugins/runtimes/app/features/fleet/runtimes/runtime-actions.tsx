@@ -160,7 +160,7 @@ export function RuntimeActionsMenu({ runtime, refusal, onRename, onRemove, onMak
 }
 
 /** "Move 2 ferrets to claude-agent and remove codex-default" says exactly what it does, so it wraps rather than clips. */
-export const WRAPPING_SUBMIT = '!h-auto min-h-control !whitespace-normal py-2 text-center';
+const WRAPPING_SUBMIT = '!h-auto min-h-control !whitespace-normal py-2 text-center';
 
 // ── The dialog frame ─────────────────────────────────────────────────────────────────────────────
 
@@ -174,7 +174,7 @@ interface RuntimeDialogProps {
 }
 
 /** A sheet at the bottom on a phone, in thumb reach, and a centred dialog from `sm` up. */
-export function RuntimeDialog({ title, name, busy, onClose, children }: RuntimeDialogProps) {
+function RuntimeDialog({ title, name, busy, onClose, children }: RuntimeDialogProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
   const dismiss = useCallback(() => {

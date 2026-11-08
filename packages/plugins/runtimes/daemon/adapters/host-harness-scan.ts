@@ -39,7 +39,7 @@ import type { HarnessKind } from '../lib/manifest.ts';
 import type { HostEntry, HostFiles } from './ports.ts';
 
 /** Resolving a bare command name on this machine's `PATH`. The daemon's one harness locator. */
-export interface HostCommandResolver {
+interface HostCommandResolver {
   resolve(name: string): string | undefined;
 }
 

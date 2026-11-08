@@ -6,7 +6,7 @@
 import { type LoginList, LoginListSchema } from '@ferretry/plugin-logins/contract';
 import { type MachineView, type RuntimeCatalog, RuntimeCatalogSchema } from '../../../../../../contract/index.ts';
 import type { MachineData } from '../../../../../../app/features/fleet/runtimes/machine-data.ts';
-import { DATA, machine, RUNTIMES, type runtime } from '../account-support.ts';
+import { machine, RUNTIMES, type runtime } from '../account-support.ts';
 
 export const credentialsOf = (...items: Record<string, unknown>[]): LoginList =>
   LoginListSchema.parse({ format: 1, machine: 'studio-mac', logins: items });
@@ -27,5 +27,3 @@ export const withRuntime = (base: MachineData, ...made: ReturnType<typeof runtim
 /** What the shell's client throws for an answer of 4xx: the daemon's sentence, with its status and code. */
 export const refusal = (message: string, status: number, code: string): Error =>
   Object.assign(new Error(message), { status, code });
-
-export { DATA };

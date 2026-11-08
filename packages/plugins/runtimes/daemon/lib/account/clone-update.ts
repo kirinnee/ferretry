@@ -1156,7 +1156,7 @@ export function cloneBaseFor(record: CloneBase, source: CloneSourceIdentity | un
  * sentence when the set cannot be applied. `both` has no default, so a `both` item with no decision
  * refuses the update and says which.
  */
-export function resolveCloneDecisions(
+function resolveCloneDecisions(
   analysis: CloneAnalysis,
   given: CloneDecisions,
   skip: readonly string[] = [],

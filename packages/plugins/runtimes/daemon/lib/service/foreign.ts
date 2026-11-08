@@ -11,7 +11,7 @@
 import type { z } from 'zod';
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import type { HarnessKind } from '../manifest.ts';
-import { type BrowserModeSchema, type BrowserPortsSettingSchema, ORIGIN_KEY_PATTERN } from '../../../contract/index.ts';
+import { type BrowserModeSchema, type BrowserPortsSettingSchema } from '../../../contract/index.ts';
 
 /** A runtime's old name and its new one (the edits that re-point every other file that names it). */
 // GAP(kernel): `fleet/src/lib/config-files/render.ts`.
@@ -24,53 +24,6 @@ export interface RuntimeRename {
 
 // GAP(kernel): `fleet/src/lib/config-files/secrets.ts` (the config layer refuses a raw secret in a file; a change that
 // would write one is refused here first, with the same test).
-
-const KNOWN_SHAPES: readonly RegExp[] = [
-  /\bsk-ant-[A-Za-z0-9_-]{8,}/u,
-  /\bsk-or-[A-Za-z0-9_-]{8,}/u,
-  /\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}/u,
-  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/u,
-  /\bgh[pousr]_[A-Za-z0-9]{20,}/u,
-  /\bgithub_pat_[A-Za-z0-9_]{20,}/u,
-  /\bxox[abprs]-[A-Za-z0-9-]{10,}/u,
-  /\bgsk_[A-Za-z0-9]{20,}/u,
-  /\bcsk-[A-Za-z0-9]{20,}/u,
-  /\bAIza[0-9A-Za-z_-]{30,}/u,
-  /\bglpat-[A-Za-z0-9_-]{16,}/u,
-];
-const CREDENTIAL_KEY = /(?:(?:key|token|secret|password|passwd)s?|credentials?)$/iu;
-const REFERENCE = /^\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)$/u;
-const MIN_SECRET_LENGTH = 16;
-const ENTROPY_THRESHOLD = 3.5;
-const ORIGIN_KEY_FIELD = 'clonedFromKey';
-
-function shannonEntropy(value: string): number {
-  const characters = [...value];
-  const counts = new Map<string, number>();
-  for (const character of characters) counts.set(character, (counts.get(character) ?? 0) + 1);
-  let bits = 0;
-  for (const count of counts.values()) {
-    const p = count / characters.length;
-    bits -= p * Math.log2(p);
-  }
-  return bits;
-}
-
-/** Whether `value`, found under `key`, looks like a raw secret. It never repeats the value. */
-export function looksLikeRawSecret(
-  key: string | number | undefined,
-  value: string,
-  options: { readonly topLevel?: boolean } = {},
-): boolean {
-  if (KNOWN_SHAPES.some(shape => shape.test(value))) return true;
-  if (typeof key !== 'string' || !CREDENTIAL_KEY.test(key)) return false;
-  if (options.topLevel === true && key === ORIGIN_KEY_FIELD && ORIGIN_KEY_PATTERN.test(value)) return false;
-  const trimmed = value.trim();
-  if (REFERENCE.test(trimmed) || trimmed.length < MIN_SECRET_LENGTH || /\s/u.test(trimmed)) return false;
-  // A path or a URL under a "...key" name (a key file, a JWKS endpoint) is where a secret is, not one.
-  if (/^(?:[a-z][a-z0-9+.-]*:\/\/|[/~.])/iu.test(trimmed)) return false;
-  return shannonEntropy(trimmed) >= ENTROPY_THRESHOLD;
-}
 
 // ── the harness ──────────────────────────────────────────────────────────────────────────────────
 
@@ -119,20 +72,6 @@ export const SESSION_STATUSES = [
   'stopped',
 ] as const;
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
-
-/** Ferrets' four states onto the status words: a `stopped` ferret is not running; the rest are. */
-export function sessionStatusOf(state: 'starting' | 'working' | 'idle' | 'stopped'): SessionStatus {
-  switch (state) {
-    case 'starting':
-      return 'starting';
-    case 'working':
-      return 'running';
-    case 'idle':
-      return 'waiting';
-    case 'stopped':
-      return 'stopped';
-  }
-}
 
 // ── the browser settings a machine change carries ────────────────────────────────────────────────
 

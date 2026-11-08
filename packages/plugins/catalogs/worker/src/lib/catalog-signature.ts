@@ -47,7 +47,7 @@ import { publicKeyMatchesDaemonId } from '../kernel-wire/index.ts';
 export { CATALOG_LINK_SIGNATURE_LABEL, CATALOG_MANIFEST_SIGNATURE_LABEL, CATALOG_VERSIONS_SIGNATURE_LABEL };
 
 /** Why a catalog did not verify. Each is a different sentence for the person. */
-export type CatalogVerificationRefusal =
+type CatalogVerificationRefusal =
   | 'signature_invalid'
   | 'item_mismatch'
   | 'not_canonical'
@@ -72,7 +72,7 @@ const canonicalBytes = (document: unknown): Uint8Array | null => {
 };
 
 /** An item's canonical text with its digest and size: the one place they are derived. `null` when it has no one spelling. */
-export async function catalogItemCanonical(
+async function catalogItemCanonical(
   crypto: SessionCrypto,
   item: SharedCatalogItem,
 ): Promise<{ readonly text: string; readonly digest: CatalogDigest; readonly size: number } | null> {
