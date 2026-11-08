@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { AdmissionPort, type Admission } from '../../../contract/bound.ts';
 import { defineEvent, definePort, defineState } from '../../../contract/define.ts';
 import { jsonResponse } from '../../../contract/http.ts';
-import { DoctorChecks } from '../../../contract/kernel.ts';
+import { DoctorChecks, SESSION_CREDENTIAL_FEATURE } from '../../../contract/kernel.ts';
 import { milliseconds } from '@ferretry/std';
 import { bootHost, type RunningHost } from '../../../host/host.ts';
 import { realAdapters } from '../../../host/wiring.ts';
@@ -256,12 +256,17 @@ describe('boot (§7.6)', () => {
     expect(admission.asked).toEqual(['route GET /v1/board', 'route GET /v1/agenda', 'route GET /v1/voice']);
   });
 
-  test('GET /v1/health answers the protocol and version pre-auth; /v1/plugins without a projection shows core only', async () => {
+  test('R-0097 GET /v1/health answers exactly the protocol, version and session.credential.1 pre-auth; /v1/plugins under a keep-everything projection lists every plugin', async () => {
     const host = await boot(
       await freshHome(),
       recordingAdmission(path => path === '/v1/health'),
     );
-    expect(body(await host.dispatch(request('GET', '/v1/health')))).toEqual({ protocol: 1, version: '5.0.0' });
+    // The whole unauthenticated answer, strictly: any new key leaking into it (a token, a digest, anything) fails here.
+    const health = body(await host.dispatch(request('GET', '/v1/health')));
+    expect(health).toStrictEqual({ protocol: 1, version: '5.0.0', features: [SESSION_CREDENTIAL_FEATURE] });
+    // A fy from before 5.0 reads this name to know a 401 here is the answer, never a reason to open the admin token.
+    expect((health as { features: string[] }).features).toContain('session.credential.1');
+    expect(JSON.stringify(health)).not.toMatch(/token|digest|fys_|secret/i);
     const permissive = await boot(await freshHome());
     const inventory = body(await permissive.dispatch(request('GET', '/v1/plugins'))) as { plugins: { id: string }[] };
     expect(inventory.plugins.map(plugin => plugin.id).sort()).toEqual(['agenda', 'board', 'gate', 'kernel', 'voice']);
