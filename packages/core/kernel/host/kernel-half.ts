@@ -109,12 +109,16 @@ export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<Kernel
     ...configRoutes(sources.config),
     'GET /v1/config/status': async () => jsonResponse(configStatusView(sources.agentConfig)),
     'POST /v1/agent/config': async call => {
-      const body = await parseBody(call.request, AgentConfigCallSchema, { maxBytes: 2 * 256 * 1024 });
-      // The route is served without a credential; the tool it names admits the caller, as the tool door would.
-      const tool = AGENT_CONFIG_TOOL_OF[body.tool];
-      const decision = sources.admitTool(tool, call.request);
+      // The route is served without a credential, so the CALLER is admitted before the body is read (today's order: no
+      // credential 401, an unknown one 403, whatever the body). The tool is known only from the body, but the three share
+      // one declaration shape (a test pins it), so `config_read`'s declaration admits for all of them.
+      const decision = sources.admitTool(AGENT_CONFIG_TOOL_OF['config.read'], call.request);
       if (decision.outcome === 'refused') return decision.response;
-      return jsonResponse(await agentConfig(sources.agentConfig).run(body, decision.standing));
+      // Then the ferret and the owner's switch, still before the body (today's order: credential, switch, body).
+      const door = agentConfig(sources.agentConfig);
+      await door.authorize(decision.standing);
+      const body = await parseBody(call.request, AgentConfigCallSchema, { maxBytes: 2 * 256 * 1024 });
+      return jsonResponse(await door.act(body));
     },
     'GET /v1/health': async () => jsonResponse({ protocol: PROTOCOL, version: sources.version } satisfies Health),
     'GET /healthz': async () => {

@@ -54,6 +54,7 @@ import {
   NO_AGENT_CONTROL,
 } from '../../../contract/index.ts';
 import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../tokens/tokens.ts';
+import { type LaunchEnvironmentRecord, recordedSwitches } from '../agent-control/launch-environment.ts';
 
 /**
  * THE FERRETS PORT (§2.2): who each ferret is and its state, and the launch pipeline. Starting and stopping are
@@ -69,15 +70,6 @@ import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../token
 /** Today's launch variables: the ferret's own bearer and id, read by `fy` inside the pane. */
 const FERRET_TOKEN_VARIABLE = 'FY_SESSION_TOKEN';
 const FERRET_ID_VARIABLE = 'FY_SESSION_ID';
-/** The launch variables `instructions` reports on: the mode and the four per-ferret section switches (never a secret). */
-const SECTION_SWITCH_VARIABLES = [
-  FERRET_ID_VARIABLE,
-  'FY_SESSION_MODE',
-  'FY_HYPERMEDIA',
-  'FY_PACK',
-  'FY_AGENDA',
-  'FY_LEARNING_PASSIVE',
-] as const;
 
 /** The reason a stop records when its caller gave none (today's lifecycle `defaultStopReason`). */
 const DEFAULT_STOP_REASON = 'stopped by client';
@@ -125,6 +117,8 @@ export interface FerretsPorts {
    * cannot be resolved. Unbound, no work folder is answered.
    */
   realPath?(ferret: FerretId, folder: string): Promise<string | undefined>;
+  /** Where a launch records the switches it handed the pane (`instructions` reads them back). Unbound: none is kept. */
+  launchEnvironment?: Pick<LaunchEnvironmentRecord, 'write'>;
   /** `limits.yaml` as it is now (the kernel's config port), read fresh for every agent-control answer. */
   limits?(): LimitsFile | undefined;
   /** Ferret id → the instant the owner pinned it (`agent-pins.json`). */
@@ -257,8 +251,6 @@ export const RENAME_HTTP: Readonly<Record<RenameFailure, { readonly status: numb
 export class FerretsService implements FerretsApi {
   /** Today's lifecycle gate: read the current record only after acquiring its key. */
   private readonly serial = new KeyedSerialExecutor();
-  /** What each ferret's current run launched with (see {@link FerretsService.launchedSwitches}); memory only. */
-  private readonly launchSwitches = new Map<FerretId, Readonly<Record<string, string>>>();
   /**
    * The pin-marked summary made from one registry summary, so the same summary with the same pin answers the same
    * object (R501: the fleet read reuses its body while nothing moved). Held weakly by the input summary.
@@ -1095,11 +1087,6 @@ export class FerretsService implements FerretsApi {
     return ok(home);
   }
 
-  /** The section switches the ferret's current run launched with; `undefined` when this daemon did not launch it (it was running before a restart). */
-  launchedSwitches(ferret: FerretId): Readonly<Record<string, string>> | undefined {
-    return this.launchSwitches.get(ferret);
-  }
-
   private async environment(
     ferret: FerretId,
     token: string,
@@ -1108,16 +1095,13 @@ export class FerretsService implements FerretsApi {
     const env: Record<string, string> = {};
     for (const part of parts) if (part.kind === 'env' || part.kind === 'shell') Object.assign(env, part.env);
     env[FERRET_ID_VARIABLE] = ferret;
-    // What this launch told the ferret, kept for `instructions`: a fact of THIS run, so a switch flipped since is not in it.
-    this.launchSwitches.set(
-      ferret,
-      Object.fromEntries(
-        SECTION_SWITCH_VARIABLES.flatMap(name => (env[name] === undefined ? [] : [[name, env[name]] as const])),
-      ),
-    );
     env[FERRET_TOKEN_VARIABLE] = token;
     const resolved = await this.ports.vault.childEnvironment(ferret, env);
-    return resolved.ok ? ok(resolved.value) : err(`unknown secrets: ${resolved.error.unknown.join(', ')}`);
+    if (!resolved.ok) return err(`unknown secrets: ${resolved.error.unknown.join(', ')}`);
+    // What this launch told the ferret, kept for `instructions` (persisted, so a restart changes no answer): only the
+    // switches, after the launch can no longer be refused. A store that fails never fails the launch.
+    await this.ports.launchEnvironment?.write(ferret, recordedSwitches(env)).catch(() => undefined);
+    return ok(resolved.value);
   }
 
   private async abandon(

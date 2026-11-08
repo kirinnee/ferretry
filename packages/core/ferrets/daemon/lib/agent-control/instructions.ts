@@ -3,16 +3,18 @@ import { instructionsReport, renderInstructionsReport } from '../../../contract/
 
 /**
  * Today's `instructions` tool: which of its own sections THIS ferret launched with, and how the owner turns each on.
- * The answer is for the ferret the session credential names, from the switches its launch recorded
- * (`FerretsService.launchedSwitches`) — the same variables the wrapper composed its prompt from, so it cannot disagree
- * with what the launch did. A caller that is no ferret, or one this daemon did not launch, gets today's own sentences
- * for those cases.
+ * The answer is for the ferret the session credential names, from the PERSISTED launch environment
+ * (`LaunchEnvironmentStore`, the one reader) — the same variables the wrapper composed its prompt from, so it cannot
+ * disagree with what the launch did, and a restart changes nothing. A caller that is no ferret, or one whose launch
+ * recorded no switches, gets today's own sentences for those cases.
  */
-export function instructionsAnswer(
+export async function instructionsAnswer(
   ferret: FerretId | undefined,
-  launched: (ferret: FerretId) => Readonly<Record<string, string>> | undefined,
+  launched: (ferret: FerretId) => Promise<Readonly<Record<string, string>>>,
   binary: string,
-): { readonly text: string } {
+): Promise<{ readonly text: string }> {
   if (ferret === undefined) return { text: renderInstructionsReport(instructionsReport({}), binary) };
-  return { text: renderInstructionsReport(instructionsReport({ FY_SESSION_ID: ferret, ...launched(ferret) }), binary) };
+  return {
+    text: renderInstructionsReport(instructionsReport({ ...(await launched(ferret)), FY_SESSION_ID: ferret }), binary),
+  };
 }

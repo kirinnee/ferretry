@@ -111,9 +111,18 @@ export interface ConfigWriteOptions {
    * owner, and neither Gate's judge nor anything else confirms it (NN2). The owner's writer never sets it.
    */
   readonly byPlugin?: true;
+  /**
+   * An AGENT's write (`config_write`): as untrusted as a plugin's own, so an edit that adds a `${secret:NAME}` reference
+   * is held for the owner and nothing confirms it (NN2). The owner's writer never sets it.
+   */
+  readonly byAgent?: true;
   /** A removal only: one that would be held is refused `would_hold`, with the file untouched and nothing held. */
   readonly refuseIfHeld?: true;
 }
+
+/** A write whose `${secret:NAME}` additions only the owner may make: a plugin's own, or an agent's. */
+const untrustedWrite = (writeOptions: ConfigWriteOptions): boolean =>
+  writeOptions.byPlugin === true || writeOptions.byAgent === true;
 
 export type ConfigWriteRefusal = ConfigRefusal | 'not_declared' | 'bad_name' | 'conflict' | 'not_a_mapping';
 
@@ -692,7 +701,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     const before = settled.get(slot.path)?.evaluated.value;
     const unchanged = etag === settled.get(slot.path)?.evaluated.inEffect?.etag;
     const added =
-      unchanged || writeOptions.byPlugin !== true ? [] : addedSecretReferenceSentences(before, checked.value);
+      unchanged || !untrustedWrite(writeOptions) ? [] : addedSecretReferenceSentences(before, checked.value);
     const loosens = unchanged ? [] : [...judgeLoosening(def, before, checked.value), ...added];
     const confirmed =
       added.length === 0 &&
@@ -762,7 +771,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       const before = entry.evaluated.value;
       const unchanged = digest(effectiveText) === inEffect?.etag;
       const added =
-        unchanged || writeOptions.byPlugin !== true ? [] : addedSecretReferenceSentences(before, effective.value);
+        unchanged || !untrustedWrite(writeOptions) ? [] : addedSecretReferenceSentences(before, effective.value);
       const loosens = unchanged ? [] : [...judgeLoosening(def, before, effective.value), ...added];
       const confirmed =
         added.length === 0 &&

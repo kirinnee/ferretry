@@ -22,6 +22,12 @@ const SECTIONS = [
   { id: 'lessons', label: 'Lessons', env: 'FY_LEARNING_PASSIVE', action: 'Passive learning', also: '' },
 ] as const;
 
+/**
+ * The launch variables `instructions` answers from: the mode and the four section switches (never a secret). The ONE
+ * list of what a launch records of its environment (`FerretLaunchEnvironmentFiles`) and of what the tool reads back.
+ */
+export const LAUNCH_SWITCH_VARIABLES = [SESSION_MODE_ENV, ...SECTIONS.map(section => section.env)] as const;
+
 /** One per-ferret section, in the order the wrapper appends them. */
 interface InstructionSection {
   readonly id: 'hypermedia' | 'pack' | 'agenda' | 'lessons';

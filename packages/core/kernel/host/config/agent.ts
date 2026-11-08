@@ -7,18 +7,23 @@
  *   field names one, and a caller that is not a ferret is refused.
  * - The owner's "What agents may control › Ferretry settings" switch is asked of the Ferrets-provided
  *   {@link AgentControlReader}; unbound, throwing, or off, the call is refused `403 agent_control_off`: it fails CLOSED.
- * - A write passes `confirmedLoosening: false` and no judge: an edit that loosens is written and HELD for the owner,
- *   the tighter version in effect. There is no confirm and no discard here: an agent never confirms its own edit.
+ * - A write passes `confirmedLoosening: false`, no judge and `byAgent`: an edit that loosens is written and HELD for the
+ *   owner, the tighter version in effect, and so is one that adds a `${secret:NAME}` reference (NN2: an agent is no more
+ *   trusted than a plugin's own write). There is no confirm and no discard here: an agent never confirms its own edit.
+ * - The files the door NAMES are today's reach and no more (`agent-reach.ts`): a person-only file (`gate.yaml`,
+ *   `plugins.yaml`) or anything outside the list is refused on read, validate AND write, with today's words.
  * - A raw secret is refused by the writer like a file that does not parse, and no issue repeats the value. A read
- *   never returns the text of a file that holds one.
+ *   never returns the text of a file that holds one, parsed or not.
  */
 import type { AgentConfigAnswer, AgentConfigCall } from '../../contract/agent-config.ts';
 import { type AgentControlReader, agentControlRefusal } from '../../contract/bound.ts';
 import { ApiError } from '../../contract/http.ts';
 import type { FerretId } from '../../contract/ids.ts';
 import type { ConfigFileIssue, ConfigFilesWriter, ConfigTarget } from '../../contract/ports.ts';
+import { AGENT_REACH_WORDS, agentMayName } from './agent-reach.ts';
 import { checkConfigText } from './check.ts';
 import { type ConfigDeclaration, targetOfPath } from './claims.ts';
+import { rawTextHoldsSecret } from './secrets.ts';
 import { schemaFileName, schemaModeline } from './schemas.ts';
 import type { ConfigStatus } from './service.ts';
 
@@ -67,7 +72,9 @@ const plural = (count: number): string => `${String(count)} ${count === 1 ? 'pro
 export interface AgentConfig {
   /** Refuses (throws) unless this call's ferret may use the config tools right now; answers the ferret. */
   authorize(standing: object | undefined): Promise<FerretId>;
-  /** One call, answered as a sentence an agent can act on. Refusals of the FILE are answers; of the CALLER, errors. */
+  /** One call of a ferret already authorized. Refusals of the FILE are answers. */
+  act(call: AgentConfigCall): Promise<AgentConfigAnswer>;
+  /** {@link AgentConfig.authorize}, then {@link AgentConfig.act}: refusals of the CALLER are errors, of the FILE answers. */
   run(call: AgentConfigCall, standing: object | undefined): Promise<AgentConfigAnswer>;
 }
 
@@ -88,11 +95,19 @@ export function agentConfig(sources: AgentConfigSources): AgentConfig {
     const found = declarations === undefined ? undefined : targetOfPath(declarations, path);
     return found === undefined ? undefined : { ...found, path };
   };
-  const target = (path: string): ConfigTarget & { readonly path: string } =>
-    resolve(path) ??
-    ((): never => {
-      throw new ApiError(400, `${NOT_A_FILE}: ${path}`, 'bad_request');
-    })();
+  /** Whether this agent may name `path` at all: today's reach, and never a person-only file. */
+  const reachable = (path: string): boolean => agentMayName(path) && resolve(path)?.def.personOnly !== true;
+  const target = (path: string): ConfigTarget & { readonly path: string } => {
+    // Today's refusal for a path outside the reach: the body schema's `400 invalid_request`, in today's words.
+    if (!reachable(path))
+      throw new ApiError(400, `the request body is invalid — path: ${AGENT_REACH_WORDS}`, 'invalid_request');
+    return (
+      resolve(path) ??
+      ((): never => {
+        throw new ApiError(400, `${NOT_A_FILE}: ${path}`, 'bad_request');
+      })()
+    );
+  };
 
   const authorize: AgentConfig['authorize'] = async standing => {
     const ferret = ferretOfStanding(standing);
@@ -108,12 +123,16 @@ export function agentConfig(sources: AgentConfigSources): AgentConfig {
   };
 
   const listing = (): AgentConfigAnswer => {
+    // Only the files this agent may name: the listing never shows a file the calls would refuse.
     const view = configStatusView(sources);
-    const errors = view.issues.filter(issue => issue.severity === 'error').length;
+    const files = view.files.filter(file => reachable(file.path));
+    const issues = view.issues.filter(issue => reachable(issue.path));
+    const pending = view.pending.filter(held => reachable(held.path));
+    const errors = issues.filter(issue => issue.severity === 'error').length;
     return {
-      summary: `${String(view.files.length)} configuration files in ${view.directory}; ${String(errors)} with errors; ${String(view.pending.length)} waiting for the owner's confirmation.`,
-      files: view.files,
-      issues: view.issues,
+      summary: `${String(files.length)} configuration files in ${view.directory}; ${String(errors)} with errors; ${String(pending.length)} waiting for the owner's confirmation.`,
+      files,
+      issues,
     };
   };
 
@@ -124,7 +143,11 @@ export function agentConfig(sources: AgentConfigSources): AgentConfig {
     const state = file.status.state === 'invalid' ? 'invalid' : file.status.state === 'held' ? 'pending' : 'ok';
     // A file somebody hand-wrote a raw secret into is shown by its located issue, never by its text.
     const checked = file.text === undefined ? undefined : checkConfigText(found.def, path, file.text, sources.binary);
-    const holdsSecret = checked !== undefined && !checked.ok && checked.reason === 'raw_secret';
+    // A file that does not even parse was never scanned by the check, so its raw text is: a key pasted mid-edit counts.
+    const holdsSecret =
+      checked !== undefined &&
+      !checked.ok &&
+      (checked.reason === 'raw_secret' || (checked.reason === 'yaml' && rawTextHoldsSecret(file.text ?? '')));
     return {
       summary: file.exists
         ? `${file.path} (${state})${holdsSecret ? '; its text is not shown because it holds a raw secret, which the owner must move into the secret store' : ''}.`
@@ -150,7 +173,9 @@ export function agentConfig(sources: AgentConfigSources): AgentConfig {
     const found = target(path);
     const outcome = await writerOrFail().write(found, text, {
       // The agent never confirms: a loosening is written and HELD for the owner, and no judge is asked to claim a proof.
+      // `byAgent`: a `${secret:NAME}` it adds is held too, and nothing can confirm that (NN2).
       confirmedLoosening: false,
+      byAgent: true,
       ...(etag === undefined ? {} : { ifMatch: etag }),
     });
     switch (outcome.kind) {
@@ -181,18 +206,23 @@ export function agentConfig(sources: AgentConfigSources): AgentConfig {
     }
   };
 
+  const act: AgentConfig['act'] = async call => {
+    switch (call.tool) {
+      case 'config.read':
+        return call.path === undefined ? listing() : await read(call.path);
+      case 'config.validate':
+        return validate(call.path, call.text);
+      case 'config.write':
+        return await write(call.path, call.text, call.etag);
+    }
+  };
+
   return {
     authorize,
+    act,
     run: async (call, standing) => {
       await authorize(standing);
-      switch (call.tool) {
-        case 'config.read':
-          return call.path === undefined ? listing() : await read(call.path);
-        case 'config.validate':
-          return validate(call.path, call.text);
-        case 'config.write':
-          return await write(call.path, call.text, call.etag);
-      }
+      return await act(call);
     },
   };
 }

@@ -39,6 +39,7 @@ import {
   AgentPinsFile,
   FerretConfigFile,
   FerretDetailsFile,
+  FerretLaunchEnvironmentFiles,
   FerretPinsFile,
   FerretStateFile,
   StartRequestsFile,
@@ -489,6 +490,7 @@ export default definePlugin({
       TransferBriefFiles,
       MoveInflightFiles,
       FerretWaitFiles,
+      FerretLaunchEnvironmentFiles,
     ],
     // Cast: see packages/core/gate/manifest.ts (leaf `ConfigDef<unknown>` variance; reported to the lead).
     // biome-ignore lint/suspicious/noExplicitAny: the leaf cast named above
