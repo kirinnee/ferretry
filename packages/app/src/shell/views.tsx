@@ -1,7 +1,8 @@
 import { skeletonSentence } from '@ferretry/kernel/contract';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import type { PanelRef, ScreenRef } from '../layout/engine.ts';
-import { useOptionalShell, useRuntimeVersion, useShell } from './context.tsx';
+import { useRouter } from '../router/router.tsx';
+import { useOptionalShell, useRuntimeVersion, useShell, WithoutShell } from './context.tsx';
 
 /**
  * WHERE PLUGIN VIEWS ARE DRAWN. Every plugin screen, panel and settings tab goes through {@link PluginView}, which
@@ -72,6 +73,36 @@ export function PluginView({ daemon, plugin, section, id, props }: PluginViewPro
   );
 }
 
+/**
+ * A DAEMON-LESS SCREEN (an absolute path: a share link's landing page, first-run setup, the page a pairing link opens).
+ * It is drawn with the route's parameters, the router's `navigate` and the address read on demand — and no daemon
+ * client: it is never given a default daemon, the first, or the last used (`DaemonlessScreenProps` has no field for
+ * one). A plugin that gave no view for it draws the skeleton line.
+ *
+ * The props are not the only way to a daemon: the shell context is another. The view is drawn under {@link WithoutShell},
+ * so `useDaemonClients`, `PanelSlot`, `RendererView` and every other reader of the shell find none and answer as they
+ * do outside a shell (a rejection, nothing drawn).
+ */
+function DaemonlessScreen({
+  screen,
+  params,
+}: {
+  readonly screen: ScreenRef;
+  readonly params: Readonly<Record<string, string>>;
+}) {
+  const { runtime } = useShell();
+  const router = useRouter();
+  const View = runtime.daemonlessView(screen.plugin, screen.id);
+  if (View === undefined) return <ShellLine>{skeletonSentence(screen.label)}</ShellLine>;
+  return (
+    <ViewBoundary title={runtime.titleOf(screen.plugin)}>
+      <WithoutShell>
+        <View params={params} navigate={router.navigate} location={runtime.location} />
+      </WithoutShell>
+    </ViewBoundary>
+  );
+}
+
 export function ScreenView({
   daemon,
   screen,
@@ -81,10 +112,16 @@ export function ScreenView({
   readonly screen: ScreenRef;
   readonly params: Readonly<Record<string, string>>;
 }) {
+  const daemonless = screen.path.startsWith('/');
+  // A daemon-less screen is drawn without a daemon and ONLY without one: never under a `/d/<daemon>/` prefix.
   if (daemon === undefined) {
-    // A daemon-less screen (an absolute path): it has no daemon to read its inventory from.
-    return <ShellLine>{skeletonSentence(screen.label)}</ShellLine>;
+    return daemonless ? (
+      <DaemonlessScreen screen={screen} params={params} />
+    ) : (
+      <ShellLine>{skeletonSentence(screen.label)}</ShellLine>
+    );
   }
+  if (daemonless) return <ShellLine>{skeletonSentence(screen.label)}</ShellLine>;
   return <PluginView daemon={daemon} plugin={screen.plugin} section="screens" id={screen.id} props={{ params }} />;
 }
 
