@@ -20,14 +20,11 @@ import manifest from '../../../manifest.ts';
 import { asksStateAt } from './agenda-state.ts';
 
 /**
- * What the kernel hands a route about its caller's grants: a paired device holds every grant unless the case says
- * otherwise, and anyone else is ungoverned.
+ * What the kernel hands a route about its caller's grants: only what a case passes explicitly. A standing that carries
+ * its own governance keeps it, and one that names none stays ungoverned, as it always was.
  */
-const governanceOf = (standing: CallStanding, governance?: CallerGovernance): { governance?: CallerGovernance } => {
-  if (governance !== undefined) return { governance };
-  if (standing.credential?.tokenClass !== 'device') return {};
-  return { governance: { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) } };
-};
+const governanceOf = (governance?: CallerGovernance): { governance?: CallerGovernance } =>
+  governance === undefined ? {} : { governance };
 
 /** What a handler answered, as a client reads it. */
 export interface Answered {
@@ -159,7 +156,7 @@ export async function asksHalf(
           request,
           params: new Map(Object.entries(params)),
           ...standing,
-          ...governanceOf(standing, governance),
+          ...governanceOf(governance),
         });
         status = response.status;
         text = response.body;

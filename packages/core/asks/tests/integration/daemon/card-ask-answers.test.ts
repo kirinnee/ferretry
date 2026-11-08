@@ -21,6 +21,8 @@ import { asksHalf } from '../../support/daemon/asks-half.ts';
 const BOARD = 'POST /v1/ferrets/:ferretId/agenda';
 const F1 = { ferretId: 'f1' };
 const AT = '2026-11-06T09:00:00.000Z';
+/** A paired device that holds every grant: the route asks, and this answers yes. */
+const allowEverything: CallerGovernance = { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) };
 const gate = {
   cardId: 'F12',
   laneId: 'to-test',
@@ -133,7 +135,7 @@ describe('a card ask answered by the owner', () => {
     const half = await world(card.providers);
 
     // Act
-    const response = await choose(half, 'Done', { note: 'looks right' }, deviceStanding('phone'));
+    const response = await choose(half, 'Done', { note: 'looks right' }, deviceStanding('phone'), allowEverything);
 
     // Assert
     expect(response.status).toBe(200);
