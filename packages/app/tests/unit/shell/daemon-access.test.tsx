@@ -6,7 +6,8 @@ import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { App } from '../../../src/shell/app.tsx';
 import type { ShellWindow } from '../../../src/shell/context.tsx';
-import { type DaemonClientOf, useDaemonClients, usePairedDaemons } from '../../../src/shell/daemon-access.ts';
+import { usePairedDaemons } from '../../../src/shell/daemon-access.ts';
+import { type DaemonReach, useEveryDaemon } from '../../../src/shell/every-daemon.ts';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
@@ -16,8 +17,8 @@ import { interact, mount } from '../../support/dom.ts';
 import { CORE, FakeTransport, inventoryOf, json, surface } from '../client/fixtures.ts';
 
 /**
- * A page that reads several daemons: the paired list, live, and one package's client on each of them, which waits for
- * the daemon's inventory and refuses (saying why) for a daemon that is not paired or does not allow the package.
+ * A page that reads several daemons: the paired list, live, and the page's own plugin's row on each of them
+ * (`useEveryDaemon`), which appears once that daemon's inventory allows the plugin and never for one that does not.
  */
 
 const manifest = {
@@ -31,7 +32,7 @@ const manifest = {
   ui: { screens: [{ id: 'reach', path: 'reach' }] },
 } as unknown as Manifest;
 
-let clientOf: DaemonClientOf | undefined;
+let rows: readonly DaemonReach[] = [];
 let listed: readonly string[] = [];
 
 const app = implementApp(manifest, {
@@ -39,20 +40,19 @@ const app = implementApp(manifest, {
     screens: {
       reach: () => {
         const daemons = usePairedDaemons();
-        const clients = useDaemonClients('reach');
+        const every = useEveryDaemon();
         const [answer, setAnswer] = useState('waiting');
         listed = daemons.map(daemon => daemon.daemon);
-        clientOf = clients;
+        rows = every;
+        const there = every.find(row => row.daemon === 'd2')?.client;
         useEffect(() => {
+          if (there === undefined) return;
           let live = true;
-          void clients('d2').then(
-            client => client.call<{ ok: boolean }>('GET /v1/reach').then(body => live && setAnswer(`ok:${body.ok}`)),
-            (error: Error) => live && setAnswer(error.message),
-          );
+          void there.call<{ ok: boolean }>('GET /v1/reach').then(body => live && setAnswer(`ok:${body.ok}`));
           return () => {
             live = false;
           };
-        }, [clients]);
+        }, [there]);
         return <p data-testid="answer">{answer}</p>;
       },
     },
@@ -95,7 +95,7 @@ function setup(secondInventory: Parameters<typeof inventoryOf>[1] = {}) {
     daemons,
     connect: async paired => (paired.daemon === 'd2' ? there : here),
   });
-  return { runtime, storage, daemons };
+  return { runtime, storage, daemons, there };
 }
 
 const draw = (runtime: ShellRuntime, storage: ReturnType<typeof memoryStore>) =>
@@ -111,12 +111,12 @@ const draw = (runtime: ShellRuntime, storage: ReturnType<typeof memoryStore>) =>
 
 afterEach(() => {
   window.history.replaceState({}, '', '/');
-  clientOf = undefined;
+  rows = [];
   listed = [];
 });
 
 describe('reaching the other paired daemons', () => {
-  test('the paired list is live and a package client waits for another daemon, then reads through it', async () => {
+  test('the paired list is live, and the page reads another daemon through its own row there', async () => {
     window.history.replaceState({}, '', '/d/d1/reach');
     const { runtime, storage, daemons } = setup();
     const view = await draw(runtime, storage);
@@ -126,37 +126,18 @@ describe('reaching the other paired daemons', () => {
     await interact(() => daemons.remove('d2'));
     await settle();
     expect(listed).toEqual(['d1']);
+    expect(rows.map(row => row.daemon)).toEqual(['d1']);
     await view.unmount();
   });
 
-  test('a daemon that is not paired is refused with a sentence, not hung', async () => {
+  test('a daemon that does not allow the package has no row, and nothing is sent to it', async () => {
     window.history.replaceState({}, '', '/d/d1/reach');
-    const { runtime, storage } = setup();
+    const { runtime, storage, there } = setup({ reach: { on: false } });
     const view = await draw(runtime, storage);
     await settle();
-    let reason = '';
-    await interact(async () => {
-      await clientOf?.('d9').catch((error: Error) => {
-        reason = error.message;
-      });
-    });
-    expect(reason).toBe('This device cannot reach this daemon yet.');
-    await view.unmount();
-  });
-
-  test('a daemon that does not allow the package refuses with the shell’s line and sends nothing', async () => {
-    window.history.replaceState({}, '', '/d/d1/reach');
-    const { runtime, storage } = setup({ reach: { on: false } });
-    const view = await draw(runtime, storage);
-    await settle();
-    let reason = '';
-    await interact(async () => {
-      await clientOf?.('d2').catch((error: Error) => {
-        reason = error.message;
-      });
-    });
-    expect(reason).not.toBe('');
-    expect(reason).not.toBe('waiting');
+    expect(rows.map(row => row.daemon)).toEqual(['d1']);
+    expect(view.container.querySelector('[data-testid="answer"]')?.textContent).toBe('waiting');
+    expect(there.paths()).not.toContain('GET /v1/reach');
     await view.unmount();
   });
 });

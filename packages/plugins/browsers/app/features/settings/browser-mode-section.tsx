@@ -25,6 +25,13 @@ const BROWSER_MODE_WORDS: Readonly<Record<BrowserMode, { readonly title: string;
 /** The sentence for a change the daemon holds until the owner confirms it (it loosens what this machine allows). */
 export const HELD_CHANGE_SENTENCE = 'Saved, but not in effect until you confirm it.';
 
+/** The name the tab is given when there is no machine to name (a suite): "This machine", "this machine" mid-sentence. */
+export const UNNAMED_MACHINE = 'This machine';
+
+/** A machine's name inside a sentence ("the browser on {it} starts"): the unnamed one reads in lower case. */
+export const machineInSentence = (machineName: string): string =>
+  machineName === UNNAMED_MACHINE ? 'this machine' : machineName;
+
 /**
  * What saving a change answered: it took, the daemon holds it until the owner confirms it (the earlier setting stays in
  * effect), or one sentence on why it did not.
@@ -73,8 +80,8 @@ export function BrowserModeSection({
         options={(['headless', 'window'] as const).map(choice => ({ id: choice, ...BROWSER_MODE_WORDS[choice] }))}
       />
       <p className="m-0 text-meta leading-base text-muted" data-browser-mode-hint="">
-        Applies the next time the browser on this machine starts. Neither mode solves a captcha for you: when a page
-        asks, take it over and solve it yourself.
+        Applies the next time the browser on {machineInSentence(machineName)} starts. Neither mode solves a captcha for
+        you: when a page asks, take it over and solve it yourself.
       </p>
       {outcome?.kind === 'refused' ? (
         <SetupNote live tone="warn" name="browser-mode-refusal">

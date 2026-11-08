@@ -21,5 +21,8 @@
     "@ferretry/std": "workspace:*",
     "zod": "4.4.3"
   },
+  "devDependencies": {
+    "@ferretry/app": "workspace:*"
+  },
   "sideEffects": false
 }

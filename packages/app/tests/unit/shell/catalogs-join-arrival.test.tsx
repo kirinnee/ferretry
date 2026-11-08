@@ -16,7 +16,9 @@ import { CORE, FakeTransport, json } from '../client/fixtures.ts';
 
 /**
  * R2-B1: A SHARE LINK THAT ARRIVES MUST NOT KEEP ITS LIVE CODE IN THE ADDRESS BAR OR THE HISTORY. The shell is booted with
- * NO daemon paired (a recipient's browser) over the real Catalogs half, at `/join#<fragment>`.
+ * NO daemon paired (a recipient's browser) over the real Catalogs half, at `/join#<fragment>`. Catalogs declares the
+ * fragment (`{ form: 'path', screen: 'join' }`) and the SHELL takes it (shell contract S3): when the runtime is built,
+ * before the first render and before any chunk, and on every arrival after.
  */
 
 const catalogs = generated.surfaces.find(entry => entry.id === 'catalogs') as SurfaceEntry;
@@ -29,13 +31,16 @@ const browser: ShellWindow = {
 
 const go = (path: string): void => window.history.replaceState(null, '', path);
 
-/** The `hashchange` listeners a boot armed on the window, so the next test does not find a stale hold listening. */
-const armed: EventListener[] = [];
-const addListener = window.addEventListener.bind(window);
-window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: unknown) => {
-  if (type === 'hashchange' && typeof listener === 'function') armed.push(listener);
-  addListener(type, listener, options as AddEventListenerOptions);
-}) as typeof window.addEventListener;
+/** The `hashchange` listeners each boot armed, so the next test does not find a stale taker listening. */
+const armed: (() => void)[] = [];
+const address = {
+  location: window.location,
+  history: window.history,
+  addEventListener: (type: 'hashchange', listener: () => void) => {
+    armed.push(listener);
+    window.addEventListener(type, listener);
+  },
+};
 afterEach(() => {
   go('/');
   for (const listener of armed.splice(0)) window.removeEventListener('hashchange', listener);
@@ -48,14 +53,12 @@ async function until(done: () => boolean, turns = 200): Promise<void> {
   }
 }
 
-/** Boots the shell over the real Catalogs half with no daemon paired, at whatever address the page is on. */
-async function boot(blocked?: ComponentType) {
-  const transport = new FakeTransport(() => json({ error: 'none', code: 'not_found' }, 404));
-  const storage = memoryStore();
-  const daemons = new DaemonList({ storage, now: () => 1 });
+/** Builds the runtime over the real Catalogs half with no daemon paired: what main.tsx does before the first render. */
+function runtimeOf(transport: FakeTransport, blocked?: ComponentType): ShellRuntime {
+  const daemons = new DaemonList({ storage: memoryStore(), now: () => 1 });
   const registered = registeredDaemonless([catalogs], {} as DaemonlessPorts);
   expect(registered.failures).toEqual([]);
-  const runtime = new ShellRuntime({
+  return new ShellRuntime({
     appVersion: '5.1.0',
     surfaces,
     daemons,
@@ -65,7 +68,15 @@ async function boot(blocked?: ComponentType) {
         blocked === undefined ? registered.views : new Map([...registered.views, ['catalogs.join', blocked as never]]),
       location: () => window.location.href,
     },
+    address,
   });
+}
+
+/** Boots the shell over the real Catalogs half with no daemon paired, at whatever address the page is on. */
+async function boot(blocked?: ComponentType) {
+  const transport = new FakeTransport(() => json({ error: 'none', code: 'not_found' }, 404));
+  const storage = memoryStore();
+  const runtime = runtimeOf(transport, blocked);
   const mounted = await mount(
     <App
       runtime={runtime}
@@ -84,15 +95,14 @@ const WORKING = 'Working…';
 const INVALID_TITLE = 'This link does not work';
 
 describe('R3-B1 the code leaves the address before any Catalogs chunk is asked for', () => {
-  test('R3-B1 arming the daemon-less screens alone takes the code off the address and the history entry: no chunk, no React', () => {
+  test('R3-B1 building the runtime alone takes the code off the address and the history entry: no chunk, no React', () => {
     go(`/join${FRAGMENT}`);
     const lengthBefore = window.history.length;
     const push = spyOn(window.history, 'pushState');
     const replace = spyOn(window.history, 'replaceState');
     try {
       // Nothing is mounted and no view is drawn, so the lazily loaded views chunk has not been asked for.
-      const registered = registeredDaemonless([catalogs], {} as DaemonlessPorts);
-      expect(registered.failures).toEqual([]);
+      runtimeOf(new FakeTransport(() => json({}, 404)));
       expect(window.location.hash).toBe('');
       expect(window.location.pathname).toBe('/join');
       expect(window.history.length).toBe(lengthBefore);
@@ -233,6 +243,54 @@ describe('R2-B1 a share link arriving on /join', () => {
     } finally {
       replace.mockRestore();
     }
+  });
+});
+
+describe('S3 the join screen takes the code once, and only at its own address', () => {
+  test('beneath /join (/join/x#code) the code leaves the address and no screen is handed it', async () => {
+    go(`/join/x${FRAGMENT}`);
+    const { mounted } = await boot();
+    await until(() => mounted.container.textContent !== '');
+    expect(window.location.hash).toBe('');
+    expect(window.location.pathname).toBe('/join/x');
+    expect(mounted.container.textContent).not.toContain('fy_share_x');
+    await mounted.unmount();
+  });
+
+  test('the code is never drawn: the screen opens the link it took, and the page never shows the code', async () => {
+    go(`/join${FRAGMENT}`);
+    const { mounted } = await boot();
+    await until(() => mounted.container.textContent?.includes(INVALID_TITLE) === true);
+    expect(mounted.container.textContent).not.toContain('fy_share_x');
+    expect(JSON.stringify(window.history.state)).not.toContain('fy_share_x');
+    await mounted.unmount();
+  });
+});
+
+describe('S3 a link handed to /join in memory', () => {
+  test("'Subscribe with a link' carries the code to /join without the address: the screen takes it once", async () => {
+    go('/join');
+    const transport = new FakeTransport(() => json({ error: 'none', code: 'not_found' }, 404));
+    const runtime = runtimeOf(transport);
+    const join = runtime.handOffs.ref<string>('catalogs', 'join');
+    expect(join).toBeDefined();
+    if (join === undefined) return;
+    runtime.handOffs.give(join, FRAGMENT);
+    const storage = memoryStore();
+    const mounted = await mount(
+      <App
+        runtime={runtime}
+        themes={new ThemePreferenceStore(storage)}
+        layouts={new DeviceLayoutStore(storage)}
+        browser={browser}
+        scroll={new ScrollMemory(null)}
+      />,
+    );
+    await until(() => mounted.container.textContent?.includes(INVALID_TITLE) === true);
+    expect(runtime.handOffs.peek(join, 'catalogs')).toBeUndefined();
+    expect(window.location.hash).toBe('');
+    expect(mounted.container.textContent).not.toContain('fy_share_x');
+    await mounted.unmount();
   });
 });
 

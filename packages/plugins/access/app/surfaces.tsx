@@ -16,7 +16,7 @@ import { useOpenSecurity, useSelectedDaemon } from './shell-grants.ts';
  */
 export function devicesTab(client: PluginClient) {
   return function DevicesTab() {
-    const connection = useMachineOf(client);
+    const connection = useMachineOf();
     return connection === undefined ? null : (
       <AddDeviceSurface connection={connection} createClient={async () => pairingClientOf(client)} />
     );
@@ -31,7 +31,7 @@ export function devicesTab(client: PluginClient) {
 export function newDevicesPanel(client: PluginClient) {
   const clients = { client: async () => pairingClientOf(client) };
   return function NewDevicesPanel() {
-    const connection = useMachineOf(client);
+    const connection = useMachineOf();
     return connection === undefined ? null : <NewDeviceNotices connections={[connection]} clients={clients} />;
   };
 }

@@ -8,6 +8,7 @@ import { contextFor, parseArgs } from '../lib/check.ts';
 import type { Finding } from '../lib/graph.ts';
 import { check as actRunner } from '../../validate/act-runner.ts';
 import { appHookFindings } from '../../validate/app-hooks.ts';
+import { check as shellProvides, shellProvidesFindings } from '../../validate/shell-provides.ts';
 import { bannedIn, check as bannedGlobals } from '../../validate/banned-globals.ts';
 import { check as contextImports } from '../../validate/context-imports.ts';
 import { check as contractConsumes } from '../../validate/contract-consumes.ts';
@@ -1304,5 +1305,99 @@ describe('app-hooks', () => {
     expect(found([{ plugin: 'agenda', hooks: { 'board.thing': fn } }], [gives('board', 'board.thing')])).toEqual([
       'offers app hook "board.thing", which is not named "agenda.<name>"',
     ]);
+  });
+});
+
+// ─── shell-provides (S3: declared fragments and device views) ────────────────────────────────────────────────────
+
+describe('shell-provides', () => {
+  const half = (plugin: string, extra: Partial<Parameters<typeof shellProvidesFindings>[0][number]> = {}) => ({
+    plugin,
+    skeleton: false,
+    screens: [{ id: 'join', daemonless: true }, { id: 'main' }],
+    fragments: [],
+    device: [],
+    ...extra,
+  });
+  const found = (...halves: Parameters<typeof shellProvidesFindings>[0]) =>
+    shellProvidesFindings(halves).map(x => x.message);
+
+  test('the real shapes pass: a taken keyed key, a kept one, and a path on an own daemon-less screen', () => {
+    expect(
+      found(
+        half('agenda', { fragments: [{ form: 'keyed', key: 'agenda' }], device: ['deep-link'] }),
+        half('runtimes', { fragments: [{ form: 'keyed', key: 'machines', strip: false }] }),
+        half('catalogs', { fragments: [{ form: 'path', screen: 'join' }] }),
+      ),
+    ).toEqual([]);
+  });
+  test('planted: one key claimed twice is found, strip: false claims included', () => {
+    expect(
+      found(
+        half('runtimes', { fragments: [{ form: 'keyed', key: 'machines', strip: false }] }),
+        half('other', { fragments: [{ form: 'keyed', key: 'machines', strip: false }] }),
+      ),
+    ).toEqual([expect.stringContaining('"machines" is claimed 2 times (runtimes, other)')]);
+    expect(
+      found(
+        half('agenda', {
+          fragments: [
+            { form: 'keyed', key: 'agenda' },
+            { form: 'keyed', key: 'agenda' },
+          ],
+          device: ['d'],
+        }),
+      ),
+    ).toEqual([expect.stringContaining('"agenda" is claimed 2 times (agenda, agenda)')]);
+  });
+  test('planted: a key outside the grammar is found', () => {
+    for (const key of ['Rules', '1rules', 'r'.repeat(33), 'rules/x', ''])
+      expect(found(half('accounts', { fragments: [{ form: 'keyed', key, strip: false }] }))).toEqual([
+        expect.stringContaining(`declares fragment key "${key}", which is not`),
+      ]);
+  });
+  test('planted: a path on a screen the plugin does not declare, or one that is not daemon-less, is found', () => {
+    expect(found(half('catalogs', { fragments: [{ form: 'path', screen: 'pair' }] }))).toEqual([
+      'declares a path fragment on screen "pair", which its manifest does not declare',
+    ]);
+    expect(found(half('catalogs', { fragments: [{ form: 'path', screen: 'main' }] }))).toEqual([
+      'declares a path fragment on screen "main", which is not daemon-less',
+    ]);
+  });
+  test('planted: a stripping key with no device view is found; a kept one needs none', () => {
+    expect(found(half('agenda', { fragments: [{ form: 'keyed', key: 'agenda' }] }))).toEqual([
+      expect.stringContaining('stripping fragment key "agenda" with no `shell.device` view'),
+    ]);
+  });
+  test('planted: a device view on a skeleton half, and a declaration in no known form, are found', () => {
+    expect(found(half('agenda', { skeleton: true, device: ['deep-link'] }))).toEqual([
+      'is a skeleton half with `shell.device` views (deep-link): nothing mounts them',
+    ]);
+    expect(found(half('agenda', { fragments: [{ form: 'query', key: 'x' }, null] }))).toEqual([
+      'declares a fragment in no known form: {"form":"query","key":"x"}',
+      'declares a fragment in no known form: null',
+    ]);
+  });
+  test('over a workspace: a half that declares a key with no taker fails, and a half that fails to load is said', async () => {
+    const fx = fixture([
+      {
+        id: 'alpha',
+        kinds: ['view'],
+        manifest: '  ui: { screens: [] },',
+        app: `import { implementApp } from '${SDK}';\nimport manifest from '../manifest.ts';\nconst half = implementApp(manifest, { build: () => ({}) });\nexport default { ...half, shell: { fragments: [{ form: 'keyed', key: 'alpha' }] } };\n`,
+      },
+      { id: 'beta', app: 'throw new Error("boom");\n' },
+    ]);
+    try {
+      const all = (await shellProvides.run(contextFor(fx.root, NO_BASE))).map(x => `${x.where}: ${x.message}`);
+      expect(all).toContain(
+        'alpha: declares the stripping fragment key "alpha" with no `shell.device` view: the shell would strip a link nothing takes',
+      );
+      expect(all).toContain('beta: app half failed to load: boom');
+      const scoped = await shellProvides.run(contextFor(fx.root, { ...NO_BASE, packageId: 'beta' }));
+      expect(scoped.map(x => x.where)).toEqual(['beta']);
+    } finally {
+      fx.dispose();
+    }
   });
 });

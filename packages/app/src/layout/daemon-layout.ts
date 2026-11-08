@@ -18,9 +18,12 @@ import type { Layout } from './layout.ts';
 export const LAYOUTS_PLUGIN = 'layouts';
 const CURRENT_ROUTE = 'GET /v1/layouts/current';
 
-/** What the channel needs from the shell runtime: the guarded client of one package on one daemon, when allowed. */
+/**
+ * What the channel needs from the shell runtime: the guarded client of one package on one daemon, when allowed — the
+ * one client cache's entry, the same object across a reconnect, so a reconnect never restarts the watch.
+ */
 export interface PackageClients {
-  packageClient(daemon: string, packageId: string): ShellPluginClient | undefined;
+  client(daemon: string, packageId: string): ShellPluginClient | undefined;
 }
 
 /** What the daemon serves as the owner's: the layout, and the theme when its tokens are ones the shell reads. */
@@ -63,7 +66,7 @@ export class DaemonLayouts {
    * allowed starts its read, one that became blocked stops and its layout is dropped, a replaced client is re-read.
    */
   watch(daemon: string): void {
-    const client = this.#clients.packageClient(daemon, LAYOUTS_PLUGIN);
+    const client = this.#clients.client(daemon, LAYOUTS_PLUGIN);
     const known = this.#watches.get(daemon);
     if (known !== undefined && known.client === client) return;
     if (known !== undefined) {

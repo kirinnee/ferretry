@@ -14,17 +14,18 @@ import { AgendaInboxContext, useRuntimeInbox } from '../hooks/use-agenda-inbox.t
 import { AgendaClientContext } from '../lib/agenda-client-context.tsx';
 import { inboxSourceFromSearch } from '../lib/agenda-inbox-list.ts';
 import { useAgendaLinks } from '../lib/agenda-links.ts';
+import type { AgendaFleet } from '../lib/agenda-fleet.ts';
 import type { AgendaRuntime } from '../lib/agenda-runtime.ts';
 import { useLayoutMode, useRouter } from '../shell.ts';
 
-export function createAgendaScreen(runtime: AgendaRuntime) {
+export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) {
   const daemon = runtime.connection.daemonId;
   return function AgendaScreen(_props: ScreenProps) {
     const { navigate } = useRouter();
     const links = useAgendaLinks();
     // Board's hooks for this machine: Done · closes, a notice's Start and Close, Edit's lane editor and `&F12` proof.
     const board = useAgendaBoardHooks(daemon);
-    const inbox = useRuntimeInbox(runtime, laneEditorOf(board));
+    const inbox = useRuntimeInbox(runtime, laneEditorOf(board), fleet);
     const phone = useLayoutMode() === 'drawer';
     // A machine ask's push opens `/agenda?ask=A3`: the page opens that ask's card once it is among the open ones.
     const asked = useAskFocus();
