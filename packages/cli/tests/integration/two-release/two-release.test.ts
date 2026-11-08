@@ -119,7 +119,13 @@ async function attach(daemon: StartedDaemon, proxy: RecordingProxy): Promise<Ses
       const io = capturedIo();
       const code = await runFy(argv, worldFor(io));
       const run = { code, out: io.stdout(), err: io.stderr() };
-      return expectedCode === undefined ? run : expectFyExit(argv, run, expectedCode, [token]);
+      if (expectedCode === undefined) return run;
+      try {
+        return expectFyExit(argv, run, expectedCode, [token]);
+      } catch (error) {
+        // The daemon's own account of why (mount outcomes, masked log) beside the run's.
+        throw new Error(`${(error as Error).message}\n${daemon.diagnose()}`);
+      }
     },
     deps: async () => {
       const connection = await worldFor().connect({ asOwner: false });

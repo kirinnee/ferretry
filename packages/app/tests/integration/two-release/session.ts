@@ -74,8 +74,11 @@ export async function openApp(
     body: JSON.stringify({ grants: options.grants }),
   });
   // Status only: the body is a live credential.
-  if (!mint.ok) throw new Error(`minting a pairing code answered HTTP ${mint.status}`);
-  const code = ((await mint.json()) as { code: string }).code;
+  if (!mint.ok) throw new Error(`minting a pairing code answered HTTP ${mint.status}\n${daemon.diagnose()}`);
+  const minted = (await mint.json().catch(() => undefined)) as { code?: unknown } | undefined;
+  if (typeof minted?.code !== 'string')
+    throw new Error(`minting a pairing code answered HTTP ${mint.status} with no code\n${daemon.diagnose()}`);
+  const code = minted.code;
 
   const daemonId = daemon.host.identity.daemonId;
   const device = await crypto.generateDeviceKey();

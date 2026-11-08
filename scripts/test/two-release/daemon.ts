@@ -10,7 +10,7 @@
  * It never touches the network: the `fetch` adapter refuses, and the run is under `scripts/ci/test.sh`'s `FY_*=off`
  * environment besides.
  */
-import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { chmod, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,6 +35,8 @@ export interface StartedDaemon {
   readonly version: string;
   /** Reads the admin token Gate minted, waiting for it. The value is returned to the caller and never printed. */
   adminToken(): Promise<string>;
+  /** What a red run needs to explain itself: each plugin's mount outcome and the masked tail of `logs/fyd.log`. */
+  diagnose(): string;
   stop(): Promise<void>;
 }
 
@@ -122,9 +124,30 @@ export async function startDaemon(release: Release, options: { readonly version:
         15_000,
         'the admin token',
       ),
+    diagnose: () => describeDaemon(host, home),
     stop: async () => {
       await host.stop();
       rmSync(parent, { recursive: true, force: true });
     },
   };
+}
+
+const LOG_TAIL = 6000;
+
+/** Every plugin's status and failure, and the tail of the daemon's log with the admin token masked. */
+function describeDaemon(host: RunningHost, home: string): string {
+  const plugins = [...host.plugins]
+    .map(([id, record]) => `${id}: ${record.status}${record.failure === undefined ? '' : ` (${record.failure})`}`)
+    .join('\n');
+  const read = (path: string): string => {
+    try {
+      return readFileSync(path, 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  const token = read(join(home, 'state', 'gate', 'admin-token')).trim();
+  const log = read(join(home, 'logs', 'fyd.log'));
+  const masked = token === '' ? log : log.split(token).join('<admin-token>');
+  return `plugins:\n${plugins}\nfyd.log (tail):\n${masked.slice(-LOG_TAIL)}`;
 }
