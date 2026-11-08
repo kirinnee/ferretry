@@ -243,6 +243,12 @@ export interface Permissions {
    * plugin that does not declare it is refused by name.
    */
   readonly checkDirectory?: true;
+  /**
+   * It resolves a bare executable name to a path through `kernel.paths.which` (Runtimes: whether an MCP server's command
+   * and a harness are installed). Bounded and never executing, but it tells what is installed where, so a plugin that
+   * does not declare it is refused by name.
+   */
+  readonly which?: true;
   /** It reads the running build's facts and launches the self-update through `kernel.updateHost` (Updates). */
   readonly updateHost?: true;
 }

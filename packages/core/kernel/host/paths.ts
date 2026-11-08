@@ -39,5 +39,23 @@ export function gatedPaths(plugin: string, declared: boolean, base: PathsPort): 
     checkDirectory: async () => {
       throw new Error(`${plugin} did not declare permissions.checkDirectory, so it probes no absolute path.`);
     },
+    // Gated on its own permission ({@link gatedWhich}), never by this one.
+    which: base.which,
+  });
+}
+
+/**
+ * `kernel.paths.which` for one plugin: the lookup itself (`./which.ts`) only for a manifest that declares
+ * `permissions.which`; any other plugin's call is refused naming the plugin, as `checkDirectory` is. It tells what is
+ * installed where, which a plugin that never asked has no business learning.
+ */
+export function gatedWhich(plugin: string, declared: boolean, base: PathsPort): PathsPort {
+  if (declared) return base;
+  return Object.freeze({
+    home: base.home,
+    checkDirectory: base.checkDirectory,
+    which: async () => {
+      throw new Error(`${plugin} did not declare permissions.which, so it looks no command up.`);
+    },
   });
 }

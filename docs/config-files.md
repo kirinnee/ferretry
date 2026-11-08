@@ -90,6 +90,32 @@ that is not there). Three rules, in order:
    version's own sub-keys survive. A named key whose new or current value is not a mapping is replaced, as any
    patch replaces a key. The schema, the loosening hold and the judge see the merged versions, and both are
    written or neither.
+4. **A change of several files lands whole or not at all.** A change that spans files — a runtime, its profile
+   and its model set — is ONE act in the kernel, `ConfigPort.writeAll`, never several writes a reader could see
+   half of. Every document of the set is checked as a single write checks one (its own file, its name, YAML, a
+   raw secret, the schema, its own `ifMatch`) and judged as a single write is judged — against the version in
+   effect, by the same Gate judge with the caller's actor, an added `${secret:NAME}` held for the owner whatever
+   the judge says — **before anything is written**. So one document refused refuses the set and names it; one
+   stale is a conflict that names it; and **one document that would be held holds the whole set**: nothing in it
+   is written or takes effect, and the answer names that document, what it loosens, and says the set is held, so
+   the owner makes the change in an act Gate's judge lets through. A set that touches a file with another edit
+   held is refused until that edit is confirmed or discarded (a set never discards a held edit and never carries
+   one into effect), as is one that touches a file the kernel cannot read back.
+
+   **What a crash does.** Before the first file is touched, the kernel writes an intent record
+   (`state/kernel/config-write-set.json`: every file of the set and its accepted record as they were) atomically
+   and synced. Files are then written one by one (each atomically, as a single write is), then their accepted
+   records, and the record's removal is the commit. A daemon that stops anywhere before that removal — between
+   two files included — finds the record on its next load (boot loads first) and puts every file and every
+   accepted record of the set back as they were before anything is evaluated: the last good version of every
+   document is in effect and none of the set is. A disk failure the daemon survives is put back the same way at
+   once, and the write throws. What it does not promise: the removal itself is not synced, so a power loss just
+   after a set was answered `written` can bring the record back and put the WHOLE set back — never half of it. A
+   record that cannot be read is said once in the log and left alone, and its files are judged as they are.
+
+   Gate's judge spends a remote device's one step-up proof on the first loosening it lets through, so a set with
+   **two** loosening documents is held for a remote device (the second ask finds the proof spent). It fails
+   closed; judging a set as one act is Gate's to add (declared GAP).
 
 What is in effect is recorded in the state home (`state/config-accepted.json`), file by file with its text,
 so a last good version survives a restart and a confirmed loosening is not asked about again. A missing or
