@@ -231,3 +231,31 @@ describe('FileConversationDescriber.preview', () => {
     expect(files.heads.map(read => read.file).filter(file => !file.endsWith('.jsonl'))).toEqual([document]);
   });
 });
+
+describe('FileConversationDescriber names', () => {
+  test('gives a conversation the title its CLI generated, unless it only repeats what a wrapper said', async () => {
+    const files = new FakeFiles({
+      [FILE]: [
+        claude('Fix the cart total', '2026-10-17T08:00:00.000Z'),
+        JSON.stringify({ type: 'ai-title', aiTitle: 'Cart total fix' }),
+      ].join('\n'),
+    });
+    const described = await new FileConversationDescriber(files, parsers).describe(candidate());
+    expect(described?.name).toBe('Cart total fix');
+  });
+
+  test('finds a Codex conversation’s folder in its session_meta, past a record that is not one', async () => {
+    const source = '/host/codex/sessions/2026/10/10/rollout.jsonl';
+    const files = new FakeFiles({
+      [source]: [
+        JSON.stringify({ type: 'turn_context', payload: { cwd: '/not/here' } }),
+        codexMeta,
+        codexUser('Take notes'),
+      ].join('\n'),
+    });
+    const described = await new FileConversationDescriber(files, parsers).describe(
+      candidate({ harness: 'codex', source, relativePath: 'sessions/2026/10/10/rollout.jsonl', nameId: CODEX_ID }),
+    );
+    expect(described?.project).toBe('/work/notes');
+  });
+});

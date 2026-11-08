@@ -127,3 +127,11 @@ describe('the rarity a related check gives the words it did not re-scrub', () =>
     expect(byIndex).toBeGreaterThan(unknown ?? 0);
   });
 });
+
+describe('the line a hit shows', () => {
+  test('falls back to the title when the words matched only the id', () => {
+    const index = indexOf(cardWork({ id: 'F1', title: 'Board store' }));
+    const hit = index.search(query('F1 F1'), NOW_MS).hits[0];
+    expect(hit?.match).toEqual({ field: 'title', line: 'Board store' });
+  });
+});
