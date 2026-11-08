@@ -6,6 +6,7 @@ import {
   type Lineage,
   type PackLineageFacts,
   packEligibleInLineage,
+  runningChildCount,
   packInstructed,
   packLaunchDefault,
   WARDEN_LABEL,
@@ -203,5 +204,22 @@ describe('packEligibleInLineage', () => {
     for (let i = 0; i < 20; i += 1) long[`f${String(i)}`] = { parent: `f${String(i + 1)}` };
     should(await packEligibleInLineage('f0', chain(long), 16)).be.false();
     should(await packEligibleInLineage('f10', chain(long), 16)).be.true();
+  });
+});
+
+describe('runningChildCount', () => {
+  it('should count the parent’s children that are not stopped, starting ones included', () => {
+    // Arrange
+    const children = [
+      { parent: 'p', state: 'working' },
+      { parent: 'p', state: 'starting' },
+      { parent: 'p', state: 'stopped' },
+      { parent: 'other', state: 'working' },
+      { state: 'working' },
+    ];
+
+    // Act + Assert
+    should(runningChildCount('p', children)).equal(2);
+    should(runningChildCount('nobody', children)).equal(0);
   });
 });

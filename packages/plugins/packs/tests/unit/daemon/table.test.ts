@@ -147,6 +147,65 @@ describe('readPackTable', () => {
     should(e).containEql({ state: 'ended', endedAt: at(5), ferretState: 'stopped' });
   });
 
+  it('should keep the newer of two lines, and a note over a message that is as new', async () => {
+    // Arrange
+    const ferrets = [
+      ferret('a', { parent: 'lead' as FerretSummary['id'] }),
+      ferret('b', { parent: 'lead' as FerretSummary['id'] }),
+    ];
+    const lines = {
+      a: [
+        { kind: 'doing', text: 'newer', at: at(1) },
+        { kind: 'doing', text: 'older', at: at(10) },
+      ] satisfies SitrepLine[],
+      b: [
+        { kind: 'doing', text: 'a message', at: at(2) },
+        { kind: 'note', text: 'a note', at: at(2) },
+        { kind: 'doing', text: 'another message', at: at(2) },
+      ] satisfies SitrepLine[],
+    };
+
+    // Act
+    const table = await build(ferrets, lines);
+
+    // Assert
+    should(table.rows.find(row => row.id === 'a')?.last).deepEqual({ at: at(1), source: 'message', text: 'newer' });
+    should(table.rows.find(row => row.id === 'b')?.last).deepEqual({ at: at(2), source: 'note', text: 'a note' });
+  });
+
+  it('should show no newest line when a line has no time and the ferret’s own state time is unreadable', async () => {
+    // Arrange
+    const ferrets = [ferret('a', { parent: 'lead' as FerretSummary['id'], stateAt: 'not a time' as Instant })];
+    const lines = { a: [{ kind: 'doing', text: 'undated' }] satisfies SitrepLine[] };
+
+    // Act
+    const table = await build(ferrets, lines);
+
+    // Assert
+    should(table.rows[0]?.last).be.undefined();
+  });
+
+  it('should list a member whose sitrep cannot be read, as if it had none', async () => {
+    // Arrange
+    const ferrets = [ferret('a', { parent: 'lead' as FerretSummary['id'] })];
+
+    // Act
+    const table = await readPackTable({
+      root: ROOT,
+      ferrets,
+      sitrep: async () => {
+        throw new Error('the sitrep is damaged');
+      },
+      redact: async texts => texts,
+      nowMs: NOW,
+    });
+
+    // Assert
+    should(table.rows.map(row => row.id)).deepEqual(['a']);
+    should(table.rows[0]?.last).be.undefined();
+    should(table.rows[0]?.card).be.undefined();
+  });
+
   it('should be an empty table for a lead with no helpers', async () => {
     should((await build([])).rows).deepEqual([]);
   });
