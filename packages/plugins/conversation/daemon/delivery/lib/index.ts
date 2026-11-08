@@ -1,4 +1,5 @@
 export * from './handoff.ts';
+export * from './interrupt.ts';
 export * from './notifier.ts';
 export * from './policy.ts';
 export * from './retraction.ts';

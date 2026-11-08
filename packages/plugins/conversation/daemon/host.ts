@@ -1,6 +1,6 @@
 import { ApiError, type KernelPorts, type RouteHandler, type SocketAccept } from '@ferretry/kernel/contract';
 import { type AskId, AskIdSchema, type AsksApi } from '@ferretry/core-asks/contract';
-import type { FerretsApi, SitrepLineSource } from '@ferretry/core-ferrets/contract';
+import type { FerretsApi, FerretSummary, SitrepLineSource } from '@ferretry/core-ferrets/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { Instant } from '@ferretry/std';
 import { err, milliseconds, ok } from '@ferretry/std';
@@ -17,7 +17,8 @@ import {
   TurnEnded,
 } from '../contract/index.ts';
 import { ClockSendScheduler, StateSendChannel, StateSendLedger } from './delivery/adapters/index.ts';
-import { sendRecordFor, sendRecordView } from './delivery/lib/index.ts';
+import { type SendTarget, SendRefused, SessionInterrupt, sendRecordFor, sendRecordView } from './delivery/lib/index.ts';
+import type { SessionStatus } from './seams/ferret-types.ts';
 import { sentDraftClearer, sharedDraftRoutes, sharedDraftSocketRoutes } from './drafts/lib/mounts/shared-drafts.ts';
 import { SessionSendError, sessionSendRoutes } from './delivery/lib/mounts/session-send.ts';
 import { StateDraftRepository } from './drafts/adapters/index.ts';
@@ -38,6 +39,7 @@ import {
   SEND_EXTRAS_UNAVAILABLE,
   SEND_UNAVAILABLE,
   terminalSeam,
+  Unconfirmed,
 } from './harness-seam.ts';
 import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
 import { type MountRoute, routeTable, socketTable } from './seams/api.ts';
@@ -57,19 +59,59 @@ const pendingRefusal = (): ConversationRefusal => ({
   message: TERMINAL_PENDING,
 });
 
-/** The code a refusal answers with on the port: the route's own code, else the word of a send refusal. */
-const refusalCode = (error: unknown): string =>
-  error instanceof ApiError
-    ? (error.code ?? 'send_refused')
-    : error instanceof SessionSendError
-      ? ((
-          { not_found: 'not_found', refused: 'send_refused', failed: 'session_send_failed' } as Readonly<
-            Record<string, string>
-          >
-        )[error.failure] ?? 'send_refused')
-      : 'send_refused';
+/** Said by a repeat of a send that was typed and not proven: it is not typed again, and the answer names it. */
+const UNCONFIRMED_AGAIN =
+  "this message was already typed into the agent's box and nothing proved it landed, so it was not typed again. Check the ferret's terminal before sending it again";
 
-/** What a send can carry that the harness seam does not type yet. */
+/**
+ * The code a refusal answers with on the port: the route's own code, else the word the send route answers for that
+ * refusal (`composer_occupied` for a draft in the way, `send_unconfirmed` for a typed send nothing proved).
+ */
+const refusalCode = (error: unknown): string => {
+  if (error instanceof ApiError) return error.code ?? 'send_refused';
+  if (!(error instanceof SessionSendError)) return 'send_refused';
+  if (error.failure === 'refused' && error.draft !== undefined) return 'composer_occupied';
+  return (
+    (
+      {
+        not_found: 'not_found',
+        refused: 'send_refused',
+        pending: 'session_launching',
+        unconfirmed: 'send_unconfirmed',
+        failed: 'session_send_failed',
+      } as Readonly<Record<string, string>>
+    )[error.failure] ?? 'send_refused'
+  );
+};
+
+/** Today's session-layer refusals (`SendRefused` and its kinds), in the send route's taxonomy. */
+const sendRefusal = (error: unknown): never => {
+  if (error instanceof SendRefused) throw new SessionSendError('refused', error.message);
+  throw error;
+};
+
+/** A ferret's lifecycle state, as the session status the interrupt's refusals are written against. */
+const statusOf = (ferret: FerretSummary): SessionStatus => {
+  switch (ferret.state) {
+    case 'starting':
+      return 'starting';
+    case 'working':
+      return 'running';
+    case 'idle':
+      return 'awaiting_user';
+    case 'stopped':
+      return ferret.cause?.kind === 'completed'
+        ? 'completed'
+        : ferret.cause === undefined || ferret.cause.kind === 'stopped' || ferret.cause.kind === 'clean_exit'
+          ? 'stopped'
+          : 'failed';
+  }
+};
+
+/**
+ * What a send can carry that the harness seam does not type yet. `label` is read only for `fyi`, the one label that
+ * changes WHEN a message goes (held to the turn's end); `action` and `blocker` type at once, as the seam does.
+ */
 interface UnwiredSend {
   readonly attachmentIds?: readonly string[] | undefined;
   readonly label?: unknown;
@@ -120,8 +162,8 @@ export interface ConversationAHalf {
 
 /**
  * Part a of Conversation's daemon half: the queue, the send ledger, questions, turns and the shared draft, on the
- * kernel's state, clock, events and ids. A send and an interrupt are built over Ferrets' harness seam but wait behind
- * the gate (`deps.gate`) until Ferrets answers a closed refusal for a send and presses the harness's own stop key.
+ * kernel's state, clock, events and ids. A send and an interrupt go through Ferrets' harness seam, which answers a
+ * closed refusal for a send and presses the harness's own stop key (`deps.gate` can still hold either back, 503).
  * Everything else that needs the pane (the composer actions, a send's retry, cancel and submit, answering a question's
  * form, the harness's own compact-at setting) is wired to a refusal that says so; the queue, the ledger reads, the
  * shared draft and its stream are real.
@@ -195,39 +237,70 @@ export function buildConversationA(deps: {
     answer: async (_ferret: string, _request: AnswerToTerminal): Promise<SessionView> => pending(),
   };
   /**
-   * Stops the ferret's turn and answers its view, so a route can show what the call changed. Waits behind the gate before
-   * anything is opened: Ferrets' interrupt is the runner's raw `C-c`, which quits an idle Codex, answers a pending
-   * question by accident and ignores a terminal status, where today presses Escape and only on a pane doing work.
+   * TODAY'S INTERRUPT (`SessionInterrupt`, the session layer's `interruptLocked`) over Ferrets' harness stop. The
+   * session's own refusals come first — an unconfirmed shutdown, a pending structured question (`question.json`), a
+   * ferret with no running turn — so the harness is never asked to press at a question; the harness then presses its
+   * own stop key under its own rule, and says whether the pane still shows work, which decides `awaiting_user` (an
+   * interactive pane handed back) from `interrupted`.
+   */
+  const interrupts = new SessionInterrupt({
+    serial: new KeyedSerialExecutor(),
+    repository: {
+      read: async (id): Promise<SendTarget> => {
+        const ferret = await ferrets.get(id);
+        if (ferret === undefined) throw new SessionSendError('not_found', `session not found: ${id}`);
+        const question = await askedQuestion(id);
+        return {
+          id,
+          status: statusOf(ferret),
+          mode: ferret.mode ?? 'auto',
+          harness: ferret.harness,
+          // Ferrets keeps no turn count (turns are named by when they began), so none is claimed.
+          turn: 0,
+          ...(question === undefined ? {} : { pendingQuestion: { toolUseId: question.toolUseId } }),
+        };
+      },
+      transition: async (id, change) => {
+        // The round the stop ended ends as interrupted, whichever way the ferret then settles (a round in progress
+        // only: a stop at an idle ferret interrupted no round).
+        boundaries.markInterrupted(id);
+        return { id, status: change.status ?? 'interrupted', mode: 'auto', turn: 0 };
+      },
+    },
+    stopTurn: async id => await (await terminal.bind(id)).interrupt(),
+  });
+  /**
+   * Stops the ferret's turn and answers its view, with the status the stop really left (`interrupted`, or
+   * `awaiting_user` for an interactive pane handed back to its person). A closed gate answers before anything is read.
    */
   const interruptFerret = async (ferret: string): Promise<SessionView> => {
     if (!gate.interrupt) return pending(INTERRUPT_UNAVAILABLE);
-    await (await terminal.bind(ferret)).interrupt();
-    boundaries.markInterrupted(ferret);
-    // Ferrets' record carries no turn count, so the view is the id and the status the interrupt just made true.
-    return { id: ferret, status: 'interrupted', turn: 0 };
+    const after = await interrupts.interrupt(parseSessionId(ferret)).catch(sendRefusal);
+    return { id: after.id, status: after.status, turn: after.turn, health: 'idle' };
   };
   /**
-   * Whether a send may be typed at all, before anything is opened or kept (a repeat of a kept id is answered without it). Waits behind the gate:
-   * the runner throws, rather than answers, for a pane that is busy, behind a dialog or holding the person's draft, so a
-   * refusal that typed nothing cannot be told from a send that was typed. And refuses what the harness seam does not type
-   * yet: files, a hold-to-turn-end label, the type-now flag and a reply request would be dropped, and the send answered
-   * `sent` all the same (U3 carries them).
+   * Whether a send may be typed at all, before its text is prepared, opened or kept (a repeat of a kept id is answered
+   * without it). A closed gate refuses it. And refuses what the harness seam does not type yet: files, an fyi message
+   * (held to the turn's end), the send-now flag and a reply request would be dropped, and the send answered `sent` all
+   * the same (U3 carries them). A field is refused only when it asks for something: the CLI always sends `now: false`
+   * and a label (`action` by default), and those type exactly as the seam types.
    */
   const mayGo = (request: UnwiredSend): void => {
     if (!gate.send) pending(SEND_UNAVAILABLE);
     if (
       (request.attachmentIds?.length ?? 0) > 0 ||
-      request.label !== undefined ||
-      request.now !== undefined ||
-      request.replyExpected !== undefined
+      request.label === 'fyi' ||
+      request.now === true ||
+      request.replyExpected === true
     )
       pending(SEND_EXTRAS_UNAVAILABLE);
   };
   /**
    * Types one message. The send is ledgered as accepted BEFORE a key goes (the same id twice is one message), and a
-   * refusal that typed nothing takes the record back so the id may start over; a runner that threw mid-write keeps it,
-   * because what reached the pane is uncertain. Proof that the harness took it is the tracker's, so the fate stays
-   * `accepted` here.
+   * refusal that typed nothing takes the record back so the id may start over. A send that was typed and not proven is
+   * settled `unaccounted` and answered `send_unconfirmed` with its id, never typed again; a runner failure nobody could
+   * classify keeps the record as it is, because what reached the pane is uncertain. Proof that the harness took it is
+   * the tracker's, so a delivered send's fate stays `accepted` here.
    */
   const typeMessage = async (
     ferret: SessionId,
@@ -237,7 +310,6 @@ export function buildConversationA(deps: {
       readonly senderSessionId?: string | undefined;
     },
   ): Promise<SendResult> => {
-    mayGo(request);
     // Opened BEFORE the record: an unknown ferret or a seam that is off types nothing and keeps nothing. No caller goes
     // to Ferrets: a send has no target rule (the path names where it goes, as for every caller); a ferret is a SENDER.
     const bound = await terminal.bind(ferret);
@@ -260,6 +332,18 @@ export function buildConversationA(deps: {
       await bound.deliver(request.message);
     } catch (error) {
       if (error instanceof MaybeTyped) throw error.answer;
+      if (error instanceof Unconfirmed) {
+        // Typed, not proven: never withdrawn (that would invite a second copy), settled so a retry of this id says so.
+        await ledger
+          .settle(ferret, request.sendId, {
+            fate: 'unaccounted',
+            fateAt: kernel.clock.now(),
+            unaccountedReason: 'landing_unconfirmed',
+            ...(error.stranded ? { typedNotSent: true } : {}),
+          })
+          .catch(() => undefined);
+        throw new SessionSendError('unconfirmed', error.message, undefined, request.sendId);
+      }
       await ledger.withdraw(ferret, request.sendId, 'nothing was typed').catch(() => undefined);
       throw error;
     }
@@ -280,6 +364,9 @@ export function buildConversationA(deps: {
       rows.find(entry => entry.sendId === sendId && (entry.fate !== 'withdrawn' || waiting !== undefined)) ??
       (waiting?.deliveredAs === undefined ? undefined : rows.find(entry => entry.sendId === waiting.deliveredAs));
     if (row === undefined && waiting === undefined) return undefined;
+    // A send typed and not proven is answered as it was the first time: unconfirmed, with its id, never `sent`.
+    if (row?.fate === 'unaccounted' && row.unaccountedReason === 'landing_unconfirmed')
+      throw new SessionSendError('unconfirmed', UNCONFIRMED_AGAIN, undefined, sendId);
     const answer = answerOf(row, waiting);
     return {
       ferret,
@@ -354,9 +441,13 @@ export function buildConversationA(deps: {
             readonly sendId: string;
             readonly senderSessionId?: string | undefined;
           },
-        ) =>
-          (await keptSend(parseSessionId(id), request.sendId)) ??
-          (await typeMessage(parseSessionId(id), { ...request, message: await prepared(id, request.message) })),
+        ) => {
+          const kept = await keptSend(parseSessionId(id), request.sendId);
+          if (kept !== undefined) return kept;
+          // Asked before the text is prepared: a refused send runs no `message.before-send` transform.
+          mayGo(request);
+          return await typeMessage(parseSessionId(id), { ...request, message: await prepared(id, request.message) });
+        },
         interrupt: async (id: string) => await interruptFerret(id),
         sends: records,
         sendStatus: async (id, sendId) => {
@@ -395,6 +486,8 @@ export function buildConversationA(deps: {
       try {
         const kept = await keptSend(ferret, request.sendId);
         if (kept !== undefined) return ok(kept);
+        // Asked before an id is minted or the text is prepared: a refused send runs no transform and spends nothing.
+        mayGo(request);
         return ok(
           await typeMessage(ferret, {
             sendId: request.sendId ?? String(kernel.ids.mint('send')),
