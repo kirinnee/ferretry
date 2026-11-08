@@ -36,7 +36,7 @@ export interface ShellRuntimeOptions {
 type Connection =
   | { readonly kind: 'connecting' }
   | { readonly kind: 'unreachable' }
-  | { readonly kind: 'connected'; readonly client: DaemonClient };
+  | { readonly kind: 'connected'; readonly client: DaemonClient; readonly transport: DaemonTransport };
 
 export class ShellRuntime {
   readonly appVersion: string;
@@ -87,9 +87,10 @@ export class ShellRuntime {
     if (known !== undefined) return known;
     const paired = this.daemons.get(daemon);
     if (paired === undefined) return { kind: 'unreachable' };
-    this.#connections.set(daemon, { kind: 'connecting' });
-    void this.#open(paired);
-    return { kind: 'connecting' };
+    const connecting: Connection = { kind: 'connecting' };
+    this.#connections.set(daemon, connecting);
+    void this.#open(paired, connecting);
+    return connecting;
   }
 
   standing(daemon: string, packageId: string): Standing {
@@ -141,12 +142,18 @@ export class ShellRuntime {
     return client;
   }
 
-  async #open(paired: PairedDaemon): Promise<void> {
+  async #open(paired: PairedDaemon, connecting: Connection): Promise<void> {
     let transport: DaemonTransport | undefined;
     try {
       transport = await this.#connect(paired);
     } catch {
       transport = undefined;
+    }
+    // A connection that finishes opening into an entry nobody holds any more (the daemon was unpaired, or unpaired and
+    // paired again, while it dialled) is closed, not installed (R568): nothing would ever drop it again.
+    if (this.#connections.get(paired.daemon) !== connecting) {
+      transport?.close?.();
+      return;
     }
     if (transport === undefined) {
       this.#connections.set(paired.daemon, { kind: 'unreachable' });
@@ -163,7 +170,7 @@ export class ShellRuntime {
       this.#halves.clearDaemon(paired.daemon);
       this.#changed();
     });
-    this.#connections.set(paired.daemon, { kind: 'connected', client });
+    this.#connections.set(paired.daemon, { kind: 'connected', client, transport });
     this.#changed();
     await client.start();
   }
@@ -178,7 +185,12 @@ export class ShellRuntime {
 
   #drop(daemon: string): void {
     const connection = this.#connections.get(daemon);
-    if (connection?.kind === 'connected') connection.client.stop();
+    if (connection?.kind === 'connected') {
+      connection.client.stop();
+      // The transport's own sessions end here too (R568): the client only stops what it holds, and a request lane
+      // opened by this device would otherwise stay live after the unpair.
+      connection.transport.close?.();
+    }
     this.#connections.delete(daemon);
     this.#halves.clearDaemon(daemon);
     for (const key of [...this.#packageClients.keys()]) {

@@ -45,11 +45,13 @@ import {
 import { SubtreeService } from './lib/session/pack/subtree.ts';
 import manifest from '../manifest.ts';
 import { ConditionalFleetList } from './lib/fleet-list/conditional.ts';
-import { FerretsService } from './lib/ferrets/service.ts';
+import { FerretsService, RENAME_HTTP } from './lib/ferrets/service.ts';
 import { parseRenameBody, parseResumeBody, parseStartBody, parseStopBody } from './lib/ferrets/wire.ts';
 import { createSessionEvent, encodeSessionEvent, parseSessionEvent } from './lib/storage/journal.ts';
 import { type SessionId, tryParseSessionId } from './lib/session-id.ts';
-import { DEFAULT_CALLSIGN_POOL, suggestCallsigns } from './lib/names/index.ts';
+import { DEFAULT_CALLSIGN_POOL, NameAllocator, SystemCallsignIssuer, suggestCallsigns } from './lib/names/index.ts';
+import { LedgerNameClaimStore, stateClaimLedger } from './adapters/names/name-claim-store.ts';
+import { StateCallsignCounters } from './adapters/names/state-callsign-counters.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from './lib/protocol/agent-address.ts';
 import { FerretRegistry } from './lib/registry/registry.ts';
 import { FerretTokenDirectory, type TokenEntry } from './lib/tokens/tokens.ts';
@@ -201,8 +203,31 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     return read.ok && read.value !== undefined ? read.value : {};
   };
 
+  // ONE executor for the callsign ledger: what makes a claim atomic across concurrent starts and renames.
+  const callsignSerial = new KeyedSerialExecutor();
+  const claimStore = new LedgerNameClaimStore(stateClaimLedger(kernel.state), callsignSerial, () =>
+    registry.nameClaims(),
+  );
+  const claims = {
+    allocate: async (request: Parameters<NameAllocator['allocate']>[0]) =>
+      await new NameAllocator(claimStore, {
+        // Rotating the pick so two starts racing for the pool do not both begin at its first entry.
+        nextIndex: upperExclusive => Math.floor(Math.random() * upperExclusive),
+      }).allocate(request),
+    release: async (callsign: string, ownerId: string) => await claimStore.release(callsign, ownerId),
+  };
+  const systemCallsigns = new SystemCallsignIssuer({
+    counters: new StateCallsignCounters(kernel.state),
+    // Every callsign the fleet holds or has held, expired claims included, as today's `held`: a stopped ferret's id is
+    // never issued again.
+    held: async () => registry.nameClaims().map(claim => claim.callsign),
+    serial: callsignSerial,
+  });
+
   const service = new FerretsService(registry, tokens, {
     ready,
+    claims,
+    systemCallsign: async prefix => await systemCallsigns.next(prefix),
     now: () => kernel.clock.now(),
     newId: () => mintId(kernel.clock.nowMs()),
     newName: taken =>
@@ -807,7 +832,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         const id = await pathFerret(call);
         mayAct(call, id);
         const renamed = await service.rename(id, parseRenameBody(await body(call)));
-        if (!renamed.ok) throw new ApiError(409, renamed.error, 'name_taken');
+        if (!renamed.ok) {
+          const refusal = RENAME_HTTP[renamed.error.failure];
+          throw new ApiError(refusal.status, renamed.error.message, refusal.code);
+        }
         return jsonResponse(renamed.value);
       },
       'POST /v1/ferrets/:ferretId/revoke-credential': async call => {
@@ -821,12 +849,9 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         if (!Number.isInteger(count) || count < 1)
           throw new ApiError(400, 'count must be a whole number of at least one', 'invalid_count');
         const nowMs = kernel.clock.nowMs();
-        const claims = registry
-          .list()
-          .filter(ferret => ferret.state !== 'stopped')
-          .map(ferret => ({ callsign: ferret.name, ownerId: ferret.id, claimedAtMs: 0, expiresAtMs: nowMs + 1 }));
+        // A suggestion, not a reservation: the names the fleet holds (a stopped ferret's inside its window), as today.
         const start = Math.floor(nowMs / 1000) % DEFAULT_CALLSIGN_POOL.length;
-        return jsonResponse([...suggestCallsigns(DEFAULT_CALLSIGN_POOL, claims, nowMs, count, start)]);
+        return jsonResponse([...suggestCallsigns(DEFAULT_CALLSIGN_POOL, registry.nameClaims(), nowMs, count, start)]);
       },
     },
   };

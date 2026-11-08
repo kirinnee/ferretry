@@ -480,11 +480,18 @@ describe('catalog install apply: secret bindings', () => {
     should(two.message).match(/are not something/u);
   });
 
-  it('should refuse a binding to a secret this machine does not hold', async () => {
+  it('S67 should refuse a binding to a secret this machine does not hold up front, before anything is written', async () => {
     const r = rig();
     const error = await refusal(apply(r, await preview(r), { ACME_TOKEN: 'MISSING' }));
     should(error.code).equal('catalog_bindings_invalid');
     should(error.message).match(/no secret called MISSING/u);
+    // Judged before the apply, never mid-apply: no install was recorded and the project's file was not touched.
+    should(r.store.state.installs).have.length(0);
+    should(r.mcp.text).not.match(/ACME_TOKEN/u);
+    // Once the secret exists, the same preview applies.
+    r.secrets.add('MISSING');
+    const done = await apply(r, await preview(r), { ACME_TOKEN: 'MISSING' });
+    should(done.install.secretBindings).eql({ ACME_TOKEN: 'MISSING' });
   });
 
   it('should install an unbound placeholder even when a secret of that name exists, and not use that secret', async () => {

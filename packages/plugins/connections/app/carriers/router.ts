@@ -220,6 +220,11 @@ class Generation {
     this.#sockets.clear();
   }
 
+  /** Every session this generation holds proves it is alive now (the browser's foreground, online or network-change signal). */
+  checkLiveness(): void {
+    for (const socket of [...this.#sockets]) socket.checkLiveness();
+  }
+
   /** A republish: close every session dialling or bound to a carrier `kept` refuses, saying why (today's `#refreshed`). */
   withdraw(kept: (method: ConnectionMethod) => boolean, reason: string): void {
     for (const socket of [...this.#sockets]) {
@@ -265,6 +270,15 @@ export class CarrierRouter {
       dial: daemon => this.dial(daemon),
       control: { paths: CONTROL_PATHS, dial: daemon => this.control(daemon) },
     };
+  }
+
+  /**
+   * PROVE EVERY HELD SESSION IS ALIVE, NOW (today's `DaemonCarrierRouter.checkLiveness`): a ping on each, a 4 s
+   * deadline. For the moments the browser says the network may have changed under it; a dead session ends the way any
+   * other dead session does (4408), and the next request redials.
+   */
+  checkLiveness(): void {
+    for (const entry of this.#entries.values()) entry.generation.checkLiveness();
   }
 
   subscribe(listener: () => void): () => void {

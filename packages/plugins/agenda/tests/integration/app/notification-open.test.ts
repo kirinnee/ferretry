@@ -39,11 +39,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page, Worker } from 'playwright-core';
-import { waitFor } from './support/ait-for';
-import { sharedChromium } from './support/hromium.ts';
-import { releaseKey, run, signedRelease } from './support/igned-release.ts';
+import { releaseKey, run, sharedChromium, signedRelease, waitFor } from '@ferretry/app/testing/browser';
 
-const packageRoot = resolve(import.meta.dir, '../..');
+/** This file's folder: the scene paths below are relative to it, and the builder runs here. */
+const packageRoot = import.meta.dir;
 
 const LANDING = '<!doctype html><meta charset="utf-8"><title>landing</title><p>landing</p>';
 const APP = `<!doctype html><meta charset="utf-8"><title>app</title>
@@ -69,7 +68,7 @@ beforeAll(async () => {
   run([
     'bun',
     'build',
-    resolve(packageRoot, 'tests/integration/fixtures/notification-open-scene.tsx'),
+    resolve(packageRoot, 'fixtures/notification-open-scene.tsx'),
     '--target',
     'browser',
     '--outfile',

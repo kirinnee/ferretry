@@ -193,6 +193,16 @@ describe('a relay session that is not serving', () => {
     should(other.socket.closed?.code).equal(RELAY_CLOSE_CODES.protocolError);
   });
 
+  it('the browser’s heartbeat is hop text outside the sealed channel: a ping sends no frame, a pong ends nothing', async () => {
+    const { session, socket } = await opened();
+    const framesBefore = socket.sent.length;
+    session.heartbeat();
+    session.receiveText('fy-pong');
+    should(socket.texts).eql(['fy-ping']);
+    should(socket.sent.length).equal(framesBefore);
+    should(socket.closed).be.null();
+  });
+
   it('should close from this side and stay closed', async () => {
     const { session, socket } = await opened();
     session.close();
@@ -386,6 +396,26 @@ describe('a streaming relay session', () => {
   });
 });
 
+describe('a stream session refused for the rendezvous’s session ceiling', () => {
+  it('R567 a 4429 refusal reaches the caller with its close code and its reason intact', async () => {
+    const identity = await newDaemonIdentity();
+    const socket = new ScriptedSocket();
+    const session = new RelayClientSession({
+      crypto: relayCrypto,
+      daemonId: identity.daemonId,
+      mode: { kind: 'stream', device: device.claim, path: '/v1/events' },
+      socket,
+    });
+    const ready = failure(session.ready());
+    const reason = 'this daemon is carrying as many sessions as it allows';
+    session.carrierClosed(4429, reason);
+    const refused = await ready;
+    should(refused.code).equal(4429);
+    should(refused.message).containEql(reason);
+    should(session.live()).be.false();
+  });
+});
+
 describe('a serving relay session', () => {
   it('R575 a forwarded 4440 while serving keeps the rendezvous close sentence', async () => {
     for (const reason of ['', 'concluded']) {
@@ -429,7 +459,7 @@ describe('a serving relay session', () => {
     should(await third).eql({ kind: 'response', status: 200, headers: {}, body: 'abcdef' });
   });
 
-  it('should ask for gzip, let a caller override it, and read a compressed answer back as the plain text', async () => {
+  it('R506 should ask for gzip, let a caller override it, and read a compressed answer back as the plain text', async () => {
     const { session, daemon, socket } = await serving();
     const text = JSON.stringify({ rows: Array.from({ length: 400 }, (_, index) => ({ index, name: `row ${index}` })) });
     const wire = toBase64Url(new Uint8Array(gzipSync(text)));
@@ -466,7 +496,7 @@ describe('a serving relay session', () => {
     should((await second).body).equal('plain');
   });
 
-  it('should refuse a compressed answer that cannot be read, never hand back the encoded text', async () => {
+  it('R507 should refuse a compressed answer that cannot be read, never hand back the encoded text', async () => {
     const { session, daemon } = await serving();
     const headers = { 'content-encoding': 'gzip', 'content-transfer-encoding': 'base64url' };
     const notBase64 = failure(session.request({ method: 'GET', path: '/a' }));
@@ -629,7 +659,7 @@ const manualTimers = () => {
 };
 
 describe('a relay session under a burst of its own requests', () => {
-  it('should refuse only the request past the queue bound, unsent and retryable, and keep every other', async () => {
+  it('R530 should refuse only the request past the queue bound, unsent and retryable, and keep every other', async () => {
     const { session, socket } = await serving();
     const queued = Array.from({ length: MAX_QUEUED_REQUESTS }, (_, index) =>
       rejection(session.request({ method: 'GET', path: `/v1/${index}` })),
@@ -646,7 +676,7 @@ describe('a relay session under a burst of its own requests', () => {
     should((await Promise.all(queued)).every(reason => reason instanceof RelaySessionError)).be.true();
   });
 
-  it('should withdraw a request whose caller gives up before it leaves, parts and all, and never send it', async () => {
+  it('R531 should withdraw a request whose caller gives up before it leaves, parts and all, and never send it', async () => {
     const { session, socket, daemon } = await serving();
     const filling = Array.from({ length: CREDIT_WINDOW_FRAMES }, (_, index) =>
       rejection(session.request({ method: 'GET', path: `/v1/${index}` })),
@@ -675,7 +705,7 @@ describe('a relay session under a burst of its own requests', () => {
     await Promise.all(filling);
   });
 
-  it('should give up on a request that waits too long for credit, unsent, and keep the session', async () => {
+  it('R531 should give up on a request that waits too long for credit, unsent, and keep the session', async () => {
     const { timers, schedule } = manualTimers();
     const { session, socket, daemon } = await serving({ schedule });
     // The hello and the credential took two frames of the window, so this many requests fill the rest.

@@ -27,10 +27,10 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
-import { sharedChromium } from './support/chromium.ts';
-import { gate } from './support/overlap.ts';
+import { gate, sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 
-const packageRoot = resolve(import.meta.dir, '../..');
+/** This file's folder: the scene paths below are relative to it, and the builder runs here. */
+const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_HANDOVER_SHOTS_DIR ?? '';
 
 const SCENE_CSS = `
@@ -46,14 +46,7 @@ let server: ReturnType<typeof Bun.serve> | undefined;
 const build = async (): Promise<{ readonly css: string; readonly js: string }> => {
   directory = await mkdtemp(join(tmpdir(), 'ferretry-send-handover-'));
   const child = Bun.spawn(
-    [
-      process.execPath,
-      resolve(packageRoot, 'scripts/build-composer-integration-fixture.ts'),
-      '--out',
-      directory,
-      '--entry',
-      'tests/integration/fixtures/send-handover-scene.tsx',
-    ],
+    [process.execPath, sceneBuilder, '--out', directory, '--entry', 'fixtures/send-handover-scene.tsx'],
     { cwd: packageRoot, stderr: 'pipe', stdout: 'pipe' },
   );
   const [stdout, stderr, code] = await Promise.all([

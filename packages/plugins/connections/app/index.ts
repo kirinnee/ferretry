@@ -8,6 +8,11 @@ import { bundledRelayDirectory, documentRelayDiscovery } from './discovery/hoste
 import { ActiveCarrierCard } from './features/carrier/active-carrier-card.tsx';
 import { CarrierPreferenceSelector } from './features/carrier/carrier-preference-selector.tsx';
 import { CarrierPreferenceStore } from './lib/carrier-preference.ts';
+import {
+  browserConnectionSignals,
+  type ConnectionSignalEnvironment,
+  watchConnectionSignals,
+} from './lib/connection-signals.ts';
 import type { ConnectionChoice } from './lib/connection.ts';
 import { readTunnelService, type TunnelServiceState } from './lib/tunnel-service.ts';
 import { pairingWalk } from './pairing/walk.ts';
@@ -41,7 +46,11 @@ function connectFor(ports: ConnectPorts): Connect {
 }
 
 /** Builds the document's router and pairing walk from the shell's ports (`registeredConnect`, once per document). */
-export function buildConnect(ports: ConnectPorts, preferences = new CarrierPreferenceStore()) {
+export function buildConnect(
+  ports: ConnectPorts,
+  preferences = new CarrierPreferenceStore(),
+  signals: ConnectionSignalEnvironment = browserConnectionSignals(),
+) {
   const discovery = documentRelayDiscovery(ports.directory);
   let tunnelService: Promise<TunnelServiceState> | undefined;
   const router = new CarrierRouter({
@@ -61,6 +70,17 @@ export function buildConnect(ports: ConnectPorts, preferences = new CarrierPrefe
   });
   // A preference change forgets only that machine's winner; an unpair forgets the machine.
   preferences.subscribe(daemonId => router.rewalk(daemonId));
+  // Back online, back in the foreground, a new network: prove every held session is still alive (4 s) rather than
+  // waiting for its next ping. Document-lifetime, like the router (`registeredConnect` builds this once per document).
+  // GAP(parity): R88's "retry every outage now" and the WebRTC network nudge are NOT wired — no reconnect loop is built in
+  // this half yet, so a daemon that is reconnecting waits for its backoff timer. Said out loud here (and in
+  // ports-pending.json) rather than hidden by an optional field.
+  watchConnectionSignals(signals, {
+    reconnecting: () => [],
+    retryNow: () => {},
+    networkChanged: () => {},
+    checkLiveness: () => router.checkLiveness(),
+  });
   ports.daemons.registerCache({ clearDaemon: daemonId => router.clearDaemon(daemonId) });
   const pairing = pairingWalk({ openSocket: ports.openSocket, after: ports.after, hostedRelay: discovery.hostedRelay });
   return { router, preferences, discovery, pairing };

@@ -120,6 +120,8 @@ export interface ScopedSocket {
   carrier(): ConnectionMethod | undefined;
   /** Close the session, saying why: it may not go on crossing this carrier for this pairing. */
   cancel(reason: string): void;
+  /** Prove the carrier is alive within {@link LIVENESS_CHECK_DEADLINE_MS}, or end; a session the daemon has not accepted says nothing. */
+  checkLiveness(): void;
 }
 
 const UNSCOPED: WalkScope = { stale: () => undefined, track: () => () => undefined };
@@ -232,6 +234,15 @@ class WalkingSocket implements ScopedSocket {
 
   carrier(): ConnectionMethod | undefined {
     return this.#socket === undefined ? undefined : this.#method;
+  }
+
+  /**
+   * A ping now with the short deadline (today's `checkSessionLiveness`): the browser said the network may have changed
+   * under a session it holds. Only a session the daemon ACCEPTED is held; a shorter deadline already armed stays.
+   */
+  checkLiveness(): void {
+    if (this.#ended || this.#phase !== 'accepted') return;
+    this.#ping(LIVENESS_CHECK_DEADLINE_MS);
   }
 
   /** The router closes this session (an unpair, a re-pair, a new preference, a withdrawn carrier), saying why. */

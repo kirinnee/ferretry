@@ -63,6 +63,7 @@ test('through the port, the service’s own members are not there: revokeToken, 
       'start',
       'stop',
       'summary',
+      'systemCallsign',
       'workFolder',
     ].sort(),
   );
