@@ -41,6 +41,7 @@ const natives = network.map(name => [name, Reflect.get(globalThis, name)] as con
 afterEach(async () => {
   const live = (globalThis as { __ferretryLiveMounts?: Set<() => Promise<void>> }).__ferretryLiveMounts;
   for (const unmount of [...(live ?? [])]) await unmount();
-  if (typeof document !== 'undefined') document.body.replaceChildren();
+  // A file may stand in its own `document` (Connections' page-signal fakes have no body): only a real body is emptied.
+  if (typeof document !== 'undefined') document?.body?.replaceChildren?.();
   for (const [name, native] of natives) Reflect.set(globalThis, name, native);
 });

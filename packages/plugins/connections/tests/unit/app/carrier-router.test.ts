@@ -248,11 +248,16 @@ describe('hosted relay discovery (R580)', () => {
       addEventListener: (type: string) => void added.push(`${kind} ${type}`),
       removeEventListener: () => undefined,
     });
-    const host = globalThis as { window?: unknown; document?: unknown; navigator?: unknown };
-    const before = { window: host.window, document: host.document, navigator: host.navigator };
-    host.window = target('window');
-    host.document = { ...target('document'), visibilityState: 'visible' };
-    host.navigator = { connection: target('connection') };
+    // The page globals are swapped by DESCRIPTOR and put back the same way: under happy-dom (registered by any
+    // earlier DOM file in the one-process unit run) a plain assignment back does not restore them, and a fake
+    // `document` with no body then reached every later file.
+    const names = ['window', 'document', 'navigator'] as const;
+    const before = names.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
+    const stand = (name: (typeof names)[number], value: unknown): void =>
+      void Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
+    stand('window', target('window'));
+    stand('document', { ...target('document'), visibilityState: 'visible' });
+    stand('navigator', { connection: target('connection') });
     const ports = {
       openSocket: () => {
         throw new Error('nothing dials here');
@@ -264,7 +269,10 @@ describe('hosted relay discovery (R580)', () => {
     try {
       (connections as unknown as { shell: Required<import('@ferretry/app').ShellProvides> }).shell.carriers(ports);
     } finally {
-      Object.assign(host, before);
+      for (const [name, descriptor] of before) {
+        if (descriptor === undefined) Reflect.deleteProperty(globalThis, name);
+        else Object.defineProperty(globalThis, name, descriptor);
+      }
     }
     expect(added.sort()).toEqual(['connection change', 'document visibilitychange', 'window online']);
   });
