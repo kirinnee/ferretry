@@ -39,9 +39,10 @@ const manifest = {
   },
 } as unknown as Manifest;
 
-let seen = undefined as DaemonlessScreenProps | undefined;
+const got: { props?: DaemonlessScreenProps } = {};
+const current = (): DaemonlessScreenProps | undefined => got.props;
 const view = (props: DaemonlessScreenProps) => {
-  seen = props;
+  got.props = props;
   return <p data-testid="landing">landing {props.params.tab ?? '-'}</p>;
 };
 const half = provideToShell(
@@ -106,26 +107,26 @@ async function open(path: string, withDaemon: boolean) {
 
 describe('daemon-less screens', () => {
   test('a declared daemon-less route draws its view with its parameters and no daemon is contacted', async () => {
-    seen = undefined;
+    delete got.props;
     const { mounted, transport } = await open('/landing/start', false);
     expect(mounted.container.querySelector('[data-testid="landing"]')?.textContent).toBe('landing start');
-    expect(seen?.location()).toBe('https://app.example/landing#secret');
+    expect(current()?.location()).toBe('https://app.example/landing#secret');
     // With no daemon paired, nothing is dialled for the screen.
     expect(transport.paths()).toEqual([]);
     await mounted.unmount();
   });
 
   test('guard (a): the props carry no client, and a runtime probe finds none', async () => {
-    seen = undefined;
+    delete got.props;
     const { mounted } = await open('/landing/start', true);
-    expect(Object.keys(seen ?? {}).toSorted()).toEqual(['location', 'navigate', 'params']);
+    expect(Object.keys(current() ?? {}).toSorted()).toEqual(['location', 'navigate', 'params']);
     const found = (value: unknown, depth = 0): boolean => {
       if (depth > 2 || typeof value !== 'object' || value === null) return false;
       return Object.entries(value).some(
         ([key, inner]) => /client|transport|daemon/iu.test(key) || found(inner, depth + 1),
       );
     };
-    expect(found(seen)).toBe(false);
+    expect(found(current())).toBe(false);
     await mounted.unmount();
   });
 
