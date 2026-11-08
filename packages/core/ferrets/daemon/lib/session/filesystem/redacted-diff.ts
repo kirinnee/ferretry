@@ -37,12 +37,24 @@ export function redactedDiff(
   let covered = false;
   let body: Body[] = [];
   let inHunk = false;
+  // The hunk header already written to `out` whose section heading is body[0] (the virtual entry), if any.
+  let header: Heading | undefined;
 
   const flush = (): void => {
-    const hunk = maskHunk(body, scope);
+    // A heading with no body after it is only the header line, which was masked on its own.
+    const lone = body.length === 1 && body[0]?.virtual === true;
+    const hunk = maskHunk(lone ? [] : body, scope);
     if (hunk.covered) covered = true;
-    out.push(...hunk.lines);
+    let lines = hunk.lines;
+    if (header !== undefined && body[0]?.virtual === true && !lone) {
+      const first = lines[0] ?? '';
+      const current = out[header.at] ?? '';
+      out[header.at] = unionHeading(current, header.start, first.slice(1));
+      lines = lines.slice(1);
+    }
+    out.push(...lines);
     body = [];
+    header = undefined;
   };
 
   for (const line of diff.split('\n')) {
@@ -60,16 +72,53 @@ export function redactedDiff(
       continue;
     }
     flush();
-    if (line.startsWith('@@')) inHunk = true;
     const masked = maskLine(line, scope);
     if (masked !== line) covered = true;
     out.push(masked);
+    if (line.startsWith('@@')) {
+      inHunk = true;
+      // The section heading git prints after the closing `@@` is the line BEFORE the hunk, so it reads as the line
+      // that comes before the first body line, on the old side and the new side alike: it is fed to the hunk as a
+      // context entry, and what it covers is written back onto the heading's own positions.
+      const heading = headingOf(line);
+      if (heading !== undefined) {
+        header = { at: out.length - 1, start: heading.start };
+        body.push({ line: ` ${heading.text}`, marker: ' ', text: heading.text, virtual: true });
+      }
+    }
   }
   flush();
   return { text: out.join('\n'), covered };
 }
 
 type Marker = ' ' | '+' | '-' | '\\';
+
+interface Heading {
+  /** Index in the output of the hunk header line the heading belongs to. */
+  readonly at: number;
+  /** Where the heading text starts in that line. */
+  readonly start: number;
+}
+
+/** The section heading of a hunk header (`@@ -3,3 +3,5 @@ heading`): its text and where it starts. */
+function headingOf(line: string): { readonly text: string; readonly start: number } | undefined {
+  const match = /^@@+ .*? @@+ /.exec(line);
+  if (match === null) return undefined;
+  const start = match[0].length;
+  const text = line.slice(start);
+  return text === '' ? undefined : { text, start };
+}
+
+/** The header line with every heading character either look covered starred (units line up: same length). */
+function unionHeading(current: string, start: number, viaHunk: string): string {
+  let out = current.slice(0, start);
+  for (let unit = start; unit < current.length; unit++) {
+    const mine = current.charAt(unit);
+    const theirs = viaHunk.charAt(unit - start);
+    out += theirs === '*' && mine !== '\r' ? '*' : mine;
+  }
+  return out;
+}
 
 /** One header line masked the way the body is: a positional `*` per covered character, same length. */
 function maskLine(line: string, scope: RedactionScope): string {
@@ -80,6 +129,8 @@ interface Body {
   readonly line: string;
   readonly marker: Marker;
   readonly text: string;
+  /** The hunk header's section heading, standing in as the context line before the body. */
+  readonly virtual?: true;
 }
 
 /**

@@ -14,9 +14,11 @@ import {
   FsError,
   type FsErrorCode,
   MAX_FILE_BYTES,
+  type FsDiffView,
   type FsFileView,
   redactedDiff,
   redactedFileBase64,
+  fileHoldsValue,
   redactedFile,
   type SessionFilesystem,
   type SessionReadFence,
@@ -172,15 +174,25 @@ async function diff(filesystem: SessionFilesystem, deps: FileBrowserDeps, contex
   }
   // The vault opens HERE and only here: every refusal above was decided without it, and a vault that cannot open
   // serves no diff at all (it fails closed).
-  return await deps.redaction.read(scope => diffResponse(view.diff, scope, fence !== undefined, view.path));
+  return await deps.redaction.read(scope => diffResponse(view, scope, fence !== undefined));
 }
 
 /** The one place diff text leaves the daemon: masked through the read's scope. */
-function diffResponse(text: string, scope: RedactionScope, agent: boolean, path: string): ApiResponse {
-  const { text: masked, covered } = redactedDiff(text, scope);
+function diffResponse(view: FsDiffView, scope: RedactionScope, agent: boolean): ApiResponse {
+  const { text: masked, covered } = redactedDiff(view.diff, scope);
   // The refusal rests on what the scope reported, never on whether the masked text differs from the original.
-  if (agent && covered) throw holdsSecret(path);
+  if (agent && covered) throw holdsSecret(view.path);
+  // An agent is also refused a file that holds a value, as fs/file does: a diff can show only part of a value, so the
+  // two sides the service already read (HEAD and working) are asked too. A person's diff is masked, never refused.
+  if (agent && sidesHoldValue(view, scope)) throw holdsSecret(view.path);
   return textResponse(masked);
+}
+
+function sidesHoldValue(view: FsDiffView, scope: RedactionScope): boolean {
+  const { head, working } = view.sides ?? {};
+  return (
+    (head !== undefined && fileHoldsValue(head, scope)) || (working !== undefined && fileHoldsValue(working, scope))
+  );
 }
 
 /**

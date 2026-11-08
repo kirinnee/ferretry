@@ -826,7 +826,16 @@ export class SessionFilesystem {
       head ? { bytes: head.bytes, mode: head.mode } : undefined,
       working ? { bytes: working, mode: executable ? 0o100755 : 0o100644 } : undefined,
     );
-    return { path: rel, diff: rendered.diff, kind, ...(rendered.truncated ? { truncated: true } : {}) };
+    return {
+      path: rel,
+      diff: rendered.diff,
+      kind,
+      ...(rendered.truncated ? { truncated: true } : {}),
+      sides: {
+        ...(head ? { head: head.bytes } : {}),
+        ...(working ? { working } : {}),
+      },
+    };
   }
 
   /**

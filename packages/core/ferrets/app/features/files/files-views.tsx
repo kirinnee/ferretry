@@ -368,7 +368,7 @@ export interface FileBodyProps {
 }
 
 /** Said wherever masked bytes are shown: the daemon replaced a private value, so this is not the real file. */
-export const MASKED_NOTICE = 'private values masked — this is not the file';
+const MASKED_NOTICE = 'private values masked — this is not the file';
 
 export const FileBody = ({ file, path, raw = false, selection, targetLineRef, preview }: FileBodyProps) => {
   const refusal = fileRefusal(file);

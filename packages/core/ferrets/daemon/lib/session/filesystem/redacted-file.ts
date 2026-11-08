@@ -62,9 +62,10 @@ function coverage(text: string, scope: RedactionScope): boolean[] {
 
 /**
  * A base64 read of a TEXT file is the same bytes in another coat, so it is masked too: decoded, masked as text, and
- * encoded again. Bytes that are not valid UTF-8 text (or hold a NUL) get a byte-for-byte pass: read as latin1 (one byte,
- * one unit) and every byte of a matched value becomes `*`, length kept. That finds every ASCII value wherever it sits
- * in the bytes. Not covered: values inside compressed containers, UTF-16 files, and non-ASCII values in such bytes.
+ * encoded again, and that holds when the text has a NUL in it (a NUL is just a unit). Bytes that are NOT valid UTF-8
+ * get a byte-for-byte pass: read as latin1 (one byte, one unit) and every byte of a matched value becomes `*`, length
+ * kept. That finds every ASCII value wherever it sits in the bytes. Not covered: values inside compressed containers,
+ * UTF-16 files, and non-ASCII values in bytes that are not UTF-8.
  */
 export function redactedFileBase64(
   base64: string,
@@ -77,11 +78,23 @@ export function redactedFileBase64(
   } catch {
     return redactedBytes(bytes, base64, scope);
   }
-  if (text.includes('\0')) return redactedBytes(bytes, base64, scope);
   const masked = redactedFile(text, scope);
   return masked.covered
     ? { base64: Buffer.from(masked.text, 'utf8').toString('base64'), covered: true }
     : { base64, covered: false };
+}
+
+/**
+ * Whether the scope covers anything in these bytes, read the way {@link redactedFileBase64} reads them. Nothing is
+ * masked and nothing is returned but the answer: it is what an agent refusal rests on.
+ */
+export function fileHoldsValue(bytes: Uint8Array, scope: RedactionScope): boolean {
+  const buffer = Buffer.from(bytes);
+  try {
+    return redactedFile(new TextDecoder('utf-8', { fatal: true }).decode(buffer), scope).covered;
+  } catch {
+    return coverage(buffer.toString('latin1'), scope).includes(true);
+  }
 }
 
 function redactedBytes(

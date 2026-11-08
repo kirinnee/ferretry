@@ -526,6 +526,125 @@ describe('the diff route', () => {
     }
   });
 
+  const HEADING = ['fixture-route-head-a-0020', 'fixture-route-head-b-0021', 'fixture-route-head-c-0022'];
+
+  it('R-0150 a value split between the hunk heading and the leading context: masked for a person, 403 holds_secret for an agent', async () => {
+    for (const eol of ['\n', '\r\n']) {
+      for (const joiner of ['\n', '\r\n']) {
+        const raw = `@@ -3,3 +3,4 @@ KEY=${HEADING[0]}\n ${HEADING[1]}${eol} ${HEADING[2]}${eol} b=2${eol}+c=3${eol}`;
+        const redaction = new FakeRedaction(new Map([[FIXTURE_NAME, HEADING.join(joiner)]]));
+        const asPerson = fixture(
+          { tree: tree() },
+          { isTracked: () => true, diffSnapshots: () => ({ diff: raw, truncated: false }) },
+          person,
+          redaction,
+        );
+        const served = await asPerson.ask(DIFF, { query: { path: 'a.ts' } });
+        const wire = String(served.body);
+        should(served.status === 200).be.true();
+        should(HEADING.some(line => wire.includes(line))).be.false();
+        should(wire.split('\n')[0]?.startsWith('@@ -3,3 +3,4 @@ KEY=*')).be.true();
+
+        const asAgent = fixture(
+          { tree: tree() },
+          { isTracked: () => true, diffSnapshots: () => ({ diff: raw, truncated: false }) },
+          agent,
+          redaction,
+        );
+        const refusal = await refusalOf(asAgent.ask(DIFF, { query: { path: 'a.ts' } }));
+        should(refusal?.status === 403 && refusal?.code === 'holds_secret').be.true();
+      }
+    }
+  });
+
+  it('R-0150 an agent diff is refused when either side the service read holds a value, even if the diff shows only part of it', async () => {
+    const partial = `@@ -1 +1 @@\n-old\n+new\n`;
+    const held = `KEY=${FIXTURE_SECRET}\nrest\n`;
+    const head = (text: string) => () => ({ mode: 0o100644, bytes: Buffer.from(text), truncated: false });
+    const scripts = [
+      { tree: treeOf(['a.ts', textFile(held)]), headEntry: head('plain\n') },
+      { tree: tree(), headEntry: head(held) },
+    ];
+    for (const { tree: files, headEntry } of scripts) {
+      const git = { isTracked: () => true, headEntry, diffSnapshots: () => ({ diff: partial, truncated: false }) };
+      const asAgent = fixture({ tree: files }, git, agent, withSecret());
+      const refusal = await refusalOf(asAgent.ask(DIFF, { query: { path: 'a.ts' } }));
+      should(refusal?.status === 403 && refusal?.code === 'holds_secret').be.true();
+
+      const asPerson = fixture({ tree: files }, git, person, withSecret());
+      const served = await asPerson.ask(DIFF, { query: { path: 'a.ts' } });
+      should(served.status === 200 && String(served.body) === partial).be.true();
+    }
+  });
+
+  it('R-0150 an agent diff of two sides that hold no value is still served', async () => {
+    const partial = `@@ -1 +1 @@\n-old\n+new\n`;
+    const { ask } = fixture(
+      { tree: tree() },
+      {
+        isTracked: () => true,
+        headEntry: () => ({ mode: 0o100644, bytes: Buffer.from('old\n'), truncated: false }),
+        diffSnapshots: () => ({ diff: partial, truncated: false }),
+      },
+      agent,
+      withSecret(),
+    );
+    const served = await ask(DIFF, { query: { path: 'a.ts' } });
+    should(served.status === 200 && String(served.body) === partial).be.true();
+  });
+
+  it('R-0151 a value with a trailing CR on a last line with no final newline: masked for a person, 403 for an agent', async () => {
+    const lines = ['fixture-route-crlf-a-0023', 'fixture-route-crlf-b-0024', 'fixture-route-crlf-c-0025'];
+    const stored = [`${FIXTURE_SECRET}\r`, `${lines.join('\r\n')}\r`];
+    const marks = [FIXTURE_SECRET, ...lines];
+    for (const value of stored) {
+      for (const eol of ['\n', '\r\n']) {
+        const inside = value.includes('\r\n') && eol === '\n' ? value.replace(/\r\n/g, '\n') : value;
+        for (const prefix of ['head\n', '\0head\n']) {
+          const body = `${prefix}KEY=${inside}`;
+          const files = { tree: treeOf(['a.ts', textFile(body)]) };
+          const redaction = new FakeRedaction(new Map([[FIXTURE_NAME, value]]));
+          const reads = [
+            ...(prefix === '\0head\n' ? [] : [{ path: 'a.ts' }]),
+            { path: 'a.ts', format: 'base64' },
+          ] as const;
+          for (const query of reads) {
+            const asPerson = fixture(files, { isTracked: () => true }, person, redaction);
+            const response = await asPerson.ask(FILE, { query });
+            const wire = String(response.body);
+            const json = JSON.parse(wire) as { content?: string; base64?: string; redacted?: boolean };
+            const served =
+              json.base64 === undefined ? (json.content ?? '') : Buffer.from(json.base64, 'base64').toString('latin1');
+            should(response.status === 200 && json.redacted === true).be.true();
+            should(marks.some(mark => served.includes(mark))).be.false();
+
+            const asAgent = fixture(files, { isTracked: () => true }, agent, redaction);
+            const refusal = await refusalOf(asAgent.ask(FILE, { query }));
+            should(refusal?.status === 403 && refusal?.code === 'holds_secret').be.true();
+          }
+        }
+      }
+    }
+  });
+
+  it('R-0151 an agent base64 read of valid UTF-8 with a NUL that holds a non-ASCII value is a 403 holds_secret', async () => {
+    const value = 'fixture-é-💥-route-0026';
+    const files = { tree: treeOf(['a.bin', textFile(`\0KEY=${value}\n`)]) };
+    const redaction = new FakeRedaction(new Map([[FIXTURE_NAME, value]]));
+    const refusal = await refusalOf(
+      fixture(files, { isTracked: () => true }, agent, redaction).ask(FILE, {
+        query: { path: 'a.bin', format: 'base64' },
+      }),
+    );
+    should(refusal?.status === 403 && refusal?.code === 'holds_secret').be.true();
+    const served = await fixture(files, { isTracked: () => true }, person, redaction).ask(FILE, {
+      query: { path: 'a.bin', format: 'base64' },
+    });
+    const json = JSON.parse(String(served.body)) as { base64: string; redacted?: boolean };
+    should(json.redacted === true).be.true();
+    should(Buffer.from(json.base64, 'base64').toString('utf8').includes(value)).be.false();
+  });
+
   it('R-0150 an agent still reads a diff that holds no vault value', async () => {
     const { ask } = fixture(
       { tree: tree() },

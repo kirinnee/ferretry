@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import { FakeRedaction } from '@ferretry/core-vault/contract/testing';
 import should from 'should';
 import {
+  fileHoldsValue,
   redactedFile,
   redactedFileBase64,
   redactedFileText,
@@ -132,5 +133,40 @@ describe('the outbound file projection, base64 (R-0151)', () => {
     );
     should(out.covered).be.false();
     should(out.text === 'KEY=abc\r\nnext\r\n').be.true();
+  });
+
+  it('R-0151 valid UTF-8 that holds a NUL is masked as text, so a non-ASCII value in it is found', async () => {
+    const value = 'fixture-é-💥-value-0014';
+    const bytes = Buffer.from(`\0KEY=${value}\n`, 'utf8');
+    const out = await new FakeRedaction(new Map([['V' as never, value]])).read(scope =>
+      redactedFileBase64(bytes.toString('base64'), scope),
+    );
+    should(out.covered).be.true();
+    should(Buffer.from(out.base64, 'base64').toString('utf8').includes(value)).be.false();
+    should(Buffer.from(out.base64, 'base64')[0] === 0).be.true();
+  });
+
+  it('R-0151 bytes that are not UTF-8 keep the latin1 pass: an ASCII value is masked, a non-ASCII one is the declared gap', async () => {
+    const ascii = Buffer.concat([Buffer.from([0xff, 0]), Buffer.from(`KEY=${ONE_LINE}\n`)]);
+    const out = await new FakeRedaction(new Map([['V' as never, ONE_LINE]])).read(scope =>
+      redactedFileBase64(ascii.toString('base64'), scope),
+    );
+    should(out.covered).be.true();
+    should(Buffer.from(out.base64, 'base64').toString('latin1').includes(ONE_LINE)).be.false();
+    const value = 'fixture-é-value-0015';
+    const wide = Buffer.concat([Buffer.from([0xff, 0]), Buffer.from(`KEY=${value}\n`, 'utf8')]);
+    const gap = await new FakeRedaction(new Map([['V' as never, value]])).read(scope =>
+      redactedFileBase64(wide.toString('base64'), scope),
+    );
+    should(gap.covered).be.false();
+  });
+
+  it('R-0151 fileHoldsValue answers for UTF-8 text, text with a NUL, and bytes that are not UTF-8', async () => {
+    const holds = async (bytes: Buffer, value: string): Promise<boolean> =>
+      await new FakeRedaction(new Map([['V' as never, value]])).read(scope => fileHoldsValue(bytes, scope));
+    should(await holds(Buffer.from(`x ${ONE_LINE}\n`), ONE_LINE)).be.true();
+    should(await holds(Buffer.from(`\0x ${ONE_LINE}\n`), ONE_LINE)).be.true();
+    should(await holds(Buffer.concat([Buffer.from([0xff]), Buffer.from(ONE_LINE)]), ONE_LINE)).be.true();
+    should(await holds(Buffer.from('nothing here\n'), ONE_LINE)).be.false();
   });
 });
