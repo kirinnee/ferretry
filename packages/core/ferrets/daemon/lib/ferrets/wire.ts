@@ -84,8 +84,7 @@ export const parseStartBody = (value: unknown): Omit<StartRequest, 'by'> => {
   const body = parse(StartBodySchema, value);
   // Today's `start`: a start with no working directory would run the agent wherever the daemon happens to be, which is
   // never what a caller meant (400 `invalid_request`).
-  if (body.folder === undefined)
-    throw new ApiError(400, START_NEEDS_FOLDER, 'invalid_request');
+  if (body.folder === undefined) throw new ApiError(400, START_NEEDS_FOLDER, 'invalid_request');
   for (const [key, field] of Object.entries(body))
     if (field !== undefined) (OPTION_KEYS.has(key) ? options : identity)[key] = field;
   return {

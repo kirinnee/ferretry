@@ -13,7 +13,8 @@ import { asksHalf } from '../../support/daemon/asks-half.ts';
  * view has it, and what it tells goes the way an owner's answer goes (settle window, composer wait, give-up).
  */
 const FERRET = 'mvv6b4qw-49d0158d';
-const ENDED = 'A3 ended without a value (cancelled: owner declined). If you still need a value, raise a fresh terminal_request_input.';
+const ENDED =
+  'A3 ended without a value (cancelled: owner declined). If you still need a value, raise a fresh terminal_request_input.';
 
 const halves: Awaited<ReturnType<typeof asksHalf>>[] = [];
 afterEach(async () => {

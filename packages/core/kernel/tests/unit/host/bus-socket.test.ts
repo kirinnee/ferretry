@@ -123,7 +123,9 @@ test('V-0452 the bus socket sends one { name, payload } frame per event the call
     published['board']?.(Moved, { card: 'F1' });
     published['voice']?.(Secret, { text: 'never shown' });
     await flush();
-    expect(feed.sent.map(entry => JSON.parse(entry.frame))).toEqual([{ name: 'board.card-moved', payload: { card: 'F1' } }]);
+    expect(feed.sent.map(entry => JSON.parse(entry.frame))).toEqual([
+      { name: 'board.card-moved', payload: { card: 'F1' } },
+    ]);
     expect(feed.sent.some(entry => entry.frame.includes('never shown'))).toBe(false);
     // each frame carries the immediate pre-write permit
     expect(feed.sent[0]?.permit?.()).toBe(true);

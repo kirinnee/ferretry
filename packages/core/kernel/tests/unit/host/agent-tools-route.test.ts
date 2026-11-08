@@ -110,8 +110,14 @@ test('R-0246 it names no ferret and no plugin: extra fields, unknown and ambiguo
       const response = await host.dispatch(post(text));
       return { status: response.status, code: (JSON.parse(response.body) as { code?: string }).code };
     };
-    expect(await refused(JSON.stringify({ tool: 'terminal_list', sessionId: 'wren' }))).toEqual({ status: 400, code: 'invalid_body' });
-    expect(await refused(JSON.stringify({ tool: 'terminal_list', plugin: 'browsers' }))).toEqual({ status: 400, code: 'invalid_body' });
+    expect(await refused(JSON.stringify({ tool: 'terminal_list', sessionId: 'wren' }))).toEqual({
+      status: 400,
+      code: 'invalid_body',
+    });
+    expect(await refused(JSON.stringify({ tool: 'terminal_list', plugin: 'browsers' }))).toEqual({
+      status: 400,
+      code: 'invalid_body',
+    });
     expect(await refused('not json')).toEqual({ status: 400, code: 'invalid_body' });
     expect(await refused(JSON.stringify({ tool: 'nothing_here' }))).toEqual({ status: 404, code: 'unknown_tool' });
     expect(await refused(JSON.stringify({ tool: 'shared_name' }))).toEqual({ status: 400, code: 'ambiguous_tool' });

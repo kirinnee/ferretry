@@ -136,7 +136,15 @@ export interface LayoutDecl {
 // data ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export type ItemKind =
-  'mcp' | 'skill' | 'shell' | 'recipe' | 'instruction' | 'layout' | 'theme' | 'runtime' | 'endpoint';
+  | 'mcp'
+  | 'skill'
+  | 'shell'
+  | 'recipe'
+  | 'instruction'
+  | 'layout'
+  | 'theme'
+  | 'runtime'
+  | 'endpoint';
 
 export interface ItemDecl {
   readonly kind: ItemKind;

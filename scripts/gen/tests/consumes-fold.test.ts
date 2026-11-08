@@ -10,18 +10,31 @@ const manifests: Record<string, Partial<Manifest>> = {
   board: {
     id: 'board',
     hooks: { takes: [{ hook: { name: 'ask.sources' } as never, key: 'card' }] },
-    ui: { renderers: [{ kind: 'ask', source: 'card', key: 'ask:card' }, { kind: 'reference', prefix: '&', key: 'reference:&' }] },
+    ui: {
+      renderers: [
+        { kind: 'ask', source: 'card', key: 'ask:card' },
+        { kind: 'reference', prefix: '&', key: 'reference:&' },
+      ],
+    },
   } as never,
   // Agenda renders Board's ask source and ALSO the `&` prefix Board registered first.
   agenda: {
     id: 'agenda',
-    ui: { renderers: [{ kind: 'ask', source: 'card', key: 'ask:card' }, { kind: 'reference', prefix: '&', key: 'reference:&' }] },
+    ui: {
+      renderers: [
+        { kind: 'ask', source: 'card', key: 'ask:card' },
+        { kind: 'reference', prefix: '&', key: 'reference:&' },
+      ],
+    },
   } as never,
   // Notes renders a prefix nobody else registered: it consumes nothing for it.
   notes: { id: 'notes', ui: { renderers: [{ kind: 'reference', prefix: '#', key: 'reference:#' }] } } as never,
   // Vault offers input.targets; Terminals and Browsers take it with a kind; Voice does not.
   vault: { id: 'vault', hooks: { offers: [hook('input.targets')] } } as never,
-  terminals: { id: 'terminals', hooks: { takes: [{ hook: { name: 'input.targets' } as never, key: 'terminal' }] } } as never,
+  terminals: {
+    id: 'terminals',
+    hooks: { takes: [{ hook: { name: 'input.targets' } as never, key: 'terminal' }] },
+  } as never,
   browsers: { id: 'browsers', hooks: { takes: [{ hook: { name: 'input.targets' } as never, key: 'page' }] } } as never,
   voice: { id: 'voice' } as never,
 };

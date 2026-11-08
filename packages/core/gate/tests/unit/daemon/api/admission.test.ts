@@ -572,7 +572,9 @@ describe('S61 / R-0246 the agent tool door acts only for the ferret its own toke
 
   test('S61 a ferret token still acts as its own ferret, and the header naming another one is still a session_mismatch', () => {
     expect(asTool({ bearer: FERRET_TOKEN, arrival: local(true) })).toBe(`admitted as ferret:${FERRET}`);
-    expect(asTool({ bearer: FERRET_TOKEN, arrival: local(true), headers: naming })).toBe(`admitted as ferret:${FERRET}`);
+    expect(asTool({ bearer: FERRET_TOKEN, arrival: local(true), headers: naming })).toBe(
+      `admitted as ferret:${FERRET}`,
+    );
     expect(asTool({ bearer: FERRET_TOKEN, arrival: local(true), headers: { [SESSION_ID_HEADER]: 'F99' } })).toBe(
       '401 session_mismatch',
     );
