@@ -7,10 +7,15 @@ set -euo pipefail
 # every daemon boot, while the kernel's bounded reader refused the same file in one linear pass. Every daemon-side
 # reader of text a person or an agent can write goes through that reader, or the value the kernel already checked.
 #
-# HOW. `no-raw-yaml.ts` reads every tracked product file under `packages/` (tests, fixtures and test support are out
-# of scope) and refuses any `Bun.YAML`, `YAML.parse(` or import of `yaml` / `js-yaml` in a file the ledger
-# (`scripts/validate/raw-yaml-allowlist.txt`, one `path  # reason` per line) does not name. EXACT BOTH WAYS: a listed
-# file that no longer parses YAML fails too.
+# HOW. `no-raw-yaml.ts` WALKS THE SYNTAX TREE of every tracked product file under `packages/` and of the `testing/`
+# support product code may import (tests and `fixtures/` are out of scope) and refuses any use of Bun's `YAML` but
+# `stringify` however it is reached (aliased or namespace import, destructure, computed key, dynamic import, a name for
+# `Bun`), any import of a module with `yaml` in its name through any plain loader (`require`, `import.meta.require`,
+# `createRequire`), a load whose module name is built at run time (Bun's loader parses a `.yaml` path itself), a
+# static `.yaml` load the ledger does not list, and any load of a ledgered parser by a file the ledger does not name
+# (laundering). The ledger
+# (`scripts/validate/raw-yaml-allowlist.txt`) lists files, their parsing exports and those exports' callers, each
+# with a reason. EXACT BOTH WAYS: a listed file, export or caller that no longer applies fails too.
 #
 # Exit codes follow the repo convention: 0 clean, 1 a violation, 2 a broken gate.
 

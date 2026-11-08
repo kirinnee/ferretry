@@ -52,7 +52,7 @@ import type {
   WebSocketClient,
   CarrierListenerPort,
 } from '../contract/ports.ts';
-import { parse as parseYaml } from 'yaml';
+import { readConfigText } from '../host/config/yaml-text.ts';
 import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
 import { createIdentitySigner, signerFor } from '../host/session/signer.ts';
 import {
@@ -606,11 +606,11 @@ async function start(world: World): Promise<TestHost> {
         const before = def.shape === 'file' ? all : name === undefined ? undefined : all?.[name];
         let next: unknown;
         if (typeof edit === 'string') {
-          try {
-            next = parseYaml(edit) ?? {};
-          } catch {
+          // The kernel's bounded reader, as the real writer reads an edit: never a raw parse of a text a test hands in.
+          const read = readConfigText(edit);
+          if (!read.ok)
             return { kind: 'refused', reason: 'yaml', issues: [{ path: key, message: 'this is not YAML' }] };
-          }
+          next = read.read.value ?? {};
         } else {
           next = { ...((before as Record<string, unknown> | undefined) ?? {}), ...edit.patch };
           for (const [field, value] of Object.entries(edit.patch))
