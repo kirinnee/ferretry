@@ -82,7 +82,7 @@ const freeName = (name: string, taken: (candidate: string) => boolean): string =
 
 function assertNoRawSecrets(env: Readonly<Record<string, string>>, owner: string): void {
   for (const [name, value] of Object.entries(env)) {
-    // The browser's rule (one helper), a token-shaped value at any length, a name that ENDS in a credential word from 8 characters.
+    // The browser's rule (one helper), a token-shaped value anywhere in it at any length, a credential-named variable holding 8 characters or more outside its references.
     const plain = plainPaste(name, value, false, 'stored');
     const secretShaped =
       plain.kind === 'withheld' && (plain.reason === 'credential-name' || plain.reason === 'token-shape');

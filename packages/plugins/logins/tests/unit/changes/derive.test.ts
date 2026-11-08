@@ -144,11 +144,57 @@ describe('deriveLoginChange', () => {
     ).containEql('Save it in this machine');
   });
 
+  describe('a raw key beside a ${secret:NAME} reference', () => {
+    const rawKey = (): string => 'q7Zk'.repeat(10);
+    const stage = (env: Record<string, string>): unknown =>
+      deriveLoginChange(
+        FILES,
+        { kind: 'login.add', id: 'beside', harness: 'claude-code', store: 'environment', env },
+        facts(),
+      );
+    const jwt = (): string => `eyJ${'a'.repeat(12)}.${'b'.repeat(12)}.${'c'.repeat(12)}`;
+    const refused: readonly (readonly [string, string, () => string])[] = [
+      ['GATEWAY_TOKEN', 'a scheme word, a raw key and a reference', () => `Bearer ${rawKey()} \${secret:X}`],
+      ['ANTHROPIC_API_KEY', 'a reference then a raw key', () => `\${secret:X} ${rawKey()}`],
+      ['GATEWAY_TOKEN', 'a JWT beside a reference', () => `Bearer ${jwt()} \${secret:X}`],
+      ['GATEWAY_TOKEN', 'a hf_ token beside a reference', () => `Bearer hf_${'x1'.repeat(10)} \${secret:X}`],
+      ['GATEWAY_AUTH', 'a raw key under a mid-name credential word', () => `Bearer ${rawKey()} \${secret:X}`],
+    ];
+    for (const [name, what, value] of refused) {
+      it(`should refuse ${name} holding ${what}, naming the variable and never the value`, () => {
+        const message = refusal(() => stage({ [name]: value() }));
+
+        should(message).startWith(`${name} in login beside looks like a secret`);
+        should(message).not.containEql(rawKey());
+      });
+    }
+
+    it('should refuse a token found beside a reference under a name that is not a credential', () => {
+      for (const value of [
+        `Bearer ${jwt()} \${secret:X}`,
+        `Bearer hf_${'x1'.repeat(10)} \${secret:X}`,
+        'Bearer ya29.a0 ${secret:X}',
+      ]) {
+        should(refusal(() => stage({ GATEWAY_NOTE: value }))).startWith(
+          'GATEWAY_NOTE in login beside looks like a secret',
+        );
+      }
+    });
+
+    it('should accept a scheme word and header punctuation around a reference', () => {
+      for (const value of ['Bearer ${secret:K}', 'Authorization: Bearer ${secret:K}', '${secret:A}${secret:B}']) {
+        should(stage({ GATEWAY_TOKEN: value })).be.an.Object();
+      }
+    });
+  });
+
   it('should accept a documented flag whose name only mentions auth or a key, and a composite reference', () => {
     const env = {
       CLAUDE_CODE_USE_BEDROCK: '1',
       CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1',
       CLAUDE_CODE_API_KEY_HELPER_TTL_MS: '3600000',
+      MAX_THINKING_TOKENS: '31999',
+      ANTHROPIC_CUSTOM_HEADERS: 'Authorization: Bearer ${secret:K}',
       GATEWAY_AUTH: 'Bearer ${secret:K}',
       GATEWAY_TOKEN: 'Bearer ${secret:K}',
     };

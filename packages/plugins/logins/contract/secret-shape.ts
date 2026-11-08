@@ -126,7 +126,7 @@ export function findRawSecrets(document: unknown): readonly SecretFinding[] {
 }
 
 // ── looksSecret: one environment entry that looks like a secret (today's account import rule) ──
-import { MIN_SECRET_VALUE_LENGTH, secretReferencesIn } from '@ferretry/core-vault/contract';
+import { MIN_SECRET_VALUE_LENGTH, secretReferencePattern, secretReferencesIn } from '@ferretry/core-vault/contract';
 
 /** Name words that say a variable holds a credential. Matched per `_`-separated word. */
 const SECRET_NAME_WORDS: ReadonlySet<string> = new Set([
@@ -151,7 +151,7 @@ const TOKEN_BODY = '[A-Za-z0-9_-]{8,}';
 /**
  * THE list of well-known token formats (one owner): each is a fixed prefix and the body that follows it. A
  * value that starts with a prefix is a secret by value ({@link looksSecret}), and text that holds a whole token
- * anywhere, glued to anything, is cut ({@link SECRET_TOKEN_SOURCE}). Every body is a linear class of a minimum
+ * anywhere, glued to anything, is found ({@link hasTokenShape}). Every body is a linear class of a minimum
  * length and no format looks behind it: `<&ghp_x` and `{sk-x` are cut as `ghp_x` and `sk-x` are. A new format
  * is added here and nowhere else.
  */
@@ -170,6 +170,12 @@ const TOKEN_FORMATS: readonly (readonly [prefix: string, body: string])[] = [
 
 /** Value prefixes of well-known token formats, and of two more whose body is not a plain run (a Google OAuth token, a JWT). */
 const SECRET_VALUE_PREFIX = new RegExp(`^(?:${TOKEN_FORMATS.map(([prefix]) => prefix).join('|')}|ya29\\.|eyJ)`, 'u');
+
+/** A whole well-known token anywhere in a string, glued to anything, plus a JWT and a Google OAuth token. */
+const TOKEN_ANYWHERE = new RegExp(
+  `${TOKEN_FORMATS.map(([prefix, body]) => `${prefix}${body}`).join('|')}|eyJ[A-Za-z0-9_-]{8,}\\.|ya29\\.`,
+  'u',
+);
 
 /** A value that only points somewhere else: `$NAME`, `${NAME}`, `${secret:NAME}`. */
 const INDIRECT_VALUE = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[^}]+\})$/u;
@@ -197,9 +203,9 @@ export function namesACredential(name: string): boolean {
   return words.some((word, index) => SECRET_NAME_PAIRS.has(`${word}_${words[index + 1] ?? ''}`));
 }
 
-/** Whether a value starts like a well-known token (`sk-…`, `ghp_…`, a JWT), whatever the variable is called. */
+/** Whether a value starts like a well-known token (any length) or holds a whole one anywhere in it (`sk-…`, `ghp_…`, a JWT, `ya29.`), whatever the variable is called. */
 export function hasTokenShape(value: string): boolean {
-  return SECRET_VALUE_PREFIX.test(value) || KNOWN_SHAPES.some(shape => shape.test(value));
+  return SECRET_VALUE_PREFIX.test(value) || TOKEN_ANYWHERE.test(value) || KNOWN_SHAPES.some(shape => shape.test(value));
 }
 
 /** What is wrong with a URL held as a plain value: a user and password in it, or a query string. */
@@ -233,9 +239,9 @@ const FINAL_CREDENTIAL_WORDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Whether a variable's NAME ENDS in a credential word (`GATEWAY_TOKEN`) or pair (`ANTHROPIC_API_KEY`). Only such a name
- * is refused at any length: `AUTH` and `AUTHORIZATION` (`SKIP_BEDROCK_AUTH=1`) and a credential word in the middle
- * (`API_KEY_HELPER_TTL_MS`) name a flag or a setting, and stay on {@link looksSecret}'s minimum-length rule.
+ * Whether a variable's NAME ENDS in a credential word (`GATEWAY_TOKEN`) or pair (`ANTHROPIC_API_KEY`). Only the browser's
+ * `'prefill'` mode uses it, to withhold such a name at any length: `AUTH` and `AUTHORIZATION` (`SKIP_BEDROCK_AUTH=1`) and a
+ * credential word in the middle (`API_KEY_HELPER_TTL_MS`) name a flag or a setting, and stay on the length rule.
  */
 function namesACredentialAtEnd(name: string): boolean {
   const words = name
@@ -246,15 +252,35 @@ function namesACredentialAtEnd(name: string): boolean {
   return FINAL_CREDENTIAL_WORDS.has(last) || SECRET_NAME_PAIRS.has(`${words.at(-2) ?? ''}_${last}`);
 }
 
+/** A run of characters a key is made of, as long as the secret store accepts. */
+const KEY_RUN = new RegExp(`[A-Za-z0-9._~+/=-]{${String(MIN_SECRET_VALUE_LENGTH)},}`, 'u');
+
+/** What a header leaves once its `${secret:NAME}` references, one `Authorization:` and one scheme word are taken away. */
+function outsideReferences(value: string): string {
+  return value
+    .replace(secretReferencePattern(), ' ')
+    .trim()
+    .replace(/^(?:authorization\s*:\s*)?(?:(?:bearer|basic|token)\b\s*)?/iu, '');
+}
+
+/**
+ * Whether a value holds something key-like. With no reference it is any value of 8 characters or more (the secret store's
+ * floor, so a shorter one is a placeholder such as `ollama`). With a `${secret:NAME}` in it, only what is LEFT counts: a
+ * scheme word and header punctuation may surround the reference, but a run of 8 key characters beside it is a raw key.
+ */
+function holdsAKey(value: string): boolean {
+  if (secretReferencesIn(value).length === 0) return value.length >= MIN_SECRET_VALUE_LENGTH;
+  return KEY_RUN.test(outsideReferences(value));
+}
+
 /**
  * THE rule for a value headed for a PLAIN field (one owner, shared by this browser's paste and the daemon's
  * backstop `assertNoRawSecrets`, which refuses `credential-name`, `token-shape` and `url-userinfo`): a variable the
  * preset deliberately leaves empty keeps its `''`; a value with a token shape is never taken, at any length. In
  * `'prefill'` (the browser's paste) a variable whose name ENDS in a credential word is never taken either, however
- * short, and the person types a placeholder themselves. In `'stored'` (the daemon) such a name is refused only at
- * 8 characters or more, since a shorter value is a placeholder (`ollama`), and a value that holds a
- * `${secret:NAME}` among other text is let through. `AUTH`-style flags and a credential word mid-name go by
- * {@link looksSecret} (eight characters and more) in both. A URL with a user or a query string is not taken. It returns
+ * short, and the person types a placeholder themselves. In both modes a credential-named variable (a credential word in
+ * any position) is refused when its value holds 8 or more characters outside any `${secret:NAME}` reference, so only a
+ * scheme word (`Bearer`, `Basic`, `Token`) and header punctuation (`Authorization:`) may surround a reference. A URL with a user or a query string is not taken. It returns
  * the verdict, never the value in a sentence.
  */
 export function plainPaste(
@@ -264,13 +290,8 @@ export function plainPaste(
   mode: 'prefill' | 'stored' = 'prefill',
 ): PlainPaste {
   if (value !== '' && !INDIRECT_VALUE.test(value.trim())) {
-    const stored = mode === 'stored';
-    const referenced = stored && secretReferencesIn(value).length > 0;
-    // A STORED value under 8 characters is a placeholder (`ollama`), as the secret store cannot hold one either.
-    const longEnough = !stored || value.length >= MIN_SECRET_VALUE_LENGTH;
-    const midName =
-      value.length >= MIN_SECRET_VALUE_LENGTH && secretReferencesIn(value).length === 0 && namesACredential(name);
-    if ((!referenced && longEnough && namesACredentialAtEnd(name)) || midName) {
+    const namesOne = namesACredential(name) && holdsAKey(value);
+    if (namesOne || (mode === 'prefill' && namesACredentialAtEnd(name))) {
       return { kind: 'withheld', reason: 'credential-name' };
     }
     if (hasTokenShape(value)) return { kind: 'withheld', reason: 'token-shape' };
