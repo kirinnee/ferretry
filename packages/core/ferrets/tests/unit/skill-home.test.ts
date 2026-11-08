@@ -79,19 +79,18 @@ describe('F-0006 the selected skills are linked into the ferret home, one link e
   test('F-0006 a shared skill is ONE link to the minter’s installed folder, and the harness reads it through the link', async () => {
     const f = await fixture();
     const made = await materializeSkills(f.home, [part('review', await f.tree('review'))], []);
-    expect(made).toEqual({ linked: ['review'], copied: [], skipped: [], pruned: [], kept: [], stuck: [] });
+    expect(made).toEqual({ linked: ['review'], copied: [], skipped: [], pruned: [] });
     const at = join(f.disk, 'skills', 'review');
     expect((await lstat(at)).isSymbolicLink()).toBe(true);
     expect(await realpath(at)).toBe(join(f.installed, 'review'));
     expect(await readFile(join(at, 'scripts', 'run.sh'), 'utf8')).toBe('run\n');
   });
 
-  test('F-0006 a relaunch finds last time’s link, leaves it as it is and keeps the skill', async () => {
+  test('F-0006 a relaunch replaces last time’s link and keeps the skill', async () => {
     const f = await fixture();
     await materializeSkills(f.home, [part('review', await f.tree('review'))], []);
     const again = await materializeSkills(f.home, [part('review', await f.tree('review'))], []);
-    expect(again.kept).toEqual(['review']);
-    expect(again.linked).toEqual([]);
+    expect(again.linked).toEqual(['review']);
     expect(await readFile(join(f.disk, 'skills', 'review', 'SKILL.md'), 'utf8')).toBe('review\n');
   });
 
@@ -107,12 +106,10 @@ describe('F-0006 the selected skills are linked into the ferret home, one link e
     await mkdir(join(f.disk, 'skills', 'stale'), { recursive: true });
     await writeFile(join(f.disk, 'skills', 'stale', 'SKILL.md'), 'old\n');
     const made = await materializeSkills(f.home, [part('review', await f.tree('review'))], ['.system']);
-    // A folder goes; a link cannot be unlinked by the root (declared GAP), so it is reported and stays.
-    expect(made.pruned).toEqual(['stale']);
-    expect(made.stuck).toEqual(['lint']);
+    expect(made.pruned.toSorted()).toEqual(['lint', 'stale']);
     expect(await readFile(join(f.disk, 'skills', '.system', 'bundled.md'), 'utf8')).toBe('codex\n');
-    expect((await lstat(join(f.disk, 'skills', 'lint'))).isSymbolicLink()).toBe(true);
-    // Whatever happens to the link, what it points at is never touched.
+    expect(await gone(join(f.disk, 'skills', 'lint'))).toBe(true);
+    // Removing the link removed the link, never what it pointed at.
     expect(await readFile(join(f.installed, 'lint', 'SKILL.md'), 'utf8')).toBe('lint\n');
   });
 
@@ -120,7 +117,7 @@ describe('F-0006 the selected skills are linked into the ferret home, one link e
     const f = await fixture();
     const project: LaunchPart = { kind: 'skill', name: 'local', path: '/work/app/.claude/skills/local' as FencedPath };
     const made = await materializeSkills(f.home, [project], []);
-    expect(made).toEqual({ linked: [], copied: [], skipped: ['local'], pruned: [], kept: [], stuck: [] });
+    expect(made).toEqual({ linked: [], copied: [], skipped: ['local'], pruned: [] });
     expect(await gone(join(f.disk, 'skills', 'local'))).toBe(true);
   });
 
@@ -172,15 +169,16 @@ describe('F-0006 the selected skills are linked into the ferret home, one link e
     await expect(materializeSkills(f.home, [part('review', tree)], [])).rejects.toThrow();
   });
 
-  test('F-0006 a link already at skills/ is never followed, and what it names is never touched', async () => {
+  test('F-0006 a link already at skills/ is unlinked, never followed, and what it names is never touched', async () => {
     const f = await fixture();
     await mkdir(join(f.disk, 'skills'), { recursive: true });
     await mkdir(join(f.disk, '..', 'victim'), { recursive: true });
     await writeFile(join(f.disk, '..', 'victim', 'keep.txt'), 'keep\n');
     await symlink(join(f.disk, '..', 'victim'), join(f.disk, 'skills', 'review'));
     const made = await materializeSkills(f.home, [part('review', await f.tree('review'))], []);
-    expect(made.kept).toEqual(['review']);
+    expect(made.linked).toEqual(['review']);
     expect(await readFile(join(f.disk, '..', 'victim', 'keep.txt'), 'utf8')).toBe('keep\n');
+    expect(await readFile(join(f.disk, 'skills', 'review', 'SKILL.md'), 'utf8')).toBe('review\n');
   });
 });
 
@@ -191,7 +189,9 @@ describe('F-0006 the answer says what was made', () => {
       resolve: (relative: string) => ({ ok: true, value: `/h/${relative}` }),
       makeDirectory: async () => {},
       list: async () => [],
+      lstat: async () => undefined,
       remove: async () => {},
+      unlink: async () => {},
       copyShared: async (_tree: unknown, to: string, options?: { link?: boolean }) => {
         calls.push(`${to}:${String(options?.link)}`);
         return 'copied';

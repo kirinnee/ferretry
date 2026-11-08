@@ -176,7 +176,6 @@
     ],
     "skills": [
       "[cross: catalogs] GAP(skills): nothing writes Skills' installed/* yet: SkillStore.install (the home of today's <fleet>/assets/skills/<name>/ written by a catalog install) is built and tested, but the Catalogs install path reaches no skills provider (CatalogItems 'skill' is offered by nobody), so no skill is installed, no launch has a skill to share, and a ferret home's skills/ stays empty until it does: daemon/lib/skill-store.ts",
-      "[kernel: unlink a link out of the root] GAP(kernel): RootHandle.remove follows the leaf and refuses link_escape for a link whose target is outside the root, so the skill links in a ferret home cannot be unlinked: a relaunch keeps last time's link (same target) and a deselected skill's link stays in skills/ until remove can unlink a link without following it (materializeSkills reports kept and stuck): core/ferrets/contract/skill-home.ts",
       "[cross: catalogs] Skill rows in the ferret panel: Publish / Uninstall / “installed from” in a skill row’s ⋯ are Catalogs’ rows; they need a per-row contribution on Skills’ panel (Skills offers only the header slot `skills.add`, where Catalogs draws “+ Add skills”)",
       "[cross: ferrets] a /name or $name reference links to Settings › Skills on the daemon it names; opening the Skills tab of the ferret’s context needs Ferrets to offer a way to select a side panel (no screen or address for it yet)"
     ],
