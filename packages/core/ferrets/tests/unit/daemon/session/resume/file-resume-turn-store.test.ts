@@ -151,3 +151,66 @@ describe('the resume turn store keeps a ferret’s turns on its own private fold
     expect(() => store.file(FERRET, 0)).toThrow('from one');
   });
 });
+
+/**
+ * m1 (britnee's ruling: must-fix): an agent of the same uid can plant a link at a turn's name inside its own folder.
+ * `turns/turn-099.md -> ../environment.json` would otherwise be served as turn 99's words to the owner's app and to the
+ * ferret's lead. Only a regular file of its own is a turn: the listing skips a link, every read refuses one while it
+ * holds the file, so a name swapped for a link between the listing and the read is refused too. The fixture value is
+ * fake.
+ */
+describe('m1 a turn file that is a link is never read: no launch value reaches a turn reader', () => {
+  const FAKE = 'FY_TOKEN_FIXTURE_m1_value';
+  const planted = async () => {
+    const world = await subject();
+    await world.store.writeTurn(FERRET, 1, 'Read the file and do it.\n');
+    await writeFile(`${world.folder}/environment.json`, `{"FY_SESSION_TOKEN":"${FAKE}"}\n`);
+    await symlink('../environment.json', `${world.folder}/turns/turn-099.md`);
+    await world.store.writeTurn(FERRET, 2, 'two\n');
+    await symlink('../environment.json', `${world.folder}/turns/turn-002.by.json`);
+    return world;
+  };
+
+  test('m1 the listing skips a turn and an author record that are links to environment.json, strict or best effort', async () => {
+    const { store } = await planted();
+    for (const strict of [true, false]) {
+      const turns = await store.list(FERRET, { strict });
+      expect(turns).toEqual([
+        { turn: 1, text: 'Read the file and do it.\n' },
+        { turn: 2, text: 'two\n' },
+      ]);
+      expect(JSON.stringify(turns)).not.toContain(FAKE);
+    }
+    expect(await store.latest(FERRET)).toBe(2);
+  });
+
+  test('m1 a read of a turn whose name is a link refuses it, even when the linked bytes are exactly the words asked about', async () => {
+    const { store } = await planted();
+    // `matches` reads the document through the same held read: a link never matches, so a revive numbers past it.
+    expect(await store.matches(FERRET, 99, `{"FY_SESSION_TOKEN":"${FAKE}"}\n`)).toBe(false);
+  });
+
+  test('m1 a name that the listing saw as a file and is a link by the time it is read is refused, naming no path or value', async () => {
+    const { root, folder } = await planted();
+    // The listing is told every name is a regular file, as if the link were swapped in right after it looked.
+    const raced: RootHandle = {
+      ...root,
+      entries: async path => (await root.entries(path)).map(entry => ({ ...entry, kind: 'file' as const })),
+    };
+    const store = new FileResumeTurnStore(raced, FERRET);
+
+    const strict = store.list(FERRET, { strict: true });
+    await expect(strict).rejects.toThrow(/turn document turn-099\.md could not be read|not a regular file of its own/u);
+    await strict.catch((error: unknown) => {
+      const said = `${String(error)} ${String((error as Error).cause)}`;
+      expect(said).not.toContain(FAKE);
+      expect(said).not.toContain(folder);
+    });
+    const best = await store.list(FERRET, { strict: false });
+    expect(best).toEqual([
+      { turn: 1, text: 'Read the file and do it.\n' },
+      { turn: 2, text: 'two\n' },
+    ]);
+    expect(JSON.stringify(best)).not.toContain(FAKE);
+  });
+});

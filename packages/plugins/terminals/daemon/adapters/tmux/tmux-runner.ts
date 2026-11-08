@@ -64,6 +64,8 @@ const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 /** What tmux is asked about a pane: id, process, dead, the session holding it, and when that session began. */
 const PANE_FACTS = '#{pane_id}|#{pane_pid}|#{pane_dead}|#{session_name}|#{session_created}';
 const DELIVERY_FACTS = `${PANE_FACTS}|#{pane_current_command}|#{cursor_y}`;
+/** The only tmux commands a startup wait may run: questions about the pane. Anything else is refused before tmux. */
+const STARTUP_READS: ReadonlySet<string> = new Set(['has-session', 'display-message', 'capture-pane']);
 
 export function ferretTmuxSession(ferret: string): string {
   return sessionTarget(`${FERRET_TMUX_PREFIX}${ferret}`.slice(0, MAX_TMUX_SESSION_NAME_LENGTH));
@@ -190,6 +192,38 @@ export class TmuxRunner implements Runner {
     } catch (error) {
       throw typedNotLost(error, pane.typings());
     }
+  }
+
+  /**
+   * Today's `TmuxSessionLifecycleLauncher.settled`: waits, boundedly, for the harness to finish its own startup now
+   * that its first turn is in (`TmuxPaneDelivery.waitStartupSettled`, unchanged). It reads the SAME exact pane
+   * `deliver` bound, through that binding (every read re-proves the pane is the one first seen, so a pane that died or
+   * was replaced reads as exited), and it writes NOTHING: any write it asked for would be refused before tmux saw it.
+   * Its reads are not acted on, exactly like `deliver`'s own frame reads. A pane that dies rejects with
+   * `PaneStartupExitedError`, whose `parked` says whether a frame showed the first turn parked first.
+   */
+  async settled(handle: RunnerHandle): Promise<'settled' | 'timed-out'> {
+    const pane = await this.guardedPane(handle);
+    const reading: TmuxCommandPort = {
+      execute: async (args, stdin) =>
+        STARTUP_READS.has(args[0] ?? '')
+          ? await pane.port.execute(args, stdin)
+          : { code: 1, stdout: '', stderr: 'a startup wait writes nothing' },
+    };
+    return await new TmuxPaneDelivery(new TmuxController(reading), pane.sleep).waitStartupSettled(pane.session);
+  }
+
+  /**
+   * Today's `PaneScreenReader.text`: the visible screen of the ferret pane behind `handle`, dead or alive, for its
+   * harness to explain a failed start. Only a ferret's own pane is read (a person's shell answers `''`), only by its
+   * exact id, and nothing is written. The text goes to the caller and is never logged here.
+   */
+  async lastScreen(handle: RunnerHandle): Promise<string> {
+    if (!PANE_ID.test(handle)) return '';
+    const facts = await this.facts(handle);
+    if (facts === undefined || !isFerretSession(facts.session)) return '';
+    const captured = await this.options.tmux.execute(['capture-pane', '-p', '-t', handle]);
+    return captured.code === 0 ? captured.stdout : '';
   }
 
   /**

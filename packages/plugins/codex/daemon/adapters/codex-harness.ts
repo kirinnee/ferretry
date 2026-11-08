@@ -20,6 +20,7 @@ import type {
   Started,
   StartRefusal,
 } from '@ferretry/core-ferrets/contract';
+import { codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import { buildCodexLaunchArgv, tomlTables } from '../lib/index.ts';
 import type { HarnessConfig } from '../../contract/index.ts';
@@ -203,6 +204,10 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     async deliver(_ferret, _handle, message): Promise<Delivery> {
       return refused(message.id, 'Codex messages are sent through Conversation, which owns the send path');
     },
+
+    // Today's RuntimeSupervisedLauncher: a pane that died starting because Codex could not reach the network is told
+    // so in words. The sentence is fixed text; the screen is only matched, never quoted.
+    startFailure: screen => codexLaunchFailure(screen),
 
     transcript: rollouts.transcript,
     usage: rollouts.usage,

@@ -9,7 +9,7 @@ import { platformRootPinner } from '../../../host/adapters/pinned/index.ts';
 import { nodeFs } from '../../../host/adapters/node-fs.ts';
 import { PinRegistry } from '../../../host/pins.ts';
 import { RootError, rootsPortFor } from '../../../host/roots.ts';
-import { fenceOf, PINNED_KEY_PATHS } from '../../../host/fence-guard.ts';
+import { fenceOf, internalRootPins, PINNED_KEY_PATHS } from '../../../host/fence-guard.ts';
 
 /**
  * A ferret working in `~`: the pinned `work` root is an ANCESTOR of the state home. The root itself is outside the
@@ -545,5 +545,64 @@ describe("S40 S47 the home's state and config folders are fenced wherever they r
     await expect(fenceOf(fs, home)).rejects.toThrow('cannot be identified');
     const pinned = await pinOf(home, parent).catch((error: unknown) => error);
     expect(pinned instanceof RootError ? pinned.refusal : 'pinned').toBe('fenced');
+  });
+});
+
+/**
+ * MP1: 5.0 keeps each ferret's `environment.json` (its launch credential) and its turns in Ferrets' internal `sessions`
+ * root, `state/ferrets/sessions`, not in today's `state/sessions`. The fence pins every plugin's internal roots by
+ * identity, from the kernel's own layout, so that folder bind-mounted alone into a work folder is refused under any
+ * name, exactly as today's `state/sessions` was. `<parent>/home` is the home and `<parent>/work` the work folder.
+ */
+async function sessionsLayout() {
+  const parent = await realpath(await mkdtemp(`${tmpdir()}/fy-pin-fence-sessions-`));
+  parents.push(parent);
+  const home = `${parent}/home`;
+  const work = `${parent}/work`;
+  await mkdir(`${home}/state/ferrets/sessions/F1`, { recursive: true });
+  await mkdir(`${home}/state/ferrets/other`, { recursive: true });
+  await mkdir(`${home}/state/codex/agent-homes/F1`, { recursive: true });
+  await writeFile(`${home}/state/ferrets/sessions/F1/environment.json`, `{"FY_TOKEN":"${SECRET}"}`);
+  await writeFile(`${home}/state/not-a-plugin`, 'a file, not a plugin folder');
+  await mkdir(`${work}/project`, { recursive: true });
+  await writeFile(`${work}/project/a.ts`, 'project-bytes');
+  return { home, work };
+}
+
+describe("S47 MP1 the fence pins each plugin's internal roots where 5.0 keeps them", () => {
+  test("S47 MP1 environment.json's real folder, state/ferrets/sessions, is held by identity, derived from the kernel layout", async () => {
+    const { home } = await sessionsLayout();
+    expect(internalRootPins(['ferrets', 'codex'])).toContain('state/ferrets/sessions');
+    expect(internalRootPins(['ferrets', 'codex'])).toContain('state/codex/agent-homes');
+    // A `-before-` folder is fenced whole already, so it adds no pins of its own.
+    expect(internalRootPins(['ferrets-before-2026-11-08-1000'])).toEqual([]);
+    const fence = await fenceOf(fs, home);
+    const held = async (path: string): Promise<boolean> => {
+      const identity = await fs.identity(path);
+      return fence.identities.some(entry => entry.device === identity?.device && entry.inode === identity.inode);
+    };
+    expect(await held(`${home}/state/ferrets/sessions`)).toBe(true);
+    expect(await held(`${home}/state/codex/agent-homes`)).toBe(true);
+    // Only the kernel's own roots are pinned: an ordinary plugin state folder is not.
+    expect(await held(`${home}/state/ferrets/other`)).toBe(false);
+  });
+
+  test('S47 MP1 a folder that IS state/ferrets/sessions by device and inode (a bind mount) fences a work folder; another plugin folder does not', async () => {
+    const { home, work } = await sessionsLayout();
+    for (const [folder, expected] of [
+      ['state/ferrets/sessions', 'refused:fenced'],
+      ['state/ferrets/other', 'project-bytes'],
+    ] as const) {
+      const identity = await fs.identity(`${home}/${folder}`);
+      if (identity === undefined) throw new Error(`the fixture ${folder} has no identity`);
+      const pinned = await pinOf(home, work, aliasingPinner('project', identity));
+      try {
+        const answer = await outcome(read(pinned, 'project/a.ts'));
+        expect(answer).toBe(expected);
+        expect(answer).not.toContain(SECRET);
+      } finally {
+        await pinned.close();
+      }
+    }
   });
 });

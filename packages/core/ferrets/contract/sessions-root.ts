@@ -1,4 +1,4 @@
-import type { RootName } from '@ferretry/kernel/contract';
+import { internalRootFolder, type RootName } from '@ferretry/kernel/contract';
 
 /**
  * Where a ferret's private session folder is: ONE fact, owned here, for every reader and writer outside Ferrets that
@@ -14,8 +14,12 @@ import type { RootName } from '@ferretry/kernel/contract';
 /** The kernel root each ferret's session folder is a scoped handle on. */
 export const FERRET_SESSIONS_ROOT = 'sessions' satisfies RootName;
 
-/** That root's folder, relative to the Ferretry home: `state/ferrets/sessions` (one `<ferret>` folder below it). */
-export const FERRET_SESSIONS_FOLDER = 'state/ferrets/sessions';
+/**
+ * That root's folder, relative to the Ferretry home: `state/ferrets/sessions` (one `<ferret>` folder below it). Derived
+ * from the kernel's own layout ({@link internalRootFolder}), the same fact the kernel makes the base by and the home
+ * fence pins it by, so the three can never name two places.
+ */
+export const FERRET_SESSIONS_FOLDER = internalRootFolder('ferrets', FERRET_SESSIONS_ROOT);
 
 /** The folder of a ferret's turn documents, relative to its own session folder. */
 export const FERRET_TURNS_FOLDER = 'turns';

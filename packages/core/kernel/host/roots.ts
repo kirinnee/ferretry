@@ -12,7 +12,7 @@ import {
   type PinnedOpenOptions,
   type PinnedTarget,
 } from '../contract/pinned.ts';
-import { insideFence } from '../contract/home.ts';
+import { insideFence, internalRootFolder } from '../contract/home.ts';
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import type {
   RootEntry,
@@ -1320,7 +1320,7 @@ export function pluginStateFolder(home: string, plugin: string): string {
  * makes at boot and the base the roots port serves are this fact.
  */
 function internalRootBase(home: string, plugin: string, name: RootName): string | undefined {
-  return isInternalRoot(name) ? `${pluginStateFolder(home, plugin)}/${name}` : undefined;
+  return isInternalRoot(name) ? `${home.replace(/\/+$/u, '')}/${internalRootFolder(plugin, name)}` : undefined;
 }
 
 /** One declared internal root whose base the kernel would not make or accept, and why. */

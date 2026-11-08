@@ -15,15 +15,24 @@ import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
 import { createWardenRemedies, RESTART_STOP_REASON } from '../../daemon/remedies.ts';
 
-/** Ferrets' fake with the two additives it does not model: the options a resume carries, and the move. */
+/** Ferrets' fake with the additives it does not model: the options a resume carries, what it decided, and the move. */
 class AdditiveFerrets extends FakeFerrets {
   readonly resumeOptions: (ResumeOptions | undefined)[] = [];
   readonly moves: { ferret: FerretId; runtime: string; options?: MoveOptions; caller?: FerretId }[] = [];
   refuseMove: MoveFailure | undefined;
 
+  /** Run just before the resume decides: a start or a stop that lands between the Warden's read and its resume. */
+  beforeResume: ((ferret: FerretId) => void) | undefined;
+
+  /** Models Ferrets' `decided` answer as its service gives it: a stopped ferret relaunches, any other is left running. */
   override async resume(ferret: FerretId, message?: string, options?: ResumeOptions) {
-    this.resumeOptions.push(options);
-    return await super.resume(ferret, message);
+    const { decided, ...recorded } = options ?? {};
+    this.resumeOptions.push(options === undefined ? undefined : recorded);
+    this.beforeResume?.(ferret);
+    const before = (await this.get(ferret))?.state;
+    const resumed = await super.resume(ferret, message);
+    if (resumed.ok) decided?.(before === 'stopped' ? 'relaunching' : 'running');
+    return resumed;
   }
 
   move: NonNullable<FerretsApi['move']> = async (
@@ -249,6 +258,40 @@ describe('M2 a Warden resume hands its message over once: as the relaunch’s tu
     should(revived.ok).be.true();
     should((revived as { caveat?: string }).caveat).startWith('It could not be told why');
     should(undelivered).have.length(1);
+  });
+});
+
+describe('m2 the Warden hands its notice over by what Ferrets did, never by its own earlier read', () => {
+  it('m2 should say the notice when the ferret was started between the Warden’s read and its resume (no drop)', async () => {
+    // Arrange: stopped when the Warden looks, started by someone else before Ferrets decides.
+    const { ferrets, conversation, undelivered, resume } = subject();
+    const asked = recordRefusedSends(conversation);
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.beforeResume = ferret => ferrets.setState(ferret, 'working');
+
+    // Act
+    const revived = await resume('f1', 'carry on');
+
+    // Assert: Ferrets left it running (no turn carried the words), so the Warden says them, once.
+    should(revived.ok).be.true();
+    should(asked).eql(['f1']);
+    should(undelivered).have.length(1);
+  });
+
+  it('m2 should not say the notice again when the ferret was stopped between the Warden’s read and its resume (no double)', async () => {
+    // Arrange: running when the Warden looks, stopped before Ferrets decides, so the resume relaunches it.
+    const { ferrets, conversation, undelivered, remedies } = subject();
+    const asked = recordRefusedSends(conversation);
+    ferrets.add({ id: ferretId('f1'), state: 'working' });
+    ferrets.beforeResume = ferret => ferrets.setState(ferret, 'stopped');
+
+    // Act
+    await remedies.resume('f1', 'carry on');
+
+    // Assert: the relaunch’s turn carried the words; nothing is said a second time, nothing is journalled.
+    should(ferrets.resumes).eql([{ ferret: 'f1', message: 'carry on' }]);
+    should(asked).eql([]);
+    should(undelivered).eql([]);
   });
 });
 

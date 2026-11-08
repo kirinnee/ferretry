@@ -159,6 +159,15 @@ export interface ResumeOptions {
    * only, never authority: it changes no policy, admission or refusal. Absent: the turn names no author.
    */
   readonly actor?: 'warden';
+  /**
+   * Additive (U3 fix2): told, ONCE and under the ferret's own queue, what this resume decided — `running`: the ferret
+   * was not stopped, so nothing was relaunched and a message was NOT handed over (the send shortcut); `relaunching`: it
+   * was stopped and is being relaunched, with a message as its own turn. A caller that must hand a message over itself
+   * decides from this answer, never from an earlier read of the ferret's state that a start or stop in between could
+   * make wrong (today's one resume decided send vs. relaunch under the session lock). Not called for a resume refused
+   * before it decided. Attribution of nothing: it changes no policy, admission or refusal.
+   */
+  readonly decided?: (disposition: 'running' | 'relaunching') => void;
 }
 
 /** Why a harness-seam act did not happen: a hold the act runner applied, or nothing to act on. */

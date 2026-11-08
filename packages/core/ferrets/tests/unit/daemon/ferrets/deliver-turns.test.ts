@@ -7,6 +7,7 @@ import { err, ok, type Result } from '@ferretry/std';
 import {
   FerretConfigFile,
   type FerretRecord,
+  type RunnerHandle,
   type RunningFerret,
   type RunSpec,
   type StartRefusal,
@@ -41,6 +42,15 @@ afterEach(async () => {
 /** A runner whose next starts can be refused, and that tells a test what it saw at the moment of each start. */
 class ScriptedRunner extends FakeRunner {
   refuseStarts = 0;
+  /** Today's startup wait, when a test gives the runner one; absent, a start does not wait (as a runner that cannot tell). */
+  settled?: (handle: RunnerHandle) => Promise<'settled' | 'timed-out'>;
+  /** What the pane last showed, when a test gives the runner a screen to read. */
+  lastScreen?: (handle: RunnerHandle) => Promise<string>;
+  readonly stopped: string[] = [];
+  override async stop(handle: RunnerHandle): Promise<void> {
+    this.stopped.push(handle);
+    await super.stop(handle);
+  }
   onStart: ((spec: RunSpec) => Promise<void>) | undefined;
   override async start(spec: RunSpec): Promise<Result<RunningFerret, StartRefusal>> {
     await this.onStart?.(spec);
@@ -57,6 +67,8 @@ interface World {
   readonly registry: FerretRegistry;
   readonly files: SessionFiles;
   readonly runner: ScriptedRunner;
+  readonly harness: FakeHarness;
+  readonly tokens: FerretTokenDirectory;
   readonly storage: Awaited<ReturnType<typeof memoryStorage>>['storage'];
   readonly state: MemoryStateFolder;
   readonly folderOf: (id: string) => string;
@@ -153,13 +165,16 @@ async function world(
     asks: { open: async () => [] },
     session: files.port,
   };
-  const service = new FerretsService(registry, new FerretTokenDirectory(), ports);
+  const tokens = new FerretTokenDirectory();
+  const service = new FerretsService(registry, tokens, ports);
   if (backfill) await files.backfill(async () => registry.list().map(ferret => ferret.id));
   return {
     service,
     registry,
     files,
     runner,
+    harness,
+    tokens,
     storage,
     state,
     folderOf: id => folders[id] ?? '',
@@ -537,6 +552,170 @@ describe('F-0344 today’s deliverFirstTurn: a start types its assigned task’s
     }
     expect(await w.runner.alive('%1' as never)).toBe(false);
     expect(w.registry.get(IDS[0] as never)?.state).toBe('stopped');
+  });
+});
+
+/**
+ * Today's `settleStartup` (britnee's ruling: must-fix): delivery is not startup. Codex takes the first turn while it is
+ * still starting and parks it until its account check answers, so a pane that dies in that window fails THIS start,
+ * with the harness's own explanation when it has one (today's `RuntimeSupervisedLauncher`) and today's never-ran or
+ * maybe-ran ending, instead of answering a working ferret whose task never ran. Fixture values only.
+ */
+describe('GAP(deliver) settleStartup: a pane that dies while its harness is still starting fails the start', () => {
+  const NEVER_RAN = '; its first turn was never run, so start a new session rather than reviving this one';
+  const MAYBE_RAN = '; its first turn may not have run, so start a new session rather than reviving this one';
+  const died = (parked: boolean) => async (): Promise<'settled' | 'timed-out'> =>
+    await Promise.reject(Object.assign(new Error('FIXTURE_SECRET the pane exited; tmux session fy-x'), { parked }));
+  const live = (w: World, id: string) =>
+    w.tokens.snapshot().filter(entry => entry.ferret === id && entry.revoked !== true);
+
+  for (const [label, parked, ending] of [
+    ['(a) parked: its first turn was never run', true, NEVER_RAN],
+    ['(b) not seen parked: its first turn may not have run', false, MAYBE_RAN],
+  ] as const)
+    test(`GAP(deliver) settleStartup ${label}; the pane is stopped, the token revoked, nothing quoted`, async () => {
+      const w = await world();
+      w.runner.settled = died(parked);
+
+      const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe('failed');
+        expect(result.error.reason).toBe(`the ferret's pane exited while its harness was still starting${ending}`);
+        expect(result.error.reason).not.toContain('FIXTURE_SECRET');
+        expect(result.error.reason).not.toContain('fy-x');
+      }
+      // Typed once and settled, as today: a replay of this start would type nothing.
+      expect(w.runner.deliveries).toHaveLength(1);
+      expect(await w.files.port.admitFirstTurn?.(IDS[0] as never, 'Build the thing.')).toBe('settled');
+      expect(w.runner.stopped).toEqual(['%1']);
+      expect(await w.runner.alive('%1' as never)).toBe(false);
+      expect(live(w, IDS[0])).toEqual([]);
+      expect(w.registry.get(IDS[0] as never)?.state).toBe('stopped');
+    });
+
+  test('GAP(deliver) settleStartup (c) a wait that runs out its bound is not a failure: the start succeeds', async () => {
+    const w = await world();
+    const waited: string[] = [];
+    w.runner.settled = async handle => {
+      waited.push(handle);
+      return 'timed-out';
+    };
+
+    const id = await started(w, 'Build the thing.');
+
+    expect(waited).toEqual(['%1']);
+    expect(w.registry.get(id as never)?.state).toBe('working');
+    expect(w.runner.stopped).toEqual([]);
+  });
+
+  test('GAP(deliver) settleStartup (d) a runner with no startup wait starts as before', async () => {
+    const w = await world();
+    expect(w.runner.settled).toBeUndefined();
+
+    const id = await started(w, 'Build the thing.');
+
+    expect(w.registry.get(id as never)?.state).toBe('working');
+    expect(w.runner.deliveries).toHaveLength(1);
+  });
+
+  test('GAP(deliver) settleStartup a start with no task waits for nothing (there is no first turn to time)', async () => {
+    const w = await world();
+    let asked = 0;
+    w.runner.settled = async () => {
+      asked += 1;
+      return 'settled';
+    };
+
+    await started(w);
+
+    expect(asked).toBe(0);
+  });
+
+  test('GAP(deliver) settleStartup the harness explains a parked death from the screen in its own fixed words, and the screen is never quoted', async () => {
+    const w = await world();
+    const SCREEN = 'Error: FIXTURE_SECRET workspace routing discovery failed (code -32603)';
+    const screens: string[] = [];
+    w.runner.settled = died(true);
+    w.runner.lastScreen = async handle => {
+      screens.push(handle);
+      return SCREEN;
+    };
+    Object.assign(w.harness, {
+      startFailure: (screen: string) =>
+        screen.includes('workspace routing') ? 'Codex needs a network connection to start.' : undefined,
+    });
+
+    const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.reason).toBe(`Codex needs a network connection to start.${NEVER_RAN}`);
+      expect(result.error.reason).not.toContain('FIXTURE_SECRET');
+    }
+    // The screen was read off this start's own pane, before the cleanup stopped it.
+    expect(screens).toEqual(['%1']);
+    expect(w.runner.stopped).toEqual(['%1']);
+  });
+
+  test('GAP(deliver) settleStartup a first turn that cannot be typed takes the harness explanation too; a harness that throws or says nothing keeps the fixed sentence', async () => {
+    for (const [explain, reason] of [
+      [() => 'Codex needs a network connection to start.', 'Codex needs a network connection to start.'],
+      [
+        () => {
+          throw new Error('FIXTURE_SECRET');
+        },
+        "the ferret's assigned task could not be typed into its pane, so it was not started",
+      ],
+      [() => undefined, "the ferret's assigned task could not be typed into its pane, so it was not started"],
+    ] as const) {
+      const w = await world();
+      w.runner.deliver = async () => {
+        throw new Error('FIXTURE_SECRET pane refused');
+      };
+      w.runner.lastScreen = async () => 'FIXTURE_SECRET screen';
+      Object.assign(w.harness, { startFailure: explain });
+
+      const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.reason).toBe(reason);
+        expect(result.error.reason).not.toContain('FIXTURE_SECRET');
+      }
+    }
+  });
+});
+
+describe('m2 a resume tells its caller what it decided, under the ferret’s own queue (ResumeOptions.decided)', () => {
+  test('m2 a stopped ferret is relaunching, a running one is left running, a refused resume decided nothing', async () => {
+    const w = await world();
+    const id = await started(w);
+    const told: string[] = [];
+    const decided = (disposition: string) => void told.push(disposition);
+
+    await w.service.resume(id as never, 'Again.', { decided });
+    await w.service.stop(id as never, 'now');
+    await w.service.resume(id as never, 'Again.', { decided });
+    await w.service.resume('mw7bp88g-0000ffff' as never, 'Again.', { decided });
+
+    expect(told).toEqual(['running', 'relaunching']);
+  });
+
+  test('m2 a caller whose answer throws never changes the resume', async () => {
+    const w = await world();
+    const id = await started(w);
+    await w.service.stop(id as never, 'now');
+
+    const resumed = await w.service.resume(id as never, undefined, {
+      decided: () => {
+        throw new Error('the caller broke');
+      },
+    });
+
+    expect(resumed.ok).toBe(true);
+    expect(w.registry.get(id as never)?.state).toBe('working');
   });
 });
 

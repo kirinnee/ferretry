@@ -48,6 +48,7 @@ import { normalizeCallsign } from '../names/policy.ts';
 import type { NameAllocationErrorCode } from '../names/types.ts';
 import type { SystemCallsignPrefix } from '../protocol/system-callsigns.ts';
 import {
+  diedParked,
   FerretDetailsSchema,
   FerretRecordSchema,
   HARNESS_KEYS,
@@ -227,6 +228,24 @@ type PendingTurn =
 
 /** The ledger did not admit the first turn's write; thrown from `beforeWrite`, so the runner types no key. */
 class FirstTurnNotPerformed extends Error {}
+
+/**
+ * Today's start-failure endings (the session lifecycle's `FIRST_TURN_NEVER_RAN` / `FIRST_TURN_MAYBE_RAN`),
+ * word for word: what a start whose pane died while its harness was still starting says of its first turn.
+ */
+const FIRST_TURN_NEVER_RAN = '; its first turn was never run, so start a new session rather than reviving this one';
+const FIRST_TURN_MAYBE_RAN = '; its first turn may not have run, so start a new session rather than reviving this one';
+/** The fixed sentence when the harness has no explanation of its own: the pane's own words are never quoted. */
+const STARTUP_EXITED = "the ferret's pane exited while its harness was still starting";
+
+/** Tells a resume's caller what it decided; a caller's own failure there never changes the resume. */
+function tellDecided(options: ServiceResumeOptions | undefined, disposition: 'running' | 'relaunching'): void {
+  try {
+    options?.decided?.(disposition);
+  } catch {
+    // The caller's bookkeeping; the resume goes on as decided.
+  }
+}
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
   err({ code, reason } as StartFailure);
@@ -660,7 +679,10 @@ export class FerretsService implements FerretsApi {
     // A plain resume of a running ferret is the send shortcut: nothing to relaunch. Only a move gives it up, and then
     // the live pane is stopped first (never a second pane beside it).
     const replacing = found.state !== 'stopped';
-    if (replacing && options?.replaceLiveTerminal !== true) return ok(ferret);
+    if (replacing && options?.replaceLiveTerminal !== true) {
+      tellDecided(options, 'running');
+      return ok(ferret);
+    }
     // The record the relaunch is on: the move's target when it has one. Everything that can refuse WITHOUT launching —
     // the target itself, the start gate and the launch's own preconditions — is judged on it BEFORE the live pane is
     // stopped, so a refusal leaves a working ferret working with the same handle.
@@ -694,6 +716,9 @@ export class FerretsService implements FerretsApi {
     // it, as the moves module leaves its own document: a plain resume or Restart relaunches on the target.
     if (target !== undefined) await this.moveOptions(ferret, target);
     await this.write(starting, settled.state, 'state');
+    // Said once the relaunch is committed (the record is `starting`), still under this ferret's queue: the message, if
+    // any, is the relaunch's own turn from here on.
+    tellDecided(options, 'relaunching');
     const author = resumeTurnAuthor(options?.actor ?? 'unknown');
     const resumed = await this.launch(starting, undefined, record.harnessConversation, 'resume', {
       ...(message === undefined ? {} : { message }),
@@ -1269,7 +1294,9 @@ export class FerretsService implements FerretsApi {
    * harness (today put no prompt on any harness's argv), through the runner's own `deliver` (not wrapped in a second
    * act). The effect ledger admits the write at the runner's last step before its first composer write: `perform`
    * types it and is then settled; a `settled` replay aborts before any key and is a success; `conflict` and
-   * `unsettled` refuse. Any other failure fails the start. Nothing a port says is quoted.
+   * `unsettled` refuse. Any other failure fails the start, with the harness's own explanation when it has one
+   * ({@link startExplained}). A typed first turn is then waited on until the harness has started ({@link settleStartup}).
+   * Nothing a port or the pane says is quoted.
    */
   private async deliverFirstTurn(
     ferret: FerretId,
@@ -1279,10 +1306,8 @@ export class FerretsService implements FerretsApi {
     const session = this.ports.session;
     const admit = session?.admitFirstTurn;
     const handle = this.registry.get(ferret)?.handle as RunnerHandle | undefined;
-    const notTyped = failed(
-      'failed',
-      "the ferret's assigned task could not be typed into its pane, so it was not started",
-    );
+    const untyped = "the ferret's assigned task could not be typed into its pane, so it was not started";
+    const notTyped = failed('failed', untyped);
     if (session === undefined || admit === undefined || session.settleFirstTurn === undefined)
       return failed('failed', "the ferret's first turn has no durable effect record, so it was not started");
     if (handle === undefined) return notTyped;
@@ -1310,9 +1335,52 @@ export class FerretsService implements FerretsApi {
             ? "the ferret's first-turn record is held for a different task, so it was not started"
             : "the ferret's first turn began but never settled; it was not typed again, so the ferret was not started",
         );
-      return notTyped;
+      return failed('failed', (await this.startExplained(ferret, runner, handle)) ?? untyped);
+    }
+    return await this.settleStartup(ferret, runner, handle);
+  }
+
+  /**
+   * Today's `settleStartup`: waits, boundedly, for the harness to finish its own startup once its first turn is in.
+   *
+   * Delivery is not startup — Codex parks a first turn until its account check answers — so a pane that dies in that
+   * window fails THIS start (its pane stopped and its credential revoked by the launch's cleanup) with the harness's
+   * own explanation when it has one, rather than reporting a working ferret whose task never ran. A wait that runs out
+   * its bound is not a failure. The first turn stays settled, as today: a replay still types nothing. A parked Codex
+   * never ran it, and reviving would resume a conversation that was never given its assignment; a pane that died
+   * before any park was seen may have run it, so that is not claimed. Nothing the runner or the pane says is quoted.
+   */
+  private async settleStartup(
+    ferret: FerretId,
+    runner: Runner,
+    handle: RunnerHandle,
+  ): Promise<Result<FerretId, StartFailure>> {
+    if (runner.settled === undefined) return ok(ferret);
+    try {
+      await runner.settled(handle);
+    } catch (error) {
+      const ran = diedParked(error) ? FIRST_TURN_NEVER_RAN : FIRST_TURN_MAYBE_RAN;
+      const why = (await this.startExplained(ferret, runner, handle)) ?? STARTUP_EXITED;
+      return failed('failed', `${why}${ran}`);
     }
     return ok(ferret);
+  }
+
+  /**
+   * The harness's own sentence for a start that failed at its first turn (today's `RuntimeSupervisedLauncher`), read
+   * off what the pane last showed; `undefined` when the harness has none, cannot be asked or does not recognise the
+   * screen. The screen goes to the harness only and is dropped here: only the harness's fixed sentence is kept.
+   */
+  private async startExplained(ferret: FerretId, runner: Runner, handle: RunnerHandle): Promise<string | undefined> {
+    const key = this.registry.get(ferret)?.harness;
+    const harness = key === undefined ? undefined : this.ports.harness(key);
+    if (harness?.startFailure === undefined || runner.lastScreen === undefined) return undefined;
+    try {
+      const sentence = harness.startFailure(await runner.lastScreen(handle));
+      return typeof sentence === 'string' && sentence !== '' ? sentence : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /**

@@ -28,8 +28,7 @@ export type TurnRoot = Pick<
   | 'publish'
   | 'readDurable'
   | 'syncDirectory'
-  | 'list'
-  | 'readText'
+  | 'entries'
   | 'lstat'
   | 'remove'
 >;
@@ -46,6 +45,17 @@ const authorName = (turnName: string): string => turnName.replace(/\.md$/u, '.by
 
 /** The bytes of an author record, exactly as {@link FileResumeTurnStore.writeTurn} writes them. */
 const authorRecord = (by: QueueAuthor): string => `${JSON.stringify(QueueAuthorSchema.parse(by))}\n`;
+
+/**
+ * A turn file whose NAME is not the regular file that was read: a link (to the ferret's own `environment.json`, say),
+ * or a name swapped while it was read. Says which kind of file only, never a path or a byte of it.
+ */
+class TurnFileNotOwn extends Error {
+  constructor() {
+    super('a turn file is not a regular file of its own, so it was not read');
+    this.name = 'TurnFileNotOwn';
+  }
+}
 
 /** The kernel's refusal word, read structurally: this plugin may not import the kernel's host. */
 function refusalOf(error: unknown): string | undefined {
@@ -109,9 +119,9 @@ export class FileResumeTurnStore implements ResumeTurnStore {
     if (!(await this.present())) return false;
     const author = authorName(file) as FencedPath;
     try {
-      if ((await this.root.readText(file, TURN_READ_LIMIT_BYTES)) !== document) return false;
+      if ((await this.readOwn(file)) !== document) return false;
       if (by === undefined) return (await this.root.lstat(author)) === undefined;
-      return (await this.root.readText(author, TURN_READ_LIMIT_BYTES)) === authorRecord(by);
+      return (await this.readOwn(author)) === authorRecord(by);
     } catch {
       return false;
     }
@@ -139,14 +149,19 @@ export class FileResumeTurnStore implements ResumeTurnStore {
     if (!(await this.present())) return [];
     const directory = this.path(TURNS_DIRECTORY);
     if ((await this.root.lstat(directory)) === undefined) return [];
-    const names = new Set(await this.root.list(directory));
+    // Only a regular file is a turn: a link (to the ferret's own `environment.json`, say) or anything else at a turn's
+    // name is skipped, never followed. The read below proves it again while it holds the file, so a name swapped for a
+    // link between this listing and that read is refused too.
+    const names = new Set(
+      (await this.root.entries(directory)).filter(entry => entry.kind === 'file').map(entry => entry.name),
+    );
     const turns: StoredTurn[] = [];
     for (const name of names) {
       const number = TURN_FILE.exec(name)?.[1];
       if (number === undefined) continue;
       let text: string;
       try {
-        text = await this.root.readText(this.path(`${TURNS_DIRECTORY}/${name}`), TURN_READ_LIMIT_BYTES);
+        text = await this.readOwn(this.path(`${TURNS_DIRECTORY}/${name}`));
       } catch (error) {
         if (options.strict) throw new Error(`turn document ${name} could not be read`, { cause: error });
         continue;
@@ -166,7 +181,7 @@ export class FileResumeTurnStore implements ResumeTurnStore {
   /** Who a turn document is from, by the record Ferretry wrote beside it. Named by file only, never quoted. */
   private async author(name: string, strict: boolean): Promise<QueueAuthor | undefined> {
     try {
-      const raw = await this.root.readText(this.path(`${TURNS_DIRECTORY}/${name}`), TURN_READ_LIMIT_BYTES);
+      const raw = await this.readOwn(this.path(`${TURNS_DIRECTORY}/${name}`));
       const parsed = QueueAuthorSchema.safeParse(JSON.parse(raw));
       if (parsed.success) return parsed.data;
       if (strict) throw new Error(`turn author record ${name} does not parse`);
@@ -191,6 +206,22 @@ export class FileResumeTurnStore implements ResumeTurnStore {
       if (refusalOf(error) === 'outside') return false;
       throw error;
     }
+  }
+
+  /**
+   * A turn file's text, read through ONE held descriptor and kept only when the NAME, its leaf never followed, still
+   * reaches the very file that was read (the kernel's `readDurable` + `stillNames`). A link at the name reaches the
+   * link, not its target, so it is refused ({@link TurnFileNotOwn}) whenever it was put there, before the open or
+   * during the read: no window between a check and the read lets another file's bytes through. A file with a second
+   * hard link is the kernel's own refusal. Gone is an error too.
+   */
+  private async readOwn(file: FencedPath): Promise<string> {
+    const text = await this.root.readDurable(file, TURN_READ_LIMIT_BYTES, async held => {
+      if (!(await held.stillNames())) throw new TurnFileNotOwn();
+      return new TextDecoder().decode(held.bytes);
+    });
+    if (text === undefined) throw new Error('a turn file is gone');
+    return text;
   }
 
   private path(relative: string): FencedPath {

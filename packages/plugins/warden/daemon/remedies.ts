@@ -66,31 +66,39 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
   };
 
   // Today's `authorizeResume` under the Warden's automatic policy, checked before anything is stopped or started.
-  // Answers whether the ferret is stopped, so the resume RELAUNCHES it (a running one is left as it is).
-  const authorize = async (ferret: string): Promise<boolean> => {
+  const authorize = async (ferret: string): Promise<void> => {
     const target = await ferrets.get(ferret as FerretId);
     if (target === undefined) throw new WardenResumeRefused(`no ferret ${ferret} to resume`);
     authorizeWardenResume(target, await ferrets.list(), await hasOpenQuestion(asks, target.id));
-    return target.state === 'stopped';
   };
 
   /**
    * Resumes, and answers why its notice was not typed (nothing when it was, or there was none). A RELAUNCH (the ferret
    * was stopped) carries the message as its own turn document, whose pointer Ferrets types into the new pane, with the
    * Warden as its author (today's one resume: the message is the turn, no second send). Only a resume that relaunches
-   * nothing — the ferret is running — still says the message, since nothing else would hand it over.
+   * nothing — the ferret is running — still says the message, since nothing else would hand it over. WHICH of the two
+   * happened is Ferrets' own answer (`ResumeOptions.decided`, told under that ferret's queue), never an earlier read of
+   * its state: a start or stop between that read and the resume would otherwise drop the notice or type it twice.
    */
   const resumeOrThrow = async (
     ferret: string,
     message: string | undefined,
     what: string,
-    relaunches: boolean,
   ): Promise<string | undefined> => {
     // Every resume the Warden makes is automated recovery, not a person asking: Ferrets records it as such, and the
     // turn it writes is from the Warden.
-    const resumed = await ferrets.resume(ferret as FerretId, message, { automatic: true, actor: 'warden' });
+    let relaunched: boolean | undefined;
+    const resumed = await ferrets.resume(ferret as FerretId, message, {
+      automatic: true,
+      actor: 'warden',
+      decided: disposition => {
+        relaunched = disposition === 'relaunching';
+      },
+    });
     if (!resumed.ok) throw new ResumeRefused(`${what} refused: ${resumed.error.reason}`);
-    if (message === undefined || relaunches) return undefined;
+    // Ferrets that cannot say what it did (a port without `decided`) is read as a relaunch: the notice is then not typed
+    // a second time, and a running ferret's notice goes undelivered rather than twice.
+    if (message === undefined || relaunched !== false) return undefined;
     // The ferret is running: the resume is DONE whatever happens to its notice. A notice that cannot be typed is
     // journalled apart, never turned into a refusal: a refused revive is not recorded, so the limits that count
     // revives would never see this one.
@@ -108,7 +116,8 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
     nudge: async (ferret, message) => await act(ferret, 'nudge', async () => await say(ferret, message)),
     resume: async (ferret, message) =>
       await act(ferret, 'resume', async () => {
-        await resumeOrThrow(ferret, message, 'resume', await authorize(ferret));
+        await authorize(ferret);
+        await resumeOrThrow(ferret, message, 'resume');
       }),
     // A restart replaces a process that only looks alive: stop it for real, then resume the conversation. Today this
     // was ONE resume that replaced the live pane under the automatic policy (`replaceLiveTerminal`); Ferrets has no
@@ -118,8 +127,8 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
       await act(ferret, 'restart', async () => {
         await authorize(ferret);
         await ferrets.stop(ferret as FerretId, 'now', RESTART_STOP_REASON);
-        // Stopped just now, so the resume relaunches it and its turn carries the message.
-        await resumeOrThrow(ferret, message, 'restart', true);
+        // Stopped just now, so the resume relaunches it and its turn carries the message (Ferrets says so).
+        await resumeOrThrow(ferret, message, 'restart');
       }),
     stop: async (ferret, reason) =>
       await act(ferret, 'stop', async () => await ferrets.stop(ferret as FerretId, 'polite', reason)),
@@ -167,9 +176,9 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
       // Ferrets answered leaves nothing started.
       let asked = false;
       try {
-        const relaunches = await authorize(ferret);
+        await authorize(ferret);
         asked = true;
-        const unsent = await resumeOrThrow(ferret, message, 'revive', relaunches);
+        const unsent = await resumeOrThrow(ferret, message, 'revive');
         return unsent === undefined ? { ok: true } : { ok: true, caveat: `It could not be told why: ${unsent}.` };
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
