@@ -12,11 +12,11 @@ import type {
   RunnerDelivery,
 } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
-import { ApiError, REFUSAL_SENTENCES } from '@ferretry/kernel/contract';
+import { ApiError, REFUSAL_SENTENCES, type RouteHandler } from '@ferretry/kernel/contract';
 import { ferret as asFerret, fixedClock, owner, testHost, type TestCaller } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
 import { err, ok, type Result } from '@ferretry/std';
-import { CONVERSATION_STATE, ConversationPort } from '../../../contract/index.ts';
+import { CONVERSATION_STATE, ConversationPort, parsePeerEnvelope } from '../../../contract/index.ts';
 import { conversationDaemon } from '../../../daemon/index.ts';
 import {
   type HarnessGate,
@@ -39,6 +39,16 @@ const CLOSED: HarnessGate = { send: false, interrupt: false };
 
 const F1 = ferretId('f1');
 const CALLER = ferretId('lead');
+/** The calling ferret's name, apart from its id so a banner that names the wrong one shows. */
+const LEAD_NAME = 'kamila';
+const SEND_ROUTE = 'POST /v1/ferrets/:ferretId/send';
+
+/**
+ * The banner a message from the lead (`kamila`, session `lead`) is typed under, spelled out by hand rather than built
+ * with the protocol's writer, so a change to what is typed fails here.
+ */
+const banner = (kind: 'message' | 'reply' | 'question', label?: 'action' | 'blocker', name = LEAD_NAME, id = 'lead') =>
+  `[${label === undefined ? kind : `${kind} · ${label}`} from ferret ${name} (session ${id}) — not from the owner] To reply: fy send ${name} "<reply>"\n`;
 
 /** A structured question the ferret asked (the live `PreToolUse` payload of `asked.test.ts`). */
 const fixture = await fixtureTexts(join(import.meta.dir, '../../fixtures/question-asked'));
@@ -107,11 +117,27 @@ async function conversation(
   ferrets: HarnessFerrets = new HarnessFerrets(),
   gate: HarnessGate = OPEN,
   f1: Partial<FerretSummary> = {},
+  options: {
+    /**
+     * The actor Gate stamps on a send ROUTE call (`peer:<id>` for a ferret's own credential). The test host stamps a
+     * ferret caller as `ferret`, never `peer:<id>`, so the send route is wrapped to carry this one instead.
+     */
+    readonly sendActor?: string;
+  } = {},
 ) {
   ferrets.add({ id: F1, state: 'working', ...f1 });
-  ferrets.add({ id: CALLER, state: 'working' });
+  ferrets.add({ id: CALLER, name: LEAD_NAME, state: 'working' });
   const acted: string[] = [];
-  const state = memoryStatePort(CONVERSATION_STATE);
+  const base = memoryStatePort(CONVERSATION_STATE);
+  /** Set to make every appended line fail (the send ledger appends each accept, settle and withdrawal). */
+  const writes = { fail: false };
+  const state: typeof base = {
+    ...base,
+    append: async (...args: Parameters<typeof base.append>) => {
+      if (writes.fail) throw new Error('ENOSPC: no space left on device, write /state/sends/f1.jsonl');
+      return await base.append(...args);
+    },
+  };
   const served = conversationDaemon(gate);
   const implementation = {
     ...served,
@@ -122,7 +148,14 @@ async function conversation(
         acted.push(String(JSON.stringify(target)));
         throw new Error('Conversation entered kernel.act around the harness seam: that deadlocks the runner');
       }) as typeof ctx.kernel.act;
-      return build({ ...ctx, kernel: { ...ctx.kernel, act, state } });
+      const built = build({ ...ctx, kernel: { ...ctx.kernel, act, state } });
+      const actor = options.sendActor;
+      if (actor === undefined) return built;
+      const routes = built.routes as Readonly<Record<string, RouteHandler | undefined>>;
+      const handler = routes[SEND_ROUTE];
+      if (handler === undefined) throw new Error('the conversation daemon half serves no send route');
+      const peer: RouteHandler = async call => await handler({ ...call, actor } as typeof call);
+      return { ...built, routes: { ...routes, [SEND_ROUTE]: peer } } as typeof built;
     },
   } as typeof served;
   const host = await testHost({
@@ -139,7 +172,7 @@ async function conversation(
       '2026-11-08T08:59:00.000Z' as Instant,
       '/home/user/.claude/projects/-work-repro/48fa096f-185c-42e1-b456-33dd3c77c5ce.jsonl',
     );
-  return { host, ferrets, acted, asking, api: () => host.provided(ConversationPort) };
+  return { host, ferrets, acted, asking, writes, api: () => host.provided(ConversationPort) };
 }
 
 /** The sends a ferret still holds: a refusal before any key leaves only a withdrawn tombstone, which this leaves out. */
@@ -391,6 +424,43 @@ describe('the closed taxonomy of a delivery, as today’s send routes answer it'
     expect(ferrets.delivered).toHaveLength(1);
     await host.stop();
   });
+
+  test('the port’s unconfirmed answer names the send it minted, so the caller can ask about exactly that one', async () => {
+    const { host, ferrets, api } = await conversation();
+    ferrets.script.deliver = async () => err({ unconfirmed: true, stranded: false });
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'nudge' });
+
+    const [row] = (await api().sends(F1)).sends;
+    expect(row?.sendId).toBeString();
+    expect(sent).toMatchObject({
+      ok: false,
+      error: { code: 'send_unconfirmed', message: `${UNCONFIRMED_SENTENCE} (send ${row?.sendId})` },
+    });
+    await host.stop();
+  });
+
+  test('an unconfirmed send whose record cannot be settled is the uncertain 500: record kept, nothing typed again', async () => {
+    const { host, ferrets, api, writes } = await conversation();
+    ferrets.script.deliver = async () => {
+      writes.fail = true;
+      return err({ unconfirmed: true, stranded: false });
+    };
+
+    const response = await send(host);
+    writes.fail = false;
+
+    expect([response.status, response.json<{ code: string }>().code]).toEqual([500, 'session_send_failed']);
+    const said = response.json<{ error: string }>().error;
+    expect(said).toBe(
+      `${UNCONFIRMED_SENTENCE}. Its record could not be marked unconfirmed, so a repeat of this send may wrongly read as sent; check the ferret’s terminal instead`,
+    );
+    // The disk's own words (a path) stay out of the answer.
+    expect(said).not.toContain('ENOSPC');
+    expect((await live(api)).map(row => (row as { fate?: string }).fate)).toEqual(['accepted']);
+    expect(ferrets.delivered).toHaveLength(1);
+    await host.stop();
+  });
 });
 
 describe('a send has no target rule: no caller reaches Ferrets, and a ferret is the SENDER', () => {
@@ -478,7 +548,7 @@ describe('the CLI’s own send body goes: `now: false` and a label are not extra
       );
 
       expect(sent.ok).toBe(true);
-      expect(ferrets.delivered).toHaveLength(1);
+      expect(ferrets.delivered).toEqual([{ text: `${banner('message', label)}psst` }]);
       expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
         ['s-1', 'agent', CALLER],
       ]);
@@ -496,7 +566,129 @@ describe('the CLI’s own send body goes: `now: false` and a label are not extra
     );
 
     expect(sent.ok).toBe(true);
-    expect(ferrets.delivered).toHaveLength(1);
+    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'action')}psst` }]);
+    await host.stop();
+  });
+});
+
+describe('a peer’s message is typed under today’s banner, so it never reads as the owner speaking', () => {
+  test('the port: a ferret’s send is typed as banner + label + message, and ledgered as typed', async () => {
+    const { host, ferrets, api } = await conversation();
+
+    const sent = await api().send(
+      F1,
+      { kind: 'ferret', ferret: CALLER },
+      { message: 'psst', sendId: 's-1', label: 'blocker' },
+    );
+
+    expect(sent.ok).toBe(true);
+    const typed =
+      '[message · blocker from ferret kamila (session lead) — not from the owner] To reply: fy send kamila "<reply>"\npsst';
+    expect(ferrets.delivered).toEqual([{ text: typed }]);
+    const rows = (await api().sends(F1)).sends;
+    expect(rows.map(row => [row.sendId, row.message, row.senderKind, row.from, row.fromName])).toEqual([
+      ['s-1', typed, 'agent', CALLER, LEAD_NAME],
+    ]);
+    await host.stop();
+  });
+
+  test('the port: a send with no label is typed under the plain banner', async () => {
+    const { host, ferrets, api } = await conversation();
+
+    await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'psst', sendId: 's-1' });
+
+    expect(ferrets.delivered).toEqual([{ text: `${banner('message')}psst` }]);
+    await host.stop();
+  });
+
+  test('the ROUTE: a ferret’s own credential (Gate’s peer actor) types the CLI body under the banner, label and all', async () => {
+    const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendActor: `peer:${CALLER}` });
+
+    const response = await send(
+      host,
+      'req-peer',
+      'f1',
+      { message: 'hello there', attachmentIds: [], now: false, label: 'action' },
+      asFerret(CALLER),
+    );
+
+    expect(response.status).toBe(200);
+    expect(ferrets.delivered).toEqual([
+      {
+        text: '[message · action from ferret kamila (session lead) — not from the owner] To reply: fy send kamila "<reply>"\nhello there',
+      },
+    ]);
+    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
+      ['req-peer', 'agent', CALLER],
+    ]);
+    await host.stop();
+  });
+
+  test('the ROUTE: the owner’s send is typed as the bare message, and a label it carries is not honoured', async () => {
+    const { host, ferrets } = await conversation();
+
+    await send(host, 'req-own', 'f1', { message: 'hello there', now: false, label: 'blocker' });
+
+    expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    await host.stop();
+  });
+
+  test('the app reads the typed text back as FROM that ferret (parsePeerEnvelope round-trip)', async () => {
+    const { host, ferrets, api } = await conversation();
+
+    await api().send(
+      F1,
+      { kind: 'ferret', ferret: CALLER },
+      { message: 'ship it\nthen tell me', sendId: 's-1', label: 'action' },
+    );
+
+    const typed = ferrets.delivered[0]?.text ?? '';
+    expect(parsePeerEnvelope(typed)).toMatchObject({
+      envelope: { name: LEAD_NAME, sessionId: CALLER, kind: 'message', label: 'action', replyExpected: false },
+      body: 'ship it\nthen tell me',
+    });
+    await host.stop();
+  });
+
+  test('the answer a recipient is parked on is typed as a reply', async () => {
+    const { host, ferrets, api } = await conversation(undefined, OPEN, {
+      waiting: { since: '2026-11-08T08:00:00.000Z' as Instant, peer: CALLER, peerName: LEAD_NAME },
+    });
+
+    await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'done', sendId: 's-1', label: 'action' });
+
+    expect(ferrets.delivered).toEqual([{ text: `${banner('reply', 'action')}done` }]);
+    await host.stop();
+  });
+
+  test('a sender Ferrets cannot find now is still named by its id, never typed in the owner’s voice', async () => {
+    const { host, ferrets, api } = await conversation();
+    const gone = ferretId('gone-1');
+
+    await api().send(F1, { kind: 'ferret', ferret: gone }, { message: 'psst', sendId: 's-1' });
+
+    expect(ferrets.delivered).toEqual([{ text: `${banner('message', undefined, 'gone-1', 'gone-1')}psst` }]);
+    await host.stop();
+  });
+
+  test('a ferret sending to itself is typed as the bare message', async () => {
+    const { host, ferrets, api } = await conversation();
+
+    await api().send(F1, { kind: 'ferret', ferret: F1 }, { message: 'note to self', sendId: 's-1' });
+
+    expect(ferrets.delivered).toEqual([{ text: 'note to self' }]);
+    await host.stop();
+  });
+
+  test('the message is trimmed as today, and one with nothing in it is refused before anything is kept', async () => {
+    const { host, ferrets, api } = await conversation();
+
+    await api().send(F1, { kind: 'owner' }, { message: '  ship it \n', sendId: 's-1' });
+    const empty = await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: '   ', sendId: 's-2' });
+
+    expect(ferrets.delivered).toEqual([{ text: 'ship it' }]);
+    expect(empty).toMatchObject({ ok: false, error: { code: 'send_refused' } });
+    expect((await api().sends(F1)).sends.map(row => row.sendId)).toEqual(['s-1']);
     await host.stop();
   });
 });

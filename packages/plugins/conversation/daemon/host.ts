@@ -8,6 +8,8 @@ import {
   type ConversationApi,
   type ConversationRefusal,
   MessageBeforeSend,
+  PEER_MESSAGE_LABELS,
+  type PeerMessageLabel,
   QueueChanged,
   type QueuedMessage,
   QUESTION_STATE,
@@ -17,7 +19,17 @@ import {
   TurnEnded,
 } from '../contract/index.ts';
 import { ClockSendScheduler, StateSendChannel, StateSendLedger } from './delivery/adapters/index.ts';
-import { type SendTarget, SendRefused, SessionInterrupt, sendRecordFor, sendRecordView } from './delivery/lib/index.ts';
+import {
+  defaultSessionSendSettings,
+  peerMessageKind,
+  peerPreamble,
+  type SendTarget,
+  SendRefused,
+  SessionInterrupt,
+  sendPayload,
+  sendRecordFor,
+  sendRecordView,
+} from './delivery/lib/index.ts';
 import type { SessionStatus } from './seams/ferret-types.ts';
 import { sentDraftClearer, sharedDraftRoutes, sharedDraftSocketRoutes } from './drafts/lib/mounts/shared-drafts.ts';
 import { SessionSendError, sessionSendRoutes } from './delivery/lib/mounts/session-send.ts';
@@ -62,6 +74,10 @@ const pendingRefusal = (): ConversationRefusal => ({
 /** Said by a repeat of a send that was typed and not proven: it is not typed again, and the answer names it. */
 const UNCONFIRMED_AGAIN =
   "this message was already typed into the agent's box and nothing proved it landed, so it was not typed again. Check the ferret's terminal before sending it again";
+
+/** Said after a typed, unproven send whose record could not be marked so: a repeat of its id would read as sent. */
+const UNSETTLED_SENTENCE =
+  'Its record could not be marked unconfirmed, so a repeat of this send may wrongly read as sent; check the ferret’s terminal instead';
 
 /**
  * The code a refusal answers with on the port: the route's own code, else the word the send route answers for that
@@ -118,6 +134,19 @@ interface UnwiredSend {
   readonly now?: boolean | undefined;
   readonly replyExpected?: boolean | undefined;
 }
+
+/** The message a send carries (today's `sendPayload`, trimmed), an empty one refused 409 before anything is kept. */
+const payloadOf = (message: string): string => {
+  try {
+    return sendPayload(message);
+  } catch (error) {
+    return sendRefusal(error);
+  }
+};
+
+/** A triage label a peer's banner can carry (the route and the port parse it; anything else carries none). */
+const bannerLabel = (label: unknown): PeerMessageLabel | undefined =>
+  PEER_MESSAGE_LABELS.find(known => known === label);
 
 /** One answer as the terminal seam takes it: the route's request, or the port's with a minted request id. */
 type AnswerToTerminal = Parameters<SessionAnswerSubsystem['answer']>[1];
@@ -296,6 +325,38 @@ export function buildConversationA(deps: {
       pending(SEND_EXTRAS_UNAVAILABLE);
   };
   /**
+   * THE TEXT THE AGENT READS (today's `payload()`): the message, trimmed, and — when a FERRET sent it — the protocol's
+   * peer banner first, naming the sender and its label. A ferret reads only the message text, so attribution must live
+   * in it: without the banner every peer message reads as the owner speaking, and a ferret that cannot tell a peer from
+   * its owner cannot judge whether to comply, push back or escalate. The app reads the same banner back
+   * (`parsePeerEnvelope`) to show the message as FROM that ferret.
+   *
+   * Added AFTER `message.before-send`, so no transform can drop or reword it. The sender's name is its ferret name; a
+   * sender Ferrets cannot find now is still named by its id (the caller was proved to be that ferret), never dropped
+   * to the owner's voice. The recipient is read only to tell a REPLY it is parked on from a new message; one that
+   * cannot be read degrades to the plainer kind rather than failing the send. A ferret sending to itself gets none.
+   */
+  const typedText = async (
+    ferret: SessionId,
+    request: Pick<UnwiredSend, 'label' | 'replyExpected'> & {
+      readonly message: string;
+      readonly senderSessionId?: string | undefined;
+    },
+  ): Promise<{ readonly text: string; readonly fromName?: string }> => {
+    const message = payloadOf(request.message);
+    const senderId = request.senderSessionId;
+    if (senderId === undefined || senderId === ferret) return { text: message };
+    const parsed = tryParseSessionId(senderId);
+    const [from, recipient] = await Promise.all([
+      parsed === undefined ? undefined : ferrets.get(parsed).catch(() => undefined),
+      ferrets.get(ferret).catch(() => undefined),
+    ]);
+    const sender = { id: parsed ?? (senderId as SessionId), ...(from === undefined ? {} : { teammate: from.name }) };
+    const kind = peerMessageKind(recipient, senderId, request.replyExpected === true);
+    const banner = peerPreamble(sender, kind, defaultSessionSendSettings.clientName, bannerLabel(request.label));
+    return { text: `${banner}${message}`, ...(from === undefined ? {} : { fromName: from.name }) };
+  };
+  /**
    * Types one message. The send is ledgered as accepted BEFORE a key goes (the same id twice is one message), and a
    * refusal that typed nothing takes the record back so the id may start over. A send that was typed and not proven is
    * settled `unaccounted` and answered `send_unconfirmed` with its id, never typed again; a runner failure nobody could
@@ -313,27 +374,32 @@ export function buildConversationA(deps: {
     // Opened BEFORE the record: an unknown ferret or a seam that is off types nothing and keeps nothing. No caller goes
     // to Ferrets: a send has no target rule (the path names where it goes, as for every caller); a ferret is a SENDER.
     const bound = await terminal.bind(ferret);
+    const { text, fromName } = await typedText(ferret, request);
     const at = kernel.clock.now();
     const accepted = await ledger.accept(ferret, {
       sendId: request.sendId,
       acceptedAt: at,
       acceptedTurn: 0,
       path: 'direct',
-      message: request.message,
-      matchText: request.message,
+      // What the agent reads, banner and all, as today's ledger keeps it: the row is the record of what was typed.
+      message: text,
+      matchText: text,
       fate: 'accepted',
       attempt: 1,
       attemptAt: at,
       senderKind: request.senderSessionId === undefined ? 'human' : 'agent',
       ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
+      ...(fromName === undefined ? {} : { fromName }),
     });
     if (!accepted.created) return (await keptSend(ferret, request.sendId)) ?? { ferret, disposition: 'sent' };
     try {
-      await bound.deliver(request.message);
+      await bound.deliver(text);
     } catch (error) {
       if (error instanceof MaybeTyped) throw error.answer;
       if (error instanceof Unconfirmed) {
         // Typed, not proven: never withdrawn (that would invite a second copy), settled so a retry of this id says so.
+        // A settle that fails leaves the row `accepted`, which a retry of this id would read as sent: that is the
+        // uncertain 500 instead (the record is kept, nothing is typed again), never a quiet unconfirmed answer.
         await ledger
           .settle(ferret, request.sendId, {
             fate: 'unaccounted',
@@ -341,7 +407,9 @@ export function buildConversationA(deps: {
             unaccountedReason: 'landing_unconfirmed',
             ...(error.stranded ? { typedNotSent: true } : {}),
           })
-          .catch(() => undefined);
+          .catch(() => {
+            throw new SessionSendError('failed', `${error.message}. ${UNSETTLED_SENTENCE}`);
+          });
         throw new SessionSendError('unconfirmed', error.message, undefined, request.sendId);
       }
       await ledger.withdraw(ferret, request.sendId, 'nothing was typed').catch(() => undefined);
@@ -501,9 +569,15 @@ export function buildConversationA(deps: {
           }),
         );
       } catch (error) {
+        // An unconfirmed send names its id in the words: the refusal has no field for it, and a caller that let the id
+        // be minted could not otherwise ask about, or avoid repeating, exactly that send.
+        const unconfirmed =
+          error instanceof SessionSendError && error.failure === 'unconfirmed' && error.sendId !== undefined
+            ? ` (send ${error.sendId})`
+            : '';
         return err({
           code: refusalCode(error),
-          message: error instanceof Error ? error.message : String(error),
+          message: `${error instanceof Error ? error.message : String(error)}${unconfirmed}`,
         });
       }
     },
