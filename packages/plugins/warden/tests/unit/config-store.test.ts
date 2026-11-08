@@ -86,13 +86,13 @@ describe('warden.yaml changes in flight', () => {
     should(await plain).eql([]);
   });
 
-  it('should refuse a save while warden.yaml holds an edit for the owner, and write nothing', async () => {
+  it('should refuse, in a sentence, a save naming nothing while warden.yaml holds an edit, and write nothing', async () => {
     // Arrange
     const { port, writes } = portWithDoor({ fileHeld: true });
     const store = new ConfigWardenConfigStore(port);
 
     // Act
-    const saving = store.write(anyConfig, { caps: { investigationUsdPerDay: 1 } } as WardenConfigPatch);
+    const saving = store.write(anyConfig, {} as WardenConfigPatch);
 
     // Assert
     await saving.then(
@@ -190,8 +190,12 @@ describe('an owner’s save while warden.yaml holds another edit (docs/config-fi
         plain.push(edit);
         return written;
       },
-      writeAsOwner: async (_def: unknown, name: unknown, edit: { readonly patch: unknown }) => {
-        owner.push({ name, patch: edit.patch });
+      writeAsOwner: async (
+        _def: unknown,
+        name: unknown,
+        edit: { readonly patch: unknown; readonly within?: readonly string[] },
+      ) => {
+        owner.push({ name, patch: edit.patch, ...(edit.within === undefined ? {} : { within: edit.within }) });
         return result;
       },
     } as unknown as ConfigPort;
@@ -239,16 +243,29 @@ describe('an owner’s save while warden.yaml holds another edit (docs/config-fi
     );
   });
 
-  it('should refuse a save that changes a section, writing nothing, since a whole section would undo the held one', async () => {
-    const { store, owner, plain } = heldPort({ kind: 'written', etag: 'e', loosened: [] });
+  it('should make a section save to BOTH versions, sending only the sub-keys it changed and naming the section in within', async () => {
+    const { store, owner, plain } = heldPort({
+      kind: 'written',
+      etag: 'e4',
+      loosened: [],
+      stillHeld: { id: 'warden.yaml@e4', sentences: ['a bigger daily cap'] },
+    });
+    const next = {
+      ...DEFAULT_WARDEN_CONFIG,
+      enabled: false,
+      caps: { ...DEFAULT_WARDEN_CONFIG.caps, investigationUsdPerDay: 1 },
+    };
 
-    await store
-      .write(DEFAULT_WARDEN_CONFIG, { enabled: false, caps: { investigationUsdPerDay: 1 } } as WardenConfigPatch)
-      .then(
-        () => should.fail('', '', 'should have been refused'),
-        (error: unknown) => should(error).be.instanceOf(WardenConfigHeld),
-      );
-    should(owner).have.length(0);
+    const waiting = await store.write(next, {
+      enabled: false,
+      caps: { investigationUsdPerDay: 1 },
+    } as WardenConfigPatch);
+
+    // The section merges one level deep, so the held version keeps every caps sub-key this save did not name.
+    should(waiting).eql([]);
+    should(owner).eql([
+      { name: undefined, patch: { enabled: false, caps: { investigationUsdPerDay: 1 } }, within: ['caps'] },
+    ]);
     should(plain).have.length(0);
   });
 
