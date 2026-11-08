@@ -61,7 +61,9 @@ const CatalogChangeHunkSchema = z.strictObject({
 export type CatalogChangeHunk = z.infer<typeof CatalogChangeHunkSchema>;
 
 /** What deserves a second look: a command or address, a script, or a file a tool obeys on its own. */
-const CatalogChangeFlagSchema = z.enum(['command', 'script', 'runs-on-its-own']);
+export const CatalogChangeFlagSchema = z.enum(['command', 'script', 'runs-on-its-own']);
+export type CatalogChangeFlag = z.infer<typeof CatalogChangeFlagSchema>;
+
 const CatalogChangeSchema = z.strictObject({
   label: z.string().min(1),
   change: z.enum(['added', 'removed', 'changed']),

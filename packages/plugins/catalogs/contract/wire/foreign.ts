@@ -218,6 +218,7 @@ const PublishedCarrierSchema = z.discriminatedUnion('kind', [
 ]);
 
 export const PublishedCarriersSchema = z.array(PublishedCarrierSchema).max(MAX_PUBLISHED_CARRIERS).readonly();
+export type PublishedCarriers = z.infer<typeof PublishedCarriersSchema>;
 // ─── harness names (Ferrets; today's `session-base.ts`) ───────────────────────────────────────────────────────────
 
 export const HarnessSchema = z.enum(['claude', 'codex']);
