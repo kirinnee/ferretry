@@ -19,6 +19,10 @@ export const PHRASE_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
   ['routing prompt', 'the one text Pack mode picks helper models with (docs/pack-mode.md); not a message to a ferret'],
   ['firewall timer', 'a systemd .timer unit that runs the loopback-firewall verify unit; not a job'],
   [
+    'your prompt launched with',
+    "the system prompt the harness was given at launch, in today's `instructions` tool wording kept by parity (T-0036); not a message to a ferret",
+  ],
+  [
     'its own credential',
     "the ferret's own session credential that `fy session revoke-credential` (V-0434, R-0364) cuts off, today's verb name kept by parity; not a Vault secret (use, never read)",
   ],

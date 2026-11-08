@@ -2,9 +2,17 @@ import type { BinaryNames, ContractSurface, HostFactsPort, UpdateHostPort } from
 import type { Instant } from '@ferretry/std';
 import { decideHome } from '../contract/home.ts';
 import { milliseconds } from '@ferretry/std';
-import type { InputHolds, OutputGuard, Admission, Redaction, WorkFolders } from '../contract/bound.ts';
+import type {
+  AgentControlReader,
+  InputHolds,
+  OutputGuard,
+  Admission,
+  Redaction,
+  WorkFolders,
+} from '../contract/bound.ts';
 import {
   AdmissionPort,
+  AgentControlPort,
   type ChildEnvironmentOpener,
   ChildEnvironmentPort,
   SecretResolverPort,
@@ -16,7 +24,8 @@ import {
 } from '../contract/bound.ts';
 import type { ConfigDef, PortToken } from '../contract/define.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
-import { ApiError } from '../contract/http.ts';
+import { ApiError, errorResponse } from '../contract/http.ts';
+import type { ConfigStatus } from './config/service.ts';
 import { CORE_IDS, type PluginId } from '../contract/ids.ts';
 import { beforeListen } from './before-listen.ts';
 import { type HomeLockLease, StateHomeLockedError } from './state/home-lock.ts';
@@ -71,6 +80,7 @@ import {
   type KernelHalfSources,
   kernelRoutes,
   kernelSockets,
+  kernelTools,
 } from './kernel-half.ts';
 import { JobRunner } from './jobs.ts';
 import type { ResponseCompressor } from './compression.ts';
@@ -143,6 +153,8 @@ export interface HostConfig {
   port(plugin: string): ConfigPort;
   /** The writer over every declared file; Gate alone receives it. Absent: Gate gets none. */
   writer?(): ConfigFilesWriter;
+  /** What every declared file stands at (`GET /v1/config/status`, `config_read`). Absent: none can be listed. */
+  status?(): ConfigStatus;
   reload(): Promise<void>;
   startWatching?(): () => void;
   /** The `${secret:NAME}` names a plugin's own files in effect name. Absent: none, so `kernel.secrets` refuses. */
@@ -562,6 +574,7 @@ async function bootLocked(
     holds?: InputHolds;
     redaction?: Redaction;
     workFolders?: WorkFolders;
+    agentControl?: AgentControlReader;
     childEnvironments?: ChildEnvironmentOpener;
     secretResolver?: SecretResolver;
   } = {};
@@ -836,6 +849,7 @@ async function bootLocked(
     holds: { get: () => boundValue(InputHoldsPort) },
     redaction: { get: () => boundValue(RedactionPort) },
     workFolders: { get: () => boundValue(WorkFoldersPort) },
+    agentControl: { get: () => boundValue(AgentControlPort) },
     childEnvironments: { get: () => boundValue(ChildEnvironmentPort) },
     secretResolver: { get: () => boundValue(SecretResolverPort) },
   });
@@ -936,6 +950,26 @@ async function bootLocked(
     },
     snapshot: () => frozen as PostBuildSnapshot,
     config: { writer: () => configWriter, admission: () => bound.admission, home },
+    agentConfig: {
+      writer: () => configWriter,
+      control: () => bound.agentControl,
+      status: () => config.status?.(),
+      home,
+      binary: options.binaries?.client ?? PRODUCT_BINARIES.client,
+      now: () => String(clock.now()),
+    },
+    admitTool: (name, request) => {
+      const entry = tools.get(`kernel/${name}`);
+      if (entry === undefined)
+        return { outcome: 'refused', response: errorResponse(404, `there is no tool ${name}`, 'unknown_tool') };
+      return admitCall(
+        bindings,
+        'tool',
+        { ...entry.decl, method: 'POST', path: `/v1/tools/kernel/${name}` },
+        request,
+        new Map(),
+      );
+    },
     doctor: async () => doctorReport([...bootNotes, ...(await doctorLines(records, hooks, jobs, data.refused))]),
     liveness: () => ({
       status: phase === 'started' ? 'ok' : 'starting',
@@ -945,6 +979,7 @@ async function bootLocked(
   };
   const kernelHandlers = kernelRoutes(kernelSources);
   const kernelBus = kernelSockets(kernelSources);
+  const kernelToolHandlers = kernelTools(kernelSources);
   const routes: MountedRoute[] = [];
   const sockets: MountedSocket[] = [];
   const memberRoutes: MountedMemberRoute[] = [];
@@ -975,9 +1010,11 @@ async function bootLocked(
       memberRoutes.push({ ...decl, owner, ...(handle === undefined ? {} : { handle }) });
     }
     for (const decl of manifest.actions?.agentTools ?? []) {
-      const handle = (half?.tools as Readonly<Record<string, unknown>> | undefined)?.[decl.name] as
-        | ToolHandler
-        | undefined;
+      const handle = (
+        manifest.id === 'kernel'
+          ? (kernelToolHandlers as Readonly<Record<string, unknown>>)
+          : (half?.tools as Readonly<Record<string, unknown>> | undefined)
+      )?.[decl.name] as ToolHandler | undefined;
       tools.set(`${manifest.id}/${decl.name}`, { decl, owner, ...(handle === undefined ? {} : { handle }) });
     }
   }

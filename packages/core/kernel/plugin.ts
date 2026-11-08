@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Carriers, DoctorChecks, defineConfig, PluginsChanged, policyRef, SessionModes } from './contract/index.ts';
-import { definePlugin, route, socket } from './manifest/index.ts';
+import { definePlugin, route, socket, tool } from './manifest/index.ts';
+import { AgentConfigCallSchemas, AGENT_CONFIG_TOOLS } from './contract/agent-config.ts';
 
 /** `config/plugins.yaml` (§3.6): on or off per plugin. Core is always on whatever it says. */
 export const PluginsYamlSchema = z.strictObject({
@@ -96,6 +97,15 @@ export default definePlugin({
       }),
       // The configuration files (docs/config-files.md, D2 #3): today's three routes, served here because every plugin's
       // files are the kernel's to read and write. Gate answers per file which capability and axis the act needs.
+      // What is in effect and what is wrong, for every declared file (today's `GET /v1/config/status`).
+      route('GET /v1/config/status', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: FLEET_USE,
+        noStore: true,
+        audit: { skip: 'a read of what the configuration files stand at' },
+        guard: { none: 'file names, kinds, states and located issues; never a file’s text or a value' },
+      }),
       route('GET /v1/config/file', {
         minimum: 'operator',
         caller: 'any',
@@ -123,12 +133,57 @@ export default definePlugin({
         audit: { record: FLEET_CONFIGURED },
         guard: { none: 'the answer names the path and whether the held edit was confirmed; never a value' },
       }),
+      // The agent's config door (today's `POST /v1/agent/config`): authenticated by the session credential alone, over a
+      // privileged local carrier, and refused unless the owner turned "Ferretry settings" on. It is an agent's ONLY write
+      // door: `PUT /v1/config/file` is a person's. Each call is admitted by the declaration of the tool it names.
+      route('POST /v1/agent/config', {
+        minimum: 'none',
+        caller: 'any',
+        privilegedOnly: true,
+        noStore: true,
+        audit: {
+          skip: 'each config tool call is answered by the tool’s own declaration; a held edit is the owner’s to confirm',
+        },
+        guard: { none: 'file names, etags, located issues and what waits for the owner; never a secret value' },
+      }),
       // §1.3.
       route('GET /v1/glossary', {
         minimum: 'authenticated',
         caller: 'any',
         audit: { skip: 'public vocabulary' },
         guard: { none: 'public vocabulary' },
+      }),
+    ],
+    // The agent's config tools (docs/config-files.md), today's names, schemas and words: live for every ferret. Each is a
+    // ferret's alone (the session credential names it), refused unless "Ferretry settings" is on, and a write that
+    // loosens waits for the owner: the agent can never confirm its own held edit.
+    agentTools: [
+      tool('config_read', {
+        minimum: 'authenticated',
+        caller: 'any',
+        privilegedOnly: true,
+        audit: { skip: 'a read of the configuration files an agent may see' },
+        guard: { none: 'file names, text with ${secret:NAME} references only, etags and located issues' },
+        input: AgentConfigCallSchemas.config_read,
+        summary: AGENT_CONFIG_TOOLS.config_read,
+      }),
+      tool('config_validate', {
+        minimum: 'authenticated',
+        caller: 'any',
+        privilegedOnly: true,
+        audit: { skip: 'a check that writes nothing' },
+        guard: { none: 'located issues; never the offending value' },
+        input: AgentConfigCallSchemas.config_validate,
+        summary: AGENT_CONFIG_TOOLS.config_validate,
+      }),
+      tool('config_write', {
+        minimum: 'authenticated',
+        caller: 'any',
+        privilegedOnly: true,
+        audit: { skip: 'the answer names the path, the etag and what waits for the owner' },
+        guard: { none: 'the path, the etag, located issues and what waits for the owner; never a value' },
+        input: AgentConfigCallSchemas.config_write,
+        summary: AGENT_CONFIG_TOOLS.config_write,
       }),
     ],
     sockets: [

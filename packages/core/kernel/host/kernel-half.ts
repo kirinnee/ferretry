@@ -1,6 +1,7 @@
 import type { InventoryEntry, InventorySurfaces } from '../contract/bound.ts';
 import type { ApiRequest } from '../contract/http.ts';
 import { ApiError, jsonResponse } from '../contract/http.ts';
+import { parseBody } from '../contract/body.ts';
 import { z } from 'zod';
 import type { Health, PluginInventory } from '../contract/kernel.ts';
 import { CORE_IDS } from '../contract/ids.ts';
@@ -9,11 +10,20 @@ import type { DoctorReport } from '../contract/doctor.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { RouteHandler, ScopedRoute } from '../contract/route.ts';
 import type { Manifest } from '../manifest/types.ts';
-import type { ToolResult } from '../manifest/implement.ts';
+import type { ToolHandler, ToolResult } from '../manifest/implement.ts';
 import type { SocketAccept } from '../contract/socket.ts';
 import { busAccept, type BusSources } from './bus-socket.ts';
 import type kernelManifest from '../plugin.ts';
 import { type ConfigRouteSources, configRoutes } from './config/routes.ts';
+import { type AgentConfigSources, agentConfig, configStatusView } from './config/agent.ts';
+import {
+  AGENT_CONFIG_TOOL_OF,
+  AgentConfigCallSchema,
+  AgentConfigCallSchemas,
+  type AgentConfigCall,
+  type AgentConfigToolName,
+} from '../contract/agent-config.ts';
+import type { AdmissionDecision } from '../contract/bound.ts';
 
 type KernelRouteKey = NonNullable<(typeof kernelManifest)['actions']>['routes'][number]['key'];
 
@@ -51,6 +61,10 @@ export interface KernelHalfSources {
   liveness(): { readonly status: 'starting' | 'ok'; readonly uptimeSeconds: number; readonly pid: number };
   /** What the configuration-file routes act through (`./config/routes.ts`). */
   readonly config: ConfigRouteSources;
+  /** What the agent's config door acts through (`./config/agent.ts`). */
+  readonly agentConfig: AgentConfigSources;
+  /** Admits a call to one of the KERNEL's own agent tools by its declaration, as the tool door would (the standing, or Gate's refusal). */
+  admitTool(name: string, request: ApiRequest): AdmissionDecision;
 }
 
 /** The most a tool call's body may be. */
@@ -58,6 +72,29 @@ const AGENT_TOOL_BODY_MAX = 1024 * 1024;
 
 /** `POST /v1/agent/tools`: a tool by name and its input. No session, no plugin, no credential field: strict. */
 const AgentToolCallSchema = z.strictObject({ tool: z.string().min(1).max(128), input: z.unknown().optional() });
+
+type KernelToolName = AgentConfigToolName;
+
+/**
+ * The kernel's own agent tools: the three config tools every ferret has (docs/config-files.md). Each runs the same
+ * logic as `POST /v1/agent/config`; a refusal of the CALLER (switch off, not a ferret) is the tool's error text.
+ */
+export function kernelTools(sources: KernelHalfSources): Readonly<Record<KernelToolName, ToolHandler>> {
+  const config = agentConfig(sources.agentConfig);
+  const handler =
+    (name: KernelToolName): ToolHandler =>
+    async (call, input) => {
+      const parsed = AgentConfigCallSchemas[name].parse(input ?? {});
+      const wire = { tool: name.replace('_', '.'), ...parsed } as AgentConfigCall;
+      const answer = await config.run(wire, call);
+      return { text: JSON.stringify(answer), data: JSON.parse(JSON.stringify(answer)) };
+    };
+  return {
+    config_read: handler('config_read'),
+    config_validate: handler('config_validate'),
+    config_write: handler('config_write'),
+  };
+}
 
 type KernelSocketKey = NonNullable<(typeof kernelManifest)['actions']>['sockets'][number]['key'];
 
@@ -70,6 +107,15 @@ export function kernelSockets(sources: KernelHalfSources): Readonly<Record<Kerne
 export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<KernelRouteKey, RouteHandler>> {
   return {
     ...configRoutes(sources.config),
+    'GET /v1/config/status': async () => jsonResponse(configStatusView(sources.agentConfig)),
+    'POST /v1/agent/config': async call => {
+      const body = await parseBody(call.request, AgentConfigCallSchema, { maxBytes: 2 * 256 * 1024 });
+      // The route is served without a credential; the tool it names admits the caller, as the tool door would.
+      const tool = AGENT_CONFIG_TOOL_OF[body.tool];
+      const decision = sources.admitTool(tool, call.request);
+      if (decision.outcome === 'refused') return decision.response;
+      return jsonResponse(await agentConfig(sources.agentConfig).run(body, decision.standing));
+    },
     'GET /v1/health': async () => jsonResponse({ protocol: PROTOCOL, version: sources.version } satisfies Health),
     'GET /healthz': async () => {
       const live = sources.liveness();

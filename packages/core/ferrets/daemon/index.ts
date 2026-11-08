@@ -55,6 +55,8 @@ import { StateCallsignCounters } from './adapters/names/state-callsign-counters.
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from './lib/protocol/agent-address.ts';
 import { FerretRegistry } from './lib/registry/registry.ts';
 import { FerretTokenDirectory, type TokenEntry } from './lib/tokens/tokens.ts';
+import { instructionsAnswer } from './lib/agent-control/instructions.ts';
+import { agentControlReader } from './lib/agent-control/reader.ts';
 import { RegistryWorkFolders } from './lib/work-folders/work-folders.ts';
 import { buildWorktrees } from './modules/worktrees.ts';
 import { FY_REQUEST_ID_HEADER } from './lib/protocol/headers.ts';
@@ -672,7 +674,16 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   );
 
   return {
-    provides: { ferrets: ferretsPort(service), workFolders },
+    provides: {
+      ferrets: ferretsPort(service),
+      workFolders,
+      agentControl: agentControlReader(ferret => service.agentControl(ferret)),
+    },
+    tools: {
+      // Today's `instructions`: answered for the ferret the session credential names, from what ITS launch told it.
+      instructions: async call =>
+        instructionsAnswer(callerFerret(call), id => service.launchedSwitches(id), kernel.identity.binaries.client),
+    },
     hooks: {
       'bearers:ferret': {
         ferretFor: (digest: BearerDigest) => {

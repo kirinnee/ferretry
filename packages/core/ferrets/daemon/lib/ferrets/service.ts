@@ -69,6 +69,15 @@ import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../token
 /** Today's launch variables: the ferret's own bearer and id, read by `fy` inside the pane. */
 const FERRET_TOKEN_VARIABLE = 'FY_SESSION_TOKEN';
 const FERRET_ID_VARIABLE = 'FY_SESSION_ID';
+/** The launch variables `instructions` reports on: the mode and the four per-ferret section switches (never a secret). */
+const SECTION_SWITCH_VARIABLES = [
+  FERRET_ID_VARIABLE,
+  'FY_SESSION_MODE',
+  'FY_HYPERMEDIA',
+  'FY_PACK',
+  'FY_AGENDA',
+  'FY_LEARNING_PASSIVE',
+] as const;
 
 /** The reason a stop records when its caller gave none (today's lifecycle `defaultStopReason`). */
 const DEFAULT_STOP_REASON = 'stopped by client';
@@ -248,6 +257,8 @@ export const RENAME_HTTP: Readonly<Record<RenameFailure, { readonly status: numb
 export class FerretsService implements FerretsApi {
   /** Today's lifecycle gate: read the current record only after acquiring its key. */
   private readonly serial = new KeyedSerialExecutor();
+  /** What each ferret's current run launched with (see {@link FerretsService.launchedSwitches}); memory only. */
+  private readonly launchSwitches = new Map<FerretId, Readonly<Record<string, string>>>();
   /**
    * The pin-marked summary made from one registry summary, so the same summary with the same pin answers the same
    * object (R501: the fleet read reuses its body while nothing moved). Held weakly by the input summary.
@@ -1084,6 +1095,11 @@ export class FerretsService implements FerretsApi {
     return ok(home);
   }
 
+  /** The section switches the ferret's current run launched with; `undefined` when this daemon did not launch it (it was running before a restart). */
+  launchedSwitches(ferret: FerretId): Readonly<Record<string, string>> | undefined {
+    return this.launchSwitches.get(ferret);
+  }
+
   private async environment(
     ferret: FerretId,
     token: string,
@@ -1092,6 +1108,13 @@ export class FerretsService implements FerretsApi {
     const env: Record<string, string> = {};
     for (const part of parts) if (part.kind === 'env' || part.kind === 'shell') Object.assign(env, part.env);
     env[FERRET_ID_VARIABLE] = ferret;
+    // What this launch told the ferret, kept for `instructions`: a fact of THIS run, so a switch flipped since is not in it.
+    this.launchSwitches.set(
+      ferret,
+      Object.fromEntries(
+        SECTION_SWITCH_VARIABLES.flatMap(name => (env[name] === undefined ? [] : [[name, env[name]] as const])),
+      ),
+    );
     env[FERRET_TOKEN_VARIABLE] = token;
     const resolved = await this.ports.vault.childEnvironment(ferret, env);
     return resolved.ok ? ok(resolved.value) : err(`unknown secrets: ${resolved.error.unknown.join(', ')}`);
