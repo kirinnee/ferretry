@@ -108,3 +108,14 @@ describe('building', () => {
       expect(cacheName(buildKey(packagesLock(packages)))).toMatch(/^[A-Za-z0-9_-]{43}$/u);
   });
 });
+
+describe('what nix answers badly', () => {
+  test('metadata whose locked address is not a URL cannot be pinned, even with a prefetched hash', () => {
+    const doc = JSON.stringify({ url: `not a url/${REV_A}`, locked: { rev: REV_A } });
+    expect(parseFlakeMetadata(doc, HASH_A)).toEqual({ ok: false, error: 'nix named no locked address for it' });
+  });
+
+  test('a dev-env answer that is not JSON is refused in words', () => {
+    expect(parseDevEnv('not json')).toEqual({ ok: false, error: 'nix did not answer in JSON' });
+  });
+});
