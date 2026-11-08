@@ -4,6 +4,7 @@ import {
   DisableExpiryWatch,
   earliestExpiry,
   expiredBetween,
+  keepUnpublished,
   runtimesBackOn,
 } from '../../../daemon/lib/service/disable-expiry.ts';
 
@@ -219,5 +220,31 @@ describe('which runtime switches fall due', () => {
     should(expiredBetween(files, at('2026-11-08T10:00:00Z'), at('2026-11-09T00:00:00Z'))).eql(['b']);
     should(expiredBetween(files, at('2026-11-08T09:00:00Z'), at('2026-11-09T01:00:00Z'))).eql(['a', 'b']);
     should(expiredBetween(files, at('2026-11-09T00:00:00Z'), at('2026-11-10T00:00:00Z'))).eql([]);
+  });
+
+  it('should keep a login block that passed but was not yet published when a newer reading no longer names it', () => {
+    // Arrange: the earlier reading saw three logins off; the newer one, read at 09:30, names none of the passed ones.
+    const earlier = new Map<string, { disabled?: { until?: string } }>([
+      ['passed', { disabled: { until: '2026-11-08T09:30:00Z' } }],
+      ['published', { disabled: { until: '2026-11-08T08:00:00Z' } }],
+      ['ahead', { disabled: { until: '2026-11-08T10:00:00Z' } }],
+      ['off-again', { disabled: { until: '2026-11-08T09:15:00Z' } }],
+    ]);
+    const newer = new Map<string, { disabled?: { until?: string } }>([
+      ['passed', {}],
+      ['published', {}],
+      ['ahead', {}],
+      ['off-again', { disabled: { until: '2026-11-08T11:00:00Z' } }],
+    ]);
+
+    // Act
+    const kept = keepUnpublished(earlier, newer, at('2026-11-08T09:00:00Z'), at('2026-11-08T09:30:00Z'));
+
+    // Assert: only the one inside the window, and not named off again, keeps the earlier block.
+    should(kept.get('passed')).eql({ disabled: { until: '2026-11-08T09:30:00Z' } });
+    should(kept.get('published')).eql({});
+    should(kept.get('ahead')).eql({});
+    should(kept.get('off-again')).eql({ disabled: { until: '2026-11-08T11:00:00Z' } });
+    should(keepUnpublished(earlier, newer, at('2026-11-08T09:30:00Z'), at('2026-11-08T09:45:00Z'))).equal(newer);
   });
 });

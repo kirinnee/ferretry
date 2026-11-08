@@ -43,7 +43,7 @@ import manifest from '../manifest.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
 import { autoResumeAnswer } from './lib/service/auto-resume-answer.ts';
-import { DisableExpiryWatch, earliestExpiry, runtimesBackOn } from './lib/service/disable-expiry.ts';
+import { DisableExpiryWatch, earliestExpiry, keepUnpublished, runtimesBackOn } from './lib/service/disable-expiry.ts';
 import { loginUsers } from './lib/service/login-users.ts';
 import { createRuntimesApi } from './lib/service/runtimes-api.ts';
 import { RuntimeEndSupervision, type RuntimeEndSeams } from './lib/service/runtime-end-supervision.ts';
@@ -176,11 +176,17 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
       //
       // Logins drops a login's `disabled` from its view once the `until` has passed, so the list read when the timer
       // fires no longer names the block that expired: the fire judges the logins' `until`s as the arming read saw them.
+      // A re-read that lands after a login's `until` passed but before the timer fired keeps the block it no longer
+      // names, so that expiry is still published; the timer is set for the earliest `until` not yet published, which
+      // fires at once for one already past.
       // A login list that cannot be read counts as no login blocks, so the runtimes' own `until`s still arm and publish.
       const loginBlocks = async (): Promise<ReadonlyMap<string, LoginView>> =>
         await ctx.needs.logins.list().then(
           list => new Map(list.logins.map(view => [view.id as string, view])),
-          () => new Map(),
+          () => {
+            ctx.kernel.log.warn('the logins could not be read: a login switched off until a time is not watched');
+            return new Map();
+          },
         );
       let expiredUpTo = clock.nowMs();
       let armedLogins: ReadonlyMap<string, LoginView> = new Map();
@@ -188,16 +194,18 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
       const expiry = new DisableExpiryWatch({
         next: async () => {
           const read = ++loginReads;
-          const logins = await loginBlocks();
+          const fresh = await loginBlocks();
           // An older read landing after a newer one never replaces what the newer one saw.
-          if (read === loginReads) armedLogins = logins;
-          return earliestExpiry(config.collection(runtimeItems), logins, clock.nowMs());
+          if (read !== loginReads) return earliestExpiry(config.collection(runtimeItems), fresh, expiredUpTo);
+          armedLogins = keepUnpublished(armedLogins, fresh, expiredUpTo, clock.nowMs());
+          return earliestExpiry(config.collection(runtimeItems), armedLogins, expiredUpTo);
         },
         now: () => clock.nowMs(),
         republish: async () => {
           const now = clock.nowMs();
-          const back = runtimesBackOn(config.collection(runtimeItems), armedLogins, expiredUpTo, now);
+          const after = expiredUpTo;
           expiredUpTo = now;
+          const back = runtimesBackOn(config.collection(runtimeItems), armedLogins, after, now);
           if (back.length > 0) events.publish(RuntimesChanged, { runtimes: [...back], profiles: [], modelSets: [] });
         },
         setTimer: (run, ms) => clock.after(milliseconds(ms), run),

@@ -25,8 +25,6 @@ import { type RuntimesAssembly, runtimesDaemon } from '../../../daemon/index.ts'
 import { UNAVAILABLE } from '../../../daemon/lib/service/assembly.ts';
 import { LoginChanged, type LoginView } from '@ferretry/plugin-logins/contract';
 import { type FakeLogins, fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
-import loginsDaemon from '@ferretry/plugin-logins/daemon';
-import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import manifest from '../../../manifest.ts';
 
 const login = sampleLogin;
@@ -49,6 +47,8 @@ interface Built {
 interface ProjectedLogins extends FakeLogins {
   /** Make every list read throw (a Logins that cannot answer), or answer again. */
   failReads(failing: boolean): void;
+  /** Hold every list read until the answer is released: a slow read, projected at the instant it is released. */
+  holdReads(): () => void;
 }
 
 /**
@@ -58,6 +58,7 @@ interface ProjectedLogins extends FakeLogins {
  */
 function projectedLogins(inner: FakeLogins, nowMs: () => number): ProjectedLogins {
   let failing = false;
+  let held: Promise<void> | undefined;
   const active = (view: LoginView): LoginView => {
     const until = view.disabled?.until;
     if (until === undefined || Date.parse(until) > nowMs()) return view;
@@ -67,12 +68,23 @@ function projectedLogins(inner: FakeLogins, nowMs: () => number): ProjectedLogin
   return {
     ...inner,
     list: async () => {
+      if (held !== undefined) await held;
       if (failing) throw new Error('the logins cannot be read right now');
       const list = await inner.list();
       return { ...list, logins: list.logins.map(active) };
     },
     failReads: next => {
       failing = next;
+    },
+    holdReads: () => {
+      let release = (): void => undefined;
+      held = new Promise(resolve => {
+        release = () => {
+          held = undefined;
+          resolve();
+        };
+      });
+      return release;
     },
   };
 }
@@ -451,41 +463,42 @@ describe('the runtimes daemon', () => {
     await clock.advance(30 * 60_000);
     await quiet(host);
 
-    // Assert
+    // Assert: the runtime still came back, and the operator is told once why a login's timed switch is not watched.
     should(changed()).deepEqual(named('codex-work'));
+    const warned = host.logs.filter(
+      entry => entry.level === 'warn' && entry.message.includes('the logins could not be read'),
+    );
+    should(warned.length).be.above(0);
+    should(warned.every(entry => entry.fields === undefined)).be.true();
   });
 
-  it('should wake the views at the until a hand edit of a login file wrote, through the real Logins', async () => {
-    // Arrange: the real Logins beside Runtimes; nothing is off at start. Then the owner edits logins/codex-work.yaml by
-    // hand (no Logins change) to switch it off until 09:30.
+  it('should still wake the views for a login whose until passed while a re-read of the logins was in flight', async () => {
+    // Arrange: the login codex-work is off until 09:30; the clock reads 09:00 and the timer is set for 09:30.
     const clock = fixedClock('2026-11-08T09:00:00.000Z');
-    const loginFiles = (extra: Record<string, unknown> = {}) => ({
-      'claude-you': { harness: 'claude-code', store: 'host' },
-      'codex-work': { harness: 'codex', store: 'host', ...extra },
-    });
-    const host = await testHost({
-      // Logins first: the host builds in order, and Runtimes needs the port Logins provides.
-      plugins: [loginsDaemon as DaemonImplementation<any>, runtimesDaemon() as DaemonImplementation<any>],
-      fakes: { ferrets: new FakeFerrets(), vault: new FakeVault() },
-      gate: new StandInAdmission(() => ownerStanding()),
-      config: { ...FILES, logins: loginFiles() },
+    const { host, logins } = await build({
       clock,
+      logins: [
+        login('claude-you'),
+        login('codex-work', { harness: 'codex', ...loginOffUntil('2026-11-08T09:30:00Z') }),
+      ],
     });
     await quiet(host);
-    host.setConfig('logins', loginFiles({ disabled: { reason: 'cooling off', until: '2026-11-08T09:30:00Z' } }));
-    await quiet(host);
+    await clock.advance(29 * 60_000);
     const changed = changesSince(host);
 
-    // Act
-    await clock.advance(29 * 60_000);
+    // Act: at 09:29 a runtime file is saved (a re-arm), which drops the timer and reads the logins slowly; the read
+    // answers at 09:30, after the until, so Logins no longer names the block.
+    const release = logins.holdReads();
+    host.setConfig('runtimes', { ...FILES.runtimes });
     await quiet(host);
-    should(changed()).deepEqual([]);
     await clock.advance(60_000);
+    release();
+    await quiet(host);
+    await clock.advance(0);
     await quiet(host);
 
-    // Assert
+    // Assert: the expiry that passed during the read is still published, naming codex-work.
     should(changed()).deepEqual(named('codex-work'));
-    await host.stop();
   });
 
   it('should publish nothing once the daemon stops, and set no timer for a file change after it', async () => {
