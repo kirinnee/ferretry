@@ -133,6 +133,15 @@ export function world(options: WorldOptions = {}) {
     codeWorked: undefined as boolean | undefined | Error,
     /** Held until the test lets go: the observer's look at a code takes as long as the test says. */
     codeGate: undefined as Promise<void> | undefined,
+    /** The picture a page answers with (none by default) and the document it shows now. */
+    shot: undefined as { pngBase64: string; clip: { x: number; y: number; w: number; h: number } } | undefined,
+    document: undefined as string | undefined,
+    /** Who the page is signing in, as the ferret typed it. */
+    typedUsername: undefined as string | undefined,
+    observerFails: false,
+    /** Asked inside the agenda's raise, before it answers: what the card is while it is being raised. */
+    onAgendaRaise: undefined as ((card: InputCard) => void) | undefined,
+    quarantineSessions: undefined as readonly string[] | Error | undefined,
   };
   const writes: { values: string[]; submit: boolean; options: TypeOptions | undefined }[] = [];
   const cleared: ClearJob[] = [];
@@ -206,6 +215,8 @@ export function world(options: WorldOptions = {}) {
         ...(state.codeProgram ? { codeProgram: true as const } : {}),
       };
     },
+    shoot: async () => state.shot,
+    document: async () => state.document,
     type: async (_session, _target, typedValues, submit, _expected, typeOptions) => {
       writes.push({ values: typedValues.map(each => each.text), submit, options: typeOptions });
       state.onType?.();
@@ -227,6 +238,7 @@ export function world(options: WorldOptions = {}) {
     agenda: {
       raise: async (_session, raised) => {
         if (state.agendaFails) return { ok: false, message: 'the agenda is full' };
+        state.onAgendaRaise?.(raised);
         cards.push(raised);
         return { ok: true, id: `A${card++}` as AgendaId };
       },
@@ -243,7 +255,12 @@ export function world(options: WorldOptions = {}) {
       history: async () => options.history ?? [],
       quarantine: async () => undefined,
       quarantines: async () => [],
+      quarantineSessions: async () => {
+        if (state.quarantineSessions instanceof Error) throw state.quarantineSessions;
+        return state.quarantineSessions ?? [];
+      },
     },
+    identities: { at: () => state.typedUsername },
     audit: {
       record: async entry => void audits.push(entry),
       saved: async () => undefined,
@@ -292,7 +309,10 @@ export function world(options: WorldOptions = {}) {
       ? {}
       : {
           observer: {
-            delivered: async (delivery: unknown) => void delivered.push(delivery),
+            delivered: async (delivery: unknown) => {
+              if (state.observerFails) throw new Error('the observer fell over');
+              delivered.push(delivery);
+            },
             tainted: () => state.tainted,
             codeTyped: async (typed: unknown) => {
               codesChecked.push(typed);
