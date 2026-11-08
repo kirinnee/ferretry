@@ -276,10 +276,138 @@ describe('component text redaction', () => {
       });
     });
 
+    // Ruling #36, amendment 3: YAML node properties (a tag, an anchor, both in either order) before a block indicator
+    // hide nothing of the block from a name that announces a secret.
+    it('S26 should hide a block whose indicator follows node properties: db_password: !vault |⏎  value', () => {
+      // Assert
+      for (const [input, expected] of [
+        [
+          'db_password: !vault |\n  $ANSIBLE_VAULT;1.1;AES256\n  62316530fake0000\nnext: fake-shown-0000',
+          `db_password: !vault |\n  ${HIDDEN}\n  ${HIDDEN}\nnext: fake-shown-0000`,
+        ],
+        // Today hides the eight-character tag beside the name, and still does.
+        ['password: !!binary |\n  fake-block-value-0000', `password: ${HIDDEN} |\n  ${HIDDEN}`],
+        ['password: &a |\n  fake-block-value-0000', `password: &a |\n  ${HIDDEN}`],
+        ['password: !!str |\n  fake-block-value-0000', `password: !!str |\n  ${HIDDEN}`],
+        ['token: &a !!str >-\r\n  fake-block-value-0000', `token: &a !!str >-\r\n  ${HIDDEN}`],
+        [
+          'secret: !!str &a |- # fake comment\n\tfake-block-value-0000',
+          `secret: !!str &a |- # fake comment\n\t${HIDDEN}`,
+        ],
+        ['- "password": !x |\n    fake-block-value-0000', `- "password": !x |\n    ${HIDDEN}`],
+      ] as const) {
+        should(shownFor(input)).eql({ text: expected, redacted: true });
+      }
+    });
+
+    it('S26 should hide a block whose node properties stand off the name line: PASSWORD⏎= !!str |, password:⏎  &a |, password: &a⏎  |', () => {
+      // Assert: a line that opens the block is as written or, at eight characters or more, hidden whole.
+      for (const [input, expected] of [
+        ['PASSWORD\n= !x |\n  fake-block-value-0000', `PASSWORD\n= !x |\n  ${HIDDEN}`],
+        ['PASSWORD\n= !!str |\n  fake-block-value-0000', `PASSWORD\n${HIDDEN}\n  ${HIDDEN}`],
+        ['password:\n  &a |\n    fake-block-value-0000', `password:\n  &a |\n    ${HIDDEN}`],
+        ['PASSWORD\n=\n!x >\n  fake-block-value-0000', `PASSWORD\n=\n!x >\n  ${HIDDEN}`],
+        ['password: &a\n|\n  fake-block-value-0000', `password: &a\n|\n  ${HIDDEN}`],
+        ['PASSWORD\n= &a\n  |\n    fake-block-value-0000', `PASSWORD\n= &a\n  |\n    ${HIDDEN}`],
+      ] as const) {
+        should(shownFor(input)).eql({ text: expected, redacted: true });
+      }
+    });
+
+    // Ruling #36, amendment 3: today reads node properties as the value, and shows the value after them.
+    it("S26 should hide the value after node properties on its name's line: password: !!str value", () => {
+      // Assert
+      for (const [input, expected] of [
+        ['password: !!str fake-inline-value-0000', `password: !!str ${HIDDEN}`],
+        ['password: &pw fake-inline-value-0000 # fake comment', `password: &pw ${HIDDEN} # fake comment`],
+        // A tag today hides (eight characters under a secret name) stays hidden, and the value after it is too.
+        ['password: !!binary fake-inline-value-0000', `password: ${HIDDEN} ${HIDDEN}`],
+        ['api_token = &a !!str "fake-inline-value-0000"', `api_token = &a !!str "${HIDDEN}"`],
+        ['password: !<tag:yaml.org,2002:str> fake-inline-value-0000', `password: ${HIDDEN},2002:str> ${HIDDEN}`],
+        // An operand is read as the value too: it only hides more (`!Ref` names a parameter).
+        ['password: !Ref DbPasswordFake', `password: !Ref ${HIDDEN}`],
+      ] as const) {
+        should(shownFor(input)).eql({ text: expected, redacted: true });
+      }
+    });
+
+    it('S26 should hide the value after node properties on the lines after its name: PASSWORD⏎= !!str value, password:⏎  &a value, password: &a⏎  value', () => {
+      // Assert
+      for (const [input, expected] of [
+        ['PASSWORD\n= !!str fake-inline-value-0000', `PASSWORD\n= !!str ${HIDDEN}`],
+        ['PASSWORD\n=\n&a fake-inline-value-0000', `PASSWORD\n=\n&a ${HIDDEN}`],
+        ['password:\n  &a fake-inline-value-0000', `password:\n  &a ${HIDDEN}`],
+        ['password: &a\n  fake-inline-value-0000', `password: &a\n  ${HIDDEN}`],
+        ['password: !!binary\r\n  fake-inline-value-0000', `password: ${HIDDEN}\r\n  ${HIDDEN}`],
+        ['PASSWORD\n= !!str &a\n\tfake-inline-value-0000', `PASSWORD\n= !!str &a\n\t${HIDDEN}`],
+      ] as const) {
+        should(shownFor(input)).eql({ text: expected, redacted: true });
+      }
+    });
+
+    it('S26 should leave node properties and what follows them under a name that announces no secret, a pointer or a comment after them, and a lone &', () => {
+      // Assert
+      for (const input of [
+        'mode: !!str plain-inline-text-0000',
+        'mode: !vault |\n  plain-block-text-0000',
+        'mode: &a\n  plain-inline-text-0000',
+        'MODE\n= !!str plain-inline-text-0000',
+        'password: !!str ${secret:FAKE}',
+        'password: &a !!str # see-the-notes-below',
+        'Q=& plain-inline-text-0000',
+        'password: & fake-inline-value-0000',
+        'e=! sk-<2xyz',
+      ]) {
+        should(shownFor(input)).eql({ text: input, redacted: false });
+      }
+    });
+
+    // A cut that took a private key's header would leave its body for no pass to find, so a reading leaves the key
+    // whole for the pass that cuts keys. Round 3's blocks of the family took the header, below today's floor.
+    it('S26 should cut a private key whole when a block of the family holds its header and its body runs past the block', () => {
+      // Assert
+      for (const [input, expected] of [
+        [
+          'PASSWORD\n= |\n  -----BEGIN RSA PRIVATE KEY-----\nMIIEfakefakefake\n-----END RSA PRIVATE KEY-----\nnext: fake-shown-0000',
+          `PASSWORD\n= |\n  ${HIDDEN}\nnext: fake-shown-0000`,
+        ],
+        [
+          'password: | # c\n  -----BEGIN PRIVATE KEY-----\nMIIEfakefakefake\n-----END PRIVATE KEY-----',
+          `password: | # c\n  ${HIDDEN}`,
+        ],
+        // Today's own block took it as well: the rest of the line is hidden, and the key cut whole.
+        [
+          'password: |\n  fake x -----BEGIN RSA PRIVATE KEY-----\nMIIEfake\n-----END RSA PRIVATE KEY-----\nnext: ok',
+          `password: |\n  ${HIDDEN} ${HIDDEN}\nnext: ok`,
+        ],
+        // A key wholly inside the block is hidden line by line, as today hides it.
+        [
+          'password: |\n  -----BEGIN RSA PRIVATE KEY-----\n  MIIEfakefakefake\n  -----END RSA PRIVATE KEY-----',
+          `password: |\n  ${HIDDEN}\n  ${HIDDEN}\n  ${HIDDEN}`,
+        ],
+      ] as const) {
+        should(shownFor(input)).eql({ text: expected, redacted: true });
+      }
+    });
+
+    it("S26 should cut a private key whole when a name's value starts with it: password: -----BEGIN…", () => {
+      // Assert
+      const key = '-----BEGIN RSA PRIVATE KEY-----\nMIIEfakefakefake\n-----END RSA PRIVATE KEY-----';
+      for (const [input, expected] of [
+        [`password: ${key}`, `password: ${HIDDEN}`],
+        [`password:\n${key}`, `password:\n${HIDDEN}`],
+        [`password: !!str ${key}`, `password: !!str ${HIDDEN}`],
+        [`password: fake-${key}`, `password: ${HIDDEN}${HIDDEN}`],
+      ] as const) {
+        should(shownFor(input)).eql({ text: expected, redacted: true });
+      }
+    });
+
     // The whole family, generated: every separator, gap before the indicator, indicator (with and without a
     // comment, one ending in a name and its separator), position of the indicator (shallower than the name too),
     // base indent, block indent and line ending, alone or inside an outer block, under a name that announces a
-    // secret and under one that does not.
+    // secret and under one that does not. And (amendment 3) node properties — tags, anchors, both in either order —
+    // before the indicator wherever it stands, or ending the line before the indicator's.
     const SEPARATORS = [':', '='];
     const GAPS = [' ', '', '\t'];
     const INDICATORS = ['|', '|-', '>'];
@@ -288,81 +416,308 @@ describe('component text redaction', () => {
     const INDENTS = ['  ', '\t'];
     const ENDINGS = ['\n', '\r\n'];
     const WRAPPED = [false, true];
+    const NODE_PROPERTIES = ['', '!x ', '!!str ', '!!binary ', '&a ', '&a !!str ', '!!str &a '];
+    /** Tens of thousands of shapes take a few seconds, past bun's 5 s per-test default on a slow box. */
+    const FAMILY_TIMEOUT = 60_000;
     interface Shape {
       readonly name: string;
       readonly separator: string;
       readonly gap: string;
+      /** The indicator with its comment, and the node properties before it (each with its space). */
       readonly indicator: string;
+      readonly properties: string;
       readonly base: string;
       readonly indent: string;
     }
+    /** The node properties and the indicator, where they share a line. */
+    const opener = (s: Shape): string => `${s.properties}${s.indicator}`;
     /**
      * The lines from the name to the indicator, for each place the indicator can stand: whether a gap can stand
-     * between the separator and the indicator (they share a line), and whether it stands shallower than the name.
+     * between the separator and the indicator (they share a line), whether it stands shallower than the name, and
+     * whether node properties end a line of their own (so the position needs some).
      */
     const POSITIONS: Readonly<
-      Record<string, { readonly gapped: boolean; readonly shallow: boolean; readonly lines: (s: Shape) => string[] }>
+      Record<
+        string,
+        {
+          readonly gapped: boolean;
+          readonly shallow: boolean;
+          readonly tagged?: true;
+          readonly lines: (s: Shape) => string[];
+        }
+      >
     > = {
       'same line': {
         gapped: true,
         shallow: false,
-        lines: s => [`${s.base}${s.name}${s.separator}${s.gap}${s.indicator}`],
+        lines: s => [`${s.base}${s.name}${s.separator}${s.gap}${opener(s)}`],
       },
       'next line': {
         gapped: true,
         shallow: false,
-        lines: s => [`${s.base}${s.name}`, `${s.base}${s.separator}${s.gap}${s.indicator}`],
+        lines: s => [`${s.base}${s.name}`, `${s.base}${s.separator}${s.gap}${opener(s)}`],
       },
       'next line, shallower than the name': {
         gapped: true,
         shallow: true,
-        lines: s => [`${s.base}${s.name}`, `${s.separator}${s.gap}${s.indicator}`],
+        lines: s => [`${s.base}${s.name}`, `${s.separator}${s.gap}${opener(s)}`],
       },
       'own line, indented': {
         gapped: false,
         shallow: false,
-        lines: s => [`${s.base}${s.name}${s.separator}`, `${s.base}${s.indent}${s.indicator}`],
+        lines: s => [`${s.base}${s.name}${s.separator}`, `${s.base}${s.indent}${opener(s)}`],
       },
       'own line, at the name': {
         gapped: false,
         shallow: false,
-        lines: s => [`${s.base}${s.name}${s.separator}`, `${s.base}${s.indicator}`],
+        lines: s => [`${s.base}${s.name}${s.separator}`, `${s.base}${opener(s)}`],
       },
       'own line, shallower than the name': {
         gapped: false,
         shallow: true,
-        lines: s => [`${s.base}${s.name}${s.separator}`, s.indicator],
+        lines: s => [`${s.base}${s.name}${s.separator}`, opener(s)],
       },
       'own line after a separator line': {
         gapped: false,
         shallow: false,
-        lines: s => [`${s.base}${s.name}`, `${s.base}${s.separator}`, `${s.base}${s.indicator}`],
+        lines: s => [`${s.base}${s.name}`, `${s.base}${s.separator}`, `${s.base}${opener(s)}`],
       },
       'own line after a separator line, indented': {
         gapped: false,
         shallow: false,
-        lines: s => [`${s.base}${s.name}`, `${s.base}${s.separator}`, `${s.base}${s.indent}${s.indicator}`],
+        lines: s => [`${s.base}${s.name}`, `${s.base}${s.separator}`, `${s.base}${s.indent}${opener(s)}`],
       },
       'own line after a separator line, shallower than the name': {
         gapped: false,
         shallow: true,
-        lines: s => [`${s.base}${s.name}`, s.separator, s.indicator],
+        lines: s => [`${s.base}${s.name}`, s.separator, opener(s)],
+      },
+      'properties end the name line': {
+        gapped: true,
+        shallow: false,
+        tagged: true,
+        lines: s => [
+          `${s.base}${s.name}${s.separator}${s.gap}${s.properties.trimEnd()}`,
+          `${s.base}${s.indent}${s.indicator}`,
+        ],
+      },
+      'properties end the name line, the indicator at the name': {
+        gapped: true,
+        shallow: false,
+        tagged: true,
+        lines: s => [`${s.base}${s.name}${s.separator}${s.gap}${s.properties.trimEnd()}`, `${s.base}${s.indicator}`],
+      },
+      'properties end the separator line': {
+        gapped: true,
+        shallow: false,
+        tagged: true,
+        lines: s => [
+          `${s.base}${s.name}`,
+          `${s.base}${s.separator}${s.gap}${s.properties.trimEnd()}`,
+          `${s.base}${s.indent}${s.indicator}`,
+        ],
       },
     };
-    const family = Object.entries(POSITIONS).flatMap(([position, { gapped, shallow, lines }]) =>
+    const family = Object.entries(POSITIONS).flatMap(([position, { gapped, shallow, tagged, lines }]) =>
       BASES.filter(base => !shallow || base !== '').flatMap(base =>
         (gapped ? GAPS : [' ']).flatMap(gap =>
           SEPARATORS.flatMap(separator =>
             INDICATORS.flatMap(indicator =>
               COMMENTS.flatMap(comment =>
+                NODE_PROPERTIES.filter(properties => tagged !== true || properties !== '').flatMap(properties =>
+                  INDENTS.flatMap(indent =>
+                    ENDINGS.flatMap(ending =>
+                      WRAPPED.map(wrapped => ({
+                        position,
+                        opener: (name: string) =>
+                          lines({ name, separator, gap, indicator: indicator + comment, properties, base, indent }),
+                        base,
+                        indent,
+                        ending,
+                        wrapped,
+                      })),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    /**
+     * A line as written, or with the `!!binary` tag today hides as a value (eight characters under a secret name)
+     * hidden. {@link asWrittenOrHidden}: or hidden whole after its indent.
+     */
+    const asWritten = (line: string | undefined, written: string): boolean =>
+      line === written || line === written.replace('!!binary', HIDDEN);
+    const asWrittenOrHidden = (line: string | undefined, written: string): boolean =>
+      asWritten(line, written) || line === `${/^\s*/u.exec(written)?.[0]}${HIDDEN}`;
+
+    it(
+      `S26 should hide every value line of every block in the family (${family.length} shapes), and nothing after it`,
+      () => {
+        const leaks: string[] = [];
+        for (const { position, opener, base, indent, ending, wrapped } of family) {
+          // Arrange
+          const wrap = wrapped ? ['api_token: |'] : [];
+          const head = opener('PASSWORD');
+          const values = [
+            `${base}${indent}fake-block-value-0001`,
+            '',
+            `${base}${indent}${indent}fake-block-value-0002`,
+          ];
+          const input = [...wrap, ...head, ...values, 'after: fake-shown-0000', ''].join(ending);
+
+          // Act
+          const actual = shownFor(input);
+
+          // Assert: the outer line, the name line (unless the outer block holds it) and the line after the block as
+          // written, every value line hidden, and a line that opens the block either as written or hidden whole (one
+          // of eight characters or more is read as a block line).
+          const lines = actual.text.split(ending).slice(wrap.length);
+          const insideOuter = wrapped && base !== '';
+          const opensRight =
+            (insideOuter ? asWrittenOrHidden(lines[0], head[0] ?? '') : asWritten(lines[0], head[0] ?? '')) &&
+            head.slice(1).every((line, at) => asWrittenOrHidden(lines[at + 1], line));
+          const expected = [
+            ...wrap,
+            ...lines.slice(0, head.length),
+            `${base}${indent}${HIDDEN}`,
+            '',
+            `${base}${indent}${indent}${HIDDEN}`,
+            'after: fake-shown-0000',
+            '',
+          ];
+          if (!opensRight || actual.text !== expected.join(ending) || !actual.redacted) {
+            leaks.push(`${position}: ${JSON.stringify(input)} -> ${JSON.stringify(actual.text)}`);
+          }
+        }
+        should(leaks).deepEqual([]);
+      },
+      FAMILY_TIMEOUT,
+    );
+
+    it(
+      `S26 should hide nothing of any block in the family (${family.length} shapes) under a name that announces no secret`,
+      () => {
+        const touched: string[] = [];
+        for (const { opener, base, indent, ending, wrapped } of family) {
+          // Arrange
+          const wrap = wrapped ? ['notes: |'] : [];
+          const input = [
+            ...wrap,
+            ...opener('mode'),
+            `${base}${indent}plain-block-text-0001`,
+            'after: plain-text-0000',
+          ].join(ending);
+
+          // Act
+          const actual = shownFor(input);
+
+          // Assert
+          if (actual.text !== input || actual.redacted) touched.push(JSON.stringify(input));
+        }
+        should(touched).deepEqual([]);
+      },
+      FAMILY_TIMEOUT,
+    );
+
+    // The value after node properties, generated (amendment 3): every place a value is read — the name's own line,
+    // the separator's line after it, a line of its own, the line after a separator line, and the line after one that
+    // node properties end — crossed with every separator, gap, node property, comment after the value, base indent,
+    // value indent, line ending and outer block, under a name that announces a secret and under one that does not.
+    const VALUE = 'fake-inline-value-0001';
+    const VALUE_COMMENTS = ['', ' # fake comment'];
+    const VALUE_PROPERTIES = NODE_PROPERTIES.filter(properties => properties !== '');
+    interface ValueShape {
+      readonly name: string;
+      readonly separator: string;
+      readonly gap: string;
+      /** The node properties, each with its space. */
+      readonly properties: string;
+      /** The value with its comment. */
+      readonly value: string;
+      readonly base: string;
+      readonly indent: string;
+    }
+    const VALUE_POSITIONS: Readonly<
+      Record<
+        string,
+        { readonly gapped: boolean; readonly shallow: boolean; readonly lines: (s: ValueShape) => string[] }
+      >
+    > = {
+      'same line': {
+        gapped: true,
+        shallow: false,
+        lines: s => [`${s.base}${s.name}${s.separator}${s.gap}${s.properties}${s.value}`],
+      },
+      'next line': {
+        gapped: true,
+        shallow: false,
+        lines: s => [`${s.base}${s.name}`, `${s.base}${s.separator}${s.gap}${s.properties}${s.value}`],
+      },
+      'next line, shallower than the name': {
+        gapped: true,
+        shallow: true,
+        lines: s => [`${s.base}${s.name}`, `${s.separator}${s.gap}${s.properties}${s.value}`],
+      },
+      'own line, indented': {
+        gapped: false,
+        shallow: false,
+        lines: s => [`${s.base}${s.name}${s.separator}`, `${s.base}${s.indent}${s.properties}${s.value}`],
+      },
+      'own line, at the name': {
+        gapped: false,
+        shallow: false,
+        lines: s => [`${s.base}${s.name}${s.separator}`, `${s.base}${s.properties}${s.value}`],
+      },
+      'own line, shallower than the name': {
+        gapped: false,
+        shallow: true,
+        lines: s => [`${s.base}${s.name}${s.separator}`, `${s.properties}${s.value}`],
+      },
+      'own line after a separator line': {
+        gapped: false,
+        shallow: false,
+        lines: s => [`${s.base}${s.name}`, `${s.base}${s.separator}`, `${s.base}${s.properties}${s.value}`],
+      },
+      'own line after a separator line, shallower than the name': {
+        gapped: false,
+        shallow: true,
+        lines: s => [`${s.base}${s.name}`, s.separator, `${s.properties}${s.value}`],
+      },
+      'properties end the name line': {
+        gapped: true,
+        shallow: false,
+        lines: s => [
+          `${s.base}${s.name}${s.separator}${s.gap}${s.properties.trimEnd()}`,
+          `${s.base}${s.indent}${s.value}`,
+        ],
+      },
+      'properties end the separator line': {
+        gapped: true,
+        shallow: false,
+        lines: s => [
+          `${s.base}${s.name}`,
+          `${s.base}${s.separator}${s.gap}${s.properties.trimEnd()}`,
+          `${s.base}${s.indent}${s.value}`,
+        ],
+      },
+    };
+    const valueFamily = Object.entries(VALUE_POSITIONS).flatMap(([position, { gapped, shallow, lines }]) =>
+      BASES.filter(base => !shallow || base !== '').flatMap(base =>
+        (gapped ? GAPS : [' ']).flatMap(gap =>
+          SEPARATORS.flatMap(separator =>
+            VALUE_PROPERTIES.flatMap(properties =>
+              VALUE_COMMENTS.flatMap(comment =>
                 INDENTS.flatMap(indent =>
                   ENDINGS.flatMap(ending =>
                     WRAPPED.map(wrapped => ({
                       position,
-                      opener: (name: string) =>
-                        lines({ name, separator, gap, indicator: indicator + comment, base, indent }),
+                      head: (name: string, value: string) =>
+                        lines({ name, separator, gap, properties, value: value + comment, base, indent }),
                       base,
-                      indent,
                       ending,
                       wrapped,
                     })),
@@ -374,66 +729,61 @@ describe('component text redaction', () => {
         ),
       ),
     );
-    /** A line as written, or hidden whole after its indent. */
-    const asWrittenOrHidden = (line: string | undefined, written: string): boolean =>
-      line === written || line === `${/^\s*/u.exec(written)?.[0]}${HIDDEN}`;
 
-    it(`S26 should hide every value line of every block in the family (${family.length} shapes), and nothing after it`, () => {
-      const leaks: string[] = [];
-      for (const { position, opener, base, indent, ending, wrapped } of family) {
-        // Arrange
-        const wrap = wrapped ? ['api_token: |'] : [];
-        const head = opener('PASSWORD');
-        const values = [`${base}${indent}fake-block-value-0001`, '', `${base}${indent}${indent}fake-block-value-0002`];
-        const input = [...wrap, ...head, ...values, 'after: fake-shown-0000', ''].join(ending);
+    it(
+      `S26 should hide the value after node properties in every place a value is read (${valueFamily.length} shapes), and nothing else`,
+      () => {
+        const leaks: string[] = [];
+        for (const { position, head, base, ending, wrapped } of valueFamily) {
+          // Arrange
+          const wrap = wrapped ? ['api_token: |'] : [];
+          const written = [...wrap, ...head('PASSWORD', VALUE), 'after: fake-shown-0000', ''];
+          const input = written.join(ending);
 
-        // Act
-        const actual = shownFor(input);
+          // Act
+          const actual = shownFor(input);
 
-        // Assert: the outer line, the name line (unless the outer block holds it) and the line after the block as
-        // written, every value line hidden, and a line that opens the block either as written or hidden whole (one
-        // of eight characters or more is read as a block line).
-        const lines = actual.text.split(ending).slice(wrap.length);
-        const insideOuter = wrapped && base !== '';
-        const opensRight =
-          (insideOuter ? asWrittenOrHidden(lines[0], head[0] ?? '') : lines[0] === head[0]) &&
-          head.slice(1).every((line, at) => asWrittenOrHidden(lines[at + 1], line));
-        const expected = [
-          ...wrap,
-          ...lines.slice(0, head.length),
-          `${base}${indent}${HIDDEN}`,
-          '',
-          `${base}${indent}${indent}${HIDDEN}`,
-          'after: fake-shown-0000',
-          '',
-        ];
-        if (!opensRight || actual.text !== expected.join(ending) || !actual.redacted) {
-          leaks.push(`${position}: ${JSON.stringify(input)} -> ${JSON.stringify(actual.text)}`);
+          // Assert: each line as written, its value hidden or not, with the tag today hides hidden or not — or, inside
+          // the outer block, hidden whole — and the value shown nowhere.
+          const lines = actual.text.split(ending);
+          const insideOuter = wrapped && base !== '';
+          const right = written.every((line, at) => {
+            const shown = lines[at];
+            const hidden = line.replace(VALUE, HIDDEN);
+            return (
+              asWritten(shown, line) ||
+              asWritten(shown, hidden) ||
+              (insideOuter && at > 0 && line.startsWith(base) && asWrittenOrHidden(shown, line))
+            );
+          });
+          if (!right || lines.length !== written.length || actual.text.includes(VALUE) || !actual.redacted) {
+            leaks.push(`${position}: ${JSON.stringify(input)} -> ${JSON.stringify(actual.text)}`);
+          }
         }
-      }
-      should(leaks).deepEqual([]);
-    });
+        should(leaks).deepEqual([]);
+      },
+      FAMILY_TIMEOUT,
+    );
 
-    it(`S26 should hide nothing of any block in the family (${family.length} shapes) under a name that announces no secret`, () => {
-      const touched: string[] = [];
-      for (const { opener, base, indent, ending, wrapped } of family) {
-        // Arrange
-        const wrap = wrapped ? ['notes: |'] : [];
-        const input = [
-          ...wrap,
-          ...opener('mode'),
-          `${base}${indent}plain-block-text-0001`,
-          'after: plain-text-0000',
-        ].join(ending);
+    it(
+      `S26 should hide nothing after node properties in any place a value is read (${valueFamily.length} shapes) under a name that announces no secret`,
+      () => {
+        const touched: string[] = [];
+        for (const { head, ending, wrapped } of valueFamily) {
+          // Arrange
+          const wrap = wrapped ? ['notes: |'] : [];
+          const input = [...wrap, ...head('mode', 'plain-inline-text-0001'), 'after: plain-text-0000'].join(ending);
 
-        // Act
-        const actual = shownFor(input);
+          // Act
+          const actual = shownFor(input);
 
-        // Assert
-        if (actual.text !== input || actual.redacted) touched.push(JSON.stringify(input));
-      }
-      should(touched).deepEqual([]);
-    });
+          // Assert
+          if (actual.text !== input || actual.redacted) touched.push(JSON.stringify(input));
+        }
+        should(touched).deepEqual([]);
+      },
+      FAMILY_TIMEOUT,
+    );
 
     it('S26 should hide nothing of that shape under a name that announces no secret, nor after the block ends', () => {
       // Assert

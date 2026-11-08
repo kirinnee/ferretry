@@ -14,6 +14,11 @@
  * generated text is checked. Today's own S26 held today to hide at least what the older rule of main hid, so 5.0
  * hiding at least what today hides keeps that floor too.
  *
+ * The family has a second dimension (#36, amendment 3): YAML node properties — a tag (`!vault`, `!!str`) and an
+ * anchor (`&a`), one or both — standing where a value or a block indicator would (`password: !vault |⏎  value`,
+ * `password: !!str value`, `password: &a⏎  value`). Today reads the properties as the value and shows what follows
+ * them; 5.0 hides it. Those lines are tightened too ({@link tightenedLines}).
+ *
  * Every secret value here is an obviously fake one.
  */
 import { describe, it } from 'bun:test';
@@ -99,7 +104,23 @@ const LEADS = [
 const GAPS = ['', '', ' ', '  ', '\t', '\n', '\r', '\r\n', '\n  ', '\n\n', '\r\r', ' \n '];
 const MARKS = [':', '=', ':', '=', ':='];
 /** Indicators, with and without a comment; the last is a value today hides the first word of, its comment a pointer. */
-const BLOCKS = ['', '', '', '', '|', '>-', '|+', '>2', '| # note', '>- #c', '>-1234567 # ${secret:API_KEY}'];
+const BLOCKS = [
+  '',
+  '',
+  '',
+  '',
+  '|',
+  '>-',
+  '|+',
+  '>2',
+  '| # note',
+  '>- #c',
+  '>-1234567 # ${secret:API_KEY}',
+  // A block opened inside another on its opener's line: an outer block must not swallow it when it runs past.
+  '| # token: |',
+];
+/** YAML node properties before an indicator or a value (#36, amendment 3): tags, anchors, both in either order. */
+const NODE_PROPERTIES = ['', '', '', '', '', '!!str ', '&a ', '!vault ', '!!binary ', '&a !!str ', '!!str &a ', '!\t'];
 const PARENTS = ['db', 'auth', 'env', 'mcp.servers', 'x'];
 const QUOTES = ['', '"', "'"];
 /** True pointers, which may stay, and `${NAME<op>default}` forms whose default is a value (`%` is the value). */
@@ -157,6 +178,10 @@ const SOUP = [
   '<',
   '>',
   '&amp;',
+  '!!str',
+  '&a',
+  '!vault',
+  '!',
   ...POINTERS,
   ...EXPANSIONS.map(form => form.replace('%', 'hunter2hunter2xyz')),
 ];
@@ -179,7 +204,7 @@ function generate(next: () => number): string {
   for (let at = 0; at < entries; at += 1) {
     const quote = pick(QUOTES);
     if (next() < 0.25) text += `${pick(PARENTS)}:${pick(BREAKS)}`;
-    const separator = `${pick(GAPS)}${pick(MARKS)}${pick(GAPS)}${pick(BLOCKS)}${pick(GAPS)}`;
+    const separator = `${pick(GAPS)}${pick(MARKS)}${pick(GAPS)}${pick(NODE_PROPERTIES)}${pick(BLOCKS)}${pick(GAPS)}`;
     const value = pick(SECRET_VALUES);
     const shape = next();
     const written = shape < 0.15 ? pick(EXPANSIONS).replace('%', value) : shape < 0.25 ? pick(POINTERS) : value;
@@ -211,9 +236,24 @@ const ENDS_IN_NAME = /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*$/u;
 const ENDS_IN_COMMENTED_BLOCK =
   /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*[:=][ \t]*[|>][-+0-9]*[ \t]+#.*$/u;
 const SEPARATOR_ONLY = /^[ \t]*[:=][ \t]*$/u;
+const SEPARATOR_AT_HEAD = /^[ \t]*[:=][ \t]*/u;
 const SEPARATOR_AND_INDICATOR = new RegExp(`^[ \\t]*[:=][ \\t]*${INDICATOR}[ \\t]*$`, 'u');
 const INDICATOR_ONLY = new RegExp(`^[ \\t]*${INDICATOR}[ \\t]*$`, 'u');
 const announcesSecret = (name: string): boolean => looksSecret(name.replace(/^[0-9.-]+/u, ''), 'x'.repeat(8));
+/** One YAML node property: a tag (`!`, `!!str`, `!vault`) or an anchor with a name (`&a`), with no space in it. */
+const PROPERTY = '(?:!|&(?=\\S))\\S{0,128}';
+const PROPERTIES = `${PROPERTY}(?:[ \\t]+${PROPERTY})?`;
+/** A name, its separator and a node property after it, on one line (`password: !!str value`, `"auth": &a value`). */
+const NAMED_PROPERTY = new RegExp(
+  `(?<![A-Za-z0-9_.-])[0-9.-]*([A-Za-z_][A-Za-z0-9_.-]*)["']?[ \\t]*[:=][ \\t]*["']?(?=${PROPERTY}[ \\t])`,
+  'gu',
+);
+/** A line that ends in a name, its separator and node properties, an indicator after them or not. */
+const ENDS_IN_PROPERTIES = new RegExp(
+  `(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \\t]*[:=][ \\t]*(${PROPERTIES}(?:[ \\t]+${INDICATOR})?)[ \\t]*$`,
+  'u',
+);
+const STARTS_WITH_PROPERTIES = new RegExp(`^[ \\t]*${PROPERTIES}(?:[ \\t]+|$)`, 'u');
 
 /**
  * Which lines of `text` (split at its line breaks) stand in a block of the tightened family (#36), read from the text
@@ -223,9 +263,16 @@ const announcesSecret = (name: string): boolean => looksSecret(name.replace(/^[0
  * - `name:⏎|` — a line that ends in the name and its separator, and an indicator alone on the next;
  * - `name: | # note` — an indicator with a comment on the name's own line, whatever the comment's last word is read
  *   as besides (`name: | # see note:`, `name: | # token⏎= x`);
+ * - node properties before the indicator on any of those lines (`name: !vault |`, `NAME⏎= &a |`, `name:⏎!!str |`),
+ *   or ending a line with the indicator on the next (`name: &a⏎|`);
  * and each block runs from the line after the name's — the name's line is never the block's, so it must equal today's
  * — to the last line before the first one, after the indicator's, that stands no deeper than the name. A same-line
- * block with no comment (`password: |`) is no member: today already reads it.
+ * block with no comment and no properties (`password: |`) is no member: today already reads it.
+ *
+ * And which lines hold a VALUE after node properties under such a name (amendment 3): the name's own line when a
+ * property follows its separator (`password: !!str value`), the line a value is read on when it starts with
+ * properties (`password:⏎!!str value`, `NAME⏎= &a value`), and the line after one that properties end
+ * (`password: &a⏎value`, `NAME⏎= !!str⏎value`).
  */
 function tightenedLines(text: string): ReadonlySet<number> {
   const lines = text.split(BREAK);
@@ -234,31 +281,52 @@ function tightenedLines(text: string): ReadonlySet<number> {
     while (next < lines.length && (lines[next] ?? '').trim() === '') next += 1;
     return next;
   };
-  /** The lines the indicators of the family's blocks named on the line at `at` stand on. */
+  const tightened = new Set<number>();
+  /** Blocks of the family named on the line at `at`, each at the line its indicator stands on. */
   const indicatorLines = (at: number): number[] => {
     const line = lines[at] ?? '';
     const found: number[] = [];
+    /** What node properties at the head of `content`, standing on line `on`, lead to. */
+    const properties = (on: number, content: string): void => {
+      const head = STARTS_WITH_PROPERTIES.exec(content);
+      if (head === null) return;
+      const rest = content.slice(head[0].length);
+      if (INDICATOR_ONLY.test(rest)) found.push(on);
+      else if (rest.trim() !== '') tightened.add(on);
+      else if (INDICATOR_ONLY.test(lines[after(on)] ?? '')) found.push(after(on));
+      else tightened.add(after(on));
+    };
     const commented = ENDS_IN_COMMENTED_BLOCK.exec(line)?.[1];
     if (commented !== undefined && announcesSecret(commented)) found.push(at);
+    const tagged = ENDS_IN_PROPERTIES.exec(line);
+    if (tagged?.[1] !== undefined && tagged[1].replace(/^[0-9.-]+/u, '') !== '' && announcesSecret(tagged[1])) {
+      properties(at, tagged[2] ?? '');
+    }
     const separator = ENDS_IN_SEPARATOR.exec(line);
     const next = after(at);
     if (separator?.[1] !== undefined && separator[1].replace(/^[0-9.-]+/u, '') !== '') {
-      if (separator[2] === undefined && announcesSecret(separator[1]) && INDICATOR_ONLY.test(lines[next] ?? '')) {
-        found.push(next);
+      if (separator[2] === undefined && announcesSecret(separator[1])) {
+        if (INDICATOR_ONLY.test(lines[next] ?? '')) found.push(next);
+        properties(next, lines[next] ?? '');
       }
       return found;
     }
     const name = ENDS_IN_NAME.exec(line)?.[1];
     if (name === undefined || name.replace(/^[0-9.-]+/u, '') === '' || !announcesSecret(name)) return found;
+    const separated = SEPARATOR_AT_HEAD.exec(lines[next] ?? '');
     if (SEPARATOR_AND_INDICATOR.test(lines[next] ?? '')) found.push(next);
-    else if (SEPARATOR_ONLY.test(lines[next] ?? '') && INDICATOR_ONLY.test(lines[after(next)] ?? '')) {
-      found.push(after(next));
-    }
+    else if (SEPARATOR_ONLY.test(lines[next] ?? '')) {
+      if (INDICATOR_ONLY.test(lines[after(next)] ?? '')) found.push(after(next));
+      properties(after(next), lines[after(next)] ?? '');
+    } else if (separated !== null) properties(next, (lines[next] ?? '').slice(separated[0].length));
     return found;
   };
-  const tightened = new Set<number>();
   for (let at = 0; at < lines.length; at += 1) {
-    const indent = (lines[at] ?? '').length - (lines[at] ?? '').trimStart().length;
+    const line = lines[at] ?? '';
+    for (const named of line.matchAll(NAMED_PROPERTY)) {
+      if (announcesSecret(named[1] ?? '')) tightened.add(at);
+    }
+    const indent = line.length - line.trimStart().length;
     for (const opens of indicatorLines(at)) {
       let end = opens;
       for (let next = opens + 1; next < lines.length; next += 1) {
@@ -362,22 +430,33 @@ function breaches(shape: (next: () => number) => string, seed: number, cases: nu
 // A review can re-run either with another seed and a larger count: `REDACT_FUZZ_SEED=7 REDACT_FUZZ_CASES=100000`.
 const SEED = Number(process.env.REDACT_FUZZ_SEED ?? 0x5eed);
 const CASES = Number(process.env.REDACT_FUZZ_CASES ?? 20_000);
+// A run takes a few seconds per 20,000 texts, past bun's 5 s per-test default at a larger count: each run is given
+// a minute per 20,000, so a review at `REDACT_FUZZ_CASES=100000` never reads a timeout as a breach.
+const FUZZ_TIMEOUT = Math.max(60_000, Math.ceil(CASES / 20_000) * 60_000);
 
 describe('component text redaction never hides less than today', () => {
-  it('S26 should hide every byte today hides, and equal today off the tightened lines, over structured texts', () => {
-    // Act
-    const result = breaches(generate, SEED, CASES);
+  it(
+    'S26 should hide every byte today hides, and equal today off the tightened lines, over structured texts',
+    () => {
+      // Act
+      const result = breaches(generate, SEED, CASES);
 
-    // Assert
-    should(result.failures).deepEqual([]);
-    should(result.tightened).be.above(0);
-    should(result.differed).be.above(0);
-  });
+      // Assert
+      should(result.failures).deepEqual([]);
+      should(result.tightened).be.above(0);
+      should(result.differed).be.above(0);
+    },
+    FUZZ_TIMEOUT,
+  );
 
-  it('S26 should hide every byte today hides, and equal today off the tightened lines, over unstructured texts', () => {
-    // Assert
-    should(breaches(soup, SEED ^ 0x50f7, CASES).failures).deepEqual([]);
-  });
+  it(
+    'S26 should hide every byte today hides, and equal today off the tightened lines, over unstructured texts',
+    () => {
+      // Assert
+      should(breaches(soup, SEED ^ 0x50f7, CASES).failures).deepEqual([]);
+    },
+    FUZZ_TIMEOUT,
+  );
 
   it('S26 should take the tightened shape as hiding more than today, never as showing what today hides', () => {
     // Arrange

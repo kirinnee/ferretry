@@ -315,10 +315,16 @@ const WORD = /[^\s"'`,;()[\]{}<>]+/gu;
  * ({@link SECRET_TOKEN_SOURCE}), wherever either stands: no name, separator or word boundary is needed. Every
  * part is a linear class, so a long run of one costs a single pass.
  */
-const CONTEXT_FREE_SECRET = new RegExp(
-  `-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----[A-Za-z0-9+/=\\s]*(?:-----END [A-Z ]{0,40}PRIVATE KEY-----)?|${SECRET_TOKEN_SOURCE}`,
-  'gu',
-);
+const PRIVATE_KEY_HEADER_SOURCE = '-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----';
+const PRIVATE_KEY_SOURCE = `${PRIVATE_KEY_HEADER_SOURCE}[A-Za-z0-9+/=\\s]*(?:-----END [A-Z ]{0,40}PRIVATE KEY-----)?`;
+const CONTEXT_FREE_SECRET = new RegExp(`${PRIVATE_KEY_SOURCE}|${SECRET_TOKEN_SOURCE}`, 'gu');
+/**
+ * A private-key block alone, and its header where it starts: what a name's reading never cuts into, so the key is
+ * cut whole, header to footer, by {@link CONTEXT_FREE_SECRET} (a cut that took its header would leave its body showing).
+ */
+const PRIVATE_KEY = new RegExp(PRIVATE_KEY_SOURCE, 'gu');
+const PRIVATE_KEY_HEADER = new RegExp(PRIVATE_KEY_HEADER_SOURCE, 'uy');
+const PRIVATE_KEY_START = '-----BEGIN';
 
 /** A line that ends in a name and its separator (`password =`), or opens a block value (`password: |`, `token: >-`). */
 const OPENS_VALUE = /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*[:=]([ \t]*[|>][-+0-9]*)?[ \t]*$/u;
@@ -330,6 +336,27 @@ const BLOCK_INDICATOR = /^[|>][-+0-9]*$/u;
 const BLOCK_OPENER = /^[|>][-+0-9]*(?:[ \t]+#.*)?$/u;
 /** A line that opens a block value and comments on it (`password: | # note`). */
 const OPENS_COMMENTED_BLOCK = /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*[:=][ \t]*[|>][-+0-9]*[ \t]+#.*$/u;
+/**
+ * YAML node properties — a tag (`!vault`, `!!str`, `!<tag:yaml.org,2002:str>`) and an anchor (`&pw`), one or both, in
+ * either order — before a value or a block indicator (`password: !vault |`, `password: &pw !!str fake`). Each is a run
+ * of at most 128 characters with no space in it, and a space follows each, so a long run costs a bounded look. An
+ * anchor has a name (a lone `&` is no anchor: `Q=& value`); a lone `!` is a tag.
+ */
+const PROPERTY = '(?:!|&(?=\\S))\\S{0,128}';
+/** Node properties at the head of a value, the space after them included. */
+const PROPERTIES = new RegExp(`^[ \\t]*${PROPERTY}(?:[ \\t]+${PROPERTY})?(?:[ \\t]+|$)`, 'u');
+/** The same, standing where a name's separator ends, and an opening quote after them when there is one. */
+const PROPERTIES_AT = new RegExp(`(?:${PROPERTY}[ \\t]+){1,2}["']?`, 'uy');
+/**
+ * A line that ends in a name, its separator and node properties, with or without a block indicator (and a comment)
+ * after them (`password: !vault |`, `password: &pw`): what follows the separator is group 2.
+ */
+const OPENS_AFTER_PROPERTIES = new RegExp(
+  `(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \\t]*[:=]([ \\t]*${PROPERTY}(?:[ \\t]+${PROPERTY})?(?:[ \\t]+[|>][-+0-9]*(?:[ \\t]+#.*)?)?[ \\t]*)$`,
+  'u',
+);
+/** A value as {@link ASSIGNMENT} looks at it, read where node properties end. */
+const VALUE_LOOK = /[^\s"'`,;)}\]]{1,1024}/uy;
 const LINE_BREAKS = /(\r\n|\r|\n)/u;
 const FIRST_VALUE = /^([ \t]*["']?)([^\s"'`,;)}\]]*[A-Za-z0-9][^\s"'`,;)}\]]*)/u;
 /** A line that is a key of its own (`login_page: x`), and so is not the value of the name above it. */
@@ -374,11 +401,13 @@ function isContextFreeSecret(match: string, offset: number, whole: string): bool
   return !ALPHANUMERIC.test(whole.charAt(offset - 1)) && DIGIT.test(match);
 }
 
-/** Where a name reads its value: the line it is on and how far in. */
+/** Where a name reads its value: the line it is on and how far in, and whether node properties come first. */
 interface Reading {
   readonly name: string;
   readonly line: number;
   readonly from: number;
+  /** The value stands after node properties at `from` (`!!str fake`), which are skipped when it is read. */
+  readonly properties?: true;
 }
 
 /** A block scalar a name opens: the line its indicator stands on. */
@@ -399,8 +428,16 @@ interface Block {
  * line that opens a block hides at least what it always hid. A comment may follow the indicator on the name's own
  * line (`password: | # note`); that block is read beside any other reading of the line, so a name the comment ends
  * in (`password: | # see note:`) keeps the value it always had.
+ *
+ * YAML node properties (`!vault`, `!!str`, `&pw`) may stand where a value or an indicator would: on the name's own
+ * line (`password: !vault |`, `password: &pw⏎  fake`) or at the head of the value it reads (`PASSWORD⏎= !!str fake`,
+ * `password:⏎  !!binary |`). Then the block they open is read, or the value after them (`properties`), or — when
+ * they end the line — the value on the next line, beside every reading above, which stays as it was.
  */
-function opening(parts: readonly string[], index: number): { value?: Reading; blocks: readonly Block[] } {
+function opening(
+  parts: readonly string[],
+  index: number,
+): { value?: Reading; blocks: readonly Block[]; properties: readonly Reading[] } {
   const next = (after: number): number => {
     let at = after + 2;
     while (at < parts.length && (parts[at] ?? '').trim() === '') at += 2;
@@ -408,6 +445,7 @@ function opening(parts: readonly string[], index: number): { value?: Reading; bl
   };
   const line = parts[index] ?? '';
   const blocks: Block[] = [];
+  const properties: Reading[] = [];
   let value: Reading | undefined;
   const opens = OPENS_VALUE.exec(line);
   const opened = opens?.[1]?.replace(LEADING_DIGITS, '');
@@ -430,12 +468,100 @@ function opening(parts: readonly string[], index: number): { value?: Reading; bl
   }
   const commented = OPENS_COMMENTED_BLOCK.exec(line)?.[1]?.replace(LEADING_DIGITS, '');
   if (commented) blocks.push({ name: commented, line: index });
-  return value === undefined ? { blocks } : { value, blocks };
+  /** What node properties at `from` of line `at` lead to: the block they open, or the value after them. */
+  const afterProperties = (name: string, at: number, from: number): void => {
+    const rest = (parts[at] ?? '').slice(from);
+    const found = PROPERTIES.exec(rest);
+    if (found === null) return;
+    const after = rest.slice(found[0].length).trim();
+    if (BLOCK_OPENER.test(after)) blocks.push({ name, line: at });
+    else if (after !== '') properties.push({ name, line: at, from, properties: true });
+    else if (BLOCK_OPENER.test((parts[next(at)] ?? '').trim())) blocks.push({ name, line: next(at) });
+    else properties.push({ name, line: next(at), from: 0 });
+  };
+  if (value) afterProperties(value.name, value.line, value.from);
+  const tagged = OPENS_AFTER_PROPERTIES.exec(line);
+  const named = tagged?.[1]?.replace(LEADING_DIGITS, '');
+  if (named) afterProperties(named, index, line.length - (tagged?.[2]?.length ?? 0));
+  return value === undefined ? { blocks, properties } : { value, blocks, properties };
 }
 
 /** Whether the name at `at` is the inside of a pointer (`${secret:TOKEN}`), which is no name and value. */
 const insidePointer = (text: string, at: number): boolean =>
   at >= 2 && text.startsWith('${', at - 2) && isPointer(text, at - 2);
+
+/**
+ * Where a cut of `text` from `start` to `end` must stop so that it takes no part of a private key: at the header of
+ * one that starts inside it, or `end`. A cut that took the header would leave the key's body for no pass to find.
+ */
+function beforePrivateKey(text: string, start: number, end: number): number {
+  const run = text.slice(start, end);
+  for (let at = run.indexOf(PRIVATE_KEY_START); at >= 0; at = run.indexOf(PRIVATE_KEY_START, at + 1)) {
+    PRIVATE_KEY_HEADER.lastIndex = start + at;
+    if (PRIVATE_KEY_HEADER.test(text)) return start + at;
+  }
+  return end;
+}
+
+/** Where a private key stands among a text's lines: its first and last line (indices into the parts), and how far in. */
+interface KeyPlace {
+  readonly first: number;
+  readonly from: number;
+  readonly last: number;
+  /** Where it ends on its last line (exclusive). */
+  readonly to: number;
+}
+
+/** Every private key in the text split into `parts` (lines and the breaks between them), in order. */
+function privateKeysIn(parts: readonly string[]): readonly KeyPlace[] {
+  const text = parts.join('');
+  if (!text.includes(PRIVATE_KEY_START)) return [];
+  const places: KeyPlace[] = [];
+  let part = 0;
+  let offset = 0;
+  /** The part that holds the character at `at`, and how far into it. */
+  const locate = (at: number): readonly [number, number] => {
+    while (offset + (parts[part] ?? '').length <= at) {
+      offset += (parts[part] ?? '').length;
+      part += 1;
+    }
+    return [part, at - offset];
+  };
+  for (const key of text.matchAll(PRIVATE_KEY)) {
+    const [first, from] = locate(key.index);
+    const [end, column] = locate(key.index + key[0].length - 1);
+    // A key whose last character is a line break ends on the line before it.
+    const last = end % 2 === 0 ? end : end - 1;
+    places.push({ first, from, last, to: end % 2 === 0 ? column + 1 : (parts[last] ?? '').length });
+  }
+  return places;
+}
+
+/** `text` with what it holds, if anything, hidden between the spaces around it. */
+const hiddenWithin = (text: string): string =>
+  text.trim() === '' ? text : `${text.slice(0, indentOf(text))}${HIDDEN_TEXT}${text.slice(text.trimEnd().length)}`;
+
+/**
+ * The line of a block at `at`, hidden after its indent — but a private key that does not lie wholly inside the block
+ * (the lines after its name's line `block[0]`, up to `block[1]`) is left as it is on it, and only the rest of the line
+ * is hidden, so the key is cut whole by {@link CONTEXT_FREE_SECRET}: hiding its header or one line of its body here
+ * would leave the rest of it showing. A key's place is read before any line is hidden, and still holds here: a value
+ * reading changes only the line after its name (and its separator lines), where no block opens, so every block that
+ * holds that line was read before it, and a line a block left a key on is never hidden whole after ({@link redactNextLines}).
+ */
+function hideBlockLine(line: string, at: number, block: readonly [number, number], keys: readonly KeyPlace[]): string {
+  const left = keys.filter(key => key.first <= at && at <= key.last && (key.first <= block[0] || key.last > block[1]));
+  if (left.length === 0) return `${line.slice(0, indentOf(line))}${HIDDEN_TEXT}`;
+  let out = '';
+  let from = 0;
+  for (const key of left) {
+    const start = Math.max(from, key.first === at ? key.from : 0);
+    const end = Math.max(start, key.last === at ? key.to : line.length);
+    out += hiddenWithin(line.slice(from, start)) + line.slice(start, end);
+    from = end;
+  }
+  return out + hiddenWithin(line.slice(from));
+}
 
 /**
  * The value of a name that ends its line, on the lines after it (`password:⏎hunter2`, `password =⏎x`,
@@ -445,7 +571,8 @@ const insidePointer = (text: string, at: number): boolean =>
  * inside it whose indicator stands inside it too is not read again (it ends inside it, and what the outer name hides
  * the inner one cannot show), and the block under any other name is not read at all. A block whose indicator stands
  * past the outer one (`password: |⏎  PASSWORD⏎= |`), or that is opened on a line that opens the outer one and stands
- * no deeper than its name (`password=⏎| # token: |`), can run past it, so it is read on its own.
+ * no deeper than its name (`password=⏎| # token: |`), can run past it, so it is read on its own. No reading cuts
+ * into a private key ({@link beforePrivateKey}, {@link hideBlockLine}).
  */
 function redactNextLines(
   original: string,
@@ -454,12 +581,18 @@ function redactNextLines(
 ): { readonly text: string; readonly redacted: boolean } {
   const parts = text.split(LINE_BREAKS);
   const asWritten = original.split(LINE_BREAKS);
+  const keys = privateKeysIn(parts);
+  /** The lines a block left a private key on: hidden around it already, and never hidden whole after. */
+  const keptKeys = new Set<number>();
   let redacted = false;
   let covered = -1;
   let coveredBelow = -1;
   /** The value `reading` names on its line, hidden when it is a secret. */
-  const readValue = ({ name, line: at, from }: Reading): void => {
+  const readValue = ({ name, line: at, from: written, properties }: Reading): void => {
     const line = parts[at] ?? '';
+    const skipped = properties === true ? PROPERTIES.exec(line.slice(written))?.[0].length : 0;
+    if (skipped === undefined) return;
+    const from = written + skipped;
     const rest = line.slice(from);
     const value = FIRST_VALUE.exec(rest);
     if (value?.[2] === HIDDEN_TEXT) return;
@@ -468,12 +601,15 @@ function redactNextLines(
     const headHidden = value?.[2]?.startsWith(HIDDEN_TEXT) === true;
     if (
       value === null ||
+      (properties === true && value[2]?.startsWith('#') === true) ||
       (!headHidden &&
         ((from === 0 && KEY_LINE.test(rest)) || isPointer(line, start) || !isSecret(name, value[2] ?? '')))
     ) {
       return;
     }
-    parts[at] = `${line.slice(0, start)}${HIDDEN_TEXT}${line.slice(from + value[0].length)}`;
+    const end = beforePrivateKey(line, start, from + value[0].length);
+    if (end === start) return;
+    parts[at] = `${line.slice(0, start)}${HIDDEN_TEXT}${line.slice(end)}`;
     redacted = true;
   };
   for (let index = 0; index < parts.length; index += 2) {
@@ -490,13 +626,19 @@ function redactNextLines(
         // deeper than the name.
         if (next > block.line && indentOf(line) <= indent) break;
         last = next;
-        if (!isSecret(block.name, line.trim())) continue;
-        parts[next] = `${line.slice(0, indentOf(line))}${HIDDEN_TEXT}`;
+      }
+      for (let next = index + 2; next <= last; next += 2) {
+        const line = parts[next] ?? '';
+        if (line.trim() === '' || keptKeys.has(next) || !isSecret(block.name, line.trim())) continue;
+        parts[next] = hideBlockLine(line, next, [index, last], keys);
+        if (parts[next] !== `${line.slice(0, indentOf(line))}${HIDDEN_TEXT}`) keptKeys.add(next);
         redacted = true;
       }
       covered = last;
       coveredBelow = indent;
     }
+    // Only under a name that announces a secret, as a block is: what today hides by its shape alone it still does.
+    for (const reading of opens.properties) if (isSecret(reading.name, BLOCK_PROBE)) readValue(reading);
     if (opens.value) readValue(opens.value);
   }
   return { text: parts.join(''), redacted };
@@ -526,6 +668,42 @@ function redactExpansions(
 }
 
 /**
+ * The value after node properties that stand where a name's separator ends (`password: !!str fake`, `&pw fake`,
+ * `!!binary fake`) and where it starts: {@link ASSIGNMENT} reads the properties as the value. None when no
+ * properties stand there, or what follows them is a block indicator, a comment or a pointer.
+ */
+function valueAfterProperties(text: string, start: number): readonly [number, string] | undefined {
+  PROPERTIES_AT.lastIndex = start;
+  const found = PROPERTIES_AT.exec(text);
+  if (found === null) return undefined;
+  const at = start + found[0].length;
+  VALUE_LOOK.lastIndex = at;
+  const value = VALUE_LOOK.exec(text)?.[0];
+  if (value === undefined || BLOCK_INDICATOR.test(value) || value.startsWith('#') || isPointer(text, at)) {
+    return undefined;
+  }
+  return [at, value];
+}
+
+/** `text` with every cut hidden (in any order; cuts that overlap are hidden as one). */
+function withCuts(text: string, cuts: readonly (readonly [number, number])[]): string {
+  let out = '';
+  let from = 0;
+  let open: readonly [number, number] | undefined;
+  for (const [start, end] of cuts.toSorted(([left], [right]) => left - right)) {
+    if (open !== undefined && start < open[1]) {
+      open = [open[0], Math.max(open[1], end)];
+      continue;
+    }
+    if (open !== undefined) out += `${text.slice(from, open[0])}${HIDDEN_TEXT}`;
+    from = open?.[1] ?? from;
+    open = [start, end];
+  }
+  if (open !== undefined) out += `${text.slice(from, open[0])}${HIDDEN_TEXT}`;
+  return out + text.slice(open?.[1] ?? from);
+}
+
+/**
  * A component's text with every secret-looking value replaced by {@link HIDDEN_TEXT}. `isSecret` is the rule for
  * a value beside its name (the fleet's `looksSecret` unless a caller needs a stricter one).
  */
@@ -533,25 +711,36 @@ function redactText(
   text: string,
   isSecret: (name: string, value: string) => boolean = looksSecret,
 ): { readonly text: string; readonly redacted: boolean } {
-  let redacted = false;
-  let named = '';
+  const cuts: (readonly [number, number])[] = [];
   let from = 0;
+  let afterFrom = 0;
   ASSIGNMENT.lastIndex = 0;
   for (let found = ASSIGNMENT.exec(text); found !== null; found = ASSIGNMENT.exec(text)) {
     const start = found.index + found[0].length;
     const value = found[4] ?? '';
+    const name = found[2] ?? '';
+    // 5.0 (#36): the value after node properties, which today reads as the value (`password: !!str fake`), under a
+    // name that announces a secret. Each cut is read once (`afterFrom`); today's cuts below are left as they were.
+    const after = insidePointer(text, found.index) ? undefined : valueAfterProperties(text, start);
+    if (after !== undefined && after[0] >= afterFrom && isSecret(name, BLOCK_PROBE) && isSecret(name, after[1])) {
+      VALUE_RUN.lastIndex = after[0];
+      const end = beforePrivateKey(text, after[0], after[0] + (VALUE_RUN.exec(text)?.[0].length ?? 0));
+      if (end > after[0]) cuts.push([after[0], end]);
+      afterFrom = end;
+    }
     if (start < from || BLOCK_INDICATOR.test(value) || isPointer(text, start) || insidePointer(text, found.index)) {
       continue;
     }
-    if (!isSecret(found[2] ?? '', value)) continue;
+    if (!isSecret(name, value)) continue;
     VALUE_RUN.lastIndex = start;
-    const end = start + (VALUE_RUN.exec(text)?.[0].length ?? 0);
-    named += `${text.slice(from, start)}${HIDDEN_TEXT}`;
+    const end = beforePrivateKey(text, start, start + (VALUE_RUN.exec(text)?.[0].length ?? 0));
+    if (end === start) continue;
+    cuts.push([start, end]);
     from = end;
     ASSIGNMENT.lastIndex = start;
-    redacted = true;
   }
-  named += text.slice(from);
+  let redacted = cuts.length > 0;
+  const named = withCuts(text, cuts);
   const expanded = redactExpansions(named, isSecret);
   redacted = redacted || expanded.redacted;
   const bare = expanded.text.replace(WORD, word => {
