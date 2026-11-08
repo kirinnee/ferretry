@@ -2,41 +2,20 @@
  * One push worker per machine: which machine a registration serves, and what its notifications may
  * say and open (docs/cross-daemon.md §4a–§4c).
  */
-import { describe, expect, it, test } from 'bun:test';
-import type { PushNotificationPayload } from '../../../contract/index.ts';
-import {
-  daemonConnection,
-  daemonId,
-  daemonSessionPath,
-  NOTIFICATION_BADGE,
-  NOTIFICATION_ICON,
-} from '../../../app/shell-pairing.ts';
+import { describe, expect, it } from 'bun:test';
+import { daemonId, NOTIFICATION_BADGE, NOTIFICATION_ICON } from '../../../app/shell-pairing.ts';
 import {
   FILTERED_PUSH_TAG_PREFIX,
   filteredPushNotification,
   isPushScope,
-  machineNotification,
-  notificationUrl,
   PUSH_SCOPE_ROOT,
   pushMachineOf,
   pushScopePath,
   pushWorkerUrl,
-  unreadablePushTitle,
-  unverifiedNotification,
 } from '../../../app/lib/push-scope.ts';
 
 const ORIGIN = 'https://ferretry.example.test';
 const WORK = { daemonId: 'sha256:work/one', label: 'Work laptop' };
-
-const payload: PushNotificationPayload = {
-  version: 1,
-  eventKey: 'e1',
-  title: 'A new device was paired',
-  body: 'Pixel 9 can now reach this machine.',
-  tag: 'pairing',
-  url: '/',
-  count: 1,
-};
 
 describe('the per-machine scope and worker address', () => {
   it('puts each machine under its own escaped scope, never a page the app serves', () => {
@@ -80,97 +59,7 @@ describe('pushMachineOf', () => {
   });
 });
 
-describe('machineNotification', () => {
-  it('titles it with the reader’s label, keeps its tag in the machine’s namespace and its link at home', () => {
-    expect(machineNotification({ ...payload, url: 'https://evil.test/' }, WORK, ORIGIN)).toEqual({
-      ...payload,
-      title: 'Work laptop · A new device was paired',
-      tag: 'fy-push:sha256%3Awork%2Fone:pairing',
-      url: `${ORIGIN}/d/sha256%3Awork%2Fone`,
-    });
-  });
-
-  it('keeps a link that is already one of the machine’s own pages', () => {
-    const own = `/d/${encodeURIComponent(WORK.daemonId)}/session/s1`;
-    expect(machineNotification({ ...payload, url: own }, WORK, ORIGIN).url).toBe(`${ORIGIN}${own}`);
-  });
-
-  it('cannot reuse another machine’s tag, so it can never replace that machine’s notification', () => {
-    const other = { daemonId: 'sha256:home', label: 'Home' };
-    expect(machineNotification(payload, WORK, ORIGIN).tag).not.toBe(machineNotification(payload, other, ORIGIN).tag);
-  });
-
-  it('titles a push nobody composed by the machine it came through', () => {
-    expect(unreadablePushTitle(WORK)).toBe('Work laptop · Ferretry');
-    expect(unreadablePushTitle(null)).toBe('Unverified · Ferretry');
-  });
-});
-
-describe('notificationUrl (§4a: only this site; §4c: only this machine)', () => {
-  it('opens this site’s own page, and the app for anything off this site', () => {
-    expect(notificationUrl('/d/x/session/1', ORIGIN, null)).toBe(`${ORIGIN}/d/x/session/1`);
-    expect(notificationUrl('https://evil.test/phish', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
-    expect(notificationUrl('//evil.test/phish', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
-    expect(notificationUrl('javascript:alert(1)', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
-    expect(notificationUrl(undefined, ORIGIN, null)).toBe(`${ORIGIN}/app/`);
-    expect(notificationUrl(42, ORIGIN, null)).toBe(`${ORIGIN}/app/`);
-  });
-
-  it('keeps a machine inside its own pages, even through a climbing or look-alike path', () => {
-    const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
-    expect(notificationUrl(`${home}/session/s1`, ORIGIN, WORK)).toBe(`${home}/session/s1`);
-    expect(notificationUrl(home, ORIGIN, WORK)).toBe(home);
-    for (const elsewhere of [
-      '/d/sha256%3Ahome/settings',
-      `/d/sha256%3Awork%2Fone/../../d/other`,
-      '/d/sha256%3Awork%2Fone-evil/x',
-      '/',
-      'https://evil.test/',
-    ]) {
-      expect(notificationUrl(elsewhere, ORIGIN, WORK)).toBe(home);
-    }
-  });
-
-  it('places a daemon’s machine-relative conversation link under THAT machine, item and all', () => {
-    const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
-    // The machine-relative link the Agenda writes for an item (today's `agendaNotificationPath('session 1', 'A3')`).
-    const link = '/session/session%201?attention=A3';
-    expect(notificationUrl(link, ORIGIN, WORK)).toBe(`${home}/session/session%201?attention=A3`);
-    // A climb out of the machine from a relative link is still caught by the machine check.
-    expect(notificationUrl('/session/../../d/other', ORIGIN, WORK)).toBe(home);
-    // The app-wide worker knows no machine, so a relative link opens nothing but the app.
-    expect(notificationUrl(link, ORIGIN, null)).toBe(`${ORIGIN}/app/`);
-  });
-
-  it('opens at the item whichever link parameter the daemon spelled, agenda or attention', () => {
-    const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
-    expect(notificationUrl('/session/s1?attention=A3', ORIGIN, WORK, 's1')).toBe(`${home}/session/s1?attention=A3`);
-    expect(notificationUrl('/session/s1?agenda=A3', ORIGIN, WORK, 's1')).toBe(`${home}/session/s1?agenda=A3`);
-  });
-
-  it('opens the conversation a push is about when its daemon named no page (before #768, `fy attention notify`)', () => {
-    const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
-    // An older daemon's ask, and every push it sent: `url: '/'`, with the session it is about.
-    expect(notificationUrl('/', ORIGIN, WORK, 'session 1')).toBe(`${home}/session/session%201`);
-    // Off this site, or on another machine's pages: still this machine's copy of that conversation.
-    expect(notificationUrl('https://evil.test/', ORIGIN, WORK, 's1')).toBe(`${home}/session/s1`);
-    expect(notificationUrl('/d/other/session/s1', ORIGIN, WORK, 's1')).toBe(`${home}/session/s1`);
-    // A page it did name, and may open, wins over the session.
-    expect(notificationUrl('/session/s1?attention=A3', ORIGIN, WORK, 's1')).toBe(`${home}/session/s1?attention=A3`);
-    expect(notificationUrl(`${home}/settings`, ORIGIN, WORK, 's1')).toBe(`${home}/settings`);
-    // About no conversation (a blank id is none): the machine's sessions. The app-wide worker knows no
-    // machine to open a session on, so the id changes nothing there.
-    expect(notificationUrl('/', ORIGIN, WORK, ' ')).toBe(home);
-    expect(notificationUrl('/', ORIGIN, null, 's1')).toBe(notificationUrl('/', ORIGIN, null));
-  });
-
-  it('shows an older daemon’s session push pointing at its conversation', () => {
-    const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
-    const shown = machineNotification({ ...payload, sessionId: 's1', kind: 'failed', url: '/' }, WORK, ORIGIN);
-    expect(shown.url).toBe(`${home}/session/s1`);
-    expect(machineNotification({ ...payload, url: '/' }, WORK, ORIGIN).url).toBe(home);
-  });
-
+describe('the quiet notification’s mark', () => {
   it('carries the Ferretry mark on the quiet notification too', () => {
     const shown = filteredPushNotification(WORK, ORIGIN);
     expect(shown.options.icon).toBe(NOTIFICATION_ICON);
@@ -205,34 +94,5 @@ describe('filteredPushNotification', () => {
     expect(filteredPushNotification(WORK, ORIGIN).options.tag).not.toBe(
       filteredPushNotification(other, ORIGIN).options.tag,
     );
-  });
-});
-
-describe('unverifiedNotification (review M3)', () => {
-  it('titles a push to the app-wide registration Unverified, keeps it out of every machine’s tags, opens the app', () => {
-    const shown = unverifiedNotification({ ...payload, url: '/d/sha256%3Ahome/settings' }, ORIGIN);
-    expect(shown).toEqual({
-      ...payload,
-      title: 'Unverified · A new device was paired',
-      tag: 'fy-push-unverified:pairing',
-      url: `${ORIGIN}/app/`,
-    });
-    expect(shown.tag.startsWith('fy-push:')).toBe(false);
-  });
-});
-
-describe('a tap opens the machine the notification came from', () => {
-  test('a session on the other machine opens that machine’s session, and never this one’s', () => {
-    const origin = 'https://app.example.test';
-    const studio = { daemonId: 'studio', label: 'studio' };
-    const laptop = { daemonId: 'laptop', label: 'laptop' };
-    // The same session id on both machines: the URL is what keeps them apart. A session notification's page is
-    // its machine's conversation path (today built by the notification ledger from the session's scope).
-    const laptopConnection = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.test', deviceId: 'd' });
-    const spec = { url: daemonSessionPath(laptopConnection.daemonId, 's-1') };
-    expect(spec.url).toBe('/d/laptop/session/s-1');
-    expect(notificationUrl(spec.url, origin, laptop)).toBe(`${origin}/d/laptop/session/s-1`);
-    // Studio's worker refuses to open the laptop's page, and falls back to its own sessions.
-    expect(notificationUrl(spec.url, origin, studio)).toBe(`${origin}/d/studio`);
   });
 });

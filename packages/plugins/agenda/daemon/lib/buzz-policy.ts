@@ -1,5 +1,5 @@
 import type { AskSummary } from '@ferretry/core-asks/contract';
-import { agendaAskBuzzTag, agendaAskPath, agendaStopBuzzTag, type BuzzKind } from '../../contract/index.ts';
+import { agendaAskBuzzTag, agendaStopBuzzTag, askBuzzPath, type BuzzKind } from '../../contract/index.ts';
 import { buzzBody, buzzTitle, clipAtWord, oneLine, STOPPED_NAME_LENGTH } from './words.ts';
 
 /** An ask as the buzz policy reads it: the summary Asks gives, plus the one flag a notice may carry (`--buzz`). */
@@ -39,7 +39,7 @@ export function askBuzzWords(ask: BuzzableAsk): BuzzWords {
     tag: agendaAskBuzzTag(ferret, ask.id),
     title: buzzTitle(ask.subject),
     body: buzzBody(ask.subject),
-    url: agendaAskPath(ferret, ask.id),
+    url: askBuzzPath(ferret, ask.id),
   };
 }
 
@@ -60,6 +60,6 @@ export function stopBuzzWords(
     tag: agendaStopBuzzTag(ferret),
     title: `${shown} is stopped · ${count === 1 ? '1 needs you' : `${count} need you`}`,
     body: buzzBody(first.subject),
-    url: agendaAskPath(ferret, first.id),
+    url: askBuzzPath(ferret, first.id),
   };
 }
