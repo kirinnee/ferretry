@@ -220,7 +220,7 @@ test('converts every v4 config kind into the v5 file that owns it, read back wit
   ] as const)
     expect((await read(path, schema)).permissionMode).toBe('skip');
   expect(await text('harness-claude-code.yaml')).toContain('# I trust my agents');
-  expect(await read('runtimes.yaml', RuntimesFileSchema)).toEqual({ defaultRuntime: 'claude-work' });
+  expect(await read('runtimes.yaml', RuntimesFileSchema)).toEqual({ defaultRuntime: 'claude-work', autoResume: false });
   expect(await read('conversation.yaml', ConversationConfigSchema)).toEqual({ keepInSync: false });
   const browsers = await read('browsers.yaml', BrowsersConfigSchema);
   expect(browsers.mode).toBe('window');
@@ -231,7 +231,8 @@ test('converts every v4 config kind into the v5 file that owns it, read back wit
 
   expect((await stat(join(f.to, 'config/runtimes/claude-work.yaml'))).mode & 0o777).toBe(0o600);
   const notCarried = report.notCarried.map(item => item.what);
-  for (const key of ['browserPorts', 'autoResume', 'advanced', 'attentionNudge'])
+  expect(notCarried).not.toContain('config/machine.yaml autoResume');
+  for (const key of ['browserPorts', 'advanced', 'attentionNudge'])
     expect(notCarried).toContain(`config/machine.yaml ${key}`);
   expect(report.kept).toContainEqual({ what: 'runtimes', count: 1 });
   expect(report.kept).toContainEqual({ what: 'instruction documents', count: 1 });
