@@ -13,10 +13,16 @@ import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import { err, ok, type Result } from '@ferretry/std';
 import { ConversationPort } from '../../../contract/index.ts';
 import { conversationDaemon } from '../../../daemon/index.ts';
-import { type HarnessGate, HARNESS_PENDING } from '../../../daemon/harness-seam.ts';
+import {
+  type HarnessGate,
+  HARNESS_OPEN,
+  HARNESS_PENDING,
+  INTERRUPT_UNAVAILABLE,
+  SEND_EXTRAS_UNAVAILABLE,
+  SEND_UNAVAILABLE,
+} from '../../../daemon/harness-seam.ts';
 
-/** Both actions live: what the seam does once Ferrets answers a closed refusal and presses a safe stop. */
-const OPEN: HarnessGate = { send: true, interrupt: true };
+const OPEN: HarnessGate = HARNESS_OPEN;
 
 const F1 = ferretId('f1');
 const CALLER = ferretId('lead');
@@ -301,6 +307,7 @@ describe('a send carrying what the seam does not type yet is refused 503, never 
       503,
       'conversation_terminal_unavailable',
     ]);
+    expect(response.json<{ error: string }>().error).toBe(SEND_EXTRAS_UNAVAILABLE);
     expect(ferrets.opens).toEqual([]);
     expect(ferrets.delivered).toEqual([]);
     expect((await api().sends(F1)).sends).toEqual([]);
@@ -317,7 +324,10 @@ describe('a send carrying what the seam does not type yet is refused 503, never 
 
     const sent = await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'psst', sendId: 's-1', ...extra });
 
-    expect(sent).toMatchObject({ ok: false, error: { code: 'conversation_terminal_unavailable' } });
+    expect(sent).toMatchObject({
+      ok: false,
+      error: { code: 'conversation_terminal_unavailable', message: SEND_EXTRAS_UNAVAILABLE },
+    });
     expect(ferrets.delivered).toEqual([]);
     expect((await api().sends(F1)).sends).toEqual([]);
     await host.stop();
@@ -344,6 +354,7 @@ describe('a send and an interrupt wait behind the gate until Ferrets’ seam is 
       503,
       'conversation_terminal_unavailable',
     ]);
+    expect(response.json<{ error: string }>().error).toBe(SEND_UNAVAILABLE);
     expect(ferrets.opens).toEqual([]);
     expect(ferrets.delivered).toEqual([]);
     expect((await api().sends(F1)).sends).toEqual([]);
@@ -356,7 +367,10 @@ describe('a send and an interrupt wait behind the gate until Ferrets’ seam is 
     const first = await api().send(F1, { kind: 'owner' }, { message: 'nudge', sendId: 's-1' });
     const again = await api().send(F1, { kind: 'owner' }, { message: 'nudge', sendId: 's-1' });
 
-    expect(first).toMatchObject({ ok: false, error: { code: 'conversation_terminal_unavailable' } });
+    expect(first).toMatchObject({
+      ok: false,
+      error: { code: 'conversation_terminal_unavailable', message: SEND_UNAVAILABLE },
+    });
     expect(again).toEqual(first);
     expect(ferrets.opens).toEqual([]);
     expect((await api().sends(F1)).sends).toEqual([]);
@@ -372,6 +386,7 @@ describe('a send and an interrupt wait behind the gate until Ferrets’ seam is 
       503,
       'conversation_terminal_unavailable',
     ]);
+    expect(response.json<{ error: string }>().error).toBe(INTERRUPT_UNAVAILABLE);
     expect(ferrets.opens).toEqual([]);
     expect(ferrets.interrupts).toBe(0);
     expect(acted).toEqual([]);
@@ -383,7 +398,10 @@ describe('a send and an interrupt wait behind the gate until Ferrets’ seam is 
 
     const result = await api().interrupt(F1, {});
 
-    expect(result).toMatchObject({ ok: false, error: { code: 'conversation_terminal_unavailable' } });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'conversation_terminal_unavailable', message: INTERRUPT_UNAVAILABLE },
+    });
     expect(ferrets.interrupts).toBe(0);
     await host.stop();
   });

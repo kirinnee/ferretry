@@ -33,8 +33,28 @@ export interface HarnessGate {
   readonly interrupt: boolean;
 }
 
-/** Both actions wait: a send and an interrupt answer 503 until Ferrets' seam is safe to use. */
+/**
+ * Both actions wait: a send and an interrupt answer 503 until Ferrets' seam is safe to use. This is the ONE value the
+ * daemon wires (`daemon/index.ts`): opening the gate is changing that line to {@link HARNESS_OPEN}. The test
+ * `tests/unit/daemon/harness-gate.test.ts` fails the day Ferrets answers a closed refusal taxonomy, so the removal
+ * cannot be forgotten.
+ */
 export const HARNESS_PENDING: HarnessGate = { send: false, interrupt: false };
+
+/** Both actions live: what the gate becomes once Ferrets answers a closed refusal for a send and presses a safe stop. */
+export const HARNESS_OPEN: HarnessGate = { send: true, interrupt: true };
+
+/** Said by a send while the gate is closed: what is unavailable and why, in the person's words. */
+export const SEND_UNAVAILABLE =
+  "Sending a message to a ferret from here is not available yet: this machine cannot yet tell safely whether the ferret is busy, waiting at a dialog or holding a draft, so a message could be lost or typed twice. Type it in the ferret's terminal for now.";
+
+/** Said by an interrupt while the gate is closed. */
+export const INTERRUPT_UNAVAILABLE =
+  "Stopping a ferret's turn from here is not available yet: this machine cannot yet tell safely whether the ferret is working or waiting at its prompt, so a stop could quit the agent instead. Stop it in the ferret's terminal for now.";
+
+/** Said by a send that carries files, a label, the send-now flag or a reply request: they would be dropped. */
+export const SEND_EXTRAS_UNAVAILABLE =
+  "Sending files, a label, the send-now flag or a reply request is not available yet: they would be dropped and the message still reported as sent. Send the message alone, or type it in the ferret's terminal.";
 
 /** One ferret's terminal, as Ferrets opened it. */
 interface BoundTerminal {

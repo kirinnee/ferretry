@@ -31,7 +31,14 @@ import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './questions/li
 import { sessionCompactAtRoutes } from './turns/lib/mounts/session-compact-at.ts';
 import { StateHypermediaSwitch } from './hypermedia/adapters/index.ts';
 import { hypermediaDefault, SessionHypermediaService, sessionHypermediaRoutes } from './hypermedia/lib/index.ts';
-import { type HarnessGate, MaybeTyped, terminalSeam } from './harness-seam.ts';
+import {
+  type HarnessGate,
+  INTERRUPT_UNAVAILABLE,
+  MaybeTyped,
+  SEND_EXTRAS_UNAVAILABLE,
+  SEND_UNAVAILABLE,
+  terminalSeam,
+} from './harness-seam.ts';
 import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
 import { type MountRoute, routeTable, socketTable } from './seams/api.ts';
 import { parseSessionId, type SessionId, tryParseSessionId } from './seams/ferret-id.ts';
@@ -42,8 +49,8 @@ import type { SessionView } from './seams/protocol.ts';
 const TERMINAL_PENDING =
   "This needs the ferret's terminal, and Conversation is not connected to it yet. Drive the ferret from its terminal for now.";
 
-const pending = (): never => {
-  throw new ApiError(503, TERMINAL_PENDING, 'conversation_terminal_unavailable');
+const pending = (sentence: string = TERMINAL_PENDING): never => {
+  throw new ApiError(503, sentence, 'conversation_terminal_unavailable');
 };
 const pendingRefusal = (): ConversationRefusal => ({
   code: 'conversation_terminal_unavailable',
@@ -193,7 +200,7 @@ export function buildConversationA(deps: {
    * question by accident and ignores a terminal status, where today presses Escape and only on a pane doing work.
    */
   const interruptFerret = async (ferret: string): Promise<SessionView> => {
-    if (!gate.interrupt) return pending();
+    if (!gate.interrupt) return pending(INTERRUPT_UNAVAILABLE);
     await (await terminal.bind(ferret)).interrupt();
     boundaries.markInterrupted(ferret);
     // Ferrets' record carries no turn count, so the view is the id and the status the interrupt just made true.
@@ -207,14 +214,14 @@ export function buildConversationA(deps: {
    * `sent` all the same (U3 carries them).
    */
   const mayGo = (request: UnwiredSend): void => {
-    if (!gate.send) pending();
+    if (!gate.send) pending(SEND_UNAVAILABLE);
     if (
       (request.attachmentIds?.length ?? 0) > 0 ||
       request.label !== undefined ||
       request.now !== undefined ||
       request.replyExpected !== undefined
     )
-      pending();
+      pending(SEND_EXTRAS_UNAVAILABLE);
   };
   /**
    * Types one message. The send is ledgered as accepted BEFORE a key goes (the same id twice is one message), and a
