@@ -438,6 +438,7 @@ describe('the view place', () => {
     const plugin: ShellPluginClient = parts.client().forPackage('conv');
     // @ts-expect-error readGrants is the shell's own read: DaemonClient only, never on a plugin's client.
     expect(plugin.readGrants).toBeUndefined();
+    // Mutation row: adding `noPause` to `forPackage` goes red under `tsc` (this line), not under `bun test`.
     // @ts-expect-error there is no noPause option on a plugin's client.
     parts.client().forPackage('conv', { noPause: true });
     const shell: Pick<DaemonClient, 'readGrants'> = parts.client();
@@ -499,6 +500,29 @@ describe('the view place', () => {
     });
     await settle();
     expect(seen.place?.authorityOf(MEMORY)).toEqual({ kind: 'open' });
+  });
+
+  test('m4 a grants read sent before a 401 unlock_required and answered after it leaves the machine locked', async () => {
+    const parts = setup();
+    const machine = parts.machine();
+    await open(parts);
+    // A re-read is sent (the app came back) and the daemon holds its answer …
+    const heldRead = deferred<TransportAnswer>();
+    machine.grants = () => heldRead.promise;
+    parts.backOnScreen();
+    await settle();
+    // … the unlock expires and a plugin call's 401 (same generation) says locked …
+    machine.locked = true;
+    await interact(async () => {
+      await seen.client?.call(SEND).catch(() => {});
+    });
+    await settle();
+    expect(seen.place?.authorityOf(MEMORY)).toEqual({ kind: 'locked' });
+    // … and the older read answers 200 afterwards: it does not undo the locked.
+    heldRead.resolve(json(grants(row('fleet', true))));
+    await settle();
+    expect(seen.place?.authorityOf(MEMORY)).toEqual({ kind: 'locked' });
+    expect(parts.runtime.lockedDaemons()).toEqual(['d1']);
   });
 
   test('one locked set: a locked machine with nothing parked is in useLockedDaemons', async () => {

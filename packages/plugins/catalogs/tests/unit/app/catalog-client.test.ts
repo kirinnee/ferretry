@@ -100,4 +100,20 @@ describe('the catalog client of any paired machine', () => {
   it('refuses, saying so, for a machine with no Catalogs row', async () => {
     await expect(clientOf({ daemonId: 'd3' })).rejects.toThrow(NO_MACHINE_SENTENCE);
   });
+
+  it('m2 an install on a machine still connecting waits for its row; an off Catalogs says its own sentence', async () => {
+    const rows = new Map<string, PluginClient>();
+    const waiting = machineCatalogClient(own, 'd1', {
+      clients: () => rows,
+      whyNone: () => ({ waiting: true, line: 'Checking what this daemon offers…' }),
+    });
+    const pending = waiting({ daemonId: 'd2' });
+    setTimeout(() => rows.set('d2', elsewhere), 150);
+    await pending;
+    const off = machineCatalogClient(own, 'd1', {
+      clients: () => new Map(),
+      whyNone: () => ({ waiting: false, line: 'Catalogs is off on this daemon.' }),
+    });
+    await expect(off({ daemonId: 'd3' })).rejects.toThrow('Catalogs is off on this daemon.');
+  });
 });

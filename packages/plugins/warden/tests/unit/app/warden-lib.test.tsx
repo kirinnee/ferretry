@@ -81,6 +81,41 @@ describe('daemonReach', () => {
   });
 });
 
+describe('daemonReach — a machine still connecting (m2)', () => {
+  const own = { call: async () => 'own' } as unknown as PluginClient;
+  const other = { call: async () => 'other' } as unknown as PluginClient;
+  const home = daemonConnection({ daemonId: 'd1', daemonName: 'laptop' });
+  const d2 = daemonConnection({ daemonId: 'd2', daemonName: 'desk' });
+
+  it('m2 waits for the row of a machine that is still connecting, then answers it', async () => {
+    const rows = new Map<string, PluginClient>();
+    const reach = daemonReach(home, own, {
+      clients: () => rows,
+      whyNone: () => ({ waiting: true, line: 'Checking what this daemon offers…' }),
+    });
+    const pending = reach(d2);
+    setTimeout(() => rows.set('d2', other), 150);
+    expect(await pending).toBe(other);
+  });
+
+  it('m2 says the machine’s own sentence at once for a Warden that is paused or off there', async () => {
+    const reach = daemonReach(home, own, {
+      clients: () => new Map(),
+      whyNone: () => ({ waiting: false, line: 'Warden is off on this daemon.' }),
+    });
+    await expect(reach(d2)).rejects.toThrow('Warden is off on this daemon.');
+  });
+
+  it('m2 gives up with the machine’s sentence when the wait runs out', async () => {
+    const reach = daemonReach(home, own, {
+      clients: () => new Map(),
+      whyNone: () => ({ waiting: true, line: 'Checking what this daemon offers…' }),
+      waitMs: 150,
+    });
+    await expect(reach(d2)).rejects.toThrow('Checking what this daemon offers…');
+  });
+});
+
 describe('the Warden client factories', () => {
   const config = wardenConfig();
   const answering = (calls: string[]) =>

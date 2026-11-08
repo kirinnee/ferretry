@@ -59,6 +59,8 @@ export interface DeviceViewHarness {
   readonly handOffs: HandOffs;
   /** The machines the view lists, live. */
   readonly setRows: (rows: readonly DaemonReach[]) => void;
+  /** The machines this device is paired with, in this order (a machine may be paired and have no row yet), and the selected one. */
+  readonly setPaired: (daemons: readonly string[], selected?: string) => void;
   /** A link arrives on the open page (a `hashchange`): the shell reads it, and a declared part leaves the address. */
   readonly arrive: (href: string) => void;
   /** What the address bar holds now (path, query and fragment). */
@@ -121,6 +123,7 @@ export function deviceViewHarness(options: {
       return () => void rowListeners.delete(listener);
     },
     rows: () => rows,
+    whyNone: () => undefined,
   };
   const device = {
     theme: new ThemePreferenceStore(memoryStore()),
@@ -148,6 +151,18 @@ export function deviceViewHarness(options: {
     setRows: next => {
       rows = next;
       for (const listener of [...rowListeners]) listener();
+    },
+    setPaired: (ids, selected) => {
+      for (const known of device.daemons.snapshot().daemons)
+        if (!ids.includes(known.daemon)) device.daemons.remove(known.daemon);
+      for (const id of [...ids].reverse())
+        device.daemons.add({
+          daemon: id,
+          machine: `${id.slice(10, 11)}-host`,
+          deviceId: `device-${id}`,
+          address: 'https://daemon.test',
+        });
+      if (selected !== undefined) device.daemons.select(selected);
     },
     arrive: href => {
       move(href);

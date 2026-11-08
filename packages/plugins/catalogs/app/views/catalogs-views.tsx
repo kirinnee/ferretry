@@ -14,6 +14,7 @@ import {
   HOME_HREF,
   distinctDaemonName,
   useEveryDaemon,
+  useNoReach,
   useFragment,
   useHandOff,
   useOwnScreen,
@@ -68,7 +69,13 @@ function useCatalogClients(): ReadonlyMap<string, PluginClient> {
 /** Installs go through THAT machine's own client: this one's, or Catalogs' own row on another paired daemon. */
 function useInstallHost(own: CatalogClient, ownId: string): InstallHost {
   const others = useCatalogClients();
-  return useMemo(() => ({ createClient: machineCatalogClient(own, ownId, others) }), [others, own, ownId]);
+  const whyNone = useNoReach();
+  const live = useRef(others);
+  live.current = others;
+  return useMemo(
+    () => ({ createClient: machineCatalogClient(own, ownId, { clients: () => live.current, whyNone }) }),
+    [own, ownId, whyNone],
+  );
 }
 
 export function createSharingScreen(client: PluginClient) {

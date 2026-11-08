@@ -231,8 +231,23 @@ describe('in a per-daemon view', () => {
   });
 });
 
+describe('why a machine has no row (S2)', () => {
+  test('a machine still connecting waits; an unpaired one and one with the plugin off say so for good', async () => {
+    const parts = setup();
+    parts.machine('d2').off.add('conv');
+    const whyNone = parts.runtime.reach('conv', 'ordinary').whyNone;
+    // Nothing is connected yet: both are still being reached.
+    expect(whyNone('d1')?.waiting).toBe(true);
+    await parts.connectAll();
+    expect(whyNone('d1')).toBeUndefined();
+    expect(whyNone('d2')).toEqual({ waiting: false, line: expect.stringContaining('is off on this daemon') });
+    expect(whyNone('nobody')).toEqual({ waiting: false, line: 'This device is not paired with that machine.' });
+  });
+});
+
 describe('no hook takes a package id', () => {
   test('useEveryDaemon accepts no argument (a type test)', () => {
+    // Mutation row: giving `useEveryDaemon` a `packageId?` goes red under `tsc` (this line), not under `bun test`.
     // @ts-expect-error — the caller is the plugin-identity context, never a package id.
     const call = () => useEveryDaemon('conv');
     expect(typeof call).toBe('function');

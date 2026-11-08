@@ -57,6 +57,8 @@ interface Entry {
   state: State;
   reading: boolean;
   again: boolean;
+  /** Bumped by every answer set: a read that was sent before a later set is older than it and is dropped. */
+  sequence: number;
 }
 
 const NOTHING_LOCKED: readonly string[] = Object.freeze([]);
@@ -78,6 +80,7 @@ export class GrantsCache {
       state: { kind: 'unknown' },
       reading: false,
       again: false,
+      sequence: 0,
       stop: client.onAuthority(signal => this.#heard(daemon, entry, signal)),
     };
     this.#entries.set(daemon, entry);
@@ -152,11 +155,14 @@ export class GrantsCache {
       return;
     }
     entry.reading = true;
+    const sent = entry.sequence;
     void entry.client
       .readGrants({ noPause: true })
       .then(
         read => {
           if (this.#entries.get(daemon) !== entry || read.generation !== entry.client.generation) return;
+          // A `locked` signal (or any answer) set after this read was sent is fresher than what it says (m4).
+          if (entry.sequence !== sent) return;
           if (read.answer === undefined) return; // reached nothing: offline keeps the last answer
           if (read.need?.kind === 'unlock') return this.#set(entry, { kind: 'locked' });
           const body = read.answer.status === 200 ? GrantsBodySchema.safeParse(read.answer.body) : undefined;
@@ -182,6 +188,7 @@ export class GrantsCache {
 
   #set(entry: Entry, state: State): void {
     entry.state = state;
+    entry.sequence += 1;
     this.#publish();
   }
 

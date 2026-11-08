@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react';
 import type { ClientOrigin } from '../client/daemon-client.ts';
 import { daemonTitle } from '../daemons/daemon-list.ts';
 import { appHookProviders } from '../surfaces/app-hooks.ts';
-import { type PluginReach, usePluginIdentity } from './plugin-identity.tsx';
+import { type NoReach, type PluginReach, usePluginIdentity } from './plugin-identity.tsx';
 import type { ShellRuntime } from './runtime.ts';
 import type { Authority, Axis, CapabilityName } from './view-place.tsx';
 
@@ -42,6 +42,18 @@ export interface DaemonReach {
 const NONE: readonly DaemonReach[] = Object.freeze([]);
 const noSubscription = (): (() => void) => () => {};
 const nothing = (): readonly DaemonReach[] => NONE;
+
+const noReason = (): undefined => undefined;
+
+/**
+ * WHY THE CALLING PLUGIN HAS NO ROW ON A MACHINE (S2): a lookup `(daemon) => NoReach | undefined`, stable for the
+ * caller's life and always reading the shell's present answer, for code that waits for a machine's row (a read of
+ * another machine that is still connecting waits; one that is off or paused says the machine's own sentence). It
+ * answers `undefined` for every machine outside a shell and on a daemon-less screen.
+ */
+export function useNoReach(): (daemon: string) => NoReach | undefined {
+  return usePluginIdentity()?.reach?.whyNone ?? noReason;
+}
 
 /**
  * Every paired daemon where the calling plugin is on and allowed, in the daemon list's order; live. Answers in a
@@ -89,9 +101,23 @@ export class DaemonReachCache {
     const reach: PluginReach = {
       subscribe: listener => this.#runtime.subscribe(listener),
       rows: () => this.#read(key, plugin, origin),
+      whyNone: daemon => this.#whyNone(plugin, daemon),
     };
     this.#reaches.set(key, reach);
     return reach;
+  }
+
+  #whyNone(plugin: string, daemon: string): NoReach | undefined {
+    const runtime = this.#runtime;
+    if (runtime.daemons.get(daemon) === undefined)
+      return { waiting: false, line: 'This device is not paired with that machine.' };
+    const line = runtime.blockedLine(daemon, plugin);
+    if (line === undefined) return undefined;
+    const standing = runtime.standing(daemon, plugin);
+    const waiting =
+      runtime.connection(daemon).kind === 'unreachable' ||
+      (standing.state !== 'allowed' && standing.reason === 'unread');
+    return { waiting, line };
   }
 
   #read(key: string, plugin: string, origin: ClientOrigin): readonly DaemonReach[] {

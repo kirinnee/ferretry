@@ -5,6 +5,7 @@
  * route the manifest does not list (and never another plugin's).
  */
 
+import type { NoReach } from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { z } from 'zod';
 import manifest from '../../manifest.ts';
@@ -110,11 +111,29 @@ export const machineCatalogClient =
   (
     own: CatalogClient,
     ownId: string,
-    others: ReadonlyMap<string, PluginClient>,
+    others: ReadonlyMap<string, PluginClient> | RowSource,
   ): ((connection: { readonly daemonId: string }) => Promise<CatalogClient>) =>
   async connection => {
     if (connection.daemonId === ownId) return own;
-    const other = others.get(connection.daemonId);
-    if (other === undefined) throw new Error(NO_MACHINE_SENTENCE);
-    return catalogClientOf(other);
+    const source: RowSource = 'clients' in others ? others : { clients: () => others };
+    const deadline = Date.now() + (source.waitMs ?? ROW_WAIT_MS);
+    for (;;) {
+      const row = source.clients().get(connection.daemonId);
+      if (row !== undefined) return catalogClientOf(row);
+      const why = source.whyNone?.(connection.daemonId);
+      if (why !== undefined && !why.waiting) throw new Error(why.line);
+      if (why === undefined || Date.now() >= deadline) throw new Error(why?.line ?? NO_MACHINE_SENTENCE);
+      await new Promise(resolve => setTimeout(resolve, ROW_POLL_MS));
+    }
   };
+
+/** How long an install on another machine waits for its row (connecting, or its plugin list being read). */
+const ROW_WAIT_MS = 15_000;
+const ROW_POLL_MS = 100;
+
+/** The live row clients (a getter, so a wait sees a row that arrives), and the shell's reason a machine has none. */
+export interface RowSource {
+  readonly clients: () => ReadonlyMap<string, PluginClient>;
+  readonly whyNone?: (daemon: string) => NoReach | undefined;
+  readonly waitMs?: number;
+}

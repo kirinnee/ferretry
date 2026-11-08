@@ -1,5 +1,5 @@
 import { createContext, type ReactNode, useCallback, useContext, useSyncExternalStore } from 'react';
-import type { DaemonList } from '../daemons/daemon-list.ts';
+import type { DaemonList, DaemonListSnapshot } from '../daemons/daemon-list.ts';
 import type { AddressTaker } from '../router/address.ts';
 import type { HandOffs } from './hand-off.ts';
 import {
@@ -102,4 +102,18 @@ export function useDeviceTheme(): DeviceTheme | null {
     setFamily: family => void store.setFamily(family),
     setTextScale: scale => void store.setTextScale(scale),
   };
+}
+
+const NO_PAIRED: DaemonListSnapshot = Object.freeze({ daemons: Object.freeze([]), selected: null });
+
+/**
+ * THE PAIRED LIST, DAEMON-LESS SAFE (S9): every paired daemon and the selected id, live — what a device view needs to
+ * tell a machine that is still connecting (paired, no row yet) from one this device is not paired with. It reads the
+ * device context, so it answers in a device view, a daemon-less screen and a per-daemon view alike (unlike
+ * `usePairedDaemons`, which `WithoutShell` hides); it carries no client. Empty outside an app shell.
+ */
+export function useDevicePaired(): DaemonListSnapshot {
+  const list = useOptionalDevice()?.daemons;
+  const read = useCallback(() => list?.snapshot() ?? NO_PAIRED, [list]);
+  return useSyncExternalStore(list?.subscribe ?? noSubscription, read, read);
 }

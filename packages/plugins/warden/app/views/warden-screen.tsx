@@ -3,9 +3,9 @@
  * bound to its own daemon's client, so nothing read from one is shown or acted on through another.
  */
 
-import { deviceControls } from '@ferretry/app';
+import { deviceControls, useNoReach } from '@ferretry/app';
 import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { WardenOverviewSurface } from '../features/warden/warden-overview-surface.tsx';
 import { WardenTotalsSurface } from '../features/warden/warden-totals-surface.tsx';
 import { useFerretsOf } from '../hooks/use-ferrets-of.ts';
@@ -37,7 +37,13 @@ export function createWardenScreen(client: PluginClient) {
     const machines = useWardenMachines();
     const others = useWardenClients();
     const { remembered, remember } = useWardenDaemonScope(deviceControls());
-    const reach = useMemo(() => daemonReach(connection, client, others), [connection, others]);
+    const whyNone = useNoReach();
+    const live = useRef(others);
+    live.current = others;
+    const reach = useMemo(
+      () => daemonReach(connection, client, { clients: () => live.current, whyNone }),
+      [connection, whyNone],
+    );
     const factory = useMemo(() => wardenClientFactory(reach), [reach]);
     return (
       <DaemonReachContext.Provider value={reach}>

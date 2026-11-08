@@ -20,6 +20,7 @@ import {
 } from '@ferretry/app/testing';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { type ComponentType, Suspense } from 'react';
+import { useRuntimeInbox } from '../../../app/hooks/use-agenda-inbox.ts';
 import app from '../../../app/index.ts';
 import { AgendaFleet, fleetIn, mergedFleet } from '../../../app/lib/agenda-fleet.ts';
 import type { DaemonFleetStore, FleetSnapshot } from '../../../app/lib/ferret-store.ts';
@@ -209,5 +210,28 @@ describe('the Agenda page over every machine', () => {
     expect(locked?.textContent).toContain('Locked — unlock studio to see its items');
     await interact(() => locked?.querySelector('button')?.click());
     expect(unlocked).toBe(1);
+  });
+
+  it('m1 the page’s own machine, while locked, keeps the Inbox unsettled', async () => {
+    const a = machine(A, []);
+    const b = machine(B, []);
+    const rows: DaemonReach[] = [
+      fakeReachRow({ daemon: A, client: a.client, machine: 'laptop' }),
+      fakeReachRow({ daemon: B, client: b.client, machine: 'server', locked: true }),
+    ];
+    const harness = deviceViewHarness({ plugin: 'agenda', fragments: [] });
+    harness.setRows(rows);
+    const fleet = fleetIn({});
+    const Probe = () => {
+      const inbox = useRuntimeInbox(fleet.runtimeOf(b.client), undefined, fleet);
+      return <p data-settled={String(inbox.settled)} />;
+    };
+    view = await mount(
+      <harness.Harness place="daemon">
+        <Probe />
+      </harness.Harness>,
+    );
+    await interact(() => new Promise(resolve => setTimeout(resolve, 20)));
+    expect(view.container.querySelector('[data-settled]')?.getAttribute('data-settled')).toBe('false');
   });
 });

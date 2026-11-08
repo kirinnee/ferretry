@@ -588,7 +588,10 @@ export const useRuntimeInbox = (runtime: AgendaRuntime, laneEditor?: LaneEditor,
   );
   const machines = useInboxMachines(store, reach.pairings);
   const inbox = useAgendaInboxModel(reach.agenda, machines);
-  const settled = machines.every(machine => machine.sessions !== null) && !inbox.reading;
+  // The machine this page is drawn for, when it is locked, is not in the Inbox (it is not read): nothing is settled
+  // until it is unlocked and read, or the reader would be sent away from a card that was never looked for.
+  const ownLocked = reach.locked.some(line => line.daemonId === runtime.connection.daemonId);
+  const settled = machines.every(machine => machine.sessions !== null) && !inbox.reading && !ownLocked;
   return useMemo(
     () => ({
       ...inbox,

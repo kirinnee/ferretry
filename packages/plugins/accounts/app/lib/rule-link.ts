@@ -5,7 +5,7 @@
  * read the daemon's list. A link only picks WHICH row to show: it never reaches the daemon and never asks for a passkey;
  * the owner still taps Confirm on the row.
  *
- * One hold is made per app half and handed to both by construction (no module state); it keeps only the latest link.
+ * One hold is made per app half (a bundle-level singleton in `../index.ts`) and handed to both views by construction; it keeps only the latest link.
  */
 
 import type { SignInRuleStageId } from '../../contract/routes/index.ts';

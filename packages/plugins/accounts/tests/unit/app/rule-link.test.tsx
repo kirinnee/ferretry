@@ -18,11 +18,15 @@ import {
 } from '@ferretry/app/testing';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
-import { RULE_FRAGMENT_KEY, ruleLinkView } from '../../../app/features/secure-copy/rule-link-view.tsx';
+import {
+  RULE_FRAGMENT_KEY,
+  RULE_LINK_WAIT_MS,
+  ruleLinkView,
+} from '../../../app/features/secure-copy/rule-link-view.tsx';
 import { SignInRulesSurface } from '../../../app/features/secure-copy/sign-in-rules-surface.tsx';
 import half from '../../../app/index.ts';
 import { RULE_LINKED_ELSEWHERE_WORDS, RULE_LINKED_STAGE_GONE_WORDS, RuleLinkHold } from '../../../app/lib/rule-link.ts';
-import { ruleDeepLink, ruleDeepLinkFromFragment } from '../../../contract/routes/index.ts';
+import { agendaDeepLinkFragment, ruleDeepLink, ruleDeepLinkFromFragment } from '../../../contract/routes/index.ts';
 import { click, settle } from '../../support/app/dom-form.ts';
 import { ruleClient } from '../../support/app/sign-in-rule-client.ts';
 import { machineStage, ruleList, STAGE_ID } from '../../support/app/sign-in-rule-fixtures.ts';
@@ -43,8 +47,16 @@ afterEach(async () => {
   window.history.replaceState(null, '', '/');
 });
 
-async function open(href: string, rows: readonly DaemonReach[], wrap: (node: ReactNode) => ReactNode = node => node) {
+/** `paired`: the machines this device is paired with (default: the machines that have a row). */
+async function open(
+  href: string,
+  rows: readonly DaemonReach[],
+  wrap: (node: ReactNode) => ReactNode = node => node,
+  paired: readonly string[] = rows.map(r => r.daemon),
+  selected?: string,
+) {
   const harness = deviceViewHarness({ plugin: 'accounts', fragments: half.shell.fragments ?? [], href });
+  harness.setPaired(paired, selected);
   harness.setRows(rows);
   const hold = new RuleLinkHold();
   const View = ruleLinkView(hold);
@@ -88,6 +100,58 @@ describe('the #rules link', () => {
     expect(first.went).toEqual([secureCopy(A)]);
   });
 
+  it('m3 naming no machine on a home route, opens on the SELECTED machine, not the first row', async () => {
+    const { went } = await open(ruleDeepLink(ORIGIN, STAGE_ID), [row(A), row(B)], n => n, [A, B], B);
+    expect(went).toEqual([secureCopy(B)]);
+  });
+
+  it('M2 a link taken on a cold open, while no machine has a row yet, still opens when the rows arrive', async () => {
+    const { harness, hold, went, view: mounted } = await open(ruleDeepLink(ORIGIN, STAGE_ID, B), [], n => n, [A, B]);
+    expect(went).toEqual([]);
+    expect(mounted.container.querySelector('[data-rule-linked-elsewhere]')).toBeNull();
+    await interact(() => harness.setRows([row(A), row(B)]));
+    expect(went).toEqual([secureCopy(B)]);
+    expect(hold.stageFor(B)).toBe(STAGE_ID);
+  });
+
+  it('M2 a link naming machine B waits while B is still connecting, never says "not on this machine", then opens', async () => {
+    const {
+      harness,
+      hold,
+      went,
+      view: mounted,
+    } = await open(ruleDeepLink(ORIGIN, STAGE_ID, B), [row(A)], n => n, [A, B]);
+    expect(went).toEqual([]);
+    expect(mounted.container.querySelector('[data-rule-linked-elsewhere]')).toBeNull();
+    expect(mounted.container.textContent).not.toContain(RULE_LINKED_ELSEWHERE_WORDS);
+    await interact(() => harness.setRows([row(A), row(B)]));
+    expect(went).toEqual([secureCopy(B)]);
+    expect(hold.stageFor(B)).toBe(STAGE_ID);
+  });
+
+  it('M2 a link waiting for a machine that never connects is dropped after two minutes', async () => {
+    const realSetTimeout = globalThis.setTimeout;
+    const waits: (() => void)[] = [];
+    globalThis.setTimeout = ((run: () => void, ms?: number) => {
+      if (ms === RULE_LINK_WAIT_MS) {
+        waits.push(run);
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }
+      return realSetTimeout(run, ms);
+    }) as typeof setTimeout;
+    try {
+      const { harness, went } = await open(ruleDeepLink(ORIGIN, STAGE_ID, B), [row(A)], n => n, [A, B]);
+      expect(waits.length).toBeGreaterThan(0);
+      await interact(() => {
+        for (const run of waits.splice(0)) run();
+      });
+      await interact(() => harness.setRows([row(A), row(B)]));
+      expect(went).toEqual([]);
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+  });
+
   it('naming a machine this device is not paired with, says so in one line and goes nowhere', async () => {
     const { harness, hold, went, view: mounted } = await open(ruleDeepLink(ORIGIN, STAGE_ID, C), [row(A), row(B)]);
     expect(went).toEqual([]);
@@ -125,6 +189,18 @@ describe('the #rules link', () => {
     harness.setRows([row(B), row(A)]);
     await interact(() => {});
     expect(went).toEqual([secureCopy(A)]);
+  });
+});
+
+describe('the #agenda link Accounts prints', () => {
+  it('the real builder’s output is the keyed #agenda fragment the shell strips whole and holds for Agenda', async () => {
+    const fragment = agendaDeepLinkFragment('A8', 'sess-1', B as never);
+    const harness = deviceViewHarness({
+      plugin: 'agenda',
+      fragments: [{ form: 'keyed', key: 'agenda' }],
+      href: `/app/${fragment}`,
+    });
+    expect(harness.address()).toBe('/app/');
   });
 });
 

@@ -23,6 +23,15 @@ export interface PluginReach {
   readonly subscribe: (listener: () => void) => () => void;
   /** The same array until a row changes. */
   readonly rows: () => readonly DaemonReach[];
+  /** Why the calling plugin has NO row on `daemon`, or `undefined` when it has one (S2). */
+  readonly whyNone: (daemon: string) => NoReach | undefined;
+}
+
+/** Why a paired machine has no row: still being reached or read (`waiting`), or for good (not paired, off, paused…). */
+export interface NoReach {
+  readonly waiting: boolean;
+  /** The shell's own sentence for it (the same one the machine's page shows). */
+  readonly line: string;
 }
 
 export interface PluginIdentity {

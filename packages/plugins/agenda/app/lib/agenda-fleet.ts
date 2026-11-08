@@ -5,7 +5,7 @@
  * from the Inbox to that machine's ask page — and each machine is read once, whichever view asks.
  *
  * One fleet is made per app half (`../index.ts`) and handed to its views and its device view by construction; it keeps
- * no module state.
+ * no state beyond that per-half holder (a WeakMap keyed by it, one per bundle).
  */
 
 import { type AgendaCall, DaemonResponseError } from './agenda-call.ts';

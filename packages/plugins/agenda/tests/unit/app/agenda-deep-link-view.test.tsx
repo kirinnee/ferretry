@@ -64,8 +64,10 @@ afterEach(async () => {
   view = null;
 });
 
-async function open(href: string, rows: readonly DaemonReach[]) {
+/** `paired`: the machines this device is paired with (default: the machines that have a row). */
+async function open(href: string, rows: readonly DaemonReach[], paired: readonly string[] = rows.map(r => r.daemon)) {
   const harness = deviceViewHarness({ plugin: 'agenda', fragments: half.shell.fragments ?? [], href });
+  harness.setPaired(paired);
   harness.setRows(rows);
   const went: string[] = [];
   const View = agendaDeepLinkView({});
@@ -166,6 +168,32 @@ describe("Agenda's device view", () => {
     } finally {
       globalThis.setTimeout = realSetTimeout;
     }
+  });
+
+  it('M1 a link taken on a cold open, while no machine has a row yet, still opens when the rows arrive', async () => {
+    const a = machineClient(A, ['x']);
+    const b = machineClient(B, ['sess-1']);
+    const { harness, went } = await open(`/app/${agendaLink('A8', 'sess-1')}`, [], [A, B]);
+    expect(went).toEqual([]);
+    await interact(() => harness.setRows([rowOf(A, a.client), rowOf(B, b.client)]));
+    await settle();
+    expect(went).toEqual([`/d/${B}/agenda/sess-1/A8`]);
+  });
+
+  it('M1 a link that names machine B waits while only A has a row, then opens on B once B connects', async () => {
+    const a = machineClient(A, ['x']);
+    const b = machineClient(B, ['sess-1']);
+    const { harness, went } = await open(`/app/${agendaLink('A8', 'sess-1', B)}`, [rowOf(A, a.client)], [A, B]);
+    expect(went).toEqual([]);
+    await interact(() => harness.setRows([rowOf(A, a.client), rowOf(B, b.client)]));
+    await settle();
+    expect(went).toEqual([`/d/${B}/agenda/sess-1/A8`]);
+  });
+
+  it('M1 a link no paired machine runs is dropped once every paired machine has answered', async () => {
+    const a = machineClient(A, ['x']);
+    const { went } = await open(`/app/${agendaLink('A8', 'sess-9')}`, [rowOf(A, a.client)], [A]);
+    expect(went).toEqual([]);
   });
 
   it('drops a link no machine runs, and a link that names no session, without navigating', async () => {
