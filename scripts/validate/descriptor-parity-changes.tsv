@@ -113,13 +113,6 @@ route	POST /v1/shells/:name/build	added	new in 5.0: no table of today's to copy 
 route	DELETE /v1/shells/:name	added	new in 5.0: no table of today's to copy (design §2.3)
 route	GET /v1/ferrets/:ferretId/skills	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId/skills/inventory	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	POST /v1/skills/installs/local/project/preview	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	POST /v1/skills/installs/local/runtime/preview	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	POST /v1/skills/installs/local/project	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	POST /v1/skills/installs/local/runtime	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	GET /v1/skills/installs/local	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	DELETE /v1/skills/installs/local/project/:installId	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-route	DELETE /v1/skills/installs/local/runtime/:installId	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 member	DELETE /v1/shared/me/keys/self	changed	R619: member answers are no-store; today the member dispatcher stamped it on every answer, 5.0 declares it (noStore: true)
 member	GET /v1/shared/me	changed	R619: member answers are no-store; today the member dispatcher stamped it on every answer, 5.0 declares it (noStore: true)
 member	POST /v1/shared/passkeys	changed	R619: member answers are no-store; today the member dispatcher stamped it on every answer, 5.0 declares it (noStore: true)
@@ -154,7 +147,6 @@ route	POST /v1/sessions/:sessionId/task-plans/:planId/revoke	removed	session rou
 route	POST /v1/ferrets/:ferretId/task-plans/:planId/revoke	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/task-plans	removed	Accounts owns task plans: moved under its own prefix as /v1/accounts/plans (the replaced word `task`); lead decision 2026-11-07 (DECISIONS-1 item 16); descriptor fields unchanged
 route	GET /v1/accounts/plans	added	Accounts owns task plans: moved under its own prefix as /v1/accounts/plans (the replaced word `task`); lead decision 2026-11-07 (DECISIONS-1 item 16); descriptor fields unchanged
-route	POST /v1/push/seen	removed	DECISIONS-1 #4: Agenda owns the seen route; Access keeps push subscriptions.
 route	POST /v1/sessions/:sessionId/fork	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/fork	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/handover	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
