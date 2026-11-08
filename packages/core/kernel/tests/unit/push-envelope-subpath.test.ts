@@ -1,7 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import { dirname, resolve } from 'node:path';
-import { PushEnvelopeSchema as fromBarrel } from '../../contract/index.ts';
-import { PUSH_BODY_MAX, PUSH_TITLE_MAX, PUSH_URL_MAX, PushEnvelopeSchema } from '../../contract/push-envelope.ts';
+import {
+  PushEnvelopeSchema as fromBarrel,
+  readPushMessage as readFromBarrel,
+  shouldShowPush as decideFromBarrel,
+} from '../../contract/index.ts';
+import { shouldShowPush } from '../../contract/notification-filter.ts';
+import {
+  PUSH_BODY_MAX,
+  PUSH_TITLE_MAX,
+  PUSH_URL_MAX,
+  PushEnvelopeSchema,
+  readPushMessage,
+} from '../../contract/push-envelope.ts';
 
 const root = resolve(import.meta.dir, '../..');
 
@@ -25,6 +36,27 @@ async function importGraph(entry: string): Promise<readonly string[]> {
 
 const good = { title: 'Deploy approval', body: 'Ship the build?', url: '/ferrets/f1/chat?ask=A3' };
 
+describe('@ferretry/kernel/contract/notification-filter', () => {
+  test('is zod and the push envelope only: the signed service worker imports it by this subpath', async () => {
+    expect(await importGraph(resolve(root, 'contract/notification-filter.ts'))).toEqual([
+      'contract/notification-filter.ts',
+      'contract/push-envelope.ts',
+      'external:zod',
+    ]);
+  });
+
+  test('the subpath and the contract barrel are the same declaration', () => {
+    expect(decideFromBarrel).toBe(shouldShowPush);
+  });
+
+  test('both subpaths resolve alone through the package exports', () => {
+    for (const subpath of ['push-envelope', 'notification-filter'])
+      expect(Bun.resolveSync(`@ferretry/kernel/contract/${subpath}`, root)).toBe(
+        resolve(root, `contract/${subpath}.ts`),
+      );
+  });
+});
+
 describe('@ferretry/kernel/contract/push-envelope', () => {
   test('is zod and nothing else: the signed service worker imports it by this subpath', async () => {
     expect(await importGraph(resolve(root, 'contract/push-envelope.ts'))).toEqual([
@@ -35,6 +67,7 @@ describe('@ferretry/kernel/contract/push-envelope', () => {
 
   test('the subpath and the contract barrel are the same declaration', () => {
     expect(fromBarrel).toBe(PushEnvelopeSchema);
+    expect(readFromBarrel).toBe(readPushMessage);
   });
 
   test('a field exactly at its cap is accepted and one past it is refused; nothing else rides along', () => {

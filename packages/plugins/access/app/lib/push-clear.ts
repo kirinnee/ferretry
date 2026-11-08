@@ -27,7 +27,8 @@
  * machine's push is shown under), so a clear can only ever take down what that same machine showed.
  */
 
-import { type PushClearPayload, pushServiceAllowsSilent } from '../../contract/index.ts';
+import { pushServiceAllowsSilent } from '@ferretry/kernel/contract/push-envelope';
+import type { PushClearPayload } from '../../contract/index.ts';
 import { notificationBrand } from '../shell-pairing.ts';
 import { machineHomeUrl, type PushMachine } from './push-scope.ts';
 
