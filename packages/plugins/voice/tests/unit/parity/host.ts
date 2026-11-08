@@ -7,7 +7,7 @@ import voice from '../../../daemon/index.ts';
 export const GROQ_KEY = 'gsk_test_0123456789abcdef';
 export const CEREBRAS_KEY = 'csk_test_0123456789abcdef';
 
-export const chat = (content: string): AuthorizedOutcome => ({
+const chat = (content: string): AuthorizedOutcome => ({
   kind: 'completion',
   payload: { choices: [{ message: { content }, finish_reason: 'stop' }] },
 });

@@ -11,7 +11,6 @@ import {
 
 export const FERRETRY_ID = '11111111-1111-4111-8111-111111111111';
 export const DOCS_ID = '22222222-2222-4222-8222-222222222222';
-export const PROJECT = FERRETRY_ID;
 
 export function project(id: string, path: string, commonDirectory?: string): ProjectInfo {
   return {
@@ -93,7 +92,7 @@ const CLASSIC_LAYOUTS = {
 
 /** A lane set from the live template, on a project. */
 export const templateLanes = (
-  projectId: BoardProjectId = PROJECT,
+  projectId: BoardProjectId = FERRETRY_ID,
   template: LaneTemplateName = 'pr-release-verify',
 ): LaneSet => ({
   projectId,
@@ -109,7 +108,7 @@ export const templateLanes = (
  * {@link templateLanes} is the live template.
  */
 export const lanes = (
-  projectId: BoardProjectId = PROJECT,
+  projectId: BoardProjectId = FERRETRY_ID,
   template: LaneTemplateName = 'pr-release-verify',
 ): LaneSet => {
   const layout = template in CLASSIC_LAYOUTS ? CLASSIC_LAYOUTS[template as keyof typeof CLASSIC_LAYOUTS] : undefined;

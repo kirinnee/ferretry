@@ -12,7 +12,7 @@ import { RuntimeCatalogSchema, type RuntimeView } from '@ferretry/plugin-runtime
 import { isPluginOff } from './plugin-off.ts';
 
 /** One model a login offers, as the model field lists it. */
-export type PickerModel = ModelChoice;
+type PickerModel = ModelChoice;
 
 /** One runtime the Warden can investigate on, as the settings form reads it. */
 export interface PickerAccount {
@@ -39,7 +39,7 @@ export interface PickerAccount {
 }
 
 /** One runtime as the picker reads it. A model set's models are offered; the harness default offers none. */
-export const pickerAccount = (runtime: RuntimeView): PickerAccount => ({
+const pickerAccount = (runtime: RuntimeView): PickerAccount => ({
   id: runtime.id,
   wrapper: runtime.wrapper,
   displayName: runtime.name,

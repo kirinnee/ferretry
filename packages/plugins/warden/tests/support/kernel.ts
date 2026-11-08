@@ -10,7 +10,7 @@ import type {
 } from '@ferretry/kernel/contract';
 import { WARDEN_JEV_CHECKS, WARDEN_REMEMBERED, WARDEN_REPORTS, WARDEN_STATE } from '../../contract/index.ts';
 
-export const WARDEN_STATE_FILES: readonly StateFileDef[] = [
+const WARDEN_STATE_FILES: readonly StateFileDef[] = [
   WARDEN_STATE,
   WARDEN_REPORTS,
   WARDEN_JEV_CHECKS,

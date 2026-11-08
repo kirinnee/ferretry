@@ -41,7 +41,7 @@ import type { DaemonConnection } from './shell-pairing.ts';
 
 // ─── class names, buttons, dialog focus (the app shell's UI kit, `@ferretry/app/ui`) ─────────────────────────────
 
-export { Button, type ButtonProps, type ClassValue, cn, useDialogFocus } from '@ferretry/app/ui';
+export { Button, cn, useDialogFocus } from '@ferretry/app/ui';
 
 // ─── the daemon connection (pwa/src/lib/daemon-connection.ts) ─────────────────────────────────────────────────────
 

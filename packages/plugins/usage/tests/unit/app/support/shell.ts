@@ -3,12 +3,10 @@
  * its id only now (the client the shell builds is already that daemon's), so `daemonConnection` keeps accepting the
  * address and device fields the old suites passed and drops them.
  */
-import { DaemonCallError, type DaemonConnection, type DaemonId } from '../../../../app/shell.ts';
+import { DaemonCallError, type DaemonConnection } from '../../../../app/shell.ts';
 
-export type { DaemonConnection, DaemonId };
+export type { DaemonConnection };
 export { DaemonCallError, daemonSessionScope } from '../../../../app/shell.ts';
-
-export const daemonId = (value: string): DaemonId => value;
 
 export const daemonConnection = (input: {
   readonly daemonId: string;

@@ -1,19 +1,19 @@
 /** What a harness dialog says, as far as this module reads it. */
-export interface HarnessDialog {
+interface HarnessDialog {
   readonly kind: string;
   readonly title: string;
   readonly body?: string | undefined;
 }
 
 /** The quota block of a session that hit a limit, as far as this module reads it. */
-export interface SessionQuotaFacts {
+interface SessionQuotaFacts {
   readonly limitNotice?: string | undefined;
   readonly atLimit?: boolean | undefined;
   readonly retryAt?: number | undefined;
   readonly unavailableReason?: string | undefined;
 }
 
-export interface SessionState {
+interface SessionState {
   readonly status: string;
   readonly quota?: SessionQuotaFacts | undefined;
 }

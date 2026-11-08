@@ -23,7 +23,6 @@
     "zod": "4.4.3",
     "@ferretry/plugin-connections": "workspace:*",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
     "lucide-react": "^0.468.0",
     "qrcode-terminal": "0.12.0",
     "@ferretry/app": "workspace:*"
@@ -36,6 +35,7 @@
     "@types/react-test-renderer": "^19.0.0",
     "@happy-dom/global-registrator": "^20.11.1",
     "should": "^13.2.3",
-    "@types/qrcode-terminal": "0.12.2"
+    "@types/qrcode-terminal": "0.12.2",
+    "react-dom": "^19.0.0"
   }
 }

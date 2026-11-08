@@ -6,25 +6,17 @@
 import { NonNegativeFiniteSchema } from '@ferretry/std';
 import { z } from 'zod';
 import {
-  DEFAULT_WARDEN_AUTO_MOVE,
-  DEFAULT_WARDEN_JEV_ACTS,
   DEFAULT_WARDEN_REVIVE,
-  ProviderOutageConfigSchema,
   WARDEN_AUTO_MOVE_TRIGGERS,
-  WARDEN_GUARD_THRESHOLD_RANGE,
-  WARDEN_LEAVE_DURATIONS,
-  WARDEN_SWEEP_INTERVALS,
   WardenAccountSchema,
   WardenAnomalyKindSchema,
-  WardenAutoMoveConfigSchema,
   WardenCapsSchema,
   WardenClearedBySchema,
   WardenConfigSchema,
+  WardenFileSchema,
   WardenEventTriggersSchema,
-  WardenFailoverConfigSchema,
   WardenFailoverPolicySchema,
   WardenGuardConfigSchema,
-  WardenInvestigationConfigSchema,
   WardenJevActsSchema,
   WardenLayerStatusSchema,
   WardenLayersSchema,
@@ -32,13 +24,10 @@ import {
   WardenMayActAloneSchema,
   WardenRecommendationSchema,
   WardenReviveConfigSchema,
-  WardenSweepIntervalSchema,
   WardenTriageReasonSchema,
   WardenVerdictKindSchema,
-  type WardenAnomalyKind,
   type WardenConfig,
   type WardenFile,
-  WardenFileSchema,
 } from '../../contract/index.ts';
 import { CardRefSchema } from '@ferretry/plugin-board/contract';
 import {
@@ -51,47 +40,15 @@ import {
 } from './foreign.ts';
 
 /** An instant as the sweep's own computing shapes carry it: an ISO date-time with an offset (not the branded wire type). */
-export const InstantSchema = z.iso.datetime({ offset: true });
+const InstantSchema = z.iso.datetime({ offset: true });
 
 const NonNegativeIntegerSchema = z.number().int().nonnegative();
 const PositiveIntegerSchema = z.number().int().positive();
 
-export {
-  DEFAULT_WARDEN_AUTO_MOVE,
-  DEFAULT_WARDEN_JEV_ACTS,
-  DEFAULT_WARDEN_REVIVE,
-  WARDEN_AUTO_MOVE_TRIGGERS,
-  WARDEN_GUARD_THRESHOLD_RANGE,
-  WARDEN_LEAVE_DURATIONS,
-  WARDEN_SWEEP_INTERVALS,
-  WardenAccountSchema,
-  WardenAnomalyKindSchema,
-  WardenClearedBySchema,
-  WardenConfigSchema,
-  WardenFailoverPolicySchema,
-  WardenLayerStatusSchema,
-  WardenLeaveDurationSchema,
-  WardenRecommendationSchema,
-  WardenTriageReasonSchema,
-  WardenVerdictKindSchema,
-};
-export {
-  WardenJevActsSchema,
-  WardenFailoverConfigSchema,
-  WardenGuardConfigSchema,
-  WardenCapsSchema,
-  WardenMayActAloneSchema,
-  WardenEventTriggersSchema,
-  WardenInvestigationConfigSchema,
-  WardenReviveConfigSchema,
-  WardenAutoMoveConfigSchema,
-  WardenLayersSchema,
-  ProviderOutageConfigSchema,
-  WardenSweepIntervalSchema,
-};
-export type { SessionStatus, WardenAnomalyKind, WardenConfig };
+export { DEFAULT_WARDEN_REVIVE, WardenClearedBySchema, WardenConfigSchema, WardenFileSchema, WardenVerdictKindSchema };
+export { WardenJevActsSchema };
+export type { SessionStatus, WardenConfig };
 export const WardenAutoMoveTriggerSchema = z.enum(WARDEN_AUTO_MOVE_TRIGGERS);
-export const WardenConfigPatchSchema = WardenFileSchema;
 const WARDEN_CONFIG_SECTIONS = [
   'revive',
   'autoMove',
@@ -126,13 +83,7 @@ import { effectiveWardenConfig as effectiveWardenConfigOf } from '../../contract
 /** The most a blessing may last, whatever the owner or the growth rule asks. */
 export const WARDEN_BLESSING_CEILING_MINUTES = 240;
 
-export type WardenFailoverPolicy = z.infer<typeof WardenFailoverPolicySchema>;
-export type WardenAccount = z.infer<typeof WardenAccountSchema>;
-export type WardenFailoverConfig = z.infer<typeof WardenFailoverConfigSchema>;
-export type ProviderOutageConfig = z.infer<typeof ProviderOutageConfigSchema>;
 export type WardenLayers = z.infer<typeof WardenLayersSchema>;
-export type WardenLayer = keyof WardenLayers;
-export type WardenSweepInterval = z.infer<typeof WardenSweepIntervalSchema>;
 export type WardenGuardConfig = z.infer<typeof WardenGuardConfigSchema>;
 export type WardenCaps = z.infer<typeof WardenCapsSchema>;
 export type WardenJevActs = z.infer<typeof WardenJevActsSchema>;
@@ -140,15 +91,10 @@ export type WardenJevAct = keyof WardenJevActs;
 export type WardenMayActAlone = z.infer<typeof WardenMayActAloneSchema>;
 export type WardenEventTriggers = z.infer<typeof WardenEventTriggersSchema>;
 export type WardenEventTrigger = keyof WardenEventTriggers;
-export type WardenInvestigationConfig = z.infer<typeof WardenInvestigationConfigSchema>;
-export type WardenEffort = WardenInvestigationConfig['effort'];
 export type WardenReviveConfig = z.infer<typeof WardenReviveConfigSchema>;
 export type WardenAutoMoveTrigger = (typeof WARDEN_AUTO_MOVE_TRIGGERS)[number];
-export type WardenAutoMoveConfig = z.infer<typeof WardenAutoMoveConfigSchema>;
 export type WardenConfigPatch = WardenFile;
-export type WardenVerdictKind = z.infer<typeof WardenVerdictKindSchema>;
-export type WardenRecommendation = z.infer<typeof WardenRecommendationSchema>;
-export const LivenessLedgerSchema = z.object({
+const LivenessLedgerSchema = z.object({
   lastTranscriptAt: InstantSchema.optional(),
   lastCounterAdvanceAt: InstantSchema.optional(),
   lastTokenAdvanceAt: InstantSchema.optional(),
@@ -158,9 +104,8 @@ export const LivenessLedgerSchema = z.object({
   subprocessSince: InstantSchema.optional(),
   subprocessKey: z.string().min(1).optional(),
 });
-export type LivenessLedger = z.infer<typeof LivenessLedgerSchema>;
 
-export const WardenAnomalySchema = z.object({
+const WardenAnomalySchema = z.object({
   kind: WardenAnomalyKindSchema,
   sessionId: z.string().min(1),
   fleetKey: z.string().optional(),
@@ -181,9 +126,9 @@ export const WardenAnomalySchema = z.object({
   task: CardRefSchema.optional(),
 });
 export type WardenAnomaly = z.infer<typeof WardenAnomalySchema>;
-export const WardenStuckInputFlagSchema = WardenAnomalySchema.extend({ kind: z.literal('input_stuck') });
+const WardenStuckInputFlagSchema = WardenAnomalySchema.extend({ kind: z.literal('input_stuck') });
 export type WardenStuckInputFlag = z.infer<typeof WardenStuckInputFlagSchema>;
-export const WardenStuckInboxFlagSchema = WardenAnomalySchema.extend({ kind: z.literal('inbox_stuck') });
+const WardenStuckInboxFlagSchema = WardenAnomalySchema.extend({ kind: z.literal('inbox_stuck') });
 export type WardenStuckInboxFlag = z.infer<typeof WardenStuckInboxFlagSchema>;
 export function wardenFlags(view: {
   readonly anomalies: readonly WardenAnomaly[];
@@ -192,7 +137,7 @@ export function wardenFlags(view: {
 }): readonly WardenAnomaly[] {
   return [...view.anomalies, ...(view.stuckInput ?? []), ...(view.stuckInbox ?? [])];
 }
-export const WardenFailoverAccountViewSchema = z.object({
+const WardenFailoverAccountViewSchema = z.object({
   agent: z.string().min(1),
   model: z.string().optional(),
   eligible: z.boolean(),
@@ -208,8 +153,7 @@ export const WardenFailoverAccountViewSchema = z.object({
     })
     .optional(),
 });
-export type WardenFailoverAccountView = z.infer<typeof WardenFailoverAccountViewSchema>;
-export const WardenFailoverStatusSchema = z.object({
+const WardenFailoverStatusSchema = z.object({
   policy: WardenFailoverPolicySchema,
   failureThreshold: PositiveIntegerSchema,
   cooldownMinutes: PositiveIntegerSchema,
@@ -220,15 +164,14 @@ export const WardenFailoverStatusSchema = z.object({
   exhaustedSince: InstantSchema.optional(),
 });
 export type WardenFailoverStatus = z.infer<typeof WardenFailoverStatusSchema>;
-export const WardenLoginSourceSchema = z.enum(['configured', 'machine_default', 'not_set']);
-export type WardenLoginSource = z.infer<typeof WardenLoginSourceSchema>;
-export const WardenLoginSchema = z.object({
+const WardenLoginSourceSchema = z.enum(['configured', 'machine_default', 'not_set']);
+const WardenLoginSchema = z.object({
   source: WardenLoginSourceSchema,
   unknown: z.array(z.string().min(1)),
   available: z.array(z.string().min(1)),
 });
 export type WardenLogin = z.infer<typeof WardenLoginSchema>;
-export const WardenConfigViewSchema = z.object({
+const WardenConfigViewSchema = z.object({
   config: WardenConfigSchema,
   accounts: z.array(WardenAccountSchema),
   warnings: z.array(z.string()),
@@ -236,7 +179,7 @@ export const WardenConfigViewSchema = z.object({
   held: z.array(z.string()).optional(),
 });
 export type WardenConfigView = z.infer<typeof WardenConfigViewSchema>;
-export const WardenVerdictSpawnSchema = z.object({
+const WardenVerdictSpawnSchema = z.object({
   agent: z.string().min(1),
   model: z.string().min(1),
   modelSource: z.enum(['harness', 'agent', 'configured', 'unknown']),
@@ -247,8 +190,7 @@ export const WardenVerdictSpawnSchema = z.object({
   configuredFirst: z.string().min(1),
   skipped: z.record(z.string(), z.string()),
 });
-export type WardenVerdictSpawn = z.infer<typeof WardenVerdictSpawnSchema>;
-export const WardenVerdictSchema = z.object({
+const WardenVerdictSchema = z.object({
   at: InstantSchema,
   targetSession: z.string().min(1).optional(),
   teammate: z.string().min(1).optional(),
@@ -262,8 +204,6 @@ export const WardenVerdictSchema = z.object({
   spawn: WardenVerdictSpawnSchema.optional(),
 });
 export type WardenVerdict = z.infer<typeof WardenVerdictSchema>;
-export const WardenVerdictsViewSchema = z.array(WardenVerdictSchema);
-export type WardenVerdictsView = z.infer<typeof WardenVerdictsViewSchema>;
 export type WardenTriageReason = z.infer<typeof WardenTriageReasonSchema>;
 export const WardenGuardFailureCodeSchema = z.enum([
   'not_set',
@@ -282,17 +222,17 @@ export const WardenGuardFailureCodeSchema = z.enum([
 ]);
 export type WardenGuardFailureCode = z.infer<typeof WardenGuardFailureCodeSchema>;
 export type WardenLayerStatus = z.infer<typeof WardenLayerStatusSchema>;
-export const WardenTriageStatusSchema = z.object({
+const WardenTriageStatusSchema = z.object({
   jev: WardenLayerStatusSchema,
   llm: WardenLayerStatusSchema,
   guardFailure: z.object({ code: WardenGuardFailureCodeSchema, at: InstantSchema }).optional(),
   guardBackoffUntil: InstantSchema.optional(),
 });
 export type WardenTriageStatus = z.infer<typeof WardenTriageStatusSchema>;
-export const WardenSpendDaySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-export const WardenCapSchema = z.enum(['jev', 'investigation']);
+const WardenSpendDaySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const WardenCapSchema = z.enum(['jev', 'investigation']);
 export type WardenCap = z.infer<typeof WardenCapSchema>;
-export const WardenSpendSchema = z.object({
+const WardenSpendSchema = z.object({
   day: WardenSpendDaySchema,
   jevUsd: NonNegativeFiniteSchema,
   jevCapUsd: NonNegativeFiniteSchema,
@@ -306,7 +246,7 @@ export const WardenSpendSchema = z.object({
   maxInvestigationsPerHour: PositiveIntegerSchema,
 });
 export type WardenSpend = z.infer<typeof WardenSpendSchema>;
-export const WardenSavingsSchema = z.object({
+const WardenSavingsSchema = z.object({
   day: WardenSpendDaySchema,
   flags: NonNegativeIntegerSchema,
   jevDecisions: NonNegativeIntegerSchema,
@@ -317,11 +257,10 @@ export const WardenSavingsSchema = z.object({
   savedUsd: NonNegativeFiniteSchema.optional(),
 });
 export type WardenSavings = z.infer<typeof WardenSavingsSchema>;
-export const WardenInvestigationStateSchema = z.enum(['queued', 'running', 'done']);
-export type WardenInvestigationState = z.infer<typeof WardenInvestigationStateSchema>;
+const WardenInvestigationStateSchema = z.enum(['queued', 'running', 'done']);
 export const WardenInvestigationOriginSchema = z.enum(['sweep', 'jev', 'owner']);
 export type WardenInvestigationOrigin = z.infer<typeof WardenInvestigationOriginSchema>;
-export const WardenInvestigationSchema = z.object({
+const WardenInvestigationSchema = z.object({
   id: z.string().min(1),
   state: WardenInvestigationStateSchema,
   scope: z.enum(['session', 'fleet']),
@@ -342,7 +281,7 @@ export const WardenInvestigationSchema = z.object({
 });
 export type WardenInvestigation = z.infer<typeof WardenInvestigationSchema>;
 export type WardenClearedBy = z.infer<typeof WardenClearedBySchema>;
-export const WardenActionKindSchema = z.enum([
+const WardenActionKindSchema = z.enum([
   'bless',
   'nudge',
   'resume',
@@ -353,11 +292,11 @@ export const WardenActionKindSchema = z.enum([
   'revive',
 ]);
 export type WardenActionKind = z.infer<typeof WardenActionKindSchema>;
-export const WardenActionOutcomeSchema = z.enum(['done', 'held', 'failed']);
+const WardenActionOutcomeSchema = z.enum(['done', 'held', 'failed']);
 export type WardenActionOutcome = z.infer<typeof WardenActionOutcomeSchema>;
 export const WardenActorSchema = z.enum(['auto', 'jev', 'llm', 'owner']);
 export type WardenActor = z.infer<typeof WardenActorSchema>;
-export const WardenOutcomeSchema = z.enum(['moved', 'cleared', 'stopped', 'asked']);
+const WardenOutcomeSchema = z.enum(['moved', 'cleared', 'stopped', 'asked']);
 export type WardenOutcome = z.infer<typeof WardenOutcomeSchema>;
 export const WardenActionSchema = z.object({
   at: InstantSchema,
@@ -401,30 +340,28 @@ export function wardenActionOutcome(action: Pick<WardenAction, 'action' | 'outco
       return undefined;
   }
 }
-export const WardenActorCountsSchema = z.object({
+const WardenActorCountsSchema = z.object({
   auto: NonNegativeIntegerSchema,
   jev: NonNegativeIntegerSchema,
   llm: NonNegativeIntegerSchema,
   owner: NonNegativeIntegerSchema.optional(),
 });
 export type WardenActorCounts = z.infer<typeof WardenActorCountsSchema>;
-export const WardenStatActionSchema = z.enum([...WardenActionKindSchema.options, 'escalate']);
+const WardenStatActionSchema = z.enum([...WardenActionKindSchema.options, 'escalate']);
 export type WardenStatActionKind = z.infer<typeof WardenStatActionSchema>;
-export const WARDEN_REVIVE_ACTIONS: readonly WardenStatActionKind[] = ['revive', 'resume'];
-export const WardenActionTallySchema = WardenActorCountsSchema.extend({
+const WardenActionTallySchema = WardenActorCountsSchema.extend({
   action: WardenStatActionSchema,
   outcome: WardenActionOutcomeSchema,
 });
 export type WardenActionTally = z.infer<typeof WardenActionTallySchema>;
-export const WardenReviveResultsSchema = z.object({
+const WardenReviveResultsSchema = z.object({
   progressed: WardenActorCountsSchema,
   stalled: WardenActorCountsSchema,
 });
 export type WardenReviveResults = z.infer<typeof WardenReviveResultsSchema>;
 export const WARDEN_REVIVE_PROGRESS_MINUTES = 10;
-export const WardenJevCheckVerdictSchema = z.enum(['healthy', 'acted', 'handed_on', 'skipped']);
-export type WardenJevCheckVerdict = z.infer<typeof WardenJevCheckVerdictSchema>;
-export const WardenJevCheckWhySchema = z.enum([
+const WardenJevCheckVerdictSchema = z.enum(['healthy', 'acted', 'handed_on', 'skipped']);
+const WardenJevCheckWhySchema = z.enum([
   'unsure',
   'not_sure_enough',
   'never_alone',
@@ -438,11 +375,10 @@ export const WardenJevCheckWhySchema = z.enum([
   'jev_cap',
   'jev_paced',
 ]);
-export type WardenJevCheckWhy = z.infer<typeof WardenJevCheckWhySchema>;
-export const WardenJevCheckRouteSchema = z.enum(['investigation', 'owner']);
+const WardenJevCheckRouteSchema = z.enum(['investigation', 'owner']);
 export type WardenJevCheckRoute = z.infer<typeof WardenJevCheckRouteSchema>;
-export const WARDEN_JEV_PATH_MAX = 12;
-export const WardenJevPathStepSchema = z.object({
+const WARDEN_JEV_PATH_MAX = 12;
+const WardenJevPathStepSchema = z.object({
   node: z.string().min(1).max(64),
   kind: z.enum(['fact', 'judgement']),
   answer: z.enum(['yes', 'no']),
@@ -464,7 +400,7 @@ export const WardenJevCheckSchema = z.object({
   node: z.string().min(1).max(64).optional(),
 });
 export type WardenJevCheck = z.infer<typeof WardenJevCheckSchema>;
-export const WardenJevDayStatsSchema = z.object({
+const WardenJevDayStatsSchema = z.object({
   checks: NonNegativeIntegerSchema,
   healthy: NonNegativeIntegerSchema,
   acted: NonNegativeIntegerSchema,
@@ -472,7 +408,7 @@ export const WardenJevDayStatsSchema = z.object({
   skippedForCap: NonNegativeIntegerSchema,
 });
 export type WardenJevDayStats = z.infer<typeof WardenJevDayStatsSchema>;
-export const WardenJevBeforeWhySchema = z.enum([
+const WardenJevBeforeWhySchema = z.enum([
   ...WardenJevCheckWhySchema.options,
   'owner_request',
   'forced',
@@ -481,7 +417,6 @@ export const WardenJevBeforeWhySchema = z.enum([
   'unredacted',
   'no_record',
 ]);
-export type WardenJevBeforeWhy = z.infer<typeof WardenJevBeforeWhySchema>;
 export const WardenJevBeforeSchema = z.object({
   verdict: z.enum(['handed_on', 'skipped', 'not_asked', 'off']),
   why: WardenJevBeforeWhySchema.optional(),
@@ -510,13 +445,12 @@ export const WardenDayStatsSchema = z.object({
 });
 export type WardenDayStats = z.infer<typeof WardenDayStatsSchema>;
 export const WARDEN_HISTORY_DAYS = 30;
-export const WARDEN_INVESTIGATOR_NAME_PATTERN = /^warden-([0-9a-f]{6})$/iu;
 export const WARDEN_INVESTIGATOR_MAX_SEQUENCE = SYSTEM_CALLSIGN_MAX_SEQUENCE;
 export const wardenInvestigatorName = (sequence: number): string => systemCallsignName('warden', sequence);
 export const wardenInvestigatorSequence = (name: string | undefined): number | undefined =>
   systemCallsignSequence('warden', name);
 export const nextWardenInvestigatorSequence = nextSystemCallsignSequence;
-export const WardenBlessingViewSchema = z.object({
+const WardenBlessingViewSchema = z.object({
   sessionId: z.string().min(1),
   kinds: z.array(WardenAnomalyKindSchema),
   expiresAt: InstantSchema,
@@ -550,7 +484,7 @@ export const WardenStatusViewSchema = z.object({
   jevChecks: z.array(WardenJevCheckSchema).optional(),
 });
 export type WardenStatusView = z.infer<typeof WardenStatusViewSchema>;
-export const WardenRunViewSchema = z.object({
+const WardenRunViewSchema = z.object({
   sweptAt: InstantSchema,
   anomalies: z.array(WardenAnomalySchema),
   stuckInput: z.array(WardenStuckInputFlagSchema).optional(),
@@ -560,18 +494,7 @@ export const WardenRunViewSchema = z.object({
   message: z.string().optional(),
 });
 export type WardenRunView = z.infer<typeof WardenRunViewSchema>;
-export const WardenRunRequestSchema = z.strictObject({
-  spawn: z.boolean().default(false),
-});
-export type WardenRunRequest = z.infer<typeof WardenRunRequestSchema>;
-export type WardenRunRequestInput = z.input<typeof WardenRunRequestSchema>;
-export const WARDEN_INVESTIGATE_PATH = '/v1/warden/investigate';
-export const WardenInvestigateRequestSchema = z.strictObject({
-  sessionId: z.string().trim().min(1),
-  note: z.string().trim().min(1).max(500).optional(),
-});
-export type WardenInvestigateRequest = z.infer<typeof WardenInvestigateRequestSchema>;
-export const WardenInvestigateViewSchema = z.object({
+const WardenInvestigateViewSchema = z.object({
   sessionId: z.string().min(1),
   state: z.enum(['queued', 'running']),
   position: PositiveIntegerSchema.optional(),
@@ -579,29 +502,20 @@ export const WardenInvestigateViewSchema = z.object({
   message: z.string().min(1),
 });
 export type WardenInvestigateView = z.infer<typeof WardenInvestigateViewSchema>;
-export const WARDEN_LEAVE_PATH = '/v1/warden/leave';
 export type WardenLeaveDuration = z.infer<typeof WardenLeaveDurationSchema>;
-export const WardenLeaveRequestSchema = z.strictObject({
-  sessionId: z.string().trim().min(1),
-  duration: WardenLeaveDurationSchema,
-});
-export type WardenLeaveRequest = z.infer<typeof WardenLeaveRequestSchema>;
-export const WardenLeaveViewSchema = z.object({
+const WardenLeaveViewSchema = z.object({
   blessing: WardenBlessingViewSchema,
   message: z.string().min(1),
 });
 export type WardenLeaveView = z.infer<typeof WardenLeaveViewSchema>;
-export const WARDEN_AGENDA_PATH = '/v1/warden/agenda';
-export const WardenJudgementStateSchema = z.enum(['judged', 'pending', 'queued', 'failed', 'none']);
-export type WardenJudgementState = z.infer<typeof WardenJudgementStateSchema>;
-export const WardenJudgeProvenanceSchema = z.object({
+const WardenJudgementStateSchema = z.enum(['judged', 'pending', 'queued', 'failed', 'none']);
+const WardenJudgeProvenanceSchema = z.object({
   wardenSessionId: z.string().optional(),
   agent: z.string().optional(),
   model: z.string().optional(),
   harness: z.string().optional(),
 });
-export type WardenJudgeProvenance = z.infer<typeof WardenJudgeProvenanceSchema>;
-export const WardenJudgementSchema = z.object({
+const WardenJudgementSchema = z.object({
   state: WardenJudgementStateSchema,
   verdict: WardenVerdictKindSchema.optional(),
   reason: z.string().min(1),
@@ -611,8 +525,7 @@ export const WardenJudgementSchema = z.object({
   recommendation: WardenRecommendationSchema.optional(),
   stale: z.boolean().optional(),
 });
-export type WardenJudgement = z.infer<typeof WardenJudgementSchema>;
-export const FleetAgendaItemSchema = z.object({
+const FleetAgendaItemSchema = z.object({
   sessionId: z.string().min(1),
   teammate: z.string().optional(),
   label: z.string().optional(),
@@ -633,9 +546,9 @@ export const FleetAgendaItemSchema = z.object({
   anomalyKind: WardenAnomalyKindSchema.optional(),
 });
 export type FleetAgendaItem = z.infer<typeof FleetAgendaItemSchema>;
-export const WardenAgendaOutcomeSchema = z.enum(['items', 'clean-sweep', 'degraded', 'no-sweep']);
+const WardenAgendaOutcomeSchema = z.enum(['items', 'clean-sweep', 'degraded', 'no-sweep']);
 export type WardenAgendaOutcome = z.infer<typeof WardenAgendaOutcomeSchema>;
-export const WardenAgendaViewSchema = z.object({
+const WardenAgendaViewSchema = z.object({
   generatedAt: InstantSchema,
   lastSweepAt: InstantSchema.optional(),
   outcome: WardenAgendaOutcomeSchema,

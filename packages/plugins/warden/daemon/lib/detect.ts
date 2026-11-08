@@ -156,7 +156,7 @@ export const WAITING_BACKSTOP_MS = 4 * 60 * 60_000;
 /** A sweep observes sessions still live enough for a warden action. Terminal
  *  history belongs to the activity log. Kept separate from detection so callers
  *  inspecting a saved historical snapshot may still call `detectAnomalies`. */
-export const WARDEN_SCANNABLE_STATUSES: readonly WardenSessionStatus[] = [
+const WARDEN_SCANNABLE_STATUSES: readonly WardenSessionStatus[] = [
   'running',
   'thinking',
   'tool_running',

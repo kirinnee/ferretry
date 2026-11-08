@@ -20,17 +20,17 @@ interface EventBase {
   readonly inputSource?: 'native-queue' | 'harness';
 }
 
-export interface TranscriptMessageEvent extends EventBase {
+interface TranscriptMessageEvent extends EventBase {
   readonly kind: 'message';
   readonly text: string;
 }
 
-export interface TranscriptToolCallEvent extends EventBase {
+interface TranscriptToolCallEvent extends EventBase {
   readonly kind: 'tool-call';
   readonly call: { readonly id: string; readonly name: string; readonly input: TranscriptJsonValue };
 }
 
-export interface TranscriptToolResultEvent extends EventBase {
+interface TranscriptToolResultEvent extends EventBase {
   readonly kind: 'tool-result';
   readonly result: {
     readonly callId: string;
@@ -41,7 +41,7 @@ export interface TranscriptToolResultEvent extends EventBase {
 }
 
 /** Any other event kind (reasoning, attachments, …): read by nobody here. */
-export interface TranscriptOtherEvent extends EventBase {
+interface TranscriptOtherEvent extends EventBase {
   readonly kind: 'reasoning' | 'attachment' | 'question' | 'status';
 }
 

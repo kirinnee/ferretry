@@ -54,7 +54,7 @@ import {
 export type ClipboardWriter = (text: string) => Promise<void>;
 
 /** The real clipboard, which rejects rather than pretending on a browser that has none. */
-export const browserClipboardWriter =
+const browserClipboardWriter =
   (): ClipboardWriter =>
   async (text: string): Promise<void> => {
     const clipboard = (globalThis.navigator as { clipboard?: { writeText?: (value: string) => Promise<void> } })

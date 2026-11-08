@@ -84,7 +84,7 @@ import { parseWardenAnomalyKind, type WardenRecommendation, type WardenVerdict }
  * `agent-raised` is the only source the state machine lets a stable `sourceRef` ride on, and a non-null
  * `sourceRef` is reserved for a daemon actor — which is precisely the dedupe key this module turns on.
  */
-export const WARDEN_ESCALATION_SOURCE: AgendaSource = 'agent-raised';
+const WARDEN_ESCALATION_SOURCE: AgendaSource = 'agent-raised';
 
 /** A parsed report row as the escalation reads it: the verdict, plus the daemon-owned sidecar naming
  *  which account and model actually judged it. */
@@ -111,7 +111,7 @@ export interface WardenEscalationBoard {
 
 /** What the daemon was allowed to do about a suspicious node, and what came of it. `applied` is the
  *  only disposition that withholds an escalation. */
-export type WardenRemedyDisposition = 'forbidden' | 'failed' | 'applied';
+type WardenRemedyDisposition = 'forbidden' | 'failed' | 'applied';
 
 export interface WardenRemedyOutcome {
   readonly disposition: WardenRemedyDisposition;
@@ -278,7 +278,7 @@ export interface WardenEscalationRaise {
 export type WardenEscalationReasonKind = 'needs_human' | WardenOwnerRoute['reason']['kind'];
 
 /** One open item whose reason has gone away, or an old escalation item being retired. */
-export interface WardenEscalationResolution {
+interface WardenEscalationResolution {
   readonly sessionId: string;
   readonly anomalyKind: WardenAnomalyKind;
   readonly source: AgendaSource;

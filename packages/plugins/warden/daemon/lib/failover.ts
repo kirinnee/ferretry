@@ -51,13 +51,13 @@ export interface WardenAccountHealth {
   readonly retryAt?: number;
 }
 
-export interface WardenStrike {
+interface WardenStrike {
   readonly count: number;
   readonly lastAt: string;
   readonly lastReason: string;
 }
 
-export interface WardenLastSelection {
+interface WardenLastSelection {
   readonly agent: string;
   readonly policy: WardenFailoverPolicy;
   readonly at: string;

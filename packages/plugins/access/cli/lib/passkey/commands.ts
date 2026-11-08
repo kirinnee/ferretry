@@ -36,8 +36,8 @@ export function passkeyHelp(binaryName: string): string {
 }
 
 /** `passkey` alone takes nothing: it is the group. */
-export const PASSKEY_SHAPE: VerbShape = { command: 'passkey', args: [], switches: [] };
-export const PASSKEY_WINDOW_SHAPE: VerbShape = { command: 'window', args: ['device'], switches: [] };
+const PASSKEY_SHAPE: VerbShape = { command: 'passkey', args: [], switches: [] };
+const PASSKEY_WINDOW_SHAPE: VerbShape = { command: 'window', args: ['device'], switches: [] };
 
 /**
  * `fy passkey` and `fy passkey window <device>`.
