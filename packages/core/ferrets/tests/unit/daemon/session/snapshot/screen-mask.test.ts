@@ -159,3 +159,60 @@ describe('F-0326 #U4 one screen masker for the last screen and the live look', (
     expect(terminals).toBe(ferrets);
   });
 });
+
+describe('F-0326 #U4 the masker stays inside the stop bound on a big, busy screen', () => {
+  /** A 4-character value printed densely across a 200×2000 pane: 80,000 matches. Fake. */
+  const PIN = '1234';
+  const busy = (row: (index: number) => string) => Array.from({ length: 200 }, (_, index) => row(index)).join('\n');
+
+  /** `maskedScreen` over `screen`, with every character it hands the scope counted. */
+  async function measured(
+    screen: string,
+  ): Promise<{ readonly out: string; readonly asked: number; readonly took: number }> {
+    let asked = 0;
+    const started = performance.now();
+    const out = await vault({ PIN }).read(scope =>
+      maskedScreen(
+        {
+          ...scope,
+          text: text => {
+            asked += text.length;
+            return scope.text(text);
+          },
+          lines: lines => {
+            for (const line of lines) asked += line.length;
+            return scope.lines(lines);
+          },
+        },
+        screen,
+      ),
+    );
+    return { out, asked, took: performance.now() - started };
+  }
+
+  test('F-0326 #U4 a 200×2000 screen dense with a short value behind a gutter asks a bounded number of whole-screen readings', async () => {
+    // Arrange — every other row behind Claude Code's ⎿ indent, so whole rows and content spans differ.
+    const screen = busy(index => (index % 2 === 0 ? `  ⎿  ${`${PIN} `.repeat(399)}` : `${PIN} `.repeat(400)));
+
+    // Act
+    const { out, asked, took } = await measured(screen);
+
+    // Assert — six readings, one row-by-row check and the final text: at most eight screens' worth, never more.
+    expect(out).not.toContain(PIN);
+    expect(asked).toBeLessThanOrEqual(8 * screen.length);
+    expect(took).toBeLessThan(2000);
+  });
+
+  test('F-0326 #U4 a screen that draws no gutter reads each join once, not twice', async () => {
+    // Arrange — rows that start and end with content: whole rows and content spans are the same pieces.
+    const screen = busy(() => `${PIN} `.repeat(400).trimEnd());
+
+    // Act
+    const { out, asked, took } = await measured(screen);
+
+    // Assert — three readings, the row check and the final text.
+    expect(out).not.toContain(PIN);
+    expect(asked).toBeLessThanOrEqual(5 * screen.length);
+    expect(took).toBeLessThan(2000);
+  });
+});

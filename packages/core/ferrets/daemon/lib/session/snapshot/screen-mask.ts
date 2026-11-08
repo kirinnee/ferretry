@@ -31,6 +31,14 @@ function contentOf(row: string, index: number): Piece {
 }
 
 /**
+ * Which reading `pieces` joined by `join` is: two readings with one key ask `scope.lines` the very same lines, so
+ * the second can add no mark and is skipped. A single piece meets nothing, so its join does not count.
+ */
+function readingOf(pieces: readonly Piece[], join: string): string {
+  return `${pieces.length > 1 ? JSON.stringify(join) : ''}|${pieces.map(piece => `${piece.start}:${piece.end}`).join(',')}`;
+}
+
+/**
  * Marks in `hidden` every character of `pieces` that `scope.lines` covers when the pieces are read as one run, each
  * meeting the next with `join`. `lines` keeps each line's length, so a `*` maps back to its row and column exactly; a
  * line that comes back with another length is not trusted, and its whole piece is hidden (closed, never open). A `*`
@@ -75,7 +83,8 @@ function cover(
  * over exactly the covered characters, keeping its width. A reading that joins unrelated rows can only add `*`, never remove one.
  *
  * Not covered (GAP(snapshot-wrap)): the end of a value whose start has scrolled off the top of the screen; a break
- * whose continuation starts or ends with a character the UI draws that {@link GUTTER} does not name; a value broken
+ * whose continuation starts or ends with a character the UI draws that {@link GUTTER} does not name; a value in a table
+ * column that is not the last (the next column's border and cells stand between its pieces); a value broken
  * over three or more rows where the breaks meet in different ways (one with a space, one without).
  */
 export function maskedScreen(scope: RedactionScope, screen: string): string {
@@ -83,10 +92,15 @@ export function maskedScreen(scope: RedactionScope, screen: string): string {
   const hidden = rows.map(row => Array.from({ length: row.length }, () => false));
   const whole = rows.map((row, index) => ({ row: index, start: 0, end: row.length }));
   const content = rows.map(contentOf);
-  for (const join of JOINS) {
-    cover(scope, rows, whole, join, hidden);
-    cover(scope, rows, content, join, hidden);
-  }
+  // A screen whose rows draw no gutter has content equal to its whole rows: each reading is made once.
+  const read = new Set<string>();
+  for (const join of JOINS)
+    for (const pieces of [whole, content]) {
+      const reading = readingOf(pieces, join);
+      if (read.has(reading)) continue;
+      read.add(reading);
+      cover(scope, rows, pieces, join, hidden);
+    }
   const starred = rows.map((row, index) => {
     const marks = hidden[index] as boolean[];
     if (!marks.includes(true)) return row;
