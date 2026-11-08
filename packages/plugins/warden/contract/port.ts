@@ -51,3 +51,10 @@ export const WardenActed = defineEvent(
     leftAlone: z.array(z.strictObject({ pid: z.number().int(), why: WardenLeftAloneWhySchema })).optional(),
   }),
 );
+
+/**
+ * Published when `warden.yaml` moved — the owner's save, `fy`, an agent's config tool, a hand edit, a confirmed or
+ * discarded held edit — as the kernel's config `watch` hears it. It carries nothing: the truth is
+ * `GET /v1/warden/config`, which a settings screen reads again.
+ */
+export const WardenConfigChanged = defineEvent('warden.config-changed', z.strictObject({}));
