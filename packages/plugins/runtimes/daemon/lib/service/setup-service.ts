@@ -294,17 +294,6 @@ const IMPORT_RECORD_FILE = 'setup/import.json';
  */
 const CLONE_BUNDLE_MAX_BYTES = 384 * 1024;
 
-/** Stands in when only the machine's own controls are compared, which read no file. */
-const NO_CONFIG_TEXT: ConfigText = {
-  read: () => ({ ok: false, errors: [{ message: 'no settings file can be read here' }] }),
-  // Only a settings FILE is edited, judged for a raw secret or for loosening, and a file document is refused before this
-  // stands in; the controls document is read without the config text. So these are never reached with a file.
-  edit: existing => existing ?? '',
-  hasRawSecret: () => false,
-  loosening: () => undefined,
-  modeline: () => '',
-};
-
 const DOCUMENT_MODE = 0o600;
 const HARNESSES: readonly HarnessKind[] = ['claude', 'codex'];
 const SETTINGS_FORMAT = { claude: 'json', codex: 'toml' } as const satisfies Record<HarnessKind, 'json' | 'toml'>;
@@ -1051,10 +1040,7 @@ export class FleetSetupService {
       });
     }
     const config = this.deps.configText;
-    if (config === undefined && inputs.some(input => input.path !== 'controls')) {
-      throw new CloneRefusal('This machine cannot merge settings documents yet. Leave them out and copy the rest.');
-    }
-    return { analysis: analyseCloneSettings(inputs, base, config ?? NO_CONFIG_TEXT), etags };
+    return { analysis: analyseCloneSettings(inputs, base, config), etags };
   }
 
   /** Why this caller may not write a settings file, in words; none when it may (or, staging, only needs a passkey). */
