@@ -99,6 +99,8 @@ export function mcpFileOnly(handle: RootHandle): RootHandle {
     syncDirectory: refuse('syncDirectory'),
     fileIdentity: refuse('fileIdentity'),
     remove: refuse('remove'),
+    linkTo: refuse('link'),
+    setMode: refuse('change a mode'),
   };
 }
 

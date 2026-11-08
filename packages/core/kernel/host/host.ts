@@ -647,7 +647,13 @@ async function bootLocked(
       { home, plugin: manifest.id, worktrees: options.worktrees ?? `${home}-worktrees` },
       manifest.permissions?.roots ?? [],
       () => bound.workFolders,
-      { random: adapters.random, ...(pins === undefined ? {} : { pins }) },
+      {
+        random: adapters.random,
+        ...(pins === undefined ? {} : { pins }),
+        ...(manifest.permissions?.harnessFiles === undefined
+          ? {}
+          : { harnessFiles: manifest.permissions.harnessFiles }),
+      },
     );
     const declaredNetwork = effectivePermissions(manifest.id, manifest.permissions?.network ?? []);
     const fetchPort = restrictFetch(manifest.id, declaredNetwork, adapters.fetch, items, resolversOf(manifest.id));

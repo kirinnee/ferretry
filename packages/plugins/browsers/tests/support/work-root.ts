@@ -81,6 +81,13 @@ export function workRoots(folder: string, stateHome: string): RootsPort {
     readDurable: unused('readDurable'),
     syncDirectory: unused('syncDirectory'),
     fileIdentity: unused('fileIdentity'),
+    linkTo: unused('linkTo'),
+    setMode: unused('setMode'),
   };
-  return { root: () => handle };
+  return {
+    root: () => handle,
+    harnessFile: () => {
+      throw new Error('the work-root fixture has no harness file');
+    },
+  };
 }

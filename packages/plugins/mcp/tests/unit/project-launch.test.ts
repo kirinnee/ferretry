@@ -130,6 +130,8 @@ function kernelRoots(
         syncDirectory: missing('syncDirectory'),
         fileIdentity: missing('fileIdentity'),
         remove: missing('remove a file'),
+        linkTo: missing('link'),
+        setMode: missing('change a mode'),
       };
     },
   };

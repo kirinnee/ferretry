@@ -54,6 +54,8 @@ function memoryRoot(files: Record<string, string>, outside: readonly string[] = 
     readDurable: () => Promise.reject(new Error('the fixture has no readDurable')),
     syncDirectory: () => Promise.reject(new Error('the fixture has no syncDirectory')),
     fileIdentity: () => Promise.reject(new Error('the fixture has no fileIdentity')),
+    linkTo: () => Promise.reject(new Error('the fixture has no linkTo')),
+    setMode: () => Promise.reject(new Error('the fixture has no setMode')),
   };
 }
 

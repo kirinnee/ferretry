@@ -1,7 +1,8 @@
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { isKernelMadeRoot } from '../host/internal-roots.ts';
-import { mayHoldRoot, scopedSubfolder } from '../host/roots.ts';
+import { isReadOnlyRoot, mayHoldRoot, RootError, scopedSubfolder } from '../host/roots.ts';
+import { harnessFileRefusal, permittedMode, takesLinks } from '../host/root-rules.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { failureResponse } from '../host/responses.ts';
 import type { ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
@@ -49,6 +50,8 @@ import type {
   KernelPorts,
   Log,
   LogFields,
+  RootDurableHeld,
+  RootFileHandle,
   RootHandle,
   RootName,
   SpawnOptions,
@@ -138,6 +141,13 @@ export interface TestHostOptions {
   readonly pinner?: SessionRootPinner;
   /** What `kernel.paths.home()` answers. Default: `/home/owner`. */
   readonly ownerHome?: string;
+  /**
+   * The files `kernel.roots.harnessFile` reads, by absolute path (`/home/owner/.claude.json` → its text). The rule
+   * over the path is the real host's (`host/root-rules.ts`); a path not here reads as absent. Default: none.
+   */
+  readonly harnessFiles?: Readonly<Record<string, string>>;
+  /** The kernel home the test roots' fence is judged against (`harnessFile` refuses a path in it). Default: `/test-home`. */
+  readonly fenceHome?: string;
   /** The directories `kernel.paths.checkDirectory` accepts: the absolute path asked → its real path. Default: none. */
   readonly directories?: Readonly<Record<string, string>>;
   /** The absolute paths `kernel.paths.which` finds executable. Default: none. */
@@ -854,7 +864,58 @@ async function start(world: World): Promise<TestHost> {
     if (![...world.roots.keys()].some(key => key.startsWith(`${path}/`))) throw new Error(`no such folder ${path}`);
     return [path];
   };
+  /** `linkTo`'s links in the test world: the link's path → the target path it points at. */
+  const testLinks = new Map<string, string>();
+  /** `setMode`'s modes in the test world, by path; a path never set keeps the default (`0o600` for a file). */
+  const testModes = new Map<string, number>();
+  const testFolderExists = (path: string): boolean => [...world.roots.keys()].some(key => key.startsWith(`${path}/`));
+  const testHarnessFile = (manifest: Manifest, absolutePath: string): RootFileHandle => {
+    const refusal = harnessFileRefusal({
+      plugin: manifest.id,
+      mayHold: mayHoldRoot(manifest.id, 'harness-home'),
+      roots: manifest.permissions?.roots ?? [],
+      names: manifest.permissions?.harnessFiles,
+      home: options.fenceHome ?? '/test-home',
+      absolutePath,
+    });
+    if (refusal !== undefined) throw new RootError(refusal);
+    const text = (): string | undefined => options.harnessFiles?.[absolutePath];
+    const stat = () => {
+      const found = text();
+      return found === undefined
+        ? undefined
+        : { kind: 'file' as const, size: found.length, modified: clock.now(), mode: 0o600, links: 1 };
+    };
+    const bytes = (): Uint8Array => {
+      const found = text();
+      if (found === undefined) throw new Error(`no such file ${absolutePath}`);
+      return new TextEncoder().encode(found);
+    };
+    const identity = () => (text() === undefined ? undefined : { device: 1n, inode: 1n });
+    return Object.freeze({
+      name: 'harness-home' as const,
+      path: absolutePath,
+      stat: async () => stat(),
+      lstat: async () => stat(),
+      readText: async (limit?: number) => new TextDecoder().decode(bytes().slice(0, limit)),
+      readBytes: async (limit?: number | { readonly offset: number; readonly length: number }) => {
+        if (typeof limit === 'number') return bytes().slice(0, limit);
+        if (limit === undefined) return bytes();
+        if (limit.length > MAX_ROOT_WINDOW_BYTES || limit.offset < 0 || limit.length < 0)
+          throw new RootError('outside');
+        return bytes().slice(limit.offset, limit.offset + limit.length);
+      },
+      fileIdentity: async () => identity(),
+      readDurable: async <T>(limit?: number, hold?: (read: RootDurableHeld) => Promise<T>) => {
+        if (text() === undefined) return undefined;
+        const read = { bytes: bytes().slice(0, limit), identity: { device: 1n, inode: 1n } };
+        if (hold === undefined) return read as T;
+        return await hold({ ...read, stillNames: async () => identity() !== undefined });
+      },
+    });
+  };
   const rootsFor = (manifest: Manifest): KernelPorts['roots'] => ({
+    harnessFile: absolutePath => testHarnessFile(manifest, absolutePath),
     root(name, scope) {
       if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name))
         throw new Error(`${manifest.id}: root ${name} is not declared`);
@@ -867,9 +928,20 @@ async function start(world: World): Promise<TestHost> {
         kind: 'file' as const,
         size: (world.roots.get(path) ?? '').length,
         modified: clock.now(),
-        mode: 0o600,
+        mode: testModes.get(path) ?? 0o600,
         links: 1,
       });
+      /** A path of THIS handle's scope (no `..`), or the refusal production makes for one outside it. */
+      const ownPath = (path: string): string => {
+        if (
+          prefix === undefined ||
+          typeof path !== 'string' ||
+          path.split('/').includes('..') ||
+          !path.startsWith(`${prefix}/`)
+        )
+          throw new RootError('outside');
+        return path;
+      };
       const handle: RootHandle = {
         name,
         internal: isKernelMadeRoot(name),
@@ -936,6 +1008,7 @@ async function start(world: World): Promise<TestHost> {
         },
         ensurePrivateDirectory: async () => {},
         lstat: async path => {
+          if (testLinks.has(path)) return { kind: 'symlink', size: 0, modified: clock.now(), mode: 0o777, links: 1 };
           if (world.roots.has(path)) return fileStat(path);
           return [...world.roots.keys()].some(p => p.startsWith(`${path}/`))
             ? { kind: 'directory', size: 0, modified: clock.now(), mode: 0o700, links: 1 }
@@ -956,6 +1029,29 @@ async function start(world: World): Promise<TestHost> {
         stat: async path => (world.roots.has(path) ? fileStat(path) : undefined),
         remove: async path => {
           world.roots.delete(path);
+        },
+        // The real host's rules (`host/root-rules.ts`) over the flat test world, with the same refusals.
+        linkTo: async (at, target) => {
+          if (isReadOnlyRoot(name) || !takesLinks(name)) throw new RootError('read_only');
+          const known = testHandles.get(target?.root ?? {});
+          if (known === undefined || known.plugin !== manifest.id) throw new RootError('not_declared');
+          const to = target.path as string;
+          if (to.split('/').includes('..') || (to !== known.prefix && !to.startsWith(`${known.prefix}/`)))
+            throw new RootError('outside');
+          if (testLinks.has(to)) throw new RootError('link_escape');
+          if (!world.roots.has(to) && !testFolderExists(to) && target.dangling !== true) throw new RootError('outside');
+          const place = ownPath(at);
+          if (world.roots.has(place) || testFolderExists(place) || testLinks.has(place)) throw new RootError('outside');
+          testLinks.set(place, to);
+        },
+        setMode: async (path, mode) => {
+          if (isReadOnlyRoot(name)) throw new RootError('read_only');
+          const bits = permittedMode(isKernelMadeRoot(name), mode);
+          if (bits === undefined) throw new RootError('outside');
+          const place = ownPath(path);
+          if (testLinks.has(place)) throw new RootError('link_escape');
+          if (!world.roots.has(place) && !testFolderExists(place)) throw new RootError('outside');
+          testModes.set(place, bits);
         },
         pin: async (path, pinOptions) => {
           // The test world keeps no state home, so its pin fences nothing beneath the root.

@@ -28,6 +28,10 @@ export class MemoryHistoryRoots implements RootsPort {
     return file === undefined ? undefined : new TextDecoder().decode(file.bytes);
   }
 
+  harnessFile(): never {
+    throw new Error('the history roots fixture has no harness file');
+  }
+
   root(name: RootName, scope?: { readonly subfolder?: string }): RootHandle {
     const folder = scope?.subfolder;
     if (folder === undefined || !folder.startsWith('/')) throw new Error(`the ${name} root needs an absolute folder`);
