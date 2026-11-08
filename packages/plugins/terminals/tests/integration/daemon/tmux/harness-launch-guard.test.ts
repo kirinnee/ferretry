@@ -92,7 +92,7 @@ describe('RealHarnessLaunchGuard', () => {
     // Arrange
     const subject = await machine();
     await executable(join(subject.root, 'home', '.claude', 'local', 'claude'));
-    const guard = new RealHarnessLaunchGuard(() => undefined);
+    const guard = new RealHarnessLaunchGuard(() => subject.fakes);
 
     try {
       // Act
