@@ -15,9 +15,6 @@ export {
 } from '@ferretry/kernel/contract';
 export { parseBody } from './body.ts';
 
-/** What Gate stamps for a call from a ferret's own credential: `peer:<ferret id>`. */
-export const PEER_ACTOR_PREFIX = 'peer:';
-
 export type RouteContext = CallContext;
 import type { SocketAccept } from '@ferretry/kernel/contract';
 export type { SocketAccept };
@@ -38,7 +35,7 @@ export function routeTable(mounts: readonly MountRoute[]): Record<string, RouteH
 // `CallStanding` when its contract is in the program.
 import type {} from '@ferretry/core-gate/contract';
 
-/** `peer:<ferret>`, `device:<id>`, `admin-cli`, ...: Gate's text for who is calling. */
+/** `ferret:<id>`, `warden:<id>`, `device:<id>`, `admin-cli`, ...: Gate's text for who is calling, for attribution only. */
 export type ApiActor = string;
 
 export interface ParsedActor {

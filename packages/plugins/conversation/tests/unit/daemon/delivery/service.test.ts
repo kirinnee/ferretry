@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { queuedMessageInstruction, turnFileInstruction } from '../../../../daemon/seams/protocol.ts';
 import should from 'should';
-import { type ClockPort, type SerialExecutor } from '../../../../daemon/seams/ports.ts';
+import type { ClockPort, SerialExecutor } from '../../../../daemon/seams/ports.ts';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
 import {
   type ComposerClearOutcome,
@@ -241,10 +241,6 @@ class FakeTerminal implements SendTerminal {
     return this.frames.length > 1
       ? (this.frames.shift() as SendPaneObservation)
       : (this.frames[0] as SendPaneObservation);
-  }
-
-  async pressStopKey(): Promise<void> {
-    this.calls.push('pressStopKey');
   }
 }
 
@@ -862,80 +858,6 @@ describe('peer messaging', () => {
     peerWaits.failure = new Error('signal service is busy');
     should((await service.send(request({ senderReference: PEER }))).disposition).equal('delivered');
     should(peerWaits.ended).have.length(1);
-  });
-});
-
-describe('interrupt', () => {
-  it('stops the turn and marks the session interrupted', async () => {
-    const { service, terminal, repository } = parts(target(), [pane({ activeWork: true })]);
-    const after = await service.interrupt(ID);
-    should(terminal.calls).eql(['observe', 'pressStopKey', 'observe']);
-    should(repository.events).eql(['control.interrupt_requested']);
-    should(repository.transitions[0]).match({
-      event: 'control.interrupted',
-      status: 'interrupted',
-      promptReady: true,
-      reason: 'interrupted by client',
-    });
-    should(after.status).equal('interrupted');
-  });
-
-  it('hands an interactive terminal back to its human rather than marking it interrupted forever', async () => {
-    const { service, repository } = parts(target({ mode: 'interactive' }), [pane()]);
-    await service.interrupt(ID);
-    should(repository.transitions[0]).match({ event: 'control.interrupted', status: 'awaiting_user' });
-    should(repository.transitions[0]?.reason).be.undefined();
-  });
-
-  it('keeps `interrupted` for an interactive session that is still visibly working', async () => {
-    const { service, repository } = parts(target({ mode: 'interactive' }), [pane({ activeWork: true })]);
-    await service.interrupt(ID);
-    should(repository.transitions[0]?.status).equal('interrupted');
-  });
-
-  it('still records the interrupt when the pane could not be read afterwards', async () => {
-    const { service, repository, terminal } = parts(target({ mode: 'interactive' }), [pane()]);
-    terminal.observeFailure = new Error('tmux is gone');
-    terminal.observeFailFrom = 1;
-    await service.interrupt(ID);
-    should(repository.transitions[0]?.status).equal('interrupted');
-  });
-
-  it('refuses to abandon a rendered structured question by accident', async () => {
-    const { service, terminal } = parts(target({ pendingQuestion: { toolUseId: 'tool-7' } }));
-    await should(service.interrupt(ID)).be.rejectedWith(SendUnavailable);
-    await should(service.interrupt(ID)).be.rejectedWith(/tool-7/u);
-    should(terminal.calls).be.empty();
-  });
-
-  it('refuses a session whose shutdown was never confirmed, and one that is already finished', async () => {
-    await should(parts(target({ status: 'kill_failed' })).service.interrupt(ID)).be.rejectedWith(SendUnavailable);
-    await should(parts(target({ status: 'completed' })).service.interrupt(ID)).be.rejectedWith(SendRefused);
-    await should(parts(target({ status: 'completed' })).service.interrupt(ID)).be.rejectedWith(/no running turn/u);
-  });
-
-  it('presses no key at an idle auto pane, and still records the interrupt', async () => {
-    const { service, terminal, repository } = parts(target(), [pane()]);
-    await service.interrupt(ID);
-    should(terminal.calls).eql(['observe', 'observe']);
-    should(repository.transitions[0]?.status).equal('interrupted');
-  });
-
-  it("sends the stop key at an idle interactive claude pane, which is the human's own stop", async () => {
-    const { service, terminal } = parts(target({ mode: 'interactive', harness: 'claude' }), [pane()]);
-    await service.interrupt(ID);
-    should(terminal.calls).eql(['observe', 'pressStopKey', 'observe']);
-  });
-
-  it('refuses a session whose pane is gone, and says to revive it instead', async () => {
-    const { service, repository } = parts(target(), [pane({ alive: false, dead: true })]);
-    await should(service.interrupt(ID)).be.rejectedWith(/revive it rather than interrupting/u);
-    should(repository.journal_).be.empty();
-  });
-
-  it('refuses a session it cannot read', async () => {
-    await should(parts(null).service.interrupt(ID)).be.rejectedWith(SendRefused);
-    await should(parts(null).service.interrupt(ID)).be.rejectedWith(/session not found/u);
   });
 });
 

@@ -1,4 +1,4 @@
-import type { ApiRequest } from '@ferretry/kernel/contract';
+import type { ApiRequest, CallStanding } from '@ferretry/kernel/contract';
 import type { MountRoute, RouteContext } from '../../daemon/seams/api.ts';
 
 /** What a mounted route is called with: only the parts the handlers read. */
@@ -11,6 +11,8 @@ export interface CallSpec {
   /** A body sent as written, for a body that is not JSON. */
   readonly rawBody?: string;
   readonly actor?: string;
+  /** Gate's whole standing (actor, credential, …), built with Gate's own testing helpers; wins over `actor`. */
+  readonly standing?: CallStanding;
 }
 
 /** The context Gate would hand a mounted route, with the standing a test names. */
@@ -29,6 +31,7 @@ export const callOf = (spec: CallSpec = {}): RouteContext => {
     request,
     params: new Map(Object.entries(spec.params ?? {})),
     actor: spec.actor,
+    ...spec.standing,
   } as unknown as RouteContext;
 };
 

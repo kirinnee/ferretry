@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import { ferretActor } from '@ferretry/core-gate/contract';
+import { ferretStanding, ownerStanding, wardenStanding } from '@ferretry/core-gate/contract/testing';
+import type { FerretId } from '@ferretry/core-ferrets/contract';
 import { COMPOSER_OCCUPIED_CODE, SEND_UNCONFIRMED_CODE } from '../../../../daemon/seams/protocol.ts';
 import {
   type SentDraftClearer,
@@ -58,23 +61,54 @@ describe('POST send', () => {
     ]);
   });
 
-  it('takes the sender and the label from the ferret’s credential, never from the body', async () => {
+  it('takes the sender and the label from the ferret’s credential (Gate’s own standing), never from the body', async () => {
+    const { subsystem, calls } = build();
+    const routes = sessionSendRoutes(subsystem);
+    const f9 = 'f9' as FerretId;
+    const body = { message: 'hi', label: 'fyi' };
+    // A ferret's own token: Gate stamps `ferret:f9` and the ferret credential.
+    await answerOf(routes, 'POST', SEND, { params: ID, headers: KEY, standing: ferretStanding(f9), body });
+    // The admin token plus the session header: Gate stamps `ferret:f9` on an admin credential.
+    await answerOf(routes, 'POST', SEND, {
+      params: ID,
+      headers: KEY,
+      standing: { actor: ferretActor(f9), credential: { kind: 'authenticated', tokenClass: 'admin' } },
+      body,
+    });
+    // The credential names the ferret first: an actor that says otherwise cannot move the sender.
+    await answerOf(routes, 'POST', SEND, {
+      params: ID,
+      headers: KEY,
+      standing: { ...ferretStanding(f9), actor: ferretActor('f7' as FerretId) },
+      body,
+    });
+    await answerOf(routes, 'POST', SEND, { params: ID, headers: KEY, standing: ownerStanding(), body });
+    await answerOf(routes, 'POST', SEND, { params: ID, headers: KEY, standing: wardenStanding(f9), body });
+    expect(calls.map(call => call.args[1])).toEqual([
+      { message: 'hi', sendId: 'req-1', label: 'fyi', senderSessionId: 'f9' },
+      { message: 'hi', sendId: 'req-1', label: 'fyi', senderSessionId: 'f9' },
+      { message: 'hi', sendId: 'req-1', label: 'fyi', senderSessionId: 'f9' },
+      { message: 'hi', sendId: 'req-1' },
+      { message: 'hi', sendId: 'req-1' },
+    ]);
+  });
+
+  // Tripwire for the r4 BLOCKER: Gate never stamps `peer:<id>` (it renamed it `ferret:`), so a route that keeps
+  // reading that prefix names no sender for any real ferret. An agent call whose actor is `peer:f9` names none here.
+  it('reads no `peer:` actor: an agent admin call stamped `peer:f9` names no sender and carries no label', async () => {
     const { subsystem, calls } = build();
     const routes = sessionSendRoutes(subsystem);
     await answerOf(routes, 'POST', SEND, {
       params: ID,
       headers: KEY,
-      actor: 'peer:f9',
+      standing: { actor: 'peer:f9', credential: { kind: 'authenticated', tokenClass: 'admin' } },
       body: { message: 'hi', label: 'fyi' },
     });
-    await answerOf(routes, 'POST', SEND, {
-      params: ID,
-      headers: KEY,
-      actor: 'owner',
-      body: { message: 'hi', label: 'fyi' },
-    });
-    expect(calls[0]?.args[1]).toMatchObject({ senderSessionId: 'f9', label: 'fyi' });
-    expect(calls[1]?.args[1]).toEqual({ message: 'hi', sendId: 'req-1' });
+    await answerOf(routes, 'POST', SEND, { params: ID, headers: KEY, actor: 'peer:f9', body: { message: 'hi' } });
+    expect(calls.map(call => call.args[1])).toEqual([
+      { message: 'hi', sendId: 'req-1' },
+      { message: 'hi', sendId: 'req-1' },
+    ]);
   });
 
   it('refuses a path that is not a usable id, a missing key, and a body naming a different key', async () => {

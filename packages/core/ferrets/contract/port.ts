@@ -203,6 +203,15 @@ export interface HarnessUnconfirmed {
 /** Everything a delivery or queue can answer instead of an outcome. A rejection is a failure nobody could classify. */
 export type HarnessDeliveryFailure = HarnessDeliveryRefusal | HarnessUnconfirmed;
 
+/** What a queue may carry beyond its text (additive, ruling #45). */
+export interface HarnessQueueOptions {
+  /**
+   * The send this message is, so a message long enough to go by file is written to `channel/queued-<send id>.md`: the
+   * name the app reads the send back by. One outside the protocol's grammar (`[\w-]{1,128}`) is not used; a fresh id is.
+   */
+  readonly sendId?: string;
+}
+
 /**
  * What an interrupt did (today's `interruptLocked`): whether the harness's stop key was pressed — it is NOT at a pane
  * that shows no active work unless the key is harmless there ({@link shouldPressStopKey}) — and whether the pane
@@ -228,6 +237,11 @@ export interface FerretHarness {
   /**
    * Types one message. Answers its outcome, a {@link HarnessDeliveryRefusal} (nothing typed), or
    * {@link HarnessUnconfirmed} (typed, not proven); rejects only for a failure the runner could not classify.
+   *
+   * Ruling #45 (today's `routeSend` / `paneMidTurn`): ONE look at the pane first (the runner's `look`, which never
+   * writes). A pane that shows the harness at work and no prompt answers `not_ready` / `busy` AT ONCE, nothing typed,
+   * so the caller can queue the message instead of waiting out the delivery's readiness wait (about 27 s). A look that
+   * sees nothing (no `look`, a hold, an unreadable pane) decides nothing: the delivery goes on as before.
    */
   deliver(delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessDeliveryFailure>>;
   /**
@@ -235,8 +249,13 @@ export interface FerretHarness {
    * is NOT wrapped in a second act here: the runner acts on the pane for each write it makes, and an outer act would
    * wait on the inner one so that neither ever settled. A runner that cannot queue answers `plugin_unavailable`; its
    * other answers are `deliver`'s.
+   *
+   * Additive (ruling #45): a `text` over 1000 characters is never typed inline (today's `native-file` path). It is
+   * written first, durably and `0600`, to the ferret's own `channel/queued-<send id>.md` (`options.sendId`, else a
+   * fresh id), and the queue is handed the one-line pointer to it. With no session folder bound to write it to, a long
+   * `text` answers `plugin_unavailable` and nothing is typed.
    */
-  queue(text: string): Promise<Result<QueueOutcome, HarnessDeliveryFailure>>;
+  queue(text: string, options?: HarnessQueueOptions): Promise<Result<QueueOutcome, HarnessDeliveryFailure>>;
   /**
    * Stops the current turn with the HARNESS's stop key (its `turnStop.key`, today's `Escape`; never the runner's raw
    * `C-c`, which quits an idle Codex), pressed by the runner's `stopTurn` only under {@link shouldPressStopKey}: at a
