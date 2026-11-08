@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os';
 import { nodeFs } from '../../../host/adapters/node-fs.ts';
 import { checkDirectory, gatedPaths } from '../../../host/paths.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
+import { bootHost } from '../../../host/host.ts';
+import { realAdapters } from '../../../host/wiring.ts';
+import { fixedClock } from '../../../testing/clock.ts';
 import { testHost } from '../../../testing/index.ts';
 
 /** `kernel.paths.checkDirectory`: today's session working-directory resolver, rule for rule and sentence for sentence. */
@@ -117,5 +120,48 @@ describe('TT kernel.paths.checkDirectory is gated by permissions.checkDirectory'
       'undeclared did not declare permissions.checkDirectory',
     );
     await host.stop();
+  });
+  test('the REAL host hands a plugin the gated paths: a declared one probes, an undeclared one is refused', async () => {
+    const seen: Record<string, () => Promise<unknown>> = {};
+    const half = (id: string, checkDirectory?: true) =>
+      implementDaemon(
+        definePlugin({
+          id,
+          title: id,
+          version: '5.0.0',
+          api: 5,
+          core: false,
+          kinds: [],
+          ...(checkDirectory === undefined ? {} : { permissions: { checkDirectory } }),
+        }),
+        {
+          build: ({ kernel }) => {
+            seen[id] = () => kernel.paths.checkDirectory('/');
+            return {};
+          },
+        },
+      );
+    const root = await mkdtemp(`${tmpdir()}/paths-real-host-`);
+    const home = `${root}/home`;
+    const outcome = await bootHost({
+      home,
+      version: '5.0.0',
+      adapters: {
+        ...realAdapters(home, () => {}, { binary: 'fy' }),
+        clock: fixedClock(),
+        homeLock: async () => ({ release: async () => {} }),
+      },
+      implementations: [half('declared', true), half('undeclared')],
+    });
+    try {
+      if (outcome.kind !== 'running') throw new Error(outcome.sentence);
+      expect(await seen['declared']?.()).toMatchObject({ ok: true });
+      await expect(seen['undeclared']?.() ?? Promise.resolve()).rejects.toThrow(
+        'undeclared did not declare permissions.checkDirectory',
+      );
+    } finally {
+      if (outcome.kind === 'running') await outcome.host.stop();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

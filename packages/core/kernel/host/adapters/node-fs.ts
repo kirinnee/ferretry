@@ -165,9 +165,15 @@ async function opened(path: string, flags: number, mode?: number): Promise<[File
     return [handle, identity];
   } finally {
     if (identity === undefined) {
+      const made = await handle.stat({ bigint: true }).catch(() => undefined);
       await handle.close().catch(() => undefined);
       // An exclusive create made this name, so a file this call cannot describe is one only this call can remove.
-      if ((flags & constants.O_EXCL) !== 0) await unlink(path).catch(() => undefined);
+      if ((flags & constants.O_EXCL) !== 0) {
+        // Only while the name still reaches what this call opened: another writer may have replaced it since.
+        const named = await lstat(path, { bigint: true }).catch(() => undefined);
+        if (named !== undefined && made !== undefined && named.dev === made.dev && named.ino === made.ino)
+          await unlink(path).catch(() => undefined);
+      }
     }
   }
 }

@@ -669,6 +669,7 @@ async function start(world: World): Promise<TestHost> {
   );
   /** The test roots' stand-in inodes, so `fileIdentity` can tell two publishes of one name apart. */
   const inodes = new Map<string, bigint>();
+  let nextInode = 0n;
   const rootsFor = (manifest: Manifest): KernelPorts['roots'] => ({
     root(name) {
       if (!(manifest.permissions?.roots ?? []).includes(name))
@@ -717,7 +718,8 @@ async function start(world: World): Promise<TestHost> {
         publish: async (path, bytes, publishOptions) => {
           if (publishOptions?.exclusive === true && world.roots.has(path)) return { outcome: 'exists' };
           world.roots.set(path, new TextDecoder().decode(bytes));
-          const inode = BigInt(inodes.size + 1);
+          nextInode += 1n;
+          const inode = nextInode;
           inodes.set(path, inode);
           return { outcome: 'published', identity: { device: 1n, inode } };
         },
@@ -852,7 +854,8 @@ async function start(world: World): Promise<TestHost> {
               name =>
                 (
                   built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
+                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
+                    | undefined
                 )?.[name],
               parsed.host,
             )
@@ -876,7 +879,8 @@ async function start(world: World): Promise<TestHost> {
               name =>
                 (
                   built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
+                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
+                    | undefined
                 )?.[name],
               parsed.host,
             )

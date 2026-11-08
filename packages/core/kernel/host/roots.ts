@@ -70,7 +70,13 @@ export interface RootLayout {
  * that cannot reach an entry through its checked folder, S44).
  */
 export type RootRefusal =
-  FolderRefusal | 'read_only' | 'not_declared' | 'hard_link' | 'changed' | 'not_a_file' | 'no_descriptor_reach';
+  | FolderRefusal
+  | 'read_only'
+  | 'not_declared'
+  | 'hard_link'
+  | 'changed'
+  | 'not_a_file'
+  | 'no_descriptor_reach';
 
 export class RootError extends Error {
   constructor(readonly refusal: RootRefusal) {
@@ -531,7 +537,7 @@ async function publishChecked(
  * exclusive publish (same folder, same device and inode): removes that name through the checked folder's descriptor
  * and says so. A stranger's hard link (any other name, any other folder) is never touched, so it stays refused.
  */
-async function adoptLeftoverName(scope: Scope, full: string): Promise<boolean> {
+async function adoptLeftoverName(scope: Scope, full: string, random: () => string): Promise<boolean> {
   const target = await scope.fs.realpath(full);
   const folderPath = dirname(target);
   const leaf = basename(target);
@@ -547,8 +553,26 @@ async function adoptLeftoverName(scope: Scope, full: string): Promise<boolean> {
       const path = await entry(scope, folder, folderPath, name);
       const sibling = await scope.fs.identity(path);
       if (sibling?.kind !== 'file' || !same(found, sibling)) continue;
-      await scope.fs.unlink(path).catch(() => undefined);
-      removed = true;
+      // Moved to a private name nobody else knows BEFORE the last look: a writer that renames another file onto the
+      // candidate name between the look and the removal can then never lose its file to this unlink.
+      const aside = await entry(scope, folder, folderPath, `.${leaf}.${random()}.adopt`);
+      try {
+        await scope.fs.rename(path, aside);
+      } catch {
+        continue;
+      }
+      const moved = await scope.fs.identity(aside);
+      if (moved?.kind === 'file' && same(found, moved)) {
+        await scope.fs.unlink(aside).catch(() => undefined);
+        removed = true;
+        continue;
+      }
+      // Not ours after all: put it back under its name (an existing name wins; then it stays under the private one).
+      const restored = await scope.fs.link(aside, path).then(
+        () => true,
+        () => false,
+      );
+      if (restored) await scope.fs.unlink(aside).catch(() => undefined);
     }
     return removed;
   } finally {
@@ -885,6 +909,11 @@ function internalPin(pinned: UnjudgedRoot): HeldRoot {
   return Object.freeze({ ...pinned, fenced: async (rels: readonly string[]) => rels.map(() => false) });
 }
 
+/** An error thrown by the caller's own `hold`: it passes through `readDurable` untouched, never mapped, never retried. */
+class HoldFailure {
+  constructor(readonly cause: unknown) {}
+}
+
 /** How often a read that met a file mid-`link` asks again, and how long it waits between asks. */
 const HARD_LINK_RETRIES = 20;
 const HARD_LINK_RETRY_MS = 5;
@@ -905,6 +934,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
     limit: number | undefined,
     hold: (read: RootDurableRead, stillNames: () => Promise<boolean>) => Promise<T>,
   ): Promise<T | undefined> => {
+    let adoptionTried = false;
     for (let attempt = 0; ; attempt += 1) {
       try {
         const { full, scope } = await real(path);
@@ -912,18 +942,30 @@ function rootHandle(setup: HandleSetup): RootHandle {
           const bytes = await file.read(limit);
           await file.sync();
           const read = { bytes, identity: identityOfEntry(file.identity) };
-          return await hold(read, async () => {
-            const named = await rootHandleIdentity(path);
-            return named !== undefined && named.device === read.identity.device && named.inode === read.identity.inode;
-          });
+          try {
+            return await hold(read, async () => {
+              const named = await rootHandleIdentity(path);
+              return (
+                named !== undefined && named.device === read.identity.device && named.inode === read.identity.inode
+              );
+            });
+          } catch (failure) {
+            throw new HoldFailure(failure);
+          }
         });
       } catch (error) {
+        if (error instanceof HoldFailure) throw error.cause;
         if (errnoOf(error) === 'ENOENT') return undefined;
         if (error instanceof RootError && error.refusal === 'hard_link') {
-          const adopted = await real(path)
-            .then(async ({ full, scope }) => await adoptLeftoverName(scope, full))
-            .catch(() => false);
-          if (adopted) continue;
+          // Only a root this kernel publishes into (internal, writable) can hold its OWN leftover; a read-only or an
+          // owner's root never loses a name to a read. At most one adoption per call.
+          if (!adoptionTried && !readOnly && !ownerRoot) {
+            adoptionTried = true;
+            const adopted = await real(path)
+              .then(async ({ full, scope }) => await adoptLeftoverName(scope, full, random))
+              .catch(() => false);
+            if (adopted) continue;
+          }
           if (attempt < HARD_LINK_RETRIES) {
             await new Promise<void>(resolve => setTimeout(resolve, HARD_LINK_RETRY_MS));
             continue;
@@ -1068,8 +1110,6 @@ function rootHandle(setup: HandleSetup): RootHandle {
       ),
     syncDirectory: async (path, options) => {
       const { full, scope } = await real(path);
-      const folder = await openCheckedFolder(scope, full);
-      await folder.close();
       if (options?.parent === true && within(scope.base.real, dirname(full)) && dirname(full) !== full)
         await syncChecked(scope, dirname(full));
       await syncChecked(scope, full);

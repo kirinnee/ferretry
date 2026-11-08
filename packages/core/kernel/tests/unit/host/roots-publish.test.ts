@@ -44,11 +44,17 @@ interface World {
 }
 
 /** A root over a fresh folder; `change` may turn the real adapter into one that observes or fails a step. */
-async function world(change: (events: string[], disk: HostFs) => HostFs = (_, disk) => disk): Promise<World> {
+type Kind = 'work' | 'downloads' | 'imports' | 'harness-history';
+
+async function world(
+  change: (events: string[], disk: HostFs) => HostFs = (_, disk) => disk,
+  kind: Kind = 'work',
+): Promise<World> {
   const parent = await mkdtemp(`${tmpdir()}/fy-roots-publish-`);
   parents.push(parent);
-  const work = `${parent}/work`;
-  await mkdir(work, { recursive: true });
+  // an internal root lives under the home; the owner's roots sit in a folder the owner named
+  const work = kind === 'downloads' ? `${parent}/home/state/ferrets/downloads` : `${parent}/work`;
+  await mkdir(work, { recursive: true, mode: 0o700 });
   // the home the fence judges every owner's root against
   await mkdir(`${parent}/home/state/vault`, { recursive: true });
   await writeFile(`${parent}/home/state/vault/vault.key`, 'protected-fixture');
@@ -61,10 +67,10 @@ async function world(change: (events: string[], disk: HostFs) => HostFs = (_, di
   const root = rootsPortFor(
     change(events, real),
     { home: `${parent}/home`, plugin: 'ferrets', worktrees: `${parent}/worktrees` },
-    ['work'],
+    [kind],
     () => folders,
     { random: () => `t${String((counter += 1))}` },
-  ).root('work', { ferret: 'F1' as FerretId });
+  ).root(kind, kind === 'work' ? { ferret: 'F1' as FerretId } : kind === 'downloads' ? undefined : { subfolder: work });
   return { parent, work, root, events };
 }
 
@@ -403,7 +409,7 @@ describe('a leftover second name and a slow winner', () => {
   });
 
   test("a record with this root's own leftover temp link is still readable, and the leftover is removed", async () => {
-    const { root, work } = await world();
+    const { root, work } = await world(undefined, 'downloads');
     await root.publish(at(root, 'd/r.json'), encoder.encode('one'), { exclusive: true });
     // what a crash between the link and the unlink (or a power cut before the unlink was synced) leaves behind
     await link(`${work}/d/r.json`, `${work}/d/.r.json.0f3a.tmp`);
@@ -416,7 +422,7 @@ describe('a leftover second name and a slow winner', () => {
   });
 
   test("the leftover of an interrupted publish does not wedge the next exclusive publish's loser either", async () => {
-    const { root, work } = await world();
+    const { root, work } = await world(undefined, 'downloads');
     await root.publish(at(root, 'd/r.json'), encoder.encode('one'), { exclusive: true });
     await link(`${work}/d/r.json`, `${work}/d/.r.json.0f3a.tmp`);
 
@@ -427,7 +433,7 @@ describe('a leftover second name and a slow winner', () => {
   });
 
   test('a stranger hard link stays refused: another name in the folder, or one in another folder', async () => {
-    const { root, work } = await world();
+    const { root, work } = await world(undefined, 'downloads');
     await root.publish(at(root, 'd/r.json'), encoder.encode('one'), { exclusive: true });
     await link(`${work}/d/r.json`, `${work}/d/notes.txt`);
 
@@ -603,4 +609,116 @@ describe('directory sync tolerance', () => {
     await folder.sync();
     await folder.close();
   });
+});
+
+describe('a read never removes a name outside the roots this kernel publishes into', () => {
+  for (const kind of ['harness-history', 'imports', 'work'] as const)
+    test(`a leftover-shaped second name on a ${kind} root is refused hard_link and both names survive`, async () => {
+      const { root, work } = await world(undefined, kind);
+      await mkdir(`${work}/d`, { recursive: true });
+      await writeFile(`${work}/d/s.jsonl`, 'theirs');
+      await link(`${work}/d/s.jsonl`, `${work}/d/.s.jsonl.abc.tmp`);
+
+      expect(await refusalOf(async () => await root.readDurable(at(root, 'd/s.jsonl')))).toBe('refused:hard_link');
+      expect((await readdir(`${work}/d`)).sort()).toEqual(['.s.jsonl.abc.tmp', 's.jsonl']);
+    });
+});
+
+describe('adopting a leftover on an internal root', () => {
+  test('a different file renamed onto the temp name in the swap window keeps its name and its bytes', async () => {
+    const at$ = { work: '' };
+    let swapped = false;
+    const built = await world(
+      (_events, disk) => ({
+        ...disk,
+        rename: async (from, to) => {
+          if (!swapped && to.includes('.adopt')) {
+            swapped = true;
+            // a writer replaces the candidate just before it is moved aside
+            await writeFile(`${at$.work}/d/other`, 'stranger');
+            await rename(`${at$.work}/d/other`, `${at$.work}/d/.r.json.0f3a.tmp`);
+          }
+          await disk.rename(from, to);
+        },
+      }),
+      'downloads',
+    );
+    at$.work = built.work;
+    const { root, work } = built;
+    await root.publish(at(root, 'd/r.json'), encoder.encode('one'), { exclusive: true });
+    await link(`${work}/d/r.json`, `${work}/d/.r.json.0f3a.tmp`);
+
+    await root.readDurable(at(root, 'd/r.json')).catch(() => undefined);
+
+    expect(swapped).toBe(true);
+    expect(await readFile(`${work}/d/.r.json.0f3a.tmp`, 'utf8')).toBe('stranger');
+    expect((await readdir(`${work}/d`)).sort()).toEqual(['.r.json.0f3a.tmp', 'r.json']);
+  });
+
+  test('a writer that keeps re-creating the leftover cannot keep the read looping: one adoption, then refused', async () => {
+    const at$ = { work: '' };
+    let adoptions = 0;
+    const built = await world(
+      (_events, disk) => ({
+        ...disk,
+        unlink: async path => {
+          await disk.unlink(path);
+          if (path.includes('.adopt')) {
+            adoptions += 1;
+            await link(`${at$.work}/d/r.json`, `${at$.work}/d/.r.json.again${String(adoptions)}.tmp`);
+          }
+        },
+      }),
+      'downloads',
+    );
+    at$.work = built.work;
+    const { root, work } = built;
+    await root.publish(at(root, 'd/r.json'), encoder.encode('one'), { exclusive: true });
+    await link(`${work}/d/r.json`, `${work}/d/.r.json.0f3a.tmp`);
+
+    expect(await refusalOf(async () => await root.readDurable(at(root, 'd/r.json')))).toBe('refused:hard_link');
+    expect(adoptions).toBe(1);
+  });
+});
+
+describe('an error from the callers own hold', () => {
+  test('an ENOENT thrown inside hold reaches the caller, and a hard_link refusal from it does not run hold again', async () => {
+    const { root } = await world();
+    await root.publish(at(root, 'd/r.json'), encoder.encode('one'));
+
+    await expect(
+      root.readDurable(at(root, 'd/r.json'), undefined, async () => {
+        throw Object.assign(new Error('gone'), { code: 'ENOENT' });
+      }),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    let runs = 0;
+    expect(
+      await refusalOf(
+        async () =>
+          await root.readDurable(at(root, 'd/r.json'), undefined, async () => {
+            runs += 1;
+            throw new RootError('hard_link');
+          }),
+      ),
+    ).toBe('refused:hard_link');
+    expect(runs).toBe(1);
+  });
+});
+
+describe('RootHandle.syncDirectory at the open', () => {
+  for (const code of ['EINVAL', 'ENOTSUP', 'EPERM'])
+    test(`${code} at the OPEN of the folder is tolerated, like the sync itself`, async () => {
+      let failing = false;
+      const { root } = await world((_events, disk) => ({
+        ...disk,
+        openDirectory: async path => {
+          if (failing && path.endsWith('/d')) throw Object.assign(new Error('cannot open a directory here'), { code });
+          return await disk.openDirectory(path);
+        },
+      }));
+      await root.publish(at(root, 'd/x.json'), encoder.encode('x'));
+      failing = true;
+
+      await root.syncDirectory(at(root, 'd'));
+    });
 });
