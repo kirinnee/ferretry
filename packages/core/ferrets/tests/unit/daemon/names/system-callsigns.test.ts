@@ -1,5 +1,8 @@
 import { describe, it } from 'bun:test';
+import { state } from '@ferretry/kernel/host';
 import should from 'should';
+import { KeyedSerialExecutor } from '../../../../daemon/adapters/storage/keyed-serial-executor.ts';
+import { SystemCallsignIssuer } from '../../../../daemon/lib/names/index.ts';
 import { SystemCallsignsFile } from '../../../../contract/state.ts';
 import { StateCallsignCounters } from '../../../../daemon/adapters/names/state-callsign-counters.ts';
 import { SYSTEM_CALLSIGN_MAX_SEQUENCE } from '../../../../daemon/lib/protocol/system-callsigns.ts';
@@ -122,9 +125,45 @@ describe('a damaged system-callsigns.json (F-0349)', () => {
     } as never;
     const counters = new StateCallsignCounters(refusing);
 
-    // Act + Assert
+    // Act + Assert: the kernel's refusal is swallowed, and the daemon still remembers how far it got
     await counters.write({ pack: 3 });
-    should(await counters.read()).deepEqual({});
+    should(await counters.read()).deepEqual({ pack: 3 });
+  });
+
+  it('should issue two different ids over a damaged file on the kernel state port, and leave the file as it was', async () => {
+    // Arrange: the kernel's real state port over a memory fs, with garbage planted where the counters live
+    const fs = state.createMemoryHostFs();
+    const path = '/home/fy/state/ferrets/system-callsigns.json';
+    fs.seed(path, '{not json');
+    const port = state.createStatePort({ home: '/home/fy', pluginId: 'ferrets', files: [SystemCallsignsFile], fs });
+    const issuer = new SystemCallsignIssuer({
+      counters: new StateCallsignCounters(port),
+      held: async () => [],
+      serial: new KeyedSerialExecutor(),
+    });
+
+    // Act
+    const first = await issuer.next('learning');
+    const second = await issuer.next('learning');
+
+    // Assert
+    should(first).equal('learning-000001');
+    should(second).equal('learning-000002');
+    should(fs.snapshot().get(path)).equal('{not json');
+  });
+
+  it('should hold the larger of the file and the daemon\'s own mark', async () => {
+    // Arrange
+    const fs = state.createMemoryHostFs();
+    const port = state.createStatePort({ home: '/home/fy', pluginId: 'ferrets', files: [SystemCallsignsFile], fs });
+    const counters = new StateCallsignCounters(port);
+
+    // Act
+    await counters.write({ pack: 4 });
+    await counters.write({ pack: 2 });
+
+    // Assert
+    should(await counters.read()).deepEqual({ pack: 4 });
   });
 
   it('should still raise any other write fault', async () => {

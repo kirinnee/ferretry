@@ -60,12 +60,30 @@ describe('the start takes its name through the ledger (F-0232)', () => {
     expect(h.state('ferrets').raw(NamesFile)).toBe('{not json');
   });
 
-  test('a damaged ledger never costs an automatic start: it falls back to the pool scan', async () => {
+  test('a damaged ledger never costs an automatic start: the ferret answers to its own id, not a pool name', async () => {
     const h = await fresh();
     h.state('ferrets').plant(NamesFile, '{not json');
     const answer = await start(h, {});
     expect(answer.status).toBeLessThan(300);
+    const { id } = answer.json<{ id: string }>();
+    const [summary] = (await h.request('GET', '/v1/ferrets')).json<{ id: string; name: string }[]>();
+    expect(summary?.name).toBe(id);
+    expect(DEFAULT_CALLSIGN_POOL).not.toContain(summary?.name as string);
     expect(h.state('ferrets').raw(NamesFile)).toBe('{not json');
+  });
+
+  test('--teammate-fallback takes a free pool name when the requested one is held by a running ferret', async () => {
+    const h = await fresh();
+    await running(h, 'wren');
+    const refused = await start(h, { name: 'wren' });
+    expect(refused.status).toBeGreaterThanOrEqual(400);
+    const answer = await start(h, { name: 'wren', teammateFallback: true });
+    expect(answer.status).toBeLessThan(300);
+    const names = (await h.request('GET', '/v1/ferrets')).json<{ name: string }[]>().map(summary => summary.name);
+    expect(names).toHaveLength(2);
+    expect(names).toContain('wren');
+    const other = names.find(name => name !== 'wren') as string;
+    expect(DEFAULT_CALLSIGN_POOL).toContain(other);
   });
 
   test('a start refused before its record exists gives the claim back', async () => {
@@ -164,26 +182,38 @@ describe('a name is held for the window after the STOP, as today (F-0232)', () =
   });
 });
 
-describe('an automatic start the ledger cannot reserve never takes a pool name (F-0232)', () => {
-  test('two concurrent automatic starts over a damaged ledger end with two different names, neither from the pool', async () => {
+describe('an automatic start the ledger cannot reserve answers to its id and never takes a pool name (F-0232)', () => {
+  test('two concurrent automatic starts over a damaged ledger end with their own ids as names', async () => {
     const h = await fresh();
     h.state('ferrets').plant(NamesFile, '{not json');
     const [a, b] = await Promise.all([start(h, {}), start(h, { folder: '/work/b' })]);
     expect(a.status).toBeLessThan(300);
     expect(b.status).toBeLessThan(300);
-    const names = (await h.request('GET', '/v1/ferrets')).json<{ name: string }[]>().map(summary => summary.name);
-    expect(names).toHaveLength(2);
-    expect(new Set(names).size).toBe(2);
-    for (const name of names) expect(DEFAULT_CALLSIGN_POOL).not.toContain(name);
+    const summaries = (await h.request('GET', '/v1/ferrets')).json<{ id: string; name: string }[]>();
+    expect(summaries).toHaveLength(2);
+    // Each answers to its own id: unique by construction, and never a pool name.
+    for (const summary of summaries) expect(summary.name).toBe(summary.id);
   });
 });
 
 describe('a rename always goes through the ledger (F-0232)', () => {
-  test('a name that is not a callsign is refused and never written', async () => {
+  test('a name that is not a callsign is refused (400 invalid_request) and never written', async () => {
     const h = await fresh();
     const lead = await running(h, 'lead');
     const refused = await h.request('POST', `/v1/ferrets/${lead}/rename`, { body: { name: 'Not A Callsign!' } });
-    expect(refused.status).toBeGreaterThanOrEqual(400);
+    expect(refused.status).toBe(400);
+    expect(JSON.stringify(refused.json())).toContain('invalid_request');
+    expect(JSON.parse(h.state('ferrets').raw(FerretFiles, lead) as string).name).toBe('lead');
+  });
+
+  test('a damaged ledger refuses a rename with 503 name_unavailable, not name_taken, and leaves the file as it was', async () => {
+    const h = await fresh();
+    const lead = await running(h, 'lead');
+    h.state('ferrets').plant(NamesFile, '{not json');
+    const refused = await h.request('POST', `/v1/ferrets/${lead}/rename`, { body: { name: 'finch' } });
+    expect(refused.status).toBe(503);
+    expect(JSON.stringify(refused.json())).toContain('name_unavailable');
+    expect(h.state('ferrets').raw(NamesFile)).toBe('{not json');
     expect(JSON.parse(h.state('ferrets').raw(FerretFiles, lead) as string).name).toBe('lead');
   });
 
@@ -195,7 +225,7 @@ describe('a rename always goes through the ledger (F-0232)', () => {
     expect(JSON.parse(h.state('ferrets').raw(FerretFiles, lead) as string).name).toBe('finch');
   });
 
-  test('R-0114 a ferret cannot rename a ferret that is neither itself nor its helper (403)', async () => {
+  test('R-0362 a ferret cannot rename a ferret that is neither itself nor its helper (403)', async () => {
     const h = await fresh();
     const lead = await running(h, 'lead');
     const other = await running(h, 'wing');

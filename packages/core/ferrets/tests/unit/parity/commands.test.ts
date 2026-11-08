@@ -1,15 +1,36 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import type { PluginClient, VerbInvocation } from '@ferretry/kernel/manifest';
+import cli from '../../../cli/index.ts';
+import manifest from '../../../manifest.ts';
 
-/** The parity ledger's command rows for the names verb name this file; the proof lives in the test that carries the id. */
-const PROOF: Readonly<Record<string, string>> = { 'V-0333': 'cli/session/controllers.test.ts' };
+/** The names verb, run against a recording API: what it asks the daemon, and what it prints. */
+function run(answers: Readonly<Record<string, unknown>>) {
+  const calls: { readonly route: string; readonly init?: unknown }[] = [];
+  const out: string[] = [];
+  const client: PluginClient = {
+    call: async (route, init) => {
+      calls.push(init === undefined ? { route } : { route, init });
+      return (answers[route] ?? {}) as never;
+    },
+    subscribe: () => () => undefined,
+  };
+  const half = cli.build?.({
+    manifest,
+    client,
+    io: { out: text => out.push(text), err: () => undefined, isTty: false },
+    clock: { now: () => '2026-11-06T09:00:00.000Z' as never, nowMs: () => 0 },
+    sleep: async () => undefined,
+  });
+  if (half === undefined) throw new Error('the cli half is real');
+  const verbs = half.verbs as Readonly<Record<string, (invocation: VerbInvocation) => Promise<number>>>;
+  return { verbs, calls, out };
+}
 
-describe('the names command rows are proven where the ids are tagged', () => {
-  for (const [id, file] of Object.entries(PROOF))
-    test(`${id} is proven by a test in ${file}`, () => {
-      const path = join(import.meta.dir, '..', file);
-      expect(existsSync(path)).toBe(true);
-      expect(readFileSync(path, 'utf8')).toContain(id);
-    });
+describe('commands parity', () => {
+  test('V-0333 fy name -n 2 asks GET /v1/names for two and prints the names, one per line', async () => {
+    const { verbs, calls, out } = run({ 'GET /v1/names': ['ash', 'elm'] });
+    expect(await verbs.name?.({ args: [], options: { n: '2' } })).toBe(0);
+    expect(calls).toEqual([{ route: 'GET /v1/names', init: { query: { count: '2' } } }]);
+    expect(out.join('\n')).toBe('ash\nelm');
+  });
 });

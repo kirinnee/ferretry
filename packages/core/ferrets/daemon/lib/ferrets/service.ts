@@ -41,6 +41,7 @@ import type {
 } from '../../../contract/index.ts';
 import { claimStartName, displayAgentName, type SessionNameClaims } from '../names/session-names.ts';
 import { normalizeCallsign } from '../names/policy.ts';
+import type { NameAllocationErrorCode } from '../names/types.ts';
 import type { SystemCallsignPrefix } from '../protocol/system-callsigns.ts';
 import { FerretDetailsSchema, FerretRecordSchema, HARNESS_KEYS, type FerretDetails } from '../../../contract/index.ts';
 import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
@@ -218,6 +219,32 @@ class ResumeRefusal extends Error {
   }
 }
 
+/** Why a rename was refused: the route answers each with its own status (today's `SessionRenameFailure`). */
+export type RenameFailure = 'invalid' | 'not_found' | 'taken' | 'unavailable' | 'failed';
+
+export interface RenameRefusal {
+  readonly failure: RenameFailure;
+  readonly message: string;
+}
+
+/** How each allocation refusal reads as a rename refusal (today's table): a requested name never falls back. */
+const RENAME_REFUSALS: Readonly<Record<NameAllocationErrorCode, RenameFailure>> = {
+  invalid_callsign: 'invalid',
+  callsign_taken: 'taken',
+  pool_exhausted: 'failed',
+  claim_store_failed: 'unavailable',
+  random_source_failed: 'failed',
+};
+
+/** The HTTP status and code each rename refusal answers with (today's `REFUSALS` table). */
+export const RENAME_HTTP: Readonly<Record<RenameFailure, { readonly status: number; readonly code: string }>> = {
+  invalid: { status: 400, code: 'invalid_request' },
+  not_found: { status: 404, code: 'not-found' },
+  taken: { status: 409, code: 'name_taken' },
+  unavailable: { status: 503, code: 'name_unavailable' },
+  failed: { status: 500, code: 'session_rename_failed' },
+};
+
 export class FerretsService implements FerretsApi {
   /** Today's lifecycle gate: read the current record only after acquiring its key. */
   private readonly serial = new KeyedSerialExecutor();
@@ -315,12 +342,7 @@ export class FerretsService implements FerretsApi {
     }
   }
 
-  /**
-   * The callsign a start answers to, taken through the claim ledger BEFORE the record exists (today's
-   * `claimStartName`). The registry stays the one owner of "a running ferret holds this name"; the ledger adds the
-   * reservations of starts in flight and the window a stopped ferret's name is kept. A REQUESTED name is refused when
-   * taken; an AUTOMATIC one never costs the start: a spent pool or an unreadable ledger falls back to the pool scan.
-   */
+  /** A system callsign (`learning-000001`) for a helper the daemon starts itself, issued by the bound issuer. */
   async systemCallsign(prefix: SystemCallsignPrefix): Promise<string> {
     await this.ports.ready?.();
     if (this.ports.systemCallsign === undefined) throw new Error('system callsigns are not bound');
@@ -332,16 +354,26 @@ export class FerretsService implements FerretsApi {
     return Number.isFinite(parsed) ? parsed : Date.now();
   }
 
+  /**
+   * The callsign a start answers to, taken through the claim ledger BEFORE the record exists (today's
+   * `claimStartName`). The registry stays the one owner of "a running ferret holds this name"; the ledger adds the
+   * reservations of starts in flight and the window a stopped ferret's name is kept. A REQUESTED name is refused when
+   * taken, unless the caller allowed the fallback (a free pool name instead). An AUTOMATIC one never costs the start:
+   * when the ledger cannot reserve one (spent pool, unreadable ledger, failed draw) the ferret answers to its own id,
+   * as today's unnamed session did; a pool name there would be unreserved and two starts could pick the same one.
+   */
   private async takeName(id: FerretId, request: StartRequest): Promise<Result<string, StartFailure>> {
     const requested = request.name?.trim();
     if (requested) {
-      const holder = this.registry.nameHolder(requested);
+      const fallback = request.options?.teammateFallback === true;
+      // The ledger already holds running names through `nameClaims`; with the fallback on it decides, not this sentence.
+      const holder = fallback ? undefined : this.registry.nameHolder(requested);
       if (holder !== undefined) return failed('refused', `the name ${requested} is held by running ferret ${holder}`);
       if (this.ports.claims === undefined) return ok(requested);
       const claim = await claimStartName(
         this.ports.claims,
         id,
-        { teammate: requested },
+        { teammate: requested, ...(fallback ? { teammateFallback: true } : {}) },
         this.nowMs(),
       );
       if (claim.ok) return ok(claim.callsign ?? requested);
@@ -351,9 +383,8 @@ export class FerretsService implements FerretsApi {
       const claim = await claimStartName(this.ports.claims, id, {}, this.nowMs());
       if (claim.ok && claim.callsign !== undefined) return ok(claim.callsign);
     }
-    // The ledger could not reserve (damaged, spent or a failed draw): start UNNAMED as today, answering to its id. A
-    // pool name here would be unreserved and two starts could pick the same one.
-    if (this.ports.claims !== undefined) return ok(`ferret-${id}`);
+    // The ledger could not reserve: the ferret answers to its id (the unnamed shape `takeName` documents).
+    if (this.ports.claims !== undefined) return ok(id);
     const name = this.ports.newName(candidate => this.registry.nameHolder(candidate) !== undefined);
     const holder = this.registry.nameHolder(name);
     if (holder !== undefined) return failed('refused', `the name ${name} is held by running ferret ${holder}`);
@@ -617,15 +648,15 @@ export class FerretsService implements FerretsApi {
   async rename(
     ferret: FerretId,
     change: { readonly name?: string; readonly title?: string },
-  ): Promise<Result<FerretSummary, string>> {
+  ): Promise<Result<FerretSummary, RenameRefusal>> {
     const record = this.registry.get(ferret);
-    if (record === undefined) return err(`no ferret ${ferret}`);
+    if (record === undefined) return err({ failure: 'not_found', message: `no ferret ${ferret}` });
     const name = change.name?.trim();
     let claimed: string | undefined;
     let keep = false;
     if (name !== undefined) {
       const holder = this.registry.nameHolder(name);
-      if (holder !== undefined && holder !== ferret) return err(`the name ${name} is held by running ferret ${holder}`);
+      if (holder !== undefined && holder !== ferret) return err({ failure: 'taken', message: `the name ${name} is held by running ferret ${holder}` });
       // Renaming to the callsign the ferret already answers to is a no-op claim (it keeps its current name); any other
       // name, a non-canonical one included, goes through the ledger, which refuses an invalid one.
       const canonical = normalizeCallsign(name);
@@ -634,11 +665,13 @@ export class FerretsService implements FerretsApi {
       else if (this.ports.claims !== undefined) {
         const allocated = await this.ports.claims.allocate({ ownerId: ferret, nowMs: this.nowMs(), requested: name });
         if (!allocated.ok)
-          return err(
-            allocated.error.code === 'callsign_taken'
-              ? `another agent on this machine is already called ${displayAgentName(normalizeCallsign(name) ?? name)} — choose a different name`
-              : allocated.error.message,
-          );
+          return err({
+            failure: RENAME_REFUSALS[allocated.error.code],
+            message:
+              allocated.error.code === 'callsign_taken'
+                ? `another agent on this machine is already called ${displayAgentName(normalizeCallsign(name) ?? name)} — choose a different name`
+                : allocated.error.message,
+          });
         claimed = allocated.claim.callsign;
       }
     }

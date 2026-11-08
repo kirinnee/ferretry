@@ -45,7 +45,7 @@ import {
 import { SubtreeService } from './lib/session/pack/subtree.ts';
 import manifest from '../manifest.ts';
 import { ConditionalFleetList } from './lib/fleet-list/conditional.ts';
-import { FerretsService } from './lib/ferrets/service.ts';
+import { FerretsService, RENAME_HTTP } from './lib/ferrets/service.ts';
 import { parseRenameBody, parseResumeBody, parseStartBody, parseStopBody } from './lib/ferrets/wire.ts';
 import { createSessionEvent, encodeSessionEvent, parseSessionEvent } from './lib/storage/journal.ts';
 import { type SessionId, tryParseSessionId } from './lib/session-id.ts';
@@ -218,13 +218,9 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
   const systemCallsigns = new SystemCallsignIssuer({
     counters: new StateCallsignCounters(kernel.state),
-    held: async () => {
-      const nowMs = kernel.clock.nowMs();
-      return registry
-        .nameClaims()
-        .filter(claim => claim.expiresAtMs > nowMs)
-        .map(claim => claim.callsign);
-    },
+    // Every callsign the fleet holds or has held, expired claims included, as today's `held`: a stopped ferret's id is
+    // never issued again.
+    held: async () => registry.nameClaims().map(claim => claim.callsign),
     serial: callsignSerial,
   });
 
@@ -836,7 +832,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         const id = await pathFerret(call);
         mayAct(call, id);
         const renamed = await service.rename(id, parseRenameBody(await body(call)));
-        if (!renamed.ok) throw new ApiError(409, renamed.error, 'name_taken');
+        if (!renamed.ok) {
+          const refusal = RENAME_HTTP[renamed.error.failure];
+          throw new ApiError(refusal.status, renamed.error.message, refusal.code);
+        }
         return jsonResponse(renamed.value);
       },
       'POST /v1/ferrets/:ferretId/revoke-credential': async call => {
