@@ -2,15 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import type { TaskRef } from '@ferretry/core-asks/contract';
 import {
   closeCards,
-  closePlan,
   type DoneCloseResult,
   doneCloseLabel,
   doneCloseShortLabel,
   offeredCards,
 } from '../../../app/lib/agenda-done-close.ts';
-import { laneSetFor } from './board-support.ts';
 
-const lanes = laneSetFor();
 const F12: TaskRef = { id: 'F12' };
 
 describe('which cards an agenda item offers to close', () => {
@@ -37,36 +34,6 @@ describe('the button’s words', () => {
     // A narrow row's words: the one card, or how many.
     expect(doneCloseShortLabel([F12])).toBe('Close &F12');
     expect(doneCloseShortLabel([F12, { id: 'F13' }, { id: 'F14' }])).toBe('Close 3 cards');
-  });
-});
-
-describe('the lane a Done moves a card into', () => {
-  it('moves an open card into the Closed lane', () => {
-    expect(closePlan({ laneId: 'tested', dropped: false, laneSet: lanes })).toEqual({ kind: 'move', laneId: 'closed' });
-  });
-
-  it('has nothing to do for a card that is already closed', () => {
-    expect(closePlan({ laneId: 'closed', dropped: false, laneSet: lanes })).toEqual({ kind: 'closed' });
-  });
-
-  it('refuses a closed card on a board with no lane to reopen it into', () => {
-    const onlyClosed = { lanes: [{ id: 'closed', category: 'closed' }], doneLane: 'closed' };
-    expect(closePlan({ laneId: 'closed', dropped: false, laneSet: onlyClosed })).toEqual({
-      kind: 'refused',
-      message: 'the board has no Done for this card',
-    });
-  });
-
-  it('refuses a card it cannot read, a dropped one and one on a board with no lanes', () => {
-    expect(closePlan(undefined)).toEqual({ kind: 'refused', message: 'the card could not be read' });
-    expect(closePlan({ laneId: 'tested', dropped: true, laneSet: lanes })).toEqual({
-      kind: 'refused',
-      message: 'the board has no Done for this card',
-    });
-    expect(closePlan({ laneId: 'tested', dropped: false, laneSet: null })).toEqual({
-      kind: 'refused',
-      message: 'the board has no Done for this card',
-    });
   });
 });
 

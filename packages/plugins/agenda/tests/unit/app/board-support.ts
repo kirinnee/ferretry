@@ -1,32 +1,15 @@
 /**
- * The board a Done · closes reads, as Agenda's own small fixture: Agenda's opaque board shapes (`CardForClose`,
- * `DoneCloseBoard`) and nothing of Board's tests or app. The lanes are Ferretry's classic lane set — the
- * ids and categories a Done reads.
+ * The board a Done · closes reads and closes through, as Agenda's own small fixture: a stand-in for Board's
+ * `agenda.card-answer` hook (`contract/app-hooks.ts`) and nothing of Board's tests or app. Which lane a Done moves a
+ * card into is Board's rule (tested in Board); this stand-in closes into `closed` and counts a card there as closed.
  */
 
+import type { AgendaCardView, AgendaCardWrite } from '../../../contract/app-hooks.ts';
 import type { DoneCloseResult } from '../../../app/lib/agenda-done-close.ts';
-import type { CardForClose } from '../../../app/lib/agenda-done-close.ts';
-import type { DoneCloseBoard, DoneCloseCardState } from '../../../app/hooks/use-done-close.ts';
+import type { DoneCloseBoard } from '../../../app/hooks/use-done-close.ts';
 import { daemonConnection } from '../../../app/shell.ts';
 
 export const laptop = daemonConnection({ daemonId: 'daemon/laptop' });
-
-type LaneSet = NonNullable<CardForClose['laneSet']>;
-
-/** Ferretry's lanes before board v3: what a Done needs of them (an id and a category each, and the Done lane). */
-export const laneSetFor = (): LaneSet => ({
-  lanes: [
-    { id: 'todo', category: 'backlog' },
-    { id: 'plan', category: 'active' },
-    { id: 'implement', category: 'active' },
-    { id: 'review', category: 'review' },
-    { id: 'merged', category: 'shipped' },
-    { id: 'released', category: 'shipped' },
-    { id: 'tested', category: 'verify' },
-    { id: 'closed', category: 'closed' },
-  ],
-  doneLane: 'closed',
-});
 
 /** A card as the board serves it, as far as a Done reads it; `extra` overrides any field. */
 export interface BoardCard {
@@ -63,8 +46,8 @@ export const flush = async (): Promise<void> => {
   for (let turn = 0; turn < 5; turn += 1) await new Promise(done => setTimeout(done, 0));
 };
 
-/** What the fake board's read answers: the card on its lanes, or `null` for a card the board does not have. */
-export type BoardRead = { readonly task: BoardCard; readonly laneSet: LaneSet } | null;
+/** What the fake board's read answers: the card, or `null` for a card the board does not have. */
+export type BoardRead = { readonly task: BoardCard } | null;
 
 /** A move's answer: the card where it landed, or the board's refusal. */
 export type BoardMove =
@@ -75,8 +58,8 @@ export const moved = (read: BoardRead): BoardMove => ({ ok: true, read });
 export const refusedMove = (message: string): BoardMove => ({ ok: false, message });
 
 /**
- * A board a host would hand the ask surfaces: each card is read once on first ask, and a move is recorded as
- * `<id>:move:<lane>` before it answers. `act` moves a card as Board would, publishing where it landed.
+ * The board Board's hook would hand the ask surfaces: each card is read once when it is first watched, and a Done is
+ * recorded as `<id>:move:closed` before it answers. `act` moves a card as Board would, publishing where it landed.
  */
 export const fakeDoneCloseBoard = (
   options: { readonly task?: () => Promise<BoardRead>; readonly act?: () => Promise<BoardMove> } = {},
@@ -86,47 +69,57 @@ export const fakeDoneCloseBoard = (
 } => {
   const moves: string[] = [];
   const listeners = new Set<() => void>();
-  const states = new Map<string, DoneCloseCardState>();
-  const read = options.task ?? (async () => ({ task: card('F1', { laneId: 'tested' }), laneSet: laneSetFor() }));
-  const publish = (id: string, state: DoneCloseCardState): void => {
+  const states = new Map<string, AgendaCardView>();
+  const reads = new Map<string, BoardCard | null>();
+  const read = options.task ?? (async () => ({ task: card('F1', { laneId: 'tested' }) }));
+  const IDLE: AgendaCardView = { status: 'idle', missing: false, closed: false };
+  const publish = (id: string, state: AgendaCardView): void => {
     states.set(id, state);
     for (const listener of listeners) listener();
   };
-  const stateOf = (answer: BoardRead): DoneCloseCardState =>
-    answer === null
-      ? { status: 'ready', missing: true }
-      : {
-          status: 'ready',
-          missing: false,
-          title: answer.task.title,
-          card: { laneId: answer.task.laneId, dropped: answer.task.dropped !== null, laneSet: answer.laneSet },
-        };
+  const land = (id: string, answer: BoardRead): void => {
+    reads.set(id, answer?.task ?? null);
+    publish(
+      id,
+      answer === null
+        ? { status: 'ready', missing: true, closed: false }
+        : { status: 'ready', missing: false, title: answer.task.title, closed: answer.task.laneId === 'closed' },
+    );
+  };
   const act = async (id: string, laneId: string): Promise<DoneCloseResult> => {
     moves.push(`${id}:move:${laneId}`);
-    const answer =
-      options.act === undefined ? moved({ task: card(id, { laneId }), laneSet: laneSetFor() }) : await options.act();
+    const answer = options.act === undefined ? moved({ task: card(id, { laneId }) }) : await options.act();
     if (!answer.ok) return { ok: false, message: answer.message };
-    publish(id, stateOf(answer.read));
+    land(id, answer.read);
     return { ok: true };
   };
+  const refused = (message: string): AgendaCardWrite => ({ ok: false, status: 0, message });
   return {
+    daemonId: laptop.daemonId,
     moves,
     act,
     subscribe: listener => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    cardState: (_daemonId, id) => {
-      const known = states.get(id);
-      if (known !== undefined) return known;
-      const loading: DoneCloseCardState = { status: 'loading', missing: false };
-      states.set(id, loading);
-      read().then(
-        answer => publish(id, stateOf(answer)),
-        () => publish(id, { status: 'failed', missing: false }),
-      );
-      return loading;
+    watch: id => {
+      if (!states.has(id)) {
+        publish(id, { status: 'loading', missing: false, closed: false });
+        read().then(
+          answer => land(id, answer),
+          () => publish(id, { status: 'failed', missing: false, closed: false }),
+        );
+      }
+      return () => undefined;
     },
-    move: (_daemonId, id, _card, laneId) => act(id, laneId),
+    card: id => states.get(id) ?? IDLE,
+    done: async id => {
+      const known = reads.get(id);
+      if (known === undefined || known === null) return refused('the card could not be read');
+      if (known.dropped !== null) return refused('the board has no Done for this card');
+      if (known.laneId === 'closed') return { ok: true };
+      const closed = await act(id, 'closed');
+      return closed.ok ? { ok: true } : refused(closed.message);
+    },
   };
 };

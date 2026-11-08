@@ -66,3 +66,24 @@ describe('mergeProgress', () => {
     should(mergeProgress(undefined, { next: '1. CLI' })).eql({ next: '1. CLI' });
   });
 });
+
+describe('parseProgressFile: a file that parses but is not a value', () => {
+  /** Five lines whose aliases would expand to a hundred thousand nodes: YAML the reader refuses to build. */
+  const ALIAS_BOMB = [
+    'now: &a [x, x, x, x, x, x, x, x, x, x]',
+    'b: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]',
+    'c: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]',
+    'd: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]',
+    'next: [*d, *d, *d, *d, *d, *d, *d, *d, *d, *d]',
+  ].join('\n');
+
+  it('should keep the reader’s own sentence instead of the generic one', () => {
+    // Act
+    const said = refusal(() => parseProgressFile(ALIAS_BOMB, 's.yaml'));
+
+    // Assert
+    should(said).equal(
+      's.yaml could not be read as a patch: Excessive alias count indicates a resource exhaustion attack',
+    );
+  });
+});

@@ -29,7 +29,7 @@ import { ChatTasks } from './chat-tasks.tsx';
 import { BoardDetail } from './detail/board-detail.tsx';
 import { useLocationSearch } from './location.ts';
 import { cardProse } from './prose.tsx';
-import { type BoardRuntime, createBoardRuntime, type FerretRow } from './runtime.ts';
+import { type BoardRuntime, boardRuntimeOf, type FerretRow } from './runtime.ts';
 
 const MACHINE = { connection: THIS_MACHINE, name: 'This machine' } as const;
 const MACHINES = [MACHINE] as const;
@@ -276,7 +276,7 @@ export interface BoardSurfaces {
 }
 
 export const createSurfaces = (client: PluginClient): BoardSurfaces => {
-  const runtime = createBoardRuntime(client);
+  const runtime = boardRuntimeOf(client);
   return {
     screens: { board: boardScreen(runtime), card: cardScreen(runtime) },
     panels: { 'cards-of-ferret': cardsOfFerret(runtime), 'card-progress': cardProgress(runtime) },

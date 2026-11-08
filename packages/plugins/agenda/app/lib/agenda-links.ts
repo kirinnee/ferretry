@@ -19,8 +19,6 @@ export interface AgendaLinks {
   readonly agenda: (daemonId: string) => string;
   /** A card's page, when Board is installed. */
   readonly card: (daemonId: string, id: string) => string | undefined;
-  /** A project's lane editor (Board's board page with its lanes open), when Board is installed. */
-  readonly lanes: (daemonId: string, project: string) => string | undefined;
 }
 
 export const useAgendaLinks = (): AgendaLinks => {
@@ -29,14 +27,10 @@ export const useAgendaLinks = (): AgendaLinks => {
 };
 
 /** The links over one route table (`useScreenHref`'s answer). */
-export const agendaLinks = (href: ReturnType<typeof useScreenHref>): AgendaLinks => {
+const agendaLinks = (href: ReturnType<typeof useScreenHref>): AgendaLinks => {
   return {
     chat: (daemonId, ferret) => href(daemonId, 'conversation', 'chat', { ferret }) ?? agendaPagePath(daemonId),
     agenda: daemonId => href(daemonId, 'agenda', 'agenda') ?? agendaPagePath(daemonId),
     card: (daemonId, id) => href(daemonId, 'board', 'card', { id }),
-    lanes: (daemonId, project) => {
-      const board = href(daemonId, 'board', 'board', { project });
-      return board === undefined ? undefined : `${board}?lanes=1`;
-    },
   };
 };

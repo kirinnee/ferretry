@@ -68,6 +68,7 @@ import { withMachineAgendas } from '../lib/machine-agenda.ts';
 import { daemonSessionKey, daemonSessionScope } from '../shell.ts';
 import type { DaemonFleetStore } from '../lib/ferret-store.ts';
 import type { AgendaRuntime } from '../lib/agenda-runtime.ts';
+import type { AgendaLaneEditor as LaneEditor } from '../../contract/app-hooks.ts';
 import { type BoardReadFailure, InboxBoardReads } from '../lib/inbox-board-reads.ts';
 
 /** One paired machine, as the inbox reads it: its pairing, its name, its last session list. */
@@ -123,8 +124,8 @@ export interface AgendaInbox {
   readonly boardOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaItem[];
   /** The resolved records one conversation's board holds: where the title of an agenda merged away is read. */
   readonly recordsOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaListRecord[];
-  /** A project's lane editor (Board's page), where Edit on a lane-proposal card goes. Absent: Edit only answers. */
-  readonly laneEditor?: (projectId: string) => string | undefined;
+  /** Where Edit on a lane-proposal card goes: Board's lane editor (its `agenda.lane-proposal` hook). Absent: Edit only answers. */
+  readonly laneEditor?: LaneEditor;
   /** Every machine's ferrets have been read and no board is on its first read: a card not listed now is not open. */
   readonly settled?: boolean;
 }
@@ -535,12 +536,9 @@ export function useAgendaInboxModel(
 
 /**
  * The inbox of the half's one machine, over its runtime: its ferrets (read as soon as something draws them) and the
- * model above. `laneEditor` is the host's link to Board's lane editor.
+ * model above. `laneEditor` is Board's lane editor, from its `agenda.lane-proposal` hook.
  */
-export const useRuntimeInbox = (
-  runtime: AgendaRuntime,
-  laneEditor?: (projectId: string) => string | undefined,
-): AgendaInbox => {
+export const useRuntimeInbox = (runtime: AgendaRuntime, laneEditor?: LaneEditor): AgendaInbox => {
   const pairings = useMemo(
     () => [{ connection: runtime.connection, name: runtime.name }],
     [runtime.connection, runtime.name],

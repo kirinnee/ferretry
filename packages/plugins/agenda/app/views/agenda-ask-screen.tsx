@@ -6,6 +6,7 @@
  */
 
 import type { ScreenProps } from '@ferretry/kernel/manifest';
+import { AgendaBoardProviders, laneEditorOf, useAgendaBoardHooks } from '../features/agenda/agenda-board-hooks.tsx';
 import { AgendaConversationSlot } from '../features/agenda/agenda-conversation-slot.tsx';
 import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
 import { AgendaInboxContext, useRuntimeInbox } from '../hooks/use-agenda-inbox.ts';
@@ -20,7 +21,9 @@ export function createAgendaAskScreen(runtime: AgendaRuntime) {
   return function AgendaAskScreen({ params }: ScreenProps) {
     const { navigate } = useRouter();
     const links = useAgendaLinks();
-    const inbox = useRuntimeInbox(runtime, project => links.lanes(daemon, project));
+    // Board's hooks for this machine: Done · closes, a notice's Start and Close, Edit's lane editor and `&F12` proof.
+    const board = useAgendaBoardHooks(daemon);
+    const inbox = useRuntimeInbox(runtime, laneEditorOf(board));
     const phone = useLayoutMode() === 'drawer';
     const ferret = params.ferret;
     const ask = AgendaIdSchema.safeParse(params.ask);
@@ -30,26 +33,28 @@ export function createAgendaAskScreen(runtime: AgendaRuntime) {
         ? undefined
         : { daemonId: daemon, sessionId: ferret, id: ask.data, settled: inbox.settled === true };
     return (
-      <AgendaClientContext.Provider value={runtime.client}>
-        <AgendaInboxContext.Provider value={inbox}>
-          <AgendaInboxPage
-            inbox={inbox}
-            phone={phone}
-            clearPort={runtime.clearPort}
-            {...(open === undefined ? {} : { open })}
-            onOpenSettled={opened =>
-              navigate(opened || ferret === undefined ? links.agenda(daemon) : links.chat(daemon, ferret), {
-                replace: true,
-              })
-            }
-            onNavigate={to => navigate(to)}
-            onItemOpened={card => void runtime.itemOpened(card.view.config.id, card.item.id)}
-            renderComposer={card => (
-              <AgendaConversationSlot ask={card.item.id} daemon={daemon} ferret={card.view.config.id} />
-            )}
-          />
-        </AgendaInboxContext.Provider>
-      </AgendaClientContext.Provider>
+      <AgendaBoardProviders hooks={board} onNavigate={to => navigate(to)}>
+        <AgendaClientContext.Provider value={runtime.client}>
+          <AgendaInboxContext.Provider value={inbox}>
+            <AgendaInboxPage
+              inbox={inbox}
+              phone={phone}
+              clearPort={runtime.clearPort}
+              {...(open === undefined ? {} : { open })}
+              onOpenSettled={opened =>
+                navigate(opened || ferret === undefined ? links.agenda(daemon) : links.chat(daemon, ferret), {
+                  replace: true,
+                })
+              }
+              onNavigate={to => navigate(to)}
+              onItemOpened={card => void runtime.itemOpened(card.view.config.id, card.item.id)}
+              renderComposer={card => (
+                <AgendaConversationSlot ask={card.item.id} daemon={daemon} ferret={card.view.config.id} />
+              )}
+            />
+          </AgendaInboxContext.Provider>
+        </AgendaClientContext.Provider>
+      </AgendaBoardProviders>
     );
   };
 }
