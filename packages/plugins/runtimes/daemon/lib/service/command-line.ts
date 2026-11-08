@@ -15,7 +15,9 @@
  *   quoted nested value runs to its closing quote (`API_KEY="v,w"`), and a key in a glued flag's own part counts too
  *   (`--hdr,api_key:v more`). A pointer in a value hides nothing else in it (review r2 M1): the keys after it are read
  *   (`API_KEY=${secret:X} CLIENT_SECRET=v`), and so is a piece of it set apart from the pointer
- *   (`Authorization: v LOG_LEVEL=${secret:X}`, `KEY=v ${secret:X}`);
+ *   (`Authorization: v LOG_LEVEL=${secret:X}`, `KEY=v ${secret:X}`), and so is every part of it before the pointer
+ *   that a space or `#` sets apart, however many `=` or `:` it holds (review r3 N1: `Basic <b64>== X=${secret:X}`,
+ *   `user:<v> ${secret:X}`);
  * - the password of a URL's user (`scheme://user:PASS@host`), up to the LAST `@` before the host.
  *
  * Only the VALUE is replaced: the flag's own spelling, a nested key's name, a URL's user and host and every other
@@ -27,10 +29,12 @@
  * one-letter flag, the whole word) is searched and what ANY of them cuts is cut, so no reading shows what another hid.
  *
  * NOT handled (declared GAPs): a JSON document inside a flag (`--settings '{"env":{"API_KEY":"v"}}'`, its keys are
- * quoted) and a plain password stuck to a one-letter flag (`-p<password>`: a single letter is no secret name).
+ * quoted), a plain password stuck to a one-letter flag (`-p<password>`: a single letter is no secret name), and a
+ * value glued to a pointer with no space or `#` between them (`API_KEY=v${secret:X}`: it IS that pointer, as
+ * `prefix${secret:X}` is).
  *
- * LINEAR in the word, however many keys share one value: where a value ends, and whether it holds a pointer, are read
- * from tables built once per text ({@link valueEnds}).
+ * LINEAR in the word, however many keys share one value: where a value ends, whether it holds a pointer, and which of
+ * its parts look like credentials, are read from tables built once per text ({@link valueEnds}).
  *
  * Pure.
  */
@@ -112,6 +116,15 @@ const NESTED_VALUE_END = new Set([',', ';', '&']);
 /** What sets a part of a value apart from a pointer next to it: a space, or a URL's fragment mark. */
 const PART_BREAK = /[\s#]+/u;
 
+/** One character that {@link PART_BREAK} splits at. */
+const PART_BREAK_CHAR = /[\s#]/u;
+
+/** One character a `$NAME` pointer's name may hold. */
+const POINTER_NAME_CHAR = /[A-Za-z0-9_]/u;
+
+/** The first character of a `$NAME` pointer's name. */
+const POINTER_NAME_START = /[A-Za-z_]/u;
+
 /** For each index of a text, read once: where a nested value starting there ends, and what it holds. */
 interface ValueEnds {
   /**
@@ -124,20 +137,45 @@ interface ValueEnds {
   readonly piece: Int32Array;
   /** The end of the first well-formed pointer (`${secret:NAME}`) that starts at or after it; past the end when none. */
   readonly pointer: Int32Array;
+  /** The start of that pointer; the text's end when none. */
+  readonly pointerStart: Int32Array;
   /** The next `}`, or the text's end. */
   readonly close: Int32Array;
   /** Just past the last character before it that is not white space (0 when there is none). */
   readonly shownEnd: Int32Array;
+  /** The next character {@link PART_BREAK} splits at, or the text's end: where a part that holds it ends. */
+  readonly partEnd: Int32Array;
+  /** Where the part that holds it starts (for a character a part holds). */
+  readonly partStart: Int32Array;
+  /** The next character no `$NAME` pointer's name may hold, or the text's end. */
+  readonly nameEnd: Int32Array;
+  /** The start of the last part that ends at or before it and looks like a credential ({@link partHeld}); -1 when none. */
+  readonly heldStart: Int32Array;
+  /** That part's end; -1 when none. */
+  readonly heldEnd: Int32Array;
+  /** The start of the next part that is a key and its `:` and nothing else (`X-Trace:`), or the text's end. */
+  readonly bareKey: Int32Array;
 }
 
-/** {@link ValueEnds} of a text whose keys start at `keyStarts`, built right to left in one pass (shown ends left to right). */
-function valueEnds(text: string, keyStarts: ReadonlySet<number>): ValueEnds {
+/**
+ * {@link ValueEnds} of a text whose keys start at the keys of `keyStarts` (each with the place of its separator), built
+ * right to left in one pass (shown ends, part starts and the parts that look like credentials left to right, and the
+ * bare keys right to left again).
+ */
+function valueEnds(text: string, keyStarts: ReadonlyMap<number, number>): ValueEnds {
   const length = text.length;
   const value = new Int32Array(length + 1).fill(length);
   const piece = new Int32Array(length + 1).fill(length);
   const pointer = new Int32Array(length + 1).fill(length + 1);
+  const pointerStart = new Int32Array(length + 1).fill(length);
   const close = new Int32Array(length + 3).fill(length);
   const shownEnd = new Int32Array(length + 1);
+  const partEnd = new Int32Array(length + 1).fill(length);
+  const partStart = new Int32Array(length + 1);
+  const nameEnd = new Int32Array(length + 2).fill(length);
+  const heldStart = new Int32Array(length + 1);
+  const heldEnd = new Int32Array(length + 1);
+  const bareKey = new Int32Array(length + 2).fill(length);
   const pointerEnds = new Map(
     matchesOf(secretReferencePattern(), text).map(found => [found.index, found.index + found[0].length]),
   );
@@ -145,8 +183,12 @@ function valueEnds(text: string, keyStarts: ReadonlySet<number>): ValueEnds {
   let nextSingle = length;
   for (let at = length - 1; at >= 0; at--) {
     const char = text[at] as string;
-    pointer[at] = pointerEnds.get(at) ?? (pointer[at + 1] as number);
+    const pointerEnd = pointerEnds.get(at);
+    pointer[at] = pointerEnd ?? (pointer[at + 1] as number);
+    pointerStart[at] = pointerEnd === undefined ? (pointerStart[at + 1] as number) : at;
     close[at] = char === '}' ? at : (close[at + 1] as number);
+    partEnd[at] = PART_BREAK_CHAR.test(char) ? at : (partEnd[at + 1] as number);
+    nameEnd[at] = POINTER_NAME_CHAR.test(char) ? (nameEnd[at + 1] as number) : at;
     if (NESTED_VALUE_END.has(char)) {
       value[at] = at;
       piece[at] = at;
@@ -163,7 +205,59 @@ function valueEnds(text: string, keyStarts: ReadonlySet<number>): ValueEnds {
   }
   for (let at = 0; at < length; at++)
     shownEnd[at + 1] = /\s/u.test(text[at] as string) ? (shownEnd[at] as number) : at + 1;
-  return { value, piece, pointer, close, shownEnd };
+  const ends = {
+    ...{ value, piece, pointer, pointerStart, close, shownEnd },
+    ...{ partEnd, partStart, nameEnd, heldStart, heldEnd, bareKey },
+  };
+  let held: Cut | undefined;
+  for (let at = 0; at <= length; at++) {
+    const breaks = at === length || PART_BREAK_CHAR.test(text[at] as string);
+    if (!breaks) partStart[at] = at > 0 && partEnd[at - 1] !== at - 1 ? (partStart[at - 1] as number) : at;
+    else if (at > 0 && partEnd[at - 1] === at) {
+      const from = partStart[at - 1] as number;
+      if (text[at - 1] === ':' && keyStarts.get(from) === at - 1) bareKey[from] = from;
+      else if (partHeld(text, ends, from, at)) held = [from, at];
+    }
+    heldStart[at] = held?.[0] ?? -1;
+    heldEnd[at] = held?.[1] ?? -1;
+  }
+  for (let at = length - 1; at >= 0; at--) bareKey[at] = Math.min(bareKey[at] as number, bareKey[at + 1] as number);
+  return ends;
+}
+
+/**
+ * Whether the part `[from, to)` of a secret-named key's value, before the first `${secret:…}` pointer in it, looks
+ * like a credential, read from the tables: exactly `looksSecret` of it unquoted, which under a secret name is long
+ * enough and no pointer (not one `$NAME` or `${…}`; it holds no `${secret:…}`, as it stands before the first).
+ */
+function partHeld(text: string, ends: ValueEnds, from: number, to: number): boolean {
+  const quote = text[from];
+  const quoted = to - from >= 2 && (quote === '"' || quote === "'") && text[to - 1] === quote;
+  const start = quoted ? from + 1 : from;
+  const end = quoted ? to - 1 : to;
+  if (end - start < MIN_SECRET_VALUE_LENGTH) return false;
+  if (text[start] !== '$') return true;
+  if (text[start + 1] === '{') return ends.close[start + 2] !== end - 1;
+  return !(POINTER_NAME_START.test(text[start + 1] as string) && (ends.nameEnd[start + 1] as number) >= end);
+}
+
+/**
+ * Where the cut of a secret-named key's value `[start, end)` with a pointer in it must reach for the parts before the
+ * pointer (review r3 N1): to the end of the last of them that looks like a credential, each judged on its own
+ * ({@link partHeld}), however many `=` or `:` it holds (`Basic <b64>==`, `user:<v>`), because the key a `<b64>=`
+ * or a `user:` reads as ends no piece of a credential. The part that holds the pointer is that pointer, and is not
+ * judged; nor is a part from a key that stands alone with its `:` (`X-Trace: ${secret:X}`) on, as such a key's
+ * value is set apart from it. `start` when none looks like a credential, or there is no pointer: then the whole
+ * value was judged.
+ */
+function heldBeforePointer(text: string, ends: ValueEnds, start: number, end: number): number {
+  if ((ends.pointer[start] as number) > end) return start;
+  const pointerPart = ends.partStart[ends.pointerStart[start] as number] as number;
+  const limit = Math.max(start, Math.min(pointerPart, ends.bareKey[start] as number));
+  if (limit === start) return start;
+  const first = ends.partEnd[start] as number;
+  const last = (ends.heldStart[limit] as number) >= first ? (ends.heldEnd[limit] as number) : start;
+  return Math.max(last, partHeld(text, ends, start, first) ? first : start);
 }
 
 /**
@@ -195,13 +289,14 @@ function heldInPiece(name: string, piece: string): boolean {
  *
  * Every key is read, in order. A value that looks like a credential is cut whole, and a key inside it is read only when
  * its own value runs on past the cut. One that does not (a pointer in it, too short) hides nothing else: the first
- * piece of it is judged on its own ({@link heldInPiece}), and the keys inside it are read on (review r2 M1:
+ * piece of it is judged on its own ({@link heldInPiece}), and so is each part before its pointer
+ * ({@link heldBeforePointer}, review r3 N1), and the keys inside it are read on (review r2 M1:
  * `API_KEY=${secret:X} CLIENT_SECRET=v`, `password=${secret:X}?password:v`).
  */
 function nestedValueCuts(text: string): readonly Cut[] {
   const keys = matchesOf(NESTED_NAME, text);
   if (keys.length === 0) return [];
-  const ends = valueEnds(text, new Set(keys.map(key => key.index)));
+  const ends = valueEnds(text, new Map(keys.map(key => [key.index, key.index + key[0].search(/[:=]/u)])));
   const cuts: Cut[] = [];
   let covered = 0;
   for (const key of keys) {
@@ -216,9 +311,11 @@ function nestedValueCuts(text: string): readonly Cut[] {
       continue;
     }
     const piece = text.slice(start, ends.piece[start]).trimEnd();
-    if (!heldInPiece(name, piece)) continue;
-    cuts.push([start, start + piece.length]);
-    covered = Math.max(covered, start + piece.length);
+    const pieceEnd = heldInPiece(name, piece) ? start + piece.length : start;
+    const to = Math.max(pieceEnd, heldBeforePointer(text, ends, start, end));
+    if (to === start) continue;
+    cuts.push([start, to]);
+    covered = Math.max(covered, to);
   }
   return cuts;
 }

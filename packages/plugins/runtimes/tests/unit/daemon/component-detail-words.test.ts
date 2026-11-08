@@ -266,6 +266,32 @@ describe('componentDetail — the #40 rule after review r2 (R-0082, M1, M2, M3, 
   });
 });
 
+describe('componentDetail — the #40 rule after review r3 (R-0082, N1)', () => {
+  const NESTED = 'nested-fake-value-0000';
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
+  const POINTER = '${secret:OTHER_TOKEN}';
+
+  it("R-0082 should hide a secret-named key's value that holds = or : before a pointer later in it, in flags and arguments (N1)", () => {
+    // Arrange
+    const words = [
+      `--header=Authorization: Basic ${NESTED}== LOG_LEVEL=${POINTER}`,
+      `--env API_KEY=${NESTED}= MODEL=${POINTER}`,
+      `API_KEY=person:${NESTED} ${POINTER}`,
+      `--header=Authorization: Basic person:${NESTED} ${POINTER}`,
+    ];
+    const expected = [
+      hid(`--header=Authorization: ${HIDDEN} LOG_LEVEL=${POINTER}`),
+      hid(`--env API_KEY=${HIDDEN} MODEL=${POINTER}`),
+      hid(`API_KEY=${HIDDEN} ${POINTER}`),
+      hid(`--header=Authorization: ${HIDDEN} ${POINTER}`),
+    ];
+
+    // Assert
+    should(flagsOf(words)).deepEqual(expected);
+    should(argsOf(words)).deepEqual(expected);
+  });
+});
+
 describe('componentDetail — one rule with the Resolved view (rulings #39, #40)', () => {
   it('R-0082 should show every launch flag word for word as the Resolved view does (the #37 and #40 families)', () => {
     // Arrange

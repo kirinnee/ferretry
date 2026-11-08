@@ -950,3 +950,90 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
     should(performance.now() - started).be.below(2_000);
   });
 });
+
+describe('resolvedEntries — the #40 rule after review r3 (N1, L1)', () => {
+  const V = 'nested-fake-value-0000';
+  const B64 = 'bm90LWEtcmVhbC0wMDAw';
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
+  const P = '${secret:OTHER_TOKEN}';
+
+  it("should hide a secret-named key's value that holds = or : before a pointer later in it: Basic <b64>==, user:<v> (N1)", () => {
+    // Act
+    const actual = shownFlags([
+      `--header=Authorization: Basic ${B64}== LOG_LEVEL=${P}`,
+      `--header=Authorization: Basic ${B64}= LOG_LEVEL=${P}`,
+      `--header=Authorization: Basic ${V}== X-Trace=${P}`,
+      `--env API_KEY=${B64}== MODEL=${P}`,
+      `API_KEY=${B64}== ${P}`,
+      '-c',
+      `env.PASSWORD=${V}= env.HOME=${P}`,
+      `API_KEY=person:${V} ${P}`,
+      `-eAuthorization: person:${V} ${P}`,
+      `--header=Authorization: Basic person:${V} ${P}`,
+      `--url=https://h.example.invalid/?token=person=${V}#${P}`,
+      `--header=Authorization: Basic person:${V}: X-Trace: ${P}`,
+    ]);
+
+    // Assert
+    should(actual).deepEqual([
+      hid(`--header=Authorization: ${HIDDEN} LOG_LEVEL=${P}`),
+      hid(`--header=Authorization: ${HIDDEN} LOG_LEVEL=${P}`),
+      hid(`--header=Authorization: ${HIDDEN} X-Trace=${P}`),
+      hid(`--env API_KEY=${HIDDEN} MODEL=${P}`),
+      hid(`API_KEY=${HIDDEN} ${P}`),
+      as('-c'),
+      hid(`env.PASSWORD=${HIDDEN} env.HOME=${P}`),
+      hid(`API_KEY=${HIDDEN} ${P}`),
+      hid(`-eAuthorization: ${HIDDEN} ${P}`),
+      hid(`--header=Authorization: ${HIDDEN} ${P}`),
+      hid(`--url=https://h.example.invalid/?token=${HIDDEN}#${P}`),
+      hid(`--header=Authorization: ${HIDDEN} X-Trace: ${P}`),
+    ]);
+  });
+
+  it("should hide the same shapes in an MCP server's arguments (N1)", () => {
+    // Act
+    const actual = shownServer([`API_KEY=${B64}== ${P}`, `--header=Authorization: Basic person:${V} ${P}`]);
+
+    // Assert
+    should(actual).equal(`run-server API_KEY=${HIDDEN} ${P} --header=Authorization: ${HIDDEN} ${P}`);
+  });
+
+  it('should cut up to the last part before the pointer that looks like a credential, a harmless key between them too (N1)', () => {
+    // Act — every part before the pointer is judged on its own, so a harmless `MODEL=…` part long enough to be a
+    // secret, between the secret and the pointer, is cut with it; one too short is not, and ends no cut.
+    const actual = shownFlags([`API_KEY=${V} MODEL=gpt-4o-mini ${P}`, `API_KEY=${V} x=y ${P}`]);
+
+    // Assert
+    should(actual).deepEqual([hid(`API_KEY=${HIDDEN} ${P}`), hid(`API_KEY=${HIDDEN} x=y ${P}`)]);
+  });
+
+  it('should keep a part that only points at one, or is too short, before a pointer, and a harmless key exactly (N1 control)', () => {
+    // Arrange
+    const words = [
+      `API_KEY=$LONG_POINTER_NAME ${P}`,
+      `API_KEY='$LONG_POINTER_NAME' ${P}`,
+      `API_KEY="\${LONG_POINTER_NAME}" ${P}`,
+      `API_KEY=short== ${P}`,
+      `Authorization: Basic ${P}`,
+      `--header=Authorization: Basic X-Request-Id: abcdefghijk ${P}`,
+      `LOG_LEVEL=${B64}== ${P}`,
+      `LOG_LEVEL=person:${V} ${P}`,
+    ];
+
+    // Act
+    const actual = shownFlags(words);
+
+    // Assert
+    should(actual).deepEqual(words.map(as));
+  });
+
+  it('should judge a value that starts with a ${…} and goes on past its } as one value, whole (L1)', () => {
+    // Act — only a value that IS one ${…} is no secret; this one goes on, so it is judged whole and cut whole, not
+    // cut to its first piece with the text under the harmless key after it shown.
+    const actual = shownFlags(['API_KEY=${A} short model=abcdefghijk', '--env=API_KEY=${A}?model=abcdefghijk']);
+
+    // Assert
+    should(actual).deepEqual([hid(`API_KEY=${HIDDEN}`), hid(`--env=API_KEY=${HIDDEN}`)]);
+  });
+});

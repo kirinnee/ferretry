@@ -22,6 +22,13 @@
  * built only of harmless parts must be shown exactly as ruling #37 showed it — as written, unless #37's own name rule
  * reads its flag part as a secret name (`--name,LOG_LEVEL:$API_TOKEN,x=v` names TOKEN) — so #40 cuts nothing of it.
  *
+ * Review r3 (r4 round) added a marked value that holds `=` or `:` itself (N1): base64 padding 0, 1 or 2, `Basic`
+ * before it, `user:pass`, `user=pass`, crossed with every pointer position after it — set apart by a space or `#`,
+ * or as a harmless key's value. A pointer BEFORE such a value (`API_KEY=${secret:X} <v>==`) shows it: a GAP
+ * candidate of the r4 report, so that arrangement is generated only for values that hold no `=` or `:`. Harmless
+ * values with padding and `user:pass` stand under harmless keys too, and must be shown exactly. And one more floor:
+ * every word must hide at least what the r3 rule hid (`command-line-r3.ts`, frozen at 9a35f2d316).
+ *
  * Every secret value here is an obviously fake one.
  */
 import { describe, it } from 'bun:test';
@@ -33,6 +40,7 @@ import { todayFlag, todayServerLine } from './resolved-view-today.ts';
 import { HIDDEN, hidesAtLeast, hidesAtLeast37, lineHidesAtLeast, type Shown } from './command-line-family.ts';
 import { flags37, serverLine37 } from './command-line-37.ts';
 import { shownWordsR2 } from './command-line-r2.ts';
+import { shownWordsR3 } from './command-line-r3.ts';
 
 const resolved = (input: ResolveInput): ResolvedProfile => {
   const result = resolveProfile(input);
@@ -161,6 +169,8 @@ const HEAD_VALUES = [...VALUES, ...POINTERS];
 const LETTER_FLAGS = ['-e', '-H', '-c', '-k', '-p'];
 /** What sets a pointer apart from a value next to it, inside the same value: a space, or a URL's fragment mark. */
 const POINTER_BREAKS = [' ', '#', '  '];
+/** What ends a base64 value: no padding, one `=` or two (review r3 N1), or a `:` and more. */
+const PADDINGS = ['', '=', '==', ':x', '=:'];
 
 // Harmless parts only: a compound word made of these holds no nested secret, so #40 must cut nothing of it.
 const HARMLESS_FLAGS = ['--model', '--name', '--verbose', '--header', '-v', '-H', '-c', '-e'];
@@ -173,6 +183,11 @@ const HARMLESS_VALUES = [
   '$API_TOKEN',
   ...POINTERS,
   'https://person@h.example.invalid/x?model=m',
+  // A harmless key's value with padding, `user:pass` and a pointer after it: never cut (review r3 N1). No secret word
+  // in it, or the `<value>=` before the padding is itself a secret-named key (`not-a-real-secret-0000=`).
+  'harmless-value-0000==',
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
+  'Basic person:harmless-value-0000 ${secret:OTHER_TOKEN}',
 ];
 
 /** A small, seeded, repeatable generator (mulberry32). */
@@ -203,18 +218,19 @@ function commandLines(seed: number, count: number): readonly CommandLine[] {
     // A pointer may sit in the same value as the marker, set apart from it (review r2 M1): `v ${secret:X}`,
     // `v#${secret:X}`, `${secret:X} v`. Glued straight to it (`v${secret:X}`) the value is composed with the pointer,
     // and IS one, so it is never generated.
-    const marked = pick([
-      NESTED_SECRET,
-      `Bearer ${NESTED_SECRET}`,
-      `${NESTED_SECRET},${NESTED_SECRET}`,
-      `a${NESTED_SECRET}`,
-    ]);
+    // Or one that holds `=` or `:` itself (review r3 N1): base64 padding, `Basic` before it, `user:pass`.
+    const padded = next() < 0.5;
+    const marked = padded
+      ? `${pick(['', 'Basic ', 'person:', 'person=', 'Basic person:', 'a='])}${NESTED_SECRET}${pick(PADDINGS)}`
+      : pick([NESTED_SECRET, `Bearer ${NESTED_SECRET}`, `${NESTED_SECRET},${NESTED_SECRET}`, `a${NESTED_SECRET}`]);
     const value = named
       ? pick([
           marked,
           marked,
           `${marked}${pick(POINTER_BREAKS)}${pick(POINTERS)}`,
-          `${pick(POINTERS)}${pick([' ', '  '])}${marked}`,
+          `${marked}${pick(POINTER_BREAKS)}${pick(NESTED_HARMLESS_KEYS)}${pick(NESTED_SEPARATORS)}${pick(POINTERS)}`,
+          // A pointer before a value with `=` or `:` in it shows the value: a GAP candidate (r4 report), not generated.
+          padded && /[=:]/u.test(marked) ? marked : `${pick(POINTERS)}${pick([' ', '  '])}${marked}`,
         ])
       : pick(HEAD_VALUES);
     // A `,` inside a value is the value's only between a pair of quotes; unquoted it ends the value (a list).
@@ -349,10 +365,12 @@ describe('resolvedEntries — today differential for command lines (ruling #37)'
       const five = shownFlags(words);
       const ruled37 = flags37(words);
       const ruledR2 = shownWordsR2(words);
+      const ruledR3 = shownWordsR3(words);
       for (const [index, word] of words.entries()) {
         const today = todayFlag(word);
         const shown = five[index] ?? { value: '' };
         const r2 = ruledR2[index];
+        const r3 = ruledR3[index];
         if (!hidesAtLeast37(ruled37[index] ?? { value: '' }, shown))
           breaches.push(`${JSON.stringify(words)} @${String(index)} (#37)`);
         if (
@@ -360,6 +378,11 @@ describe('resolvedEntries — today differential for command lines (ruling #37)'
           !hidesAtLeast37(r2.hidden ? { value: r2.text, hidden: true } : { value: r2.text }, shown)
         )
           breaches.push(`${JSON.stringify(words)} @${String(index)} (r2)`);
+        if (
+          r3 !== undefined &&
+          !hidesAtLeast37(r3.hidden ? { value: r3.text, hidden: true } : { value: r3.text }, shown)
+        )
+          breaches.push(`${JSON.stringify(words)} @${String(index)} (r3)`);
         if (shown.value.includes(NESTED_SECRET)) breaches.push(`${JSON.stringify(words)} @${String(index)} (nested)`);
         if (word.includes(NESTED_SECRET)) nestedMembers += 1;
         if (harmless[index] === true) {
@@ -403,11 +426,15 @@ describe('resolvedEntries — today differential for command lines (ruling #37)'
       const r2 = shownWordsR2([COMMAND, ...words])
         .map(word => word.text)
         .join(' ');
+      const r3 = shownWordsR3([COMMAND, ...words])
+        .map(word => word.text)
+        .join(' ');
       const anyTightened = words.some((word, index) => tightened(word, index === 0 ? COMMAND : words[index - 1]));
       if (five !== today) differed += 1;
       if (anyTightened ? !lineHidesAtLeast(today, five) : five !== today) breaches.push(JSON.stringify(words));
       if (!lineHidesAtLeast(serverLine37(COMMAND, words), five)) breaches.push(`${JSON.stringify(words)} (#37)`);
       if (!lineHidesAtLeast(r2, five)) breaches.push(`${JSON.stringify(words)} (r2)`);
+      if (!lineHidesAtLeast(r3, five)) breaches.push(`${JSON.stringify(words)} (r3)`);
       if (five.includes(NESTED_SECRET)) breaches.push(`${JSON.stringify(words)} (nested)`);
       if (harmless.every(Boolean)) harmlessLines += 1;
       if (harmless.every(Boolean) && five !== serverLine37(COMMAND, words))

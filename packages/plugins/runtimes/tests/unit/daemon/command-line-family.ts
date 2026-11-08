@@ -18,6 +18,12 @@
  * a second cut (`--hdr,api_key=v;y=${secret:Z};token=v`, M3). Their controls (a value composed with a pointer,
  * `Bearer ${secret:X}`, `prefix${secret:X}`) must be exact.
  *
+ * Review r3 (r4 round) added a value that holds `=` or `:` itself (N1): base64 padded by 0, 1 or 2 `=`, `Basic`
+ * before it, a `user:pass` and a `user=pass`, with a pointer later in the same value, set apart by a space or `#`,
+ * or as a harmless key's value. Their controls (a part that only points at one, one too short, the same values under a
+ * harmless key) must be exact. Not generated: such a value AFTER a pointer (`API_KEY=${secret:X} <v>==`), a declared
+ * GAP candidate of the r4 report.
+ *
  * Also the oracle the differentials share: what "hides at least what today hides" means for one word and one line.
  *
  * Every secret here is an obviously fake one.
@@ -321,6 +327,74 @@ function secondCutCases(): NestedCase[] {
   return cases;
 }
 
+/** A secret value that holds `=` or `:` (review r3 N1): base64 padding 0, 1 or 2, `Basic` before it, `user:pass`. */
+const PADDED_VALUES = [
+  FAKE,
+  `${FAKE}=`,
+  `${FAKE}==`,
+  `Basic ${FAKE}`,
+  `Basic ${FAKE}=`,
+  `Basic ${FAKE}==`,
+  `person:${FAKE}`,
+  `person=${FAKE}`,
+  `Basic person:${FAKE}`,
+  `${FAKE}:${FAKE}==`,
+];
+
+/** A pointer LATER in the same value as a padded secret: set apart by a space, two, a `#`, or as a harmless key's. */
+const LATER_POINTERS: readonly ((value: string) => { text: string; kept: string[] })[] = [
+  value => ({ text: `${value} ${POINTER}`, kept: [] }),
+  value => ({ text: `${value}  ${POINTER}`, kept: [] }),
+  value => ({ text: `${value}#${POINTER}`, kept: [] }),
+  value => ({ text: `${value} LOG_LEVEL=${POINTER}`, kept: [` LOG_LEVEL=${POINTER}`] }),
+  value => ({ text: `${value} X-Trace: ${POINTER}`, kept: [` X-Trace: ${POINTER}`] }),
+];
+
+/** Before a later pointer, a part that is no secret: it points at one, or is too short; and a harmless key's value. */
+const PADDED_CONTROLS: readonly ((key: string) => string)[] = [
+  key => `${key}$LONG_POINTER_NAME ${POINTER}`,
+  key => `${key}'$LONG_POINTER_NAME' ${POINTER}`,
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: a pointer is the literal text `${NAME}`
+  key => `${key}\${LONG_POINTER_NAME} ${POINTER}`,
+  key => `${key}short== ${POINTER}`,
+  key => `${key}a:b x=y ${POINTER}`,
+  () => `LOG_LEVEL=${FAKE}== ${POINTER}`,
+  () => `X-Trace: Basic person:${FAKE} ${POINTER}`,
+];
+
+/** The padded family (review r3 N1): key × separator × position × padded value × later pointer, and controls. */
+function paddedCases(): NestedCase[] {
+  const cases: NestedCase[] = [];
+  const add = (text: string, position: Position, secret: boolean, kept: readonly string[], last: boolean) => {
+    const shape = placed(text, position);
+    const words = [BEFORE, ...shape.words, ...(last ? [] : [AFTER])];
+    cases.push({
+      label: JSON.stringify(words),
+      words,
+      at: shape.at,
+      secret,
+      body: FAKE,
+      kept: [...shape.kept, ...kept],
+    });
+  };
+  for (const key of POINTER_KEYS) {
+    for (const separator of ['=', ':', ': ']) {
+      for (const position of POINTER_POSITIONS) {
+        for (const last of [true, false]) {
+          for (const value of PADDED_VALUES) {
+            for (const later of LATER_POINTERS) {
+              const { text, kept } = later(value);
+              add(`${key}${separator}${text}`, position, true, [`${key}${separator.trimEnd()}`, ...kept], last);
+            }
+          }
+          for (const control of PADDED_CONTROLS) add(control(`${key}${separator}`), position, false, [], last);
+        }
+      }
+    }
+  }
+  return cases;
+}
+
 /** Every generated case of ruling #40. */
 export const nestedFamily = (): readonly NestedCase[] => [
   ...nestedKeyCases(),
@@ -328,6 +402,7 @@ export const nestedFamily = (): readonly NestedCase[] => [
   ...stuckTokenCases(),
   ...pointerCases(),
   ...secondCutCases(),
+  ...paddedCases(),
 ];
 
 /** What is wrong with what was shown, word by word, for one case; or nothing. */
