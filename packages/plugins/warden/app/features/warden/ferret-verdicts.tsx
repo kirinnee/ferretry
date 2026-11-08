@@ -15,7 +15,7 @@ export type FerretVerdictsRead =
   | { readonly kind: 'failed'; readonly reason: string };
 
 /** What the Warden did, in words. */
-export const VERDICT_WORDS: Readonly<Record<WardenVerdict['verdict'], string>> = {
+const VERDICT_WORDS: Readonly<Record<WardenVerdict['verdict'], string>> = {
   killed: 'Stopped it',
   revived: 'Revived it',
   nudged: 'Nudged it',
@@ -25,7 +25,7 @@ export const VERDICT_WORDS: Readonly<Record<WardenVerdict['verdict'], string>> =
 };
 
 /** This ferret's verdicts, newest first. */
-export const ferretVerdicts = (verdicts: readonly WardenVerdict[], ferret: string): WardenVerdict[] =>
+const ferretVerdicts = (verdicts: readonly WardenVerdict[], ferret: string): WardenVerdict[] =>
   verdicts
     .filter(verdict => verdict.target === ferret)
     .sort((left, right) => Date.parse(right.at) - Date.parse(left.at));
