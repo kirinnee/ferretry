@@ -3,11 +3,11 @@ import { clock } from '../../support/io.ts';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  NodeDataChannelEngine,
   type EngineDataChannel,
   type EnginePeerConnection,
-  NodeDataChannelEngine,
   type NodeDataChannelModule,
-} from '../../../daemon/adapters/webrtc/index.ts';
+} from '../../../daemon/adapters/webrtc/node-datachannel-engine.ts';
 
 describe('the node-datachannel WebRTC engine', () => {
   it('should prove the real native engine by echoing between two loopback peers', async () => {

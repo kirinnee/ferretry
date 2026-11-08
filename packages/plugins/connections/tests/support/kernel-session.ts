@@ -29,7 +29,7 @@ const settle = async (rounds = 30): Promise<void> => {
 };
 
 /** A clock the test drives: `after` timers fire only on `advance`. */
-export class DrivenKernelClock {
+class DrivenKernelClock {
   #now = Date.parse('2026-11-07T09:00:00.000Z');
   readonly #timers = new Map<number, { at: number; fn: () => void }>();
   #next = 0;

@@ -3,9 +3,6 @@ import { basename, isAbsolute } from 'node:path';
 import { CODE_PROGRAMS, type CodeProgramPort } from '../../lib/inputs/index.ts';
 import { ROOT_PROGRAM_FOLDERS, replaceableBy } from './replaceable-file.ts';
 
-// The folders a program is trusted from are owned by replaceable-file.ts, beside the rule that walks them.
-export { ROOT_PROGRAM_FOLDERS };
-
 /**
  * Whether a process runs a code program (`CODE_PROGRAMS`: ssh, scp, sftp, mosh, the aws, gcloud, az and vault CLIs)
  * from a system folder this account cannot replace. Decided from the REAL executable, never from the name `ps` shows:

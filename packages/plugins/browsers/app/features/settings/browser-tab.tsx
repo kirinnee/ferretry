@@ -29,7 +29,7 @@ export const BROWSER_USER_AGENT_WORDS =
   'A headless browser announces itself with “HeadlessChrome” in its user agent. This browser sends the ordinary Chrome user agent instead, without that token. Nothing else about it is changed.';
 
 /** The shell hands a settings tab no machine name yet (GAP(shell) in ports-pending.json), so the sentence says this one. */
-export const BROWSER_MACHINE_NAME = 'This machine';
+const BROWSER_MACHINE_NAME = 'This machine';
 
 type Reading =
   | { readonly kind: 'reading' }

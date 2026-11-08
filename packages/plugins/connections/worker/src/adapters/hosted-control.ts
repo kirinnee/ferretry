@@ -41,7 +41,7 @@ import {
   releaseHostedRelayConnection,
 } from '../lib/index.ts';
 
-export const HOSTED_RELAY_CONTROL_OBJECT_NAME = 'ferretry-relay-control/v1' as const;
+const HOSTED_RELAY_CONTROL_OBJECT_NAME = 'ferretry-relay-control/v1' as const;
 export const HOSTED_RELAY_PUBLIC_PATH = '/v1/default-relay' as const;
 export const HOSTED_RELAY_OPERATOR_CONFIG_PATH = '/v1/operator/config' as const;
 export const HOSTED_RELAY_OPERATOR_METRICS_PATH = '/v1/operator/metrics' as const;
@@ -152,7 +152,7 @@ export interface HostedRelayControlNamespace {
   get(id: unknown): { fetch(request: Request): Promise<Response> };
 }
 
-export const hostedRelayControlRuntime: HostedRelayControlRuntime = { now: () => Date.now() };
+const hostedRelayControlRuntime: HostedRelayControlRuntime = { now: () => Date.now() };
 
 interface LoadedControl {
   readonly configured: boolean;

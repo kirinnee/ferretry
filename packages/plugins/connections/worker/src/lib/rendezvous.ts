@@ -62,7 +62,7 @@ import {
   type SessionId,
 } from '../wire/frames.ts';
 
-export interface PendingDaemonSocket {
+interface PendingDaemonSocket {
   readonly socketId: string;
   readonly challenge: Uint8Array;
   readonly host: string;
@@ -77,7 +77,7 @@ export interface PendingDaemonSocket {
   readonly replaces?: string;
 }
 
-export interface DaemonSlot {
+interface DaemonSlot {
   readonly socketId: string;
   readonly since: number;
   readonly features?: readonly RelayFeature[];
@@ -91,7 +91,7 @@ export interface DaemonSlot {
   readonly restored?: boolean;
 }
 
-export interface RendezvousSession {
+interface RendezvousSession {
   readonly sessionId: SessionId;
   readonly clientSocketId: string;
   readonly since: number;
@@ -131,7 +131,7 @@ export interface RendezvousState {
 }
 
 /** One session this rendezvous ended, and when, so a daemon frame racing the close can be dropped. */
-export interface EndedSession {
+interface EndedSession {
   readonly sessionId: string;
   readonly at: number;
 }

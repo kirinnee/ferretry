@@ -30,7 +30,7 @@ export function browserSelectorOf(target: ElementTarget): string {
 }
 
 /** What an agent is told about a ref the page no longer knows. */
-export function staleRefMessage(ref: string): string {
+function staleRefMessage(ref: string): string {
   return `${ref} is not on the page's latest snapshot (it changed, or was never read): read the page again with mode "snapshot" and use a fresh ref`;
 }
 

@@ -3,13 +3,12 @@ import should from 'should';
 import {
   DurableTunnelStore,
   HOSTED_TUNNEL_CONTROL_OBJECT_NAME,
-  hostedTunnelControlRuntime,
-  type RelayEnvironment,
-  relayFetch,
   TUNNEL_CONTROL_ROUTES,
   TUNNEL_RECLAIM_CONTINUE_MS,
-  TUNNEL_REQUEST_MAX_BYTES,
-} from '../../../worker/src/adapters/index.ts';
+  hostedTunnelControlRuntime,
+} from '../../../worker/src/adapters/hosted-tunnel-control.ts';
+import { relayFetch, type RelayEnvironment } from '../../../worker/src/adapters/worker.ts';
+import { TUNNEL_REQUEST_MAX_BYTES } from '../../../worker/src/adapters/hosted-tunnel-routes.ts';
 // From the Worker ENTRY, deliberately: Cloudflare finds the class `wrangler.hosted.json` binds only there.
 import relayWorker, { HostedTunnelControlDurableObject } from '../../../worker/src/adapters/worker.ts';
 import {

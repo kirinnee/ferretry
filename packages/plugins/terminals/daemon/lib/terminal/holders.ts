@@ -13,10 +13,10 @@ import type { TerminalOwnerStanding, TerminalRecord } from './contracts.ts';
  */
 
 /** The session statuses after which a ferret's terminals are no use to it. */
-export const FINISHED_SESSION_STATUSES: ReadonlySet<string> = new Set(['completed', 'stopped']);
+const FINISHED_SESSION_STATUSES: ReadonlySet<string> = new Set(['completed', 'stopped']);
 
 /** The status word of a session that no longer exists. */
-export const REMOVED_SESSION_STATUS = 'removed';
+const REMOVED_SESSION_STATUS = 'removed';
 
 /**
  * Where an owner stands, from the status its session records.

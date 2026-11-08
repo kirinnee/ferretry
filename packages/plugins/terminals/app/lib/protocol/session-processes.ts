@@ -24,8 +24,7 @@ import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, Posit
  * - `helper` — something the harness keeps for the whole session: an MCP server, a language server,
  *   Codex's app server, a browser an MCP server drives.
  */
-export const SessionProcessKindSchema = z.enum(['command', 'background', 'server', 'helper']);
-export type SessionProcessKind = z.infer<typeof SessionProcessKindSchema>;
+const SessionProcessKindSchema = z.enum(['command', 'background', 'server', 'helper']);
 
 /**
  * Where the process is in its life. `running` is on a CPU, `sleeping` is waiting on something (most
@@ -33,8 +32,7 @@ export type SessionProcessKind = z.infer<typeof SessionProcessKindSchema>;
  * and its parent has not collected it, and `exited` is gone — kept for a while so its output can still
  * be read.
  */
-export const SessionProcessStateSchema = z.enum(['running', 'sleeping', 'stopped', 'zombie', 'exited']);
-export type SessionProcessState = z.infer<typeof SessionProcessStateSchema>;
+const SessionProcessStateSchema = z.enum(['running', 'sleeping', 'stopped', 'zombie', 'exited']);
 
 /**
  * Where the process's output can be read from.
@@ -44,15 +42,13 @@ export type SessionProcessState = z.infer<typeof SessionProcessStateSchema>;
  * - `transcript` — it has exited, and the conversation transcript recorded what the tool returned.
  * - `none` — nothing can be read without stealing it; `reason` says why in words a person can act on.
  */
-export const SessionProcessOutputSourceSchema = z.enum(['file', 'transcript', 'none']);
-export type SessionProcessOutputSource = z.infer<typeof SessionProcessOutputSourceSchema>;
+const SessionProcessOutputSourceSchema = z.enum(['file', 'transcript', 'none']);
 
-export const SessionProcessOutputAvailabilitySchema = z.strictObject({
+const SessionProcessOutputAvailabilitySchema = z.strictObject({
   source: SessionProcessOutputSourceSchema,
   /** Set when `source` is `none`: why there is nothing to read, e.g. "Writes to the terminal — see Console". */
   reason: z.string().min(1).max(200).optional(),
 });
-export type SessionProcessOutputAvailability = z.infer<typeof SessionProcessOutputAvailabilitySchema>;
 
 /**
  * A process's identity: its pid and its start time (`ProcessIncarnation`: Linux start ticks, macOS epoch
@@ -60,21 +56,19 @@ export type SessionProcessOutputAvailability = z.infer<typeof SessionProcessOutp
  * id never names two processes — Stop relies on that.
  */
 export const SessionProcessIdSchema = z.string().regex(/^[1-9][0-9]{0,9}\.[0-9]{1,20}$/u);
-export type SessionProcessId = z.infer<typeof SessionProcessIdSchema>;
 
 /** The longest command line a list carries, in UTF-16 code units; a longer one is cut and says so. */
-export const SESSION_PROCESS_COMMAND_MAX = 2_000;
+const SESSION_PROCESS_COMMAND_MAX = 2_000;
 
 /** How an exited process ended, when anything recorded it. */
-export const SessionProcessExitSchema = z.strictObject({
+const SessionProcessExitSchema = z.strictObject({
   /** The exit code, when known. */
   code: z.number().int().optional(),
   /** `true` when it failed (a non-zero code, or the harness marked the result an error). */
   failed: z.boolean(),
 });
-export type SessionProcessExit = z.infer<typeof SessionProcessExitSchema>;
 
-export const SessionProcessSchema = z.strictObject({
+const SessionProcessSchema = z.strictObject({
   id: SessionProcessIdSchema,
   pid: PositiveIntegerSchema,
   /** The process this one was started by, when that is listed too; absent for a top-level entry. */
@@ -121,7 +115,7 @@ export const SessionProcessListSchema = z.strictObject({
 export type SessionProcessList = z.infer<typeof SessionProcessListSchema>;
 
 /** The most text one output read returns, in bytes: the tail of a larger file. */
-export const SESSION_PROCESS_OUTPUT_READ_MAX = 256 * 1024;
+const SESSION_PROCESS_OUTPUT_READ_MAX = 256 * 1024;
 
 /**
  * One read of a process's output.
@@ -151,10 +145,6 @@ export const SessionProcessOutputSchema = z.strictObject({
 });
 export type SessionProcessOutput = z.infer<typeof SessionProcessOutputSchema>;
 
-export const SessionProcessOutputQuerySchema = z.strictObject({
-  after: z.coerce.number().int().nonnegative().optional(),
-});
-
 /**
  * Stopping one process: SIGTERM to it and every process below it, deepest first. The daemon first proves
  * again that the id's pid is still under this ferret's pane AND still has the same start time, so a pid
@@ -167,19 +157,6 @@ export const SessionProcessStopResultSchema = z.strictObject({
 });
 export type SessionProcessStopResult = z.infer<typeof SessionProcessStopResultSchema>;
 
-// ─── the attach proof and the Console (today's `protocol/src/lib/session.ts`) ──────────────────────────────────────
-
-export const SessionAttachTargetSchema = z.strictObject({
-  /** The private tmux server owned by the daemon that answered the request. */
-  socketPath: z.string().min(1).regex(/^\//u, 'the tmux socket path must be absolute'),
-  tmuxSession: z.string().min(1),
-  paneId: z.string().regex(/^%(?:0|[1-9][0-9]*)$/u),
-  pid: PositiveIntegerSchema.refine(value => value > 1, 'the pane pid must be greater than one'),
-  /** The pane process's start identity (`ProcessIncarnation`: Linux start ticks, macOS epoch seconds), which distinguishes a reused PID. */
-  processStartTicks: PositiveIntegerSchema,
-});
-export type SessionAttachTarget = z.infer<typeof SessionAttachTargetSchema>;
-
 /**
  * The most a single Console write may carry, in UTF-16 code units. A keystroke is one to a handful; a
  * paste is the large case, and a client splits anything longer into ordered writes rather than the
@@ -191,10 +168,8 @@ export const SESSION_CONSOLE_INPUT_MAX = 4_096;
 export const SessionConsoleInputRequestSchema = z.strictObject({
   data: z.string().min(1).max(SESSION_CONSOLE_INPUT_MAX),
 });
-export type SessionConsoleInputRequest = z.infer<typeof SessionConsoleInputRequestSchema>;
 
 /** How many bytes reached the pane: the UTF-8 length of `data`, never the bytes themselves. */
 export const SessionConsoleInputResultSchema = z.strictObject({
   written: PositiveIntegerSchema,
 });
-export type SessionConsoleInputResult = z.infer<typeof SessionConsoleInputResultSchema>;

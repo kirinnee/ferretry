@@ -8,13 +8,13 @@ import {
 import type { LivePaneSource } from './pane-session-memory.ts';
 
 /** One live managed pane, from the panes the tmux runner recorded. */
-export interface ManagedPane {
+interface ManagedPane {
   readonly sessionId: string;
   readonly pid: number;
 }
 
 /** A pane the runner recorded whose live identity could NOT be established. */
-export interface UnprovenPane {
+interface UnprovenPane {
   readonly sessionId: string;
   readonly failure: string;
 }

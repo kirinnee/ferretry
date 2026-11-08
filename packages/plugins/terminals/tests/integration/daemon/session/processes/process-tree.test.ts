@@ -4,13 +4,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
-  classifyStreamLink,
-  HarnessProcessProvenance,
   ProcfsProcessTree,
   PsProcessTree,
+  classifyStreamLink,
   processTreeFor,
+} from '../../../../../daemon/adapters/session/processes/process-tree.ts';
+import {
+  HarnessProcessProvenance,
   SigtermProcessSignal,
-} from '../../../../../daemon/adapters/session/processes/index.ts';
+} from '../../../../../daemon/adapters/session/processes/output-file.ts';
 import type { ProcessDetailRow } from '../../../../../daemon/lib/session/processes/ports.ts';
 import { bunSpawn } from '@ferretry/kernel/host';
 import { waitFor, waitForValue } from '../../support/wait-for.ts';
