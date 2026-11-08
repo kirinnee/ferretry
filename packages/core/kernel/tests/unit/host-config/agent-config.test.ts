@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
-import { AGENT_CONFIG_TOOLS, AgentConfigCallSchema, type AgentConfigCall } from '../../../contract/agent-config.ts';
+import {
+  AGENT_CONFIG_TEXT_MAX_BYTES,
+  AGENT_CONFIG_TOOLS,
+  AgentConfigCallSchema,
+  type AgentConfigCall,
+} from '../../../contract/agent-config.ts';
 import {
   AGENT_CONTROL_KINDS,
   type AgentControlKind,
@@ -655,10 +660,15 @@ describe('a file that does not parse is scanned on its raw text (M1)', () => {
 describe('a key in a comment or a tag is a raw secret too (R4 m1; tightened by design)', () => {
   const COMMENTED = `limit: 5\n# the old key ${FAKE_SECRET}\n`;
   const TAGGED = `limit: 5\nnote: !${FAKE_SECRET} x\n`;
+  // An undeclared tag HANDLE does not parse, and the parser's own words quote it: the key is found on the raw text first.
+  const HANDLE = `limit: 5\nnote: !${FAKE_SECRET}!x 1\n`;
+  const KEY_HANDLE = `limit: 5\n? !${FAKE_SECRET}!y a\n: 1\n`;
 
   for (const [label, text] of [
     ['a comment', COMMENTED],
     ['a tag', TAGGED],
+    ['an undeclared tag handle (R5)', HANDLE],
+    ['an undeclared tag handle on a key (R5)', KEY_HANDLE],
   ] as const) {
     test(`T-0032 a hand-written file with a key in ${label} is refused, its text never returned, the last good in effect`, async () => {
       const { agent, fs, files } = world();
@@ -694,6 +704,29 @@ describe('a key in a comment or a tag is a raw secret too (R4 m1; tightened by d
       expect(await fs.readText(UPDATES).catch(() => undefined)).toBeUndefined();
     });
   }
+
+  test('T-0032 a hand-written file that does not parse is said in fixed sentences: no issue repeats a word of it (R5)', async () => {
+    const WORD = 'zebraquartz';
+    for (const text of [
+      `limit: 5\nnote: !${WORD}!x 1\n`,
+      `limit: 5\nnote: "\\q${WORD}"\n`,
+      `limit: 5\n${WORD}: 1\n${WORD}: 2\n`,
+    ]) {
+      const { agent, fs, files } = world();
+      fs.seed(UPDATES, 'limit: 7\n');
+      await files.reload();
+      fs.seed(UPDATES, text);
+      await files.reload();
+      const read = await agent.run(call({ tool: 'config.read', path: 'voice.yaml' }), ferretStanding);
+      const listing = await agent.run(call({ tool: 'config.read' }), ferretStanding);
+      const validated = await agent.run(call({ tool: 'config.validate', path: 'voice.yaml', text }), ferretStanding);
+      expect(read.issues?.[0]?.line).toBeNumber();
+      expect(validated.issues?.[0]?.message).toStartWith('this is not valid YAML: ');
+      expect(JSON.stringify([read.issues, listing, validated])).not.toContain(WORD);
+      expect(JSON.stringify(files.status().issues)).not.toContain(WORD);
+      expect(files.port('voice').file(voiceDef)?.limit).toBe(7);
+    }
+  });
 
   test('T-0032 a file whose comments hold no key is still returned as written', async () => {
     const { agent, fs, files } = world();
@@ -762,4 +795,49 @@ describe('Gate’s refusals of the route, in today’s words (round-2 m-c)', () 
     ])
       expect(agentDoorRefusal(refused)).toBe(refused);
   });
+});
+
+describe('a file at the size limit is checked in one pass, whatever its aliases do (R5 critical)', () => {
+  /** A hard bound per call, far above one linear pass; the quadratic reads this guards took minutes at this size. */
+  const BOUND_MS = 1500;
+  const fill = (head: string, line: string, tail = ''): string =>
+    head + line.repeat(Math.floor((AGENT_CONFIG_TEXT_MAX_BYTES - 64 - head.length - tail.length) / line.length)) + tail;
+  const laughs = Array.from(
+    { length: 10 },
+    (_, level) =>
+      `l${level}: &l${level} [${Array.from({ length: 9 }, () => (level === 0 ? 'lol' : `*l${level - 1}`)).join(', ')}]\n`,
+  ).join('');
+
+  for (const [label, text] of [
+    ['many aliases, the last unresolved', fill('limit: 5\nnote: &a x\nmore:\n', '  - *a\n', '  - *nope\n')],
+    ['an alias bomb (billion laughs), padded', fill(laughs, '# padding\n')],
+    ['an anchor of an empty anchor, aliased many times', fill('e: &e []\na: &a [*e]\nb:\n', '  - *a\n')],
+    ['an alias loop at the end', fill('limit: 5\nnote: &a\n  b:\n', '    - 1\n', '    - *a\n')],
+  ] as const) {
+    test(`T-0033 T-0034 ${label}: validate and write each answer in under ${BOUND_MS} ms, nothing is written`, async () => {
+      const { agent, fs, files } = world();
+      fs.seed(UPDATES, 'limit: 7\n');
+      await files.reload();
+      for (const tool of ['config.validate', 'config.write'] as const) {
+        const started = performance.now();
+        const answer = await agent.run(call({ tool, path: 'voice.yaml', text }), ferretStanding);
+        expect(performance.now() - started).toBeLessThan(BOUND_MS);
+        expect(answer.issues?.length).toBeGreaterThan(0);
+      }
+      expect(await fs.readText(UPDATES)).toBe('limit: 7\n');
+      expect(files.port('voice').file(voiceDef)?.limit).toBe(7);
+    });
+
+    test(`T-0032 ${label}, hand-written: the reload answers in under ${BOUND_MS} ms and the last good stays`, async () => {
+      const { fs, files } = world();
+      fs.seed(UPDATES, 'limit: 7\n');
+      await files.reload();
+      fs.seed(UPDATES, text);
+      const started = performance.now();
+      await files.reload();
+      expect(performance.now() - started).toBeLessThan(BOUND_MS);
+      expect(files.status().files.find(file => file.path === 'voice.yaml')?.state).toBe('invalid');
+      expect(files.port('voice').file(voiceDef)?.limit).toBe(7);
+    });
+  }
 });

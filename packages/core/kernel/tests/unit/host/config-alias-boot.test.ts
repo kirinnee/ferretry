@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { z } from 'zod';
+import { AGENT_CONFIG_TEXT_MAX_BYTES } from '../../../contract/agent-config.ts';
 import { AdmissionPort } from '../../../contract/bound.ts';
 import { defineConfig } from '../../../contract/index.ts';
 import type { ConfigPort } from '../../../contract/ports.ts';
@@ -17,10 +18,27 @@ import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { fixedClock } from '../../../testing/clock.ts';
 import { recordingAdmission } from './fixtures.ts';
 
-/** Fake only: an alias NAME shaped like a key, so a message that repeated the name would be caught. */
-const FAKE_NAME = 'sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+/**
+ * An alias NAME only the file holds, so a message that repeated the name would be caught. Not key-shaped: a name that
+ * looks like a key is refused as a raw secret before anything else is said (the last test here).
+ */
+const FAKE_NAME = 'private-anchor-zebraquartz';
+/** Fake only: an alias name shaped like a key. */
+const KEY_NAME = 'sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const UNRESOLVED = `limit: 3\nnote: *${FAKE_NAME}\n`;
 const LOOP = `limit: 3\nnote: &${FAKE_NAME}\n  again: *${FAKE_NAME}\n`;
+/** Billion laughs: each anchor nine of the one before. The fifth (line 6) reads out past the budget. */
+const BOMB = `limit: 3\n${Array.from(
+  { length: 10 },
+  (_, level) =>
+    `l${level}: &l${level} [${Array.from({ length: 9 }, () => (level === 0 ? FAKE_NAME : `*l${level - 1}`)).join(', ')}]\n`,
+).join('')}`;
+/** A file at the agent door's size limit, every line an alias, the last one unresolved. */
+const AT_THE_LIMIT = `limit: 3\nnote: &${FAKE_NAME} x\nmore:\n${`  - *${FAKE_NAME}\n`.repeat(
+  Math.floor((AGENT_CONFIG_TEXT_MAX_BYTES - 256) / (FAKE_NAME.length + 6)),
+)}  - *nope\n`;
+/** A hard bound, far above one linear read; the quadratic read this guards took minutes on a file this size. */
+const BOUND_MS = 1500;
 
 const voiceDef = defineConfig({
   file: 'voice.yaml',
@@ -108,15 +126,16 @@ async function boot(at: string) {
 }
 
 /** Nothing the daemon says about the file — an issue, a log line — repeats the alias's name. */
-function namesNothing(world: Awaited<ReturnType<typeof boot>>): void {
-  expect(JSON.stringify(world.voiceIssues())).not.toContain(FAKE_NAME);
-  expect(JSON.stringify(world.logs)).not.toContain(FAKE_NAME);
+function namesNothing(world: Awaited<ReturnType<typeof boot>>, name: string = FAKE_NAME): void {
+  expect(JSON.stringify(world.voiceIssues())).not.toContain(name);
+  expect(JSON.stringify(world.logs)).not.toContain(name);
 }
 
 describe('an alias that cannot be read is a broken file, not a crash', () => {
   for (const [label, text, message, line] of [
     ['an unresolved alias', UNRESOLVED, 'names an anchor (&name) that is not set before it', 2],
     ['an alias loop', LOOP, 'sits inside the anchor (&name) it names', 3],
+    ['an alias bomb', BOMB, 'expand too far to read', 6],
   ] as const) {
     test(`${label} at boot: boot continues and the last good version stays in effect`, async () => {
       const at = await home();
@@ -167,4 +186,42 @@ describe('an alias that cannot be read is a broken file, not a crash', () => {
       expect(world.voiceIssues()).toEqual([]);
     });
   }
+});
+
+describe('a file at the size limit is read in one pass at boot and on reload', () => {
+  test('a 256 KiB file of aliases, the last unresolved: boot and the reload each read it in under the bound', async () => {
+    const at = await home();
+    await bootOnce(at, async first => {
+      await writeVoice(at, 'limit: 7\n');
+      await first.reload();
+    });
+    await writeVoice(at, AT_THE_LIMIT);
+
+    const booting = performance.now();
+    const world = await boot(at);
+    // Boot does more than read one file; the read itself is what the bound is about, so it is given the bound twice.
+    expect(performance.now() - booting).toBeLessThan(BOUND_MS * 2);
+    expect(world.limit()).toBe(7);
+    expect(world.voiceIssues()[0]?.message).toContain('not set before it');
+
+    const reloading = performance.now();
+    await world.reload();
+    expect(performance.now() - reloading).toBeLessThan(BOUND_MS);
+    expect(world.limit()).toBe(7);
+    namesNothing(world);
+  });
+});
+
+describe('an unreadable alias whose name looks like a key', () => {
+  test('is refused as a raw secret by its line alone, before anything is said about the alias (R5)', async () => {
+    const world = await boot(await home());
+    await writeVoice(world.home, 'limit: 7\n');
+    await world.reload();
+
+    await writeVoice(world.home, `limit: 3\nnote: *${KEY_NAME}\n`);
+    await world.reload();
+    expect(world.limit()).toBe(7);
+    expect(world.voiceIssues()).toMatchObject([{ line: 2, column: 1, message: expect.stringContaining('raw secret') }]);
+    namesNothing(world, KEY_NAME);
+  });
 });

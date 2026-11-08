@@ -130,7 +130,9 @@ test('R-0244 a call Gate refuses before the handler is recorded as today: no cre
 
     w.ferrets.revoke(bearerDigest(FERRET_TOKEN));
     const revoked = await host.dispatch(post({ tool: 'config.write', path: 'voice.yaml', text: `note: ${MARKER}\n` }));
-    expect([401, 403]).toContain(revoked.status);
+    // Exactly one status: Gate refuses a revoked bearer as unauthenticated, before the handler. (Today's handler, which
+    // checked the credential itself, answered 403 for a presented credential it could not resolve.)
+    expect(revoked.status).toBe(401);
     expect(w.recorded).toHaveLength(2);
 
     for (const [index, status] of [anonymous.status, revoked.status].entries()) {

@@ -58,7 +58,11 @@ that is not there). Three rules, in order:
 1. **Last good wins.** A file that fails a check is reported with its path, line, column and a plain fix
    (`GET /v1/config/status`, `fy config check`, the daemon log, the app's Files panel), and the version the
    daemon accepted before stays in effect. Nothing half-applies. When the fleet does not assemble, every
-   fleet change of that round is held back and the machine keeps the fleet it had.
+   fleet change of that round is held back and the machine keeps the fleet it had. A YAML problem is said in
+   a fixed sentence with its line — never the parser's own words, which quote the file. A YAML alias (`*name`)
+   that names no anchor set before it, sits inside its own anchor, or reads out too large (more than 10 000
+   values plus two per character of the file: an alias bomb) is such a problem; every file is read in one pass
+   whatever its aliases do.
 2. **Loosening waits for the owner.** An edit that loosens what the machine may spend or what agents may do
    is HELD and the tighter version stays in effect: a Warden layer that spends switched on (Jev, LLM),
    a cap raised, something it may now do alone, its concurrency raised or its cadence shortened; lesson mining turned on or its caps raised; Pack mode switched on, Jev choosing sub-ferret models, a sub-ferret limit or depth raised; an agent control turned on (Ferretry

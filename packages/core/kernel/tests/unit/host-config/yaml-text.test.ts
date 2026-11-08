@@ -1,6 +1,7 @@
-import { describe, it } from 'bun:test';
+import { afterEach, describe, it } from 'bun:test';
 import should from 'should';
-import { editConfigText, readConfigText, sameConfigValue } from '../../../host/config/yaml-text.ts';
+import { AGENT_CONFIG_TEXT_MAX_BYTES } from '../../../contract/agent-config.ts';
+import { editConfigText, readConfigText, sameConfigValue, setConfigKey } from '../../../host/config/yaml-text.ts';
 
 const MODELINE = '# yaml-language-server: $schema=../.schema/machine.json';
 
@@ -74,7 +75,99 @@ describe('readConfigText', () => {
     // Assert
     should(actual).deepEqual({
       ok: false,
-      errors: [{ message: 'Map keys must be unique', position: { line: 2, column: 1 } }],
+      errors: [{ message: 'a key is written twice in the same mapping', position: { line: 2, column: 1 } }],
+    });
+  });
+
+  it('should refuse every duplicate key, nested or in braces, in the order they are written', () => {
+    // Arrange: 0x1 is the integer 1, so it is the same key as 1 — the parser's own rule.
+    const input = 'a:\n  b: 1\n  b: 2\nc: {d: 1, d: 2}\n1: x\n0x1: y\n';
+
+    // Act
+    const actual = readConfigText(input);
+
+    // Assert
+    should(actual.ok).be.false();
+    if (actual.ok) return;
+    should(actual.errors.map(error => error.position?.line)).deepEqual([3, 4, 6]);
+  });
+
+  it('should not call the same key in two mappings, or two .nan keys, a duplicate', () => {
+    // Act
+    const actual = meaningOf('a: {x: 1}\nb: {x: 1}\n.nan: 1\n.NaN: 2\n');
+
+    // Assert
+    should(Object.keys(actual as object)).deepEqual(['a', 'b', 'NaN']);
+  });
+});
+
+describe('readConfigText — no message quotes the file', () => {
+  /** A word only the file holds: a message that repeated any part of the file would carry it. */
+  const WORD = 'zebraquartz';
+  const BROKEN = [
+    `a: !${WORD}!x 1\n`,
+    `? !${WORD}!y a\n: 1\n`,
+    `a: "\\q${WORD}"\n`,
+    `a: &${WORD} &b 1\n`,
+    `a: !x !${WORD} 1\n`,
+    `${WORD}: [\n`,
+    `a: b: ${WORD}\n`,
+    `a:\n\t${WORD}: 1\n`,
+    `a: 1\n---\n${WORD}: 2\n`,
+    `a: *${WORD} &x\n`,
+    `- ${WORD}\na: 1\n`,
+    `"${WORD}\n`,
+    `a: @${WORD}\n`,
+    `${WORD}: 1\n${WORD}: 2\n`,
+    `a: *${WORD}\n`,
+    `a: &${WORD} [*${WORD}]\n`,
+  ];
+
+  for (const text of BROKEN) {
+    it(`should refuse ${JSON.stringify(text)} in a fixed sentence and a line, never a word of the text`, () => {
+      // Act
+      const actual = readConfigText(text);
+
+      // Assert
+      should(actual.ok).be.false();
+      if (actual.ok) return;
+      should(actual.errors.length).be.above(0);
+      should(JSON.stringify(actual.errors)).not.containEql(WORD);
+      for (const error of actual.errors) should(error.position?.line).be.a.Number();
+    });
+  }
+
+  it('should refuse to set a key in a text that does not parse without quoting it', () => {
+    // Act
+    const act = (text: string) => () => setConfigKey(text, 'a', 1);
+
+    // Assert
+    should(act(`a: !${WORD}!x 1\n`)).throw(/^the file does not parse: a tag/u);
+    should(act(`${WORD}: 1\n${WORD}: 2\n`)).throw(
+      'the file does not parse: a key is written twice in the same mapping',
+    );
+  });
+
+  describe('the library never writes a key out as a warning', () => {
+    const emit = process.emitWarning;
+    const warn = console.warn;
+    afterEach(() => {
+      process.emitWarning = emit;
+      console.warn = warn;
+    });
+
+    it('should read a mapping whose key is a collection without printing that key', () => {
+      // Arrange
+      const printed: unknown[] = [];
+      process.emitWarning = ((warning: unknown) => printed.push(warning)) as typeof process.emitWarning;
+      console.warn = (...parts: unknown[]) => printed.push(parts);
+
+      // Act
+      const actual = readConfigText(`[${WORD}]: 1\n`);
+
+      // Assert
+      should(actual.ok).be.true();
+      should(JSON.stringify(printed.map(String))).not.containEql(WORD);
     });
   });
 });
@@ -121,16 +214,49 @@ describe('readConfigText — aliases it cannot read are syntax errors, never a t
     should(JSON.stringify([inFlow, inBlock])).not.containEql(NAME);
   });
 
-  it("should refuse aliases that expand too far (the library's alias count)", () => {
-    // Arrange
+  it('should refuse aliases that expand too far (an alias bomb), at the alias that goes over', () => {
+    // Arrange: each anchor holds twelve of the one before, so five steps read out as 12^5 values.
     const many = (alias: string) => Array.from({ length: 12 }, () => `*${alias}`).join(', ');
-    const text = `a: &a [1, 2, 3]\nb: &b [${many('a')}]\nc: &c [${many('b')}]\nd: [${many('c')}]\n`;
+    const text = `a: &a [1, 2, 3]\nb: &b [${many('a')}]\nc: &c [${many('b')}]\nd: &d [${many('c')}]\ne: [${many('d')}]\n`;
 
     // Act
     const errors = errorsOf(text);
 
     // Assert
+    should(errors).have.length(1);
     should(errors[0]?.message).containEql('expand too far');
+    should(errors[0]?.position?.line).equal(5);
+  });
+
+  it('should still read an anchor re-used many times that never multiplies', () => {
+    // Arrange: an anchor whose items alias an empty one — the shape the library's own count reads as nothing.
+    const text = `e: &e []\na: &a [*e]\nb: [${Array.from({ length: 2000 }, () => '*a').join(', ')}]\n`;
+
+    // Act
+    const actual = meaningOf(text) as { readonly b: readonly unknown[] };
+
+    // Assert
+    should(actual.b).have.length(2000);
+    should(actual.b[0]).deepEqual([[]]);
+  });
+
+  it('should resolve an alias to the LAST anchor of its name set before it, as YAML says', () => {
+    // Act
+    const actual = meaningOf('a: &x 1\nb: *x\nc: &x 2\nd: *x\ne: [&x 3, *x]\n');
+
+    // Assert
+    should(actual).deepEqual({ a: 1, b: 1, c: 2, d: 2, e: [3, 3] });
+  });
+
+  it('should refuse a loop through a mapping key or a nested sequence', () => {
+    // Act
+    const throughKey = errorsOf(`a: &${NAME}\n  ? *${NAME}\n  : 1\n`);
+    const nested = errorsOf(`a: &${NAME}\n  - - - *${NAME}\n`);
+
+    // Assert
+    should(throughKey[0]?.message).containEql('sits inside the anchor');
+    should(nested[0]?.message).containEql('sits inside the anchor');
+    should(JSON.stringify([throughKey, nested])).not.containEql(NAME);
   });
 
   it('should still read an alias that resolves', () => {
@@ -140,6 +266,69 @@ describe('readConfigText — aliases it cannot read are syntax errors, never a t
     // Assert
     should(actual).deepEqual({ a: { x: 1 }, b: { x: 1 } });
   });
+});
+
+describe('readConfigText — a file at the size limit is read in ONE pass, whatever its aliases do', () => {
+  /** A hard bound, far above what one linear pass takes; the quadratic paths this guards took seconds to minutes. */
+  const BOUND_MS = 1500;
+  const fill = (head: string, line: (index: number) => string, tail = ''): string => {
+    const lines = [head];
+    let size = head.length + tail.length;
+    for (let index = 0; size + 32 < AGENT_CONFIG_TEXT_MAX_BYTES; index += 1) {
+      const next = line(index);
+      lines.push(next);
+      size += next.length;
+    }
+    return lines.join('') + tail;
+  };
+  const laughs = (() => {
+    const lines = ['l0: &l0 [lol, lol, lol, lol, lol, lol, lol, lol, lol]\n'];
+    for (let level = 1; level < 10; level += 1) {
+      lines.push(`l${level}: &l${level} [${Array.from({ length: 9 }, () => `*l${level - 1}`).join(', ')}]\n`);
+    }
+    return lines.join('');
+  })();
+  const deep = `a: ${'['.repeat(5000)}*nope${']'.repeat(5000)}\n`;
+
+  for (const [label, text, refused] of [
+    ['many aliases, the last unresolved', fill('a: &a 1\nb:\n', () => '  - *a\n', '  - *nope\n'), 'not set before it'],
+    ['many aliases of one anchor', fill('a: &a 1\nb:\n', () => '  - *a\n'), undefined],
+    [
+      'many anchors, each aliased many times',
+      fill(
+        `${Array.from({ length: 1500 }, (_, index) => `k${index}: &a${index} x\n`).join('')}b:\n`,
+        index => `  - *a${index % 1500}\n`,
+      ),
+      undefined,
+    ],
+    [
+      'an anchor of an empty anchor, aliased many times',
+      fill('e: &e []\na: &a [*e]\nb:\n', () => '  - *a\n'),
+      undefined,
+    ],
+    ['an alias bomb (billion laughs), padded', fill(laughs, index => `k${index}: v\n`), 'expand too far'],
+    [
+      'an alias loop at the end of a long anchor',
+      fill('a: &a\n  b:\n', () => '    - 1\n', '    - *a\n'),
+      'sits inside the anchor',
+    ],
+    ['one unresolved alias 5000 deep', deep, 'not set before it'],
+    ['one flat mapping', fill('', index => `k${index}: v\n`), undefined],
+    ['one flow mapping', `${fill('{', index => `k${index}: 1, `)}z: 1}\n`, undefined],
+    ['an alias as every key', fill('a: &a [1, 2, 3]\n', index => `? *a\n: ${index}\n`), undefined],
+  ] as const) {
+    it(`should read ${label} in under ${BOUND_MS} ms`, () => {
+      // Act
+      const started = performance.now();
+      const actual = readConfigText(text);
+      const took = performance.now() - started;
+
+      // Assert
+      should(took).be.below(BOUND_MS);
+      if (refused === undefined) should(actual.ok).be.true();
+      else should(actual.ok ? '' : actual.errors[0]?.message).containEql(refused);
+    });
+  }
 });
 
 describe('readConfigText — locate', () => {
@@ -544,6 +733,15 @@ describe('editConfigText — the file itself', () => {
     // Assert
     should(meaningOf(actual)).deepEqual({ a: 1 });
     should(actual).not.containEql('unclosed');
+    should(actual).not.containEql('my notes');
+  });
+
+  it('should replace an existing text with a key written twice, whole, as it does any text that does not parse', () => {
+    // Act
+    const actual = editConfigText('# my notes\na: 1\na: 2\n', { a: 3 }, {}, MODELINE);
+
+    // Assert
+    should(meaningOf(actual)).deepEqual({ a: 3 });
     should(actual).not.containEql('my notes');
   });
 

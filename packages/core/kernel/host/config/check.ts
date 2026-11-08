@@ -98,6 +98,10 @@ export function checkConfigText(
 ): CheckedConfigText | RefusedConfigText {
   const read = readConfigText(text);
   if (!read.ok) {
+    // A key in text that does not parse (in an undeclared tag handle, say) is refused as a key, by line only: the
+    // first thing said about such a file is that it holds one, never anything quoted from around it.
+    const held = rawTextIssue(path, text, binary);
+    if (held !== undefined) return held;
     return {
       ok: false,
       reason: 'yaml',
@@ -130,18 +134,21 @@ export function checkConfigText(
     };
   }
   // The walk above sees parsed VALUES only, so a key left in a comment or a tag is found on the raw text: refused the same.
-  const line = rawTextSecretLine(text);
-  if (line !== undefined) {
-    return {
-      ok: false,
-      reason: 'raw_secret',
-      issues: [
-        { path, line, column: 1, severity: 'error', message: RAW_TEXT_SECRET_MESSAGE, fix: rawSecretFix(binary) },
-      ],
-    };
-  }
+  const held = rawTextIssue(path, text, binary);
+  if (held !== undefined) return held;
   const parsed = def.schema.safeParse(read.read.value);
   if (!parsed.success)
     return { ok: false, reason: 'schema', issues: schemaIssues(path, parsed.error, read.read.locate) };
   return { ok: true, value: parsed.data, written: read.read.value, text };
+}
+
+/** A raw key anywhere in the text — a comment, a tag, an anchor, a line that does not parse — refused by its line alone. */
+function rawTextIssue(path: string, text: string, binary: string): RefusedConfigText | undefined {
+  const line = rawTextSecretLine(text);
+  if (line === undefined) return undefined;
+  return {
+    ok: false,
+    reason: 'raw_secret',
+    issues: [{ path, line, column: 1, severity: 'error', message: RAW_TEXT_SECRET_MESSAGE, fix: rawSecretFix(binary) }],
+  };
 }
