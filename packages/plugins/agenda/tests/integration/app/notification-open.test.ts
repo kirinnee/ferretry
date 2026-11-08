@@ -20,22 +20,23 @@
  * exactly the URL the worker asked for, which is what the browser would have done.
  *
  * What is proved, for a push from machine Beta while Alpha is also paired:
- *   - the app closed: the worker opens Beta's conversation, at the item;
- *   - the app open on Alpha's conversation, on Sessions, or on the same conversation at another item:
+ *   - the app closed: the worker opens Beta's chat, AT the ask (`/d/beta/ferrets/<id>/chat?ask=A3`);
+ *   - the app open on Alpha's conversation, on the machine's home, or on the same chat at another ask:
  *     the open window is brought forward and routed in the app — no second window, no reload;
  *   - several windows: the app window is the one routed, never the landing page beside it;
  *   - each machine's notification opens only its own machine's conversation;
- *   - a daemon that names no page (`url: '/'`, before #768 and `fy attention notify`) still opens the
- *     conversation the push is about; one about no conversation opens that machine's sessions;
+ *   - a push's `url` is not trusted: the worker opens only the machine's own chat (or home) after the shell's route parse
+ *     accepts it, and the app (`/app/`) for anything else — `/`, the old `/session/` spelling, another machine's page, an
+ *     encoded climb, a foreign address;
  *   - a window still starting when the tap lands is routed once it is up, without a second window;
  *   - a window with no app wiring (an app too old to know the message) still ends on the conversation;
- *   - a notification the PAGE showed (the page watcher's needs-input / failed) opens its conversation;
+ *   - a notification the PAGE showed through the app-wide worker opens the app, whatever address it carries;
  *   - a machine's push worker takes a new release only when the app asks for one — loading the app
  *     never re-checks it — which is why the app's reconcile asks at every start.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page, Worker } from 'playwright-core';
@@ -64,9 +65,9 @@ const origin = (): string => `http://127.0.0.1:${server.port}`;
 
 beforeAll(async () => {
   workDirectory = await mkdtemp(join(tmpdir(), 'ferretry-notification-open-'));
-  // `--outdir`, not `--outfile`: the scene's graph imports stylesheets, so the build makes a `.css` beside the script
-  // and bun refuses to write two files to one path. Only the script is served (nothing here measures a style).
-  const scene = join(workDirectory, 'scene.js');
+  // `--outdir`, not `--outfile`: the scene's bundle comes with the font files it names, and bun refuses several outputs
+  // for one file.
+  const built = join(workDirectory, 'scene');
   run([
     'bun',
     'build',
@@ -74,18 +75,17 @@ beforeAll(async () => {
     '--target',
     'browser',
     '--outdir',
-    workDirectory,
-    '--entry-naming',
-    'scene.[ext]',
+    built,
   ]);
+  const outputs = new Map<string, string | Uint8Array>();
+  for (const name of await readdir(built)) {
+    const bytes = new Uint8Array(await Bun.file(join(built, name)).arrayBuffer());
+    outputs.set(name === 'notification-open-scene.js' ? 'app/scene.js' : `app/${name}`, bytes);
+  }
   site = await signedRelease({
     directory: workDirectory,
     name: 'site',
-    files: new Map<string, string | Uint8Array>([
-      ['index.html', LANDING],
-      ['app/index.html', APP],
-      ['app/scene.js', new Uint8Array(await Bun.file(scene).arrayBuffer())],
-    ]),
+    files: new Map<string, string | Uint8Array>([['index.html', LANDING], ['app/index.html', APP], ...outputs]),
     identity: { commit: 'aaaaaaa', sequence: 1 },
     key: await releaseKey(workDirectory, 'key'),
   });
@@ -104,7 +104,13 @@ beforeAll(async () => {
             : pathname.slice(1);
       const bytes = site.get(path);
       if (bytes === undefined) return new Response('not found', { status: 404 });
-      const type = path.endsWith('.html') ? 'text/html' : path.endsWith('.js') ? 'text/javascript' : 'text/plain';
+      const type = path.endsWith('.html')
+        ? 'text/html'
+        : path.endsWith('.js')
+          ? 'text/javascript'
+          : path.endsWith('.woff2')
+            ? 'font/woff2'
+            : 'text/plain';
       return new Response(bytes as Uint8Array<ArrayBuffer>, {
         headers: { 'content-type': type, 'cache-control': 'no-store' },
       });
@@ -136,10 +142,14 @@ interface Shown {
     readonly kind: string;
     /** The address the app rendered this route for: equal to `path` once the render has caught up. */
     readonly path: string;
-    readonly attention: string | null;
+    readonly daemon?: string;
+    readonly screen?: { readonly plugin: string; readonly id: string };
+    readonly params?: Readonly<Record<string, string>>;
     readonly entry: string;
   } | null;
   readonly opens: readonly string[];
+  /** The asks the chat's Agenda panel is ringing (`[data-agenda-focused]`): what the reader sees focused. */
+  readonly rung: readonly string[];
 }
 
 const shown = async (page: Page): Promise<Shown> =>
@@ -149,6 +159,9 @@ const shown = async (page: Page): Promise<Shown> =>
       path: `${location.pathname}${location.search}`,
       route: raw === undefined ? null : JSON.parse(raw),
       opens: (globalThis as unknown as { __notificationOpens?: string[] }).__notificationOpens ?? [],
+      rung: [...document.querySelectorAll('[data-agenda-focused]')].map(
+        row => row.getAttribute('data-agenda-row') ?? '',
+      ),
     };
   });
 
@@ -161,7 +174,18 @@ const settledOn = async (page: Page, path: string, timeout = 60_000): Promise<Sh
     await pause(50);
     last = await shown(page).catch(() => null);
   }
-  return last ?? { path: 'unreadable', route: null, opens: [] };
+  return last ?? { path: 'unreadable', route: null, opens: [], rung: [] };
+};
+
+/** Waits for the chat's Agenda panel to ring an ask, once it has read the ferret's agenda. */
+const ringing = async (page: Page, timeout = 30_000): Promise<readonly string[]> => {
+  const deadline = Date.now() + timeout;
+  let last = await shown(page).catch(() => null);
+  while (Date.now() < deadline && (last?.rung.length ?? 0) === 0) {
+    await pause(50);
+    last = await shown(page).catch(() => null);
+  }
+  return last?.rung ?? [];
 };
 
 /**
@@ -452,15 +476,25 @@ const ASK = {
   kind: 'attention',
   title: '“Builder”: Pick a release window',
   tag: 'agenda-mvb9x0-c0ffee01',
-  url: '/session/mvb9x0-c0ffee01?attention=A3',
+  body: 'Ship the build?',
+  url: '/ferrets/mvb9x0-c0ffee01/chat?ask=A3',
 } as const;
 /**
- * Where a tap on that push lands: the address the push named, under the machine that sent it. The 5.0 router (`routeTable`
- * in @ferretry/app) knows no `session/<id>` screen at all (a conversation is `ferrets/:ferret/chat`), so it resolves this
- * address to `not-found` carrying the path; the machine is in the path, not in a route field.
+ * Where a tap on that push lands: the ferret's chat on the machine that sent it, AT the ask (`?ask=`). The 5.0 router
+ * (`routeTable` in @ferretry/app) draws it as Conversation's `chat` screen on that daemon, and the chat's side panel (the
+ * real `ferret-agenda` panel, mounted by the scene) rings the ask's row.
  */
-const BETA_ASK = '/d/beta/session/mvb9x0-c0ffee01?attention=A3';
-const ALPHA_ASK = '/d/alpha/session/mvb9x0-c0ffee01?attention=A2';
+const BETA_ASK = '/d/beta/ferrets/mvb9x0-c0ffee01/chat?ask=A3';
+const ALPHA_ASK = '/d/alpha/ferrets/mvb9x0-c0ffee01/chat?ask=A2';
+const chatRoute = (daemon: string, ferret: string, path: string) => ({
+  kind: 'screen',
+  daemon,
+  screen: { plugin: 'conversation', id: 'chat' },
+  params: { ferret },
+  path,
+});
+const BETA_ROUTE = chatRoute('beta', 'mvb9x0-c0ffee01', BETA_ASK);
+const ALPHA_ROUTE = chatRoute('alpha', 'mvb9x0-c0ffee01', ALPHA_ASK);
 
 describe('a notification tap opens its conversation on the machine that sent it', () => {
   beforeAll(async () => {
@@ -473,7 +507,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     });
   }, 240_000);
 
-  lane('with the app closed, the worker opens Beta’s Inbox at the item', async () => {
+  lane('with the app closed, the worker opens Beta’s chat at the ask', async () => {
     const browserProfile = await profile();
     await push(browserProfile, 'beta', ASK);
     // Every window of the app is gone; only the browser's notification is left.
@@ -487,13 +521,15 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const window = await browserProfile.context.newPage();
     await window.goto(opened[0] ?? '');
     const landed = await settledOn(window, BETA_ASK);
-    expect(landed.route).toMatchObject({ kind: 'not-found', path: BETA_ASK });
+    expect(landed.route).toMatchObject(BETA_ROUTE);
+    // The chat opened AT the ask: its Agenda panel rings A3, and nothing else.
+    expect(await ringing(window)).toEqual(['A3']);
     await browserProfile.context.close();
   });
 
   lane('with the app on Alpha’s conversation, routes that window to Beta’s — no second window, no reload', async () => {
     const browserProfile = await profile();
-    const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001');
+    const app = await appAt(browserProfile, '/d/alpha/ferrets/mva1-aaaa0001/chat');
     await retire(browserProfile);
     await app.evaluate(() => {
       (globalThis as unknown as { __sameDocument: boolean }).__sameDocument = true;
@@ -503,15 +539,15 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
 
-    expect(landed.route).toMatchObject({ kind: 'not-found', path: BETA_ASK });
+    expect(landed.route).toMatchObject(BETA_ROUTE);
     expect(landed.opens).toEqual([BETA_ASK]);
-    expect(await tapped()).toEqual({ focused: [`${origin()}/d/alpha/session/mva1-aaaa0001`], opened: [] });
+    expect(await tapped()).toEqual({ focused: [`${origin()}/d/alpha/ferrets/mva1-aaaa0001/chat`], opened: [] });
     // Routed in the app: the same document, not a reload.
     expect(await app.evaluate(() => (globalThis as unknown as { __sameDocument?: boolean }).__sameDocument)).toBe(true);
     await browserProfile.context.close();
   });
 
-  lane('with the app on Sessions, opens Beta’s Inbox item', async () => {
+  lane('with the app on the machine’s home, opens Beta’s chat at the ask', async () => {
     const browserProfile = await profile();
     const app = await appAt(browserProfile, '/d/alpha');
     await retire(browserProfile);
@@ -520,14 +556,14 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
 
-    expect(landed.route).toMatchObject({ kind: 'not-found', path: BETA_ASK });
+    expect(landed.route).toMatchObject(BETA_ROUTE);
     expect((await tapped()).opened).toEqual([]);
     await browserProfile.context.close();
   });
 
-  lane('with the app on the same conversation at another item, moves to the tapped item', async () => {
+  lane('with the app on the same conversation at another item, moves to the tapped ask', async () => {
     const browserProfile = await profile();
-    const app = await appAt(browserProfile, '/d/beta/session/mvb9x0-c0ffee01?attention=A1');
+    const app = await appAt(browserProfile, '/d/beta/ferrets/mvb9x0-c0ffee01/chat?ask=A1');
     const before = await shown(app);
     await retire(browserProfile);
     await push(browserProfile, 'beta', ASK);
@@ -535,7 +571,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
 
-    expect(landed.route).toMatchObject({ kind: 'not-found', path: BETA_ASK });
+    expect(landed.route).toMatchObject(BETA_ROUTE);
     // A new navigation, so the conversation re-targets even when the item is one it showed before.
     expect(landed.route?.entry).not.toBe(before.route?.entry);
     expect((await tapped()).opened).toEqual([]);
@@ -544,7 +580,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
 
   lane('with the landing page and the app both open, routes the app window and leaves the landing page', async () => {
     const browserProfile = await profile();
-    const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001');
+    const app = await appAt(browserProfile, '/d/alpha/ferrets/mva1-aaaa0001/chat');
     await retire(browserProfile);
     // The landing page is the newest window, and the one the reader looked at last.
     const landing = await browserProfile.context.newPage();
@@ -555,7 +591,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
 
-    expect(landed.route).toMatchObject({ kind: 'not-found', path: BETA_ASK });
+    expect(landed.route).toMatchObject(BETA_ROUTE);
     expect(await landing.evaluate(() => location.pathname)).toBe('/');
     expect((await tapped()).opened).toEqual([]);
     await browserProfile.context.close();
@@ -565,7 +601,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const browserProfile = await profile();
     const app = await appAt(browserProfile, '/d/alpha');
     await retire(browserProfile);
-    await push(browserProfile, 'alpha', { ...ASK, url: '/session/mvb9x0-c0ffee01?attention=A2' });
+    await push(browserProfile, 'alpha', { ...ASK, url: '/ferrets/mvb9x0-c0ffee01/chat?ask=A2' });
     await push(browserProfile, 'beta', ASK);
 
     // The same session id on both machines: the machine that sent it is what decides.
@@ -574,66 +610,85 @@ describe('a notification tap opens its conversation on the machine that sent it'
     await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const onBeta = await settledOn(app, BETA_ASK);
 
-    expect(onAlpha.route).toMatchObject({ kind: 'not-found', path: ALPHA_ASK });
-    expect(onBeta.route).toMatchObject({ kind: 'not-found', path: BETA_ASK });
+    expect(onAlpha.route).toMatchObject(ALPHA_ROUTE);
+    expect(onBeta.route).toMatchObject(BETA_ROUTE);
     await browserProfile.context.close();
   });
 
   /**
-   * A DAEMON THAT NAMES NO PAGE. Before #768 every push carried `url: '/'`, an ask included, and
-   * `fy attention notify` still did; a machine that has not been updated sends exactly that.
+   * A PUSH THE WORKER WILL NOT OPEN. Its `url` is not trusted: only the machine's own chat (or its home) opens, and
+   * anything else — `/`, the old `/session/` spelling, another machine's page, a foreign address — opens the app.
    */
-  const UNNAMED_PAGES = [
+  const REFUSED_PAGES = [
     {
-      name: 'an older daemon’s ask (url "/", a session)',
-      payload: { sessionId: 'mvb9x0-c0ffee01', kind: 'question', title: 'Needs you', tag: 't', url: '/' },
-      expected: '/d/beta/session/mvb9x0-c0ffee01',
-      kind: 'not-found',
+      name: 'a push that names only "/"',
+      payload: { ...ASK, url: '/' },
+      expected: '/app/',
     },
+    {
+      // There is no /session/ alias: that path is no route the shell draws, so it opens the app.
+      name: 'the old /session/ spelling of an ask',
+      payload: { ...ASK, url: '/session/mvb9x0-c0ffee01?attention=A3' },
+      expected: '/app/',
+    },
+    {
+      name: 'another machine’s page',
+      payload: { ...ASK, url: '/d/alpha/ferrets/mva1-aaaa0001/chat?ask=A2' },
+      expected: '/app/',
+    },
+    {
+      name: 'an encoded climb out of the machine',
+      payload: { ...ASK, url: '/ferrets/%2e%2e/%2e%2e/%2e%2e/d/alpha/ferrets/mva1-aaaa0001/chat' },
+      expected: '/app/',
+    },
+    {
+      name: 'a foreign address',
+      payload: { ...ASK, url: 'https://evil.example/d/beta' },
+      expected: '/app/',
+    },
+  ] as const;
+  // The accepted pages that are not a ferret's chat at an ask.
+  const OTHER_PAGES = [
     {
       name: 'a conversation link with no item',
-      payload: {
-        sessionId: 'mvb9x0-c0ffee01',
-        kind: 'failed',
-        title: 'Failed',
-        tag: 't',
-        url: '/session/mvb9x0-c0ffee01',
-      },
-      expected: '/d/beta/session/mvb9x0-c0ffee01',
-      kind: 'not-found',
+      payload: { ...ASK, url: '/ferrets/mvb9x0-c0ffee01/chat' },
+      expected: '/d/beta/ferrets/mvb9x0-c0ffee01/chat',
+      kind: 'screen',
     },
     {
-      name: 'a push about no conversation (kind only)',
-      payload: { kind: 'device-paired', title: 'A new device was paired', tag: 't', url: '/' },
+      name: 'the machine’s home',
+      payload: { ...ASK, url: '/d/beta' },
       expected: '/d/beta',
       kind: 'daemon-home',
     },
   ] as const;
-  // Three independent profiles, so the cases run side by side instead of paying each boot in turn.
+  // Independent profiles, so the cases run side by side instead of paying each boot in turn.
   lane(
-    'a daemon that names no page still opens the conversation the push is about, or that machine’s sessions',
+    'a daemon that names a page it may not open still opens the app, and one that names its home opens that machine’s home',
     async () => {
       const outcomes = await Promise.allSettled(
-        UNNAMED_PAGES.map(async ({ name, payload, expected, kind }) => {
-          const browserProfile = await profile();
-          try {
-            const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001');
-            await retire(browserProfile);
-            await push(browserProfile, 'beta', payload);
+        [...OTHER_PAGES, ...REFUSED_PAGES.map(refused => ({ ...refused, kind: 'home' }))].map(
+          async ({ name, payload, expected, kind }) => {
+            const browserProfile = await profile();
+            try {
+              const app = await appAt(browserProfile, '/d/alpha/ferrets/mva1-aaaa0001/chat');
+              await retire(browserProfile);
+              await push(browserProfile, 'beta', payload);
 
-            await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
-            const landed = await settledOn(app, expected);
+              await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
+              const landed = await settledOn(app, expected);
 
-            expect(landed.path).toBe(expected);
-            // The machine is in the address (`landed.path`, above); the route is the one the 5.0 router resolves it to.
-            expect(landed.route?.kind).toBe(kind);
-          } catch (error) {
-            if (error instanceof Error) error.message = `[${name} → ${expected}] ${error.message}`;
-            throw error;
-          } finally {
-            await browserProfile.context.close();
-          }
-        }),
+              expect(landed.path).toBe(expected);
+              // The machine is in the address (`landed.path`, above); the route is the one the 5.0 router resolves it to.
+              expect(landed.route?.kind).toBe(kind);
+            } catch (error) {
+              if (error instanceof Error) error.message = `[${name} → ${expected}] ${error.message}`;
+              throw error;
+            } finally {
+              await browserProfile.context.close();
+            }
+          },
+        ),
       );
       for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
     },
@@ -642,7 +697,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
   lane('a window still starting when the tap lands is routed once the app is up, without a second window', async () => {
     const browserProfile = await profile();
     // The store is still loading — the router is not mounted — for as long as the test holds it.
-    const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001', { held: true });
+    const app = await appAt(browserProfile, '/d/alpha/ferrets/mva1-aaaa0001/chat', { held: true });
     await retire(browserProfile);
     await push(browserProfile, 'beta', ASK);
 
@@ -653,13 +708,14 @@ describe('a notification tap opens its conversation on the machine that sent it'
     await app.evaluate(() => (globalThis as unknown as { __mountScene: () => void }).__mountScene());
     const landed = await settledOn(app, BETA_ASK);
 
-    expect(landed.route).toMatchObject({ kind: 'not-found', path: BETA_ASK });
+    expect(landed.route).toMatchObject(BETA_ROUTE);
+    expect(await ringing(app)).toEqual(['A3']);
     await browserProfile.context.close();
   });
 
   lane('a window that never answers (an app too old for the message) still ends on the conversation', async () => {
     const browserProfile = await profile();
-    const stale = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001', { wired: false });
+    const stale = await appAt(browserProfile, '/d/alpha/ferrets/mva1-aaaa0001/chat', { wired: false });
     await retire(browserProfile);
     await push(browserProfile, 'beta', ASK);
 
@@ -668,34 +724,60 @@ describe('a notification tap opens its conversation on the machine that sent it'
 
     // A machine's worker controls no page, so it may not navigate that window: it opens the
     // conversation in one of its own instead of leaving the reader where they were.
-    expect(await stale.evaluate(() => location.pathname)).toBe('/d/alpha/session/mva1-aaaa0001');
+    expect(await stale.evaluate(() => location.pathname)).toBe('/d/alpha/ferrets/mva1-aaaa0001/chat');
     expect((await tapped()).opened).toEqual([`${origin()}${BETA_ASK}`]);
     await browserProfile.context.close();
   });
 
-  lane(
-    'a notification the page showed (needs input, failed) opens its conversation through the app’s worker',
-    async () => {
+  // The page watcher shows its “needs input / failed / done” lines through the app-wide registration, with its own deep
+  // link (`notify.ts`: `data.url`). The worker holds no pairings, so it keeps only an address on its closed list
+  // (a machine's chat, Agenda page or home, rebuilt) and the page — which does — refuses a machine it never paired.
+  for (const { name, stored, expected, kind } of [
+    {
+      name: 'a page-shown line for a paired machine’s ferret opens its chat',
+      stored: '/d/beta/ferrets/mvb9x0-c0ffee01/chat?ask=A3',
+      expected: BETA_ASK,
+      kind: 'screen',
+    },
+    {
+      name: 'a page-shown line with extra query words opens the same chat, without them',
+      stored: '/d/beta/ferrets/mvb9x0-c0ffee01/chat?ask=A3&next=https://evil.test',
+      expected: BETA_ASK,
+      kind: 'screen',
+    },
+    {
+      name: 'a page-shown line for a machine this browser never paired opens the app',
+      stored: '/d/stranger/ferrets/mvb9x0-c0ffee01/chat?ask=A3',
+      expected: '/app/',
+      kind: 'home',
+    },
+    {
+      name: 'a page-shown line carrying a hostile address opens the app',
+      stored: 'https://evil.test/d/beta/ferrets/mvb9x0-c0ffee01/chat',
+      expected: '/app/',
+      kind: 'home',
+    },
+  ] as const) {
+    lane(`${name}, through the app-wide worker`, async () => {
       const browserProfile = await profile();
       const app = await appAt(browserProfile, '/d/alpha');
       await retire(browserProfile);
-      // The page watcher shows through the app-wide registration, with the app's own path
-      // (`notification-ledger.ts` → `notify.ts`).
-      await app.evaluate(async () => {
+      await app.evaluate(async (url: string) => {
         const registration = await navigator.serviceWorker.getRegistration();
         await registration?.showNotification('Needs input', {
           tag: 'session-needs',
-          data: { url: '/d/beta/session/mvb9x0-c0ffee01', sessionId: 'mvb9x0-c0ffee01', eventKey: 'k', count: 1 },
+          data: { url, sessionId: 'mvb9x0-c0ffee01', eventKey: 'k', count: 1 },
         });
-      });
+      }, stored);
 
       await tap(browserProfile, '/', '/sw.verified.js');
-      const landed = await settledOn(app, '/d/beta/session/mvb9x0-c0ffee01');
+      const landed = await settledOn(app, expected);
 
-      expect(landed.route).toMatchObject({ kind: 'not-found', path: '/d/beta/session/mvb9x0-c0ffee01' });
+      expect(landed.path).toBe(expected);
+      expect(landed.route?.kind).toBe(kind);
       await browserProfile.context.close();
-    },
-  );
+    });
+  }
 
   /**
    * WHY A FIX TO THE WORKER NEVER REACHED A PHONE THAT WAS ALREADY ENROLLED. A browser re-checks a

@@ -43,7 +43,14 @@ import { claimStartName, displayAgentName, type SessionNameClaims } from '../nam
 import { normalizeCallsign } from '../names/policy.ts';
 import type { NameAllocationErrorCode } from '../names/types.ts';
 import type { SystemCallsignPrefix } from '../protocol/system-callsigns.ts';
-import { FerretDetailsSchema, FerretRecordSchema, HARNESS_KEYS, type FerretDetails } from '../../../contract/index.ts';
+import {
+  FerretDetailsSchema,
+  FerretRecordSchema,
+  HARNESS_KEYS,
+  REAL_HARNESS_REFUSED,
+  StartRefusalCodeSchema,
+  type FerretDetails,
+} from '../../../contract/index.ts';
 import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import { SessionMoveError } from '../runtime/mounts/session-move.ts';
@@ -55,6 +62,7 @@ import {
 } from '../../../contract/index.ts';
 import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../tokens/tokens.ts';
 import type { SessionSpawnRequest } from '../session/provenance/types.ts';
+import { type LaunchEnvironmentRecord, recordedSwitches } from '../agent-control/launch-environment.ts';
 
 /**
  * THE FERRETS PORT (§2.2): who each ferret is and its state, and the launch pipeline. Starting and stopping are
@@ -117,6 +125,8 @@ export interface FerretsPorts {
    * cannot be resolved. Unbound, no work folder is answered.
    */
   realPath?(ferret: FerretId, folder: string): Promise<string | undefined>;
+  /** Where a launch records the switches it handed the pane (`instructions` reads them back). Unbound: none is kept. */
+  launchEnvironment?: Pick<LaunchEnvironmentRecord, 'write'>;
   /** `limits.yaml` as it is now (the kernel's config port), read fresh for every agent-control answer. */
   limits?(): LimitsFile | undefined;
   /** Ferret id → the instant the owner pinned it (`agent-pins.json`). */
@@ -161,6 +171,15 @@ export interface FerretSessionPort {
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
   err({ code, reason } as StartFailure);
+
+/**
+ * A `start.decide` taker's `no` as a start failure. The taker's `code` is read through Ferrets' own closed list; an
+ * unknown one (or none) is a plain `refused`, never passed through.
+ */
+const refusedBy = (decision: { readonly reason: string; readonly code?: string }): Result<never, StartFailure> => {
+  const code = StartRefusalCodeSchema.safeParse(decision.code);
+  return failed(code.success ? code.data : 'refused', decision.reason);
+};
 
 /** Every code unit is ASCII, so no Unicode normalization form can make two spellings name one folder. */
 const isAscii = (text: string): boolean => {
@@ -435,8 +454,11 @@ export class FerretsService implements FerretsApi {
       ...(request.login === undefined ? {} : { login: request.login }),
       folder: folder.value,
       by: request.by,
+      ...(request.options?.model === undefined ? {} : { model: request.options.model }),
+      ...(request.options?.fast === undefined ? {} : { fast: request.options.fast }),
     });
-    if (!decision.allow) return failed('refused', decision.reason);
+    // A refusal here is BEFORE the first write (details, record, token): `start()` gives the name back.
+    if (!decision.allow) return refusedBy(decision);
     if (request.options !== undefined) {
       const { title, ...options } = request.options;
       await this.saveDetails(id, {
@@ -593,7 +615,7 @@ export class FerretsService implements FerretsApi {
       folder: retargeted.folder,
       by: 'resume',
     });
-    if (!decision.allow) return failed('refused', decision.reason);
+    if (!decision.allow) return refusedBy(decision);
     if (replacing) {
       const ready = await this.launchable(retargeted);
       if (!ready.ok) return ready;
@@ -1040,6 +1062,8 @@ export class FerretsService implements FerretsApi {
         ? await harness.start(spec, runner, env.value)
         : await harness.resume(spec, runner, env.value, conversation);
     if (!started.ok) {
+      // A test-mode daemon refused to reach a real harness: the closed code becomes a sentence a test log can act on.
+      if (started.error === 'real_harness') return failed('refused', REAL_HARNESS_REFUSED);
       const code = started.error === 'unavailable' ? 'runner_unavailable' : 'failed';
       return failed(code, `the harness could not start: ${started.error}`);
     }
@@ -1152,7 +1176,11 @@ export class FerretsService implements FerretsApi {
     env[FERRET_ID_VARIABLE] = ferret;
     env[FERRET_TOKEN_VARIABLE] = token;
     const resolved = await this.ports.vault.childEnvironment(ferret, env);
-    return resolved.ok ? ok(resolved.value) : err(`unknown secrets: ${resolved.error.unknown.join(', ')}`);
+    if (!resolved.ok) return err(`unknown secrets: ${resolved.error.unknown.join(', ')}`);
+    // What this launch told the ferret, kept for `instructions` (persisted, so a restart changes no answer): only the
+    // switches, after the launch can no longer be refused. A store that fails never fails the launch.
+    await this.ports.launchEnvironment?.write(ferret, recordedSwitches(env)).catch(() => undefined);
+    return ok(resolved.value);
   }
 
   private async abandon(

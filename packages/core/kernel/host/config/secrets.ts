@@ -125,3 +125,20 @@ export function findRawSecrets(document: unknown): readonly SecretFinding[] {
   visit(document, []);
   return findings;
 }
+
+/** A line's `key: value`, the key and the value without quotes or a list dash: enough to ask {@link looksLikeRawSecret}. */
+const KEY_VALUE_LINE = /^\s*(?:-\s+)?["']?([^:"'#]+?)["']?\s*:\s*["']?(.+?)["']?\s*$/u;
+
+/**
+ * Whether the RAW TEXT of a file holds anything shaped like a secret, for a file that does not parse (so
+ * {@link findRawSecrets} has no document to walk). Line by line: a known key shape anywhere on the line, or a
+ * high-entropy value under a key that names a credential. It never says WHERE or WHAT: a caller that gets `true`
+ * withholds the text.
+ */
+export function rawTextHoldsSecret(text: string): boolean {
+  return text.split(/\r?\n/u).some(line => {
+    if (looksLikeRawSecret(undefined, line)) return true;
+    const pair = KEY_VALUE_LINE.exec(line);
+    return pair?.[1] !== undefined && pair[2] !== undefined && looksLikeRawSecret(pair[1], pair[2]);
+  });
+}

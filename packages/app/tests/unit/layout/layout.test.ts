@@ -26,10 +26,11 @@ const surfaces = [
     panels: [{ id: 'ferret-agenda', slot: 'ferret.side', order: 0 }],
   }),
   plugin('warden', { panels: [{ id: 'ferret-warden', slot: 'ferret.side', order: 5 }] }),
+  // The ids the real manifests declare: Ferrets declares no list or ferret screen, only the new-ferret and move ones.
   plugin('ferrets', {
     screens: [
-      { id: 'ferrets', path: 'ferrets' },
-      { id: 'ferret', path: 'ferret/:id' },
+      { id: 'new-ferret', path: 'new' },
+      { id: 'move', path: 'ferrets/:ferret/move' },
     ],
     panels: [{ id: 'files', slot: 'ferret.side', order: 2 }],
   }),
@@ -39,9 +40,9 @@ const surfaces = [
   }),
   plugin('usage', {
     screens: [{ id: 'insights', path: 'insights' }],
-    panels: [{ id: 'usage', slot: 'ferret.side', order: 4 }],
+    panels: [{ id: 'insights', slot: 'ferret.side', order: 4 }],
   }),
-  plugin('conversation', { panels: [{ id: 'sitrep', slot: 'ferret.side', order: 3 }] }),
+  plugin('conversation', { panels: [{ id: 'queue', slot: 'ferret.side', order: 3 }] }),
   // The ids and orders the real manifests declare for `composer.tools` (voice, conversation, runtimes, usage).
   plugin('voice', { panels: [{ id: 'dictation', slot: 'composer.tools', order: 20 }] }),
   plugin('conversation-files', { panels: [{ id: 'attachments', slot: 'composer.tools', order: 10 }] }),
@@ -88,7 +89,7 @@ describe('the layout item', () => {
   test('phone overrides apply only on a phone', () => {
     expect(resolveLayout(DEFAULT_LAYOUT, 'wide').nav.side).toBe('left');
     const phone = resolveLayout(DEFAULT_LAYOUT, 'phone');
-    expect(phone.nav).toEqual({ side: 'bottom', style: 'rail', items: ['agenda', 'ferrets', 'board'] });
+    expect(phone.nav).toEqual({ side: 'bottom', style: 'rail', items: ['agenda', 'board'] });
   });
 });
 
@@ -158,7 +159,7 @@ describe('the owner layout and this device (§5.3)', () => {
 
   test('applyOverrides lays phone fields over the phone overrides the layout has', () => {
     const laid = applyOverrides(DEFAULT_LAYOUT, { phone: { nav: { side: 'top' } } });
-    expect(laid?.phone?.nav).toEqual({ side: 'top', items: ['agenda', 'ferrets', 'board'] });
+    expect(laid?.phone?.nav).toEqual({ side: 'top', items: ['agenda', 'board'] });
   });
 });
 
@@ -178,19 +179,18 @@ describe('the frame plan', () => {
     const plan = planFrame(resolveLayout(DEFAULT_LAYOUT, 'wide'), views);
     expect(plan.nav.entries.map(e => (e.kind === 'screen' ? `${e.screen.plugin}.${e.screen.id}` : e.item))).toEqual([
       'agenda.agenda',
-      'ferrets.ferrets',
       'board.board',
       'usage.insights',
       'settings',
     ]);
-    expect(plan.side.holds).toMatchObject({ kind: 'screen', screen: { plugin: 'ferrets', id: 'ferret' } });
+    expect(plan.side.holds).toMatchObject({ kind: 'panels' });
     expect(plan.panels('ferret.side').map(p => p.id)).toEqual([
       'ferret-agenda',
       'cards-of-ferret',
       'files',
       'ferret-warden',
-      'sitrep',
-      'usage',
+      'queue',
+      'insights',
     ]);
     expect(plan.panels('composer.tools').map(p => p.id)).toEqual([
       'attachments',
@@ -206,7 +206,7 @@ describe('the frame plan', () => {
       planFrame(layout, views)
         .panels('ferret.side')
         .map(p => p.id),
-    ).toEqual(['ferret-agenda', 'cards-of-ferret', 'files', 'sitrep', 'usage', 'ferret-warden']);
+    ).toEqual(['ferret-agenda', 'cards-of-ferret', 'files', 'queue', 'insights', 'ferret-warden']);
   });
 
   test('a screen id two plugins declare is reachable only qualified', () => {

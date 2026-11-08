@@ -207,6 +207,21 @@ describe('readWorkspaceMedia outcomes', () => {
     });
   }
 
+  test('should refuse bytes the daemon masked, with the masked-file sentence, so they are never opened or downloaded as the file', async () => {
+    // Arrange
+    const { fetcher } = answering(() => file({ base64: 'AAEC', redacted: true }));
+
+    // Act
+    const actual = await read(fetcher);
+
+    // Assert
+    should(actual).deepEqual({
+      ok: false,
+      reason: 'not-served',
+      rule: 'private values masked — this is not the file',
+    });
+  });
+
   test('should read a media-folder file by its own path, through the media scope', async () => {
     // Arrange
     const { calls, fetcher } = answering(() => file({ base64: 'AAEC' }));

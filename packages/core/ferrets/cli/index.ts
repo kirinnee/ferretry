@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { implementCli, type VerbInvocation } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { ClientRestartGateway, ClientSessionApi } from './lib/client.ts';
-import { instructionsReport, renderInstructionsReport } from './lib/instructions/report.ts';
+import { instructionsReport, renderInstructionsReport } from '../contract/instructions-report.ts';
 import { moveOptions } from './lib/move/commands.ts';
 import { MoveController } from './lib/move/controller.ts';
 import { ClientMoveGateway } from './lib/move/gateway.ts';

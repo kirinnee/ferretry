@@ -35,15 +35,56 @@ const bodyOf = (body: RequestInit['body']): unknown => {
   return JSON.parse(body) as unknown;
 };
 
-/** Today's request client over one daemon's Access client. */
-export function routeRequestClient(client: Pick<PluginClient, 'call'>): IFyApiClient {
+/**
+ * A literal request line against the route templates a plugin declares (`DELETE /v1/pair/devices/:deviceId`): the
+ * template that matches segment for segment, with what its parameters were, or `undefined` when none does.
+ */
+function matchTemplate(
+  line: string,
+  templates: readonly string[],
+): { readonly route: string; readonly params: Record<string, string> } | undefined {
+  const [method = '', path = ''] = line.split(' ');
+  const actual = path.split('/');
+  for (const template of templates) {
+    const [templateMethod = '', templatePath = ''] = template.split(' ');
+    const pattern = templatePath.split('/');
+    if (templateMethod !== method || pattern.length !== actual.length) continue;
+    const params: Record<string, string> = {};
+    const fits = pattern.every((part, index) => {
+      const got = actual[index] ?? '';
+      if (!part.startsWith(':')) return part === got;
+      try {
+        params[part.slice(1)] = decodeURIComponent(got);
+        return got !== '';
+      } catch {
+        return false;
+      }
+    });
+    if (fits) return { route: template, params };
+  }
+  return undefined;
+}
+
+/**
+ * Today's request client over one daemon's Access client. `templates` are the route keys with parameters the caller
+ * reaches by a literal path (`/v1/pair/devices/abc`); a path no template names is called as written.
+ */
+export function routeRequestClient(
+  client: Pick<PluginClient, 'call'>,
+  templates: readonly string[] = [],
+): IFyApiClient {
   return {
     async request<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}): Promise<T> {
-      const route = `${(init.method ?? 'GET').toUpperCase()} ${path}`;
+      const line = `${(init.method ?? 'GET').toUpperCase()} ${path}`;
+      const matched = matchTemplate(line, templates);
+      const route = matched?.route ?? line;
       const body = bodyOf(init.body);
       let answer: unknown;
       try {
-        answer = await client.call(route, body === undefined ? {} : { body });
+        answer = await client.call(route, {
+          ...(matched === undefined ? {} : { params: matched.params }),
+          ...(body === undefined ? {} : { body }),
+        });
       } catch (reason) {
         if (isRefusal(reason)) throw new FyHttpError(reason.message, reason.status, reason.code, reason.body);
         throw reason;

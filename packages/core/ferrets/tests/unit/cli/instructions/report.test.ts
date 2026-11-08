@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { instructionsReport, renderInstructionsReport } from '../../../../cli/lib/instructions/report.ts';
+import { instructionsReport, renderInstructionsReport } from '../../../../contract/instructions-report.ts';
 
 describe('which sections a ferret launched with', () => {
   test('V-instructions a section is on only when its variable is exactly 1', () => {

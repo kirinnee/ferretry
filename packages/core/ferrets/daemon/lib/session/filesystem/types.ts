@@ -173,6 +173,8 @@ export interface FsFileView {
   readonly rule?: string;
   /** Served from `HEAD` rather than from the working tree. */
   readonly rev?: 'head';
+  /** Set by the route, never the service: a vault value was masked in the bytes served, so this is not the file. */
+  readonly redacted?: true;
 }
 
 export interface FsDiffView {
@@ -185,6 +187,11 @@ export interface FsDiffView {
   /** Gitignore gate. The same split as {@link FsFileView}. */
   readonly ignored?: boolean;
   readonly reason?: 'denylist' | 'ignored';
+  /**
+   * The two sides the diff was built from: bytes the service had ALREADY read, kept so the route can ask whether
+   * either holds a vault value. Internal: the route answers with the diff text and never with these.
+   */
+  readonly sides?: { readonly head?: Uint8Array; readonly working?: Uint8Array };
 }
 
 /** Where a validated relative path landed, for callers that only want the location. */

@@ -242,6 +242,45 @@ export interface WorkFolders {
 
 export const WorkFoldersPort = defineBoundPort<WorkFolders>('work-folders', 'ferrets');
 
+// ─── Agent control (Ferrets) ──────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The five things "What agents may control" switches independently (today's `AgentControlKind`, copied):
+ * `terminal`, `browser`, `files`, `settings` (the `config.*` tools: this machine's configuration files, off by
+ * default) and `scripts` (`browser.eval`, off by default). A closed list: a kind not named here cannot be asked.
+ */
+export const AGENT_CONTROL_KINDS = ['terminal', 'browser', 'files', 'settings', 'scripts'] as const;
+export type AgentControlKind = (typeof AGENT_CONTROL_KINDS)[number];
+
+/**
+ * Whether a ferret may use one kind of control on this machine, right now: the ONE reader of the owner's switches
+ * (`limits.yaml`, "What agents may control"), so no plugin reads that configuration itself. Never a security boundary
+ * against the operator's own agents, only a kill switch. Read fresh on every call; a ferret Ferrets does not know
+ * controls nothing. Provided by Ferrets only; unbound, or when Ferrets failed, every agent act of a kind is refused.
+ */
+export interface AgentControlReader {
+  allows(ferret: FerretId, kind: AgentControlKind): Promise<boolean>;
+}
+
+export const AgentControlPort = defineBoundPort<AgentControlReader>('agent-control', 'ferrets');
+
+/** The name the owner sees for each switch (today's `CONTROL_SETTING`). */
+const AGENT_CONTROL_SETTING: Readonly<Record<AgentControlKind, string>> = {
+  terminal: 'Terminals',
+  browser: 'Browsers',
+  files: 'Files',
+  settings: 'Ferretry settings',
+  scripts: 'Page scripts',
+};
+
+/** The plain sentence an agent is told when a switch is off (today's `controlRefusal`, word for word). */
+export function agentControlRefusal(kind: AgentControlKind): string {
+  const setting = AGENT_CONTROL_SETTING[kind];
+  // Lower-cased as a phrase, except a name that is a name: Ferretry settings.
+  const phrase = setting.startsWith('Ferretry') ? setting : setting.toLowerCase();
+  return `This machine does not let agents control ${phrase}: "What agents may control › ${setting}" is off in this machine's settings. Ask the person to turn it on if you need it.`;
+}
+
 // ─── Child environments (Vault) ───────────────────────────────────────────────────────────────────────────────────
 
 declare const childEnvironmentBrand: unique symbol;
@@ -292,6 +331,7 @@ export const KERNEL_BOUND_PORTS = [
   InputHoldsPort,
   RedactionPort,
   WorkFoldersPort,
+  AgentControlPort,
   ChildEnvironmentPort,
   SecretResolverPort,
 ] as const;

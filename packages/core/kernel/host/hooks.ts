@@ -310,14 +310,12 @@ export class HookEngine {
       if (answer === 'threw') return { allow: false, reason: `${taker.plugin} failed while deciding.` };
       const decision = answer.value;
       if (decision === null || typeof decision !== 'object' || decision.allow !== true) {
-        const reason =
-          decision !== null &&
-          typeof decision === 'object' &&
-          decision.allow === false &&
-          typeof decision.reason === 'string'
-            ? decision.reason
-            : `${taker.plugin} refused.`;
-        return { allow: false, reason };
+        const refusal = decision !== null && typeof decision === 'object' && decision.allow === false;
+        const reason = refusal && typeof decision.reason === 'string' ? decision.reason : `${taker.plugin} refused.`;
+        // A string code passes through untouched (the offerer parses it); any other type is dropped.
+        return refusal && typeof decision.code === 'string'
+          ? { allow: false, reason, code: decision.code }
+          : { allow: false, reason };
       }
     }
     return { allow: true };

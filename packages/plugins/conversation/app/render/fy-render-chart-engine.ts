@@ -33,7 +33,7 @@ import {
 import zoomPlugin from 'chartjs-plugin-zoom';
 import type { ChartSpec } from './fy-render-chart-model.ts';
 import { type ChartInteraction, chartConfiguration, chartDatasets } from './fy-render-chart-config.ts';
-import type { ResolvedTheme } from './fy-render-palette.ts';
+import type { ResolvedTheme } from '@ferretry/app';
 
 Chart.register(
   ArcElement,

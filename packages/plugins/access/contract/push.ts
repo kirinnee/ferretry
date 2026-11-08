@@ -1,3 +1,4 @@
+import { PushEnvelopeFields } from '@ferretry/kernel/contract';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
 
@@ -147,13 +148,16 @@ export function pushUrgencyFor(subject: PushSubject): PushUrgency {
  */
 export const PUSH_URGENT_TTL_SECONDS = 600;
 
+/**
+ * Every payload is the SHELL WORKER's push envelope (`title`, `body`, `url`, declared once in the kernel contract, where
+ * the signed service worker reads it too) plus the fields only this plugin and the daemon read. The title and body carry
+ * no secret, token or pairing code.
+ */
 const PushPayloadBaseShape = {
   version: z.literal(1),
   eventKey: z.string().min(1),
-  title: z.string().min(1),
-  body: z.string(),
+  ...PushEnvelopeFields,
   tag: z.string().min(1),
-  url: z.string().min(1),
   count: PositiveIntegerSchema,
   /**
    * A high-priority push: the service worker asks the platform to keep it on screen and to sound again. Only `high`

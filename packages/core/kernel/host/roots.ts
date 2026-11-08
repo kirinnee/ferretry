@@ -1302,12 +1302,20 @@ function rootHandle(setup: HandleSetup): RootHandle {
 }
 
 /**
+ * The one place a plugin's own state folder under the home is named: `<home>/state/<plugin>`. Its internal roots sit
+ * in it, and `fyd --check` hands a host selftest this same folder as `stateDir`, so the two can never disagree.
+ */
+export function pluginStateFolder(home: string, plugin: string): string {
+  return `${home.replace(/\/+$/u, '')}/state/${plugin}`;
+}
+
+/**
  * The one place the base of an internal root under the home is named: `<home>/state/<plugin>/<name>` for the roots
  * the kernel makes (`agent-homes`, `downloads`, `credentials`, `sessions`), nothing for any other root. Both the folder the kernel
  * makes at boot and the base the roots port serves are this fact.
  */
 function internalRootBase(home: string, plugin: string, name: RootName): string | undefined {
-  return isInternalRoot(name) ? `${home}/state/${plugin}/${name}` : undefined;
+  return isInternalRoot(name) ? `${pluginStateFolder(home, plugin)}/${name}` : undefined;
 }
 
 /** One declared internal root whose base the kernel would not make or accept, and why. */

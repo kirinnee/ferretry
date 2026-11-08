@@ -54,8 +54,15 @@ export function defineEvent<const Name extends string, Payload>(
 /** The five hook modes (§3.5). */
 export type HookMode = 'observe' | 'decide' | 'transform' | 'provide' | 'contribute';
 
-/** A decide taker's answer. The first `no` wins, with its reason; a throw or timeout is a `no`. */
-export type HookDecision = { readonly allow: true } | { readonly allow: false; readonly reason: string };
+/**
+ * A decide taker's answer. The first `no` wins, with its reason; a throw or timeout is a `no`. A `no` may carry a
+ * `code` the OFFERER defined for its refusals (ADDITIVE): the kernel passes a string through untouched and never
+ * interprets it; the offerer parses it against its own closed list, so a taker can never mint a code the offerer did not
+ * declare. A failed, timed-out or throwing taker never carries one.
+ */
+export type HookDecision =
+  | { readonly allow: true }
+  | { readonly allow: false; readonly reason: string; readonly code?: string };
 
 export const ALLOW: HookDecision = Object.freeze({ allow: true });
 

@@ -209,7 +209,8 @@ export interface TestHost {
   setConfig(fileOrCollection: string, value: unknown): void;
   runJob(id: string): Promise<void>;
   /** Runs a half's declared `doctor` check (manifest `doctor` id) as `fy doctor` would. */
-  doctor(plugin: string, check: string): Promise<DoctorFinding>;
+  /** A declared check's finding; `undefined` when it reports no row. */
+  doctor(plugin: string, check: string): Promise<DoctorFinding | undefined>;
   jobIds(): readonly string[];
   /** Makes `InputHolds.decide` refuse this target (when the stand-in holds are in use). */
   hold(target: TargetRef, code?: RefusalCode): void;
@@ -439,11 +440,21 @@ async function start(world: World): Promise<TestHost> {
         for (const taker of hookTakers(hook.name)) {
           if (typeof taker.impl !== 'function') continue; // a skeleton take is a no-op
           try {
-            const answer = await timed(
-              (taker.impl as (i: unknown) => HookDecision | Promise<HookDecision>)(input),
-              hook.timeoutMs,
-            );
-            if (!answer.allow) return answer;
+            const answer = (await timed((taker.impl as (i: unknown) => unknown)(input), hook.timeoutMs)) as {
+              readonly allow?: unknown;
+              readonly reason?: unknown;
+              readonly code?: unknown;
+            } | null;
+            // The real host's rule (`host/hooks.ts` decide), exactly: anything but an object with `allow: true` is a
+            // refusal; a string `reason` is kept, else the plugin "refused"; a string `code` passes through, any other
+            // type is dropped.
+            if (answer === null || typeof answer !== 'object' || answer.allow !== true) {
+              const refusal = answer !== null && typeof answer === 'object' && answer.allow === false;
+              const reason = refusal && typeof answer.reason === 'string' ? answer.reason : `${taker.id} refused.`;
+              return refusal && typeof answer.code === 'string'
+                ? { allow: false, reason, code: answer.code }
+                : { allow: false, reason };
+            }
           } catch (error) {
             return { allow: false, reason: `${taker.id}: ${error instanceof Error ? error.message : String(error)}` };
           }

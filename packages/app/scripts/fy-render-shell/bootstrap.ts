@@ -40,16 +40,8 @@
  * the global listener is removed the moment it lands. Everything after that is
  * port-only traffic no other document can reach.
  */
-import {
-  FY_RENDER_LIMITS,
-  FY_RENDER_SANDBOX_LIMITS,
-} from '../../../plugins/conversation/app/render/fy-render-bounds.ts';
-import {
-  FONT_STACK,
-  HEX_LITERAL,
-  MERMAID_COLOR_VARIABLES,
-  PALETTE_KEY,
-} from '../../../plugins/conversation/app/render/fy-render-palette.ts';
+import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS } from '../../src/fy-render/bounds.ts';
+import { FONT_STACK, HEX_LITERAL, MERMAID_COLOR_VARIABLES, PALETTE_KEY } from '../../src/fy-render/palette.ts';
 
 type Reply =
   | { kind: 'shell-ready' }

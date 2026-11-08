@@ -166,8 +166,7 @@
     },
     "packages/plugins/claude-code": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["daemon/lib/harness/fast-mode.ts"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/packs": {
       "entry": ["app/views/*.tsx"],
@@ -275,12 +274,7 @@
     "packages/plugins/terminals": {
       "entry": [],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": [
-        "daemon/adapters/tmux/pane-queue.ts",
-        "daemon/adapters/tmux/harness-launch-guard.ts",
-        "daemon/adapters/tmux/forget-ferret-identity.ts",
-        "daemon/adapters/tmux/tmux-release-reader.ts"
-      ]
+      "ignore": ["daemon/adapters/tmux/pane-queue.ts"]
     },
     "packages/plugins/browsers": {
       "entry": [],
@@ -401,8 +395,7 @@
     },
     "packages/plugins/codex": {
       "entry": [],
-      "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["daemon/adapters/app-server-catalog.ts"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     }
   },
   "bun": false,

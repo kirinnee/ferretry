@@ -457,14 +457,9 @@ export const ruleMissSuspends = (reason: GrantMissReason): boolean =>
  * agenda card closes in the words a tap fill closes with, because every ferret can read every agenda (C26): this line
  * is drawn on the owner's input card only.
  */
-export function grantFilledLineFor(
-  note: { readonly by: 'plan'; readonly line: number } | { readonly by: 'rule' },
-  place?: string,
-): string {
+export function grantFilledLineFor(note: { readonly by: 'plan'; readonly line: number }, place?: string): string {
   const at = place === undefined || place === '' ? '' : ` on ${place}`;
-  return note.by === 'plan'
-    ? `Filled under your task plan (line ${String(note.line + 1)})${at}.`
-    : `Filled under your standing sign-in rule${at}.`;
+  return `Filled under your task plan (line ${String(note.line + 1)})${at}.`;
 }
 
 /** What the FERRET is told when a plan did not fill a card: the same sentence for every reason. */
@@ -534,8 +529,6 @@ const MAX_LOGIN_ENTRIES = 256;
  */
 export const LOGIN_PASSWORD_MIN_LENGTH = MIN_SECRET_VALUE_LENGTH;
 
-const LOGIN_PASSWORD_MAX_LENGTH = 1_024;
-
 /**
  * What an entry is for, as the daemon names a target: `program@host` for a terminal (`sudo@kirin-box`,
  * `ssh@build.example.com`), or a web host for a page (`github.com`, `localhost:8443`). Lowercase. The DAEMON
@@ -553,22 +546,8 @@ type LoginMatch = z.infer<typeof LoginMatchSchema>;
 
 export type LoginFieldRole = z.infer<typeof LoginFieldRoleSchema>;
 
-/**
- * THE SENTENCE the owner reads before a 2FA key is SAVED, in the app, the CLI and the docs. It is the
- * reason TOTP is off by default and opted into per entry. It is about keeping the key, never about a fill: a ticked
- * code on a plan line or a standing rule says {@link AUTOMATED_CODE_WARNING}.
- */
-const LOGIN_TOTP_WARNING =
-  "Keeping the password and the 2FA key in the same place means one compromise of this machine's vault defeats both factors.";
-
 /** Most 2FA keys of one account that hold a seed: a re-enrolled second authenticator, a backup app. */
 const MAX_SEEDS_PER_ACCOUNT = 4;
-
-/** A base32 TOTP seed, as authenticator setup pages show it (spaces and `=` padding allowed). */
-const TotpSeedSchema = z
-  .string()
-  .transform(seed => seed.replaceAll(/[\s=-]/gu, '').toUpperCase())
-  .pipe(z.string().regex(/^[A-Z2-7]{16,128}$/u, 'a base32 2FA key of 16 to 128 characters'));
 
 /**
  * WHERE THE SIGN-IN HAPPENS: a web host, exactly as a page's origin names it (`app.vercel.com`,
@@ -597,15 +576,6 @@ const LoginMethodKindSchema = z.enum(LOGIN_METHODS);
 type LoginMethodKind = z.infer<typeof LoginMethodKindSchema>;
 
 const LOGIN_SSO_NAME_MAX_LENGTH = 40;
-
-/** Words that name a passkey or a hardware authenticator: never a saved login's method. */
-const PASSKEY_WORDS =
-  /pass\s*-?\s*key|web\s*-?\s*authn|fido|u2f|security\s*-?\s*key|hardware\s*-?\s*key|yubi\s*-?\s*key/iu;
-
-/** Whether a sign-in method's name means a passkey: a change that says one is refused. */
-const namesPasskey = (text: string): boolean => PASSKEY_WORDS.test(text);
-
-const PASSKEYS_OFF = 'passkeys are off: a saved login signs in with a password or a provider';
 
 /**
  * What is wrong with a method, as issues: an SSO method names its provider, only SSO does, and a password sign-in
@@ -641,22 +611,6 @@ const LoginMethodSchema = z
     for (const issue of loginMethodIssues(method.kind, method.name, method.via, 'via'))
       context.addIssue({ code: 'custom', ...issue });
   });
-
-/**
- * A method as a CHANGE sends it: {@link LoginMethodSchema}, and an SSO name that says passkey is refused. Only a
- * write is judged by the word list, so a list that grows later never makes an entry already stored unreadable.
- */
-const LoginMethodChangeSchema = LoginMethodSchema.refine(
-  method => method.name === undefined || !namesPasskey(method.name),
-  { path: ['name'], message: PASSKEYS_OFF },
-);
-
-/** A password as a write sends it: no control character or line break, which would press keys. */
-const LoginPasswordSchema = z
-  .string()
-  .min(LOGIN_PASSWORD_MIN_LENGTH)
-  .max(LOGIN_PASSWORD_MAX_LENGTH)
-  .regex(/^[^\p{Cc}]*$/u, 'a password with a control character or line break would press keys');
 
 // ─── from login-recipes.ts ───
 
@@ -715,35 +669,6 @@ const LoginRecipeSchema = z
   );
 
 // ─── from login-entries.ts ───
-
-/**
- * `PUT /v1/secrets/logins/:id`: create the entry, or change the parts named. A field left out is kept;
- * `null` removes it. Values travel IN only. Adding a seed needs `totpAcknowledged: true`, which the
- * client sends only after showing {@link LOGIN_TOTP_WARNING}.
- */
-const PutLoginEntryRequestSchema = z
-  .strictObject({
-    label: oneLine(LOGIN_LABEL_MAX_LENGTH).optional(),
-    match: z.array(LoginMatchSchema).max(LOGIN_MATCH_MAX).optional(),
-    /** The whole method, replaced: `{ kind: 'password' }` goes back to a password sign-in. */
-    method: LoginMethodChangeSchema.optional(),
-    domains: z.array(LoginDomainSchema).max(LOGIN_MATCH_MAX).optional(),
-    username: oneLine(LOGIN_USERNAME_MAX_LENGTH).nullable().optional(),
-    password: LoginPasswordSchema.nullable().optional(),
-    totp: z.strictObject({ seed: TotpSeedSchema, parameters: TotpParametersSchema.optional() }).nullable().optional(),
-    totpAcknowledged: z.literal(true).optional(),
-    /** The recipe, replaced whole; `null` removes it. A text holding any saved or vault value is refused. */
-    recipe: LoginRecipeSchema.nullable().optional(),
-    autoApplyRecipe: z.boolean().optional(),
-  })
-  .superRefine((body, context) => {
-    if (body.totp !== undefined && body.totp !== null && body.totpAcknowledged !== true)
-      context.addIssue({
-        code: 'custom',
-        path: ['totpAcknowledged'],
-        message: `confirm the warning first: ${LOGIN_TOTP_WARNING}`,
-      });
-  });
 
 /**
  * Why a card's primary offer is first (accounts.ts `chosenSignIn`): the ferret named it, a project, folder or
@@ -1366,7 +1291,7 @@ const SignInSummarySchema = z.strictObject({
 export type SignInSummary = z.infer<typeof SignInSummarySchema>;
 
 /** `GET /v1/accounts`. A damaged store says so; it is never an empty list. */
-const AccountListSchema = z.strictObject({
+export const AccountListSchema = z.strictObject({
   v: z.literal(1),
   health: SecretStoreHealthSchema,
   diagnosis: z.string().min(1).optional(),
@@ -1565,70 +1490,22 @@ export type PushSubject = 'one-time-code' | 'approve-on-phone' | 'other';
 
 // ─── from two-factor.ts ───
 
-/** What the mismatch check reads of the account a key is being saved to. */
-export interface FactorMismatchAccount {
-  readonly label: string;
-  readonly username?: string | undefined;
-}
-
-/** "GitHub · kirinnee": how an account is named on a card. */
-const accountWords = (account: FactorMismatchAccount): string =>
-  account.username === undefined ? account.label : `${account.label} · ${account.username}`;
-
-const twoDots = '••';
-
-/** One key on its own: "Code sent to ••42 (SMS)", "Code sent to kirin@… (email)", "Code from Authenticator app". */
-function oneKeyWords(key: TwoFactorKeySummary): string {
-  switch (key.kind) {
-    case 'sms':
-      return key.endsWith === undefined
-        ? `Code sent by SMS (${key.label})`
-        : `Code sent to ${twoDots}${key.endsWith} (SMS)`;
-    case 'email':
-      return key.to === undefined ? `Code sent by email (${key.label})` : `Code sent to ${key.to} (email)`;
-    default:
-      return `Code from ${key.label}`;
-  }
-}
-
-/** One key in a list: "SMS ••42", "email to kirin@…", "Authenticator app". */
-function shortKeyWords(key: TwoFactorKeySummary): string {
-  switch (key.kind) {
-    case 'sms':
-      return key.endsWith === undefined ? `SMS (${key.label})` : `SMS ${twoDots}${key.endsWith}`;
-    case 'email':
-      return key.to === undefined ? `email (${key.label})` : `email to ${key.to}`;
-    default:
-      return key.label;
-  }
-}
-
 /** A code key by its kind alone, for agenda text: no label, address or digits the owner wrote. */
 const KEY_KIND_WORDS = { totp: 'authenticator app', sms: 'SMS', email: 'email' } as const;
 
 /**
- * THE TITLE OF A CODE CARD, from the account's keys: the one a ferret named (`factor`) when the caller passes only
- * that one, else every key that ends in a code. One: where its code went ("Code sent to ••42 (SMS)"). Several: each
- * ("One-time code: SMS ••42 or Authenticator app"). None known: the account ("One-time code for GitHub · kirinnee") where
- * the caller may name it (the app, from the accounts it reads), and the PLACE alone ("One-time code for github.com")
- * where the words reach the agenda: agenda text is readable by every ferret, so it never names an account label or a
- * username. On that path the keys are said by KIND only ("One-time code for github.com, by email"): a key's label and
- * the address an email key goes to are the owner's words, and an address is often the username (secrev-1329a L6).
- * Every word is the OWNER's (the key's label and plain facts) or Ferretry's, never a ferret's.
+ * THE TITLE OF A CODE CARD, from the account's keys: the PLACE alone ("One-time code for github.com"), and the keys said
+ * by KIND only ("One-time code for github.com, by email"). The words reach the agenda, which every ferret can read, so
+ * they never name an account label, a username, a key's label or the address an email key goes to: an address is often
+ * the username (secrev-1329a L6). Every word is Ferretry's, never a ferret's.
  */
-export function factorAskWords(
-  keys: readonly TwoFactorKeySummary[],
-  named: FactorMismatchAccount | { readonly place: string },
-): string {
-  const codes = keys.filter(key => isCodeFactor(key.kind));
-  const [only] = codes;
-  if ('place' in named) {
-    const kinds = [...new Set(codes.map(key => KEY_KIND_WORDS[key.kind as keyof typeof KEY_KIND_WORDS]))];
-    return `One-time code for ${named.place}${kinds.length === 0 ? '' : `, by ${kinds.join(' or ')}`}`;
-  }
-  if (only === undefined) return `One-time code for ${accountWords(named)}`;
-  if (codes.length === 1) return oneKeyWords(only);
-  return `One-time code: ${codes.map(shortKeyWords).join(' or ')}`;
+export function factorAskWords(keys: readonly TwoFactorKeySummary[], named: { readonly place: string }): string {
+  const kinds = [
+    ...new Set(
+      keys.filter(key => isCodeFactor(key.kind)).map(key => KEY_KIND_WORDS[key.kind as keyof typeof KEY_KIND_WORDS]),
+    ),
+  ];
+  return `One-time code for ${named.place}${kinds.length === 0 ? '' : `, by ${kinds.join(' or ')}`}`;
 }
 
 // ─── from daemon/src/lib/secrets/accounts.ts ───

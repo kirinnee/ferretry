@@ -197,3 +197,31 @@ export const DiscoverySchema = z.strictObject({
   method: HarnessInstallMethodSchema.nullable(),
 });
 export type Discovery = z.infer<typeof DiscoverySchema>;
+
+// ─── the held fast-start catalog (persisted) ─────────────────────────────────────────────────────────────────
+
+/**
+ * The last good Codex model catalog a fast start is judged against, as kept on disk so a start right after boot decides
+ * at once. THE MODEL LIST ONLY: no sign-in, token, account or path is in it (the read is the login-less one, taken with a
+ * throwaway HOME), and a field this schema does not name does not load.
+ */
+export const HeldModelChoiceSchema = z.strictObject({
+  value: z.string(),
+  label: z.string(),
+  description: z.string().optional(),
+  tier: z.enum(['best', 'balanced', 'fast']).optional(),
+  context: z.number().optional(),
+  isDefault: z.literal(true).optional(),
+  reasoningEfforts: z.array(z.strictObject({ value: z.string(), description: z.string().optional() })),
+  defaultReasoningEffort: z.string().optional(),
+  fast: z.boolean().optional(),
+  fastDefault: z.literal(true).optional(),
+});
+
+export const HeldCatalogSchema = z.strictObject({
+  format: z.literal(1),
+  /** When the read that produced `choices` landed. */
+  readAt: InstantSchema,
+  choices: z.array(HeldModelChoiceSchema),
+});
+export type HeldCatalogFile = z.infer<typeof HeldCatalogSchema>;

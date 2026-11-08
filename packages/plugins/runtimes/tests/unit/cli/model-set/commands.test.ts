@@ -25,6 +25,11 @@ describe('model set renderings', () => {
       .and.match(/Cannot remove yet: 1 profile uses it\./);
   });
 
+  it('should show no model lines for a component that is not a model set', () => {
+    should(renderModelSet(component())).match(/^instructions\/main\n {2}Used by profiles: default/);
+    should(renderModelSet(component())).not.match(/Models:|Starts with:/);
+  });
+
   it('should list model sets, and say how to add the first', () => {
     should(renderModelSetList([modelSet()], 'fz')).match(
       /^heavy {2}opus, sonnet {2}used by 1 profile\(s\)\n\nShow one with `fz model-set show <name>`\./,

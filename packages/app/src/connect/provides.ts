@@ -1,11 +1,14 @@
 import type { AppImplementation, Manifest } from '@ferretry/kernel/manifest';
+import type { NavigateOptions } from '../router/router.tsx';
 import type { PluginCommandSource } from '../shell/command-sources.ts';
+import type { View } from '../surfaces/halves.ts';
 import type { DaemonList, PairedDaemon } from '../daemons/daemon-list.ts';
 import type { RelayPairingOutcome, SessionDeviceClaim } from '../session/session-client.ts';
 import type { CarrierDial, SessionKeyRotation } from '../session/session-transport.ts';
 import type { SocketLike } from '../session/direct-dial.ts';
 import type { WebCryptoRelayCrypto } from '../session/webcrypto.ts';
 import type { OwnerPayload, PrivateKeyHandle, RelayCrypto } from '../session/wire/index.ts';
+import type { ShellPluginClient } from '../client/daemon-client.ts';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
 import { PASSKEY_TAKERS, type PasskeyPorts, type PasskeyProvision } from '../passkey/passkey.ts';
 
@@ -174,6 +177,47 @@ export interface ConnectPorts {
   readonly directory?: DirectoryFetch;
 }
 
+/**
+ * WHAT A DAEMON-LESS SCREEN IS GIVEN, AND ALL IT IS GIVEN (a share link's landing page, first-run setup, the page a pairing
+ * link opens on a device that has no daemon yet). It is the session layer's parts and the paired list, and no more:
+ *
+ * - NO CLIENT, NO TRANSPORT, NO SOCKET, NO DIRECTORY. A daemon-less screen has no daemon to talk to, so it is handed no
+ *   default one, not the first, not the last used. Its only ways to a daemon are the pairing exchange ({@link pair},
+ *   {@link pairDirect}: the carriers Connections' walk gives, in the order the protocol says) and, for Catalogs, its own
+ *   member transport (a part of its own, never reached through here).
+ * - It reads the paired list and may add to it (a pairing answers by adding the daemon it paired with).
+ */
+export type DaemonlessPorts = Pick<
+  ConnectPorts,
+  'crypto' | 'subtle' | 'indexedDB' | 'now' | 'after' | 'pairDirect' | 'pair'
+> & { readonly daemons: PairedList };
+
+/**
+ * THE PAIRED LIST AS A DAEMON-LESS SCREEN MAY USE IT: read it and follow it, choose one, forget one, and add the one a
+ * pairing just answered with. Nothing else of the {@link DaemonList}: not its carriers, not its caches, not a rename.
+ * It holds no client; it is the list a device-less visitor already sees.
+ */
+export type PairedList = Pick<DaemonList, 'snapshot' | 'subscribe' | 'select' | 'remove' | 'add'>;
+
+/**
+ * THE PROPS OF A DAEMON-LESS SCREEN: where the page is (its route's parameters, an address read on demand) and how to
+ * leave it. There is NO field a daemon client could ride in, by type; a test also probes what is rendered.
+ */
+export interface DaemonlessScreenProps {
+  /** The route's parameters (`/join/:tab` → `{ tab }`). */
+  readonly params: Readonly<Record<string, string>>;
+  /** Moves to another address; `replace` swaps this entry instead of adding one (a link whose secret was taken). */
+  readonly navigate: (to: string, options?: NavigateOptions) => void;
+  /**
+   * The address this tab was opened at, fragment included, READ ON DEMAND so a screen takes what it needs once and
+   * keeps nothing: a pairing link's fragment carries a single-use code.
+   */
+  readonly location: () => string;
+}
+
+/** The daemon-less screens of one plugin, by screen id. */
+export type DaemonlessViews = Readonly<Record<string, View<DaemonlessScreenProps>>>;
+
 /** What a plugin app half may hand the shell. Each part is a factory over the {@link ConnectPorts}. */
 export interface ShellProvides {
   /** Access only. */
@@ -192,6 +236,12 @@ export interface ShellProvides {
    * session parts (claims, carriers, pairing) it is NOT built before the bootstrap read: the bar builds it on a daemon.
    */
   readonly commands?: PluginCommandSource;
+  /**
+   * Any plugin: the views of the screens its manifest declares `daemonless: true`, built once before any daemon is
+   * contacted, over the {@link DaemonlessPorts} and nothing else. A screen id the manifest does not declare as
+   * daemon-less is ignored, so a per-daemon screen can never be mounted without its daemon this way.
+   */
+  readonly daemonless?: (ports: DaemonlessPorts) => DaemonlessViews;
 }
 
 /** An app half with its `shell` section. */
@@ -271,16 +321,25 @@ export interface RegisteredPasskey {
 }
 
 /**
+ * What the composition root hands {@link registeredPasskey}: {@link PasskeyPorts} except that the client is asked for BY
+ * plugin, so the host never names the provider (the registry does).
+ */
+export type PasskeyHostPorts = Omit<PasskeyPorts, 'client'> & {
+  readonly clientOf: (daemon: string, plugin: string) => ShellPluginClient | undefined;
+};
+
+/**
  * Builds the ONE passkey provision (G105: one prompt, no second implementation): Access's, from the generated surfaces
  * registry. A provision from any other plugin is ignored; one that throws is left out, and then a passkey refusal is
  * simply returned as it came (nothing asks).
  */
-export function registeredPasskey(surfaces: readonly SurfaceEntry[], ports: PasskeyPorts): RegisteredPasskey {
+export function registeredPasskey(surfaces: readonly SurfaceEntry[], host: PasskeyHostPorts): RegisteredPasskey {
+  const { clientOf, ...rest } = host;
   for (const entry of surfaces) {
     const make = shellProvidesOf(entry)?.passkey;
     if (make === undefined || !PASSKEY_TAKERS.includes(entry.id)) continue;
     try {
-      return { passkey: make(ports), failures: [] };
+      return { passkey: make({ ...rest, client: daemon => clientOf(daemon, entry.id) }), failures: [] };
     } catch (error) {
       return {
         passkey: undefined,
@@ -289,4 +348,35 @@ export function registeredPasskey(surfaces: readonly SurfaceEntry[], ports: Pass
     }
   }
   return { passkey: undefined, failures: [] };
+}
+
+/** The daemon-less views the registered halves gave, by `<plugin>.<screen>`, and the ones that failed (said, never thrown). */
+export interface RegisteredDaemonless {
+  readonly views: ReadonlyMap<string, View<DaemonlessScreenProps>>;
+  readonly failures: readonly { readonly plugin: string; readonly reason: string }[];
+}
+
+/**
+ * Builds every plugin's daemon-less screens from the generated surfaces registry. Only a screen the plugin's manifest
+ * declares `daemonless: true` is taken: a view for any other id is dropped. A factory that throws costs only its own
+ * plugin's screens.
+ */
+export function registeredDaemonless(surfaces: readonly SurfaceEntry[], ports: DaemonlessPorts): RegisteredDaemonless {
+  const views = new Map<string, View<DaemonlessScreenProps>>();
+  const failures: { plugin: string; reason: string }[] = [];
+  for (const entry of surfaces) {
+    const make = shellProvidesOf(entry)?.daemonless;
+    if (make === undefined) continue;
+    const declared = new Set(
+      (entry.manifest.ui?.screens ?? []).filter(screen => screen.daemonless === true).map(screen => screen.id),
+    );
+    try {
+      for (const [id, view] of Object.entries(make(ports))) {
+        if (declared.has(id)) views.set(`${entry.id}.${id}`, view);
+      }
+    } catch (error) {
+      failures.push({ plugin: entry.id, reason: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { views, failures };
 }

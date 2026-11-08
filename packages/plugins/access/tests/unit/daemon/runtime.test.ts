@@ -1163,3 +1163,20 @@ test('an idle device expiring fires the credentials watch once', async () => {
   expect(moves).toBe(2);
   expect(heard.count).toBe(moves);
 });
+
+describe('the buzz port', () => {
+  test('an over-cap buzz is refused at the sender, before any push is composed, not shown unreadable on a phone', async () => {
+    const w = world();
+    const buzz = {
+      tag: 'agenda-A3',
+      title: 'Deploy approval',
+      body: 'Ship the build?',
+      url: '/ferrets/f1/chat?ask=A3',
+    };
+    await expect(w.runtime.port.buzz({ ...buzz, title: 'x'.repeat(201) })).rejects.toThrow();
+    await expect(w.runtime.port.buzz({ ...buzz, body: 'x'.repeat(1_001) })).rejects.toThrow();
+    await expect(w.runtime.port.buzz({ ...buzz, url: `/${'x'.repeat(1_024)}` })).rejects.toThrow();
+    // Within the caps it is delivered to nobody (no enrolment), and throws nothing.
+    expect(await w.runtime.port.buzz(buzz)).toBe(0);
+  });
+});

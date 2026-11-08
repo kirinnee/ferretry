@@ -28,7 +28,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { ChartSpec, readChart as ReadChart } from './fy-render-chart-model.ts';
 import { ZOOMABLE_KINDS } from './fy-render-chart-config.ts';
 import { formatChartValue } from './fy-render-chart-format.ts';
-import { paletteColors, paletteKey, type ResolvedTheme, toneColor } from './fy-render-palette.ts';
+import { paletteColors, paletteKey, type ResolvedTheme, toneColor } from '@ferretry/app';
 import type { ChartHandle, mountChart as MountChart } from './fy-render-chart-engine.ts';
 import type { FyRenderSandboxFailure } from './fy-render-sandbox.tsx';
 

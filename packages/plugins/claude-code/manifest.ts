@@ -13,7 +13,7 @@ import {
   ClaudeCodeUpdateFinished,
 } from './contract/index.ts';
 import { audit, cap } from '@ferretry/core-gate/contract';
-import { Harnesses } from '@ferretry/core-ferrets/contract';
+import { Harnesses, StartDecide } from '@ferretry/core-ferrets/contract';
 
 /**
  * Claude Code (§2.3): a harness. It takes `harnesses:claude-code` from Ferrets and needs a `runners` provider only at
@@ -121,7 +121,7 @@ export default definePlugin({
   },
 
   hooks: {
-    takes: [{ hook: Harnesses, key: CLAUDE_CODE }],
+    takes: [{ hook: Harnesses, key: CLAUDE_CODE }, { hook: StartDecide }],
   },
 
   onboarding: [{ id: 'harness', title: 'Claude Code', order: 20 }],

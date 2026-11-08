@@ -5,8 +5,10 @@
  */
 
 import type { ScreenProps } from '@ferretry/kernel/manifest';
+import { MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
 import { AgendaConversationSlot } from '../features/agenda/agenda-conversation-slot.tsx';
 import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
+import { useAskFocus } from '../features/agenda/use-ask-focus.ts';
 import { AgendaInboxContext, useRuntimeInbox } from '../hooks/use-agenda-inbox.ts';
 import { AgendaClientContext } from '../lib/agenda-client-context.tsx';
 import { inboxSourceFromSearch } from '../lib/agenda-inbox-list.ts';
@@ -21,6 +23,8 @@ export function createAgendaScreen(runtime: AgendaRuntime) {
     const links = useAgendaLinks();
     const inbox = useRuntimeInbox(runtime, project => links.lanes(daemon, project));
     const phone = useLayoutMode() === 'drawer';
+    // A machine ask's push opens `/agenda?ask=A3`: the page opens that ask's card once it is among the open ones.
+    const asked = useAskFocus();
     return (
       <AgendaClientContext.Provider value={runtime.client}>
         <AgendaInboxContext.Provider value={inbox}>
@@ -29,6 +33,15 @@ export function createAgendaScreen(runtime: AgendaRuntime) {
             phone={phone}
             clearPort={runtime.clearPort}
             onNavigate={to => navigate(to)}
+            open={
+              asked?.target == null
+                ? null
+                : { daemonId: daemon, sessionId: MACHINE_AGENDA_ID, id: asked.target, settled: inbox.settled === true }
+            }
+            // An ask that is no longer open ends the request: the address drops `?ask=` and the page stays on the list.
+            onOpenSettled={opened => {
+              if (!opened) navigate(links.agenda(daemon), { replace: true });
+            }}
             from={inboxSourceFromSearch(window.location.search)}
             onClearFrom={() => navigate(links.agenda(daemon), { replace: true })}
             onItemOpened={card => void runtime.itemOpened(card.view.config.id, card.item.id)}
