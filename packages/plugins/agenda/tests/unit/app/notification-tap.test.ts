@@ -13,7 +13,8 @@ import {
   MACHINE_AGENDA_ID,
   sessionNotificationPath,
 } from '@ferretry/core-asks/contract';
-import { askBuzzPath } from '../../../contract/index.ts';
+import { agendaAskPath, askBuzzPath } from '../../../contract/index.ts';
+import { askBuzzWords, type BuzzableAsk, stopBuzzWords } from '../../../daemon/lib/buzz-policy.ts';
 import agendaManifest from '../../../manifest.ts';
 import type { NotificationPayload as PushNotificationPayload } from '../../../app/lib/notify.ts';
 import { inboxTargetFromSearch, inboxTargetPath } from '../../../app/lib/agenda-inbox.ts';
@@ -85,6 +86,17 @@ describe('a tap, per kind of push', () => {
     );
     expect(notificationUrl(sessionNotificationPath('s1'), ORIGIN, MACHINE)).toBe(`${HOME}/ferrets/s1/chat`);
     expect(notificationUrl(agendaNotificationPath('s1', A3), ORIGIN, null)).toBe(`${ORIGIN}/app/`);
+  });
+
+  it('the words a daemon buzzes with open the ferret’s chat AT the ask, never the Inbox page the tap rule refuses', () => {
+    // What the daemon half actually sends (buzz-policy), not only the path builder: a card's ask and a stop both tap
+    // into the chat. The Inbox page (`agendaAskPath`) is not a tap screen, so a buzz carrying it would open the app home.
+    const ask = { id: 'A1', subject: 'Badge colour', ferret: 'f1', state: 'open', source: 'card' } as BuzzableAsk;
+    expect(notificationUrl(askBuzzWords(ask).url, ORIGIN, MACHINE)).toBe(`${HOME}/ferrets/f1/chat?ask=A1`);
+    expect(notificationUrl(stopBuzzWords('f1', 'build-bot', [ask]).url, ORIGIN, MACHINE)).toBe(
+      `${HOME}/ferrets/f1/chat?ask=A1`,
+    );
+    expect(notificationUrl(agendaAskPath('f1', 'A1'), ORIGIN, MACHINE)).toBe(APP);
   });
 
   it('NIT-1: the ask a tap may carry is exactly an Agenda id, the way Asks spells it', () => {

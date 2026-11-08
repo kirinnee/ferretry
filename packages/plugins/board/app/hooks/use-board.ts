@@ -27,6 +27,7 @@ import {
   parseBoardFilters,
   toServerQuery,
 } from '../lib/board-model.ts';
+import { type CardReferenceResolver, createCardReferenceResolver } from '../lib/card-reference-context.ts';
 import { boardPrivate } from '../lib/board-private-preference.ts';
 import {
   type BoardLoadStatus,
@@ -206,4 +207,29 @@ export const useBoardFilters = (
     [filters.agents, navigate, showPrivate],
   );
   return [filters, set];
+};
+
+const NO_CARDS: readonly { readonly id: string }[] = [];
+
+/**
+ * Whether a written card id proves out on `machine`: the card ids the machine holds (read once, kept live by
+ * `board.changed`) plus the card the caller has already read in full. Syntax is not proof, so until the ids are
+ * known nothing links.
+ */
+export const useCardReferenceProof = (
+  store: DaemonBoardStore,
+  machine: DaemonConnection | undefined,
+  read: readonly { readonly id: string }[] = NO_CARDS,
+): CardReferenceResolver => {
+  const daemonId = machine?.daemonId;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the pairing is the deliberate key
+  useEffect(() => {
+    if (machine !== undefined) store.watchIds(machine);
+  }, [store, daemonId]);
+  const ids = useSyncExternalStore(
+    store.subscribe,
+    () => (daemonId === undefined ? null : store.idsState(daemonId).ids),
+    () => null,
+  );
+  return useMemo(() => createCardReferenceResolver(read, ids ?? undefined), [read, ids]);
 };
