@@ -217,33 +217,26 @@ export class CodexRollouts {
     // The window may start mid-record, and the last line may be one the harness has not finished: neither is read.
     if (read.size > read.bytes.length) lines.shift();
     lines.pop();
-    const records: HarnessTailRecord[] = [];
-    for (const [index, line] of lines.entries()) {
-      try {
-        for (const event of this.#parser.parseRecord(JSON.parse(line), {
-          source: found.rollout.file,
-          line: index + 1,
-          sessionId: found.rollout.id,
-        }).events) {
-          const record = tailRecordOf(event);
-          if (record !== undefined) records.push(record);
+    // The one sentence a record may carry is masked whole, then cut, before it leaves the harness.
+    const records = await this.kernel.redaction.read(scope => {
+      const parsed: HarnessTailRecord[] = [];
+      for (const [index, line] of lines.entries()) {
+        try {
+          for (const event of this.#parser.parseRecord(JSON.parse(line), {
+            source: found.rollout.file,
+            line: index + 1,
+            sessionId: found.rollout.id,
+          }).events) {
+            const record = tailRecordOf(event, text => scope.text(text));
+            if (record !== undefined) parsed.push(record);
+          }
+        } catch {
+          /* A line that is not a record says nothing about the turn. */
         }
-      } catch {
-        /* A line that is not a record says nothing about the turn. */
       }
-    }
-    const newest = records.slice(-limit);
-    // The one sentence a record may carry is masked here, before it leaves the harness.
-    return {
-      kind: 'read',
-      records: await this.kernel.redaction.read(scope =>
-        newest.map(record =>
-          record.kind === 'error' && record.notice !== undefined
-            ? { ...record, notice: scope.text(record.notice) }
-            : record,
-        ),
-      ),
-    };
+      return parsed;
+    });
+    return { kind: 'read', records: records.slice(-limit) };
   };
 
   private events(rollout: OwnedRollout) {

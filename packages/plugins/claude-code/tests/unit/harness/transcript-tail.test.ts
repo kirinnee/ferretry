@@ -1,6 +1,6 @@
 /** U5: the records the turn watch and the live readout read from the END of a Claude transcript: kinds and counts, no text. */
 import { describe, expect, test } from 'bun:test';
-import { parseTail } from '../../../daemon/lib/harness/transcript.ts';
+import { parseTail, windowHoldsOneCutRecord } from '../../../daemon/lib/harness/transcript.ts';
 import type { Instant } from '@ferretry/std';
 
 const AT = (n: number): Instant => `2026-11-08T10:00:${String(n).padStart(2, '0')}.000Z` as Instant;
@@ -76,6 +76,44 @@ describe('parseTail', () => {
       false,
     );
     expect(records).toEqual([{ kind: 'compaction', at: AT(9), trigger: 'auto', tokensBefore: 150000 }]);
+  });
+
+  test('G161 a compaction boundary carries the context it ended with, so the freed tokens are known', () => {
+    const records = parseTail(
+      line({
+        type: 'system',
+        subtype: 'compact_boundary',
+        timestamp: AT(9),
+        compactMetadata: { trigger: 'manual', preTokens: 150000, postTokens: 20000 },
+      }),
+      false,
+    );
+    expect(records).toEqual([
+      { kind: 'compaction', at: AT(9), trigger: 'manual', tokensBefore: 150000, tokensAfter: 20000 },
+    ]);
+  });
+
+  test('a user record the harness wrote (origin not human, shown only in the transcript view) is marked, a human one is not', () => {
+    const records = parseTail(
+      [
+        user(1, 'hello', { origin: { kind: 'human' } }),
+        user(2, 'task done', { origin: { kind: 'task-notification' } }),
+        user(3, 'shown only', { isVisibleInTranscriptOnly: true }),
+      ].join('\n'),
+      false,
+    );
+    expect(records).toEqual([
+      { kind: 'message', role: 'user', at: AT(1) },
+      { kind: 'message', role: 'user', at: AT(2), inputSource: 'harness' },
+      { kind: 'message', role: 'user', at: AT(3), inputSource: 'harness' },
+    ]);
+  });
+
+  test('a window that holds nothing but the end of one record is told apart from one that holds whole lines', () => {
+    expect(windowHoldsOneCutRecord('{"type":"user","uuid":"x","timest')).toBe(true);
+    expect(windowHoldsOneCutRecord('ngs"}\n')).toBe(true);
+    expect(windowHoldsOneCutRecord(`ngs"}\n${user(2, 'x')}\n`)).toBe(false);
+    expect(windowHoldsOneCutRecord('ngs"}\n{"type":"summary"')).toBe(false);
   });
 
   test('text the harness wrote into the user channel is marked, and a window cut mid-record skips its first line', () => {

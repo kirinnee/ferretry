@@ -347,6 +347,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
 
   // Bound once the turn watch is built below: a delivery into a ferret's pane brings its next look forward.
   let wakeTurnWatch: ((ferret: FerretId) => void) | undefined;
+  // Bound once the harness transcript is built below: a stopped ferret's remembered transcript and tail are dropped.
+  let forgetTranscript: ((ferret: FerretId) => void) | undefined;
   const service = new FerretsService(registry, tokens, {
     launchEnvironment,
     ready,
@@ -392,6 +394,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     delivered: ferret => wakeTurnWatch?.(ferret),
     changed: payload => {
       followStatus(payload.ferret, payload.state);
+      if (payload.state === 'stopped') forgetTranscript?.(payload.ferret);
       hooks.observe(FerretChanged, payload);
     },
     stopping: ferret => {
@@ -462,6 +465,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     ferret => registry.get(ferret)?.harness,
   );
+  forgetTranscript = ferret => transcripts.forget(ferret);
   const turnWatch = buildTurnWatch({
     storage: sessionStore,
     tail: transcripts.tail,

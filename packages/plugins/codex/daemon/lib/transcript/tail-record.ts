@@ -7,11 +7,11 @@ const NOTICE_MAX = 200;
 
 /**
  * One parsed rollout event as the record the turn watch and the live readout read (`HarnessTailRecord`): kinds, roles,
- * instants and counts. NO text leaves this function except the first sentence of a usage-limit error, cut short; the
- * caller masks that sentence (a `notice`) before it goes anywhere. Events that say nothing about a turn (settings,
- * attachments) are dropped.
+ * instants and counts. NO text leaves this function except the first line of a usage-limit error (a `notice`), which
+ * `mask` has seen WHOLE before the line is taken and cut: a vault value that crosses the cut would otherwise survive as a
+ * prefix. Events that say nothing about a turn (settings, attachments) are dropped.
  */
-export function tailRecordOf(event: TranscriptEvent): HarnessTailRecord | undefined {
+export function tailRecordOf(event: TranscriptEvent, mask: (text: string) => string): HarnessTailRecord | undefined {
   const at = event.timestamp === undefined ? {} : { at: event.timestamp as Instant };
   switch (event.kind) {
     case 'message':
@@ -49,7 +49,7 @@ export function tailRecordOf(event: TranscriptEvent): HarnessTailRecord | undefi
         ...(event.tokensAfter === undefined ? {} : { tokensAfter: event.tokensAfter }),
       };
     case 'error': {
-      const notice = event.error.message.split('\n')[0]?.trim().slice(0, NOTICE_MAX);
+      const notice = mask(event.error.message).split('\n')[0]?.trim().slice(0, NOTICE_MAX);
       return {
         kind: 'error',
         ...at,

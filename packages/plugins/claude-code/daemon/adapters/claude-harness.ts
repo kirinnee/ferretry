@@ -34,6 +34,7 @@ import type {
   RootsPort,
   SpawnPort,
 } from '@ferretry/kernel/contract';
+import { MAX_ROOT_WINDOW_BYTES } from '@ferretry/kernel/contract';
 import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import {
   CLAUDE_CODE_CONFIG,
@@ -45,7 +46,7 @@ import type { DialogAnswerService } from '../lib/dialog/service.ts';
 import { MAX_HOME_DOCUMENT_BYTES as MAX_CLAUDE_JSON_BYTES, mergeClaudeJson } from '../lib/harness/claude-json.ts';
 import { claudeTranscriptPath, isConversationId } from '../lib/harness/claude-path.ts';
 import { HOME_FILES, homeText, launchCommand } from '../lib/harness/launch.ts';
-import { parseEntries, parseTail, parseUsage } from '../lib/harness/transcript.ts';
+import { parseEntries, parseTail, parseUsage, windowHoldsOneCutRecord } from '../lib/harness/transcript.ts';
 import { parseHarnessDialog } from '../lib/pane/harness-dialog.ts';
 import { parsePermissionPrompt } from '../lib/pane/permission-prompt.ts';
 import type { PermissionAnswerService } from '../lib/permission/service.ts';
@@ -75,6 +76,8 @@ const TMUX_TIMEOUT_MS = 5_000;
 const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
 /** How much of the end of a transcript one tail read takes: a turn's records are near the end. */
 const TAIL_READ_BYTES = 512 * 1024;
+/** The widest window a tail read grows to when the newest record is larger than the first one (the roots' own limit). */
+const TAIL_READ_BYTES_MAX = MAX_ROOT_WINDOW_BYTES;
 const FIRST_RECORDS_BYTES = 16 * 1024;
 
 const configFile = CLAUDE_CODE_CONFIG as unknown as ConfigFileDef<HarnessConfig>;
@@ -400,12 +403,21 @@ export class ClaudeHarness implements Harness {
   async transcriptTail(ferret: FerretId, limit: number): Promise<HarnessTranscriptTail> {
     const found = await this.transcriptFile(ferret);
     if (found === undefined) return { kind: 'unresolved' };
-    const tail = await found.home.readTail(found.file, TAIL_READ_BYTES).catch(() => undefined);
-    if (tail === undefined) return { kind: 'unreadable' };
-    return {
-      kind: 'read',
-      records: parseTail(new TextDecoder().decode(tail.bytes), tail.size > tail.bytes.length).slice(-limit),
-    };
+    for (let window = TAIL_READ_BYTES; ; window = Math.min(window * 8, TAIL_READ_BYTES_MAX)) {
+      const tail = await found.home.readTail(found.file, window).catch(() => undefined);
+      if (tail === undefined) return { kind: 'unreadable' };
+      const text = new TextDecoder().decode(tail.bytes);
+      const partial = tail.size > tail.bytes.length;
+      const records = parseTail(text, partial);
+      // The newest record is larger than the window: read wider, and if even the widest holds none of it whole, the
+      // record is still being written or is huge, which is a turn at work (never "no transcript", so the pane alone
+      // cannot end it).
+      if (records.length === 0 && partial && windowHoldsOneCutRecord(text)) {
+        if (window < TAIL_READ_BYTES_MAX) continue;
+        return { kind: 'read', records: [{ kind: 'work' }] };
+      }
+      return { kind: 'read', records: records.slice(-limit) };
+    }
   }
 
   /** The exact transcript of the assigned id in its encoded cwd, including after a daemon restart; never one found by guessing. */

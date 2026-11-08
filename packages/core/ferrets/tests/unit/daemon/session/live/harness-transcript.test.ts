@@ -102,6 +102,77 @@ describe('HarnessTranscript (U5)', () => {
   });
 });
 
+describe('HarnessTranscript tail cache (U5 fix1, RULING #27 Q4)', () => {
+  const stampOf = (size: number, mtimeMs = size) => ({ file: '/t/a.jsonl', size, mtimeMs });
+  const records: HarnessTailRecord[] = [
+    { kind: 'message', role: 'user', at: AT },
+    { kind: 'work', at: AT },
+  ];
+
+  test('J-0260 a transcript that has not moved is read and parsed once, however often the turn watch looks', async () => {
+    const { transcript, harness } = world();
+    harness.transcripts.set(FERRET, { stamp: stampOf(5), records });
+    for (let look = 0; look < 20; look += 1) {
+      const read = await transcript.tail.tail(FERRET, 400);
+      if (read.kind !== 'read') throw new Error('read');
+      expect(read.events.length).toBe(2);
+    }
+    expect(harness.tailed.length).toBe(1);
+  });
+
+  test('J-0260 a moved stamp reads again, and a wider window than the cached one reads again', async () => {
+    const { transcript, harness } = world();
+    harness.transcripts.set(FERRET, { stamp: stampOf(5), records });
+    await transcript.tail.tail(FERRET, 10);
+    await transcript.tail.tail(FERRET, 10);
+    expect(harness.tailed.length).toBe(1);
+
+    harness.transcripts.set(FERRET, {
+      stamp: stampOf(9),
+      records: [...records, { kind: 'turn', state: 'completed', at: AT }],
+    });
+    const moved = await transcript.tail.tail(FERRET, 10);
+    if (moved.kind !== 'read') throw new Error('read');
+    expect(transcriptTurnPhase(moved.events)).toBe('ended');
+    expect(harness.tailed.length).toBe(2);
+
+    await transcript.tail.tail(FERRET, 400);
+    expect(harness.tailed.length).toBe(3);
+    // A narrower ask is answered from the wider read, with exactly the newest events.
+    const narrow = await transcript.tail.tail(FERRET, 1);
+    if (narrow.kind !== 'read') throw new Error('read');
+    expect(narrow.events.length).toBe(1);
+    expect(harness.tailed.length).toBe(3);
+  });
+
+  test('J-0260 a transcript lost, or a ferret forgotten at its stop, keeps nothing: the next look reads afresh', async () => {
+    const { transcript, harness } = world();
+    harness.transcripts.set(FERRET, { stamp: stampOf(5), records });
+    await transcript.tail.tail(FERRET, 10);
+    transcript.forget(FERRET);
+    await transcript.tail.tail(FERRET, 10);
+    expect(harness.tailed.length).toBe(2);
+
+    harness.transcripts.delete(FERRET);
+    expect(await transcript.tail.tail(FERRET, 10)).toEqual({ kind: 'unresolved' });
+    harness.transcripts.set(FERRET, { stamp: stampOf(5), records });
+    await transcript.tail.tail(FERRET, 10);
+    expect(harness.tailed.length).toBe(4);
+  });
+
+  test('J-0240 a live sample costs ONE stamp: the file and its stat share the stamp the file took', async () => {
+    const { transcript, harness } = world();
+    harness.transcripts.set(FERRET, { stamp: stampOf(5), records });
+    const id = FERRET as unknown as SessionId;
+    const file = await transcript.reads.transcriptFile(id);
+    expect(await transcript.reads.transcriptStat(file as string)).toEqual({ size: 5, mtimeMs: 5 });
+    expect(harness.stamped.length).toBe(1);
+    // The shared stamp is used once: the next sample takes its own.
+    await transcript.reads.transcriptFile(id);
+    expect(harness.stamped.length).toBe(2);
+  });
+});
+
 describe('PolledTranscriptEvents (no faster than 1 s; K2 has no file watch)', () => {
   test('one timer per subscription tells its listener the path each second until it is closed', () => {
     const ticks: (() => void)[] = [];

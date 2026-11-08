@@ -575,6 +575,36 @@ describe('ClaudeHarness', () => {
     expect(JSON.stringify(tail)).not.toContain('SECRET');
   });
 
+  test('U5 a newest record larger than the first tail window is still read: wider, and if even that is cut, as a turn at work', async () => {
+    const { harness, writeHome } = build();
+    await harness.start(spec(), runner({}), {} as never);
+    const done = JSON.stringify({
+      type: 'assistant',
+      uuid: 'a0',
+      timestamp: T,
+      message: { id: 'm0', content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' },
+    });
+    const bigResult = (bytes: number) =>
+      JSON.stringify({
+        type: 'user',
+        uuid: 'u9',
+        timestamp: T,
+        message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'x'.repeat(bytes) }] },
+      });
+
+    // 600 KB: past the 512 KB first window, whole inside the wider one. The turn is at work, not "no transcript".
+    await writeHome('projects/-work/conv-1.jsonl', `${done}\n${bigResult(600 * 1024)}\n`);
+    const wide = await harness.transcriptTail(FERRET, 10);
+    if (wide.kind !== 'read') throw new Error('the tail reads');
+    expect(wide.records.map(record => record.kind)).toEqual(['message', 'turn', 'work']);
+
+    // 5 MB: larger than the widest window the roots allow. Never an empty tail: the record is a turn at work.
+    await writeHome('projects/-work/conv-1.jsonl', `${done}\n${bigResult(5 * 1024 * 1024)}\n`);
+    const cut = await harness.transcriptTail(FERRET, 10);
+    if (cut.kind !== 'read') throw new Error('the tail reads');
+    expect(cut.records).toEqual([{ kind: 'work' }]);
+  });
+
   test('dialogs.current finds nothing on an empty pane and answer refuses a prompt that is gone', async () => {
     const { harness, panes } = build();
     panes.remember(FERRET, '%7');

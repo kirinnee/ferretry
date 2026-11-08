@@ -102,6 +102,18 @@ export function parseUsage(text: string): readonly TurnUsage[] {
 const TAIL_USER_ROLES = new Set(['user', 'assistant']);
 
 /**
+ * Whether a window cut from the end of a file holds NOTHING BUT the end of one record: no complete line follows the cut
+ * one. The newest record is then larger than the window (a pasted image, a big tool result), so no record was read, which
+ * is not the same as a transcript with nothing to say.
+ */
+export function windowHoldsOneCutRecord(text: string): boolean {
+  return text
+    .split('\n')
+    .slice(1)
+    .every(line => line.trim() === '');
+}
+
+/**
  * The records the turn watch and the live readout read from a transcript's END, without their text (`HarnessTailRecord`):
  * who spoke or worked and when, what each model call spent, where a turn ended and where the context was compacted.
  * `partial` says the text begins mid-record (a window cut from the end of a file), so its first line is not read.
@@ -126,12 +138,15 @@ export function parseTail(text: string, partial: boolean): readonly HarnessTailR
       const metadata = asObject(record.compactMetadata);
       const before =
         typeof metadata?.preTokens === 'number' && metadata.preTokens >= 0 ? metadata.preTokens : undefined;
+      const after =
+        typeof metadata?.postTokens === 'number' && metadata.postTokens >= 0 ? metadata.postTokens : undefined;
       const trigger = metadata?.trigger === 'manual' || metadata?.trigger === 'auto' ? metadata.trigger : undefined;
       records.push({
         kind: 'compaction',
         ...when,
         ...(trigger === undefined ? {} : { trigger }),
         ...(before === undefined ? {} : { tokensBefore: before }),
+        ...(after === undefined ? {} : { tokensAfter: after }),
       });
       continue;
     }
@@ -143,7 +158,13 @@ export function parseTail(text: string, partial: boolean): readonly HarnessTailR
       block => block?.type === 'tool_use' || block?.type === 'tool_result' || block?.type === 'thinking',
     );
     const hasText = typeof content === 'string' || blocks.some(block => block?.type === 'text');
-    const harnessWrote = record.isMeta === true || record.isCompactSummary === true || record.isSidechain === true;
+    const origin = asObject(record.origin)?.kind;
+    const harnessWrote =
+      record.isMeta === true ||
+      record.isCompactSummary === true ||
+      record.isSidechain === true ||
+      record.isVisibleInTranscriptOnly === true ||
+      (typeof origin === 'string' && origin !== '' && origin !== 'human');
     if (record.type === 'user') {
       if (hasText && !working)
         records.push({

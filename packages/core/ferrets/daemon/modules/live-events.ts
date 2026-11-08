@@ -6,8 +6,10 @@
  *
  * WHAT A LIVE FRAME MAY CARRY is the closed list in `FerretLiveActivitySchema`: ids and instants, token counts, the
  * compaction's counts and timings, and ONE free text, the harness's own status verb (80 characters, cut from the pane by
- * a pattern). That verb is read from a pane the runner already masked and is masked AGAIN here inside one
- * `kernel.redaction` read before it leaves, so a verb that matches a secret never goes out as one. No pane text and no
+ * a pattern). That verb is read from a pane the runner already masked, stripped of control and format characters and
+ * masked AGAIN here inside one `kernel.redaction` read before it leaves, so a verb that matches a vault value never goes
+ * out as one. (Masking is by vault VALUE: a token the Vault does not hold, painted on the status line, is not caught
+ * here: GAP(live).) No pane text and no
  * transcript text is ever a frame: the harness's tail records carry none (`HarnessTailRecord`), and a transcript signal
  * has no body at all.
  *
@@ -16,7 +18,7 @@
  * through the harness that wrote it (`transcriptStamp`, `transcriptTail`): Ferrets opens no transcript path. A ferret the
  * registry does not hold, or holds stopped, has no pane to look at.
  *
- * NO FASTER THAN TODAY: the stream samples at 500 ms; a quiet transcript costs one stamp per sample and is re-read only
+ * NO FASTER THAN TODAY: the stream samples at 500 ms; a quiet transcript costs one stamp per sample (the tail asks for its own only when the readout needs it) and is re-read only
  * when its stamp moved; an idle pane is looked at every 2 s; a followed transcript is asked every second (the kernel has
  * no file watch on a root: GAP(live)).
  */
@@ -52,6 +54,13 @@ export interface LiveEventsDeps {
 const VERB_MAX = 80;
 
 /**
+ * Control and format characters (C0/C1 controls, bidi overrides, zero-width joiners) that a status line could paint:
+ * they are removed BEFORE the verb is masked, so a vault value broken up by one is still seen whole, and none reaches a
+ * screen to reorder or hide the words around it.
+ */
+const UNPRINTABLE = /[\p{Cc}\p{Cf}]/gu;
+
+/**
  * The live source with every frame passed through the schema and the verb through the redaction on its way out: a frame
  * the schema refuses is dropped, and the verb is cut to the schema's bound after it is masked.
  */
@@ -68,7 +77,10 @@ class MaskedLiveActivity implements LiveActivitySource {
       sample.verb === undefined
         ? sample
         : await this.redaction.read(scope => {
-            const verb = scope.text(sample.verb as string).slice(0, VERB_MAX);
+            const verb = scope
+              .text((sample.verb as string).replace(UNPRINTABLE, ''))
+              .trim()
+              .slice(0, VERB_MAX);
             const { verb: _unmasked, ...rest } = sample;
             return verb === '' ? rest : { ...rest, verb };
           });

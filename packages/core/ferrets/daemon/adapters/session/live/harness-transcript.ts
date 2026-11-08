@@ -74,11 +74,26 @@ export function eventOfRecord(harness: TranscriptHarness, record: HarnessTailRec
   }
 }
 
+/** What one read of a ferret's tail answered, and the stamp of the file it was read from. */
+interface CachedTail {
+  readonly file: string;
+  readonly size: number;
+  readonly mtimeMs: number;
+  /** The `limit` the read asked for: a later ask for no more than this is answered from it. */
+  readonly limit: number;
+  readonly events: readonly TranscriptEvent[];
+}
+
 /**
  * A ferret's transcript as the harness that wrote it offers it (U5): the proof of WHICH file is the ferret's is the
- * harness's, so Ferrets neither names nor opens a transcript path. It asks `Harness.transcriptStamp` (one stat) and
+ * harness's, so Ferrets neither names nor opens a transcript path. It asks `Harness.transcriptStamp` (one stamp) and
  * `Harness.transcriptTail` (records without text); a harness that offers neither proves no transcript, and the turn is
  * decided from the pane alone.
+ *
+ * The tail is cached by the file's stamp, one entry per ferret (dropped by {@link forget}): the turn watch asks for it on
+ * every look and the live source on every sample, and a transcript that has not moved is neither read nor parsed again,
+ * as today's daemon-wide tail cache did. A moved stamp, a larger window asked for, or a harness that gives no stamp reads
+ * afresh.
  *
  * Both halves of the live readout and the transcript-change signal read through here: {@link tail} is the
  * `SessionTranscriptTail`, {@link reads} is the transcript half of `LiveActivityReads`.
@@ -87,6 +102,9 @@ export class HarnessTranscript {
   /** Which ferret a proved file belongs to, so a later stat of that file asks the right harness. Replaced per ferret. */
   readonly #owners = new Map<string, FerretId>();
   readonly #files = new Map<FerretId, string>();
+  /** The stamp the last `transcriptFile` took, kept for the `transcriptStat` that follows it (one stamp per sample). */
+  readonly #sampled = new Map<FerretId, HarnessTranscriptStamp>();
+  readonly #tails = new Map<FerretId, CachedTail>();
 
   constructor(
     private readonly harnessOf: HarnessOf,
@@ -104,6 +122,7 @@ export class HarnessTranscript {
     if (stamp === undefined) {
       if (known !== undefined) this.#owners.delete(known);
       this.#files.delete(ferret);
+      this.#tails.delete(ferret);
       return undefined;
     }
     if (known !== undefined && known !== stamp.file) this.#owners.delete(known);
@@ -117,6 +136,8 @@ export class HarnessTranscript {
     const known = this.#files.get(ferret);
     if (known !== undefined) this.#owners.delete(known);
     this.#files.delete(ferret);
+    this.#sampled.delete(ferret);
+    this.#tails.delete(ferret);
   }
 
   readonly tail: SessionTranscriptTail = {
@@ -125,20 +146,43 @@ export class HarnessTranscript {
       const harness = this.harnessOf(ferret);
       const key = this.keyOf(ferret);
       if (harness?.transcriptTail === undefined || key === undefined) return { kind: 'unresolved' };
+      const stamp = harness.transcriptStamp === undefined ? undefined : await this.stamp(sessionId as SessionId);
+      const cached = this.#tails.get(ferret);
+      if (
+        stamp !== undefined &&
+        cached?.file === stamp.file &&
+        cached.size === stamp.size &&
+        cached.mtimeMs === stamp.mtimeMs &&
+        cached.limit >= limit
+      )
+        return { kind: 'read', events: cached.events.slice(-limit) };
       const read = await harness.transcriptTail(ferret, limit).catch(() => undefined);
       if (read === undefined) return { kind: 'unreadable' };
       if (read.kind !== 'read') return read;
       const name = harnessName(key);
-      return { kind: 'read', events: read.records.slice(-limit).map(record => eventOfRecord(name, record)) };
+      const events = read.records.slice(-limit).map(record => eventOfRecord(name, record));
+      // Taken BEFORE the read: a file that grew meanwhile is read again at the next look, never served stale.
+      if (stamp === undefined) this.#tails.delete(ferret);
+      else this.#tails.set(ferret, { file: stamp.file, size: stamp.size, mtimeMs: stamp.mtimeMs, limit, events });
+      return { kind: 'read', events };
     },
   };
 
   readonly reads: Pick<LiveActivityReads, 'transcriptFile' | 'transcriptStat'> = {
-    transcriptFile: async id => (await this.stamp(id))?.file,
+    transcriptFile: async id => {
+      const stamp = await this.stamp(id);
+      const ferret = id as unknown as FerretId;
+      if (stamp === undefined) this.#sampled.delete(ferret);
+      else this.#sampled.set(ferret, stamp);
+      return stamp?.file;
+    },
+    // The stamp `transcriptFile` just took, used once: a sample costs one stamp, not two.
     transcriptStat: async file => {
       const owner = this.#owners.get(file);
       if (owner === undefined) return undefined;
-      const stamp = await this.stamp(owner as unknown as SessionId);
+      const taken = this.#sampled.get(owner);
+      this.#sampled.delete(owner);
+      const stamp = taken ?? (await this.stamp(owner as unknown as SessionId));
       return stamp?.file === file ? { size: stamp.size, mtimeMs: stamp.mtimeMs } : undefined;
     },
   };
