@@ -13,6 +13,7 @@
   },
   "exports": {
     "./contract": "./contract/index.ts",
+    "./contract/push-envelope": "./contract/push-envelope.ts",
     "./manifest": "./manifest/index.ts",
     "./testing": "./testing/index.ts",
     "./host": "./host/index.ts",

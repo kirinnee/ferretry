@@ -12,8 +12,9 @@
  *     load from it and every subresource it lists, from bytes re-hashed on the way out, with the headers `_headers`
  *     names; leave everything else — every daemon request included — exactly as the page sent it;
  *   - message: answer the page's "check now", "what happened" and "is this new worker signed?";
- *   - push / notificationclick: show a push plainly, titled for the machine whose registration this copy is, and
- *     open only this site's pages — only that machine's — on a tap (`notifications.ts`).
+ *   - push / notificationclick: show a push's envelope (`push-envelope.ts`) titled for the machine whose registration this
+ *     copy is, carrying the page it named only when the shell's route parse accepts it; on a tap open that page — never
+ *     another origin or machine's (`notifications.ts`).
  *
  * NO PLUGIN CODE RUNS IN THIS WORKER. Every byte is the shell's own: the build compiles this file and nothing else, and
  * FAILS if any `packages/{core,plugins}/<id>/app/worker.ts` exists. Code evaluated in this realm could rewrite the
@@ -37,12 +38,11 @@ import type { ReleaseRewrite } from '../release/manifest.ts';
 import { CacheStorageReleaseCaches, FetchReleaseNetwork, IndexedDbReleaseState } from '../release/storage.ts';
 import {
   notificationBrand,
-  notificationUrl,
+  notificationClickUrl,
   notificationWindow,
   openInWindow,
+  presentPush,
   pushMachineOf,
-  UNREADABLE_PUSH_BODY,
-  unreadablePushTitle,
 } from './notifications.ts';
 
 declare const __FY_RELEASE_KEY__: string;
@@ -81,7 +81,12 @@ interface WorkerScope {
     readonly scope: string;
     showNotification(
       title: string,
-      options: { readonly body: string; readonly icon: string; readonly badge: string },
+      options: {
+        readonly body: string;
+        readonly icon: string;
+        readonly badge: string;
+        readonly data?: { readonly url: string };
+      },
     ): Promise<void>;
   };
   readonly clients: {
@@ -174,11 +179,22 @@ worker.addEventListener('message', event => {
 });
 
 worker.addEventListener('push', event => {
-  // No push payload is in a contract yet, so every push is shown as today's worker shows one it cannot read: plainly.
-  // A subscription that receives a push and shows nothing is penalised by the browser and eventually revoked.
+  // The envelope (`title`, `body`, `url`) is the only part of a push this worker reads (`push-envelope.ts`). One that has none
+  // is shown plainly: a subscription that receives a push and shows nothing is penalised by the browser and revoked.
+  let json: unknown = null;
+  try {
+    json = event.data?.json() ?? null;
+  } catch {
+    json = null;
+  }
+  const shown = presentPush(json, origin, machine);
   event.waitUntil(
     worker.registration
-      .showNotification(unreadablePushTitle(machine), { ...notificationBrand(), body: UNREADABLE_PUSH_BODY })
+      .showNotification(shown.title, {
+        ...notificationBrand(),
+        body: shown.body,
+        ...(shown.data === undefined ? {} : { data: shown.data }),
+      })
       .catch(() => undefined),
   );
 });
@@ -188,7 +204,7 @@ worker.addEventListener('notificationclick', event => {
   const data = event.notification.data as { readonly url?: unknown } | undefined;
   // Only this site's own pages, and only this machine's: a notification can never open another origin, and one
   // machine's notification can never open another machine's pages.
-  const url = notificationUrl(data?.url, origin, machine);
+  const url = notificationClickUrl(data?.url, origin, machine);
   const openWindow = (target: string): Promise<unknown> => worker.clients.openWindow(target);
   event.waitUntil(
     worker.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async windows => {

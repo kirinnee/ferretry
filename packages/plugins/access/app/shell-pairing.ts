@@ -299,37 +299,11 @@ export const notificationBrand = (): { readonly icon: string; readonly badge: st
   badge: NOTIFICATION_BADGE,
 });
 
-/** The id the machine agenda goes by. COPY of today's `isMachineAgendaId`; REPLACE WITH the Agenda contract's. */
-export const isMachineAgendaId = (sessionId: string): boolean => sessionId === 'machine-agenda';
-
 /** A machine's home page. COPY. */
 export const daemonHomePath = (id: DaemonId): string => `/d/${encodeURIComponent(id)}`;
 
-/** A machine's Inbox. COPY. */
-export const daemonAgendaPath = (id: DaemonId): string => `${daemonHomePath(id)}/inbox`;
-
-/** One conversation's page. COPY (today's session-scope check is the non-empty rule below). */
-export const daemonSessionPath = (id: DaemonId, sessionId: string): string =>
-  `${daemonHomePath(id)}/session/${encodeURIComponent(requireNonEmpty(sessionId, 'sessionId'))}`;
-
-/** The page model of a pathname, narrowed to the one kind Access reads. STAND-IN: the router is the shell's. */
-export function parseRoute(
-  _pathname: string,
-):
-  | { readonly kind: 'session'; readonly daemonId: DaemonId; readonly sessionId: string }
-  | { readonly kind: 'elsewhere' } {
-  return fromShell('parseRoute');
-}
-
-/** The Agenda item an address names. STAND-IN: Agenda's link grammar. */
-export function agendaTargetFromSearch(_search: string): string | null {
-  return fromShell('agendaTargetFromSearch');
-}
-
-/** The Inbox address of one item. STAND-IN: Agenda's link grammar. */
-export function inboxTargetPath(_daemonId: DaemonId, _sessionId: string, _id: string): string {
-  return fromShell('inboxTargetPath');
-}
+/** The shell's route table and its tap check: `@ferretry/app`. A tap is decided by the router that draws the page. */
+export { type PushMachine, pushMachineOf } from '@ferretry/app';
 
 // ─── 7. advertisement notices (today: `protocol/src/lib/advertisement.ts`; `cli/shell.ts` holds the same copy) ──
 
@@ -408,13 +382,7 @@ export { cn } from './shell-grants.ts';
 // ─── 9. shell components and hooks (today: `pwa/src/shell/*`, `pwa/src/hooks/*`; spine-app-shell: `src/shell/`) ─
 
 /** The shell's bottom sheet, the Ferretry mark, and the layout and viewport hooks: `@ferretry/app/ui`. */
-export {
-  BottomSheet,
-  BrandMark,
-  useAppViewport,
-  useKeyboardOpen,
-  useLayoutMode,
-} from '@ferretry/app/ui';
+export { BottomSheet, BrandMark, useAppViewport, useKeyboardOpen, useLayoutMode } from '@ferretry/app/ui';
 
 /** The sessions bar the pairing harness opens its sheet from. STAND-IN: the shell holds no feature, and this bar is one. */
 export function SessionsBar(_props: Readonly<Record<string, unknown>>): ReactNode {

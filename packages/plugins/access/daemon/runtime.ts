@@ -37,6 +37,7 @@ import {
   PairedDeviceIdSchema,
   PairingDeviceNameSchema,
   type PasskeyVerifier,
+  PushNotificationPayloadSchema,
   type StagedStepUp,
   type StagedStepUpAct,
 } from '../contract/index.ts';
@@ -474,17 +475,17 @@ export class AccessRuntime {
       await (await this.ready()).stepUp.verifyStoredProof(proof, expectedChallenge),
     buzz: async (message: Buzz) => {
       const { push } = await this.ready();
-      const result = await push.notify({
-        payload: {
-          version: 1,
-          eventKey: message.tag,
-          title: message.title,
-          body: message.body,
-          tag: message.tag,
-          url: message.url,
-          count: 1,
-        },
+      // Parsed here, not trusted: an over-cap buzz throws at the sender instead of reaching a phone as an unreadable push.
+      const payload = PushNotificationPayloadSchema.parse({
+        version: 1,
+        eventKey: message.tag,
+        title: message.title,
+        body: message.body,
+        tag: message.tag,
+        url: message.url,
+        count: 1,
       });
+      const result = await push.notify({ payload });
       return result.delivered;
     },
   };

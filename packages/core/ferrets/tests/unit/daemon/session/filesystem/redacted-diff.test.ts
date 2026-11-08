@@ -226,7 +226,7 @@ function appendedDiff({ lines, eol, blankEmpty }: Shape): string {
   return `diff --git a/f b/f\n--- a/f\n+++ b/f\n${header}\n${context.join('')}+c=3${eol}`;
 }
 
-describe('a hunk header section heading is part of the old and the new side (R-0151)', () => {
+describe('a hunk header section heading is part of the old and the new side (R-0150)', () => {
   const stores = [
     { name: 'LF', joiner: '\n' },
     { name: 'CRLF', joiner: '\r\n' },
@@ -236,7 +236,7 @@ describe('a hunk header section heading is part of the old and the new side (R-0
       for (const blankEmpty of [false, true]) {
         for (const before of [[], ['a=1']]) {
           const label = `a 3-line ${name}-stored value, ${JSON.stringify(eol)} file, ${before.length === 0 ? 'on the first line' : 'mid-file'}${blankEmpty ? ', suppressBlankEmpty' : ''}`;
-          it(`R-0151 ${label}: split between the heading and the leading context, it is masked and reported`, async () => {
+          it(`R-0150 ${label}: split between the heading and the leading context, it is masked and reported`, async () => {
             const value = HEAD_LINES.join(joiner);
             const lines = [...before, `KEY=${HEAD_LINES[0]}`, HEAD_LINES[1] ?? '', HEAD_LINES[2] ?? '', 'b=2'];
             const raw = appendedDiff({ lines, eol, blankEmpty });
@@ -254,7 +254,7 @@ describe('a hunk header section heading is part of the old and the new side (R-0
     }
   }
 
-  it('R-0151 a value with a blank middle line, split between the heading and the context, is masked under suppressBlankEmpty', async () => {
+  it('R-0150 a value with a blank middle line, split between the heading and the context, is masked under suppressBlankEmpty', async () => {
     const value = `${HEAD_LINES[0]}\n\n${HEAD_LINES[2]}`;
     const lines = ['a=1', `KEY=${HEAD_LINES[0]}`, '', HEAD_LINES[2] ?? '', 'b=2'];
     const raw = appendedDiff({ lines, eol: '\n', blankEmpty: true });
@@ -265,7 +265,7 @@ describe('a hunk header section heading is part of the old and the new side (R-0
     should(covered).be.true();
   });
 
-  it('R-0151 the masked heading keeps its length and the rest of the header byte for byte', async () => {
+  it('R-0150 the masked heading keeps its length and the rest of the header byte for byte', async () => {
     const lines = ['a=1', `KEY=${HEAD_LINES[0]}`, HEAD_LINES[1] ?? '', HEAD_LINES[2] ?? '', 'b=2'];
     const raw = appendedDiff({ lines, eol: '\n', blankEmpty: false });
     const out = await new FakeRedaction(new Map([['V' as never, HEAD_LINES.join('\n')]])).read(
@@ -277,7 +277,7 @@ describe('a hunk header section heading is part of the old and the new side (R-0
     should(now === `@@ -3,3 +3,4 @@ KEY=${'*'.repeat(HEAD_LINES[0]?.length ?? 0)}`).be.true();
   });
 
-  it('R-0151 a 2-line value held whole in the context is masked and reported (control)', async () => {
+  it('R-0150 a 2-line value held whole in the context is masked and reported (control)', async () => {
     const value = `${HEAD_LINES[0]}\n${HEAD_LINES[1]}`;
     const lines = ['a=1', `KEY=${HEAD_LINES[0]}`, HEAD_LINES[1] ?? '', 'b=2'];
     const raw = appendedDiff({ lines, eol: '\n', blankEmpty: false });
@@ -288,7 +288,7 @@ describe('a hunk header section heading is part of the old and the new side (R-0
     should(covered).be.true();
   });
 
-  it('R-0151 a value split with a digit-start line (git skips it as a heading) is the declared partial: nothing is claimed (control)', async () => {
+  it('R-0150 a value split with a digit-start line (git skips it as a heading) is the declared partial: nothing is claimed (control)', async () => {
     const digit = `9${HEAD_LINES[1]}`;
     const value = [HEAD_LINES[0], digit, HEAD_LINES[2], 'tail-line-0013'].join('\n');
     const lines = ['a=1', `KEY=${HEAD_LINES[0]}`, digit, HEAD_LINES[2] ?? '', 'tail-line-0013', 'b=2'];
@@ -299,19 +299,19 @@ describe('a hunk header section heading is part of the old and the new side (R-0
     should(covered).be.false();
   });
 
-  it('R-0151 a heading that is not part of a value stays byte for byte', async () => {
+  it('R-0150 a heading that is not part of a value stays byte for byte', async () => {
     const raw = `@@ -3,3 +3,4 @@ function plain() {\n ${HEAD_LINES[1]}\n-old\n+${ONE_LINE}\n`;
     const out = await project(raw);
     should(out.includes(ONE_LINE)).be.false();
     should(out.split('\n')[0] === '@@ -3,3 +3,4 @@ function plain() {').be.true();
   });
 
-  it('R-0151 a heading with no body after it is masked on its own', async () => {
+  it('R-0150 a heading with no body after it is masked on its own', async () => {
     const out = await project(`@@ -1 +1 @@ ${ONE_LINE}\n`);
     should(out.includes(ONE_LINE)).be.false();
   });
 
-  it('R-0151 the shape real `git diff --no-index` prints is masked', async () => {
+  it('R-0150 the shape real `git diff --no-index` prints is masked', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fdr-heading-'));
     try {
       for (const eol of ['\n', '\r\n']) {
@@ -334,5 +334,111 @@ describe('a hunk header section heading is part of the old and the new side (R-0
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * Two changes exactly 8 lines apart leave ONE line between their hunks, and git prints it as the second hunk's
+ * section heading. The trailing context of the first hunk, that heading and the leading context of the second are then
+ * three consecutive file lines, all in the diff text, in three different places.
+ */
+const JOIN_LINES = ['fixture-join-a-0030', 'fixture-join-b-0031', 'fixture-join-c-0032'];
+
+function twoHunkFile(eol: string, hidden: readonly string[]): { readonly before: string; readonly after: string } {
+  const lines = [
+    'a=1',
+    'x2',
+    'x3',
+    ...JOIN_LINES.slice(0, 1),
+    ...hidden,
+    ...JOIN_LINES.slice(2),
+    'x7',
+    'x8',
+    'b=2',
+    'x10',
+    'x11',
+  ];
+  const before = lines.map(line => `${line}${eol}`).join('');
+  return { before, after: before.replace(`a=1${eol}`, `a=9${eol}`).replace(`b=2${eol}`, `b=9${eol}`) };
+}
+
+function gitDiff(before: string, after: string): string {
+  const dir = mkdtempSync(join(tmpdir(), 'fdr-join-'));
+  try {
+    writeFileSync(join(dir, 'a'), before);
+    writeFileSync(join(dir, 'b'), after);
+    return Bun.spawnSync(['git', 'diff', '--no-index', 'a', 'b'], { cwd: dir }).stdout.toString();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe('a value over one hunk, the next hunk heading and its leading context is masked whole (R-0150)', () => {
+  for (const eol of ['\n', '\r\n']) {
+    for (const joiner of ['\n', '\r\n']) {
+      it(`R-0150 edits 8 lines apart with one hidden line, ${JSON.stringify(eol)} file, ${JSON.stringify(joiner)} value: masked and reported`, async () => {
+        const { before, after } = twoHunkFile(eol, [JOIN_LINES[1] ?? '']);
+        const raw = gitDiff(before, after);
+        should(raw.split('\n').filter(line => line.startsWith('@@')).length === 2).be.true();
+        should(raw.includes(`@@ ${JOIN_LINES[1]}`)).be.true();
+        const { text, covered } = await new FakeRedaction(new Map([['V' as never, JOIN_LINES.join(joiner)]])).read(
+          scope => redactedDiff(raw, scope),
+        );
+        should(JOIN_LINES.some(line => text.includes(line))).be.false();
+        should(covered).be.true();
+        should(text.split('\n').length === raw.split('\n').length).be.true();
+        // The heading stays on the wire, masked where it is covered, and the header stays true.
+        const header = text
+          .split('\n')
+          .find((line, index, all) => line.startsWith('@@') && all.slice(0, index).some(l => l.startsWith('@@')));
+        should(header?.startsWith('@@ -6,6 +6,6 @@ ')).be.true();
+        should(header?.length === (raw.split('\n').filter(line => line.startsWith('@@'))[1]?.length ?? -1)).be.true();
+      });
+    }
+  }
+
+  it('R-0150 a value over two hunks and a heading, with the heading first of two hidden lines, is masked and reported', async () => {
+    // Two hidden lines: the heading is the first of them, straight after the first hunk's trailing context.
+    const lines = [
+      'a=1',
+      'x2',
+      'x3',
+      JOIN_LINES[0] ?? '',
+      JOIN_LINES[1] ?? '',
+      '9hidden',
+      'x7',
+      'x8',
+      'x9',
+      'b=2',
+      'x11',
+      'x12',
+    ];
+    const before = lines.map(line => `${line}\n`).join('');
+    const after = before.replace('a=1\n', 'a=9\n').replace('b=2\n', 'b=9\n');
+    const raw = gitDiff(before, after);
+    should(raw.includes(`@@ ${JOIN_LINES[1]}`)).be.true();
+    const { text, covered } = await new FakeRedaction(
+      new Map([['V' as never, JOIN_LINES.slice(0, 2).join('\n')]]),
+    ).read(scope => redactedDiff(raw, scope));
+    should(JOIN_LINES.slice(0, 2).some(line => text.includes(line))).be.false();
+    should(covered).be.true();
+  });
+
+  it('R-0150 a digit-start hidden line is skipped as a heading: the value across it is the declared partial (control)', async () => {
+    const { before, after } = twoHunkFile('\n', [`9${JOIN_LINES[1]}`]);
+    const raw = gitDiff(before, after);
+    should(raw.includes(`@@ ${JOIN_LINES[0]}\n`)).be.true();
+    const { covered } = await new FakeRedaction(
+      new Map([['V' as never, [JOIN_LINES[0], `9${JOIN_LINES[1]}`, JOIN_LINES[2]].join('\n')]]),
+    ).read(scope => redactedDiff(raw, scope));
+    should(covered).be.false();
+  });
+
+  it('R-0150 hunks with no heading between them are not joined: a value over unrelated lines is not invented', async () => {
+    const raw = `@@ -1,2 +1,2 @@\n-a\n+b\n ${JOIN_LINES[0]}\n@@ -9,2 +9,2 @@\n ${JOIN_LINES[1]}\n-c\n+d\n`;
+    const { covered } = await new FakeRedaction(new Map([['V' as never, `${JOIN_LINES[0]}\n${JOIN_LINES[1]}`]])).read(
+      scope => redactedDiff(raw, scope),
+    );
+    should(covered).be.false();
   });
 });

@@ -181,37 +181,39 @@ function display(value: unknown): string {
   return text.length > 300 ? `${text.slice(0, 299)}…` : text;
 }
 
-/** What a document says, key by key; the sentence it is refused with when it cannot be read. */
-function read(
-  config: ConfigText,
-  path: CloneSettingsDoc,
-  text: string,
-  whose: string,
-): { values: Map<string, unknown>; root: Record<string, unknown> } {
-  let root: unknown;
-  if (path === 'controls') {
-    try {
-      const parsed = ControlsSchema.safeParse(text.trim() === '' ? {} : JSON.parse(text));
-      if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'not the machine controls');
-      // A field the source did not report is absent, and an unset default runtime is absent too.
-      const { defaultRuntime, ...rest } = parsed.data;
-      root = { ...rest, ...(defaultRuntime === null || defaultRuntime === undefined ? {} : { defaultRuntime }) };
-    } catch (error) {
-      throw new CloneRefusal(
-        `${whose} controls could not be read: ${error instanceof Error ? error.message : 'not JSON'}.`,
-      );
-    }
-  } else {
-    const parsed = config.read(text);
-    if (!parsed.ok) {
-      throw new CloneRefusal(`${whose} ${path} could not be read: ${parsed.errors[0]?.message ?? 'not valid YAML'}.`);
-    }
-    root = parsed.read.value;
-    if (!isPlainObject(root)) throw new CloneRefusal(`${whose} ${path} is not a mapping of settings.`);
-  }
+type Reading = { values: Map<string, unknown>; root: Record<string, unknown> };
+
+/** A document's keys, flattened, and the document itself. */
+function reading(root: unknown): Reading {
   const values = new Map<string, unknown>();
   flatten(root, [], values);
   return { values, root: root as Record<string, unknown> };
+}
+
+/** What the machine controls say, key by key; the sentence they are refused with when they cannot be read. */
+function readControls(text: string, whose: string): Reading {
+  try {
+    const parsed = ControlsSchema.safeParse(text.trim() === '' ? {} : JSON.parse(text));
+    if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'not the machine controls');
+    // A field the source did not report is absent, and an unset default runtime is absent too.
+    const { defaultRuntime, ...rest } = parsed.data;
+    return reading({ ...rest, ...(defaultRuntime === null || defaultRuntime === undefined ? {} : { defaultRuntime }) });
+  } catch (error) {
+    throw new CloneRefusal(
+      `${whose} controls could not be read: ${error instanceof Error ? error.message : 'not JSON'}.`,
+    );
+  }
+}
+
+/** What a settings file says, key by key; the sentence it is refused with when it cannot be read. */
+function readFile(config: ConfigText, path: FileDoc, text: string, whose: string): Reading {
+  const parsed = config.read(text);
+  if (!parsed.ok) {
+    throw new CloneRefusal(`${whose} ${path} could not be read: ${parsed.errors[0]?.message ?? 'not valid YAML'}.`);
+  }
+  const root = parsed.read.value;
+  if (!isPlainObject(root)) throw new CloneRefusal(`${whose} ${path} is not a mapping of settings.`);
+  return reading(root);
 }
 
 // ── Analysis ─────────────────────────────────────────────────────────────────────────────────────
@@ -249,14 +251,14 @@ interface FileAnalysis {
   readonly theirsDigests: Readonly<Record<string, string>>;
   /** This machine's document as parsed, kept to build the merge from. */
   readonly root: Record<string, unknown>;
+  /** The config layer a settings FILE was reviewed through; the plan writes through the same one. The controls have none. */
+  readonly config?: ConfigText;
 }
 
 export interface CloneSettingsAnalysis {
   readonly files: readonly FileAnalysis[];
   /** Binds the review to the texts it was made from and the record it was compared with. */
   readonly fingerprint: string;
-  /** The config layer the review was made through; the plan writes through the same one. */
-  readonly config: ConfigText;
 }
 
 const DEFAULT_CHOICE: Readonly<Partial<Record<CloneOutcome, CloneKeyChoice>>> = {
@@ -389,45 +391,19 @@ function mergedText(
 /** The most differing keys whose loosening is judged one by one; a document with more is flagged as a whole. */
 const LOOSENING_JUDGED_LIMIT = 256;
 
-function analyseFile(
-  config: ConfigText,
+/** The rows of a document whose two sides were read, or `undefined` when more keys differ than a copy merges. */
+function compare(
   input: CloneSettingsInput,
+  theirs: Reading,
+  own: Reading,
   known: Readonly<Record<string, string>> | undefined,
-): FileAnalysis {
-  let theirs: ReturnType<typeof read>;
-  try {
-    theirs = read(config, input.path, input.theirs, 'The');
-  } catch (error) {
-    // `read` refuses with a sentence; anything else is still a document this machine cannot take, never a crash.
-    const refused = error instanceof CloneRefusal ? error.message : `The ${input.path} could not be read.`;
-    return { input, rows: [], refused, theirsDigests: {}, root: {} };
-  }
-  if (isFileDoc(input.path) && config.hasRawSecret(theirs.root)) {
-    return {
-      input,
-      rows: [],
-      refused: `${input.path} from the source holds a value that looks like a secret, which a configuration file never does. Fix it there, or leave ${input.path} out.`,
-      withheld: true,
-      theirsDigests: {},
-      root: {},
-    };
-  }
-  const own =
-    input.mineExists || input.path === 'controls'
-      ? read(config, input.path, input.mine, 'Your')
-      : { values: new Map<string, unknown>(), root: {} };
-  // The same refusal for this machine's own file: a value pasted into it by hand must never reach a review row,
-  // a digest or a log. Nothing about it is returned but the sentence.
-  if (isFileDoc(input.path) && config.hasRawSecret(own.root)) {
-    return {
-      input,
-      rows: [],
-      refused: `Your ${input.path} holds a value that looks like a secret, which a configuration file never does. Move it into a secret and refer to it as \${secret:NAME}, or leave ${input.path} out of this copy.`,
-      withheld: true,
-      theirsDigests: {},
-      root: {},
-    };
-  }
+):
+  | {
+      readonly rows: readonly Row[];
+      readonly source: ReadonlyMap<string, unknown>;
+      readonly theirsDigests: Readonly<Record<string, string>>;
+    }
+  | undefined {
   // A key one side holds as a value and the other as a mapping is compared whole, at that path.
   const structural = structuralPaths(own.values, theirs.values);
   const ours = collapse(own.values, own.root, structural);
@@ -458,30 +434,99 @@ function analyseFile(
       ...(theirsDigest === undefined ? {} : { theirs: there }),
     });
   }
-  if (rows.length > CLONE_SETTINGS_KEYS_LIMIT) {
+  return rows.length > CLONE_SETTINGS_KEYS_LIMIT ? undefined : { rows, source, theirsDigests };
+}
+
+/** The analysis of a document that has more differing keys than a copy merges. */
+function tooManyKeys(input: CloneSettingsInput): FileAnalysis {
+  return {
+    input,
+    rows: [],
+    refused: `${input.path} has more than ${String(CLONE_SETTINGS_KEYS_LIMIT)} settings that differ, which is more than a copy merges. Leave ${input.path} out.`,
+    theirsDigests: {},
+    root: {},
+  };
+}
+
+/** The analysis of a document that cannot be read: `read` refuses with a sentence; anything else is still a document this machine cannot take, never a crash. */
+function unreadable(input: CloneSettingsInput, error: unknown): FileAnalysis {
+  const refused = error instanceof CloneRefusal ? error.message : `The ${input.path} could not be read.`;
+  return { input, rows: [], refused, theirsDigests: {}, root: {} };
+}
+
+/** The machine controls compared with the source's. They are JSON this package reads itself: no config layer is asked. */
+function analyseControls(input: CloneSettingsInput, known: Readonly<Record<string, string>> | undefined): FileAnalysis {
+  let theirs: Reading;
+  try {
+    theirs = readControls(input.theirs, 'The');
+  } catch (error) {
+    return unreadable(input, error);
+  }
+  const own = readControls(input.mine, 'Your');
+  const compared = compare(input, theirs, own, known);
+  if (compared === undefined) return tooManyKeys(input);
+  const rows = compared.rows.map(row => ({ ...row, loosens: controlsLoosen(row.key, row.mine, row.theirs) }));
+  return { input, rows, theirsDigests: compared.theirsDigests, root: own.root };
+}
+
+/** A settings file compared with the source's, through the config layer that reads, judges and later edits it. */
+function analyseFile(
+  config: ConfigText,
+  path: FileDoc,
+  input: CloneSettingsInput,
+  known: Readonly<Record<string, string>> | undefined,
+): FileAnalysis {
+  let theirs: Reading;
+  try {
+    theirs = readFile(config, path, input.theirs, 'The');
+  } catch (error) {
+    return unreadable(input, error);
+  }
+  if (config.hasRawSecret(theirs.root)) {
     return {
       input,
       rows: [],
-      refused: `${input.path} has more than ${String(CLONE_SETTINGS_KEYS_LIMIT)} settings that differ, which is more than a copy merges. Leave ${input.path} out.`,
+      refused: `${path} from the source holds a value that looks like a secret, which a configuration file never does. Fix it there, or leave ${path} out.`,
+      withheld: true,
       theirsDigests: {},
       root: {},
     };
   }
-  return { input, rows: withLoosening(config, input, own.root, source, rows), theirsDigests, root: own.root };
+  const own = input.mineExists
+    ? readFile(config, path, input.mine, 'Your')
+    : { values: new Map<string, unknown>(), root: {} };
+  // The same refusal for this machine's own file: a value pasted into it by hand must never reach a review row,
+  // a digest or a log. Nothing about it is returned but the sentence.
+  if (config.hasRawSecret(own.root)) {
+    return {
+      input,
+      rows: [],
+      refused: `Your ${path} holds a value that looks like a secret, which a configuration file never does. Move it into a secret and refer to it as \${secret:NAME}, or leave ${path} out of this copy.`,
+      withheld: true,
+      theirsDigests: {},
+      root: {},
+    };
+  }
+  const compared = compare(input, theirs, own, known);
+  if (compared === undefined) return tooManyKeys(input);
+  return {
+    input,
+    rows: withLoosening(config, path, input, own.root, compared.source, compared.rows),
+    theirsDigests: compared.theirsDigests,
+    root: own.root,
+    config,
+  };
 }
 
 /** Each row flagged when taking it alone would loosen what this machine may spend or what its agents may do. */
 function withLoosening(
   config: ConfigText,
+  path: FileDoc,
   input: CloneSettingsInput,
   root: Readonly<Record<string, unknown>>,
   theirs: ReadonlyMap<string, unknown>,
   rows: readonly Row[],
 ): readonly Row[] {
-  if (input.path === 'controls') {
-    return rows.map(row => ({ ...row, loosens: controlsLoosen(row.key, row.mine, row.theirs) }));
-  }
-  const path = input.path as FileDoc;
   if (input.effective === undefined) return rows;
   if (rows.length > LOOSENING_JUDGED_LIMIT) return rows.map(row => ({ ...row, loosens: true }));
   // What this machine's own file already loosens (a held edit) is not charged to the key being taken.
@@ -502,14 +547,20 @@ function withLoosening(
 export function analyseCloneSettings(
   inputs: readonly CloneSettingsInput[],
   base: Readonly<Partial<Record<CloneSettingsDoc, Readonly<Record<string, string>>>>> | undefined,
-  config: ConfigText,
+  config: ConfigText | undefined,
 ): CloneSettingsAnalysis {
   const seen = new Set<string>();
   for (const input of inputs) {
     if (seen.has(input.path)) throw new CloneRefusal(`${input.path} was sent twice. Send each settings document once.`);
     seen.add(input.path);
   }
-  const files = inputs.map(input => analyseFile(config, input, base?.[input.path]));
+  const files = inputs.map(input => {
+    if (!isFileDoc(input.path)) return analyseControls(input, base?.[input.path]);
+    if (config === undefined) {
+      throw new CloneRefusal('This machine cannot merge settings documents yet. Leave them out and copy the rest.');
+    }
+    return analyseFile(config, input.path, input, base?.[input.path]);
+  });
   const fingerprint = sha256Hex(
     JSON.stringify(
       files.map(file => [
@@ -522,7 +573,7 @@ export function analyseCloneSettings(
       ]),
     ),
   );
-  return { files, fingerprint, config };
+  return { files, fingerprint };
 }
 
 /** The review's rows: every key that differs and why, what is chosen for it, and what taking it would loosen. */
@@ -627,7 +678,7 @@ export function planCloneSettings(
       } else kept.push(`${file.input.path}: ${row.key}`);
     }
     if (chosen.size === 0) continue;
-    if (file.input.path === 'controls') {
+    if (file.config === undefined) {
       const fields: Record<string, unknown> = {};
       const agentControl: Record<string, boolean> = {};
       let widens = false;
@@ -654,7 +705,7 @@ export function planCloneSettings(
     const text = everyKeyOfNewFile
       ? file.input.theirs
       : mergedText(
-          analysis.config,
+          file.config,
           path,
           file.input,
           file.root,

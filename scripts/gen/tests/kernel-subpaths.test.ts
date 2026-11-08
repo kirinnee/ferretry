@@ -35,6 +35,12 @@ describe('context-imports: the kernel wire and session subpaths', () => {
     }
   });
 
+  test('the push envelope is contract surface by its own subpath: the signed worker and a plugin contract import it', () => {
+    const specifier = '@ferretry/kernel/contract/push-envelope';
+    expect(edge('access', 'contract/push.ts', specifier).toArea).toBe('kernel-contract');
+    expect(refusal(edge('access', 'contract/push.ts', specifier))).toBeUndefined();
+  });
+
   test('a plugin contract may import them too (they are pure)', () => {
     expect(refusal(edge('connections', 'contract/index.ts', '@ferretry/kernel/wire'))).toBeUndefined();
   });

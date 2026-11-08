@@ -112,7 +112,7 @@ describe('notification payloads', () => {
     should(yours.body).equal('Your turn — finished and waiting for you.');
     should(aSpec.sessionId).equal('same/id');
     should(aSpec.tag).not.equal(bSpec.tag);
-    should(aSpec.url).equal('/d/daemon-a/session/same%2Fid');
+    should(aSpec.url).equal('/d/daemon-a/ferrets/same%2Fid/chat');
     should(aSpec.eventKey).equal(notificationEventKey(a, waiting, 'attention'));
     should(aSpec.eventKey).not.equal(bSpec.eventKey);
     should(summaryNotification(daemonA, 7).tag).equal('fy-summary:daemon-a');

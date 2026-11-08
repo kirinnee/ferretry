@@ -11,7 +11,7 @@
  * - A TAP OPENS THE ITEM HERE, as the SAME full item view the chat shows (`AgendaItemView`: Markdown, options,
  *   quick replies, terms, history), with that ferret's REAL composer under it ({@link AgendaInboxPageProps.renderComposer}):
  *   what is typed goes to the ferret's chat about the item (`!A5 …`, the chat's own path) and a quick reply carries
- *   it as its note. Every row is still a real link to the conversation at the item (`?attention=<id>`), so a
+ *   it as its note. Every row is still a real link to the conversation at the item (`?ask=<id>`), so a
  *   modified click opens the chat, and the open item has "Open chat". A tapped notification opens the chat and
  *   clears itself.
  * - THE OPEN ITEMS ARE A DECK, on a phone and a wide screen alike: SWIPE (or press) in the direction of an answer —
