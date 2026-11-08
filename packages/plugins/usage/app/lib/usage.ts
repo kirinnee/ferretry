@@ -36,7 +36,7 @@ import type { DaemonId } from '../shell.ts';
  * The usage a ferret's own monitor stamped onto its state, and the account (`agent`) it runs under: the two facts of a
  * ferret's view that a quota is resolved from. Structural, so whichever view carries them can be passed.
  */
-export interface QuotaState {
+interface QuotaState {
   readonly usageAuthOk?: boolean;
   readonly usage5hPercent?: number;
   readonly usageWeeklyPercent?: number;
@@ -67,6 +67,7 @@ export interface ResolvedQuota {
  * The dashboard only needs to resolve one row's quota. Keeping this narrow
  * lets its connected page pass a `DaemonUsageStore` without exposing that
  * store's private feed index.
+ * @pending usage: SessionQuotaResolver in app/lib/usage.ts is imported by the unmerged branch rebuild/port-ferrets-b (core/ferrets/app/components/session-dashboard*.tsx), so it stays until that branch lands
  */
 export interface SessionQuotaResolver {
   quotaFor(daemonId: DaemonId, view: QuotaSubject): ResolvedQuota | null;

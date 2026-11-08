@@ -222,7 +222,7 @@ export interface ReflexSettings {
   readonly tickSeconds: number;
 }
 
-export type ReflexVerdict = 'alive' | 'nudge' | 'frozen';
+type ReflexVerdict = 'alive' | 'nudge' | 'frozen';
 
 export interface ReflexAssessment {
   readonly verdict: ReflexVerdict;
@@ -316,9 +316,9 @@ export const REFLEX_NUDGE_MESSAGE =
   'Liveness check: no output, screen change or subprocess activity has been seen for several minutes. If you are alive, continue the task now and post a short status.';
 
 /** How long a ferret may be quiet before the reflex nudges it, when its own settings name no time. */
-export const DEFAULT_REFLEX_NUDGE_SECONDS = 300;
+const DEFAULT_REFLEX_NUDGE_SECONDS = 300;
 /** How long a ferret may show no strong life-sign before it is frozen, when its settings name none. */
-export const DEFAULT_REFLEX_FROZEN_SECONDS = 900;
+const DEFAULT_REFLEX_FROZEN_SECONDS = 900;
 
 /**
  * The reflex times for one ferret: its own `nudgeAfterSeconds` / `killAfterSeconds` when it names them

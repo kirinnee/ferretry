@@ -48,7 +48,7 @@ export interface InvestigationBackoff {
 }
 
 /** What the Warden remembers of Jev's last act on one (ferret, kind). */
-export interface JevActMemory {
+interface JevActMemory {
   readonly action: WardenJevAct;
   readonly at: string;
   /** The subject it acted on ({@link jevSubject}). */
@@ -64,7 +64,7 @@ export type BackoffStore = Readonly<Record<string, InvestigationBackoff>>;
 export const BACKOFF_CEILING_MS = 24 * 60 * 60_000;
 
 /** Each rung waits this many times longer than the one before. */
-export const BACKOFF_FACTOR = 4;
+const BACKOFF_FACTOR = 4;
 
 export function backoffKey(sessionId: string, kind: WardenAnomalyKind): string {
   return `${sessionId}|${kind}`;

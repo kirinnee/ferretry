@@ -62,7 +62,7 @@ export const laneProposalCard = (projectName: string, laneSet: LaneSet): LanePro
 };
 
 /** How long a proposer's name may run on the card, so it never crowds out what the change would do. */
-export const MAX_PROPOSER_NAME = 60;
+const MAX_PROPOSER_NAME = 60;
 
 /** The answer of a card with no Accept that leaves the proposal waiting. Never an Accept, so it confirms nothing. */
 export const LANE_CHANGE_LATER = 'Later';

@@ -48,7 +48,6 @@ import {
   isBlockerDone,
   laneOf,
   type SweepFile,
-  SweepFileSchema,
 } from '../../../contract/index.ts';
 import {
   cardStaleAfterMs,
@@ -67,7 +66,6 @@ import type { BoardClock, BoardDiagnostics } from './ports.ts';
 /** How often the daemon sweeps the board. */
 export const BOARD_SWEEP_INTERVAL_MS = 60_000;
 
-export const SweepMemorySchema = SweepFileSchema;
 type CardMark = SweepFile['seen'][string];
 export type SweepMemory = SweepFile;
 

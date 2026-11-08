@@ -55,10 +55,6 @@ export const helperRefusal = async (
   return helperRefusalMessage(doing, may, address, claim);
 };
 
-/** Whether `ferret` was started by another ferret. */
-export const isHelper = async (directory: HelperDirectory, ferret: string): Promise<boolean> =>
-  (await directory.leadOf(ferret).catch(() => undefined)) !== undefined;
-
 /**
  * Who a board nudge about `ferret`'s card is typed to: its lead when it is a helper (the lead moves the card and decides
  * what the helper does next), else the ferret itself.

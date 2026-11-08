@@ -24,10 +24,7 @@ const live = (ferret: FerretSummary): boolean => ferret.state !== 'stopped';
  * slug, so this may only suppress an AUTOMATIC recovery, never an operator's; a ferret with no label or no folder
  * matches nothing.
  */
-export function recoveryScopeConflict(
-  target: FerretSummary,
-  candidates: readonly FerretSummary[],
-): FerretSummary | undefined {
+function recoveryScopeConflict(target: FerretSummary, candidates: readonly FerretSummary[]): FerretSummary | undefined {
   const label = target.label?.trim();
   if (!label || !target.folder.trim()) return undefined;
   const folder = resolve(target.folder);

@@ -9,7 +9,7 @@ import type { BoardErrorCode } from '../../contract/index.ts';
 export const FY_REQUEST_ID_HEADER = 'x-fy-request-id';
 
 /** The HTTP status each refusal answers with. */
-export const BOARD_ERROR_STATUS: Readonly<Record<BoardErrorCode, number>> = {
+const BOARD_ERROR_STATUS: Readonly<Record<BoardErrorCode, number>> = {
   invalid: 400,
   'not-found': 404,
   forbidden: 403,

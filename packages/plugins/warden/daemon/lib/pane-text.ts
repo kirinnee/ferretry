@@ -22,7 +22,7 @@ export function paneShowsActiveWork(pane: string): boolean {
  * else: a running turn shows it too, but so can something on an idle screen that merely looks like one,
  * so it is the one reading a transcript that says the turn ENDED may overrule.
  */
-export function paneActiveWork(pane: string): 'status' | 'spinner' | undefined {
+function paneActiveWork(pane: string): 'status' | 'spinner' | undefined {
   const lower = pane.toLowerCase();
   if (INTERRUPT_HINTS.some(marker => lower.includes(marker))) return 'status';
   if (CODEX_ELAPSED.test(lower) || CLAUDE_ELAPSED.test(lower) || TOKEN_COUNTER.test(lower)) return 'status';

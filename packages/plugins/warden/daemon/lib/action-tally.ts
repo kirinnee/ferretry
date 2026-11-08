@@ -21,7 +21,7 @@ import type {
 
 const NO_COUNTS: WardenActorCounts = { auto: 0, jev: 0, llm: 0 };
 
-export const NO_REVIVE_RESULTS: WardenReviveResults = { progressed: NO_COUNTS, stalled: NO_COUNTS };
+const NO_REVIVE_RESULTS: WardenReviveResults = { progressed: NO_COUNTS, stalled: NO_COUNTS };
 
 const bumpedBy = (counts: WardenActorCounts, actor: WardenActor, by: number): WardenActorCounts => ({
   ...counts,
@@ -29,7 +29,7 @@ const bumpedBy = (counts: WardenActorCounts, actor: WardenActor, by: number): Wa
 });
 
 /** Two counts added: `owner` appears only when either side has it. */
-export const addActorCounts = (left: WardenActorCounts, right: WardenActorCounts): WardenActorCounts => ({
+const addActorCounts = (left: WardenActorCounts, right: WardenActorCounts): WardenActorCounts => ({
   auto: left.auto + right.auto,
   jev: left.jev + right.jev,
   llm: left.llm + right.llm,

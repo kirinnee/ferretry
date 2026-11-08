@@ -15,7 +15,7 @@ const daemonConnection = (input: { readonly daemonId: string }): DaemonConnectio
 });
 
 /** The clock the merged boards are read at. */
-export const NOW = Date.parse('2026-08-01T12:00:00.000Z');
+const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 export const PROJECT = '00000000-0000-4000-8000-000000000001';
 export const OTHER_PROJECT = '00000000-0000-4000-8000-000000000002';
 const LEAD = 'mvuc7tsf-0c3d50df';

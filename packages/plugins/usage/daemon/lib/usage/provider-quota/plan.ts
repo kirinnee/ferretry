@@ -36,7 +36,7 @@ export const PROVIDER_QUOTA_TIMEOUT_MS = 8_000;
 export const PROVIDER_QUOTA_MAX_BYTES = 128 * 1_024;
 
 /** `https://`, or plain `http://` only to this machine: where a key may be sent at all. */
-export function isCredentialSafeUrl(url: string): boolean {
+function isCredentialSafeUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     if (parsed.protocol === 'https:') return true;
@@ -48,7 +48,7 @@ export function isCredentialSafeUrl(url: string): boolean {
 }
 
 /** The hosts the login itself sends to: every one of its plain values that is a key-safe URL. */
-export function loginHosts(env: Readonly<Record<string, string>>): ReadonlySet<string> {
+function loginHosts(env: Readonly<Record<string, string>>): ReadonlySet<string> {
   const hosts = new Set<string>();
   for (const value of Object.values(env)) {
     if (value.includes('$') || !isCredentialSafeUrl(value)) continue;
@@ -131,7 +131,7 @@ const moonshotHost = (env: Readonly<Record<string, string>>): string =>
     : 'api.moonshot.ai';
 
 /** Every source that has an endpoint, and how it is read. */
-export const PROVIDER_QUOTA_ENDPOINTS: Readonly<Record<EndpointSource, QuotaEndpoint>> = {
+const PROVIDER_QUOTA_ENDPOINTS: Readonly<Record<EndpointSource, QuotaEndpoint>> = {
   'zai-coding-plan': {
     url: () => 'https://api.z.ai/api/monitor/usage/quota/limit',
     // The community tools that found this endpoint send the bare key, with no `Bearer`.

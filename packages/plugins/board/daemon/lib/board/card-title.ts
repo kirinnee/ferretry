@@ -24,14 +24,6 @@ const ROLE_PLAY = /^(?:you are|you're|act as|your role|your job)\b/iu;
 const POINTER = /^(?:please\s+)?(?:first\s+)?(?:read|follow|see|open)\b/iu;
 const PATH_TOKEN = /(?:^|\s)(?:~|\.{1,2})?\/\S+/gu;
 const URL_TOKEN = /\bhttps?:\/\/\S+/giu;
-const REFERENCE =
-  /\b(?:read|follow|see|open)\s+[`'"]?((?:~|\.{1,2})?\/[^\s`'")]+|[\w.-]+\/[^\s`'")]+\.\w+|[\w.-]+\.md)/iu;
-
-/** The file a brief tells its reader to read first (`Read /tmp/brief.md and follow it`), or null. */
-export function briefFileReference(brief: string): string | null {
-  const match = REFERENCE.exec(brief);
-  return match?.[1] === undefined ? null : match[1].replace(/[.,;:]+$/u, '');
-}
 
 const unmark = (text: string): string =>
   text
@@ -96,7 +88,7 @@ export function deriveCardTitle(brief: string): string | null {
 }
 
 /** A short, stable hash of a brief, so two untitled sessions of one kind still read apart. */
-export function briefHash(brief: string): string {
+function briefHash(brief: string): string {
   let hash = 0x811c9dc5;
   for (const character of brief) {
     hash ^= character.codePointAt(0) as number;
@@ -106,7 +98,7 @@ export function briefHash(brief: string): string {
 }
 
 /** The label-and-hash title used when a brief has nothing readable in it: `Review 7k2x`. */
-export function fallbackCardTitle(label: string, brief: string): string {
+function fallbackCardTitle(label: string, brief: string): string {
   const named = titleOf(unmark(label.replaceAll(/[-_]+/gu, ' '))) ?? 'Task';
   return `${named} ${briefHash(brief)}`;
 }

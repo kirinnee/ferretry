@@ -25,7 +25,7 @@ export interface ProcessReading {
 }
 
 /** The process's own counters, read by an adapter that can see them. */
-export interface ProcessGaugePort {
+interface ProcessGaugePort {
   read(): Promise<ProcessReading>;
 }
 

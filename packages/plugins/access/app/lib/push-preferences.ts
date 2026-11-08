@@ -34,7 +34,7 @@ const rowOf = (value: unknown): Row =>
     : DEFAULT_ROW;
 
 /** Decodes the versioned store into one row per daemon, dropping anything that is not one. */
-export const parsePushPreferenceStore = (raw: string | null): ReadonlyMap<DaemonId, Row> => {
+const parsePushPreferenceStore = (raw: string | null): ReadonlyMap<DaemonId, Row> => {
   if (raw === null) return new Map();
   try {
     const value: unknown = JSON.parse(raw);

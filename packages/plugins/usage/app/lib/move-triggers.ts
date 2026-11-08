@@ -7,5 +7,3 @@ export const MOVE_TRIGGERS = [
   { id: 'rate_limited', label: 'It hits a usage limit' },
   { id: 'budget_exceeded', label: 'Its login passes its hard spend budget' },
 ] as const;
-
-export type MoveTriggerId = (typeof MOVE_TRIGGERS)[number]['id'];

@@ -7,15 +7,13 @@
 import type { LoginBudget, LoginBudgetLevel, LoginBudgetPeriodView } from '@ferretry/plugin-logins/contract';
 import { usdWords } from '../../contract/index.ts';
 
-export { usdWords };
-
 const plural = (count: number, one: string, many = `${one}s`): string => `${String(count)} ${count === 1 ? one : many}`;
 
 /**
  * `resets Sat` — a reset in the zone the budget is counted in, never the reader's. A budget resets at local
  * midnight, so the time is said only when it is not midnight (a zone whose clocks skip it): `resets Sun 01:00`.
  */
-export const budgetResetWords = (resetsAt: string, zone: string): string =>
+const budgetResetWords = (resetsAt: string, zone: string): string =>
   `resets ${new Intl.DateTimeFormat('en-US', {
     timeZone: zone,
     weekday: 'short',
@@ -137,7 +135,7 @@ export const budgetDraft = (budget: LoginBudget | undefined): BudgetDraft => ({
 });
 
 /** A field's dollars: `undefined` when empty, `NaN` when it is not a positive amount. Takes a `$`. */
-export const parseBudgetAmount = (text: string): number | undefined => {
+const parseBudgetAmount = (text: string): number | undefined => {
   const trimmed = text.trim().replace(/^\$/u, '');
   if (trimmed === '') return undefined;
   const amount = Number(trimmed);

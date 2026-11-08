@@ -29,12 +29,12 @@ export interface RepositoryLocator {
   locate(cwd: string): Promise<RepositoryLocation | null>;
 }
 
-export interface AdoptionLaneSets {
+interface AdoptionLaneSets {
   laneSet(projectId: BoardProjectId): Promise<LaneSet | null>;
 }
 
 /** Proposes the lanes a project's folder suggests, as `ferretId`; `null` when it could not. */
-export interface AdoptionLaneProposer {
+interface AdoptionLaneProposer {
   propose(projectId: BoardProjectId, ferretId: string): Promise<LaneSet | null>;
 }
 

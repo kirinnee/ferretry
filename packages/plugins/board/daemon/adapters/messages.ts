@@ -17,7 +17,7 @@ import {
  * Board `uses` (optional, lead decision D2 #12); with Conversation off every message Board owes a ferret is HELD with a
  * warning — said in the log, never typed, and never pretended delivered (today's "held with a warning").
  */
-export interface FerretMessenger {
+interface FerretMessenger {
   /** Sends one message to one ferret as the ordinary send path would; the same `key` twice is one message. */
   deliver: ReopenMessenger['deliver'];
   /** How the ferret takes messages; `undefined` when it cannot be read. */
@@ -27,7 +27,7 @@ export interface FerretMessenger {
 }
 
 /** The sentence a ferret reads when the owner's files could not be copied to it: the message itself still lands. */
-export const uncarriedFilesLine = (count: number): string =>
+const uncarriedFilesLine = (count: number): string =>
   `The owner also attached ${count === 1 ? 'a file' : `${count} files`} that could not be copied to this chat.`;
 
 /** The longest send id Conversation takes, and the characters its files and ids allow. */

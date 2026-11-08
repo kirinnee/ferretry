@@ -151,7 +151,7 @@ export class DaemonPushDevices {
 /* ---------- the daemon push API, as a port -------------------------------- */
 
 /** The machine a push call is about: its identity for the device memory and the push scope, never an address. */
-export type PushTarget = Pick<DaemonConnection, 'daemonId'>;
+type PushTarget = Pick<DaemonConnection, 'daemonId'>;
 
 /**
  * The four daemon calls enrolment makes. A port rather than direct imports so a
@@ -280,7 +280,7 @@ export const unsubscribeLocalPush = async (enrolment: PushEnrolment, daemon: Dae
 
 /* ---------- the reader-facing delivery report ----------------------------- */
 
-export type PushDeliveryStatus = 'idle' | 'checking' | 'active' | 'unavailable';
+type PushDeliveryStatus = 'idle' | 'checking' | 'active' | 'unavailable';
 
 export interface PushDeliveryReport {
   readonly status: PushDeliveryStatus;
@@ -462,7 +462,7 @@ export interface ContainerPushEnrolmentDeps {
 }
 
 /** A daemon this browser is still paired with, by the label the reader gave it. */
-export interface PairedPushMachine {
+interface PairedPushMachine {
   readonly daemonId: DaemonId;
   readonly label: string;
 }

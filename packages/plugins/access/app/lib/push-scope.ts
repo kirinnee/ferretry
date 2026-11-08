@@ -156,6 +156,7 @@ export const notificationUrl = (
  * the tap opens the Inbox at that card. The Inbox sends the reader on to the conversation itself when the
  * item is no longer open (answered elsewhere, snoozed, on the ferret's turn). Every other page — a
  * conversation with no item, settings — is returned untouched.
+ * @pending access: notificationTapUrl in app/lib/push-scope.ts is rewritten by the unmerged branch rebuild/fix-notification-tap, so it stays until that branch lands
  */
 export const notificationTapUrl = (allowed: string, origin: string): string => {
   const url = URL.parse(allowed, origin);

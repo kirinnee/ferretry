@@ -3,7 +3,7 @@ import { type AnalyticsModelAliasGroup, normalizeAnalyticsModelIdentity } from '
 import type { AnalyticsTokenUsage } from './pricing.ts';
 
 /** A session's token total, as this daemon can prove it from that session's own turns. */
-export type AnalyticsSessionUsage = Omit<AnalyticsTokenUsage, 'createdAt'>;
+type AnalyticsSessionUsage = Omit<AnalyticsTokenUsage, 'createdAt'>;
 
 /**
  * Why a session has no reportable token total.
@@ -21,7 +21,7 @@ export type AnalyticsUsageRefusal =
   /** A usage figure whose accounting this daemon cannot state, so no total is derivable. */
   | 'ambiguous_token_accounting';
 
-export type AnalyticsSessionUsageFold =
+type AnalyticsSessionUsageFold =
   | { readonly kind: 'usage'; readonly usage: AnalyticsSessionUsage }
   | { readonly kind: 'refused'; readonly reason: AnalyticsUsageRefusal };
 
@@ -43,7 +43,7 @@ export interface AnalyticsTranscriptFold {
  */
 export type TurnEvidence = readonly TurnUsage[] | undefined;
 
-export function isCountable(value: number | undefined): value is number {
+function isCountable(value: number | undefined): value is number {
   return value !== undefined && Number.isSafeInteger(value) && value >= 0;
 }
 
@@ -72,7 +72,7 @@ export function turnTokenUsage(turn: TurnUsage): AnalyticsTokenUsage {
  * The turn reader states no cache-write lifetime split and no reasoning figure, so both stay `null`: pricing then
  * charges the write at the single write rate and the whole output at the output rate (and says so in the row).
  */
-export function foldTurnUsage(
+function foldTurnUsage(
   evidence: TurnEvidence,
   aliasGroups: readonly AnalyticsModelAliasGroup[] = [],
 ): AnalyticsSessionUsageFold {
@@ -115,7 +115,7 @@ export function foldTurnUsage(
 }
 
 /** What the turns say about activity: how many turns, and nothing about time (the reader carries tokens, not timing). */
-export function turnActivity(evidence: TurnEvidence): AnalyticsSessionActivity {
+function turnActivity(evidence: TurnEvidence): AnalyticsSessionActivity {
   return { activeDurationMs: null, turns: evidence === undefined ? null : evidence.length };
 }
 

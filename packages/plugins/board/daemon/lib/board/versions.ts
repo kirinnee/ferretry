@@ -5,7 +5,6 @@ const VERSION_PATTERN =
   /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/u;
 
 export const ReleaseVersionSchema = z.string().regex(VERSION_PATTERN);
-export type ReleaseVersion = z.infer<typeof ReleaseVersionSchema>;
 
 interface ParsedVersion {
   core: readonly [bigint, bigint, bigint];

@@ -21,7 +21,10 @@ import type { PairingClientFactory } from '../features/settings/add-device-setti
 import { PairPhoneSheet } from '../features/settings/pair-phone.tsx';
 import { type DaemonId, daemonConnection, SessionsBar, useAppViewport, useLayoutMode } from '../shell-pairing.ts';
 
-/** `?pair-from-menu` names this page. */
+/**
+ * `?pair-from-menu` names this page.
+ * @pending access: app/harness/pair-from-menu.tsx is not reached by the pairing screen
+ */
 export const isPairFromMenuPage = (search: string): boolean => new URLSearchParams(search).has('pair-from-menu');
 
 const MACHINE = 'studio';
@@ -83,6 +86,7 @@ const MACHINES = [
   { daemonId: `fy_daemon_${'Ll'.repeat(21)}A` as DaemonId, name: 'laptop' },
 ];
 
+/** @pending access: app/harness/pair-from-menu.tsx is not reached by the pairing screen */
 export function PairFromMenuHarness() {
   useAppViewport();
   const phone = useLayoutMode() === 'drawer';

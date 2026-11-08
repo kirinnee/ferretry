@@ -33,11 +33,11 @@ export interface SpeedupsServiceParts {
   readonly guard: JevProbePort;
 }
 
-export const SPEEDUP_TEST_TIMEOUT_MS = 8_000;
+const SPEEDUP_TEST_TIMEOUT_MS = 8_000;
 /** A model list is a few kilobytes; a 2xx past this is still a key that worked. */
 const MODEL_LIST_MAX_BYTES = 512 * 1_024;
 
-export const SPEEDUP_TEST_MESSAGES: Readonly<Record<SpeedupTestCode, string>> = {
+const SPEEDUP_TEST_MESSAGES: Readonly<Record<SpeedupTestCode, string>> = {
   ok: 'The key works.',
   not_set: 'No key is set. Paste one and save it first.',
   rejected: 'The provider refused this key. Check it was copied whole, or make a new one.',
@@ -50,7 +50,7 @@ export const SPEEDUP_TEST_MESSAGES: Readonly<Record<SpeedupTestCode, string>> = 
 };
 
 /** What a model-list probe proved about the key. */
-export function modelListCode(outcome: AuthorizedOutcome): SpeedupTestCode {
+function modelListCode(outcome: AuthorizedOutcome): SpeedupTestCode {
   switch (outcome.kind) {
     case 'completion':
       return 'ok';
@@ -92,7 +92,7 @@ const TRIAGE_TEST_CODES: Readonly<Record<JevProbeFailureCode, SpeedupTestCode>> 
 };
 
 /** The ledger as it rests: one last result per provider. Anything unreadable is simply "never tested". */
-export function parseTestLedger(raw: unknown): Partial<Record<SpeedupProvider, SpeedupTestResult>> {
+function parseTestLedger(raw: unknown): Partial<Record<SpeedupProvider, SpeedupTestResult>> {
   if (typeof raw !== 'object' || raw === null || !('results' in raw)) return {};
   const results = (raw as { results: unknown }).results;
   if (typeof results !== 'object' || results === null) return {};
@@ -105,7 +105,7 @@ export function parseTestLedger(raw: unknown): Partial<Record<SpeedupProvider, S
 }
 
 /** True when the key was replaced after the test, so the test no longer describes it. */
-export function testIsStale(lastTest: SpeedupTestResult | undefined, secretUpdatedAt: Instant | undefined): boolean {
+function testIsStale(lastTest: SpeedupTestResult | undefined, secretUpdatedAt: Instant | undefined): boolean {
   if (lastTest === undefined || secretUpdatedAt === undefined) return false;
   return Date.parse(secretUpdatedAt) > Date.parse(lastTest.at);
 }
