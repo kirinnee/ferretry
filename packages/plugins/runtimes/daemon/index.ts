@@ -196,7 +196,8 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
           const read = ++loginReads;
           const fresh = await loginBlocks();
           // An older read landing after a newer one never replaces what the newer one saw.
-          if (read !== loginReads) return earliestExpiry(config.collection(runtimeItems), fresh, expiredUpTo);
+          // `rearm` discards the value of a stale read (its generation moved), so there is none to compute.
+          if (read !== loginReads) return undefined;
           armedLogins = keepUnpublished(armedLogins, fresh, expiredUpTo, clock.nowMs());
           return earliestExpiry(config.collection(runtimeItems), armedLogins, expiredUpTo);
         },
