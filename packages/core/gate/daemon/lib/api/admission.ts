@@ -384,7 +384,11 @@ export class GateAdmission implements Admission {
 
     // THE AGENT TOOL DOOR ACTS ONLY FOR THE FERRET ITS OWN TOKEN NAMES (S61, R-0246): the tool table is that door's, and
     // there a header cannot choose who the caller is, whatever other credential carries it.
-    if (table === 'tool' && authentication.tokenClass !== 'ferret' && (headerValue(request, SESSION_ID_HEADER)?.trim() ?? '') !== '')
+    if (
+      table === 'tool' &&
+      authentication.tokenClass !== 'ferret' &&
+      (headerValue(request, SESSION_ID_HEADER)?.trim() ?? '') !== ''
+    )
       return refused(
         errorResponse(
           403,

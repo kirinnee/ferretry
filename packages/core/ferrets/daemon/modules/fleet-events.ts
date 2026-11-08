@@ -39,7 +39,9 @@ export class HistoryEventSource implements FleetEventSource {
   /** One pass reads at a time: the next waits its turn, which is when later feeds can still join it. */
   #turn: Promise<unknown> = Promise.resolve();
   /** Feeds that open while a pass is still waiting for its turn share it (one pass per limit), as today's did. */
-  readonly #shared = new SharedFleetBacklog({ fleetBacklog: (limit, claim) => this.#pass(limit, claim) } satisfies FleetBacklogPasses);
+  readonly #shared = new SharedFleetBacklog({
+    fleetBacklog: (limit, claim) => this.#pass(limit, claim),
+  } satisfies FleetBacklogPasses);
 
   constructor(
     private readonly state: Pick<StatePort, 'lines' | 'tail'>,
@@ -85,9 +87,7 @@ export class HistoryEventSource implements FleetEventSource {
 
   /** One pass: it waits for the pass before it, then asks `claim` whether any reader is still there; a pass nobody waits for reads nothing. */
   async #pass(limit: number, claim: () => boolean): Promise<FleetEventBacklog | undefined> {
-    const pass = this.#turn
-      .catch(() => undefined)
-      .then(async () => (claim() ? await this.#survey(limit) : undefined));
+    const pass = this.#turn.catch(() => undefined).then(async () => (claim() ? await this.#survey(limit) : undefined));
     this.#turn = pass.catch(() => undefined);
     return await pass;
   }
@@ -101,7 +101,10 @@ export class HistoryEventSource implements FleetEventSource {
       for (const record of tail.records.slice(-limit)) events.push(stored(record));
     }
     // Recent first by time (each ferret's own order is its sequence), then the last `limit`.
-    events.sort((a, b) => Date.parse(a.time) - Date.parse(b.time) || a.sessionId.localeCompare(b.sessionId) || a.sequence - b.sequence);
+    events.sort(
+      (a, b) =>
+        Date.parse(a.time) - Date.parse(b.time) || a.sessionId.localeCompare(b.sessionId) || a.sequence - b.sequence,
+    );
     return { sessionIds, events: events.slice(-limit) };
   }
 }
@@ -113,7 +116,13 @@ function stored(record: {
   readonly type: string;
   readonly data: unknown;
 }): StoredSessionEvent {
-  return { sequence: record.sequence, sessionId: record.sessionId, time: record.time, type: record.type, data: record.data };
+  return {
+    sequence: record.sequence,
+    sessionId: record.sessionId,
+    time: record.time,
+    type: record.type,
+    data: record.data,
+  };
 }
 
 function sole(call: CallContext, name: string): string | undefined {
@@ -194,7 +203,6 @@ export function fleetEventsAccept(
     return async downstream => service.handler(scope, downstream);
   };
 }
-
 
 /**
  * Whether a stream may follow `id`: the live registry, or a ferret the archive holds. Today's `findSession` found both,

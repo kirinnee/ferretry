@@ -90,11 +90,8 @@ export interface TransformHook<Name extends string = string, Value = unknown> ex
  * One taker per key is THE implementation for it; two takers of one key refuse the build. A security-path provide
  * hook names its allowed takers (`takers`); the build refuses any other (§3.5).
  */
-export interface ProvideHook<
-  Name extends string = string,
-  Key extends string = string,
-  Value = unknown,
-> extends HookBase<Name, 'provide'> {
+export interface ProvideHook<Name extends string = string, Key extends string = string, Value = unknown>
+  extends HookBase<Name, 'provide'> {
   readonly key: z.ZodType<Key>;
   readonly value?: z.ZodType<Value>;
   readonly takers?: readonly string[];

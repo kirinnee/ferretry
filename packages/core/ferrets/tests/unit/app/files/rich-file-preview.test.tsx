@@ -313,7 +313,10 @@ describe('rich preview containment', () => {
           for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
         });
         expect(view.container.querySelector('dialog')).toBeNull();
-        const open = must(view.container.querySelector<HTMLButtonElement>('[data-rich-file-open-image]'), 'open button');
+        const open = must(
+          view.container.querySelector<HTMLButtonElement>('[data-rich-file-open-image]'),
+          'open button',
+        );
         expect(open.getAttribute('aria-label')).toBe('Open photo.png full screen');
         await interact(async () => open.click());
         expect(document.querySelector('dialog') ?? view.container.querySelector('dialog')).not.toBeNull();

@@ -59,14 +59,23 @@ function handler(answers: readonly boolean[] = [true, true]) {
   return { fake, asked };
 }
 
+/** As the real session transport: a request whose signal has already aborted throws before anything is sent. */
+class SignalAwareTransport extends FakeTransport {
+  override async request(request: TransportRequest): Promise<TransportAnswer> {
+    request.signal?.throwIfAborted();
+    return await super.request(request);
+  }
+}
+
 /** A daemon that answers the board route from a script, one answer per send. */
-function daemon(script: readonly TransportAnswer[], passkey?: PasskeyHandler) {
+function daemon(script: readonly TransportAnswer[], passkey?: PasskeyHandler, options: { signalAware?: boolean } = {}) {
   const board: TransportAnswer[] = [...script];
-  const transport = new FakeTransport((request: TransportRequest) => {
+  const answer = (request: TransportRequest) => {
     if (request.path === '/v1/plugins') return json(inventoryOf(compiled));
     if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
     return board.shift() ?? OK;
-  });
+  };
+  const transport = options.signalAware === true ? new SignalAwareTransport(answer) : new FakeTransport(answer);
   const client = new DaemonClient({
     transport,
     surfaces: compiled,
@@ -341,15 +350,16 @@ describe('G95 a read that stops waiting leaves its parked prompt', () => {
     expect(transport.requests.at(-1)?.signal).toBe(caller.signal);
   });
 
-  test('G95 the step-up wait is not abortable, as today: an aborted read still waits and is sent again on confirm', async () => {
+  test('G95 the step-up wait is not abortable, as today: an aborted read still waits for the prompt, and is not sent again', async () => {
     const { parked, settle } = parkedHandler();
-    const { client, sends } = daemon([STEP_UP, OK], parked);
+    const { client, sends } = daemon([STEP_UP, OK], parked, { signalAware: true });
     await client.start();
     const caller = new AbortController();
     let done = false;
     const waiting = client
       .forPackage('board')
       .call('GET /v1/board', { signal: caller.signal })
+      .catch((error: unknown) => error)
       .finally(() => {
         done = true;
       });
@@ -359,8 +369,10 @@ describe('G95 a read that stops waiting leaves its parked prompt', () => {
     expect(done).toBe(false);
     expect(sends()).toHaveLength(1);
     settle[0]?.(true);
-    expect(await waiting).toEqual({ cards: [] });
-    expect(sends()).toHaveLength(2);
+    // The confirmed resend carries the aborted signal, so the transport throws before sending: nothing is spent.
+    const failure = await waiting;
+    expect(failure).toBeInstanceOf(DOMException);
+    expect(sends()).toHaveLength(1);
   });
 
   test('G95 an explicit press behind a step-up that is aborted keeps waiting for the prompt too', async () => {

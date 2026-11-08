@@ -51,7 +51,10 @@ test('replacing a live pane fails closed (503) when the harness that must stop i
   f.ports.harness = key => (key === 'codex' ? codex : undefined);
   f.ports.harnessKeys = () => ['claude-code', 'codex'];
   await expect(
-    f.service.resume(f.id, undefined, { replaceLiveTerminal: true, target: { runtime: 'codex-two', harness: 'codex' } }),
+    f.service.resume(f.id, undefined, {
+      replaceLiveTerminal: true,
+      target: { runtime: 'codex-two', harness: 'codex' },
+    }),
   ).rejects.toMatchObject({ status: 503, code: 'plugin_unavailable' });
   expect(f.runner.starts).toBe(1);
   expect(f.registry.get(f.id)?.state).toBe('working');

@@ -34,8 +34,12 @@ async function main(): Promise<number> {
     return answer.exitCode;
   }
   const { configFile, host: hostOverride, logLevel } = answer.overrides;
-  const unserved = [answer.kind !== 'boot' && `--${answer.kind}`, configFile !== undefined && '--config',
-    hostOverride !== undefined && '--host', logLevel !== undefined && '--log-level'].filter(Boolean);
+  const unserved = [
+    answer.kind !== 'boot' && `--${answer.kind}`,
+    configFile !== undefined && '--config',
+    hostOverride !== undefined && '--host',
+    logLevel !== undefined && '--log-level',
+  ].filter(Boolean);
   if (unserved.length > 0) {
     process.stderr.write(`${usage.daemonName}: ${unserved.join(', ')} is not served by this daemon yet.\n`);
     return EXIT_USAGE;

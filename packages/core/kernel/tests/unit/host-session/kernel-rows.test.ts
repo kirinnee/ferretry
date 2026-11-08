@@ -168,10 +168,34 @@ describe('frames, handshake and flow', () => {
     const cases: [string, Uint8Array, number][] = [
       ['too short', new Uint8Array([0xfe, 0x01, FRAME_KINDS.credit]), 4400],
       ['too long', new Uint8Array(65_537).fill(0xfe), 4413],
-      ['wrong magic', header(bytes => void (bytes[0] = 0x00)), 4400],
-      ['wrong version', header(bytes => void (bytes[1] = 0x02)), 4426],
-      ['unknown kind', header(bytes => void (bytes[2] = 0x7f)), 4400],
-      ['reserved byte set', header(bytes => void (bytes[3] = 0x01)), 4400],
+      [
+        'wrong magic',
+        header(bytes => {
+          bytes[0] = 0x00;
+        }),
+        4400,
+      ],
+      [
+        'wrong version',
+        header(bytes => {
+          bytes[1] = 0x02;
+        }),
+        4426,
+      ],
+      [
+        'unknown kind',
+        header(bytes => {
+          bytes[2] = 0x7f;
+        }),
+        4400,
+      ],
+      [
+        'reserved byte set',
+        header(bytes => {
+          bytes[3] = 0x01;
+        }),
+        4400,
+      ],
     ];
     for (const [name, bytes, code] of cases) {
       const client = TestClient.open(fx);

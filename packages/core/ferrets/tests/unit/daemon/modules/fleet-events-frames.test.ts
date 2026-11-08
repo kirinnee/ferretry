@@ -98,7 +98,10 @@ describe('R518 a session view carries journalSequence, and a reader opens events
     const viewed = await view.get('wren');
     expect(viewed?.journalSequence).toBe(3);
 
-    const resumed = await open(source, [['sessionId', 'wren'], ['after', String(viewed?.journalSequence)]]);
+    const resumed = await open(source, [
+      ['sessionId', 'wren'],
+      ['after', String(viewed?.journalSequence)],
+    ]);
     expect(resumed.feed.frames).toMatchObject([
       { kind: 'event', event: { sequence: 4 } },
       { kind: 'event', event: { sequence: 5 } },
@@ -198,9 +201,16 @@ describe('R522 transcript=1 sends a content-free transcript frame each time the 
     const { append, source } = world();
     await append('wren', 1);
     const file = transcriptFile();
-    const { feed, handler } = await open(source, [['sessionId', 'wren'], ['transcript', '1']], {
-      transcript: file.changes,
-    });
+    const { feed, handler } = await open(
+      source,
+      [
+        ['sessionId', 'wren'],
+        ['transcript', '1'],
+      ],
+      {
+        transcript: file.changes,
+      },
+    );
     await file.settle();
     expect(feed.kinds()).toEqual(['event', 'idle']);
     await file.touch();
@@ -220,11 +230,21 @@ describe('R523 transcript=1 on a fleet stream is refused', () => {
   test('R523 a fleet stream asking for transcript=1 is refused 400 transcript_needs_session before any frame', async () => {
     const { source } = world();
     expect(await refusal(source, [['transcript', '1']])).toEqual({ status: 400, code: 'transcript_needs_session' });
-    expect(await refusal(source, [['transcript', '1'], ['tail', '0']])).toEqual({
+    expect(
+      await refusal(source, [
+        ['transcript', '1'],
+        ['tail', '0'],
+      ]),
+    ).toEqual({
       status: 400,
       code: 'transcript_needs_session',
     });
-    expect(await refusal(source, [['transcript', '2'], ['sessionId', 'wren']])).toEqual({
+    expect(
+      await refusal(source, [
+        ['transcript', '2'],
+        ['sessionId', 'wren'],
+      ]),
+    ).toEqual({
       status: 400,
       code: 'invalid_query',
     });
@@ -236,7 +256,14 @@ describe('R524 only a stream that asked for transcript=1 carries a transcript fr
     const { append, source } = world();
     await append('wren', 1);
     const file = transcriptFile();
-    const asked = await open(source, [['sessionId', 'wren'], ['transcript', '1']], { transcript: file.changes });
+    const asked = await open(
+      source,
+      [
+        ['sessionId', 'wren'],
+        ['transcript', '1'],
+      ],
+      { transcript: file.changes },
+    );
     const plain = await open(source, [['sessionId', 'wren']], { transcript: file.changes });
     const fleet = await open(source, [], { transcript: file.changes });
     await file.settle();
@@ -258,11 +285,21 @@ describe('R525 tail is an integer 0-5000, default 5000, and only valid on a flee
     for (const bad of ['5001', '-1', '1.5', 'x', '']) {
       expect(await refusal(source, [['tail', bad]])).toEqual({ status: 400, code: 'invalid_query' });
     }
-    expect(await refusal(source, [['sessionId', 'wren'], ['tail', '3']])).toEqual({
+    expect(
+      await refusal(source, [
+        ['sessionId', 'wren'],
+        ['tail', '3'],
+      ]),
+    ).toEqual({
       status: 400,
       code: 'tail_needs_fleet',
     });
-    expect(await refusal(source, [['sessionId', 'wren'], ['tail', '0']])).toEqual({
+    expect(
+      await refusal(source, [
+        ['sessionId', 'wren'],
+        ['tail', '0'],
+      ]),
+    ).toEqual({
       status: 400,
       code: 'tail_needs_fleet',
     });

@@ -35,11 +35,7 @@ import { AgendaReplyBatcher, AgendaService, isAgendaSessionId } from './lib/agen
 import { KeyedSerialQueue } from './lib/agenda/serial-queue.ts';
 import { AgendaChangeFanout, AgendaReplyDelivery, AgendaBoardUndelivered } from './lib/agenda/observers.ts';
 import { agendaRoutes } from './lib/routes/agenda.ts';
-import {
-  AgendaRepliesFiles,
-  AgendaPendingChangesFiles,
-  AgendaPendingVersionsFiles,
-} from '../manifest.ts';
+import { AgendaRepliesFiles, AgendaPendingChangesFiles, AgendaPendingVersionsFiles } from '../manifest.ts';
 import { AsksConfigFile } from '../contract/index.ts';
 import { AgendaWaker, WAKE_SWEEP_MS } from './lib/agenda/waker.ts';
 import { AgendaResurfacer, RESURFACE_SWEEP_MS } from './lib/agenda/resurfacer.ts';

@@ -62,7 +62,9 @@ const LinkStoreRequestBodySchema: z.ZodType<LinkStoreRequestBody> = z.discrimina
 /** The request body from its canonical JSON bytes; `undefined` when it is not exactly one of the three shapes. */
 export function parseLinkStoreRequestBody(bytes: Uint8Array): LinkStoreRequestBody | undefined {
   try {
-    const parsed = LinkStoreRequestBodySchema.safeParse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
+    const parsed = LinkStoreRequestBodySchema.safeParse(
+      JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)),
+    );
     return parsed.success ? parsed.data : undefined;
   } catch {
     return undefined;

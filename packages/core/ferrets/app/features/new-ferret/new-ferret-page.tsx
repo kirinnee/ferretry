@@ -254,7 +254,9 @@ export function NewFerretPage({
             {/* Registered projects are Projects': its picker fills the folder field through the slot Ferrets offers. */}
             <PanelSlot
               daemon={daemon}
-              props={{ value: draft.folder, onPick: folder => update('folder', folder) } satisfies NewFerretProjectSlotProps}
+              props={
+                { value: draft.folder, onPick: folder => update('folder', folder) } satisfies NewFerretProjectSlotProps
+              }
               slot={NEW_FERRET_PROJECT_SLOT}
             />
           </FerretField>

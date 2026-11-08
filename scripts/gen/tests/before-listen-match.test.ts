@@ -24,6 +24,8 @@ describe('manifest-match: beforeListen', () => {
     ]);
   });
   test('only the daemon half may carry it', () => {
-    expect(messages({ beforeListen: async () => {} }, 'cli')).toEqual(['cli half returns unknown section "beforeListen"']);
+    expect(messages({ beforeListen: async () => {} }, 'cli')).toEqual([
+      'cli half returns unknown section "beforeListen"',
+    ]);
   });
 });
