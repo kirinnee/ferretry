@@ -39,6 +39,7 @@ import {
   StartRequestsFile,
   withStartRequest,
   RestartQueueEntrySchema,
+  FerretLaunchEnvironmentFiles,
   FerretSummaryFiles,
   FerretWaitFiles,
 } from '../contract/index.ts';
@@ -55,6 +56,9 @@ import { StateCallsignCounters } from './adapters/names/state-callsign-counters.
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from './lib/protocol/agent-address.ts';
 import { FerretRegistry } from './lib/registry/registry.ts';
 import { FerretTokenDirectory, type TokenEntry } from './lib/tokens/tokens.ts';
+import { instructionsAnswer } from './lib/agent-control/instructions.ts';
+import { LaunchEnvironmentStore, switchesOfRecord } from './lib/agent-control/launch-environment.ts';
+import { agentControlReader } from './lib/agent-control/reader.ts';
 import { RegistryWorkFolders } from './lib/work-folders/work-folders.ts';
 import { buildWorktrees } from './modules/worktrees.ts';
 import { FY_REQUEST_ID_HEADER } from './lib/protocol/headers.ts';
@@ -224,7 +228,25 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     serial: callsignSerial,
   });
 
+  // The launch environment: ONE store, written by every launch and read by `instructions` (stored over what the record
+  // implies; RULING #30). Each section's flag is its OWNER's launch part; Pack's `FY_PACK` is the only one registered.
+  // GAP(ports-pending: Conversation): `hypermediaLaunchEnvironment` (FY_HYPERMEDIA) is not registered as `launch.parts`.
+  // GAP(ports-pending: Agenda): no `launch.parts` contribution of FY_AGENDA yet.
+  // GAP(ports-pending: Lessons): no `launch.parts` contribution of FY_LEARNING_PASSIVE yet.
+  // Until each lands its section is not recorded, and `instructions` says the pane was not handed the switches: no stand-in.
+  const launchEnvironment = new LaunchEnvironmentStore(
+    {
+      read: async ferret => {
+        const read = await kernel.state.read(FerretLaunchEnvironmentFiles, ferret);
+        return read.ok ? (read.value ?? {}) : {};
+      },
+      write: async (ferret, environment) => await kernel.state.write(FerretLaunchEnvironmentFiles, environment, ferret),
+    },
+    async ferret => switchesOfRecord(registry.get(ferret)),
+  );
+
   const service = new FerretsService(registry, tokens, {
+    launchEnvironment,
     ready,
     claims,
     systemCallsign: async prefix => await systemCallsigns.next(prefix),
@@ -674,7 +696,16 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   );
 
   return {
-    provides: { ferrets: ferretsPort(service), workFolders },
+    provides: {
+      ferrets: ferretsPort(service),
+      workFolders,
+      agentControl: agentControlReader(ferret => service.agentControl(ferret)),
+    },
+    tools: {
+      // Today's `instructions`: answered for the ferret the session credential names, from what ITS launch told it.
+      instructions: async call =>
+        await instructionsAnswer(callerFerret(call), id => launchEnvironment.read(id), kernel.identity.binaries.client),
+    },
     hooks: {
       'bearers:ferret': {
         ferretFor: (digest: BearerDigest) => {

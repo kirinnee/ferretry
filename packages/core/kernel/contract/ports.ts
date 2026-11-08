@@ -370,6 +370,11 @@ export interface ConfigFilesWriter {
       readonly ifMatch?: string;
       /** Asked only when the edit loosens and `confirmedLoosening` is not set: true puts it into effect (Gate's claim). */
       readonly judge?: (sentences: readonly string[], removal: boolean) => boolean;
+      /**
+       * An agent's own write: as untrusted as a plugin's, so an edit that adds a `${secret:NAME}` reference is held for
+       * the owner and neither `confirmedLoosening` nor a judge confirms it (NN2).
+       */
+      readonly byAgent?: true;
     },
   ): Promise<ConfigWriteOutcome>;
   remove(

@@ -77,6 +77,18 @@ export const ALLOWED_KNIP: ReadonlyMap<string, string> = new Map([
     'loaded lazily by `import(`./views/${"surfaces"}.tsx`)` in app/index.ts, a template import knip cannot follow.',
   ],
   [
+    'knip.production.json#workspaces["packages/plugins/catalogs"].ignoreDependencies:react-dom',
+    'only app/features/catalogs/catalog-add-toast.tsx (createPortal) imports it, and that file waits for its caller (catalogs GAP(conversation) line in ports-pending.json); the dependency leaves with that GAP.',
+  ],
+  [
+    'knip.json#ignoreIssues["packages/plugins/catalogs/contract/wire/shared-catalog-diff.ts"]',
+    '`CatalogChangeFlagSchema` (a frozen wire schema, `contract/wire`) is built into the diff shapes in the same file and is a named word of the contract vocabulary a consumer may import; the contract is not edited after day 1, so the export stays and knip is told it is intended. Not a pending-port gap.',
+  ],
+  [
+    'knip.json#ignoreIssues["packages/plugins/catalogs/contract/wire/shared-catalog-owner.ts"]',
+    '`OwnedSharedItemVersionSchema` (a frozen wire schema, `contract/wire`) is built into the owner shapes in the same file and is a named word of the contract vocabulary a consumer may import; the contract is not edited after day 1, so the export stays and knip is told it is intended. Not a pending-port gap.',
+  ],
+  [
     'knip.json#ignoreIssues["packages/plugins/shells/contract/wire.ts"]',
     '`ShellCacheKeySchema` (wire.ts) is a second name for `NarHashSchema`, kept as its own word of the cache vocabulary; knip reports that alias as a duplicate export. Not a pending-port gap.',
   ],
@@ -123,10 +135,6 @@ export const ALLOWED_KNIP: ReadonlyMap<string, string> = new Map([
   [
     'knip.json#workspaces["packages/app"].entry:scripts/**/*.ts',
     'the app shell build scripts (build-release, build-fy-render-libs) are run by path from package.json scripts; nothing imports them.',
-  ],
-  [
-    'knip.json#workspaces["packages/app"].ignore:tests/integration/fixtures/chat-tail-scene.tsx',
-    'the scene chat-tail.visual.test.ts bundles by path (`--entry fixtures/chat-tail-scene.tsx`); nothing imports it.',
   ],
   [
     'knip.json#workspaces["packages/app"].ignore:tests/support/dom-leak-guard.ts',

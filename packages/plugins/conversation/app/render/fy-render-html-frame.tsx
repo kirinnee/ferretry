@@ -51,7 +51,7 @@ const FY_RENDER_HTML_SHELL_URL = '/fy-render-html.html';
 /**
  * WHAT THE PAGE IS PAINTED WITH, so a frameless page reads as part of the
  * message: the reader's mode, and the app's theme tokens as computed on the
- * column — `FY_RENDER_HTML_TOKENS` in `lib/fy-render-html-kit.ts` names every
+ * column — `FY_RENDER_HTML_TOKENS` in `@ferretry/app` (html-kit.ts) names every
  * one, and the shell admits each by that module's rule. Values the reader can
  * already see on screen, nothing else of the app. No background: the page is
  * transparent and sits on the column's own surface.

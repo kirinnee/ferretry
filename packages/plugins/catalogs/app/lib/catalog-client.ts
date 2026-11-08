@@ -14,7 +14,7 @@ export interface CatalogClient {
   request<T>(path: string, schema: z.ZodType<T>, init?: CatalogRequestInit): Promise<T>;
 }
 
-export type CatalogRequestInit = Pick<RequestInit, 'method' | 'headers' | 'body'>;
+type CatalogRequestInit = Pick<RequestInit, 'method' | 'headers' | 'body'>;
 
 /** The one read beyond Catalogs' own routes: the NAMES of this machine's secrets, governed by the Vault route's own grant (operator, secrets.use), not by `secretNamePicker`. */
 export const SECRET_NAMES_PATH = '/v1/secrets';

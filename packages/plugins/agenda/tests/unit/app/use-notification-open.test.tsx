@@ -9,6 +9,7 @@ import {
   NOTIFICATION_OPEN_MESSAGE,
   NotificationOpenInbox,
 } from '../../../app/lib/notification-open.ts';
+import { PUSH_TAP_SCREENS, routeTable } from '@ferretry/app';
 import { type Mounted, mount } from '@ferretry/app/testing';
 
 const ORIGIN = 'https://pwa.example.test';
@@ -35,8 +36,11 @@ const fakeSource = () => {
   return { source, listeners, emit };
 };
 
+/** The shell's route table and the machines this browser has paired: `a` and `b`. */
+const TAP = { routes: routeTable(PUSH_TAP_SCREENS), isPaired: (daemon: string) => daemon === 'a' || daemon === 'b' };
+
 function Probe(props: { source: NotificationOpenSource | null; navigate: (to: string) => void }) {
-  useNotificationOpen(props.source, ORIGIN, props.navigate);
+  useNotificationOpen(props.source, ORIGIN, props.navigate, TAP);
   return null;
 }
 
@@ -62,10 +66,10 @@ describe('useNotificationOpen', () => {
     mounted = await mount(<Probe source={source} navigate={to => navigated.push(to)} />);
 
     // Act
-    emit(message('/d/a/session/b?x=1#h'), [{ postMessage: (value: unknown) => acks.push(value) }]);
+    emit(message('/d/a/ferrets/b/chat?ask=A3#h'), [{ postMessage: (value: unknown) => acks.push(value) }]);
 
     // Assert
-    expect(navigated).toEqual(['/d/a/session/b?x=1#h']);
+    expect(navigated).toEqual(['/d/a/ferrets/b/chat?ask=A3#h']);
     expect(acks).toEqual([NOTIFICATION_OPEN_ACK]);
   });
 
@@ -76,10 +80,10 @@ describe('useNotificationOpen', () => {
     mounted = await mount(<Probe source={source} navigate={to => navigated.push(to)} />);
 
     // Act
-    emit(message('/p'));
+    emit(message('/d/a/agenda?ask=A3'));
 
     // Assert
-    expect(navigated).toEqual(['/p']);
+    expect(navigated).toEqual(['/d/a/agenda?ask=A3']);
   });
 
   it('ignores an invalid message and acknowledges nothing', async () => {
@@ -95,6 +99,34 @@ describe('useNotificationOpen', () => {
     // Assert
     expect(navigated).toEqual([]);
     expect(acks).toEqual([]);
+  });
+
+  it('S1/S2 a page-shown “needs input” line for a paired machine’s ferret opens that ferret’s chat', async () => {
+    const { source, emit } = fakeSource();
+    const navigated: string[] = [];
+    mounted = await mount(<Probe source={source} navigate={to => navigated.push(to)} />);
+
+    emit(message(`${ORIGIN}/d/b/ferrets/f1/chat?ask=A3`));
+
+    expect(navigated).toEqual(['/d/b/ferrets/f1/chat?ask=A3']);
+  });
+
+  it('S1/S2 an address the shell would not draw under a paired machine opens the app, never the address', async () => {
+    const { source, emit } = fakeSource();
+    const navigated: string[] = [];
+    mounted = await mount(<Probe source={source} navigate={to => navigated.push(to)} />);
+
+    for (const stored of [
+      '/d/stranger/ferrets/f1/chat?ask=A3', // a machine this browser never paired
+      '/join#c=123', // a daemon-less screen
+      '/', // the landing page
+      '/nowhere', // an unknown page outside a machine
+      '/d/a/nowhere', // a page a paired machine's router does not know: that machine's home, not the page
+    ]) {
+      emit(message(stored));
+    }
+
+    expect(navigated).toEqual(['/app/', '/app/', '/app/', '/app/', '/d/a']);
   });
 
   it('removes its listener on unmount', async () => {
@@ -117,7 +149,7 @@ describe('useNotificationOpen', () => {
     const inbox = new NotificationOpenInbox(ORIGIN);
     const acks: unknown[] = [];
     inbox.receive({
-      data: message('/d/b/session/s2?attention=A3'),
+      data: message('/d/b/ferrets/s2/chat?ask=A3'),
       ports: [{ postMessage: (value: unknown) => acks.push(value) }] as unknown as readonly MessagePort[],
     });
     const { source, listeners } = fakeSource();
@@ -129,14 +161,14 @@ describe('useNotificationOpen', () => {
         <Probe source={source} navigate={to => navigated.push(to)} />
       </NotificationOpenContext.Provider>,
     );
-    inbox.receive({ data: message('/later'), ports: [] });
+    inbox.receive({ data: message('/d/b/agenda'), ports: [] });
     await mounted.unmount();
     mounted = null;
-    inbox.receive({ data: message('/after-unmount'), ports: [] });
+    inbox.receive({ data: message('/d/b/agenda?ask=A9'), ports: [] });
 
     // Assert
     expect(acks).toEqual([NOTIFICATION_OPEN_ACK]);
-    expect(navigated).toEqual(['/d/b/session/s2?attention=A3', '/later']);
+    expect(navigated).toEqual(['/d/b/ferrets/s2/chat?ask=A3', '/d/b/agenda']);
     // The inbox already listens; the hook adds no second listener of its own.
     expect(listeners.size).toBe(0);
   });

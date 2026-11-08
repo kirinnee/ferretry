@@ -99,8 +99,9 @@ caches them between reads, so plaintext lives no longer than the read that neede
 
 `GET /v1/ferrets/:id/fs/file` and `fs/diff` mask every vault value found **whole** in the text (or, for a file that
 is not text, in its bytes), one `*` per character, as Terminals does. In a diff the section heading git prints after a
-hunk header's closing `@@` is read as the line before the hunk's first line, so a value split between that heading and
-the leading context is found whole and masked in both places. An **agent** is refused instead: a masked copy
+hunk header's closing `@@` is read as the line before the hunk's first line, and the hunks of a file are looked at
+together when the next one has a heading, so a value split between the previous hunk's trailing context, that heading
+and the leading context is found whole and masked in every place. The heading stays in the header, masked where covered. An **agent** is refused instead: a masked copy
 looks like ordinary content and could be written back over the real file, so the answer is a 403 with the code
 `holds_secret` and one sentence that names the path only, whatever the count of values. A **person** keeps the masked
 text, and the file answer says `redacted: true`; the app says "private values masked — this is not the file" and offers
@@ -118,6 +119,8 @@ no download or open of the masked bytes. Matching is whole-value only, never a p
   other side holds it whole — apart from an identical line, which takes the other side's mask). A section heading that
   git does not pick (a line that starts with a digit or a symbol is skipped) is not part of the diff, so a value
   split across it is the same partial.
+  Git also cuts a section heading to 80 bytes, so a value whose first line is longer than that and sits in the heading
+  is shown only in part (the same partial; an agent is still refused by the two-sides check above).
   A value is found in a CRLF file whether it was stored with `\r` (a CRLF key file, `token\r`) or without (LF), and a CRLF-stored value in an LF file: all
   three looks are made and the coverage is their union; the `\r` and the line breaks are kept in the output, so a masked
   multi-line value keeps one mask per line. Positions are

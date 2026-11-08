@@ -22,7 +22,7 @@ import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type CatalogClient, catalogClientOf } from '../lib/catalog-client.ts';
 import { CatalogClientProvider } from '../lib/client-context.tsx';
-import { fragmentOf, takeArrival } from '../lib/arrival.ts';
+import type { ArrivalHold } from '../lib/arrival.ts';
 import { daemonConnection } from '../lib/machine.ts';
 import { sharedMembers } from '../lib/members.ts';
 import { isSharingTab, SHARED_PATH } from '../lib/routes.ts';
@@ -89,35 +89,33 @@ export function createSharingScreen(client: PluginClient) {
 }
 
 /**
- * `/join`, where a share link lands. It reads the link's fragment off the address once, on mount, and takes it out of
- * the address (by `replaceState`, keeping the entry's own history state); a second link opened in the same tab is read
- * the same way, from the router's new entry or from `hashchange`, and starts the join over.
+ * `/join`, where a share link lands. The link's fragment is NOT read here: the eager module already took it off the
+ * address (and out of the history entry) before this chunk was asked for, and holds it in memory. This screen takes
+ * the held link on mount; a link that arrives later (a second one opened in the same tab, the router's new entry,
+ * `hashchange`) is delivered to it and starts the join over.
  */
-export function createJoinScreen() {
-  return function JoinRoute({ navigate, location }: DaemonlessScreenProps) {
-    const [link, setLink] = useState(() => ({ fragment: fragmentOf(location()), nonce: 0 }));
-    const read = useCallback((): void => {
-      const fragment = fragmentOf(location());
-      if (fragment === '') return;
-      takeArrival(globalThis);
-      setLink(held => ({ fragment, nonce: held.nonce + 1 }));
-    }, [location]);
+export function createJoinScreen(hold: ArrivalHold) {
+  return function JoinRoute({ navigate }: DaemonlessScreenProps) {
+    const [link, setLink] = useState(() => ({ fragment: hold.waiting(), nonce: 0 }));
     const entryKey = useOptionalRouter()?.entryKey;
     const arrived = useRef(false);
+    useEffect(() => {
+      const open = (fragment: string): void => setLink(held => ({ fragment, nonce: held.nonce + 1 }));
+      const stop = hold.subscribe(open);
+      // The link drawn above was only looked at; it is taken now. One that arrived between the draw and this effect
+      // differs from it and starts the join over.
+      const late = hold.take();
+      if (late !== '') setLink(held => (held.fragment === late ? held : { fragment: late, nonce: held.nonce + 1 }));
+      return stop;
+    }, []);
     // biome-ignore lint/correctness/useExhaustiveDependencies: `entryKey` is the trigger; a second link navigates to the same path
     useEffect(() => {
       if (!arrived.current) {
-        // The first link is already held by the state above; it only has to leave the address.
         arrived.current = true;
-        takeArrival(globalThis);
         return;
       }
-      read();
-    }, [read, entryKey]);
-    useEffect(() => {
-      globalThis.addEventListener('hashchange', read);
-      return () => globalThis.removeEventListener('hashchange', read);
-    }, [read]);
+      hold.read();
+    }, [entryKey]);
     const now = useCallback(() => new Date(), []);
     return (
       <JoinScreen

@@ -5,6 +5,9 @@
  * Subpaths: `@ferretry/app/ui` (the shared UI kit) and `@ferretry/app/testing` (fakes for the connect interface).
  */
 
+// ─── the fy-render sandbox shells' and Conversation's shared numbers, palette and HTML kit ───────────────────────────
+export * from './fy-render/index.ts';
+
 // ─── reaching a daemon: what Access and Connections provide (§4.8, §4.13) ─────────────────────────────────────────
 export {
   CARRIER_TAKERS,
@@ -171,7 +174,25 @@ export {
 } from './daemons/machine-names.ts';
 export { type DaemonClientOf, useDaemonClients, usePairedDaemons } from './shell/daemon-access.ts';
 
-export { DEVICE_SETTINGS_HREF, daemonHomeHref, daemonSettingsHref, HOME_HREF } from './router/routes.ts';
+export {
+  DEVICE_SETTINGS_HREF,
+  daemonHomeHref,
+  daemonSettingsHref,
+  HOME_HREF,
+  type Route,
+  type RouteTable,
+  routeTable,
+} from './router/routes.ts';
+export { notificationTapTarget, PUSH_TAP_SCREENS } from './router/tap-target.ts';
+export {
+  notificationClickUrl,
+  notificationUrl,
+  presentPush,
+  PUSH_ASK_PATTERN,
+  PUSH_FERRET_PATTERN,
+  type PushMachine,
+  pushMachineOf,
+} from './worker/notifications.ts';
 
 // ─── the reference grammar (docs/reference-standard.md) ───────────────────────────────────────────────────────────
 export * from './references/grammar.ts';

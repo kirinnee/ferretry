@@ -99,7 +99,7 @@ export const downloadText: SaveText = (fileName, text) => {
 };
 
 /** The device id Access mints, as a command line may carry it. */
-export const PAIRED_DEVICE_ID = /^fy_device_id_[A-Za-z0-9_-]{22}$/u;
+const PAIRED_DEVICE_ID = /^fy_device_id_[A-Za-z0-9_-]{22}$/u;
 export const PairedDeviceIdSchema = {
   safeParse: (value: unknown): { readonly success: boolean } => ({
     success: typeof value === 'string' && PAIRED_DEVICE_ID.test(value),

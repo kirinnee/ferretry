@@ -239,7 +239,11 @@ export function machinePreview(fixture: UpdateFixture, version: number, change: 
   });
 }
 
-/** A second verified catalog beside the fixture's, listing one skill of its own. The signature is the first one's. */
+/**
+ * A second verified catalog beside the fixture's, listing one skill of its own. The signature is the first one's.
+ *
+ * @pending catalogs: the test helper otherCatalogView waits for its caller, Conversation's add-skills-model test
+ */
 export function otherCatalogView(
   fixture: SharedItemFixture,
   name = 'Design catalog',

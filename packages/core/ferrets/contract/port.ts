@@ -108,7 +108,7 @@ export interface StartRequest {
 }
 
 export type StartFailure =
-  | { readonly code: 'refused' | 'unservable_model'; readonly reason: string } // a start.decide taker said no (`unservable_model`: what the start asked of its model cannot be given)
+  | { readonly code: 'refused' | 'unservable_model'; readonly reason: string } // a start.decide taker said no, or a test-mode runner refused a real harness (`real_harness`) (`unservable_model`: what the start asked of its model cannot be given)
   | { readonly code: 'folder'; readonly reason: string } // WorkFolders refused the folder
   | { readonly code: 'harness_unavailable' | 'runner_unavailable' | 'login_unavailable'; readonly reason: string }
   | { readonly code: 'failed'; readonly reason: string };

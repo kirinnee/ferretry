@@ -72,9 +72,14 @@ import {
   type FyRenderBlock as ParsedBlock,
 } from './fy-render.ts';
 import { fyRenderHeightKey, recallFyRenderHeight, rememberFyRenderHeight } from './fy-render-height-memory.ts';
-import { FY_RENDER_HTML_PAGE_TOKENS, FY_RENDER_HTML_TOKENS } from './fy-render-html-kit.ts';
+import {
+  FY_RENDER_HTML_PAGE_TOKENS,
+  FY_RENDER_HTML_TOKENS,
+  mermaidThemeVariables,
+  paletteKey,
+  type ResolvedTheme,
+} from '@ferretry/app';
 import { flowsDown, isNarrowColumn, verticalizeMermaid } from './fy-render-mermaid-layout.ts';
-import { mermaidThemeVariables, paletteKey, type ResolvedTheme } from './fy-render-palette.ts';
 import { MERMAID_LEGIBLE_SCALE, svgNaturalSize, viewBoxSize } from './fy-render-viewport-model.ts';
 import { FyRenderChart, type FyRenderChartModules } from './fy-render-chart.tsx';
 import { FyRenderFragment } from './fy-render-fragment.tsx';
@@ -128,7 +133,7 @@ const PAGE_TOKENS: ReadonlySet<string> = new Set(FY_RENDER_HTML_PAGE_TOKENS);
 
 /**
  * WHAT AN INTERACTIVE PAGE PAINTS ITSELF WITH, so a frameless page reads as part of the message rather
- * than as a window into another one: the reader's mode and the app's theme tokens (`lib/fy-render-html-kit.ts`
+ * than as a window into another one: the reader's mode and the app's theme tokens (`@ferretry/app` (html-kit.ts)
  * names them) as computed where the block sits — so a swatch preview's own family is the one sent — plus the
  * column's ink and font. Values handed to the shell as data, re-read on every theme switch; nothing of the app
  * beyond what is already on screen. No background: the page is transparent on the column's own surface.

@@ -4,6 +4,7 @@ import { InstantSchema } from '@ferretry/std';
 import { FerretTitleSchema, FerretWaitingSchema } from './ids.ts';
 import { StartOptionsSchema } from './port.ts';
 import { AgentPinsDocumentSchema, FerretPinsDocumentSchema } from './pins.ts';
+import { LAUNCH_SWITCH_VARIABLES } from './instructions-report.ts';
 import { SessionConfigSchema, SessionStateSchema } from './view/ferret-view.ts';
 
 /**
@@ -127,6 +128,25 @@ export const FerretSummaryFiles = defineState<'summary', Uint8Array>({
   store: 'opaque',
   format: 1,
   mode: 0o600,
+});
+
+/**
+ * What a ferret's last launch handed its pane of the section switches: `state/ferrets/<ferret>/launch-environment.json`
+ * (today's `environment.json`, kept to the switches and never a secret). It is the PERSISTED launch environment that
+ * `instructions` reads, through one reader, so a daemon restart changes no answer. Each switch's decision stays with
+ * the owner that contributes it as a launch part; this records only what the launch said. Private to Ferrets.
+ */
+export const FerretLaunchEnvironmentFiles = defineState({
+  name: 'launch-environment',
+  path: '*/launch-environment.json',
+  store: 'json',
+  format: 1,
+  schema: z.partialRecord(z.enum(LAUNCH_SWITCH_VARIABLES), z.string().max(16)),
+  mode: 0o600,
+  onDamaged: {
+    narrower:
+      'a damaged launch-environment.json reads as no recorded switches, so the ferret is told it was not handed them',
+  },
 });
 
 /**

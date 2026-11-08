@@ -2,6 +2,8 @@ import { type DaemonlessScreenProps, type DaemonlessViews, provideToShell } from
 import type { AppComponent, PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { type ArrivalHold, armArrivalHold } from './lib/arrival.ts';
+import { JOIN_PATH } from './lib/routes.ts';
 import { lazyComponent } from './lazy.ts';
 
 /**
@@ -19,10 +21,14 @@ const sharingScreen = (client: PluginClient): AppComponent<ScreenProps> =>
  * A daemon-less screen: built with nothing but the shell's daemon-less props, so it cannot be given a client. The shell's
  * `View` returns React nodes and this module holds no React, so the lazy component is handed over as one.
  */
-const daemonlessScreen = (factory: 'createJoinScreen' | 'createSharedScreen'): DaemonlessViews[string] =>
-  lazyComponent<DaemonlessScreenProps>(async () =>
-    ((await loadViews())[factory] as () => AppComponent<DaemonlessScreenProps>)(),
-  ) as DaemonlessViews[string];
+const daemonlessScreen = (
+  build: (views: Record<string, unknown>) => AppComponent<DaemonlessScreenProps>,
+): DaemonlessViews[string] =>
+  lazyComponent<DaemonlessScreenProps>(async () => build(await loadViews())) as DaemonlessViews[string];
+
+/** The views module's screen factories, as this module calls them. */
+type JoinFactory = (hold: ArrivalHold) => AppComponent<DaemonlessScreenProps>;
+type SharedFactory = () => AppComponent<DaemonlessScreenProps>;
 
 /** The per-machine slot of a daemon-less screen: never drawn (its route is under no `/d/<machine>/`), so it draws nothing. */
 const daemonlessPlaceholder = (): null => null;
@@ -50,6 +56,14 @@ export default provideToShell(
     }),
   }),
   {
-    daemonless: () => ({ join: daemonlessScreen('createJoinScreen'), shared: daemonlessScreen('createSharedScreen') }),
+    // The factory runs before the first render and before any chunk loads: a share link's code leaves the address bar and
+    // the history entry HERE, so it does not wait for the views chunk, which may be slow or never arrive.
+    daemonless: () => {
+      const hold = armArrivalHold(globalThis, JOIN_PATH);
+      return {
+        join: daemonlessScreen(views => (views.createJoinScreen as JoinFactory)(hold)),
+        shared: daemonlessScreen(views => (views.createSharedScreen as SharedFactory)()),
+      };
+    },
   },
 );

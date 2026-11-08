@@ -15,8 +15,8 @@ import {
   FY_RENDER_HTML_KIT_CSS,
   FY_RENDER_HTML_TOKEN_MAX_LENGTH,
   FY_RENDER_HTML_TOKENS,
-} from '../../../../app/render/fy-render-html-kit.ts';
-import { THEME_TOKENS } from '../../../../app/render/fy-render-palette.ts';
+} from '../../../src/fy-render/html-kit.ts';
+import { THEME_TOKENS } from '../../../src/fy-render/palette.ts';
 
 describe('fy-render html kit tokens', () => {
   test('should carry every palette token an illustration reads, by its app name', () => {

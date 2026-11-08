@@ -3,8 +3,10 @@
  * only inspects it (the registry generator, `manifest-match`) before the app shell, which owns React, is in place.
  *
  * The first call starts the load and SUSPENDS by throwing the loading promise, which is the protocol a React
- * `<Suspense>` boundary understands; the shell wraps every plugin component in one. Once loaded the same call returns
- * the real component's output. A load that fails throws the failure for the shell's error boundary.
+ * `<Suspense>` boundary understands. The shell has no such boundary yet (GAP(shell) in ports-pending.json), so until it
+ * adds one the first draw suspends the whole root. Once loaded the same call returns the real component's output. A load
+ * that fails throws the failure for the shell's error boundary. Nothing that must happen early may wait on this: a share
+ * link's code is taken off the address by the eager module (`lib/arrival.ts`), not by a lazily loaded view.
  */
 
 import type { AppComponent } from '@ferretry/kernel/manifest';

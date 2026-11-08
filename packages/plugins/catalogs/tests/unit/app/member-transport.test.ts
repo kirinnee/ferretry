@@ -428,6 +428,22 @@ describe('R2-S1 this half holds the carrier to the deadline and decides finality
     }
   });
 
+  it('R3-N1 a join whose session settled does not wait for a drive that returns late', async () => {
+    const { transport, dials } = harness(
+      async (_step, session) => {
+        session.finish(joinedAnswer);
+        return await never(); // a drive that runs to the end of the session and so outlives the join
+      },
+      { mirror: false },
+    );
+    const pending = transport.join({ seed: SEED, clientName: 'Browser', keys: KEYS });
+    // Well inside the 4 s deadline: the answer comes from the settled session, not from the drive or the timer.
+    const first = await Promise.race([pending, clock(250).then(() => 'waited' as const)]);
+    expect(first).not.toBe('waited');
+    expect(first).toMatchObject({ kind: 'joined', carrier: { kind: 'direct' } });
+    expect(dials.map(dial => dial.kind)).toEqual(['direct']);
+  });
+
   it('reports a share that may be spent when the code was sent and the carrier then outlived its deadline', async () => {
     const deadlines = spyOn(globalThis, 'setTimeout');
     try {
@@ -623,7 +639,9 @@ describe('R2-S2 which 401 and which close mean the key is refused', () => {
 });
 
 describe('GAP(connections): guarantees that need the real carrier (ported with Connections’ dial and drive)', () => {
-  it.todo('S1 the direct deadline stops a dial that never opens and the walk moves on (should not hang the join)');
+  it.todo(
+    'S1 the carrier’s own dial timeout: a dial that never opens is closed by the real carrier (this half’s deadline is covered above)',
+  );
   it.todo('S1 a rendezvous that closes before it accepts the session is a transport failure, not a refusal');
   it.todo('S1 the heartbeat keeps a member session alive, and a session the carrier dropped is no longer live');
 });

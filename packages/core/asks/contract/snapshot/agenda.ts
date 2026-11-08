@@ -2163,8 +2163,8 @@ export const ASK_LINK_PARAMETER = 'ask';
  * browser's per-machine push worker puts it under that machine; the daemon never names an origin for itself. A push
  * with no item to point at opens here.
  */
-export const sessionNotificationPath = (sessionId: string): string => `/session/${encodeURIComponent(sessionId)}`;
+export const sessionNotificationPath = (sessionId: string): string => `/ferrets/${encodeURIComponent(sessionId)}/chat`;
 
-/** Where an Agenda notification opens: its conversation, AT the ask (`?ask=A3`). */
+/** Where an Agenda notification opens: the ferret's chat, AT the ask (`/ferrets/<ferret>/chat?ask=A3`). */
 export const agendaNotificationPath = (sessionId: string, id: AgendaId): string =>
   `${sessionNotificationPath(sessionId)}?${ASK_LINK_PARAMETER}=${encodeURIComponent(id)}`;

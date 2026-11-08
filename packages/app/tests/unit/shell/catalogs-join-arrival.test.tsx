@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import type { ComponentType } from 'react';
 import { type DaemonlessPorts, registeredDaemonless } from '../../../src/connect/provides.ts';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { generated } from '../../../src/generated/surfaces.ts';
@@ -27,7 +28,18 @@ const browser: ShellWindow = {
 };
 
 const go = (path: string): void => window.history.replaceState(null, '', path);
-afterEach(() => go('/'));
+
+/** The `hashchange` listeners a boot armed on the window, so the next test does not find a stale hold listening. */
+const armed: EventListener[] = [];
+const addListener = window.addEventListener.bind(window);
+window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: unknown) => {
+  if (type === 'hashchange' && typeof listener === 'function') armed.push(listener);
+  addListener(type, listener, options as AddEventListenerOptions);
+}) as typeof window.addEventListener;
+afterEach(() => {
+  go('/');
+  for (const listener of armed.splice(0)) window.removeEventListener('hashchange', listener);
+});
 
 /** Lets the lazily loaded views arrive and their effects run. */
 async function until(done: () => boolean): Promise<void> {
@@ -37,7 +49,7 @@ async function until(done: () => boolean): Promise<void> {
 }
 
 /** Boots the shell over the real Catalogs half with no daemon paired, at whatever address the page is on. */
-async function boot() {
+async function boot(blocked?: ComponentType) {
   const transport = new FakeTransport(() => json({ error: 'none', code: 'not_found' }, 404));
   const storage = memoryStore();
   const daemons = new DaemonList({ storage, now: () => 1 });
@@ -48,7 +60,11 @@ async function boot() {
     surfaces,
     daemons,
     connect: async () => transport,
-    daemonless: { views: registered.views, location: () => window.location.href },
+    daemonless: {
+      views:
+        blocked === undefined ? registered.views : new Map([...registered.views, ['catalogs.join', blocked as never]]),
+      location: () => window.location.href,
+    },
   });
   const mounted = await mount(
     <App
@@ -63,6 +79,52 @@ async function boot() {
 }
 
 const FRAGMENT = '#v1;code=fy_share_x';
+
+describe('R3-B1 the code leaves the address before any Catalogs chunk is asked for', () => {
+  test('R3-B1 arming the daemon-less screens alone takes the code off the address and the history entry: no chunk, no React', () => {
+    go(`/join${FRAGMENT}`);
+    const lengthBefore = window.history.length;
+    const push = spyOn(window.history, 'pushState');
+    const replace = spyOn(window.history, 'replaceState');
+    try {
+      // Nothing is mounted and no view is drawn, so the lazily loaded views chunk has not been asked for.
+      const registered = registeredDaemonless([catalogs], {} as DaemonlessPorts);
+      expect(registered.failures).toEqual([]);
+      expect(window.location.hash).toBe('');
+      expect(window.location.pathname).toBe('/join');
+      expect(window.history.length).toBe(lengthBefore);
+      expect(push).not.toHaveBeenCalled();
+      expect(replace.mock.calls.map(call => String(call[2] ?? ''))).toEqual(['/join']);
+    } finally {
+      push.mockRestore();
+      replace.mockRestore();
+    }
+  });
+
+  test('R3-B1 a join screen that never arrives (its chunk is blocked) still leaves the address clean', async () => {
+    go(`/join${FRAGMENT}`);
+    const lengthBefore = window.history.length;
+    const never = (): never => {
+      throw new Promise(() => {});
+    };
+    const { mounted } = await boot(never);
+    expect(window.location.hash).toBe('');
+    expect(window.history.length).toBe(lengthBefore);
+    await mounted.unmount();
+  });
+
+  test('R3-B1 a join screen that fails to load (its chunk errors) still leaves the address clean', async () => {
+    go(`/join${FRAGMENT}`);
+    const lengthBefore = window.history.length;
+    const failing = (): never => {
+      throw new Error('chunk failed to load');
+    };
+    const { mounted } = await boot(failing);
+    expect(window.location.hash).toBe('');
+    expect(window.history.length).toBe(lengthBefore);
+    await mounted.unmount();
+  });
+});
 
 describe('R2-B1 a share link arriving on /join', () => {
   test('R2-B1 the shell with no daemons takes the code off /join: no hash, no new history entry, no write carrying a #', async () => {
@@ -122,6 +184,26 @@ describe('R2-B1 a share link arriving on /join', () => {
       await mounted.unmount();
     } finally {
       push.mockRestore();
+    }
+  });
+
+  test('R3-N4 a real second link (pushState, popstate, then hashchange) leaves the address once and restarts the join once', async () => {
+    go('/join');
+    const { mounted } = await boot();
+    await until(() => mounted.container.textContent !== '');
+    const replace = spyOn(window.history, 'replaceState');
+    try {
+      window.history.pushState(null, '', '/join#v1;code=fy_share_z');
+      window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+      await until(() => window.location.hash === '');
+      expect(window.location.hash).toBe('');
+      const stripping = replace.mock.calls.filter(call => call[2] === '/join');
+      expect(stripping.length).toBeGreaterThan(0);
+      expect(replace.mock.calls.every(call => !String(call[2] ?? '').includes('#'))).toBe(true);
+      await mounted.unmount();
+    } finally {
+      replace.mockRestore();
     }
   });
 

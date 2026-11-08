@@ -1,3 +1,4 @@
+import { unarmedHostFacts } from '../../support/daemon/host-facts.ts';
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import type { LimitsFile } from '@ferretry/core-ferrets/contract';
 import { ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
@@ -32,6 +33,7 @@ async function subject(effectiveLimits?: () => Promise<LimitsFile>, platform = '
     build: ctx => buildTerminals(ctx, { tmux, socketPath: '/fixture/state/terminals/tmux.sock' }),
   });
   const host = await testHost({
+    hostFacts: unarmedHostFacts,
     plugins: [plugin],
     fakes: { ferrets, vault: fakeVault([]) },
     gate: new StandInAdmission(() => (caller === 'ferret' ? ferretStanding(FERRET) : ownerStanding())),

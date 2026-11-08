@@ -45,12 +45,12 @@ import { type MemberClient, MemberRefusedError, MemberUnreachableError } from '.
 import type { MemberSubscription, MintedMemberKeys } from './member-keys.ts';
 
 /** The carrier a session crossed. */
-export type MemberCarrierMethod =
+type MemberCarrierMethod =
   | { readonly kind: 'direct'; readonly daemonUrl: string }
   | { readonly kind: 'relay'; readonly relayUrl: string };
 
 /** What the publisher said joining with this code needs. */
-export type JoinOptionsAnswer =
+type JoinOptionsAnswer =
   | { readonly kind: 'open'; readonly why: 'first-browser' | 'owner-approved' }
   | {
       readonly kind: 'challenge';
@@ -126,7 +126,8 @@ interface Held {
  * ONE ATTEMPT ON ONE CARRIER, decided by the session this half built (R2-S1). The carrier's `drive` runs the heartbeat
  * and the deadline, but this half does not trust it to:
  *  - it holds `drive` to its OWN deadline timer (`step.deadlineMs`): on expiry the session and the socket are closed and
- *    the attempt is a transport failure, so a carrier that ignores the value cannot hang the walk;
+ *    the attempt is a transport failure, so a carrier that ignores the value cannot hang the walk; and it does not wait
+ *    for `drive` once the session itself has settled (`drive` is still called: it wires the socket's handlers);
  *  - the outcome is what the session settled with, never what `drive` resolved or rejected with: a refusal the session
  *    sealed stays a refusal if `drive` wraps the error, and a value `drive` made up is not a join;
  *  - the socket is kept in `held` BEFORE the session is built, so a build that throws still closes what the carrier opened.
@@ -157,6 +158,10 @@ async function attemptOver<T>(
       box.current = { kind: 'failed', reason };
     },
   );
+  const over = settled.then(
+    () => undefined,
+    () => undefined,
+  );
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<void>(resolve => {
     timer = setTimeout(resolve, step.deadlineMs);
@@ -169,7 +174,9 @@ async function attemptOver<T>(
     }
   })();
   try {
-    await Promise.race([driven, expired]);
+    // The attempt is over when the session says so, when `drive` returns, or when the deadline passes: a `drive` that
+    // returns late (it keeps its own cleanup, or runs to the session's end) never makes a settled session wait it out.
+    await Promise.race([driven, expired, over]);
   } finally {
     clearTimeout(timer);
   }

@@ -2,7 +2,8 @@ import { AsksPort } from '@ferretry/core-asks/contract';
 import { AUDIT_KINDS, audit, Bearers, CAPABILITIES, GatePort } from '@ferretry/core-gate/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
 import type { ConfigDef } from '@ferretry/kernel/contract';
-import { definePlugin, panel, route, screen, socket, verb } from '@ferretry/kernel/manifest';
+import { z } from 'zod';
+import { definePlugin, panel, route, screen, socket, tool, verb } from '@ferretry/kernel/manifest';
 import {
   ArchiveFile,
   AutoResumeFile,
@@ -33,10 +34,12 @@ import {
   SitrepLines,
   StartDecide,
   WorkFoldersPort,
+  AgentControlPort,
   WorktreesFile,
   AgentPinsFile,
   FerretConfigFile,
   FerretDetailsFile,
+  FerretLaunchEnvironmentFiles,
   FerretPinsFile,
   FerretStateFile,
   StartRequestsFile,
@@ -67,7 +70,7 @@ export default definePlugin({
     { word: 'state', means: 'starting, working, idle, stopped' },
   ],
   needs: { gate: GatePort, vault: VaultPort, asks: AsksPort },
-  provides: { ferrets: FerretsPort, workFolders: WorkFoldersPort },
+  provides: { ferrets: FerretsPort, workFolders: WorkFoldersPort, agentControl: AgentControlPort },
   actions: {
     // R-0424: the journal stream (a ferret from its cursor, or the fleet's recent tail). Today's descriptor.
     sockets: [
@@ -76,6 +79,19 @@ export default definePlugin({
         caller: 'any',
         audit: { skip: 'a live read of the journals records nothing' },
         guard: 'secrets',
+      }),
+    ],
+    // Today's `instructions` tool: which of its own system-prompt sections THIS ferret launched with. The launch parts own
+    // those sections, so Ferrets answers it, for the ferret the session credential names.
+    agentTools: [
+      tool('instructions', {
+        minimum: 'authenticated',
+        caller: 'any',
+        audit: { skip: 'a read of the ferret’s own launch sections: it changes nothing' },
+        guard: { none: 'section names and on/off; never a value' },
+        input: z.strictObject({}),
+        summary:
+          'Which Ferretry sections your prompt launched with (hypermedia, Pack mode, agenda mode, lessons) and how to turn each on. Check before saying one is missing.',
       }),
     ],
     // Today's descriptors (packages/daemon/src/lib/runtime/mounts/{sessions,session-control,session-resume,
@@ -474,6 +490,7 @@ export default definePlugin({
       TransferBriefFiles,
       MoveInflightFiles,
       FerretWaitFiles,
+      FerretLaunchEnvironmentFiles,
     ],
     // Cast: see packages/core/gate/manifest.ts (leaf `ConfigDef<unknown>` variance; reported to the lead).
     // biome-ignore lint/suspicious/noExplicitAny: the leaf cast named above

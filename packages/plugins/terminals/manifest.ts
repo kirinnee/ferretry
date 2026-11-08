@@ -328,7 +328,11 @@ export default definePlugin({
     ],
   },
 
-  doctor: ['tmux', 'user-slice'],
+  /** `tmux-release`: today's `tmux release` row, asked fresh per report (it never starts a tmux server). */
+  doctor: ['tmux', 'user-slice', 'tmux-release'],
+
+  /** `fyd --check` asks the installed tmux and this daemon's own socket for their releases; nothing runs it at boot. */
+  selftest: ['tmux-release'],
 
   permissions: {
     /**
@@ -350,5 +354,7 @@ export default definePlugin({
     ],
     /** `downloads`: only to locate Terminals' state folder for tmux's socket (no kernel port names it). */
     roots: ['downloads'],
+    /** The kernel's launch-guard fact: whether this daemon is a test's, and the PATH a real harness would be found on. */
+    hostFacts: true,
   },
 });
