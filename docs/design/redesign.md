@@ -1565,12 +1565,17 @@ dusk-layout/
   `skeleton`, and the global `manifest-match` check accepts a skeleton half only while the plugin is listed in
   `ports-pending.json`, which may only shrink.
 - **Open gaps are sorted by root cause** (lead ruling #50, 2026-11-08): every `pendingReasons` line starts with
-  the one piece of work that closes it, and lines are ordered by it — `[mount]` (built, but the app shell has no
-  mount point for it), `[kernel: <capability>]` (a host capability the kernel does not offer), `[cross: <plugin>]`
-  (a half the named plugin must contribute to another), `[compose]` (ported, but the plugin's own daemon does not
-  compose it), `[cli]` (CLI verbs not declared), `[tests]` (only tests or captures missing), `[own]` (the plugin's
-  own remaining work). Progress is reported per bucket, and work is cut as one unit per bucket (one shell mount
-  pass, one kernel batch with one security review, one unit per contributing plugin), not line by line.
+  the one piece of work that closes it, and lines are ordered by it — `[shell]` (the app shell draws no host for it,
+  or the app contract is too thin to carry it), `[declare]` (built, and the slot, screen or tab it needs already
+  exists: the owning plugin's own manifest and app half must declare and bind it), `[kernel: <capability>]` (a host
+  capability the kernel does not offer), `[contribute: <plugin>]` (the named plugin contributes into a slot or hook
+  another plugin already offers, with no change to that host), `[cross: <plugin>]` (it needs data, a contract member
+  or a host change from the named plugin), `[compose]` (ported, but the plugin's own daemon does not compose it),
+  `[cli]` (CLI verbs not declared), `[tests]` (only tests or captures missing), `[own]` (the plugin's own remaining
+  work, or a lead decision about who owns it). The old `[mount]` bucket was split into `[shell]` and `[declare]`
+  (ruling #50, shell-mount pass). Progress is reported per bucket, and work is cut as one unit per bucket (one shell
+  contract change, one kernel batch with one security review, one unit per declaring or contributing plugin), not
+  line by line.
 - **Guarantee fixtures**: every row of Appendix D that a package owns has a test whose name contains the row id
   (`I103 wait predicate sees masked text`, in **Terminals**). `fy check` fails a kept row with no test. A row's owner
   is the package whose code **enforces** it, row by row, never the section it came from (review r8 finding 1): the
