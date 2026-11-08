@@ -900,6 +900,20 @@ describe("ruling #45 (b): a queued message over 1000 characters goes by file (to
     for (const name of names) expect(name).toMatch(/^queued-[\w-]{1,128}\.md$/u);
     expect(await readdir(w.folderOf(id))).not.toContain('escape');
   });
+
+  test('ruling #45 two send ids that differ only by case never name one file (a filesystem that ignores case)', async () => {
+    const w = await world();
+    const { id, seam } = await live(w);
+    await seam.queue('g'.repeat(1_500), { sendId: 'send-case' });
+    await seam.queue('h'.repeat(1_500), { sendId: 'Send-Case' });
+
+    const names = await readdir(`${w.folderOf(id)}/channel`);
+    // The capitalised id takes a fresh lower-case name, so on macOS it could not have overwritten the first.
+    expect(names).toHaveLength(2);
+    expect(names).toContain('queued-send-case.md');
+    for (const name of names) expect(name).toBe(name.toLowerCase());
+    expect(await readFile(queuedFile(w, id, 'send-case'), 'utf8')).toBe(`${'g'.repeat(1_500)}\n`);
+  });
 });
 
 describe('ruling #31b: the start writes the session document, and strict ancestry stays strict', () => {
