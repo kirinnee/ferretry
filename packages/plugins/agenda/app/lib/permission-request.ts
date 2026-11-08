@@ -67,21 +67,23 @@ const NOUN: Readonly<Record<'run' | 'read' | 'edit' | 'create' | 'fetch', string
 };
 
 /** The request as a verb phrase with no subject — `read /etc/hostname`, ``run `curl -s …` ``. */
-const permissionPhrase = (request: PermissionRequest, what = request.what): string => {
-  switch (request.action) {
+const permissionPhrase = (
+  action: Exclude<PermissionAction, 'other'>,
+  request: PermissionRequest,
+  what = request.what,
+): string => {
+  switch (action) {
     case 'run':
       return what === undefined ? `run ${NOUN.run}` : `run \`${what}\``;
     case 'read':
     case 'edit':
     case 'create':
     case 'fetch':
-      return `${request.action} ${what ?? NOUN[request.action]}`;
+      return `${action} ${what ?? NOUN[action]}`;
     case 'use':
       return `use ${what ?? request.tool}`;
     case 'exit-plan':
       return 'exit plan mode and start';
-    case 'other':
-      return `use ${request.tool}`;
   }
 };
 
@@ -95,7 +97,7 @@ export interface PermissionWords {
 export const permissionWords = (agent: string, request: PermissionRequest): PermissionWords => {
   if (request.action === 'other') return { lead: `${agent} needs permission to use ${request.tool}` };
   if (request.action === 'exit-plan' || request.what === undefined)
-    return { lead: `${agent} wants to ${permissionPhrase(request)}` };
+    return { lead: `${agent} wants to ${permissionPhrase(request.action, request)}` };
   return { lead: `${agent} wants to ${request.action}`, what: request.what };
 };
 

@@ -14,7 +14,7 @@ import {
   SendRequestSchema,
   type SendResult,
   SendRetryRequestSchema,
-  SendSubmitRequestSchema,
+  SendEnterRequestSchema,
   type SessionHandoff,
   SessionHandoffNameSchema,
   type SessionView,
@@ -439,7 +439,7 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly MountRoute[
       handle: async context => {
         const id = pathSessionId(context);
         const sendId = pathSendId(context);
-        await parseBody(context.request, SendSubmitRequestSchema);
+        await parseBody(context.request, SendEnterRequestSchema);
         return jsonResponse(await subsystem.submit(id, sendId).catch(refuse));
       },
     },

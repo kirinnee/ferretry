@@ -1,3 +1,5 @@
+import { itemCardKind } from '../../../../app/lib/card-kind.ts';
+import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
 import { TASK_CARD_KIND } from '../../../../app/lib/card-kind.ts';
 import { describe, expect, it } from 'bun:test';
 import { CardKindChip } from '../../../../app/features/agenda/card-kind-chip.tsx';
@@ -18,5 +20,12 @@ describe('CardKindChip', () => {
     expect(agendaChip.textContent).toBe('Decision');
     expect(agendaChip.innerHTML).not.toBe(taskChip.innerHTML);
     await agenda.unmount();
+  });
+});
+
+describe('itemCardKind', () => {
+  it('words a notice as FYI whatever its kind, and any other item by its kind', () => {
+    const notice = itemCardKind(agendaItem('N1', { notice: true, kind: 'decision' } as never));
+    expect(notice).toEqual({ family: 'agenda', word: 'FYI' });
   });
 });

@@ -261,3 +261,25 @@ describe('G164 a related check that never names the secret cannot tell a guessed
     expect(await answers(a.service)).toEqual(await answers(b.service));
   });
 });
+
+describe('the work search index failing to build', () => {
+  const tick = async (): Promise<void> => {
+    for (let spin = 0; spin < 5; spin += 1) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+
+  test('a warm-up that cannot build says so once, and the next search builds again', async () => {
+    const redaction = new FakeRedaction();
+    const asks = new FakeSource('asks', [askWork({ id: 'A1', title: 'Relay question' })]);
+    const { service, warnings } = build([asks], { redaction });
+    const epoch = redaction.epoch.bind(redaction);
+    redaction.epoch = async () => {
+      throw new Error('the vault will not open');
+    };
+    service.warm();
+    await tick();
+    expect(warnings).toEqual(['work search could not build its index: the vault will not open']);
+
+    redaction.epoch = epoch;
+    expect((await service.search(query('relay'))).total).toBe(1);
+  });
+});

@@ -1,12 +1,13 @@
 import { describe, it } from 'bun:test';
 import type { SendEnvironment } from '../../../cli/lib/send/ports.ts';
-import type { SendResult } from '../../../contract/index.ts';
+import type { SendRecord, SendResult } from '../../../contract/index.ts';
 import should from 'should';
 import { at } from '../../support/instant.ts';
 
 type SendDisposition = SendResult['disposition'];
 import {
   describeDisposition,
+  describeFate,
   describePark,
   describeSendResult,
   planSend,
@@ -214,5 +215,28 @@ describe('describePark', () => {
     // Assert
     should(actual.parked).be.true();
     should(actual.note).match(/open-ended; the 4h backstop still applies/);
+  });
+});
+
+describe('describeFate', () => {
+  const fate = (record: Partial<SendRecord>): string => describeFate({ fate: 'accepted', ...record } as SendRecord);
+
+  it('should say where a send settled, and for a failure that it is safe to send again', () => {
+    should(fate({ fate: 'delivered' })).startWith('delivered');
+    should(fate({ fate: 'timed_out', unaccountedReason: 'ferret_ended', attempt: 2 })).equal(
+      'not delivered (ferret ended) after 2 attempt(s); it is safe to send it again',
+    );
+    should(fate({ fate: 'unaccounted' })).startWith('unconfirmed (timeout)');
+  });
+
+  it('should say what cancelling did on the screen', () => {
+    should(fate({ fate: 'cancelled', cancelEffect: 'cleared' })).endWith('it was erased from the agent’s composer');
+    should(fate({ fate: 'cancelled' })).endWith('it never reached the agent');
+  });
+
+  it('should say a message typed and not sent is waiting for Enter, a queued one is held, and an accepted one is unproven', () => {
+    should(fate({ fate: 'queued', typedNotSent: true })).startWith('typed into the agent’s composer and not sent');
+    should(fate({ fate: 'queued' })).startWith('queued — the agent is holding it');
+    should(fate({ fate: 'accepted' })).equal('accepted — not yet proven anywhere');
   });
 });
