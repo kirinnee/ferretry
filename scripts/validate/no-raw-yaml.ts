@@ -25,11 +25,18 @@
  * - any `YAML.parse`-family member (`parse`, `parseDocument`, `load`, …) of a name that holds a YAML module;
  * - any import, re-export, dynamic import or `require` of a module whose bare name contains `yaml` (`yaml`,
  *   `js-yaml`, `@std/yaml`, `yamljs`, …), type-only imports included: they are the first step;
- * - the same through every plain loader: `require`, `import.meta.require` (Bun), `module.require`,
- *   `createRequire(import.meta.url)` (under any name it is imported as) and a name bound to any of them;
+ * - the same through every plain loader: `require`, `import.meta.require` (Bun), `module.require` (the object in
+ *   brackets or not), `createRequire(import.meta.url)` (under any name it is imported, destructured out of a dynamic
+ *   import or given) and a name bound to any of them — or assigned one later (`let require; require = createRequire(…)`);
+ * - a loader handed on as a VALUE (`require.call(null, p)`, `.apply`, `.bind`, `paths.map(require)`, an argument): the
+ *   call that loads is made where this walk does not follow. A loader is only ever called, named, or asked for a
+ *   property that loads nothing (`require.resolve`, `typeof require`). A `require` the code declares for itself
+ *   (`const require = async (id) => …`, a parameter) is that function where it is in scope, and only there;
  * - a dynamic `import()` or loader call whose module name is built at run time. Bun's module loader is itself a YAML
  *   parser (a `.yaml` path, `with { type: 'yaml' }`), so loading a path read off the disk parses a text a person may
- *   have written. Allowed: a view loader that stays in its own folder's `.tsx` files (`import(\`./views/${name}.tsx\`)`).
+ *   have written. Allowed: a view loader in APP code (a `/app/` folder: it runs in a browser, bundled) that stays in its
+ *   own folder's `.tsx` files (`import(\`./views/${name}.tsx\`)`). Outside app code the hole could be `../gate.yaml?`
+ *   (Bun drops the query and loads the file), so there it is a use.
  *   A STATIC `.yaml`/`.yml` load (not read `with { type: 'text' }` or `'file'`) and any `type: 'yaml'` load count too,
  *   but they name a file committed in this repository, never a person's text: the ledger lists them with that reason.
  *
@@ -357,8 +364,7 @@ export function scanFile(path: string, text: string): FileFacts {
     if (at.type === 'MemberExpression')
       // `import.meta.require(…)` (Bun) and `module.require(…)`.
       return (
-        memberName(at) === 'require' &&
-        (isImportMeta(at.object) || (isNode(at.object) && staticName(at.object) === 'module'))
+        memberName(at) === 'require' && (isImportMeta(unwrap(at.object)) || staticName(unwrap(at.object)) === 'module')
       );
     // `createRequire(import.meta.url)(…)`.
     return at.type === 'CallExpression' && isCreateRequire(at.callee);
@@ -387,20 +393,96 @@ export function scanFile(path: string, text: string): FileFacts {
    * parse of a text a person may have written. The one shape allowed is a view loader that cannot leave its own
    * folder's `.tsx` files: a template that starts `./`, ends `.tsx`, and holds no `..`.
    */
-  // A file that declares a `require` of its own (`const require = async (id) => …`) calls that, not the loader. Names are
-  // file-wide, so its bare `require(x)` is not read as a load of a built path; a literal `require('yaml')` still counts.
-  const declaresRequire = nodes.some(
-    ({ node, parent, key }) =>
-      node.type === 'Identifier' &&
-      node.name === 'require' &&
-      (bound.has(node) || (declaresOnly(parent, key) && key === 'id')) &&
-      // `const require = createRequire(import.meta.url)` declares a LOADER, not a function of the file's own.
-      !(isNode(parent) && parent.type === 'VariableDeclarator' && key === 'id' && isRequire(parent.init)),
-  );
+  // A `require` the code declares for itself (`const require = async (id) => …`, a parameter `require`) is that function,
+  // not the loader, where it is in scope: its bare `require(x)` is not read as a load of a built path (a literal
+  // `require('yaml')` still counts). Scope is read as the language does — a function for a parameter or a `var`, the
+  // enclosing block for `let`, `const`, a class or a function declaration — so a `require` declared in one function
+  // no longer hides the loader in every other. A declaration that IS a loader (`const require = createRequire(…)`, or
+  // a name later assigned one) is not its own.
+  const mentionsRequire = text.includes('equire');
+  const parentOf = new Map<Node, Visited>();
+  const ownScopes = new Set<Node>();
+  if (mentionsRequire) {
+    for (const visited of nodes) parentOf.set(visited.node, visited);
+    const FUNCTIONS: ReadonlySet<string> = new Set([
+      'FunctionDeclaration',
+      'FunctionExpression',
+      'ArrowFunctionExpression',
+    ]);
+    const FUNCTION_SCOPES: ReadonlySet<string> = new Set([...FUNCTIONS, 'Program', 'StaticBlock']);
+    const BLOCK_SCOPES: ReadonlySet<string> = new Set([
+      ...FUNCTION_SCOPES,
+      'BlockStatement',
+      'ForStatement',
+      'ForInStatement',
+      'ForOfStatement',
+      'SwitchStatement',
+      'CatchClause',
+    ]);
+    const scopeAbove = (start: Node, accept: ReadonlySet<string>): Node | undefined => {
+      let at = parentOf.get(start)?.parent;
+      while (at !== undefined && !accept.has(at.type)) at = parentOf.get(at)?.parent;
+      return at;
+    };
+    // A name assigned a loader anywhere (`let require; require = createRequire(…)`) is a loader wherever it is declared.
+    const assignedLoader = nodes.some(
+      ({ node }) =>
+        node.type === 'AssignmentExpression' &&
+        node.operator === '=' &&
+        isNode(node.left) &&
+        node.left.type === 'Identifier' &&
+        node.left.name === 'require' &&
+        isRequire(node.right),
+    );
+    for (const { node, parent, key } of nodes) {
+      if (node.type !== 'Identifier' || node.name !== 'require') continue;
+      const declaresFunction =
+        isNode(parent) &&
+        key === 'id' &&
+        (parent.type === 'FunctionDeclaration' ||
+          parent.type === 'FunctionExpression' ||
+          parent.type === 'ClassDeclaration');
+      if (!bound.has(node) && !declaresFunction) continue;
+      if (parent?.type === 'FunctionDeclaration' && declaresFunction) {
+        const scope = scopeAbove(parent, BLOCK_SCOPES);
+        if (scope !== undefined) ownScopes.add(scope);
+      } else if (parent?.type === 'FunctionExpression' && declaresFunction) ownScopes.add(parent);
+      else if (parent?.type === 'ClassDeclaration' && declaresFunction) {
+        const scope = scopeAbove(parent, BLOCK_SCOPES);
+        if (scope !== undefined) ownScopes.add(scope);
+      } else {
+        // A binding inside a pattern: climb to what declares it.
+        let at: Visited | undefined = parentOf.get(node);
+        while (at !== undefined) {
+          const type = at.node.type;
+          if (type === 'VariableDeclarator') {
+            if (isRequire(at.node.init) || assignedLoader) break;
+            const declaration = parentOf.get(at.node)?.node;
+            const scope = scopeAbove(at.node, declaration?.kind === 'var' ? FUNCTION_SCOPES : BLOCK_SCOPES);
+            if (scope !== undefined) ownScopes.add(scope);
+            break;
+          }
+          if (FUNCTIONS.has(type) || type === 'CatchClause') {
+            ownScopes.add(at.node);
+            break;
+          }
+          at = at.parent === undefined ? undefined : parentOf.get(at.parent);
+        }
+      }
+    }
+  }
+  const inOwnScope = (node: Node): boolean => {
+    for (let at = parentOf.get(node)?.parent; at !== undefined; at = parentOf.get(at)?.parent)
+      if (ownScopes.has(at)) return true;
+    return false;
+  };
   const ownRequire = (callee: unknown): boolean => {
     const at = unwrap(callee);
-    return declaresRequire && isNode(at) && at.type === 'Identifier' && at.name === 'require';
+    return isNode(at) && at.type === 'Identifier' && at.name === 'require' && inOwnScope(at);
   };
+  // Code that runs in a browser is bundled: a view loader there names a chunk, never a file on a disk. Anywhere else a
+  // hole in the template could be `../gate.yaml?` (Bun drops the query and loads, and parses, the file).
+  const appSide = /(?:^|\/)app\//u.test(path);
   const builtAtRunTime = (node: Node): boolean => {
     const source =
       node.type === 'ImportExpression'
@@ -416,12 +498,45 @@ export function scanFile(path: string, text: string): FileFacts {
     const first = quasis[0];
     const last = quasis.at(-1);
     const viewLoader =
+      appSide &&
       typeof first === 'string' &&
       typeof last === 'string' &&
       first.startsWith('./') &&
       last.endsWith('.tsx') &&
       quasis.every(quasi => typeof quasi === 'string' && !quasi.includes('..'));
     return !viewLoader;
+  };
+
+  /**
+   * A loader handed on as a VALUE — `require.call(null, p)`, `import.meta.require.apply(…)`, `paths.map(require)`,
+   * `load(createRequire(url))`: the call that loads is made somewhere this walk does not follow. A loader is only ever
+   * called, read for a property that loads nothing (`require.resolve`, `typeof require`) or given a name
+   * (`const r = require`, which the bindings follow).
+   */
+  const loaderHandedOn = (node: Node, parent: Node | undefined, key: string): boolean => {
+    if (!mentionsRequire || TRANSPARENT.has(node.type)) return false;
+    const loader =
+      node.type === 'Identifier'
+        ? requireNames.has(node.name as string) && !declaresOnly(parent, key) && !bound.has(node) && !inOwnScope(node)
+        : (node.type === 'MemberExpression' || node.type === 'CallExpression') && isRequire(node);
+    if (!loader) return false;
+    // Where the value goes: up through the brackets and casts around it.
+    let child = node;
+    let at = parentOf.get(node);
+    while (at?.parent !== undefined && TRANSPARENT.has(at.parent.type) && at.parent.type !== 'AwaitExpression') {
+      child = at.parent;
+      at = parentOf.get(child);
+    }
+    const holder = at?.parent;
+    const slot = at?.key;
+    if (holder === undefined) return false;
+    if (holder.type === 'CallExpression' && slot === 'callee') return false;
+    if (holder.type === 'MemberExpression' && slot === 'object')
+      return ['call', 'apply', 'bind'].includes(memberName(holder) ?? '');
+    if (holder.type === 'VariableDeclarator' && slot === 'init') return false;
+    if (holder.type === 'AssignmentExpression' && slot === 'right') return false;
+    if (holder.type === 'UnaryExpression' && holder.operator === 'typeof') return false;
+    return true;
   };
 
   /** The `type` an import's attributes name (`with { type: 'text' }`): a string, `null` when it cannot be read. */
@@ -597,6 +712,36 @@ export function scanFile(path: string, text: string): FileFacts {
         changed = true;
       }
       changed = takeOut(target, holds(value)) || changed;
+      // `const { createRequire: cr } = await import('node:module')` and `const cr = createRequire`: `cr(url)` is one too.
+      if (isNode(target) && target.type === 'ObjectPattern') {
+        let from: unknown = value;
+        while (isNode(from) && TRANSPARENT.has(from.type)) from = from.expression ?? from.argument;
+        const module =
+          isNode(from) && (from.type === 'ImportExpression' || from.type === 'CallExpression')
+            ? specifierOf(from)
+            : undefined;
+        if (module === 'module' || module === 'node:module')
+          for (const property of (target.properties as Node[] | undefined) ?? []) {
+            if (property.type === 'RestElement' || keyName(property) !== 'createRequire') continue;
+            const into: Node[] = [];
+            bindingsOf(property.value, into);
+            for (const id of into)
+              if (!createRequireNames.has(id.name as string)) {
+                createRequireNames.add(id.name as string);
+                changed = true;
+              }
+          }
+      } else if (
+        isNode(target) &&
+        target.type === 'Identifier' &&
+        isNode(unwrap(value)) &&
+        (unwrap(value) as Node).type !== 'CallExpression' &&
+        isCreateRequire(value) &&
+        !createRequireNames.has(target.name as string)
+      ) {
+        createRequireNames.add(target.name as string);
+        changed = true;
+      }
     }
   }
 
@@ -628,7 +773,7 @@ export function scanFile(path: string, text: string): FileFacts {
   };
 
   for (const { node, parent, key } of nodes) {
-    if (builtAtRunTime(node) || loadsYamlFile(node)) use(node, false);
+    if (builtAtRunTime(node) || loadsYamlFile(node) || loaderHandedOn(node, parent, key)) use(node, false);
     const specifier = specifierOf(node);
     if (specifier !== undefined) {
       if (isYamlLibrary(specifier)) use(node, false);

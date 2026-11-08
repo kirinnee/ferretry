@@ -658,6 +658,7 @@ async function bootLocked(
           flooded: plugin => log.warn('a worker flooded its grant channel, so the channel was closed', { plugin }),
         },
         { onStop: fn => lifecycle.onStop(fn), stopping: () => lifecycle.stopping() },
+        { urls: () => implementations.get(manifest.id)?.workers },
       ),
       spawn: restrictSpawn(
         manifest.id,

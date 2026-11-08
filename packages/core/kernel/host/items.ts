@@ -73,7 +73,17 @@ export async function installedItemReach(
         if (info?.kind !== 'file' || info.size > ITEM_FILE_MAX_BYTES) continue;
         // The kernel's own bounded reader (alias budget, no YAML 1.1 tags, duplicate keys refused): a file that does
         // not read names nothing, as one that did not parse always did.
-        const read = readConfigText(await fs.readText(resolved));
+        // Read with a hard bound, at most one byte past the cap: the size above was read before the bytes, and a file
+        // that grew in between is never read whole — only far enough to see it is over the cap.
+        const file = await fs.openRead(resolved);
+        let bytes: Uint8Array;
+        try {
+          bytes = await file.read(ITEM_FILE_MAX_BYTES + 1);
+        } finally {
+          await file.close();
+        }
+        if (bytes.byteLength > ITEM_FILE_MAX_BYTES) continue;
+        const read = readConfigText(new TextDecoder().decode(bytes));
         if (!read.ok) continue;
         value = read.read.value;
       } catch {

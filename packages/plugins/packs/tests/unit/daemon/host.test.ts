@@ -47,6 +47,12 @@ async function host(setup: (ferrets: FakeFerrets) => void = () => {}) {
 const lead = ferretId('lead');
 
 describe('the start.decide and launch.parts decisions', () => {
+  test("Packs' manifest id is 'packs': it is the id Ferrets reads a helper's admission from", () => {
+    // Ferrets admits a child only on the `start.decide` answer of the plugin with this id (`HELPER_ADMISSION_ANSWERER`).
+    // Both sides write the literal, so a rename of either one goes red here or in Ferrets' own tests, never by coincidence.
+    expect(manifest.id).toBe('packs');
+  });
+
   test('G12 R-0332 a started child is judged against its parent, and a resume is answered without the limits (today)', () => {
     expect(limitedParent({ parent: 'lead', by: 'owner' })).toBe('lead');
     expect(limitedParent({ parent: 'lead', by: 'ferret' })).toBe('lead');

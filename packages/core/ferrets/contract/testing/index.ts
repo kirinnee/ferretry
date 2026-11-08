@@ -24,6 +24,7 @@ import {
   type Runner,
   type RunnerHandle,
   runnerDeliveryFailure,
+  type RunnerLook,
   type RunnerStop,
   type RunnerStopOutcome,
   type RunningFerret,
@@ -123,6 +124,18 @@ export class FakeRunner implements Runner {
     if (!shouldPressStopKey(this.working, stop)) return { pressed: false, working: this.working };
     this.pressed.push({ handle, key: stop.key });
     return { pressed: true, working: false };
+  }
+  /**
+   * What `look` sees on each live handle's pane, set by a test (`frame` is the screen's identity); a live handle
+   * with none set shows an idle prompt on frame `idle`. A handle with nothing live behind it shows nothing.
+   */
+  readonly screens = new Map<RunnerHandle, RunnerLook>();
+  /** Every handle `look` was asked about, in order. */
+  readonly looked: RunnerHandle[] = [];
+  async look(handle: RunnerHandle): Promise<RunnerLook | undefined> {
+    this.looked.push(handle);
+    if (!this.#live.has(handle)) return undefined;
+    return this.screens.get(handle) ?? { frame: 'idle', working: false, atPrompt: true, permission: false };
   }
   #fail(): void {
     const failure = this.fail;

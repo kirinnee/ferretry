@@ -99,6 +99,9 @@ export interface SessionFilesDeps {
   readonly log: Pick<Log, 'warn'>;
 }
 
+/** The file Claude Code's question hook writes in a ferret's session folder (today's `SessionPaths.questionAsked`). */
+const QUESTION_ASKED_FILE = 'question-asked.json';
+
 /**
  * Ferrets' per-ferret private session files, all on the internal `sessions` root (`state/ferrets/sessions/<ferret>/`):
  * the environment (the plaintext credential, `environment.json`, `0600`), the assigned task (`turns/turn-001.md`), every
@@ -155,6 +158,13 @@ export class SessionFiles {
           if (!resolved.ok) throw new Error('a hand-off folder of this ferret could not be named');
           return resolved.value;
         });
+      },
+      // Claude Code's question hook records the question it asks here (`FY_QUESTION_FILE`, today's `questionAsked`):
+      // inside the ferret's own folder on the sessions root, never in its work tree.
+      questionFile: async ferret => {
+        const named = this.root(parseSessionId(ferret)).resolve(QUESTION_ASKED_FILE);
+        if (!named.ok) throw new Error('the question file of this ferret could not be named');
+        return named.value;
       },
       assign: async (ferret, prompt) => {
         const id = parseSessionId(ferret);

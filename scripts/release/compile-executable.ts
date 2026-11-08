@@ -210,6 +210,8 @@ const pluginPrograms =
         ((await import(pathToFileURL(registry).href)) as { daemonImplementations: readonly WorkerHalf[] })
           .daemonImplementations,
         `${basename(entry).replace(/\.[cm]?[jt]sx?$/u, '')}.js`,
+        undefined,
+        workers.map(path => `${basename(path).replace(/\.[cm]?[jt]sx?$/u, '')}.js`),
       );
 const result = await Bun.build({
   entrypoints: [entry, ...workers, ...pluginPrograms.map(program => program.source)],
