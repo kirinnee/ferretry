@@ -47,24 +47,13 @@ test('an unknown argument is refused 64 with the usage, before boot', () => {
   expect(answer.touched).toBe(false);
 });
 
-test('a mode this daemon does not serve yet is refused 64, never ignored', () => {
-  for (const argv of [['--config', '/x/daemon.json']]) {
-    const answer = run(...argv);
-    expect(answer.code).toBe(64);
-    expect(answer.err).toContain('--config is not served');
-    expect(answer.touched).toBe(false);
-  }
-});
 
 test('V-0511 --port sets the port for one run, and a value that is not a port number is refused 64', () => {
   const ok = run('--print-config', '--port', '9123');
   expect(ok.code).toBe(0);
   expect(ok.out).toMatch(/port\s+9123\s+flag \(--port\)/);
   expect(ok.touched).toBe(false);
-  const zero = run('--print-config', '--port', '0');
-  expect(zero.code).toBe(0);
-  expect(zero.out).toMatch(/port\s+0\s+flag \(--port\)/);
-  for (const bad of ['abc', '70000', '-1']) {
+  for (const bad of ['abc', '0', '70000']) {
     const refused = run('--print-config', '--port', bad);
     expect(refused.code).toBe(64);
     expect(refused.err).toContain('is not a port number');

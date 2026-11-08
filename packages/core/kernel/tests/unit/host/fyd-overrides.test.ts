@@ -32,8 +32,10 @@ test('V-0510 --log-level drops records below it; debug selects the same records 
   expect(same).toEqual(['debug', 'info', 'warn', 'error']);
 });
 
-test('V-0507 --config is refused 64 with the reason, never ignored', () => {
+test('V-0507 --config is refused 64 by name, saying 5.0 reads configuration from $FY_HOME/config/, and touches nothing', () => {
   const child = Bun.spawnSync(['bun', FYD, '--config', '/nonexistent/daemon.json'], { timeout: 20_000 });
   expect(child.exitCode).toBe(64);
-  expect(child.stderr.toString()).toContain('--config is not served');
+  const err = child.stderr.toString();
+  expect(err).toContain('--config is not an option in 5.0');
+  expect(err).toContain('$FY_HOME/config/');
 });

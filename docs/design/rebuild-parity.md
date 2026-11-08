@@ -10,7 +10,7 @@ Generator regression checks: `bun test scripts/rebuild/parity.test.ts` (first ob
 
 Generator typecheck: it is part of the repository typecheck (`scripts/tsconfig.json`, run by `scripts/validate/typecheck.sh`), with strict indexed-access checks.
 
-**2276 rows; 129 removed by design; 0 unplaced owners.**
+**2276 rows; 130 removed by design; 0 unplaced owners.**
 
 <!-- prettier-ignore -->
 | Kind | Count |
@@ -242,7 +242,7 @@ No unresolved Commander declarations.
 | V-0249 | V | fy daemon uninstall | packages/cli/src/lib/daemon/commands.ts:55 | daemon | packages/core/kernel | fy daemon uninstall | stop the daemon and remove its user service definition; flags (including inherited): --as-owner; -h, --help; -v, --version | packages/core/kernel/tests/unit/parity/commands.test.ts | [ ] |
 | V-0251 | V | fy daemon which | packages/cli/src/lib/daemon/commands.ts:145 | daemon | packages/core/kernel | fy daemon which | show the installed and currently running daemon identities; flags (including inherited): --as-owner; --json; -h, --help; -v, --version | packages/core/kernel/tests/unit/parity/commands.test.ts | [ ] |
 | V-0506 | V | fyd --check | packages/daemon/src/lib/runtime/arguments.ts:122 | runtime | packages/core/kernel | fyd --check | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-check.test.ts | [x] |
-| V-0507 | V | fyd --config | packages/daemon/src/lib/runtime/arguments.ts:107 | runtime | packages/core/kernel | fyd --config | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-overrides.test.ts | [ ] |
+| V-0507 | V | fyd --config | packages/daemon/src/lib/runtime/arguments.ts:107 | runtime | packages/core/kernel | fyd --config | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-overrides.test.ts | removed by design (5.0 reads configuration from $FY_HOME/config/; fyd refuses --config by name, exit 64) |
 | V-0508 | V | fyd --help | packages/daemon/src/lib/runtime/arguments.ts:143 | runtime | packages/core/kernel | fyd --help | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-arguments.test.ts | [x] |
 | V-0509 | V | fyd --host | packages/daemon/src/lib/runtime/arguments.ts:108 | runtime | packages/core/kernel | fyd --host | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-overrides.test.ts | [x] |
 | V-0510 | V | fyd --log-level | packages/daemon/src/lib/runtime/arguments.ts:115 | runtime | packages/core/kernel | fyd --log-level | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-overrides.test.ts | [x] |

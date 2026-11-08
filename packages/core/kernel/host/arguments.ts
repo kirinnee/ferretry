@@ -79,7 +79,6 @@ export function daemonUsageText(usage: DaemonUsage): string {
     '      --check           report whether this daemon would start — the state home, the agent',
     '                        harnesses it could launch, the address and who holds it — then exit',
     '                        without creating, locking or binding anything',
-    '      --config <path>   read this configuration document instead of the one in the state home',
     '      --host <host>     serve on this host for one run, overriding the document',
     '      --port <port>     serve on this port for one run, overriding the document',
     '      --log-level <l>   one of debug, info, warn, error (default info). `debug` is accepted and',

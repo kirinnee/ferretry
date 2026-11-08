@@ -36,7 +36,7 @@ async function main(): Promise<number> {
     return answer.exitCode;
   }
   if (answer.overrides.configFile !== undefined) {
-    process.stderr.write(`${usage.daemonName}: --config is not served: v5 has no single configuration document to point at (configuration is one file per building block under <FY_HOME>/config/).\n`);
+    process.stderr.write(`${usage.daemonName}: --config is not an option in 5.0: configuration is read from $FY_HOME/config/ (one file per building block), so there is no single document to point at. Remove --config from the unit file or script that passes it.\n`);
     return EXIT_USAGE;
   }
   const resolved = resolveSettings(process.env, answer.overrides, homedir());

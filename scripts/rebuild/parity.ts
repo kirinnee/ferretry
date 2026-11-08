@@ -261,6 +261,8 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
   if (kind === 'S' && /legacy-tasks-redirect|version-skew|feature-unavailable|daemon-features/.test(what + file))
     return 'removed by design (§9.6: old routes/probes/fallback UI)';
   if (kind === 'V' && /fy daemon adopt\b/.test(what)) return 'removed by design (§9.1, §9.2: old home adoption)';
+  if (kind === 'V' && what === 'fyd --config')
+    return 'removed by design (5.0 reads configuration from $FY_HOME/config/; fyd refuses --config by name, exit 64)';
   if (kind === 'V' && what === 'fy import')
     return 'removed by design (§1.4: imports are links; its one verb is `fy link`)';
   if (kind === 'R' && /legacy-tasks/.test(file)) return 'removed by design (§9.1, §9.2: per-ferret tasks/old readers)';
