@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { RootHandle } from '@ferretry/kernel/contract';
 import { diskPaths, diskSessionsRoot, type MemoryStateFolder } from '@ferretry/kernel/testing';
@@ -8,6 +8,7 @@ import {
   FerretConfigFile,
   type FerretRecord,
   type RunnerHandle,
+  type RunnerLook,
   type RunningFerret,
   type RunSpec,
   type StartRefusal,
@@ -20,7 +21,7 @@ import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
 import { SessionFiles } from '../../../../daemon/modules/session-files.ts';
 import { SessionConfigSchema, SessionStateSchema } from '../../../../daemon/lib/protocol/session.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
-import { turnFileInstruction } from '../../../../daemon/lib/protocol/turn-handoff.ts';
+import { queuedMessageInstruction, turnFileInstruction } from '../../../../daemon/lib/protocol/turn-handoff.ts';
 import { defaultSessionResumeSettings } from '../../../../daemon/lib/session/resume/settings.ts';
 import type { ResumeActor } from '../../../../daemon/lib/session/resume/types.ts';
 import { memoryStorage } from '../../../support/daemon/storage.ts';
@@ -769,6 +770,135 @@ describe('FerretHarness.queue: the runner’s own queue, never wrapped in a seco
     expect(await seam?.queue('x')).toEqual(err({ refused: 'plugin_unavailable' }));
     await w.service.stop(id as never, 'now');
     expect(await seam?.queue('x')).toEqual(err({ refused: 'no_pane' }));
+  });
+});
+
+describe('ruling #45 (a): one look before deliver, so a send to a working ferret is answered busy at once', () => {
+  /** A screen as the runner's `look` reads it: today's `activeWork` (the harness's working line) and no prompt. */
+  const WORKING: RunnerLook = { frame: 'working', working: true, atPrompt: false, permission: false };
+  /** The delivery's own readiness wait, standing in for its ~27 s: it never answers within the test's window. */
+  const waitsOutItsReadiness = (w: World): void => {
+    w.runner.deliver = async () => await new Promise<never>(() => undefined);
+  };
+  const within = async <T>(ms: number, work: Promise<T>): Promise<T | 'timed out'> =>
+    await Promise.race([work, new Promise<'timed out'>(resolve => setTimeout(() => resolve('timed out'), ms))]);
+
+  test('ruling #45 send to a working ferret answers in under 1 s: busy, nothing typed, the readiness wait never entered', async () => {
+    const w = await world();
+    const id = await started(w);
+    const handle = w.registry.get(id as never)?.handle as RunnerHandle;
+    w.runner.screens.set(handle, WORKING);
+    waitsOutItsReadiness(w);
+    const seam = await w.service.harness(id as never);
+
+    const began = Date.now();
+    expect(await within(1_000, seam!.deliver({ text: 'FIXTURE report to a busy lead' }))).toEqual(
+      err({ refused: 'not_ready', why: 'busy' }),
+    );
+    expect(Date.now() - began).toBeLessThan(1_000);
+    expect(w.runner.looked).toEqual([handle]);
+    expect(w.runner.deliveries).toEqual([]);
+  });
+
+  test('ruling #45 a pane at its prompt, behind a permission prompt or a dialog, or one the look cannot read, goes on to the delivery', async () => {
+    const screens: readonly [string, RunnerLook | undefined][] = [
+      ['an idle prompt', { frame: 'idle', working: false, atPrompt: true, permission: false }],
+      ['a working line under a prompt', { ...WORKING, atPrompt: true }],
+      ['a permission prompt', { ...WORKING, permission: true }],
+      ['a harness dialog', { ...WORKING, prompt: 'FIXTURE dialog words' }],
+      ['a dialog read as data', { ...WORKING, dialog: { kind: 'FIXTURE' } }],
+      ['no work and no prompt (the record alone proves nothing)', { ...WORKING, working: false }],
+    ];
+    for (const [what, screen] of screens) {
+      const w = await world();
+      const id = await started(w);
+      const handle = w.registry.get(id as never)?.handle as RunnerHandle;
+      if (screen !== undefined) w.runner.screens.set(handle, screen);
+      const seam = await w.service.harness(id as never);
+      expect({ what, answer: await seam!.deliver({ text: 'FIXTURE words' }) }).toEqual({
+        what,
+        answer: ok('turn-started'),
+      });
+      expect(w.runner.deliveries.map(entry => entry.delivery.text)).toEqual(['FIXTURE words']);
+    }
+  });
+
+  test('ruling #45 a look that rejects or sees nothing decides nothing: the delivery runs as before', async () => {
+    for (const look of [
+      async () => {
+        throw new Error('tmux could not be asked');
+      },
+      async () => undefined,
+    ]) {
+      const w = await world();
+      const id = await started(w);
+      w.runner.look = look;
+      const seam = await w.service.harness(id as never);
+      expect(await seam!.deliver({ text: 'FIXTURE words' })).toEqual(ok('turn-started'));
+    }
+    // A runner with no `look` at all is the same.
+    const w = await world();
+    const id = await started(w);
+    (w.runner as { look?: unknown }).look = undefined;
+    expect(await (await w.service.harness(id as never))!.deliver({ text: 'FIXTURE words' })).toEqual(
+      ok('turn-started'),
+    );
+  });
+});
+
+describe("ruling #45 (b): a queued message over 1000 characters goes by file (today's native-file path)", () => {
+  const queuedFile = (w: World, id: string, sendId: string) => `${w.folderOf(id)}/channel/queued-${sendId}.md`;
+  const live = async (w: World) => {
+    const id = await started(w);
+    return { id, seam: (await w.service.harness(id as never))! };
+  };
+
+  test('ruling #45 a 5000-char payload goes by file: written 0600 first, and the queue is typed the one-line pointer', async () => {
+    const w = await world();
+    const { id, seam } = await live(w);
+    const payload = `FIXTURE long report\n${'x'.repeat(5_000 - 20)}`;
+    expect(payload).toHaveLength(5_000);
+
+    expect(await seam.queue(payload, { sendId: 'send-mw7a-0001' })).toEqual(ok('held'));
+
+    const file = queuedFile(w, id, 'send-mw7a-0001');
+    expect(w.runner.queued.map(entry => entry.text)).toEqual([queuedMessageInstruction(file)]);
+    expect(await readFile(file, 'utf8')).toBe(`${payload}\n`);
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    // Nothing of the message itself went into the composer, and no temporary file was left beside it.
+    expect(w.runner.queued[0]?.text).not.toContain('xxxx');
+    expect(await readdir(`${w.folderOf(id)}/channel`)).toEqual(['queued-send-mw7a-0001.md']);
+  });
+
+  test('ruling #45 the 1000/1001 boundary: 1000 characters are typed inline, 1001 go by file', async () => {
+    const w = await world();
+    const { id, seam } = await live(w);
+    const inline = 'a'.repeat(1_000);
+    const byFile = 'b'.repeat(1_001);
+
+    expect(await seam.queue(inline, { sendId: 'send-at' })).toEqual(ok('held'));
+    expect(await seam.queue(byFile, { sendId: 'send-over' })).toEqual(ok('held'));
+
+    expect(w.runner.queued.map(entry => entry.text)).toEqual([
+      inline,
+      queuedMessageInstruction(queuedFile(w, id, 'send-over')),
+    ]);
+    expect(await readdir(`${w.folderOf(id)}/channel`)).toEqual(['queued-send-over.md']);
+  });
+
+  test('ruling #45 the same send id rewrites the same file; none, or one outside the grammar, takes a fresh id inside channel/', async () => {
+    const w = await world();
+    const { id, seam } = await live(w);
+    await seam.queue('c'.repeat(1_500), { sendId: 'send-again' });
+    await seam.queue('d'.repeat(1_500), { sendId: 'send-again' });
+    expect(await readFile(queuedFile(w, id, 'send-again'), 'utf8')).toBe(`${'d'.repeat(1_500)}\n`);
+
+    await seam.queue('e'.repeat(1_500));
+    await seam.queue('f'.repeat(1_500), { sendId: '../../escape' });
+    const names = await readdir(`${w.folderOf(id)}/channel`);
+    expect(names).toHaveLength(3);
+    for (const name of names) expect(name).toMatch(/^queued-[\w-]{1,128}\.md$/u);
+    expect(await readdir(w.folderOf(id))).not.toContain('escape');
   });
 });
 

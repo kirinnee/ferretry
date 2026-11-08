@@ -24,6 +24,9 @@ export const FERRET_SESSIONS_FOLDER = internalRootFolder('ferrets', FERRET_SESSI
 /** The folder of a ferret's turn documents, relative to its own session folder. */
 export const FERRET_TURNS_FOLDER = 'turns';
 
+/** The folder of a ferret's queued-message files (`queued-<send id>.md`), relative to its own session folder. */
+export const FERRET_CHANNEL_FOLDER = 'channel';
+
 /** A turn document's name, at least three digits: `turn-001.md`, `turn-012.md`, `turn-1000.md`. */
 export function ferretTurnFileName(turn: number): string {
   if (!Number.isInteger(turn) || turn < 1) throw new Error(`a turn number is a whole number from one (got ${turn})`);
@@ -37,7 +40,11 @@ export function ferretTurnFileName(turn: number): string {
  * and the completion markers sit beside these and stay unreadable without asking. A start or a resume hands their
  * absolute paths to the harness as `LaunchSpec.readable`.
  */
-export const FERRET_READABLE_FOLDERS = Object.freeze([FERRET_TURNS_FOLDER, 'channel', 'attachments'] as const);
+export const FERRET_READABLE_FOLDERS = Object.freeze([
+  FERRET_TURNS_FOLDER,
+  FERRET_CHANNEL_FOLDER,
+  'attachments',
+] as const);
 
 /** A turn document's path relative to its ferret's session folder: `turns/turn-001.md`. */
 export function ferretTurnFile(turn: number): string {
