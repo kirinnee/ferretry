@@ -1816,7 +1816,7 @@ A bare **Got it** (or Done with no words) on an `info` item is never delivered: 
    restarts the countdown, and the first one never waits more than **2 minutes**. The agenda says so:
    `replies: {pending, dueAt, heldForTurn?}` on every `GET` and `POST` of the agenda route
    (`/v1/sessions/:id/agenda`). "Send now"
-   (`POST /v1/sessions/:id/agenda/replies`, `fy agenda send-now`) skips the countdown.
+   (`POST /v1/sessions/:id/agenda/replies`, `fy agenda send-now`) skips the countdown, never the empty-composer rule (step 3): with text in the composer nothing is typed and the answers stay held.
 2. **Waiting for the turn.** A due batch waits while the ferret's `turnState` is `working`, and later
    answers join it. It is looked at again every 5 seconds and goes once the turn ends. Past 15 minutes it
    goes through the ordinary send path anyway, which queues natively. A state that cannot be read
