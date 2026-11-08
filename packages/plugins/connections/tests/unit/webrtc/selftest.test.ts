@@ -49,7 +49,10 @@ function echoingModule(cleanups: string[]): NodeDataChannelModule {
     addRemoteCandidate(): void {}
     createDataChannel(): EngineDataChannel {
       const channel = new Channel();
-      queueMicrotask(() => (channel.opened?.(), channel.received?.(channel.sent)));
+      queueMicrotask(() => {
+        channel.opened?.();
+        channel.received?.(channel.sent);
+      });
       return channel;
     }
     close(): void {}
