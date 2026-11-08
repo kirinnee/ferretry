@@ -3,7 +3,7 @@
  * the `bin` key of `packages/cli/package.json`, the daemon is the `bin` key of this package. Neither is a literal
  * here, so `scripts/local/rename.sh --bin` moves both.
  */
-import cliPackage from '../../../cli/package.json' with { type: 'json' };
+import { CLIENT_BINARY } from '../src/generated/client-binary.ts';
 import kernelPackage from '../package.json' with { type: 'json' };
 import type { BinaryNames } from '../contract/ports.ts';
 
@@ -14,6 +14,6 @@ function firstBin(owner: string, bin: Readonly<Record<string, string>>): string 
 }
 
 export const PRODUCT_BINARIES: BinaryNames = Object.freeze({
-  client: firstBin('cli', cliPackage.bin),
+  client: CLIENT_BINARY,
   daemon: firstBin('kernel', kernelPackage.bin),
 });
