@@ -8,7 +8,7 @@ import {
   type FileBrowserRouteKey,
   sessionFilesystemRoutes,
 } from '../../../../../daemon/lib/runtime/mounts/session-filesystem.ts';
-import { FsError, SessionFilesystem } from '../../../../../daemon/lib/session/filesystem/index.ts';
+import { AGENT_READ_FENCE, FsError, SessionFilesystem } from '../../../../../daemon/lib/session/filesystem/index.ts';
 import { type RequestOf, jsonOf, requestOf } from '../../support/requests.ts';
 import { refusalOf } from '../../support/calls.ts';
 import {
@@ -58,6 +58,13 @@ function fixture(
     await routes[key](requestOf({ ...spec, params: { ferretId } }));
   return { pinner, filesystem, ask };
 }
+
+/** The host's reach as an agent sees it: the same ferret, behind the read fence. */
+const agent: FileBrowserDeps['reach'] = async context => ({
+  id: context.params.get('ferretId') ?? '',
+  cwd: SESSION_CWD,
+  fence: AGENT_READ_FENCE,
+});
 
 const tree = () => treeOf(['', directory([{ name: 'a.ts', type: 'file' }])], ['a.ts', textFile('body\n')]);
 
@@ -286,6 +293,88 @@ describe('the diff route', () => {
       throw new Error('the vault could not open');
     },
   };
+
+  it('R-0151 an agent read of a file holding a vault value is a 403 holds_secret with one fixed sentence, and the disk keeps the real bytes', async () => {
+    const text = `const key = "${FIXTURE_SECRET}";\n`;
+    const { ask, filesystem } = fixture(
+      { tree: treeOf(['a.ts', textFile(text)]) },
+      { isTracked: () => true },
+      agent,
+      withSecret(),
+    );
+
+    const refusal = await refusalOf(ask(FILE, { query: { path: 'a.ts' } }));
+    const again = await ask(FILE, { query: { path: 'a.ts' } }).catch((error: unknown) => error);
+    const internal = await filesystem.readFile(SESSION_CWD, 'a.ts', {});
+
+    should(refusal).eql({ status: 403, code: 'holds_secret' });
+    should(again).be.instanceOf(ApiError);
+    should((again as ApiError).message).eql('a.ts holds a private value, so it is not served to an agent.');
+    should((again as ApiError).message.includes(FIXTURE_SECRET)).be.false();
+    should(internal.content === text).be.true();
+  });
+
+  it('R-0151 an agent still reads a file that holds no vault value', async () => {
+    const { ask } = fixture({ tree: tree() }, { isTracked: () => true }, agent, withSecret());
+
+    const response = await ask(FILE, { query: { path: 'a.ts' } });
+
+    should(response.status).eql(200);
+    should(jsonOf(response)).not.have.property('redacted');
+  });
+
+  it('R-0151 a person read of a masked file says redacted: true', async () => {
+    const { ask } = fixture(
+      { tree: treeOf(['a.ts', textFile(FIXTURE_SECRET)]) },
+      { isTracked: () => true },
+      person,
+      withSecret(),
+    );
+
+    const response = await ask(FILE, { query: { path: 'a.ts' } });
+
+    should(jsonOf(response)).have.property('redacted', true);
+    should(JSON.stringify(response.body).includes(FIXTURE_SECRET)).be.false();
+  });
+
+  it('R-0151 a prefix of a vault value is not matched: only the whole value is', async () => {
+    const { ask } = fixture(
+      { tree: treeOf(['a.ts', textFile(FIXTURE_SECRET.slice(0, -4))]) },
+      { isTracked: () => true },
+      agent,
+      withSecret(),
+    );
+
+    const response = await ask(FILE, { query: { path: 'a.ts' } });
+
+    should(response.status).eql(200);
+    should(jsonOf(response)).not.have.property('redacted');
+  });
+
+  it('R-0150 an agent read of a diff holding a vault value is a 403 holds_secret', async () => {
+    const raw = `@@ -1 +1 @@\n-old\n+${FIXTURE_SECRET}\n`;
+    const { ask } = fixture(
+      { tree: tree() },
+      { isTracked: () => true, diffSnapshots: () => ({ diff: raw, truncated: false }) },
+      agent,
+      withSecret(),
+    );
+
+    const refusal = await refusalOf(ask(DIFF, { query: { path: 'a.ts' } }));
+
+    should(refusal).eql({ status: 403, code: 'holds_secret' });
+  });
+
+  it('R-0150 an agent still reads a diff that holds no vault value', async () => {
+    const { ask } = fixture(
+      { tree: tree() },
+      { isTracked: () => true, diffSnapshots: () => ({ diff: '@@ -1 +1 @@\n+x\n', truncated: false }) },
+      agent,
+      withSecret(),
+    );
+
+    should((await ask(DIFF, { query: { path: 'a.ts' } })).status).eql(200);
+  });
 
   it('R-0151 a denied file is still its badge when the vault cannot open', async () => {
     const { ask } = fixture(

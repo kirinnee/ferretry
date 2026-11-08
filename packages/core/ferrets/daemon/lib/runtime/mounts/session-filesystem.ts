@@ -172,12 +172,22 @@ async function diff(filesystem: SessionFilesystem, deps: FileBrowserDeps, contex
   }
   // The vault opens HERE and only here: every refusal above was decided without it, and a vault that cannot open
   // serves no diff at all (it fails closed).
-  return await deps.redaction.read(scope => diffResponse(view.diff, scope));
+  return await deps.redaction.read(scope => diffResponse(view.diff, scope, fence !== undefined, view.path));
 }
 
 /** The one place diff text leaves the daemon: masked through the read's scope. */
-function diffResponse(text: string, scope: RedactionScope): ApiResponse {
-  return textResponse(redactedDiffText(text, scope));
+function diffResponse(text: string, scope: RedactionScope, agent: boolean, path: string): ApiResponse {
+  const masked = redactedDiffText(text, scope);
+  if (agent && masked !== text) throw holdsSecret(path);
+  return textResponse(masked);
+}
+
+/**
+ * An agent is never handed a file that holds a vault value, masked or not: a masked copy looks like ordinary content
+ * and an agent could write it back over the real file. ONE sentence for any count of values; it names the path only.
+ */
+function holdsSecret(path: string): ApiError {
+  return new ApiError(403, `${path} holds a private value, so it is not served to an agent.`, 'holds_secret');
 }
 
 /**
@@ -207,15 +217,20 @@ async function file(filesystem: SessionFilesystem, deps: FileBrowserDeps, contex
   // A flag-only view (denied, ignored, too large, binary) carries no bytes: it is served without the vault.
   if (view.content === undefined && view.base64 === undefined) return jsonResponse(view);
   // The vault opens HERE and only here (after every gate); a vault that cannot open serves no bytes (fail closed).
-  return await deps.redaction.read(scope => fileResponse(view, scope));
+  return await deps.redaction.read(scope => fileResponse(view, scope, fence !== undefined));
 }
 
 /** The one place file bytes leave the daemon: text masked through the read's scope, character for character. */
-function fileResponse(view: FsFileView, scope: RedactionScope): ApiResponse {
+function fileResponse(view: FsFileView, scope: RedactionScope, agent: boolean): ApiResponse {
+  const content = view.content === undefined ? undefined : redactedFileText(view.content, scope);
+  const base64 = view.base64 === undefined ? undefined : redactedFileBase64(view.base64, scope);
+  const redacted = content !== view.content || base64 !== view.base64;
+  if (redacted && agent) throw holdsSecret(view.path);
   return jsonResponse({
     ...view,
-    ...(view.content === undefined ? {} : { content: redactedFileText(view.content, scope) }),
-    ...(view.base64 === undefined ? {} : { base64: redactedFileBase64(view.base64, scope) }),
+    ...(content === undefined ? {} : { content }),
+    ...(base64 === undefined ? {} : { base64 }),
+    ...(redacted ? { redacted: true } : {}),
   });
 }
 

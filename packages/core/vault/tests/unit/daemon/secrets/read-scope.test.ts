@@ -285,4 +285,14 @@ describe('the output guard', () => {
     should(last.body).containEql(WITHHELD_SENTENCE);
     should(last.body).not.containEql('the old pane');
   });
+
+  it('R-0151 only the WHOLE value is matched: a prefix or a piece of it is left alone', async () => {
+    const redaction = new VaultRedaction(source({ TOKEN }));
+
+    const out = await redaction.read(scope => scope.lines([TOKEN.slice(0, -3), TOKEN.slice(3), TOKEN]));
+
+    should(out[0]).eql(TOKEN.slice(0, -3));
+    should(out[1]).eql(TOKEN.slice(3));
+    should(out[2]).eql('*'.repeat(TOKEN.length));
+  });
 });

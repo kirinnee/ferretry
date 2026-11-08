@@ -173,6 +173,8 @@ export interface FsFileView {
   readonly rule?: string;
   /** Served from `HEAD` rather than from the working tree. */
   readonly rev?: 'head';
+  /** Set by the route, never the service: a vault value was masked in the bytes served, so this is not the file. */
+  readonly redacted?: true;
 }
 
 export interface FsDiffView {

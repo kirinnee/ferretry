@@ -95,6 +95,21 @@ Each read opens the vault **once**: a whole page of a journal or a transcript is
 open (`SecretRedactor.batch`), and the opened values are let go when that read returns. Nothing
 caches them between reads, so plaintext lives no longer than the read that needed it.
 
+### A file or diff that holds a value: refused to an agent, masked for a person
+
+`GET /v1/ferrets/:id/fs/file` and `fs/diff` mask every vault value found **whole** in the text (or, for a file that
+is not text, in its bytes), one `*` per character, as Terminals does. An **agent** is refused instead: a masked copy
+looks like ordinary content and could be written back over the real file, so the answer is a 403 with the code
+`holds_secret` and one sentence that names the path only, whatever the count of values. A **person** keeps the masked
+text, and the file answer says `redacted: true`; the app says "private values masked — this is not the file" and offers
+no download or open of the masked bytes. Matching is whole-value only, never a prefix or a piece.
+
+- **The whole-value oracle — GAP.** The refusal and the mask both tell a caller "this file contains a vault value", so an
+  agent that writes a guess into its own worktree can confirm a WHOLE-value guess. That is negligible for a
+  high-entropy secret and real for a short one (a PIN). Not closed: closing it would mean not saying so.
+- Not found, so not masked: a value inside compressed bytes, in a UTF-16 file, or a non-ASCII value in a file that is not
+  UTF-8, and a value a diff shows only in part.
+
 ### Text a component shows: recognised by shape
 
 A component's text on the fleet view (a settings file, an instructions file, a server's command) was
