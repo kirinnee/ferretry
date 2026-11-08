@@ -23,12 +23,27 @@ const ORIGINAL_LEDGER = [
   'packages/plugins/conversation/app/render/fy-render-map-model.ts',
 ];
 
+/**
+ * The whole-tree scan parses every tracked product file (~8000) into a syntax tree: about 3 s on a developer machine
+ * and more than bun's 5 s default on a loaded CI runner, where the test was killed (status null) with NO finding. The
+ * bound is explicit so a slow runner is not a failed gate, and a real hang still fails.
+ */
+const WHOLE_TREE_SCAN_MS = 120_000;
+
 describe('the raw-YAML gate on this repository', () => {
-  test('is clean against its own ledger', () => {
-    const run = spawnSync('bash', [join(root, 'scripts/validate/no-raw-yaml.sh')], { cwd: root, encoding: 'utf8' });
-    expect(run.stderr).toBe('');
-    expect(run.status).toBe(0);
-  });
+  test(
+    'is clean against its own ledger',
+    () => {
+      const run = spawnSync('bash', [join(root, 'scripts/validate/no-raw-yaml.sh')], {
+        cwd: root,
+        encoding: 'utf8',
+        timeout: WHOLE_TREE_SCAN_MS - 10_000,
+      });
+      expect(run.stderr).toBe('');
+      expect(run.status).toBe(0);
+    },
+    WHOLE_TREE_SCAN_MS,
+  );
 
   test('still lists the nine entries it started with, and no reason claims a text was "already checked"', () => {
     const { files, problems } = parseLedger(readFileSync(join(root, LEDGER), 'utf8'));
