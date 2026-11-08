@@ -143,6 +143,10 @@ describe('K1 the sessions root: a subfolder is exactly one plain ferret-id segme
     'f1/../..',
     '.hidden',
     'a b',
+    // r2-m1: upper case is another spelling of the same folder on a case-insensitive disk, so only the minted shape passes
+    'ABC-1',
+    'F1',
+    'Mw7bp88g-50e00159',
   ]) {
     test(`K1 the subfolder ${JSON.stringify(bad)} is refused and nothing is made`, async () => {
       const f = await fresh();
@@ -314,6 +318,68 @@ describe('K1 kernel.state.list(FerretFiles) skips the sessions folder', () => {
     expect(await port.list(ferretFile)).toEqual(['mw7bp88g-50e00159']);
   });
 
+  test('K1 r2-m1 the reserved names are refused in any case: Sessions, SESSIONS, Agent-Homes on write and on read', async () => {
+    const fs = createMemoryHostFs();
+    const port = createStatePort({ home: '/home/fy', pluginId: 'ferrets', files: [ferretFile], fs });
+    for (const reserved of [
+      'Sessions',
+      'SESSIONS',
+      'sEsSiOnS',
+      'Agent-Homes',
+      'AGENT-HOMES',
+      'Credentials',
+      'DOWNLOADS',
+    ]) {
+      await expect(port.write(ferretFile, { id: reserved }, reserved)).rejects.toBeInstanceOf(UndeclaredStateFileError);
+      await expect(port.read(ferretFile, reserved)).rejects.toBeInstanceOf(UndeclaredStateFileError);
+    }
+    expect(await fs.list('/home/fy/state/ferrets')).toEqual([]);
+  });
+
+  test('K1 r2-m1 the list skips a kernel-made folder in any case (what a case-insensitive disk hands back)', async () => {
+    const fs = createMemoryHostFs();
+    const port = createStatePort({ home: '/home/fy', pluginId: 'ferrets', files: [ferretFile], fs });
+    await port.write(ferretFile, { id: 'mw7bp88g-50e00159' }, 'mw7bp88g-50e00159');
+    for (const folder of ['Sessions', 'SESSIONS', 'Agent-Homes'])
+      await fs.writeAtomic(`/home/fy/state/ferrets/${folder}/x/ferret.json`, new Uint8Array(), 0o600);
+    expect(await port.list(ferretFile)).toEqual(['mw7bp88g-50e00159']);
+  });
+
+  test('K1 r2-m2 a fixed state file under a kernel-made folder is refused at declaration, in any case', () => {
+    const fs = createMemoryHostFs();
+    for (const path of [
+      'sessions/index.json',
+      'sessions/x/y.json',
+      'Sessions/index.json',
+      'credentials/index.json',
+      'downloads/index.json',
+      'agent-homes/index.json',
+      'SESSIONS',
+    ]) {
+      const fixed = defineState({
+        name: 'fixed',
+        path,
+        store: 'json',
+        format: 1,
+        schema: z.strictObject({ id: z.string() }),
+      });
+      expect(() => createStatePort({ home: '/home/fy', pluginId: 'ferrets', files: [fixed], fs })).toThrow(
+        UndeclaredStateFileError,
+      );
+    }
+    // a fixed file whose folder only starts like one, and an ordinary fixed file, are fine
+    for (const path of ['sessions-1/index.json', 'index.json', 'a/sessions/index.json']) {
+      const fixed = defineState({
+        name: 'fixed',
+        path,
+        store: 'json',
+        format: 1,
+        schema: z.strictObject({ id: z.string() }),
+      });
+      expect(() => createStatePort({ home: '/home/fy', pluginId: 'ferrets', files: [fixed], fs })).not.toThrow();
+    }
+  });
+
   test('K1 a name that only starts like a kernel-made folder is still a name', async () => {
     const fs = createMemoryHostFs();
     const port = createStatePort({ home: '/home/fy', pluginId: 'ferrets', files: [ferretFile], fs });
@@ -347,6 +413,8 @@ describe('K1 the sessions root stays private: nothing widens past the owner', ()
     expect(await ensureInternalRootBases(f.fs, { home: f.home, plugin: 'ferrets' }, ['sessions'])).toEqual([]);
 
     expect(await modeOf(`${f.home}/state/ferrets/sessions`)).toBe(0o700);
+    // n-b: only the base is clamped; the plugin's own state folder is left as it was (the 0700 base is the gate)
+    expect(await modeOf(`${f.home}/state/ferrets`)).toBe(0o755);
   });
 
   test('K1 a file written with a wider mode, or replaced over a wider one, comes out 0600', async () => {
@@ -371,6 +439,31 @@ describe('K1 the sessions root stays private: nothing widens past the owner', ()
 
     await root.publish(resolved(root, 'effects/e.json'), encoder.encode('p'), { mode: 0o644 });
     expect(await modeOf(`${f.home}/state/ferrets/sessions/f1/effects/e.json`)).toBe(0o600);
+  });
+
+  test('K1 n-a copyTree into a sessions handle: a 0644 file and a 0755 folder land 0600 and 0700', async () => {
+    const f = await fresh();
+    await ensureInternalRootBases(f.fs, { home: f.home, plugin: 'ferrets' }, ['sessions']);
+    const worktrees = `${f.home}-worktrees`;
+    await mkdir(`${worktrees}/d/sub`, { recursive: true, mode: 0o755 });
+    await chmod(`${worktrees}/d`, 0o755);
+    await chmod(`${worktrees}/d/sub`, 0o755);
+    await writeFile(`${worktrees}/d/a.txt`, 'a', { mode: 0o644 });
+    await writeFile(`${worktrees}/d/sub/b.txt`, 'b', { mode: 0o644 });
+    await chmod(`${worktrees}/d/a.txt`, 0o644);
+    await chmod(`${worktrees}/d/sub/b.txt`, 0o644);
+    const roots = f.port('ferrets', ['sessions', 'worktrees']);
+    const source = roots.root('worktrees');
+    const target = roots.root('sessions', { subfolder: 'f1' });
+
+    await target.copyTree(source, resolved(source, 'd'), resolved(target, 'copy'));
+
+    const into = `${f.home}/state/ferrets/sessions/f1/copy`;
+    expect(await readFile(`${into}/sub/b.txt`, 'utf8')).toBe('b');
+    expect(await modeOf(into)).toBe(0o700);
+    expect(await modeOf(`${into}/sub`)).toBe(0o700);
+    expect(await modeOf(`${into}/a.txt`)).toBe(0o600);
+    expect(await modeOf(`${into}/sub/b.txt`)).toBe(0o600);
   });
 
   test('K1 a folder made through the sessions handle is 0700 whatever mode is asked', async () => {
@@ -410,6 +503,57 @@ describe('K1 the testing host refuses an owned root to a plugin that does not ow
       },
     );
   const seen = new Map<string, () => RootHandle>();
+  const scoped = new Map<string, RootHandle>();
+
+  test("K1 r2-m3 testHost: two sessions subfolders do not see each other, and the folder rule is production's", async () => {
+    seen.clear();
+    const plugin = implementDaemon(
+      definePlugin({
+        id: 'ferrets',
+        title: 'ferrets',
+        version: '5.0.0',
+        api: 5,
+        core: false,
+        kinds: [],
+        permissions: { roots: ['sessions', 'agent-homes'] },
+      }),
+      {
+        build: ctx => {
+          scoped.set('a', ctx.kernel.roots.root('sessions', { subfolder: 'aaa-1' }));
+          scoped.set('b', ctx.kernel.roots.root('sessions', { subfolder: 'bbb-2' }));
+          scoped.set('whole', ctx.kernel.roots.root('sessions'));
+          scoped.set('nested', ctx.kernel.roots.root('sessions', { subfolder: 'a/b' }));
+          scoped.set('upper', ctx.kernel.roots.root('sessions', { subfolder: 'AAA-1' }));
+          scoped.set('homeA', ctx.kernel.roots.root('agent-homes', { subfolder: 'aaa-1' }));
+          scoped.set('homeB', ctx.kernel.roots.root('agent-homes', { subfolder: 'bbb-2' }));
+          scoped.set('homeUp', ctx.kernel.roots.root('agent-homes', { subfolder: '../x' }));
+          return {};
+        },
+      },
+    );
+    const host = await testHost({ plugins: [plugin] });
+    const handle = (key: string): RootHandle => {
+      const found = scoped.get(key);
+      if (found === undefined) throw new Error(key);
+      return found;
+    };
+    const a = handle('a');
+    const b = handle('b');
+    await a.writeText(resolved(a, 'environment.json'), 'secret-of-a');
+    expect(await a.readText(resolved(a, 'environment.json'))).toBe('secret-of-a');
+    // the other ferret's handle names its own folder: it never reads what a wrote
+    await expect(b.readText(resolved(b, 'environment.json'))).rejects.toThrow();
+    expect(String(resolved(b, 'environment.json'))).not.toBe(String(resolved(a, 'environment.json')));
+    // agent-homes scopes the same way
+    const homeA = handle('homeA');
+    const homeB = handle('homeB');
+    await homeA.writeText(resolved(homeA, 'x.json'), 'a');
+    await expect(homeB.readText(resolved(homeB, 'x.json'))).rejects.toThrow();
+    // production's refusals: the whole base, a nested path, an upper-case id, a traversing agent-homes scope
+    for (const key of ['whole', 'nested', 'upper', 'homeUp'])
+      expect(handle(key).resolve('environment.json')).toEqual({ ok: false, error: 'outside' });
+    await host.stop();
+  });
 
   for (const [owned, owner] of [
     ['sessions', 'ferrets'],

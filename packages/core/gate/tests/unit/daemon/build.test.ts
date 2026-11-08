@@ -26,11 +26,13 @@ import {
   type GateConfig,
   GatePolicyChanged,
   LIMITED_DEVICE_GRANTS,
+  StepUp,
+  type StepUpWitness,
   WardenTokenFile,
 } from '../../../contract/index.ts';
 import gateDaemon from '../../../daemon/index.ts';
 import manifest, { AuditKeptFile, GrantAuditFile } from '../../../manifest.ts';
-import { FakeDeviceProvider, holder } from '../../../contract/testing/index.ts';
+import { FakeDeviceProvider, FakeStepUpWitness, holder } from '../../../contract/testing/index.ts';
 import { ADMIN, carried, descriptor, local, request, WARDEN } from './support.ts';
 
 // ─── a minimal kernel: only the ports Gate's build touches, each observable ─────────────────────────────────────────
@@ -52,6 +54,13 @@ interface FakeKernelOptions {
   readonly slowReads?: boolean;
   /** The `credentials` providers the hooks answer, by kind; a kind left out is "that plugin is off". */
   readonly credentials?: Readonly<Partial<Record<'device' | 'member', CredentialProvider>>>;
+  /** Access's `step-up:device` value; left out, "Access is off" (every device must unlock, fail closed). */
+  readonly stepUp?: StepUpWitness;
+  /**
+   * The kernel's writer puts a written `patch` into effect at once, as the real config service does (it loads the file
+   * before it answers) and tells the `gate.yaml` watchers; left out, a write changes nothing.
+   */
+  readonly applyWrites?: boolean;
 }
 
 function boot(options: FakeKernelOptions = {}) {
@@ -94,6 +103,7 @@ function boot(options: FakeKernelOptions = {}) {
     },
     damaged: () => [],
   };
+  let live = options.config;
   const absent: ConfigFileStatus = { state: 'absent', inEffect: false, sentences: [] };
   const configFiles = {
     declarations: () => [{ plugin: 'gate', def: manifest.data?.config?.[0] }],
@@ -106,13 +116,17 @@ function boot(options: FakeKernelOptions = {}) {
     }),
     write: async (target: ConfigTarget, edit: ConfigEdit, writeOptions: unknown): Promise<ConfigWriteOutcome> => {
       configWrites.push({ target, edit, options: writeOptions });
+      if (options.applyWrites === true && typeof edit !== 'string' && live !== undefined && live !== 'throws') {
+        live = { ...live, ...(edit.patch as Partial<GateConfig>) };
+        for (const listener of watchers) listener();
+      }
       return options.writeOutcome ?? { kind: 'written', etag: 'e2', loosened: [] };
     },
   };
   const config = {
     file: () => {
-      if (options.config === 'throws') throw new Error('gate.yaml cannot be read');
-      return options.config;
+      if (live === 'throws') throw new Error('gate.yaml cannot be read');
+      return live;
     },
     collection: () => new Map(),
     watch: (_def: unknown, listener: () => void) => {
@@ -120,7 +134,7 @@ function boot(options: FakeKernelOptions = {}) {
       return () => undefined;
     },
     fileState: () =>
-      options.fileState ?? (options.config === undefined ? absent : { state: 'valid', inEffect: true, sentences: [] }),
+      options.fileState ?? (live === undefined ? absent : { state: 'valid', inEffect: true, sentences: [] }),
   };
   const log = { debug() {}, info() {}, warn() {}, error() {}, child: () => log };
   const kernel = {
@@ -139,7 +153,11 @@ function boot(options: FakeKernelOptions = {}) {
   const credentials = { ...options.credentials };
   const hooks = {
     provider: (hook: { name: string }, key: string) =>
-      (hook.name === Credentials.name ? credentials[key as 'device' | 'member'] : undefined) ?? 'unavailable',
+      (hook.name === Credentials.name
+        ? credentials[key as 'device' | 'member']
+        : hook.name === StepUp.name
+          ? options.stepUp
+          : undefined) ?? 'unavailable',
     invoke: async () => [],
   };
   const build = gateDaemon.build;
@@ -311,6 +329,44 @@ describe('config writes in the built daemon', () => {
     const response = await dispatch(built, 'PATCH /v1/security', { bearer: ADMIN, body: { unlockValidityHours: 4 } });
     expect(response.status).toBe(503);
     expect(bodyOf(response).code).toBe('config_not_saved');
+  });
+
+  test('G74 G111 an on-host admin-token PATCH turning unlockOnOpen off is applied at once: a device that never unlocked is then served a non-exempt socket', async () => {
+    const devices = new FakeDeviceProvider();
+    devices.enrol(holder('d1'));
+    // Access's witness reads the settings in force from Gate's policy at every question, as Access's runtime does.
+    const witness = new FakeStepUpWitness({
+      nowMs: () => Date.parse('2026-11-07T12:00:00.000Z'),
+      settings: () => built.half.provides.gate.policy()?.security,
+    });
+    const built = boot({
+      secrets: seeded,
+      config: DEFAULT_GATE_CONFIG,
+      credentials: { device: devices },
+      stepUp: witness,
+      applyWrites: true,
+    });
+    await built.jobs.get('gate.tokens')?.();
+    // The kernel's bus socket: authenticated, any caller, no capability, and NOT unlock-exempt.
+    const bus = descriptor({ method: 'GET', path: '/v1/bus', minimum: 'authenticated' });
+    const openBus = () =>
+      built.half.provides.admission.admit({
+        table: 'socket',
+        descriptor: bus,
+        request: request({ device: 'd1', method: 'GET', path: '/v1/bus' }),
+        params: new Map(),
+      });
+    const before = openBus();
+    expect(before.outcome).toBe('refused');
+    if (before.outcome === 'refused') expect(bodyOf(before.response).code).toBe('unlock_required');
+
+    const response = await dispatch(built, 'PATCH /v1/security', { bearer: ADMIN, body: { unlockOnOpen: false } });
+    expect(response.status).toBe(200);
+    expect(built.configWrites).toHaveLength(1);
+    // Applied, not held: the route decided this caller may loosen, and the writer was told so.
+    expect(built.configWrites[0]?.options).toEqual({ confirmedLoosening: true });
+    expect(built.half.provides.gate.policy()?.security.unlockOnOpen).toBe(false);
+    expect(openBus().outcome).toBe('admitted');
   });
 
   test('G131 a plugin’s own loosening config write with no call standing is held by the built admission', () => {
