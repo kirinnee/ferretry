@@ -3,7 +3,7 @@ import { fixedClock } from '@ferretry/kernel/testing';
 import { milliseconds } from '@ferretry/std';
 import should from 'should';
 import { type Card, type PrLink, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
-import { BoardService, NO_HELPERS } from '../../../daemon/lib/board/index.ts';
+import { BoardService, type FerretRoster, NO_HELPERS } from '../../../daemon/lib/board/index.ts';
 import {
   BOOT_REFILE_DELAY_MS,
   GITHUB_WATCH_JOB_ID,
@@ -13,8 +13,18 @@ import {
   WATCH_TICK_MS,
   type WatchSleep,
 } from '../../../daemon/lib/github/index.ts';
-import { card, FakeLanes, lanes, MemoryBoardStore, NOW, OTHER_PROJECT, PROJECT, world } from '../board/support.ts';
-import { prUrl, REPO } from './support.ts';
+import {
+  card,
+  FakeLanes,
+  lanes,
+  liveSession,
+  MemoryBoardStore,
+  NOW,
+  OTHER_PROJECT,
+  PROJECT,
+  world,
+} from '../board/support.ts';
+import { answer, prNode, prUrl, REPO } from './support.ts';
 
 const merged: PrLink = {
   url: prUrl(985),
@@ -39,6 +49,14 @@ interface RigOptions {
   readonly random?: () => number;
   /** Runs as each tick reads the board. */
   readonly onTick?: () => void;
+  /** How the ferret an alert is routed to takes messages; absent is unreadable. */
+  readonly mode?: 'auto' | 'interactive';
+  /** The sessions alive; absent is none. */
+  readonly roster?: FerretRoster;
+  /** What `gh` answers a poll with. */
+  readonly ghAnswer?: string;
+  /** Makes the board read that surfaces a withheld alert fail. */
+  readonly surfaceFails?: boolean;
 }
 
 /** The watch as `build()` makes it, over the kernel's driven clock; each tick is seen as the watcher's board read. */
@@ -56,6 +74,8 @@ const rig = (options: RigOptions = {}) => {
   const ticks: number[] = [];
   const hold: { until?: Promise<void> } = {};
   const warnings: string[] = [];
+  const sent: { ferret: string; message: string }[] = [];
+  const withheld: string[] = [];
   const projects = { projects: async () => [{ id: PROJECT, name: 'Ferretry', path: '/p' }] as never };
   const copies = {
     repositoryOf: async (path: string) => (path === '/p' ? REPO : null),
@@ -64,9 +84,24 @@ const rig = (options: RigOptions = {}) => {
   const diagnostics = { warn: (message: string) => warnings.push(message) };
   const now = () => clock.now() as string;
   const watch = githubWatchJob({
-    alerts: { mode: async () => undefined, send: async () => undefined, withheld: async () => undefined },
-    surface: { snapshot: async () => await service.snapshot(), note: async () => undefined, machineId: () => 'm' },
-    roster: async () => ({ held: new Set(), sessions: new Map() }),
+    alerts: {
+      mode: async () => options.mode,
+      send: async (ferret, message) => {
+        sent.push({ ferret, message });
+      },
+      withheld: async (ferret, message) => {
+        withheld.push(`${ferret}: ${message}`);
+      },
+    },
+    surface: {
+      snapshot: async () => {
+        if (options.surfaceFails === true) throw new Error('the board is unreadable');
+        return await service.snapshot();
+      },
+      note: async () => undefined,
+      machineId: () => 'm',
+    },
+    roster: async () => options.roster ?? { held: new Set(), sessions: new Map() },
     helpers: NO_HELPERS,
     refiler: {
       board: service,
@@ -88,7 +123,7 @@ const rig = (options: RigOptions = {}) => {
         recordPullRequests: async (id, update) => await service.recordPullRequests(id, update),
         act: async (id, request, caller) => await service.act(id, request, caller),
       },
-      gh: { run: async () => ({ kind: 'ok', stdout: '{}' }) },
+      gh: { run: async () => ({ kind: 'ok', stdout: options.ghAnswer ?? '{}' }) },
       copies,
       sessions: { cwdOf: async () => null },
       projects,
@@ -110,7 +145,7 @@ const rig = (options: RigOptions = {}) => {
     await new Promise<void>(resolve => {
       slept = resolve;
     });
-  return { clock, store, watch, jobs: watch.jobs(sleep), ticks, hold, sleeps, nextSleep, warnings };
+  return { clock, store, watch, jobs: watch.jobs(sleep), ticks, hold, sleeps, nextSleep, warnings, sent, withheld };
 };
 
 describe('the GitHub watch job: its cadence', () => {
@@ -241,5 +276,51 @@ describe('the GitHub watch job: the Unfiled refile at start', () => {
     // Assert: refiled without a tick of the watch.
     should(subject.store.cards.get('F1' as never)?.projectId).equal(PROJECT);
     should(subject.ticks).be.empty();
+  });
+});
+
+describe('the GitHub watch job: where an alert goes', () => {
+  const closedUnmerged = (): Card =>
+    card({
+      laneId: 'review',
+      workflow: 'quick',
+      owner: 'lead',
+      assignee: 'worker',
+      links: {
+        prs: [
+          { ...merged, number: 940, url: prUrl(940), state: 'open', mergedAt: null, mergeSha: null, polledAt: NOW },
+        ],
+        branch: null,
+        commits: [],
+        docs: [],
+      },
+    });
+  const ghAnswer = answer({ prs: { 940: prNode(940, { state: 'CLOSED' }) } });
+
+  it('should send a PR alert to the live ferret the card answers to', async () => {
+    const roster = { held: new Set(['worker']), sessions: new Map([['worker', liveSession('worker')]]) };
+    const subject = rig({ cards: [closedUnmerged()], roster, ghAnswer, mode: 'auto' });
+
+    await subject.watch.watcher.tick();
+
+    should(subject.sent.map(each => each.ferret)).deepEqual(['worker']);
+  });
+
+  it('should fall back to the ferret the alert was for, or its lead, when nobody on the card is alive', async () => {
+    const subject = rig({ cards: [closedUnmerged()], ghAnswer, mode: 'auto' });
+
+    await subject.watch.watcher.tick();
+
+    should(subject.sent.map(each => each.ferret)).deepEqual(['lead']);
+  });
+
+  it('should hold the alert back from an interactive ferret, and warn when the board cannot show it', async () => {
+    const subject = rig({ cards: [closedUnmerged()], ghAnswer, mode: 'interactive', surfaceFails: true });
+
+    await subject.watch.watcher.tick();
+
+    should(subject.sent).be.empty();
+    should(subject.withheld).have.length(1);
+    should(subject.warnings.some(warning => warning.includes('could not surface a withheld alert on'))).be.true();
   });
 });
