@@ -209,7 +209,8 @@ export interface TestHost {
   setConfig(fileOrCollection: string, value: unknown): void;
   runJob(id: string): Promise<void>;
   /** Runs a half's declared `doctor` check (manifest `doctor` id) as `fy doctor` would. */
-  doctor(plugin: string, check: string): Promise<DoctorFinding>;
+  /** A declared check's finding; `undefined` when it reports no row. */
+  doctor(plugin: string, check: string): Promise<DoctorFinding | undefined>;
   jobIds(): readonly string[];
   /** Makes `InputHolds.decide` refuse this target (when the stand-in holds are in use). */
   hold(target: TargetRef, code?: RefusalCode): void;

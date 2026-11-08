@@ -1,7 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  launchGuardActive,
   RealHarnessRefusedError,
   realHarnessInstall,
   type TmuxLaunchGuard,
@@ -68,30 +67,6 @@ describe('real harness installs', () => {
 
     // Assert
     should(actual).eql([undefined, undefined, undefined, undefined, undefined]);
-  });
-});
-
-describe('when the launch guard is on', () => {
-  it('should turn on for the runner flag or a state home under a temporary root, and only then', () => {
-    // Act
-    const actual = {
-      flagged: launchGuardActive({ flag: '1', home: '/home/someone/.ferretry', temporaryRoots: ['/tmp'] }),
-      temporary: launchGuardActive({ flag: undefined, home: '/tmp/fy-e2e-1/state', temporaryRoots: ['/tmp'] }),
-      rootItself: launchGuardActive({ flag: undefined, home: '/tmp', temporaryRoots: ['/tmp/'] }),
-      lookalike: launchGuardActive({ flag: undefined, home: '/tmpfoo/state', temporaryRoots: ['/tmp'] }),
-      blankRoot: launchGuardActive({ flag: '0', home: '/home/someone/.ferretry', temporaryRoots: [''] }),
-      owner: launchGuardActive({ flag: undefined, home: '/home/someone/.ferretry', temporaryRoots: ['/tmp'] }),
-    };
-
-    // Assert
-    should(actual).eql({
-      flagged: true,
-      temporary: true,
-      rootItself: true,
-      lookalike: false,
-      blankRoot: false,
-      owner: false,
-    });
   });
 });
 

@@ -1,3 +1,4 @@
+import { unarmedHostFacts } from '../../../../support/daemon/host-facts.ts';
 import type { FerretSummary } from '@ferretry/core-ferrets/contract';
 import {
   deviceStanding,
@@ -82,6 +83,7 @@ export async function mountHalf(
     build: ctx => buildTerminals(ctx, { tmux: new ScriptedTmux(), socketPath: '/state/terminals/tmux.sock', runtime }),
   });
   const host = await testHost({
+    hostFacts: unarmedHostFacts,
     plugins: [plugin],
     fakes: { ferrets: fakeFerrets(options.ferrets ?? [ferretSummary()]), vault: fakeVault(raised) },
     gate: new StandInAdmission(() => STANDINGS[caller]()),

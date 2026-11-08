@@ -1,17 +1,16 @@
-import { realpath } from '../host/fs.ts';
+import { locateCommand, realpath } from '../host/fs.ts';
 import { isAbsolute, resolve } from 'node:path';
 import {
   GUARDED_HARNESS_NAMES,
   RealHarnessRefusedError,
   realHarnessInstall,
+  UnprovableHarnessError,
   type TmuxLaunch,
   type TmuxLaunchGuard,
 } from '../../lib/tmux/index.ts';
 
 /** Finds a bare command name on a colon-separated search path, as the pane's shell would. */
 export type CommandLocator = (name: string, searchPath: string) => string | undefined;
-
-const locateOnPath: CommandLocator = (name, searchPath) => Bun.which(name, { PATH: searchPath }) ?? undefined;
 
 /**
  * Refuses a launch that would reach the owner's real Claude Code or Codex.
@@ -22,17 +21,26 @@ const locateOnPath: CommandLocator = (name, searchPath) => Bun.which(name, { PAT
  * whose `claude` was the real one. The pane's PATH is the launch's own `PATH` when it carries one and
  * otherwise this daemon's, because the tmux server the daemon starts inherits the daemon's.
  *
+ * IT FAILS CLOSED when it cannot make that search: a launch whose opaque environment handle sets `PATH`
+ * (`envNames`; the value never reaches this plugin), or no search path at all. Either way the pane could reach a
+ * `claude` the guard never looked at, so the launch is refused rather than passed (`UnprovableHarnessError`).
+ *
  * Every path is compared after symlinks are resolved and before, so a profile link and the store path
  * it points into are both recognised.
  */
 export class RealHarnessLaunchGuard implements TmuxLaunchGuard {
   constructor(
+    /** The daemon's `PATH` as the kernel's launch-guard fact names it (`hostFacts.launchGuard().searchPath`). */
     private readonly daemonSearchPath: () => string | undefined,
-    private readonly locate: CommandLocator = locateOnPath,
+    private readonly locate: CommandLocator = locateCommand,
   ) {}
 
   async check(launch: TmuxLaunch): Promise<void> {
-    const searchPath = launch.env?.PATH ?? this.daemonSearchPath() ?? '';
+    const ownPath = launch.env?.PATH;
+    if (ownPath === undefined && launch.envNames?.includes('PATH') === true)
+      throw new UnprovableHarnessError('own-path');
+    const searchPath = ownPath ?? this.daemonSearchPath();
+    if (searchPath === undefined || searchPath === '') throw new UnprovableHarnessError('no-path');
     const [program] = launch.command;
     const candidates: { readonly name: string; readonly path: string | undefined }[] = [
       {

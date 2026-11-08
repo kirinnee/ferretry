@@ -203,7 +203,7 @@
       "the Layout tab edits the wide layout only: the `phone.*` keys (`fy layout set phone.nav.side bottom`) have no row in either scope"
     ],
     "terminals": [
-      "GAP(ferrets): the tmux adapters daemon/adapters/tmux/pane-queue.ts, daemon/adapters/tmux/harness-launch-guard.ts, daemon/adapters/tmux/forget-ferret-identity.ts and daemon/adapters/tmux/tmux-release-reader.ts are ported and tested but nothing composes them until Ferrets wires the deliver and runner seams and reads FERRETRY_TEST (scripts/test/swept.sh) to arm it (gustavo)"
+      "GAP(ferrets): the tmux adapter daemon/adapters/tmux/pane-queue.ts is ported and tested but nothing composes it until the Runner queue seam of Ferrets is wired to it (gustavo)"
     ],
     "access": [
       "GAP(access): app/features/device-notice/devices-looked.ts is not reached by a panel of the app shell (the new-device notice) (owner: kaizen app shell)",

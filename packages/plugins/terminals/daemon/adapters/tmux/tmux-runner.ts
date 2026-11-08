@@ -9,7 +9,7 @@ import type {
   StartRefusal,
 } from '@ferretry/core-ferrets/contract';
 import type { RunnerKey } from '@ferretry/core-ferrets/contract';
-import { type ActRunner, REFUSAL_SENTENCES, type SpawnPort } from '@ferretry/kernel/contract';
+import { type ActRunner, type Log, REFUSAL_SENTENCES, type SpawnPort } from '@ferretry/kernel/contract';
 import { targetRef } from '@ferretry/core-vault/contract';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { sessionTarget } from '../../lib/tmux/address.ts';
@@ -19,6 +19,7 @@ import { TmuxController } from '../../lib/tmux/controller.ts';
 import { scriptLine } from '../../lib/tmux/script.ts';
 import { guardedWriteArguments, GUARD_REFUSED } from '../../lib/tmux/write-guard.ts';
 import { TERMINAL_TMUX_PREFIX } from '../../lib/terminal/runtime-policy.ts';
+import { LaunchGuardRefusal, RealHarnessRefusedError, type TmuxLaunchGuard } from '../../lib/tmux/harness-guard.ts';
 import { TMUX_PROGRAM } from './kernel-tmux-process.ts';
 import { ComposerUnconfirmedError, type DeliverySleep } from './composer-fill.ts';
 import { PaneDeliveryError, PaneNotReadyError, PaneStrandedError, TmuxPaneDelivery } from './pane-delivery.ts';
@@ -99,6 +100,16 @@ export interface TmuxRunnerOptions {
   readonly remember?: (ferret: string, running: RunningFerret) => Promise<void>;
   /** The kernel guards every delivery write; sleeps use its clock. Absent: delivery refuses before any keys. */
   readonly delivery?: { readonly act: ActRunner; readonly sleep: DeliverySleep };
+  /**
+   * Armed under test mode (the kernel's `hostFacts.launchGuard()`): consulted before ANY tmux command of a launch, so a
+   * real harness is never reached and no server is started for it. A refusal is LOUD: its sentence (a harness name, a
+   * filesystem path and an install name, never an environment value) is logged as a warning, and the start answers
+   * the closed refusal `real_harness`, which Ferrets turns into the start's reason. Anything else the guard throws
+   * (a locator that failed) still rejects the start: it fails closed, never open.
+   */
+  readonly launchGuard?: TmuxLaunchGuard;
+  /** Where a refused launch is said. */
+  readonly log?: Pick<Log, 'warn'>;
 }
 
 export class TmuxRunner implements Runner {
@@ -276,6 +287,16 @@ export class TmuxRunner implements Runner {
     const names = spec.env.names.filter(name => ENVIRONMENT_NAME.test(name));
     if (names.length !== spec.env.names.length) return err('failed');
     const session = ferretTmuxSession(spec.ferret);
+    try {
+      await this.options.launchGuard?.check({ session, cwd: spec.cwd, command: [program, ...args], envNames: names });
+    } catch (error) {
+      if (!(error instanceof LaunchGuardRefusal)) throw error;
+      this.options.log?.warn(error.message, {
+        ferret: spec.ferret,
+        ...(error instanceof RealHarnessRefusedError ? { harness: error.harness } : {}),
+      });
+      return err('real_harness');
+    }
     if ((await this.options.tmux.execute(['has-session', '-t', session])).code === 0) return err('failed');
     // Started without the handle, so the server never holds a ferret's values in its own environment.
     if ((await this.options.tmux.execute(['start-server'])).code !== 0) return err('unavailable');
