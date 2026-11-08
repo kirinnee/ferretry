@@ -6,13 +6,16 @@
  * THERE IS NO DEVICE TOKEN, AND NO SCHEMA FOR ONE. A paired device proves itself by signing each session's
  * transcript with a key it cannot export; the daemon holds only the public half, and no view here carries it.
  */
+import { PushEnvelopeFields } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 
-/** One buzz as another plugin hands it to Access (Agenda's `uses`): words only, never a secret. */
+/**
+ * One buzz as another plugin hands it to Access (Agenda's `uses`): words only, never a secret. Its `title`, `body` and
+ * `url` ARE the push envelope, with the envelope's caps (declared once in the kernel contract), so a buzz the shell worker
+ * could not read is refused where it is sent.
+ */
 export const BuzzSchema = z.strictObject({
   tag: z.string().min(1).max(200),
-  title: z.string().min(1),
-  body: z.string(),
-  url: z.string().min(1),
+  ...PushEnvelopeFields,
 });
 export type Buzz = z.infer<typeof BuzzSchema>;

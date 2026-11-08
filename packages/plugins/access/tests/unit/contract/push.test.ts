@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { PUSH_BODY_MAX, PUSH_TITLE_MAX, PUSH_URL_MAX } from '@ferretry/kernel/contract';
 import * as push from '../../../contract/push.ts';
+import { BuzzSchema } from '../../../contract/wire.ts';
 import { INSTANT, LATER_INSTANT } from './fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
@@ -556,4 +557,13 @@ it('a payload over an envelope cap is refused where it is composed, not shown un
   should(
     push.PushNotificationPayloadSchema.safeParse({ ...sessionPayload, title: 'x'.repeat(PUSH_TITLE_MAX) }).success,
   ).be.true();
+});
+
+it('a buzz carries the envelope’s caps: an over-cap one is refused where another plugin sends it', () => {
+  const buzz = { tag: 'agenda-A3', title: 'Deploy approval', body: 'Ship the build?', url: '/ferrets/f1/chat?ask=A3' };
+  should(BuzzSchema.safeParse(buzz).success).be.true();
+  should(BuzzSchema.safeParse({ ...buzz, title: 'x'.repeat(PUSH_TITLE_MAX + 1) }).success).be.false();
+  should(BuzzSchema.safeParse({ ...buzz, body: 'x'.repeat(PUSH_BODY_MAX + 1) }).success).be.false();
+  should(BuzzSchema.safeParse({ ...buzz, url: `/${'x'.repeat(PUSH_URL_MAX)}` }).success).be.false();
+  should(BuzzSchema.safeParse({ ...buzz, title: 'x'.repeat(PUSH_TITLE_MAX) }).success).be.true();
 });
