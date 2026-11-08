@@ -520,10 +520,11 @@ describe('FileSessionTaskStore', () => {
     // Act
     const file = await subject.writeAssignedTask(id, 'work\n');
 
-    // Assert: the session folder first (it names `turns`, which this publish created), then the turns
-    // directory once the rename has published the file into it. The `sessions` base was made at boot.
+    // Assert: parents first and oldest ancestor first — this write created both the session folder
+    // and `turns`, so the chain reaches the `sessions` folder that names the session — then the turns
+    // directory once the rename has published the file into it.
     const turns = join(folder, 'durable-session', 'turns');
-    should(synced).eql([join(folder, 'durable-session'), turns]);
+    should(synced).eql([folder, join(folder, 'durable-session'), turns]);
     should(await readFile(file, 'utf8')).equal('work\n');
     should(await readdir(turns)).eql(['turn-001.md']);
   });

@@ -26,10 +26,12 @@ const EnvironmentDocumentSchema = z.record(z.string().min(1), z.string());
  * hash only after this method returns, so mere call ordering without power-loss durability would
  * still be able to leave a hash whose plaintext vanished after a crash.
  *
- * THE KERNEL OWNS THE DURABILITY. `RootHandle.publish` writes the temp file (exclusive create, `0o600`, synced),
- * moves it onto the name and syncs the folder, and before writing it syncs the folder's parent and any ancestor it
- * had to create, parent first. `SessionLifecycleService.create` still persists the session directory's own entry in
- * `<sessions>` (`repository.reserve`); the extra parent sync here is a harmless repeat, not a second owner.
+ * THE KERNEL OWNS THE DURABILITY, in two steps. The ferret's folder's own entry in `sessions/` is made durable when
+ * the folder is made: `OwnFolder.ensure` (before every read and write here) has the handle make it, and the kernel
+ * syncs `sessions/` right after that `mkdir`, before anything is written below it. Then `RootHandle.publish`
+ * writes the temp file (exclusive create, `0o600`, synced), moves it onto the name and syncs the ferret's folder.
+ * The publish itself cannot reach `sessions/` (it is above this handle's root), and nothing else persists that
+ * entry: `repository.reserve` persists a different folder (`state/ferrets/<id>/`).
  *
  * USE, NEVER READ. The store has no getter that hands the document out: `read` is the launch's own and the
  * rotation's, and no route, port member or log line carries its contents.

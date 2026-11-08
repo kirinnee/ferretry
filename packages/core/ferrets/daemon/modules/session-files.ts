@@ -136,7 +136,11 @@ export class SessionFiles {
     return new FileSessionEffectLedger(this.root(id), id);
   }
 
-  /** One lifecycle for one session: its stores on its own folder, the shared gate and queue. */
+  /**
+   * One lifecycle for one session: its stores on its own folder, the shared gate and queue. Built without today's
+   * conversation `leases` and board `projects` (GAP(ports-pending: Session adapters)): `leases` must be bound before a
+   * pane launcher is.
+   */
   createLifecycle = (id: SessionId, envelope?: SessionProtocolEnvelope): SessionLifecycleService =>
     new SessionLifecycleService(
       {
@@ -171,6 +175,8 @@ export class SessionFiles {
    * (`createLifecycle`), which this build does not drive yet, so a ferret started by Ferrets' own service has none to
    * merge into: nothing is created for it and the start goes on (a session with no stamp is the answer "nobody has
    * decided", which every reader already handles). A document that is there and cannot take the stamp refuses the start.
+   * Because the ancestry snapshot is not taken for a start with no document, a damaged, unreadable or vanished ancestor
+   * does not refuse it, which today's start does (GAP(provenance)).
    */
   private async stampAtStart(request: SessionSpawnRequest): Promise<void> {
     const id = parseSessionId(request.id);

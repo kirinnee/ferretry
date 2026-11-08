@@ -144,7 +144,7 @@ describe('FileSessionEffectLedger', () => {
     // Arrange: nothing of this session exists yet, so the mkdir creates the whole chain and every
     // link of it has its name in the link above.
     const { subject, sessions, synced } = await ledger('parents');
-    // The kernel made the `sessions` base at boot, so the only directory this attempt creates is `effects`.
+    // The kernel made the `sessions` base at boot; this attempt creates the session folder and `effects`.
     const session = join(sessions, SESSION);
     const effects = join(session, 'effects');
 
@@ -152,10 +152,11 @@ describe('FileSessionEffectLedger', () => {
     await subject.begin(key, FINGERPRINT, BEGUN_AT);
 
     // Assert: an entry lives in its PARENT, so syncing the leaf persists the record inside it and
-    // says nothing about the leaf's own name. The session folder is synced because `effects` — which this attempt
-    // DID create — is named inside it, BEFORE the record's own directory sync, which is last and is what persists
-    // the record itself.
-    should(synced).eql([session, effects]);
+    // says nothing about the leaf's own name. `sessions` is synced because the session folder — which this attempt
+    // DID create — is named inside it, then the session folder because `effects` is named inside it. Oldest ancestor
+    // first, because a child's fsync is only well defined once its own entry is durable, and every one of them lands
+    // BEFORE the record's own directory sync, which is last and is what persists the record itself.
+    should(synced).eql([sessions, session, effects]);
     should(synced.at(-1)).equal(effects);
   });
 
@@ -172,7 +173,7 @@ describe('FileSessionEffectLedger', () => {
     // a directory is not atomic with persisting its name — the attempt that created it may not
     // have synced the parent yet, and inheriting that promise is what would let this record be
     // admitted into a directory a power loss can leave nameless. No higher ancestor is touched;
-    // lifecycle reservation owns durability of the session directory entry itself.
+    // the session folder's own entry in `sessions` was made durable when the first attempt made the folder.
     should(synced).eql([join(sessions, SESSION), join(sessions, SESSION, 'effects')]);
   });
 

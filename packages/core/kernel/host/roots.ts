@@ -369,6 +369,11 @@ async function ensureScopedBase(
     for (const segment of missing) {
       const at = await entry(scope, folder, parent, segment);
       await fs.mkdir(at, 0o700).catch(() => refuse('changed'));
+      // Creating a folder is not atomic with persisting its name: the folder it was made in is synced through the
+      // descriptor already proven, parent first, so the new entry is durable before anything is made or written below
+      // it (a ferret's `sessions/<ferret>` holds its effect ledger and credential). A filesystem that cannot sync a
+      // directory (`EINVAL`, `ENOTSUP`, `EPERM`) is tolerated by the adapter, as the state filesystem tolerates it.
+      await folder.sync();
       const made = await fs.openDirectory(at).catch(() => refuse('changed'));
       const previous = folder;
       folder = made;

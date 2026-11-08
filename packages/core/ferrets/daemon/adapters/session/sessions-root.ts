@@ -26,7 +26,9 @@ export function assertOwnSession(own: SessionId, asked: SessionId, owner: string
  * The ferret's own folder on the `sessions` root, made `0700` before the first thing is read or written through its
  * handle, and held to `0700` if it already existed wider. The kernel refuses a read below a scoped folder that is not
  * there yet (`outside`), so without this a never-launched session could not even be asked whether it has an
- * environment or an effect on record. Idempotent; only a success is remembered.
+ * environment or an effect on record. Idempotent; only a success is remembered. Making it is also what makes its NAME
+ * durable: the kernel syncs `sessions/` right after the `mkdir`, before anything is written below it, so the effect
+ * ledger and the credential never sit in a folder a power cut can leave nameless.
  */
 export class OwnFolder {
   private done: Promise<void> | undefined;

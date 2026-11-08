@@ -533,6 +533,65 @@ describe('unbuilt adapters: provenance', () => {
     expect(resume).toBe(start);
     expect(await storage.readConfig(FERRET)).toEqual(before);
   });
+
+  /**
+   * GAP(provenance), pinned. Today's start always takes the spawn ancestry snapshot, so a damaged, unreadable or
+   * vanished ancestor refuses EVERY start. In 5.0 a start with no session document returns before the snapshot is
+   * taken, so the ancestry is never checked and such a start goes on unstamped. That is the declared trade (nothing
+   * is written, so no false `wardenLineage: false` lands, and taking the snapshot here would lock out every start
+   * while a journal-only ferret is indexed); the same ancestry DOES refuse once the child has a document.
+   */
+  test("GAP(provenance) a start with no session document is not refused for a damaged, unreadable or vanished ancestor, which today's start is: the ancestry is never checked", async () => {
+    for (const damage of ['damaged', 'unreadable', 'vanished'] as const) {
+      // Arrange: the child (FERRET) has no document; its registered parent (OTHER) is damaged, or indexed with none
+      const kernel = await wired();
+      const warnings: string[] = [];
+      const { subject, storage, folder } = await files(kernel.roots, warnings, [{ id: OTHER, label: 'team' }]);
+      if (damage === 'unreadable') folder.plant(FerretConfigFile, '{"format": 1, "label": "fleet-', OTHER);
+      else if (damage === 'damaged')
+        folder.plant(
+          FerretConfigFile,
+          JSON.stringify({ format: 1, ...sessionConfig(OTHER, { label: WARDEN_LABEL }), provenance: { v: 99 } }),
+          OTHER,
+        );
+      else {
+        await folder
+          .port([FerretHistoryFiles])
+          .append(
+            FerretHistoryFiles,
+            encodeSessionEvent(createSessionEvent(OTHER, 0, NOW, 'ferret.stopped', {})),
+            OTHER,
+          );
+        await storage.rebuildIndex();
+      }
+
+      // Act
+      const start = await subject.port.stamp({ id: FERRET, parent: OTHER, requestedByHuman: false }).then(
+        () => undefined,
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
+
+      // Assert: not refused, nothing written for the child, and the log line is the only trace
+      expect(start).toBeUndefined();
+      expect(await storage.readConfig(FERRET)).toBeUndefined();
+      expect(warnings).toEqual(['a ferret has no session document yet, so its spawn stamp was not recorded']);
+
+      // Contrast: the same ancestry refuses the start as soon as the child has a document (the snapshot is taken).
+      // The document is the child's own, written as it lands on disk (a write naming a damaged parent is refused).
+      folder.plant(
+        FerretConfigFile,
+        JSON.stringify({ format: 1, ...sessionConfig(FERRET, { parent: OTHER }) }),
+        FERRET,
+      );
+      const documented = await subject.port.stamp({ id: FERRET, parent: OTHER, requestedByHuman: false }).then(
+        () => undefined,
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
+      // refused for the ANCESTOR, quoting none of its bytes
+      expect(documented).toContain(OTHER);
+      expect(documented).not.toContain('fleet-');
+    }
+  });
 });
 
 describe('the ferret folder is held private when a ferret starts', () => {

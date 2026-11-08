@@ -1,13 +1,25 @@
 /** K1: the `sessions` root — Ferrets' internal root under `state/ferrets/sessions/<ferret>`; the plaintext session credential lives there. */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { chmod, link, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  link,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { ok } from '@ferretry/std';
 import { z } from 'zod';
 import type { FencedPath } from '../../../contract/bound.ts';
 import { defineState } from '../../../contract/index.ts';
 import type { RootHandle, RootName, RootsPort } from '../../../contract/ports.ts';
-import { nodeFs } from '../../../host/adapters/node-fs.ts';
+import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
 import { bootHost, type HostOptions, type RunningHost } from '../../../host/host.ts';
 import { INTERNAL_ROOT_FOLDERS } from '../../../host/internal-roots.ts';
 import { ensureInternalRootBases, RootError, rootsPortFor } from '../../../host/roots.ts';
@@ -469,6 +481,88 @@ describe('K1 the sessions root stays private: nothing widens past the owner', ()
 
     expect(await modeOf(`${f.home}/state/ferrets/sessions/f1`)).toBe(0o700);
     await expect(root.readBytes(resolved(root, 'environment.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  describe('K1 u2 a handle that makes its own ferret folder syncs the sessions folder that names it, before anything below it is written', () => {
+    /**
+     * Wraps the real adapter (the IO still happens) and records, in order, each folder made (by its leaf), each file
+     * written (by its leaf) and each folder synced (by the real path its proven descriptor resolves to).
+     */
+    const recording = (disk: HostFs, events: string[]): HostFs => ({
+      ...disk,
+      mkdir: async (path, mode) => {
+        await disk.mkdir(path, mode);
+        events.push(`mkdir ${path.split('/').at(-1)}`);
+      },
+      writeNew: async (path, data, mode) => {
+        const made = await disk.writeNew(path, data, mode);
+        events.push(`write ${path.split('/').at(-1)}`);
+        return made;
+      },
+      openDirectory: async path => {
+        const opened = await disk.openDirectory(path);
+        return {
+          ...opened,
+          sync: async () => {
+            await opened.sync();
+            events.push(`sync ${await realpath(opened.entryPath('') ?? path)}`);
+          },
+        };
+      },
+    });
+
+    const setUp = async () => {
+      const f = await fresh();
+      await ensureInternalRootBases(f.fs, { home: f.home, plugin: 'ferrets' }, ['sessions']);
+      const sessions = await realpath(`${f.home}/state/ferrets/sessions`);
+      const events: string[] = [];
+      const disk = recording(f.fs, events);
+      const roots = rootsPortFor(
+        disk,
+        { home: f.home, plugin: 'ferrets', worktrees: `${f.home}-worktrees` },
+        ['sessions'],
+        () => undefined,
+      );
+      return { root: roots.root('sessions', { subfolder: 'f1' }), sessions, events };
+    };
+
+    test("K1 u2 holding the folder private (the stores' first step) syncs sessions/ right after making <ferret>/", async () => {
+      const { root, sessions, events } = await setUp();
+
+      await root.ensurePrivateDirectory(resolved(root, '.'));
+
+      expect(events).toEqual(['mkdir f1', `sync ${sessions}`]);
+
+      // a later publish below the folder: sessions/ was made durable first, then the folder, then the new effects/
+      await root.publish(resolved(root, 'effects/e.json'), encoder.encode('p'), { exclusive: true });
+      expect(events.filter(event => event.startsWith('sync '))).toEqual([
+        `sync ${sessions}`,
+        `sync ${sessions}/f1`,
+        `sync ${sessions}/f1/effects`,
+      ]);
+      expect(events.indexOf(`sync ${sessions}`)).toBeLessThan(events.indexOf('mkdir effects'));
+    });
+
+    test('K1 u2 a publish straight into a fresh handle syncs sessions/ before <ferret>/ holds anything', async () => {
+      const { root, sessions, events } = await setUp();
+
+      await root.publish(resolved(root, 'environment.json'), encoder.encode('{}'));
+
+      expect(events[0]).toBe('mkdir f1');
+      expect(events[1]).toBe(`sync ${sessions}`);
+      expect(events.indexOf(`sync ${sessions}`)).toBeLessThan(events.findIndex(event => event.startsWith('write ')));
+      expect(events.filter(event => event.startsWith('sync '))).toEqual([`sync ${sessions}`, `sync ${sessions}/f1`]);
+    });
+
+    test('K1 u2 a folder already there is not synced again by the handle (nothing new to persist)', async () => {
+      const { root, events } = await setUp();
+      await root.ensurePrivateDirectory(resolved(root, '.'));
+      events.splice(0);
+
+      await root.ensurePrivateDirectory(resolved(root, '.'));
+
+      expect(events).toEqual([]);
+    });
   });
 
   test('K1 u2 a link at the ferret folder is refused when the handle holds it private, never followed', async () => {
