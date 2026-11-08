@@ -8,6 +8,8 @@ import { indexSurfaces, type SurfaceEntry } from '../surfaces/registry.ts';
 import { DaemonLayouts } from '../layout/daemon-layout.ts';
 import { noteClientDaemon } from '../connect/daemon-of.ts';
 import type { PasskeyProvision } from '../passkey/passkey.ts';
+import type { DaemonlessScreenProps } from '../connect/provides.ts';
+import type { View } from '../surfaces/halves.ts';
 
 /**
  * THE SHELL'S RUNTIME: one generated client per paired daemon, started on first use; the halves built against it;
@@ -31,6 +33,14 @@ export interface ShellRuntimeOptions {
    * consults on an unlock or step-up refusal, its prompts what the frame mounts. Absent, nothing asks.
    */
   readonly passkey?: () => PasskeyProvision | undefined;
+  /**
+   * The plugins' daemon-less screens (`<plugin>.<screen>` → view) and the address this tab was opened at, read on
+   * demand (`connect/provides.ts`). Absent, a daemon-less route draws the skeleton line.
+   */
+  readonly daemonless?: {
+    readonly views: ReadonlyMap<string, View<DaemonlessScreenProps>>;
+    readonly location: () => string;
+  };
 }
 
 type Connection =
@@ -45,6 +55,7 @@ export class ShellRuntime {
   readonly daemons: DaemonList;
   readonly #connect: TransportFactory;
   readonly #passkey: () => PasskeyProvision | undefined;
+  readonly #daemonless: NonNullable<ShellRuntimeOptions['daemonless']>;
   readonly #connections = new Map<string, Connection>();
   readonly #halves: HalfCache;
   readonly #packageClients = new Map<string, ShellPluginClient>();
@@ -60,6 +71,7 @@ export class ShellRuntime {
     this.daemons = options.daemons;
     this.#connect = options.connect;
     this.#passkey = options.passkey ?? (() => undefined);
+    this.#daemonless = options.daemonless ?? { views: new Map(), location: () => '' };
     this.#halves = new HalfCache(this.byId, (daemon, id) => this.#clientFor(daemon, id));
     this.layouts = new DaemonLayouts(this);
     this.daemons.registerCache({ clearDaemon: daemon => this.#drop(daemon) });
@@ -80,6 +92,14 @@ export class ShellRuntime {
   passkey(): PasskeyProvision | undefined {
     return this.#passkey();
   }
+
+  /** A plugin's daemon-less screen, or `undefined` when it gave none. Nothing about a daemon is read to find it. */
+  daemonlessView(plugin: string, screen: string): View<DaemonlessScreenProps> | undefined {
+    return this.#daemonless.views.get(`${plugin}.${screen}`);
+  }
+
+  /** The address this tab was opened at, fragment included: for a daemon-less screen to take what it needs once. */
+  location = (): string => this.#daemonless.location();
 
   /** The connection to a daemon, opening it on first ask. */
   connection(daemon: string): Connection {

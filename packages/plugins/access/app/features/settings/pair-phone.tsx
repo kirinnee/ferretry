@@ -24,11 +24,10 @@
  */
 
 import { QrCode, X } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useRef } from 'react';
 import type { GrantsView } from '../../../contract/index.ts';
-import { BottomSheet, type DaemonConnection, useDaemonClient, useDialogFocus } from '../../shell-pairing.ts';
+import { BottomSheet, type DaemonConnection, useDialogFocus } from '../../shell-pairing.ts';
 import { AddDeviceSurface, type PairingClientFactory, type PairingClock } from './add-device-settings.tsx';
-import { type GrantClient, readGrants } from './grants-api.ts';
 
 /** The act, worded so it cannot be mistaken for "Add a machine" sitting beside it. */
 export const pairPhoneLabel = (machineName: string): string => `Pair a phone with ${machineName}`;
@@ -38,55 +37,17 @@ export const PAIR_PHONE_DESCRIPTION =
   'Show a QR code another phone or browser scans to reach this machine. Revoke devices in Settings › Devices.';
 
 /**
- * Whether this caller may be offered the act at all.
+ * Whether this caller may be offered the act at all, from the EFFECTIVE grant (Gate's `GET /v1/grants`, P58).
  *
- * Open when `pairing.use` is open, or when the only thing standing between the caller and it is a
- * passkey confirmation — that is asked for at the mint, so hiding the entry would hide a door that does
- * open. Every other refusal (switched off, not granted to this device, a document the daemon cannot
- * read) closes it, and so does a view that does not mention pairing.
+ * Open when `pairing.use` is open, or when the only thing standing between the caller and it is a passkey
+ * confirmation — that is asked for at the mint, so hiding the entry would hide a door that does open. Every other
+ * refusal (switched off, not granted to this device, a document the daemon cannot read) closes it, and so does a view
+ * that does not mention pairing.
  */
 export function mayPairPhone(view: GrantsView): boolean {
   const entry = view.capabilities.find(candidate => candidate.capability === 'pairing');
   if (entry === undefined) return false;
   return entry.use || entry.useRefusal === 'step-up-required';
-}
-
-export type PairingGrantsClientFactory = (connection: DaemonConnection) => Promise<GrantClient>;
-
-/**
- * Asks this machine, once per machine, whether the reader may pair a phone with it.
- *
- * KEYED BY THE MACHINE. An answer read for one daemon is never returned for another: switching machines
- * reads false until the new one has answered. A read that fails reads false too — the entry is a
- * shortcut, Settings › Devices is still there and explains whatever went wrong in full.
- */
-export function usePairPhoneAllowed(
-  connection: DaemonConnection | undefined,
-  createClient?: PairingGrantsClientFactory,
-): boolean {
-  const routedClient = useDaemonClient();
-  const factory = createClient ?? routedClient;
-  const daemonId = connection?.daemonId;
-  // The connection object can be re-created for the same machine (a refreshed snapshot); the read is
-  // keyed by the machine's id, so the latest object is read through a ref rather than re-triggering it.
-  const latest = useRef(connection);
-  latest.current = connection;
-  const [answer, setAnswer] = useState<{ readonly daemonId: string; readonly allowed: boolean } | null>(null);
-  useEffect(() => {
-    const target = latest.current;
-    if (daemonId === undefined || target === undefined) return;
-    let live = true;
-    void factory(target)
-      .then(async client => mayPairPhone(await readGrants(client)))
-      .catch(() => false)
-      .then(allowed => {
-        if (live) setAnswer({ daemonId, allowed });
-      });
-    return () => {
-      live = false;
-    };
-  }, [daemonId, factory]);
-  return answer !== null && answer.daemonId === daemonId && answer.allowed;
 }
 
 export type PairPhonePresentation = 'sheet' | 'dialog';

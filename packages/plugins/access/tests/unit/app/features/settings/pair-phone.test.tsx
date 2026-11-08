@@ -6,17 +6,14 @@ import type { PairingClientFactory } from '../../../../../app/features/settings/
 import {
   mayPairPhone,
   PAIR_PHONE_DESCRIPTION,
-  type PairingGrantsClientFactory,
   type PairPhonePresentation,
   PairPhoneSheet,
   pairPhoneLabel,
-  usePairPhoneAllowed,
 } from '../../../../../app/features/settings/pair-phone.tsx';
 import { type DaemonConnection, daemonConnection } from '../../../../../app/shell-pairing.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../../../../support/app/dom.ts';
 
 const ALPHA = `fy_daemon_${'a'.repeat(43)}`;
-const BETA = `fy_daemon_${'b'.repeat(43)}`;
 const connection = (id: string): DaemonConnection =>
   daemonConnection({ daemonId: id, baseUrl: 'https://workstation.example.test', deviceId: `token-${id}` });
 
@@ -69,81 +66,6 @@ describe('who is offered "Pair a phone"', () => {
   it('words the act apart from "Add a machine"', () => {
     expect(pairPhoneLabel('studio')).toBe('Pair a phone with studio');
     expect(PAIR_PHONE_DESCRIPTION).toContain('Settings › Devices');
-  });
-});
-
-function AllowedProbe({
-  target,
-  createClient,
-}: {
-  readonly target: DaemonConnection | undefined;
-  readonly createClient?: PairingGrantsClientFactory;
-}) {
-  const allowed = usePairPhoneAllowed(target, createClient);
-  return <p data-allowed={String(allowed)}>{String(allowed)}</p>;
-}
-
-const allowedText = (): string | null | undefined => view?.container.querySelector('[data-allowed]')?.textContent;
-
-describe('usePairPhoneAllowed', () => {
-  it('reads this machine’s grants, and keys the answer by machine', async () => {
-    const asked: string[] = [];
-    const answers: Record<string, GrantsView> = { [ALPHA]: grants('granted'), [BETA]: grants('not-granted') };
-    const factory: PairingGrantsClientFactory = async target => {
-      asked.push(`${target.daemonId}`);
-      return {
-        request: (async (path: string) => {
-          expect(path).toBe('/v1/grants');
-          return answers[`${target.daemonId}`];
-        }) as never,
-      };
-    };
-    const alpha = connection(ALPHA);
-    view = await mount(<AllowedProbe createClient={factory} target={alpha} />);
-    await settle();
-    expect(allowedText()).toBe('true');
-
-    // The same machine through a re-created connection object is not asked again.
-    await view.render(<AllowedProbe createClient={factory} target={connection(ALPHA)} />);
-    await settle();
-    expect(asked).toEqual([ALPHA]);
-
-    // Another machine is asked for itself, and its no is not overridden by the first machine's yes.
-    await view.render(<AllowedProbe createClient={factory} target={connection(BETA)} />);
-    await settle();
-    expect(allowedText()).toBe('false');
-    expect(asked).toEqual([ALPHA, BETA]);
-  });
-
-  it('reads false with no machine, and when the machine cannot be asked', async () => {
-    view = await mount(<AllowedProbe target={undefined} />);
-    await settle();
-    expect(allowedText()).toBe('false');
-    await view.unmount();
-
-    view = await mount(
-      <AllowedProbe
-        createClient={async () => {
-          throw new Error('offline');
-        }}
-        target={connection(ALPHA)}
-      />,
-    );
-    await settle();
-    expect(allowedText()).toBe('false');
-  });
-
-  it('drops a late answer for a machine that is no longer on screen', async () => {
-    let release: (view: GrantsView) => void = () => undefined;
-    const factory: PairingGrantsClientFactory = async () => ({
-      request: (async () => await new Promise<GrantsView>(resolve => (release = resolve))) as never,
-    });
-    view = await mount(<AllowedProbe createClient={factory} target={connection(ALPHA)} />);
-    await settle();
-    await view.render(<AllowedProbe createClient={factory} target={undefined} />);
-    await interact(() => release(grants('granted')));
-    await settle();
-    expect(allowedText()).toBe('false');
   });
 });
 
