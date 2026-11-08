@@ -422,6 +422,33 @@ describe('component text redaction', () => {
       }
     });
 
+    // Ruling #36, r6: a key whose breaks are escaped twice (service-account JSON inside a JSON string, a hooks command
+    // that carries it) showed its body, as today's does.
+    it('S26 should cut a private key whole when its line breaks are escaped twice: "private_key": "-----BEGIN…\\\\n…"', () => {
+      // Assert
+      for (const escaped of ['\\\\n', '\\\\\\\\n', '\\\\r\\\\n']) {
+        const key = [
+          '-----BEGIN PRIVATE KEY-----',
+          'MIIEfakeBody0001',
+          'MIIEfakeBody0002',
+          '-----END PRIVATE KEY-----',
+        ].join(escaped);
+        for (const [input, expected] of [
+          [
+            `{"private_key": "${key}${escaped}", "client_email": "fake@example.invalid"}`,
+            `{"private_key": "${HIDDEN}${escaped}", "client_email": "fake@example.invalid"}`,
+          ],
+          [
+            `{"command": "echo '{\\"private_key\\": \\"${key}\\"}'"}`,
+            `{"command": "echo '{\\"private_key\\": \\"${HIDDEN}\\"}'"}`,
+          ],
+          [`key: ${key}\nnext: ok`, `key: ${HIDDEN}\nnext: ok`],
+        ] as const) {
+          should(shownFor(input)).eql({ text: expected, redacted: true });
+        }
+      }
+    });
+
     it('S26 should cut a private key whole when a body line starts the way a token does: eyJ…, AIza…', () => {
       // Assert
       const key = (line: string) =>
@@ -1050,6 +1077,228 @@ describe('component text redaction', () => {
         should(shownFor(input)).eql({ text: input, redacted: false });
       }
     });
+  });
+
+  // Ruling #36, r6: YAML reads a line deeper than a key as more of the plain value ending the key's line
+  // (`password: fake⏎  more` is `fake more`); 5.0 hid only the first line of it, as today does.
+  describe('a value continued on the lines after its name', () => {
+    it('S26 should hide the lines that continue a hidden value: password: value⏎  more', () => {
+      // Assert
+      for (const [input, expected] of [
+        ['password: fake-value-0001\n  fake-more-0002\nuser: bob', `password: ${HIDDEN}\n  ${HIDDEN}\nuser: bob`],
+        [
+          'password: fake-value-0001\n  one\n    two\n  - three',
+          `password: ${HIDDEN}\n  ${HIDDEN}\n    ${HIDDEN}\n  ${HIDDEN}`,
+        ],
+        [
+          'db:\n  password: fake-value-0001\n    more words\n  user: bob',
+          `db:\n  password: ${HIDDEN}\n    ${HIDDEN}\n  user: bob`,
+        ],
+        ['- password: fake-value-0001\n    more\n  user: bob', `- password: ${HIDDEN}\n    ${HIDDEN}\n  user: bob`],
+        ['api_token: fake-value-0001\r\n\tmore\r\nnext: ok', `api_token: ${HIDDEN}\r\n\t${HIDDEN}\r\nnext: ok`],
+        ['password: "fake-value-0001\n  more"', `password: "${HIDDEN}\n  ${HIDDEN}`],
+        ['"password": fake-value-0001\n more', `"password": ${HIDDEN}\n ${HIDDEN}`],
+        ['password: !!str fake-value-0001\n  more', `password: !!str ${HIDDEN}\n  ${HIDDEN}`],
+        ['password: &a fake-value-0001\n  more', `password: &a ${HIDDEN}\n  ${HIDDEN}`],
+        ['PASSWORD = fake-value-0001\n  more', `PASSWORD = ${HIDDEN}\n  ${HIDDEN}`],
+        ['x: 1 password: fake-value-0001\n      more', `x: 1 password: ${HIDDEN}\n      ${HIDDEN}`],
+      ] as const) {
+        should(shownFor(input)).eql({ text: expected, redacted: true });
+      }
+    });
+
+    it('S26 should leave a line no deeper than the name, and every line from a blank line, a comment, an assignment or a mapping colon on', () => {
+      // Assert: the key line hidden as today hides it, and the rest as written.
+      for (const [input, expected] of [
+        ['password: fake-value-0001\nuser: bob', `password: ${HIDDEN}\nuser: bob`],
+        ['db:\n  password: fake-value-0001\n  equal-line', `db:\n  password: ${HIDDEN}\n  equal-line`],
+        ['db:\n  password: fake-value-0001\nshallower', `db:\n  password: ${HIDDEN}\nshallower`],
+        ['- password: fake-value-0001\n  - next-item', `- password: ${HIDDEN}\n  - next-item`],
+        // Wrapped prose: the name stands past the line's indent, and the next line is no deeper than the name.
+        [
+          '1. Set the password: fake-value-0001\n   then restart the service',
+          `1. Set the password: ${HIDDEN}\n   then restart the service`,
+        ],
+        ['password: fake-value-0001\n\n  after-blank', `password: ${HIDDEN}\n\n  after-blank`],
+        ['password: fake-value-0001\n    \n  after-blank', `password: ${HIDDEN}\n    \n  after-blank`],
+        ['password: fake-value-0001\n  # a comment\n  after', `password: ${HIDDEN}\n  # a comment\n  after`],
+        ['password: fake-value-0001\n  more\n  NEXT=plain', `password: ${HIDDEN}\n  ${HIDDEN}\n  NEXT=plain`],
+        ['password: fake-value-0001\n  more\n  key: plain', `password: ${HIDDEN}\n  ${HIDDEN}\n  key: plain`],
+        ['password: fake-value-0001\n  so: on\n  more', `password: ${HIDDEN}\n  so: on\n  more`],
+        ['password: fake-value-0001\n  key:\n  more', `password: ${HIDDEN}\n  key:\n  more`],
+      ] as const) {
+        should(shownFor(input)).eql({ text: expected, redacted: true });
+      }
+    });
+
+    it('S26 should continue no value that is not hidden, under a name that announces no secret, in a comment, closed or commented', () => {
+      // Assert
+      for (const input of [
+        'mode: plain-value-0001\n  more',
+        'password: short\n  more',
+        'password: ${secret:FAKE}\n  more',
+        'password: $FAKE_POINTER\n  more',
+        'password: |\n',
+        'password: >\n',
+        // A block indicator of eight characters or more: the block reads its lines, each by its own value.
+        'password: |-1234567\n  short',
+        'PASSWORD:\n  # a comment',
+      ]) {
+        should(shownFor(input)).eql({ text: input, redacted: false });
+      }
+      for (const [input, expected] of [
+        ['password: "fake-value-0001"\n  more', `password: "${HIDDEN}"\n  more`],
+        ['password: fake-value-0001 # note\n  more', `password: ${HIDDEN} # note\n  more`],
+        ['# password: fake-value-0001\n    more', `# password: ${HIDDEN}\n    more`],
+        // A token by its own shape under a name that announces no secret is hidden, and continues nothing.
+        ['mode: ghp_abcdefghijklmnop1234\n  more', `mode: ${HIDDEN}\n  more`],
+        ['password: fake-value-0001, more\n  more', `password: ${HIDDEN}, more\n  more`],
+        // A value that starts with `#` is a comment in YAML (glued, no key at all), whatever an environment file says.
+        ['PASSWORD=#fake-value-0001\n  more', `PASSWORD=${HIDDEN}\n  more`],
+        // Node properties alone, or a comment, end the line: what they lead to is read on its own (r4, r5).
+        ['PASSWORD: !!binary\n  fake-value-0001 # c', `PASSWORD: ${HIDDEN}\n  ${HIDDEN} # c`],
+        ['password: #fake-comment\n  # c', `password: ${HIDDEN}\n  # c`],
+      ] as const) {
+        should(shownFor(input)).eql({ text: expected, redacted: true });
+      }
+    });
+
+    it('S26 should leave a private key on the lines that continue a value to be cut whole, header to footer', () => {
+      // Assert
+      const key = '-----BEGIN PRIVATE KEY-----\n  MIIEfakeBody0001\n  MIIEfakeBody0002\n  -----END PRIVATE KEY-----';
+      for (const [input, expected] of [
+        [`password: fake-value-0001\n  ${key}\nafter: ok`, `password: ${HIDDEN}\n  ${HIDDEN}\nafter: ok`],
+        [
+          `password: fake-value-0001\n  more ${key}\nafter: ok`,
+          `password: ${HIDDEN}\n  ${HIDDEN} ${HIDDEN}\nafter: ok`,
+        ],
+        // A block that holds the value and the key hid both whole already: the lines stay as the block left them.
+        [
+          `api_token: |\n  password: fake-value-0001\n    more ${key.replaceAll('\n  ', '\n    ')}\nafter: ok`,
+          `api_token: |\n  ${HIDDEN}\n    ${HIDDEN}\n    ${HIDDEN}\n    ${HIDDEN}\n    ${HIDDEN}\nafter: ok`,
+        ],
+      ] as const) {
+        should(shownFor(input)).eql({ text: expected, redacted: true });
+      }
+    });
+
+    // The family, generated: the key line's lead (none, indented, a tab, a list item, wrapped prose), separator, value
+    // (plain, an open quote, node properties), one to three lines that continue it (a word, a list item, prose), each
+    // deeper than, at or shallower than the name's column, with spaces or tabs; then what ends it (the text's end, a
+    // blank line, a comment, an assignment, a key, a line holding `: `, a sibling key at the name's column) — crossed
+    // with the line ending and an outer block under a name that announces no secret.
+    const CONTINUED_VALUE = 'fake-inline-value-0001';
+    const LEADS = ['', '  ', '\t', '- ', 'Set the '];
+    const VALUE_SEPARATORS = [': ', ' = ', '=', ':\t'];
+    const OPENERS = ['', '"', '!!str ', '&a '];
+    const LINES = ['fake-continued-0001', '- fake-list-item-0002', 'fake wrapped prose 0003'];
+    const DEPTHS = ['deeper', 'at the name', 'shallower'] as const;
+    const STYLES = [' ', '\t'];
+    const ENDS: Readonly<Record<string, (indent: string, column: string) => string[]>> = {
+      'the end': () => [],
+      'a blank line': indent => ['', `${indent}after-blank-0000`],
+      'a comment': indent => [`${indent}# a fake comment`, `${indent}after-comment-0000`],
+      'an assignment': indent => [`${indent}NEXT=plain-0000`],
+      'a key': indent => [`${indent}next_key: plain-0000`],
+      'a mapping colon': indent => [`${indent}and so: on-0000`],
+      'a sibling key': (_, column) => [`${column}user: plain-user-0000`],
+    };
+    const ENDINGS_OF_LINES = ['\n', '\r\n'];
+    /** Tens of thousands of shapes take a few seconds, past bun's 5 s per-test default on a slow box. */
+    const CONTINUED_TIMEOUT = 60_000;
+    const continuedFamily = LEADS.flatMap(lead =>
+      VALUE_SEPARATORS.flatMap(separator =>
+        OPENERS.flatMap(opener =>
+          [1, 2, 3].flatMap(count =>
+            DEPTHS.filter(depth => depth !== 'shallower' || lead !== '').flatMap(depth =>
+              STYLES.flatMap(style =>
+                Object.entries(ENDS).flatMap(([end, endLines]) =>
+                  ENDINGS_OF_LINES.flatMap(ending =>
+                    [false, true].map(wrapped => {
+                      const base = wrapped ? '  ' : '';
+                      const width = base.length + lead.length;
+                      const column = style.repeat(width);
+                      const indent = style.repeat(
+                        depth === 'deeper' ? width + 2 : depth === 'shallower' ? width - 1 : width,
+                      );
+                      return {
+                        shape: `${JSON.stringify(lead)}, ${JSON.stringify(separator)}, ${JSON.stringify(opener)}, ${String(count)} line(s) ${depth}, ${JSON.stringify(style)}, ${end}`,
+                        wrap: wrapped ? ['notes: |'] : [],
+                        key: (name: string, value: string) => `${base}${lead}${name}${separator}${opener}${value}`,
+                        continued: LINES.slice(0, count).map(line => `${indent}${line}`),
+                        hides: depth === 'deeper',
+                        end: endLines(style.repeat(width + 2), column),
+                        ending,
+                      };
+                    }),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    it(
+      `S26 should hide every line that continues a value in the family (${continuedFamily.length} shapes), and nothing else`,
+      () => {
+        const leaks: string[] = [];
+        for (const { shape, wrap, key, continued, hides, end, ending } of continuedFamily) {
+          // Arrange
+          const input = [
+            ...wrap,
+            key('PASSWORD', CONTINUED_VALUE),
+            ...continued,
+            ...end,
+            'after: fake-shown-0000',
+          ].join(ending);
+
+          // Act
+          const actual = shownFor(input);
+
+          // Assert: the key line hidden as today hides it, each line that continues it deeper than the name hidden
+          // after its indent, and every other line as written.
+          const expected = [
+            ...wrap,
+            key('PASSWORD', HIDDEN),
+            ...continued.map(line => (hides ? `${/^\s*/u.exec(line)?.[0]}${HIDDEN}` : line)),
+            ...end,
+            'after: fake-shown-0000',
+          ].join(ending);
+          if (actual.text !== expected || !actual.redacted) {
+            leaks.push(`${shape}: ${JSON.stringify(input)} -> ${JSON.stringify(actual.text)}`);
+          }
+        }
+        should(leaks).deepEqual([]);
+      },
+      CONTINUED_TIMEOUT,
+    );
+
+    it(
+      `S26 should hide nothing that continues a value in the family (${continuedFamily.length} shapes) under a name that announces no secret`,
+      () => {
+        const touched: string[] = [];
+        for (const { wrap, key, continued, end, ending } of continuedFamily) {
+          // Arrange
+          const input = [
+            ...wrap,
+            key('mode', 'plain-inline-value-0001'),
+            ...continued,
+            ...end,
+            'after: plain-0000',
+          ].join(ending);
+
+          // Act
+          const actual = shownFor(input);
+
+          // Assert
+          if (actual.text !== input || actual.redacted) touched.push(JSON.stringify(input));
+        }
+        should(touched).deepEqual([]);
+      },
+      CONTINUED_TIMEOUT,
+    );
   });
 
   describe('a ${NAME<op>default} expansion', () => {

@@ -23,6 +23,10 @@
  * `password:⏎  # note⏎  value`, `password: &a # note⏎  value`, `password: # note⏎  |⏎    value`). YAML reads the value
  * past the comment; today shows it, and 5.0 hides it. The lines read past the comment are tightened too.
  *
+ * And a fourth (#36, r6): a value continued on the lines after its name's (`password: fake⏎  more`, which YAML reads as
+ * `fake more`). Today shows the lines that continue it; 5.0 hides them after a value it hides, so they are tightened
+ * too ({@link continuationLines}).
+ *
  * A private key's cut can take line breaks with it, so no generated text here holds one, and keys are held to the
  * floor on the whole text instead, over every shape of `redact-private-keys.ts` (#36, r5: escaped breaks, a body
  * line that starts the way a token does).
@@ -151,6 +155,27 @@ const NOTES = [
   ' # see token:\n',
   '\n# password: # c\n',
 ];
+/**
+ * A value continued on the lines after its name's (#36, r6): deeper lines (one to three), a list item, CRLF and a tab,
+ * a line at or above the name, wrapped prose, and each line that ends it — a blank line, a comment, a key, an
+ * assignment, a line holding `: `.
+ */
+const CONTINUED = [
+  '',
+  '',
+  '',
+  '\n  more-words',
+  '\n    cont1\n    cont2\n    cont3',
+  '\n  - item',
+  '\r\n\tcont',
+  '\n cont\n\n  after-blank',
+  '\n  cont\n  # c\n  after',
+  '\n  cont\n  key: v',
+  '\n  cont\n  NEXT=x',
+  '\n  cont\n  so: on',
+  '\nshallow',
+  '\n   then restart the service',
+];
 const PARENTS = ['db', 'auth', 'env', 'mcp.servers', 'x'];
 const QUOTES = ['', '"', "'"];
 /** True pointers, which may stay, and `${NAME<op>default}` forms whose default is a value (`%` is the value). */
@@ -240,7 +265,7 @@ function generate(next: () => number): string {
     const value = pick(SECRET_VALUES);
     const shape = next();
     const written = shape < 0.15 ? pick(EXPANSIONS).replace('%', value) : shape < 0.25 ? pick(POINTERS) : value;
-    text += pick(LEADS) + pick(NAMES) + pick(QUOTES) + separator + quote + written + quote;
+    text += pick(LEADS) + pick(NAMES) + pick(QUOTES) + separator + quote + written + quote + pick(CONTINUED);
     if (next() < 0.3) text += pick(NAMES);
     if (next() < 0.3) text += pick(GLUES) + pick(SECRET_VALUES);
     text += pick(BREAKS);
@@ -292,6 +317,48 @@ const ENDS_IN_COMMENT = /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*[
 /** A separator at the head of a line and a comment after a space or a tab (`= # note`). */
 const SEPARATOR_AND_COMMENT = /^[ \t]*[:=][ \t]+#/u;
 const STARTS_WITH_PROPERTIES = new RegExp(`^[ \\t]*${PROPERTIES}(?:[ \\t]+|$)`, 'u');
+/** A name and its separator, an opening quote after them or not, wherever a run of name characters starts. */
+const NAME_AND_SEPARATOR = /(?<![A-Za-z0-9_.-])[0-9.-]*([A-Za-z_][A-Za-z0-9_.-]*)["']?[ \t]*[:=][ \t]*["']?/gu;
+/** Node properties where a separator ends, each with the space after it, and an opening quote after them or not. */
+const PROPERTIES_THEN_SPACE = new RegExp(`(?:${PROPERTY}[ \\t]+){1,2}["']?`, 'uy');
+/** What a value's run never holds. */
+const NOT_IN_VALUE = /[\s"'`,;)}\]]/u;
+/** A line that ends a continued value: an assignment of its own, or one holding a mapping's `:`. */
+const ASSIGNMENT_LINE = /^[ \t]*["']?[A-Za-z_][A-Za-z0-9_.-]*["']?[ \t]*=/u;
+const MAPPING_COLON = /:(?:[ \t]|$)/u;
+
+/**
+ * The lines that continue a value (#36, r6) ending line `at` of `lines`: the value is the run after the last character
+ * no value holds, read under the first name whose separator (and node properties) ends at or inside it, that
+ * announces a secret and holds it as a secret (not a comment, node properties, a block indicator or a pointer); the
+ * lines are those after it deeper than that name's column (its quote's, when one stands before it), up to a blank
+ * line, a comment line, an assignment or a line holding a mapping's `:`. None from a line that is a comment.
+ */
+function continuationLines(lines: readonly string[], at: number): readonly number[] {
+  const line = (lines[at] ?? '').trimEnd();
+  if (COMMENT_ONLY.test(line)) return [];
+  let run = line.length;
+  while (run > 0 && !NOT_IN_VALUE.test(line.charAt(run - 1))) run -= 1;
+  for (const named of line.matchAll(NAME_AND_SEPARATOR)) {
+    PROPERTIES_THEN_SPACE.lastIndex = named.index + named[0].length;
+    const from = named.index + named[0].length + (PROPERTIES_THEN_SPACE.exec(line)?.[0].length ?? 0);
+    const value = line.slice(from, from + 1024);
+    const name = named[1] ?? '';
+    if (from < run || value === '' || /^[#!&]|^[|>][-+0-9]*$/u.test(value)) continue;
+    if (!announcesSecret(name) || !looksSecret(name, value)) continue;
+    const column = named.index - (/["']/u.test(line.charAt(named.index - 1)) ? 1 : 0);
+    const continued: number[] = [];
+    for (let next = at + 1; next < lines.length; next += 1) {
+      const below = lines[next] ?? '';
+      const indent = below.length - below.trimStart().length;
+      if (below.trim() === '' || indent <= column || COMMENT_ONLY.test(below)) break;
+      if (ASSIGNMENT_LINE.test(below) || MAPPING_COLON.test(below)) break;
+      continued.push(next);
+    }
+    return continued;
+  }
+  return [];
+}
 
 /**
  * Which lines of `text` (split at its line breaks) stand in a block of the tightened family (#36), read from the text
@@ -318,6 +385,8 @@ const STARTS_WITH_PROPERTIES = new RegExp(`^[ \\t]*${PROPERTIES}(?:[ \\t]+|$)`, 
  * the value after node properties there, or the value there (that line alone). From a line that is a comment itself,
  * nothing is read past comments (a name in it is no key), and a line that properties end looks only past blank lines
  * from there.
+ *
+ * And (r6) the lines that continue a hidden value ending a line ({@link continuationLines}).
  *
  * One width by design: a line holding `secret: !x ` anywhere is tightened whole (`NAMED_PROPERTY`), so on that line
  * any extra hiding passes here, and its exactness rests on the generated families of `catalog-redaction.test.ts`.
@@ -399,6 +468,7 @@ function tightenedLines(text: string): ReadonlySet<number> {
     for (const named of line.matchAll(NAMED_PROPERTY)) {
       if (announcesSecret(named[1] ?? '')) tightened.add(at);
     }
+    for (const continued of continuationLines(lines, at)) tightened.add(continued);
     const indent = line.length - line.trimStart().length;
     for (const opens of indicatorLines(at)) {
       let end = opens;
@@ -481,23 +551,28 @@ function minimal(text: string, why: string): string {
 
 /**
  * The first few texts of `cases` that break the oracle, each cut down; how many held a tightened line, and how many
- * of those 5.0 shows differently from today (so the superset branch was taken, not only reached).
+ * of those 5.0 shows differently from today (so the superset branch was taken, not only reached), and how many of
+ * those continue a value (#36, r6).
  */
 function breaches(shape: (next: () => number) => string, seed: number, cases: number) {
   const next = seeded(seed);
   const failures: string[] = [];
   let tightened = 0;
   let differed = 0;
+  let continued = 0;
   for (let count = 0; count < cases && failures.length < 5; count += 1) {
     const text = shape(next);
     if (tightenedLines(text).size > 0) {
       tightened += 1;
       if (shownFor(text).text !== redactTodayText(text).text) differed += 1;
+      const lines = text.split(BREAK);
+      const continues = lines.some((_, at) => continuationLines(lines, at).length > 0);
+      if (continues && shownFor(text).text !== redactTodayText(text).text) continued += 1;
     }
     const why = breach(text);
     if (why !== undefined) failures.push(`${why}: ${JSON.stringify(minimal(text, why))}`);
   }
-  return { failures, tightened, differed };
+  return { failures, tightened, differed, continued };
 }
 
 // A review can re-run either with another seed and a larger count: `REDACT_FUZZ_SEED=7 REDACT_FUZZ_CASES=100000`.
@@ -518,6 +593,7 @@ describe('component text redaction never hides less than today', () => {
       should(result.failures).deepEqual([]);
       should(result.tightened).be.above(0);
       should(result.differed).be.above(0);
+      should(result.continued).be.above(0);
     },
     FUZZ_TIMEOUT,
   );
@@ -581,6 +657,30 @@ describe('component text redaction never hides less than today', () => {
     should(tightenedLines('# password: # c\n  v').size).equal(0);
     should(tightenedLines('password:# c\n  v').size).equal(0);
     should(tightenedLines('PASSWORD\n=# c\n  v').size).equal(0);
+  });
+
+  it('S26 should mark the lines that continue a hidden value deeper than its name, and no other line', () => {
+    // Assert: only the continuation lines, never the name's own line.
+    should([...tightenedLines('password: fake-value-0001\n  one\n    two\nuser: bob')]).deepEqual([1, 2]);
+    should([...tightenedLines('db:\n  password: fake-value-0001\n    more\n  user: bob')]).deepEqual([2]);
+    should([...tightenedLines('- password: fake-value-0001\r\n\t\t\tmore')]).deepEqual([1]);
+    should([...tightenedLines('password: !!str fake-value-0001\n  more')]).deepEqual([0, 1]);
+    should([...tightenedLines('"password": "fake-value-0001\n more')]).deepEqual([1]);
+    // It ends at a blank line, a comment, an assignment, a mapping colon and a line no deeper than the name.
+    should([...tightenedLines('password: fake-value-0001\n  a\n\n  b')]).deepEqual([1]);
+    should([...tightenedLines('password: fake-value-0001\n  a\n  # c\n  b')]).deepEqual([1]);
+    should([...tightenedLines('password: fake-value-0001\n  a\n  NEXT=x\n  b')]).deepEqual([1]);
+    should([...tightenedLines('password: fake-value-0001\n  a\n  so: on\n  b')]).deepEqual([1]);
+    should([...tightenedLines('db:\n  password: fake-value-0001\n  a\n    b')]).deepEqual([]);
+    // No member: wrapped prose, a value that is no secret, a name that announces none, a pointer, a closed quote, a
+    // comment after the value, a name in a comment.
+    should(tightenedLines('1. Set the password: fake-value-0001\n   then restart').size).equal(0);
+    should(tightenedLines('password: short\n  more').size).equal(0);
+    should(tightenedLines('mode: fake-value-0001\n  more').size).equal(0);
+    should(tightenedLines('password: ${secret:FAKE}\n  more').size).equal(0);
+    should(tightenedLines('password: "fake-value-0001"\n  more').size).equal(0);
+    should(tightenedLines('password: fake-value-0001 # c\n  more').size).equal(0);
+    should(tightenedLines('# password: fake-value-0001\n  more').size).equal(0);
   });
 
   it(`S26 should hide every byte today hides of every private key shape (${privateKeyShapes().length} shapes)`, () => {

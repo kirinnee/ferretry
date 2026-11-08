@@ -1,8 +1,9 @@
 /**
  * Private keys as a component's text holds them (#36, r5), for the S26 redaction tests: every header, line break —
- * real, or written as an escape as a service account's JSON does (`"private_key": "-----BEGIN…\n…"`) — body (a line
- * that starts the way a token does among them, `eyJ…`, `AIza…`, which an earlier pass hides on its own) and place a
- * key stands in, under a name that announces a secret and under one that does not.
+ * real, or written as an escape as a service account's JSON does (`"private_key": "-----BEGIN…\n…"`), or escaped
+ * twice as that JSON inside a JSON string is (`\\n`, r6) — body (a line that starts the way a token does among them,
+ * `eyJ…`, `AIza…`, which an earlier pass hides on its own) and place a key stands in, under a name that announces a
+ * secret and under one that does not.
  *
  * Every key here is an obviously fake one: no body line is base64 of anything.
  */
@@ -33,6 +34,7 @@ const BREAKS: readonly (readonly [string, string])[] = [
   ['\r\n', '\r\n'],
   ['\\n', '\n'],
   ['\\r\\n', '\n'],
+  ['\\\\n', '\n'],
 ];
 const HEADERS = ['RSA PRIVATE KEY', 'PRIVATE KEY', 'OPENSSH PRIVATE KEY'];
 const PLACES: Readonly<Record<string, (key: string, ending: string) => string>> = {

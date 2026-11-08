@@ -314,12 +314,12 @@ const WORD = /[^\s"'`,;()[\]{}<>]+/gu;
  * A private-key block (its header, the base64 body and its footer when there is one) and any well-known token
  * ({@link SECRET_TOKEN_SOURCE}), wherever either stands: no name, separator or word boundary is needed. Every
  * part is a linear class, so a long run of one costs a single pass. A key's body runs over line breaks written as
- * escapes too (`\n`, `\r`: a service account's JSON), and over a word an earlier pass hid already (a body line that
- * starts the way a token does, `eyJ…`, `AIza…`): each of the three starts with a character no other one does, so the
- * body stays one linear pass.
+ * escapes too, however many times escaped (`\n`, `\r`: a service account's JSON; `\\n`: that JSON inside a JSON
+ * string), and over a word an earlier pass hid already (a body line that starts the way a token does, `eyJ…`,
+ * `AIza…`): each of the three starts with a character no other one does, so the body stays one linear pass.
  */
 const PRIVATE_KEY_HEADER_SOURCE = '-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----';
-const PRIVATE_KEY_SOURCE = `${PRIVATE_KEY_HEADER_SOURCE}(?:[A-Za-z0-9+/=\\s]|\\\\[nr]|${HIDDEN_TEXT})*(?:-----END [A-Z ]{0,40}PRIVATE KEY-----)?`;
+const PRIVATE_KEY_SOURCE = `${PRIVATE_KEY_HEADER_SOURCE}(?:[A-Za-z0-9+/=\\s]|\\\\+[nr]|${HIDDEN_TEXT})*(?:-----END [A-Z ]{0,40}PRIVATE KEY-----)?`;
 const CONTEXT_FREE_SECRET = new RegExp(`${PRIVATE_KEY_SOURCE}|${SECRET_TOKEN_SOURCE}`, 'gu');
 /**
  * A private-key block alone, and its header where it starts: what a name's reading never cuts into, so the key is
@@ -369,6 +369,15 @@ const LINE_BREAKS = /(\r\n|\r|\n)/u;
 const FIRST_VALUE = /^([ \t]*["']?)([^\s"'`,;)}\]]*[A-Za-z0-9][^\s"'`,;)}\]]*)/u;
 /** A line that is a key of its own (`login_page: x`), and so is not the value of the name above it. */
 const KEY_LINE = /^[ \t]*["']?[A-Za-z_][A-Za-z0-9_.-]*["']?[ \t]*:(?:[ \t]|$)/u;
+/** A name and its separator as {@link ASSIGNMENT} reads them, for one line at a time. */
+const NAME_IN_LINE = new RegExp(ASSIGNMENT.source, 'gu');
+/** What ends a value as {@link ASSIGNMENT} reads it. */
+const VALUE_END = /[\s"'`,;)}\]]/u;
+/** A line that is an assignment of its own (`NAME=value`), or that holds a mapping's `:` (`x: y`, `key:`). */
+const ASSIGNS = /^[ \t]*["']?[A-Za-z_][A-Za-z0-9_.-]*["']?[ \t]*=/u;
+const MAPS = /:(?:[ \t]|$)/u;
+/** What a continued value never starts with: a comment (`# note`), or node properties (`!!binary`, `&pw`). */
+const NO_VALUE_HEAD = /^[#!&]/u;
 /**
  * A value that only points at one (`$HOME`, `${TOKEN}`, `${secret:TOKEN}`), whole up to the next space. A
  * `${NAME-default}` is no pointer: its default is a value, read as the value of NAME ({@link redactExpansions}).
@@ -533,6 +542,58 @@ function commentsFrom(line: string, from: number): boolean {
   return line.charAt(at) === '#' && (at === 0 || line.charAt(at - 1) === ' ' || line.charAt(at - 1) === '\t');
 }
 
+/**
+ * 5.0 (#36, r6): the last line of a value that the lines after its name's line continue, or `index` when none does.
+ * YAML reads a line deeper than a key as more of the plain value that ends the key's line (`password: fake⏎  more` is
+ * `fake more`); today shows it. Read only after a value that is hidden — one {@link ASSIGNMENT} reads, under a name
+ * that announces a secret, with nothing but node properties between them (`password: !!str fake`), ending the line —
+ * and never from a line that is a comment. The lines read are those deeper than the column the name (or the quote
+ * before it) starts at, not the line's indent, so wrapped prose (`1. Set the password: fake⏎   then restart`) keeps
+ * its next line; they end at a blank line, a comment line, a line no deeper than that column, an assignment of its
+ * own (`NAME=value`) or a line that holds a mapping's `:` (`x: y`, `key:`).
+ *
+ * LINEAR: the value that ends the line is found once from its end, and each name on the line is looked at once.
+ */
+function continuedTo(
+  written: readonly string[],
+  index: number,
+  isSecret: (name: string, value: string) => boolean,
+): number {
+  const line = (written[index] ?? '').trimEnd();
+  if (COMMENT_LINE.test(line)) return index;
+  let start = line.length;
+  while (start > 0 && !VALUE_END.test(line.charAt(start - 1))) start -= 1;
+  for (const found of line.matchAll(NAME_IN_LINE)) {
+    const name = found[2] ?? '';
+    if (!isSecret(name, BLOCK_PROBE)) continue;
+    let at = found.index + found[0].length;
+    PROPERTIES_AT.lastIndex = at;
+    at += PROPERTIES_AT.exec(line)?.[0].length ?? 0;
+    VALUE_LOOK.lastIndex = at;
+    const value = at < start ? undefined : VALUE_LOOK.exec(line)?.[0];
+    if (value === undefined || NO_VALUE_HEAD.test(value) || BLOCK_INDICATOR.test(value) || !isSecret(name, value)) {
+      continue;
+    }
+    const column = found.index - (/["']/u.test(line.charAt(found.index - 1)) ? 1 : 0);
+    let last = index;
+    for (let next = index + 2; next < written.length; next += 2) {
+      const below = written[next] ?? '';
+      if (
+        below.trim() === '' ||
+        indentOf(below) <= column ||
+        COMMENT_LINE.test(below) ||
+        ASSIGNS.test(below) ||
+        MAPS.test(below)
+      ) {
+        break;
+      }
+      last = next;
+    }
+    return last;
+  }
+  return index;
+}
+
 /** Whether the name at `at` is the inside of a pointer (`${secret:TOKEN}`), which is no name and value. */
 const insidePointer = (text: string, at: number): boolean =>
   at >= 2 && text.startsWith('${', at - 2) && isPointer(text, at - 2);
@@ -618,8 +679,10 @@ function hideBlockLine(line: string, at: number, block: readonly [number, number
  * inside it whose indicator stands inside it too is not read again (it ends inside it, and what the outer name hides
  * the inner one cannot show), and the block under any other name is not read at all. A block whose indicator stands
  * past the outer one (`password: |⏎  PASSWORD⏎= |`), or that is opened on a line that opens the outer one and stands
- * no deeper than its name (`password=⏎| # token: |`), can run past it, so it is read on its own. No reading cuts
- * into a private key ({@link beforePrivateKey}, {@link hideBlockLine}).
+ * no deeper than its name (`password=⏎| # token: |`), can run past it, so it is read on its own. A hidden value that
+ * ends its name's line is read on over the lines that continue it ({@link continuedTo}), each hidden after its indent
+ * but for any private key on it, which is left to be cut whole; a line hidden whole already is left as it is. No
+ * reading cuts into a private key ({@link beforePrivateKey}, {@link hideBlockLine}).
  */
 function redactNextLines(
   original: string,
@@ -634,6 +697,8 @@ function redactNextLines(
   let redacted = false;
   let covered = -1;
   let coveredBelow = -1;
+  /** The last line of the value continued last ({@link continuedTo}). */
+  let continued = -1;
   /** The value `reading` names on its line, hidden when it is a secret. */
   const readValue = ({ name, line: at, from: written, properties }: Reading): void => {
     const line = parts[at] ?? '';
@@ -687,6 +752,20 @@ function redactNextLines(
     // Only under a name that announces a secret, as a block is: what today hides by its shape alone it still does.
     for (const reading of opens.readings) if (isSecret(reading.name, BLOCK_PROBE)) readValue(reading);
     if (opens.value) readValue(opens.value);
+    // A line a continued value was read over starts no value of its own: every one continued from it ends inside it.
+    if (index <= continued) continue;
+    continued = continuedTo(asWritten, index, isSecret);
+    for (let next = index + 2; next <= continued; next += 2) {
+      const line = parts[next] ?? '';
+      const whole = `${line.slice(0, indentOf(line))}${HIDDEN_TEXT}`;
+      // A line a block hid whole already may have held a key the block cut with it: there is nothing left to read.
+      if (line === whole || keptKeys.has(next)) continue;
+      // Every private key on the line is left whole (its first line is no later than this one), even one that lies
+      // wholly inside the value: it is cut header to footer, line breaks and all, as today cuts it.
+      parts[next] = hideBlockLine(line, next, [next, next], keys);
+      if (parts[next] !== whole) keptKeys.add(next);
+      redacted = true;
+    }
   }
   return { text: parts.join(''), redacted };
 }
