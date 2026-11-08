@@ -46,3 +46,4 @@ export { COMPARED, type DescriptorRow, type ParityResult, type Table, parity, ro
 export { RouteTable, compareRouteSpecificity, orderRoutesBySpecificity } from './router.ts';
 export { MemoryStateFolder, SimulatedCrash, parseDocument } from './state.ts';
 export { type ToolCase, toolConformance } from './tool-suite.ts';
+export { type DiskRoot, diskPaths, diskRoot } from './disk-root.ts';

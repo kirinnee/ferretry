@@ -106,13 +106,14 @@ export class VirtualFs {
             const start = offset < 0 ? Math.max(0, bytes.length + offset) : offset;
             return { bytes: bytes.slice(start, start + length), size: bytes.length };
           },
+          sync: unused,
           close: async () => undefined,
         };
       },
       openDirectory: async path => {
         const identity = this.#identity(path);
         if (identity === undefined || identity.kind !== 'directory') throw missing(path);
-        return { identity, entryPath: () => undefined, chmod: unused, close: async () => undefined };
+        return { identity, entryPath: () => undefined, chmod: unused, sync: unused, close: async () => undefined };
       },
       list: async path => {
         const real = this.#resolve(path, true);
@@ -131,6 +132,7 @@ export class VirtualFs {
       },
       readBytes: unused,
       writeNew: unused,
+      link: unused,
       mkdir: unused,
       symlink: unused,
       unlink: unused,

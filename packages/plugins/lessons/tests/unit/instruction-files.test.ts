@@ -44,6 +44,10 @@ function disk(paths: readonly string[]) {
         makeDirectory: () => Promise.reject(new Error('the fixture has no makeDirectory')),
         realPath: () => Promise.reject(new Error('the fixture has no realPath')),
         pin: () => Promise.reject(new Error('the fixture has no pin')),
+        publish: () => Promise.reject(new Error('the fixture has no publish')),
+        readDurable: () => Promise.reject(new Error('the fixture has no readDurable')),
+        syncDirectory: () => Promise.reject(new Error('the fixture has no syncDirectory')),
+        fileIdentity: () => Promise.reject(new Error('the fixture has no fileIdentity')),
       };
       return handle;
     },

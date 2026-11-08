@@ -136,15 +136,7 @@ export interface LayoutDecl {
 // data ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export type ItemKind =
-  | 'mcp'
-  | 'skill'
-  | 'shell'
-  | 'recipe'
-  | 'instruction'
-  | 'layout'
-  | 'theme'
-  | 'runtime'
-  | 'endpoint';
+  'mcp' | 'skill' | 'shell' | 'recipe' | 'instruction' | 'layout' | 'theme' | 'runtime' | 'endpoint';
 
 export interface ItemDecl {
   readonly kind: ItemKind;
@@ -237,6 +229,12 @@ export interface Permissions {
   readonly secretNamePicker?: true;
   /** It reads this machine's `/proc` and `/sys` facts through `kernel.hostFacts` (today's Terminals). */
   readonly hostFacts?: true;
+  /**
+   * It asks `kernel.paths.checkDirectory` whether an owner-named absolute path is a directory (Ferrets' session
+   * working directory, today's resolver). The check answers for ANY absolute path with no root and no fence, so a
+   * plugin that does not declare it is refused by name.
+   */
+  readonly checkDirectory?: true;
   /** It reads the running build's facts and launches the self-update through `kernel.updateHost` (Updates). */
   readonly updateHost?: true;
 }
