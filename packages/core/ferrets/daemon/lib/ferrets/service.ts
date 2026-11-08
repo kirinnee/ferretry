@@ -350,8 +350,8 @@ export class FerretsService implements FerretsApi {
   }
 
   private nowMs(): number {
-    const parsed = Date.parse(String(this.ports.now()));
-    return Number.isFinite(parsed) ? parsed : Date.now();
+    // The kernel clock answers a valid ISO instant, so the parse is total.
+    return Date.parse(this.ports.now());
   }
 
   /**
@@ -391,11 +391,7 @@ export class FerretsService implements FerretsApi {
     return ok(name);
   }
 
-  private async startNamed(
-    id: FerretId,
-    name: string,
-    request: StartRequest,
-  ): Promise<Result<FerretId, StartFailure>> {
+  private async startNamed(id: FerretId, name: string, request: StartRequest): Promise<Result<FerretId, StartFailure>> {
     // A work folder replaces the folder the ferret works in; it is canonical and goes through the same folder check.
     const anchor = this.ports.folder(request.folder);
     if (!anchor.ok) return failed('folder', anchor.error);
@@ -656,7 +652,8 @@ export class FerretsService implements FerretsApi {
     let keep = false;
     if (name !== undefined) {
       const holder = this.registry.nameHolder(name);
-      if (holder !== undefined && holder !== ferret) return err({ failure: 'taken', message: `the name ${name} is held by running ferret ${holder}` });
+      if (holder !== undefined && holder !== ferret)
+        return err({ failure: 'taken', message: `the name ${name} is held by running ferret ${holder}` });
       // Renaming to the callsign the ferret already answers to is a no-op claim (it keeps its current name); any other
       // name, a non-canonical one included, goes through the ledger, which refuses an invalid one.
       const canonical = normalizeCallsign(name);
@@ -685,8 +682,7 @@ export class FerretsService implements FerretsApi {
         if (claimed !== undefined) await this.ports.claims?.release(claimed, ferret).catch(() => undefined);
         throw error;
       }
-    }
-    else this.ports.changed({ ferret, state: record.state, previous: record.state, change: 'renamed' });
+    } else this.ports.changed({ ferret, state: record.state, previous: record.state, change: 'renamed' });
     return ok((await this.get(ferret)) as FerretSummary);
   }
 

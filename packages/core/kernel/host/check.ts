@@ -8,8 +8,29 @@ import { probeHome } from './home.ts';
 export const EXIT_FOREIGN_HOLDER = 69;
 export const EXIT_ALREADY_SERVING = 78;
 
-/** Whether anything accepts a connection at the address. A connection attempt is not a change to this machine. */
-export type AddressProbe = (host: string, port: number) => Promise<'free' | 'held'>;
+/**
+ * What a connection attempt at the address found: nothing listening (`free`), something answering or resetting
+ * (`held`), or an address this machine cannot reach at all (`unusable`: a mistyped host, no route, no permission).
+ * A connection attempt is not a change to this machine.
+ */
+export type AddressState = 'free' | 'held' | 'unusable';
+export type AddressProbe = (host: string, port: number) => Promise<AddressState>;
+
+/** Error codes that mean the address itself cannot be used from here, as opposed to something holding it. */
+const UNUSABLE_ADDRESS_CODES: ReadonlySet<string> = new Set([
+  'EADDRNOTAVAIL',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+  'EACCES',
+  'EPERM',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EAI_NONAME',
+]);
+
+/** Classifies a connect error: refused = free, address-class = unusable, reset or anything else = held. */
+export const classifyConnectError = (code: string | undefined): AddressState =>
+  code === 'ECONNREFUSED' ? 'free' : code !== undefined && UNUSABLE_ADDRESS_CODES.has(code) ? 'unusable' : 'held';
 
 export interface CheckOptions {
   readonly fs: HostFs;
@@ -28,7 +49,7 @@ export const tcpProbe: AddressProbe = (host, port) =>
     const socket = connect({ host, port, timeout: 1500 });
     socket.once('connect', () => (socket.destroy(), resolve('held')));
     socket.once('timeout', () => (socket.destroy(), resolve('held')));
-    socket.once('error', error => resolve((error as NodeJS.ErrnoException).code === 'ECONNREFUSED' ? 'free' : 'held'));
+    socket.once('error', error => resolve(classifyConnectError((error as NodeJS.ErrnoException).code)));
   });
 
 export const processAlive = (pid: number): boolean => {
@@ -66,12 +87,19 @@ export async function checkHost(options: CheckOptions): Promise<number> {
     return exit;
   }
   const where = `${options.host}:${options.port}`;
-  if ((await options.probe(options.host, options.port)) === 'free') {
+  const state = await options.probe(options.host, options.port);
+  if (state === 'free') {
     say(`address      ${where}  (free — this daemon would bind it)`);
     return exit;
   }
+  if (state === 'unusable') {
+    say(`address      ${where}  (cannot be used from this machine)`);
+    say(`! ${options.host} cannot be reached from this machine. Check --host, or choose another with --host.`);
+    return Math.max(exit, EXIT_ALREADY_SERVING);
+  }
   if (owner !== undefined && owner.port === options.port) {
     say(`address      ${where}  (taken — another ${options.daemonName}, pid ${owner.pid})`);
+    say(`! Another ${options.daemonName} already serves ${where}. Stop it with \`fy daemon stop\`, or choose another port with --port.`);
     return Math.max(exit, EXIT_ALREADY_SERVING);
   }
   say(`address      ${where}  (taken — by something that is not a ${options.daemonName})`);

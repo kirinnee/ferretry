@@ -26,14 +26,14 @@ function run(...argv: string[]) {
   };
 }
 
-test('fyd --version prints the version, exits 0 and creates no home', () => {
+test('V-0513 fyd --version prints the version, exits 0 and creates no home', () => {
   const answer = run('--version');
   expect(answer.code).toBe(0);
   expect(answer.out.trim()).toMatch(/^\d+\.\d+\.\d+/);
   expect(answer.touched).toBe(false);
 });
 
-test('fyd --help prints the usage and creates no home', () => {
+test('V-0508 fyd --help prints the usage and creates no home', () => {
   const answer = run('--help');
   expect(answer.code).toBe(0);
   expect(answer.out).toContain('Exit codes:');
@@ -53,5 +53,21 @@ test('a mode this daemon does not serve yet is refused 64, never ignored', () =>
     expect(answer.code).toBe(64);
     expect(answer.err).toContain('--config is not served');
     expect(answer.touched).toBe(false);
+  }
+});
+
+test('V-0511 --port sets the port for one run, and a value that is not a port number is refused 64', () => {
+  const ok = run('--print-config', '--port', '9123');
+  expect(ok.code).toBe(0);
+  expect(ok.out).toMatch(/port\s+9123\s+flag \(--port\)/);
+  expect(ok.touched).toBe(false);
+  const zero = run('--print-config', '--port', '0');
+  expect(zero.code).toBe(0);
+  expect(zero.out).toMatch(/port\s+0\s+flag \(--port\)/);
+  for (const bad of ['abc', '70000', '-1']) {
+    const refused = run('--print-config', '--port', bad);
+    expect(refused.code).toBe(64);
+    expect(refused.err).toContain('is not a port number');
+    expect(refused.touched).toBe(false);
   }
 });
