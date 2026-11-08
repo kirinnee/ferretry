@@ -155,6 +155,16 @@ both harness files and the agenda deadline → `agenda.yaml`, added to what Sett
 (`linkStore` as written, v4's effective `memberUnlockDays`; checked with the contract's own loosening rule); `secretEnvironment` → `vault.yaml` key for key (raw-secret rule applies); `usage.url`, CORS,
 `publicUrl` and tuning keys are listed in `notCarried`, by key only; `routing.json` belongs to the Packs step.
 
+Archive setting (`src/steps/archive-setting.ts`) carries v4's one switch for automatic session archiving, the daemon environment
+variable `FYD_SESSION_ARCHIVE_AFTER_HOURS` (default off), to `archive.yaml` `afterHours`. First source that names it wins:
+the Linux unit's `fyd.service.d/*.conf` drop-ins then `fyd.service`, else the macOS plist's `EnvironmentVariables`, else the
+converter's own environment (a managed daemon sees only its service definition, so that beats an incidental shell `export`; a
+unit for another `FY_HOME` is skipped). The value passes v4's own parse rule (whole hours, 1 or more, or `off`). Absent, `off`,
+invalid or over 8760 hours writes nothing and the summary says why, so the default stays off. `launchctl setenv`, `set-environment` and
+`EnvironmentFile=` are never read or run. The `archive.yaml` schema is Ferrets' U6 (`rebuild/mount-ferrets-archive-restarts`, not on
+`rebuild/5.0` yet), restated in the step until it lands. `src/main.ts` passes the real home directory and environment; tests inject
+temp ones.
+
 The `rebuild/migration-ferrets-b` development branch contains a local merge of the unreviewed
 `rebuild/port-ferrets-a2` schemas. **Do not integrate it before Ferrets lands on `rebuild/5.0`.** Once Ferrets lands,
 rebase the converter commits onto `rebuild/migration` without that port merge. The independent first pass remains
