@@ -53,6 +53,15 @@ describe('a ferret’s skills list', () => {
     expect(sortedSkills(skills).map(entry => entry.name)).toEqual(['mid', 'zeta', 'alpha', 'beta']);
   });
 
+  it('breaks a tie of scope by name, ignoring case', () => {
+    const tied = [
+      skill('Zulu', { scope: 'user' }),
+      skill('alpha', { scope: 'user' }),
+      skill('Mike', { scope: 'user' }),
+    ];
+    expect(sortedSkills(tied).map(entry => entry.name)).toEqual(['alpha', 'Mike', 'Zulu']);
+  });
+
   it('says why a shadowed skill is not active, and counts only the ones that load', () => {
     expect(skillOverride(skills[3] as never)).toBe('Not active: the skill of the same name in This project wins');
     expect(skillOverride(skills[0] as never)).toBeUndefined();
@@ -210,6 +219,25 @@ describe('what a refused copy says', () => {
     expect(localRefusal(refusal(410, 'local_skill_preview_expired', 'x')).sentence).toContain('10 minutes');
     expect(localRefusal(refusal(404, 'local_skill_preview_expired', 'x')).previewAgain).toBe(true);
     expect(localRefusal(refusal(409, 'local_skill_conflict', 'already there')).previewAgain).toBe(false);
+  });
+
+  it('says what the machine refused when it gave no sentence, and what an unknown source, target or copy means', () => {
+    expect(localRefusal(refusal(500, 'something_else', '  ')).sentence).toBe('This machine refused the change (500).');
+    expect(localRefusal(refusal(500, 'something_else', 'it broke')).sentence).toBe('it broke');
+    expect(localRefusal(new Error('   ')).sentence).toBe('This machine didn’t answer.');
+    expect(localRefusal(refusal(404, 'local_skill_source_unknown', '')).sentence).toBe(
+      'This machine no longer lists that skill. Nothing was installed.',
+    );
+    expect(localRefusal(refusal(404, 'local_skill_source_unknown', 'gone')).sentence).toBe(
+      'This machine no longer lists that skill. Nothing was installed. gone',
+    );
+    expect(localRefusal(refusal(404, 'local_skill_target_unknown', 'no such profile')).sentence).toBe(
+      'This machine does not know that project or profile. Pick another place. no such profile',
+    );
+    expect(localRefusal(refusal(404, 'local_skill_install_unknown', '')).sentence).toBe(
+      'This machine has no such copy any more.',
+    );
+    expect(localRefusal(refusal(404, 'local_skill_install_unknown', '')).previewAgain).toBe(false);
   });
 
   it('shows the machine’s own sentence for a source it will not copy, and a plain one when it gave none', () => {
