@@ -24,8 +24,8 @@ export interface WardenRemedyHost {
   /** Browsers, while it is on (an optional use): it closes the browsers left under a ferret's pane. */
   readonly browsers?: () => BrowsersApi | undefined;
   /**
-   * Told when a resume that DID start the ferret could not type its notice (Conversation refuses until its terminal
-   * seam lands). The resume stands; the notice's failure is journalled apart from it.
+   * Told when a resume that DID start the ferret could not type its notice (Conversation refused it, or the ferret's terminal
+   * could not be reached). The resume stands; the notice's failure is journalled apart from it.
    */
   readonly noticeUndelivered?: (ferret: string, reason: string) => void;
 }

@@ -89,6 +89,23 @@ export interface ConversationApi {
     action: 'submit' | 'clear',
     draft: string,
   ): Promise<Result<ComposerResult, ConversationRefusal>>;
+  /**
+   * Additive (send path, today's `SessionSendService.resubmitStuck`): the Warden's ONE verified Enter on a send's own text
+   * left typed in a ferret's composer. It presses only when the composer holds exactly that send's text at an idle,
+   * undialogued pane, and no more than one Enter past the send path's own bound. `submitted` / `holding` say what the
+   * Enter did, `absent` that the box is empty (the message is not sitting there), `refused` that nothing was pressed.
+   * Only the `warden` caller may ask: any other is refused `forbidden` before a pane is read.
+   */
+  resubmitStuck?(
+    ferret: FerretId,
+    caller: ConversationCaller,
+    sendId: string,
+  ): Promise<Result<'submitted' | 'holding' | 'absent' | 'refused', ConversationRefusal>>;
+  /**
+   * Additive (send path, &B153): the id of the delivered pointer the harness took back into the ferret's box, when an idle,
+   * undialogued pane shows exactly it. Reads the pane and presses nothing; `undefined` when none (or the pane cannot be read).
+   */
+  retractedDraft?(ferret: FerretId): Promise<string | undefined>;
 
   // reading
   transcript(

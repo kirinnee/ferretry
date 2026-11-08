@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { runnerDeliveryFailure } from '@ferretry/core-ferrets/contract';
 import type { Redaction, RedactionScope } from '@ferretry/kernel/contract';
+import { ComposerActs } from '../../../../daemon/adapters/tmux/composer-acts.ts';
+import type { TmuxController } from '../../../../daemon/lib/tmux/index.ts';
 import { subject } from './runner-world.ts';
 
 const failureOf = async (promise: Promise<unknown>) =>
@@ -223,5 +227,50 @@ describe('send path: stopActiveTurn presses the harness stop under shouldPressSt
       code: 'input_pending',
     });
     expect(keys(world)).toEqual([]);
+  });
+});
+
+describe('send path: the composer acts keep their bounds', () => {
+  it('submitComposer says holding when the composer still shows the message after every poll', async () => {
+    const world = subject();
+    world.server.composer = 'one send';
+    world.server.swallowEnters = 99;
+    expect(await world.runner.submitComposer(world.handle, 'one send')).toBe('holding');
+    expect(keys(world)).toEqual(['Enter']);
+  });
+
+  it('clearComposer stops, never wipes, when erasing stops making progress or the composer cannot be read', async () => {
+    const multi = subject();
+    multi.server.composer = 'line one\nline two';
+    const outcome = await multi.runner.clearComposer(multi.handle, 'line one\nline two');
+    expect(['cleared', 'stuck']).toContain(outcome);
+    expect(keys(multi).every(key => key === 'C-u')).toBe(true);
+    const covered = subject();
+    covered.server.composer = 'one send';
+    covered.server.modal = TRUST;
+    covered.server.modalReplacesComposer = true;
+    expect(await covered.runner.clearComposer(covered.handle, 'one send')).toBe('stuck');
+    expect(keys(covered)).toEqual([]);
+  });
+
+  it('heldAt REJECTS for a queue that runs past what the pane shows: "not held" would license a retype', async () => {
+    const frame = readFileSync(
+      join(import.meta.dir, '../../../fixtures/composer/claude-2.1.281-busy-queued-overflow.txt'),
+      'utf8',
+    );
+    const tmux = {
+      state: async () => ({
+        alive: true,
+        dead: false,
+        promptReady: false,
+        history: '',
+        visible: frame,
+        cursorX: 2,
+        cursorY: 17,
+      }),
+      rows: async () => undefined,
+    } as unknown as TmuxController;
+    const acts = new ComposerActs(tmux, 'fy-f-hadi', async () => undefined);
+    await expect(acts.heldAt('a message that was never typed here at all')).rejects.toThrow(/runs past/);
   });
 });

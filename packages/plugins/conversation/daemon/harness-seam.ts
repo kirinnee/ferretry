@@ -53,11 +53,11 @@ export const INTERRUPT_UNAVAILABLE =
   "Stopping a ferret's turn from here is not available yet: this machine cannot yet tell safely whether the ferret is working or waiting at its prompt, so a stop could quit the agent instead. Stop it in the ferret's terminal for now.";
 
 /**
- * Said by a send that carries what the seam does not type yet: files, the fyi label (which holds a message to the
- * turn's end), the send-now flag or a reply request. Each would be dropped and the message still reported as sent.
+ * Said by a send that carries what the seam does not type yet: files, or the fyi label (which holds a message to the
+ * turn's end). Each would be dropped and the message still reported as sent.
  */
 export const SEND_EXTRAS_UNAVAILABLE =
-  "Sending files, an fyi message held to the turn's end, the send-now flag or a reply request is not available yet: they would be dropped and the message still reported as sent. Send the message alone (as an action or a blocker), or type it in the ferret's terminal.";
+  "Sending files or an fyi message held to the turn's end is not available yet: they would be dropped and the message still reported as sent. Send the message alone (as an action or a blocker), or type it in the ferret's terminal.";
 
 /**
  * ONE FIXED SENTENCE PER REASON a pane never came to a prompt. Nothing of the message was typed, so the same send may
@@ -106,6 +106,12 @@ interface BoundTerminal {
   queue(text: string, sendId: string): Promise<QueueOutcome | undefined>;
   /** Presses the harness's stop under its own rule and says what it did. Throws the answer for a refusal. */
   interrupt(): Promise<TurnStopped>;
+  /**
+   * The send-now's stop: the harness's stop key under the same rule as {@link interrupt}, then a wait for the pane to
+   * come back to a prompt. Throws the answer for a refusal (nothing pressed), and `plugin_unavailable` when the runner
+   * cannot, so a send-now that cannot stop the turn types NOTHING.
+   */
+  stopActive(): Promise<void>;
 }
 
 /**
@@ -148,7 +154,7 @@ const SEAM_OFF =
   "Ferrets does not offer a way to reach this ferret's terminal, so Conversation cannot type into it yet.";
 
 /** A harness refusal, in the words and status today's send routes give for that case. */
-function refusalAnswer(refusal: HarnessRefusal, noPane: string): Error {
+export function refusalAnswer(refusal: HarnessRefusal, noPane: string): Error {
   switch (refusal.refused) {
     case 'no_pane':
       return new SessionSendError('refused', noPane);
@@ -166,7 +172,7 @@ function refusalAnswer(refusal: HarnessRefusal, noPane: string): Error {
  * person's own text is 409 `composer_occupied` with that draft, and the draft goes nowhere else; any other refusal is
  * {@link refusalAnswer}'s. Exhaustive: a new kind in Ferrets' taxonomy does not compile until it is answered here.
  */
-function deliveryAnswer(ferret: string, failure: HarnessDeliveryFailure): Error {
+export function deliveryAnswer(ferret: string, failure: HarnessDeliveryFailure): Error {
   if ('unconfirmed' in failure) return new Unconfirmed(failure.stranded);
   switch (failure.refused) {
     case 'not_ready':
@@ -216,6 +222,12 @@ export function terminalSeam(ferrets: Pick<FerretsApi, 'harness'>): TerminalSeam
           if (queued.ok) return queued.value;
           if ('refused' in queued.error && queued.error.refused === 'plugin_unavailable') return undefined;
           throw deliveryAnswer(ferret, queued.error);
+        },
+        stopActive: async () => {
+          const stopped = await harness.stopActive?.();
+          if (stopped === undefined)
+            throw new ApiError(503, "the runner that owns this ferret's terminal is off", 'plugin_unavailable');
+          if (!stopped.ok) throw refusalAnswer(stopped.error, INTERRUPT_NO_PANE);
         },
         interrupt: async () => {
           const interrupted = await harness.interrupt();
