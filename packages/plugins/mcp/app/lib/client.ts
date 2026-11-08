@@ -9,6 +9,7 @@
  * nothing that repeats it, and the caller drops it before the promise settles. The contract has no field that could carry
  * a token either way.
  */
+import { type RestartResult, RestartRequestSchema, RestartResultSchema } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
   McpCheckRequestSchema,
@@ -158,7 +159,14 @@ export const addFerretMcp = async (
     await client.call(ADD_ROUTES[scope], { params: { ferretId }, body: SessionMcpAddRequestSchema.parse(request) }),
   );
 
-/** Restarts these ferrets' CLIs with their conversations (a busy one waits for its next idle moment). */
-export const restartFerrets = async (client: McpClient, ids: readonly string[]): Promise<void> => {
-  await client.call(RESTART_ROUTE, { body: { scope: 'ids', ids } });
-};
+/**
+ * Restarts these ferrets' CLIs with their conversations (a busy one waits for its next idle moment). The answer is Ferrets'
+ * own `RestartResult`: a 200 can mean restarted, queued, skipped or failed, so the caller reads which, per ferret.
+ */
+export const restartFerrets = async (client: McpClient, ids: readonly string[]): Promise<RestartResult> =>
+  RestartResultSchema.parse(
+    await client.call(RESTART_ROUTE, {
+      body: RestartRequestSchema.parse({ scope: 'ids', ids }),
+      headers: { 'x-fy-request-id': crypto.randomUUID() },
+    }),
+  );

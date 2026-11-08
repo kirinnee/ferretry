@@ -82,10 +82,10 @@ describe('mcp#0 Add MCP server — project scope', () => {
     const { root, calls, closed } = await open({
       [PREVIEW_PROJECT]: projectPreview({ etag: null }),
       [ADD_PROJECT]: projectAdded,
-      [RESTART]: { restarted: [], queued: [], skipped: [], failed: [] },
+      [RESTART]: { restarted: [{ id: 'f1' }], queued: [], skipped: [], failed: [] },
     });
     expect(calls[0]).toEqual({ route: LISTING, params: { ferretId: 'f1' }, body: undefined });
-    expect(root.textContent).toContain('Writes .mcp.json');
+    expect(root.textContent).toContain('Writes .mcp.json in w;');
     await fillCommand(root);
     expect(text(root, '[data-add-mcp-preview="project"]')).toContain('new file');
     expect([...root.querySelectorAll('.fy-diff__line')].map(line => line.textContent)).toEqual([
@@ -104,6 +104,7 @@ describe('mcp#0 Add MCP server — project scope', () => {
     expect(root.textContent).toContain('Claude Code asks once to trust');
     await click(root, '[data-add-mcp-reload]');
     expect(calls.find(call => call.route === RESTART)?.body).toEqual({ scope: 'ids', ids: ['f1'] });
+    expect(calls.find(call => call.route === RESTART)?.headers?.['x-fy-request-id']).toMatch(/^[0-9a-f-]{36}$/);
     expect(closed).toEqual(['closed']);
   });
 
@@ -271,5 +272,53 @@ describe('mcp#0 Add MCP server — scope switching', () => {
     mounted = undefined;
     fail(new Error('too late'));
     await settle();
+  });
+});
+
+describe('mcp#1 Reload this ferret says what the restart did', () => {
+  const none = { restarted: [], queued: [], skipped: [], failed: [] };
+
+  const added = async (restart: unknown) => {
+    const made = await open({
+      [PREVIEW_PROJECT]: projectPreview(),
+      [ADD_PROJECT]: projectAdded,
+      [RESTART]: restart,
+    });
+    await fillCommand(made.root);
+    await submit(made.root);
+    await click(made.root, '[data-add-mcp-reload]');
+    return made;
+  };
+
+  it('a restart nobody reported is not a success: the dialog stays open and says so', async () => {
+    const { root, closed } = await added(none);
+    expect(closed).toEqual([]);
+    expect(root.querySelector('[role="alert"]')?.textContent).toContain('did not say whether Marin reloaded');
+  });
+
+  it('a queued restart says it reloads at its next idle moment, and does not close or offer a second reload', async () => {
+    const { root, closed } = await added({ ...none, queued: [{ id: 'f1', reason: 'mid-turn' }] });
+    expect(closed).toEqual([]);
+    expect(text(root, '[data-add-mcp-queued]')).toBe(
+      'Marin reloads at its next idle moment (it is working on a turn).',
+    );
+    expect(root.querySelector('[data-add-mcp-reload]')).toBeNull();
+    await click(root, '.fy-action-form__foot button');
+    expect(closed).toEqual(['closed']);
+  });
+
+  it('a skipped restart is a failure in words, and the dialog stays open', async () => {
+    const { root, closed } = await added({ ...none, skipped: [{ id: 'f1', reason: 'not-running' }] });
+    expect(closed).toEqual([]);
+    expect(root.querySelector('[role="alert"]')?.textContent).toContain('Marin was not reloaded: it is not running.');
+    expect(root.querySelector('[data-add-mcp-reload]')).not.toBeNull();
+  });
+
+  it('a failed restart is a failure with the daemon’s reason, and the dialog stays open', async () => {
+    const { root, closed } = await added({ ...none, failed: [{ id: 'f1', reason: 'the pane did not answer' }] });
+    expect(closed).toEqual([]);
+    expect(root.querySelector('[role="alert"]')?.textContent).toContain(
+      'Marin could not be reloaded: the pane did not answer',
+    );
   });
 });

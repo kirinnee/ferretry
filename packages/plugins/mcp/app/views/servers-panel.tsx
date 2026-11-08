@@ -8,6 +8,7 @@
  * through the half's own client; no secret value, token or program argument ever reaches it.
  */
 import { ContextFailure, ContextFilterBar, contextEmptyCopy, ContextNote, useContextRead } from '@ferretry/app/ui';
+import { Plus } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { type McpClient, readFerretMcpServers } from '../lib/client.ts';
 import {
@@ -87,7 +88,13 @@ export function McpServersPanel({ client, ferretId, now = Date.now, searchDeboun
         <span>
           {servers.length} server{servers.length === 1 ? '' : 's'} this ferret sees
         </span>
-        <button className="fy-mcp-link text-meta" data-mcp-add="" onClick={() => setAdding(true)} type="button">
+        <button
+          className="fy-mcp-link inline-flex items-center gap-1 text-meta"
+          data-mcp-add=""
+          onClick={() => setAdding(true)}
+          type="button"
+        >
+          <Plus aria-hidden="true" size={13} />
           Add…
         </button>
       </div>

@@ -9,6 +9,7 @@ import { TaskPlanHost } from './features/secure-copy/task-plan-host.tsx';
 import { TaskPlansSurface } from './features/secure-copy/task-plans-surface.tsx';
 import { PhoneApprovalHost } from './features/sign-in-approval/phone-approval-host.tsx';
 import { TwoFactorSeedHost } from './features/two-factor/two-factor-seed-host.tsx';
+import type { RuleLinkHold } from './lib/rule-link.ts';
 import { type AccountsPasskeys, useAccountsPasskeys } from './passkeys.ts';
 import type { AccountsClient } from './shell.tsx';
 
@@ -31,14 +32,18 @@ export function accountsTab(client: AccountsClient) {
  * app's one prompt (Access's), bound to this machine and the staged change. Where nothing can ask, it is refused with
  * today's no-passkey words and the stage is dropped.
  */
-export function secureCopyTab(client: AccountsClient) {
+export function secureCopyTab(client: AccountsClient, ruleLink?: RuleLinkHold) {
   return function SecureCopyTab() {
     const asks = useAccountsPasskeys(client);
     return (
       <div className="flex min-w-0 flex-col gap-4">
         <CopyRulesSurface client={client} {...(asks === undefined ? {} : { askPasskey: asks.pasteRule })} />
         <TaskPlansSurface client={client} />
-        <SignInRulesSurface client={client} {...(asks === undefined ? {} : { askPasskey: asks.signInRule })} />
+        <SignInRulesSurface
+          client={client}
+          {...(asks === undefined ? {} : { askPasskey: asks.signInRule })}
+          {...(ruleLink === undefined ? {} : { ruleLink })}
+        />
       </div>
     );
   };

@@ -1,8 +1,10 @@
 import { skeletonSentence } from '@ferretry/kernel/contract';
-import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { Component, type ErrorInfo, type ReactNode, useMemo } from 'react';
 import type { PanelRef, ScreenRef } from '../layout/engine.ts';
 import { useRouter } from '../router/router.tsx';
 import { useOptionalShell, useRuntimeVersion, useShell, WithoutShell } from './context.tsx';
+import { identityOf, WithPluginIdentity } from './plugin-identity.tsx';
+import { WithViewPlace } from './view-place.tsx';
 
 /**
  * WHERE PLUGIN VIEWS ARE DRAWN. Every plugin screen, panel and settings tab goes through {@link PluginView}, which
@@ -27,7 +29,10 @@ export function ShellLine({
 }
 
 /** A view that throws while rendering is contained to its own box. */
-class ViewBoundary extends Component<{ readonly title: string; readonly children: ReactNode }, { failed: boolean }> {
+export class ViewBoundary extends Component<
+  { readonly title: string; readonly children: ReactNode },
+  { failed: boolean }
+> {
   override state = { failed: false };
 
   static getDerivedStateFromError(): { failed: boolean } {
@@ -57,6 +62,8 @@ interface PluginViewProps {
 export function PluginView({ daemon, plugin, section, id, props }: PluginViewProps) {
   const { runtime } = useShell();
   useRuntimeVersion(runtime);
+  // Who is drawn here (§1.1): this plugin, on a daemon, with its own reach into every paired daemon (S2).
+  const identity = useMemo(() => identityOf(runtime, plugin, 'daemon'), [runtime, plugin]);
   const title = runtime.titleOf(plugin);
   const blocked = runtime.blockedLine(daemon, plugin);
   if (blocked !== undefined) return <ShellLine tone="warn">{blocked}</ShellLine>;
@@ -66,9 +73,14 @@ export function PluginView({ daemon, plugin, section, id, props }: PluginViewPro
   const view = half[section][id] as ((p: Record<string, unknown>) => ReactNode) | undefined;
   if (view === undefined) return <ShellLine>{skeletonSentence(title)}</ShellLine>;
   const Rendered = view;
+  // Where the view is drawn (S1): ITS daemon's machine, feed and authority, never the selected daemon's.
   return (
     <ViewBoundary title={title}>
-      <Rendered {...props} />
+      <WithPluginIdentity identity={identity}>
+        <WithViewPlace place={runtime.place(daemon)}>
+          <Rendered {...props} />
+        </WithViewPlace>
+      </WithPluginIdentity>
     </ViewBoundary>
   );
 }
@@ -80,8 +92,9 @@ export function PluginView({ daemon, plugin, section, id, props }: PluginViewPro
  * one). A plugin that gave no view for it draws the skeleton line.
  *
  * The props are not the only way to a daemon: the shell context is another. The view is drawn under {@link WithoutShell},
- * so `useDaemonClients`, `PanelSlot`, `RendererView` and every other reader of the shell find none and answer as they
- * do outside a shell (a rejection, nothing drawn).
+ * so `usePairedDaemons`, `useAppHook`, `PanelSlot`, `RendererView` and every other reader of the shell find none
+ * and answer as they do outside a shell (nothing listed, nothing drawn). Its plugin identity has NO reach, so
+ * `useEveryDaemon` answers `[]` there (MA4).
  */
 function DaemonlessScreen({
   screen,
@@ -92,13 +105,19 @@ function DaemonlessScreen({
 }) {
   const { runtime } = useShell();
   const router = useRouter();
+  const identity = useMemo(
+    () => identityOf(runtime, screen.plugin, 'daemonless', screen.id),
+    [runtime, screen.plugin, screen.id],
+  );
   const View = runtime.daemonlessView(screen.plugin, screen.id);
   if (View === undefined) return <ShellLine>{skeletonSentence(screen.label)}</ShellLine>;
   return (
     <ViewBoundary title={runtime.titleOf(screen.plugin)}>
-      <WithoutShell>
-        <View params={params} navigate={router.navigate} location={runtime.location} />
-      </WithoutShell>
+      <WithPluginIdentity identity={identity}>
+        <WithoutShell>
+          <View params={params} navigate={router.navigate} location={runtime.location} />
+        </WithoutShell>
+      </WithPluginIdentity>
     </ViewBoundary>
   );
 }

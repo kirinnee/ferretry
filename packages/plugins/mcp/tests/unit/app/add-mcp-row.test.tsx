@@ -72,6 +72,7 @@ describe('mcp#0 the panel’s Add… link', () => {
       <McpServersPanel client={client} ferretId="f1" now={() => NOW} searchDebounceMs={0} />,
     );
     const reads = () => calls.filter(call => call.route.endsWith('/mcp/servers')).length;
+    expect(mounted.container.querySelector('[data-mcp-add] svg')).not.toBeNull();
     await click(mounted.container, '[data-mcp-add]');
     expect(document.body.querySelector('[data-add-mcp-dialog]')).not.toBeNull();
     const before = reads();

@@ -25,7 +25,7 @@ import type {
   SessionMcpPreview,
   SessionMcpScope,
 } from '../../contract/index.ts';
-import { draftRequest, EMPTY_MCP_DRAFT, type McpDraft } from '../lib/add-model.ts';
+import { draftRequest, EMPTY_MCP_DRAFT, type McpDraft, projectFolderName, reloadOutcome } from '../lib/add-model.ts';
 import {
   addFerretMcp,
   type McpClient,
@@ -178,6 +178,7 @@ export function AddMcpForm({
 
   const projectUnavailable = listing === null ? null : listing.project === null ? listing.projectUnavailable : null;
   const reason = result.kind === 'incomplete' ? result.reason : null;
+  const projectFolder = listing?.project == null ? null : projectFolderName(listing.project.path);
 
   return (
     <form className="fy-action-form__body" data-add-mcp="" noValidate onSubmit={event => void submit(event)}>
@@ -194,7 +195,8 @@ export function AddMcpForm({
           >
             {projectUnavailable ?? (
               <>
-                Writes <span className="font-mono">.mcp.json</span>; shared with everyone on the repo.
+                Writes <span className="font-mono">.mcp.json</span>
+                {projectFolder === null ? '' : ` in ${projectFolder}`}; shared with everyone on the repo.
               </>
             )}
           </ChoiceCard>
@@ -427,14 +429,17 @@ function AddedStep({
   const [failure, setFailure] = useState<string | null>(null);
   const [flow, setFlow] = useState<McpOAuthFlow | null>(null);
   const [signedIn, setSignedIn] = useState(false);
+  const [queued, setQueued] = useState<string | null>(null);
   const redirectUri = useMemo(() => mcpRedirectUri(origin), [origin]);
 
   const reload = async (): Promise<void> => {
     setBusy('reload');
     setFailure(null);
     try {
-      await restartFerrets(client, [ferretId]);
-      host.close();
+      const outcome = reloadOutcome(await restartFerrets(client, [ferretId]), ferretId, agentName);
+      if (outcome.kind === 'restarted') host.close();
+      else if (outcome.kind === 'queued') setQueued(outcome.sentence);
+      else setFailure(outcome.sentence);
     } catch (reason) {
       setFailure(changeRefusalSentence(reason));
     } finally {
@@ -494,22 +499,29 @@ function AddedStep({
           )}
         </div>
       ) : null}
+      {queued === null ? null : (
+        <p className="fy-action-form__note" data-add-mcp-queued="" role="status">
+          {queued}
+        </p>
+      )}
       <FormFailure message={failure} />
       <div className="fy-action-form__foot">
         <Button disabled={busy !== null} onClick={host.close} size="sm" type="button" variant="ghost">
-          Later
+          {queued === null ? 'Later' : 'Close'}
         </Button>
-        <Button
-          data-add-mcp-reload=""
-          disabled={busy !== null}
-          onClick={() => void reload()}
-          size="sm"
-          type="button"
-          variant="primary"
-        >
-          <RotateCw aria-hidden="true" size={14} />
-          {busy === 'reload' ? 'Reloading…' : 'Reload this ferret'}
-        </Button>
+        {queued === null ? (
+          <Button
+            data-add-mcp-reload=""
+            disabled={busy !== null}
+            onClick={() => void reload()}
+            size="sm"
+            type="button"
+            variant="primary"
+          >
+            <RotateCw aria-hidden="true" size={14} />
+            {busy === 'reload' ? 'Reloading…' : 'Reload this ferret'}
+          </Button>
+        ) : null}
       </div>
       {flow === null ? null : (
         <McpSignInSheet

@@ -5,6 +5,7 @@
  * The secret rule is the CONTRACT's (`mcpServerRefusal`), not a copy of it: the form says a raw key is refused as the
  * person types, and the daemon refuses the same request if anything else sends it.
  */
+import type { RestartResult } from '@ferretry/core-ferrets/contract';
 import {
   mcpServerRefusal,
   SessionMcpNameSchema,
@@ -115,3 +116,48 @@ export const draftRequest = (draft: McpDraft): DraftResult => {
   if (refusal !== null) return { kind: 'incomplete', reason: refusal };
   return { kind: 'ready', request: { name, server } };
 };
+
+/** What a reload did for the one ferret it was asked for. Only `restarted` is a reload that happened. */
+export type ReloadOutcome =
+  | { readonly kind: 'restarted' }
+  | { readonly kind: 'queued'; readonly sentence: string }
+  | { readonly kind: 'failed'; readonly sentence: string };
+
+const QUEUED_WHY = {
+  'mid-turn': 'it is working on a turn',
+  'in-flight': 'it has work a restart would lose',
+  'own-session': 'its own turn has to end first',
+} as const;
+
+const SKIPPED_WHY = {
+  'not-running': 'is not running',
+  'not-found': 'was not found',
+  'not-outdated': 'is already up to date',
+} as const;
+
+/**
+ * Reads Ferrets' answer for ONE ferret, in words, and never as success unless it restarted: queued is "reloads at its
+ * next idle moment", skipped and failed are failures, and an answer that names the ferret in none of the four lists is a
+ * failure too (a restart nobody reported is not a restart that happened).
+ */
+export function reloadOutcome(result: RestartResult, ferretId: string, name: string): ReloadOutcome {
+  if (result.restarted.some(row => row.id === ferretId)) return { kind: 'restarted' };
+  const queued = result.queued.find(row => row.id === ferretId);
+  if (queued !== undefined)
+    return {
+      kind: 'queued',
+      sentence: `${name} reloads at its next idle moment (${queued.detail ?? QUEUED_WHY[queued.reason]}).`,
+    };
+  const skipped = result.skipped.find(row => row.id === ferretId);
+  if (skipped !== undefined)
+    return { kind: 'failed', sentence: `${name} was not reloaded: it ${SKIPPED_WHY[skipped.reason]}.` };
+  const failed = result.failed.find(row => row.id === ferretId);
+  if (failed !== undefined) return { kind: 'failed', sentence: `${name} could not be reloaded: ${failed.reason}` };
+  return { kind: 'failed', sentence: `Ferretry did not say whether ${name} reloaded.` };
+}
+
+/** The folder a project's `.mcp.json` sits in, by name (`/work/ferretry/.mcp.json` → `ferretry`); null when the path names none. */
+export function projectFolderName(mcpJsonPath: string): string | null {
+  const parts = mcpJsonPath.split('/').filter(part => part !== '');
+  return parts.length >= 2 ? (parts[parts.length - 2] ?? null) : null;
+}

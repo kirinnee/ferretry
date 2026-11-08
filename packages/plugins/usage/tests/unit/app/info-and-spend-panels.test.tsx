@@ -98,6 +98,31 @@ describe('usage#0 Info › Usage panel (ferret.side)', () => {
     }
   });
 
+  it('usage#0 says the daemon’s own reason a cost is unknown, not always “no pricing for this model”', async () => {
+    const view = await panel(
+      [rawRow({ id: 'f1', equivalentApiCostUsdMicros: null, costGap: 'transcript_unresolved' })],
+      feedOf(),
+    );
+    try {
+      expect(text(view.container)).toContain('usage unknown — transcript not found');
+      expect(text(view.container)).not.toContain('no pricing for this model');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('usage#0 says a priced cost is this ferret’s, and links to its insights', async () => {
+    const view = await panel([rawRow({ id: 'f1', equivalentApiCostUsdMicros: 2_000_000 })], feedOf());
+    try {
+      expect(text(view.container)).toContain('$2.00this ferret');
+      const link = view.container.querySelector('[data-info-open-insights]');
+      expect(link?.textContent).toBe('Open this ferret’s insights');
+      expect(link?.getAttribute('href') ?? '').toContain('insights');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('shows a credit login’s money line, and an at-limit state', async () => {
     const view = await panel(
       [rawRow({ id: 'f1' })],

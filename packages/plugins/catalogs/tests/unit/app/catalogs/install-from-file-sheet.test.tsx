@@ -490,6 +490,82 @@ describe('the projects the host names', () => {
   });
 });
 
+describe('catalogs#5 the projects of the machine being installed onto', () => {
+  const ALPHA = [{ name: 'alpha-proj', path: '/a' }];
+  const BETA = [{ name: 'beta-proj', path: '/b' }];
+  const read = async (target: { readonly daemonId: string }) => (target.daemonId === 'alpha' ? ALPHA : BETA);
+
+  const openOn = async (daemonId: string, host: Partial<InstallHost>) => {
+    const fake = fakeClient({ ...baseHandlers });
+    const view = await mount(
+      <InstallFromFileSheet
+        connection={daemonConnection({ daemonId })}
+        onClose={() => undefined}
+        host={{ createClient: fake.factory, crypto: watched.crypto, ...host }}
+      />,
+    );
+    await giveText(fileText);
+    await choose('[data-catalog-scope]', 'project');
+    await settle();
+    return view;
+  };
+
+  it('offers the TARGET machine’s projects, never the screen’s own, when they differ', async () => {
+    // The screen is on alpha (its own list rides `projects`); the person picked beta to install onto.
+    const view = await openOn('beta', { projects: ALPHA, readProjects: read });
+    expect(q('[data-catalog-project]')?.textContent).toContain('beta-proj');
+    expect(q('[data-catalog-project]')?.textContent).not.toContain('alpha-proj');
+    await view.unmount();
+  });
+
+  it('offers the screen’s own machine’s projects when that is the target', async () => {
+    const view = await openOn('alpha', { projects: BETA, readProjects: read });
+    expect(q('[data-catalog-project]')?.textContent).toContain('alpha-proj');
+    expect(q('[data-catalog-project]')?.textContent).not.toContain('beta-proj');
+    await view.unmount();
+  });
+
+  it('offers none, not another machine’s, when the target’s list cannot be read', async () => {
+    const view = await openOn('beta', {
+      projects: ALPHA,
+      readProjects: async () => {
+        throw new Error('This device cannot reach Catalogs on that machine yet.');
+      },
+    });
+    expect(q('[data-catalog-project]')?.textContent).not.toContain('alpha-proj');
+    await view.unmount();
+  });
+
+  it('drops an answer that lands after the sheet closed', async () => {
+    let release: (value: typeof BETA) => void = () => undefined;
+    const late = new Promise<typeof BETA>(resolve => {
+      release = resolve;
+    });
+    const fake = fakeClient({ ...baseHandlers });
+    const view = await mount(
+      <InstallFromFileSheet
+        connection={daemonConnection({ daemonId: 'beta' })}
+        onClose={() => undefined}
+        host={{ createClient: fake.factory, crypto: watched.crypto, readProjects: () => late }}
+      />,
+    );
+    await view.unmount();
+    release(BETA);
+    await late;
+    const failing = Promise.reject(new Error('late'));
+    const second = await mount(
+      <InstallFromFileSheet
+        connection={daemonConnection({ daemonId: 'beta' })}
+        onClose={() => undefined}
+        host={{ createClient: fake.factory, crypto: watched.crypto, readProjects: () => failing }}
+      />,
+    );
+    await second.unmount();
+    await failing.catch(() => undefined);
+    expect(document.body.textContent).not.toContain('beta-proj');
+  });
+});
+
 describe('a preview that is overtaken', () => {
   const held = () => {
     let release: (value: unknown) => void = () => undefined;

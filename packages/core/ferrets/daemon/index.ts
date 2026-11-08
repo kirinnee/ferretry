@@ -336,7 +336,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   // Lessons' `FY_LEARNING_PASSIVE` is registered too.
   // GAP(ports-pending: Ferrets): with no hypermedia switch set, the mode default the pane is handed is not recorded.
   // Until each lands its section is not recorded, and `instructions` reads it as off: no stand-in. Each is one line in
-  // ports-pending.json under its owner (ferrets, lessons).
+  // ports-pending.json under its owner (ferrets).
   const launchEnvironment = new LaunchEnvironmentStore(
     {
       read: async ferret => {

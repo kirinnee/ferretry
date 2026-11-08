@@ -7,14 +7,17 @@
  * for the login the row names. A total the analytics could not price says "unknown", never $0.00, and a login with no
  * quota reading says "usage unknown".
  */
+import { useOptionalRouter } from '@ferretry/app';
+import { RouteLink } from '@ferretry/app/ui';
 import { useEffect, useState } from 'react';
 import type { AnalyticsRawSession } from '../../contract/index.ts';
 import { fetchSessionAnalytics } from '../features/analytics/analytics-api.ts';
+import { costGapReason } from '../features/analytics/analytics-cost-gaps.ts';
 import { formatTokens, formatUsd } from '../features/analytics/analytics-overview.ts';
 import { analyticsIdQuery } from '../features/analytics/session-analytics-query.ts';
 import { useUsage } from '../hooks/use-usage.ts';
 import type { DaemonUsageStore } from '../lib/usage-store.ts';
-import { browserClock, type UsageClient, useDaemonConnection } from '../shell.ts';
+import { browserClock, daemonInsightsPath, type UsageClient, useDaemonConnection } from '../shell.ts';
 import { quotaMoneyText, quotaResetsIn } from './quota-readout.tsx';
 
 type Read =
@@ -67,6 +70,7 @@ export function FerretUsageInfoPanel({
   readonly now?: () => number;
 }) {
   const connection = useDaemonConnection();
+  const router = useOptionalRouter();
   const [read, setRead] = useState<Read>({ kind: 'loading' });
   useUsage(store, connection);
   useEffect(() => {
@@ -130,10 +134,25 @@ export function FerretUsageInfoPanel({
           <Row label="Tokens">{tokensText(row)}</Row>
           <Row label="Cost (equiv.)">
             {row.equivalentApiCostUsdMicros === null ? (
-              <Muted>usage unknown — no pricing for this model</Muted>
+              <Muted>
+                usage unknown — {row.costGap == null ? 'no pricing for this model' : costGapReason(row.costGap)}
+              </Muted>
             ) : (
-              formatUsd(row.equivalentApiCostUsdMicros)
+              <>
+                {formatUsd(row.equivalentApiCostUsdMicros)}
+                <Muted>this ferret</Muted>
+              </>
             )}
+          </Row>
+          <Row label="Insights">
+            <RouteLink
+              className="text-cell"
+              data-info-open-insights=""
+              to={daemonInsightsPath(connection.daemonId)}
+              {...(router ? { onNavigate: router.navigate } : {})}
+            >
+              Open this ferret’s insights
+            </RouteLink>
           </Row>
           <h3 className="m-0 mt-2 text-meta font-semibold text-muted">Login quota · {row.agent ?? 'unknown login'}</h3>
           {windows.length === 0 ? (
