@@ -65,6 +65,7 @@ async function fleetOf(turnState: 'your-turn' | 'working') {
   let longestSliceMs = 0;
   const { host } = buildTurnWatch({
     storage,
+    tail: { tail: async () => ({ kind: 'unresolved' }) },
     record: ferret => records.get(ferret),
     runner: () => runner,
     turnObserved: async () => undefined,

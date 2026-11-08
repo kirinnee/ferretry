@@ -8,10 +8,15 @@ import {
 } from '../../../../../daemon/lib/session/observer/turn-watch.ts';
 import type { TurnFacts, TurnStateChange } from '../../../../../daemon/lib/session/observer/turn.ts';
 import { TURN_WATCH_INTERVAL_MS, type TurnPaneEvidence } from '../../../../../daemon/lib/session/peers/turn.ts';
+import type { TranscriptEvent } from '../../../../../daemon/lib/session/peers/transcript.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 
 const T0 = Date.parse('2026-11-08T10:00:00.000Z');
 const IDLE: TurnPaneEvidence = { working: false, atPrompt: true, permission: false, frame: 'idle' };
+/** A transcript whose newest record is the agent mid-turn: the record the pane's idle prompt disagrees with. */
+const MID_TURN: readonly TranscriptEvent[] = [
+  { kind: 'reasoning', harness: 'claude', role: 'assistant', text: '', format: 'thinking' },
+];
 const DRAWING = (n: number): TurnPaneEvidence => ({
   working: true,
   atPrompt: false,
@@ -24,6 +29,7 @@ function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', t
   let nowMs = T0;
   const state = new Map<SessionId, TurnFacts>(ids.map(id => [parseSessionId(id), facts]));
   const panes = new Map<SessionId, TurnPaneEvidence | undefined>();
+  const transcripts = new Map<SessionId, readonly TranscriptEvent[] | undefined>();
   const looked: SessionId[] = [];
   const recorded: { readonly id: SessionId; readonly change: TurnStateChange }[] = [];
   const failed: SessionId[] = [];
@@ -31,7 +37,7 @@ function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', t
   const broken = new Set<SessionId>();
   const ports: PacedTurnPorts = {
     sessions: async () => [...state].map(([id, each]) => ({ id, state: each })),
-    transcript: async () => undefined,
+    transcript: async id => transcripts.get(id),
     pane: async id => {
       looked.push(id);
       if (broken.has(id)) throw new Error('the pane could not be read');
@@ -59,6 +65,7 @@ function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', t
     tick,
     state,
     panes,
+    transcripts,
     looked,
     recorded,
     failed,
@@ -169,8 +176,10 @@ describe('PacedTurnWatcher', () => {
   });
 
   it('should never slow the second look an unconfirmed end of turn waits for', async () => {
-    // Arrange: the record says working; the pane now shows only an idle prompt (unconfirmed your-turn).
+    // Arrange: the record says working and the transcript's newest record is the agent mid-turn; the pane now shows
+    // only an idle prompt, so the end of turn is unconfirmed.
     const subject = fleet(['ends-1'], { status: 'running', turn: 1, turnState: 'working' });
+    subject.transcripts.set(subject.id('ends-1'), MID_TURN);
 
     // Act
     await subject.tick();
@@ -181,10 +190,22 @@ describe('PacedTurnWatcher', () => {
     should(subject.recorded.map(each => each.change.to)).deepEqual(['your-turn']);
   });
 
-  it('should not end a turn on one idle-looking frame between two spinner frames while no transcript is proved', async () => {
+  it("should end a turn on the pane alone, on sight, while no transcript is proved (the fold's own rule)", async () => {
+    // Arrange: no transcript is proved to be this ferret's, so nothing disagrees with the idle prompt.
+    const subject = fleet(['bare-1'], { status: 'running', turn: 1, turnState: 'working' });
+
+    // Act
+    await subject.tick();
+
+    // Assert
+    should(subject.recorded.map(each => each.change.to)).deepEqual(['your-turn']);
+  });
+
+  it('should not end a turn on one idle-looking frame between two spinner frames while the transcript says it works', async () => {
     // Arrange
     const subject = fleet(['flick-1'], { status: 'running', turn: 1, turnState: 'working' });
     const id = subject.id('flick-1');
+    subject.transcripts.set(id, MID_TURN);
 
     // Act: drawing, one frame with no spinner, drawing again.
     subject.panes.set(id, DRAWING(1));
@@ -213,6 +234,7 @@ describe('PacedTurnWatcher', () => {
     // Arrange
     const subject = fleet(['bad-1', 'good-1'], { status: 'running', turn: 1, turnState: 'working' });
     subject.broken.add(subject.id('bad-1'));
+    subject.transcripts.set(subject.id('good-1'), MID_TURN);
 
     // Act: the good one needs its second look to end its turn.
     const first = await subject.tick();

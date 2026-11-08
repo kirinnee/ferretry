@@ -30,6 +30,25 @@ async function working(storage: Awaited<ReturnType<typeof opened>>['storage'], r
   return id;
 }
 
+/**
+ * A transcript whose newest record is the agent mid-turn: the pane's idle prompt then disagrees with it, so the end of a
+ * turn needs its second look (the two-frame rule the transcript gives) — which is when these tests damage the document.
+ */
+const MID_TURN_TAIL = {
+  tail: async () => ({
+    kind: 'read' as const,
+    events: [
+      {
+        kind: 'reasoning' as const,
+        harness: 'claude' as const,
+        role: 'assistant' as const,
+        text: '',
+        format: 'thinking' as const,
+      },
+    ],
+  }),
+};
+
 describe('recordTurnChange over a damaged state.json (today’s rule, R/src/adapters/storage/session-storage.ts:1316)', () => {
   it('recordTurnChange throws naming state.json when it is not JSON', async () => {
     // Arrange
@@ -125,6 +144,7 @@ describe('recordTurnChange over a damaged state.json (today’s rule, R/src/adap
     let nowMs = Date.parse(AT);
     const { host } = buildTurnWatch({
       storage,
+      tail: MID_TURN_TAIL,
       record: ferret => records.get(ferret),
       runner: () => runner,
       turnObserved: async (ferret, turn) => void followed.push(`${ferret}:${turn}`),
@@ -188,6 +208,7 @@ describe('recordTurnChange over a damaged state.json (today’s rule, R/src/adap
     let nowMs = Date.parse(AT);
     const { host } = buildTurnWatch({
       storage,
+      tail: MID_TURN_TAIL,
       record: () => record,
       runner: () => runner,
       turnObserved: async () => undefined,

@@ -102,6 +102,8 @@ import type { ResumeActor } from './lib/session/resume/types.ts';
 import { SessionStateSchema } from './lib/protocol/session.ts';
 import { promptOf } from './lib/ferrets/prompt.ts';
 import { buildTurnWatch, turnWatchFailureFields } from './modules/turn-watch.ts';
+import { buildLiveEvents } from './modules/live-events.ts';
+import { HarnessTranscript } from './adapters/session/live/harness-transcript.ts';
 import { lifecycleStatus } from './lib/ferrets/session-document.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
@@ -450,8 +452,19 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   // The turn watch (U4, RULING #44): the session observer's turn part on the main thread, every live ferret's pane looked
   // at through `Runner.look` at today's 2 s tick (a quiet pane backing off to 10 s), one pane per turn of the loop.
   // Armed once the daemon serves (today's `observer.arm()` after the first monitor tick), closed when it stops.
+  // The transcript, through the harness that wrote it (U5): the proof of WHICH file is a ferret's is the harness's, so
+  // Ferrets opens no transcript path. The turn fold and both stream sources read it here.
+  const transcripts = new HarnessTranscript(
+    ferret => {
+      const key = registry.get(ferret)?.harness;
+      const found = key === undefined ? 'unavailable' : hooks.provider(Harnesses, key);
+      return found === 'unavailable' ? undefined : found;
+    },
+    ferret => registry.get(ferret)?.harness,
+  );
   const turnWatch = buildTurnWatch({
     storage: sessionStore,
+    tail: transcripts.tail,
     record: ferret => registry.get(ferret),
     runner: () => {
       const found = hooks.provider(Runners, 'tmux');
@@ -815,6 +828,20 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
 
   // Today's `findSession` also found archived ferrets, whose journals are untouched, so their streams replay.
+  // `?live=1` and `?transcript=1` (U5, G161): the live readout and the transcript signal, each read through its owner and
+  // masked on the way out (`modules/live-events.ts`).
+  const liveEvents = buildLiveEvents({
+    readState: async id => await sessionStore.readState(id),
+    record: ferret => registry.get(ferret),
+    runner: () => {
+      const found = hooks.provider(Runners, 'tmux');
+      return found === 'unavailable' ? undefined : found;
+    },
+    transcript: transcripts,
+    clock: { now: () => kernel.clock.now() },
+    every: (intervalMs, tick) => kernel.clock.every(milliseconds(intervalMs), tick),
+    redaction: kernel.redaction,
+  });
   const eventsAccept = fleetEventsAccept(
     eventSource,
     { after: (delay, action) => ({ cancel: kernel.clock.after(milliseconds(delay), action) }) },
@@ -825,6 +852,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         return session !== undefined && sessionStore.findSession(session) !== undefined;
       },
     }),
+    {
+      ...liveEvents,
+      // A ferret's own token follows its own live readout and its helpers', never another's (G161).
+      mayFollow: (call, id) => mayAct(call, id as FerretId),
+    },
   );
 
   return {

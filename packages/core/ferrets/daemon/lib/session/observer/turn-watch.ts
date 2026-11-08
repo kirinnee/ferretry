@@ -63,28 +63,6 @@ function settled(observation: TurnObservation | undefined, recorded: SessionTurn
   return observation === undefined || observation.state === recorded;
 }
 
-/**
- * Whether an end of turn is held for one more look: the pane ALONE says a working turn ended (no transcript is proved
- * yet, U5), and the look before this one did not say so too. Today the transcript is what made one idle-looking frame
- * between two spinner redraws unable to end a turn (`settleTurnState` asks two frames when the two do not agree); with
- * no transcript the fold confirms the pane on sight, so the watch asks for the second frame itself. It delays an end
- * of turn by one look (never paced: the observation disagrees with the record) and changes nothing else.
- */
-function heldForASecondLook(
-  change: TurnStateChange | undefined,
-  look: TurnLook | undefined,
-  before: TurnObservation | undefined,
-): boolean {
-  return (
-    change !== undefined &&
-    look !== undefined &&
-    look.transcript === undefined &&
-    change.from === 'working' &&
-    change.to === 'your-turn' &&
-    before?.state !== 'your-turn'
-  );
-}
-
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /**
@@ -195,7 +173,7 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
     const before = this.previous.get(session.id);
     const step = stepTurn(session.state, before, look);
     this.previous.set(session.id, step.observation);
-    const change = heldForASecondLook(step.change, look, before) ? undefined : step.change;
+    const change = step.change;
     const frame = frameOf(look);
     const quiet =
       pace !== undefined &&

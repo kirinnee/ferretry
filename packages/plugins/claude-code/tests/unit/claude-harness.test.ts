@@ -543,6 +543,38 @@ describe('ClaudeHarness', () => {
     expect(entries.length).toBe(2);
   });
 
+  test('U5 the transcript stamp and tail name only the assigned conversation, and carry no text', async () => {
+    const { harness, writeHome } = build();
+    expect(await harness.transcriptStamp(FERRET)).toBeUndefined();
+    expect(await harness.transcriptTail(FERRET, 10)).toEqual({ kind: 'unresolved' });
+
+    await harness.start(spec(), runner({}), {} as never);
+    await writeHome(
+      'projects/-work/conv-1.jsonl',
+      `${JSON.stringify({ type: 'user', uuid: 'u1', timestamp: T, message: { content: 'my SECRET here' } })}\n${JSON.stringify(
+        {
+          type: 'assistant',
+          uuid: 'a1',
+          timestamp: T,
+          message: {
+            id: 'm1',
+            content: [{ type: 'text', text: 'SECRET reply' }],
+            stop_reason: 'end_turn',
+            usage: { input_tokens: 3, output_tokens: 1 },
+          },
+        },
+      )}\n`,
+    );
+
+    const stamp = await harness.transcriptStamp(FERRET);
+    expect(stamp?.file).toEndWith('conv-1.jsonl');
+    expect(stamp?.size).toBeGreaterThan(0);
+    const tail = await harness.transcriptTail(FERRET, 10);
+    if (tail.kind !== 'read') throw new Error('the tail reads');
+    expect(tail.records.map(record => record.kind)).toEqual(['message', 'message', 'usage', 'turn']);
+    expect(JSON.stringify(tail)).not.toContain('SECRET');
+  });
+
   test('dialogs.current finds nothing on an empty pane and answer refuses a prompt that is gone', async () => {
     const { harness, panes } = build();
     panes.remember(FERRET, '%7');

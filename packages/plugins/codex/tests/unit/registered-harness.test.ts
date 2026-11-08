@@ -225,6 +225,13 @@ describe('the registered Codex harness', () => {
       },
     ]);
     expect(await harness.usage.turns(spec.ferret, '2026-11-01T00:00:00.000Z' as never)).toEqual([]);
+    // U5: the stamp names the proved rollout, and the tail carries kinds and counts, never the answer's words.
+    expect((await harness.transcriptStamp?.(spec.ferret))?.file).toBe(file);
+    const tail = await harness.transcriptTail?.(spec.ferret, 50);
+    if (tail?.kind !== 'read') throw new Error('the tail reads');
+    expect(tail.records.map(record => record.kind)).toContain('turn');
+    expect(tail.records.find(record => record.kind === 'usage')).toMatchObject({ inputTokens: 20, outputTokens: 5 });
+    expect(JSON.stringify(tail)).not.toContain('answer');
     const history = '/fixture-owner/.codex/sessions/2026/10/20/rollout-import.jsonl';
     box.files.set(history, header('import-native', '/another-home'));
     expect(await harness.conversations.list('/work/project' as never)).toEqual([
