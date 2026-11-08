@@ -19,7 +19,7 @@ import {
 } from '@ferretry/app/testing';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import half from '../../../app/index.ts';
-import { AGENDA_LINK_WAIT_MS, AgendaDeepLinkView } from '../../../app/views/agenda-deep-link-view.tsx';
+import { AGENDA_LINK_WAIT_MS, agendaDeepLinkView } from '../../../app/views/agenda-deep-link-view.tsx';
 
 /** `agendaDeepLinkFragment(id, sessionId, machine)`, as Accounts builds it. */
 const agendaLink = (id: string, sessionId?: string, machine?: string): string => {
@@ -68,9 +68,10 @@ async function open(href: string, rows: readonly DaemonReach[]) {
   const harness = deviceViewHarness({ plugin: 'agenda', fragments: half.shell.fragments ?? [], href });
   harness.setRows(rows);
   const went: string[] = [];
+  const View = agendaDeepLinkView({});
   view = await mount(
     <harness.Harness>
-      <AgendaDeepLinkView navigate={to => void went.push(to)} />
+      <View navigate={to => void went.push(to)} />
     </harness.Harness>,
   );
   await settle();

@@ -19,7 +19,7 @@ import {
   inboxTargetPath,
   machineForAgendaLink,
 } from '../lib/agenda-inbox.ts';
-import { agendaRuntimeOf } from '../lib/agenda-runtime.ts';
+import { type AgendaFleet, fleetIn } from '../lib/agenda-fleet.ts';
 import type { FleetSnapshot } from '../lib/ferret-store.ts';
 import { type DaemonId, daemonId } from '../lib/machine.ts';
 
@@ -36,10 +36,10 @@ interface LinkMachine {
 }
 
 /** Every listed machine's session ids (`null` until read), live; a locked machine lists none. */
-function useLinkMachines(rows: readonly DaemonReach[]): readonly LinkMachine[] {
+function useLinkMachines(fleet: AgendaFleet, rows: readonly DaemonReach[]): readonly LinkMachine[] {
   const sources = useMemo(
-    () => rows.map(row => ({ row, ferrets: row.locked ? undefined : agendaRuntimeOf(row.client).ferrets })),
-    [rows],
+    () => rows.map(row => ({ row, ferrets: row.locked ? undefined : fleet.runtimeOf(row.client).ferrets })),
+    [fleet, rows],
   );
   const subscribe = useCallback(
     (listener: () => void) => {
@@ -71,7 +71,15 @@ function useLinkMachines(rows: readonly DaemonReach[]): readonly LinkMachine[] {
   return useSyncExternalStore(subscribe, read, read);
 }
 
-export function AgendaDeepLinkView({ navigate }: DeviceViewProps) {
+/** The device view over the half's fleet (`holder`, the half's own): its machines' runtimes are the half's. */
+export function agendaDeepLinkView(holder: object) {
+  const fleet = fleetIn(holder);
+  return function AgendaDeepLinkView(props: DeviceViewProps) {
+    return <DeepLink fleet={fleet} {...props} />;
+  };
+}
+
+function DeepLink({ navigate, fleet }: DeviceViewProps & { readonly fleet: AgendaFleet }) {
   const rows = useEveryDaemon();
   const { arrival, take } = useFragment(AGENDA_FRAGMENT_KEY);
   const [link, setLink] = useState<AgendaDeepLink | null>(null);
@@ -89,7 +97,7 @@ export function AgendaDeepLinkView({ navigate }: DeviceViewProps) {
     return () => clearTimeout(timer);
   }, [link]);
   // The machines are read only while a link waits: with none, opening the app reads nothing for it.
-  const machines = useLinkMachines(link === null ? NO_ROWS : rows);
+  const machines = useLinkMachines(fleet, link === null ? NO_ROWS : rows);
   useEffect(() => {
     if (link === null || link.sessionId === undefined) return;
     const found = machineForAgendaLink(link, machines);

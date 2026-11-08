@@ -16,6 +16,9 @@ type Surfaces = {
  */
 const loadSurfaces = (): Promise<Record<string, unknown>> => import(`./views/${'surfaces'}.tsx`);
 
+/** What every machine's surfaces and the device view share their one fleet through (`lib/agenda-fleet.ts`). */
+const fleet = {};
+
 /**
  * Agenda's app half: the `agenda` page and the page a buzz opens (`agenda-ask`), one ferret's agenda beside its chat
  * (`ferret-agenda`) and the `agenda` Settings tab. Every surface reads and answers through the one generated client,
@@ -26,7 +29,9 @@ const half = implementApp(manifest, {
   build: ({ client }) => {
     let surfaces: Promise<Surfaces> | undefined;
     const surfacesOf = (): Promise<Surfaces> => {
-      surfaces ??= loadSurfaces().then(module => (module.createSurfaces as (client: PluginClient) => Surfaces)(client));
+      surfaces ??= loadSurfaces().then(module =>
+        (module.createSurfaces as (client: PluginClient, holder: object) => Surfaces)(client, fleet),
+      );
       return surfaces;
     };
     const screen = (id: 'agenda' | 'agenda-ask') =>
@@ -55,7 +60,8 @@ const half = implementApp(manifest, {
  * off the address and hands it to the one device view, which opens the ask on the machine that runs it.
  */
 const deepLinkView = lazyComponent<DeviceViewProps>(
-  async () => (await import('./views/agenda-deep-link-view.tsx')).AgendaDeepLinkView as AppComponent<DeviceViewProps>,
+  async () =>
+    (await import('./views/agenda-deep-link-view.tsx')).agendaDeepLinkView(fleet) as AppComponent<DeviceViewProps>,
 ) as NonNullable<ShellProvides['device']>[string];
 
 export default provideToShell(half, {
