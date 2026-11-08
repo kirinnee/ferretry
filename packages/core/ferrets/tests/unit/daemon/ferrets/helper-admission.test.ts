@@ -132,6 +132,32 @@ test("G12 R-0332 Packs' yes does not outvote a later taker's no, and a no asked 
   expect(earlierPacks.asked).toHaveLength(0);
 });
 
+test("G12 R-0332 a start cast to by:'resume' through the provided port is refused before start.decide, so it never skips Packs' limits", async () => {
+  // Arrange: Packs admits anything, so only Ferrets' own run-time check can stop it. `by` is closed by the type only.
+  const runner = new FakeRunner();
+  const packs = fakePacks();
+  const h = await host([record('lead')], { harness: new FakeHarness(), runner, plugins: [packs.plugin] });
+  const port = h.provided(FerretsPort);
+  const cast = (by: string) => port.start({ folder: '/work/child', parent: ferretId('lead'), by: by as 'pack' });
+
+  // Act
+  const resumeCast = await cast('resume');
+  const unknown = await cast('nobody');
+  const lead = await port.start({ folder: '/work/lead', by: 'resume' as 'owner' });
+
+  // Assert: the port's own refusal shape, nothing asked, nothing written or launched.
+  for (const answer of [resumeCast, unknown, lead]) {
+    expect(answer.ok).toBe(false);
+    if (!answer.ok) {
+      expect(answer.error.code).toBe('refused');
+      expect(answer.error.reason).toContain('a resume is asked for through resume');
+    }
+  }
+  expect(packs.asked).toHaveLength(0);
+  expect(runner.starts).toBe(0);
+  expect((await h.request('GET', '/v1/ferrets')).json<unknown[]>()).toHaveLength(1);
+});
+
 test('G12 a lead start needs no helper admission: it starts with Packs absent', async () => {
   // Arrange
   const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });

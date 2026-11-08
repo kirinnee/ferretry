@@ -17,7 +17,10 @@ function needsHelperAdmission(input: Pick<StartDecideInput, 'parent' | 'role'>):
   return input.parent !== undefined || input.role === 'helper';
 }
 
-/** No answer from Packs: no helper is started, and nothing is launched (5.0's fail-closed sentence, unchanged). */
+/**
+ * No answer from Packs: no helper is started, and nothing is launched (the code `helper_admission_unavailable` is
+ * unchanged).
+ */
 export function noHelperAdmission(): ApiError {
   return new ApiError(
     503,

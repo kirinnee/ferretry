@@ -56,6 +56,37 @@ describe('the start.decide and launch.parts decisions', () => {
     expect(limitedParent({ parent: 'lead', by: 'resume' })).toBeUndefined();
     expect(startDecision(undefined, DEFAULT_PACK_CONFIG.limits)).toEqual({ allow: true });
   });
+  test('G12 R-0332 the wired start.decide taker limits a start, but never a resume (a Warden revive is not Pack-limited)', async () => {
+    // Arrange: an unattended lead already running its most helpers, and one stopped child the Warden would revive.
+    const ferrets = new FakeFerrets();
+    ferrets.add({ id: lead, role: 'lead', mode: 'auto' });
+    for (let i = 0; i < DEFAULT_PACK_CONFIG.limits.autoChildren; i += 1)
+      ferrets.add({ id: ferretId(`kid-${String(i)}`), parent: lead, role: 'helper', state: 'working' });
+    ferrets.add({ id: ferretId('stopped-kid'), parent: lead, role: 'helper', state: 'stopped' });
+    const decide = builtHalf(ferrets)?.hooks?.['start.decide'];
+    if (decide === undefined) throw new Error('Packs takes start.decide');
+    const ask = async (ferret: string, by: 'owner' | 'ferret' | 'pack' | 'board' | 'resume') =>
+      await decide({
+        ferret: ferretId(ferret),
+        name: ferret,
+        role: 'helper',
+        parent: lead,
+        harness: 'claude-code',
+        folder: '/work',
+        by,
+      });
+
+    // Act
+    const revive = await ask('stopped-kid', 'resume');
+    const starts = await Promise.all((['owner', 'ferret', 'pack', 'board'] as const).map(by => ask('new-kid', by)));
+
+    // Assert: the resume is answered yes without the limits; every start is refused with Packs' own sentence.
+    expect(revive).toEqual({ allow: true });
+    for (const decision of starts) {
+      expect(decision.allow).toBe(false);
+      if (!decision.allow) expect(decision.reason).toContain('lead already has 4 running helpers');
+    }
+  });
   test('a start with no known parent is not refused', () => {
     expect(startDecision(undefined, DEFAULT_PACK_CONFIG.limits)).toEqual({ allow: true });
   });
