@@ -78,7 +78,7 @@ export async function catalogItemCanonical(
 }
 
 /** An item's digest and canonical size: what its manifest line must say. `null` when it has no one spelling. */
-async function catalogItemDigest(
+export async function catalogItemDigest(
   crypto: SessionCrypto,
   item: SharedCatalogItem,
 ): Promise<{ readonly digest: CatalogDigest; readonly size: number } | null> {

@@ -108,7 +108,11 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/catalogs": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "worker/src/adapters/link-store-worker.ts"],
+      "entry": [
+        "tests/**/*.test.{ts,tsx}",
+        "tests/integration/app/*.harness.tsx",
+        "worker/src/adapters/link-store-worker.ts"
+      ],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/conversation": {
@@ -167,6 +171,8 @@
     "enumMembers": "off"
   },
   "ignoreIssues": {
+    "packages/plugins/catalogs/contract/wire/shared-catalog-diff.ts": ["exports"],
+    "packages/plugins/catalogs/contract/wire/shared-catalog-owner.ts": ["exports"],
     "packages/plugins/shells/contract/wire.ts": ["duplicates"]
   },
   "tags": ["-pending"]

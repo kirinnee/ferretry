@@ -3,7 +3,7 @@ import { access, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { diskRoot } from '@ferretry/kernel/testing';
+import { diskSessionsRoot } from '@ferretry/kernel/testing';
 import { FileSessionEnvironmentStore } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 
@@ -32,8 +32,7 @@ async function subject(syncFails?: Error): Promise<{
 }> {
   const home = await mkdtemp(join(tmpdir(), 'fy-environment-store-'));
   homes.add(home);
-  const directory = join(home, 'files', SESSION);
-  const { root } = await diskRoot(home, disk =>
+  const { root, folder: directory } = await diskSessionsRoot(home, SESSION, disk =>
     syncFails === undefined
       ? disk
       : {
@@ -58,9 +57,9 @@ async function subject(syncFails?: Error): Promise<{
         },
   );
   return {
-    store: new FileSessionEnvironmentStore(root, () => directory),
+    store: new FileSessionEnvironmentStore(root, SESSION),
     directory,
-    reader: () => new FileSessionEnvironmentStore(root, () => directory),
+    reader: () => new FileSessionEnvironmentStore(root, SESSION),
   };
 }
 

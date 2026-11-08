@@ -8,6 +8,7 @@ import type { DaemonStorage } from './adapters/storage/session-storage.ts';
 import type { ProcessHostFacts } from './adapters/moves/process-inventory.ts';
 import type { MovesDeps } from './moves.ts';
 import type { SessionMoveNeeds } from './modules/session-move.ts';
+import type { SessionForkNeeds } from './modules/session-fork.ts';
 import type { SessionId } from './lib/session-id.ts';
 
 /**
@@ -26,7 +27,7 @@ import type { SessionId } from './lib/session-id.ts';
  * GAPS, each to be bound by its owner (name — owner):
  *   fork:     attachmentStore, attachments, conversation, selection, harnessFacts, transcripts, catalog, catalogs,
  *             harness — Conversation / the harness plugins; gateway — the managed worktree host (unbound in `index.ts`);
- *             accounts, planner, createLifecycle, environment, runtime, view, readableHandoffs — Ferrets' session services.
+ *             accounts, planner, runtime, view, readableHandoffs — Ferrets' session services (`environment` and `createLifecycle` are bound by `index.ts` on the `sessions` root; the lifecycle's pane launcher is Terminals' and still unbound).
  *   handover: sessions, startAccount, planner — Ferrets' session services / Runtimes.
  *   move:     resume, launch, preflight, askAgent, sessions, planner — Ferrets' session services; accounts,
  *             accountResolver, transcripts, transcriptProvenance, codexRollouts, toolkit, conversionCheck,
@@ -64,6 +65,10 @@ export interface MovesOwn {
   readonly clientName: string;
   /** The move's relaunch, bound by Ferrets to its own resume; unbound, a move refuses before it writes anything. */
   readonly resume?: SessionMoveNeeds['resume'];
+  /** The session environment on each ferret's own folder of the `sessions` root; unbound, a fork refuses before it writes. */
+  readonly environment?: SessionForkNeeds['environment'];
+  /** One lifecycle for one session on its own folder; unbound, a fork refuses before it writes. */
+  readonly createLifecycle?: SessionForkNeeds['createLifecycle'];
 }
 
 export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): MovesDeps {
@@ -103,9 +108,9 @@ export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): M
       catalog: unbound('The runtime catalogue cache'),
       catalogs: unbound('The runtime catalogues'),
       harnessFacts: unbound('The harness facts'),
-      createLifecycle: unboundFn('The ferret lifecycle'),
+      createLifecycle: own.createLifecycle ?? unboundFn('The ferret lifecycle'),
       transcripts: unbound('The transcript capture'),
-      environment: unbound('The session environment'),
+      environment: own.environment ?? unbound('The session environment'),
       runtime: unbound('The runtime startup record'),
       view: unboundFn('The ferret view'),
       readableHandoffs: unboundFn('The readable hand-off folders'),

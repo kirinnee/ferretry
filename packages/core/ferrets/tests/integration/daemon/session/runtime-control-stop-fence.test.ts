@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type RuntimeControlRequest, SessionViewSchema } from '../../../../daemon/lib/protocol/session.ts';
-import { diskRoot } from '@ferretry/kernel/testing';
+import { diskSessionsRoot } from '@ferretry/kernel/testing';
 import should from 'should';
 import { FileSessionEffectLedger } from '../../../../daemon/adapters/session/effects/file-session-effect-ledger.ts';
 import { StorageSessionLifecycleRepository } from '../../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
@@ -116,8 +116,7 @@ async function buildFixture(options: FixtureOptions = {}) {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-runtime-stop-fence-'));
   homes.add(home);
   const { storage } = await memoryStorage({ clock: { now: () => NOW } });
-  const { root, folder } = await diskRoot(home);
-  const sessionDirectory = (id: string) => join(folder, 'sessions', id);
+  const { root, folder } = await diskSessionsRoot(home, SESSION);
   const serial = new ObservedSerial();
   const actions: string[] = [];
   const harness = options.harness ?? 'claude';
@@ -147,7 +146,7 @@ async function buildFixture(options: FixtureOptions = {}) {
     exitCode: 137,
   }));
 
-  const effects = new FileSessionEffectLedger(root, sessionDirectory);
+  const effects = new FileSessionEffectLedger(root, SESSION);
   const lifecycleRepository = new StorageSessionLifecycleRepository(storage);
   const launcher: SessionLifecycleLauncher = {
     alive: async () => true,
@@ -185,7 +184,7 @@ async function buildFixture(options: FixtureOptions = {}) {
   const view = async () => {
     const [config, state] = await Promise.all([storage.readConfig(SESSION), storage.readState(SESSION)]);
     if (config === undefined || state === undefined) return undefined;
-    return SessionViewSchema.parse({ config, state, directory: sessionDirectory(SESSION) });
+    return SessionViewSchema.parse({ config, state, directory: folder });
   };
   const cleanup = {
     async dismiss() {

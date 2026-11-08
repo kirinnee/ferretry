@@ -44,12 +44,6 @@
         "daemon/lib/session/auto-resume/**",
         "daemon/adapters/session/auto-resume/**",
         "daemon/lib/protocol/auto-resume.ts",
-        "daemon/lib/session/provenance/lineage.ts",
-        "daemon/lib/session/provenance/recorder.ts",
-        "daemon/lib/session/provenance/stamper.ts",
-        "daemon/adapters/session/provenance/storage-session-provenance-store.ts",
-        "daemon/adapters/session/effects/file-session-effect-ledger.ts",
-        "daemon/adapters/session/resume/in-memory-launch-gate.ts",
         "daemon/adapters/session/lifecycle/process-incarnation.ts",
         "daemon/adapters/session/resume/tmux-resume-launcher.ts",
         "daemon/adapters/session/resume/file-resume-turn-store.ts",
@@ -226,7 +220,13 @@
     },
     "packages/plugins/catalogs": {
       "entry": ["worker/src/adapters/link-store-worker.ts"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/features/catalogs/catalog-item-row.tsx",
+        "app/features/catalogs/catalog-add-toast.tsx",
+        "app/features/shared/shared-entry.tsx"
+      ],
+      "ignoreDependencies": ["react-dom"]
     },
     "packages/plugins/conversation": {
       "entry": ["app/surfaces.tsx"],
