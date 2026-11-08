@@ -245,6 +245,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     clock: { now: () => kernel.clock.now() },
     sleep: async delay => await kernel.clock.sleep(delay),
     paths: kernel.paths,
+    // The requested label and parent: lineage uses them only for a ferret with no session document yet.
     fleet: () =>
       registry.list().map(ferret => {
         const label = registry.detailsOf(ferret.id)?.options?.label;

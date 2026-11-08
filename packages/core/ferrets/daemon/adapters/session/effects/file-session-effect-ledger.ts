@@ -150,6 +150,8 @@ export class FileSessionEffectLedger implements SessionEffectLedger {
    * clean directory; nothing on disk says which of the two it is.
    */
   private async held(key: SessionEffectKey): Promise<SessionEffectRecord | undefined> {
+    // Even an inspection makes the ferret's own folder (0700) on purpose: the kernel refuses a read below a missing scoped
+    // folder. The `effects/` directory itself is still made only by a write.
     await this.folder.ensure();
     const file = this.file(key);
     const read = await this.root.readDurable(file);

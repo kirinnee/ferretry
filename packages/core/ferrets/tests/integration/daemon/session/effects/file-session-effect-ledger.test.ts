@@ -110,7 +110,8 @@ describe('FileSessionEffectLedger', () => {
     // Act
     const standing = await subject.inspect(key, FINGERPRINT);
 
-    // Assert: an inspection is a question, so it must not create the directory it asks about.
+    // Assert: an inspection is a question, so it must not create the effects directory it asks about. It DOES make the
+    // ferret's own session folder (0700) on purpose: the kernel refuses any read below a scoped folder that does not exist.
     should(standing).equal('unclaimed');
     should(await stat(join(sessions, SESSION, 'effects')).catch(() => undefined)).equal(undefined);
   });

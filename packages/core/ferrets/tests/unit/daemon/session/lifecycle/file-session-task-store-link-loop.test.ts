@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readlink, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { diskSessionsRoot } from '@ferretry/kernel/testing';
@@ -15,11 +15,11 @@ afterEach(async () => {
   homes.clear();
 });
 
-// No guarantees row covers this rule (docs/rebuild/guarantees.tsv names none): the kernel root, not an errno, refuses it.
+// No guarantees row covers this rule (docs/rebuild/guarantees.tsv names none): the kernel root refuses it.
 describe('FileSessionTaskStore over a turn document that is a link pointing at itself (no guarantees row)', () => {
-  it('should refuse a turn document that is a link to itself, and never read it as "absent"', async () => {
-    // Arrange: on the internal `sessions` root the kernel's base-anchored check meets the link first, so the platform's own
-    // ELOOP surfaces (on an owner's root the hop bound answers `fenced`). Either way the write refuses and publishes nothing.
+  it('should refuse with ELOOP on the internal sessions root, publish nothing, and never read it as "absent"', async () => {
+    // Arrange: on the internal `sessions` root the kernel's base-anchored check meets the link first, so the platform's
+    // own ELOOP is the refusal (an owner's root answers `fenced` at its hop bound instead; that is the kernel's to pin).
     const home = await mkdtemp(join(tmpdir(), 'fy-task-loop-'));
     homes.add(home);
     const { root } = await diskSessionsRoot(home, SESSION);
@@ -34,9 +34,11 @@ describe('FileSessionTaskStore over a turn document that is a link pointing at i
       (error: unknown) => error as { name?: string; code?: string; refusal?: string },
     );
 
-    // Assert
+    // Assert: exactly ELOOP, and the link is still the link (the task was not published through or over it)
     should(failure).not.be.undefined();
-    should(failure?.code === 'ELOOP' || failure?.refusal === 'fenced').equal(true);
-    should(failure?.code).not.equal('ENOENT');
+    should(failure?.code).equal('ELOOP');
+    should(failure?.refusal).be.undefined();
+    should((await lstat(file)).isSymbolicLink()).equal(true);
+    should(await readlink(file)).equal(file);
   });
 });

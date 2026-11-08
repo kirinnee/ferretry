@@ -11,6 +11,9 @@ import {
 import { SessionFiles } from '../../../../daemon/modules/session-files.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import { SessionConfigSchema } from '../../../../daemon/lib/protocol/session.ts';
+import type { RegisteredAncestor } from '../../../../daemon/adapters/session/provenance/storage-session-ancestry.ts';
+import { WARDEN_LABEL } from '../../../../daemon/lib/session/peers/warden-lifecycle.ts';
+import { FerretConfigFile } from '../../../../contract/index.ts';
 import { ferretId } from '../../../../contract/testing/index.ts';
 import { memoryStorage, sessionConfig } from '../../../support/daemon/storage.ts';
 
@@ -45,18 +48,22 @@ function recordingKernel(handles: Readonly<Record<string, RootHandle>>, work: Ro
   return { roots, calls, received };
 }
 
-async function files(roots: Pick<RootsPort, 'root'>, warnings: string[] = []) {
-  const { storage } = await memoryStorage({ clock: { now: () => NOW } });
+async function files(
+  roots: Pick<RootsPort, 'root'>,
+  warnings: string[] = [],
+  fleet: readonly RegisteredAncestor[] = [],
+) {
+  const { storage, folder } = await memoryStorage({ clock: { now: () => NOW } });
   const subject = new SessionFiles({
     roots,
     storage,
     clock: { now: () => NOW },
     sleep: async () => undefined,
     paths: diskPaths(),
-    fleet: () => [],
+    fleet: () => fleet,
     log: { warn: message => void warnings.push(message) },
   });
-  return { subject, storage };
+  return { subject, storage, folder };
 }
 
 async function wired() {
@@ -126,10 +133,26 @@ describe('GAP(composition) the environment store, task store and effect ledger a
     ).toThrow(/through the folder of/u);
   });
 
-  test('GAP(composition) 4: the kernel pairs it (sessions-root.test.ts): base, no fence, leftover adoption on sessions and not on work', () => {
-    // The kernel half is `packages/core/kernel/tests/unit/host/sessions-root.test.ts` ("K1 the base is …",
-    // "K1 a record with its own leftover temp link is readable …", "K1 the same leftover on a work root stays refused …").
-    expect(true).toBe(true);
+  test('GAP(composition) 4: the handle the stores get is the kernel sessions root scoped to the ferret folder', async () => {
+    // The kernel half (base, no fence, leftover adoption on sessions and not on work) is pinned in
+    // `packages/core/kernel/tests/unit/host/sessions-root.test.ts` ("K1 the base is …", "K1 a record with its own
+    // leftover temp link is readable …", "K1 the same leftover on a work root stays refused …").
+    // Arrange
+    const kernel = await wired();
+    const { subject } = await files(kernel.roots);
+    await subject.port.prepare(ferretId(FERRET));
+
+    // Act
+    const handle = subject.root(FERRET);
+    const environment = handle.resolve('environment.json');
+
+    // Assert: the kernel's own sessions handle for this ferret, resolving inside the ferret's folder
+    expect(handle).toBe(kernel.first.root);
+    expect(handle.name).toBe('sessions');
+    expect(handle.internal).toBe(true);
+    expect(environment.ok ? environment.value : environment.error).toEndWith(
+      `/state/ferrets/sessions/${FERRET}/environment.json`,
+    );
   });
 });
 
@@ -235,6 +258,110 @@ describe('unbuilt adapters: provenance', () => {
     // Assert: no document was invented for it
     expect(await storage.readConfig(FERRET)).toBeUndefined();
     expect(warnings).toEqual(['a ferret has no session document yet, so its spawn stamp was not recorded']);
+  });
+
+  /** The child (FERRET) has a document; its parent (OTHER) is registered under a NON-warden requested label. */
+  async function underParent(parentDocument: 'damaged' | 'unreadable' | 'missing' | Record<string, unknown>) {
+    const kernel = await wired();
+    const { subject, storage, folder } = await files(kernel.roots, [], [{ id: OTHER, label: 'team' }]);
+    await storage.writeConfig(FERRET, sessionConfig(FERRET));
+    if (parentDocument === 'unreadable') folder.plant(FerretConfigFile, '{"format": 1, "label": "fleet-', OTHER);
+    // Valid JSON the session schema refuses: the stamp the parent carried is no longer a stamp.
+    else if (parentDocument === 'damaged')
+      folder.plant(
+        FerretConfigFile,
+        JSON.stringify({ format: 1, ...sessionConfig(OTHER, { label: WARDEN_LABEL }), provenance: { v: 99 } }),
+        OTHER,
+      );
+    else if (parentDocument !== 'missing') await storage.writeConfig(OTHER, sessionConfig(OTHER, parentDocument));
+    return { subject, storage };
+  }
+  const childOf = { id: FERRET, parent: OTHER, requestedByHuman: false } as const;
+
+  test('unbuilt adapters: a damaged ancestor document refuses the start stamp (the start is refused)', async () => {
+    for (const damage of ['damaged', 'unreadable'] as const) {
+      // Arrange
+      const { subject, storage } = await underParent(damage);
+
+      // Act
+      const refused = await subject.port.stamp(childOf).then(
+        () => false,
+        () => true,
+      );
+
+      // Assert: refused, and the child was not stamped `wardenLineage: false` behind the parent's back
+      expect(refused).toBe(true);
+      expect((await provenanceOf(storage)).provenance).toBeUndefined();
+    }
+  });
+
+  test('unbuilt adapters: a resume over a damaged ancestor leaves the stored stamp untouched', async () => {
+    for (const damage of ['damaged', 'unreadable'] as const) {
+      // Arrange: a child whose document carries no stamp yet, which a resume would otherwise write
+      const { subject, storage } = await underParent(damage);
+      const before = await storage.readConfig(FERRET);
+
+      // Act
+      const refused = await subject.port.carry(childOf).then(
+        () => false,
+        () => true,
+      );
+
+      // Assert: the recorder raised before it wrote, so the document is exactly as it was
+      expect(refused).toBe(true);
+      expect(await storage.readConfig(FERRET)).toEqual(before);
+    }
+  });
+
+  test('unbuilt adapters: an ancestor label is the one its document holds, so the forced warden label shields the child', async () => {
+    // Arrange: the registry still says `team` (what was asked); the document says `fleet-warden` (what was forced)
+    const { subject, storage } = await underParent({ label: WARDEN_LABEL });
+
+    // Act
+    await subject.port.stamp(childOf);
+
+    // Assert: the warden shield holds
+    const stamped = await provenanceOf(storage);
+    expect(stamped.provenance).toMatchObject({ origin: 'warden', wardenLineage: true, warden: OTHER });
+    expect(stamped.label).toBe(WARDEN_LABEL);
+  });
+
+  test('unbuilt adapters: an ancestor stamp in its document shields the child, and a resume keeps it', async () => {
+    // Arrange: the parent was stamped warden-descended; its own label has since drifted to `team`
+    const wardenStamp = {
+      v: 1,
+      at: NOW,
+      origin: 'warden',
+      warden: 'mw7bp88g-aaaa0002',
+      wardenLineage: true,
+      lineageSource: 'self_label',
+    };
+    const { subject, storage } = await underParent({ label: 'team', provenance: wardenStamp });
+
+    // Act
+    await subject.port.carry(childOf);
+
+    // Assert
+    expect((await provenanceOf(storage)).provenance).toMatchObject({
+      wardenLineage: true,
+      lineageSource: 'parent_stamp',
+    });
+  });
+
+  test('unbuilt adapters: a registered ancestor with no session document carries no stamp, and the start goes on', async () => {
+    // Arrange: no parent document; the registry's requested label is all there is
+    const plain = await underParent('missing');
+    const kernel = await wired();
+    const warden = await files(kernel.roots, [], [{ id: OTHER, label: WARDEN_LABEL }]);
+    await warden.storage.writeConfig(FERRET, sessionConfig(FERRET));
+
+    // Act
+    await plain.subject.port.stamp(childOf);
+    await warden.subject.port.stamp(childOf);
+
+    // Assert: stamped, never refused; the registry's label is what decides, for lack of a document
+    expect((await provenanceOf(plain.storage)).provenance).toMatchObject({ wardenLineage: false });
+    expect((await provenanceOf(warden.storage)).provenance).toMatchObject({ wardenLineage: true, warden: OTHER });
   });
 });
 

@@ -10,6 +10,10 @@ import {
   StorageSessionLifecycleRepository,
 } from '../adapters/session/lifecycle/index.ts';
 import { OwnFolder } from '../adapters/session/sessions-root.ts';
+import {
+  type RegisteredAncestor,
+  StorageSessionAncestry,
+} from '../adapters/session/provenance/storage-session-ancestry.ts';
 import { StorageSessionProvenanceStore } from '../adapters/session/provenance/storage-session-provenance-store.ts';
 import { InMemoryLaunchGate } from '../adapters/session/resume/in-memory-launch-gate.ts';
 import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
@@ -27,7 +31,7 @@ import {
 } from '../lib/session/lifecycle/index.ts';
 import { SessionProvenanceRecorder, type SessionAncestry } from '../lib/session/provenance/recorder.ts';
 import { SessionProvenanceStamper } from '../lib/session/provenance/stamper.ts';
-import type { SessionAncestor, SessionSpawnRequest } from '../lib/session/provenance/types.ts';
+import type { SessionSpawnRequest } from '../lib/session/provenance/types.ts';
 
 /**
  * A lifecycle launcher that opens nothing: every member answers the spine's 503 when CALLED, so a launch through a
@@ -55,8 +59,11 @@ export interface SessionFilesDeps {
   /** The kernel's sleep, for the launch gate's poll. */
   readonly sleep: (delay: Duration) => Promise<void>;
   readonly paths: ConstructorParameters<typeof NodeWorkingDirectoryResolver>[0];
-  /** Every ferret the fleet holds, as lineage resolution may consult it (without any stamp: that is read here). */
-  readonly fleet: () => readonly Omit<SessionAncestor, 'provenance'>[];
+  /**
+   * Every ferret the registry holds, as it was ASKED to be. Lineage reads each one's session document strictly and
+   * takes the label, parent and stamp from there; this answer is used only for a ferret that has no document yet.
+   */
+  readonly fleet: () => readonly RegisteredAncestor[];
   /** What opens a pane: Terminals' to bind. Without it a lifecycle refuses at the launch, before anything is typed. */
   readonly launcher?: SessionLifecycleLauncher;
   readonly log: Pick<Log, 'warn'>;
@@ -73,7 +80,13 @@ export interface SessionFilesDeps {
 export class SessionFiles {
   /** ONE gate, shared by the lifecycle, the resume, the sends, the exit observer and the interrupted-launch reconciler. */
   readonly launchGate: InMemoryLaunchGate;
-  private readonly serial = new KeyedSerialExecutor();
+  /**
+   * ONE per-session mutation queue (today's `sessionMutations`): the lifecycle uses it, and so must every other
+   * writer of a session's launch state. GAP(ports-pending: Session adapters): FerretsService's start/stop runs on its
+   * own executor, so before a lifecycle may launch a ferret that already exists, that start/stop must run on THIS
+   * queue (as must the interrupted-launch reconciler, runtime control, Pack hooks and switches, and answers).
+   */
+  readonly serial = new KeyedSerialExecutor();
   private readonly credentials = new NodeSessionCredentialIssuer();
   private readonly hashes: StorageSessionCapabilityHashStore;
   private readonly provenance: StorageSessionProvenanceStore;
@@ -90,20 +103,9 @@ export class SessionFiles {
     this.hashes = new StorageSessionCapabilityHashStore(deps.storage);
     this.provenance = new StorageSessionProvenanceStore(deps.storage);
     this.stamper = new SessionProvenanceStamper(deps.clock);
-    this.ancestry = {
-      snapshot: async () =>
-        new Map(
-          await Promise.all(
-            deps.fleet().map(async ancestor => {
-              const stored = await this.provenance.read(ancestor.id);
-              return [
-                ancestor.id,
-                { ...ancestor, ...(stored.provenance === undefined ? {} : { provenance: stored.provenance }) },
-              ] as const;
-            }),
-          ),
-        ),
-    };
+    // STRICT, unlike `provenance.read` (which answers "no stamp" for the session's OWN damaged document, as today's
+    // recorder does): a damaged or vanished ancestor throws, so a start is refused and a resume writes nothing.
+    this.ancestry = new StorageSessionAncestry(deps.storage, deps.fleet);
     this.recorder = new SessionProvenanceRecorder(this.stamper, this.provenance, this.ancestry);
     this.environment = {
       read: async id => await this.environmentStore(id).read(id),

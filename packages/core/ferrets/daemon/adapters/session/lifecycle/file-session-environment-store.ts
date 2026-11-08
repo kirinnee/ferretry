@@ -65,6 +65,8 @@ export class FileSessionEnvironmentStore implements SessionEnvironmentStore {
   }
 
   async read(id: SessionId): Promise<Readonly<Record<string, string>>> {
+    // A read makes the ferret's own folder (0700, empty) on purpose: the kernel refuses a read below a missing
+    // scoped folder.
     await this.folder.ensure();
     let raw: string;
     try {
