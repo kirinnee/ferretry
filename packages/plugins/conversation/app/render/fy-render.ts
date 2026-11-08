@@ -73,10 +73,8 @@ import {
   validateHtml,
   validateSvg,
 } from '../../contract/index.ts';
-import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS } from './fy-render-bounds.ts';
-import { PALETTE_KEY } from './fy-render-palette.ts';
+import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS, PALETTE_KEY, parseReferenceToken } from '@ferretry/app';
 import { type FyRenderEmbedSpec, parseFyRenderEmbed } from './fy-render-embed.ts';
-import { parseReferenceToken } from '@ferretry/app';
 
 export { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS };
 

@@ -125,10 +125,6 @@ export const ALLOWED_KNIP: ReadonlyMap<string, string> = new Map([
     'the app shell build scripts (build-release, build-fy-render-libs) are run by path from package.json scripts; nothing imports them.',
   ],
   [
-    'knip.json#workspaces["packages/app"].ignore:tests/integration/fixtures/chat-tail-scene.tsx',
-    'the scene chat-tail.visual.test.ts bundles by path (`--entry fixtures/chat-tail-scene.tsx`); nothing imports it.',
-  ],
-  [
     'knip.json#workspaces["packages/app"].ignore:tests/support/dom-leak-guard.ts',
     'a bun test preload named by path in bunfig.unit.toml; nothing imports it.',
   ],
