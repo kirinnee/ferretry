@@ -141,9 +141,8 @@ export default definePlugin({
         caller: 'any',
         privilegedOnly: true,
         noStore: true,
-        audit: {
-          skip: 'each config tool call is answered by the tool’s own declaration; a held edit is the owner’s to confirm',
-        },
+        // Today's `fleet.configured` with `action: agent-config` (Gate's audited-route rule): names and ids only.
+        audit: { record: FLEET_CONFIGURED },
         guard: { none: 'file names, etags, located issues and what waits for the owner; never a secret value' },
       }),
       // §1.3.
@@ -156,13 +155,14 @@ export default definePlugin({
     ],
     // The agent's config tools (docs/config-files.md), today's names, schemas and words: live for every ferret. Each is a
     // ferret's alone (the session credential names it), refused unless "Ferretry settings" is on, and a write that
-    // loosens waits for the owner: the agent can never confirm its own held edit.
+    // loosens waits for the owner: the agent can never confirm its own held edit. Each is recorded as today's route was
+    // (`fleet.configured`, `action: agent-config`), because today's tools all went through `POST /v1/agent/config`.
     agentTools: [
       tool('config_read', {
         minimum: 'authenticated',
         caller: 'any',
         privilegedOnly: true,
-        audit: { skip: 'a read of the configuration files an agent may see' },
+        audit: { record: FLEET_CONFIGURED },
         guard: { none: 'file names, text with ${secret:NAME} references only, etags and located issues' },
         input: AgentConfigCallSchemas.config_read,
         summary: AGENT_CONFIG_TOOLS.config_read,
@@ -171,7 +171,7 @@ export default definePlugin({
         minimum: 'authenticated',
         caller: 'any',
         privilegedOnly: true,
-        audit: { skip: 'a check that writes nothing' },
+        audit: { record: FLEET_CONFIGURED },
         guard: { none: 'located issues; never the offending value' },
         input: AgentConfigCallSchemas.config_validate,
         summary: AGENT_CONFIG_TOOLS.config_validate,
@@ -180,7 +180,7 @@ export default definePlugin({
         minimum: 'authenticated',
         caller: 'any',
         privilegedOnly: true,
-        audit: { skip: 'the answer names the path, the etag and what waits for the owner' },
+        audit: { record: FLEET_CONFIGURED },
         guard: { none: 'the path, the etag, located issues and what waits for the owner; never a value' },
         input: AgentConfigCallSchemas.config_write,
         summary: AGENT_CONFIG_TOOLS.config_write,

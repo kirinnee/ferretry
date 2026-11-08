@@ -8,8 +8,8 @@ import {
   agentControlRefusal,
 } from '../../../contract/bound.ts';
 import { ApiError } from '../../../contract/http.ts';
-import { defineConfig } from '../../../contract/index.ts';
-import { agentConfig, configStatusView, ferretOfStanding } from '../../../host/config/agent.ts';
+import { defineConfig, policyRef } from '../../../contract/index.ts';
+import { agentConfig, agentDoorRefusal, configStatusView, ferretOfStanding } from '../../../host/config/agent.ts';
 import { agentMayName } from '../../../host/config/agent-reach.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
@@ -126,6 +126,13 @@ describe('the descriptors are today’s', () => {
     const declared = route('POST /v1/agent/config');
     expect(declared).toMatchObject({ minimum: 'none', caller: 'any', privilegedOnly: true, noStore: true });
     expect(declared?.capability).toBeUndefined();
+  });
+
+  test('R-0244 T-0034 the route and each config tool are audited as today’s route was: fleet.configured', () => {
+    // Today every agent config call went through `POST /v1/agent/config`, recorded `fleet.configured` (round-2 N2).
+    const recorded = { record: policyRef('audit', 'fleet.configured') };
+    expect(route('POST /v1/agent/config')?.audit).toEqual(recorded);
+    for (const name of ['config_read', 'config_validate', 'config_write']) expect(tool(name)?.audit).toEqual(recorded);
   });
 
   test('T-0032 T-0033 T-0034 the three config tools carry today’s names and words', () => {
@@ -534,38 +541,73 @@ describe('the files an agent may name are today’s and no more (C2)', () => {
     expect(listing.summary).toStartWith('1 configuration files in');
   });
 
-  test('R-0073 today’s reach, path by path', () => {
+  test('R-0073 today’s reach in 5.0’s names, path by path: each of today’s 14 entries where its file holds loosenings', () => {
     for (const path of [
-      'machine.yaml',
       'warden.yaml',
-      'learning.yaml',
       'voice.yaml',
-      'pack.yaml',
       'limits.yaml',
-      'models-guide.yaml',
-      'account-defaults.yaml',
+      'lessons.yaml',
+      'packs.yaml',
+      'accounts.yaml',
+      'runtimes.yaml',
+      'agenda.yaml',
       'logins/work.yaml',
       'profiles/p.yaml',
       'runtimes/r.yaml',
-      'presets/x.yaml',
       'models/m.yaml',
-      'components/mcp/github.yaml',
-      'components/modelSets/fast.yaml',
+      'mcp/github.yaml',
+      'skills/s.yaml',
+      'claude-code/settings/a.yaml',
+      'codex/settings/a.yaml',
+      'claude-code/hooks/h.yaml',
+      'model-sets/fast.yaml',
     ])
       expect(agentMayName(path)).toBe(true);
     for (const path of [
+      // Today's names that no 5.0 file has: refused, never guessed at.
+      'machine.yaml',
+      'learning.yaml',
+      'pack.yaml',
+      'models-guide.yaml',
+      'account-defaults.yaml',
+      'presets/x.yaml',
+      'components/mcp/github.yaml',
+      'components/modelSets/fast.yaml',
+      // Not mapped until their loosenings are ported, or holding what today's agent never reached (GAP lines).
+      'browsers.yaml',
+      'usage.yaml',
+      'harness-claude-code.yaml',
+      'harness-codex.yaml',
+      'conversation.yaml',
+      'instructions/x.yaml',
+      'endpoints/x.yaml',
+      // No today equivalent at all.
       'gate.yaml',
       'plugins.yaml',
+      'catalogs.yaml',
+      'vault.yaml',
+      'asks.yaml',
+      'board.yaml',
+      'tidy.yaml',
       'updates.yaml',
-      'lessons.yaml',
+      'connections.yaml',
+      'terminals.yaml',
+      'layout.yaml',
+      'layouts/x.yaml',
+      'themes/x.yaml',
+      'shells/x.yaml',
+      'claude-code/x.yaml',
+      // Shapes that are never a file.
       'logins/.hidden.yaml',
       'logins/a/b.yaml',
       'logins/x.yml',
-      'components/other/x.yaml',
-      'components/mcp/a/b.yaml',
-      '../machine.yaml',
-      'machine.yaml/x.yaml',
+      'logins/.yaml',
+      'mcp/a/b.yaml',
+      '../warden.yaml',
+      'warden.yaml/x.yaml',
+      '/warden.yaml',
       'voice',
+      '',
     ])
       expect(agentMayName(path)).toBe(false);
   });
@@ -640,5 +682,29 @@ describe('GET /v1/config/status', () => {
         now: () => 'now',
       }),
     ).toThrow(ApiError);
+  });
+});
+
+describe('Gate’s refusals of the route, in today’s words (round-2 m-c)', () => {
+  const answer = (status: number, body: string) => ({ status, headers: new Map<string, string>(), body });
+
+  test('R-0244 no credential (Gate’s 401 unauthorized) is today’s 401 missing_capability with today’s sentence', () => {
+    const mapped = agentDoorRefusal(answer(401, '{"error":"unauthorized","code":"unauthorized"}'));
+    expect(mapped.status).toBe(401);
+    expect(JSON.parse(mapped.body)).toEqual({
+      error:
+        'the config tools need the session credential Ferretry gives each agent session; run this from inside an agent session',
+      code: 'missing_capability',
+    });
+  });
+
+  test('R-0244 every other refusal is Gate’s, unchanged: a session mismatch, a 403, an unreadable body', () => {
+    for (const refused of [
+      answer(401, '{"error":"x","code":"session_mismatch"}'),
+      answer(403, '{"error":"forbidden","code":"forbidden"}'),
+      answer(403, '{"error":"unauthorized","code":"unauthorized"}'),
+      answer(401, 'not json'),
+    ])
+      expect(agentDoorRefusal(refused)).toBe(refused);
   });
 });

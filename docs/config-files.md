@@ -702,11 +702,34 @@ no file holds and no route returns.
 is **off by default**, and turning it on from another device needs a passkey like the other controls. It is a
 kill switch, not a boundary: an agent with plain file access can edit the files too. The real guard is rule
 2 — an agent's loosening waits for the owner either way, and so does a `${secret:NAME}` reference it adds: an
-agent's write is as untrusted as a plugin's own. The tools reach only the files they always did (`machine.yaml`,
-`warden.yaml`, `learning.yaml`, `voice.yaml`, `pack.yaml`, `limits.yaml`, `models-guide.yaml`,
-`account-defaults.yaml`, `logins/`, `profiles/`, `runtimes/`, `presets/`, `models/` and `components/`); any other
-file, and every person-only one (`gate.yaml`, `plugins.yaml`), is refused on read, check and write. A file that does not
-parse is never shown if its text holds anything shaped like a secret.
+agent's write is as untrusted as a plugin's own. Every call is recorded in the security log as **Agent settings
+were changed** (`fleet.configured`, `action: agent-config`), naming the ferret and never the file's text.
+
+The tools reach the files that now hold what they always reached, and no more:
+
+| Before 5.0                                       | The file the tools reach                                             |
+| ------------------------------------------------ | -------------------------------------------------------------------- |
+| `warden.yaml`, `voice.yaml`, `limits.yaml`       | the same files (`limits.yaml` also holds the agent-control switches) |
+| `learning.yaml`                                  | `lessons.yaml`                                                       |
+| `pack.yaml`, `models-guide.yaml`                 | `packs.yaml` (the routing prompt is its `routing` block)             |
+| `account-defaults.yaml`                          | `accounts.yaml`                                                      |
+| `machine.yaml`: the default runtime, agenda mode | `runtimes.yaml`, `agenda.yaml`                                       |
+| `logins/`, `profiles/`, `runtimes/`, `models/`   | the same folders                                                     |
+| `components/mcp/`, `components/skills/`          | `mcp/`, `skills/`                                                    |
+| `components/settings/`, `components/hooks/`      | `claude-code/settings/`, `codex/settings/`, `claude-code/hooks/`     |
+| `components/modelSets/`                          | `model-sets/`                                                        |
+
+Any other file, and every person-only one (`gate.yaml`, `plugins.yaml`, `catalogs.yaml`), is refused on read,
+check and write. A file that does not parse is never shown if its text holds anything shaped like a secret. Not
+reached yet, each a declared GAP:
+
+- `browsers.yaml` (the browser mode, proxy and ports): a new or re-aimed proxy is not held yet; before 5.0 it was.
+- `usage.yaml` (the time zone and the public feed): a time-zone change is not held yet; before 5.0 it was.
+- `harness-claude-code.yaml`, `harness-codex.yaml` (the agent permission mode): each also holds the harness
+  binary and search paths, which no agent reached before, and only the permission mode is judged.
+- `conversation.yaml`: its one switch is new, so it was never an agent's to change.
+- `components/instructions/` (now `instructions/<name>.md`, not a declared YAML file) and `presets/` (no
+  successor declared yet).
 
 The built-in **Set up Ferretry** skill teaches any agent the layout, the schemas, the commands and the rules.
 Every agent runtime's system prompt carries its short form (where the files are, no secret values,

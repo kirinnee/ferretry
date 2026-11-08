@@ -1,37 +1,54 @@
 /**
- * Which configuration files an AGENT may name: exactly the ones today's agent could (RULING on C2). Today's door took a
- * path only if `classifyConfigPath` knew it, so the agent never reached `plugins.yaml`, `gate.yaml` or any file the
- * 5.0 plugins added; widening that is the owner's decision, not a side effect of the new declared-file reader.
+ * Which configuration files an AGENT may name: the 5.0 files that now hold what today's agent could reach (RULING on
+ * C2 and the round-2 reach table), and no more. Today's door took a path only if `classifyConfigPath` knew it: 8 single
+ * files, 5 named-file folders and `components/<kind>/`, 14 entries. Each is mapped here to the file that holds the same
+ * content in 5.0, ONLY where that file's `loosens` is at least as strict as today's rule for the same content (an
+ * agent's loosening must be HELD, never applied), and ONLY where the file holds nothing today's agent could not reach.
+ * Never `gate.yaml`, `plugins.yaml` or any file the 5.0 plugins added with no today equivalent: widening that is the
+ * owner's decision, not a side effect of the declared-file reader.
  *
- * Copied from today's `classifyConfigPath` (path shape only; the kind it names is not needed here). Pure and total over
- * every string.
+ * NOT MAPPED, each a declared GAP (docs/config-files.md, the agent's tools):
+ * - `browsers.yaml` (today machine.yaml's browser mode, proxy and ports): its `loosens` holds nothing, and today a new or
+ *   re-aimed browser proxy was held. Mapped the day Browsers ports `browserProxyLoosening`.
+ * - `usage.yaml` (today machine.yaml's time zone and public feed): a time-zone change is not held, and today it was
+ *   (it moves when budgets reset). Mapped the day Usage ports the zone rule.
+ * - `harness-claude-code.yaml`, `harness-codex.yaml` (today machine.yaml's agent permissions): each also holds the
+ *   harness `binary` and `searchPaths`, which today lived in `daemon.json` where no agent reached, and its `loosens`
+ *   judges only the permission mode. Mapping it would let an agent choose the program every new ferret launches.
+ * - `conversation.yaml`: its one switch (keep in sync) is new in 5.0; today's machine.yaml had none (the shared draft
+ *   was always on), so it is not one of today's entries.
+ * - `components/instructions/<n>`: now `config/instructions/<n>.md`, which no plugin declares as a config file.
+ * - `presets/<n>.yaml`: no declared successor (Logins to rule whether `endpoints/` is one).
+ *
+ * Pure and total over every string.
  */
 
 const EXTENSION = '.yaml';
 
-/** Today's singleton files. */
-const SINGLETONS: ReadonlySet<string> = new Set([
-  'machine',
-  'warden',
-  'learning',
-  'voice',
-  'pack',
-  'limits',
-  'models-guide',
-  'account-defaults',
+/** The single files, each with the entry of today's it holds. */
+const FILES: ReadonlyMap<string, string> = new Map([
+  ['warden.yaml', 'warden.yaml'],
+  ['voice.yaml', 'voice.yaml'],
+  ['limits.yaml', "limits.yaml, and machine.yaml's agent-control switches"],
+  ['lessons.yaml', 'learning.yaml'],
+  ['packs.yaml', 'pack.yaml and models-guide.yaml'],
+  ['accounts.yaml', 'account-defaults.yaml'],
+  ['runtimes.yaml', "machine.yaml's default runtime"],
+  ['agenda.yaml', "machine.yaml's agenda mode and agenda check"],
 ]);
 
-/** Today's named-file directories. */
-const NAMED_DIRECTORIES: ReadonlySet<string> = new Set(['logins', 'profiles', 'runtimes', 'presets', 'models']);
-
-/** Today's component kinds (`components/<kind>/<name>.yaml`). */
-const COMPONENT_KINDS: ReadonlySet<string> = new Set([
-  'instructions',
-  'mcp',
-  'skills',
-  'settings',
-  'hooks',
-  'modelSets',
+/** The named-file folders (`<folder>/<name>.yaml`), each with the entry of today's it holds. */
+const FOLDERS: ReadonlyMap<string, string> = new Map([
+  ['logins', 'logins/<id>.yaml'],
+  ['profiles', 'profiles/<name>.yaml'],
+  ['runtimes', 'runtimes/<name>.yaml'],
+  ['models', 'models/<name>.yaml'],
+  ['mcp', 'components/mcp/<name>'],
+  ['skills', 'components/skills/<name>'],
+  ['claude-code/settings', 'components/settings/<name>'],
+  ['codex/settings', 'components/settings/<name>'],
+  ['claude-code/hooks', 'components/hooks/<name>'],
+  ['model-sets', 'components/modelSets/<name>'],
 ]);
 
 /** A file name's stem: no separator, no leading dot, no traversal, no control character, at most 64 long. */
@@ -43,15 +60,13 @@ const usableStem = (stem: string): boolean =>
   !/[/\\]/u.test(stem) &&
   ![...stem].some(character => (character.codePointAt(0) ?? 0) < 0x20);
 
-/** Whether today's agent could have named this path (relative to the config directory). */
+/** Whether an agent may name this path (relative to the config directory): one of today's entries, in 5.0's name. */
 export function agentMayName(relativePath: string): boolean {
+  if (FILES.has(relativePath)) return true;
   if (!relativePath.endsWith(EXTENSION)) return false;
-  const parts = relativePath.slice(0, -EXTENSION.length).split('/');
-  if (parts.length === 1) return SINGLETONS.has(parts[0] as string);
-  if (parts.length === 2) return NAMED_DIRECTORIES.has(parts[0] as string) && usableStem(parts[1] as string);
-  if (parts.length === 3)
-    return parts[0] === 'components' && COMPONENT_KINDS.has(parts[1] as string) && usableStem(parts[2] as string);
-  return false;
+  const cut = relativePath.lastIndexOf('/');
+  if (cut <= 0) return false;
+  return FOLDERS.has(relativePath.slice(0, cut)) && usableStem(relativePath.slice(cut + 1, -EXTENSION.length));
 }
 
 /**

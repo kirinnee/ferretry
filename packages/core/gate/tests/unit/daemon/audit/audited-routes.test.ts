@@ -12,22 +12,24 @@ const ROOT = resolve(import.meta.dir, '../../../../../../..');
  * Rules whose route another piece has yet to declare. Each names its owner; the entry goes the day the route is
  * declared (the test below fails if a listed rule already matches), so this list can only shrink.
  */
-const PENDING: Readonly<Record<string, string>> = {
-  'POST /v1/agent/config': 'kernel (config routes, D2 #3)',
-};
+const PENDING: Readonly<Record<string, string>> = {};
 
-/** Every declared route, socket and member route by `METHOD path`, with whether its descriptor records. */
+/** Every declared route, socket, member route and agent tool by `METHOD path`, with whether its descriptor records. */
 async function declaredRoutes(): Promise<ReadonlyMap<string, { readonly records: boolean }>> {
   const { loaded, failures } = await loadManifests(loadWorkspace(ROOT));
   expect(failures).toEqual([]);
   const keys = new Map<string, { readonly records: boolean }>();
-  for (const { manifest } of loaded)
+  for (const { manifest } of loaded) {
     for (const r of [
       ...(manifest.actions?.routes ?? []),
       ...(manifest.actions?.sockets ?? []),
       ...(manifest.actions?.memberRoutes ?? []),
     ])
       keys.set(`${r.method} ${r.path}`, { records: 'record' in r.audit });
+    // A tool's call is told under `POST /v1/tools/<plugin>/<tool>` (the kernel's `callTool`).
+    for (const t of manifest.actions?.agentTools ?? [])
+      keys.set(`POST /v1/tools/${manifest.id}/${t.name}`, { records: 'record' in t.audit });
+  }
   return keys;
 }
 
@@ -112,5 +114,26 @@ describe('a send or a queue edit is recorded against the ferret it acted on, as 
       const draft = recordedCallDraft(told(method, path, { ferretId: ferret, [other]: 'x9' }));
       expect(draft?.subject).toBe(ferret);
       expect(draft?.detail).toMatchObject({ action });
+    });
+});
+
+describe('an agent’s config call is recorded as today’s route was (round-2 review N2)', () => {
+  const ferretStanding: CallStanding = {
+    credential: { kind: 'authenticated', tokenClass: 'ferret', ferret: 'wren' } as CallStanding['credential'],
+  };
+  for (const path of [
+    '/v1/agent/config',
+    '/v1/tools/kernel/config_read',
+    '/v1/tools/kernel/config_validate',
+    '/v1/tools/kernel/config_write',
+  ])
+    test(`R-0244 T-0034 POST ${path} is fleet.configured with action agent-config, and nothing from the body`, async () => {
+      const declared = await declaredRoutes();
+      expect(declared.get(`POST ${path}`)).toEqual({ records: true });
+      const draft = recordedCallDraft({ ...told('POST', path, {}), standing: ferretStanding });
+      expect(draft?.event).toBe(auditKind('fleet.configured'));
+      expect(draft?.outcome).toBe('succeeded');
+      expect(draft?.detail).toEqual({ action: 'agent-config', by: 'agent', ferret: 'wren', status: 200 });
+      expect(draft?.subject).toBeUndefined();
     });
 });

@@ -744,4 +744,24 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     responseConfigKind: 'path',
   },
   { method: 'POST', path: '/v1/agent/config', event: 'fleet.configured', detail: { action: 'agent-config' } },
+  // The same calls as the kernel's agent tools: today every one went through `POST /v1/agent/config` above, so each is
+  // recorded as that route was. A tool's call is told under `POST /v1/tools/<plugin>/<tool>`.
+  {
+    method: 'POST',
+    path: '/v1/tools/kernel/config_read',
+    event: 'fleet.configured',
+    detail: { action: 'agent-config' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/tools/kernel/config_validate',
+    event: 'fleet.configured',
+    detail: { action: 'agent-config' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/tools/kernel/config_write',
+    event: 'fleet.configured',
+    detail: { action: 'agent-config' },
+  },
 ];

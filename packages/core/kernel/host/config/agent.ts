@@ -17,7 +17,7 @@
  */
 import type { AgentConfigAnswer, AgentConfigCall } from '../../contract/agent-config.ts';
 import { type AgentControlReader, agentControlRefusal } from '../../contract/bound.ts';
-import { ApiError } from '../../contract/http.ts';
+import { ApiError, type ApiResponse, errorResponse } from '../../contract/http.ts';
 import type { FerretId } from '../../contract/ids.ts';
 import type { ConfigFileIssue, ConfigFilesWriter, ConfigTarget } from '../../contract/ports.ts';
 import { AGENT_REACH_WORDS, agentMayName } from './agent-reach.ts';
@@ -48,6 +48,23 @@ const NOT_A_FILE =
 
 const SESSION_CREDENTIAL_WORDS =
   'the config tools need the session credential Ferretry gives each agent session; run this from inside an agent session';
+
+/**
+ * Gate's refusal of a call to `POST /v1/agent/config`, in today's words where today's differed (round-2 m-c). Today's
+ * door answered a call with NO credential `401 missing_capability` and the session-credential sentence; Gate answers
+ * that `401 unauthorized`. Same status, same order: only the code and the words are today's again. Every other refusal
+ * (a session mismatch, an unknown credential's 403, a carrier that is not privileged) is Gate's, unchanged.
+ */
+export function agentDoorRefusal(response: ApiResponse): ApiResponse {
+  if (response.status !== 401) return response;
+  let code: unknown;
+  try {
+    code = (JSON.parse(response.body) as { readonly code?: unknown } | null)?.code;
+  } catch {
+    return response;
+  }
+  return code === 'unauthorized' ? errorResponse(401, SESSION_CREDENTIAL_WORDS, 'missing_capability') : response;
+}
 
 /**
  * The ferret a call's standing names, or `undefined`. Read structurally because the kernel is a leaf: Gate's

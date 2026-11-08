@@ -290,12 +290,17 @@ test('R-0244 the owner’s switch is asked BEFORE the body too: off, a bad body 
   }
 });
 
-test('R-0244 Gate’s refusals survive through the route: 401 unauthorized, 401 session_mismatch, 403 on a carrier that is not privileged', async () => {
+test('R-0244 Gate’s refusals survive through the route, no credential in today’s words: 401 missing_capability, 401 session_mismatch, 403 on a carrier that is not privileged', async () => {
   const host = await boot({ switches: { on: ['settings'], asked: [] } });
   try {
     const none = await host.dispatch(post('/v1/agent/config', { tool: 'config.read' }));
     expect(none.status).toBe(401);
-    expect(json(none).code).toBe('unauthorized');
+    // Today's code and sentence (round-2 m-c), not Gate's `unauthorized`.
+    expect(json(none)).toEqual({
+      error:
+        'the config tools need the session credential Ferretry gives each agent session; run this from inside an agent session',
+      code: 'missing_capability',
+    });
     const mismatch = await host.dispatch(
       post('/v1/agent/config', { tool: 'config.read' }, 'wren', { headers: { 'x-ferretry-session-id': 'other' } }),
     );

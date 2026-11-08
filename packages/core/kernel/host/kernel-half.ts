@@ -15,7 +15,7 @@ import type { SocketAccept } from '../contract/socket.ts';
 import { busAccept, type BusSources } from './bus-socket.ts';
 import type kernelManifest from '../plugin.ts';
 import { type ConfigRouteSources, configRoutes } from './config/routes.ts';
-import { type AgentConfigSources, agentConfig, configStatusView } from './config/agent.ts';
+import { type AgentConfigSources, agentConfig, agentDoorRefusal, configStatusView } from './config/agent.ts';
 import {
   AGENT_CONFIG_TOOL_OF,
   AgentConfigCallSchema,
@@ -113,7 +113,8 @@ export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<Kernel
       // credential 401, an unknown one 403, whatever the body). The tool is known only from the body, but the three share
       // one declaration shape (a test pins it), so `config_read`'s declaration admits for all of them.
       const decision = sources.admitTool(AGENT_CONFIG_TOOL_OF['config.read'], call.request);
-      if (decision.outcome === 'refused') return decision.response;
+      // Gate's refusal, with today's code and words for a call that carries no credential (round-2 m-c).
+      if (decision.outcome === 'refused') return agentDoorRefusal(decision.response);
       // Then the ferret and the owner's switch, still before the body (today's order: credential, switch, body).
       const door = agentConfig(sources.agentConfig);
       await door.authorize(decision.standing);
