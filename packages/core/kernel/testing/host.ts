@@ -1035,7 +1035,9 @@ async function start(world: World): Promise<TestHost> {
   const testLinks = new Map<string, string>();
   /** `setMode`'s modes in the test world, by path; a path never set keeps the default (`0o600` for a file). */
   const testModes = new Map<string, number>();
-  const testFolderExists = (path: string): boolean => [...world.roots.keys()].some(key => key.startsWith(`${path}/`));
+  /** A folder exists in the flat test world when a file OR a link lies under it. */
+  const testFolderExists = (path: string): boolean =>
+    [...world.roots.keys(), ...testLinks.keys()].some(key => key.startsWith(`${path}/`));
   const testHarnessFile = (manifest: Manifest, absolutePath: string): RootFileHandle => {
     const refusal = harnessFileRefusal({
       plugin: manifest.id,
@@ -1287,19 +1289,24 @@ async function start(world: World): Promise<TestHost> {
             if (world.roots.has(target) || testLinks.has(target) || testFolderExists(target))
               throw new RootError('outside');
             if (target.startsWith(`${source}/`)) throw new RootError('changed');
-            if (isLink) {
-              testLinks.set(target, testLinks.get(source) as string);
-              testLinks.delete(source);
-            }
+            // The flat world keeps files, links and modes in three maps keyed by full path: everything at `source`
+            // or under it moves to the same place under `target`, a link as the text it holds.
+            const under = (key: string): boolean => key === source || key.startsWith(`${source}/`);
+            const placed = (key: string): string => `${target}${key.slice(source.length)}`;
             for (const [key, text] of [...world.roots])
-              if (key === source || key.startsWith(`${source}/`)) {
-                world.roots.set(`${target}${key.slice(source.length)}`, text);
+              if (under(key)) {
+                world.roots.set(placed(key), text);
                 world.roots.delete(key);
-                const mode = testModes.get(key);
-                if (mode !== undefined) {
-                  testModes.set(`${target}${key.slice(source.length)}`, mode);
-                  testModes.delete(key);
-                }
+              }
+            for (const [key, pointsAt] of [...testLinks])
+              if (under(key)) {
+                testLinks.set(placed(key), pointsAt);
+                testLinks.delete(key);
+              }
+            for (const [key, mode] of [...testModes])
+              if (under(key)) {
+                testModes.set(placed(key), mode);
+                testModes.delete(key);
               }
           },
           setMode: async (path, mode) => {

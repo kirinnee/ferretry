@@ -161,10 +161,25 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
     ['the old link name is gone', { ok: await kindAt(place) }],
     ['rename a folder', await answer(() => fleet.rename(at(fleet, 'homes/claude-a'), at(fleet, 'homes/claude-b')))],
     ['the folder’s file moved with it', { ok: await kindAt(at(fleet, 'homes/claude-b/settings.json')) }],
+    // asked WHILE the folder sits at its new name: moving it back would hide a link left behind
+    ['link inside a moved folder is at the new place', { ok: await kindAt(at(fleet, 'homes/claude-b/linked.aside')) }],
+    [
+      'link inside a moved folder is gone from the old place',
+      { ok: await kindAt(at(fleet, 'homes/claude-a/linked.aside')) },
+    ],
+    ['the moved file keeps its mode', { ok: await modeAt(at(fleet, 'homes/claude-b/settings.json')) }],
     [
       'rename it back, folder',
       await answer(() => fleet.rename(at(fleet, 'homes/claude-b'), at(fleet, 'homes/claude-a'))),
     ],
+    ['make a folder to hold only a link', await answer(() => fleet.makeDirectory(at(fleet, 'homes/claude-c')))],
+    ['linkTo inside it', await answer(() => fleet.linkTo(at(fleet, 'homes/claude-c/only.json'), credential))],
+    [
+      'rename a folder holding only a link',
+      await answer(() => fleet.rename(at(fleet, 'homes/claude-c'), at(fleet, 'homes/claude-d'))),
+    ],
+    ['the only link is at the new place', { ok: await kindAt(at(fleet, 'homes/claude-d/only.json')) }],
+    ['the only link is gone from the old place', { ok: await kindAt(at(fleet, 'homes/claude-c/only.json')) }],
     [
       'rename onto an existing name',
       await answer(() => fleet.rename(settings, at(fleet, 'homes/claude-a/linked.aside'))),
@@ -175,6 +190,14 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
     ],
     ['rename to the same name', await answer(() => fleet.rename(settings, settings))],
     ['rename with ..', await answer(() => fleet.rename(settings, `${settings}/../x` as FencedPath))],
+    [
+      'rename to a . segment',
+      await answer(() => fleet.rename(settings, `${at(fleet, 'homes/claude-a')}/.` as FencedPath)),
+    ],
+    [
+      'rename with an empty middle segment',
+      await answer(() => fleet.rename(settings, `${at(fleet, 'homes/claude-a')}//x` as FencedPath)),
+    ],
     ['rename on a read-only root', await answer(() => harness.rename(credential.path, at(harness, 'x.json')))],
     ['rename in downloads', await answer(() => downloads.rename(at(downloads, 'a'), at(downloads, 'b')))],
     [
@@ -268,6 +291,14 @@ test('roots part 2 parity: linkTo, setMode and harnessFile answer every case ali
   expect(byCase['setMode on a missing name']).toEqual({ refused: 'outside' });
   expect(byCase['setMode by a plugin that did not declare it']).toEqual({ refused: 'not_declared' });
   expect(byCase['setMode on a link']).toEqual({ refused: 'link_escape' });
+  expect(byCase['rename to a . segment']).toEqual({ refused: 'outside' });
+  expect(byCase['rename with an empty middle segment']).toEqual({ refused: 'outside' });
+  expect(byCase['link inside a moved folder is at the new place']).toEqual({ ok: 'symlink' });
+  expect(byCase['link inside a moved folder is gone from the old place']).toEqual({ ok: null });
+  expect(byCase['the moved file keeps its mode']).toEqual({ ok: 0o600 });
+  expect(byCase['rename a folder holding only a link']).toEqual({ ok: null });
+  expect(byCase['the only link is at the new place']).toEqual({ ok: 'symlink' });
+  expect(byCase['the only link is gone from the old place']).toEqual({ ok: null });
   expect(byCase['harnessFile read']).toEqual({ ok: CLAUDE_JSON });
   expect(byCase['harnessFile stat kind']).toEqual({ ok: 'file' });
   expect(byCase['harnessFile a missing declared file']).toEqual({ ok: null });

@@ -128,7 +128,7 @@ export interface RootLayout {
 /**
  * Why a root refused, host-side: the contract's {@link FolderRefusal}, plus today's guard rules a handle's caller
  * meets only as this error — `hard_link` (a file with another name that could be anywhere), `changed` (what was
- * opened is not what was checked), `not_a_file`, and `no_descriptor_reach` (a remove outside daemon folders on a host
+ * opened is not what was checked), `not_a_file`, and `no_descriptor_reach` (a remove outside daemon folders, or any `rename`, on a host
  * that cannot reach an entry through its checked folder, S44).
  */
 export type RootRefusal =
@@ -1074,8 +1074,11 @@ async function setModeChecked(scope: Scope, full: string, bits: number): Promise
 /**
  * `rename` through the two checked folders: each parent is opened without following a link and proven, the entry at
  * `from` is looked at WITHOUT following it (it must exist: a link stays a link, a directory moves whole), nothing may
- * be at `to` (a link there included), and the move is `rename(2)` between the two folders' descriptors. No copy is
- * ever the fallback: any failure of the move itself (another device, a folder into itself, a full disk) is `changed`,
+ * be at `to` (a link there included), and the move is `rename(2)` between the two folders' descriptors. A host that
+ * cannot reach an entry through a held folder's descriptor (macOS today) is refused `no_descriptor_reach`: there the
+ * move would resolve both parents by name again and follow a link swapped in after the proof, so it is never made
+ * ([own] BEFORE-GREEN(runtimes): the owner runs macOS, so the provisioner's move-aside and undo fail there). No copy
+ * is ever the fallback: any failure of the move itself (another device, a folder into itself, a full disk) is `changed`,
  * a fact with no path or content in it.
  *
  * GAP (declared, tested): the standard library has no `renameat2(RENAME_NOREPLACE)`, so "nothing at `to`" is a look
@@ -1090,6 +1093,10 @@ async function renameChecked(from: Checked, to: Checked): Promise<void> {
   try {
     const target = await openCheckedFolder(to.scope, toParent);
     try {
+      // Without descriptor reach the move would run on plain paths, which resolve the parents afresh (as `removeWithin`
+      // refuses a folder it cannot hold). Refuse before anything is looked at or moved.
+      if (source.entryPath('') === undefined || target.entryPath('') === undefined)
+        return refuse('no_descriptor_reach');
       const fromAt = await entry(from.scope, source, fromParent, basename(from.full));
       const toAt = await entry(to.scope, target, toParent, basename(to.full));
       if ((await from.scope.fs.identity(fromAt)) === undefined) return refuse('outside');
