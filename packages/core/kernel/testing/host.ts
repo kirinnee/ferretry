@@ -55,6 +55,7 @@ import type {
   CarrierListenerPort,
 } from '../contract/ports.ts';
 import { readConfigText } from '../host/config/yaml-text.ts';
+import { isWithinList, patchedValue } from '../host/config/patch.ts';
 import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
 import { createIdentitySigner, signerFor } from '../host/session/signer.ts';
 import {
@@ -582,6 +583,47 @@ async function start(world: World): Promise<TestHost> {
     const assertDeclared = (def: ConfigFileDef<any> | ConfigCollectionDef<any>): void => {
       if (!declared.includes(def)) throw new Error(`${manifest.id}: config ${keyOf(def)} is not declared`);
     };
+    // The real writer's outcomes over the in-memory values: own defs only, schema checked, a loosening held unless
+    // the admission in use (Gate's, when given) judges this call may apply it. `within` is the owner's only (the
+    // real writer's one-level merge, `host/config/patch.ts`).
+    const write: (
+      ...args: [...Parameters<ConfigPort['write']>, within?: readonly string[]]
+    ) => ReturnType<ConfigPort['write']> = async (def, name, edit, writeOptions = {}, within = undefined) => {
+      if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
+      const key = keyOf(def);
+      if (def.shape === 'collection' && (name === undefined || !def.name.test(name)))
+        return { kind: 'refused', reason: 'bad_name', issues: [] };
+      const all = world.config.get(key) as Record<string, unknown> | undefined;
+      const before = def.shape === 'file' ? all : name === undefined ? undefined : all?.[name];
+      let next: unknown;
+      if (typeof edit === 'string') {
+        // The kernel's bounded reader, as the real writer reads an edit: never a raw parse of a text a test hands in.
+        const read = readConfigText(edit);
+        if (!read.ok) return { kind: 'refused', reason: 'yaml', issues: [{ path: key, message: 'this is not YAML' }] };
+        next = read.read.value ?? {};
+      } else next = patchedValue((before as Record<string, unknown> | undefined) ?? {}, edit.patch, within);
+      const checked = def.schema.safeParse(next);
+      if (!checked.success)
+        return {
+          kind: 'refused',
+          reason: 'schema',
+          issues: checked.error.issues.map(issue => ({ path: key, message: issue.message })),
+        };
+      const etag = JSON.stringify(next);
+      if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null))
+        return { kind: 'conflict' };
+      const prior = before === undefined ? undefined : def.schema.safeParse(before);
+      const priorValue = prior?.success === true ? prior.data : undefined;
+      // as the real port: a plugin's own write that adds a secret reference is held for the owner, judge or not
+      const added = addedSecretReferenceSentences(priorValue, checked.data);
+      const sentences = [...judgeLoosening(def, priorValue, checked.data), ...added];
+      const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
+      if (added.length > 0 || (sentences.length > 0 && !judged(manifest.id, path, false, sentences)))
+        return { kind: 'held', etag, id: `${path}@held`, sentences };
+      world.config.set(key, def.shape === 'file' ? next : { ...(all ?? {}), [name as string]: next });
+      for (const listener of configListeners.get(key) ?? []) listener();
+      return { kind: 'written', etag, loosened: sentences };
+    };
     return {
       file(def) {
         assertDeclared(def);
@@ -619,52 +661,20 @@ async function start(world: World): Promise<TestHost> {
           ? { state: 'valid', inEffect: true, sentences: [] }
           : { state: 'invalid', inEffect: false, sentences: parsed.error.issues.map(issue => issue.message) };
       },
-      // The real writer's outcomes over the in-memory values: own defs only, schema checked, a loosening held unless
-      // the admission in use (Gate's, when given) judges this call may apply it.
       async write(def, name, edit, writeOptions = {}) {
-        if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
-        const key = keyOf(def);
-        if (def.shape === 'collection' && (name === undefined || !def.name.test(name)))
-          return { kind: 'refused', reason: 'bad_name', issues: [] };
-        const all = world.config.get(key) as Record<string, unknown> | undefined;
-        const before = def.shape === 'file' ? all : name === undefined ? undefined : all?.[name];
-        let next: unknown;
-        if (typeof edit === 'string') {
-          // The kernel's bounded reader, as the real writer reads an edit: never a raw parse of a text a test hands in.
-          const read = readConfigText(edit);
-          if (!read.ok)
-            return { kind: 'refused', reason: 'yaml', issues: [{ path: key, message: 'this is not YAML' }] };
-          next = read.read.value ?? {};
-        } else {
-          next = { ...((before as Record<string, unknown> | undefined) ?? {}), ...edit.patch };
-          for (const [field, value] of Object.entries(edit.patch))
-            if (value === undefined) delete (next as Record<string, unknown>)[field];
-        }
-        const checked = def.schema.safeParse(next);
-        if (!checked.success)
+        return await write(def, name, edit, writeOptions);
+      },
+      // The in-memory world holds no edit held for the owner, so the owner's patch is a write of that patch (merged
+      // one level deep into the keys `within` names, as the real writer merges it).
+      async writeAsOwner(def, name, edit, writeOptions = {}) {
+        // As the real writer: a `within` that is not a list is refused, never read as something else.
+        if (!isWithinList(edit.within))
           return {
             kind: 'refused',
             reason: 'schema',
-            issues: checked.error.issues.map(issue => ({ path: key, message: issue.message })),
+            issues: [{ path: keyOf(def), message: '`within` must be a list of top-level key names' }],
           };
-        const etag = JSON.stringify(next);
-        if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null))
-          return { kind: 'conflict' };
-        const prior = before === undefined ? undefined : def.schema.safeParse(before);
-        const priorValue = prior?.success === true ? prior.data : undefined;
-        // as the real port: a plugin's own write that adds a secret reference is held for the owner, judge or not
-        const added = addedSecretReferenceSentences(priorValue, checked.data);
-        const sentences = [...judgeLoosening(def, priorValue, checked.data), ...added];
-        const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
-        if (added.length > 0 || (sentences.length > 0 && !judged(manifest.id, path, false, sentences)))
-          return { kind: 'held', etag, id: `${path}@held`, sentences };
-        world.config.set(key, def.shape === 'file' ? next : { ...(all ?? {}), [name as string]: next });
-        for (const listener of configListeners.get(key) ?? []) listener();
-        return { kind: 'written', etag, loosened: sentences };
-      },
-      // The in-memory world holds no edit held for the owner, so the owner's patch is a write of that patch.
-      async writeAsOwner(def, name, edit, writeOptions = {}) {
-        return await this.write(def, name, edit, writeOptions);
+        return await write(def, name, { patch: edit.patch }, writeOptions, edit.within);
       },
       async remove(def, name, writeOptions = {}) {
         if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
