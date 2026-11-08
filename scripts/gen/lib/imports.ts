@@ -72,6 +72,8 @@ function areaOfSubpath(pkg: WorkspacePackage, subpath: string): Area {
   if (pkg.id === 'kernel') {
     const kernelAreas: Record<string, Area> = {
       contract: 'kernel-contract',
+      // The push envelope alone, for the signed service worker: its graph may hold this one file and zod, not the barrel.
+      'contract/push-envelope': 'kernel-contract',
       // The pure wire and the browser-safe session codec: no IO, so another package may import them as it imports
       // the contract (the files themselves sit outside contract/ because they re-export the host's session wire).
       wire: 'kernel-contract',
