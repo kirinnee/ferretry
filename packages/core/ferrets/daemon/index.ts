@@ -90,6 +90,7 @@ import {
   FerretSignalTerminal,
 } from './adapters/session/signal/ferret-signal.ts';
 import { DaemonStorage } from './adapters/storage/session-storage.ts';
+import { SessionFiles } from './modules/session-files.ts';
 import { buildMoves, MOVE_ROUTE_KEYS } from './moves.ts';
 import { movesDeps } from './moves-deps.ts';
 import { fleetEventsAccept, followableFerret, HistoryEventSource } from './modules/fleet-events.ts';
@@ -228,6 +229,34 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     serial: callsignSerial,
   });
 
+  // The session store and the ferret's private session files. Everything a session keeps that is a credential or an
+  // irreversible-act record sits on the internal `sessions` root (one minted ferret folder per handle), never on `work`.
+  // The archive the store keeps is read before the first move or fork route answers.
+  const sessionStore = new DaemonStorage(kernel.state, { now: () => kernel.clock.now() }, log);
+  const storeLoaded = sessionStore.loadArchive().catch((error: unknown) => {
+    log.warn('the session store could not load its archive', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  });
+  const sessionFiles = new SessionFiles({
+    roots: kernel.roots,
+    storage: sessionStore,
+    clock: { now: () => kernel.clock.now() },
+    sleep: async delay => await kernel.clock.sleep(delay),
+    paths: kernel.paths,
+    // The requested label and parent: lineage uses them only for a ferret with no session document yet.
+    fleet: () =>
+      registry.list().map(ferret => {
+        const label = registry.detailsOf(ferret.id)?.options?.label;
+        return {
+          id: ferret.id,
+          ...(label === undefined ? {} : { label }),
+          ...(ferret.parent === undefined ? {} : { parent: ferret.parent }),
+        };
+      }),
+    log,
+  });
   // The launch environment: ONE store, written by every launch and read by `instructions` (stored over what the record
   // implies; RULING #30). Each section's flag is its OWNER's launch part: Pack's `FY_PACK` and Conversation's
   // `conversation-hypermedia` (FY_HYPERMEDIA, only when the owner set the ferret's switch) are registered.
@@ -250,6 +279,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   const service = new FerretsService(registry, tokens, {
     launchEnvironment,
     ready,
+    session: sessionFiles.port,
     claims,
     systemCallsign: async prefix => await systemCallsigns.next(prefix),
     now: () => kernel.clock.now(),
@@ -483,18 +513,13 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   // Moves and forks (ferrets-c): today's fork, handover and move modules, built once. The archive the session store
   // keeps is read before the first of their routes answers; the handover's reconcile loop is armed once the daemon
   // serves (today: beside the warden sweep) and disarmed when it stops.
-  const sessionStore = new DaemonStorage(kernel.state, { now: () => kernel.clock.now() }, log);
-  const storeLoaded = sessionStore.loadArchive().catch((error: unknown) => {
-    log.warn('the session store could not load its archive', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  });
   const moves = buildMoves(
     ctx,
     movesDeps(ctx, {
       storage: sessionStore,
       clientName: 'fy',
+      environment: sessionFiles.environment,
+      createLifecycle: sessionFiles.createLifecycle,
       // A move's relaunch is a resume of THIS service, so it goes through the ordinary launch (home, token, environment).
       resume: ferretsMoveResume(
         service,

@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { diskRoot } from '@ferretry/kernel/testing';
+import { diskSessionsRoot } from '@ferretry/kernel/testing';
 import should from 'should';
 import {
   effectFileName,
@@ -45,9 +45,9 @@ async function ledger(label: string): Promise<{
   const parent = await mkdtemp(join(tmpdir(), `fy-effects-${label}-`));
   directories.add(parent);
   const synced: string[] = [];
-  const { root, folder: home } = await diskRoot(parent, recordingSyncs(synced));
-  const sessions = join(home, 'state', 'sessions');
-  return { subject: new FileSessionEffectLedger(root, sessionId => join(sessions, sessionId)), sessions, home, synced };
+  const { root, folder } = await diskSessionsRoot(parent, SESSION, recordingSyncs(synced));
+  const sessions = dirname(folder);
+  return { subject: new FileSessionEffectLedger(root, SESSION), sessions, home: join(parent, 'home'), synced };
 }
 
 /**
@@ -65,7 +65,7 @@ async function failingLedger(label: string): Promise<{
   const parent = await mkdtemp(join(tmpdir(), `fy-effects-${label}-`));
   directories.add(parent);
   let failNext = false;
-  const { root, folder: home } = await diskRoot(parent, disk => ({
+  const { root, folder } = await diskSessionsRoot(parent, SESSION, disk => ({
     ...disk,
     link: async (existing, destination) => {
       if (failNext) {
@@ -75,9 +75,9 @@ async function failingLedger(label: string): Promise<{
       await disk.link(existing, destination);
     },
   }));
-  const sessions = join(home, 'state', 'sessions');
+  const sessions = dirname(folder);
   return {
-    subject: new FileSessionEffectLedger(root, sessionId => join(sessions, sessionId)),
+    subject: new FileSessionEffectLedger(root, SESSION),
     sessions,
     failNextSync: () => {
       failNext = true;
@@ -97,6 +97,17 @@ async function refusal(promise: Promise<unknown>): Promise<SessionEffectLedgerEr
   throw new Error('expected the ledger to refuse, but it resolved');
 }
 
+/** The error a promise rejects with, whatever its kind; fails if it resolves. */
+async function refusalOf(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise;
+  } catch (error) {
+    if (error instanceof Error) return error;
+    throw error;
+  }
+  throw new Error('expected the ledger to refuse, but it resolved');
+}
+
 async function held(sessions: string, effect: SessionEffectKey = key): Promise<Record<string, unknown>> {
   const file = join(sessions, effect.sessionId, 'effects', `${effectFileName(effect.effectId)}.json`);
   return JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
@@ -110,9 +121,10 @@ describe('FileSessionEffectLedger', () => {
     // Act
     const standing = await subject.inspect(key, FINGERPRINT);
 
-    // Assert: an inspection is a question, so it must not create the directory it asks about.
+    // Assert: an inspection is a question, so it must not create the effects directory it asks about. It DOES make the
+    // ferret's own session folder (0700) on purpose: the kernel refuses any read below a scoped folder that does not exist.
     should(standing).equal('unclaimed');
-    should(await stat(sessions).catch(() => undefined)).equal(undefined);
+    should(await stat(join(sessions, SESSION, 'effects')).catch(() => undefined)).equal(undefined);
   });
 
   it('should admit the first attempt and record the whole act before it is performed', async () => {
@@ -142,9 +154,8 @@ describe('FileSessionEffectLedger', () => {
   it('should persist each created directory own entry in its parent, parent first', async () => {
     // Arrange: nothing of this session exists yet, so the mkdir creates the whole chain and every
     // link of it has its name in the link above.
-    const { subject, sessions, home, synced } = await ledger('parents');
-    // Only the temporary home exists, so the mkdir creates four levels beneath it.
-    const state = dirname(sessions);
+    const { subject, sessions, synced } = await ledger('parents');
+    // The kernel made the `sessions` base at boot; this attempt creates the session folder and `effects`.
     const session = join(sessions, SESSION);
     const effects = join(session, 'effects');
 
@@ -152,11 +163,11 @@ describe('FileSessionEffectLedger', () => {
     await subject.begin(key, FINGERPRINT, BEGUN_AT);
 
     // Assert: an entry lives in its PARENT, so syncing the leaf persists the record inside it and
-    // says nothing about the leaf's own name. `home` is synced although the mkdir did not create it,
-    // because `state` — which it DID create — is named inside it. Oldest ancestor first, because a
-    // child's fsync is only well defined once its own entry is durable, and every one of them lands
+    // says nothing about the leaf's own name. `sessions` is synced because the session folder — which this attempt
+    // DID create — is named inside it, then the session folder because `effects` is named inside it. Oldest ancestor
+    // first, because a child's fsync is only well defined once its own entry is durable, and every one of them lands
     // BEFORE the record's own directory sync, which is last and is what persists the record itself.
-    should(synced).eql([home, state, sessions, session, effects]);
+    should(synced).eql([sessions, session, effects]);
     should(synced.at(-1)).equal(effects);
   });
 
@@ -173,7 +184,7 @@ describe('FileSessionEffectLedger', () => {
     // a directory is not atomic with persisting its name — the attempt that created it may not
     // have synced the parent yet, and inheriting that promise is what would let this record be
     // admitted into a directory a power loss can leave nameless. No higher ancestor is touched;
-    // lifecycle reservation owns durability of the session directory entry itself.
+    // the session folder's own entry in `sessions` was made durable when the first attempt made the folder.
     should(synced).eql([join(sessions, SESSION), join(sessions, SESSION, 'effects')]);
   });
 
@@ -272,7 +283,8 @@ describe('FileSessionEffectLedger', () => {
 
     // Assert: a settled record claims keystrokes reached an agent, and this one never did.
     should(refused.message).match(/was never begun/u);
-    should(await stat(join(sessions, SESSION)).catch(() => undefined)).equal(undefined);
+    // The ferret's own folder is made before the ledger is consulted (U2), so it exists; nothing is written below it.
+    should(await readdir(join(sessions, SESSION))).eql([]);
   });
 
   it('should refuse to settle an effect held for a different act', async () => {
@@ -404,9 +416,9 @@ describe('FileSessionEffectLedger', () => {
     await written.subject.begin(key, FINGERPRINT, BEGUN_AT);
 
     const restartedSyncs: string[] = [];
-    const parentOf = dirname(dirname(dirname(written.sessions)));
-    const restartedDisk = await diskRoot(parentOf, recordingSyncs(restartedSyncs));
-    const restarted = new FileSessionEffectLedger(restartedDisk.root, sessionId => join(written.sessions, sessionId));
+    const parentOf = dirname(dirname(dirname(dirname(written.sessions))));
+    const restartedDisk = await diskSessionsRoot(parentOf, SESSION, recordingSyncs(restartedSyncs));
+    const restarted = new FileSessionEffectLedger(restartedDisk.root, SESSION);
     written.synced.length = 0;
 
     // Act: inspect, then a begin that loses the compare-and-set, then a settle.
@@ -575,8 +587,9 @@ describe('FileSessionEffectLedger', () => {
     let plantedDuringSync = false;
     let planted: string | undefined;
     let recordPath = '';
-    const { root, folder: home } = await diskRoot(
+    const { root, folder } = await diskSessionsRoot(
       parent,
+      SESSION,
       recordingSyncs([], async () => {
         if (!settling || plantedDuringSync) return;
         // GATED ON THE PUBLISHED RECORD, not on being the first sync of the call. `settle` persists
@@ -593,7 +606,7 @@ describe('FileSessionEffectLedger', () => {
         await writeFile(planted as string, 'another attempt\n', { encoding: 'utf8', mode: 0o600 });
       }),
     );
-    const sessions = join(home, 'state', 'sessions');
+    const sessions = dirname(folder);
     const effects = join(sessions, SESSION, 'effects');
     const record = join(effects, `${effectFileName(EFFECT)}.json`);
     // `t2` IS DELIBERATE: it is the exact name this `settle` owned and then freed by renaming its temporary onto the
@@ -602,7 +615,7 @@ describe('FileSessionEffectLedger', () => {
     const reused = join(effects, `.${effectFileName(EFFECT)}.json.t2.tmp`);
     recordPath = record;
     planted = reused;
-    const subject = new FileSessionEffectLedger(root, sessionId => join(sessions, sessionId));
+    const subject = new FileSessionEffectLedger(root, SESSION);
     await subject.begin(key, FINGERPRINT, BEGUN_AT);
     settling = true;
 
@@ -617,20 +630,30 @@ describe('FileSessionEffectLedger', () => {
   });
 
   it('should keep two sessions and two effects on one session apart', async () => {
-    // Arrange
-    const { subject, sessions } = await ledger('separate');
+    // Arrange: one ledger per ferret, both on the same `sessions` root, each over its own folder.
+    const { subject, sessions, home } = await ledger('separate');
     const sibling: SessionEffectKey = { sessionId: SESSION, effectId: 'turn-1' };
     const elsewhere: SessionEffectKey = { sessionId: OTHER_SESSION, effectId: EFFECT };
+    const { root: otherRoot } = await diskSessionsRoot(dirname(home), OTHER_SESSION);
+    const other = new FileSessionEffectLedger(otherRoot, OTHER_SESSION);
 
     // Act
     await subject.begin(key, FINGERPRINT, BEGUN_AT);
     await subject.settle(key, FINGERPRINT, SETTLED_AT);
+    const crossed = await refusalOf(subject.inspect(elsewhere, FINGERPRINT));
 
-    // Assert: neither neighbour is answered from this one's record.
+    // Assert: a handle is one ferret's, so asking it about another ferret is refused, not answered 'unclaimed' ...
+    should(crossed.constructor).equal(Error);
+    should(crossed.message).equal(
+      'the session effect ledger was asked about session 20260806-other through the folder of 20260806-target',
+    );
+    // ... a sibling effect on the same session is not answered from this one's record ...
     should(await subject.inspect(sibling, FINGERPRINT)).equal('unclaimed');
-    should(await subject.inspect(elsewhere, FINGERPRINT)).equal('unclaimed');
+    // ... and the other ferret, through ITS OWN folder, has no record of the effect this one settled.
+    should(await other.inspect(elsewhere, FINGERPRINT)).equal('unclaimed');
+    should(await subject.inspect(key, FINGERPRINT)).equal('settled');
     should(await readdir(join(sessions, SESSION, 'effects'))).eql([`${effectFileName(EFFECT)}.json`]);
-    should(await readdir(sessions)).eql([SESSION]);
+    should(await readdir(sessions)).eql([OTHER_SESSION, SESSION]);
   });
 });
 

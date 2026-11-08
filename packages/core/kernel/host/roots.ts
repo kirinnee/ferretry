@@ -369,6 +369,11 @@ async function ensureScopedBase(
     for (const segment of missing) {
       const at = await entry(scope, folder, parent, segment);
       await fs.mkdir(at, 0o700).catch(() => refuse('changed'));
+      // Creating a folder is not atomic with persisting its name: the folder it was made in is synced through the
+      // descriptor already proven, parent first, so the new entry is durable before anything is made or written below
+      // it (a ferret's `sessions/<ferret>` holds its effect ledger and credential). A filesystem that cannot sync a
+      // directory (`EINVAL`, `ENOTSUP`, `EPERM`) is tolerated by the adapter, as the state filesystem tolerates it.
+      await folder.sync();
       const made = await fs.openDirectory(at).catch(() => refuse('changed'));
       const previous = folder;
       folder = made;
@@ -1206,6 +1211,19 @@ function rootHandle(setup: HandleSetup): RootHandle {
     },
     ensurePrivateDirectory: async path => {
       writable();
+      // A handle scoped to one folder of a private root (a ferret's `sessions` folder) can name ITS OWN folder: it is made
+      // `0700` when missing and an existing wider one is narrowed through the descriptor just proven to be it. The parent
+      // is outside the handle, so this is the only way the folder itself can be held private by its owner.
+      if (privateFolder && scopedParent !== undefined && path === base()) {
+        const own = await real(path, true);
+        const held = await openCheckedFolder(own.scope, own.full);
+        try {
+          await held.chmod(0o700).catch(() => refuse('changed'));
+        } finally {
+          await held.close();
+        }
+        return;
+      }
       const { full, scope } = await realParent(path, true);
       const made = await openFolderMaking(scope, dirname(full), 0o700, true);
       try {
