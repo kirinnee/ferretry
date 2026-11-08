@@ -1,6 +1,7 @@
 import type { Duration, Instant, JsonValue, Result } from '@ferretry/std';
 import type {
   ApiOf,
+  ConfigFileDef,
   ContributeHook,
   Contribution,
   DecideAnswer,
@@ -255,6 +256,21 @@ export interface SelftestProbe {
    * only these (a name the manifest does not declare grants nothing); absent, every declared program.
    */
   readonly programs?: readonly string[];
+  /**
+   * The probe runs only when this plugin's OWN config file, as in effect, says on (today's `webrtc … switched off in
+   * <config>`). The kernel reads the file read-only, as boot would put it into effect (its last good version, the
+   * schema's defaults when there is no file), calls the pure `on` with that value, and on an exact `false` prints
+   * `<label> switched off in <path>` (then ` — <consequence>`) without running the probe. The probe itself is given
+   * nothing more than without it: no config port. A file with nothing in effect, `on` throwing or answering anything
+   * but a boolean, or no reader in this check, runs the probe: `--check` never claims "off" on a broken file. A def
+   * that is not one of the manifest's own `data.config` file defs is a failed line, and the probe does not run.
+   */
+  readonly enabledBy?: {
+    // biome-ignore lint/suspicious/noExplicitAny: any file def of the plugin's own; `on` judges the value
+    readonly def: ConfigFileDef<any>;
+    readonly on: (value: unknown) => boolean;
+    readonly consequence?: string;
+  };
   readonly run: (environment: SelftestEnvironment) => Promise<string>;
 }
 

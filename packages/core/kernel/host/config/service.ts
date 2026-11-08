@@ -74,7 +74,8 @@ import {
 } from './evaluate.ts';
 import { configJsonSchemaText, schemaFileName, schemaModeline } from './schemas.ts';
 import { type ConfigTreeEvents, watchConfigFiles } from './watcher.ts';
-import { CONFIG_FILE_MAX_BYTES, configTextTooLarge, editConfigText, readConfigTextToEdit } from './yaml-text.ts';
+import { readConfigDisk } from './disk.ts';
+import { CONFIG_FILE_MAX_BYTES, editConfigText, readConfigTextToEdit } from './yaml-text.ts';
 import { isWithinList, patchedValue } from './patch.ts';
 import {
   ALREADY_HELD_ISSUE,
@@ -441,28 +442,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     }
   };
 
-  const readDisk = async (path: string): Promise<DiskState> => {
-    const absolute = `${root}/${path}`;
-    let info: Awaited<ReturnType<HostFs['info']>>;
-    try {
-      info = await fs.info(absolute);
-    } catch {
-      return { kind: 'unreadable' };
-    }
-    if (info === undefined) return { kind: 'absent' };
-    if (!info.regularFile || info.size > CONFIG_FILE_MAX_BYTES) return { kind: 'unreadable' };
-    try {
-      // Read with a hard bound, at most one byte past the cap: the size above was read before the bytes, and a file
-      // that grew in between is never read whole — only far enough to see it is over the cap.
-      const read = await fs.readTail(absolute, CONFIG_FILE_MAX_BYTES + 1);
-      if (read === undefined) return { kind: 'absent' };
-      if (read.from > 0 || read.bytes.byteLength > CONFIG_FILE_MAX_BYTES) return { kind: 'unreadable' };
-      const text = new TextDecoder().decode(read.bytes);
-      return configTextTooLarge(text) ? { kind: 'unreadable' } : { kind: 'text', text };
-    } catch {
-      return { kind: 'unreadable' };
-    }
-  };
+  const readDisk = async (path: string): Promise<DiskState> => await readConfigDisk(fs, `${root}/${path}`);
 
   /** Every slot there is: each declared file, each collection item on disk, and each accepted item whose file is gone. */
   const gatherSlots = async (extra: ConfigIssue[]): Promise<readonly Slot[]> => {

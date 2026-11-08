@@ -163,5 +163,18 @@ function checkSeamFindings(where: string, manifest: Manifest, impl: AnyImplement
       if (!declared.has(id))
         findings.push({ check, where, message: `daemon half implements undeclared ${seam} "${id}"` });
   }
+  // A selftest's `enabledBy` names one of the manifest's OWN config file defs (kernel batch #14): the very object.
+  const own: readonly unknown[] = manifest.data?.config ?? [];
+  for (const [id, probe] of Object.entries(
+    (seams.selftest ?? {}) as Record<string, { enabledBy?: { def?: unknown } }>,
+  )) {
+    const def = probe?.enabledBy?.def as { shape?: unknown } | undefined;
+    if (probe?.enabledBy !== undefined && (def?.shape !== 'file' || !own.includes(def)))
+      findings.push({
+        check,
+        where,
+        message: `daemon half's selftest "${id}" is switched by a config file that is not one of its own declared files`,
+      });
+  }
   return findings;
 }

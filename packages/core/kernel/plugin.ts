@@ -133,6 +133,16 @@ export default definePlugin({
         audit: { record: FLEET_CONFIGURED },
         guard: { none: 'the answer names the path, the etag and what waits for the owner; never the text or a value' },
       }),
+      // Removing one declared file (kernel batch #11: the CLI's `rm` verbs over a config collection item). The same
+      // descriptor as `PUT`: Gate admits it per file, and a removal that loosens is held for the owner.
+      route('DELETE /v1/config/file', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: FLEET_USE,
+        noStore: true,
+        audit: { record: FLEET_CONFIGURED },
+        guard: { none: 'the answer names the path, the etag and what waits for the owner; never the text or a value' },
+      }),
       route('POST /v1/config/confirm', {
         minimum: 'operator',
         caller: 'person',

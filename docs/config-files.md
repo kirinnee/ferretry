@@ -169,14 +169,15 @@ left out.
 
 ## Routes
 
-| Route                       | Grant                                                                                                                                | Does                                                   |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
-| `GET /v1/config/status`     | `fleet.use`                                                                                                                          | every file, its state, every issue, every held edit    |
-| `GET /v1/config/file?path=` | the file's capability, `use`                                                                                                         | one file (or the starter a new one begins with) + etag |
-| `PUT /v1/config/file`       | the file's capability, `configure`; `If-Match: <etag>`                                                                               | write a file that checks; a loosening may be held      |
-| `POST /v1/config/confirm`   | the file's capability, `configure`; fresh passkey remotely                                                                           | confirm one held edit by its etag                      |
-| `PUT /v1/accounts/defaults` | `secrets.configure`, and the file's `configure` (fleet); fresh passkey remotely to set or change a line, none to remove one (!A243)¹ | the owner sets or clears one default account line      |
-| `POST /v1/agent/config`     | the agent's session credential; Ferretry settings on                                                                                 | the `config.*` tools                                   |
+| Route                          | Grant                                                                                                                                | Does                                                   |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
+| `GET /v1/config/status`        | `fleet.use`                                                                                                                          | every file, its state, every issue, every held edit    |
+| `GET /v1/config/file?path=`    | the file's capability, `use`                                                                                                         | one file (or the starter a new one begins with) + etag |
+| `PUT /v1/config/file`          | the file's capability, `configure`; `If-Match: <etag>`                                                                               | write a file that checks; a loosening may be held      |
+| `DELETE /v1/config/file?path=` | the file's capability, `configure`; `If-Match: <etag>` (or `?etag=`) required                                                        | remove one declared file; a loosening removal is held  |
+| `POST /v1/config/confirm`      | the file's capability, `configure`; fresh passkey remotely                                                                           | confirm one held edit by its etag                      |
+| `PUT /v1/accounts/defaults`    | `secrets.configure`, and the file's `configure` (fleet); fresh passkey remotely to set or change a line, none to remove one (!A243)¹ | the owner sets or clears one default account line      |
+| `POST /v1/agent/config`        | the agent's session credential; Ferretry settings on                                                                                 | the `config.*` tools                                   |
 
 **What `GET /v1/config/file` says differs in three values from the fixed file-kind list it replaces**: `kind` is the id of the
 plugin that declares the file (it was a file-kind name such as `machine`), `schema` is the schema file's name
@@ -191,7 +192,10 @@ owner decision !A243 accepts it as tap-free.
 
 The file's capability is `warden` for `warden.yaml` and `fleet` for everything else. A loosening `PUT` is in
 effect at once only for somebody at the machine or a device that proved a passkey for the act; anyone
-else's is written and held. `PUT /v1/config/file` is a person's route (`caller: 'person'`): a ferret's
+else's is written and held. `DELETE /v1/config/file` is bounded the same way: a declared file only, Gate asked per file
+as for a write, the etag it was read at required (`428` without one, `409` when the file moved), and a removal that
+loosens (a budget, a rule) is held with the file still in effect unless somebody at the machine asked. GAP: a remote
+device's passkey proof is never spent on a removal, so its loosening removal is held. `PUT /v1/config/file` is a person's route (`caller: 'person'`): a ferret's
 credential, or the admin token naming a ferret's session, is refused with `403 owner_only` before the body is read,
 so `fy config write` from inside a ferret is refused too. A ferret's one write door is `config.write`
 (`POST /v1/agent/config`), where every loosening is held. An agent never confirms. The agenda's Allow

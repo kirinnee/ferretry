@@ -98,9 +98,11 @@ import {
   hostPermitted,
   type ItemReachOf,
   NO_ITEMS,
+  PermissionError,
   spawnPermitted,
 } from '../host/permissions.ts';
 import { scratchPort } from '../host/scratch.ts';
+import { type DetachedCall, detachedHandle, detachedRefusal } from '../host/detached.ts';
 import { PinRegistry } from '../host/pins.ts';
 import { type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
 import { matchingHook } from '../host/hooks.ts';
@@ -129,6 +131,23 @@ import { MemoryStateFolder, SimulatedCrash } from './state.ts';
 
 // ─── options and results ──────────────────────────────────────────────────────────────────────────────────────────
 
+/** The real host's detached rule (`host/detached.ts`), with its sentence, before anything is started. */
+function refuseDetached(
+  manifest: Manifest,
+  items: ItemReachOf,
+  call: DetachedCall,
+  program: string,
+  spawnOptions: SpawnOptions,
+): void {
+  const spawnDeclared = spawnPermitted(
+    effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
+    items,
+    program,
+  );
+  const why = detachedRefusal(manifest.id, manifest.permissions?.detached, spawnDeclared, call, program, spawnOptions);
+  if (why !== undefined) throw new PermissionError(why);
+}
+
 export interface TestHostOptions {
   /** The halves under test, built in this order. No other plugin's code is loaded. */
   readonly plugins: readonly DaemonImplementation<any>[];
@@ -145,6 +164,11 @@ export interface TestHostOptions {
   readonly clock?: DrivenClock;
   /** Config values by `file` or `collection` (a collection is `{ name: value }`). Parsed with the declared schema. */
   readonly config?: Readonly<Record<string, unknown>>;
+  /**
+   * Hears a DETACHED `kernel.spawn.start` the real host's rule allowed (`host/detached.ts`), and answers its pid.
+   * Without it an allowed detached start throws, as any `start` here does. A refused one never reaches it.
+   */
+  readonly detachedStart?: (program: string, args: readonly string[], options: SpawnOptions) => number;
   /** Answers `kernel.spawn.run` for declared programs. Without it a spawn fails. */
   readonly spawn?: (
     program: string,
@@ -1308,6 +1332,8 @@ async function start(world: World): Promise<TestHost> {
       },
       spawn: {
         async run(program, args, spawnOptions) {
+          if (spawnOptions?.detached !== undefined)
+            refuseDetached(manifest, options.items ?? NO_ITEMS, 'run', program, spawnOptions);
           if (
             !spawnPermitted(
               effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
@@ -1320,6 +1346,8 @@ async function start(world: World): Promise<TestHost> {
           return options.spawn(program, args, spawnOptions);
         },
         async runBytes(program, args, spawnOptions) {
+          if (spawnOptions?.detached !== undefined)
+            refuseDetached(manifest, options.items ?? NO_ITEMS, 'runBytes', program, spawnOptions);
           const result = await this.run(program, args, spawnOptions);
           const all = new TextEncoder().encode(result.stdout);
           const cap = spawnOptions?.maxStdoutBytes ?? 1024 * 1024;
@@ -1332,7 +1360,13 @@ async function start(world: World): Promise<TestHost> {
             timedOut: false,
           };
         },
-        start(program): ChildHandle {
+        start(program, args, spawnOptions): ChildHandle {
+          if (spawnOptions?.detached !== undefined) {
+            refuseDetached(manifest, options.items ?? NO_ITEMS, 'start', program, spawnOptions);
+            if (options.detachedStart === undefined)
+              throw new Error(`${manifest.id}: detached ${program} with no detachedStart fake`);
+            return detachedHandle(options.detachedStart(program, args, spawnOptions));
+          }
           throw new Error(
             `${manifest.id}: the test host does not start long-lived ${program}; fake the port that does`,
           );

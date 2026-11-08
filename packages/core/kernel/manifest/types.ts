@@ -277,6 +277,12 @@ export interface Permissions {
    * for the plugin that may hold it. Absent: every `harnessFile` is refused.
    */
   readonly harnessFiles?: readonly string[];
+  /**
+   * The programs `kernel.spawn.start` may start DETACHED (`SpawnOptions.detached`: its own process group, outliving the
+   * daemon; Browsers: the platform link opener, `xdg-open` / `open`). Each must also be in `spawn`. Matched as `spawn`
+   * matches a name; `'*'` or any pattern names no program, for a core piece too. Absent: every detached start is refused.
+   */
+  readonly detached?: readonly string[];
   /** It reads the running build's facts and launches the self-update through `kernel.updateHost` (Updates). */
   readonly updateHost?: true;
 }

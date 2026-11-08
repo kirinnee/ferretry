@@ -970,6 +970,15 @@ export interface SpawnOptions {
    * `--remote-debugging-pipe` on 3 and 4). The daemon's ends are {@link ChildHandle.pipes}. At most 4.
    */
   readonly extraPipes?: number;
+  /**
+   * `start` only: the child gets its own session and process group (setsid), its stdio is ignored and it is
+   * unreferenced, so it outlives this daemon (Browsers' platform link opener). Only for a program the manifest lists in
+   * `permissions.detached` (a subset of `permissions.spawn`). Refused, before anything starts, with `run`/`runBytes`,
+   * `forFerret`, `extraPipes`, `stdin`, a pinned `cwd`, `timeout`, `signal` or a Vault {@link ChildEnvironment}. The
+   * handle's streams are empty and closed, `write` and `kill` throw, and `exited` is `null` at once: the kernel never
+   * waits on it. The kernel logs the program's name and pid, never its arguments.
+   */
+  readonly detached?: true;
 }
 
 export interface SpawnResult {

@@ -52,4 +52,31 @@ describe('manifest-match: the fyd --check seams', () => {
       'daemon half implements undeclared workers "more"',
     ]);
   });
+
+  test('R689 a selftest switched by its OWN config file def has no finding; any other def is one', () => {
+    const own = { kind: 'config', shape: 'file', file: 'alpha.yaml' };
+    const lookalike = { ...own };
+    const collection = { kind: 'config', shape: 'collection', collection: 'alpha' };
+    const withConfig = { ...manifest, data: { config: [own, collection] } } as unknown as Manifest;
+    const found = (def: object): string[] =>
+      halfFindings(
+        'packages/plugins/alpha/daemon',
+        withConfig,
+        'daemon',
+        {
+          half: 'daemon',
+          manifest: withConfig,
+          build: () => ({}),
+          preflight: { lines: () => [] },
+          selftest: { engine: { enabledBy: { def, on: () => true } } },
+          workers: { thread: new URL('file:///w.ts') },
+        } as unknown as AnyImplementation,
+        false,
+      ).map(f => f.message);
+    expect(found(own)).toEqual([]);
+    for (const def of [lookalike, collection])
+      expect(found(def)).toEqual([
+        'daemon half\'s selftest "engine" is switched by a config file that is not one of its own declared files',
+      ]);
+  });
 });

@@ -160,7 +160,7 @@ class RecordingSpawn {
 }
 
 describe('G27 the real launcher', () => {
-  test('G27 starts the opener as program plus argv with the host environment, an ended stdin and no shell', async () => {
+  test('G27 starts the opener detached, as program plus argv with the host environment, no stdin and no shell', async () => {
     const spawn = new RecordingSpawn();
     const environment = { PATH: '/bin', DISPLAY: ':0', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1/bus' };
     const launcher = new KernelDetachedLauncher(spawn, environment);
@@ -174,7 +174,8 @@ describe('G27 the real launcher', () => {
     expect(started?.args).toEqual([href]);
     expect(started?.program).not.toMatch(/^(sh|bash|cmd|powershell)/);
     expect(started?.options?.env).toEqual(environment);
-    expect(started?.options?.stdin).toEqual(new Uint8Array());
+    expect(started?.options?.stdin).toBeUndefined();
+    expect(started?.options?.detached).toBe(true);
   });
 
   test('G27 gives the opener exactly the allow-listed names, and drops a token or FY_HOME', () => {

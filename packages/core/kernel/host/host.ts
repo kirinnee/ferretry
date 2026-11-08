@@ -111,6 +111,7 @@ import { doctorReport } from './doctor-report.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
 import { type DaemonTimings, DEFAULT_DAEMON_TIMINGS } from './session/timings.ts';
 import {
+  allowDetachedSpawn,
   hostPermitted,
   effectivePermissions,
   openChildEnvironments,
@@ -729,12 +730,21 @@ async function bootLocked(
         // refusal, and stays green if this line is deleted. `workersFor`'s rule is unit-tested (declared-workers.test.ts).
         { urls: () => implementations.get(manifest.id)?.workers },
       ),
-      spawn: restrictSpawn(
+      spawn: allowDetachedSpawn(
         manifest.id,
+        manifest.permissions?.detached,
         effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
-        openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
+        restrictSpawn(
+          manifest.id,
+          effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
+          openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
+          items,
+          pins,
+        ),
+        adapters.spawn,
         items,
-        pins,
+        // The program's name and pid, never its arguments: a link opener's URL may carry a query.
+        (program, pid) => log.info('a detached child was started', { plugin: manifest.id, program, pid }),
       ),
       scratch: adapters.scratch ?? NO_SCRATCH,
       fetch: fetchPort,

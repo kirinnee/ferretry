@@ -9,6 +9,7 @@ import { WORKER_GRANTS_KEY } from './worker-grants/wire.ts';
 import type { ItemKind, PermissionEntry } from '../manifest/types.ts';
 import { hostAllowed, programAmong, programName, WILDCARD } from '../manifest/reach.ts';
 import type { PinRegistry } from './pins.ts';
+import { type DetachedCall, detachedNotOffered, detachedRefusal } from './detached.ts';
 
 export { hostAllowed, WILDCARD };
 
@@ -120,6 +121,8 @@ export function restrictSpawn(
 ): SpawnPort {
   /** Refuses an undeclared program, and a pinned cwd this plugin's roots did not mint; a Linux pin's alias is used. */
   const check = <O extends SpawnOptions | undefined>(program: string, options: O): O => {
+    // A detached start is offered only by `allowDetachedSpawn` around this port; through this one it is refused.
+    if (options?.detached !== undefined) throw new PermissionError(detachedNotOffered(plugin, program));
     if (!spawnPermitted(declared, items, program))
       throw new PermissionError(`${plugin} may not run ${programName(program)}: its manifest does not declare it.`);
     const cwd = options?.cwd;
@@ -133,6 +136,51 @@ export function restrictSpawn(
     run: async (program, args, options) => await base.run(program, args, check(program, options)),
     runBytes: async (program, args, options) => await base.runBytes(program, args, check(program, options)),
     start: (program, args, options) => base.start(program, args, check(program, options)),
+  };
+}
+
+/**
+ * `SpawnOptions.detached` (kernel batch #15) around a `restrictSpawn` port: a call without `detached` goes to
+ * `restricted` unchanged; a detached one is judged by `detachedRefusal` (`permissions.detached` by name, inside
+ * `permissions.spawn`, `start` only, none of the refused options) and, allowed, started on `base` directly. `started`
+ * hears the program's NAME and the pid, never its arguments (a URL may carry a query).
+ */
+export function allowDetachedSpawn(
+  plugin: string,
+  declared: readonly string[] | undefined,
+  spawnDeclared: readonly PermissionEntry[],
+  restricted: SpawnPort,
+  base: SpawnPort,
+  items: ItemReachOf = NO_ITEMS,
+  started: (program: string, pid: number) => void = () => undefined,
+): SpawnPort {
+  const judge = (call: DetachedCall, program: string, options: SpawnOptions): void => {
+    const why = detachedRefusal(
+      plugin,
+      declared,
+      spawnPermitted(spawnDeclared, items, program),
+      call,
+      program,
+      options,
+    );
+    if (why !== undefined) throw new PermissionError(why);
+  };
+  return {
+    run: async (program, args, options) => {
+      if (options?.detached !== undefined) judge('run', program, options);
+      return await restricted.run(program, args, options);
+    },
+    runBytes: async (program, args, options) => {
+      if (options?.detached !== undefined) judge('runBytes', program, options);
+      return await restricted.runBytes(program, args, options);
+    },
+    start: (program, args, options) => {
+      if (options?.detached === undefined) return restricted.start(program, args, options);
+      judge('start', program, options);
+      const handle = base.start(program, args, options);
+      started(programName(program), handle.pid);
+      return handle;
+    },
   };
 }
 

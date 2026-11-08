@@ -13,6 +13,7 @@ import type {
   WorkerHandle,
   WorkersPort,
 } from '../../contract/ports.ts';
+import { detachedHandle, plainEnvironment } from '../detached.ts';
 import { embeddedWorkerUrl } from './embedded-worker.ts';
 
 /**
@@ -21,6 +22,63 @@ import { embeddedWorkerUrl } from './embedded-worker.ts';
  * values go straight into the child and never back to the caller (lead decision 9). A handle with no opener bound, or
  * one the opener does not recognise, refuses the start: it is never passed through as if it were plain values.
  */
+/**
+ * The spawn call a detached start makes (`Bun.spawn` in the daemon); a unit test passes a recorder instead, so it
+ * can see `detached: true` and the ignored streams reach the call and `unref` run, with no real orphan left behind.
+ */
+export type DetachedSpawnCall = (
+  argv: readonly string[],
+  options: {
+    readonly cwd?: string;
+    readonly env: Readonly<Record<string, string>>;
+    readonly stdin: 'ignore';
+    readonly stdout: 'ignore';
+    readonly stderr: 'ignore';
+    readonly detached: true;
+  },
+) => { readonly pid: number; unref(): void };
+
+const bunDetachedSpawn: DetachedSpawnCall = (argv, options) =>
+  Bun.spawn([...argv], { ...options, env: { ...options.env } });
+
+/**
+ * A detached start (`SpawnOptions.detached`): its own session and process group (Bun's `detached` is `setsid`), all
+ * three streams ignored, unreferenced so the daemon never waits on it. The gate (`allowDetachedSpawn`) already refused
+ * every option a detached child cannot carry; this refuses them again so the adapter alone never starts one with a
+ * pipe, a held folder or a secret environment.
+ */
+export function startDetached(
+  program: string,
+  args: readonly string[],
+  options: SpawnOptions,
+  env: (program: string, options?: SpawnOptions) => Record<string, string>,
+  call: DetachedSpawnCall = bunDetachedSpawn,
+): ChildHandle {
+  const cwd = options.cwd;
+  if (
+    options.extraPipes !== undefined ||
+    options.stdin !== undefined ||
+    options.forFerret !== undefined ||
+    options.timeout !== undefined ||
+    options.signal !== undefined ||
+    (cwd !== undefined && typeof cwd !== 'string') ||
+    (options.env !== undefined && !plainEnvironment(options.env))
+  )
+    throw new Error(
+      'A detached child takes no pipes, stdin, ferret, timeout, signal, held folder or secret environment.',
+    );
+  const child = call([program, ...args], {
+    ...(cwd === undefined ? {} : { cwd }),
+    env: env(program, options),
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+    detached: true,
+  });
+  child.unref();
+  return detachedHandle(child.pid);
+}
+
 /** The most extra pipes one child may have (Chrome's DevTools pipe needs two). */
 const MAX_EXTRA_PIPES = 4;
 
@@ -79,6 +137,7 @@ export function bunSpawn(
   const env = (program: string, options?: SpawnOptions): Record<string, string> =>
     childEnvironment(program, baseEnv, tools, resolveEnv(options?.env, opener()));
   const start = (program: string, args: readonly string[], options?: SpawnOptions): ChildHandle => {
+    if (options?.detached !== undefined) return startDetached(program, args, options, env);
     const cwd = options?.cwd;
     // A pin is installed for exactly the one spawn statement, no await inside the bracket, and the child is given
     // `.`: it inherits the held directory and resolves `.` against it, never a name re-resolved after the fact.
@@ -127,6 +186,7 @@ export function bunSpawn(
   return {
     start,
     runBytes: async (program, args, options): Promise<SpawnBytesResult> => {
+      if (options?.detached !== undefined) throw new Error('A detached child is started with start, never runBytes.');
       const maxStdout = checkedLimit(options?.maxStdoutBytes, DEFAULT_STDOUT_LIMIT, 'maxStdoutBytes');
       const maxStderr = checkedLimit(options?.maxStderrBytes, DEFAULT_STDERR_LIMIT, 'maxStderrBytes');
       // The timeout is ours (SIGKILL, then stop reading): a grandchild holding the pipe cannot hang the caller.
@@ -161,6 +221,7 @@ export function bunSpawn(
       }
     },
     run: async (program, args, options): Promise<SpawnResult> => {
+      if (options?.detached !== undefined) throw new Error('A detached child is started with start, never run.');
       const child = start(program, args, options);
       const [stdout, stderr, exitCode] = await Promise.all([
         new Response(child.stdout).text(),

@@ -1,6 +1,6 @@
 /**
  * The configuration files over HTTP (docs/config-files.md): one file (`GET /v1/config/file`), an edit
- * (`PUT /v1/config/file`) and the owner's confirmation of an edit that loosens (`POST /v1/config/confirm`). Today's
+ * (`PUT /v1/config/file`), a removal (`DELETE /v1/config/file`, kernel batch #11) and the owner's confirmation of an edit that loosens (`POST /v1/config/confirm`). Today's
  * `mounts/config-files.ts`, with the per-file knowledge taken out: the kernel resolves a path to the file a plugin
  * declared and runs the one config writer; WHO may read, write or confirm which file is Gate's answer
  * (`Admission.judgeConfigAccess`), asked per file before the act.
@@ -9,7 +9,7 @@
  * a device with a passkey proved for the act); anyone else's is written and HELD, the tighter version in effect. No
  * raw secret is accepted: the writer refuses it like a file that does not parse, and no issue repeats the value.
  *
- * `noStore` on all three: every answer is a statement about now.
+ * `noStore` on all four: every answer is a statement about now.
  */
 import { z } from 'zod';
 import type { Admission, ConfigAct, ConfigAccessVerdict } from '../../contract/bound.ts';
@@ -54,10 +54,11 @@ const ConfirmBodySchema = z.strictObject({ path: PathSchema, etag: z.string().mi
 
 type Resolved = ConfigTarget & { readonly path: string };
 
-/** The three handlers, keyed as the kernel's manifest declares them. */
+/** The four handlers, keyed as the kernel's manifest declares them. */
 export function configRoutes(sources: ConfigRouteSources): Readonly<{
   'GET /v1/config/file': RouteHandler;
   'PUT /v1/config/file': RouteHandler;
+  'DELETE /v1/config/file': RouteHandler;
   'POST /v1/config/confirm': RouteHandler;
 }> {
   const resolve = (path: string): Resolved | undefined => {
@@ -189,6 +190,55 @@ export function configRoutes(sources: ConfigRouteSources): Readonly<{
             422,
           );
         }
+      }
+    },
+
+    /**
+     * Removes one declared file (a collection item: one CLI `rm` verb). Bounded exactly as `PUT`: the path resolves only
+     * to a declared file (`targetOfPath`), Gate admits the call per file with the act `write`, and the removal is the
+     * writer's own `remove`, which judges it: a removal that loosens (a budget, a rule) is HELD unless Gate says this
+     * call may put a loosening into effect, the file staying in effect. The etag it was read at is REQUIRED (`If-Match`,
+     * or `?etag=` for a caller that sends no headers): a removal never lands on a file nobody looked at. No text is
+     * returned. GAP(kernel): `ConfigFilesWriter.remove` takes no Gate claim, so a governed device's passkey proof is
+     * never spent on a removal: its loosening removal is held, as an agent's is (it fails closed).
+     */
+    'DELETE /v1/config/file': async call => {
+      const path = PathSchema.safeParse(queryValue(call.request, 'path') ?? '');
+      if (!path.success) throw new ApiError(400, 'no file named', 'bad_request');
+      const target = resolve(path.data) ?? unresolved(path.data, 'bad_request');
+      const ifMatch = headerValue(call.request, IF_MATCH) ?? queryValue(call.request, 'etag');
+      if (ifMatch === undefined || ifMatch === '')
+        throw new ApiError(
+          428,
+          `removing ${path.data} needs the etag it was read at (If-Match), so a file nobody looked at is never removed`,
+          'precondition_required',
+        );
+      const verdict = judge(target, 'write');
+      if (!verdict.allowed) return verdict.response;
+      const outcome = await writerOrFail().remove(target, { confirmedLoosening: verdict.mayLoosen === true, ifMatch });
+      switch (outcome.kind) {
+        case 'written':
+          return jsonResponse({ path: path.data, etag: outcome.etag, outcome: 'removed' });
+        case 'held':
+          return jsonResponse({
+            path: path.data,
+            etag: outcome.etag,
+            outcome: 'pending',
+            pending: { path: path.data, etag: outcome.etag, changes: [...outcome.sentences] },
+          });
+        case 'conflict':
+          throw new ApiError(
+            409,
+            `${path.data} changed since it was read; read it again and decide again whether to remove it`,
+            'config_conflict',
+          );
+        case 'refused':
+          if (outcome.reason === 'not_declared' || outcome.reason === 'bad_name')
+            return unresolved(path.data, 'bad_request');
+          return jsonResponse(
+            { error: `${path.data} was not removed (${outcome.reason})`, code: CONFIG_INVALID_CODE, issues: [] },
+            422,
+          );
       }
     },
 
