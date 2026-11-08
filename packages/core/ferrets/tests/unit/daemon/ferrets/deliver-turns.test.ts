@@ -856,6 +856,16 @@ describe("ruling #45 (b): a queued message over 1000 characters goes by file (to
   test('ruling #45 a 5000-char payload goes by file: written 0600 first, and the queue is typed the one-line pointer', async () => {
     const w = await world();
     const { id, seam } = await live(w);
+    // The mode THIS code asks for (the kernel clamps a private root's files too, so the file's mode alone proves the kernel).
+    const handle = w.reuse.handles[id] as RootHandle;
+    const publish = handle.publish.bind(handle);
+    const asked: (number | undefined)[] = [];
+    Object.assign(handle, {
+      publish: async (...args: Parameters<RootHandle['publish']>) => {
+        asked.push(args[2]?.mode);
+        return await publish(...args);
+      },
+    });
     const payload = `FIXTURE long report\n${'x'.repeat(5_000 - 20)}`;
     expect(payload).toHaveLength(5_000);
 
@@ -865,6 +875,7 @@ describe("ruling #45 (b): a queued message over 1000 characters goes by file (to
     expect(w.runner.queued.map(entry => entry.text)).toEqual([queuedMessageInstruction(file)]);
     expect(await readFile(file, 'utf8')).toBe(`${payload}\n`);
     expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect(asked).toEqual([0o600]);
     // Nothing of the message itself went into the composer, and no temporary file was left beside it.
     expect(w.runner.queued[0]?.text).not.toContain('xxxx');
     expect(await readdir(`${w.folderOf(id)}/channel`)).toEqual(['queued-send-mw7a-0001.md']);
@@ -899,6 +910,16 @@ describe("ruling #45 (b): a queued message over 1000 characters goes by file (to
     expect(names).toHaveLength(3);
     for (const name of names) expect(name).toMatch(/^queued-[\w-]{1,128}\.md$/u);
     expect(await readdir(w.folderOf(id))).not.toContain('escape');
+    // Each fresh-id pointer typed names the very file that was written, and that file holds its own message.
+    const fresh = names.filter(name => name !== 'queued-send-again.md');
+    const typed = w.runner.queued.slice(-2).map(entry => entry.text);
+    expect([...typed].sort()).toEqual(
+      fresh.map(name => queuedMessageInstruction(`${w.folderOf(id)}/channel/${name}`)).sort(),
+    );
+    const held = await Promise.all(
+      fresh.map(async name => await readFile(`${w.folderOf(id)}/channel/${name}`, 'utf8')),
+    );
+    expect(held.sort()).toEqual([`${'e'.repeat(1_500)}\n`, `${'f'.repeat(1_500)}\n`]);
   });
 
   test('ruling #45 two send ids that differ only by case never name one file (a filesystem that ignores case)', async () => {
