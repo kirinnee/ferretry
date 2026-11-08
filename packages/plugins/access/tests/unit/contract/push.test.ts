@@ -1,6 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { PUSH_BODY_MAX, PUSH_TITLE_MAX, PUSH_URL_MAX } from '@ferretry/kernel/contract';
+import * as kernel from '@ferretry/kernel/contract/push-envelope';
+import * as pairing from '../../../contract/pairing.ts';
 import * as push from '../../../contract/push.ts';
 import { BuzzSchema } from '../../../contract/wire.ts';
 import { INSTANT, LATER_INSTANT } from './fixtures.ts';
@@ -566,4 +568,120 @@ it('a buzz carries the envelope’s caps: an over-cap one is refused where anoth
   should(BuzzSchema.safeParse({ ...buzz, body: 'x'.repeat(PUSH_BODY_MAX + 1) }).success).be.false();
   should(BuzzSchema.safeParse({ ...buzz, url: `/${'x'.repeat(PUSH_URL_MAX)}` }).success).be.false();
   should(BuzzSchema.safeParse({ ...buzz, title: 'x'.repeat(PUSH_TITLE_MAX) }).success).be.true();
+});
+
+describe('the tag grammar and the push-service table are the kernel’s (K-push, one owner per fact)', () => {
+  it('should hold no copy: the table, the rule and the host check are the kernel’s own declarations', () => {
+    // Act / Assert
+    should(push.PUSH_SERVICE_ALLOWS_SILENT).equal(kernel.PUSH_SERVICE_ALLOWS_SILENT);
+    should(push.PUSH_SERVICE_HOSTS).equal(kernel.PUSH_SERVICE_HOSTS);
+    should(push.PUSH_SERVICE_HOST_SUFFIXES).equal(kernel.PUSH_SERVICE_HOST_SUFFIXES);
+    should(push.pushServiceAllowsSilent).equal(kernel.pushServiceAllowsSilent);
+    should(push.isPushServiceHost).equal(kernel.isPushServiceHost);
+  });
+
+  it('should send a tighter clear than the worker reads', () => {
+    // Act / Assert
+    should(push.PUSH_CLEAR_MAX_TAGS).be.belowOrEqual(kernel.PUSH_CLEAR_MAX_TAGS);
+  });
+
+  it('should name only kinds the worker reads: every PushNotificationKind matches PUSH_KIND_PATTERN', () => {
+    // Act / Assert
+    for (const kind of push.PushNotificationKindSchema.options) {
+      should(kernel.PUSH_KIND_PATTERN.test(kind)).be.true();
+      should(kernel.PushKindSchema.safeParse(kind).success).be.true();
+    }
+  });
+
+  it('should bound its show count by the kernel’s, so a count never makes a push unreadable', () => {
+    // Act / Assert
+    should(
+      push.PushNotificationPayloadSchema.safeParse({ ...sessionPayload, count: kernel.PUSH_COUNT_MAX }).success,
+    ).be.true();
+    should(
+      push.PushNotificationPayloadSchema.safeParse({ ...sessionPayload, count: kernel.PUSH_COUNT_MAX + 1 }).success,
+    ).be.false();
+  });
+
+  it('should read every payload Access composes as the worker’s show or clear, tagged or untagged', () => {
+    // Arrange
+    const { tag: _tag, ...untagged } = sessionPayload;
+    const envelope = { title: payloadBase.title, body: payloadBase.body, url: payloadBase.url };
+
+    // Act / Assert
+    should(kernel.readPushMessage(push.PushNotificationPayloadSchema.parse(sessionPayload))).deepEqual({
+      type: 'show',
+      show: { ...envelope, tag: 'session-1', count: 1, kind: 'agenda' },
+    });
+    should(kernel.readPushMessage(push.PushNotificationPayloadSchema.parse(untagged))).deepEqual({
+      type: 'show',
+      show: { ...envelope, count: 1, kind: 'agenda' },
+    });
+    should(kernel.readPushMessage(push.PushClearPayloadSchema.parse(clearPayload))).deepEqual({
+      type: 'clear',
+      clear: { kind: 'clear', tags: clearPayload.tags },
+    });
+  });
+
+  it('should keep a tag the worker could not read off the push, never compose one', () => {
+    // Arrange
+    const unreadable = ['two words', 'a/b', 'a#b', 'café', 'a\u0000b', 'x'.repeat(129)];
+
+    // Act / Assert
+    for (const tag of unreadable) {
+      should(push.fittingPushTag(tag)).be.undefined();
+      should(kernel.readPushMessage({ ...sessionPayload, tag })).be.null();
+      should(push.PushNotificationPayloadSchema.safeParse({ ...sessionPayload, tag }).success).be.false();
+      should(push.PushClearPayloadSchema.safeParse({ ...clearPayload, tags: [tag] }).success).be.false();
+    }
+    should(push.fittingPushTag('attention-session-1:A3')).equal('attention-session-1:A3');
+  });
+
+  it('should never refuse a buzz or a seen answer for its tag: those are not tags the worker reads', () => {
+    // Arrange: a ferret id may be 128 characters, so an agenda tag built from one may not fit
+    const long = `agenda-${'f'.repeat(128)}:A3`;
+
+    // Act / Assert
+    should(push.fittingPushTag(long)).be.undefined();
+    should(BuzzSchema.safeParse({ tag: long, title: 'Ferret stopped', body: '', url: '/agenda' }).success).be.true();
+    should(push.PushSeenResponseSchema.safeParse({ cleared: true, tags: [long] }).success).be.true();
+  });
+});
+
+describe('every tag Access composes from its own ids fits the kernel grammar, proven from the id schemas', () => {
+  /** Every character an id class `[A-Za-z0-9_-]` allows, so a fit is shown for the whole class, not a sample. */
+  const ID_CLASS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
+  /** Ids of `length` body characters that, together, use every character of the class. */
+  const bodies = (length: number): string[] =>
+    Array.from({ length: Math.ceil(ID_CLASS.length / length) + 1 }, (_, index) =>
+      Array.from({ length }, (_, at) => ID_CLASS[(index * length + at) % ID_CLASS.length]).join(''),
+    );
+
+  it('should fit the new-device tag (`device-paired:<PairedDeviceId>`) for every paired device id', () => {
+    // Arrange: PairedDeviceIdSchema is `fy_device_id_[A-Za-z0-9_-]{22}` (fixed length)
+    for (const body of bodies(22)) {
+      const deviceId = `fy_device_id_${body}`;
+      should(pairing.PairedDeviceIdSchema.safeParse(deviceId).success).be.true();
+
+      // Act / Assert
+      should(kernel.PUSH_TAG_PATTERN.test(`device-paired:${deviceId}`)).be.true();
+    }
+  });
+
+  it('should fit a tag naming a daemon id (`fy_daemon_[A-Za-z0-9_-]{43}`) beside any un-namespaced tag of 74', () => {
+    // Arrange: no Access tag names a daemon today; the worker adds the machine outside the kernel grammar. This bounds
+    // the room left should one ever do so.
+    for (const body of bodies(43)) {
+      const daemonId = `fy_daemon_${body}`;
+      should(pairing.DaemonIdSchema.safeParse(daemonId).success).be.true();
+
+      // Act / Assert
+      should(kernel.PUSH_TAG_PATTERN.test(`${daemonId}:${'t'.repeat(128 - daemonId.length - 1)}`)).be.true();
+    }
+  });
+
+  it('should fit the constant tags (enrolment, passkey added)', () => {
+    // Act / Assert
+    for (const tag of ['push-enrolment', 'passkey-added']) should(kernel.PUSH_TAG_PATTERN.test(tag)).be.true();
+  });
 });

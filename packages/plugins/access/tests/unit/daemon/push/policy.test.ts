@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { enrolmentConfirmation, pushDeviceView } from '../../../../daemon/lib/push/index.ts';
+import { readPushMessage } from '@ferretry/kernel/contract/push-envelope';
+import { buzzPayload, enrolmentConfirmation, pushDeviceView } from '../../../../daemon/lib/push/index.ts';
 import { AT, LATER, pushId, record, subscription } from './support.ts';
 
 describe('pushDeviceView', () => {
@@ -48,5 +49,40 @@ describe('enrolmentConfirmation', () => {
     });
     // Deliberately NOT a session payload: it is about the enrolment, so no preference may silence it.
     should('kind' in payload).be.false();
+  });
+});
+
+describe('buzzPayload (K-push: a tag is never a reason to lose a buzz)', () => {
+  const words = { title: 'Deploy approval', body: 'Ship the build?', url: '/ferrets/f1/chat?ask=A3' };
+
+  it('should send a tag the worker reads, and name the event by it', () => {
+    const payload = buzzPayload({ ...words, tag: 'agenda-mw89lrce-92c0fa14:A3' });
+
+    should(payload).eql({
+      version: 1,
+      eventKey: 'agenda-mw89lrce-92c0fa14:A3',
+      ...words,
+      tag: 'agenda-mw89lrce-92c0fa14:A3',
+      count: 1,
+    });
+    should(readPushMessage(payload)).eql({
+      type: 'show',
+      show: { ...words, tag: 'agenda-mw89lrce-92c0fa14:A3', count: 1 },
+    });
+  });
+
+  it('should send a tag the worker could not read UNTAGGED, never refuse it', () => {
+    // A ferret id may be 128 characters, so its agenda tag may be past the kernel's 128; a space is outside its charset.
+    for (const tag of [`agenda-${'f'.repeat(128)}:A3`, 'two words', 'x'.repeat(200)]) {
+      const payload = buzzPayload({ ...words, tag });
+
+      should(Object.keys(payload)).not.containEql('tag');
+      should(payload.eventKey).equal(tag);
+      should(readPushMessage(payload)).eql({ type: 'show', show: { ...words, count: 1 } });
+    }
+  });
+
+  it('should still refuse over-cap words at the sender', () => {
+    should(() => buzzPayload({ ...words, tag: 'a', title: 'x'.repeat(201) })).throw();
   });
 });

@@ -39,6 +39,7 @@ function disk(paths: readonly string[]) {
         readTail: () => Promise.reject(new Error('the fixture has no readTail')),
         writeBytes: () => Promise.reject(new Error('the fixture has no writeBytes')),
         copyTree: () => Promise.reject(new Error('the fixture has no copyTree')),
+        copyShared: () => Promise.reject(new Error('the fixture has no copyShared')),
         ensurePrivateDirectory: () => Promise.reject(new Error('the fixture has no ensurePrivateDirectory')),
         entries: () => Promise.reject(new Error('the fixture has no entries')),
         lstat: () => Promise.reject(new Error('the fixture has no lstat')),

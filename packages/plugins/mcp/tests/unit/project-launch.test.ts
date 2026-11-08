@@ -120,6 +120,7 @@ function kernelRoots(
         writeText: missing('write a file'),
         writeBytes: missing('write a file'),
         copyTree: missing('copy a folder'),
+        copyShared: missing('copy a shared folder'),
         ensurePrivateDirectory: missing('make a folder'),
         makeDirectory: missing('make a folder'),
         list: missing('list a folder'),

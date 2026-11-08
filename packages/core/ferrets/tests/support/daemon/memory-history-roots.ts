@@ -1,4 +1,12 @@
-import type { FencedPath, RootEntry, RootHandle, RootName, RootStat, RootsPort } from '@ferretry/kernel/contract';
+import type {
+  FencedPath,
+  RootEntry,
+  RootHandle,
+  RootName,
+  RootStat,
+  RootsPort,
+  SharedTree,
+} from '@ferretry/kernel/contract';
 import { MAX_ROOT_WINDOW_BYTES } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import { err, ok } from '@ferretry/std';
@@ -30,6 +38,10 @@ export class MemoryHistoryRoots implements RootsPort {
 
   harnessFile(): never {
     throw new Error('the history roots fixture has no harness file');
+  }
+
+  share(): Promise<SharedTree> {
+    return Promise.reject(new Error('the history roots share nothing'));
   }
 
   root(name: RootName, scope?: { readonly subfolder?: string }): RootHandle {
