@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { ApplyOutcome } from '@ferretry/plugin-runtimes/contract';
-import { renderChangeOutcome } from '../../src/lib/machine/render.ts';
+import { renderChangeOutcome, renderChangeView } from '../../src/lib/machine/render.ts';
 
 describe('the machine renderer says what a login change did', () => {
   const committedResult = {
@@ -74,5 +74,158 @@ describe('the machine renderer says what a login change did', () => {
     });
 
     should(rendered.ok).equal(false);
+  });
+});
+
+describe('the machine renderer says what a staged change would do', () => {
+  const view = (preview: object, consequences: string[] = []) =>
+    ({ summary: 'Do the thing', consequences, preview }) as never;
+
+  it('should list the files saved, the folders prepared, the runtimes after and the ferrets running on them', () => {
+    const text = renderChangeView(
+      view(
+        {
+          kind: 'apply',
+          documents: [{ path: 'config/runtimes/work.yaml' }, { path: 'config/profiles/work.yaml' }],
+          operations: [{}, {}, {}],
+          runtimes: [
+            { name: 'work', harness: 'claude-code', agent: true, launch: { available: true } },
+            { name: 'spare', harness: 'codex', agent: false, launch: { available: false, reason: 'not signed in' } },
+          ],
+          runningSessions: [{ id: 'ada-1', name: 'ada', harness: 'codex' }],
+        },
+        ['Moves nothing'],
+      ),
+    );
+
+    should(text.split('\n')).deepEqual([
+      'Do the thing',
+      '  • Moves nothing',
+      'Saves:',
+      '  config/runtimes/work.yaml',
+      '  config/profiles/work.yaml',
+      'Prepares 3 files and folders for the runtimes.',
+      'Runtimes after this change:',
+      '  work (Claude Code, agent) — ready to launch',
+      '  spare (Codex) — not signed in',
+      'Running on it now:',
+      '  ada (Codex) · ada-1',
+    ]);
+  });
+
+  it('should say a single prepared item in the singular, and list nothing when the change touches nothing', () => {
+    should(
+      renderChangeView(view({ kind: 'apply', documents: [], operations: [{}], runtimes: [] })).split('\n'),
+    ).deepEqual(['Do the thing', 'Prepares 1 file or folder for the runtimes.']);
+    should(renderChangeView(view({ kind: 'apply', documents: [], operations: [], runtimes: [] }))).equal(
+      'Do the thing',
+    );
+  });
+
+  it('should say a sign-out signs the person out of their own terminal too, when it does', () => {
+    const preview = { kind: 'sign-out', credential: 'work', runtimesAffected: 1, signsOutTerminal: true };
+    should(renderChangeView(view(preview)).split('\n')).deepEqual([
+      'Do the thing',
+      'Signs out work: 1 runtime will need sign-in afterwards.',
+      'This also signs out the same tool in your own terminal on this machine.',
+    ]);
+    should(renderChangeView(view({ ...preview, runtimesAffected: 2, signsOutTerminal: false }))).equal(
+      'Do the thing\nSigns out work: 2 runtimes will need sign-in afterwards.',
+    );
+  });
+
+  it('should print an executor’s own description', () => {
+    should(renderChangeView(view({ kind: 'executor', executor: 'clone', description: 'copies the setup' }))).equal(
+      'Do the thing\ncopies the setup',
+    );
+  });
+});
+
+describe('the machine renderer says how an applied change ended', () => {
+  const result = (extra: object) => ({ accountCount: 1, operationCount: 1, ...extra }) as never;
+
+  it('should say a commit left earlier files aside and a lock behind, and what it left as it was', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'committed',
+        result: result({
+          backupResidue: ['a.bak', 'b.bak'],
+          lockResidue: '/home/.lock',
+          skipped: [{ path: '/homes/one/skills', reason: 'kept' }],
+        }),
+      },
+    } as never);
+
+    should(rendered).eql({
+      ok: true,
+      text: [
+        'Done.',
+        'Kept 2 earlier files aside: a.bak, b.bak',
+        'Remove /home/.lock before the next change.',
+        'Left /homes/one/skills as it was: kept',
+      ].join('\n'),
+    });
+  });
+
+  it('should say a commit with a single earlier file in the singular', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: { outcome: 'committed', result: result({ backupResidue: ['a.bak'] }) },
+    } as never);
+    should(rendered.text).equal('Done.\nKept 1 earlier file aside: a.bak');
+  });
+
+  it('should not call a change that saved but could not set up the shared history a success', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'committed-with-history-failure',
+        failedHarness: 'codex',
+        reason: 'read-only',
+        committed: result({ skipped: [{ path: '/h', reason: 'busy' }] }),
+      },
+    } as never);
+    should(rendered).eql({
+      ok: false,
+      text: 'Saved, but the shared codex history could not be set up: read-only\nLeft /h as it was: busy',
+    });
+  });
+
+  it('should say a rolled-back change changed nothing and why', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: { outcome: 'rolled-back', failedOperation: 'write runtimes/work.yaml', reason: 'disk full' },
+    } as never);
+    should(rendered).eql({ ok: false, text: 'Nothing changed. write runtimes/work.yaml failed: disk full' });
+  });
+
+  it('should name every path a failed rollback could not put back, and where its original is', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'rollback-incomplete',
+        failedOperation: 'write a',
+        reason: 'disk full',
+        unrestored: [
+          { path: '/a', reason: 'gone', backup: '/a.orig' },
+          { path: '/b', reason: 'busy' },
+        ],
+      },
+    } as never);
+    should(rendered).eql({
+      ok: false,
+      text: 'write a failed (disk full) and these could not be put back:\n  /a: gone (the original is at /a.orig)\n  /b: busy',
+    });
+  });
+
+  it('should say a sign-out, and a sign-out that failed', () => {
+    should(renderChangeOutcome({ outcome: 'signed-out', credential: { id: 'work' } } as never)).eql({
+      ok: true,
+      text: 'Signed out work.',
+    });
+    should(
+      renderChangeOutcome({ outcome: 'sign-out-failed', credential: { id: 'work' }, reason: 'no network' } as never),
+    ).eql({ ok: false, text: 'Could not sign out work: no network' });
   });
 });
