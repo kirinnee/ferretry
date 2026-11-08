@@ -247,9 +247,35 @@ describe('the held Codex catalog', () => {
       requestRefresh: () => undefined,
       warn: () => undefined,
     });
+    expect(catalog.binaryMissing()).toBe(false);
     await catalog.refresh();
     expect(reads).toBe(0);
     expect(catalog.held()).toBeUndefined();
+    expect(catalog.binaryMissing()).toBe(true);
+  });
+
+  test('(no guarantees row) r3 LOW-C a binary found on a later read clears the missing mark', async () => {
+    const { root } = await workspace();
+    let found = false;
+    const catalog = new HeldFastCatalog({
+      workspace: root,
+      environment: async () => undefined,
+      locate: async () =>
+        (found ? { outcome: 'located', path: '/opt/codex/bin/codex' } : { outcome: 'absent' }) as never,
+      read: async () => [SOL],
+      nowMs: () => 0,
+      now: () => instantFromEpochMs(0),
+      load: async () => undefined,
+      save: async () => undefined,
+      requestRefresh: () => undefined,
+      warn: () => undefined,
+    });
+    await catalog.refresh();
+    expect(catalog.binaryMissing()).toBe(true);
+    found = true;
+    await catalog.refresh();
+    expect(catalog.binaryMissing()).toBe(false);
+    expect(catalog.held()).toHaveLength(1);
   });
 
   test('(no guarantees row) a fast start asks for a read only when nothing is held or the held copy is older than five minutes', async () => {

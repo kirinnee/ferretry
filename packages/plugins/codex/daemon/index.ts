@@ -148,7 +148,11 @@ export default implementDaemon(manifest, {
           if (input.harness !== 'codex' || input.fast !== true) return fastStartDecision(input, () => undefined);
           await catalog.loaded();
           catalog.refreshIfStale();
-          return fastStartDecision(input, () => catalog.held());
+          return fastStartDecision(
+            input,
+            () => catalog.held(),
+            () => catalog.binaryMissing(),
+          );
         },
         'harnesses:codex': codexHarness({
           kernel,

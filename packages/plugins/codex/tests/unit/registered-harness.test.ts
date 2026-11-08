@@ -24,7 +24,7 @@ const message = (text: string) =>
   line('response_item', { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
 
 describe('the registered Codex harness', () => {
-  const LOADING = "Codex's model list is still loading; try again in a few seconds";
+  const LOADING = "Codex's model list is still loading; try again in about two minutes";
   const fastInput = (more: Record<string, unknown> = {}) => ({
     ferret: 'f1',
     name: 'wren',
@@ -65,6 +65,23 @@ describe('the registered Codex harness', () => {
     expect(await decide(fastInput({ fast: undefined }))).toEqual({ allow: true });
     // Asking for the catalog is what the refusal triggers: the job is kicked, not waited for.
     expect(box.kicks).toEqual(['codex-fast-catalog']);
+  });
+
+  test('(no guarantees row) r3 LOW-C once the boot read finds no Codex binary, a fast start is refused with "could not be found", not "still loading"; a non-fast start is not', async () => {
+    const box = fixture();
+    box.missingCodex();
+    const decide = decideOf(box.buildHalf());
+    // Before any read has looked, the true answer is still "loading".
+    expect(await decide(fastInput())).toMatchObject({ allow: false, reason: LOADING });
+    const job = box.jobs.find(candidate => candidate.id === 'codex-fast-catalog');
+    await job?.run(new AbortController().signal);
+    expect(box.catalogChildren).toHaveLength(0);
+    expect(await decide(fastInput())).toEqual({
+      allow: false,
+      reason: 'Codex could not be found, so its fast mode cannot be checked',
+      code: 'unservable_model',
+    });
+    expect(await decide(fastInput({ fast: false }))).toEqual({ allow: true });
   });
 
   test('(no guarantees row) #35 a persisted catalog decides a fast start at once, before any job has run', async () => {

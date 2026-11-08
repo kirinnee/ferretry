@@ -26,6 +26,7 @@ export function registeredCodex() {
   let sleepAction: (() => void) | undefined;
   let sleepFree = false;
   let nowMs = 0;
+  let codexMissing = false;
   const kicks: string[] = [];
   const catalogChildren: Started[] = [];
   const childSpawn = catalogSpawn(catalogChildren);
@@ -124,7 +125,9 @@ export function registeredCodex() {
         stderr: '',
         stdout:
           program === 'which'
-            ? '/opt/bin/codex\n'
+            ? codexMissing
+              ? ''
+              : '/opt/bin/codex\n'
             : program === 'printenv' && args[0] === 'HOME'
               ? '/fixture-owner\n'
               : '',
@@ -200,6 +203,10 @@ export function registeredCodex() {
     /** Let the clock's sleep return at once (the catalog child's reaping grace sleeps). */
     freeSleep: () => {
       sleepFree = true;
+    },
+    /** `which codex` finds nothing, so the binary is not located. */
+    missingCodex: () => {
+      codexMissing = true;
     },
     setNowMs: (ms: number) => {
       nowMs = ms;

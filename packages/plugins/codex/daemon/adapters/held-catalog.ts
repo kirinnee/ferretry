@@ -58,6 +58,7 @@ export class HeldFastCatalog {
   #pending: Promise<void> | undefined;
   #loaded: Promise<void> | undefined;
   #failing = false;
+  #unlocated = false;
 
   constructor(private readonly ports: HeldFastCatalogPorts) {}
 
@@ -85,9 +86,20 @@ export class HeldFastCatalog {
   }
 
   /**
+   * True once a read looked for the Codex binary and did not find it (and nothing is held to say otherwise). It tells a
+   * refusal apart: "still loading" is true while a read is yet to come, but a binary that is not there will never load.
+   * It is not a catalog wait — it only reports what the last read saw.
+   */
+  binaryMissing(): boolean {
+    return this.#unlocated;
+  }
+
+  /**
    * Called when a fast start arrives: if nothing is held, or the held copy is older than {@link STALE_AFTER_MS}, ask for
    * a read. Fire and forget — the start is answered from what is held, now.
    */
+  // LOW-B (r3, left as is on purpose): a read that keeps failing, or finds no binary, is asked for again on every fast start,
+  // with no backoff. Not changed in this round.
   refreshIfStale(): void {
     if (this.#pending !== undefined) return;
     if (this.#held !== undefined && this.ports.nowMs() - this.#readAtMs <= STALE_AFTER_MS) return;
@@ -119,6 +131,7 @@ export class HeldFastCatalog {
 
   async #read(signal: AbortSignal | undefined): Promise<void> {
     const location = await this.ports.locate();
+    this.#unlocated = location.outcome !== 'located';
     if (location.outcome !== 'located') return;
     const home = this.ports.workspace.resolve('home');
     const work = this.ports.workspace.resolve('work');

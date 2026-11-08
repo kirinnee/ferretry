@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { StartDecide, type StartDecideInput } from '@ferretry/core-ferrets/contract';
-import { CATALOG_LOADING, fastStartDecision } from '../../daemon/lib/fast-mode.ts';
+import { CATALOG_LOADING, CODEX_NOT_FOUND, fastStartDecision } from '../../daemon/lib/fast-mode.ts';
 import type { RuntimeModelChoice } from '../../daemon/lib/models.ts';
 import manifest from '../../manifest.ts';
 
@@ -52,13 +52,29 @@ describe('codex takes start.decide', () => {
     const none = (): undefined => undefined;
     const refused = {
       allow: false,
-      reason: "Codex's model list is still loading; try again in a few seconds",
+      reason: "Codex's model list is still loading; try again in about two minutes",
       code: 'unservable_model',
     };
     expect(CATALOG_LOADING).toBe(refused.reason);
     expect(fastStartDecision(input({ model: 'gpt-daybreak', fast: true }), none)).toEqual(refused);
     expect(fastStartDecision(input({ model: 'gpt-6-sol', fast: true }), none)).toEqual(refused);
     expect(fastStartDecision(input({ fast: true }), none)).toEqual(refused);
+  });
+
+  test('(no guarantees row) r3 LOW-C no catalog held and no Codex binary found is refused with a true sentence and the same closed code, never "still loading"', () => {
+    const none = (): undefined => undefined;
+    const refused = fastStartDecision(input({ model: 'gpt-daybreak', fast: true }), none, () => true);
+    expect(refused).toEqual({
+      allow: false,
+      reason: 'Codex could not be found, so its fast mode cannot be checked',
+      code: 'unservable_model',
+    });
+    expect(CODEX_NOT_FOUND).toBe((refused as { reason: string }).reason);
+    expect(fastStartDecision(input({ fast: true }), none, () => false)).toMatchObject({ reason: CATALOG_LOADING });
+    // A held catalog decides; a missing binary does not undo it.
+    expect(fastStartDecision(input({ model: 'gpt-6-sol', fast: true }), catalog, () => true)).toEqual({ allow: true });
+    // Not asking for fast is never held up by it.
+    expect(fastStartDecision(input({ model: 'gpt-daybreak' }), none, () => true)).toEqual({ allow: true });
   });
 
   test('(no guarantees row) #35 a start that did not ask for fast, or is not Codex, is never held up by a missing catalog', () => {

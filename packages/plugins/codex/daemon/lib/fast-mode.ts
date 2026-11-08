@@ -80,8 +80,15 @@ export function fastModeFacts(view: FastView, catalog: RuntimeModelCatalog): Fas
   };
 }
 
-/** What a fast start is told while no catalog is in hand (never loaded from disk, never read). */
-export const CATALOG_LOADING = "Codex's model list is still loading; try again in a few seconds";
+/**
+ * What a fast start is told while no catalog is in hand (never loaded from disk, never read). The first read of a machine's
+ * first boot waits for the kernel's worker lane, which opens about two minutes after the daemon serves, so that is what the
+ * sentence promises — not seconds.
+ */
+export const CATALOG_LOADING = "Codex's model list is still loading; try again in about two minutes";
+
+/** What a fast start is told when the read looked for Codex and it is not there: it will not load, so it does not say so. */
+export const CODEX_NOT_FOUND = 'Codex could not be found, so its fast mode cannot be checked';
 
 /**
  * The `start.decide` answer for a start that asks for fast mode: refuse it, with the code Ferrets maps to `409
@@ -90,17 +97,20 @@ export const CATALOG_LOADING = "Codex's model list is still loading; try again i
  *
  * The model is the one the start NAMED, else the catalog's own default. `held` is the catalog already in hand (a start
  * decides in the kernel's default 200 ms and never waits for a read). `undefined` means none is held: the first boot
- * ever, or no read has ever worked. Fast is never allowed unverified, so that REFUSES at once with {@link CATALOG_LOADING}
+ * ever, or no read has ever worked. Fast is never allowed unverified, so that REFUSES at once with {@link CATALOG_LOADING} (or {@link CODEX_NOT_FOUND}
+ * when the last read found no Codex binary — the same closed code, still fail closed)
  * (britnee, #35). Today a cold read waited, and a failed one allowed (rebuild-ref `bin/fyd.ts:2692`, `.catch(() => [])`);
  * both are tightened on purpose. A catalog that is held but does not list the model refuses nothing, as today.
  */
 export function fastStartDecision(
   input: StartDecideInput,
   held: () => readonly RuntimeModelChoice[] | undefined,
+  binaryMissing: () => boolean = () => false,
 ): HookDecision {
   if (input.harness !== 'codex' || input.fast !== true) return ALLOW;
   const choices = held();
-  if (choices === undefined) return { allow: false, reason: CATALOG_LOADING, code: UNSERVABLE_MODEL };
+  if (choices === undefined)
+    return { allow: false, reason: binaryMissing() ? CODEX_NOT_FOUND : CATALOG_LOADING, code: UNSERVABLE_MODEL };
   const model = input.model ?? choices.find(choice => choice.isDefault === true)?.value;
   if (model === undefined) return ALLOW;
   const refusal = fastStartRefusal(model, choices);
