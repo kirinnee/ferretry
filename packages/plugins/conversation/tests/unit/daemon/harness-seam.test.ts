@@ -8,6 +8,7 @@ import type {
   FerretSummary,
   HarnessDeliveryFailure,
   HarnessInterrupted,
+  HarnessQueueOptions,
   HarnessRefusal,
   QueueOutcome,
   RunnerDelivery,
@@ -61,7 +62,7 @@ const QUESTION_TOOL_USE = 'toolu_01T4KnfY1in2GTL7P9wUmRtt';
 /** What one scripted harness does when Conversation uses it. */
 interface Script {
   deliver?: () => Promise<Result<DeliveryOutcome, HarnessDeliveryFailure>>;
-  queue?: () => Promise<Result<QueueOutcome, HarnessDeliveryFailure>>;
+  queue?: (text: string, options?: HarnessQueueOptions) => Promise<Result<QueueOutcome, HarnessDeliveryFailure>>;
   interrupt?: () => Promise<Result<HarnessInterrupted, HarnessRefusal>>;
 }
 
@@ -71,6 +72,8 @@ class HarnessFerrets extends FakeFerrets {
   readonly delivered: RunnerDelivery[] = [];
   /** What was put in the busy pane's own queue. */
   readonly queued: string[] = [];
+  /** The options each queue call carried, in order (the `sendId` the send row is named by). */
+  readonly queueOptions: (HarnessQueueOptions | undefined)[] = [];
   interrupts = 0;
   script: Script = {};
   /** Set when `harness()` itself refuses, as Ferrets' mayTouch rule does. */
@@ -85,10 +88,11 @@ class HarnessFerrets extends FakeFerrets {
         this.delivered.push(delivery);
         return await (this.script.deliver?.() ?? Promise.resolve(ok('turn-started' as const)));
       },
-      queue: async text => {
+      queue: async (text, options) => {
         this.queued.push(text);
+        this.queueOptions.push(options);
         if (this.script.queue === undefined) throw new Error('this test did not expect a send to be queued');
-        return await this.script.queue();
+        return await this.script.queue(text, options);
       },
       interrupt: async () => {
         this.interrupts += 1;
@@ -640,6 +644,109 @@ describe('a send to a ferret still working on its turn goes to the harness’s o
 
     expect((await send(host)).status).toBe(409);
     expect(ferrets.queued).toEqual([]);
+    await host.stop();
+  });
+});
+
+describe('ruling #45: the queue is told WHICH send it carries, so a message that goes by file is named by its row', () => {
+  /** Ferrets' own rule, stood in for here: over this many characters the pane is typed a pointer to a file, never the text. */
+  const INLINE_MAX = 1_000;
+  const POINTER = (sendId: string) => `read channel/queued-${sendId}.md`;
+  /**
+   * What Ferrets' harness does with a queued message (its own tests prove the real file: written 0600, the 1000/1001
+   * boundary, a fresh id for one outside the grammar): a long text is written to `queued-<sendId>.md` and the pane is
+   * typed its one-line pointer. Records what the PANE was typed and what files exist.
+   */
+  const byFile = (ferrets: HarnessFerrets, files: Map<string, string>, typed: string[], writable = true) => {
+    ferrets.script.deliver = async () => err({ refused: 'not_ready', why: 'busy' });
+    ferrets.script.queue = async (text, options) => {
+      if (text.length <= INLINE_MAX) {
+        typed.push(text);
+        return ok('held');
+      }
+      // A write that cannot be made answers plugin_unavailable BEFORE any key (Ferrets' contract): nothing is typed.
+      if (!writable || options?.sendId === undefined) return err({ refused: 'plugin_unavailable' });
+      files.set(`queued-${options.sendId}.md`, text);
+      typed.push(POINTER(options.sendId));
+      return ok('held');
+    };
+  };
+  const long = `FIXTURE long report\n${'x'.repeat(4_000)}`;
+
+  test('the send row’s id reaches the harness queue, exactly, for a request id and for a minted one', async () => {
+    const { host, ferrets, api } = await conversation();
+    ferrets.script.deliver = async () => err({ refused: 'not_ready', why: 'busy' });
+    ferrets.script.queue = async () => ok('held');
+
+    expect((await send(host, 'req-7')).status).toBe(200);
+    // No request id on the call: the port mints the send's id, and that SAME id is the one the queue is handed.
+    const sent = await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'minted' });
+    expect(sent).toMatchObject({ ok: true });
+
+    const rowIds = (await api().sends(F1)).sends.map(row => row.sendId);
+    expect(ferrets.queueOptions).toEqual(rowIds.map(sendId => ({ sendId })));
+    expect(ferrets.queueOptions[0]).toEqual({ sendId: 'req-7' });
+    expect(rowIds).toHaveLength(2);
+    await host.stop();
+  });
+
+  test('a long payload goes by file under the row’s name and the pane is typed the pointer ONCE; a repeat of the id types nothing', async () => {
+    const { host, ferrets, api } = await conversation();
+    const files = new Map<string, string>();
+    const typed: string[] = [];
+    byFile(ferrets, files, typed);
+
+    const response = await send(host, 'req-long', 'f1', { message: long });
+
+    expect(response.status).toBe(200);
+    expect(response.json()).toMatchObject({ disposition: 'queued', sendId: 'req-long', fate: 'queued' });
+    // The file is named by the send row, so the app can read the send back by it; its words are what the agent reads.
+    expect([...files.keys()]).toEqual(['queued-req-long.md']);
+    expect(files.get('queued-req-long.md')).toBe(long);
+    expect((await api().sends(F1)).sends.map(row => row.sendId)).toEqual(['req-long']);
+    expect(typed).toEqual([POINTER('req-long')]);
+    expect(typed[0]).not.toContain('xxxx');
+
+    const again = await send(host, 'req-long', 'f1', { message: long });
+    expect(again.status).toBe(200);
+    expect([typed.length, ferrets.queued.length, ferrets.delivered.length]).toEqual([1, 1, 1]);
+    await host.stop();
+  });
+
+  test('a long payload whose file cannot be written: the busy refusal, NOTHING typed, the record taken back, and the same id may go again', async () => {
+    const { host, ferrets, api } = await conversation();
+    const files = new Map<string, string>();
+    const typed: string[] = [];
+    byFile(ferrets, files, typed, false);
+
+    const refused = await send(host, 'req-long', 'f1', { message: long });
+
+    expect([refused.status, refused.json<{ code: string }>().code]).toEqual([409, 'send_refused']);
+    expect(refused.json<{ error: string }>().error).toBe(NOT_READY_SENTENCES.busy);
+    expect(typed).toEqual([]);
+    expect(files.size).toBe(0);
+    expect(await live(api)).toEqual([]);
+    // Tried ONCE: a second queue attempt would be a second chance to double-type.
+    expect([ferrets.delivered.length, ferrets.queued.length]).toEqual([1, 1]);
+
+    // Nothing was typed, so the same id starts over, and now the write works.
+    byFile(ferrets, files, typed);
+    const retried = await send(host, 'req-long', 'f1', { message: long });
+    expect(retried.status).toBe(200);
+    expect(typed).toEqual([POINTER('req-long')]);
+    await host.stop();
+  });
+
+  test('a short payload is typed inline: no file, the text itself in the queue', async () => {
+    const { host, ferrets } = await conversation();
+    const files = new Map<string, string>();
+    const typed: string[] = [];
+    byFile(ferrets, files, typed);
+
+    expect((await send(host, 'req-short')).status).toBe(200);
+
+    expect(typed).toEqual(['hello there']);
+    expect(files.size).toBe(0);
     await host.stop();
   });
 });
