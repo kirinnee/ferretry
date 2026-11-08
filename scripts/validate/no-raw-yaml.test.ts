@@ -183,6 +183,16 @@ describe('every way past the old line matcher is found', () => {
       "import { createRequire } from 'node:module';\nlet require;\nrequire = createRequire(import.meta.url);\nconst m = require(path);",
     'a var require given a loader afterwards':
       "import { createRequire } from 'node:module';\nvar require;\nrequire = createRequire(import.meta.url);\nconst m = require(path);",
+    'a let require given a loader by ||=':
+      "import { createRequire } from 'node:module';\nlet require = null;\nrequire ||= createRequire(import.meta.url);\nexport const f = p => require(p);",
+    'a let require given a loader by ??=':
+      "import { createRequire } from 'node:module';\nlet require = null;\nrequire ??= createRequire(import.meta.url);\nexport const f = p => require(p);",
+    'a let require given a loader by &&=':
+      "import { createRequire } from 'node:module';\nlet require = null;\nrequire &&= createRequire(import.meta.url);\nexport const f = p => require(p);",
+    'a loader kept in a property':
+      "import { createRequire } from 'node:module';\nconst box = {};\nbox.r = createRequire(u);\nbox.r(p);",
+    'an escaped require handed to call': 'const m = r\\u0065quire.call(null, p);',
+    'an escaped require handed on as a value': 'const ms = ps.map(r\\u0065quire);',
   };
   for (const [shape, text] of Object.entries(SHAPES))
     test(shape, () => {

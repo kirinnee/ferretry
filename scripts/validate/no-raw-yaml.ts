@@ -56,7 +56,9 @@
  * through a destructure of `import.meta`, a ledgered file that parks its parser on `globalThis` or exports it by a later
  * assignment or a `namespace`, an import by absolute path, a package name or a `Worker` URL (only relative paths are
  * followed), a YAML library whose name has no `yaml` in it, and a ledgered parser reached through a function of an
- * allowed caller that itself is exported (the caller's ledger line is the review; its own importers are not followed).
+ * allowed caller that itself is exported (the caller's ledger line is the review; its own importers are not followed),
+ * `createRequire` itself handed on as a value (`[u].map(cr)`), and a loader made through a sequence callee
+ * (`(0, createRequire)(import.meta.url)`).
  *
  * Usage: `bun scripts/validate/no-raw-yaml.ts <repo root>`; exits 0 clean, 1 a violation, 2 a broken gate.
  */
@@ -336,6 +338,8 @@ export function scanFile(path: string, text: string): FileFacts {
   /** Names bound to Bun's `YAML` object. */
   const bunYamlNames = new Set<string>();
 
+  /** The assignments that can give a name a value: plain, and the logical ones (`||=`, `??=`, `&&=`) alike. */
+  const ASSIGNS: ReadonlySet<string> = new Set(['=', '||=', '??=', '&&=']);
   /** Names bound to a module loader: `require`, `const r = require`, `const r = createRequire(import.meta.url)`. */
   const requireNames = new Set<string>(['require']);
   /** Names bound to `node:module`'s `createRequire` (`import { createRequire as cr } from 'node:module'`). */
@@ -399,7 +403,8 @@ export function scanFile(path: string, text: string): FileFacts {
   // enclosing block for `let`, `const`, a class or a function declaration — so a `require` declared in one function
   // no longer hides the loader in every other. A declaration that IS a loader (`const require = createRequire(…)`, or
   // a name later assigned one) is not its own.
-  const mentionsRequire = text.includes('equire');
+  // An escaped identifier (`require`) is cooked to `require` by the parser but has no `equire` in its text.
+  const mentionsRequire = text.includes('equire') || text.includes('\\u');
   const parentOf = new Map<Node, Visited>();
   const ownScopes = new Set<Node>();
   if (mentionsRequire) {
@@ -428,7 +433,7 @@ export function scanFile(path: string, text: string): FileFacts {
     const assignedLoader = nodes.some(
       ({ node }) =>
         node.type === 'AssignmentExpression' &&
-        node.operator === '=' &&
+        ASSIGNS.has(node.operator as string) &&
         isNode(node.left) &&
         node.left.type === 'Identifier' &&
         node.left.name === 'require' &&
@@ -534,7 +539,14 @@ export function scanFile(path: string, text: string): FileFacts {
     if (holder.type === 'MemberExpression' && slot === 'object')
       return ['call', 'apply', 'bind'].includes(memberName(holder) ?? '');
     if (holder.type === 'VariableDeclarator' && slot === 'init') return false;
-    if (holder.type === 'AssignmentExpression' && slot === 'right') return false;
+    // Handed to a NAME, the bindings follow it; handed to a property (`box.r = createRequire(u)`), nothing does.
+    if (
+      holder.type === 'AssignmentExpression' &&
+      slot === 'right' &&
+      isNode(holder.left) &&
+      holder.left.type === 'Identifier'
+    )
+      return false;
     if (holder.type === 'UnaryExpression' && holder.operator === 'typeof') return false;
     return true;
   };
@@ -689,7 +701,9 @@ export function scanFile(path: string, text: string): FileFacts {
     }
   }
   const bindingSites = nodes.filter(
-    ({ node }) => node.type === 'VariableDeclarator' || (node.type === 'AssignmentExpression' && node.operator === '='),
+    ({ node }) =>
+      node.type === 'VariableDeclarator' ||
+      (node.type === 'AssignmentExpression' && ASSIGNS.has(node.operator as string)),
   );
   for (let changed = true; changed; ) {
     changed = false;
@@ -697,7 +711,7 @@ export function scanFile(path: string, text: string): FileFacts {
       const [target, value] =
         node.type === 'VariableDeclarator'
           ? [node.id, node.init]
-          : node.type === 'AssignmentExpression' && node.operator === '='
+          : node.type === 'AssignmentExpression' && ASSIGNS.has(node.operator as string)
             ? [node.left, node.right]
             : [undefined, undefined];
       if (value === null || value === undefined) continue;
