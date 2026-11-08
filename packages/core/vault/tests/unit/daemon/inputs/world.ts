@@ -88,6 +88,8 @@ export interface WorldOptions {
   /** What the target shows; the default is a sudo prompt. A function is asked at every look. */
   readonly facts?: InputTargetFacts | (() => InputTargetFacts);
   readonly observe?: () => ObserveResult;
+  /** The target's second look (`refind`); absent, the target has none (a look again returns the first look). */
+  readonly refind?: () => ObserveResult;
   readonly accounts?: Pick<AccountList, 'accounts' | 'signIns'>;
   /** The grants the source reports; read at every call, so a test may change them mid-flight. */
   readonly grants?: SignInGrant[];
@@ -222,6 +224,7 @@ export function world(options: WorldOptions = {}) {
       };
     },
     shoot: async () => state.shot,
+    ...(options.refind === undefined ? {} : { refind: async () => (options.refind as () => ObserveResult)() }),
     document: async () => state.document,
     type: async (_session, _target, typedValues, submit, _expected, typeOptions) => {
       writes.push({ values: typedValues.map(each => each.text), submit, options: typeOptions });

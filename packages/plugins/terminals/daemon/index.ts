@@ -23,6 +23,7 @@ import {
   targetRef,
 } from '@ferretry/core-vault/contract';
 import {
+  agentControlRefusal,
   ApiError,
   type CallContext,
   decodeParameter,
@@ -441,12 +442,28 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     const name = (await ferrets.get(ferret).catch(() => undefined))?.name;
     return { kind: 'agent', sessionId: ferret, ...(name === undefined ? {} : { name }) };
   };
+  /**
+   * "What agents may control › Terminals", asked of core's `AgentControlPort` for the calling ferret on every terminal tool
+   * (today's `switchOf`: every `terminal.*` tool). Fails closed: unbound (Ferrets not serving), a lookup or reader that
+   * throws, or any answer but a plain `true` refuses. A person's route is not asked, as today.
+   */
+  const terminalsOn = async (ferret: FerretId): Promise<boolean> => {
+    try {
+      const reader = ctx.uses.agentControl.current();
+      return reader !== undefined && (await reader.allows(ferret, 'terminal')) === true;
+    } catch {
+      return false;
+    }
+  };
   const tool =
     (name: string) =>
     async (call: CallContext, input: unknown): Promise<ToolResult> => {
       const caller = await callerOf(call);
       if (caller === undefined)
         return { text: "Terminal tools are a ferret's: no ferret made this call.", isError: true };
+      // Today's `forbidden` and `controlRefusal('terminal')` (rebuild-ref agent-tools/service.ts:436-437, policy.ts:96-101).
+      if (!(await terminalsOn(caller.sessionId as FerretId)))
+        return { text: agentControlRefusal('terminal'), isError: true };
       const parsed = parseToolCall(name, input);
       if (typeof parsed === 'string') return { text: parsed, isError: true };
       try {

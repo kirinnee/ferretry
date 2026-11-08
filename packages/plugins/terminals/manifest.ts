@@ -1,7 +1,7 @@
 import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
 import { HoldsChanged, InputTargets, VaultPort } from '@ferretry/core-vault/contract';
-import { FerretsPort, Runners } from '@ferretry/core-ferrets/contract';
+import { AgentControlPort, FerretsPort, Runners } from '@ferretry/core-ferrets/contract';
 import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
 import {
   AUDIT,
@@ -52,8 +52,12 @@ export default definePlugin({
   provides: { terminals: TerminalsPort },
   /** Who holds terminals and where a ferret works (Ferrets); input cards a ferret raises (Vault). */
   needs: { ferrets: FerretsPort, vault: VaultPort },
-  /** Conversation (optional; lead ruling 2026-11-07): Off, nothing asks Terminals for the composer's `%terminal` menu. */
-  uses: { conversation: ConversationPort },
+  /**
+   * Conversation (optional; lead ruling 2026-11-07): Off, nothing asks Terminals for the composer's `%terminal` menu.
+   * Agent control (core Ferrets, bound by the kernel): the owner's "What agents may control › Terminals" switch, read on
+   * every terminal tool call; unbound, every agent terminal tool is refused (fail closed).
+   */
+  uses: { conversation: ConversationPort, agentControl: AgentControlPort },
 
   actions: {
     routes: [

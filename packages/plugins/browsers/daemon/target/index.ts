@@ -6,7 +6,7 @@
  * ```ts
  * const identities = new TypedIdentities(() => kernel.clock.nowMs());
  * const runtime = new BrowserSessionService(…, identities);
- * const target = pageTarget({ kernel, pages: runtime, host: pageToolHost(tools), identities, vault });
+ * const target = pageTarget({ kernel, pages: runtime, control: policy, host: pageToolHost(tools), identities, vault });
  * return {
  *   hooks: { 'input.targets:page': target.adapter, … },
  *   tools: { ...target.tools, … },
@@ -22,6 +22,7 @@
 import type { InputTargetAdapter } from '@ferretry/core-vault/contract';
 import type { KernelPorts } from '@ferretry/kernel/contract';
 import type { ToolHandler } from '@ferretry/kernel/manifest';
+import type { AgentControlPolicy } from '../tools/service.ts';
 import { type PageInputHost, PageInputTarget } from './adapter.ts';
 import { TypedIdentities } from './sign-in/identities.ts';
 import type { BrowserSignInWatch } from './sign-in/watch.ts';
@@ -35,6 +36,12 @@ export interface PageTargetDeps extends Omit<PageToolDeps, 'kernel' | 'identitie
   readonly kernel: Pick<KernelPorts, 'act' | 'redaction' | 'clock'>;
   /** The agent browser's page queue: every look, picture and write of the input target runs inside it. */
   readonly pages: PageInputHost;
+  /**
+   * "What agents may control › Browsers": the same `AgentControlPolicy` the browser tools ask (core's `AgentControlPort`),
+   * read on every look and write into a page; required,
+   * so no target is built that skips it. Unbound or failing, every one is refused (fail closed).
+   */
+  readonly control: AgentControlPolicy;
   /** Who each page signs in: the daemon half's one ledger, which its runtime clears (I155). */
   readonly identities?: TypedIdentities;
 }
@@ -55,7 +62,7 @@ export interface PageTargetHalf {
 
 export function pageTarget(deps: PageTargetDeps): PageTargetHalf {
   const identities = deps.identities ?? new TypedIdentities(() => deps.kernel.clock.nowMs());
-  const adapter = new PageInputTarget(deps.pages);
+  const adapter = new PageInputTarget(deps.pages, deps.control);
   const tools = pageInputTools({
     kernel: deps.kernel,
     host: deps.host,
