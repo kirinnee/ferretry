@@ -15,13 +15,6 @@ afterEach(() => {
   for (const parent of parents.splice(0)) rmSync(parent, { recursive: true, force: true });
 });
 
-function freePort(): number {
-  const server = Bun.serve({ port: 0, fetch: () => new Response('') });
-  const port = server.port as number;
-  void server.stop(true);
-  return port;
-}
-
 function check(home: string, port: number, ...extra: string[]) {
   const child = Bun.spawnSync(['bun', FYD, '--check', ...extra], {
     env: { ...process.env, FY_HOME: home, FY_PORT: String(port) },
@@ -35,18 +28,29 @@ const snapshot = (dir: string): string[] =>
     entry => `${join(entry.parentPath, entry.name)}:${statSync(join(entry.parentPath, entry.name)).mtimeMs}`,
   );
 
-test('V-0506 R689 --check on a missing home reports it would create one, creates nothing and leaves the port free', () => {
+test('V-0506 R689 --check on a missing home reports it would create one, creates nothing and binds nothing', async () => {
   const parent = mkdtempSync(join(tmpdir(), 'fyd-check-'));
   parents.push(parent);
   const home = join(parent, 'home');
-  const port = freePort();
-  const answer = check(home, port);
+  const answer = check(home, 0);
   expect(answer.code).toBe(0);
   expect(answer.out).toContain('would create it');
-  expect(answer.out).toContain('free — this daemon would bind it');
+  expect(answer.out).toContain('the operating system will assign the port');
   expect(existsSync(home)).toBe(false);
-  const probe = Bun.serve({ port, fetch: () => new Response('') });
-  void probe.stop(true);
+  const lines: string[] = [];
+  const code = await checkHost({
+    fs: nodeFs(() => crypto.randomUUID()),
+    home,
+    host: '127.0.0.1',
+    port: 7457,
+    daemonName: 'fyd',
+    probe: async () => 'free',
+    alive: () => false,
+    say: line => void lines.push(line),
+  });
+  expect(code).toBe(0);
+  expect(lines.join('\n')).toContain('free — this daemon would bind it');
+  expect(existsSync(home)).toBe(false);
 });
 
 test('V-0506 R689 --check on an existing home leaves every entry untouched', () => {
@@ -54,9 +58,12 @@ test('V-0506 R689 --check on an existing home leaves every entry untouched', () 
   parents.push(parent);
   const home = join(parent, 'home');
   mkdirSync(join(home, 'run'), { recursive: true });
-  writeFileSync(join(home, 'home.json'), `${JSON.stringify({ format: 1, createdBy: 'test', createdAt: '2026-01-01T00:00:00.000Z' })}\n`);
+  writeFileSync(
+    join(home, 'home.json'),
+    `${JSON.stringify({ format: 1, createdBy: 'test', createdAt: '2026-01-01T00:00:00.000Z' })}\n`,
+  );
   const before = snapshot(home);
-  const answer = check(home, freePort());
+  const answer = check(home, 0);
   expect(answer.code).toBe(0);
   expect(answer.out).toContain('a Ferretry home');
   expect(snapshot(home)).toEqual(before);
@@ -69,7 +76,7 @@ test('V-0506 R689 --check refuses 78 for a home that is not a Ferretry home and 
   mkdirSync(home);
   writeFileSync(join(home, 'stray.txt'), 'x');
   const before = snapshot(home);
-  const answer = check(home, freePort());
+  const answer = check(home, 0);
   expect(answer.code).toBe(78);
   expect(snapshot(home)).toEqual(before);
 });
@@ -92,7 +99,10 @@ test('V-0506 R689 --check exits 78 and says `taken — another fyd, pid N` when 
   parents.push(parent);
   const home = join(parent, 'home');
   mkdirSync(join(home, 'run'), { recursive: true });
-  writeFileSync(join(home, 'home.json'), `${JSON.stringify({ format: 1, createdBy: 'test', createdAt: '2026-01-01T00:00:00.000Z' })}\n`);
+  writeFileSync(
+    join(home, 'home.json'),
+    `${JSON.stringify({ format: 1, createdBy: 'test', createdAt: '2026-01-01T00:00:00.000Z' })}\n`,
+  );
   const holder = Bun.serve({ port: 0, fetch: () => new Response('') });
   try {
     const port = holder.port as number;

@@ -43,7 +43,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 
-const packageRoot = resolve(import.meta.dir, '../../../../../app');
+/** The app shell's package (`packages/app`), whose scripts build the fy-render fixture. */
+const packageRoot = resolve(import.meta.dir, '../../../../../../app');
 const builder = resolve(packageRoot, 'scripts/build-fy-render-integration-fixture.ts');
 
 /**

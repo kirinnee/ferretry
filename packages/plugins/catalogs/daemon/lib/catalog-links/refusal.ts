@@ -4,7 +4,7 @@
  */
 import { CATALOG_LINK_REFUSALS } from '../boundary.ts';
 
-export const LINK_REFUSALS = [...CATALOG_LINK_REFUSALS, 'store_damaged', 'items_full'] as const;
+const LINK_REFUSALS = [...CATALOG_LINK_REFUSALS, 'store_damaged', 'items_full'] as const;
 export type LinkRefusalCode = (typeof LINK_REFUSALS)[number];
 
 /**

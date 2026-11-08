@@ -22,7 +22,7 @@ import { CarriableSecretNameSchema } from '../foreign.ts';
 import { type CloneBase, CloneSourceIdSchema } from './clone-base.ts';
 
 /** A secret as its list shows it: a name and when it last changed. Never a value. */
-export interface HeldKey {
+interface HeldKey {
   readonly name: string;
   readonly updatedAt: string;
 }

@@ -38,7 +38,7 @@ import {
 import type { SessionCrypto } from '../kernel-wire/index.ts';
 
 /** First four bytes of every envelope: the format and its version. */
-export const LINK_ENVELOPE_MAGIC = 'FYL1' as const;
+const LINK_ENVELOPE_MAGIC = 'FYL1' as const;
 /** Domain-separates the envelope's AEAD key from every other key derived from the same secret. */
 export const LINK_BUNDLE_KEY_LABEL = 'ferretry-link-bundle-key-v1' as const;
 /** Domain-separates the fetch token from the envelope key. */
@@ -47,13 +47,13 @@ export const LINK_FETCH_TOKEN_LABEL = 'ferretry-link-fetch-v1' as const;
 export const LINK_ENVELOPE_AAD_LABEL = 'ferretry-link-envelope-v1' as const;
 
 /** The plaintext is padded to a multiple of this, so the operator sees a size class rather than a size. */
-export const LINK_PADDING_BUCKET_BYTES = 16 * 1024;
+const LINK_PADDING_BUCKET_BYTES = 16 * 1024;
 /** The largest envelope anything accepts: a 2 MiB skill, JSON escaping, the signed document and padding. */
 export const LINK_ENVELOPE_MAX_BYTES = 3 * 1024 * 1024;
 
-export const LINK_SECRET_BYTES = 32;
-export const LINK_BUNDLE_ID_BYTES = 16;
-export const LINK_FETCH_TOKEN_BYTES = 32;
+const LINK_SECRET_BYTES = 32;
+const LINK_BUNDLE_ID_BYTES = 16;
+const LINK_FETCH_TOKEN_BYTES = 32;
 const NONCE_BYTES = 12;
 const TAG_BYTES = 16;
 const HEADER_BYTES = LINK_ENVELOPE_MAGIC.length + 4 + NONCE_BYTES;
@@ -75,7 +75,7 @@ export function mintLinkSecrets(crypto: SessionCrypto): LinkSecrets {
   };
 }
 
-export type LinkEnvelopeRefusal =
+type LinkEnvelopeRefusal =
   | 'link_too_big'
   | 'malformed_secret'
   | 'malformed_envelope'
@@ -110,18 +110,6 @@ export async function linkFetchToken(crypto: SessionCrypto, key: string, bundleI
 export async function linkFetchVerifier(crypto: SessionCrypto, token: string): Promise<string | null> {
   const bytes = fromBase64UrlFixed(token, LINK_FETCH_TOKEN_BYTES);
   return bytes === null ? null : toBase64Url(await crypto.sha256(bytes));
-}
-
-/** Does this token hash to the verifier the store holds? Compared as bytes, without an early exit. */
-export async function linkTokenMatchesVerifier(
-  crypto: SessionCrypto,
-  token: string,
-  verifier: string,
-): Promise<boolean> {
-  const expected = fromBase64UrlFixed(verifier, 32);
-  const actual = await linkFetchVerifier(crypto, token);
-  const actualBytes = actual === null ? null : fromBase64UrlFixed(actual, 32);
-  return expected !== null && actualBytes !== null && bytesEqual(expected, actualBytes);
 }
 
 const sequenceBytes = (sequence: number): Uint8Array => {
@@ -180,7 +168,7 @@ export function linkEnvelopeSize(bundleCanonicalText: string): number | null {
 }
 
 /** The sequence an envelope declares in the clear, or `null` when it is not an envelope. Authenticated by {@link openLinkEnvelope}. */
-export function linkEnvelopeSequence(bytes: Uint8Array): number | null {
+function linkEnvelopeSequence(bytes: Uint8Array): number | null {
   if (bytes.length < MIN_ENVELOPE_BYTES || bytes.length > LINK_ENVELOPE_MAX_BYTES) return null;
   if (!bytesEqual(bytes.subarray(0, LINK_ENVELOPE_MAGIC.length), utf8Bytes(LINK_ENVELOPE_MAGIC))) return null;
   const sequence = readUint32(bytes, LINK_ENVELOPE_MAGIC.length);
@@ -191,7 +179,7 @@ export function linkEnvelopeSequence(bytes: Uint8Array): number | null {
  * Open an envelope: the magic, the bounds, the authentication, the padding, and the bundle's shape.
  * Answers the declared sequence and the bundle. Whether the bundle is TRUE is `verifyLinkBundle`'s question.
  */
-export async function openLinkEnvelope(
+async function openLinkEnvelope(
   crypto: SessionCrypto,
   key: string,
   bundleId: string,

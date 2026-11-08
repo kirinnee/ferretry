@@ -55,6 +55,10 @@ function home(files: Readonly<Record<string, Entry>>, refused: readonly string[]
     makeDirectory: () => Promise.reject(new Error('the approval read never makes a folder')),
     realPath: () => Promise.reject(new Error('the approval read never resolves')),
     pin: () => Promise.reject(new Error('the approval read never pins')),
+    publish: () => Promise.reject(new Error('the fixture has no publish')),
+    readDurable: () => Promise.reject(new Error('the fixture has no readDurable')),
+    syncDirectory: () => Promise.reject(new Error('the fixture has no syncDirectory')),
+    fileIdentity: () => Promise.reject(new Error('the fixture has no fileIdentity')),
   };
 }
 

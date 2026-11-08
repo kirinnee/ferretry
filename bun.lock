@@ -360,10 +360,18 @@
       "name": "@ferretry/plugin-layouts",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/app": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
         "zod": "4.4.3",
+      },
+      "devDependencies": {
+        "@happy-dom/global-registrator": "^20.11.1",
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
       },
     },
     "packages/plugins/lessons": {
@@ -518,7 +526,6 @@
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
         "smol-toml": "1.7.1",
-        "yaml": "2.9.0",
         "zod": "4.4.3",
       },
       "devDependencies": {
@@ -533,11 +540,19 @@
       "name": "@ferretry/plugin-shells",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/app": "workspace:*",
         "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
         "zod": "4.4.3",
+      },
+      "devDependencies": {
+        "@happy-dom/global-registrator": "^20.11.1",
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
       },
     },
     "packages/plugins/skills": {

@@ -14,7 +14,7 @@ import type {
   TransformHook,
 } from '../contract/define.ts';
 import type { DoctorFinding } from '../contract/kernel.ts';
-import type { Cancel, KernelPorts, StatePort } from '../contract/ports.ts';
+import type { Cancel, Clock, KernelPorts, StatePort } from '../contract/ports.ts';
 import type { CallContext, MemberRouteHandler, RouteHandler } from '../contract/route.ts';
 import type { SocketAccept } from '../contract/socket.ts';
 import type { Manifest, Needer } from './types.ts';
@@ -41,6 +41,9 @@ export type RendererKeysOf<M> = Field<Elem<Ui<M>, 'renderers'>, 'key'>;
 export type SubscribesOf<M> = Elem<Data<M>, 'subscribes'>;
 export type TakesOf<M> = Elem<Hooks<M>, 'takes'>;
 export type DoctorIdsOf<M> = M extends { readonly doctor: readonly (infer D extends string)[] } ? D : never;
+export type PreflightIdsOf<M> = M extends { readonly preflight: readonly (infer D extends string)[] } ? D : never;
+export type SelftestIdsOf<M> = M extends { readonly selftest: readonly (infer D extends string)[] } ? D : never;
+export type WorkerIdsOf<M> = M extends { readonly workers: readonly (infer D extends string)[] } ? D : never;
 type NetworkEntryOf<M> = M extends { readonly permissions: { readonly network: readonly (infer E)[] } } ? E : never;
 export type ResolverIdsOf<M> =
   NetworkEntryOf<M> extends infer E ? (E extends { readonly resolver: infer R extends string } ? R : never) : never;
@@ -169,6 +172,70 @@ export type DaemonHalf<M extends Manifest> = Section<'routes', { readonly [K in 
     readonly beforeListen?: (ctx: DaemonContext<M>) => Promise<void>;
   };
 
+// ─── `fyd --check` seams (DECISIONS-2 #22) ───────────────────────────────────────────────────────────────────────────
+// Three declarations a plugin makes BESIDE `build`, never inside it: `fyd --check` runs them with no host booted, so
+// there is no context, no kernel port and no state to hand over. None of them runs at boot.
+
+/** What the kernel passes a preflight: facts about this run and nothing else — no port, no IO, no clock. */
+export interface PreflightFacts {
+  readonly home: string;
+  readonly host: string;
+  readonly port: number;
+  readonly version: string;
+  readonly platform: string;
+  readonly arch: string;
+}
+
+/**
+ * One line `fyd --check` prints. `label` is single-spaced lowercase words of at most 11 characters, unique across the
+ * run, and the kernel renders the label column itself. A label whose first word is `state`, `address`, `workers`,
+ * `webrtc`, `plugin` or `plugins` is refused (the smoke judges those lines); `webrtc` alone belongs to Connections'
+ * `webrtc` selftest. `text` says what was found.
+ */
+export interface CheckLine {
+  readonly label: string;
+  readonly text: string;
+}
+
+/**
+ * A PURE half: the same lines for the same facts. Synchronous (a returned promise is a failed line), no port, no IO,
+ * no clock. The kernel catches a throw and shows it as a failed line; it cannot preempt a synchronous loop, so a
+ * preflight is code review's to keep short.
+ */
+export type PreflightRun = (facts: PreflightFacts) => readonly CheckLine[];
+
+/**
+ * What the kernel hands a selftest: its OWN temp directory (removed after, whatever happened), a signal that aborts at
+ * the kernel's timeout, and a clock. Deliberately NOT here: the state home, config, any kernel port, the daemon's
+ * address. A selftest listens on loopback with port 0 only, reaches nothing beyond loopback, and releases every
+ * socket, thread and file before it returns. The kernel cannot sandbox in-process code, so these last rules are
+ * reviewed, not enforced; the timeout, the temp directory and the absence of state and ports are enforced.
+ *
+ * Both this object and its `clock` are frozen, and every selftest gets its own: the kernel's timeout runs on a timer
+ * it took before any plugin was loaded, so nothing done to what a selftest was handed can lengthen or cancel it. A
+ * selftest must stop writing to `tempDir` once `signal` aborts (the host removes the directory again before it exits).
+ * What no in-process code can stop is a module that replaces `globalThis.setTimeout` or `process.exit` while it loads:
+ * the host's own exit uses copies taken before the registry is read, and code review keeps the rest honest.
+ */
+export interface SelftestEnvironment {
+  readonly tempDir: string;
+  readonly signal: AbortSignal;
+  readonly clock: Pick<Clock, 'after' | 'nowMs'>;
+}
+
+/** A bounded probe ONLY `fyd --check` runs. `run` answers the text after `label`; a throw or a timeout is a failed line. */
+export interface SelftestProbe {
+  readonly label: string;
+  readonly run: (environment: SelftestEnvironment) => Promise<string>;
+}
+
+/** Only declared ids may be implemented; `manifest-match` refuses a declared id with no implementation. */
+type CheckSeams<M> = {
+  readonly preflight?: { readonly [K in PreflightIdsOf<M>]?: PreflightRun };
+  readonly selftest?: { readonly [K in SelftestIdsOf<M>]?: SelftestProbe };
+  readonly workers?: { readonly [K in WorkerIdsOf<M>]?: URL };
+};
+
 export interface DaemonImplementation<M extends Manifest = Manifest> {
   readonly half: 'daemon';
   readonly manifest: M;
@@ -176,13 +243,20 @@ export interface DaemonImplementation<M extends Manifest = Manifest> {
   readonly build?: (ctx: DaemonContext<M>) => DaemonHalf<M>;
   /** A day-1 skeleton: every declared route answers `503 plugin_unavailable`; allowed only while in ports-pending. */
   readonly skeleton?: true;
+  /** Pure `fyd --check` lines, by declared id. */
+  readonly preflight?: Readonly<Record<string, PreflightRun>>;
+  /** Bounded probes only `fyd --check` runs, by declared id. */
+  readonly selftest?: Readonly<Record<string, SelftestProbe>>;
+  /** Embedded worker programs `fyd --check` starts and stops, by declared id. */
+  readonly workers?: Readonly<Record<string, URL>>;
 }
 
 export function implementDaemon<const M extends Manifest>(
   manifest: M,
-  spec: { readonly build: (ctx: DaemonContext<M>) => DaemonHalf<M> },
+  spec: { readonly build: (ctx: DaemonContext<M>) => DaemonHalf<M> } & CheckSeams<M>,
 ): DaemonImplementation<M> {
-  return Object.freeze({ half: 'daemon', manifest, build: spec.build });
+  const { build, ...seams } = spec as typeof spec & Pick<DaemonImplementation, 'preflight' | 'selftest' | 'workers'>;
+  return Object.freeze({ half: 'daemon', manifest, build, ...seams });
 }
 
 // ─── app half ─────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -62,7 +62,7 @@ const owned = (bytes: Uint8Array): Uint8Array<ArrayBuffer> => {
 const b64 = (text: string | undefined): Uint8Array => fromBase64Url(text ?? '') ?? new Uint8Array();
 
 /** DER `SEQUENCE { INTEGER r, INTEGER s }` from raw r‖s, exactly as an ES256 authenticator emits it. */
-export function rawToDer(raw: Uint8Array): Uint8Array {
+function rawToDer(raw: Uint8Array): Uint8Array {
   const integer = (half: Uint8Array): Uint8Array => {
     let start = 0;
     while (start < half.length - 1 && half[start] === 0) start += 1;
@@ -96,46 +96,7 @@ export async function es256Authenticator(): Promise<
   };
 }
 
-export async function ed25519Authenticator(): Promise<Authenticator> {
-  const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
-    'sign',
-    'verify',
-  ])) as unknown as CryptoKeyPair;
-  return {
-    algorithm: -8,
-    coseKey: new Map<number | string, Cbor>([
-      [1, 1],
-      [3, -8],
-      [-1, 6],
-      [-2, new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey))],
-    ]),
-    spki: new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey)),
-    sign: async data => new Uint8Array(await crypto.subtle.sign({ name: 'Ed25519' }, pair.privateKey, owned(data))),
-  };
-}
-
-export async function rs256Authenticator(modulusLength = 2048): Promise<Authenticator> {
-  const pair = await crypto.subtle.generateKey(
-    { name: 'RSASSA-PKCS1-v1_5', modulusLength, publicExponent: Uint8Array.of(1, 0, 1), hash: 'SHA-256' },
-    true,
-    ['sign', 'verify'],
-  );
-  const jwk = await crypto.subtle.exportKey('jwk', pair.publicKey);
-  return {
-    algorithm: -257,
-    coseKey: new Map<number | string, Cbor>([
-      [1, 3],
-      [3, -257],
-      [-1, b64(jwk.n)],
-      [-2, b64(jwk.e)],
-    ]),
-    spki: new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey)),
-    sign: async data =>
-      new Uint8Array(await crypto.subtle.sign({ name: 'RSASSA-PKCS1-v1_5' }, pair.privateKey, owned(data))),
-  };
-}
-
-export async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
+async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.digest('SHA-256', owned(bytes)));
 }
 
@@ -179,7 +140,7 @@ export interface AuthDataFields {
   attested?: Uint8Array;
 }
 
-export async function authData(fields: AuthDataFields = {}): Promise<Uint8Array> {
+async function authData(fields: AuthDataFields = {}): Promise<Uint8Array> {
   const header = new Uint8Array(37);
   header.set(await sha256(utf8Bytes(fields.rpId ?? RP_ID)), 0);
   header[32] = fields.flags ?? 0x05;
@@ -199,7 +160,7 @@ export function attestedCredential(coseKey: Uint8Array, credentialId: Uint8Array
   ]);
 }
 
-export function attestationObject(auth: Uint8Array, fmt: Cbor = 'none', attStmt: Cbor = new Map()): Uint8Array {
+function attestationObject(auth: Uint8Array, fmt: Cbor = 'none', attStmt: Cbor = new Map()): Uint8Array {
   return cbor(
     new Map<number | string, Cbor>([
       ['fmt', fmt],

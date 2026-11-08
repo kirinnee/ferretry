@@ -98,7 +98,7 @@ export class SlidingWindows {
 
 // ── Owner shard ──────────────────────────────────────────────────────────────────────────────────
 
-export interface Lease {
+interface Lease {
   readonly bytes: number;
   readonly until: number;
 }
@@ -417,8 +417,6 @@ export const LinkStoreOperatorUpdateSchema = z
     limits: LinkStoreLimitsSchema.optional(),
   })
   .refine(update => Object.keys(update).length > 0, 'name at least one of available, serving, limits');
-export type LinkStoreOperatorUpdate = z.infer<typeof LinkStoreOperatorUpdateSchema>;
-
 export const LinkStoreConfigSchema = z.strictObject({
   available: z.boolean(),
   serving: z.boolean(),

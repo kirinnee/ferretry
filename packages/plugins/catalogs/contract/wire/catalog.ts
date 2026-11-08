@@ -13,15 +13,11 @@ export const AvailableSkillSchema = z.object({
   scope: z.enum(['global', 'project']),
   origin: z.enum(['claude', 'codex', 'both', 'unknown']),
 });
-export type AvailableSkill = z.infer<typeof AvailableSkillSchema>;
-
 /** The skill catalog for one session's harness and project directory. */
 export const SessionSkillsSchema = z.object({
   harness: HarnessSchema,
   skills: z.array(AvailableSkillSchema),
 });
-export type SessionSkills = z.infer<typeof SessionSkillsSchema>;
-
 /** A directory the daemon has deliberately registered as a launchable project. */
 export const ProjectInfoSchema = z.object({
   /** Stable daemon-local record identity; a path is not an identity. */
@@ -40,11 +36,6 @@ export const ProjectInfoSchema = z.object({
     .optional(),
   lastActivity: InstantSchema.optional(),
 });
-export type ProjectInfo = z.infer<typeof ProjectInfoSchema>;
-
-export const ProjectListSchema = z.array(ProjectInfoSchema);
-export type ProjectList = z.infer<typeof ProjectListSchema>;
-
 /**
  * Whether a registered project path is an absolute root (POSIX: a leading `/`).
  * A relative path would resolve against the daemon's own working directory,
@@ -58,7 +49,7 @@ function isProjectPathAbsolute(path: string): boolean {
 }
 
 /** The policy refusal the daemon mount may distinguish from ordinary malformed input. */
-export const ProjectPathMustBeAbsoluteMessage =
+const ProjectPathMustBeAbsoluteMessage =
   "a project path must be absolute; a relative path would resolve against the daemon's own directory";
 
 /**
@@ -125,4 +116,3 @@ export const RegisterProjectRequestSchema = z.discriminatedUnion('kind', [
     name: z.string().trim().min(1).optional(),
   }),
 ]);
-export type RegisterProjectRequest = z.infer<typeof RegisterProjectRequestSchema>;

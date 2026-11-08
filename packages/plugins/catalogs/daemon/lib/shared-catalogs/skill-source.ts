@@ -23,12 +23,12 @@ import {
 } from '../boundary.ts';
 
 /** How far a walk goes. Past it the listing says it was cut short. */
-export interface SkillWalkLimits {
+interface SkillWalkLimits {
   readonly entries: number;
   readonly depth: number;
 }
 
-export const SKILL_WALK_LIMITS: SkillWalkLimits = { entries: 1_000, depth: 16 };
+const SKILL_WALK_LIMITS: SkillWalkLimits = { entries: 1_000, depth: 16 };
 
 type SkillTreeEntryType = 'file' | 'symlink' | 'hardlink' | 'other' | 'deep';
 

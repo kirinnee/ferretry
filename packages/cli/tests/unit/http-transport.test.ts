@@ -326,13 +326,14 @@ describe('a send whose caller may stop waiting', () => {
             clock += ms;
             return Promise.resolve();
           }
-          return (sleeping = new Promise<void>(resolve => {
+          sleeping = new Promise<void>(resolve => {
             const timer = setTimeout(resolve, 60_000);
             signal.addEventListener('abort', () => {
               clearTimeout(timer);
               resolve();
             });
-          }));
+          });
+          return sleeping;
         },
       },
     });

@@ -19,7 +19,7 @@ import type { LoginStatusWord } from '@ferretry/plugin-logins/contract';
 import type { PickerAccountHealth } from './account-picker-catalog.ts';
 
 /** The tone a row paints itself with. */
-export type AccountHealthTone = 'ok' | 'bad' | 'warn' | 'muted';
+type AccountHealthTone = 'ok' | 'bad' | 'warn' | 'muted';
 
 export interface AccountHealthView {
   /** The headline, in the daemon's own words: `Ready`, `Refresh due`, `Needs sign-in`, `Checking`. */

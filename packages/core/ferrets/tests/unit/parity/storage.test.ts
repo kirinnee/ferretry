@@ -29,7 +29,10 @@ describe('storage parity', () => {
   test('F-0349 the first system callsign for a prefix lands in state/ferrets/system-callsigns.json as { learning: 1 }', async () => {
     const h = await fresh();
     expect(await h.provided(FerretsPort).systemCallsign?.('learning')).toBe('learning-000001');
-    const stored = JSON.parse(h.state('ferrets').files.get('system-callsigns.json') as string) as Record<string, number>;
+    const stored = JSON.parse(h.state('ferrets').files.get('system-callsigns.json') as string) as Record<
+      string,
+      number
+    >;
     expect(stored).toEqual({ format: 1, learning: 1 });
     expect(manifest.data.state.map(file => file.path)).toContain('system-callsigns.json');
   });

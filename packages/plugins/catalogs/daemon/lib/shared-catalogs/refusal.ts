@@ -3,7 +3,7 @@
  * Every refusal is the PERSON'S to fix except `store_damaged` and `export_failed`, which are this
  * machine's: a damaged file is never quietly replaced by an empty one.
  */
-export const CATALOG_REFUSALS = [
+const CATALOG_REFUSALS = [
   'catalog_unknown',
   'item_unknown',
   'item_withdrawn',

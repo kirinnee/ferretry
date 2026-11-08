@@ -87,6 +87,10 @@ function kernelRoot(
     list: record('list'),
     entries: record('entries'),
     pin: record('pin'),
+    publish: record('publish'),
+    readDurable: record('readDurable'),
+    syncDirectory: record('syncDirectory'),
+    fileIdentity: record('fileIdentity'),
     remove: record('remove'),
   };
 }

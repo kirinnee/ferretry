@@ -52,7 +52,7 @@ export interface NameProblem {
 const NAME_PATTERN = /^[A-Za-z0-9-]+$/u;
 
 /** The first free `<base>`, `<base>-2`, `<base>-3`, … */
-export const uniqueName = (base: string, taken: ReadonlySet<string>): string => {
+const uniqueName = (base: string, taken: ReadonlySet<string>): string => {
   if (!taken.has(base)) return base;
   let index = 2;
   while (taken.has(`${base}-${String(index)}`)) index += 1;
@@ -60,7 +60,7 @@ export const uniqueName = (base: string, taken: ReadonlySet<string>): string => 
 };
 
 /** Letters, digits and dashes only, lower case. */
-export const slug = (value: string): string =>
+const slug = (value: string): string =>
   value
     .toLowerCase()
     .replace(/[^a-z0-9]+/gu, '-')

@@ -17,7 +17,7 @@ import { HostHarnessScanner } from './host-harness-scan.ts';
 import type { AdapterHost, ApplyLockOptions, ConfigFileService, HostFiles } from './ports.ts';
 
 /** The largest file a folder read carries; a larger one is skipped and named. */
-export const MAX_FOLDER_FILE_BYTES = 256 * 1024;
+const MAX_FOLDER_FILE_BYTES = 256 * 1024;
 /** The most files one folder read takes; the rest are skipped and named. */
 export const MAX_FOLDER_FILES = 500;
 
@@ -94,6 +94,8 @@ export async function skillItemsIn(
  * it loosens exactly as an edit is. It writes as the owner (`'owner'`): the route that reached it is a person's.
  *
  * GAP(kernel): that service is the kernel's config layer; plugins have no config write port.
+ *
+ * @pending runtimes: plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host
  */
 export function cloneConfigFilesOver(service: ConfigFileService): CloneConfigFiles {
   return {
@@ -118,7 +120,9 @@ export function cloneConfigFilesOver(service: ConfigFileService): CloneConfigFil
   };
 }
 
-/** What the composition root hands the setup service: its own collaborators, never a second copy. */
+/** What the composition root hands the setup service: its own collaborators, never a second copy. *
+ * @pending runtimes: plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host
+ */
 export interface FileFleetSetupOptions {
   /** The host: its files, command lookup, record store and the provisioner's apply claim (`./ports.ts`). */
   readonly host: AdapterHost;
@@ -148,7 +152,9 @@ const sha256 = (text: string): string => new Bun.CryptoHasher('sha256').update(t
 /** The largest host document the import reads; anything larger is reported, never truncated. */
 const MAX_HOST_DOCUMENT_BYTES = 1024 * 1024;
 
-/** The setup service's collaborators over this machine's files. */
+/** The setup service's collaborators over this machine's files. *
+ * @pending runtimes: plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host
+ */
 export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupServiceDeps {
   const { catalog, host } = options;
   const keyWriter = host.texts;

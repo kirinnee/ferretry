@@ -94,7 +94,7 @@ export interface ComponentBadge {
 }
 
 /** A `${secret:NAME}` reference: the value lives in the secret store and is never shown (E7). */
-export const SECRET_REFERENCE = /^\$\{secret:[^}]+\}$/u;
+const SECRET_REFERENCE = /^\$\{secret:[^}]+\}$/u;
 
 /** Environment entries the secret store holds or the daemon would not show. */
 const storedSecrets = (env: readonly EnvEntry[]): number =>

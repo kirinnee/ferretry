@@ -203,7 +203,7 @@ export function buildCloneBundle(input: CloneBundleInput): CloneBundleDraft {
 
 // ── The target ───────────────────────────────────────────────────────────────────────────────────
 
-export type CloneMode = 'alongside' | 'replace';
+type CloneMode = 'alongside' | 'replace';
 
 export interface CloneOptions {
   readonly mode: CloneMode;
@@ -238,7 +238,7 @@ export interface CloneOptions {
 }
 
 /** What became of "Default runtime for new agents", so the preview and the description can say it. */
-export type CloneDefault =
+type CloneDefault =
   /** The target had none and the copy chose none. */
   | { readonly kind: 'none' }
   /** The target's own default is still a runtime after the copy. */
@@ -251,14 +251,14 @@ export type CloneDefault =
   | { readonly kind: 'repaired'; readonly was: string; readonly now?: string };
 
 /** One thing that took another name because the target already had one (E28). */
-export interface CloneRename {
+interface CloneRename {
   readonly what: 'component' | 'profile' | 'runtime' | 'login';
   readonly from: string;
   readonly to: string;
 }
 
 /** One empty slot the copy creates, and the runtimes that point at it (C8, E31). */
-export interface CloneSlot {
+interface CloneSlot {
   readonly id: string;
   readonly harness: HarnessKind;
   readonly label?: string;
@@ -271,7 +271,7 @@ export interface CloneSlot {
  * target already has (`target` is its id, nothing new is created); `slot` is a new empty slot under `target`;
  * `ask` found two or more logins here that could be it and, until the review can ask, becomes a slot too.
  */
-export interface CloneLoginOutcome {
+interface CloneLoginOutcome {
   readonly sourceId: string;
   readonly outcome: 'matched' | 'slot' | 'ask';
   readonly harness: HarnessKind;

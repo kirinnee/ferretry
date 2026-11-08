@@ -1,6 +1,6 @@
 /** The link-store Worker's deployment rules: its own Worker with no address, deployed only by a person. */
 import { describe, expect, it } from 'bun:test';
-import { LINK_WINDOW_MAX_KEYS } from '../../../worker/src/adapters/index.ts';
+import { LINK_WINDOW_MAX_KEYS } from '../../../worker/src/adapters/link-store-objects.ts';
 import { SlidingWindows } from '../../../worker/src/lib/index.ts';
 
 const WORKER = new URL('../../../worker/', import.meta.url);

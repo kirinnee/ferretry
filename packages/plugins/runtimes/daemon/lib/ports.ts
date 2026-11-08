@@ -10,7 +10,7 @@
 export type SettingsFile = 'warden.yaml' | 'learning.yaml' | 'voice.yaml';
 
 /** A file read as YAML: its plain value, or why it did not parse. */
-export type ConfigTextRead =
+type ConfigTextRead =
   | { readonly ok: true; readonly read: { readonly value: unknown } }
   | { readonly ok: false; readonly errors: readonly { readonly message: string }[] };
 

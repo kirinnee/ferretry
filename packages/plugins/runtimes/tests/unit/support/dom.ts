@@ -87,7 +87,7 @@ if (!registered.__ferretryMutationObserverPatched) {
  * Every node prints as its text and then its markup instead, each capped,
  * which is also what a reader of the failure wants to see.
  */
-export const INSPECTED_NODE_LIMIT = 600;
+const INSPECTED_NODE_LIMIT = 600;
 
 const capped = (shown: string): string =>
   shown.length > INSPECTED_NODE_LIMIT

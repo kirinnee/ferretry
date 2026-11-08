@@ -1,3 +1,4 @@
+import { diskPaths } from '@ferretry/kernel/testing';
 import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { MemoryStateFolder } from '@ferretry/kernel/testing';
@@ -178,7 +179,7 @@ async function harness(
             },
           },
           effects,
-          directories: new NodeWorkingDirectoryResolver(),
+          directories: new NodeWorkingDirectoryResolver(diskPaths()),
           ids: {
             next: () => {
               counters.creates += 1;
@@ -903,7 +904,7 @@ describe('SessionForkTargetBinder', () => {
         },
         tasks: { writeAssignedTask: async held => subject.ports.imported.brief.file(held) },
         effects: memoryEffectLedger(),
-        directories: new NodeWorkingDirectoryResolver(),
+        directories: new NodeWorkingDirectoryResolver(diskPaths()),
         ids: { next: () => subject.target },
         clock: { now: () => AT },
         serial: new KeyedSerialExecutor(),

@@ -25,7 +25,7 @@ interface GatewayCall {
 
 export const CHANGE_ID = 'fy_fprop_AAAAAAAAAAAAAAAAAAAAAA';
 const AT = '2026-10-13T00:00:00.000Z';
-export const LATER = '2026-10-13T00:10:00.000Z';
+const LATER = '2026-10-13T00:10:00.000Z';
 
 export const authorityOf = (overrides: Partial<MachineAuthority> = {}): MachineAuthority => ({
   mayApply: true,
@@ -189,8 +189,6 @@ export const scan = (overrides: Partial<SetupScan> = {}): SetupScan => ({
   importing: { available: true },
   ...overrides,
 });
-
-export const ACCOUNT_ID = 'claude-you';
 
 /** Answers for every gateway call, each overridable per test; every call is recorded. */
 export interface FakeAnswers {

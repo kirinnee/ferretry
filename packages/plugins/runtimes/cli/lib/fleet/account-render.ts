@@ -176,7 +176,7 @@ const untilWords = (until: string): string => {
 };
 
 /** "disabled (spend limit reached) until 2026-11-01" — the clause every refusal and row builds on. */
-export function disabledPhrase(disabled: Disabled): string {
+function disabledPhrase(disabled: Disabled): string {
   const why = disabled.reason === undefined ? '' : ` (${disabled.reason})`;
   const until = disabled.until === undefined ? '' : ` until ${untilWords(disabled.until)}`;
   return `disabled${why}${until}`;

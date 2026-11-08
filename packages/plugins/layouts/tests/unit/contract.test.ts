@@ -44,6 +44,11 @@ describe('layouts contract', () => {
     }
   });
 
+  test('the default layout lists the Files panel, or the side column would never show a ferret’s files', () => {
+    const panels = BUILT_IN_LAYOUTS.find(layout => layout.id === 'default')?.panels['ferret.side'];
+    expect(panels).toContain('files');
+  });
+
   test('an empty config/layout.yaml selects the default layout and theme with no overrides', () => {
     expect(LayoutSelectionSchema.parse({})).toEqual({ layout: 'default', theme: 'default', overrides: {} });
   });

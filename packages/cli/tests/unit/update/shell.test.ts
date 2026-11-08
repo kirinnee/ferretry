@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import updatesManifest from '../../../../plugins/updates/manifest.ts';
+import { registry as generated } from '../../../src/generated/commands.ts';
 import { decodeJson } from '../../../../core/kernel/host/state/format.ts';
 import { UPDATES_REPORT } from '@ferretry/plugin-updates/contract';
 import { runFy } from '../../../src/lib/run.ts';
@@ -17,6 +17,13 @@ import {
   FakeReports,
   FakeStandalone,
 } from './fixtures.ts';
+
+/** Updates' manifest as the generated registry carries it: a test reaches another package only through generated code or a contract. */
+const updatesManifest = (() => {
+  const found = generated.plugins.find(plugin => plugin.id === 'updates');
+  if (found === undefined) throw new Error('the generated registry has no updates entry');
+  return found.manifest;
+})();
 
 test.each([false, true])(
   'V-0250 fy update resolves and completes the shell transaction with Updates off (--run=%s)',

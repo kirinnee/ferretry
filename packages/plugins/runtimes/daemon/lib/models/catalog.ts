@@ -15,14 +15,14 @@ import type { ProviderPreset } from '../presets/schema.ts';
 import type { ModelCatalog } from './schema.ts';
 
 /** The catalog a SIGN-IN login reads: its CLI's maker. */
-export const SIGN_IN_MODEL_CATALOGS: Readonly<Record<HarnessKind, string>> = { claude: 'anthropic', codex: 'openai' };
+const SIGN_IN_MODEL_CATALOGS: Readonly<Record<HarnessKind, string>> = { claude: 'anthropic', codex: 'openai' };
 
 /**
  * Which catalog a login reads: a sign-in login its CLI's maker's, an environment login its preset's.
  * `undefined` for an environment login made by hand or from a preset that names none — its runtimes
  * offer what their profile's model set says, as before catalogs.
  */
-export function loginModelCatalogId(
+function loginModelCatalogId(
   credential: Pick<Credential, 'store' | 'preset'>,
   harness: HarnessKind,
   presets: readonly Pick<ProviderPreset, 'id' | 'catalog'>[],

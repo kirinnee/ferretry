@@ -60,7 +60,7 @@ export function isUsableSkillItemName(name: string): boolean {
  * why the vocabulary exists rather than a boolean. A person editing a *generated* file loses the edit;
  * a person editing a *linked* one is editing the shared document and every account with it.
  */
-export type AssetMaterialization = 'link' | 'copy' | 'generated';
+type AssetMaterialization = 'link' | 'copy' | 'generated';
 
 /**
  * One harness's destination for one asset field.

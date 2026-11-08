@@ -39,29 +39,6 @@ export interface DaemonIdentity {
   readonly privateKey: PrivateKeyHandle;
 }
 
-/**
- * The daemon's identity key as the session layer uses it: the public half, its fingerprint, and a
- * signer. The private half never leaves whoever implements this (the kernel's identity-key store);
- * the layer only ever asks for a signature over a handshake transcript or a rendezvous claim.
- */
-export interface DaemonSigningKey {
-  /** SubjectPublicKeyInfo DER of the Ed25519 public key: the 44 bytes the fingerprint hashes (R41). */
-  readonly publicKeySpki: Uint8Array;
-  /** `fy_daemon_<base64url sha256 of publicKeySpki>` — the identifier the pairing QR carries (R17). */
-  readonly daemonId: string;
-  /** Ed25519 over `message` with the identity key. */
-  sign(message: Uint8Array): Promise<Uint8Array>;
-}
-
-/** A {@link DaemonSigningKey} over an identity whose private handle this crypto port minted. */
-export function signingKey(crypto: SessionCrypto, identity: DaemonIdentity): DaemonSigningKey {
-  return {
-    publicKeySpki: identity.publicKeySpki,
-    daemonId: identity.daemonId,
-    sign: async message => await crypto.signEd25519(identity.privateKey, message),
-  };
-}
-
 export interface SessionCrypto {
   /** Cryptographically secure random bytes, for nonces, session identifiers and ephemeral keys. */
   randomBytes(length: number): Uint8Array;

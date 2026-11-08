@@ -125,6 +125,8 @@ export {
   setDeviceOverride,
 } from './layout/layout.ts';
 export { FRAME_SLOTS, isFrameSlot, isSlotName, PANEL_SLOTS, SHELL_ITEMS } from './layout/slots.ts';
+/** @public Layouts' Settings tab reads and writes this device's own layout choice (§5.3: the app's saved data, no route). */
+export { type DeviceLayout, useDeviceLayout } from './shell/use-device-layout.ts';
 /** @public A plugin screen mounts the panels contributed to a slot it offers (§5.2). */
 export { PanelSlot, useSlotHasPanels } from './shell/views.tsx';
 /** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar (§5.1). */

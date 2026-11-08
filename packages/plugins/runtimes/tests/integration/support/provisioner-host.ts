@@ -14,12 +14,12 @@ import { type ProvisionerHost, refusedProvisionerKernel } from '../../../daemon/
 import { nodeProvisionerDisk } from './node-host.ts';
 
 /** Flip to true once `refusedProvisionerKernel` below is replaced by the kernel's own helpers. */
-export const KERNEL_HELPERS_AVAILABLE = false;
+const KERNEL_HELPERS_AVAILABLE = false;
 
 /** `describe`, skipped while the kernel helpers are not available. */
 export const suite: typeof describe = KERNEL_HELPERS_AVAILABLE ? describe : describe.skip;
 
-export const testHost: ProvisionerHost = { disk: nodeProvisionerDisk, kernel: refusedProvisionerKernel };
+const testHost: ProvisionerHost = { disk: nodeProvisionerDisk, kernel: refusedProvisionerKernel };
 
 /** A provisioner over {@link testHost}; the arguments after `host` are today's. */
 type AfterHost<T extends readonly unknown[]> = T extends readonly [unknown, ...infer Rest] ? Rest : never;

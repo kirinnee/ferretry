@@ -17,7 +17,7 @@ export function sha256Hex(text: string): string {
 // ─── MCP sign-in secret names (GAP(mcp): owner is the mcp plugin's daemon/lib; its contract does not carry it) ─────
 
 /** Whether `name` is an MCP sign-in's access token: half of a sign-in whose refresh half cannot travel, so a copy would be dead on arrival. */
-export function isSignInSecretName(name: string): boolean {
+function isSignInSecretName(name: string): boolean {
   return /^MCP_(?:[A-Z0-9_]+_)?[0-9A-F]{16}_ACCESS$/u.test(name);
 }
 
@@ -31,7 +31,7 @@ export const CarriableSecretNameSchema = CloneableSecretNameSchema.refine(
 );
 
 /** The server address, canonical: no fragment, no trailing slash on a bare path. */
-export function mcpOAuthServerKey(serverUrl: string): string {
+function mcpOAuthServerKey(serverUrl: string): string {
   const url = new URL(serverUrl);
   url.hash = '';
   const text = url.toString();
