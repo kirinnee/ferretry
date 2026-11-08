@@ -99,7 +99,9 @@ export async function checkHost(options: CheckOptions): Promise<number> {
   }
   if (owner !== undefined && owner.port === options.port) {
     say(`address      ${where}  (taken — another ${options.daemonName}, pid ${owner.pid})`);
-    say(`! Another ${options.daemonName} already serves ${where}. Stop it with \`fy daemon stop\`, or choose another port with --port.`);
+    say(
+      `! Another ${options.daemonName} already serves ${where}. Stop it with \`fy daemon stop\`, or choose another port with --port.`,
+    );
     return Math.max(exit, EXIT_ALREADY_SERVING);
   }
   say(`address      ${where}  (taken — by something that is not a ${options.daemonName})`);

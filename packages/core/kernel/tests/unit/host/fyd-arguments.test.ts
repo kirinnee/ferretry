@@ -47,7 +47,6 @@ test('an unknown argument is refused 64 with the usage, before boot', () => {
   expect(answer.touched).toBe(false);
 });
 
-
 test('V-0511 --port sets the port for one run, and a value that is not a port number is refused 64', () => {
   const ok = run('--print-config', '--port', '9123');
   expect(ok.code).toBe(0);
