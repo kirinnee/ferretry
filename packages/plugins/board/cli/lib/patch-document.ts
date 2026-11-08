@@ -9,6 +9,8 @@ import { isMap, parseDocument, stringify } from 'yaml';
 import type { z } from 'zod';
 
 const PARSE_OPTIONS = { version: '1.2', uniqueKeys: true, prettyErrors: true } as const;
+/** A patch is a few fields of prose: no alias is expanded past this many times (the library's own guard, made explicit). */
+const TO_JS_OPTIONS = { maxAliasCount: 100 } as const;
 
 /** The document a patch file holds, or the sentence that says why it is not one. */
 export function readPatchText(
@@ -24,7 +26,16 @@ export function readPatchText(
   if (!isMap(document.contents)) {
     return { ok: false, problem: `${source} must be a mapping of field: value (YAML) or an object (JSON)` };
   }
-  return { ok: true, value: document.toJS() as Record<string, unknown> };
+  // A document can parse and still not become a value: an alias expanded past the reader's limit (a few lines that
+  // would grow to millions of nodes) throws here. That is a bad file, said as one, never a crash.
+  let value: Record<string, unknown>;
+  try {
+    value = document.toJS(TO_JS_OPTIONS) as Record<string, unknown>;
+  } catch (error) {
+    const why = error instanceof Error ? (error.message.split('\n')[0] ?? error.message) : String(error);
+    return { ok: false, problem: `${source} could not be read as a patch: ${why}` };
+  }
+  return { ok: true, value };
 }
 
 /** A path as a reader writes it: `tabs.Status`, `links[0].target`. */

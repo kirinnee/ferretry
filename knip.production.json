@@ -161,8 +161,7 @@
     },
     "packages/plugins/board": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["app/lib/board-done.ts", "app/lib/board-move.ts", "app/lib/lane-proposal-link.ts"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/claude-code": {
       "entry": ["app/views/*.tsx"],

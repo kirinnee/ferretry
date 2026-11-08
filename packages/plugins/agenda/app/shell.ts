@@ -48,6 +48,7 @@ export {
   ReferenceSurfaceProvider,
   RendererView,
   TABLE_VIEW_KEY,
+  useAppHook,
   useOptionalRouter,
   useReferenceSurface,
   useRouter,

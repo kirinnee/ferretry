@@ -6,8 +6,10 @@ import type {
   ScreenProps,
   SettingsProps,
 } from '@ferretry/kernel/manifest';
+import { provideToShell } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { agendaHooks } from './agenda-hooks.ts';
 import { lazyComponent } from './lazy.ts';
 
 type Surfaces = {
@@ -27,29 +29,36 @@ const loadSurfaces = (): Promise<Record<string, unknown>> => import(`./views/${'
  * Board's app half: the board and one card as screens, a ferret's cards and a card's progress as panels, the Board
  * Settings tab, and the renderers for the `card` ask and a `&F12` reference. Every surface reads the board through
  * the one generated client and draws it read-only: a card never asks, and the owner answers in the Agenda (#1552).
+ * The answer that moves a card is Agenda's to draw and Board's to make: the half provides Agenda's app hooks
+ * (`agenda-hooks.ts`) over the same client and runtime as its views.
  */
-export default implementApp(manifest, {
-  build: ({ client }) => {
-    let surfaces: Promise<Surfaces> | undefined;
-    const surfacesOf = (): Promise<Surfaces> => {
-      surfaces ??= loadSurfaces().then(module => (module.createSurfaces as (client: PluginClient) => Surfaces)(client));
-      return surfaces;
-    };
-    const screen = (id: 'board' | 'card') =>
-      lazyComponent<ScreenProps>(async () => (await surfacesOf()).screens[id] as AppComponent<ScreenProps>);
-    const panel = (id: 'cards-of-ferret' | 'card-progress') =>
-      lazyComponent<PanelProps>(async () => (await surfacesOf()).panels[id] as AppComponent<PanelProps>);
-    const renderer = (key: 'ask:card' | 'reference:&') =>
-      lazyComponent<RendererProps>(async () => (await surfacesOf()).renderers[key] as AppComponent<RendererProps>);
-    return {
-      screens: { board: screen('board'), card: screen('card') },
-      panels: { 'cards-of-ferret': panel('cards-of-ferret'), 'card-progress': panel('card-progress') },
-      settings: {
-        board: lazyComponent<SettingsProps>(
-          async () => (await surfacesOf()).settings.board as AppComponent<SettingsProps>,
-        ),
-      },
-      renderers: { 'ask:card': renderer('ask:card'), 'reference:&': renderer('reference:&') },
-    };
-  },
-});
+export default provideToShell(
+  implementApp(manifest, {
+    build: ({ client }) => {
+      let surfaces: Promise<Surfaces> | undefined;
+      const surfacesOf = (): Promise<Surfaces> => {
+        surfaces ??= loadSurfaces().then(module =>
+          (module.createSurfaces as (client: PluginClient) => Surfaces)(client),
+        );
+        return surfaces;
+      };
+      const screen = (id: 'board' | 'card') =>
+        lazyComponent<ScreenProps>(async () => (await surfacesOf()).screens[id] as AppComponent<ScreenProps>);
+      const panel = (id: 'cards-of-ferret' | 'card-progress') =>
+        lazyComponent<PanelProps>(async () => (await surfacesOf()).panels[id] as AppComponent<PanelProps>);
+      const renderer = (key: 'ask:card' | 'reference:&') =>
+        lazyComponent<RendererProps>(async () => (await surfacesOf()).renderers[key] as AppComponent<RendererProps>);
+      return {
+        screens: { board: screen('board'), card: screen('card') },
+        panels: { 'cards-of-ferret': panel('cards-of-ferret'), 'card-progress': panel('card-progress') },
+        settings: {
+          board: lazyComponent<SettingsProps>(
+            async () => (await surfacesOf()).settings.board as AppComponent<SettingsProps>,
+          ),
+        },
+        renderers: { 'ask:card': renderer('ask:card'), 'reference:&': renderer('reference:&') },
+      };
+    },
+  }),
+  { hooks: agendaHooks },
+);

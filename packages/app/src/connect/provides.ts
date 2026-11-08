@@ -1,6 +1,7 @@
 import type { AppImplementation, Manifest } from '@ferretry/kernel/manifest';
 import type { NavigateOptions } from '../router/router.tsx';
 import type { PluginCommandSource } from '../shell/command-sources.ts';
+import type { AppHookProviders } from '../surfaces/app-hooks.ts';
 import type { View } from '../surfaces/halves.ts';
 import type { DaemonList, PairedDaemon } from '../daemons/daemon-list.ts';
 import type { RelayPairingOutcome, SessionDeviceClaim } from '../session/session-client.ts';
@@ -236,6 +237,12 @@ export interface ShellProvides {
    * session parts (claims, carriers, pairing) it is NOT built before the bootstrap read: the bar builds it on a daemon.
    */
   readonly commands?: PluginCommandSource;
+  /**
+   * Any plugin: values for the app hooks another plugin's half offers (`<offerer>.<name>`, named in the offerer's
+   * contract), each built per daemon over this plugin's own guarded client (`shell/app-hooks.ts`). Like `commands`,
+   * built on a daemon, after its bootstrap read, and only while this plugin may run there.
+   */
+  readonly hooks?: AppHookProviders;
   /**
    * Any plugin: the views of the screens its manifest declares `daemonless: true`, built once before any daemon is
    * contacted, over the {@link DaemonlessPorts} and nothing else. A screen id the manifest does not declare as

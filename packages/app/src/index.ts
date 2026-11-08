@@ -139,6 +139,8 @@ export { type DeviceLayout, useDeviceLayout } from './shell/use-device-layout.ts
 export { PanelSlot, useSlotHasPanels } from './shell/views.tsx';
 /** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar (§5.1). */
 export type { PluginCommandContext, PluginCommandSource } from './shell/command-sources.ts';
+/** @public An app hook another half offers (`<offerer>.<name>`): the provider's `shell.hooks`, the offerer's `useAppHook` (§5.2). */
+export { type AppHookContext, type AppHookProvider, type AppHookProviders, useAppHook } from './shell/app-hooks.ts';
 export {
   COLOUR_TOKENS,
   SPACING_TOKENS,

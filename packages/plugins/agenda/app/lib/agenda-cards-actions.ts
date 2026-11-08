@@ -1,12 +1,12 @@
 /**
  * THE THREE BUTTONS OF A CARD IN A NOTICE (`AgendaItem.cards`), as the board's own writes: Open goes to the
- * card's page, Start a ferret is `POST /v1/board/tasks/:id/start` (a NEW ferret on the card, or the one that already holds it), Close is the board's drop with the
+ * card's page, Start a ferret is `POST /v1/board/cards/:cardId/start` (a NEW ferret on the card, or the one that already holds it), Close is the board's drop with the
  * reason the owner confirmed. Nothing here is a second path to the daemon: each is the verb the board page uses,
  * so the daemon's authorization applies to it exactly as it does there, and a refusal comes back in its words.
  *
- * The board is Board's: this half takes its two writes through {@link AgendaCardsBoard}, a port the host binds to
- * Board's own actions, and its pages through the shell's route table ({@link AgendaLinks}), so no Board path is
- * spelled here.
+ * The board is Board's: this half takes its two writes through {@link AgendaCardsBoard}, a port the screen binds to
+ * Board's `agenda.card-answer` hook, and its pages through the shell's route table ({@link AgendaLinks}), so no Board
+ * path is spelled here.
  */
 
 import type { AgendaCardOutcome, AgendaCardsActions, BoardTaskId } from '../features/agenda/agenda-cards-list.tsx';

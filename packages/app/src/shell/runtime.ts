@@ -8,6 +8,7 @@ import { indexSurfaces, type SurfaceEntry } from '../surfaces/registry.ts';
 import { DaemonLayouts } from '../layout/daemon-layout.ts';
 import { noteClientDaemon } from '../connect/daemon-of.ts';
 import type { PasskeyProvision } from '../passkey/passkey.ts';
+import { AppHookCache, appHookProviders } from '../surfaces/app-hooks.ts';
 import type { DaemonlessScreenProps } from '../connect/provides.ts';
 import type { View } from '../surfaces/halves.ts';
 
@@ -58,6 +59,7 @@ export class ShellRuntime {
   readonly #daemonless: NonNullable<ShellRuntimeOptions['daemonless']>;
   readonly #connections = new Map<string, Connection>();
   readonly #halves: HalfCache;
+  readonly #hooks = new AppHookCache();
   readonly #packageClients = new Map<string, ShellPluginClient>();
   /** The owner's layout per daemon (the Layouts plugin), read through each daemon's guarded client. */
   readonly layouts: DaemonLayouts;
@@ -149,6 +151,20 @@ export class ShellRuntime {
   }
 
   /**
+   * The value the ONE provider of app hook `name` gives on this daemon (`shell/app-hooks.ts`), built over the client
+   * that provider's half is built with, only once that provider is allowed there; `undefined` otherwise, and when no
+   * half or more than one provides it.
+   */
+  appHook(daemon: string, name: string): unknown {
+    const providers = appHookProviders(this.surfaces, name);
+    const only = providers.length === 1 ? providers[0] : undefined;
+    if (only === undefined || this.standing(daemon, only.plugin).state !== 'allowed') return undefined;
+    const client = this.#halves.client(daemon, only.plugin);
+    if (client === undefined) return undefined;
+    return this.#hooks.get(daemon, only.plugin, name, client, only.provide);
+  }
+
+  /**
    * The guarded client one package talks through on a daemon, only once it is allowed there; the same object for as
    * long as that connection lives, so a watcher can tell a replaced client from the one it holds.
    */
@@ -188,6 +204,7 @@ export class ShellRuntime {
     });
     client.onChange(() => {
       this.#halves.clearDaemon(paired.daemon);
+      this.#hooks.clearDaemon(paired.daemon);
       this.#changed();
     });
     this.#connections.set(paired.daemon, { kind: 'connected', client, transport });
@@ -213,6 +230,7 @@ export class ShellRuntime {
     }
     this.#connections.delete(daemon);
     this.#halves.clearDaemon(daemon);
+    this.#hooks.clearDaemon(daemon);
     for (const key of [...this.#packageClients.keys()]) {
       if (key.startsWith(`${daemon}\u0000`)) this.#packageClients.delete(key);
     }
