@@ -87,6 +87,30 @@ describe('deriveLoginChange', () => {
     should(message).not.containEql('sk-proj');
   });
 
+  it('should refuse a short gateway key under a credential-named variable, naming the variable and never the value', () => {
+    const message = refusal(() =>
+      deriveLoginChange(
+        FILES,
+        {
+          kind: 'login.add',
+          id: 'short',
+          harness: 'claude-code',
+          store: 'environment',
+          preset: 'custom-gateway',
+          env: {
+            ANTHROPIC_BASE_URL: 'https://llm.corp.example',
+            ANTHROPIC_AUTH_TOKEN: '${secret:GATEWAY_KEY}',
+            ANTHROPIC_API_KEY: 'sk-1234',
+          },
+        },
+        facts(),
+      ),
+    );
+
+    should(message).startWith('ANTHROPIC_API_KEY in login short looks like a secret');
+    should(message).not.containEql('sk-1234');
+  });
+
   it('should refuse an address with a user and password in it, naming the variable and never the value', () => {
     const message = refusal(() =>
       deriveLoginChange(

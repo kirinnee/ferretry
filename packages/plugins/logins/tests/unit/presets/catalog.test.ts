@@ -19,7 +19,7 @@ describe('the built-in preset catalogue', () => {
     );
   });
 
-  it.each(builtInPresets().map(entry => entry.id))('should ship %s as a file that holds no raw secret', id => {
+  it.each(builtInPresets().map(entry => entry.id))('should ship %s as a file the catalogue lists as a built-in', id => {
     should(preset(id).id).equal(id);
     should(preset(id).origin).equal('built-in');
   });

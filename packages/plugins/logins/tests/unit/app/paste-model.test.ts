@@ -185,7 +185,7 @@ describe('withheldSentence', () => {
         { name: 'ANTHROPIC_BASE_URL', reason: 'url-userinfo' },
       ]),
     ).toBe(
-      'A_KEY, B_TOKEN read as a key, so it was not filled in: a key is stored in the secret store, never typed into a field. ANTHROPIC_BASE_URL carried a user, a password or a query string, so it was not filled in: type the plain address.',
+      'A_KEY, B_TOKEN read as keys, so they were not filled in: a key is stored in the secret store, never typed into a field. ANTHROPIC_BASE_URL carried a user, a password or a query string, so it was not filled in: type the plain address.',
     );
   });
 });

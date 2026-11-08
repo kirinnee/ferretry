@@ -13,7 +13,7 @@ import { LOGIN_NAME, LoginFileSchema, type LoginChange, type LoginFile } from '.
 import { credentialIssues, credentialOf, type Credential } from '../shared/credential.ts';
 import { credentialHarnesses, credentialVariables, hasHalves } from '../shared/halves.ts';
 import { type HarnessKind, harnessKey } from '../shared/harness.ts';
-import { looksLikeRawSecret, looksSecret, urlCarries } from '../../../contract/secret-shape.ts';
+import { looksLikeRawSecret, looksSecret, plainPaste, urlCarries } from '../../../contract/secret-shape.ts';
 import { credentialFromPreset, presetLoginRefusal } from '../presets/login.ts';
 import type { ProviderPreset } from '../presets/schema.ts';
 
@@ -82,7 +82,11 @@ const freeName = (name: string, taken: (candidate: string) => boolean): string =
 
 function assertNoRawSecrets(env: Readonly<Record<string, string>>, owner: string): void {
   for (const [name, value] of Object.entries(env)) {
-    if (looksSecret(name, value) || looksLikeRawSecret(name, value)) {
+    // The browser's rule, at any length: a credential-named or token-shaped value is a reference or nothing.
+    const plain = plainPaste(name, value, false);
+    const secretShaped =
+      plain.kind === 'withheld' && (plain.reason === 'credential-name' || plain.reason === 'token-shape');
+    if (secretShaped || looksSecret(name, value) || looksLikeRawSecret(name, value)) {
       refuse(
         `${name} in ${owner} looks like a secret, and a secret never sits in a login file. Save it in this machine's secret store and write \${secret:NAME} here instead.`,
       );
@@ -158,8 +162,8 @@ function addLogin(
   let summary: string;
   if (store === 'environment') {
     const env = change.env ?? {};
-    assertNoRawSecrets(env, `login ${change.id}`);
     if (change.preset === undefined) {
+      assertNoRawSecrets(env, `login ${change.id}`);
       candidate = present({
         harness: change.harness,
         store,
@@ -180,6 +184,8 @@ function addLogin(
       };
       const refusal = presetLoginRefusal(preset, input);
       if (refusal !== undefined) refuse(refusal);
+      // The preset names its own secrets in its own words first; the shared rule backstops every other variable.
+      assertNoRawSecrets(env, `login ${change.id}`);
       const credential = credentialFromPreset(preset, input);
       candidate = lowered(credential);
       const harnesses = credentialHarnesses(credential);

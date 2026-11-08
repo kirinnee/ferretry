@@ -335,7 +335,6 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
                                 type="button"
                                 data-add-login-use={preset.id}
                                 onClick={() => {
-                                  setPrefill(undefined);
                                   setChoosing(preset.id);
                                 }}
                               >

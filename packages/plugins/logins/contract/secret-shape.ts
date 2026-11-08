@@ -204,8 +204,9 @@ export function hasTokenShape(value: string): boolean {
 
 /** What is wrong with a URL held as a plain value: a user and password in it, or a query string. */
 export function urlCarries(value: string): 'userinfo' | 'query' | undefined {
-  const rest = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)([^#]*)/iu.exec(value.trim());
-  if (rest === null) return undefined;
+  const trimmed = value.trim();
+  const rest = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)([^#]*)/iu.exec(trimmed);
+  if (rest === null) return /^[^/\s]+:[^/\s]*@/u.test(trimmed) ? 'userinfo' : undefined;
   if ((rest[1] ?? '').includes('@')) return 'userinfo';
   return (rest[2] ?? '').includes('?') ? 'query' : undefined;
 }
@@ -219,13 +220,14 @@ export type PlainPaste =
   | { readonly kind: 'withheld'; readonly reason: WithheldReason };
 
 /**
- * THE rule for a pasted value headed for a PLAIN field (one owner, shared by this browser's paste and the daemon's
- * backstop): a variable the preset deliberately leaves empty keeps its `''` (a pasted value is not taken, and a credential is still named); a credential-named variable or a value
- * with a token shape is never taken, however short; a URL with a user or a query string is not taken. It returns the
+ * THE rule for a value headed for a PLAIN field (one owner, shared by this browser's paste and the daemon's
+ * backstop `assertNoRawSecrets`, which refuses `credential-name`, `token-shape` and `url-userinfo`): a variable the preset
+ * deliberately leaves empty keeps its `''`; a credential-named variable or a value with a token shape is never taken,
+ * however short, unless the whole value is one reference (`${secret:NAME}`); a URL with a user or a query string is not taken. It returns the
  * verdict, never the value in a sentence.
  */
 export function plainPaste(name: string, value: string, allowEmpty: boolean): PlainPaste {
-  if (value !== '' && !INDIRECT_VALUE.test(value) && secretReferencesIn(value).length === 0) {
+  if (value !== '' && !INDIRECT_VALUE.test(value.trim())) {
     if (namesACredential(name)) return { kind: 'withheld', reason: 'credential-name' };
     if (hasTokenShape(value)) return { kind: 'withheld', reason: 'token-shape' };
   }

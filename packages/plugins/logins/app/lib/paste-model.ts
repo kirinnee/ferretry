@@ -126,10 +126,10 @@ export const withheldSentence = (withheld: readonly Withheld[]): string | null =
   return [
     secret.length === 0
       ? null
-      : `${secret.map(item => item.name).join(', ')} read${secret.length === 1 ? 's' : ''} as a key, so it was not filled in: a key is stored in the secret store, never typed into a field.`,
+      : `${secret.map(item => item.name).join(', ')} read${secret.length === 1 ? 's' : ''} as ${secret.length === 1 ? 'a key, so it was' : 'keys, so they were'} not filled in: a key is stored in the secret store, never typed into a field.`,
     address.length === 0
       ? null
-      : `${address.map(item => item.name).join(', ')} carried a user, a password or a query string, so it was not filled in: type the plain address.`,
+      : `${address.map(item => item.name).join(', ')} carried a user, a password or a query string, so ${address.length === 1 ? 'it was' : 'they were'} not filled in: type the plain address.`,
   ]
     .filter(part => part !== null)
     .join(' ');

@@ -28,6 +28,7 @@ describe('urlCarries', () => {
     expect(urlCarries('https://host.example/v1?api-version=2024')).toBe('query');
     expect(urlCarries('https://host.example:8443/v1')).toBeUndefined();
     expect(urlCarries('not a url')).toBeUndefined();
+    expect(urlCarries('bob:pw@llm.corp.example')).toBe('userinfo');
   });
 });
 
@@ -42,6 +43,11 @@ describe('plainPaste', () => {
   it('keeps a deliberate empty, and still names a credential-looking value pasted into it', () => {
     expect(plainPaste('API_TIMEOUT_MS', '30000', true)).toEqual({ kind: 'withheld', reason: 'allow-empty' });
     expect(plainPaste('ANTHROPIC_API_KEY', 'sk-1234', true)).toEqual({ kind: 'withheld', reason: 'credential-name' });
+    expect(plainPaste('ANTHROPIC_API_KEY', 'sk-ant-api03-abcdefghij ${secret:X}', false)).toEqual({
+      kind: 'withheld',
+      reason: 'credential-name',
+    });
+    expect(plainPaste('ANTHROPIC_API_KEY', '${secret:X}', false)).toEqual({ kind: 'take', value: '${secret:X}' });
   });
 
   it('withholds a credential name however short the value, but takes a reference or an empty one', () => {

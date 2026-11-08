@@ -528,44 +528,79 @@ describe('the add-login panel', () => {
   });
 
   it('forgets a paste when its form is cancelled or the paste screen is left', async () => {
+    const zai = {
+      ...PRESET,
+      detect: { hosts: ['api.z.ai'], variables: ['ZAI_API_KEY'], keyPrefixes: [] },
+      variables: [
+        { name: 'ANTHROPIC_BASE_URL', kind: 'plain', required: true, allowEmpty: false, harnesses: ['claude-code'] },
+        {
+          name: 'ANTHROPIC_AUTH_TOKEN',
+          kind: 'secret',
+          secret: 'ZAI_API_KEY',
+          required: true,
+          allowEmpty: false,
+          harnesses: ['claude-code'],
+        },
+      ],
+    };
     const client = scripted({
-      'GET /v1/logins/presets': { presets: [{ ...PRESET, id: 'custom-gateway', label: 'Custom gateway' }] },
+      'GET /v1/logins/presets': { presets: [zai] },
       [LIST]: loginList(),
       [GRANTS]: OPEN,
     });
     const view = await mount(<AddLoginPanel client={client} />);
     await until(() => view.container.querySelector('[data-add-login-preset]') !== null, 'the preset');
-    const paste = async (): Promise<void> => {
-      await interact(() =>
-        must(view.container.querySelector('[data-add-login-paste]') as HTMLButtonElement | null, 'Paste').click(),
-      );
+    const press = (selector: string, name: string) =>
+      interact(() => must(view.container.querySelector(selector) as HTMLButtonElement | null, name).click());
+    // A paste that carries a secret NAME: its form says which key to paste into the secret store.
+    const pasteIntoForm = async (): Promise<void> => {
+      await press('[data-add-login-paste]', 'Paste');
       const box = must(view.container.querySelector('[data-paste-input]') as HTMLTextAreaElement | null, 'the box');
       await interact(() => {
         const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-        setter?.call(box, 'export ANTHROPIC_BASE_URL=https://llm.corp.example');
+        setter?.call(
+          box,
+          'export ANTHROPIC_BASE_URL=https://api.z.ai/api/paas/v4\nexport ZAI_API_KEY=sk-zai-very-secret',
+        );
         box.dispatchEvent(new Event('input', { bubbles: true }));
       });
+      await press('[data-paste-read]', 'Read');
+      await press('[data-paste-continue]', 'Continue');
+      expect(view.container.querySelector('[data-add-login-form="zai-glm"] [data-paste-secrets]')).not.toBeNull();
+    };
+    // The next form opened by hand starts from the preset: no paste note, no pasted address.
+    const expectFreshForm = async (): Promise<void> => {
+      await click(view.container.querySelector('[data-add-login-use="zai-glm"]'), 'Use this provider');
+      const form = must(view.container.querySelector('[data-add-login-form="zai-glm"]'), 'the form');
+      expect(form.querySelector('[data-paste-secrets]')).toBeNull();
+      expect(Array.from(form.querySelectorAll('input')).map(field => field.value)).toEqual([
+        '',
+        '${secret:ZAI_API_KEY}',
+        '',
+      ]);
       await interact(() =>
-        must(view.container.querySelector('[data-paste-read]') as HTMLButtonElement | null, 'Read').click(),
+        must(
+          Array.from(form.querySelectorAll('button')).find(b => b.textContent === 'Cancel') ?? null,
+          'Cancel',
+        ).click(),
       );
     };
-    await paste();
+    // Cancelling the prefilled form forgets the paste.
+    await pasteIntoForm();
     await interact(() =>
-      must(view.container.querySelector('[data-paste-back]') as HTMLButtonElement | null, 'Back').click(),
+      must(
+        Array.from(view.container.querySelectorAll<HTMLButtonElement>('[data-add-login-form] button')).find(
+          b => b.textContent === 'Cancel',
+        ) ?? null,
+        'Cancel',
+      ).click(),
     );
-    expect(view.container.querySelector('[data-paste-variables]')).toBeNull();
-    await paste();
-    await interact(() =>
-      must(view.container.querySelector('[data-paste-continue]') as HTMLButtonElement | null, 'Continue').click(),
-    );
-    const form = must(view.container.querySelector('[data-add-login-form="custom-gateway"]'), 'the form');
-    await interact(() =>
-      must(Array.from(form.querySelectorAll('button')).find(b => b.textContent === 'Cancel') ?? null, 'Cancel').click(),
-    );
-    expect(view.container.querySelector('[data-add-login-form]')).toBeNull();
-    // Opening the same provider again by hand starts from the preset, not from the cancelled paste.
-    await click(view.container.querySelector('[data-add-login-use="custom-gateway"]'), 'Use this provider');
-    expect(view.container.querySelector('[data-paste-secrets]')).toBeNull();
+    await expectFreshForm();
+    // Leaving the paste screen with Back forgets it too, even when it was reached from an open prefilled form.
+    await pasteIntoForm();
+    await press('[data-add-login-paste]', 'Paste');
+    await press('[data-paste-back]', 'Back');
+    await expectFreshForm();
     await view.unmount();
   });
 
