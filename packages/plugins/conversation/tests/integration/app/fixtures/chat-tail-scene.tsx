@@ -5,8 +5,10 @@
  * The agenda row is a STAND-IN: it is Agenda's `AgendaLine`, which Conversation does not import (a package reaches
  * another only through its contract). It reproduces what the transcript depends on — one row, a left slot the Jump
  * pill is portalled into (`jumpSlot`), the Agenda button on its right — so what this scene proves is Conversation's
- * half: the transcript leaves no second row of its own and the pill does not resize the row it sits in. That the real
- * row keeps its height is Agenda's (`packages/plugins/agenda/tests`).
+ * half: the transcript leaves no second row of its own and the pill does not resize the row it sits in. Its sizing
+ * (the test's `SCENE_CSS`) is the real row's: one row, never wrapped, a fixed 44px height, a truncating left slot — a
+ * stand-in that could grow would measure itself, not the transcript. That the real row keeps its height is Agenda's
+ * (`packages/plugins/agenda/tests`).
  *
  *   ?theme=<family>-<mode>
  *   ?host=0                    leave the Jump pill's host out, as the chat was (two rows under the messages)
