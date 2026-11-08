@@ -963,7 +963,8 @@ async function bootLocked(
     }
     for (const decl of manifest.actions?.agentTools ?? []) {
       const handle = (half?.tools as Readonly<Record<string, unknown>> | undefined)?.[decl.name] as
-        ToolHandler | undefined;
+        | ToolHandler
+        | undefined;
       tools.set(`${manifest.id}/${decl.name}`, { decl, owner, ...(handle === undefined ? {} : { handle }) });
     }
   }

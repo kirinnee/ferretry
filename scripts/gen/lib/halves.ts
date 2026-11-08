@@ -160,7 +160,8 @@ function checkSeamFindings(where: string, manifest: Manifest, impl: AnyImplement
     for (const id of declared)
       if (!have.has(id)) findings.push({ check, where, message: `daemon half misses ${seam} "${id}"` });
     for (const id of have)
-      if (!declared.has(id)) findings.push({ check, where, message: `daemon half implements undeclared ${seam} "${id}"` });
+      if (!declared.has(id))
+        findings.push({ check, where, message: `daemon half implements undeclared ${seam} "${id}"` });
   }
   return findings;
 }

@@ -24,7 +24,13 @@ const messages = (seams: object): string[] =>
 
 describe('manifest-match: the fyd --check seams', () => {
   test('R689 a half implementing every declared preflight, selftest and worker has no finding', () => {
-    expect(messages({ preflight: { lines: () => [] }, selftest: { engine: {} }, workers: { thread: new URL('file:///w.ts') } })).toEqual([]);
+    expect(
+      messages({
+        preflight: { lines: () => [] },
+        selftest: { engine: {} },
+        workers: { thread: new URL('file:///w.ts') },
+      }),
+    ).toEqual([]);
   });
   test('R689 a declared id with no implementation is a finding, per seam', () => {
     expect(messages({})).toEqual([
