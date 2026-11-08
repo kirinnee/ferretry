@@ -1,4 +1,4 @@
-import type { ConfigPort } from '@ferretry/kernel/contract';
+import type { ConfigPort, ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import { DEFAULT_WARDEN_CONFIG, WARDEN_CONFIG, effectiveWardenConfig, type WardenFile } from '../../contract/index.ts';
 import type { WardenConfig, WardenConfigPatch, WardenConfigStore } from '../lib/index.ts';
 
@@ -11,13 +11,17 @@ export class WardenConfigRefused extends Error {
 }
 
 /**
- * `warden.yaml` already holds an edit waiting for the owner, so this save is refused before anything is written: the
- * held edit stays held and the settings in effect stay as they are.
+ * `warden.yaml` already holds an edit waiting for the owner, and this save changes a SECTION of it, so it is refused
+ * before anything is written: the held edit stays held and the settings in effect stay as they are.
  *
- * DECLARED GAP: today the owner's own save is made to BOTH versions (the one in effect and the held one), so a
- * tightening applies at once and a held edit is neither lost nor put into effect (docs/config-files.md rule 3). The
- * kernel's ConfigPort offers no owner-acknowledged write, so on 5.0:
- * - while the kernel holds an edit, the owner's save is refused (this error), never written over it;
+ * Today the owner's own save is made to BOTH versions (the one in effect and the held one), key by key inside a
+ * section, so a tightening applies at once and a held edit is neither lost nor put into effect (docs/config-files.md
+ * rule 3). The kernel's `ConfigPort.writeAsOwner` makes a patch of TOP-LEVEL keys to both versions, so on 5.0:
+ * - a save of top-level settings only (`enabled`, the minutes, `accounts`, …) while an edit is held goes through
+ *   `writeAsOwner`, exactly today's both-versions write;
+ * - a save that changes a section (`caps`, `guard`, `mayActAlone`, …) while an edit is held is refused (this error),
+ *   because the same whole section written to the held version would put that version's own sub-keys back to what is
+ *   in effect (the 2026-10-29 price incident). GAP(kernel): it needs an owner patch that reaches inside a section;
  * - a broken file is OVERWRITTEN with the value in effect: every setting is written from the settings in effect plus
  *   the owner's patch, so such an edit is never put into effect, but it is lost (today's fail-safe) (a file with a
  *   top-level key the schema does not know is refused instead; the owner repairs it by hand);
@@ -96,7 +100,8 @@ function wholeSettings(next: WardenConfig, inEffect: WardenFile): Record<string,
  * through the kernel's config write port, which checks the schema, refuses a raw secret, keeps the comments and HOLDS a
  * loosening for the owner unless Gate's judge lets this call put it into effect. A save writes the WHOLE settings (the
  * ones in effect plus the owner's patch), so it can loosen only what the owner asked for. A save while another edit is
- * held is refused (`WardenConfigHeld`) and writes nothing.
+ * held goes to BOTH versions through `writeAsOwner` when it changes top-level settings only, and is refused
+ * (`WardenConfigHeld`, nothing written) when it changes a section (see {@link WardenConfigHeld}).
  */
 export class ConfigWardenConfigStore implements WardenConfigStore {
   constructor(private readonly config: ConfigPort) {}
@@ -105,13 +110,32 @@ export class ConfigWardenConfigStore implements WardenConfigStore {
     return effectiveWardenConfig(this.config.file(WARDEN_CONFIG) ?? {});
   }
 
-  async write(config: WardenConfig, _patch: WardenConfigPatch): Promise<readonly string[]> {
-    if (this.config.fileState(WARDEN_CONFIG).state === 'held') throw new WardenConfigHeld();
+  async write(config: WardenConfig, patch: WardenConfigPatch): Promise<readonly string[]> {
+    if (this.config.fileState(WARDEN_CONFIG).state === 'held') return await this.#writeBesideHeld(config, patch);
     const inEffect = (this.config.file(WARDEN_CONFIG) ?? {}) as WardenFile;
-    const result = await this.config.write(WARDEN_CONFIG, undefined, { patch: wholeSettings(config, inEffect) });
-    if (result.kind === 'refused')
-      throw new WardenConfigRefused(result.issues.map(issue => issue.message).join('; ') || result.reason);
-    if (result.kind === 'conflict') throw new WardenConfigMoved();
-    return result.kind === 'held' ? result.sentences : [];
+    return outcomeOf(await this.config.write(WARDEN_CONFIG, undefined, { patch: wholeSettings(config, inEffect) }));
   }
+
+  /**
+   * The owner's save while another edit of `warden.yaml` waits (docs/config-files.md rule 3): made to BOTH versions by
+   * the kernel's `writeAsOwner`, which asks Gate's judge about the owner's patch alone, never about the held edit.
+   * Only the top-level keys the owner changed are sent, as `next` means them; a save that changes a section is
+   * refused (`WardenConfigHeld`), because the port patches whole top-level keys.
+   */
+  async #writeBesideHeld(config: WardenConfig, patch: WardenConfigPatch): Promise<readonly string[]> {
+    const keys = Object.keys(patch).filter(key => (patch as Record<string, unknown>)[key] !== undefined);
+    // A save naming no key has nothing to make to either version; it is refused as before, writing nothing.
+    if (keys.length === 0 || keys.some(key => SECTIONS.includes(key))) throw new WardenConfigHeld();
+    const values = config as unknown as Record<string, unknown>;
+    const ownerPatch = Object.fromEntries(keys.map(key => [key, values[key]]));
+    return outcomeOf(await this.config.writeAsOwner(WARDEN_CONFIG, undefined, { patch: ownerPatch }));
+  }
+}
+
+/** What a write came to, for the settings route: the sentences of what waits for the owner, or a refusal thrown. */
+function outcomeOf(result: ConfigWriteOutcome): readonly string[] {
+  if (result.kind === 'refused')
+    throw new WardenConfigRefused(result.issues.map(issue => issue.message).join('; ') || result.reason);
+  if (result.kind === 'conflict') throw new WardenConfigMoved();
+  return result.kind === 'held' ? result.sentences : [];
 }

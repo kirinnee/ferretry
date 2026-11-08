@@ -165,8 +165,7 @@
         "daemon/lib/presets/detect.ts",
         "daemon/lib/presets/login.ts",
         "daemon/lib/presets/catalog.ts",
-        "daemon/lib/service/publication.ts",
-        "daemon/lib/service/disable-expiry.ts"
+        "daemon/lib/service/publication.ts"
       ]
     },
     "packages/plugins/updates": {

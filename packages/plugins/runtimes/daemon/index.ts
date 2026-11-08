@@ -11,8 +11,10 @@
  * kernel's ports; the default builds the one that refuses in a sentence, because host collaborators are not yet reachable
  * from a plugin:
  *
- *  - GAP(kernel): a config WRITE port. The apply pipeline writes through {@link RuntimeConfigWriter}
- *    (`lib/service/ports.ts`); until the kernel offers one it is `refusingConfigWriter`.
+ *  - GAP(kernel): an all-or-none write of a change's several configuration documents. The kernel's config write port
+ *    (`ConfigPort.write`) writes one declared file per call; the apply pipeline writes through
+ *    {@link RuntimeConfigWriter} (`lib/service/ports.ts`), which stays `refusingConfigWriter` until the catalogue is
+ *    composed over the host (below) and the documents can land together.
  *  - GAP(kernel): `permissions.roots` is empty and `RootName` is a fixed set, so the state home's `fleet/` folder and
  *    the harnesses' own homes are out of reach; the adapters (`daemon/adapters`) are written against narrow host ports
  *    and take their real answers from the kernel when it opens those.
@@ -20,6 +22,8 @@
  */
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon, type DaemonContext } from '@ferretry/kernel/manifest';
+import { milliseconds } from '@ferretry/std';
+import type { LoginView } from '@ferretry/plugin-logins/contract';
 import {
   MODEL_SET_ITEMS,
   PROFILE_ITEMS,
@@ -39,6 +43,7 @@ import manifest from '../manifest.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
 import { autoResumeAnswer } from './lib/service/auto-resume-answer.ts';
+import { DisableExpiryWatch, earliestExpiry, runtimesBackOn } from './lib/service/disable-expiry.ts';
 import { loginUsers } from './lib/service/login-users.ts';
 import { createRuntimesApi } from './lib/service/runtimes-api.ts';
 import { RuntimeEndSupervision, type RuntimeEndSeams } from './lib/service/runtime-end-supervision.ts';
@@ -164,6 +169,46 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
         );
       });
 
+      // A runtime, or the login it runs on, switched off `until` a time reads as on once that time passes (the port
+      // judges both blocks at now), so the views are told AT that instant rather than at their next read
+      // (docs/disabling.md). One timer, for the earliest `until` ahead among the runtime files and the logins (read
+      // through the Logins port), set again whenever a runtime file moves or Logins says a login changed.
+      //
+      // Logins drops a login's `disabled` from its view once the `until` has passed, so the list read when the timer
+      // fires no longer names the block that expired: the fire judges the logins' `until`s as the arming read saw them.
+      // A login list that cannot be read counts as no login blocks, so the runtimes' own `until`s still arm and publish.
+      const loginBlocks = async (): Promise<ReadonlyMap<string, LoginView>> =>
+        await ctx.needs.logins.list().then(
+          list => new Map(list.logins.map(view => [view.id as string, view])),
+          () => new Map(),
+        );
+      let expiredUpTo = clock.nowMs();
+      let armedLogins: ReadonlyMap<string, LoginView> = new Map();
+      let loginReads = 0;
+      const expiry = new DisableExpiryWatch({
+        next: async () => {
+          const read = ++loginReads;
+          const logins = await loginBlocks();
+          // An older read landing after a newer one never replaces what the newer one saw.
+          if (read === loginReads) armedLogins = logins;
+          return earliestExpiry(config.collection(runtimeItems), logins, clock.nowMs());
+        },
+        now: () => clock.nowMs(),
+        republish: async () => {
+          const now = clock.nowMs();
+          const back = runtimesBackOn(config.collection(runtimeItems), armedLogins, expiredUpTo, now);
+          expiredUpTo = now;
+          if (back.length > 0) events.publish(RuntimesChanged, { runtimes: [...back], profiles: [], modelSets: [] });
+        },
+        setTimer: (run, ms) => clock.after(milliseconds(ms), run),
+      });
+      void expiry.rearm();
+      const unwatchExpiry = config.watch(RUNTIME_ITEMS, () => void expiry.rearm());
+      ctx.kernel.lifecycle.onStop(() => {
+        unwatchExpiry();
+        expiry.stop();
+      });
+
       // Ferrets never calls a plugin (§2.1): Runtimes hears that a ferret stopped and looks after its own runtime.
       const ending = new RuntimeEndSupervision({
         ferrets: ctx.needs.ferrets,
@@ -187,7 +232,11 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
             resolve: async id => await api.resolve(id),
           }),
         },
-        subscribers: { 'ferrets.changed': async change => await ending.onChanged(change) },
+        subscribers: {
+          'ferrets.changed': async change => await ending.onChanged(change),
+          // A login switched off or on, or its `until` moved: the expiry timer reads the logins again.
+          'logins.changed': async () => await expiry.rearm(),
+        },
       };
     },
   });

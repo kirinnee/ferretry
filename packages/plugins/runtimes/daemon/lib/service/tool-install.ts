@@ -349,7 +349,7 @@ export type ToolInstallPreview =
   | { readonly harness: HarnessKind; readonly installed: false; readonly plan: ToolInstallPlan };
 
 /**
- * @pending runtimes: plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host
+ * @pending runtimes: the fleet's catalogue and setup cannot be composed over the host
  */
 export class ToolInstallService {
   /** One install at a time: two package managers writing one prefix at once corrupt it. */

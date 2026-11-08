@@ -6,8 +6,8 @@
  * - **Browser proxy** — where its traffic goes, with secret-store credentials, and **Test proxy**.
  * - **User agent** — what the browser says about itself, and nothing more than is true.
  *
- * The mode and the proxy live in `browsers.yaml`, read and written through the kernel's config file service. Until a
- * machine serves that service the tab says so and shows what it can: the status and the user agent.
+ * The mode and the proxy live in `browsers.yaml`, read and written through the kernel's `/v1/config/file` (D2 #3).
+ * When a machine does not answer that read the tab says why and shows what it can: the status and the user agent.
  */
 
 import { useCallback, useEffect, useState } from 'react';

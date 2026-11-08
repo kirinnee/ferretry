@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { interact, mount, must } from '@ferretry/app/testing';
+import browsersManifest from '../../../../manifest.ts';
 import { BROWSER_USER_AGENT_WORDS, BrowserTab } from '../../../../app/features/settings/browser-tab.tsx';
 import { PROXY_ERROR_WORDS } from '../../../../app/features/settings/browser-proxy-test-result.tsx';
 import { browserStateSentence } from '../../../../app/features/settings/browser-state-line.tsx';
@@ -73,6 +74,15 @@ const body = (calls: readonly RecordedCall[], route: string): unknown =>
 const text = (container: HTMLElement, selector: string): string => container.querySelector(selector)?.textContent ?? '';
 
 describe('the Browser tab', () => {
+  it('D2 #3 reads and writes browsers.yaml over the kernel’s config routes, declaring the file and none of the routes', () => {
+    // Browsers declares the FILE the kernel resolves the path to, and none of the kernel's routes itself.
+    expect((browsersManifest.actions?.routes ?? []).map(route => route.key)).not.toContain(CONFIG_GET);
+    expect((browsersManifest.actions?.routes ?? []).map(route => route.key)).not.toContain(CONFIG_PUT);
+    expect((browsersManifest.data?.config ?? []).map(def => ('file' in def ? def.file : undefined))).toContain(
+      'browsers.yaml',
+    );
+  });
+
   it('reads browsers.yaml and the browser state through its own client, by route key', async () => {
     const { calls, view } = await tab({ state: { state: 'running' } });
     expect(calls.map(call => call.route).sort()).toEqual([CONFIG_GET, STATE, GRANTS, 'GET /v1/secrets'].sort());

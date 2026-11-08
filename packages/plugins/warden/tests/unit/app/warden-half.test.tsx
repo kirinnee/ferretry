@@ -7,7 +7,8 @@ import { type ReactNode, Suspense, useState } from 'react';
 import { RuntimeCatalogSchema } from '@ferretry/plugin-runtimes/contract';
 import { SpeedupsViewSchema } from '@ferretry/plugin-voice/contract';
 import app from '../../../app/index.ts';
-import { useConfigChangeEffect } from '../../../app/hooks/use-config-change-effect.ts';
+import { configChangeEffect } from '../../../app/hooks/use-config-change-effect.ts';
+import { WardenConfigChanged } from '../../../contract/index.ts';
 import { useFerretsOf } from '../../../app/hooks/use-ferrets-of.ts';
 import { readGrants } from '../../../app/lib/grants.ts';
 import { daemonConnection } from '../../../app/lib/machine.ts';
@@ -329,9 +330,11 @@ describe('the ferrets of a paired daemon', () => {
   });
 });
 
+const useStandIn = configChangeEffect();
+
 describe('the settings card hears the owner come back', () => {
   function Probe({ onReread }: { readonly onReread: () => void }) {
-    useConfigChangeEffect('alpha', ['warden'], onReread);
+    useStandIn('alpha', ['warden'], onReread);
     return null;
   }
 
@@ -350,5 +353,74 @@ describe('the settings card hears the owner come back', () => {
     await hide(false);
     expect(rereads).toBe(1);
     await view.unmount();
+  });
+});
+
+describe('the settings card hears warden.yaml move on the daemon', () => {
+  /** A Warden client whose daemon publishes events by hand: `publish` delivers to every listener of that event. */
+  const liveClient = () => {
+    const listeners = new Map<string, Set<(payload: unknown) => void>>();
+    const client = {
+      subscribe: (event: { readonly name: string }, listener: (payload: unknown) => void) => {
+        const set = listeners.get(event.name) ?? new Set();
+        set.add(listener);
+        listeners.set(event.name, set);
+        return () => set.delete(listener);
+      },
+    } as unknown as PluginClient;
+    const publish = async (name: string): Promise<void> => {
+      await interact(() => {
+        for (const listener of [...(listeners.get(name) ?? [])]) listener({});
+      });
+    };
+    return { client, publish, count: (name: string) => listeners.get(name)?.size ?? 0 };
+  };
+
+  const settleReach = async (): Promise<void> => {
+    await interact(async () => {
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    });
+  };
+
+  it('reads again the moment the daemon says warden.yaml moved, through that daemon’s own client', async () => {
+    const live = liveClient();
+    const asked: string[] = [];
+    const useLive = configChangeEffect(async connection => {
+      asked.push(connection.daemonId);
+      return live.client;
+    });
+    let rereads = 0;
+    function Probe() {
+      useLive('alpha', ['warden', 'speedups'], () => (rereads += 1));
+      return null;
+    }
+    const view = await mount(<Probe />);
+    await settleReach();
+    expect(asked).toEqual(['alpha']);
+    expect(rereads).toBe(0);
+    await live.publish(WardenConfigChanged.name);
+    expect(rereads).toBe(1);
+    await live.publish('warden.flagged');
+    expect(rereads).toBe(1);
+    await view.unmount();
+    // Unmounted: it stops listening.
+    expect(live.count(WardenConfigChanged.name)).toBe(0);
+  });
+
+  it('does not listen for warden.yaml when the card asks for no warden kind', async () => {
+    const live = liveClient();
+    const useLive = configChangeEffect(async () => live.client);
+    function Probe() {
+      useLive('alpha', ['speedups'], () => undefined);
+      return null;
+    }
+    const view = await mount(<Probe />);
+    await settleReach();
+    expect(live.count(WardenConfigChanged.name)).toBe(0);
+    await view.unmount();
+  });
+
+  it('declares warden.config-changed among the events the Warden publishes', () => {
+    expect(manifest.data?.publishes?.map(event => event.name)).toContain('warden.config-changed');
   });
 });
