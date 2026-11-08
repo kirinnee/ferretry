@@ -40,13 +40,10 @@ import {
   type StagedStepUp,
   type StagedStepUpAct,
 } from '../contract/index.ts';
-import { JournalGrantAudit } from './adapters/grants/runtime-grant-ports.ts';
-import { NodePairingCryptography } from './adapters/pairing/node-pairing-cryptography.ts';
-import { StatePairingRepository } from './adapters/pairing/state-pairing-repository.ts';
+import { JournalGrantAudit } from './adapters/grants/index.ts';
+import { NodePairingCryptography, StatePairingRepository } from './adapters/pairing/index.ts';
 import { WebCryptoPasskeyCrypto } from './adapters/passkeys/webcrypto-passkey-crypto.ts';
-import { StatePushRepository } from './adapters/push/state-push-repository.ts';
-import { WebPushFetchTransport } from './adapters/push/web-push-transport.ts';
-import { StateVapidKeys } from './adapters/push/webcrypto-vapid-keys.ts';
+import { StatePushRepository, StateVapidKeys, WebPushFetchTransport } from './adapters/push/index.ts';
 import { StatePasskeyStore } from './adapters/step-up/state-passkey-store.ts';
 import { StateUnlockLedger } from './adapters/step-up/state-unlock-ledger.ts';
 import {

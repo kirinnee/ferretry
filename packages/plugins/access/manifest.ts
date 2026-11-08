@@ -196,7 +196,11 @@ export default definePlugin({
   },
 
   ui: {
-    settings: [settingsTab('devices', { label: 'Devices', order: 20 })],
+    settings: [
+      settingsTab('devices', { label: 'Devices', order: 20 }),
+      settingsTab('grants', { label: 'Grants', order: 30 }),
+      settingsTab('audit', { label: 'Audit log', order: 40 }),
+    ],
     panels: [
       panel('daemon.status', { id: 'unlock', order: 10 }),
       panel('daemon.status', { id: 'notifications-off', order: 20 }),

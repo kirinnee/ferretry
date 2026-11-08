@@ -2,7 +2,7 @@ import { implementDaemon } from '@ferretry/kernel/manifest';
 import { HOSTED_APP_ORIGIN, StepUpStages } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { type AccessHost, AccessRuntime } from './runtime.ts';
-import { pairingRedirectBoot } from './adapters/pairing/boot-redirect-sweep.ts';
+import { pairingRedirectBoot } from './adapters/pairing/index.ts';
 
 /**
  * The facts no port gives Access yet (see {@link AccessHost}): the app origins a passkey may answer for, and the

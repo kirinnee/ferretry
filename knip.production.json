@@ -312,12 +312,7 @@
         "app/features/pairing/device-refused-notice.tsx",
         "app/features/pairing/pair-scanner.tsx",
         "app/features/pairing/pairing-screen.tsx",
-        "app/features/settings/capability-list.tsx",
-        "app/features/settings/grants-api.ts",
-        "app/features/settings/grants-settings.tsx",
         "app/features/settings/pair-phone.tsx",
-        "app/features/settings/security-api.ts",
-        "app/features/settings/security-log-settings.tsx",
         "app/harness/pair-from-menu.tsx",
         "app/hooks/use-qr-scan.ts",
         "app/lib/device-preference.ts",
@@ -327,15 +322,11 @@
         "app/lib/push-clear.ts",
         "app/lib/push-seen.ts",
         "app/lib/qr-frame-decoder.ts",
-        "app/lib/security-log.ts",
         "cli/lib/grants/commands.ts",
         "cli/lib/grants/controller.ts",
         "cli/lib/grants/gateway.ts",
         "cli/lib/grants/ports.ts",
-        "cli/lib/grants/render.ts",
-        "daemon/adapters/grants/index.ts",
-        "daemon/adapters/pairing/index.ts",
-        "daemon/adapters/push/index.ts"
+        "cli/lib/grants/render.ts"
       ]
     },
     "packages/plugins/voice": {

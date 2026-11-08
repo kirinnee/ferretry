@@ -3,7 +3,14 @@ import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { accessClaims } from './connect.ts';
 import { accessPasskey } from './step-up-shell.tsx';
-import { DevicesTab, notificationsOffPanel, notificationsPanel, UnlockPanel } from './surfaces.tsx';
+import {
+  DevicesTab,
+  grantsTab,
+  notificationsOffPanel,
+  notificationsPanel,
+  auditTab,
+  UnlockPanel,
+} from './surfaces.tsx';
 
 /**
  * Access's app half (§2.3): Devices settings, the unlock nudge, this device's notification permission and this
@@ -14,7 +21,7 @@ import { DevicesTab, notificationsOffPanel, notificationsPanel, UnlockPanel } fr
 export default provideToShell(
   implementApp(manifest, {
     build: ({ client }) => ({
-      settings: { devices: DevicesTab },
+      settings: { devices: DevicesTab, grants: grantsTab(client), audit: auditTab(client) },
       panels: {
         unlock: UnlockPanel,
         notifications: notificationsPanel(client),

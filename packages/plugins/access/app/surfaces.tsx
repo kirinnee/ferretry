@@ -1,4 +1,7 @@
 import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
+import { GrantsSurface } from './features/settings/grants-settings.tsx';
+import { SecurityLogSurface } from './features/settings/security-log-settings.tsx';
+import { connectionOfClient, gateRouteClient } from './lib/gate-client.ts';
 import { AddDeviceSurface } from './features/settings/add-device-settings.tsx';
 import { DevicePermissionsSetting } from './features/settings/device-permissions-settings.tsx';
 import {
@@ -41,5 +44,30 @@ export function notificationsPanel(client: PluginClient) {
 export function notificationsOffPanel(client: PluginClient) {
   return function NotificationsOff() {
     return <NotificationsOffPanel client={client} />;
+  };
+}
+
+/**
+ * Settings › ‹machine› › Grants: what a caller NOT on this host may do, from Gate's `/v1/grants` through this half's
+ * client. A widen from a remote device is refused by Gate and the screen shows its sentence (G111-G113).
+ */
+export function grantsTab(client: PluginClient) {
+  const routed = gateRouteClient(client);
+  const createClient = async () => routed;
+  return function GrantsTab() {
+    const connection = connectionOfClient(client);
+    return connection === undefined ? null : <GrantsSurface connection={connection} createClient={createClient} />;
+  };
+}
+
+/** Settings › ‹machine› › Audit log: recent pairings, removals and refusals, from Gate's `/v1/audit`. */
+export function auditTab(client: PluginClient) {
+  const routed = gateRouteClient(client);
+  const createClient = async () => routed;
+  return function AuditTab() {
+    const connection = connectionOfClient(client);
+    return connection === undefined ? null : (
+      <SecurityLogSurface connection={connection} createClient={createClient} />
+    );
   };
 }
