@@ -1,5 +1,5 @@
 // This import MUST come first: it captures Bun's WebSocket and WebCrypto before happy-dom replaces the globals.
-import { nativeSetTimeout } from './native-socket.ts';
+import { NativeResponse, nativeSetTimeout } from './native-socket.ts';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import type { EventDef } from '@ferretry/kernel/contract';
 import { type StartedDaemon, startDaemon } from '../../../../../scripts/test/two-release/daemon.ts';
@@ -52,6 +52,8 @@ const interact: typeof import('../../support/dom.ts').interact = callback => dom
 
 beforeAll(async () => {
   dom = await import('../../support/dom.ts');
+  // The daemon in this process answers through the global `Response`, and `Bun.serve` accepts only Bun's own.
+  globalThis.Response = NativeResponse;
   [A, Bb, Bc, Bd] = await buildReleases();
 });
 
