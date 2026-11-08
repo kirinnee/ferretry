@@ -2,7 +2,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parse } from 'yaml';
-import { archiveSettingStep } from '../../src/steps/archive-setting.ts';
+import { ARCHIVE_MAX_HOURS, ArchiveConfigFile, ArchiveSettingsSchema } from '@ferretry/core-ferrets/contract';
+import { ARCHIVE_CONFIG, archiveSettingStep } from '../../src/steps/archive-setting.ts';
 import type { HostFacts } from '../../src/steps/index.ts';
 import { parseArchiveAfter, plistEnvironmentValue, systemdEnvironmentWords } from '../../src/v4/archive-after.ts';
 import { fixture } from './ferret-fixture.ts';
@@ -170,4 +171,33 @@ test('the parse rule is v4’s own, and the readers handle the spellings systemd
   expect(
     plistEnvironmentValue(`<dict><key>${VARIABLE}</key><string>24</string></dict>`, VARIABLE).value,
   ).toBeUndefined();
+});
+
+test('the converter writes archive.yaml with the reader’s own schema, and what it writes parses with it', async () => {
+  // One fact, one owner: the step's target IS Ferrets' ArchiveConfigFile, never a restatement of it.
+  expect(ARCHIVE_CONFIG.shape).toBe('file');
+  expect(ARCHIVE_CONFIG.shape === 'file' ? ARCHIVE_CONFIG.file : undefined).toBe(ArchiveConfigFile.file);
+  expect(ARCHIVE_CONFIG.schema).toBe(ArchiveConfigFile.schema);
+  for (const hours of ['1', '24', String(ARCHIVE_MAX_HOURS)]) {
+    await f.clean();
+    f = await fixture();
+    user = join(f.root, 'user');
+    await put(`${UNIT_DIR}/fyd.service`, unit());
+    await put(`${UNIT_DIR}/fyd.service.d/archive.conf`, `[Service]\nEnvironment="${VARIABLE}=${hours}"\n`);
+    expect((await run()).status).toBe('converted');
+    const read = ArchiveSettingsSchema.safeParse(await archive());
+    expect(read.success).toBe(true);
+    expect(read.data).toEqual({ afterHours: Number(hours) });
+  }
+  // One past the reader's bound is not carried at all: nothing the reader would refuse is ever written.
+  await f.clean();
+  f = await fixture();
+  user = join(f.root, 'user');
+  await put(`${UNIT_DIR}/fyd.service`, unit());
+  await put(
+    `${UNIT_DIR}/fyd.service.d/archive.conf`,
+    `[Service]\nEnvironment="${VARIABLE}=${String(ARCHIVE_MAX_HOURS + 1)}"\n`,
+  );
+  await run();
+  expect(await written()).toBe(false);
 });

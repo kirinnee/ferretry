@@ -554,17 +554,10 @@ export const INSTRUCTION_ITEMS_FOLDER = 'instructions' as const;
  * Archiving only hides a session from the live list, and only a write brings it back, so no edit of this file widens
  * authority or spend.
  */
+/** The longest age `archive.yaml` holds: a year of hours (the one owner of the bound; the v4 converter reads it too). */
+export const ARCHIVE_MAX_HOURS = 24 * 365;
 export const ArchiveSettingsSchema = z.strictObject({
-  afterHours: z
-    .union([
-      z.literal('off'),
-      z
-        .number()
-        .int()
-        .min(1)
-        .max(24 * 365),
-    ])
-    .optional(),
+  afterHours: z.union([z.literal('off'), z.number().int().min(1).max(ARCHIVE_MAX_HOURS)]).optional(),
 });
 export type ArchiveSettings = z.infer<typeof ArchiveSettingsSchema>;
 export const ArchiveConfigFile = defineConfig({
