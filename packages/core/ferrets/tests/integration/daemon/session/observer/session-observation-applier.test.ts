@@ -160,7 +160,8 @@ describe('SessionObservationApplier', () => {
 
   it('should re-decide under the lock: nothing to write once the document holds it, nothing over a damaged one', async () => {
     // Arrange — the look saw an open question nobody had recorded; by the time the patch is applied a
-    // writer has recorded that picker already. Later the document is damaged.
+    // writer has stamped that very form as answered, which is what "the document holds it" means (the policy
+    // keeps the projected form over a document that merely holds the same tool id). Later the document is damaged.
     const { storage, folder } = await openFolder();
     const subject = new SessionObservationApplier(
       storage,
@@ -171,9 +172,9 @@ describe('SessionObservationApplier', () => {
     const patch = patchFor({}, [question]);
     await storage.writeState(ID, {
       id: ID,
-      status: 'awaiting_question',
+      status: 'running',
       turn: 1,
-      pendingQuestion: { toolUseId: 'tool-1', questions: [{ question: 'Which one?' }] },
+      lastAnsweredQuestionToolUseId: 'tool-1',
     });
 
     // Act
