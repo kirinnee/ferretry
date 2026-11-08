@@ -21,10 +21,11 @@ import {
   realAdapters,
   type RunningHost,
 } from '../../../packages/core/kernel/host/index.ts';
+import { PRODUCT_BINARIES } from '../../../packages/core/kernel/host/binaries.ts';
 import { contractHashOf, type Release } from './releases.ts';
 
-/** The binary name the host's sentences use; the rig never runs one. */
-const BINARY = 'fy';
+/** The client binary name the host's sentences use (the generated fact, never a literal); the rig never runs one. */
+const BINARY = PRODUCT_BINARIES.client;
 
 export interface StartedDaemon {
   readonly host: RunningHost;
