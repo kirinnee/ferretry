@@ -120,7 +120,6 @@
       "GAP(attachments): the initial-attachments path (daemon/attachments/lib/initial-attachments.ts) is not composed into the daemon yet, so its bounded inflate adapter daemon/attachments/adapters/raw-deflate.ts waits for it"
     ],
     "accounts": [
-      "GAP(agenda): Agenda does not mount `ask:sign-in-approval` yet; it must pass the ask (ref, ferret, subject, why, context) in `value`",
       "GAP(board): the sign-in rule suggestion sheet does not offer the project scope, because the app half has no Board read (\"any\" and \"this ferret\" are offered)",
       "GAP(access): the device-revoke rule-count warning (\"revoking this device suspends N standing sign-in rules\") needs a slot in Access's revoke-device panel",
       "GAP(shells): the `#rules/<stage>` deep link and the \"Don't ask again\" offer on the input card are not drawn; they are not Accounts' surfaces, and dropping them removes no protection",
