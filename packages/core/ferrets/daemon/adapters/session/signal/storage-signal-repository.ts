@@ -44,6 +44,7 @@ function declaredWait(value: unknown): SignalTarget['waiting'] {
 }
 
 /** A wait, back in the JSON vocabulary, with every absent field omitted rather than nulled. */
+// read-scoped: none — the ferret's own declared text, shown back to that ferret and its owner
 function waitDocument(wait: NonNullable<SignalTarget['waiting']>): Record<string, JsonValue> {
   return {
     since: wait.since,

@@ -76,7 +76,7 @@ const resultText = (result: NonNullable<ToolCall['result']>): string =>
  * redirect — is left out, so neither the script nor what it printed leaves Conversation; an answer is cut at
  * {@link ROW_TOOL_TEXT_LIMIT} characters.
  */
-export function rowSlotTools(entry: TranscriptEntry): readonly ConversationRowToolCall[] {
+function rowSlotTools(entry: TranscriptEntry): readonly ConversationRowToolCall[] {
   if (entry.kind !== 'tool' || entry.sent !== undefined || entry.tools === undefined) return [];
   const offered: ConversationRowToolCall[] = [];
   for (const call of entry.tools) {

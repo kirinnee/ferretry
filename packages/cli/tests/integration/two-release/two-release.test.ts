@@ -10,7 +10,7 @@
  * The app's leg is `packages/app/tests/integration/two-release/`. The rig is `scripts/test/two-release/`.
  *
  * An assertion that is RED because a piece of 5.0 is not built yet carries the gap's id in its title and in its failure
- * message (G1 Gate's inventory sees no surfaces, G2 no event stream route, G3 no HTTP tool route, G4 Catalogs' member
+ * message (G1 Gate's inventory sees no surfaces, G2 the kernel bus socket did not carry the event, G3 no HTTP tool route, G4 Catalogs' member
  * table). They are not skipped: they turn green when the gap lands.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -233,7 +233,7 @@ describe('(a) nothing changed: fy of this commit against a daemon of this commit
     expect(hits.alpha.route).toBe(1);
   });
 
-  test('G2 an unchanged event reaches `fy delta watch` (the kernel has no event stream route)', async () => {
+  test('G2 an unchanged event reaches `fy delta watch` over the kernel bus socket', async () => {
     const { DeltaChangedEvent } = await A.load('packages/plugins/delta/contract/index.ts');
     let finished: { code: number; err: string } | undefined;
     void session.fy(['delta', 'watch']).then(result => {
@@ -250,12 +250,16 @@ describe('(a) nothing changed: fy of this commit against a daemon of this commit
         { within: 20_000, pollMs: 100 },
       );
     } catch (error) {
-      throw gap('G2', 'no event stream route on the kernel', error instanceof Error ? error.message : String(error));
+      throw gap(
+        'G2',
+        'the kernel bus socket did not carry the event to fy',
+        error instanceof Error ? error.message : String(error),
+      );
     }
     if (finished?.code !== 0)
       throw gap(
         'G2',
-        'no event stream route on the kernel',
+        'the kernel bus socket did not carry the event to fy',
         `fy delta watch ended ${finished?.code}: ${finished?.err}`,
       );
   });

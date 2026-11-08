@@ -50,6 +50,31 @@ const poll = async <T>(read: () => T | undefined, what: string, ms = 30_000): Pr
   }
 };
 
+/**
+ * The owner at the machine turns the confirmation on opening off, with Gate's own `PATCH /v1/security` and the admin
+ * token over loopback: exactly what `fy daemon security set unlockOnOpen false` does. A change at the machine is applied
+ * at once (the kernel's config service loads the file before it answers), never held.
+ *
+ * WHY THE LEGS THAT READ EVENTS NEED IT: the kernel's event bus socket (`GET /v1/bus`) is not `unlockExempt`, and a
+ * device off the host that has not unlocked with a passkey is served nothing but the unlock routes (401
+ * `unlock_required`). A CI run has no hands for a passkey, so a leg that is not about the unlock has the owner turn it
+ * off first. The fixture routes are `unlockExempt` instead (`workspace.ts`); the kernel's own bus is not a fixture.
+ * A leg that proves `unlock_required` must NOT call this.
+ */
+export async function turnUnlockOffAtTheMachine(daemon: StartedDaemon): Promise<void> {
+  const token = await daemon.adminToken();
+  const response = await nativeFetch(`${daemon.url}/v1/security`, {
+    method: 'PATCH',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ unlockOnOpen: false }),
+  });
+  // The answer is the settings view (no credential); a refusal's body is its sentence and code.
+  if (!response.ok)
+    throw new Error(
+      `turning unlockOnOpen off answered HTTP ${response.status}: ${(await response.text()).slice(0, 400)}\n${daemon.diagnose()}`,
+    );
+}
+
 /** Pairs a device with `grants` on `daemon`, and opens a shell runtime over the registry of `app`. */
 export async function openApp(
   daemon: StartedDaemon,

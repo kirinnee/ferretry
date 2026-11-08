@@ -793,7 +793,10 @@ describe('SessionFilesystem.diff', () => {
     const view = await filesystem.diff(CWD, 'a.ts');
 
     // Assert
-    should(view).eql({ path: 'a.ts', diff: 'DIFF', kind: 'tracked' });
+    should(view).containEql({ path: 'a.ts', diff: 'DIFF', kind: 'tracked' });
+    // the two sides the diff was built from are carried so the route can ask whether either holds a vault value
+    should(new TextDecoder().decode(view.sides?.head)).eql('old');
+    should(new TextDecoder().decode(view.sides?.working)).eql('new');
     should(git.diffCalls[0]?.oldSide?.mode).eql(0o100644);
     should(new TextDecoder().decode(git.diffCalls[0]?.newSide?.bytes)).eql('new');
   });
@@ -841,7 +844,8 @@ describe('SessionFilesystem.diff', () => {
     const view = await filesystem.diff(CWD, 'gone.ts');
 
     // Assert
-    should(view).eql({ path: 'gone.ts', diff: 'DEL', kind: 'tracked' });
+    should(view).containEql({ path: 'gone.ts', diff: 'DEL', kind: 'tracked' });
+    should(view.sides?.working === undefined && view.sides?.head !== undefined).be.true();
     should(git.diffCalls[0]?.newSide).be.undefined();
   });
 
@@ -967,7 +971,7 @@ describe('SessionFilesystem.diff', () => {
     const view = await filesystem.diff(CWD, 'a.ts');
 
     // Assert
-    should(view).eql({ path: 'a.ts', diff: 'PART', kind: 'tracked', truncated: true });
+    should(view).containEql({ path: 'a.ts', diff: 'PART', kind: 'tracked', truncated: true });
   });
 
   it('should refuse a directory asked for as a diff', async () => {

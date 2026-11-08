@@ -328,7 +328,8 @@ describe('pending-tags: knip config shape', () => {
         workspaces: {
           '.': { project: ['scripts/*.ts'] },
           'packages/plugins/*': { entry: ['tests/**/*.test.{ts,tsx}', 'app/views/*.tsx'], project: ['**/*.ts'] },
-          'packages/cli': { entry: ['bin/*.ts'], ignore: ['src/x.ts'] },
+          'packages/plugins/vault': { ignore: ['app/kept.ts'] },
+          'packages/cli': { entry: ['bin/*.ts'] },
         },
         rules: { files: 'error' },
         tags: ['-pending'],
@@ -357,6 +358,19 @@ describe('pending-tags: knip config shape', () => {
   test('an entry that is a test, a view or a bin file is fine; a string entry is read too', () => {
     expect(shape({ workspaces: { 'packages/cli': { entry: 'bin/*.ts' } } })).toEqual([]);
     expect(shape({ workspaces: { 'packages/cli': { entry: 'src/dead.ts' } } })).toHaveLength(1);
+  });
+
+  test('an ignore under a key with no subsystem (the CLI, the root) needs a reason on ALLOWED_KNIP (ruling #29)', () => {
+    const json = { workspaces: { 'packages/cli': { ignore: ['src/x.ts'] }, '.': { ignore: ['scripts/y.ts'] } } };
+    expect(shape(json).map(f => f.message)).toEqual([
+      'ignore "src/x.ts" keeps code alive without a pending-port tie; remove it, or name "knip.json#workspaces["packages/cli"].ignore:src/x.ts" on ALLOWED_KNIP with a reason',
+      'ignore "scripts/y.ts" keeps code alive without a pending-port tie; remove it, or name "knip.json#workspaces["."].ignore:scripts/y.ts" on ALLOWED_KNIP with a reason',
+    ]);
+    const allowed = new Map([
+      ['knip.json#workspaces["packages/cli"].ignore:src/x.ts', 'built by path'],
+      ['knip.json#workspaces["."].ignore:scripts/y.ts', 'run by path'],
+    ]);
+    expect(shape(json, allowed)).toEqual([]);
   });
 
   test('ALLOWED_KNIP lets a named setting through, and an entry nothing uses is a finding (shrink-only)', () => {
