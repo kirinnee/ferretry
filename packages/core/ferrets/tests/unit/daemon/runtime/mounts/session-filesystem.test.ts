@@ -557,6 +557,54 @@ describe('the diff route', () => {
     }
   });
 
+  const CROSS = ['fixture-route-cross-a-0023', 'fixture-route-cross-b-0024', 'fixture-route-cross-c-0025'];
+
+  it('R-0150 a value across one hunk, the next hunk heading and its leading context: masked for a person (covered), 403 holds_secret for an agent', async () => {
+    for (const eol of ['\n', '\r\n']) {
+      for (const joiner of ['\n', '\r\n']) {
+        const cr = eol === '\r\n' ? '\r' : '';
+        const raw = [
+          '@@ -1,4 +1,4 @@',
+          `-a=1${cr}`,
+          `+a=9${cr}`,
+          ` x2${cr}`,
+          ` x3${cr}`,
+          ` ${CROSS[0]}${cr}`,
+          `@@ -6,6 +6,6 @@ ${CROSS[1]}`,
+          ` ${CROSS[2]}${cr}`,
+          ` x7${cr}`,
+          ` x8${cr}`,
+          `-b=2${cr}`,
+          `+b=9${cr}`,
+          ` x10${cr}`,
+          ` x11${cr}`,
+          '',
+        ].join('\n');
+        const redaction = new FakeRedaction(new Map([[FIXTURE_NAME, CROSS.join(joiner)]]));
+        const asPerson = fixture(
+          { tree: tree() },
+          { isTracked: () => true, diffSnapshots: () => ({ diff: raw, truncated: false }) },
+          person,
+          redaction,
+        );
+        const served = await asPerson.ask(DIFF, { query: { path: 'a.ts' } });
+        const wire = String(served.body);
+        should(served.status === 200).be.true();
+        should(CROSS.some(line => wire.includes(line))).be.false();
+        should(wire.includes('@@ -6,6 +6,6 @@ ***')).be.true();
+
+        const asAgent = fixture(
+          { tree: tree() },
+          { isTracked: () => true, diffSnapshots: () => ({ diff: raw, truncated: false }) },
+          agent,
+          redaction,
+        );
+        const refusal = await refusalOf(asAgent.ask(DIFF, { query: { path: 'a.ts' } }));
+        should(refusal?.status === 403 && refusal?.code === 'holds_secret').be.true();
+      }
+    }
+  });
+
   it('R-0150 an agent diff is refused when either side the service read holds a value, even if the diff shows only part of it', async () => {
     const partial = `@@ -1 +1 @@\n-old\n+new\n`;
     const held = `KEY=${FIXTURE_SECRET}\nrest\n`;
