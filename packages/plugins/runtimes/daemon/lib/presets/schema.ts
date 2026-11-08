@@ -58,7 +58,7 @@ export const PresetVariableSchema = z
       });
     }
   });
-export type PresetVariable = z.infer<typeof PresetVariableSchema>;
+type PresetVariable = z.infer<typeof PresetVariableSchema>;
 
 /** The parts of an HTTP probe every kind that sends one shares. */
 const PROBE_SHAPE = {

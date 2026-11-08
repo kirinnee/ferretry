@@ -271,3 +271,21 @@ describe('storage resume repository', () => {
     ).be.rejectedWith(/unreadable after a resume transition/u);
   });
 });
+
+describe('storage resume repository: a session whose configuration states no retry budget', () => {
+  it('should be a target without a transient retry budget, never a zero one', async () => {
+    // Arrange: documents as the store hands them over, narrowed here without trusting their shape
+    const storage = {
+      readConfig: async () => ({ mode: 'auto', cwd: '/workspace/project', retry: { transientAttempts: -1 } }),
+      readState: async () => ({ status: 'stopped', turn: 1 }),
+    };
+
+    // Act
+    const actual = await new StorageResumeRepository(storage as never).read(ID);
+
+    // Assert
+    should(actual).not.be.undefined();
+    should(actual).not.have.property('transientRetryBudget');
+    should(actual).containEql({ turn: 1, mode: 'auto', cwd: '/workspace/project' });
+  });
+});

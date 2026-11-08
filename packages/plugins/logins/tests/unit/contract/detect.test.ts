@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type DetectablePreset, detectProvider, parseVariableBlock } from '../../../daemon/lib/presets/detect.ts';
+import { type DetectablePreset, detectProvider, parseVariableBlock } from '../../../contract/detect.ts';
 
 const TABLE: readonly DetectablePreset[] = [
   {

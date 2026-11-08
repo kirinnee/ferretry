@@ -1,6 +1,8 @@
 import type { AppImplementation, Manifest } from '@ferretry/kernel/manifest';
 import type { MemberCarriers } from './member.ts';
 import type { NavigateOptions } from '../router/router.tsx';
+import type { DeclaredFragment, FragmentDecl } from '../router/address.ts';
+import type { ScreenRef } from '../layout/engine.ts';
 import type { PluginCommandSource } from '../shell/command-sources.ts';
 import type { AppHookProviders } from '../surfaces/app-hooks.ts';
 import type { View } from '../surfaces/halves.ts';
@@ -220,6 +222,11 @@ export interface DaemonlessScreenProps {
 /** The daemon-less screens of one plugin, by screen id. */
 export type DaemonlessViews = Readonly<Record<string, View<DaemonlessScreenProps>>>;
 
+/** What a device view is drawn with (S3): where to go, and nothing about any daemon. */
+export interface DeviceViewProps {
+  readonly navigate: (to: string, options?: NavigateOptions) => void;
+}
+
 /** What a plugin app half may hand the shell. Each part is a factory over the {@link ConnectPorts}. */
 export interface ShellProvides {
   /** Access only. */
@@ -252,6 +259,16 @@ export interface ShellProvides {
    * daemon-less is ignored, so a per-daemon screen can never be mounted without its daemon this way.
    */
   readonly daemonless?: (ports: DaemonlessPorts) => DaemonlessViews;
+  /**
+   * Any plugin: the address fragments it owns (S3, `router/address.ts`). A keyed key is taken only by this plugin's
+   * device view; a path declaration names one of its own daemon-less screens. `strip: false` claims a key and leaves it.
+   */
+  readonly fragments?: readonly FragmentDecl[];
+  /**
+   * Any plugin: its device views (S3, MA2), each mounted once at the frame root with no daemon and no client of its
+   * own, under `WithoutShell`; it may list machines (`useEveryDaemon`) and take its keyed fragments (`useFragment`).
+   */
+  readonly device?: Readonly<Record<string, View<DeviceViewProps>>>;
 }
 
 /** An app half with its `shell` section. */
@@ -395,4 +412,31 @@ export function registeredDaemonless(surfaces: readonly SurfaceEntry[], ports: D
     }
   }
   return { views, failures };
+}
+
+/** Every plugin's declared fragments, with the screen each path declaration names (a screen it lacks names none). */
+export function registeredFragments(
+  surfaces: readonly SurfaceEntry[],
+  screenOf: (plugin: string, screen: string) => ScreenRef | undefined,
+): readonly DeclaredFragment[] {
+  return surfaces.flatMap(entry =>
+    (shellProvidesOf(entry)?.fragments ?? []).map(decl => {
+      const screen = decl.form === 'path' ? screenOf(entry.id, decl.screen) : undefined;
+      return screen === undefined ? { plugin: entry.id, decl } : { plugin: entry.id, decl, screen };
+    }),
+  );
+}
+
+/** One plugin's device view, as the host mounts it. */
+export interface RegisteredDeviceView {
+  readonly plugin: string;
+  readonly id: string;
+  readonly view: View<DeviceViewProps>;
+}
+
+/** Every plugin's device views, in registry order (a skeleton half provides none). */
+export function registeredDeviceViews(surfaces: readonly SurfaceEntry[]): readonly RegisteredDeviceView[] {
+  return surfaces.flatMap(entry =>
+    Object.entries(shellProvidesOf(entry)?.device ?? {}).map(([id, view]) => ({ plugin: entry.id, id, view })),
+  );
 }

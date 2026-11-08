@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { AddLoginPanel } from '../../../app/features/add-login-panel.tsx';
 import { LoginSignInPanel } from '../../../app/features/login-sign-in-panel.tsx';
 import { SignInsTab } from '../../../app/features/sign-ins-tab.tsx';
@@ -6,6 +6,16 @@ import { login, loginList } from '../cli/fakes.ts';
 import { interact, mount, must } from '../support/dom.ts';
 import { type Call, scripted } from './support/client.ts';
 import { CLAUDE_URL, claudeFlow } from './support/harness-login.ts';
+
+// Opening a login writes its address, so the window's hash is reset around every test here: the
+// tab must never start on a page a previous test happened to leave behind, nor leave one behind.
+beforeEach(() => {
+  window.history.pushState({}, '', '/');
+});
+afterEach(() => {
+  window.location.hash = '';
+  window.history.pushState({}, '', '/');
+});
 
 const LIST = 'GET /v1/logins';
 const START = 'POST /v1/logins/sign-in';
@@ -142,6 +152,90 @@ describe('the Sign-ins tab', () => {
   });
 });
 
+describe('the page the address names', () => {
+  /** Set the address the way a browser does, and tell the tab it changed. */
+  const address = async (hash: string): Promise<void> => {
+    await interact(() => {
+      window.location.hash = hash;
+      window.dispatchEvent(new Event('hashchange'));
+    });
+  };
+
+  it('opens on the login a #machines/<m>/sign-ins/<loginId> link names, when the tab mounts', async () => {
+    window.location.hash = '#machines/box/sign-ins/claude-you';
+    const view = await mount(<SignInsTab client={scripted({ [LIST]: loginList(login()) })} />);
+    await until(() => view.container.querySelector('[data-login-page="claude-you"]') !== null, 'the page');
+    expect(view.container.querySelector('[data-login-page]')?.getAttribute('data-login-page')).toBe('claude-you');
+    expect(view.container.querySelector('[data-logins-tab]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('follows the address while it is open, and a bare sign-ins address opens the list', async () => {
+    window.location.hash = '#machines/box/sign-ins';
+    const view = await mount(<SignInsTab client={scripted({ [LIST]: loginList(login()) })} />);
+    await until(() => view.container.querySelector('[data-logins-tab]') !== null, 'the list');
+    await address('#machines/box/sign-ins/claude-you');
+    await until(() => view.container.querySelector('[data-login-page="claude-you"]') !== null, 'the page');
+    await address('#machines/box/sign-ins');
+    await until(() => view.container.querySelector('[data-logins-tab]') !== null, 'the list');
+    expect(view.container.querySelector('[data-login-missing]')).toBeNull();
+    // Another tab's address names no login: the list stays, and says nothing.
+    await address('#machines/box/runtimes/claude-default');
+    await until(() => view.container.querySelector('[data-login-page]') === null, 'no page');
+    expect(view.container.querySelector('[data-logins-tab]')).not.toBeNull();
+    expect(view.container.querySelector('[data-login-missing]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('keeps today’s notice when the address names a login that is not on the machine', async () => {
+    window.location.hash = '#machines/box/sign-ins/claude-gone';
+    const view = await mount(<SignInsTab client={scripted({ [LIST]: loginList(login()) })} />);
+    await until(() => view.container.querySelector('[data-login-missing]') !== null, 'the notice');
+    expect(view.container.querySelector('[data-login-missing]')?.textContent).toBe(
+      'There is no login claude-gone on box any more.',
+    );
+    expect(view.container.querySelectorAll('[data-login-row]')).toHaveLength(1);
+    await view.unmount();
+  });
+
+  it('writes the address when the tab itself opens a page, and closes it back to the list', async () => {
+    window.location.hash = '#machines/box/sign-ins';
+    const view = await mount(<SignInsTab client={scripted({ [LIST]: loginList(login()) })} />);
+    await until(() => view.container.querySelector('[data-login-row]') !== null, 'the row');
+    await click(view.container.querySelector('[data-login-row="claude-you"]'), 'the row');
+    expect(window.location.hash).toBe('#machines/box/sign-ins/claude-you');
+    await click(view.container.querySelector('[data-page-back]'), 'back');
+    expect(window.location.hash).toBe('#machines/box/sign-ins');
+    await view.unmount();
+  });
+
+  it('lands on the page of the login the add screen added, at the address that names it', async () => {
+    const calls: Call[] = [];
+    // The list read before the add is empty; the reload after it carries the login the change made.
+    const client = scripted(
+      {
+        'GET /v1/logins/presets': { presets: [PRESET] },
+        [LIST]: () =>
+          calls.some(call => call.route === APPLY) ? loginList(login({ id: 'claude-zai-glm' })) : loginList(),
+        [GRANTS]: OPEN,
+        [STAGE]: staged({ kind: 'login.add', id: 'claude-zai-glm', harness: 'claude-code' }),
+        [APPLY]: { outcome: 'applied' },
+      },
+      calls,
+    );
+    const view = await mount(<SignInsTab client={client} />);
+    await until(() => view.container.querySelector('[data-add-login]') !== null, 'the add button');
+    await click(view.container.querySelector('[data-add-login]'), 'Add a login');
+    await until(() => view.container.querySelector('[data-add-login-preset]') !== null, 'the provider');
+    await click(view.container.querySelector('[data-add-login-use="zai-glm"]'), 'Use this provider');
+    await click(view.container.querySelector('[data-add-login-form="zai-glm"] [data-change-submit]'), 'Add');
+    await until(() => view.container.querySelector('[data-login-page="claude-zai-glm"]') !== null, 'the new page');
+    expect(view.container.querySelector('[data-logins-adding]')).toBeNull();
+    expect(window.location.hash).toBe('#machines/box/sign-ins/claude-zai-glm');
+    await view.unmount();
+  });
+});
+
 describe('the sign-in panel mounted by itself', () => {
   it('draws the sign-in for the login its subject names, and refuses one of the other harness', async () => {
     const client = scripted({ [LIST]: loginList(needsSignIn()) });
@@ -267,6 +361,88 @@ describe('the add-login panel', () => {
       store: 'environment',
       preset: 'zai-glm',
       env: { ZAI_KEY: '${secret:ZAI_KEY}' },
+    });
+    await view.unmount();
+  });
+
+  it('reads a pasted block, prefills the provider it recognised, and keeps the key out of everything', async () => {
+    const calls: Call[] = [];
+    const added: string[] = [];
+    const client = scripted(
+      {
+        'GET /v1/logins/presets': {
+          presets: [
+            {
+              ...PRESET,
+              variables: [
+                {
+                  name: 'ANTHROPIC_BASE_URL',
+                  kind: 'plain',
+                  required: true,
+                  allowEmpty: false,
+                  harnesses: ['claude-code'],
+                },
+                {
+                  name: 'ANTHROPIC_AUTH_TOKEN',
+                  kind: 'secret',
+                  secret: 'ZAI_API_KEY',
+                  required: true,
+                  allowEmpty: false,
+                  harnesses: ['claude-code'],
+                },
+              ],
+              detect: { hosts: ['api.z.ai'], variables: ['ZAI_API_KEY'], keyPrefixes: [] },
+            },
+          ],
+        },
+        [LIST]: loginList(),
+        [GRANTS]: OPEN,
+        [STAGE]: staged({ kind: 'login.enable', id: 'x' }),
+        [APPLY]: { outcome: 'applied' },
+      },
+      calls,
+    );
+    const view = await mount(<AddLoginPanel client={client} onAdded={id => added.push(id)} />);
+    await until(() => view.container.querySelector('[data-add-login-preset]') !== null, 'the preset');
+    await interact(() =>
+      must(
+        view.container.querySelector('[data-add-login-paste]') as HTMLButtonElement | null,
+        'Paste variables…',
+      ).click(),
+    );
+    const box = must(view.container.querySelector('[data-paste-input]') as HTMLTextAreaElement | null, 'the box');
+    await interact(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(
+        box,
+        'export ANTHROPIC_BASE_URL=https://api.z.ai/api/paas/v4\nexport ZAI_API_KEY=sk-zai-very-secret',
+      );
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await interact(() =>
+      must(view.container.querySelector('[data-paste-read]') as HTMLButtonElement | null, 'Read').click(),
+    );
+    await interact(() =>
+      must(view.container.querySelector('[data-paste-continue]') as HTMLButtonElement | null, 'Continue').click(),
+    );
+    const form = must(view.container.querySelector('[data-add-login-form="zai-glm"]'), 'the prefilled form');
+    // The plain value the paste carried fills its field; the secret stays a reference to a NAME.
+    const fields = Array.from(form.querySelectorAll('input'));
+    expect(fields.map(field => field.value)).toEqual(['https://api.z.ai/api/paas/v4', '${secret:ZAI_API_KEY}', '']);
+    expect(form.querySelector('[data-paste-secrets]')?.textContent).toContain(
+      'paste ZAI_API_KEY into the secret store',
+    );
+    // The pasted key never reaches the tree, before or after the form opens.
+    expect(view.container.innerHTML).not.toContain('sk-zai-very-secret');
+    await click(form.querySelector('[data-change-submit]'), 'Add');
+    await until(() => added.length > 0, 'the login to be added');
+    expect(calls.find(call => call.route === STAGE)?.body).toEqual({
+      kind: 'login.add',
+      id: 'claude-zai-glm',
+      harness: 'claude-code',
+      store: 'environment',
+      preset: 'zai-glm',
+      env: { ANTHROPIC_BASE_URL: 'https://api.z.ai/api/paas/v4', ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}' },
     });
     await view.unmount();
   });

@@ -1,8 +1,10 @@
 import type { AppComponent, PanelProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
+import { provideToShell } from '@ferretry/app';
 import manifest from '../manifest.ts';
 import type { LiveRuntimesClient, RuntimesClient } from './lib/client.ts';
 import { lazyComponent } from './lazy.ts';
+import { MACHINES_SECTION } from './features/fleet/shell/machine-route.ts';
 
 type SettingsView = 'runtimes-settings' | 'profiles-settings' | 'model-sets-settings';
 
@@ -40,18 +42,25 @@ const accountPanel = (
  * composer, and the account picker it contributes to the two slots Ferrets' new-ferret and move pages offer. The views
  * are React and load on first use (`./lazy.ts`), so this module imports no React and stays loadable by the registry
  * generator before the app shell, which owns React, is in place.
+ *
+ * It claims the `#machines/<machine>/<tab>[/<item>]` fragment (`machineDetailHash`) with `strip: false` (shell contract
+ * S3, m9): the shell never takes it out of the address, because the tabs' own router reads it there; the claim only
+ * stops another plugin from declaring the same key.
  */
-export default implementApp(manifest, {
-  build: ({ client }) => ({
-    settings: {
-      runtimes: settingsView('runtimes-settings', 'createRuntimesSettings', client),
-      profiles: settingsView('profiles-settings', 'createProfilesSettings', client),
-      'model-sets': settingsView('model-sets-settings', 'createModelSetsSettings', client),
-    },
-    panels: {
-      'runtime-picker': pickerView(client),
-      'new-ferret-account': accountPanel(client, 'createNewFerretAccountPanel'),
-      'move-account': accountPanel(client, 'createMoveAccountPanel'),
-    },
+export default provideToShell(
+  implementApp(manifest, {
+    build: ({ client }) => ({
+      settings: {
+        runtimes: settingsView('runtimes-settings', 'createRuntimesSettings', client),
+        profiles: settingsView('profiles-settings', 'createProfilesSettings', client),
+        'model-sets': settingsView('model-sets-settings', 'createModelSetsSettings', client),
+      },
+      panels: {
+        'runtime-picker': pickerView(client),
+        'new-ferret-account': accountPanel(client, 'createNewFerretAccountPanel'),
+        'move-account': accountPanel(client, 'createMoveAccountPanel'),
+      },
+    }),
   }),
-});
+  { fragments: [{ form: 'keyed', key: MACHINES_SECTION, strip: false }] },
+);
