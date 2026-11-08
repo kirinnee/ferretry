@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { HolderId, PolicyRef, ScopedRoute } from '@ferretry/kernel/contract';
+import type { FerretId, HolderId, PolicyRef, ScopedRoute } from '@ferretry/kernel/contract';
 import { addDuration, minutes } from '@ferretry/std';
 import {
   AUDIT_KINDS,
@@ -11,8 +11,11 @@ import {
   LIMITED_DEVICE_GRANTS,
   remedyRef,
   STEP_UP_ACTS,
+  type WardenRemedyAuthorizer,
+  type WardenRemedyGrant,
+  type WardenRemedyPresentation,
 } from '../../../../contract/index.ts';
-import { holder } from '../../../../contract/testing/index.ts';
+import { holder, T0 } from '../../../../contract/testing/index.ts';
 import { CLIENT_HEADER, SESSION_ID_HEADER } from '../../../../daemon/lib/api/admission.ts';
 import {
   ADMIN,
@@ -466,6 +469,101 @@ describe('warden remedies', () => {
     expect(
       admit(w, leave, { bearer: ADMIN, arrival: local(), headers: { 'x-fy-warden-capability': 'cap-1' } }).outcome,
     ).toBe('admitted');
+  });
+});
+
+describe('warden remedies decided by the authorizer', () => {
+  const leave = descriptor({
+    minimum: 'authenticated',
+    method: 'POST',
+    path: '/v1/warden/leave',
+    wardenRemedy: remedyRef('leave'),
+  });
+  const grant: WardenRemedyGrant = {
+    remedy: remedyRef('leave'),
+    targetFerret: 'F2' as FerretId,
+    wardenId: 'W1' as FerretId,
+    assignmentStartedAt: T0,
+  };
+  const presentCapability = (w: ReturnType<typeof world>) =>
+    admit(w, leave, { bearer: WARDEN, arrival: local(), headers: { 'x-fy-warden-capability': 'cap-1' } });
+  const answering = (decide: WardenRemedyAuthorizer['decide']) => {
+    const w = world();
+    w.remedies = { decide };
+    return presentCapability(w);
+  };
+
+  test('an allowance that names the ferret, the warden and the assignment is admitted and carried on the standing', () => {
+    const seen: WardenRemedyPresentation[] = [];
+    const { decision, outcome } = answering(presentation => {
+      seen.push(presentation);
+      return { allowed: true, grant };
+    });
+    expect(outcome).toBe('admitted');
+    if (decision.outcome !== 'admitted') throw new Error('expected admitted');
+    expect(decision.standing.wardenRemedy).toEqual(grant);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ remedy: remedyRef('leave'), capability: 'cap-1' });
+  });
+
+  test('a refusal from the authorizer is answered 403 with its own words, trimmed', () => {
+    const { decision, outcome } = answering(() => ({ allowed: false, refusal: '  this assignment has ended  ' }));
+    expect(outcome).toBe('403 warden_remedy_refused');
+    expect(decision.outcome === 'refused' && JSON.parse(String(decision.response.body)).error).toBe(
+      'this assignment has ended',
+    );
+  });
+
+  test('no answer, a throw and a blank refusal are all undetermined: the warden is refused, never admitted', () => {
+    expect(answering(() => undefined).outcome).toBe('403 warden_remedy_undetermined');
+    expect(
+      answering(() => {
+        throw new Error('the snapshot failed to refresh');
+      }).outcome,
+    ).toBe('403 warden_remedy_undetermined');
+    expect(answering(() => ({ allowed: false, refusal: '   ' })).outcome).toBe('403 warden_remedy_undetermined');
+  });
+
+  test('an allowance for another remedy, or with a blank field, is too damaged to act on', () => {
+    const allowed = (changed: Partial<Record<keyof WardenRemedyGrant, string>>) =>
+      answering(() => ({ allowed: true, grant: { ...grant, ...changed } as WardenRemedyGrant })).outcome;
+    expect(allowed({ remedy: remedyRef('stop') })).toBe('403 warden_remedy_undetermined');
+    expect(allowed({ targetFerret: ' ' })).toBe('403 warden_remedy_undetermined');
+    expect(allowed({ wardenId: '' })).toBe('403 warden_remedy_undetermined');
+    expect(allowed({ assignmentStartedAt: '\t' })).toBe('403 warden_remedy_undetermined');
+  });
+
+  test('a route that declares no remedy refuses a warden that presents a capability for one', () => {
+    const w = world();
+    const plain = descriptor({ minimum: 'authenticated', method: 'POST', path: '/v1/plain' });
+    expect(
+      admit(w, plain, { bearer: WARDEN, arrival: local(), headers: { 'x-fy-warden-capability': 'cap-1' } }).outcome,
+    ).toBe('403 warden_remedy_undeclared');
+    expect(admit(w, plain, { bearer: WARDEN, arrival: local() }).outcome).toBe('admitted');
+  });
+});
+
+describe('a step-up proof is spent by the act it paid for', () => {
+  test('a fresh proof the route spends is gone afterwards, for that copy of the app only', () => {
+    const w = world();
+    w.enrol('phone');
+    const subject = { deviceId: 'phone', appSession: 's-phone' };
+    w.stepUps.grant(subject);
+    expect(w.stepUps.freshlyHeld(subject)).toBe(true);
+    const { decision } = admit(w, fleetUse, { device: 'phone' });
+    if (decision.outcome !== 'admitted') throw new Error('expected admitted');
+    decision.standing.spendFreshStepUp?.();
+    expect(w.stepUps.freshlyHeld(subject)).toBe(false);
+  });
+
+  test('the owner at the machine holds no proof, so there is nothing for the route to spend', () => {
+    const w = world();
+    const { decision } = admit(w, fleetUse, { bearer: ADMIN, arrival: local() });
+    if (decision.outcome !== 'admitted') throw new Error('expected admitted');
+    expect(() => {
+      decision.standing.spendFreshStepUp?.();
+      decision.standing.spendStepUp?.();
+    }).not.toThrow();
   });
 });
 
