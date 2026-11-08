@@ -167,6 +167,15 @@
       "GAP(ferrets): the Files side tab (Ferrets' `files` panel on `ferret.side`, order 40) is hidden until the ferret.side panel layout lists it"
     ]
   },
-  "pendingHalves": {},
+  "pendingHalves": {
+    "catalogs": ["app"],
+    "shells": ["app"],
+    "layouts": ["app"],
+    "gate": ["app"],
+    "vault": ["app", "cli"],
+    "browsers": ["cli"],
+    "mcp": ["cli"],
+    "skills": ["cli"]
+  },
   "pendingAppPorts": []
 }

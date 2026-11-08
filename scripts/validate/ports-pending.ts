@@ -6,23 +6,57 @@
  * A plugin whose halves are all ported but whose port still has named gaps open stays listed, and says why in
  * `pendingReasons` (`{ "<id>": ["<open gap>", …] }`): a listed plugin with no skeleton half left is accepted only
  * while it states at least one reason, and a reason for an id that is not listed is a finding.
+ *
+ * Two-way skeleton rule: `pendingHalves` (`{ "<id>": ["app", …] }`) names exactly the halves that are skeletons. A
+ * skeleton half it does not name is a finding, and so is a name for a half that is real (or for a half that does not
+ * exist). `pendingHalves` also only shrinks against the base, apart from the one-time corrections in
+ * `ONE_TIME_HALF_ALLOWANCE`.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isSkeleton } from '../gen/lib/halves.ts';
 import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
+import { readPendingApps } from '../gen/lib/pending-apps.ts';
 import { HALVES, loadHalf } from '../gen/lib/workspace.ts';
+
+/**
+ * Halves that may enter `pendingHalves` once even though the list only shrinks. Each is a correction, not a new
+ * deferral: the half was a skeleton the whole time and was never named. An entry is inert once the base names it.
+ */
+export const ONE_TIME_HALF_ALLOWANCE: readonly {
+  readonly id: string;
+  readonly half: string;
+  readonly reason: string;
+}[] = [
+  { id: 'catalogs', half: 'app', reason: 'a correction: these halves were skeletons the whole time (britnee)' },
+  { id: 'shells', half: 'app', reason: 'a correction: these halves were skeletons the whole time (britnee)' },
+  { id: 'layouts', half: 'app', reason: 'a correction: these halves were skeletons the whole time (britnee)' },
+  // Found while re-checking with isSkeleton: more skeleton halves nobody had named. Same correction, flagged for review.
+  { id: 'gate', half: 'app', reason: 'a correction: these halves were skeletons the whole time (britnee)' },
+  { id: 'vault', half: 'app', reason: 'a correction: these halves were skeletons the whole time (britnee)' },
+  { id: 'vault', half: 'cli', reason: 'a correction: these halves were skeletons the whole time (britnee)' },
+  { id: 'browsers', half: 'cli', reason: 'a correction: these halves were skeletons the whole time (britnee)' },
+  { id: 'mcp', half: 'cli', reason: 'a correction: these halves were skeletons the whole time (britnee)' },
+  { id: 'skills', half: 'cli', reason: 'a correction: these halves were skeletons the whole time (britnee)' },
+];
 
 export interface PortsPending {
   readonly format: 1;
   readonly pending: readonly string[];
   /** Why a fully ported plugin is still listed: its open gaps, by plugin id. */
   readonly reasons: Readonly<Record<string, readonly string[]>>;
+  /** The halves each plugin still has as a skeleton, by plugin id. */
+  readonly halves: Readonly<Record<string, readonly string[]>>;
 }
 
 export function parsePending(text: string, where: string): PortsPending {
-  const value = JSON.parse(text) as { format?: unknown; pending?: unknown; pendingReasons?: unknown };
+  const value = JSON.parse(text) as {
+    format?: unknown;
+    pending?: unknown;
+    pendingReasons?: unknown;
+    pendingHalves?: unknown;
+  };
   if (value.format !== 1) throw new Error(`${where}: format is not 1`);
   if (!Array.isArray(value.pending) || value.pending.some(id => typeof id !== 'string'))
     throw new Error(`${where}: "pending" is not a list of ids`);
@@ -37,12 +71,23 @@ export function parsePending(text: string, where: string): PortsPending {
       reasons[id] = list as string[];
     }
   }
-  return { format: 1, pending: value.pending as string[], reasons };
+  const halves: Record<string, string[]> = {};
+  if (value.pendingHalves !== undefined) {
+    const given = value.pendingHalves;
+    if (typeof given !== 'object' || given === null || Array.isArray(given))
+      throw new Error(`${where}: "pendingHalves" is not an object of plugin id to halves`);
+    for (const [id, list] of Object.entries(given)) {
+      if (!Array.isArray(list) || list.some(half => typeof half !== 'string'))
+        throw new Error(`${where}: "pendingHalves.${id}" is not a list of half names`);
+      halves[id] = list as string[];
+    }
+  }
+  return { format: 1, pending: value.pending as string[], reasons, halves };
 }
 
 export function readPending(root: string): PortsPending {
   const file = join(root, 'ports-pending.json');
-  if (!existsSync(file)) return { format: 1, pending: [], reasons: {} };
+  if (!existsSync(file)) return { format: 1, pending: [], reasons: {}, halves: {} };
   return parsePending(readFileSync(file, 'utf8'), 'ports-pending.json');
 }
 
@@ -87,8 +132,55 @@ export const check: Check = {
       for (const id of current.pending)
         if (!before.has(id))
           findings.push({ check, where: 'ports-pending.json', message: `${id} was added; the list may only shrink` });
+      for (const [id, named] of Object.entries(current.halves))
+        for (const half of named)
+          if (
+            !(base.halves[id] ?? []).includes(half) &&
+            !ONE_TIME_HALF_ALLOWANCE.some(allowed => allowed.id === id && allowed.half === half)
+          )
+            findings.push({
+              check,
+              where: 'ports-pending.json',
+              message: `pendingHalves ${id} ${half} was added; pendingHalves may only shrink`,
+            });
     }
     const model = await ctx.model();
+    const named = readPendingApps(ctx.root).named;
+    for (const id of named.keys())
+      if (!model.loaded.some(s => s.id === id))
+        findings.push({
+          check,
+          where: 'ports-pending.json',
+          message: `pendingHalves names ${id}, which is not a subsystem`,
+        });
+    for (const subsystem of model.loaded) {
+      if (subsystem.id === 'kernel') continue;
+      for (const half of HALVES) {
+        let skeleton = false;
+        let exists = false;
+        try {
+          const impl = await loadHalf(subsystem.pkg, half);
+          exists = impl !== undefined;
+          skeleton = impl !== undefined && isSkeleton(impl);
+        } catch {
+          continue; // manifest-match reports the load failure
+        }
+        const listed = named.get(subsystem.id)?.has(half) ?? false;
+        const where = `${subsystem.pkg.rel}/${half}`;
+        if (skeleton && !listed)
+          findings.push({
+            check,
+            where,
+            message: `${half} half of ${subsystem.id} is a skeleton but ports-pending.json pendingHalves does not name it`,
+          });
+        if (listed && !skeleton)
+          findings.push({
+            check,
+            where,
+            message: `pendingHalves names the ${half} half of ${subsystem.id}, but it is ${exists ? 'a real half' : 'not a half at all'}`,
+          });
+      }
+    }
     for (const id of current.pending) {
       const subsystem = model.loaded.find(s => s.id === id);
       if (subsystem === undefined) {
