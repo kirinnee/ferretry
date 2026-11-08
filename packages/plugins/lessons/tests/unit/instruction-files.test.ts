@@ -52,6 +52,8 @@ function disk(paths: readonly string[]) {
         fileIdentity: () => Promise.reject(new Error('the fixture has no fileIdentity')),
         linkTo: () => Promise.reject(new Error('the fixture has no linkTo')),
         setMode: () => Promise.reject(new Error('the fixture has no setMode')),
+        rename: () => Promise.reject(new Error('the fixture has no rename')),
+        unlink: () => Promise.reject(new Error('the fixture has no unlink')),
       };
       return handle;
     },

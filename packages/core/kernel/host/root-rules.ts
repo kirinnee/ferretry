@@ -1,5 +1,5 @@
 /**
- * The pure rules of `RootHandle.linkTo`, `RootHandle.setMode` and `RootsPort.harnessFile` (§7.7): one fact, read by
+ * The pure rules of `RootHandle.linkTo`, `setMode`, `rename`, `unlink` and `RootsPort.harnessFile` (§7.7): one fact, read by
  * the real roots port (`./roots.ts`, which adds the descriptor checks) and by the testing host, so a plugin's unit test
  * meets exactly the refusals production makes.
  */
@@ -17,6 +17,29 @@ const LINK_ROOTS: ReadonlySet<RootName> = new Set(['fleet', 'agent-homes']);
 /** Whether `linkTo` may write a link into this root. */
 export function takesLinks(name: RootName): boolean {
   return LINK_ROOTS.has(name);
+}
+
+/**
+ * The roots an entry may be MOVED inside (`RootHandle.rename`): the same internal, writable, kernel-made roots a link
+ * may be written into, and no other. Never an owner's root, never a read-only one.
+ */
+const RENAME_ROOTS: ReadonlySet<RootName> = new Set(['fleet', 'agent-homes']);
+
+/** Whether `rename` may move an entry inside this root. */
+export function takesRenames(name: RootName): boolean {
+  return RENAME_ROOTS.has(name);
+}
+
+/**
+ * The refusal `rename` gives before any disk is asked, from the two names alone: `undefined` when both are sane. A
+ * name is a string without NUL, with no `..` segment and at least one segment; the same name at both ends moves
+ * nothing and is refused (`outside`) rather than reported as done.
+ */
+export function renameNamesRefusal(from: string, to: string): 'outside' | undefined {
+  for (const name of [from, to])
+    if (typeof name !== 'string' || name === '' || name.includes('\0') || name.split('/').includes('..'))
+      return 'outside';
+  return from === to ? 'outside' : undefined;
 }
 
 /**
@@ -65,4 +88,25 @@ export function harnessFileRefusal(ask: HarnessFileAsk): HarnessFileRefusal | un
   if (!declared.includes(leaf)) return 'not_declared';
   if (insideFence(ask.home, path)) return 'fenced';
   return undefined;
+}
+
+/**
+ * The roots a link may be REMOVED from (`RootHandle.unlink`): the same internal, writable, kernel-made roots a link
+ * may be written into, and no other. Never an owner's root, never a read-only one.
+ */
+const UNLINK_ROOTS: ReadonlySet<RootName> = new Set(['fleet', 'agent-homes']);
+
+/** Whether `unlink` may remove a link inside this root. */
+export function takesUnlinks(name: RootName): boolean {
+  return UNLINK_ROOTS.has(name);
+}
+
+/**
+ * The refusal `unlink` gives before any disk is asked, from the name alone: `undefined` when it is sane. A name is a
+ * string without NUL, with no `..` segment and at least one segment.
+ */
+export function unlinkNameRefusal(name: string): 'outside' | undefined {
+  return typeof name !== 'string' || name === '' || name.includes('\0') || name.split('/').includes('..')
+    ? 'outside'
+    : undefined;
 }

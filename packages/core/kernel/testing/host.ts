@@ -2,7 +2,15 @@ import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { isKernelMadeRoot } from '../host/internal-roots.ts';
 import { DEFAULT_COPY_ENTRIES, isReadOnlyRoot, mayHoldRoot, RootError, scopedSubfolder } from '../host/roots.ts';
-import { harnessFileRefusal, permittedMode, takesLinks } from '../host/root-rules.ts';
+import {
+  harnessFileRefusal,
+  permittedMode,
+  renameNamesRefusal,
+  takesLinks,
+  takesRenames,
+  takesUnlinks,
+  unlinkNameRefusal,
+} from '../host/root-rules.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { failureResponse } from '../host/responses.ts';
@@ -1273,6 +1281,42 @@ async function start(world: World): Promise<TestHost> {
             if (world.roots.has(place) || testFolderExists(place) || testLinks.has(place))
               throw new RootError('outside');
             testLinks.set(place, to);
+          },
+          rename: async (from, to) => {
+            if (isReadOnlyRoot(name) || !takesRenames(name)) throw new RootError('read_only');
+            const names = renameNamesRefusal(from, to);
+            if (names !== undefined) throw new RootError(names);
+            const source = ownPath(from);
+            const target = ownPath(to);
+            const isFile = world.roots.has(source);
+            const isLink = testLinks.has(source);
+            const isFolder = testFolderExists(source);
+            if (!isFile && !isLink && !isFolder) throw new RootError('outside');
+            if (world.roots.has(target) || testLinks.has(target) || testFolderExists(target))
+              throw new RootError('outside');
+            if (target.startsWith(`${source}/`)) throw new RootError('changed');
+            if (isLink) {
+              testLinks.set(target, testLinks.get(source) as string);
+              testLinks.delete(source);
+            }
+            for (const [key, text] of [...world.roots])
+              if (key === source || key.startsWith(`${source}/`)) {
+                world.roots.set(`${target}${key.slice(source.length)}`, text);
+                world.roots.delete(key);
+                const mode = testModes.get(key);
+                if (mode !== undefined) {
+                  testModes.set(`${target}${key.slice(source.length)}`, mode);
+                  testModes.delete(key);
+                }
+              }
+          },
+          unlink: async linkName => {
+            if (isReadOnlyRoot(name) || !takesUnlinks(name)) throw new RootError('read_only');
+            const refused = unlinkNameRefusal(linkName);
+            if (refused !== undefined) throw new RootError(refused);
+            const place = ownPath(linkName);
+            if (!testLinks.has(place)) throw new RootError('outside');
+            testLinks.delete(place);
           },
           setMode: async (path, mode) => {
             if (manifest.permissions?.setMode !== true) throw new RootError('not_declared');

@@ -50,7 +50,15 @@ import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from './shared-trees.ts';
 import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS, processFolderAllowed } from './processes.ts';
-import { harnessFileRefusal, permittedMode, takesLinks } from './root-rules.ts';
+import {
+  harnessFileRefusal,
+  permittedMode,
+  renameNamesRefusal,
+  takesLinks,
+  takesRenames,
+  takesUnlinks,
+  unlinkNameRefusal,
+} from './root-rules.ts';
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
 const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports', 'harness-home']);
@@ -1071,6 +1079,59 @@ async function setModeChecked(scope: Scope, full: string, bits: number): Promise
   }
 }
 
+/**
+ * `rename` through the two checked folders: each parent is opened without following a link and proven, the entry at
+ * `from` is looked at WITHOUT following it (it must exist: a link stays a link, a directory moves whole), nothing may
+ * be at `to` (a link there included), and the move is `rename(2)` between the two folders' descriptors. No copy is
+ * ever the fallback: any failure of the move itself (another device, a folder into itself, a full disk) is `changed`,
+ * a fact with no path or content in it.
+ *
+ * GAP (declared, tested): the standard library has no `renameat2(RENAME_NOREPLACE)`, so "nothing at `to`" is a look
+ * followed by the move. A writer who creates `to` in that window has a file or an empty folder replaced; a non-empty
+ * folder is never replaced (the move fails). The window is the kernel's own two calls, inside folders only the
+ * harness and the kernel write.
+ */
+async function renameChecked(from: Checked, to: Checked): Promise<void> {
+  const fromParent = dirname(from.full);
+  const toParent = dirname(to.full);
+  const source = await openCheckedFolder(from.scope, fromParent);
+  try {
+    const target = await openCheckedFolder(to.scope, toParent);
+    try {
+      const fromAt = await entry(from.scope, source, fromParent, basename(from.full));
+      const toAt = await entry(to.scope, target, toParent, basename(to.full));
+      if ((await from.scope.fs.identity(fromAt)) === undefined) return refuse('outside');
+      if ((await to.scope.fs.identity(toAt)) !== undefined) return refuse('outside');
+      await from.scope.fs.rename(fromAt, toAt).catch(() => refuse('changed'));
+    } finally {
+      await target.close();
+    }
+  } finally {
+    await source.close();
+  }
+}
+
+/**
+ * `unlink` through the checked folder: the parent is opened without following a link and proven, the leaf is looked at
+ * WITHOUT following it, and only a link is removed (`unlink(2)` on the name: what it points at is never opened). A
+ * file, a folder or nothing there is `outside`.
+ *
+ * GAP (declared, tested): the look and the `unlink(2)` are two calls; a writer who swaps a file in for the link in
+ * that window has the file removed (a folder is never removed: `unlink` refuses it, `changed`).
+ */
+async function unlinkChecked(at: Checked): Promise<void> {
+  const parent = dirname(at.full);
+  const folder = await openCheckedFolder(at.scope, parent);
+  try {
+    const leaf = await entry(at.scope, folder, parent, basename(at.full));
+    const found = await at.scope.fs.identity(leaf);
+    if (found?.kind !== 'link') return refuse('outside');
+    await at.scope.fs.unlink(leaf).catch(() => refuse('changed'));
+  } finally {
+    await folder.close();
+  }
+}
+
 /** What a harness file handle needs: the disk, the home it must stay out of, and the one file it names. */
 interface HarnessFileSetup {
   readonly fs: HostFs;
@@ -1529,6 +1590,40 @@ function rootHandle(setup: HandleSetup): RootHandle {
       } finally {
         await made.folder.close();
       }
+    },
+    rename: async (from: FencedPath, to: FencedPath) => {
+      writable();
+      if (!takesRenames(name)) return refuse('read_only');
+      const names = renameNamesRefusal(from, to);
+      if (names !== undefined) return refuse(names);
+      const source = await realParent(from);
+      const target = await realParent(to, true);
+      // No link on the way at either end: the folder each name gives, as this root names it, is the very folder reached.
+      const root = base() as string;
+      for (const [given, placed] of [
+        [from, source],
+        [to, target],
+      ] as const) {
+        const lexical = lexicalInRoot(home, root, ownerRoot, given);
+        if (!lexical.ok) return refuse(lexical.error);
+        if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
+          refuse('link_escape');
+      }
+      await renameChecked(source, target);
+    },
+    unlink: async (linkName: FencedPath) => {
+      writable();
+      if (!takesUnlinks(name)) return refuse('read_only');
+      const refused = unlinkNameRefusal(linkName);
+      if (refused !== undefined) return refuse(refused);
+      const placed = await realParent(linkName);
+      // No link on the way: the folder the name gives, as this root names it, is the very folder reached.
+      const root = base() as string;
+      const lexical = lexicalInRoot(home, root, ownerRoot, linkName);
+      if (!lexical.ok) return refuse(lexical.error);
+      if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
+        refuse('link_escape');
+      await unlinkChecked(placed);
     },
     setMode: async (path: FencedPath, mode: number) => {
       if (setup.setMode !== true) return refuse('not_declared');
