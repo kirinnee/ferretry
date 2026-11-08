@@ -31,6 +31,32 @@ export interface InstalledSkillFile {
 export const usableSkillName = (name: string): boolean =>
   SKILL_NAME.test(name) && name !== '..' && !name.includes('..');
 
+/**
+ * Why a set of paths cannot be written as one folder, or `undefined` (today's `CatalogSkillSchema` rules): two paths that
+ * differ only in case land on ONE file on a Mac or on Windows, so what the review listed is not what is written; and a
+ * path that is both a file and a folder (`a` and `a/b`) would fail part-way, after the installed skill was removed.
+ */
+function pathCollision(paths: readonly string[]): string | undefined {
+  const seen = new Map<string, string>();
+  for (const path of paths) {
+    const key = path.toLowerCase();
+    const earlier = seen.get(key);
+    if (earlier !== undefined)
+      return earlier === path
+        ? `"${path}" is given twice`
+        : `"${earlier}" and "${path}" would be one file on a Mac or on Windows`;
+    seen.set(key, path);
+  }
+  for (const [key, path] of seen) {
+    const segments = key.split('/');
+    for (let depth = 1; depth < segments.length; depth += 1) {
+      const folder = segments.slice(0, depth).join('/');
+      if (seen.has(folder)) return `"${seen.get(folder)}" is both a file and a folder (${path})`;
+    }
+  }
+  return undefined;
+}
+
 /** The reason a skill cannot be installed as given, or `undefined` when it can (nothing is touched to find out). */
 export function installRefusal(name: string, files: readonly InstalledSkillFile[]): string | undefined {
   if (!usableSkillName(name)) return `"${name}" is not one plain folder name`;
@@ -49,6 +75,8 @@ export function installRefusal(name: string, files: readonly InstalledSkillFile[
       return `"${file.path}" is larger than ${String(MAX_INSTALLED_FILE_BYTES / 1024)} KiB`;
     total += bytes;
   }
+  const collision = pathCollision(files.map(file => file.path));
+  if (collision !== undefined) return collision;
   if (total > MAX_INSTALLED_BYTES) return `the skill is larger than ${String(MAX_INSTALLED_BYTES / 1024 / 1024)} MiB`;
   if (!seen.has(SKILL_ENTRY_FILE)) return `the skill has no ${SKILL_ENTRY_FILE}`;
   return undefined;

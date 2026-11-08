@@ -182,6 +182,51 @@ describe('F-0006 the selected skills are linked into the ferret home, one link e
   });
 });
 
+describe('F-0006 a link planted AT skills/ is never followed by the sweep', () => {
+  const planted = async (f: Awaited<ReturnType<typeof fixture>>, target: string): Promise<void> => {
+    await symlink(target, join(f.disk, 'skills'));
+  };
+
+  test('F-0006 skills/ a link to a folder of the home: the link is removed, the folder and its contents are untouched', async () => {
+    const f = await fixture();
+    await mkdir(join(f.disk, 'projects', 'p1'), { recursive: true });
+    await writeFile(join(f.disk, 'projects', 'p1', 'transcript.jsonl'), 'history\n');
+    await planted(f, join(f.disk, 'projects'));
+    const made = await materializeSkills(f.home, [part('review', await f.tree('review'))], []);
+    expect(made.pruned).toEqual([]);
+    expect(await readFile(join(f.disk, 'projects', 'p1', 'transcript.jsonl'), 'utf8')).toBe('history\n');
+    expect(await gone(join(f.disk, 'projects', 'review'))).toBe(true);
+    expect((await lstat(join(f.disk, 'skills'))).isDirectory()).toBe(true);
+    expect((await lstat(join(f.disk, 'skills', 'review'))).isSymbolicLink()).toBe(true);
+  });
+
+  test('F-0006 skills/ a link to the home itself: nothing of the home is swept', async () => {
+    const f = await fixture();
+    await writeFile(join(f.disk, 'CLAUDE.md'), 'memory\n');
+    await mkdir(join(f.disk, 'projects', 'p1'), { recursive: true });
+    await planted(f, f.disk);
+    const made = await materializeSkills(f.home, [part('review', await f.tree('review'))], []);
+    expect(made.pruned).toEqual([]);
+    expect(await readFile(join(f.disk, 'CLAUDE.md'), 'utf8')).toBe('memory\n');
+    expect((await lstat(join(f.disk, 'projects', 'p1'))).isDirectory()).toBe(true);
+    expect((await lstat(join(f.disk, 'skills'))).isDirectory()).toBe(true);
+  });
+
+  test('F-0006 skills/ a dangling link, or one out of the home: replaced by a real folder, the target never touched', async () => {
+    const f = await fixture();
+    await mkdir(join(f.disk, '..', 'victim'), { recursive: true });
+    await writeFile(join(f.disk, '..', 'victim', 'keep.txt'), 'keep\n');
+    await planted(f, join(f.disk, '..', 'victim'));
+    await materializeSkills(f.home, [], []);
+    expect(await readFile(join(f.disk, '..', 'victim', 'keep.txt'), 'utf8')).toBe('keep\n');
+    expect((await lstat(join(f.disk, 'skills'))).isDirectory()).toBe(true);
+    await rm(join(f.disk, 'skills'), { recursive: true });
+    await planted(f, join(f.disk, 'nowhere'));
+    await materializeSkills(f.home, [], []);
+    expect((await lstat(join(f.disk, 'skills'))).isDirectory()).toBe(true);
+  });
+});
+
 describe('F-0006 the answer says what was made', () => {
   test('F-0006 a copy where the kernel did not link is reported as copied, and a link was asked for', async () => {
     const calls: string[] = [];

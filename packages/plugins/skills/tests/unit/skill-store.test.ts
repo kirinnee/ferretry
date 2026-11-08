@@ -117,6 +117,17 @@ describe('F-0184 a skill that cannot be one folder is refused before anything is
     ['an absolute path', 'ok', [...SKILL, { path: '/etc/passwd', content: 'x' }]],
     ['a path with a dot segment', 'ok', [...SKILL, { path: './a', content: 'x' }]],
     ['a path given twice', 'ok', [...SKILL, SKILL[0] as (typeof SKILL)[number]]],
+    ['two paths that are one file on a Mac or on Windows', 'ok', [...SKILL, { path: 'skill.MD', content: 'x' }]],
+    [
+      'a path that is both a file and a folder',
+      'ok',
+      [...SKILL, { path: 'a', content: 'x' }, { path: 'a/b', content: 'y' }],
+    ],
+    [
+      'a file and a folder that differ in case',
+      'ok',
+      [...SKILL, { path: 'a/b', content: 'y' }, { path: 'A', content: 'x' }],
+    ],
     ['no SKILL.md', 'ok', [{ path: 'README.md', content: 'x' }]],
     ['no files', 'ok', []],
     ['a file over the bound', 'ok', [...SKILL, { path: 'big.txt', content: 'x'.repeat(MAX_INSTALLED_FILE_BYTES + 1) }]],

@@ -43,6 +43,11 @@ async function removeName(home: RootHandle, path: FencedPath): Promise<void> {
  * `.system`): never replaced, never removed, never claimed as a skill.
  *
  * `home` is the ferret's own `agent-homes` handle: `copyShared` refuses any other destination.
+ *
+ * GAP (declared): the kernel offers no held folder handle, so this looks and then acts. Today's `pruneDirectory` sweeps
+ * through one handle it opened; here a folder swapped for an in-home link between the `lstat` and the `remove`/`list`
+ * (the harness child writes its own home) is followed by that one call. The scope fence still holds (a link out of the
+ * ferret's home is refused `link_escape`), and the next launch looks again.
  */
 export async function materializeSkills(
   home: RootHandle,
@@ -61,6 +66,9 @@ export async function materializeSkills(
   }
 
   const container = fenced(home, SKILLS_FOLDER);
+  // A container the harness child swapped for a link (into its own state, say) is never listed, swept or written
+  // through: only the link itself goes (`unlink` never follows it), and a real folder takes its place.
+  if ((await home.lstat(container))?.kind === 'symlink') await home.unlink(container);
   await home.makeDirectory(container, { mode: 0o700 });
   const pruned: string[] = [];
   for (const entry of await home.list(container)) {

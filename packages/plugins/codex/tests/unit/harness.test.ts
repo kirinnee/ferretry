@@ -20,6 +20,7 @@ function fakeRoots() {
     resolve: (relative: string) =>
       ok((relative.startsWith('/') ? relative : relative === '' ? HOME : `${HOME}/${relative}`) as FencedPath),
     list: async () => [],
+    lstat: async () => undefined,
     makeDirectory: async () => undefined,
     entries: async () => [],
     stat: async () => undefined,

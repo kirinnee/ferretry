@@ -26,6 +26,7 @@ function home() {
     ensurePrivateDirectory: async () => undefined,
     makeDirectory: async () => undefined,
     list: async () => [],
+    lstat: async () => undefined,
   } as unknown as RootHandle;
   const roots = { root: (name: string) => (asked.push(name), handle) } as unknown as KernelPorts['roots'];
   return { written, asked, roots };
