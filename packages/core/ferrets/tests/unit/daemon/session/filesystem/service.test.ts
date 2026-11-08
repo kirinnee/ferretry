@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  AGENT_READ_FENCE,
   FsError,
   SessionFilesystem,
   type FsFileView,
@@ -1042,5 +1043,38 @@ describe('SessionFilesystem.diff', () => {
 
     // Assert
     should(order).eql(['open:a.ts', 'barrier', 'git:isTracked', 'open:a.ts']);
+  });
+});
+
+describe('SessionFilesystem.diff behind the agent fence', () => {
+  it('should refuse a diff of a file with more than one name for an agent, and close what it opened', async () => {
+    // Arrange: a hard link left in the session folder could be the state home's own credential file.
+    const { filesystem, pinner, git } = viewer(
+      { tree: treeOf(['linked.txt', textFile('secret', { links: 2 })]) },
+      { isTracked: () => true, diffSnapshots: () => ({ diff: 'NEVER', truncated: false }) },
+    );
+
+    // Act
+    const error = await refusalFrom(async () => await filesystem.diff(CWD, 'linked.txt', { fence: AGENT_READ_FENCE }));
+
+    // Assert
+    should(error.code).eql('denied');
+    should(error.message).containEql('linked.txt is a hard link (the file has 2 names)');
+    should(git.diffCalls).eql([]);
+    should(pinner.lastRoot.targets.every(target => target.closed)).be.true();
+  });
+
+  it('should diff a file with more than one name for a person, whose reads are unchanged', async () => {
+    // Arrange
+    const { filesystem } = viewer(
+      { tree: treeOf(['linked.txt', textFile('shared', { links: 2 })]) },
+      { isTracked: () => true, diffSnapshots: () => ({ diff: 'DIFF', truncated: false }) },
+    );
+
+    // Act
+    const view = await filesystem.diff(CWD, 'linked.txt');
+
+    // Assert
+    should(view.diff).eql('DIFF');
   });
 });
