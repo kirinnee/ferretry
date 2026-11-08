@@ -44,8 +44,17 @@ export default provideToShell(
       };
       const screen = (id: 'chat' | 'links') =>
         lazyComponent<ScreenProps>(async () => (await surfacesOf()).screens[id] as AppComponent<ScreenProps>);
-      const panel = (id: 'attachments' | 'queue' | 'compact-at' | 'hypermedia' | 'chat-width') =>
-        lazyComponent<PanelProps>(async () => (await surfacesOf()).panels[id] as AppComponent<PanelProps>);
+      const panel = (
+        id:
+          | 'attachments'
+          | 'queue'
+          | 'compact-at'
+          | 'hypermedia'
+          | 'chat-width'
+          | 'files-search'
+          | 'interrupt-row'
+          | 'agenda-conversation',
+      ) => lazyComponent<PanelProps>(async () => (await surfacesOf()).panels[id] as AppComponent<PanelProps>);
       return {
         screens: { chat: screen('chat'), links: screen('links') },
         panels: {
@@ -54,6 +63,9 @@ export default provideToShell(
           'compact-at': panel('compact-at'),
           hypermedia: panel('hypermedia'),
           'chat-width': panel('chat-width'),
+          'files-search': panel('files-search'),
+          'interrupt-row': panel('interrupt-row'),
+          'agenda-conversation': panel('agenda-conversation'),
         },
         settings: {
           conversation: lazyComponent<SettingsProps>(
