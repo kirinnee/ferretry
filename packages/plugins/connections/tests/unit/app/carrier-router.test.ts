@@ -242,6 +242,33 @@ describe('hosted relay discovery (R580)', () => {
     expect(asked).toEqual(['https://directory.example/v1/default-relay']);
   });
 
+  test('R88 the shell carrier listens for the page coming online, foreground and changing network', () => {
+    const added: string[] = [];
+    const target = (kind: string) => ({
+      addEventListener: (type: string) => void added.push(`${kind} ${type}`),
+      removeEventListener: () => undefined,
+    });
+    const host = globalThis as { window?: unknown; document?: unknown; navigator?: unknown };
+    const before = { window: host.window, document: host.document, navigator: host.navigator };
+    host.window = target('window');
+    host.document = { ...target('document'), visibilityState: 'visible' };
+    host.navigator = { connection: target('connection') };
+    const ports = {
+      openSocket: () => {
+        throw new Error('nothing dials here');
+      },
+      after: () => {},
+      now: () => 0,
+      daemons: { registerCache: () => () => {} },
+    } as unknown as ConnectPorts;
+    try {
+      (connections as unknown as { shell: Required<import('@ferretry/app').ShellProvides> }).shell.carriers(ports);
+    } finally {
+      Object.assign(host, before);
+    }
+    expect(added.sort()).toEqual(['connection change', 'document visibilitychange', 'window online']);
+  });
+
   test('R580 a build with no directory (or a withdrawn relay) offers nothing and dials nothing', async () => {
     expect(await documentRelayDiscovery(undefined, 'https://directory.example').hostedRelay()).toBeUndefined();
     const withdrawn = documentRelayDiscovery(

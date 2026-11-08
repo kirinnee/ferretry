@@ -202,8 +202,14 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
     owner: 'connections',
     reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)",
   },
-  R88: { owner: 'app-shell', reason: "enforced by the app's browser session client (packages/app/src/session)" },
-  R89: { owner: 'app-shell', reason: "enforced by the app's browser session client (packages/app/src/session)" },
+  R88: {
+    owner: 'connections',
+    reason: 'enforced by the Connections browser carrier socket keepalive (app/carriers/carrier-socket.ts)',
+  },
+  R89: {
+    owner: 'connections',
+    reason: 'enforced by the Connections browser carrier socket keepalive (app/carriers/carrier-socket.ts)',
+  },
   R506: { owner: 'app-shell', reason: "enforced by the app's browser session client (packages/app/src/session)" },
   R507: { owner: 'app-shell', reason: "enforced by the app's browser session client (packages/app/src/session)" },
   R519: { owner: 'app-shell', reason: "enforced by the app's browser session client (packages/app/src/session)" },

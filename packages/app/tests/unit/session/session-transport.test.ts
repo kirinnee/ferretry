@@ -190,3 +190,86 @@ describe('R244 the app session lease retry', () => {
     }
   });
 });
+
+describe('what a device’s sessions to one daemon do', () => {
+  const transportFor = async (closes: readonly number[]) => {
+    const daemon = await scriptedDaemon(() => ({ status: 200, body: { read: true } }), { closes });
+    const transport = new SessionTransport({
+      crypto: relayCrypto,
+      daemonId: daemon.identity.daemonId,
+      device: device.claim,
+      dial: daemon.dial,
+    });
+    return { daemon, transport };
+  };
+
+  /** Two identical reads in flight are one record on the wire; nothing is cached (the unit suite is shared-reads.test.ts). */
+  test('R519 identical in-flight reads are sent once and the answer is shared, never cached', async () => {
+    const { daemon, transport } = await transportFor([]);
+    const [first, second] = await Promise.all([
+      transport.request({ method: 'GET', path: '/v1/health' }),
+      transport.request({ method: 'GET', path: '/v1/health' }),
+    ]);
+    expect(first).toEqual(second);
+    expect(daemon.seen.filter(item => item === 'GET /v1/health')).toHaveLength(1);
+    // Nothing is cached: a read after the answer is sent afresh.
+    await transport.request({ method: 'GET', path: '/v1/health' });
+    expect(daemon.seen.filter(item => item === 'GET /v1/health')).toHaveLength(2);
+    transport.close();
+  });
+
+  /** A body that travels in parts has a request session of its own, so the reads every panel polls never wait behind it. */
+  test('R532 a body large enough to need parts goes on a second request session', async () => {
+    const { daemon, transport } = await transportFor([]);
+    await transport.request({ method: 'GET', path: '/v1/health' });
+    expect(daemon.dials()).toBe(1);
+    const upload = transport.request({ method: 'POST', path: '/v1/upload', body: 'x'.repeat(300_000) });
+    upload.catch(() => undefined);
+    await settle();
+    expect(daemon.dials()).toBe(2);
+    transport.close();
+  });
+
+  test('R532 a read keeps the request session when a body in parts is on the other, and the second lane is no reconnect', async () => {
+    const { daemon, transport } = await transportFor([]);
+    let reconnects = 0;
+    transport.onReconnect(() => (reconnects += 1));
+    await transport.request({ method: 'GET', path: '/v1/health' });
+    const upload = transport.request({ method: 'POST', path: '/v1/upload', body: 'x'.repeat(300_000) });
+    upload.catch(() => undefined);
+    await settle();
+    await transport.request({ method: 'GET', path: '/v1/health' });
+    await settle();
+    // Two sessions in all: the reads' and the upload's. The second read rode the first.
+    expect(daemon.dials()).toBe(2);
+    expect(reconnects).toBe(0);
+    transport.close();
+  });
+
+  test('R568 closing the transport ends every request session it owns, the bulk lane too', async () => {
+    const { daemon, transport } = await transportFor([]);
+    await transport.request({ method: 'GET', path: '/v1/health' });
+    transport.request({ method: 'POST', path: '/v1/upload', body: 'x'.repeat(300_000) }).catch(() => undefined);
+    await settle();
+    expect(daemon.dials()).toBe(2);
+    transport.close();
+    await settle();
+    await transport.request({ method: 'GET', path: '/v1/health' });
+    transport.request({ method: 'POST', path: '/v1/upload', body: 'x'.repeat(300_000) }).catch(() => undefined);
+    await settle();
+    // Both lanes opened a session of their own again: neither closed one was reused.
+    expect(daemon.dials()).toBe(4);
+    transport.close();
+  });
+
+  test('R568 closing the transport ends the request session it owns', async () => {
+    const { daemon, transport } = await transportFor([]);
+    await transport.request({ method: 'GET', path: '/v1/health' });
+    transport.close();
+    await settle();
+    // The next request opens a session of its own: the closed one is gone.
+    await transport.request({ method: 'GET', path: '/v1/health' });
+    expect(daemon.dials()).toBe(2);
+    transport.close();
+  });
+});

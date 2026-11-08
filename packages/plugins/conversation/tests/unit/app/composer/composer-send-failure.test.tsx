@@ -73,7 +73,7 @@ describe('Composer send failures', () => {
     });
   });
 
-  test('never invites a resend when the send may already be with the daemon, not even once it reconnects', async () => {
+  test('R112 a write whose session died is never re-sent blind: no invitation to resend while the send may already be with the daemon, not even once it reconnects', async () => {
     const shown = await failSend(outage('unknown'));
     expect(shown.error).toBe(
       'Connection dropped while sending — checking whether it arrived. Don’t send it again; it will show in the transcript.',
