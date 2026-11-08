@@ -9,7 +9,7 @@ import { createWardenSubsystem, WARDEN_LIVENESS_TICK_SECONDS } from '../../../da
 import { fakeKernel, wardenConfig } from '../../support/kernel.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
-export const START = '2026-11-07T12:00:00.000Z';
+const START = '2026-11-07T12:00:00.000Z';
 export const FERRET = ferretId('f1');
 const TICK_MS = WARDEN_LIVENESS_TICK_SECONDS * 1000;
 

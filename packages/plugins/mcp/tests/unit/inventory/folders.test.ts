@@ -10,17 +10,19 @@ import { mcpOAuthSecretNames, mcpProjectSubject } from '../../../contract/index.
 import should from 'should';
 import {
   combinedMcpOAuthServers,
+  ProjectMcpLaunch,
+  ProjectMcpOAuthServers,
+} from '../../../daemon/lib/inventory/project-sign-in.ts';
+import {
   type McpInventoryFolder,
-  McpInventoryService,
   managedWorktreeRows,
   mcpFolderFor,
   mcpFolderSubject,
   mcpInventoryFolders,
   mcpProjectKey,
-  ProjectMcpLaunch,
-  ProjectMcpOAuthServers,
-} from '../../../daemon/lib/inventory/index.ts';
-import { McpOAuthRefusal, McpOAuthService } from '../../../daemon/lib/oauth/index.ts';
+} from '../../../daemon/lib/inventory/folders.ts';
+import { McpInventoryService } from '../../../daemon/lib/inventory/service.ts';
+import { McpOAuthRefusal, McpOAuthService } from '../../../daemon/lib/oauth/service.ts';
 import { PWA_REDIRECT, testCrypto, world } from '../oauth/support.ts';
 import {
   ACCOUNTS,

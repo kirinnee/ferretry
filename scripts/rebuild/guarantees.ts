@@ -425,11 +425,13 @@ export function parseAppendixD(markdown: string): { rows: Row[]; gaps: number; s
       removedPart = keptBy;
     } else if (keptBy.startsWith('SPLIT')) {
       status = 'split';
-      const m = /^SPLIT\. Kept: (.*) · ([^·]+?) · test `([^`]+)`\. Removed: (.*)$/.exec(keptBy);
+      // `Kept: <what> · <owner> · [<enforcer> · ]test …`, the same owner-then-enforcer order as a kept row.
+      const m = /^SPLIT\. Kept: ([^·]*) · ([^·]+?)(?: · ([^·]+?))? · test `([^`]+)`\. Removed: (.*)$/.exec(keptBy);
       if (!m) throw new Error(`unparsable SPLIT ${id}: ${keptBy}`);
       ownerRaw = m[2]!;
-      test = m[3]!;
-      removedPart = m[4]!;
+      if (m[3] !== undefined) enforcer = m[3];
+      test = m[4]!;
+      removedPart = m[5]!;
     } else {
       status = 'kept';
       const segs = keptBy.split(' · ');

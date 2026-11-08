@@ -42,10 +42,10 @@ export const PAIR_OPTIONS_HELP: readonly (readonly [string, string])[] = [
  * What `fy pair` accepts, and nothing else: no `--name` (the device names itself when it redeems), no `--json`
  * (the only secret here is the code) and no `--full` (full is the default, P46).
  */
-export const PAIR_SHAPE: VerbShape = { command: 'pair', args: [], switches: ['large', 'no-wait', 'limited', 'open'] };
+const PAIR_SHAPE: VerbShape = { command: 'pair', args: [], switches: ['large', 'no-wait', 'limited', 'open'] };
 
 /** The flags as `PairController` reads them: `wait` is `false` only for `--no-wait`. */
-export function pairOptions(switches: Readonly<Record<string, boolean>>): PairOptions {
+function pairOptions(switches: Readonly<Record<string, boolean>>): PairOptions {
   const options: { wait?: boolean; large?: boolean; open?: boolean; limited?: boolean } = {};
   for (const name of ['wait', 'large', 'open', 'limited'] as const) {
     const value = switches[name];

@@ -41,7 +41,7 @@ export {
   trustedWorkerUrl,
   useDocumentVisible,
 } from '@ferretry/app/ui';
-export { findReferences, parseReferenceToken, type Reference, speechModelCache } from '@ferretry/app';
+export { findReferences, parseReferenceToken, type Reference } from '@ferretry/app';
 
 // ─── the daemon this half talks to ────────────────────────────────────────────────────────────────────────────────
 
@@ -127,12 +127,7 @@ const ROUTES: readonly {
 });
 
 /** Calls the route a concrete `method path` names, through the plugin client, and answers the parsed JSON. */
-export async function callPath(
-  client: VoicePluginClient,
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<unknown> {
+async function callPath(client: VoicePluginClient, method: string, path: string, body?: unknown): Promise<unknown> {
   const [pathname = path, search = ''] = path.split('?');
   const query = Object.fromEntries(new URLSearchParams(search));
   for (const route of ROUTES) {
@@ -186,7 +181,7 @@ export function pluginFetch(client: VoicePluginClient): (input: string, init: Re
  * The slice of today's `IFyApiClient` this half uses: `request(path, schema, init)`, parsing the answer with the
  * schema. Over the plugin client; a refusal throws {@link FyHttpError}.
  */
-export class FyHttpError extends Error {
+class FyHttpError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
@@ -279,8 +274,6 @@ export const browserClipboardWriter =
     await clipboard.writeText(text);
   };
 
-export { clockOfInstant, type ClockEnvironment, type MessageClock } from './lib/message-clock.ts';
-
 // ─── what Conversation and the shell own ──────────────────────────────────────────────────────────────────────────
 
 export const FY_RENDER_FENCE_LANGUAGE = 'fy-render';
@@ -351,7 +344,7 @@ import { parseFerretryNotice, parseHandoffPointer, parsePeerEnvelope } from '../
 // ─── config files and secrets (the shell's config door and Vault's secret route) ───────────────────────────────
 
 /** The header a configuration write names the digest it was edited from in (the plugin client carries it as `etag`). */
-export const CONFIG_IF_MATCH_HEADER = 'if-match';
+const CONFIG_IF_MATCH_HEADER = 'if-match';
 
 const ConfigFileReadSchema = z.looseObject({ text: z.string(), etag: z.string() });
 const ConfigFileWriteSchema = z.looseObject({

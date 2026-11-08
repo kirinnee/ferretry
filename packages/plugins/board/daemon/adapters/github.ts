@@ -9,7 +9,7 @@ import {
 } from '../lib/github/index.ts';
 
 /** How long one `gh` call may take before it is killed and reported as failed. */
-export const GH_TIMEOUT_MS = 30_000;
+const GH_TIMEOUT_MS = 30_000;
 const DETAIL_LENGTH = 300;
 /** `gh` exits 4 when the command needs a sign-in it does not have. */
 const GH_AUTH_EXIT = 4;

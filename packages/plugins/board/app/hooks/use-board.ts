@@ -16,7 +16,7 @@
 
 import type { CardId } from '../../contract/index.ts';
 import { useNow } from '@ferretry/app/ui';
-import { useCallback, useEffect, useMemo, useReducer, useRef, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useSyncExternalStore } from 'react';
 import { type BoardActions, createBoardActions } from '../lib/board-actions.ts';
 import {
   type BoardFilters,
@@ -149,39 +149,6 @@ export const useBoardCard = (
     () => IDLE_BOARD_TASK,
   );
 };
-
-/**
- * Several cards in full, in the order asked for, each read from `machine`. The list is rebuilt only when a
- * card's state changed, so it is as stable as the states in it.
- */
-export const useBoardTasks = (
-  store: DaemonBoardStore,
-  machine: DaemonConnection | undefined,
-  ids: readonly CardId[],
-  options: { readonly beat?: boolean } = {},
-): readonly BoardCardState[] => {
-  const daemonId = machine?.daemonId;
-  const beat = options.beat !== false;
-  const wanted = ids.join(',');
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the pairing and the id list are the deliberate key
-  useEffect(() => {
-    if (machine === undefined) return undefined;
-    const releases = ids.map(id => store.watchTask(machine, id, { beat }));
-    return () => {
-      for (const release of releases) release();
-    };
-  }, [store, daemonId, wanted, beat]);
-  const last = useRef<readonly BoardCardState[]>([]);
-  const snapshot = (): readonly BoardCardState[] => {
-    const next = ids.map(id => (daemonId === undefined ? IDLE_BOARD_TASK : store.taskState(daemonId, id)));
-    const same = next.length === last.current.length && next.every((state, index) => state === last.current[index]);
-    if (!same) last.current = next;
-    return last.current;
-  };
-  return useSyncExternalStore(store.subscribe, snapshot, () => NO_TASK_STATES);
-};
-
-const NO_TASK_STATES: readonly BoardCardState[] = [];
 
 /** Each machine's projects and lane sets;  */
 export const useBoardProjects = (

@@ -21,7 +21,6 @@
     "@ferretry/std": "workspace:*",
     "zod": "4.4.3",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
     "lucide-react": "^0.468.0",
     "@ferretry/app": "workspace:*"
   },

@@ -67,7 +67,7 @@ export const JEV_FACT_NODES = [
   'already_nudged',
   'dialog_on_screen',
 ] as const;
-export type JevFactNode = (typeof JEV_FACT_NODES)[number];
+type JevFactNode = (typeof JEV_FACT_NODES)[number];
 
 /** The questions Jev answers, each a yes or a no with its own confidence. */
 export const JEV_JUDGEMENT_NODES = [
@@ -93,7 +93,7 @@ export const JEV_LEAVES = [
   'dialog_owner',
   'restart_stuck',
 ] as const;
-export type JevLeaf = (typeof JEV_LEAVES)[number];
+type JevLeaf = (typeof JEV_LEAVES)[number];
 
 interface JevBranch {
   readonly question: string;
@@ -150,11 +150,11 @@ export const JEV_TREE: Readonly<Record<JevNode, JevBranch>> = {
   },
 };
 
-export const JEV_TREE_ROOT: JevNode = 'running';
+const JEV_TREE_ROOT: JevNode = 'running';
 
 const FACT_SET: ReadonlySet<string> = new Set(JEV_FACT_NODES);
 
-export const isJevFactNode = (node: string): node is JevFactNode => FACT_SET.has(node);
+const isJevFactNode = (node: string): node is JevFactNode => FACT_SET.has(node);
 
 /** The question a node asks, as the owner reads it. `undefined` for an id this tree does not have. */
 export function jevNodeQuestion(node: string): string | undefined {
@@ -264,7 +264,7 @@ export interface JevFactsInput {
 const NOT_WORKING = new Set(['interrupted', 'rate_limited']);
 
 /** How far back a nudge still counts as "already nudged about this". */
-export const ALREADY_NUDGED_WINDOW_MS = 24 * 60 * 60_000;
+const ALREADY_NUDGED_WINDOW_MS = 24 * 60 * 60_000;
 
 /**
  * The facts, each from one thing the daemon already observes:

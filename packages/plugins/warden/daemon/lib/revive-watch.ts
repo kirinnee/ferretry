@@ -32,7 +32,7 @@ export interface ReviveWatch {
 }
 
 /** How many revives are watched at once; the oldest is dropped past it. */
-export const REVIVE_WATCH_LIMIT = 50;
+const REVIVE_WATCH_LIMIT = 50;
 
 /** How long a revived ferret has to show progress. */
 export const REVIVE_PROGRESS_MS = WARDEN_REVIVE_PROGRESS_MINUTES * 60_000;

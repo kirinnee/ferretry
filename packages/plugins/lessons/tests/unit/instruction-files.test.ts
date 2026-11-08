@@ -17,6 +17,7 @@ function disk(paths: readonly string[]) {
     root: (_name, scope) => {
       const handle: RootHandle = {
         name: 'work',
+        internal: false,
         resolve: path => {
           const folder = scope?.ferret === undefined ? undefined : folders.get(scope.ferret);
           if (folder === undefined) return err('unknown_ferret');

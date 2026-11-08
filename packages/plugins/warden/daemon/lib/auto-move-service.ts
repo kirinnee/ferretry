@@ -54,7 +54,7 @@ export interface StoppedAgentJobs {
   readonly survivors: readonly AgentJob[];
 }
 
-export interface WardenAutoMoveNotice {
+interface WardenAutoMoveNotice {
   readonly sessionId: string;
   readonly title: string;
   readonly subject: string;

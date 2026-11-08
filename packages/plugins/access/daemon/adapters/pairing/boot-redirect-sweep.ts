@@ -21,7 +21,7 @@ export function pairingRedirectBoot(): {
 }
 
 /** Today's sweep, inside Access's declared opaque tree: exact names, age, regular files, then plain rmdir. */
-export async function sweepPairingRedirectState(state: PairingRedirectStatePort, nowMs: number): Promise<void> {
+async function sweepPairingRedirectState(state: PairingRedirectStatePort, nowMs: number): Promise<void> {
   let entries: readonly string[];
   try {
     entries = await state.list(PairingRedirectsFile);

@@ -26,7 +26,7 @@ export interface ParentFacts {
 }
 
 /** The ferret state a child is over in, and so stops counting against its parent's width. */
-export const PACK_CHILD_FINISHED_STATES: ReadonlySet<string> = new Set(['stopped']);
+const PACK_CHILD_FINISHED_STATES: ReadonlySet<string> = new Set(['stopped']);
 
 /** One ferret as width counting reads it. */
 export interface PackChild {
@@ -124,7 +124,7 @@ export const LEARNING_MINER_LABEL = 'ferretry-learning';
 export const WARDEN_LABEL = 'fleet-warden';
 
 /** Who a ferret is, as {@link packEligible} reads it from its summary. */
-export interface PackEligibilityFacts {
+interface PackEligibilityFacts {
   readonly label?: string | undefined;
   readonly pack?: string | undefined;
   /** Today's start stamp. No 5.0 start writes it yet, so it is only a second guard beside the label walk. */
@@ -141,7 +141,7 @@ function isWardenOrStamped(ferret: PackEligibilityFacts): boolean {
  * (by its label), not the routing prompt's clean-up ferret (its label or its hidden pack) and not a warden. Its
  * ancestors are {@link packEligibleInLineage}'s.
  */
-export function packEligible(ferret: PackEligibilityFacts | undefined): boolean {
+function packEligible(ferret: PackEligibilityFacts | undefined): boolean {
   if (ferret === undefined) return false;
   return (
     ferret.label !== LEARNING_MINER_LABEL &&

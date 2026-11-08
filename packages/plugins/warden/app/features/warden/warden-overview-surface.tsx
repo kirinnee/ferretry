@@ -15,7 +15,6 @@ import { useCallback, useState } from 'react';
 
 import { useWardenPoll, type WardenPollOptions } from '../../hooks/use-warden-poll.ts';
 import { useWardenClientFactory, type WardenClientFactory } from '../../lib/warden-client-context.tsx';
-import type { WardenClient } from '../../lib/warden-client.ts';
 import { daemonSettingsHref } from '@ferretry/app';
 import type { FerretView } from '../../lib/callsign.ts';
 import type { DaemonConnection } from '../../lib/machine.ts';
@@ -24,7 +23,6 @@ import type { WardenReportTarget } from './warden-overview-model.ts';
 import { type WardenNotice, WardenOverview } from './warden-overview.tsx';
 import { WardenReportDialog, type WardenReportDialogRequest } from './warden-report-dialog.tsx';
 
-export type WardenOverviewClient = WardenClient;
 export type WardenOverviewClientFactory = WardenClientFactory;
 
 export interface WardenOverviewSurfaceProps {

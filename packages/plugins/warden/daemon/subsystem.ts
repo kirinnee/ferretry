@@ -53,7 +53,7 @@ import { wardenFlags } from './lib/protocol.ts';
 import { isoFromMs } from './lib/time.ts';
 
 /** The reports folder inside the warden's own state; a report's path is `reports/<stamp>.md`. */
-export const REPORTS_DIRECTORY = 'reports';
+const REPORTS_DIRECTORY = 'reports';
 
 /** What the warden needs of the rest of the daemon: ports it was handed, and the optional Usage and Board. */
 export interface WardenHost {

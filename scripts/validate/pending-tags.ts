@@ -10,8 +10,9 @@
  * - A whole file kept the same way sits in a workspace's `ignore` in a knip config. The workspace key is resolved to
  *   the packages it matches (`packages/plugins/*` is every plugin); each matching subsystem must be pending and one of
  *   its `pendingReasons` lines must name the path as a whole token (6 characters or more). A key that matches no
- *   package is a finding. The CLI, the app shell and std have no port to wait for, so an `ignore` under a key that
- *   matches only them is judged by knip alone.
+ *   package is a finding. The CLI, the app shell and std have no port to wait for, so an `ignore` path under a key
+ *   that matches only them (or the root) must instead be named on `ALLOWED_KNIP` with its reason (ruling #29: every
+ *   ignore carries a GAP line or a reason).
  * - Every other knip key that keeps code alive (`ignoreFiles`, `ignoreIssues`, `ignoreMembers`,
  *   `ignoreExportsUsedInFile`, a top-level `ignore`, `ignoreWorkspaces`, an `entry` that is no test, view or bin file,
  *   any key this check does not know) is a finding unless `ALLOWED_KNIP` names it with a reason. That map only shrinks:
@@ -47,6 +48,26 @@ export const ALLOWED_PUBLIC: ReadonlyMap<string, string> = new Map([]);
  * honest today. This list only shrinks; a new entry needs the review lead's sign-off.
  */
 export const ALLOWED_KNIP: ReadonlyMap<string, string> = new Map([
+  [
+    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:@huggingface/transformers',
+    'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
+  ],
+  [
+    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:@lichess-org/vosk-browser',
+    'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
+  ],
+  [
+    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:@sherpaw/asr',
+    'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
+  ],
+  [
+    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:onnxruntime-web',
+    'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
+  ],
+  [
+    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:parakeet.js',
+    'only the STT workers ported but unwired (voice GAP line in ports-pending.json naming app/worker/*-worker.ts) import it; the workers leave with the GAP (ruling #26).',
+  ],
   [
     'knip.production.json#workspaces["packages/plugins/mcp"].entry:app/views/surfaces.tsx',
     'loaded lazily by `import(`./views/${"surfaces"}.tsx`)` in app/index.ts, a template import knip cannot follow.',
@@ -102,6 +123,42 @@ export const ALLOWED_KNIP: ReadonlyMap<string, string> = new Map([
   [
     'knip.json#workspaces["packages/app"].entry:scripts/**/*.ts',
     'the app shell build scripts (build-release, build-fy-render-libs) are run by path from package.json scripts; nothing imports them.',
+  ],
+  [
+    'knip.json#workspaces["packages/app"].ignore:tests/integration/fixtures/chat-tail-scene.tsx',
+    'the scene chat-tail.visual.test.ts bundles by path (`--entry fixtures/chat-tail-scene.tsx`); nothing imports it.',
+  ],
+  [
+    'knip.json#workspaces["packages/app"].ignore:tests/support/dom-leak-guard.ts',
+    'a bun test preload named by path in bunfig.unit.toml; nothing imports it.',
+  ],
+  [
+    'knip.production.json#workspaces["packages/app"].ignore:src/worker/service-worker.ts',
+    'the service worker is its own bundle: packages/app/scripts/build-release.ts compiles it from this path (sw.verified.js) and the shell registers it by URL.',
+  ],
+  [
+    'knip.production.json#workspaces["packages/app"].ignore:src/worker/notifications.ts',
+    'reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.',
+  ],
+  [
+    'knip.production.json#workspaces["packages/app"].ignore:src/release/keeper.ts',
+    'reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.',
+  ],
+  [
+    'knip.production.json#workspaces["packages/app"].ignore:src/release/loopback.ts',
+    'reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.',
+  ],
+  [
+    'knip.production.json#workspaces["packages/app"].ignore:src/release/storage.ts',
+    'reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.',
+  ],
+  [
+    'knip.production.json#workspaces["packages/cli"].ignore:src/lib/tool-client.ts',
+    'GAP(mcp): the agent-tool client behind `fy mcp serve`; reached when the MCP cli half lands (ports-pending.json pendingHalves.mcp ["cli"]); only its tests reach it until then (nelly).',
+  ],
+  [
+    'knip.production.json#workspaces["packages/cli"].ignore:src/lib/update/status.ts',
+    'GAP(cli): the update line of `fy daemon status` (today rebuild-ref packages/cli/bin/program.ts:656 builds DaemonUpdateStatusReader, read at src/lib/daemon/controller.ts:630); no 5.0 verb renders it yet (nelly).',
   ],
 ]);
 
@@ -432,6 +489,14 @@ export function knipShapeFindings(
                 where,
                 `entry "${pattern}"`,
               );
+          continue;
+        }
+        if (key === 'ignore') {
+          // A subsystem's ignore is tied to its GAP line (tagFindings); one with no subsystem needs a named reason.
+          const owners = isRoot(workspace) ? [undefined] : matching(workspace, packages).map(pkg => pkg.id);
+          if (owners.length > 0 && owners.every(owner => owner === undefined))
+            for (const path of listOf(value))
+              refuse(`${config}#workspaces[${JSON.stringify(workspace)}].ignore:${path}`, where, `ignore "${path}"`);
           continue;
         }
         if (WORKSPACE_KEYS.has(key)) continue;

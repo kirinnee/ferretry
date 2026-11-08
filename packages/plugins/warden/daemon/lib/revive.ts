@@ -45,7 +45,7 @@ export type ReviveCause =
   | { readonly kind: 'agent_crashed'; readonly exitCode: number };
 
 /** Why a failed session is left as it is. */
-export type ReviveLeaveReason =
+type ReviveLeaveReason =
   | 'not_failed'
   | 'stopped'
   | 'completed'
@@ -204,7 +204,7 @@ export interface ReviveFleetEntry {
 }
 
 /** What the Warden remembers of its own revives, durably. */
-export interface ReviveSessionRecord {
+interface ReviveSessionRecord {
   readonly revivedAt: string;
   /** How many times it was revived, ever. */
   readonly attempts: number;
@@ -212,7 +212,7 @@ export interface ReviveSessionRecord {
   readonly crashRevives: number;
 }
 
-export interface ReviveBatchRecord {
+interface ReviveBatchRecord {
   readonly at: string;
   readonly ids: readonly string[];
 }
@@ -238,11 +238,11 @@ export const EMPTY_REVIVE_STATE: ReviveState = { sessions: {}, batches: [], refu
 export const REVIVE_BATCH_LIMIT = 10;
 
 /** A death this soon after a revive is the revive not taking. */
-export const REVIVE_QUICK_DEATH_MS = 2 * 60_000;
+const REVIVE_QUICK_DEATH_MS = 2 * 60_000;
 
 /** This many deaths this close together is one event, not several. */
-export const CASCADE_COUNT = 3;
-export const CASCADE_SPAN_MS = 10_000;
+const CASCADE_COUNT = 3;
+const CASCADE_SPAN_MS = 10_000;
 
 const MINUTE_MS = 60_000;
 

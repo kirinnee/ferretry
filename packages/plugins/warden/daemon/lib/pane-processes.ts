@@ -40,9 +40,9 @@ export interface PaneProcess {
   readonly listening?: boolean;
 }
 
-export type PaneProcessRole = 'harness' | 'helper' | 'command' | 'service' | 'browser';
+type PaneProcessRole = 'harness' | 'helper' | 'command' | 'service' | 'browser';
 
-export interface PaneProcessView {
+interface PaneProcessView {
   /** Top-level tool commands still doing work, oldest first. */
   readonly toolCommands: readonly PaneProcess[];
   /** Top-level browsers the agent launched (not a helper's), which nothing needs once the turn is over. */
@@ -80,7 +80,7 @@ export function isBrowserProcess(argv: string): boolean {
  * Every process's role, then the top-level members of each class: an entry whose parent has the same
  * role is part of its parent's unit, not a unit of its own.
  */
-export function classifyPaneProcesses(processes: readonly PaneProcess[]): PaneProcessView {
+function classifyPaneProcesses(processes: readonly PaneProcess[]): PaneProcessView {
   const byPid = new Map(processes.map(entry => [entry.pid, entry]));
   const roles = new Map<number, PaneProcessRole>();
   for (const entry of processes) roles.set(entry.pid, roleOf(entry, byPid, roles));

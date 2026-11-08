@@ -105,7 +105,7 @@ import { helperCloseReason } from './sub-card-close.ts';
 import { defaultVisibility, visibilityVerdict } from './visibility.ts';
 
 /** Runs work one at a time per key; work under different keys runs together (the kernel's keyed serial). */
-export interface BoardSerial {
+interface BoardSerial {
   run<T>(key: string, work: () => Promise<T>): Promise<T>;
 }
 

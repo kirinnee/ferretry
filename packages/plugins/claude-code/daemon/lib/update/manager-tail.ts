@@ -13,7 +13,7 @@ const SHORT_ESCAPE = /\u001b[()#][0-9A-Za-z]|\u001b[<>=]/gu;
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b-\u001f\u007f]/gu;
 
 /** One output line with every terminal escape and stray control character removed. */
-export function stripTerminalEscapes(raw: string): string {
+function stripTerminalEscapes(raw: string): string {
   return raw
     .replaceAll(OSC_SEQUENCE, '')
     .replaceAll(CSI_SEQUENCE, '')

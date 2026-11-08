@@ -35,7 +35,7 @@ import type { WardenInvestigationRecord, WardenLayersInEffect } from './triage.t
 import { isTerminalStatus, type WardenSessionStatus } from './types.ts';
 
 /** Why a standing flag is in front of the owner. */
-export type WardenOwnerReason =
+type WardenOwnerReason =
   | { readonly kind: 'held'; readonly action: WardenAction }
   | { readonly kind: 'investigation_failed'; readonly record: WardenInvestigationRecord }
   | { readonly kind: 'jev'; readonly handoff: WardenJevHandoff; readonly layers: WardenLayersInEffect }

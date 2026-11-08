@@ -83,23 +83,8 @@ export function utf8Text(bytes: Uint8Array): string | null {
   }
 }
 
-export function writeUint32(target: Uint8Array, offset: number, value: number): void {
+function writeUint32(target: Uint8Array, offset: number, value: number): void {
   new DataView(target.buffer, target.byteOffset, target.byteLength).setUint32(offset, value, false);
-}
-
-export function readUint32(source: Uint8Array, offset: number): number {
-  return new DataView(source.buffer, source.byteOffset, source.byteLength).getUint32(offset, false);
-}
-
-/** Sequence numbers are 64 bits on the wire even though {@link MAX_FRAME_SEQUENCE} bounds them. */
-export function writeUint64(target: Uint8Array, offset: number, value: number): void {
-  new DataView(target.buffer, target.byteOffset, target.byteLength).setBigUint64(offset, BigInt(value), false);
-}
-
-/** Read a 64-bit field, refusing a value above `Number.MAX_SAFE_INTEGER` rather than rounding it. */
-export function readUint64(source: Uint8Array, offset: number): number | null {
-  const value = new DataView(source.buffer, source.byteOffset, source.byteLength).getBigUint64(offset, false);
-  return value > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(value);
 }
 
 /**
@@ -114,11 +99,4 @@ export function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   let difference = 0;
   for (let index = 0; index < left.length; index += 1) difference |= (left[index] ?? 0) ^ (right[index] ?? 0);
   return difference === 0;
-}
-
-/** True when every byte is zero — how a degenerate X25519 shared secret is recognised. */
-export function isAllZero(bytes: Uint8Array): boolean {
-  let bits = 0;
-  for (const byte of bytes) bits |= byte;
-  return bits === 0;
 }

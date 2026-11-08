@@ -57,7 +57,7 @@ const CONNECTION_KINDS = ['direct', 'webrtc', 'tunnel', 'relay'] as const;
 const kindRank = (method: ConnectionMethod): number => CONNECTION_KINDS.indexOf(method.kind);
 
 /** Direct, then WebRTC, then a tunnel, then a relay; stable within a kind. COPY of `connectionPreferenceOrder`. */
-export function connectionPreferenceOrder(methods: readonly ConnectionMethod[]): readonly ConnectionMethod[] {
+function connectionPreferenceOrder(methods: readonly ConnectionMethod[]): readonly ConnectionMethod[] {
   return [...methods].sort((left, right) => kindRank(left) - kindRank(right));
 }
 
@@ -97,7 +97,7 @@ export type DaemonId = string & { readonly daemonId: unique symbol };
 export type RelayCarrier = Extract<ConnectionMethod, { kind: 'relay' }>;
 
 /** The tunnel half (§15): a Cloudflare hostname dialled like a direct address. */
-export type TunnelCarrier = Extract<ConnectionMethod, { kind: 'tunnel' }>;
+type TunnelCarrier = Extract<ConnectionMethod, { kind: 'tunnel' }>;
 
 export interface DaemonConnectionInput {
   daemonId: string;
@@ -212,7 +212,10 @@ export type { PrivateKeyHandle } from '@ferretry/app';
 
 // ─── 4. the session client's sentences and errors (today: `pwa/src/lib/relay-carrier.ts`, `relay-session.ts`) ──
 
-/** Said when this machine no longer accepts this browser's device. COPY of today's sentence (parity). */
+/**
+ * Said when this machine no longer accepts this browser's device. COPY of today's sentence (parity).
+ * @pending access: app/features/pairing/device-refused-notice.tsx is not reached by the app shell page shown to a refused device
+ */
 export const DEVICE_NOT_ACCEPTED_SENTENCE =
   'This machine no longer accepts this browser — it was removed, or went unused for too long. Pair it again to keep using it.';
 
@@ -276,11 +279,6 @@ export function daemonRequest(daemon: DaemonConnection, path: string, init: Requ
 
 /** The deadline every per-machine read gives up after. COPY of today's constant. */
 export const MACHINE_READ_DEADLINE_MS = 20_000;
-
-/** `read`, bounded by a deadline (a timer: the shell's clock). STAND-IN: the shell exports no deadline. */
-export function withDeadline<T>(_read: Promise<T>, _deadlineMs?: number): Promise<T> {
-  return fromShell('withDeadline');
-}
 
 /** The script URL a service worker is registered from, through the page's Trusted Types policy: the shell owns it. */
 export { trustedWorkerUrl } from '@ferretry/app/ui';
@@ -413,9 +411,7 @@ export { cn } from './shell-grants.ts';
 /** The shell's bottom sheet, the Ferretry mark, and the layout and viewport hooks: `@ferretry/app/ui`. */
 export {
   BottomSheet,
-  type BottomSheetProps,
   BrandMark,
-  type LayoutMode,
   useAppViewport,
   useKeyboardOpen,
   useLayoutMode,

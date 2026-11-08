@@ -14,7 +14,7 @@ import type { ProjectInfo } from '@ferretry/plugin-projects/contract';
 import { type BoardProjectId, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
 import { projectRootFor } from './paths.ts';
 
-export type ProjectResolutionRule = 'parent' | 'repository' | 'path' | 'unfiled';
+type ProjectResolutionRule = 'parent' | 'repository' | 'path' | 'unfiled';
 
 export interface ProjectResolution {
   readonly projectId: BoardProjectId;
@@ -41,10 +41,7 @@ export const isUnderScratchRoot = (folder: string, scratchRoots: readonly string
  * directory, so a linked checkout files under the project it was made from. A project with no Git attachment
  * matches nothing.
  */
-export const projectForWorktree = (
-  projects: readonly ProjectInfo[],
-  commonDirectory: string,
-): ProjectInfo | undefined =>
+const projectForWorktree = (projects: readonly ProjectInfo[], commonDirectory: string): ProjectInfo | undefined =>
   commonDirectory.length === 0 ? undefined : projects.find(project => project.git?.commonDirectory === commonDirectory);
 
 const inheritedProject = (input: ProjectResolutionInput): BoardProjectId | undefined => {

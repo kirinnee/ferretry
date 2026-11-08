@@ -29,13 +29,6 @@ export const typeInto = async (field: HTMLInputElement | HTMLTextAreaElement, va
   });
 };
 
-export const choose = async (select: HTMLSelectElement, value: string): Promise<void> => {
-  await interact(() => {
-    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-};
-
 /** Waits until the root's text includes `text`. */
 export const waitForText = async (root: ParentNode, text: string): Promise<void> => {
   await settleUntil(() => textOf(root).includes(text), `"${text}" on screen`, interact);

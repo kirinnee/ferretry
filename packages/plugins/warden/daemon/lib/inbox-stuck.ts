@@ -157,7 +157,7 @@ function undelivered(messages: readonly QueuedMessage[]): readonly QueuedMessage
 }
 
 /** The cause the head of the queue shows. */
-export function inboxStuckCause(
+function inboxStuckCause(
   messages: readonly QueuedMessage[],
   sends: readonly InboxSend[],
   oldest: QueuedMessage,

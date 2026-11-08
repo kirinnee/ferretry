@@ -23,7 +23,7 @@ import { dlopen, FFIType, suffix } from 'bun:ffi';
  */
 
 /** The C library this runtime is already linked against, under the name its loader answers to. */
-export const LIBC = process.platform === 'darwin' ? 'libSystem.B.dylib' : `libc.${suffix}.6`;
+const LIBC = process.platform === 'darwin' ? 'libSystem.B.dylib' : `libc.${suffix}.6`;
 
 export interface DirectorySyscalls {
   /** Installs an open directory as the kernel's working directory. Returns 0, or -1 on failure. */

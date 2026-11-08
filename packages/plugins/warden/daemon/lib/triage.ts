@@ -85,7 +85,7 @@ export function utcDay(nowMs: number): string {
 }
 
 /** The UTC clock hour an instant falls in, `YYYY-MM-DDTHH`: the hour the pacing counts against. */
-export function utcHour(nowMs: number): string {
+function utcHour(nowMs: number): string {
   return new Date(nowMs).toISOString().slice(0, 13);
 }
 
@@ -143,7 +143,7 @@ export interface WardenGuardHealth {
   readonly backoffUntil?: string;
 }
 
-export const EMPTY_TRIAGE_DAY = (day: string): WardenTriageDay => ({
+const EMPTY_TRIAGE_DAY = (day: string): WardenTriageDay => ({
   day,
   flags: 0,
   jevDecisions: 0,
@@ -326,7 +326,7 @@ export function jevJudges(anomaly: Pick<WardenAnomaly, 'kind'>): boolean {
 }
 
 /** Why Jev's answer was handed on instead of carried out. */
-export type JevEscalation =
+type JevEscalation =
   /** Jev chose `unsure`. */
   | 'unsure'
   /** Jev was less sure than the bar for what it chose. */

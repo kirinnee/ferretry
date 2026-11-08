@@ -32,7 +32,7 @@ export class PaneDirectory {
   }
 }
 
-export class PaneUnknown extends Error {
+class PaneUnknown extends Error {
   constructor(readonly ferret: string) {
     super(`this daemon does not know which pane ferret ${ferret} is in, so nothing was read or sent`);
     this.name = 'PaneUnknown';

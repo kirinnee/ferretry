@@ -35,7 +35,7 @@ import type { UsageClient } from '../../shell.ts';
 import { BudgetMeter } from './budget-meter.tsx';
 
 /** The one file the budgets and their time zone live in (`config/usage.yaml`). */
-export const USAGE_FILE = 'usage.yaml';
+const USAGE_FILE = 'usage.yaml';
 
 /** One file a save wrote but the daemon held for the owner. */
 interface HeldEdit {

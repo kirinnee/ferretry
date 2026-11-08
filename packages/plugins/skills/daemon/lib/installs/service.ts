@@ -68,7 +68,7 @@ type CatalogProvenance = SkillProvenance;
 type CatalogSourceProblem = SkillSourceProblem;
 
 /** The longest root that is `cwd` or contains it, lexically. */
-export const projectRootFor = (cwd: string, roots: readonly string[]): string | undefined => {
+const projectRootFor = (cwd: string, roots: readonly string[]): string | undefined => {
   const strip = (path: string): string => posix.normalize(path).replace(/(?<=.)\/+$/u, '');
   const target = strip(cwd);
   return roots

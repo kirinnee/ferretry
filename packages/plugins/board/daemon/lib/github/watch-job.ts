@@ -71,7 +71,7 @@ export interface GithubWatch {
 }
 
 /** The watch's two jobs. */
-export interface GithubWatchJobs {
+interface GithubWatchJobs {
   /** The watch: ticks until the daemon stops; a failed tick is reported, never thrown. */
   readonly watch: JobSpec;
   /** The Unfiled board's refile, once at start. */

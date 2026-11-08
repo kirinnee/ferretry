@@ -29,7 +29,7 @@ const LEDGER_FIELDS: Readonly<Record<LivenessSignal, keyof WardenLivenessLedger>
 
 export const DEFAULT_TICK_SECONDS = 30;
 
-export type SusKind = 'sus_thinking' | 'sus_subprocess';
+type SusKind = 'sus_thinking' | 'sus_subprocess';
 
 export interface SusFinding {
   readonly kind: SusKind;

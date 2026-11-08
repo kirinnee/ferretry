@@ -230,7 +230,7 @@ export interface OverdueTold {
 /** Every live sub-ferret the Warden acted on, keyed by its session id. */
 export type OverdueMemory = Readonly<Record<string, OverdueTold>>;
 
-export type OverdueTell =
+type OverdueTell =
   | { readonly kind: 'nudge'; readonly sessionId: string; readonly asked: string; readonly message: string }
   | {
       readonly kind: 'parent';
@@ -265,7 +265,7 @@ export interface OverduePlanInput {
 }
 
 /** The nudge a silent sub-ferret is typed. */
-export function overdueNudgeMessage(parent: WardenSessionView, minutes: number | undefined, cli: string): string {
+function overdueNudgeMessage(parent: WardenSessionView, minutes: number | undefined, cli: string): string {
   const name = parent.config.teammate ?? parent.config.id;
   const since = minutes === undefined ? '' : ` ${minutes}m ago`;
   return (
@@ -276,7 +276,7 @@ export function overdueNudgeMessage(parent: WardenSessionView, minutes: number |
 }
 
 /** The message to the parent, when a nudge could not help or did not. */
-export function overdueParentMessage(
+function overdueParentMessage(
   child: WardenSessionView,
   anomaly: WardenAnomaly,
   nudgedAt: string | undefined,

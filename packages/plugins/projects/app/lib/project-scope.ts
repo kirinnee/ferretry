@@ -75,6 +75,7 @@ let browserNavigation: ScopeNavigation | undefined;
 /**
  * The real window, as a lazily built singleton. The identity has to be stable: it is an effect dependency, and a fresh
  * object per render would tear the listener down and rebuild it on every parent update.
+ * @pending projects: app/lib/project-scope.ts is reached only through app/hooks/use-project-scope.ts: the Sessions page when rebuild/port-ferrets-b lands (today: packages/pwa/src/components/sessions-page.tsx:36)
  */
 export const browserScopeNavigation = (): ScopeNavigation => {
   const browser = globalThis as unknown as {

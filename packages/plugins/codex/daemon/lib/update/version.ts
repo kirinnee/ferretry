@@ -21,8 +21,7 @@ export const CODEX_PACKAGES = { npm: '@openai/codex', cask: 'codex', nixpkgs: 'c
 export const VERIFIED_CODEX_VERSION = '0.145.0';
 
 /** Where a person reads what a release changed. */
-export const codexChangelogUrl = (version: string): string =>
-  `https://github.com/openai/codex/releases/tag/rust-v${version}`;
+const codexChangelogUrl = (version: string): string => `https://github.com/openai/codex/releases/tag/rust-v${version}`;
 
 /** The registry address of Codex's `latest` dist-tag. */
 export const NPM_LATEST_URL = `https://registry.npmjs.org/${CODEX_PACKAGES.npm}/latest`;

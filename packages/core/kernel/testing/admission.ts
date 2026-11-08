@@ -61,7 +61,7 @@ export function tokenClassOf(caller: TestCaller): TestTokenClass | undefined {
 }
 
 /** Today's dispatcher `meetsMinimum`, copied: `operator` admits every credential but a warden's. */
-export function meetsMinimum(tokenClass: TestTokenClass, minimum: ScopedRoute['minimum']): boolean {
+function meetsMinimum(tokenClass: TestTokenClass, minimum: ScopedRoute['minimum']): boolean {
   switch (minimum) {
     case 'none':
     case 'authenticated':

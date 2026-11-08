@@ -20,15 +20,15 @@ export const WardenSelectionReasonSchema = z.enum(['preferred', 'failover', 'rot
 export type WardenSelectionReason = z.infer<typeof WardenSelectionReasonSchema>;
 
 /** Where the reported model name came from. */
-export const WardenModelSourceSchema = z.enum(['harness', 'agent', 'configured', 'unknown']);
-export type WardenModelSource = z.infer<typeof WardenModelSourceSchema>;
+const WardenModelSourceSchema = z.enum(['harness', 'agent', 'configured', 'unknown']);
+type WardenModelSource = z.infer<typeof WardenModelSourceSchema>;
 
-export const WardenHarnessSchema = z.enum(['claude', 'codex']);
-export type WardenHarness = z.infer<typeof WardenHarnessSchema>;
+const WardenHarnessSchema = z.enum(['claude', 'codex']);
+type WardenHarness = z.infer<typeof WardenHarnessSchema>;
 
 /** Selection facts captured before a warden launch. `skipped` maps each account
  *  the daemon passed over to the reason it passed over it. */
-export const WardenSelectionProvenanceSchema = z.object({
+const WardenSelectionProvenanceSchema = z.object({
   policy: WardenFailoverPolicySchema,
   selection: WardenSelectionReasonSchema,
   configuredFirst: z.string().min(1),
@@ -37,7 +37,7 @@ export const WardenSelectionProvenanceSchema = z.object({
 export type WardenSelectionProvenance = z.infer<typeof WardenSelectionProvenanceSchema>;
 
 /** Daemon-owned facts for one successfully created warden session. */
-export const WardenSpawnProvenanceSchema = WardenSelectionProvenanceSchema.extend({
+const WardenSpawnProvenanceSchema = WardenSelectionProvenanceSchema.extend({
   v: z.literal(1),
   /** Exact session creation instant reported by the start call. */
   at: z.string().min(1),

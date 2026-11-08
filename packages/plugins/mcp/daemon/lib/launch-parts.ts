@@ -27,7 +27,7 @@ export function mcpParts(items: ReadonlyMap<string, McpItem>, harness: HarnessKe
 }
 
 /** The launch's share of the sign-in service: make due tokens current. Never throws (`McpOAuthService.refreshForLaunch`). */
-export interface McpLaunchRenewal {
+interface McpLaunchRenewal {
   refreshForLaunch(names: readonly SecretName[]): Promise<void>;
 }
 

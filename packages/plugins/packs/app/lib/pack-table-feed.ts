@@ -7,7 +7,7 @@ import { type PackRow, PackTableSchema } from '../../contract/index.ts';
 import type { PacksClient } from './client.ts';
 
 /** How often the table is read again while a card is on screen, in milliseconds. */
-export const PACK_FEED_REFRESH_MS = 5_000;
+const PACK_FEED_REFRESH_MS = 5_000;
 
 export interface PackTableFeed {
   /** Joins the shared read for `ferretId`; the returned function leaves it. */

@@ -87,7 +87,7 @@ if (!registered.__ferretryMutationObserverPatched) {
  * Every node prints as its text and then its markup instead, each capped,
  * which is also what a reader of the failure wants to see.
  */
-export const INSPECTED_NODE_LIMIT = 600;
+const INSPECTED_NODE_LIMIT = 600;
 
 const capped = (shown: string): string =>
   shown.length > INSPECTED_NODE_LIMIT
@@ -159,11 +159,6 @@ export const interact = async (callback: () => unknown): Promise<void> => {
   await act(async () => {
     await callback();
   });
-};
-
-/** Dispatches a trusted-shaped keyboard event at an element. */
-export const pressKey = (target: EventTarget, key: string, init: KeyboardEventInit = {}): void => {
-  target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
 };
 
 /**

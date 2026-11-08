@@ -14,7 +14,7 @@
  */
 
 /** The levels a boot's own records are filtered by, from most to least. */
-export const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
+const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
 /** What one invocation says about this run, overriding the document for this run only. */

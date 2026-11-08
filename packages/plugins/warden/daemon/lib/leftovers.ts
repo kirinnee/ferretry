@@ -20,7 +20,7 @@ import { instantMs } from './time.ts';
 import { isTerminalStatus, livenessLedgerOf, WARDEN_LABEL, type WardenSessionView } from './types.ts';
 
 /** How long a browser must outlive the turn before it is a leftover rather than about to be used. */
-export const LEFTOVER_BROWSER_GRACE_MS = 10 * 60_000;
+const LEFTOVER_BROWSER_GRACE_MS = 10 * 60_000;
 
 export interface LeftoverBrowserCandidate {
   readonly sessionId: string;

@@ -50,10 +50,10 @@ export function factCommand(spawn: SpawnPort): FactCommand {
 }
 
 /** The link-chain and nix profile facts of one executable: what a store path's install is decided by. */
-export type ExecutableNixFacts = Pick<InstallFacts, 'nixProfileElement' | 'homeManagerProfile' | 'viaHomeManagerPath'>;
+type ExecutableNixFacts = Pick<InstallFacts, 'nixProfileElement' | 'homeManagerProfile' | 'viaHomeManagerPath'>;
 
 /** Walk the launched path's links and ask the nix profile which element holds it. */
-export async function executableNixFacts(
+async function executableNixFacts(
   launchedPath: string,
   resolvedPath: string,
   seams: { readonly run: FactCommand; readonly readLink: (path: string) => Promise<string | undefined> },
