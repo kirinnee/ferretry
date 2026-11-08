@@ -12,7 +12,7 @@ export interface CopyPageHost {
  * One copy's work in a page's queue: the guard run first, then the read. ONE object on purpose: a host that hands
  * it on whole cannot drop the guard, where a forgotten trailing argument would compile and skip the check.
  */
-export interface CopyPageJob<T> {
+interface CopyPageJob<T> {
   readonly work: (copy: BrowserCopyPort, pageId: string) => Promise<T>;
   readonly guard?: CopyPageGuard;
 }

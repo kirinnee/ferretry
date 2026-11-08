@@ -16,7 +16,7 @@ export interface CopyClock {
 }
 
 /** The folder a session works in, for a command copy's working folder; nothing when the session is unknown. */
-export interface CopyFolders {
+interface CopyFolders {
   folderOf(sessionId: string): Promise<string | undefined>;
 }
 
@@ -78,7 +78,7 @@ export interface CopyPagePort {
 }
 
 /** Where pictures of a page wait while it shows the document a value was copied from (`PageCopyRecords`). */
-export interface CopyPageHolds {
+interface CopyPageHolds {
   hold(
     sessionId: string,
     copy: string,

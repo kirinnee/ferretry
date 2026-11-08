@@ -13,6 +13,7 @@ import type {
   WorkerHandle,
   WorkersPort,
 } from '../../contract/ports.ts';
+import { embeddedWorkerUrl } from './embedded-worker.ts';
 
 /**
  * The unrestricted spawn adapter; the host wraps it per plugin (`restrictSpawn`). The child sees the base the host
@@ -257,7 +258,8 @@ export function bunWorkers(): WorkersPort {
         | { readonly workerData?: unknown; readonly transferList?: readonly unknown[] }
         | undefined;
       const data = given?.workerData;
-      const worker = new Worker(moduleUrl, {
+      // A compiled binary holds its worker programs embedded beside the entry, not where the plugin's URL points.
+      const worker = new Worker(embeddedWorkerUrl(moduleUrl), {
         ...(options?.name === undefined ? {} : { name: options.name }),
         ...(options?.env === undefined ? {} : { env: { ...options.env } }),
         ...(data === undefined ? {} : { workerData: data }),

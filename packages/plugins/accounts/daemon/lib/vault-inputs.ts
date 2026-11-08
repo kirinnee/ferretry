@@ -124,7 +124,7 @@ export function codeTargetProblem(
  * WHO DELIVERED A VALUE (`protocol/src/lib/input-request.ts`): the machine, a paired device's tap, a paste rule, a
  * task-plan line or a standing sign-in rule.
  */
-export const InputActorSchema = z.discriminatedUnion('kind', [
+const InputActorSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('host') }),
   z.strictObject({
     kind: z.literal('device'),

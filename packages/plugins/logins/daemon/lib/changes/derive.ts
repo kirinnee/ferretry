@@ -29,10 +29,10 @@ const refuse = (message: string): never => {
 };
 
 /** The harness names a sentence uses. */
-export const HARNESS_WORDS: Readonly<Record<HarnessKind, string>> = { claude: 'Claude Code', codex: 'Codex' };
+const HARNESS_WORDS: Readonly<Record<HarnessKind, string>> = { claude: 'Claude Code', codex: 'Codex' };
 
 /** One file an edit writes: the changed top-level keys (`undefined` removes a key), or the file removed. */
-export type LoginWrite =
+type LoginWrite =
   | { readonly id: string; readonly patch: Readonly<Record<string, unknown>> }
   | { readonly id: string; readonly remove: true };
 

@@ -22,7 +22,7 @@ export const HARNESSES: readonly HarnessKind[] = ['claude-code', 'codex'];
 export const HARNESS_NAMES: Readonly<Record<HarnessKind, string>> = { 'claude-code': 'Claude Code', codex: 'Codex' };
 
 /** The command a person types in their own terminal. */
-export const HARNESS_COMMANDS: Readonly<Record<HarnessKind, string>> = { 'claude-code': 'claude', codex: 'codex' };
+const HARNESS_COMMANDS: Readonly<Record<HarnessKind, string>> = { 'claude-code': 'claude', codex: 'codex' };
 
 /** Every CLI a login drives, Claude Code first: both for an environment login with a `claude-code:` and a `codex:` half. */
 export const loginHarnesses = (login: LoginView): readonly HarnessKind[] => login.harnesses;
@@ -42,7 +42,7 @@ export const LOGIN_SCOPE_WORDS: Readonly<Record<LoginScope, string>> = {
 };
 
 /** "Claude Code", or "Claude Code + Codex" for a login that drives both. */
-export const harnessesName = (harnesses: readonly HarnessKind[]): string =>
+const harnessesName = (harnesses: readonly HarnessKind[]): string =>
   harnesses.map(harness => HARNESS_NAMES[harness]).join(' + ');
 
 export const plural = (count: number, one: string, many = `${one}s`): string =>

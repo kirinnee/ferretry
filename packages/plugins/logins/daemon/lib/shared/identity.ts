@@ -41,7 +41,7 @@ import type { HarnessKind } from './harness.ts';
  * A token that expires during the command that just decided it was fine is not fine, and a clock a
  * minute out of step should not produce a `valid` reading either.
  */
-export const CREDENTIAL_EXPIRY_SKEW_MS = 60_000;
+const CREDENTIAL_EXPIRY_SKEW_MS = 60_000;
 
 /**
  * What is known about one home's credential.
@@ -109,7 +109,7 @@ function classifyTokens(shape: CredentialTokenShape, now: number): CredentialRea
 }
 
 /** Which tokens a credential holds and when its access token expires. Presence flags, never a token. */
-export interface CredentialTokenShape {
+interface CredentialTokenShape {
   readonly kind: 'tokens';
   readonly hasAccess: boolean;
   readonly hasRefresh: boolean;
@@ -193,14 +193,4 @@ export function credentialShape(kind: HarnessKind, material: CredentialMaterial)
 /** Classify whichever credential shape this harness keeps. */
 export function classifyCredential(kind: HarnessKind, material: CredentialMaterial, now: number): CredentialReading {
   return classifyShape(credentialShape(kind, material), now);
-}
-
-/**
- * A failure's message, or a stated fallback.
- *
- * Never interpolates anything but an error's own text, so a store that accidentally puts credential
- * material in an exception is still the store's bug and not this module's.
- */
-export function failureMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message.length > 0 ? error.message : fallback;
 }

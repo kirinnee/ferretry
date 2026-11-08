@@ -9,7 +9,7 @@ import type { LoginChanges } from '../lib/login-changes.ts';
 import { Button, ChangeApplyPanel } from '../ui.ts';
 import { HARNESS_NAMES } from '../lib/logins-view.ts';
 
-export const SIGN_OUT_VERSUS_REMOVE = 'Sign out keeps the login but it needs sign-in again. Remove deletes it.';
+const SIGN_OUT_VERSUS_REMOVE = 'Sign out keeps the login but it needs sign-in again. Remove deletes it.';
 
 interface PanelProps {
   readonly login: LoginView;

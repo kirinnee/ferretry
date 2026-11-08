@@ -41,10 +41,18 @@
  * the path `packages/daemon/src/adapters/runtime/bundled-worker.ts` resolves it by. Without this, a
  * `new Worker` in a compiled binary names a file the binary does not have and never starts: the PDF
  * unlock shipped that way. `fyd --check` starts each worker, and the release smoke asserts it.
+ *
+ * AND SO IS EVERY PLUGIN'S. A plugin's worker lives in its own package and is named by URL from its daemon half, so it
+ * is not beside any entry. An entry whose package holds the generated plugin registry (the daemon host) embeds every
+ * worker that registry declares (`scripts/release/plugin-workers.ts`), flat beside the entry as `<root>/<file stem>.js`;
+ * the kernel's `bunWorkers` resolves a plugin's URL to that file when compiled. A declared worker with no program on
+ * disk, or two with one name, FAILS this compile rather than the release smoke.
  */
 import { createRequire } from 'node:module';
-import { dirname, join, normalize } from 'node:path';
+import { basename, dirname, join, normalize } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { BunPlugin } from 'bun';
+import { pluginRegistryFor, pluginWorkers, type WorkerHalf } from './plugin-workers.ts';
 
 interface Rewrite {
   readonly file: RegExp;
@@ -193,11 +201,23 @@ const entry = normalize(options.entry);
 const workers = [...new Bun.Glob('*.worker.ts').scanSync({ cwd: dirname(entry) })]
   .sort()
   .map(name => join(dirname(entry), name));
+/** The plugin worker programs the generated registry declares, when this entry is the one that hosts the plugins. */
+const registry = pluginRegistryFor(entry);
+const pluginPrograms =
+  registry === undefined
+    ? []
+    : pluginWorkers(
+        ((await import(pathToFileURL(registry).href)) as { daemonImplementations: readonly WorkerHalf[] })
+          .daemonImplementations,
+        `${basename(entry).replace(/\.[cm]?[jt]sx?$/u, '')}.js`,
+      );
 const result = await Bun.build({
-  entrypoints: [entry, ...workers],
+  entrypoints: [entry, ...workers, ...pluginPrograms.map(program => program.source)],
   // Bun 1.4 may otherwise retain the project path for extra entries even when their spelling agrees.
   // The runtime resolves every embedded worker beside the binary's root entry, so pin that common root.
   root: dirname(entry),
+  // Flat: the entry and every worker program land beside each other as `<root>/<name>.js`, whatever package they came from.
+  naming: { entry: '[name].[ext]' },
   compile: {
     outfile: options.outfile,
     ...(options.target === undefined ? {} : { target: options.target as Bun.Build.CompileTarget }),
@@ -210,6 +230,7 @@ if (!result.success) {
   for (const log of result.logs) console.error(log);
   process.exit(1);
 }
+const embedded = [...workers, ...pluginPrograms.map(program => program.source)];
 console.log(
-  `✅ compiled ${options.entry}${workers.length === 0 ? '' : ` (+ ${workers.join(', ')})`} -> ${options.outfile}`,
+  `✅ compiled ${options.entry}${embedded.length === 0 ? '' : ` (+ ${embedded.join(', ')})`} -> ${options.outfile}`,
 );

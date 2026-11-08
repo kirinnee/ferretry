@@ -36,7 +36,7 @@
  */
 import { isAbsolute, join } from 'node:path';
 import type { HarnessKind } from '../shared/harness.ts';
-import { CREDENTIALS_DIRECTORY, ferretryCredentialDirectory } from './credential-directory.ts';
+import { ferretryCredentialDirectory } from './credential-directory.ts';
 import {
   cloudCredentialEnvironment,
   codexProviderArgs,
@@ -46,7 +46,7 @@ import {
 import { credentialHalf } from '../shared/halves.ts';
 import type { Credential } from '../shared/credential.ts';
 
-export { CREDENTIALS_DIRECTORY, ferretryCredentialDirectory };
+export { ferretryCredentialDirectory };
 
 /** The undocumented variable that moves Claude's credential store away from its config dir (§9.5). */
 export const CLAUDE_SECURE_STORAGE_VARIABLE = 'CLAUDE_SECURESTORAGE_CONFIG_DIR';
@@ -55,10 +55,10 @@ export const CLAUDE_SECURE_STORAGE_VARIABLE = 'CLAUDE_SECURESTORAGE_CONFIG_DIR';
 export const HOST_CLAUDE_SECURE_STORAGE = '';
 
 /** The file Claude keeps a credential in, inside its storage directory. */
-export const CLAUDE_CREDENTIAL_FILE = '.credentials.json';
+const CLAUDE_CREDENTIAL_FILE = '.credentials.json';
 
 /** The file Codex keeps a credential in, inside its home. */
-export const CODEX_CREDENTIAL_FILE = 'auth.json';
+const CODEX_CREDENTIAL_FILE = 'auth.json';
 
 /** The `config.toml` key, and its value, that keep every Codex runtime's credential in a file. */
 export const CODEX_CREDENTIAL_STORE_KEY = 'cli_auth_credentials_store';
@@ -104,7 +104,7 @@ export interface CodexStoreResolution {
  * variable its cloud credential reference is handed over as and, for Codex, the launch flags that
  * point it at its model provider (`./environment.ts`).
  */
-export interface EnvironmentStoreResolution {
+interface EnvironmentStoreResolution {
   readonly harness: HarnessKind;
   readonly store: 'environment';
   /** A secret travels as a `${secret:NAME}` reference, never a value. */

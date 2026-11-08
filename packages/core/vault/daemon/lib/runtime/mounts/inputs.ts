@@ -55,7 +55,7 @@ const STATUS: Readonly<Record<InputRequestError['code'], number>> = {
   gone: 410,
 };
 
-export function answered(error: unknown): never {
+function answered(error: unknown): never {
   if (error instanceof InputRequestError)
     throw new ApiError(STATUS[error.code], error.message, error.reason ?? error.code);
   throw error;
@@ -65,7 +65,7 @@ export function answered(error: unknown): never {
  * The owner a route was called by: the person at the machine or a paired device. Refuses a ferret before any body is
  * read, in the one owner-only sentence and code, naming the route's own act (`act`: "answers an input request").
  */
-export function ownerActorOf(
+function ownerActorOf(
   call: CallContext,
   act = 'answers an input request',
 ): Extract<InputActor, { readonly kind: 'host' | 'device' }> {
@@ -76,7 +76,7 @@ export function ownerActorOf(
     : { kind: 'host' };
 }
 
-export function ownerOf(call: CallContext): InputCaller {
+function ownerOf(call: CallContext): InputCaller {
   const actor = ownerActorOf(call);
   return { kind: 'owner', actor, carrier: actor.kind === 'device' ? 'direct' : 'loopback' };
 }

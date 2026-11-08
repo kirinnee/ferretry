@@ -28,8 +28,6 @@
  * log line. It is still never logged.
  */
 import { createHash } from 'node:crypto';
-import type { CredentialMaterial } from '../../lib/shared/identity.ts';
-import type { StoredCredentialResolution } from '../../lib/credentials/credentials.ts';
 
 /** Hex characters kept from the digest. See the note above on why it is truncated. */
 export const CREDENTIAL_FINGERPRINT_LENGTH = 32;
@@ -43,9 +41,4 @@ export const CREDENTIAL_FINGERPRINT_LENGTH = 32;
  */
 export function credentialFingerprint(blob: string): string {
   return createHash('sha256').update(blob).digest('hex').slice(0, CREDENTIAL_FINGERPRINT_LENGTH);
-}
-
-/** Reading one account-model credential's raw material from its one store. Satisfied by the platform store. */
-export interface StoredCredentialMaterialReader {
-  storedMaterial(resolution: StoredCredentialResolution): Promise<CredentialMaterial>;
 }

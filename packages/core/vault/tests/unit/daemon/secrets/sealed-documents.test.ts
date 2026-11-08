@@ -14,7 +14,8 @@ import { FileSecretDocumentStore } from '../../../../daemon/adapters/secrets/fil
 import { KernelSealedDocuments } from '../../../../daemon/adapters/secrets/kernel-sealed-documents.ts';
 import { kernelSealedFiles } from '../../../../daemon/adapters/secrets/kernel-sealed-files.ts';
 import { FileSecretKey, WebCryptoSecretCipher } from '../../../../daemon/adapters/secrets/webcrypto-secret-cipher.ts';
-import { SecretStoreError, SecretVault } from '../../../../daemon/lib/secrets/index.ts';
+import { SecretStoreError } from '../../../../daemon/lib/secrets/types.ts';
+import { SecretVault } from '../../../../daemon/lib/secrets/vault.ts';
 import manifest from '../../../../manifest.ts';
 import {
   linkKeys,

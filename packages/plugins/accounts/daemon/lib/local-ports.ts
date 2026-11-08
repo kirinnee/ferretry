@@ -54,7 +54,7 @@ export type PasskeysChangedListener = (change: PasskeysChange) => Promise<void> 
 export const UNFILED_PROJECT_ID = 'unfiled';
 
 /** The parts of a session's config the resolver reads. */
-export interface SessionProjectFacts {
+interface SessionProjectFacts {
   readonly cwd: string;
   readonly parent?: string;
   readonly projectId?: string;

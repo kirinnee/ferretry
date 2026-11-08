@@ -18,7 +18,7 @@ interface AccountStatusDefinition {
   readonly label: string;
 }
 
-export const ACCOUNT_STATUS_SHAPES: Readonly<Record<LoginStatusWord, AccountStatusDefinition>> = {
+const ACCOUNT_STATUS_SHAPES: Readonly<Record<LoginStatusWord, AccountStatusDefinition>> = {
   ready: { glyph: '●', tone: 'text-ok', label: 'Ready' },
   refresh_due: { glyph: '◐', tone: 'text-warn', label: 'Refresh due' },
   needs_sign_in: { glyph: '○', tone: 'text-err', label: 'Needs sign-in' },
@@ -58,7 +58,7 @@ const WINDOW_NAMES: Readonly<Record<ProviderQuotaWindow['label'], string>> = {
 };
 
 /** "12 of 50 prompts", "$4.20 of $10.00", "$3.10" — only what the provider said. */
-export function providerWindowAmount(window: ProviderQuotaWindow): string | null {
+function providerWindowAmount(window: ProviderQuotaWindow): string | null {
   if (window.used === undefined) return null;
   const amount = (value: number) =>
     window.unit === 'usd' ? formatQuotaMoney(value, 'USD') : String(Math.round(value * 100) / 100);
@@ -69,7 +69,7 @@ export function providerWindowAmount(window: ProviderQuotaWindow): string | null
 }
 
 /** One window's line, said in words for a screen reader. */
-export function providerWindowText(window: ProviderQuotaWindow, now: number): string {
+function providerWindowText(window: ProviderQuotaWindow, now: number): string {
   const resets = quotaResetsIn(window.resetsAt === undefined ? undefined : Date.parse(window.resetsAt), now);
   return [
     window.usedPercent === undefined ? null : `${String(Math.round(window.usedPercent))}% used`,
