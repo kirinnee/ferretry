@@ -236,7 +236,10 @@ describe('the daemon’s waits on the kernel clock', () => {
       );
       host = await testHost({
         plugins: [half],
-        uses: { ferrets: { get: async (id: string) => (id === 'f1' ? { name: id } : undefined) } },
+        uses: {
+          ferrets: { get: async (id: string) => (id === 'f1' ? { name: id } : undefined) },
+          agentControl: { allows: async () => true },
+        },
         fakes: { vault: new FakeVault(), gate: new FakeGate() },
         gate,
         clock,
