@@ -123,6 +123,20 @@ describe('fy tidy', () => {
 });
 
 describe('render', () => {
+  test('a kept ask is listed by its ask reference, with its reason', () => {
+    const text = renderDryRun(
+      {
+        ...plan,
+        keep: [
+          { kind: 'ask', id: 'A9' as never, title: 'Merge it?', code: 'needs-owner', why: 'it wants you to decide' },
+        ],
+      },
+      'fy',
+    );
+    expect(text).toContain('Would keep 1');
+    expect(text).toContain('Merge it?');
+    expect(text).toContain('it wants you to decide');
+  });
   test('nothing to tidy still lists what was kept', () => {
     const text = renderDryRun({ ...plan, drop: [], close: [] }, 'fy');
     expect(text).toContain('Nothing to tidy: no card to drop and no ask to close.');
