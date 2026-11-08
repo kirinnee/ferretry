@@ -16,8 +16,8 @@
  * | `warden.yaml`                          | `warden.yaml` (`autoMigrate` → `autoMove`, v4's read-time upgrades) |
  * | `limits.yaml`                          | `limits.yaml` (+ `machine.agentControl`)                            |
  * | `account-defaults.yaml`                | `accounts.yaml`                                                     |
- * | `machine.yaml`                         | split: harness-claude-code/-codex, runtimes, limits, conversation,  |
- * |                                        | browsers, agenda, usage; the rest not carried (see below)           |
+ * | `machine.yaml`                         | split: harness-claude-code/-codex, runtimes (+ autoResume), limits, |
+ * |                                        | conversation, browsers, agenda, usage; the rest not carried (below) |
  * | `voice.yaml`                           | waits: Voice declares no config file yet                            |
  * | `pack.yaml`, `models-guide.yaml`       | the Packs step's (`packs.yaml`)                                     |
  * | `learning.yaml`                        | the Lessons step's                                                  |
@@ -97,8 +97,6 @@ const V4_MACHINE_KEYS = new Set([
 const MACHINE_NOT_CARRIED: Readonly<Record<string, string>> = {
   browserPorts: 'v5 browsers.yaml declares only mode and proxy; the browser picks its loopback ports',
   browserFirewallFailure: 'v5 browsers.yaml declares no firewall-failure switch',
-  autoResume:
-    'no v5 config schema declares it yet (§9.2 places auto-resume in limits.yaml; LimitsFileSchema has no key)',
   advanced: 'secretsFile, aliases, wrapper commands, usage and path.announce have no v5 config field',
   attentionNudge: 'superseded: the file also wrote agendaNudge, which v4 read instead',
 };
@@ -288,6 +286,8 @@ function splitMachine(plan: Plan, file: V4ConfigFile, document: Document, resolv
     contents(place(plan, RUNTIMES_CONFIG, undefined, from).document).items.push(copy);
     count(plan, 'machine.yaml settings split out');
   }
+  const autoResume = get('autoResume');
+  if (autoResume !== undefined) into(RUNTIMES_CONFIG, autoResume, 'autoResume');
   const control = get('agentControl');
   if (control !== undefined) into(LimitsConfigFile, control, 'agentControl');
   const conversations = get('conversations');

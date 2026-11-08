@@ -8,6 +8,7 @@ import {
   TranscriptProvenanceSchema,
   TranscriptViewSchema,
 } from './records.ts';
+import { SessionOutdatedSchema } from './view/ferret-view.ts';
 
 /**
  * Ferret identity (§2.2): ids, names, parent/child, packs, the state machine. `FerretId` is the kernel's (it only
@@ -208,5 +209,11 @@ export const FerretSummarySchema = FerretRecordSchema.omit({ format: true, handl
    */
   nudgeAfterSeconds: z.number().int().nonnegative().optional(),
   killAfterSeconds: z.number().int().nonnegative().optional(),
+  /**
+   * Present only while a RUNNING ferret carries instructions a launch now would word differently (`fy restart
+   * --outdated`): the same `{ sections }` today's session view carries (`SessionView.outdated`). Derived when the list
+   * or the view is read (kept for a few seconds), never stored; a ferret nothing proves outdated has none.
+   */
+  outdated: SessionOutdatedSchema.optional(),
 });
 export type FerretSummary = z.infer<typeof FerretSummarySchema>;

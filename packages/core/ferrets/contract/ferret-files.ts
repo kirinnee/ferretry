@@ -150,6 +150,26 @@ export const FerretLaunchEnvironmentFiles = defineState({
 });
 
 /**
+ * The instruction sections a ferret's last launch was told, by id and fingerprint (never the words):
+ * `state/ferrets/<ferret>/launch-sections.json`. It is what `restart --outdated` and the ferret's `outdated` mark
+ * compare against the words a launch would give now (today's `launchInstructions` on the session's state document).
+ * A ferret with no such file (launched before it was kept, or a damaged one) is never outdated: nothing says what it
+ * was told. Private to Ferrets.
+ */
+export const FerretLaunchSectionsFiles = defineState({
+  name: 'launch-sections',
+  path: '*/launch-sections.json',
+  store: 'json',
+  format: 1,
+  schema: z.strictObject({
+    sections: z.record(z.string().min(1).max(64), z.string().min(1).max(64)),
+  }),
+  mode: 0o600,
+  onDamaged: {
+    narrower: 'a damaged launch-sections.json reads as no record, so the ferret is never marked out of date',
+  },
+});
+/**
  * A ferret's declared wait and the time it has been credited for waiting: `state/ferrets/<ferret>/waiting.json` (today's
  * `waiting` and `waitingCreditSeconds` on the session's state document). `ferret.json` is frozen, and a wait moves
  * far more often than who a ferret is. The credit outlives the wait: the turn ceiling must never charge a ferret for

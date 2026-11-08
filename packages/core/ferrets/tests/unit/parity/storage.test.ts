@@ -22,6 +22,14 @@ import { FileSessionEnvironmentStore } from '../../../daemon/adapters/session/li
 import { OwnFolder } from '../../../daemon/adapters/session/sessions-root.ts';
 import { FileResumeTurnStore } from '../../../daemon/adapters/session/resume/file-resume-turn-store.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
+import {
+  archiveWorld,
+  finishFerret,
+  HOUR_MS,
+  pass,
+  startFerret,
+  tickArchive,
+} from '../../support/daemon/archive-world.ts';
 
 const fresh = async () => await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
 
@@ -125,6 +133,25 @@ describe('session-private files parity (the internal sessions root, state/ferret
     await chmod(folder, 0o755);
     await new OwnFolder(root).ensure();
     expect(await mode(folder)).toBe(0o700);
+  });
+});
+
+describe('archive parity (U6)', () => {
+  test('F-0220 the archive is one document, state/ferrets/archive.json, naming each archived ferret and when it left', async () => {
+    const { h } = await archiveWorld({ afterHours: 24 });
+    const id = await startFerret(h, 'aniya');
+    await finishFerret(h, id);
+    await pass(h, 25 * HOUR_MS);
+    await tickArchive(h);
+    const stored = JSON.parse(h.state('ferrets').files.get('archive.json') as string) as {
+      format: number;
+      sessions: Record<string, { archivedAt: string; name?: string }>;
+    };
+    expect(stored.format).toBe(1);
+    expect(Object.keys(stored.sessions)).toEqual([id]);
+    expect(stored.sessions[id]?.name).toBe('aniya');
+    expect(stored.sessions[id]?.archivedAt).toBe(h.clock.now());
+    await h.stop();
   });
 });
 
