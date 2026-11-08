@@ -258,6 +258,43 @@ export interface Runner {
    * harness only: it is never logged, stored or quoted in any answer. A handle with nothing behind it answers `''`.
    */
   lastScreen?(handle: RunnerHandle): Promise<string>;
+  /**
+   * Additive (U4, today's `StorageTurnPorts.pane` over `PaneFrames`): ONE look at the live ferret pane behind `handle`,
+   * read as turn evidence, for Ferrets' turn watch. The runner reads the pane inside `kernel.act(terminal %n, 'read')`
+   * itself (a Vault hold refuses it: `undefined`, nothing read), masks the screen inside one `Redaction.read` before it
+   * parses it, and keeps no unmasked text in what it answers. It only reads: no key is typed, no size changed. A handle
+   * with nothing live behind it, or a pane that is not a ferret's own, answers `undefined`. Absent: the runner cannot be
+   * watched, and the ferret's turn is decided from what else is known.
+   */
+  look?(handle: RunnerHandle): Promise<RunnerLook | undefined>;
+}
+
+/**
+ * What one {@link Runner.look} saw, already parsed and masked (today's `TurnPaneEvidence` plus the frame it was read
+ * from). `request` and `dialog` are the runner's parse of a tool-permission prompt and a harness dialog, as plain data:
+ * Ferrets parses them again at its boundary and drops what does not parse, so a runner cannot put an arbitrary value
+ * into a ferret's state.
+ */
+export interface RunnerLook {
+  /**
+   * A digest of the masked screen this look was read from. Two looks with the same `frame` read the same screen: the
+   * turn watch reads an unchanged frame as an idle pane and looks at it less often. Never the text itself.
+   */
+  readonly frame: string;
+  /** The harness's own working line: spinner, elapsed clock, token counter or interrupt hint. */
+  readonly working: boolean;
+  /** `working` rests on a spinner-shaped line alone. */
+  readonly spinnerOnly?: boolean;
+  /** An idle prompt the harness would accept a message at. */
+  readonly atPrompt: boolean;
+  /** A permission (or other choice) prompt nothing moves past until a person answers. */
+  readonly permission: boolean;
+  /** A harness dialog the ferret is parked on, as the (masked) words a person is shown for it. */
+  readonly prompt?: string;
+  /** The tool-permission prompt on screen, read as data (masked). */
+  readonly request?: JsonValue;
+  /** The harness's own dialog on screen, read as data (masked). */
+  readonly dialog?: JsonValue;
 }
 
 /**

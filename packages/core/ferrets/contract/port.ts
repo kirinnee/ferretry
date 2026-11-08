@@ -1,5 +1,5 @@
 import { defineEvent, definePort, type FerretId, type RefusalCode } from '@ferretry/kernel/contract';
-import type { Result } from '@ferretry/std';
+import type { JsonValue, Result } from '@ferretry/std';
 import { z } from 'zod';
 import {
   FerretCardIdSchema,
@@ -282,6 +282,23 @@ export interface FerretTurns {
   list(options?: { readonly strict?: boolean }): Promise<readonly FerretTurnDocument[]>;
 }
 
+/**
+ * What a ferret's pane is asking right now (additive, U4; today's `turnPrompt`, `permissionRequest` and
+ * `harnessDialog` of its state document, `lib/protocol/session-dialog.ts` and `session-permission.ts`), for the panels
+ * that show it. Every text in it was read from a masked screen and is masked again inside one `Redaction.read` on the
+ * way out. Nothing here answers a dialog: no option is ever chosen.
+ */
+export interface FerretPrompt {
+  /** The turn the observer last recorded; absent when none is recorded. */
+  readonly turnState?: 'working' | 'your-turn' | 'needs-input';
+  /** The harness dialog's words behind a `needs-input`. */
+  readonly prompt?: string;
+  /** The tool-permission prompt behind a `needs-input`, as data. */
+  readonly permissionRequest?: JsonValue;
+  /** The harness's own dialog behind a `needs-input`, as data. */
+  readonly dialog?: JsonValue;
+}
+
 /** Why a move did not happen (today's `SessionMoveFailure` words and sentence). */
 export interface MoveFailure {
   readonly code: string;
@@ -393,6 +410,13 @@ export interface FerretsApi {
    * same `mayTouch` rule as `harness`: anyone else is refused with a 403 `forbidden`, so no agent reads another's turns.
    */
   turns?(ferret: FerretId, caller?: FerretId): Promise<FerretTurns | undefined>;
+  /**
+   * What the ferret's pane is asking right now (additive, U4): the dialog or permission prompt the turn watch recorded,
+   * masked, for Claude Code's panels. `undefined` for a ferret this daemon does not know; `{}` when nothing is asked or
+   * its state could not be read. Same `mayTouch` rule as `harness`: a `caller` reaching beyond itself and its helpers
+   * is refused with a 403 `forbidden`. Read only: it never answers the dialog.
+   */
+  prompt?(ferret: FerretId, caller?: FerretId): Promise<FerretPrompt | undefined>;
   /**
    * Moves a ferret onto another runtime (decision #19, additive; today's move of a session): the moves module's flow, whose
    * relaunch is a resume that replaces the live pane through the ordinary launch. Same `mayTouch` rule as above.

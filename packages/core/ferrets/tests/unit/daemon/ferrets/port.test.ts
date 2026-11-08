@@ -42,7 +42,7 @@ test('through the port, stop’s 4th cause argument is ignored: a plugin cannot 
 test('through the port, the service’s own members are not there: revokeToken, releaseLive, launch, tokens, rename', () => {
   const f = additivesFixture();
   const port = ferretsPort(f.service) as unknown as Record<string, unknown>;
-  for (const name of ['revokeToken', 'releaseLive', 'retarget', 'launch', 'tokens', 'ports', 'rename'])
+  for (const name of ['revokeToken', 'releaseLive', 'retarget', 'launch', 'tokens', 'ports', 'rename', 'turnObserved'])
     expect(port[name]).toBeUndefined();
   // Exactly the FerretsApi members the service implements are there.
   expect(Object.keys(port).sort()).toEqual(
@@ -58,6 +58,7 @@ test('through the port, the service’s own members are not there: revokeToken, 
       'managedWorktrees',
       'mayTouch',
       'move',
+      'prompt',
       'resume',
       'sitrep',
       'start',

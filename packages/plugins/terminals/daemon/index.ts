@@ -11,6 +11,7 @@
  * - EVERY READ OF PANE TEXT IS MASKED INSIDE ONE `kernel.redaction.read` (§7.3) — the wait predicate included (I103).
  * - `terminal_ask_owner` and `terminal_request_input` are not acts: they raise through the control store and Vault.
  */
+import { createHash } from 'node:crypto';
 import { ferretOf } from '@ferretry/core-gate/contract';
 import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import {
@@ -553,6 +554,13 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     delivery: {
       act: kernel.act.bind(kernel),
       sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
+    },
+    // Ferrets' turn watch (U4): every look an act on the pane, its screen masked before it is parsed; only a digest of
+    // the masked frame is handed back as the frame's identity.
+    look: {
+      act: kernel.act.bind(kernel),
+      redaction: kernel.redaction,
+      digest: text => createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16),
     },
   });
 

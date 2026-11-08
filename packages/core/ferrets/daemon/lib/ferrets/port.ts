@@ -39,6 +39,7 @@ export function ferretsPort(service: FerretsService): FerretsApi {
     agentControl: ferret => service.agentControl(ferret),
     harness: (ferret, caller) => service.harness(ferret, caller),
     turns: (ferret, caller) => service.turns(ferret, caller),
+    prompt: (ferret, caller) => service.prompt(ferret, caller),
     move: (ferret, runtime, options, caller) => service.move(ferret, runtime, options, caller),
   };
 }

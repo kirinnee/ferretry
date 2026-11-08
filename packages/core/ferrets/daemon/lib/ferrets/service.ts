@@ -13,6 +13,7 @@ import type {
   FerretTurnAuthor,
   FerretTurnDocument,
   FerretTurns,
+  FerretPrompt,
   HarnessDeliveryFailure,
   HarnessInterrupted,
   HarnessRefusal,
@@ -89,6 +90,8 @@ import { type LaunchEnvironmentRecord, recordedSwitches } from '../agent-control
 /** Today's launch variables: the ferret's own bearer and id, read by `fy` inside the pane. */
 const FERRET_TOKEN_VARIABLE = 'FY_SESSION_TOKEN';
 const FERRET_ID_VARIABLE = 'FY_SESSION_ID';
+/** Where Claude Code's question hook records the question it asks (today's `QUESTION_ASKED_FILE_ENV`). */
+export const QUESTION_FILE_VARIABLE = 'FY_QUESTION_FILE';
 
 /** The reason a stop records when its caller gave none (today's lifecycle `defaultStopReason`). */
 const DEFAULT_STOP_REASON = 'stopped by client';
@@ -156,6 +159,11 @@ export interface FerretsPorts {
    * is done and a launch goes on as before.
    */
   session?: FerretSessionPort;
+  /**
+   * Additive (U4): the prompt state the turn watch recorded in the ferret's state document, already masked inside one
+   * `Redaction.read` (`FerretsApi.prompt`). Unbound: nothing is asked.
+   */
+  promptState?(ferret: FerretId): Promise<FerretPrompt>;
   vault: Pick<VaultApi, 'childEnvironment'>;
   asks: Pick<AsksApi, 'open'>;
 }
@@ -210,6 +218,12 @@ export interface FerretSessionPort {
    * nothing is pre-allowed.
    */
   readable?(ferret: FerretId): Promise<readonly FencedPath[]>;
+  /**
+   * Additive (U4): where Claude Code's question hook records the question it is asking, inside THIS ferret's own session
+   * folder (`question-asked.json`, today's `SessionPaths.questionAsked`), handed to the pane as `FY_QUESTION_FILE`.
+   * Unbound, or a path that cannot be named: the variable is not set, and the hook records nothing.
+   */
+  questionFile?(ferret: FerretId): Promise<FencedPath>;
 }
 
 /** What a revive's turn is made from: the message (none: the mode's default), the ferret's mode and who asked. */
@@ -1041,6 +1055,34 @@ export class FerretsService implements FerretsApi {
     };
   }
 
+  /**
+   * What the ferret's pane is asking right now (`FerretsApi.prompt`), masked. The same `mayTouch` rule as `harness`.
+   * `undefined` for a ferret this daemon does not know; `{}` when nothing is recorded or it could not be read.
+   */
+  async prompt(ferret: FerretId, caller?: FerretId): Promise<FerretPrompt | undefined> {
+    await this.ports.ready?.();
+    if (this.registry.get(ferret) === undefined) return undefined;
+    this.requireMayTouch(caller, ferret);
+    return (await this.ports.promptState?.(ferret).catch(() => undefined)) ?? {};
+  }
+
+  /**
+   * The turn watch recorded a turn change (U4): a `working` turn makes the ferret `working`, a `your-turn` or a
+   * `needs-input` makes it `idle`, and `ferret.changed {change: 'state'}` follows the durable write (what
+   * Conversation's `turn.ended` reads). Only a ferret that is already `working` or `idle` moves: a start's
+   * `starting` is the start's to settle, and a stop has the last word. On the ferret's own lane, so it never races a
+   * start, stop or resume; its handle stays as it was.
+   */
+  async turnObserved(ferret: FerretId, turn: 'working' | 'your-turn' | 'needs-input'): Promise<void> {
+    await this.serial.run(ferret, async () => {
+      const record = this.registry.get(ferret);
+      if (record === undefined || (record.state !== 'working' && record.state !== 'idle')) return;
+      const state: FerretState = turn === 'working' ? 'working' : 'idle';
+      if (record.state === state) return;
+      await this.write({ ...record, state, stateAt: this.ports.now() }, record.state, 'state');
+    });
+  }
+
   async move(
     ferret: FerretId,
     runtime: string,
@@ -1478,6 +1520,9 @@ export class FerretsService implements FerretsApi {
     for (const part of parts) if (part.kind === 'env' || part.kind === 'shell') Object.assign(env, part.env);
     env[FERRET_ID_VARIABLE] = ferret;
     env[FERRET_TOKEN_VARIABLE] = token;
+    // The ferret's own question file (U4): its folder exists (`prepare` ran first); a path that cannot be named sets nothing.
+    const questionFile = await this.ports.session?.questionFile?.(ferret).catch(() => undefined);
+    if (questionFile !== undefined) env[QUESTION_FILE_VARIABLE] = questionFile;
     const resolved = await this.ports.vault.childEnvironment(ferret, env);
     if (!resolved.ok) return err(`unknown secrets: ${resolved.error.unknown.join(', ')}`);
     // What this launch told the ferret, kept for `instructions` (persisted, so a restart changes no answer): only the

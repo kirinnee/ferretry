@@ -108,6 +108,9 @@ export interface SessionFilesDeps {
  *
  * One launch gate and one serial queue for the whole process: a second of either would not see the first one's launches.
  */
+/** The file Claude Code's question hook writes in a ferret's session folder (today's `SessionPaths.questionAsked`). */
+const QUESTION_ASKED_FILE = 'question-asked.json';
+
 export class SessionFiles {
   /** ONE gate, shared by the lifecycle, the resume, the sends, the exit observer and the interrupted-launch reconciler. */
   readonly launchGate: InMemoryLaunchGate;
@@ -155,6 +158,13 @@ export class SessionFiles {
           if (!resolved.ok) throw new Error('a hand-off folder of this ferret could not be named');
           return resolved.value;
         });
+      },
+      // Claude Code's question hook records the question it asks here (`FY_QUESTION_FILE`, today's `questionAsked`):
+      // inside the ferret's own folder on the sessions root, never in its work tree.
+      questionFile: async ferret => {
+        const named = this.root(parseSessionId(ferret)).resolve(QUESTION_ASKED_FILE);
+        if (!named.ok) throw new Error('the question file of this ferret could not be named');
+        return named.value;
       },
       assign: async (ferret, prompt) => {
         const id = parseSessionId(ferret);
