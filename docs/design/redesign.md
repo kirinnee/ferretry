@@ -2542,6 +2542,9 @@ scoped handle:
     whole; the provisioner's move-aside-as-evidence and undo, which a copy cannot do). Both ends are fenced with every
     parent opened without following a link, an existing target is refused and never overwritten (a look then the move,
     a declared GAP: no `renameat2`), and a move the disk refuses (another device) is `changed`, never a copy.
+  - `unlink(name)` removes a SYMLINK LEAF in `fleet` or `agent-homes` and nothing else: the link is never followed and its
+    target is never touched (so a link pointing outside the root is removable, which `remove` refuses); a file, a folder
+    or a missing name is `outside` and left as it was, and every parent is fenced and opened without following a link.
   - `kernel.roots.harnessFile(absolutePath)` (`permissions.harnessFiles`, by exact basename, Runtimes with
     `harness-home` only) reads ONE file beside a harness home (`~/.claude.json` sits beside `~/.claude`), read-only.
     Its folder is never listable. The leaf is never a link, never a second hard link, never a device, and the name

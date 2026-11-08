@@ -50,7 +50,15 @@ import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from './shared-trees.ts';
 import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS, processFolderAllowed } from './processes.ts';
-import { harnessFileRefusal, permittedMode, renameNamesRefusal, takesLinks, takesRenames } from './root-rules.ts';
+import {
+  harnessFileRefusal,
+  permittedMode,
+  renameNamesRefusal,
+  takesLinks,
+  takesRenames,
+  takesUnlinks,
+  unlinkNameRefusal,
+} from './root-rules.ts';
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
 const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports', 'harness-home']);
@@ -1103,6 +1111,27 @@ async function renameChecked(from: Checked, to: Checked): Promise<void> {
   }
 }
 
+/**
+ * `unlink` through the checked folder: the parent is opened without following a link and proven, the leaf is looked at
+ * WITHOUT following it, and only a link is removed (`unlink(2)` on the name: what it points at is never opened). A
+ * file, a folder or nothing there is `outside`.
+ *
+ * GAP (declared, tested): the look and the `unlink(2)` are two calls; a writer who swaps a file in for the link in
+ * that window has the file removed (a folder is never removed: `unlink` refuses it, `changed`).
+ */
+async function unlinkChecked(at: Checked): Promise<void> {
+  const parent = dirname(at.full);
+  const folder = await openCheckedFolder(at.scope, parent);
+  try {
+    const leaf = await entry(at.scope, folder, parent, basename(at.full));
+    const found = await at.scope.fs.identity(leaf);
+    if (found?.kind !== 'link') return refuse('outside');
+    await at.scope.fs.unlink(leaf).catch(() => refuse('changed'));
+  } finally {
+    await folder.close();
+  }
+}
+
 /** What a harness file handle needs: the disk, the home it must stay out of, and the one file it names. */
 interface HarnessFileSetup {
   readonly fs: HostFs;
@@ -1581,6 +1610,20 @@ function rootHandle(setup: HandleSetup): RootHandle {
           refuse('link_escape');
       }
       await renameChecked(source, target);
+    },
+    unlink: async (linkName: FencedPath) => {
+      writable();
+      if (!takesUnlinks(name)) return refuse('read_only');
+      const refused = unlinkNameRefusal(linkName);
+      if (refused !== undefined) return refuse(refused);
+      const placed = await realParent(linkName);
+      // No link on the way: the folder the name gives, as this root names it, is the very folder reached.
+      const root = base() as string;
+      const lexical = lexicalInRoot(home, root, ownerRoot, linkName);
+      if (!lexical.ok) return refuse(lexical.error);
+      if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
+        refuse('link_escape');
+      await unlinkChecked(placed);
     },
     setMode: async (path: FencedPath, mode: number) => {
       if (setup.setMode !== true) return refuse('not_declared');
