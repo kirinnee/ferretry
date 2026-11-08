@@ -278,7 +278,7 @@ const PERMISSION_WINDOW_LINES = 25;
  * (the terminals plugin's `paneShowsPermissionPrompt`, as today's tmux module read it). The structured request is
  * not drawn — the observer's turn tests only need to know the harness is blocked on a choice.
  */
-export function scriptedPaneShowsPermissionPrompt(pane: string): boolean {
+function scriptedPaneShowsPermissionPrompt(pane: string): boolean {
   const lines = pane.replaceAll('\r\n', '\n').trimEnd().split('\n').slice(-PERMISSION_WINDOW_LINES);
   if (lines.filter(line => NUMBERED_CHOICE.test(line)).length < 2) return false;
   const lower = lines.join('\n').toLowerCase();
