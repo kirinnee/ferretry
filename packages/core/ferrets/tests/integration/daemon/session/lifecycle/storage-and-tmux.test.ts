@@ -2,8 +2,8 @@ import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { diskPaths, diskRoot } from '@ferretry/kernel/testing';
+import { dirname, join } from 'node:path';
+import { diskPaths, diskSessionsRoot } from '@ferretry/kernel/testing';
 import should from 'should';
 import { FileSessionEffectLedger } from '../../../../../daemon/adapters/session/effects/file-session-effect-ledger.ts';
 import { FileSessionEnvironmentStore } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
@@ -485,18 +485,19 @@ describe('TmuxSessionLifecycleLauncher', () => {
 });
 
 /** A real root in a fresh temporary home; `observe` wraps the kernel's disk adapter to watch or fail one step. */
-async function storeRoot(prefix: string, observe?: Parameters<typeof diskRoot>[1]) {
+async function storeRoot(prefix: string, id: string, observe?: Parameters<typeof diskSessionsRoot>[2]) {
   const home = await temporaryHome(prefix);
-  const { root, folder } = await diskRoot(home, observe);
-  return { root, folder };
+  const { root, folder } = await diskSessionsRoot(home, id, observe);
+  // `folder` is the `sessions` folder that holds this session's own (`join(folder, id)`).
+  return { root, folder: dirname(folder) };
 }
 
 describe('FileSessionTaskStore', () => {
   it('should write turn one privately inside the session directory and return the file to open', async () => {
     // Arrange
-    const { root, folder } = await storeRoot('ferretry-task-store-');
+    const { root, folder } = await storeRoot('ferretry-task-store-', 'task-session');
     const id = parseSessionId('task-session');
-    const subject = new FileSessionTaskStore(root, session => join(folder, session));
+    const subject = new FileSessionTaskStore(root, id);
 
     // Act
     const actual = await subject.writeAssignedTask(id, '# Assigned task\n\nDo the work\n');
@@ -512,15 +513,15 @@ describe('FileSessionTaskStore', () => {
     // Arrange: the lifecycle writes this and then begins the durable turn-one effect, so a document
     // that only reached the page cache lets a power cut strand a session that can never be assigned.
     const synced: string[] = [];
-    const { root, folder } = await storeRoot('ferretry-task-store-', recordingSyncs(synced));
+    const { root, folder } = await storeRoot('ferretry-task-store-', 'durable-session', recordingSyncs(synced));
     const id = parseSessionId('durable-session');
-    const subject = new FileSessionTaskStore(root, session => join(folder, session));
+    const subject = new FileSessionTaskStore(root, id);
 
     // Act
     const file = await subject.writeAssignedTask(id, 'work\n');
 
-    // Assert: parents first and oldest ancestor first — this publish created both the session
-    // directory and `turns`, so the chain reaches the folder that names the session — then the turns
+    // Assert: parents first and oldest ancestor first — this write created both the session folder
+    // and `turns`, so the chain reaches the `sessions` folder that names the session — then the turns
     // directory once the rename has published the file into it.
     const turns = join(folder, 'durable-session', 'turns');
     should(synced).eql([folder, join(folder, 'durable-session'), turns]);
@@ -532,9 +533,9 @@ describe('FileSessionTaskStore', () => {
     // Arrange: a retried launch and a fork replay both arrive with byte-identical content, and the
     // agent may be mid-read of the very file it was told to open.
     const synced: string[] = [];
-    const { root, folder } = await storeRoot('ferretry-task-store-', recordingSyncs(synced));
+    const { root, folder } = await storeRoot('ferretry-task-store-', 'replayed-session', recordingSyncs(synced));
     const id = parseSessionId('replayed-session');
-    const subject = new FileSessionTaskStore(root, session => join(folder, session));
+    const subject = new FileSessionTaskStore(root, id);
     const file = await subject.writeAssignedTask(id, 'same\n');
     const before = await stat(file);
     synced.length = 0;
@@ -554,9 +555,9 @@ describe('FileSessionTaskStore', () => {
 
   it('should replace differing content atomically and leave no temporary behind', async () => {
     // Arrange
-    const { root, folder } = await storeRoot('ferretry-task-store-');
+    const { root, folder } = await storeRoot('ferretry-task-store-', 'changed-session');
     const id = parseSessionId('changed-session');
-    const subject = new FileSessionTaskStore(root, session => join(folder, session));
+    const subject = new FileSessionTaskStore(root, id);
     const file = await subject.writeAssignedTask(id, 'first\n');
     const before = await stat(file);
 
@@ -581,6 +582,7 @@ describe('FileSessionTaskStore', () => {
     const published = () => join(turns, 'turn-001.md');
     const { root, folder } = await storeRoot(
       'ferretry-task-store-',
+      'substituted-session',
       recordingSyncs([], async path => {
         if (!armed || path !== turns || substituted) return;
         substituted = true;
@@ -593,7 +595,7 @@ describe('FileSessionTaskStore', () => {
     );
     const id = parseSessionId('substituted-session');
     turns = join(folder, 'substituted-session', 'turns');
-    const subject = new FileSessionTaskStore(root, session => join(folder, session));
+    const subject = new FileSessionTaskStore(root, id);
     await subject.writeAssignedTask(id, 'same\n');
     armed = true;
 
@@ -622,6 +624,7 @@ describe('FileSessionTaskStore', () => {
     let reused = '';
     const { root, folder } = await storeRoot(
       'ferretry-task-store-',
+      'published-session',
       recordingSyncs([], async () => {
         if (plantedDuringSync) return;
         if ((await stat(published).catch(() => undefined)) === undefined) return;
@@ -632,7 +635,7 @@ describe('FileSessionTaskStore', () => {
     const id = parseSessionId('published-session');
     published = join(folder, 'published-session', 'turns', 'turn-001.md');
     reused = join(folder, 'published-session', 'turns', '.turn-001.md.t1.tmp');
-    const subject = new FileSessionTaskStore(root, session => join(folder, session));
+    const subject = new FileSessionTaskStore(root, id);
 
     // Act
     const file = await subject.writeAssignedTask(id, 'first\n');
@@ -652,6 +655,7 @@ describe('FileSessionTaskStore', () => {
     let reused = '';
     const { root, folder } = await storeRoot(
       'ferretry-environment-store-',
+      'published-environment',
       recordingSyncs([], async () => {
         if (plantedDuringSync) return;
         if ((await stat(published).catch(() => undefined)) === undefined) return;
@@ -662,7 +666,7 @@ describe('FileSessionTaskStore', () => {
     const directory = join(folder, id);
     published = join(directory, 'environment.json');
     reused = join(directory, '.environment.json.t1.tmp');
-    const subject = new FileSessionEnvironmentStore(root, held => join(folder, held));
+    const subject = new FileSessionEnvironmentStore(root, id);
 
     // Act
     await subject.write(id, { FY_SESSION_BOARD_CAPABILITY: 'mine' });
@@ -677,9 +681,9 @@ describe('FileSessionTaskStore', () => {
   it('should never delete a colliding temporary it did not create', async () => {
     // Arrange: a temporary already at the name this call would use — another writer's in-flight
     // document. The root's first temporary name is determinate, which makes the collision certain.
-    const { root, folder } = await storeRoot('ferretry-task-store-');
+    const { root, folder } = await storeRoot('ferretry-task-store-', 'collided-session');
     const id = parseSessionId('collided-session');
-    const subject = new FileSessionTaskStore(root, session => join(folder, session));
+    const subject = new FileSessionTaskStore(root, id);
     const turns = join(folder, 'collided-session', 'turns');
     await mkdir(turns, { recursive: true, mode: 0o700 });
     const foreign = join(turns, '.turn-001.md.t1.tmp');
@@ -701,9 +705,9 @@ describe('FileSessionTaskStore', () => {
 
   it('should be repeatable so a retried launch can re-deliver the same assignment', async () => {
     // Arrange
-    const { root, folder } = await storeRoot('ferretry-task-store-');
+    const { root } = await storeRoot('ferretry-task-store-', 'retried-session');
     const id = parseSessionId('retried-session');
-    const subject = new FileSessionTaskStore(root, session => join(folder, session));
+    const subject = new FileSessionTaskStore(root, id);
 
     // Act
     const first = await subject.writeAssignedTask(id, 'first\n');
@@ -751,19 +755,22 @@ describe('NodeWorkingDirectoryResolver', () => {
   });
 });
 
+/** The id the composed lifecycle tests mint (a fixed clock and entropy), which is also the folder their files are in. */
+const MINTED = 'ms8ru4g0-abcdef12';
+
 describe('the composed session lifecycle', () => {
   it('should give a started auto session its task through real storage and a real turn file', async () => {
     // Arrange — every adapter is the production one; only the tmux ports are doubles.
     const storage = await openStorage();
-    const { root, folder: files } = await storeRoot('ferretry-lifecycle-files-');
+    const { root, folder: files } = await storeRoot('ferretry-lifecycle-files-', MINTED);
     const { instance, tmux, delivery } = launcher();
     const cwd = await temporaryHome('ferretry-lifecycle-cwd-');
     const subject = new SessionLifecycleService(
       {
         repository: new StorageSessionLifecycleRepository(storage, sessionEnvelope()),
         launcher: instance,
-        tasks: new FileSessionTaskStore(root, id => join(files, id)),
-        effects: new FileSessionEffectLedger(root, id => join(files, id)),
+        tasks: new FileSessionTaskStore(root, parseSessionId(MINTED)),
+        effects: new FileSessionEffectLedger(root, parseSessionId(MINTED)),
         directories: new NodeWorkingDirectoryResolver(diskPaths()),
         ids: new TimeSessionIdFactory(
           () => Date.parse(NOW),
@@ -810,16 +817,16 @@ describe('the composed session lifecycle', () => {
     // Arrange — the real credential issuer, the real environment file, and the real launcher, so the
     // only doubles in the chain are the tmux ports.
     const storage = await openStorage();
-    const { root, folder: files } = await storeRoot('ferretry-lifecycle-files-');
+    const { root } = await storeRoot('ferretry-lifecycle-files-', MINTED);
     const cwd = await temporaryHome('ferretry-lifecycle-cwd-');
-    const environment = new FileSessionEnvironmentStore(root, id => join(files, id));
+    const environment = new FileSessionEnvironmentStore(root, parseSessionId(MINTED));
     const { instance, tmux } = launcher(environment);
     const subject = new SessionLifecycleService(
       {
         repository: new StorageSessionLifecycleRepository(storage, sessionEnvelope()),
         launcher: instance,
-        tasks: new FileSessionTaskStore(root, id => join(files, id)),
-        effects: new FileSessionEffectLedger(root, id => join(files, id)),
+        tasks: new FileSessionTaskStore(root, parseSessionId(MINTED)),
+        effects: new FileSessionEffectLedger(root, parseSessionId(MINTED)),
         directories: new NodeWorkingDirectoryResolver(diskPaths()),
         ids: new TimeSessionIdFactory(
           () => Date.parse(NOW),
@@ -874,10 +881,10 @@ describe('TimeSessionIdFactory', () => {
   it('should never delete a colliding environment temporary it did not create', async () => {
     // Arrange: this file is the only place a session's plaintext credential lives, so destroying
     // another writer's in-flight document on the way out of a failure is the worst possible cleanup.
-    const { root, folder } = await storeRoot('ferretry-environment-store-');
+    const { root, folder } = await storeRoot('ferretry-environment-store-', 'collided-environment');
     const id = parseSessionId('collided-environment');
     const directory = join(folder, id);
-    const subject = new FileSessionEnvironmentStore(root, held => join(folder, held));
+    const subject = new FileSessionEnvironmentStore(root, id);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const foreign = join(directory, '.environment.json.t1.tmp');
     await writeFile(foreign, 'another writer\n', { encoding: 'utf8', mode: 0o600 });

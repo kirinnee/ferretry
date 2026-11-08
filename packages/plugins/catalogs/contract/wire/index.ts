@@ -2,6 +2,7 @@
 export * from './catalog-install.ts';
 export * from './catalog-link.ts';
 export * from './catalog-member.ts';
+export * from './member-passkeys.ts';
 export * from './catalog.ts';
 export * from './shared-catalog-diff.ts';
 export * from './shared-catalog-link.ts';
