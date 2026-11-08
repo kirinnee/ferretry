@@ -102,8 +102,6 @@ export function rootHostFiles(mounts: HostMounts): HostFiles {
 /**
  * The mounts for the first-run scan: each harness home as a `harness-home` root scoped to that ABSOLUTE folder, and
  * `besideFile` (`~/.claude.json`) as the one declared file beside a home. Nothing else is served.
- *
- * @pending runtimes: the first-run scan of the host's harness homes is not composed into the setup service
  */
 export function harnessMounts(
   roots: Pick<RootsPort, 'root' | 'harnessFile'>,

@@ -42,9 +42,6 @@ function underConfig(configDirectory: string, path: string): string | undefined 
   return path.startsWith(prefix) ? path.slice(prefix.length) : undefined;
 }
 
-/**
- * @pending runtimes: a change's configuration documents need one all-or-none write of several declared files
- */
 export function writeAllConfigWriter(
   config: Pick<ConfigPort, 'writeAll'>,
   configDirectory: string,

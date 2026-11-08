@@ -266,6 +266,9 @@ export default definePlugin({
     which: true,
     // Claude keeps its user-scope MCP servers in `~/.claude.json`, BESIDE `~/.claude`: one read-only file, no listing.
     harnessFiles: ['.claude.json'],
+    // The provisioner keeps or narrows the mode of an entry it copied into a runtime's home (`RootHandle.setMode`, the
+    // `fleet` root only: an internal root keeps owner bits, never group or other).
+    setMode: true,
     // An ended Codex ferret's app-server pair: pids and yes/no only, SIGTERM only, to a process running from one of
     // Runtimes' own `fleet/homes/<id>` folders. `CODEX_HOME` is the one variable `usersOf` may match.
     processes: { environment: ['CODEX_HOME'] },

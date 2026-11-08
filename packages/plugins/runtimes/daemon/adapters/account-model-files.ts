@@ -4,9 +4,8 @@
  * component documents they name, and what a document is now.
  *
  * Reads only. Every write a reviewed change makes goes through the provisioner, inside its rollback
- * boundary, so nothing here can leave a machine half-changed — and every configuration file that write
- * carries is acknowledged first, so the daemon never mistakes the owner's own reviewed change for an
- * unconfirmed loosening.
+ * boundary (the configuration documents through the all-or-none config writer first), so nothing here can
+ * leave a machine half-changed.
  */
 
 import { join, relative } from 'node:path';
@@ -24,15 +23,9 @@ import {
   type FleetModelApplyPlan,
 } from '../lib/provisioning.ts';
 import type { ClaudeStatuslineCommand } from '../lib/account/adapt.ts';
-import type {
-  AdapterHost,
-  ConfigFilesPort,
-  HostFiles,
-  ProvisionerKernel,
-  SharedHistoryPooling,
-  SourceFence,
-} from './ports.ts';
+import type { AdapterHost, ConfigFilesPort, HostFiles, SharedHistoryPooling } from './ports.ts';
 import { FileFleetProvisioner } from './file-provisioner.ts';
+import { readFleetManifest } from './manifest-file.ts';
 
 /** The largest component document the catalogue reads; a larger one is reported as unreadable. */
 const MAX_COMPONENT_BYTES = 1024 * 1024;
@@ -43,15 +36,11 @@ const digest = (bytes: Uint8Array): string => new Bun.CryptoHasher('sha256').upd
 const DOCUMENT_MODE = 0o600;
 
 /**
- * The directories of this daemon's home that the catalogue names.
- *
- * GAP(kernel): `FoundationPaths` (`lib/paths.ts`) is the kernel's layout of the state home; these are the five paths
- * this file reads from it, kept local until a kernel port hands them to a plugin.
+ * The directories of this daemon's home that the catalogue names: the state home, the fleet folder the `fleet` root
+ * names, and the manifest in it. The configuration folder is passed beside (`configDirectory`).
  */
-export interface FleetHomePaths {
+interface FleetHomePaths {
   readonly home: string;
-  readonly state: string;
-  readonly config: string;
   readonly fleet: string;
   readonly fleetManifest: string;
 }
@@ -93,6 +82,9 @@ export async function readConfigAccountDocument(
   };
 }
 
+/** `<FY_HOME>/config`: the configuration folder beside the fleet folder the `fleet` root names. */
+export const configDirectoryOf = (home: string): string => join(home, 'config');
+
 /** A runtime's file under `config/` (`RUNTIME_ITEMS`: `config/runtimes/<name>.yaml`). */
 const runtimeConfigPath = (name: string): string => `runtimes/${name}.yaml`;
 
@@ -115,34 +107,6 @@ export async function readDeclaredAccountModel(
   return reading.format === 'none' ? undefined : reading.model;
 }
 
-/**
- * The component-source fence over this daemon's own directories, as configured: no component may read, copy
- * or link a document inside them, the fleet's asset tree excepted (docs/secrets.md#what-the-state-home-fence-refuses).
- */
-export const componentSourceFence = (
-  paths: Pick<FleetHomePaths, 'home' | 'state' | 'config' | 'fleet'>,
-): SourceFence => ({
-  homes: [paths.home, paths.state, paths.config],
-  open: [join(paths.fleet, 'assets')],
-});
-
-/**
- * One component document's text, or `undefined` when it is absent, not a file, too large, unreadable — or
- * behind the fence, which reads exactly like a document that is not there: the configuration check has
- * already said why (an error at the field), and a body that is never read is never in a runtime.
- */
-async function readComponentText(
-  kernel: Pick<ProvisionerKernel, 'resolveSourceFence' | 'readFencedSource'>,
-  path: string,
-  fence: SourceFence,
-): Promise<string | undefined> {
-  try {
-    return await kernel.readFencedSource(await kernel.resolveSourceFence(fence), path, MAX_COMPONENT_BYTES);
-  } catch {
-    return undefined;
-  }
-}
-
 /** What a document is now: its sha256, or the absent sentinel. Throws when it exists and cannot be read. */
 export async function documentRevision(files: Pick<HostFiles, 'readBytes'>, path: string): Promise<string> {
   const bytes = await files.readBytes(path);
@@ -162,9 +126,7 @@ export function sessionStatusOf(raw: unknown): SessionStatus | undefined {
 
 const SessionStatusSchema = z.enum(SESSION_STATUSES);
 
-/** What the composition root hands the catalogue: its own collaborators, and nothing it would build twice. *
- * @pending runtimes: the fleet's catalogue and setup cannot be composed over the host
- */
+/** What the composition root hands the catalogue: its own collaborators, and nothing it would build twice. */
 export interface FileFleetCatalogOptions {
   /** The host: its files, command lookup, provisioner calls and clock (`./ports.ts`). */
   readonly host: AdapterHost;
@@ -192,11 +154,6 @@ export interface FileFleetCatalogOptions {
   /** `<FY_HOME>/config`. */
   readonly configDirectory: string;
   /**
-   * The state home's key files and folders, known to the provisioner's guard by identity so a bind mount of one of
-   * them into a runtime is refused (docs/agent-tools.md#component-destinations).
-   */
-  readonly pinned?: readonly string[];
-  /**
    * The daemon's one fleet publication: every apply runs exclusively under it, so a read of the published
    * fleet never lands between a file moved aside and its replacement (`lib/fleet/publication.ts`).
    * Required, so no composition can apply a fleet its readers are not kept out of.
@@ -205,33 +162,43 @@ export interface FileFleetCatalogOptions {
 }
 
 /**
- * The provisioner, with every configuration file an apply writes acknowledged first: the owner
- * reviewed exactly that text, so it is in effect as soon as it lands rather than held as an edit
- * nobody confirmed. Acknowledging a text that a refused apply then never writes is harmless — it is
- * accepted only if those exact bytes appear.
+ * The provisioner as the catalogue and the setup use it: ONE call that lands a change's documents and its fleet.
  *
- * The configuration is loaded again once an apply that wrote configuration files returns, because
- * readers answer from the last load: the catalogue reads the model straight after its own change, and
- * must find the files it just wrote rather than wait for the watcher to settle on them.
+ * A document is one of three kinds, told apart by where it sits. A file of the FLEET folder (the asset tree) is written
+ * by the provisioner inside its own rollback boundary with the rest of the plan. A file of the CONFIGURATION folder is
+ * written first, all or none, by the config writer (`ConfigPort.writeAll`): the files are the source of truth, so they
+ * land before the plan, and a plan that then fails is republished from them. Anything else is refused in a sentence and
+ * nothing is changed.
+ *
+ * A configuration set the owner's judge HOLDS (a loosening, an added `${secret:NAME}`) is held whole: nothing of the
+ * change is written, the fleet is not touched, and the sentence says so. The configuration is loaded again once a change
+ * that wrote configuration returns, because readers answer from the last load.
  */
-function acknowledgingProvisioner(
+export function configThenFleet(
   inner: FleetCatalogServiceDeps['provisioner'],
-  config: Pick<ConfigFilesPort<AccountModel>, 'acknowledge' | 'acknowledgeRemoval' | 'load'>,
+  writer: RuntimeConfigWriter,
+  config: Pick<ConfigFilesPort<AccountModel>, 'load'>,
   configDirectory: string,
+  disk: Pick<AdapterHost['disk'], 'contains'>,
 ): FleetCatalogServiceDeps['provisioner'] {
   return {
     preview: async plan => await inner.preview(plan),
     apply: async (plan, documents = []) => {
-      const configFiles = documents.filter(document => !relative(configDirectory, document.path).startsWith('..'));
-      for (const document of configFiles) {
-        const path = relative(configDirectory, document.path);
-        if (document.remove === true) config.acknowledgeRemoval(path);
-        else config.acknowledge(path, document.content);
+      const inFleet = documents.filter(document => disk.contains(document.path));
+      const inConfig = documents.filter(
+        document => !disk.contains(document.path) && !relative(configDirectory, document.path).startsWith('..'),
+      );
+      const elsewhere = documents.filter(document => !inFleet.includes(document) && !inConfig.includes(document));
+      if (elsewhere.length > 0) {
+        throw new Error(
+          `refusing to write ${elsewhere.map(document => document.path).join(', ')}: it is neither a file of the fleet folder nor of the configuration folder; nothing was changed`,
+        );
       }
       try {
-        return await inner.apply(plan, documents);
+        await writer.write(inConfig);
+        return await inner.apply(plan, inFleet);
       } finally {
-        if (configFiles.length > 0) await config.load();
+        if (inConfig.length > 0) await config.load().catch(() => undefined);
       }
     },
   };
@@ -254,18 +221,11 @@ async function wrappersCurrent(
 /**
  * The catalogue's collaborators over this machine's files.
  *
- * Its own provisioner, over this daemon's state home and the user's home: the apply claim is a file
- * beside the manifest, so two provisioners in one daemon still apply one at a time.
- *
- * @pending runtimes: the fleet's catalogue and setup cannot be composed over the host
+ * Its own provisioner, over the fleet root: the apply claim is a folder beside the manifest, so two provisioners in
+ * one daemon still apply one at a time.
  */
 export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCatalogServiceDeps {
   const { host, paths, userHome, sessionRecords: records } = options;
-  const allowedRoots = [paths.home, userHome];
-  const sourceFence = {
-    ...componentSourceFence(paths),
-    ...(options.pinned === undefined ? {} : { pinned: options.pinned }),
-  };
   const layout: FleetLayout = {
     stateHome: paths.home,
     userHome,
@@ -288,7 +248,9 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
   return {
     document: async fresh =>
       await readConfigAccountDocument(options.config, { configDirectory: options.configDirectory }, fresh),
-    readAsset: async path => await readComponentText(host.provisioner.kernel, path, sourceFence),
+    // Through the fleet's assets and the harness homes only (S43): any other path reads as "not there", and the
+    // configuration check has already said why.
+    readAsset: async path => await host.disk.readSource(path, MAX_COMPONENT_BYTES),
     documentRevision: async path => await documentRevision(host.files, path),
     ids,
     locate: options.locate,
@@ -308,23 +270,24 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
     credentials: options.credentials,
     loginChanges: options.loginChanges,
     configWriter: options.configWriter,
-    provisioner: acknowledgingProvisioner(
+    provisioner: configThenFleet(
       new FileFleetProvisioner(
-        host.provisioner,
-        allowedRoots,
+        host.disk,
+        host.claimFor,
         options.sharedHistory,
-        { now: host.now },
-        sourceFence,
-        undefined,
-        // Exclusive around the file mutation ONLY — after the claim is held, before the acknowledging
-        // wrapper reloads the configuration, since a load can republish and that must queue behind this
-        // apply rather than run inside it.
+        // Exclusive around the file mutation ONLY — after the claim is held, before the configuration is reloaded,
+        // since a load can republish and that must queue behind this apply rather than run inside it (S67).
         async mutate => await options.publication.publishing(mutate),
       ),
+      options.configWriter,
       options.config,
       options.configDirectory,
+      host.disk,
     ),
     layout,
+    // The published manifest, read between applies (S67): the republish asks whether anything would change.
+    publishedManifest: async () =>
+      await options.publication.reading(async () => await readFleetManifest(host.files, layout.manifestPath)),
     mint: () => crypto.randomUUID(),
     mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),
     now: host.now,
