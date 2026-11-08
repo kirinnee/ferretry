@@ -17,7 +17,7 @@ const plugin = definePlugin({
   api: 5,
   core: false,
   kinds: [],
-  doctor: ['checked-ok', 'checked-unbuilt'],
+  doctor: ['checked-ok', 'checked-unbuilt', 'checked-silent'],
 });
 
 test('G158 a declared doctor check with no run still boots, and fy doctor names it as a failure', async () => {
@@ -34,7 +34,13 @@ test('G158 a declared doctor check with no run still boots, and fy doctor names 
     adapters,
     implementations: [
       implementDaemon(plugin, {
-        build: () => ({ doctor: { 'checked-ok': async () => ({ state: 'ok', detail: 'fine' }) } }),
+        build: () => ({
+          doctor: {
+            'checked-ok': async () => ({ state: 'ok', detail: 'fine' }),
+            // Nothing to judge (today's tmux release with no answer): no row at all.
+            'checked-silent': async () => undefined,
+          },
+        }),
       }),
     ],
   });
@@ -49,6 +55,7 @@ test('G158 a declared doctor check with no run still boots, and fy doctor names 
       state: 'fail',
       detail: 'The check checked-unbuilt has no implementation.',
     });
+    expect(lines.some(line => line.check === 'checked-silent')).toBe(false);
   } finally {
     if (outcome.kind === 'running') await outcome.host.stop();
     await rm(root, { recursive: true, force: true });

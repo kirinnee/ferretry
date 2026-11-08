@@ -1,7 +1,9 @@
 import { type Duration, milliseconds } from '@ferretry/std';
-import type { Clock, WorkersPort } from '../contract/ports.ts';
+import type { Clock, SpawnOptions, SpawnPort, WorkersPort } from '../contract/ports.ts';
 import type { CheckLine, DaemonImplementation, PreflightFacts, SelftestProbe } from '../manifest/implement.ts';
 import type { TempDirs } from './adapters/temp-dir.ts';
+import { effectivePermissions, NO_ITEMS, restrictSpawn, spawnPermitted } from './permissions.ts';
+import { pluginStateFolder } from './roots.ts';
 
 /**
  * WHAT `fyd --check` ASKS OF THE PLUGINS (DECISIONS-2 #22): their pure preflight lines, their bounded selftests and the
@@ -42,6 +44,43 @@ interface Claimant {
 }
 /** The label the kernel prints a plugin's failure under: one it owns, so a plugin id can never shape the column. */
 const FAILURE_LABEL = 'plugin';
+/** What a selftest is handed when the check has no spawn adapter: every start is refused. */
+const NO_SPAWN: SpawnPort = {
+  run: () => Promise.reject(new Error('this check has no spawn adapter')),
+  runBytes: () => Promise.reject(new Error('this check has no spawn adapter')),
+  start: () => {
+    throw new Error('this check has no spawn adapter');
+  },
+};
+/**
+ * A selftest's spawn: its plugin's declared programs only — and, when the probe names `programs`, only those of them
+ * (a name the manifest does not declare grants nothing) — the selftest's abort signal on every child, never a cwd,
+ * caller env or ferret.
+ */
+function boundSpawn(
+  implementation: DaemonImplementation,
+  base: SpawnPort,
+  signal: AbortSignal,
+  programs?: readonly string[],
+): SpawnPort {
+  const plugin = implementation.manifest.id;
+  const declared = effectivePermissions(plugin, implementation.manifest.permissions?.spawn ?? []);
+  const narrowed = restrictSpawn(
+    plugin,
+    programs === undefined ? declared : programs.filter(program => spawnPermitted(declared, NO_ITEMS, program)),
+    base,
+  );
+  const options = <O extends SpawnOptions | undefined>(given: O): SpawnOptions => {
+    const { cwd: _cwd, env: _env, forFerret: _ferret, signal: _signal, ...rest } = (given ?? {}) as SpawnOptions;
+    return { ...rest, signal };
+  };
+  const bound: SpawnPort = {
+    run: async (program, args, given) => await narrowed.run(program, args, options(given)),
+    runBytes: async (program, args, given) => await narrowed.runBytes(program, args, options(given)),
+    start: (program, args, given) => narrowed.start(program, args, options(given)),
+  };
+  return Object.freeze(bound);
+}
 /** The most a whole `--check` may take before the host stops it: each selftest and worker is bounded, plus slack. */
 const DEADLINE_SLACK_MS = 20_000;
 
@@ -53,6 +92,8 @@ export interface PluginCheckDeps {
   readonly workers: WorkersPort;
   readonly tempDirs: TempDirs;
   readonly clock: Pick<Clock, 'after' | 'nowMs'>;
+  /** The unrestricted spawn adapter; each selftest gets it narrowed to its own plugin's `permissions.spawn`. Absent: nothing may run. */
+  readonly spawn?: SpawnPort;
   readonly selftestTimeoutMs?: number;
   readonly workerTimeoutMs?: number;
 }
@@ -186,12 +227,16 @@ async function runSelftests(
       );
       continue;
     }
-    gate.say(lineOf(probe.label, await runSelftest(probe, deps)));
+    gate.say(lineOf(probe.label, await runSelftest(probe, deps, implementation)));
   }
 }
 
 /** One selftest, bounded by the kernel, in a temp directory of its own that is removed whatever happens. */
-async function runSelftest(probe: SelftestProbe, deps: PluginCheckDeps): Promise<string> {
+async function runSelftest(
+  probe: SelftestProbe,
+  deps: PluginCheckDeps,
+  implementation: DaemonImplementation,
+): Promise<string> {
   const timeoutMs = deps.selftestTimeoutMs ?? SELFTEST_TIMEOUT_MS;
   const abort = new AbortController();
   let tempDir: string | undefined;
@@ -209,7 +254,19 @@ async function runSelftest(probe: SelftestProbe, deps: PluginCheckDeps): Promise
       nowMs: () => deps.clock.nowMs(),
       after: (delay: Duration, fn: () => void) => deps.clock.after(delay, fn),
     });
-    const answer = probe.run(Object.freeze({ tempDir, signal: abort.signal, clock }));
+    const answer = probe.run(
+      Object.freeze({
+        ...(probe.host === true
+          ? {
+              stateDir: pluginStateFolder(deps.facts.home, implementation.manifest.id),
+              spawn: boundSpawn(implementation, deps.spawn ?? NO_SPAWN, abort.signal, probe.programs),
+            }
+          : {}),
+        tempDir,
+        signal: abort.signal,
+        clock,
+      }),
+    );
     // A selftest that fails after the timeout already answered must not become an unhandled rejection.
     answer.catch(() => {});
     return printable(await Promise.race([answer, timeout]));

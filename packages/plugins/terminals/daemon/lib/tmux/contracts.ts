@@ -69,6 +69,12 @@ export interface TmuxLaunch {
    * (`script.ts`), so the values are in no process's argv either, the tmux server's included.
    */
   readonly env?: Readonly<Record<string, string>>;
+  /**
+   * The NAMES an opaque environment handle sets on the session (a Vault `ChildEnvironment`), when the values never
+   * pass through this plugin. Only a launch guard reads it: a launch that sets `PATH` this way reaches its harness
+   * on a PATH the guard cannot search.
+   */
+  readonly envNames?: readonly string[];
 }
 
 /** Which notifications a subscriber wants: those naming this pane, this session, or (empty) all. */

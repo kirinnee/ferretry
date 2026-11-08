@@ -1346,6 +1346,7 @@ async function doctorLines(
       }
       try {
         const finding = await run();
+        if (finding === undefined) continue;
         lines.push({
           plugin: id,
           check,

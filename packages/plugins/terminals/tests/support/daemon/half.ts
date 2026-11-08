@@ -1,8 +1,10 @@
+import { unarmedHostFacts } from './host-facts.ts';
 import {
   DEFAULT_AGENT_CONTROL,
   NO_AGENT_CONTROL,
   type FerretsApi,
   type FerretSummary,
+  type Runner,
 } from '@ferretry/core-ferrets/contract';
 import { ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import type {
@@ -19,9 +21,9 @@ import {
   type InputTargetSubject,
   type LiveInputTarget,
 } from '@ferretry/core-vault/contract/testing';
-import type { FerretId } from '@ferretry/kernel/contract';
+import type { FerretId, HostFactsPort } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
-import { type TestHost, testHost } from '@ferretry/kernel/testing';
+import { type TestHost, testHost, type TestHostOptions } from '@ferretry/kernel/testing';
 import type { ReferenceCatalogProvider } from '@ferretry/plugin-conversation/contract';
 import { ok } from '@ferretry/std';
 import { buildTerminals, type TerminalsOverrides } from '../../../daemon/index.ts';
@@ -169,11 +171,20 @@ export interface Half {
   inputTarget(): InputTargetAdapter;
   /** The `reference.catalog:%terminal` provider the half takes (Conversation's references route asks it when Conversation is on). */
   referenceMenu(): ReferenceCatalogProvider;
+  /** The `runners:tmux` runner the half composed (its launch guard armed or not by the host facts). */
+  runner(): Runner;
+}
+
+/** What the kernel answers besides the defaults: its host facts (the launch guard) and its spawn port. */
+export interface HalfHost {
+  readonly hostFacts?: HostFactsPort;
+  readonly spawn?: TestHostOptions['spawn'];
 }
 
 export async function terminalsHalf(
   overrides: Partial<TerminalsOverrides> = {},
   known: readonly FerretSummary[] = [ferretSummary()],
+  kernelHost: HalfHost = {},
 ): Promise<Half> {
   const runtime = new FakeTerminalRuntime();
   const holds = new FakeInputHolds();
@@ -191,6 +202,8 @@ export async function terminalsHalf(
       })),
   });
   const host = await testHost({
+    hostFacts: kernelHost.hostFacts ?? unarmedHostFacts,
+    ...(kernelHost.spawn === undefined ? {} : { spawn: kernelHost.spawn }),
     plugins: [plugin],
     fakes: { ferrets: fakeFerrets(known), vault: fakeVault(raised) },
     gate: new StandInAdmission(() => (caller === 'ferret' ? ferretStanding(FERRET) : ownerStanding())),
@@ -206,6 +219,7 @@ export async function terminalsHalf(
     as: next => (caller = next),
     inputTarget: () => built?.hooks['input.targets:terminal'] as InputTargetAdapter,
     referenceMenu: () => built?.hooks['reference.catalog:%terminal'] as ReferenceCatalogProvider,
+    runner: () => built?.hooks['runners:tmux'] as Runner,
   };
 }
 
