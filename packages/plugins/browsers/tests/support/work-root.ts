@@ -76,6 +76,10 @@ export function workRoots(folder: string, stateHome: string): RootsPort {
     makeDirectory: unused('makeDirectory'),
     realPath: unused('realPath'),
     pin: unused('pin'),
+    publish: unused('publish'),
+    readDurable: unused('readDurable'),
+    syncDirectory: unused('syncDirectory'),
+    fileIdentity: unused('fileIdentity'),
   };
   return { root: () => handle };
 }

@@ -21,6 +21,9 @@ import type {
   RootName,
   RootsPort,
   RootStat,
+  RootIdentity,
+  RootPublished,
+  RootPublishOptions,
   RootWriteOptions,
 } from '../contract/ports.ts';
 import type { FileIdentity, HostFs, OpenedDirectory, OpenedFile } from './adapters/node-fs.ts';
@@ -335,8 +338,9 @@ async function openFolderMaking(
   full: string,
   mode: number,
   make: boolean,
-): Promise<{ readonly folder: OpenedDirectory; readonly real: string }> {
+): Promise<{ readonly folder: OpenedDirectory; readonly real: string; readonly created: readonly string[] }> {
   let existing = full;
+  const created: string[] = [];
   const missing: string[] = [];
   let parent = await scope.fs.realpath(existing).catch(() => undefined);
   while (parent === undefined && within(scope.base.real, dirname(existing)) && dirname(existing) !== existing) {
@@ -350,11 +354,19 @@ async function openFolderMaking(
   try {
     for (const segment of missing) {
       const at = await entry(scope, folder, parent, segment);
-      await scope.fs.mkdir(at, mode).catch(() => refuse('changed'));
+      // Another publisher may make the same folder at the same moment: that is not a change under us. The open
+      // below (`O_DIRECTORY | O_NOFOLLOW`) and the check after it still prove whatever is there is a folder, and a
+      // folder this call did not make is not one it reports as created.
+      let madeHere = true;
+      await scope.fs.mkdir(at, mode).catch((error: unknown) => {
+        if (errnoOf(error) !== 'EEXIST') return refuse('changed');
+        madeHere = false;
+      });
       const made = await scope.fs.openDirectory(at).catch(() => refuse('changed'));
       await folder.close();
       folder = made;
       parent = join(parent, segment);
+      if (madeHere) created.push(parent);
       const problem = await folderProblem(scope, parent, made.identity);
       if (problem !== undefined) refuse(problem);
     }
@@ -362,7 +374,7 @@ async function openFolderMaking(
     await folder.close();
     throw error;
   }
-  return { folder, real: parent };
+  return { folder, real: parent, created };
 }
 
 /**
@@ -411,6 +423,92 @@ async function writeChecked(
       await scope.fs.unlink(madeTemp).catch(() => undefined);
       throw error;
     }
+  } finally {
+    await folder.close();
+  }
+}
+
+const errnoOf = (error: unknown): string | undefined => (error as { code?: string }).code;
+
+const identityOfEntry = (found: FileIdentity): RootIdentity => ({ device: found.device, inode: found.inode });
+
+/** Syncs one checked folder's entries, opened fresh through the fence and proven before the sync. */
+async function syncChecked(scope: Scope, real: string): Promise<void> {
+  const folder = await openCheckedFolder(scope, real);
+  try {
+    await folder.sync();
+  } finally {
+    await folder.close();
+  }
+}
+
+/**
+ * The directories whose entries must be persisted before a file in `leafFolder` is written, parent first: from the
+ * folder's own parent down through every folder this call created, and always at least that parent — creating a
+ * folder is not atomic with persisting its name, so a call that created nothing must not inherit a promise from
+ * whichever call did (today's session-effect ledger walk). Never above the root.
+ */
+function ancestorsToPersist(scope: Scope, created: readonly string[], leafFolder: string): readonly string[] {
+  const top = dirname(created[0] ?? leafFolder);
+  const chain: string[] = [];
+  for (let directory = dirname(leafFolder); ; directory = dirname(directory)) {
+    chain.push(directory);
+    if (directory === top || dirname(directory) === directory) break;
+  }
+  return chain.reverse().filter(directory => within(scope.base.real, directory));
+}
+
+/**
+ * The durable publish (today's effect ledger, task store and environment store, one place): ancestors synced parent
+ * first, the content in a new temp file (`O_EXCL | O_NOFOLLOW`, exactly `mode`, fsync'd by `writeNew`), moved onto
+ * the leaf by `link(2)` (`exclusive`) or by rename, then the folder synced. The temp name is released on every path
+ * out of a link (it stays a second name for the same inode) and on a failed rename, never after a successful rename
+ * (the name is free again and another publisher may own it).
+ */
+async function publishChecked(
+  scope: Scope,
+  full: string,
+  data: Uint8Array,
+  random: () => string,
+  options: RootPublishOptions = {},
+): Promise<RootPublished> {
+  const leaf = basename(full);
+  if (leaf === '' || full === scope.base.real) refuse('not_a_file');
+  const { folder, real: parent, created } = await openFolderMaking(scope, dirname(full), 0o700, true);
+  try {
+    for (const directory of ancestorsToPersist(scope, created, parent)) await syncChecked(scope, directory);
+    const temp = `.${leaf}.${random()}.tmp`;
+    const tempPath = await entry(scope, folder, parent, temp);
+    // OUTSIDE the cleanup below: a name this call did not create is another publisher's, and losing the exclusive
+    // create (which `writeNew` reports by throwing before it owns anything) leaves nothing to remove.
+    const made = await scope.fs.writeNew(tempPath, data, options.mode ?? 0o600);
+    if (made.kind !== 'file' || made.links !== 1) {
+      await scope.fs.unlink(tempPath).catch(() => undefined);
+      refuse('changed');
+    }
+    const leafPath = await entry(scope, folder, parent, leaf);
+    if (options.exclusive === true) {
+      try {
+        try {
+          await scope.fs.link(tempPath, leafPath);
+        } catch (error) {
+          if (errnoOf(error) !== 'EEXIST') throw error;
+          return { outcome: 'exists' };
+        }
+        await folder.sync();
+        return { outcome: 'published', identity: identityOfEntry(made) };
+      } finally {
+        await scope.fs.unlink(tempPath).catch(() => undefined);
+      }
+    }
+    try {
+      await scope.fs.rename(tempPath, leafPath);
+    } catch (error) {
+      await scope.fs.unlink(tempPath).catch(() => undefined);
+      throw error;
+    }
+    await folder.sync();
+    return { outcome: 'published', identity: identityOfEntry(made) };
   } finally {
     await folder.close();
   }
@@ -745,6 +843,10 @@ function internalPin(pinned: UnjudgedRoot): HeldRoot {
   return Object.freeze({ ...pinned, fenced: async (rels: readonly string[]) => rels.map(() => false) });
 }
 
+/** How often a read that met a file mid-`link` asks again, and how long it waits between asks. */
+const HARD_LINK_RETRIES = 20;
+const HARD_LINK_RETRY_MS = 5;
+
 function rootHandle(setup: HandleSetup): RootHandle {
   const { fs, home, name, plugin, base, anchor, scopedParent, check, immutable, random, pins } = setup;
   const ownerRoot = OWNER_ROOTS.has(name);
@@ -853,6 +955,55 @@ function rootHandle(setup: HandleSetup): RootHandle {
     },
     writeText: async (path, text, options) => await write(path, text, options),
     writeBytes: async (path, bytes, options) => await write(path, bytes, options),
+    publish: async (path, bytes, options) => {
+      writable();
+      const { full, scope } = await realParent(path, true);
+      return await publishChecked(scope, full, bytes, random, options);
+    },
+    readDurable: async (path, limit) => {
+      // `link` publishes by giving the file a second name for an instant: a reader that lands in that instant is
+      // asked again rather than refused. A file that really has several names stays refused after the last try.
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          const { full, scope } = await real(path);
+          return await withCheckedFile(scope, full, async file => {
+            const bytes = await file.read(limit);
+            await file.sync();
+            return { bytes, identity: identityOfEntry(file.identity) };
+          });
+        } catch (error) {
+          if (errnoOf(error) === 'ENOENT') return undefined;
+          if (error instanceof RootError && error.refusal === 'hard_link' && attempt < HARD_LINK_RETRIES) {
+            await new Promise<void>(resolve => setTimeout(resolve, HARD_LINK_RETRY_MS));
+            continue;
+          }
+          throw error;
+        }
+      }
+    },
+    syncDirectory: async (path, options) => {
+      const { full, scope } = await real(path);
+      const folder = await openCheckedFolder(scope, full);
+      await folder.close();
+      if (options?.parent === true && within(scope.base.real, dirname(full)) && dirname(full) !== full)
+        await syncChecked(scope, dirname(full));
+      await syncChecked(scope, full);
+    },
+    fileIdentity: async path => {
+      const { full, scope } = await realParent(path).catch((error: unknown) => {
+        if (errnoOf(error) === 'ENOENT') return { full: undefined, scope: undefined };
+        throw error;
+      });
+      // A folder that is not there holds no name; one that is must still pass the whole fence below.
+      if (full === undefined || (await scope.fs.identity(dirname(full))) === undefined) return undefined;
+      const folder = await openCheckedFolder(scope, dirname(full));
+      try {
+        const found = await scope.fs.identity(await entry(scope, folder, dirname(full), basename(full)));
+        return found === undefined ? undefined : identityOfEntry(found);
+      } finally {
+        await folder.close();
+      }
+    },
     copyTree: async (source, from, to, options) => {
       writable();
       const known = HANDLES.get(source);

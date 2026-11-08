@@ -1,19 +1,9 @@
 import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  type FileHandle,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  rename,
-  rm,
-  stat,
-  symlink,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { diskPaths, diskRoot } from '@ferretry/kernel/testing';
 import should from 'should';
 import { FileSessionEffectLedger } from '../../../../../daemon/adapters/session/effects/file-session-effect-ledger.ts';
 import { FileSessionEnvironmentStore } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
@@ -32,8 +22,6 @@ import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keye
 // functions, each of which has to be proven on its own. They are named apart rather than sharing one
 // name because `lifecycle/index.ts` star-exports both modules, and a shared name would collide
 // there and again in `adapters/index.ts`.
-import { fsyncEnvironmentDirectory } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
-import { fsyncTaskDirectory } from '../../../../../daemon/adapters/session/lifecycle/file-session-task-store.ts';
 import {
   type DaemonStorage,
   InvalidStateDocumentError,
@@ -52,6 +40,7 @@ import type { AccountLaunchEnvironment, AccountLaunchRenewal } from '../../../..
 import type { TmuxLaunch } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 import { FakePaneDelivery, FakeTmux } from '../../../../support/daemon/fake-tmux.ts';
+import { recordingSyncs } from '../../../../support/daemon/recording-syncs.ts';
 import { memoryStorage, sessionEnvelope } from '../../../../support/daemon/storage.ts';
 
 /**
@@ -495,50 +484,46 @@ describe('TmuxSessionLifecycleLauncher', () => {
   });
 });
 
+/** A real root in a fresh temporary home; `observe` wraps the kernel's disk adapter to watch or fail one step. */
+async function storeRoot(prefix: string, observe?: Parameters<typeof diskRoot>[1]) {
+  const home = await temporaryHome(prefix);
+  const { root, folder } = await diskRoot(home, observe);
+  return { root, folder };
+}
+
 describe('FileSessionTaskStore', () => {
   it('should write turn one privately inside the session directory and return the file to open', async () => {
     // Arrange
-    const home = await mkdtemp(join(tmpdir(), 'ferretry-task-store-'));
-    homes.add(home);
+    const { root, folder } = await storeRoot('ferretry-task-store-');
     const id = parseSessionId('task-session');
-    const subject = new FileSessionTaskStore(
-      session => join(home, session),
-      () => 'fixed-id',
-    );
+    const subject = new FileSessionTaskStore(root, session => join(folder, session));
 
     // Act
     const actual = await subject.writeAssignedTask(id, '# Assigned task\n\nDo the work\n');
 
     // Assert
-    should(actual).equal(join(home, 'task-session', 'turns', 'turn-001.md'));
+    should(actual).equal(join(folder, 'task-session', 'turns', 'turn-001.md'));
     should(await readFile(actual, 'utf8')).equal('# Assigned task\n\nDo the work\n');
     should((await stat(actual)).mode & 0o777).equal(0o600);
-    should((await stat(join(home, 'task-session', 'turns'))).mode & 0o777).equal(0o700);
+    should((await stat(join(folder, 'task-session', 'turns'))).mode & 0o777).equal(0o700);
   });
 
   it('should persist the document, its directory and the entries naming it before returning', async () => {
     // Arrange: the lifecycle writes this and then begins the durable turn-one effect, so a document
     // that only reached the page cache lets a power cut strand a session that can never be assigned.
-    const home = await mkdtemp(join(tmpdir(), 'ferretry-task-store-'));
-    homes.add(home);
-    const id = parseSessionId('durable-session');
     const synced: string[] = [];
-    const subject = new FileSessionTaskStore(
-      session => join(home, session),
-      () => 'fixed-id',
-      async path => {
-        synced.push(path);
-      },
-    );
+    const { root, folder } = await storeRoot('ferretry-task-store-', recordingSyncs(synced));
+    const id = parseSessionId('durable-session');
+    const subject = new FileSessionTaskStore(root, session => join(folder, session));
 
     // Act
     const file = await subject.writeAssignedTask(id, 'work\n');
 
-    // Assert: parents first and oldest ancestor first — this mkdir created both the session
-    // directory and `turns`, so the chain reaches the home that names the session — then the turns
-    // directory again once the rename has published the file into it.
-    const turns = join(home, 'durable-session', 'turns');
-    should(synced).eql([home, join(home, 'durable-session'), turns, turns]);
+    // Assert: parents first and oldest ancestor first — this publish created both the session
+    // directory and `turns`, so the chain reaches the folder that names the session — then the turns
+    // directory once the rename has published the file into it.
+    const turns = join(folder, 'durable-session', 'turns');
+    should(synced).eql([folder, join(folder, 'durable-session'), turns]);
     should(await readFile(file, 'utf8')).equal('work\n');
     should(await readdir(turns)).eql(['turn-001.md']);
   });
@@ -546,17 +531,10 @@ describe('FileSessionTaskStore', () => {
   it('should sync an identical replay in place rather than replacing the inode', async () => {
     // Arrange: a retried launch and a fork replay both arrive with byte-identical content, and the
     // agent may be mid-read of the very file it was told to open.
-    const home = await mkdtemp(join(tmpdir(), 'ferretry-task-store-'));
-    homes.add(home);
-    const id = parseSessionId('replayed-session');
     const synced: string[] = [];
-    const subject = new FileSessionTaskStore(
-      session => join(home, session),
-      () => 'fixed-id',
-      async path => {
-        synced.push(path);
-      },
-    );
+    const { root, folder } = await storeRoot('ferretry-task-store-', recordingSyncs(synced));
+    const id = parseSessionId('replayed-session');
+    const subject = new FileSessionTaskStore(root, session => join(folder, session));
     const file = await subject.writeAssignedTask(id, 'same\n');
     const before = await stat(file);
     synced.length = 0;
@@ -569,20 +547,16 @@ describe('FileSessionTaskStore', () => {
     // reached its own sync, so each call persists the entry naming it on its own behalf.
     should(again).equal(file);
     should((await stat(file)).ino).equal(before.ino);
-    const replayedTurns = join(home, 'replayed-session', 'turns');
-    should(synced).eql([join(home, 'replayed-session'), replayedTurns, replayedTurns]);
-    should(await readdir(join(home, 'replayed-session', 'turns'))).eql(['turn-001.md']);
+    const replayedTurns = join(folder, 'replayed-session', 'turns');
+    should(synced).eql([join(folder, 'replayed-session'), replayedTurns]);
+    should(await readdir(join(folder, 'replayed-session', 'turns'))).eql(['turn-001.md']);
   });
 
   it('should replace differing content atomically and leave no temporary behind', async () => {
     // Arrange
-    const home = await mkdtemp(join(tmpdir(), 'ferretry-task-store-'));
-    homes.add(home);
+    const { root, folder } = await storeRoot('ferretry-task-store-');
     const id = parseSessionId('changed-session');
-    const subject = new FileSessionTaskStore(
-      session => join(home, session),
-      () => 'fixed-id',
-    );
+    const subject = new FileSessionTaskStore(root, session => join(folder, session));
     const file = await subject.writeAssignedTask(id, 'first\n');
     const before = await stat(file);
 
@@ -593,44 +567,37 @@ describe('FileSessionTaskStore', () => {
     // publication atomic — a reader sees one document or the other, never a mixture.
     should(await readFile(file, 'utf8')).equal('second\n');
     should((await stat(file)).ino).not.equal(before.ino);
-    should(await readdir(join(home, 'changed-session', 'turns'))).eql(['turn-001.md']);
+    should(await readdir(join(folder, 'changed-session', 'turns'))).eql(['turn-001.md']);
   });
 
   it('should refuse when the path stops naming the document it proved, without overwriting it', async () => {
-    // Arrange: the exact-replay path proves an inode, then syncs the directory — and THAT await is
-    // when a concurrent writer can publish over the name by rename. The substitution happens inside
-    // the injected sync, so the interleaving is the test's rather than a hope about timing.
-    //
-    // The seam fires for the parent walk first (`<session>`, then `turns`) and again for `turns` after
-    // the document is proved, so the substitution is armed for the SECOND `turns` sync — the only one
-    // that lands after the handle exists. If the walk ever changes shape, this counter is what to fix.
-    const home = await mkdtemp(join(tmpdir(), 'ferretry-task-store-'));
-    homes.add(home);
-    const id = parseSessionId('substituted-session');
-    const turns = join(home, 'substituted-session', 'turns');
-    const published = join(turns, 'turn-001.md');
+    // Arrange: the exact-replay path proves a file, then syncs the directory — and THAT await is
+    // when a concurrent writer can publish over the name by rename. The substitution happens right
+    // after the replay's own sync of `turns`, so the interleaving is the test's rather than a hope
+    // about timing.
     let armed = false;
-    let turnsSyncs = 0;
     let substituted = false;
-    const subject = new FileSessionTaskStore(
-      session => join(home, session),
-      () => 'fixed-id',
-      async path => {
-        if (!armed || path !== turns) return;
-        turnsSyncs += 1;
-        if (turnsSyncs !== 2 || substituted) return;
+    let turns = '';
+    const published = () => join(turns, 'turn-001.md');
+    const { root, folder } = await storeRoot(
+      'ferretry-task-store-',
+      recordingSyncs([], async path => {
+        if (!armed || path !== turns || substituted) return;
         substituted = true;
         // Another writer publishing its own document at the same name, by rename, so the path now
-        // reaches a different inode while this call still holds the one it proved.
+        // reaches a different inode while this call still holds the identity it proved.
         const theirs = join(turns, 'theirs.tmp');
         await writeFile(theirs, 'somebody else won the race\n', { encoding: 'utf8', mode: 0o600 });
-        await rename(theirs, published);
-      },
+        await rename(theirs, published());
+      }),
     );
+    const id = parseSessionId('substituted-session');
+    turns = join(folder, 'substituted-session', 'turns');
+    const subject = new FileSessionTaskStore(root, session => join(folder, session));
     await subject.writeAssignedTask(id, 'same\n');
     armed = true;
 
-    // Act: a byte-identical replay, which is the path that claims "the same inode, still durable".
+    // Act: a byte-identical replay, which is the path that claims "the same file, still durable".
     let refused: Error | undefined;
     try {
       await subject.writeAssignedTask(id, 'same\n');
@@ -642,30 +609,30 @@ describe('FileSessionTaskStore', () => {
     // fall through to the overwrite path — the document that won the race is untouched.
     should(substituted).equal(true);
     should(refused?.message).match(/stopped naming the turn-one document this write proved/u);
-    should(await readFile(published, 'utf8')).equal('somebody else won the race\n');
+    should(await readFile(published(), 'utf8')).equal('somebody else won the race\n');
   });
 
   it('should stop owning the temporary name once the document is published', async () => {
     // Arrange: the interleaving itself. After the rename the name is free again, and the directory
     // sync that follows is an await — so the foreign temporary is created DURING that await, which is
-    // exactly when a real second writer would take the reused name. Deterministic: the injected sync
+    // exactly when a real second writer would take the reused name. Deterministic: the observed sync
     // is the scheduling point rather than a hope about timing.
-    const home = await mkdtemp(join(tmpdir(), 'ferretry-task-store-'));
-    homes.add(home);
-    const id = parseSessionId('published-session');
-    const reused = join(home, 'published-session', 'turns', 'turn-001.md.fixed-id.tmp');
     let plantedDuringSync = false;
-    const subject = new FileSessionTaskStore(
-      session => join(home, session),
-      () => 'fixed-id',
-      async () => {
+    let published = '';
+    let reused = '';
+    const { root, folder } = await storeRoot(
+      'ferretry-task-store-',
+      recordingSyncs([], async () => {
         if (plantedDuringSync) return;
-        if ((await stat(join(home, 'published-session', 'turns', 'turn-001.md')).catch(() => undefined)) === undefined)
-          return;
+        if ((await stat(published).catch(() => undefined)) === undefined) return;
         plantedDuringSync = true;
         await writeFile(reused, 'another writer\n', { encoding: 'utf8', mode: 0o600 });
-      },
+      }),
     );
+    const id = parseSessionId('published-session');
+    published = join(folder, 'published-session', 'turns', 'turn-001.md');
+    reused = join(folder, 'published-session', 'turns', '.turn-001.md.t1.tmp');
+    const subject = new FileSessionTaskStore(root, session => join(folder, session));
 
     // Act
     const file = await subject.writeAssignedTask(id, 'first\n');
@@ -679,19 +646,23 @@ describe('FileSessionTaskStore', () => {
 
   it('should stop owning the environment temporary once the credential file is published', async () => {
     // Arrange: the same window, in the one file that holds a session's plaintext credential.
-    const home = await temporaryHome('ferretry-environment-store-');
     const id = parseSessionId('published-environment');
-    const directory = join(home, id);
-    const reused = join(directory, 'environment.json.fixed-id.tmp');
     let plantedDuringSync = false;
-    const subject = new FileSessionEnvironmentStore(
-      held => join(home, held),
-      () => 'fixed-id',
-      async () => {
+    let published = '';
+    let reused = '';
+    const { root, folder } = await storeRoot(
+      'ferretry-environment-store-',
+      recordingSyncs([], async () => {
+        if (plantedDuringSync) return;
+        if ((await stat(published).catch(() => undefined)) === undefined) return;
         plantedDuringSync = true;
         await writeFile(reused, 'another writer\n', { encoding: 'utf8', mode: 0o600 });
-      },
+      }),
     );
+    const directory = join(folder, id);
+    published = join(directory, 'environment.json');
+    reused = join(directory, '.environment.json.t1.tmp');
+    const subject = new FileSessionEnvironmentStore(root, held => join(folder, held));
 
     // Act
     await subject.write(id, { FY_SESSION_BOARD_CAPABILITY: 'mine' });
@@ -705,17 +676,13 @@ describe('FileSessionTaskStore', () => {
 
   it('should never delete a colliding temporary it did not create', async () => {
     // Arrange: a temporary already at the name this call would use — another writer's in-flight
-    // document. A fixed unique id makes the collision certain rather than astronomically unlikely.
-    const home = await mkdtemp(join(tmpdir(), 'ferretry-task-store-'));
-    homes.add(home);
+    // document. The root's first temporary name is determinate, which makes the collision certain.
+    const { root, folder } = await storeRoot('ferretry-task-store-');
     const id = parseSessionId('collided-session');
-    const subject = new FileSessionTaskStore(
-      session => join(home, session),
-      () => 'fixed-id',
-    );
-    const turns = join(home, 'collided-session', 'turns');
+    const subject = new FileSessionTaskStore(root, session => join(folder, session));
+    const turns = join(folder, 'collided-session', 'turns');
     await mkdir(turns, { recursive: true, mode: 0o700 });
-    const foreign = join(turns, 'turn-001.md.fixed-id.tmp');
+    const foreign = join(turns, '.turn-001.md.t1.tmp');
     await writeFile(foreign, 'someone else is mid-write\n', { encoding: 'utf8', mode: 0o600 });
 
     // Act
@@ -734,10 +701,9 @@ describe('FileSessionTaskStore', () => {
 
   it('should be repeatable so a retried launch can re-deliver the same assignment', async () => {
     // Arrange
-    const home = await mkdtemp(join(tmpdir(), 'ferretry-task-store-'));
-    homes.add(home);
+    const { root, folder } = await storeRoot('ferretry-task-store-');
     const id = parseSessionId('retried-session');
-    const subject = new FileSessionTaskStore(session => join(home, session));
+    const subject = new FileSessionTaskStore(root, session => join(folder, session));
 
     // Act
     const first = await subject.writeAssignedTask(id, 'first\n');
@@ -758,7 +724,7 @@ describe('NodeWorkingDirectoryResolver', () => {
     const link = join(home, 'link');
     await mkdir(target);
     await symlink(target, link);
-    const subject = new NodeWorkingDirectoryResolver();
+    const subject = new NodeWorkingDirectoryResolver(diskPaths());
 
     // Act
     const actual = await subject.resolve(`  ${link}  `);
@@ -774,7 +740,7 @@ describe('NodeWorkingDirectoryResolver', () => {
     homes.add(home);
     const file = join(home, 'not-a-directory');
     await writeFile(file, 'x');
-    const subject = new NodeWorkingDirectoryResolver();
+    const subject = new NodeWorkingDirectoryResolver(diskPaths());
 
     // Act + Assert
     await should(subject.resolve('relative/dir')).be.rejectedWith(
@@ -789,16 +755,16 @@ describe('the composed session lifecycle', () => {
   it('should give a started auto session its task through real storage and a real turn file', async () => {
     // Arrange — every adapter is the production one; only the tmux ports are doubles.
     const storage = await openStorage();
-    const files = await temporaryHome('ferretry-lifecycle-files-');
+    const { root, folder: files } = await storeRoot('ferretry-lifecycle-files-');
     const { instance, tmux, delivery } = launcher();
     const cwd = await temporaryHome('ferretry-lifecycle-cwd-');
     const subject = new SessionLifecycleService(
       {
         repository: new StorageSessionLifecycleRepository(storage, sessionEnvelope()),
         launcher: instance,
-        tasks: new FileSessionTaskStore(id => join(files, id)),
-        effects: new FileSessionEffectLedger(id => join(files, id)),
-        directories: new NodeWorkingDirectoryResolver(),
+        tasks: new FileSessionTaskStore(root, id => join(files, id)),
+        effects: new FileSessionEffectLedger(root, id => join(files, id)),
+        directories: new NodeWorkingDirectoryResolver(diskPaths()),
         ids: new TimeSessionIdFactory(
           () => Date.parse(NOW),
           () => 'ABCDEF12-3456-7890-ABCD-EF1234567890',
@@ -844,17 +810,17 @@ describe('the composed session lifecycle', () => {
     // Arrange — the real credential issuer, the real environment file, and the real launcher, so the
     // only doubles in the chain are the tmux ports.
     const storage = await openStorage();
-    const files = await temporaryHome('ferretry-lifecycle-files-');
+    const { root, folder: files } = await storeRoot('ferretry-lifecycle-files-');
     const cwd = await temporaryHome('ferretry-lifecycle-cwd-');
-    const environment = new FileSessionEnvironmentStore(id => join(files, id));
+    const environment = new FileSessionEnvironmentStore(root, id => join(files, id));
     const { instance, tmux } = launcher(environment);
     const subject = new SessionLifecycleService(
       {
         repository: new StorageSessionLifecycleRepository(storage, sessionEnvelope()),
         launcher: instance,
-        tasks: new FileSessionTaskStore(id => join(files, id)),
-        effects: new FileSessionEffectLedger(id => join(files, id)),
-        directories: new NodeWorkingDirectoryResolver(),
+        tasks: new FileSessionTaskStore(root, id => join(files, id)),
+        effects: new FileSessionEffectLedger(root, id => join(files, id)),
+        directories: new NodeWorkingDirectoryResolver(diskPaths()),
         ids: new TimeSessionIdFactory(
           () => Date.parse(NOW),
           () => 'ABCDEF12-3456-7890-ABCD-EF1234567890',
@@ -908,15 +874,12 @@ describe('TimeSessionIdFactory', () => {
   it('should never delete a colliding environment temporary it did not create', async () => {
     // Arrange: this file is the only place a session's plaintext credential lives, so destroying
     // another writer's in-flight document on the way out of a failure is the worst possible cleanup.
-    const home = await temporaryHome('ferretry-environment-store-');
+    const { root, folder } = await storeRoot('ferretry-environment-store-');
     const id = parseSessionId('collided-environment');
-    const directory = join(home, id);
-    const subject = new FileSessionEnvironmentStore(
-      held => join(home, held),
-      () => 'fixed-id',
-    );
+    const directory = join(folder, id);
+    const subject = new FileSessionEnvironmentStore(root, held => join(folder, held));
     await mkdir(directory, { recursive: true, mode: 0o700 });
-    const foreign = join(directory, 'environment.json.fixed-id.tmp');
+    const foreign = join(directory, '.environment.json.t1.tmp');
     await writeFile(foreign, 'another writer\n', { encoding: 'utf8', mode: 0o600 });
 
     // Act
@@ -950,111 +913,6 @@ describe('TimeSessionIdFactory', () => {
     should(first).not.equal(second);
     should(parseSessionId(second)).equal(second);
   });
-});
-
-/** An errno-shaped rejection, exactly as the platform raises one. */
-function directoryRefusal(code: string): NodeJS.ErrnoException {
-  return Object.assign(new Error(`the platform refused a directory sync with ${code}`), { code });
-}
-
-/**
- * A directory handle that opens and then refuses to sync.
- *
- * The sync-side branch cannot be reached from outside on any filesystem this repository is
- * developed or tested against: all of them sync a directory successfully. The fake varies only
- * which errno the sync raises — the open, the path and the close are still the helper's own.
- */
-function handleRefusingToSync(code: string, closes: string[]): FileHandle {
-  return {
-    async sync(): Promise<void> {
-      throw directoryRefusal(code);
-    },
-    async close(): Promise<void> {
-      closes.push('closed');
-    },
-  } as unknown as FileHandle;
-}
-
-/**
- * The repo-standard directory-sync tolerance, across the whole open-then-sync operation.
- *
- * A filesystem that cannot sync a directory usually says so by refusing the READ-ONLY OPEN, not by
- * failing the fsync behind it, so tolerating only the sync left each helper's stated contract untrue
- * on exactly the platforms it was written for. Every lifecycle module that persists a directory
- * entry is driven here, because each carries its own copy of the helper and a fix applied to one of
- * them says nothing about the others.
- */
-describe('lifecycle directory durability', () => {
-  // Typed to ONE signature rather than inferred `as const`: the two exports are distinct
-  // functions, and an inferred union of them would be a union of call signatures rather than the
-  // single contract every one of them is required to keep.
-  const helpers: ReadonlyArray<{
-    readonly owner: string;
-    readonly fsyncDirectory: (path: string, openDirectory?: (target: string) => Promise<FileHandle>) => Promise<void>;
-  }> = [
-    { owner: 'FileSessionTaskStore', fsyncDirectory: fsyncTaskDirectory },
-    { owner: 'FileSessionEnvironmentStore', fsyncDirectory: fsyncEnvironmentDirectory },
-  ];
-
-  for (const { owner, fsyncDirectory } of helpers) {
-    for (const code of ['EINVAL', 'ENOTSUP', 'EPERM']) {
-      it(`should tolerate ${code} from the directory open in ${owner}`, async () => {
-        // Arrange
-        const opened: string[] = [];
-
-        // Act: resolving at all is the assertion — a helper that fell through would sync a handle it
-        // never received.
-        await fsyncDirectory('/state/sessions', async path => {
-          opened.push(path);
-          throw directoryRefusal(code);
-        });
-
-        // Assert
-        should(opened).eql(['/state/sessions']);
-      });
-
-      it(`should tolerate ${code} from the sync in ${owner}, and still close the handle`, async () => {
-        // Arrange
-        const closes: string[] = [];
-
-        // Act
-        await fsyncDirectory('/state/sessions', async () => handleRefusingToSync(code, closes));
-
-        // Assert
-        should(closes).eql(['closed']);
-      });
-    }
-
-    it(`should propagate an open failure in ${owner} that is not a platform refusal`, async () => {
-      // Act + Assert: EIO is a real failure to persist, and swallowing it would report an entry
-      // durable that is not.
-      await should(
-        fsyncDirectory('/state/sessions', async () => {
-          throw directoryRefusal('EIO');
-        }),
-      ).be.rejectedWith(/EIO/u);
-    });
-
-    it(`should propagate a sync failure in ${owner}, and still close the handle`, async () => {
-      // Arrange
-      const closes: string[] = [];
-
-      // Act + Assert
-      await should(fsyncDirectory('/state/sessions', async () => handleRefusingToSync('EIO', closes))).be.rejectedWith(
-        /EIO/u,
-      );
-      should(closes).eql(['closed']);
-    });
-
-    it(`should persist a real directory through the default opener in ${owner}`, async () => {
-      // Arrange: the default argument is what production uses, so it has to be exercised unwrapped.
-      const home = await mkdtemp(join(tmpdir(), 'fy-lifecycle-fsync-'));
-      homes.add(home);
-
-      // Act + Assert: a real open and a real fsync of a real directory.
-      await fsyncDirectory(home);
-    });
-  }
 });
 
 /**

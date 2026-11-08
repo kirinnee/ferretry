@@ -11,7 +11,7 @@ import type { DaemonTimings } from '../contract/ports.ts';
 import { DEFAULT_DAEMON_TIMINGS } from '../host/session/timings.ts';
 import { addedSecretReferenceSentences, ownSecretsPort, secretReferencesIn } from '../host/secrets.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { hours, instantFromEpochMs } from '@ferretry/std';
+import { err, hours, instantFromEpochMs, ok } from '@ferretry/std';
 import type { Actor, HoldDecision, RefusalCode, TargetRef } from '../contract/act.ts';
 import type {
   Admission,
@@ -120,6 +120,8 @@ export interface TestHostOptions {
   readonly pinner?: SessionRootPinner;
   /** What `kernel.paths.home()` answers. Default: `/home/owner`. */
   readonly ownerHome?: string;
+  /** The directories `kernel.paths.checkDirectory` accepts: the absolute path asked → its real path. Default: none. */
+  readonly directories?: Readonly<Record<string, string>>;
   /** `kernel.scratch`. Default: real private temp folders, as the daemon's. */
   readonly scratch?: ScratchPort;
   /** What the owner's installed items name, for `permissions.spawn`/`network` `{ items }` entries. Default: none. */
@@ -664,6 +666,8 @@ async function start(world: World): Promise<TestHost> {
         },
       },
   );
+  /** The test roots' stand-in inodes, so `fileIdentity` can tell two publishes of one name apart. */
+  const inodes = new Map<string, bigint>();
   const rootsFor = (manifest: Manifest): KernelPorts['roots'] => ({
     root(name) {
       if (!(manifest.permissions?.roots ?? []).includes(name))
@@ -709,6 +713,24 @@ async function start(world: World): Promise<TestHost> {
           if (writeOptions?.replaceExisting === true && !world.roots.has(path)) throw new Error(`no such file ${path}`);
           world.roots.set(path, new TextDecoder().decode(bytes));
         },
+        publish: async (path, bytes, publishOptions) => {
+          if (publishOptions?.exclusive === true && world.roots.has(path)) return { outcome: 'exists' };
+          world.roots.set(path, new TextDecoder().decode(bytes));
+          const inode = BigInt(inodes.size + 1);
+          inodes.set(path, inode);
+          return { outcome: 'published', identity: { device: 1n, inode } };
+        },
+        readDurable: async (path, limit) => {
+          const text = world.roots.get(path);
+          if (text === undefined) return undefined;
+          const bytes = new TextEncoder().encode(text);
+          return {
+            bytes: limit === undefined ? bytes : bytes.slice(0, limit),
+            identity: { device: 1n, inode: inodes.get(path) ?? 0n },
+          };
+        },
+        syncDirectory: async () => {},
+        fileIdentity: async path => (world.roots.has(path) ? { device: 1n, inode: inodes.get(path) ?? 0n } : undefined),
         copyTree: async (_source, from, to, copyOptions) => {
           // the test roots are one flat map: copy (or, for a link, alias) every file under `from`
           for (const [key, text] of [...world.roots])
@@ -869,7 +891,25 @@ async function start(world: World): Promise<TestHost> {
         },
       },
       identity,
-      paths: Object.freeze({ home: () => options.ownerHome ?? '/home/owner' }),
+      paths: Object.freeze({
+        home: () => options.ownerHome ?? '/home/owner',
+        // The test world keeps no disk: a directory is one the test named in `options.directories` (its real path).
+        checkDirectory: async (absolutePath: string) => {
+          const requested = absolutePath.trim();
+          if (!requested.startsWith('/'))
+            return err({
+              reason: 'not_absolute' as const,
+              message: `session working directory must be absolute: ${JSON.stringify(absolutePath)}`,
+            });
+          const real = options.directories?.[requested];
+          return real === undefined
+            ? err({
+                reason: 'not_a_directory' as const,
+                message: `session working directory is not a directory: ${requested}`,
+              })
+            : ok({ realPath: real });
+        },
+      }),
       updateHost:
         manifest.permissions?.updateHost === true && options.updateHost !== undefined
           ? options.updateHost

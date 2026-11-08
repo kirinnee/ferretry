@@ -47,6 +47,7 @@ import type { Manifest, Needer, ToolDecl } from '../manifest/types.ts';
 import kernelManifest, { PluginsConfig, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
+import { checkDirectory } from './paths.ts';
 import { currentActor, currentStanding, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
 import { type InstalledItems, installedItemReach } from './items.ts';
@@ -598,7 +599,10 @@ async function bootLocked(
     );
 
   const pins = new PinRegistry(() => adapters.pinner ?? NO_PINNER);
-  const ownerPaths: PathsPort = Object.freeze({ home: () => adapters.ownerHome?.() ?? process.env.HOME ?? '/' });
+  const ownerPaths: PathsPort = Object.freeze({
+    home: () => adapters.ownerHome?.() ?? process.env.HOME ?? '/',
+    checkDirectory: async (absolutePath: string) => await checkDirectory(adapters.fs, absolutePath),
+  });
   /** A plugin's own `resolvers` section, read at each call (unset during build: nothing resolves yet). */
   const resolversOf =
     (id: string): ResolverOf =>

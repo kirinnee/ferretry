@@ -462,6 +462,33 @@ export interface RootWriteOptions {
   readonly replaceExisting?: boolean;
 }
 
+/** Which object a name reaches: the device and inode, so a caller can prove a path still names what it checked. */
+export interface RootIdentity {
+  readonly device: bigint;
+  readonly inode: bigint;
+}
+
+export interface RootPublishOptions {
+  /** POSIX mode of the file this publish creates. Default `0o600`. */
+  readonly mode?: number;
+  /**
+   * Create only: the name is taken by `link(2)` (create-if-absent in the kernel) and an existing name, a link
+   * included, is reported as `exists` and left exactly as it was. Without it the new file replaces the name by rename.
+   */
+  readonly exclusive?: boolean;
+}
+
+/** What a {@link RootHandle.publish} came to: the file the name now reaches, or that someone else's was there first. */
+export type RootPublished =
+  | { readonly outcome: 'published'; readonly identity: RootIdentity }
+  | { readonly outcome: 'exists' };
+
+/** {@link RootHandle.readDurable}: the bytes, and the identity of the file they were read from. */
+export interface RootDurableRead {
+  readonly bytes: Uint8Array;
+  readonly identity: RootIdentity;
+}
+
 /**
  * A scoped handle on one root: resolves symlinks before checking, refuses `..`, keeps today's link and device-file
  * checks, and refuses everything inside the fence for an owner's root.
@@ -484,6 +511,28 @@ export interface RootHandle {
   writeText(path: FencedPath, text: string, options?: RootWriteOptions): Promise<void>;
   /** The same, for bytes. */
   writeBytes(path: FencedPath, bytes: Uint8Array, options?: RootWriteOptions): Promise<void>;
+  /**
+   * A DURABLE publish (the state filesystem's contract): missing folders are made (`0700`) and, parent first, every
+   * ancestor this call created plus the folder's own parent are synced BEFORE anything is written; the bytes go into a
+   * new temp file in the same folder (`O_EXCL | O_NOFOLLOW`, exactly `mode`, fsync'd); that is moved onto the name
+   * (`exclusive`: by `link(2)`, losing reports `exists`; otherwise by rename); and the folder is synced last. The temp
+   * name is never left behind, and a name this call did not create is never removed. Every step goes through the
+   * fenced, descriptor-reached folder: no link is followed.
+   */
+  publish(path: FencedPath, bytes: Uint8Array, options?: RootPublishOptions): Promise<RootPublished>;
+  /**
+   * Reads a file through one held descriptor and fsyncs THAT descriptor before answering, so the bytes returned are
+   * the bytes made durable; `undefined` only when nothing is at the name. Fenced exactly as `readBytes`; a name that
+   * is mid-publish by `link` (two names for a moment) is waited out briefly rather than refused.
+   */
+  readDurable(path: FencedPath, limitBytes?: number): Promise<RootDurableRead | undefined>;
+  /**
+   * Syncs one folder's entries, with `parent` the folder's own parent first (when that parent is still inside the root).
+   * A platform that cannot sync a directory (`EINVAL`, `ENOTSUP`, `EPERM`) is tolerated; anything else throws.
+   */
+  syncDirectory(path: FencedPath, options?: { readonly parent?: boolean }): Promise<void>;
+  /** The device and inode the NAME reaches now (the leaf never followed), or `undefined` when nothing is there. */
+  fileIdentity(path: FencedPath): Promise<RootIdentity | undefined>;
   /**
    * Brings a folder from one of THIS plugin's root handles (`source`, maybe this one) to `to` in this root: a copy
    * (each file read off the disk, never through a link: a link inside is skipped, a file with a second hard link is
@@ -869,6 +918,23 @@ export interface DaemonTimings {
 export interface PathsPort {
   /** The owner's home directory as the OS reports it (Accounts orders sign-ins by work folders under it, I184). */
   home(): string;
+  /**
+   * Read-only: whether an owner-named ABSOLUTE path is a directory, and its real path (links and platform aliases
+   * resolved). Never creates anything. A relative path, a path that does not exist and a path that is not a directory
+   * are refused with a sentence the owner can read.
+   */
+  checkDirectory(absolutePath: string): Promise<Result<CheckedDirectory, DirectoryRefusal>>;
+}
+
+/** {@link PathsPort.checkDirectory} accepted: the canonical path. */
+export interface CheckedDirectory {
+  readonly realPath: string;
+}
+
+/** {@link PathsPort.checkDirectory} refused: why, and the sentence for the person who named the path. */
+export interface DirectoryRefusal {
+  readonly reason: 'not_absolute' | 'not_a_directory';
+  readonly message: string;
 }
 
 /**

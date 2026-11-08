@@ -93,6 +93,10 @@ export function mcpFileOnly(handle: RootHandle): RootHandle {
     ensurePrivateDirectory: refuse('make a folder'),
     makeDirectory: refuse('make a folder'),
     pin: refuse('hold a folder open'),
+    publish: refuse('publish'),
+    readDurable: refuse('readDurable'),
+    syncDirectory: refuse('syncDirectory'),
+    fileIdentity: refuse('fileIdentity'),
     remove: refuse('remove'),
   };
 }
