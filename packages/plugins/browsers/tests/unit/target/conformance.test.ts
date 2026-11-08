@@ -77,7 +77,9 @@ function livePage(): InputTargetSubject {
     writes: () => [...world.sessions.values()].reduce((sum, session) => sum + session.count('Input.insertText'), 0),
   };
   return {
-    adapter: pointed(new PageInputTarget(host), { value: { kind: 'selector', selector: '#value' } }),
+    adapter: pointed(new PageInputTarget(host, () => ({ allows: async () => true })), {
+      value: { kind: 'selector', selector: '#value' },
+    }),
     unknownKey: 'nowhere',
     kind: 'page',
     live,

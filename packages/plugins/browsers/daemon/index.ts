@@ -241,6 +241,9 @@ export function buildBrowsers(
   const target = pageTarget({
     kernel,
     pages,
+    // The Browsers switch, at the one boundary every write into a page on a ferret's behalf passes (S2): read fresh per
+    // call, never captured, because the port binds after build.
+    control: () => ctx.uses.agentControl.current(),
     host: pageToolHost(tools),
     identities,
     vault,

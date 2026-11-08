@@ -1,7 +1,7 @@
 import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { GatePort } from '@ferretry/core-gate/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
-import { FerretsPort } from '@ferretry/core-ferrets/contract';
+import { AgentControlPort, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { InputTargets, VaultPort } from '@ferretry/core-vault/contract';
 import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
 import { TerminalsPort } from '@ferretry/plugin-terminals/contract';
@@ -53,8 +53,15 @@ export default definePlugin({
    * and the one reader of a ferret's own pane (Terminals), for closing the browsers left under it (D2 #19; off, none
    * is closed). Terminals uses neither Browsers nor the Warden, so this edge makes no cycle.
    * Conversation (lead ruling 2026-11-07): Off, nothing asks Browsers for the composer's `%browser` menu.
+   * Agent control (core Ferrets, bound by the kernel): the owner's "What agents may control" switches, read on every tool call;
+   * unbound, every agent act of a kind is refused (fail closed).
    */
-  uses: { ferrets: FerretsPort, terminals: TerminalsPort, conversation: ConversationPort },
+  uses: {
+    ferrets: FerretsPort,
+    agentControl: AgentControlPort,
+    terminals: TerminalsPort,
+    conversation: ConversationPort,
+  },
   /**
    * The Vault: input requests raised from a page (`browser_request_input`), and what a ferret did to a page and where
    * page scripts ran, told to its sign-in lock (lead DECISIONS-2 #5, I98–I100).

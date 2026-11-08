@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import type { InputTargetFacts } from '@ferretry/core-vault/contract';
-import type { FerretId } from '@ferretry/kernel/contract';
+import type { AgentControlReader, FerretId } from '@ferretry/kernel/contract';
 import should from 'should';
 import { type PageInputHost, PageInputTarget, throwawayValue } from '../../../daemon/target/adapter.ts';
 import type {
@@ -9,6 +9,9 @@ import type {
   BrowserInputObservation,
   BrowserInputOutcome,
 } from '../../../daemon/target/lib/contracts.ts';
+
+/** The owner's "What agents may control" switches with every kind on (the fixture default). */
+const ALL_ON = (): AgentControlReader => ({ allows: async () => true });
 
 /** A ferret's pages are asked for by the ferret's id. */
 const S1 = 's1' as FerretId;
@@ -130,7 +133,7 @@ function host(
     },
   };
   return {
-    target: new PageInputTarget(pages),
+    target: new PageInputTarget(pages, ALL_ON),
     calls,
     answer: (next: BrowserInputOutcome | Error) => {
       outcome = next;
@@ -309,6 +312,7 @@ describe('PageInputTarget.pushNumber', () => {
           return READ;
         },
       }),
+      ALL_ON,
     );
 
     // Act
@@ -321,14 +325,15 @@ describe('PageInputTarget.pushNumber', () => {
 
   it('should answer nothing from a browser that cannot read one, a page that is not the session’s, or a failed read', async () => {
     // Arrange
-    const unable = new PageInputTarget(pages({}));
-    const missing = new PageInputTarget(pages({ pushNumberRead: async () => READ }, true));
+    const unable = new PageInputTarget(pages({}), ALL_ON);
+    const missing = new PageInputTarget(pages({ pushNumberRead: async () => READ }, true), ALL_ON);
     const failing = new PageInputTarget(
       pages({
         pushNumberRead: async () => {
           throw new Error('the worker went away');
         },
       }),
+      ALL_ON,
     );
 
     // Act + Assert

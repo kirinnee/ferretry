@@ -21,7 +21,7 @@ import {
   type InputTargetSubject,
   type LiveInputTarget,
 } from '@ferretry/core-vault/contract/testing';
-import type { FerretId, HostFactsPort } from '@ferretry/kernel/contract';
+import type { AgentControlReader, FerretId, HostFactsPort } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost, type TestHostOptions } from '@ferretry/kernel/testing';
 import type { ReferenceCatalogProvider } from '@ferretry/plugin-conversation/contract';
@@ -38,6 +38,9 @@ import manifest from '../../../manifest.ts';
  */
 
 export const FERRET = 'f-hadi' as FerretId;
+
+/** The owner's "What agents may control" switches with every kind on: the fixture default (a test names its own). */
+export const ALL_ON: AgentControlReader = { allows: async () => true };
 export const SECRET = 'hunter2';
 
 /** Terminals as a ferret's tools see them: a screen per terminal, and every byte typed into one. */
@@ -179,6 +182,8 @@ export interface Half {
 export interface HalfHost {
   readonly hostFacts?: HostFactsPort;
   readonly spawn?: TestHostOptions['spawn'];
+  /** "What agents may control" as core's `AgentControlPort` answers it; `null` leaves the port unbound. Default all on. */
+  readonly agentControl?: AgentControlReader | null;
 }
 
 export async function terminalsHalf(
@@ -206,6 +211,7 @@ export async function terminalsHalf(
     ...(kernelHost.spawn === undefined ? {} : { spawn: kernelHost.spawn }),
     plugins: [plugin],
     fakes: { ferrets: fakeFerrets(known), vault: fakeVault(raised) },
+    uses: kernelHost.agentControl === null ? {} : { agentControl: kernelHost.agentControl ?? ALL_ON },
     gate: new StandInAdmission(() => (caller === 'ferret' ? ferretStanding(FERRET) : ownerStanding())),
     holds: holds.holds,
     redaction,
