@@ -30,7 +30,7 @@ export interface WardenRemedyHost {
   readonly noticeUndelivered?: (ferret: string, reason: string) => void;
 }
 
-/** Ferrets ANSWERED that it would not start the ferret: nothing was started. */
+/** Ferrets ANSWERED that it would not start the ferret, before it committed a relaunch: nothing was started. */
 class ResumeRefused extends Error {}
 
 /** The reason the Warden's restart gives Ferrets for the stop half of it (today's restart recorded the Warden). */
@@ -95,7 +95,14 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
         relaunched = disposition === 'relaunching';
       },
     });
-    if (!resumed.ok) throw new ResumeRefused(`${what} refused: ${resumed.error.reason}`);
+    if (!resumed.ok) {
+      // Ferrets said `relaunching` only once the record was `starting`: a no AFTER that (the launch, or the pointer to
+      // its turn, did not land) is not "nothing started", so it is a plain error the auto-revive counts as a revive
+      // (cooldown, `crash_repeat`, the breaker), as today counted a relaunch whose pointer failed. Only a no before
+      // the relaunch was committed is Ferrets' refusal.
+      if (relaunched === true) throw new Error(`${what} relaunched the ferret, then failed: ${resumed.error.reason}`);
+      throw new ResumeRefused(`${what} refused: ${resumed.error.reason}`);
+    }
     // Ferrets that cannot say what it did (a port without `decided`) is read as a relaunch: the notice is then not typed
     // a second time, and a running ferret's notice goes undelivered rather than twice.
     if (message === undefined || relaunched !== false) return undefined;
@@ -173,7 +180,7 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
     resume: async (ferret, message) => {
       // Fail closed: once Ferrets was asked to start the ferret, anything but its own refusal counts as a revive, so
       // the cooldown, `crash_repeat` and the breaker apply to it. Only the guard (before the call) or a refusal
-      // Ferrets answered leaves nothing started.
+      // Ferrets answered before it committed a relaunch leaves nothing started.
       let asked = false;
       try {
         await authorize(ferret);

@@ -92,6 +92,21 @@ export interface CommandInputs {
   readonly hasMcp: boolean;
   /** The conversation id: assigned at a start (Claude takes `--session-id`), named at a resume. */
   readonly conversation: { readonly kind: 'new' | 'resume'; readonly id: string };
+  /** The absolute folders Ferrets lets this ferret read without asking (`LaunchSpec.readable`). */
+  readonly readable?: readonly string[] | undefined;
+}
+
+/**
+ * What lets the agent open the folders it is pointed into to read what it was sent WITHOUT ASKING, and lets it do
+ * nothing else there (today's `handoffReadArguments`, copied). Every one of them is outside the agent's working folder,
+ * so Claude Code asks before reading a turn document or an attached image (in `default` and `acceptEdits`; `auto` hands
+ * it to its classifier), which stops an agent at its first turn to ask permission to read it. A `Read(…)` allow rule
+ * answers read checks only: Claude never derives a write from it, unlike `--add-dir`. The `//` prefix is Claude's
+ * spelling of an absolute path (a single `/` is relative to the settings file), and the `=` form keeps the variadic
+ * flag from swallowing the arguments after it. A folder that is not absolute is never allowed.
+ */
+export function readAllowArguments(folders: readonly string[]): readonly string[] {
+  return folders.filter(folder => folder.startsWith('/')).map(folder => `--allowedTools=Read(/${folder}/**)`);
 }
 
 /**
@@ -116,6 +131,7 @@ function claudeCommand(inputs: CommandInputs): readonly string[] {
     ...(inputs.hasMcp ? ['--mcp-config', `${inputs.home}/${HOME_FILES.mcp}`] : []),
     inputs.conversation.kind === 'new' ? '--session-id' : '--resume',
     inputs.conversation.id,
+    ...readAllowArguments(inputs.readable ?? []),
     ...(inputs.model === undefined ? [] : startupModelArguments(inputs.model)),
   ];
 }

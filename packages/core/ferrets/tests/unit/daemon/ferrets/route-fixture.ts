@@ -8,7 +8,8 @@ import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { FerretFiles, type FerretId, type FerretRecord, Harnesses, Runners } from '../../../../contract/index.ts';
 import { type FakeHarness, type FakeRunner, ferretId, T0 } from '../../../../contract/testing/index.ts';
-import ferrets from '../../../../daemon/index.ts';
+import ferrets, { ferretsDaemon } from '../../../../daemon/index.ts';
+import type { HelperAdmission } from '../../../../daemon/lib/ferrets/helper-admission.ts';
 
 /** Who calls: the `x-test-caller` header names a ferret (`ferret:<id>`), else the owner at the machine. */
 const callerHeader = 'x-test-caller';
@@ -71,12 +72,14 @@ export async function host(
     readonly pinner?: Parameters<typeof testHost>[0]['pinner'];
     /** Answers the Git the file browser runs. */
     readonly spawn?: Parameters<typeof testHost>[0]['spawn'];
+    /** The definite helper admission Ferrets is built with; absent, the unbound one (503). */
+    readonly helperAdmission?: HelperAdmission;
     /** More plugins on the host (a fake taker of a Ferrets hook). */
     readonly plugins?: Parameters<typeof testHost>[0]['plugins'];
   } = {},
 ): Promise<TestHost> {
   const plugins = [
-    ferrets,
+    extra.helperAdmission === undefined ? ferrets : ferretsDaemon({ helperAdmission: extra.helperAdmission }),
     ...(extra.harness === undefined ? [] : [harnessPlugin(extra.harness)]),
     ...(extra.runner === undefined ? [] : [runnerPlugin(extra.runner)]),
     ...(extra.plugins ?? []),
