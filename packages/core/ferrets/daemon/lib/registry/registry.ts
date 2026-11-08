@@ -7,6 +7,8 @@ import type {
   PackId,
 } from '../../../contract/index.ts';
 import { type FerretDetails } from '../../../contract/index.ts';
+import { sessionNameClaim } from '../names/session-names.ts';
+import type { NameClaim } from '../names/types.ts';
 
 /**
  * WHO EACH FERRET IS, in memory (§2.2): every `state/ferrets/<ferret>/ferret.json` the daemon holds, and the lineage
@@ -231,6 +233,26 @@ export class FerretRegistry {
       }
     }
     return depths;
+  }
+
+  /**
+   * The names the fleet holds, as today's `sessionNameClaim` reads them: a running ferret holds its name while it
+   * runs, a STOPPED one for the callsign window after its stop (`stateAt`), so `fy send <name>` still means it. The
+   * live half of "is this name taken" beside the ledger; {@link nameHolder} stays the running-only sentence.
+   */
+  nameClaims(): readonly NameClaim[] {
+    const claims: NameClaim[] = [];
+    for (const record of this.records.values()) {
+      const claim = sessionNameClaim({
+        id: record.id,
+        teammate: record.name,
+        createdAt: record.createdAt,
+        updatedAt: record.stateAt,
+        status: record.state === 'stopped' ? 'stopped' : 'running',
+      });
+      if (claim !== undefined) claims.push(claim);
+    }
+    return claims;
   }
 
   /** Whether a name is held by a ferret that is not stopped (a running ferret's name is not reused). */

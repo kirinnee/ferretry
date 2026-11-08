@@ -47,7 +47,6 @@
         "daemon/adapters/session/resume/file-resume-turn-store.ts",
         "daemon/adapters/session/resume/storage-resume-repository.ts",
         "daemon/lib/session/health/watched-panes.ts",
-        "daemon/adapters/names/file-system-callsign-counters.ts",
         "daemon/lib/session/events/index.ts",
         "daemon/lib/session/events/service.ts",
         "daemon/lib/session/peers/reads.ts",
