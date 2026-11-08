@@ -163,3 +163,26 @@ describe('EphemeralValues when a session ends', () => {
     should(values.scrubAll('sealed-value')).equal('sealed-value');
   });
 });
+
+describe('EphemeralValues coverage by position', () => {
+  it('should say where any session’s held value sits in a text, by position and never by value', () => {
+    const values = build();
+    values.hold('s1', 'abc', 'A1');
+    values.hold('s2', 'xyz', 'A2');
+
+    should(values.coverAll('abc and xyz and abc')).eql([
+      { start: 0, end: 3 },
+      { start: 8, end: 11 },
+      { start: 16, end: 19 },
+    ]);
+    should(values.coverAll('nothing held here')).eql([]);
+  });
+
+  it('should stop covering a value once its window has ended', () => {
+    const values = build();
+    values.hold('s1', 'gone-soon', 'A1', 5);
+    clock.ms += 6_000;
+
+    should(values.coverAll('gone-soon')).eql([]);
+  });
+});
