@@ -175,6 +175,12 @@ export function openChildEnvironments(base: SpawnPort, opener: () => ChildEnviro
   };
 }
 
+/** How a plugin's lifecycle ends the grants of its workers: `onStop` registers, `stopping` refuses a late start. */
+export interface WorkerGrantEnding {
+  onStop(fn: () => void): void;
+  stopping(): boolean;
+}
+
 /**
  * Workers for one plugin: each `state` grant is resolved by that plugin's own state port (declared, sqlite only, in
  * its folder) and handed to the worker as `workerData`; an ungrantable one refuses the start before a thread exists.
@@ -186,6 +192,7 @@ export function workersFor(
   base: WorkersPort,
   grant: () => ((def: StateFileDef, name?: string) => { readonly path: string; readonly label: string }) | undefined,
   reach?: WorkerGrantSources,
+  ending?: WorkerGrantEnding,
 ): WorkersPort {
   return {
     start: (moduleUrl, options) => {
@@ -204,6 +211,8 @@ export function workersFor(
         };
       });
       const asked = (options?.roots?.length ?? 0) > 0 || options?.network !== undefined;
+      if (asked && ending?.stopping() === true)
+        throw new TypeError('this plugin has stopped, so it cannot start a worker with grants');
       if (asked && reach === undefined) throw new TypeError('this plugin has no roots or network to grant a worker');
       const served =
         reach === undefined
@@ -230,8 +239,13 @@ export function workersFor(
         served.close();
         throw error;
       }
-      // The channel lives and dies with the thread: a dead worker's requests are not answered.
+      // The channel lives and dies with the thread: a dead worker's requests are not answered. It also ends with the
+      // plugin: a plugin that failed or stopped keeps no grant, and its thread is ended with it.
       handle.onExit(() => served.close());
+      ending?.onStop(() => {
+        served.close();
+        void Promise.resolve(handle.terminate()).catch(() => undefined);
+      });
       return {
         ...handle,
         terminate: async () => {

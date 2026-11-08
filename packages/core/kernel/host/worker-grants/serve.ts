@@ -6,6 +6,8 @@ import { RootError } from '../roots.ts';
 import {
   MAX_GRANT_BODY_BYTES,
   MAX_GRANT_IN_FLIGHT,
+  MAX_GRANT_REFUSALS_PER_WINDOW,
+  GRANT_REFUSAL_WINDOW_MS,
   type WorkerFetchAnswer,
   type WorkerFetchInit,
   type WorkerGrantResponse,
@@ -22,6 +24,10 @@ export interface WorkerGrantSources {
   readonly declaresNetwork: boolean;
   /** The manifest's own host check (`hostPermitted`), asked with the hostname and the `host:port`. */
   readonly mayReach: (hostname: string, host: string) => boolean;
+  /** Milliseconds from a monotonic clock, for the refusal window. Absent, the bound counts for the channel's whole life. */
+  readonly nowMs?: () => number;
+  /** Told once, with the plugin id, when a channel was closed for flooding the main thread with refused requests. */
+  readonly flooded?: (plugin: string) => void;
 }
 
 export interface WorkerGrantRequestOptions {
@@ -61,6 +67,8 @@ const Envelope = z.discriminatedUnion('kind', [
           .array(z.tuple([z.string().max(256), z.string().max(16384)]))
           .max(128)
           .optional(),
+        // The size is judged after the parse (`too_large`, below): structured clone has already copied the bytes
+        // into the main heap, so the cap bounds what is FORWARDED, not what was received.
         body: z.union([z.string(), z.instanceof(Uint8Array)]).optional(),
       })
       .strict()
@@ -78,6 +86,11 @@ class Refused extends Error {
     super(message);
   }
 }
+
+/** The request header a worker may not set: a shared front routes by it, so it could name a host the manifest never did. */
+const FORBIDDEN_HEADERS: ReadonlySet<string> = new Set(['host']);
+const bodyBytes = (body: string | Uint8Array): number =>
+  typeof body === 'string' ? Buffer.byteLength(body) : body.byteLength;
 
 const NO_BODY_STATUS: ReadonlySet<number> = new Set([101, 204, 205, 304]);
 const HOST = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?$/;
@@ -176,11 +189,35 @@ export function serveWorkerGrants(
   const channel = new MessageChannel();
   const inFlight = new Map<number, AbortController>();
   let open = true;
+  const close = (): void => {
+    open = false;
+    for (const controller of inFlight.values()) controller.abort();
+    inFlight.clear();
+    channel.port1.close();
+  };
+
+  let windowStart = 0;
+  let refusals = 0;
+  /** Counts one refused request; past the bound in one window the channel ends, so a flood costs the main thread no more. */
+  const tally = (): void => {
+    const at = sources.nowMs?.() ?? 0;
+    if (at - windowStart >= GRANT_REFUSAL_WINDOW_MS) {
+      windowStart = at;
+      refusals = 0;
+    }
+    refusals += 1;
+    if (refusals > MAX_GRANT_REFUSALS_PER_WINDOW && open) {
+      close();
+      sources.flooded?.(sources.plugin);
+    }
+  };
 
   const reply = (response: WorkerGrantResponse): void => {
     if (open) channel.port1.postMessage(response);
   };
   const refuse = (id: number, refusal: string, message: string): undefined => {
+    if (!open) return undefined;
+    tally();
     reply({ id, ok: false, refusal, message });
     return undefined;
   };
@@ -188,6 +225,10 @@ export function serveWorkerGrants(
   const rootCall = async (root: string, call: z.infer<typeof RootCall>): Promise<unknown> => {
     const handle = handles.get(root);
     if (handle === undefined) throw new Refused('not_granted', `the ${root} root was not granted to this worker`);
+    // Paths are relative to the granted root. An absolute one would answer yes or no to a guess at where the root is.
+    const asked = call.args[0];
+    if (asked.startsWith('/') || asked.startsWith('\\') || asked.includes('\0'))
+      throw new Refused('outside', `the path is not inside the ${root} root`);
     const resolved = handle.resolve(call.args[0]);
     if (!resolved.ok) throw new Refused(resolved.error, `the path is not inside the ${root} root`);
     const path = resolved.value;
@@ -218,9 +259,16 @@ export function serveWorkerGrants(
       } catch {
         throw new Refused('malformed', 'the address is malformed');
       }
-      if (!network.has(parsed.hostname.toLowerCase()) && !network.has(parsed.host.toLowerCase()))
-        throw new Refused('not_granted', `${parsed.hostname} was not granted to this worker`);
+      // A grant that names a port is that port only; one that does not is the scheme's default port only.
+      const reached =
+        network.has(parsed.host.toLowerCase()) || (parsed.port === '' && network.has(parsed.hostname.toLowerCase()));
+      if (!reached) throw new Refused('not_granted', `${parsed.hostname} was not granted to this worker`);
     }
+    for (const [name] of init?.headers ?? [])
+      if (FORBIDDEN_HEADERS.has(name.toLowerCase()))
+        throw new Refused('malformed', 'a worker may not set that request header');
+    if (init?.body !== undefined && bodyBytes(init.body) > MAX_GRANT_BODY_BYTES)
+      throw new Refused('too_large', 'the request body was larger than a worker may send');
     const controller = new AbortController();
     inFlight.set(id, controller);
     try {
@@ -283,11 +331,6 @@ export function serveWorkerGrants(
   return {
     data: { port: channel.port2, roots: [...handles.keys()], network: network !== undefined },
     transfer: [channel.port2],
-    close: () => {
-      open = false;
-      for (const controller of inFlight.values()) controller.abort();
-      inFlight.clear();
-      channel.port1.close();
-    },
+    close,
   };
 }

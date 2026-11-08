@@ -1,7 +1,7 @@
 /**
  * What crosses between a worker thread and the main thread for a worker's granted roots and network: ONE dedicated
  * `MessageChannel` the kernel makes at start (its far end goes in `workerData`, never the plugin's own handle).
- * Shapes only, no dependencies, so the worker bundle carries nothing it does not need. The main thread validates
+ * It is a grant channel, not a sandbox: the worker is an in-process thread (see `../../worker.ts`). Shapes only, no dependencies, so the worker bundle carries nothing it does not need. The main thread validates
  * every request (`serve.ts`); the worker side (`../../worker.ts`) only builds them.
  */
 
@@ -18,6 +18,9 @@ export interface WorkerGrantsData {
 /** The most one fetched body, one in-flight request set and one request body may be. */
 export const MAX_GRANT_BODY_BYTES = 8 * 1024 * 1024;
 export const MAX_GRANT_IN_FLIGHT = 32;
+/** More refused requests than this in one window end the channel: a worker that floods it is not asking for anything. */
+export const MAX_GRANT_REFUSALS_PER_WINDOW = 1000;
+export const GRANT_REFUSAL_WINDOW_MS = 1000;
 
 export interface WorkerFetchInit {
   readonly method?: string;

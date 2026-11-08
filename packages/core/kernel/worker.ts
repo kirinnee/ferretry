@@ -3,8 +3,13 @@
  * granted at `kernel.workers.start(url, { state })`. The kernel resolved each inside the plugin's state folder on the
  * main thread; the worker can open those and nothing else, with the same format check, WAL and mode as the main
  * thread's `kernel.state.sqlite`. It also holds what the half granted of the plugin's roots (READ-ONLY) and network:
- * `rootPort(id)` and `fetchPort()` work only with a grant handed at start, and a worker can never widen it — every
- * read and request is served, and judged, by the main thread.
+ * `rootPort(id)` and `fetchPort()` work only with a grant handed at start, and a worker can never widen it THROUGH
+ * THE GRANT CHANNEL — every read and request is served, and judged, by the main thread.
+ *
+ * GAP: the grants bound what a worker gets through these ports; the thread itself is in-process and is NOT a
+ * sandbox (same as the sqlite `state` grant). It can still import `node:fs`, call the global `fetch` or start its
+ * own `Worker`. The boundary for plugin code is the repo's lints (`banned-globals`, `fetch-binding`,
+ * `no-sync-io`) and the worker bundle diet test. Grants end when the plugin fails or stops.
  */
 import { workerData } from 'node:worker_threads';
 import type { StateFileDef } from './contract/define.ts';
