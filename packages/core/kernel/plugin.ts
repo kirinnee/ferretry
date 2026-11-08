@@ -58,7 +58,7 @@ export default definePlugin({
         caller: 'any',
         noStore: true,
         audit: { skip: 'a version read records nothing' },
-        guard: { none: 'the protocol number and the daemon version only' },
+        guard: { none: 'the protocol number, the daemon version and the one feature name only' },
       }),
       // Today's liveness answer, kept (parity): `fy daemon status` and supervisors wait on it.
       route('GET /healthz', {

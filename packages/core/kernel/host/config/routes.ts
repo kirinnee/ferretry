@@ -18,6 +18,7 @@ import { ApiError, errorResponse, headerValue, jsonResponse, queryValue } from '
 import type { ConfigFileIssue, ConfigFilesWriter, ConfigTarget } from '../../contract/ports.ts';
 import type { RouteHandler } from '../../contract/route.ts';
 import { currentActor, currentStanding } from '../call-scope.ts';
+import { countProblems } from './check.ts';
 import { type ConfigDeclaration, targetOfPath } from './claims.ts';
 import { schemaFileName, schemaModeline } from './schemas.ts';
 
@@ -177,9 +178,11 @@ export function configRoutes(sources: ConfigRouteSources): Readonly<{
           if (outcome.reason === 'not_declared' || outcome.reason === 'bad_name')
             return unresolved(request.path, 'invalid_request');
           const issues = issuesOf(outcome.issues);
+          // At most MAX_CONFIG_ISSUES are listed, and one more sentence counts the rest: the count said is every one.
+          const count = countProblems(issues);
           return jsonResponse(
             {
-              error: `the file does not check (${String(issues.length)} ${issues.length === 1 ? 'problem' : 'problems'}); nothing was written`,
+              error: `the file does not check (${String(count)} ${count === 1 ? 'problem' : 'problems'}); nothing was written`,
               code: CONFIG_INVALID_CODE,
               issues,
             },

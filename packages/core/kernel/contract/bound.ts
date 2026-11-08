@@ -84,7 +84,9 @@ export interface Admission<Standing extends object = CallStanding, Member extend
    * Told after every handler of a descriptor that has `audit: { record }`, once per call, with the final status —
    * the handler's own refusals (an `ApiError`) and failures included, as today's audited-route decorator recorded
    * every outcome of the handler. A call admission refused, or a plugin not serving, never reached a handler and is
-   * not told (today: "a request the authorization boundary refuses before the handler runs is not recorded").
+   * not told (today: "a request the authorization boundary refuses before the handler runs is not recorded"). One
+   * exception, today's too: `POST /v1/agent/config` admits its own caller inside its handler, so the kernel tells Gate
+   * of that refusal, with no standing.
    * Never changes the answer; a throw is swallowed.
    */
   recorded?(call: RecordedCall): void;

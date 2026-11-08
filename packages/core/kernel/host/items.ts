@@ -1,7 +1,7 @@
-import { parse as parseYaml } from 'yaml';
 import type { ItemKind } from '../manifest/types.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import type { ItemReach, ItemReachOf } from './permissions.ts';
+import { readConfigText } from './config/yaml-text.ts';
 
 /** One installed data plugin's items, as `loadDataPlugins` accepted them. */
 export interface InstalledItems {
@@ -71,7 +71,11 @@ export async function installedItemReach(
         if (!resolved.startsWith(`${root}/`)) continue;
         const info = await fs.lstat(path);
         if (info?.kind !== 'file' || info.size > ITEM_FILE_MAX_BYTES) continue;
-        value = parseYaml(await fs.readText(resolved));
+        // The kernel's own bounded reader (alias budget, no YAML 1.1 tags, duplicate keys refused): a file that does
+        // not read names nothing, as one that did not parse always did.
+        const read = readConfigText(await fs.readText(resolved));
+        if (!read.ok) continue;
+        value = read.read.value;
       } catch {
         continue;
       }
