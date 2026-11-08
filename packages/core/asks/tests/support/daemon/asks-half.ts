@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeGate, ownerStanding } from '@ferretry/core-gate/contract/testing';
+import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import {
   ApiError,
   type ApiRequest,
@@ -17,6 +18,16 @@ import { testArrival, fixedClock, owner } from '@ferretry/kernel/testing';
 import asksDaemon from '../../../daemon/index.ts';
 import manifest from '../../../manifest.ts';
 import { asksStateAt } from './agenda-state.ts';
+
+/**
+ * What the kernel hands a route about its caller's grants: a paired device holds every grant unless the case says
+ * otherwise, and anyone else is ungoverned.
+ */
+const governanceOf = (standing: CallStanding, governance?: CallerGovernance): { governance?: CallerGovernance } => {
+  if (governance !== undefined) return { governance };
+  if (standing.credential?.tokenClass !== 'device') return {};
+  return { governance: { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) } };
+};
 
 /** What a handler answered, as a client reads it. */
 export interface Answered {
@@ -128,6 +139,7 @@ export async function asksHalf(
       params: Readonly<Record<string, string>>,
       body?: unknown,
       standing: CallStanding = ownerStanding(),
+      governance?: CallerGovernance,
     ): Promise<Answered> {
       const handler = half.routes[key];
       if (handler === undefined) throw new Error(`no handler for ${key}`);
@@ -143,7 +155,12 @@ export async function asksHalf(
       let status: number;
       let text: string;
       try {
-        const response = await handler({ request, params: new Map(Object.entries(params)), ...standing });
+        const response = await handler({
+          request,
+          params: new Map(Object.entries(params)),
+          ...standing,
+          ...governanceOf(standing, governance),
+        });
         status = response.status;
         text = response.body;
       } catch (error) {
