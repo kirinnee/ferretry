@@ -534,8 +534,6 @@ const MAX_LOGIN_ENTRIES = 256;
  */
 export const LOGIN_PASSWORD_MIN_LENGTH = MIN_SECRET_VALUE_LENGTH;
 
-const LOGIN_PASSWORD_MAX_LENGTH = 1_024;
-
 /**
  * What an entry is for, as the daemon names a target: `program@host` for a terminal (`sudo@kirin-box`,
  * `ssh@build.example.com`), or a web host for a page (`github.com`, `localhost:8443`). Lowercase. The DAEMON
@@ -553,22 +551,8 @@ type LoginMatch = z.infer<typeof LoginMatchSchema>;
 
 export type LoginFieldRole = z.infer<typeof LoginFieldRoleSchema>;
 
-/**
- * THE SENTENCE the owner reads before a 2FA key is SAVED, in the app, the CLI and the docs. It is the
- * reason TOTP is off by default and opted into per entry. It is about keeping the key, never about a fill: a ticked
- * code on a plan line or a standing rule says {@link AUTOMATED_CODE_WARNING}.
- */
-const LOGIN_TOTP_WARNING =
-  "Keeping the password and the 2FA key in the same place means one compromise of this machine's vault defeats both factors.";
-
 /** Most 2FA keys of one account that hold a seed: a re-enrolled second authenticator, a backup app. */
 const MAX_SEEDS_PER_ACCOUNT = 4;
-
-/** A base32 TOTP seed, as authenticator setup pages show it (spaces and `=` padding allowed). */
-const TotpSeedSchema = z
-  .string()
-  .transform(seed => seed.replaceAll(/[\s=-]/gu, '').toUpperCase())
-  .pipe(z.string().regex(/^[A-Z2-7]{16,128}$/u, 'a base32 2FA key of 16 to 128 characters'));
 
 /**
  * WHERE THE SIGN-IN HAPPENS: a web host, exactly as a page's origin names it (`app.vercel.com`,
@@ -597,15 +581,6 @@ const LoginMethodKindSchema = z.enum(LOGIN_METHODS);
 type LoginMethodKind = z.infer<typeof LoginMethodKindSchema>;
 
 const LOGIN_SSO_NAME_MAX_LENGTH = 40;
-
-/** Words that name a passkey or a hardware authenticator: never a saved login's method. */
-const PASSKEY_WORDS =
-  /pass\s*-?\s*key|web\s*-?\s*authn|fido|u2f|security\s*-?\s*key|hardware\s*-?\s*key|yubi\s*-?\s*key/iu;
-
-/** Whether a sign-in method's name means a passkey: a change that says one is refused. */
-const namesPasskey = (text: string): boolean => PASSKEY_WORDS.test(text);
-
-const PASSKEYS_OFF = 'passkeys are off: a saved login signs in with a password or a provider';
 
 /**
  * What is wrong with a method, as issues: an SSO method names its provider, only SSO does, and a password sign-in
@@ -641,22 +616,6 @@ const LoginMethodSchema = z
     for (const issue of loginMethodIssues(method.kind, method.name, method.via, 'via'))
       context.addIssue({ code: 'custom', ...issue });
   });
-
-/**
- * A method as a CHANGE sends it: {@link LoginMethodSchema}, and an SSO name that says passkey is refused. Only a
- * write is judged by the word list, so a list that grows later never makes an entry already stored unreadable.
- */
-const LoginMethodChangeSchema = LoginMethodSchema.refine(
-  method => method.name === undefined || !namesPasskey(method.name),
-  { path: ['name'], message: PASSKEYS_OFF },
-);
-
-/** A password as a write sends it: no control character or line break, which would press keys. */
-const LoginPasswordSchema = z
-  .string()
-  .min(LOGIN_PASSWORD_MIN_LENGTH)
-  .max(LOGIN_PASSWORD_MAX_LENGTH)
-  .regex(/^[^\p{Cc}]*$/u, 'a password with a control character or line break would press keys');
 
 // ─── from login-recipes.ts ───
 
@@ -715,35 +674,6 @@ const LoginRecipeSchema = z
   );
 
 // ─── from login-entries.ts ───
-
-/**
- * `PUT /v1/secrets/logins/:id`: create the entry, or change the parts named. A field left out is kept;
- * `null` removes it. Values travel IN only. Adding a seed needs `totpAcknowledged: true`, which the
- * client sends only after showing {@link LOGIN_TOTP_WARNING}.
- */
-const PutLoginEntryRequestSchema = z
-  .strictObject({
-    label: oneLine(LOGIN_LABEL_MAX_LENGTH).optional(),
-    match: z.array(LoginMatchSchema).max(LOGIN_MATCH_MAX).optional(),
-    /** The whole method, replaced: `{ kind: 'password' }` goes back to a password sign-in. */
-    method: LoginMethodChangeSchema.optional(),
-    domains: z.array(LoginDomainSchema).max(LOGIN_MATCH_MAX).optional(),
-    username: oneLine(LOGIN_USERNAME_MAX_LENGTH).nullable().optional(),
-    password: LoginPasswordSchema.nullable().optional(),
-    totp: z.strictObject({ seed: TotpSeedSchema, parameters: TotpParametersSchema.optional() }).nullable().optional(),
-    totpAcknowledged: z.literal(true).optional(),
-    /** The recipe, replaced whole; `null` removes it. A text holding any saved or vault value is refused. */
-    recipe: LoginRecipeSchema.nullable().optional(),
-    autoApplyRecipe: z.boolean().optional(),
-  })
-  .superRefine((body, context) => {
-    if (body.totp !== undefined && body.totp !== null && body.totpAcknowledged !== true)
-      context.addIssue({
-        code: 'custom',
-        path: ['totpAcknowledged'],
-        message: `confirm the warning first: ${LOGIN_TOTP_WARNING}`,
-      });
-  });
 
 /**
  * Why a card's primary offer is first (accounts.ts `chosenSignIn`): the ferret named it, a project, folder or
