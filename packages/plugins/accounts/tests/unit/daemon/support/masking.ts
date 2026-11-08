@@ -4,7 +4,7 @@
  * TODO(contract): a Vault `contract/testing` fake of `CopyMasking`.
  */
 import { COPY_AFTER_MASK_SECONDS, COPY_MAX_LIFETIME_SECONDS } from '../../../../contract/routes/index.ts';
-import type { CopyMasking } from '../../../../daemon/lib/index.ts';
+import type { CopyMasking } from '../../../../daemon/lib/secure-copy/ports.ts';
 
 const MIN_MASKED_LENGTH = 1;
 const MAX_COPY_MASK_MS = (COPY_MAX_LIFETIME_SECONDS + COPY_AFTER_MASK_SECONDS) * 1000;

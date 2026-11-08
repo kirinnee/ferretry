@@ -16,6 +16,7 @@
 import { type Brand, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
+import { malformedSecretReference } from '@ferretry/core-vault/contract';
 
 const HarnessKindSchema = HarnessKeySchema;
 const NonEmpty = z.string().min(1);
@@ -444,6 +445,51 @@ export type LoginCheckRequest = z.infer<typeof LoginCheckRequestSchema>;
 // what was previewed. The seven intents are the ones a person makes of a single login; a runtime's switch or removal
 // along with it (today's `switchRuntimes`/`removeRuntimes`) is Runtimes' to carry out before it asks for the removal.
 
+const EnvNameSchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/u, 'a POSIX environment variable name');
+
+/**
+ * Variables a login's environment may never set, because Ferretry sets them and a second writer would lie. The first
+ * three bind a harness to the configuration directory Ferretry derives from the runtime; `CLAUDE_SECURESTORAGE_CONFIG_DIR`
+ * binds a Claude runtime to its credential, so a value set here could point a runtime at another login's store.
+ */
+export const RESERVED_LOGIN_ENV_NAMES = [
+  'CLAUDE_CONFIG_DIR',
+  'CODEX_HOME',
+  'CODEX_SQLITE_HOME',
+  'CLAUDE_SECURESTORAGE_CONFIG_DIR',
+] as const;
+
+/**
+ * The one check every login environment passes, wherever it is written (a login file, a harness half, `login.add`,
+ * `login.env`): no reserved variable, and no malformed `${secret:…}` reference (which would be exported as literal
+ * text and fail as a credential with no visible cause). A refusal names the KEY only, never the value.
+ */
+const refuseUnsafeEnvironment = (ctx: {
+  readonly value: Readonly<Record<string, unknown>>;
+  readonly issues: z.core.$ZodRawIssue[];
+}): void => {
+  for (const [name, value] of Object.entries(ctx.value)) {
+    if ((RESERVED_LOGIN_ENV_NAMES as readonly string[]).includes(name)) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `"${name}" is reserved: Ferretry sets it for the runtime itself`,
+        input: name,
+        path: [name],
+      });
+    } else if (typeof value === 'string' && malformedSecretReference(value) !== undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `"${name}" holds a malformed secret reference: a secret name is uppercase letters, digits and underscores, as in \${secret:WORK_KEY}`,
+        input: name,
+        path: [name],
+      });
+    }
+  }
+};
+
+/** A login's environment: POSIX names, plain values or `${secret:NAME}` references, no reserved variable. */
+export const LoginEnvSchema = z.record(EnvNameSchema, z.string()).check(refuseUnsafeEnvironment);
+
 const ChangeLabelSchema = NonEmptyStringSchema.max(200);
 
 export const LoginChangeSchema = z.discriminatedUnion('kind', [
@@ -458,7 +504,7 @@ export const LoginChangeSchema = z.discriminatedUnion('kind', [
     /** `store: environment` only: the preset it is made from. */
     preset: NonEmptyStringSchema.max(64).optional(),
     /** `store: environment` only: each variable as a plain value or a `${secret:NAME}` reference. */
-    env: z.record(z.string().max(128), z.string().max(4096)).optional(),
+    env: z.record(z.string().max(128), z.string().max(4096)).check(refuseUnsafeEnvironment).optional(),
     /** `store: environment` only: `aws-profile:<name>`, `gcloud-adc[:<path>]` or `azure-cli`. */
     cloudCredential: NonEmptyStringSchema.max(512).optional(),
   }),
@@ -470,7 +516,9 @@ export const LoginChangeSchema = z.discriminatedUnion('kind', [
      */
     kind: z.literal('login.env'),
     id: NonEmptyStringSchema,
-    env: z.record(z.string().max(128), z.union([z.string().max(4096), z.strictObject({ keep: z.literal(true) })])),
+    env: z
+      .record(z.string().max(128), z.union([z.string().max(4096), z.strictObject({ keep: z.literal(true) })]))
+      .check(refuseUnsafeEnvironment),
     cloudCredential: NonEmptyStringSchema.max(512).nullable().optional(),
   }),
   z.strictObject({ kind: z.literal('login.label'), id: NonEmptyStringSchema, label: ChangeLabelSchema.nullable() }),
@@ -1036,7 +1084,6 @@ export type LocalModels = z.infer<typeof LocalModelsSchema>;
 
 const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/u;
 const Text = z.string().min(1).max(600);
-const EnvNameSchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/u, 'a POSIX environment variable name');
 
 /** A login's id: the file name under `logins/`. Same grammar as {@link LoginIdSchema}. */
 export const LOGIN_NAME = /^[a-z0-9][a-z0-9-]*$/u;
@@ -1095,7 +1142,7 @@ export const CloudCredentialReferenceSchema = z
 
 /** One harness's half of an environment login. */
 export const LoginHalfSchema = z.strictObject({
-  env: z.record(EnvNameSchema, z.string()).default({}),
+  env: LoginEnvSchema.default({}),
   codexProvider: CodexProviderSchema.optional(),
 });
 
@@ -1112,7 +1159,7 @@ export const LoginFileSchema = z.strictObject({
   clonedFromKey: z.string().min(1).optional(),
   disabled: LoginDisabledFileSchema.optional(),
   budget: BudgetSchema.optional(),
-  env: z.record(EnvNameSchema, z.string()).optional(),
+  env: LoginEnvSchema.optional(),
   preset: z.string().min(1).max(64).optional(),
   cloudCredential: CloudCredentialReferenceSchema.optional(),
   codexProvider: CodexProviderSchema.optional(),

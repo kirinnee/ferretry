@@ -63,6 +63,8 @@ export const PhoneApprovalRaiseSchema = z
     path: ['element'],
     message: 'only a page has an element that shows a number',
   });
+/** @public I196 the raise shape the guarantee test parses: no prompt, message, label or number field, and an extra field is refused */
+export type PhoneApprovalRaise = z.infer<typeof PhoneApprovalRaiseSchema>;
 
 /**
  * Where a number the daemon read came from: a provider's own sign-in page. `pointed` (the element a ferret pointed at)
@@ -211,6 +213,8 @@ export const PhoneApprovalAgentViewSchema = z
     path: ['secondFactor'],
     message: 'a push is known only once the sign-in moved on',
   });
+/** @public I195 the ferret-facing view the guarantee test checks: the number is never in it */
+export type PhoneApprovalAgentView = z.infer<typeof PhoneApprovalAgentViewSchema>;
 
 /** What a card, the agenda subject and the push say: built by {@link phoneApprovalWords}, and by nothing else. */
 export interface PhoneApprovalWords {

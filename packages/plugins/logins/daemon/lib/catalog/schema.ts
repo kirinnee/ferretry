@@ -17,7 +17,6 @@
  */
 import { AnalyticsPricingProviderSchema, AnalyticsPricingSourceUrlSchema } from './price-source.ts';
 import { z } from 'zod';
-import type { HarnessKind } from '../shared/harness.ts';
 
 const Text = z.string().min(1).max(600);
 const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/u;
@@ -38,7 +37,6 @@ const SlotValueSchema = z.string().regex(/^[A-Za-z0-9~][A-Za-z0-9._:~/@+-]{0,159
 
 /** Where a model sits in a picker: the most capable, the everyday one, the quick one. */
 const ModelTierSchema = z.enum(['best', 'balanced', 'fast']);
-export type ModelTier = z.infer<typeof ModelTierSchema>;
 
 /** A reasoning effort a CLI accepts (`/effort high`, `model_reasoning_effort = "high"`). */
 const EffortSchema = z.string().regex(/^[a-z]{2,12}$/u);
@@ -278,10 +276,6 @@ export interface ModelCatalog extends ModelCatalogFile {
   readonly id: string;
   readonly origin: 'built-in' | 'published' | 'file';
 }
-
-/** The half a runtime of `harness` reads, when the catalog has one. */
-export const catalogHalf = (catalog: ModelCatalogFile, harness: HarnessKind): CatalogHalf | undefined =>
-  catalog[harness];
 
 /** The model a half launches with when nobody names one. Present by construction. */
 export const catalogDefault = (half: CatalogHalf): CatalogModel =>

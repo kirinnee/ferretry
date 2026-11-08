@@ -875,4 +875,30 @@ const subjectOf = (entry: CredentialEntry): CredentialSubject => ({ id: entry.id
 
 // ── Passive usage ────────────────────────────────────────────────────────────────────────────────
 
+/** One session this daemon launched, as usage attribution reads it: who ran it and where it wrote. */
+interface CredentialSessionRecord {
+  /** The runtime the session was started on. */
+  readonly agent: string;
+  readonly transcript?: { readonly home: string; readonly file?: string };
+}
+
+/**
+ * The transcripts of the sessions that ran on this credential (§8.2.3): a session started on one of
+ * its runtimes. A rollout this
+ * daemon did not launch has no record, so it is never attributed: the shared pool mixes credentials.
+ * @pending logins: Codex passive usage reading is not ported (today's `daemon/src/lib/fleet-reading/service.ts:226` in rebuild-ref), so nothing attributes a rollout to the credential whose session this daemon launched (`attributedTranscripts` in `daemon/lib/credentials/credentials-service.ts`)
+ */
+export function attributedTranscripts(
+  entry: Pick<CredentialEntry, 'usedBy'>,
+  sessions: readonly CredentialSessionRecord[],
+): readonly string[] {
+  const files = new Set<string>();
+  for (const session of sessions) {
+    const file = session.transcript?.file;
+    if (file === undefined) continue;
+    if (entry.usedBy.includes(session.agent)) files.add(file);
+  }
+  return [...files].sort();
+}
+
 // ── The subsystem ────────────────────────────────────────────────────────────────────────────────

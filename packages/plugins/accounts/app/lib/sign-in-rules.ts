@@ -371,6 +371,17 @@ export const suspendableRules = (rules: readonly SignInRuleView[], signIn: SignI
 export const suspendWarning = (count: number): string =>
   `Saving this suspends ${String(count)} standing ${count === 1 ? 'rule' : 'rules'}: you approve again with a passkey.`;
 
+/** @pending accounts: the device-revoke rule-count warning ("revoking this device suspends N standing sign-in rules") needs a slot in Access's revoke-device panel */
+export const deviceRevokeWarning = (count: number): string =>
+  `${String(count)} standing ${count === 1 ? 'rule was' : 'rules were'} approved with this device’s passkey; ${count === 1 ? 'it' : 'they'} will be suspended.`;
+
+/**
+ * Rules that this paired device's passkey approved (a revoke of the device suspends them).
+ * @pending accounts: the device-revoke rule-count warning ("revoking this device suspends N standing sign-in rules") needs a slot in Access's revoke-device panel
+ */
+export const rulesApprovedWith = (rules: readonly SignInRuleView[], deviceId: string): number =>
+  rules.filter(rule => rule.approvedWith.deviceId === deviceId && rule.status !== 'suspended').length;
+
 // ── Narrowing the end, in days or hours ──────────────────────────────────────────────────────────────
 
 export type EndUnit = 'days' | 'hours';

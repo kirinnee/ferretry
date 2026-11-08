@@ -281,6 +281,23 @@ export function grantMissLineFor(note: GrantMissNote): string | undefined {
   return `Your standing rule for this sign-in didn't apply: ${words}.${after}`;
 }
 
+/**
+ * THE OWNER'S LINE for a card a pre-approval filled, by its source, with the place when it is known (`github.com`,
+ * `sudo@kirin-box`): one sentence for a plan fill's agenda history and for the owner's input card (C9). A rule fill's
+ * agenda card closes in the words a tap fill closes with, because every ferret can read every agenda (C26): this line
+ * is drawn on the owner's input card only.
+ * @public I216 the enforcer of "a filled card closes at once and is raised quiet": the owner's line for a filled card
+ */
+export function grantFilledLineFor(
+  note: { readonly by: 'plan'; readonly line: number } | { readonly by: 'rule' },
+  place?: string,
+): string {
+  const at = place === undefined || place === '' ? '' : ` on ${place}`;
+  return note.by === 'plan'
+    ? `Filled under your task plan (line ${String(note.line + 1)})${at}.`
+    : `Filled under your standing sign-in rule${at}.`;
+}
+
 /** What the FERRET is told when a plan did not fill a card: the same sentence for every reason. */
 export const TASK_PLAN_MISS_AGENT_NOTE = "Your task plan didn't cover this, so the owner was asked.";
 
@@ -398,6 +415,19 @@ export const TaskPlanCallSchema = z
       seen.add(key);
     });
   });
+
+/**
+ * A paste plan's items (`secure.preapprove`) read as task-plan paste lines: one use each, as a paste plan allowed.
+ * @pending accounts: a paste plan's pre-approval (`secure.preapprove`, today's `proposePastes`) is not ported, so nothing turns its items into task-plan paste lines (`taskPlanLinesOfCopyItems` in `contract/routes/task-plan.ts`)
+ */
+export const taskPlanLinesOfCopyItems = (items: CopyPlan['items']): readonly TaskPlanPasteAsk[] =>
+  items.map(item => ({
+    kind: 'paste',
+    from: item.from,
+    to: item.to,
+    uses: TASK_PLAN_LINE_DEFAULT_USES,
+    why: item.why,
+  }));
 
 // ── What the daemon keeps (RAM only) and the owner reads ─────────────────────────────────────────────
 
