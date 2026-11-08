@@ -393,7 +393,9 @@ export function scanFile(path: string, text: string): FileFacts {
     ({ node, parent, key }) =>
       node.type === 'Identifier' &&
       node.name === 'require' &&
-      (bound.has(node) || (declaresOnly(parent, key) && key === 'id')),
+      (bound.has(node) || (declaresOnly(parent, key) && key === 'id')) &&
+      // `const require = createRequire(import.meta.url)` declares a LOADER, not a function of the file's own.
+      !(isNode(parent) && parent.type === 'VariableDeclarator' && key === 'id' && isRequire(parent.init)),
   );
   const ownRequire = (callee: unknown): boolean => {
     const at = unwrap(callee);

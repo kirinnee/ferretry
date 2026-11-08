@@ -123,6 +123,8 @@ describe('every way past the old line matcher is found', () => {
       "import { createRequire as cr } from 'node:module';\nconst r = cr(import.meta.url);\nr('yaml');",
     'createRequire, through a namespace':
       "import * as m from 'node:module';\nm.createRequire(import.meta.url)('yaml');",
+    'a require declared as a createRequire loader and called with a run-time path':
+      "import { createRequire } from 'node:module';\nconst require = createRequire(import.meta.url);\nconst m = require(path);",
     'a name for require': "const r = require;\nr('yaml');",
     'a name for import.meta.require, of bun':
       "const r = import.meta.require;\nconst B = r('bun');\nB.YAML.parse(text);",
