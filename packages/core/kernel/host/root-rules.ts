@@ -32,13 +32,17 @@ export function takesRenames(name: RootName): boolean {
 
 /**
  * The refusal `rename` gives before any disk is asked, from the two names alone: `undefined` when both are sane. A
- * name is a string without NUL, with no `..` segment and at least one segment; the same name at both ends moves
- * nothing and is refused (`outside`) rather than reported as done.
+ * name is a string without NUL whose segments (after the one leading `/` of an absolute path) are all plain: no
+ * `..`, no `.` and none empty (`a//b`, a trailing `/`), so both hosts read the same name the same way. The same name
+ * at both ends moves nothing and is refused (`outside`) rather than reported as done.
  */
 export function renameNamesRefusal(from: string, to: string): 'outside' | undefined {
-  for (const name of [from, to])
-    if (typeof name !== 'string' || name === '' || name.includes('\0') || name.split('/').includes('..'))
-      return 'outside';
+  for (const name of [from, to]) {
+    if (typeof name !== 'string' || name === '' || name.includes('\0')) return 'outside';
+    const segments = name.split('/');
+    if (name.startsWith('/')) segments.shift();
+    if (segments.some(segment => segment === '' || segment === '.' || segment === '..')) return 'outside';
+  }
   return from === to ? 'outside' : undefined;
 }
 

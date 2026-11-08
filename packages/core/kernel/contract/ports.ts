@@ -800,7 +800,11 @@ export interface RootHandle {
    * and moving it back to undo: a copy cannot, `copyTree` skips a link inside a home). Only into an internal, writable
    * root that takes links (`fleet`, `agent-homes`); any other root refuses `read_only`. Both ends are fenced and
    * every parent is opened without following a link (`link_escape`); the entry moves AS IS (a link stays a link and is
-   * never followed, a directory moves whole). `from` must exist and nothing may be at `to` (`outside`, never
+   * never followed, a directory moves whole; a link keeps the text it holds, so a RELATIVE link moved to a parent at
+   * another depth points elsewhere afterwards, while kernel-made links are absolute). The move runs between the two
+   * parents' descriptors, so a host that cannot reach an entry through a held folder (macOS today) refuses
+   * `no_descriptor_reach` and moves nothing ([own] BEFORE-GREEN(runtimes): the owner runs macOS, so the provisioner's
+   * move-aside and undo fail there until a descriptor-reach move exists). `from` must exist and nothing may be at `to` (`outside`, never
    * overwritten; a look then the move, a declared GAP). There is no copy fallback: a refused move (another device, a
    * folder into itself) is `changed`, with no path or content in it.
    */
