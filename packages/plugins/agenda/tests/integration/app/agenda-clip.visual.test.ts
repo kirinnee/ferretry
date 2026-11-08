@@ -4,9 +4,10 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
-import { sharedChromium } from './support/hromium.ts';
+import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 
-const packageRoot = resolve(import.meta.dir, '../..');
+/** This file's folder: the scene paths below are relative to it, and the builder runs here. */
+const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_CLIP_SHOTS_DIR ?? '';
 
 let browser: Browser;
@@ -16,14 +17,7 @@ let server: ReturnType<typeof Bun.serve> | undefined;
 const build = async (): Promise<{ readonly css: string; readonly js: string }> => {
   directory = await mkdtemp(join(tmpdir(), 'ferretry-clip-'));
   const child = Bun.spawn(
-    [
-      process.execPath,
-      resolve(packageRoot, 'scripts/build-composer-integration-fixture.ts'),
-      '--out',
-      directory,
-      '--entry',
-      'tests/integration/fixtures/agenda-clip-scene.tsx',
-    ],
+    [process.execPath, sceneBuilder, '--out', directory, '--entry', 'fixtures/agenda-clip-scene.tsx'],
     { cwd: packageRoot, stderr: 'pipe', stdout: 'pipe' },
   );
   const [stdout, stderr, code] = await Promise.all([

@@ -57,7 +57,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import should from 'should';
-import { sharedChromium } from './support/chromium.ts';
+import { sharedChromium } from '@ferretry/app/testing/browser';
 import { fyRenderFixtureTestSeam, fyRenderIntegrationFixture } from './support/fy-render-integration-fixture.ts';
 
 const sha256 = (text: string): string => `sha256-${createHash('sha256').update(text, 'utf8').digest('base64')}`;
