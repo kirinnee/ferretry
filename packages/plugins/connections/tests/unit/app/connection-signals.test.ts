@@ -61,6 +61,7 @@ describe('watchConnectionSignals', () => {
     const targets: ConnectionSignalTargets = {
       reconnecting: () => reconnecting,
       retryNow: daemonId => events.push(`retry ${daemonId}`),
+      networkChanged: () => undefined,
       checkLiveness: () => events.push('liveness'),
     };
     return {
@@ -229,7 +230,12 @@ describe('watchConnectionSignals, when the device changes networks', () => {
           return () => undefined;
         },
       },
-      { reconnecting: () => [], retryNow: () => undefined, checkLiveness: () => (checked += 1) },
+      {
+        reconnecting: () => [],
+        retryNow: () => undefined,
+        networkChanged: () => undefined,
+        checkLiveness: () => (checked += 1),
+      },
     );
 
     // Act

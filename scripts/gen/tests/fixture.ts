@@ -47,6 +47,7 @@ export function fixture(
   options: {
     readonly pending?: readonly string[];
     readonly pendingReasons?: Readonly<Record<string, readonly string[]>>;
+    readonly pendingHalves?: Readonly<Record<string, readonly string[]>>;
   } = {},
 ): Fixture {
   const root = join(TMP, `w${process.pid}-${++counter}`);
@@ -70,6 +71,7 @@ export function fixture(
       format: 1,
       pending: options.pending ?? [],
       ...(options.pendingReasons === undefined ? {} : { pendingReasons: options.pendingReasons }),
+      ...(options.pendingHalves === undefined ? {} : { pendingHalves: options.pendingHalves }),
     }),
   );
   for (const pkg of packages) {
