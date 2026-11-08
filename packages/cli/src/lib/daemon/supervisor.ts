@@ -121,7 +121,7 @@ const description = (daemonName: string): string => `${daemonName} — per-host 
 
 /** Validate the format-1 home before creating its log directory. */
 async function claimThenCreateLogDirectory(
-  claims: IStateHomeClaimPort,
+  claims: Pick<IStateHomeClaimPort, 'claim'>,
   files: IServiceFilePort,
   layout: DaemonLayout,
 ): Promise<void> {
@@ -137,7 +137,7 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
     private readonly layout: DaemonLayout,
     private readonly processes: IDaemonProcessPort,
     private readonly files: IServiceFilePort,
-    private readonly claims: IStateHomeClaimPort,
+    private readonly claims: Pick<IStateHomeClaimPort, 'claim'>,
   ) {}
 
   /** Where systemd reads this unit from, so an installer can name the file it wrote. */
@@ -261,7 +261,7 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
     private readonly layout: DaemonLayout,
     private readonly processes: IDaemonProcessPort,
     private readonly files: IServiceFilePort,
-    private readonly claims: IStateHomeClaimPort,
+    private readonly claims: Pick<IStateHomeClaimPort, 'claim'>,
   ) {}
 
   /** Where launchd reads this agent from, so an installer can name the file it wrote. */
@@ -388,7 +388,7 @@ export class DirectSupervisor implements IDaemonSupervisor {
     private readonly layout: DaemonLayout,
     private readonly processes: IDaemonProcessPort,
     private readonly files: IServiceFilePort,
-    private readonly claims: IStateHomeClaimPort,
+    private readonly claims: Pick<IStateHomeClaimPort, 'claim'>,
   ) {}
 
   installed(): Promise<boolean> {

@@ -41,6 +41,8 @@ export interface UpdateMachineInputs {
   readonly binaries: readonly string[];
   readonly io: TerminalIo;
   readonly selfPath: string;
+  /** The platform whose service manager is driven; the host's own unless a test names another. */
+  readonly platform?: string | undefined;
 }
 
 export function executable(path: string): boolean {
@@ -91,7 +93,7 @@ export function buildUpdateMachine(
   const files = new FileServiceStore();
   const uid = process.getuid?.() ?? 0;
   const layout = resolveDaemonLayout({
-    platform: process.platform,
+    platform: inputs.platform ?? process.platform,
     homeDirectory: userHome,
     stateHome: inputs.home,
     configHome: environment.XDG_CONFIG_HOME,
@@ -104,18 +106,9 @@ export function buildUpdateMachine(
     locale: environment,
   });
   // Updates only restart an existing format-1 home; the kernel creates new homes itself.
-  const claims: IStateHomeClaimPort = {
+  const claims: Pick<IStateHomeClaimPort, 'claim'> = {
     async claim(home) {
       HomeJsonSchema.parse(JSON.parse(await readFile(join(home, 'home.json'), 'utf8')));
-    },
-    async inspect(home) {
-      try {
-        return HomeJsonSchema.safeParse(JSON.parse(await readFile(join(home, 'home.json'), 'utf8'))).success
-          ? 'claimed'
-          : 'unclaimed';
-      } catch {
-        return 'unclaimed';
-      }
     },
   };
   const service =
@@ -154,7 +147,11 @@ export function buildUpdateMachine(
       }
     },
   });
-  const facts = new HostInstallFacts({ product, homeDirectory: userHome, platform: process.platform });
+  const facts = new HostInstallFacts({
+    product,
+    homeDirectory: userHome,
+    platform: inputs.platform ?? process.platform,
+  });
   const packages = new CommandPackageManagers((argv, onLine) => processes.runStreaming(argv, onLine));
   return {
     deps: {

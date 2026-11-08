@@ -18,7 +18,7 @@ export type BoundedRunner = (argv: readonly string[], timeoutMs: number) => Prom
  * Bun's spawn with its own timeout, which KILLS the child rather than abandoning it: an abandoned
  * `nix profile list` would hold this CLI open until it finished, whatever the race said.
  */
-const boundedRun: BoundedRunner = async (argv, timeoutMs) => {
+export const boundedRun: BoundedRunner = async (argv, timeoutMs) => {
   const [command, ...args] = argv;
   try {
     const child = Bun.spawn([command ?? '', ...args], {
