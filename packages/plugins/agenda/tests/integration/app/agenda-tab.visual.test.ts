@@ -1,12 +1,11 @@
 /**
  * THE AGENDA TAB AND THE INBOX OF A MIXED FLEET, in a real browser, on a phone (390) and a desktop (1440).
  *
- * - Tab navigation: Overview names the agenda in one line, "Open Agenda" lands on the Agenda tab, the Tasks tab and back
- *   keep the tab's rows, and each filter lists its own rows with the stage the item is at (a closed item shows the last
- *   stage it had, never "Done / Done").
+ * - The tab: each filter lists its own rows with the stage the item is at (a closed item shows the last stage it had,
+ *   never "Done / Done"). The Info panel's tab strip and Overview line are Ferrets', not drawn here.
  * - Row opening: a row is a button that hands its item to the shell.
- * - The Inbox: a machine that advertises card asks has no To test section, no To test rows in "Answer quickly" and no
- *   snoozed to-test row; an older machine keeps all three.
+ * - The Inbox: a card's ask is an agenda item, so there is no To test section, no To test rows in "Answer quickly" and no
+ *   snoozed to-test row. (The older machine that kept all three is gone from the product.)
  *
  * Set `FY_AGENDA_TAB_SHOTS_DIR` to keep the pictures.
  */
@@ -109,26 +108,14 @@ const noSidewaysScroll = async (page: Page): Promise<void> => {
 describe('The Agenda tab', () => {
   for (const viewport of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const)
-      it(`opens from Overview, keeps its rows across tabs and opens a row (${viewport.name}, ${scheme})`, async () => {
+      it(`lists its rows by filter and opens a row (${viewport.name}, ${scheme})`, async () => {
         const { context, page } = await open('/tab', viewport, scheme);
         try {
-          await page.waitForSelector('[data-info-agenda]', { timeout: 15_000 });
-          expect(await page.textContent('[data-info-agenda]')).toContain(
-            '2 need you · 1 resting · 1 snoozed · 2 resolved',
-          );
-
-          await page.click('[data-info-agenda-open]');
-          await page.waitForSelector('[data-info-panel][data-info-tab="agenda"] [data-agenda-tab="needs-you"]');
+          await page.waitForSelector('[data-agenda-tab="needs-you"]', { timeout: 15_000 });
           expect(await texts(page, '[data-agenda-tab-row] [data-agenda-tab-stage]')).toEqual([
             'Plan to approve',
             'Test',
           ]);
-
-          await page.click('[role="tab"][id$="-tab-tasks"]');
-          await page.waitForSelector('[data-tasks-body]');
-          await page.click('[role="tab"][id$="-tab-agenda"]');
-          await page.waitForSelector('[data-agenda-tab]');
-          expect((await texts(page, '[data-agenda-tab-row] [data-agenda-tab-stage]')).length).toBe(2);
 
           await page.click('[data-context-chip="resolved"]');
           await page.waitForSelector('[data-agenda-tab="resolved"]');
@@ -150,35 +137,27 @@ describe('The Agenda tab', () => {
       }, 60_000);
 });
 
-describe('The Inbox of a mixed fleet', () => {
+describe('The Inbox', () => {
   for (const viewport of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const)
-      it(`drops To test only on a machine that takes card asks (${viewport.name}, ${scheme})`, async () => {
-        for (const machine of ['modern', 'older'] as const) {
-          const { context, page } = await open(`/inbox?machine=${machine}`, viewport, scheme);
-          try {
-            await page.waitForSelector('[data-agenda-filter]', { timeout: 15_000 });
-            await page.waitForSelector('[data-agenda-quick]');
-            const older = machine === 'older';
-            const quick = Number(await page.textContent('[data-agenda-quick] .fy-inbox-quick__count'));
-            expect(await page.locator('[data-agenda-section="to-test"]').count(), `${machine}: To test section`).toBe(
-              older ? 1 : 0,
-            );
-            expect(await page.locator('[data-to-test]').count(), `${machine}: To test rows`).toBe(older ? 2 : 0);
-            expect(quick, `${machine}: the quick run`).toBe(older ? 3 : 1);
+      it(`has no To test list: a card's ask is an agenda item (${viewport.name}, ${scheme})`, async () => {
+        const { context, page } = await open('/inbox', viewport, scheme);
+        try {
+          await page.waitForSelector('[data-agenda-filter]', { timeout: 15_000 });
+          await page.waitForSelector('[data-agenda-quick]');
+          const quick = Number(await page.textContent('[data-agenda-quick] .fy-inbox-quick__count'));
+          expect(await page.locator('[data-agenda-section="to-test"]').count(), 'To test section').toBe(0);
+          expect(await page.locator('[data-to-test]').count(), 'To test rows').toBe(0);
+          expect(quick, 'the quick run').toBe(1);
 
-            await page.click('[data-agenda-filter] [aria-haspopup="menu"]');
-            await page.click('[data-agenda-filter-option="snoozed"]');
-            await page.waitForTimeout(300);
-            expect(await page.locator('[data-to-test-snoozed]').count(), `${machine}: snoozed to-test rows`).toBe(
-              older ? 1 : 0,
-            );
-            await noSidewaysScroll(page);
-            if (shotsDir !== '')
-              await page.screenshot({ path: join(shotsDir, `inbox-${machine}-${viewport.name}-${scheme}.png`) });
-          } finally {
-            await context.close();
-          }
+          await page.click('[data-agenda-filter] [aria-haspopup="menu"]');
+          await page.click('[data-agenda-filter-option="snoozed"]');
+          await page.waitForTimeout(300);
+          expect(await page.locator('[data-to-test-snoozed]').count(), 'snoozed to-test rows').toBe(0);
+          await noSidewaysScroll(page);
+          if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, `inbox-${viewport.name}-${scheme}.png`) });
+        } finally {
+          await context.close();
         }
       }, 90_000);
 });

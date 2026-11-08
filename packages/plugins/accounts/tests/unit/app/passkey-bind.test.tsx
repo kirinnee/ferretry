@@ -1,5 +1,5 @@
 /**
- * ACCOUNTS' WIDENING ACTS ARE BOUND TO THE APP'S ONE PASSKEY PROMPT (G105; S88/S91, S108/S119, G84/G85).
+ * ACCOUNTS' WIDENING ACTS ARE BOUND TO THE APP'S ONE PASSKEY PROMPT (G105; S88).
  *
  * Every act that WIDENS (a paste rule, programs in your own profile ON, a standing sign-in rule, a task plan's ticks, a
  * machine-staged confirm, saving a 2FA seed) asks the shell's prompt BEFORE its commit, bound to the machine the half was
@@ -113,7 +113,7 @@ describe('bindPasskeys: which act, which staged id and which machine each ask is
   });
 });
 
-describe('a paste rule and programs in your own profile (G84, G85)', () => {
+describe('a paste rule and programs in your own profile', () => {
   const STAGE = `prs_${'1'.repeat(24)}`;
   const PROFILE_STAGE = `prs_${'2'.repeat(24)}`;
   const RULE: PasteRule = {
@@ -283,7 +283,7 @@ describe('a paste rule and programs in your own profile (G84, G85)', () => {
   }
 });
 
-describe('a standing sign-in rule (S108, S119)', () => {
+describe('a standing sign-in rule', () => {
   const secureCopyWith = async (world: RuleWorld) => {
     const rules = ruleClient(world);
     const client = onMachine({
@@ -396,7 +396,7 @@ describe('a standing sign-in rule (S108, S119)', () => {
   });
 });
 
-describe('the Accounts tab (S108)', () => {
+describe('the Accounts tab', () => {
   const accounts = async () => {
     const rules = ruleClient({ list: ruleList() });
     const client = onMachine({
@@ -461,7 +461,7 @@ describe('the Accounts tab (S108)', () => {
   });
 });
 
-describe('a task plan’s ticks and a staged 2FA seed, on the ask card (S91)', () => {
+describe('a task plan’s ticks and a staged 2FA seed, on the ask card', () => {
   const PLAN_PATH = `/v1/ferrets/${SESSION}/task-plans/${PLAN_ID}`;
   const SUMMARY = ['Line 2: sign in to vercel.com as deploy@atomi.cloud, once'];
   const staged = {
@@ -604,7 +604,7 @@ describe('a task plan’s ticks and a staged 2FA seed, on the ask card (S91)', (
       return { ...screen, methods: () => fake.calls.map(call => `${call.method} ${call.path}`) };
     };
 
-    it('S88 S91 confirmed → asked for add-2fa-key bound to the stage, then one commit', async () => {
+    it('S88 confirmed → asked for add-2fa-key bound to the stage, then one commit', async () => {
       promptAnswers('yes');
       const { q, methods } = await seedCard();
 
@@ -618,7 +618,7 @@ describe('a task plan’s ticks and a staged 2FA seed, on the ask card (S91)', (
     });
 
     for (const answer of ['no', 'throw'] as const) {
-      it(`S88 S91 prompt ${answer === 'no' ? 'dismissed' : 'thrown'} → nothing saved, asked once`, async () => {
+      it(`S88 prompt ${answer === 'no' ? 'dismissed' : 'thrown'} → nothing saved, asked once`, async () => {
         promptAnswers(answer);
         const { q, methods } = await seedCard();
 
@@ -631,7 +631,7 @@ describe('a task plan’s ticks and a staged 2FA seed, on the ask card (S91)', (
       });
     }
 
-    it('S88 S91 no passkey mount → nothing asked, nothing saved, said plainly', async () => {
+    it('S88 no passkey mount → nothing asked, nothing saved, said plainly', async () => {
       promptAnswers('none');
       const { q, methods, text } = await seedCard();
 

@@ -91,7 +91,9 @@ export function FakeComposer(props: AgendaComposerProps): ReactElement {
         placeholder={props.placeholder}
         value={draft}
       />
-      {props.dictationSettings === undefined ? null : <button data-composer-mic="" type="button" />}
+      {props.dictationSettings === undefined ? null : (
+        <button aria-label="Dictate" data-composer-mic="" type="button" />
+      )}
       {error === null ? null : (
         <p className="fy-composer-error" role="alert">
           {error}

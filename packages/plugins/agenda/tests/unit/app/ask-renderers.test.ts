@@ -34,4 +34,11 @@ describe('what an owner’s ask renderer receives', () => {
     } as never);
     expect(askRendererFor(item, from)?.value.ref.kind).toBe('task-plan');
   });
+
+  it('sends a ferret’s rule suggestion as Accounts’ kind `rule-suggestion`, the name its renderer draws', () => {
+    const item = agendaItem('A4', { signInRuleSuggestion: { suggestion: 'srg_dddddddddddddddd' } } as never);
+    const owned = askRendererFor(item, from);
+    expect(owned?.key).toBe('ask:sign-in-approval');
+    expect(owned?.value.ref).toEqual({ kind: 'rule-suggestion', suggestion: 'srg_dddddddddddddddd' });
+  });
 });

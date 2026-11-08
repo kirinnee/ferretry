@@ -12,6 +12,7 @@
     ".": "./src/index.ts",
     "./ui": "./src/ui/index.ts",
     "./testing": "./src/testing/index.ts",
+    "./testing/router": "./src/testing/router.tsx",
     "./worker-facts": "./src/worker/facts.ts",
     "./testing/browser": "./tests/support/browser/index.ts"
   },
