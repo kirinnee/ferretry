@@ -159,13 +159,12 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         kind: 'port',
         port: fixed?.cdp ?? (await (this.modes.cdpPort ?? freePort)()),
       };
+      const prover = this.modes.listenerProver ?? new ProcListenerProver();
       if (proxy?.credentials !== undefined) {
-        relay = await ProxySignInRelay.start(
-          proxyEndpoint(proxy.setting.url),
-          proxy.credentials,
-          undefined,
-          fixed === undefined ? {} : { port: fixed.relay },
-        );
+        relay = await ProxySignInRelay.start(proxyEndpoint(proxy.setting.url), proxy.credentials, undefined, {
+          ...(fixed === undefined ? {} : { port: fixed.relay }),
+          holder: async taken => await prover.holder(taken),
+        });
       }
       const userAgent = honestChromeUserAgent(version, platform, host.arch);
       const chromeCommand = [
@@ -204,14 +203,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       // Recorded BEFORE anything else can fail: from here on, the Chrome holding the profile is this pid.
       await lease.updateChromePid(chrome.pid, version);
       const endpoint = `http://127.0.0.1:${cdp.port}`;
-      await waitForCdp(
-        this.ports,
-        endpoint,
-        cdp.port,
-        chrome,
-        diagnostics,
-        this.modes.listenerProver ?? new ProcListenerProver(),
-      );
+      await waitForCdp(this.ports, endpoint, cdp.port, chrome, diagnostics, prover);
       let worker: BrowserWorkerClient;
       try {
         worker = await this.connectWorker({

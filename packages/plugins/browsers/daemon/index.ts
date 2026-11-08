@@ -26,6 +26,7 @@ import { systemOpenRoutes } from './open-url/routes.ts';
 import { type DetachedLauncherPort, OpenUrlService } from './open-url/service.ts';
 import { closeLeftoverBrowsers, spawnTerminate } from './leftovers.ts';
 import { BrowserLoginWindowService } from './worker/control/adapters/login-window.ts';
+import { ProcListenerProver } from './worker/control/adapters/listener-prover.ts';
 import { NodeBrowserLoginRuntime, XvfbDisplay } from './worker/control/adapters/login-runtime.ts';
 import { BrowserProfileStore } from './worker/control/adapters/profile-store.ts';
 import type { StartWorker } from './worker/client.ts';
@@ -98,6 +99,8 @@ export function buildBrowsers(
     if ('refused' in command) throw new Error(command.refused);
     return kernel.spawn.start(command.program, [...command.args, ...args], { env });
   };
+  // Who holds a loopback port, proved from the kernel's `/proc` reads (`kernel.hostFacts`).
+  const listenerProver = new ProcListenerProver(kernel.hostFacts);
   const launcher =
     seams.launcher ??
     new NodeSessionBrowserLauncher(
@@ -116,6 +119,7 @@ export function buildBrowsers(
           return setting === undefined ? undefined : resolveBrowserProxy(setting, new Map());
         },
         display,
+        listenerProver,
         stageDirectory: host.stageDirectory,
         // GAP (card F1931, finding 10): no `ports`, `checkFirewall` or `limits` (today's fyd.ts 8728-8736).
         // - `ports`/`checkFirewall`: 5.0 serves Browsers no read of the machine's `browserPorts` or
@@ -175,6 +179,7 @@ export function buildBrowsers(
     timeoutExecutable: which('timeout'),
     ports: async () => ({ kind: 'random' }),
     chromeOverride: () => host.environment.FY_CHROME_BIN,
+    listenerProver,
   });
   const login = new BrowserLoginWindowService({
     profile,

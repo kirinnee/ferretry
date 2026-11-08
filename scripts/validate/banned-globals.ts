@@ -131,6 +131,68 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
       folder: 'daemon/worker/adapters/',
       reason: 'the agent-browser worker, its own process (lead decision, port-browsers r1)',
     },
+    {
+      pkg: 'browsers',
+      folder: 'daemon/proxy/firewall/marker-reader.ts',
+      reason:
+        'reads the root-owned loopback firewall marker under /etc, a host file outside every declared root (lead ruling, banned-globals r1)',
+    },
+    {
+      pkg: 'browsers',
+      folder: 'daemon/tools/adapters/staged-files.ts',
+      reason:
+        'opens staged copies O_NOFOLLOW|O_EXCL and streams a bounded binary copy, which no root handle does (lead ruling, banned-globals r1)',
+    },
+    {
+      pkg: 'browsers',
+      folder: 'daemon/worker/control/adapters/profile-store.ts',
+      reason:
+        'Chrome takes a real --user-data-dir: real profile directories, SingletonLock readlink, O_EXCL lease files (lead ruling, banned-globals r1)',
+    },
+    {
+      pkg: 'browsers',
+      folder: 'daemon/worker/control/adapters/login-runtime.ts',
+      reason:
+        'real directories and files that Xvfb, x11vnc and Chrome read by path: the Xauthority cookie and the VNC password file (lead ruling, banned-globals r1)',
+    },
+    {
+      pkg: 'browsers',
+      folder: 'daemon/adapters/host.ts',
+      reason:
+        'host facts: the named environment variables only, platform and architecture, the program search path, this executable and its worker (lead ruling, banned-globals r1)',
+    },
+    {
+      pkg: 'access',
+      folder: 'cli/adapters/pair/browser-opener.ts',
+      reason: 'fy itself opens a browser on the person desktop from their terminal (lead ruling banned-globals r1)',
+    },
+    {
+      pkg: 'access',
+      folder: 'cli/adapters/pairing-redirect-sweep.ts',
+      reason:
+        'fy itself sweeps its own pairing redirect files, a live credential, in the home it runs in (lead ruling)',
+    },
+    {
+      pkg: 'access',
+      folder: 'cli/shell.ts',
+      reason:
+        'fy at the person terminal: its state home (FY_HOME, the home directory) and the prompt it reads (lead ruling)',
+    },
+    {
+      pkg: 'accounts',
+      folder: 'cli/adapters/terminal.ts',
+      reason: 'fy at the person terminal: the hidden-read prompt and the pane session variables (lead ruling)',
+    },
+    {
+      pkg: 'terminals',
+      folder: 'cli/adapters/attach/tmux-attacher.ts',
+      reason: 'fy itself attaches the person terminal to tmux (lead ruling)',
+    },
+    {
+      pkg: 'terminals',
+      folder: 'cli/index.ts',
+      reason: 'hands fy own process environment to the tmux attach in the person terminal (lead ruling)',
+    },
   ];
 
 export function bannedScope(pkg: WorkspacePackage, file: string): boolean {

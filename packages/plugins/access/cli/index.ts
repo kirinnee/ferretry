@@ -31,7 +31,7 @@ export default implementCli(manifest, {
   build(ctx) {
     const { client, io } = ctx;
     const state = ctx.ownState;
-    const host = hostFacilities(io);
+    const host = hostFacilities(io, ctx);
     const exit = new ExitStatus();
     const out = {
       success: (message: string) => io.out(`${message}\n`),

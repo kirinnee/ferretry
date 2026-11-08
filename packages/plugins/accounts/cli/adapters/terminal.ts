@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline';
+import { milliseconds, type Duration } from '@ferretry/std';
 import { Writable } from 'node:stream';
 import type { IAccountPrompt } from '../lib/account-ports.ts';
 
@@ -55,13 +56,28 @@ export class TerminalPrompt implements IAccountPrompt {
 /** `FY_SESSION_ID`: the session this CLI runs inside; absent at the owner's own shell. TODO(CliContext port): env. */
 export const ownSessionId = (): string | undefined => process.env.FY_SESSION_ID;
 
-/** TODO(CliContext port): a clock. */
-export const nowMs = (): number => Date.now();
+/** The clock and the wait the fy shell hands every half (`CliContext.clock` and `.sleep`). */
+export interface ShellTimeContext {
+  readonly clock?: { nowMs(): number };
+  sleep?(delay: Duration, signal?: AbortSignal): Promise<void>;
+}
 
-/** TODO(CliContext port): a wait. */
-export const sleep = async (ms: number): Promise<void> => {
-  await new Promise(resolve => setTimeout(resolve, ms));
-};
+/** Today's `Date.now` and `setTimeout` wait, taken from the shell; a shell that hands neither says so when asked. */
+export function shellTime(ctx: ShellTimeContext): {
+  readonly nowMs: () => number;
+  readonly sleep: (ms: number) => Promise<void>;
+} {
+  return {
+    nowMs: () => {
+      if (ctx.clock === undefined) throw new Error('this fy shell has no clock yet; update fy');
+      return ctx.clock.nowMs();
+    },
+    sleep: async ms => {
+      if (ctx.sleep === undefined) throw new Error('this fy shell has no timer yet; update fy');
+      await ctx.sleep(milliseconds(ms));
+    },
+  };
+}
 
 /**
  * Whether this pane holds a ferret's credential (today's `paneCredentialValue` over `FY_SESSION_TOKEN` and
