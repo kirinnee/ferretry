@@ -12,7 +12,8 @@ import { RootSkillFiles } from './adapters/skill-files.ts';
 import { composerSkills } from './lib/composer.ts';
 import { MAX_SKILL_MANIFEST_BYTES, SkillsInventoryService } from './lib/inventory.ts';
 import { inventoryRoutes } from './routes.ts';
-import { skillParts, type SkillFolderResolver } from './lib/launch-parts.ts';
+import { skillParts } from './lib/launch-parts.ts';
+import { SkillStore } from './lib/skill-store.ts';
 import { skillReferenceProvider } from './lib/reference-catalog.ts';
 
 /**
@@ -75,8 +76,8 @@ export default implementDaemon(manifest, {
       },
     };
 
-    // The store's folders are not addressable through a kernel port yet: no item resolves, so no part is added.
-    const folderOf: SkillFolderResolver = () => undefined;
+    // Ferretry's own installed skills (`installed/<name>/`), shared one folder at a time (kernel.roots.share) for the harness that links them into a ferret home.
+    const store = new SkillStore(kernel.state, kernel.roots);
 
     return {
       routes: inventoryRoutes(api),
@@ -93,7 +94,7 @@ export default implementDaemon(manifest, {
                 skillParts(
                   kernel.config.collection(SKILLS_CONFIG as ConfigCollectionDef<SkillsItem>),
                   spec.harness,
-                  folderOf,
+                  name => store.tree(name),
                 ),
             },
           },

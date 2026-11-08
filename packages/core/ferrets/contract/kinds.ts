@@ -65,7 +65,11 @@ export type LaunchPart =
   | {
       readonly kind: 'skill';
       readonly name: string;
-      readonly path: FencedPath;
+      /**
+       * Not used to materialize anything: a skill reaches the home only through {@link tree}, and a part with no tree is
+       * skipped (no project skill is copied or linked, owner decision !A466).
+       */
+      readonly path?: FencedPath;
       /**
        * The skill folder, shared by the plugin that holds it (`kernel.roots.share`, Skills) for the harness that
        * materializes it in the ferret home (`RootHandle.copyShared`). Unforgeable and valid for this launch: it

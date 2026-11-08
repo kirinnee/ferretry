@@ -6,6 +6,7 @@ import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { state as kernelState } from '@ferretry/kernel/host';
 import { CLAUDE_CODE_HOOKS, CLAUDE_CODE_LAUNCH_SETTINGS, CLAUDE_CODE_SETTINGS } from '../../contract/index.ts';
 import { type Instant, ok } from '@ferretry/std';
+import { defineState } from '@ferretry/kernel/contract';
 import { ClaudeHarness } from '../../daemon/adapters/claude-harness.ts';
 import { API_KEY_SEED_NAME, API_KEY_SEED_SCRIPT, API_KEY_SEED_SHELL } from '../../daemon/lib/harness/api-key-seed.ts';
 import { PaneDirectory } from '../../daemon/adapters/tmux-pane.ts';
@@ -201,7 +202,15 @@ describe('ClaudeHarness', () => {
     expect((await lstat(fresh)).isDirectory()).toBe(true);
     expect((await lstat(fresh)).mode & 0o777).toBe(0o700);
     expect(await listing(fresh)).toEqual(
-      ['.claude.json', 'CLAUDE.md', 'conversation.json', 'launch-settings.json', 'mcp.json', 'settings.json'].sort(),
+      [
+        '.claude.json',
+        'CLAUDE.md',
+        'conversation.json',
+        'launch-settings.json',
+        'mcp.json',
+        'settings.json',
+        'skills',
+      ].sort(),
     );
     expect(started.command).toContain(`CLAUDE_CONFIG_DIR=${fresh}`);
   });
@@ -883,5 +892,62 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
     expect(started.ok).toBe(true);
     expect(folder.raw(CLAUDE_CODE_LAUNCH_SETTINGS, FERRET)).toBeUndefined();
     expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'unknown' });
+  });
+});
+
+// ─── skills: Skills' shared folders linked into the ferret home (kernel batch #10, owner decision !A466) ─────────────
+
+describe('F-0006 prepareHome links the selected skills into the ferret home', () => {
+  async function minted(name: string) {
+    const installed = join(fixture, 'fy-home/state/skills/installed', name);
+    await mkdir(installed, { recursive: true, mode: 0o700 });
+    await writeFile(join(installed, 'SKILL.md'), `${name}\n`);
+    const roots = rootsPortFor(
+      nodeFs(() => crypto.randomUUID()),
+      { home: join(fixture, 'fy-home'), plugin: 'skills', worktrees: join(fixture, 'worktrees') },
+      [],
+      () => undefined,
+      {
+        shareTrees: true,
+        stateFiles: [defineState({ name: 'installed', path: 'installed/*', store: 'opaque', format: 1 })],
+        onStop: () => {},
+      },
+    );
+    return await roots.share({
+      state: defineState({ name: 'installed', path: 'installed/*', store: 'opaque', format: 1 }),
+      name,
+    });
+  }
+
+  test('F-0006 a skill part with a shared folder is ONE link at skills/<name>, readable by the harness', async () => {
+    const { harness } = build();
+    const tree = await minted('review');
+    await harness.prepareHome(spec({ parts: [{ kind: 'skill', name: 'review', tree }] }));
+    const at = join(HOME, 'skills', 'review');
+    expect((await lstat(at)).isSymbolicLink()).toBe(true);
+    expect(await readFile(join(at, 'SKILL.md'), 'utf8')).toBe('review\n');
+  });
+
+  test('F-0006 a project skill part (no shared folder) is not copied or linked', async () => {
+    const { harness } = build();
+    await harness.prepareHome(spec({ parts: [{ kind: 'skill', name: 'local', path: '/work/.claude/skills/local' }] }));
+    expect(
+      await lstat(join(HOME, 'skills', 'local')).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
+  });
+
+  test('F-0006 a stale folder in skills/ that no part names is swept', async () => {
+    const { harness } = build();
+    await mkdir(join(HOME, 'skills', 'stale'), { recursive: true });
+    await harness.prepareHome(spec({ parts: [] }));
+    expect(
+      await lstat(join(HOME, 'skills', 'stale')).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
   });
 });

@@ -24,6 +24,8 @@ function home() {
       ok((relative.startsWith('/') ? relative : relative === '' ? HOME : `${HOME}/${relative}`) as FencedPath),
     writeText: async (path: FencedPath) => void written.push(path.slice(HOME.length + 1)),
     ensurePrivateDirectory: async () => undefined,
+    makeDirectory: async () => undefined,
+    list: async () => [],
   } as unknown as RootHandle;
   const roots = { root: (name: string) => (asked.push(name), handle) } as unknown as KernelPorts['roots'];
   return { written, asked, roots };

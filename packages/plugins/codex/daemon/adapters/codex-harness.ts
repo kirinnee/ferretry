@@ -21,6 +21,7 @@ import type {
   Started,
   StartRefusal,
 } from '@ferretry/core-ferrets/contract';
+import { materializeSkills } from '@ferretry/core-ferrets/contract';
 import { codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import { buildCodexLaunchArgv, tomlTables } from '../lib/index.ts';
@@ -54,6 +55,9 @@ const PLAIN_FERRET = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
 /** A launch record is two fingerprints (~180 bytes); one larger than this is not one, and is never read. */
 const MAX_LAUNCH_RECORD_BYTES = 4 * 1024;
 const UNKNOWN_LAUNCH: HarnessLaunchSettings = { kind: 'unknown' };
+
+/** What Codex itself writes into `skills/` on its first start (its bundled skills): never swept, never replaced. */
+const CODEX_OWNED_SKILLS: readonly string[] = ['.system'];
 
 /** Codex's `AGENTS.md`: the instructions every launch writes into the ferret's home. */
 function agentsDocument(spec: LaunchSpec): string {
@@ -214,6 +218,8 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
 
     async prepareHome(spec: LaunchSpec): Promise<HomePlan> {
       const root = await ensureHome(spec);
+      // The selected skills: Skills' shared folders linked into `skills/`, the rest swept; Codex's own `.system` stays.
+      await materializeSkills(root, spec.parts, CODEX_OWNED_SKILLS);
       const files: FencedPath[] = [];
       for (const [name, text] of [
         ['AGENTS.md', agentsDocument(spec)],

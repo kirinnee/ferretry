@@ -37,7 +37,7 @@ export const SKILLS_READ_MODELS = ['inventory', 'ferretInventory', 'forComposer'
 
 // ─── state (§9.2) ────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Installed skill folders by content hash. Opaque to the kernel: they are the skill's own files. */
+/** The skills Ferretry installs, one folder per skill name (`installed/<name>/`). Opaque to the kernel: they are the skill's own files, and the one source a launch shares from. */
 export const SKILLS_INSTALLED_STATE = defineState({
   name: 'installed',
   path: 'installed/*',
