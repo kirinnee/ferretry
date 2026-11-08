@@ -169,12 +169,12 @@
       "GAP(ferrets): the Info tab Tasks (the ferret's cards) is Board's `ferret.side` panel; not contributed yet"
     ],
     "layouts": [
-      "GAP(ferrets): the Files side tab (Ferrets' `files` panel on `ferret.side`, order 40) is hidden until the ferret.side panel layout lists it"
+      "the default layout (and compact) names views no installed manifest declares: nav item `ferrets` and `side.holds: ferret` (Ferrets declares no `ferrets` or `ferret` screen) and the ferret.side panels `sitrep` and `usage` (Conversation's is `queue`, Usage's is `insights`), so the shell refuses the layout as served and draws the built-in default, and the Layout tab says so under In use",
+      "the Layout tab edits the wide layout only: the `phone.*` keys (`fy layout set phone.nav.side bottom`) have no row in either scope"
     ]
   },
   "pendingHalves": {
     "catalogs": ["app"],
-    "layouts": ["app"],
     "gate": ["app"],
     "vault": ["app", "cli"],
     "browsers": ["cli"],
