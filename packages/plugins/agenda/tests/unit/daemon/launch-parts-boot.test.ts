@@ -17,14 +17,14 @@ async function boot(ferrets: FakeFerrets) {
   const capturing = {
     ...agenda,
     build: (ctx: never) => {
-      const half = (agenda.build as (ctx: never) => { hooks: Record<string, unknown>; provides: { agenda: never } })(
-        ctx,
-      );
+      const half = (
+        agenda.build as unknown as (ctx: never) => { hooks: Record<string, unknown>; provides: { agenda: never } }
+      )(ctx);
       taken.hooks = half.hooks;
       taken.api = half.provides.agenda;
       return half;
     },
-  } as typeof agenda;
+  } as unknown as typeof agenda;
   const host = await testHost({ plugins: [capturing], fakes: { asks: new FakeAsks(), ferrets } });
   const contribute = taken.hooks?.['launch.parts'] as () => readonly {
     readonly id: string;
