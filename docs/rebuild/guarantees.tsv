@@ -178,9 +178,9 @@ G168	removed	access	-	-	grants	-
 G169	kept	gate	-	behaviour as written	grants	G169
 G170	kept	catalogs	gate	`STEP_UP_ACTS.catalogInstall`	grants	G170
 G171	kept	catalogs	gate	behaviour as written	grants	G171
-G172	kept	skills	gate	behaviour as written	grants	G172
-G173	kept	skills	gate	behaviour as written	grants	G173
-G174	kept	skills	gate	behaviour as written	grants	G174
+G172	removed	skills	-	-	grants	-
+G173	removed	skills	-	-	grants	-
+G174	removed	skills	-	-	grants	-
 G175	kept	skills	gate	behaviour as written	grants	G175
 G176	kept	mcp	gate	`session-mcp.ts`	grants	G176
 G177	kept	mcp	gate	behaviour as written	grants	G177
@@ -1033,7 +1033,7 @@ R518	split	ferrets	kernel	`journalSequence` in `session-directory.ts`, the `afte
 R519	kept	app-shell	kernel	`shared-reads.ts`	relay-protocol	R519
 R520	kept	ferrets	kernel	`idle` frame (`FleetEventStreamService`)	relay-protocol	R520
 R521	kept	ferrets	kernel	`FyEventStreamFrameSchema` (strict)	relay-protocol	R521
-R522	kept	ferrets	kernel	`FileTranscriptChanges` (mounted in `modules/live-events.ts`: the harness's transcript stamp polled through the clock, K2 has no file watch)	relay-protocol	R522
+R522	kept	ferrets	kernel	`FileTranscriptChanges` (file-event hub, wiring pending)	relay-protocol	R522
 R523	split	ferrets	kernel	`eventStreamScope` (`transcript_needs_session`)	relay-protocol	R523
 R524	kept	ferrets	kernel	`watchTranscript` (only `scope.transcript`)	relay-protocol	R524
 R525	kept	ferrets	kernel	`eventStreamScope` (`tail`, `tail_needs_fleet`)	relay-protocol	R525
