@@ -17,6 +17,7 @@ import type {
   LaunchSpec,
   LoginKind,
   OutboundMessage,
+  QueueOutcome,
   Runner,
   RunnerHandle,
   RunningFerret,
@@ -43,6 +44,10 @@ export class FakeRunner implements Runner {
   starts = 0;
   /** Every delivery made, with the handle it went to. */
   readonly deliveries: { readonly handle: RunnerHandle; readonly delivery: RunnerDelivery }[] = [];
+  /** Every message queued, with the handle it went to. */
+  readonly queued: { readonly handle: RunnerHandle; readonly text: string }[] = [];
+  /** What the next `queue` proves: `held` unless a test says otherwise. */
+  queueOutcome: QueueOutcome = 'held';
   readonly #live = new Map<string, RunningFerret & { readonly ferret: FerretId }>();
   #next = 0;
 
@@ -81,6 +86,11 @@ export class FakeRunner implements Runner {
     await delivery.beforeWrite?.();
     this.deliveries.push({ handle, delivery });
     return delivery.text.startsWith('/') ? 'handled-local' : 'turn-started';
+  }
+  async queue(handle: RunnerHandle, text: string): Promise<QueueOutcome> {
+    if (!this.#live.has(handle)) throw new Error(`no pane ${handle}`);
+    this.queued.push({ handle, text });
+    return this.queueOutcome;
   }
 }
 
@@ -141,6 +151,18 @@ export function runnerConformance(name: string, make: () => RunnerSubject | Prom
       const before = subject.starts();
       await expect(subject.runner.deliver('%99999' as RunnerHandle, { text: 'hello' })).rejects.toThrow();
       expect(subject.starts()).toBe(before);
+    });
+    test('a queue into a live ferret answers held, typed or left; to a handle with nothing behind it, rejects', async () => {
+      const subject = await make();
+      // Optional on the kind: a runner that cannot queue has nothing to prove here.
+      if (subject.runner.queue === undefined) return;
+      const started = await subject.runner.start(subject.spec);
+      if (!started.ok) throw new Error('start refused');
+      expect(['held', 'typed', 'left']).toContain(await subject.runner.queue(started.value.handle, 'hello'));
+      const before = subject.starts();
+      await expect(subject.runner.queue('%99999' as RunnerHandle, 'hello')).rejects.toThrow();
+      expect(subject.starts()).toBe(before);
+      await subject.runner.stop(started.value.handle, 'now');
     });
     test('attach after stop is refused', async () => {
       const subject = await make();

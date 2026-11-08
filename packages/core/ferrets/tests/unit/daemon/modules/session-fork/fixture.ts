@@ -28,6 +28,9 @@ export function sessionForkNeedsForTest(overrides: Partial<SessionForkNeeds> = {
     state: refusing('state'),
     storage: refusing('storage'),
     sessionDirectory: refusing('sessionDirectory'),
+    briefs: () => {
+      throw new Error('briefs is not exercised by the session-fork fixture');
+    },
     attachmentStore: refusing('attachmentStore'),
     transferPorts,
     attachments: refusing('attachments'),

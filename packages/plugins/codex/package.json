@@ -22,7 +22,8 @@
     "zod": "4.4.3",
     "@ferretry/core-gate": "workspace:*",
     "@ferretry/core-ferrets": "workspace:*",
-    "react": "^19.0.0"
+    "react": "^19.0.0",
+    "@ferretry/plugin-runtimes": "workspace:*"
   },
   "sideEffects": false,
   "devDependencies": {

@@ -96,6 +96,7 @@ import { movesDeps } from './moves-deps.ts';
 import { fleetEventsAccept, followableFerret, HistoryEventSource } from './modules/fleet-events.ts';
 import { ferretsPort } from './lib/ferrets/port.ts';
 import { ferretsMoveResume, movedTarget } from './lib/ferrets/move-resume.ts';
+import type { ResumeActor } from './lib/session/resume/types.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
@@ -116,6 +117,20 @@ function callerIsAgent(call: CallContext): boolean {
   if (credential.tokenClass === 'ferret' || credential.tokenClass === 'warden') return true;
   if (credential.tokenClass === 'device') return false;
   return call.actor !== 'admin-ui' && call.actor !== 'admin-cli';
+}
+
+/**
+ * Who asked for a resume, for the author recorded beside its turn document (today's `resumeTurnAuthor` input):
+ * ATTRIBUTION only, never authority, which the route has already decided. The warden is the Warden; a ferret's token,
+ * or the admin token with a ferret behind it, is a peer ferret; a device and the admin UI or CLI are the owner.
+ */
+function resumeActorOf(call: CallContext): ResumeActor {
+  const credential = call.credential;
+  if (credential?.tokenClass === 'warden') return 'warden';
+  if (credential?.tokenClass === 'ferret' || callerFerret(call) !== undefined) return 'peer';
+  if (credential?.tokenClass === 'device') return 'device';
+  if (call.actor === 'admin-cli' || call.actor === 'admin-ui') return call.actor;
+  return 'unknown';
 }
 
 /** A random ferret id: base-36 time + 8 hex characters (today's `TimeSessionIdFactory`). */
@@ -255,8 +270,26 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
           ...(ferret.parent === undefined ? {} : { parent: ferret.parent }),
         };
       }),
+    // What a ferret's session document is made from (ruling #31b): its record and its start options.
+    seed: id => {
+      const record = registry.get(id as unknown as FerretId);
+      return record === undefined ? undefined : { record, details: registry.detailsOf(record.id) };
+    },
     log,
   });
+  // Every held ferret gets its session document once the records and the store's archive are loaded, before any start
+  // or resume reads the fleet's lineage (which refuses while an indexed ferret has none). Each stamp waits for it.
+  void sessionFiles
+    .backfill(async () => {
+      await loaded;
+      await storeLoaded.catch(() => undefined);
+      return registry.list().map(ferret => ferret.id);
+    })
+    .catch((error: unknown) =>
+      log.warn('the ferret session documents could not be checked at boot', {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
   // The launch environment: ONE store, written by every launch and read by `instructions` (stored over what the record
   // implies; RULING #30). Each section's flag is its OWNER's launch part: Pack's `FY_PACK` and Conversation's
   // `conversation-hypermedia` (FY_HYPERMEDIA, only when the owner set the ferret's switch) are registered.
@@ -614,7 +647,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       ferrets: () => registry.list(),
       waitingOf: ferret => registry.waitingOf(ferret),
       stop: async (ferret, reason) => await service.stop(ferret, 'polite', reason),
-      resume: async ferret => await service.resume(ferret),
+      // The daemon's own restart: its turn is drawn as Ferretry's Restart, never as the owner's words.
+      resume: async ferret => await service.resume(ferret, undefined, { actor: 'daemon' }),
       history: appendHistory,
       // An entry that does not parse is dropped on its own; the rest survive, and a queue that cannot be read is empty.
       loadQueue: async () => {
@@ -884,6 +918,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         const { message } = parseResumeBody(await body(call));
         const resumed = await service.resume(id, message, {
           confirmRestore: confirmRestore(call, callerIsAgent(call)),
+          actor: resumeActorOf(call),
         });
         if (!resumed.ok) return startFailure(resumed.error);
         return jsonResponse({ id: resumed.value });

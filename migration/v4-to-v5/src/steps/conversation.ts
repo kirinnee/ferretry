@@ -62,6 +62,7 @@ import {
 import { chmod, mkdir, readdir, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { FERRET_SESSIONS_FOLDER, FERRET_TURNS_FOLDER } from '@ferretry/core-ferrets/contract';
 import type { KeptItem, StepReport } from '../report.ts';
 import { moveSealed } from '../sealed.ts';
 import {
@@ -99,13 +100,11 @@ const at = (path: string, name?: string) => join(V5_CONVERSATION, name === undef
 export const V5_MESSAGE_TOKEN_KEY_FILE = at(MESSAGE_TOKEN_KEY_STATE.path);
 export const V5_LINKS_FILE = at(LINKS_STATE.path);
 /**
- * Ferrets' internal `sessions` root, `<home>/state/<plugin>/<root>` (`internalRootBase`,
- * packages/core/kernel/host/roots.ts; the root `sessions` is declared in packages/core/ferrets/manifest.ts). Neither
- * package exports the path, so it is named once here. 5.0 reads a ferret's turns below it (`FileSessionTaskStore`
- * `turns/turn-001.md`, `FileResumeTurnStore` `turns/turn-NNN.md`); Conversation's `TURNS_STATE` is read by nothing.
+ * A ferret's turns folder in 5.0: `<FERRET_SESSIONS_FOLDER>/<ferret>/<FERRET_TURNS_FOLDER>`, the facts Ferrets' contract
+ * owns (`contract/sessions-root.ts`), so this step and 5.0's readers (`FileSessionTaskStore` `turns/turn-001.md`,
+ * `FileResumeTurnStore` `turns/turn-NNN.md`) name one folder. Conversation's `TURNS_STATE` is read by nothing.
  */
-export const V5_FERRET_SESSIONS_ROOT = 'state/ferrets/sessions';
-export const v5TurnsFolder = (ferret: string) => join(V5_FERRET_SESSIONS_ROOT, ferret, 'turns');
+export const v5TurnsFolder = (ferret: string) => join(FERRET_SESSIONS_FOLDER, ferret, FERRET_TURNS_FOLDER);
 export const v5DraftsFile = (ferret: string) => at(DRAFTS_STATE.path, ferret);
 export const v5QueueFile = (ferret: string) => at(QUEUE_STATE.path, ferret);
 export const v5SendsFile = (ferret: string) => at(SENDS_STATE.path, ferret);

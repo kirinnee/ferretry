@@ -67,6 +67,8 @@ export function ferretsMoveResume(
         automatic: request.policy?.automatic ?? false,
         replaceLiveTerminal,
         ...(replaceLiveTerminal ? { target: await targetOf(ferret) } : {}),
+        // Who asked, for the author beside the relaunch's turn (the Warden's move is drawn as the Warden's).
+        ...(request.actor === undefined ? {} : { actor: request.actor }),
       });
       if (!resumed.ok) throw new ResumeRefused(resumed.error.reason);
       const record = recordOf(ferret);

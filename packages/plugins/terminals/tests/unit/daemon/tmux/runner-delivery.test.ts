@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { RunnerHandle } from '@ferretry/core-ferrets/contract';
+import { diedParked, type RunnerHandle } from '@ferretry/core-ferrets/contract';
 import type { InputHolds } from '@ferretry/kernel/contract';
 import { type ActRecord, testActRunner, TestMintedIds } from '@ferretry/kernel/testing';
 import { TmuxRunner } from '../../../../daemon/adapters/tmux/tmux-runner.ts';
@@ -292,5 +292,127 @@ describe('tmux runner message delivery', () => {
     expect(server.calls.filter(call => call[0] === 'send-keys' && call.includes('-l'))).toHaveLength(1);
     expect(server.calls.filter(call => call.at(-1) === 'Enter')).toHaveLength(3);
     expect(server.composer).toContain('one send');
+  });
+});
+
+describe('#23 pane-queue: a queued message is typed only through kernel.act and a held target types nothing', () => {
+  /** A fake fixture value standing in for whatever a person would not want typed into the wrong pane. */
+  const FIXTURE_SECRET = 'fixture-not-a-secret-7f3a';
+
+  it('#23 pane-queue: every write the queue makes is an act on the exact pane, and it answers what the pane proves', async () => {
+    const { runner, server, acts, guards, handle } = subject();
+
+    const outcome = await runner.queue(handle, `queue this ${FIXTURE_SECRET}`);
+
+    expect(['held', 'typed', 'left']).toContain(outcome);
+    // The fixture's pane is idle, so Enter submitted it: it left the composer and no queue shows it.
+    expect(outcome).toBe('left');
+    expect(server.submitted).toEqual([`queue this ${FIXTURE_SECRET}`]);
+    // Every keystroke went through the act runner on THIS pane, and through the server-side guard; none raw.
+    expect(acts.length).toBeGreaterThan(0);
+    expect(acts.every(act => act.op === 'keys' && act.target.key === handle && act.outcome === 'ran')).toBe(true);
+    expect(guards.length).toBe(acts.length);
+    expect(
+      server.calls.filter(call => call.includes('-t')).every(call => call[call.indexOf('-t') + 1] === handle),
+    ).toBe(true);
+  });
+
+  it('#23 pane-queue: a held target types nothing, and the refusal quotes nothing of the message', async () => {
+    const { runner, server, acts, handle, hold } = subject();
+    hold();
+
+    const queued = runner.queue(handle, `queue this ${FIXTURE_SECRET}`);
+
+    await expect(queued).rejects.toThrow('input card');
+    await queued.catch((error: unknown) => {
+      expect(String(error instanceof Error ? error.message : error)).not.toContain(FIXTURE_SECRET);
+    });
+    expect(
+      server.calls.some(call => call[0] === 'send-keys' || call[0] === 'load-buffer' || call[0] === 'paste-buffer'),
+    ).toBe(false);
+    expect(server.composer).toBe('');
+    expect(server.submitted).toEqual([]);
+    expect(acts.every(act => act.outcome !== 'ran')).toBe(true);
+  });
+
+  it('#23 pane-queue: a handle with nothing behind it rejects without a key or an act', async () => {
+    const world = subject();
+    world.server.alive = false;
+
+    await expect(world.runner.queue(world.handle, 'work')).rejects.toBeInstanceOf(PaneNotReadyError);
+    expect(world.server.calls).toEqual([]);
+    expect(world.acts).toEqual([]);
+  });
+});
+
+/**
+ * Today's `TmuxSessionLifecycleLauncher.settled` (britnee's ruling, test (e)): after the first turn, the runner watches
+ * the SAME exact pane, read only, for the harness to finish its own startup. Codex 0.166 parks a submission under
+ * `Waiting for startup · esc cancel` until its account check answers; a pane that dies in that window rejects with
+ * `parked: true`. No key, buffer or paste is ever sent by the wait.
+ */
+describe('settleStartup (e) the tmux runner waits out a parked startup and writes nothing', () => {
+  const writes = (world: ReturnType<typeof subject>) =>
+    world.server.commands().filter(command => ['send-keys', 'load-buffer', 'paste-buffer'].includes(command));
+
+  it('settleStartup (e) a pane that shows the park and then dies rejects with parked: true, and no write is made', async () => {
+    const world = subject();
+    world.server.startupWaitUntilMs = 60_000;
+    const advance = world.server.advance.bind(world.server);
+    world.server.advance = (ms: number) => {
+      advance(ms);
+      world.server.dead = true;
+    };
+
+    const error = await world.runner.settled(world.handle).then(
+      () => undefined,
+      (failure: unknown) => failure,
+    );
+
+    expect(diedParked(error)).toBe(true);
+    expect(writes(world)).toEqual([]);
+    expect(world.guards).toEqual([]);
+    expect(world.acts).toEqual([]);
+  });
+
+  it('settleStartup (e) a pane already dead before any park was seen rejects without parked', async () => {
+    const world = subject();
+    world.server.dead = true;
+
+    const error = await world.runner.settled(world.handle).then(
+      () => undefined,
+      (failure: unknown) => failure,
+    );
+
+    expect(error).toBeDefined();
+    expect(diedParked(error)).toBe(false);
+    expect(writes(world)).toEqual([]);
+  });
+
+  it('settleStartup (e) a harness that is up answers settled, and one still parked past the bound answers timed-out, both without a write', async () => {
+    const up = subject();
+    expect(await up.runner.settled(up.handle)).toBe('settled');
+    expect(writes(up)).toEqual([]);
+
+    const slow = subject();
+    slow.server.startupWaitUntilMs = Number.MAX_SAFE_INTEGER;
+    expect(await slow.runner.settled(slow.handle)).toBe('timed-out');
+    expect(writes(slow)).toEqual([]);
+    expect(slow.guards).toEqual([]);
+  });
+
+  it('settleStartup the last screen of a ferret pane is read by its exact id, dead or alive, and a person’s shell answers nothing', async () => {
+    const world = subject();
+    world.server.transcript = 'workspace routing discovery failed';
+    world.server.dead = true;
+
+    expect(await world.runner.lastScreen(world.handle)).toContain('workspace routing discovery failed');
+    expect(world.server.calls.some(call => call[0] === 'capture-pane' && call.at(-1) === world.handle)).toBe(true);
+    expect(writes(world)).toEqual([]);
+
+    const shell = subject();
+    shell.replace({ session: 'fy-webterm-person' });
+    expect(await shell.runner.lastScreen(shell.handle)).toBe('');
+    expect(await shell.runner.lastScreen('not-a-pane' as RunnerHandle)).toBe('');
   });
 });

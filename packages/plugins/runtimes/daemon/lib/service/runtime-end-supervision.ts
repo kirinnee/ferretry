@@ -17,7 +17,8 @@
  */
 import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import type { FerretId } from '@ferretry/kernel/contract';
-import { type CodexAppServerOutcome, codexLaunchFailure } from './codex-runtime.ts';
+import { codexLaunchFailure } from '../../../contract/codex-launch.ts';
+import type { CodexAppServerOutcome } from './codex-runtime.ts';
 
 /** The host seams an ended ferret's follow-up stands on. Absent until the host offers them (see `RuntimesAssembly`). */
 export interface RuntimeEndSeams {

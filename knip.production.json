@@ -46,8 +46,6 @@
         "daemon/lib/protocol/auto-resume.ts",
         "daemon/adapters/session/lifecycle/process-incarnation.ts",
         "daemon/adapters/session/resume/tmux-resume-launcher.ts",
-        "daemon/adapters/session/resume/file-resume-turn-store.ts",
-        "daemon/adapters/session/resume/storage-resume-repository.ts",
         "daemon/lib/session/health/watched-panes.ts",
         "daemon/lib/session/events/index.ts",
         "daemon/lib/session/events/service.ts",
@@ -272,8 +270,7 @@
     },
     "packages/plugins/terminals": {
       "entry": [],
-      "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["daemon/adapters/tmux/pane-queue.ts"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/browsers": {
       "entry": [],

@@ -103,6 +103,13 @@ export interface RunnerDelivery {
 
 /** Today's `InjectionOutcome`: the text started a turn, or the harness handled it locally (a slash command). */
 export type DeliveryOutcome = 'turn-started' | 'handled-local';
+
+/**
+ * What putting a message into a BUSY pane's own queue proved (today's `PaneQueueOutcome`): `held`, the harness shows it
+ * in its queue; `typed`, it is still in the composer after the submit and queue keys (a TUI will not send it on its own
+ * when the turn ends); `left`, it left the composer and no queue shows it, so only the transcript can say where it went.
+ */
+export type QueueOutcome = 'held' | 'typed' | 'left';
 /** Why `attach` would not adopt a handle: nothing there, not a ferret of ours, or not the ferret named. */
 export type AttachRefusal = 'gone' | 'not-a-ferret' | 'mismatch' | 'unsupported';
 
@@ -123,6 +130,36 @@ export interface Runner {
    * harnesses call). A handle with nothing behind it rejects; it never starts anything.
    */
   deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome>;
+  /**
+   * Additive (U3): puts one message into a BUSY pane's own queue (today's tmux `TmuxPaneQueue`), so the harness takes
+   * it when its turn ends. Like `deliver`, the runner guards EVERY write it makes with `kernel.act` on that pane itself,
+   * so a caller must not wrap it in a second act (the two would wait on each other). A handle with nothing behind it
+   * rejects; it never starts anything. Absent: the runner cannot queue, and the harness seam answers `plugin_unavailable`.
+   */
+  queue?(handle: RunnerHandle, text: string): Promise<QueueOutcome>;
+  /**
+   * Additive (U3, today's `SessionLifecycleLauncher.settled`): waits, boundedly, until the harness has finished its OWN
+   * startup after the first turn was delivered. Delivery is not startup: Codex takes a submission while it is still
+   * starting and parks it until its account check answers. Answers `settled` when the harness is up and `timed-out`
+   * when the bound passes first (not a failure). Rejects when the pane dies first, with an error that carries
+   * `parked: true` (see {@link diedParked}) when a frame showed the first turn parked before the pane died. It only
+   * reads: no key is ever written. Absent: the runner cannot tell, and a start does not wait.
+   */
+  settled?(handle: RunnerHandle): Promise<'settled' | 'timed-out'>;
+  /**
+   * Additive (U3, today's `PaneScreenReader.text`): what the pane behind `handle` last showed, dead or alive, so a
+   * harness can explain a start that failed ({@link Harness.startFailure}). It only reads, and the text is handed to the
+   * harness only: it is never logged, stored or quoted in any answer. A handle with nothing behind it answers `''`.
+   */
+  lastScreen?(handle: RunnerHandle): Promise<string>;
+}
+
+/**
+ * Whether a rejection of {@link Runner.settled} says the first turn was seen parked behind the harness's startup
+ * before the pane died (today's `diedParked`). Only that proves the turn never ran; any other failure leaves it unknown.
+ */
+export function diedParked(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'parked' in error && error.parked === true;
 }
 
 // ─── harness (§4.3) ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -264,6 +301,13 @@ export interface Harness {
   fork?(from: FerretId, at?: TurnRef): Promise<ForkPlan>;
   stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void>;
   deliver(ferret: FerretId, handle: RunnerHandle, message: OutboundMessage): Promise<Delivery>;
+  /**
+   * Additive (U3, today's `RuntimeSupervisedLauncher` explanation): the sentence a person can act on for a start whose
+   * first turn could not be typed or whose pane died while starting, read off what the pane last showed
+   * ({@link Runner.lastScreen}), or `undefined` when the screen says nothing this harness recognises. The answer is a
+   * FIXED sentence of the harness's own: it never quotes the screen. Absent: no harness explanation.
+   */
+  startFailure?(screen: string): string | undefined;
   readonly transcript: TranscriptReader;
   readonly usage: UsageReader;
   readonly dialogs?: DialogReader;
