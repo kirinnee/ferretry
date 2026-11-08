@@ -9,6 +9,10 @@
  * - A named key whose new value is not a mapping (a scalar, a list, `null`), or whose current value is not one (absent,
  *   a scalar, a list), is replaced as a plain patch replaces it; the schema then judges the result like any other edit.
  *
+ * - What a merge extends is the mapping the file ITSELF holds (`base`, the file's own value when the caller has one
+ *   apart from `current`): a section the file lacks is not given the schema's defaults by a merge, so an unchanged
+ *   default stays unwritten, exactly as a plain patch of that section would leave it.
+ *
  * The result is built from entries, never by assignment, so a key spelled `__proto__` is an ordinary key (a value
  * inherited from the prototype has no entries of its own, so nothing is merged from one).
  */
@@ -16,15 +20,20 @@ export function patchedValue(
   current: Readonly<Record<string, unknown>>,
   patch: Readonly<Record<string, unknown>>,
   within: readonly string[] = [],
+  base: Readonly<Record<string, unknown>> = current,
 ): Record<string, unknown> {
-  const named = new Set(within);
+  // A `within` that is not a list (untyped JS) names nothing: a string must never be read as its letters.
+  const named = new Set(Array.isArray(within) ? within : []);
   const entries = new Map(Object.entries(current));
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) entries.delete(key);
-    else entries.set(key, named.has(key) ? mergedMapping(current[key], value) : value);
+    else entries.set(key, named.has(key) ? mergedMapping(base[key], value) : value);
   }
   return Object.fromEntries(entries);
 }
+
+/** Whether `within` is what the contract says: absent, or a list. Anything else is refused by the writers, not guessed at. */
+export const isWithinList = (within: unknown): boolean => within === undefined || Array.isArray(within);
 
 const isMapping = (value: unknown): value is Readonly<Record<string, unknown>> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);

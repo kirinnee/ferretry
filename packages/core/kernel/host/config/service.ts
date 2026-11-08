@@ -71,7 +71,7 @@ import {
 import { configJsonSchemaText, schemaFileName, schemaModeline } from './schemas.ts';
 import { type ConfigTreeEvents, watchConfigFiles } from './watcher.ts';
 import { CONFIG_FILE_MAX_BYTES, configTextTooLarge, editConfigText, readConfigTextToEdit } from './yaml-text.ts';
-import { patchedValue } from './patch.ts';
+import { isWithinList, patchedValue } from './patch.ts';
 
 /** The most a configuration file may hold; a larger one is not read, and keeps its last good version. */
 export { CONFIG_FILE_MAX_BYTES };
@@ -700,7 +700,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (typeof written !== 'object' || written === null || Array.isArray(written)) return undefined;
     const meaning = def.schema.safeParse(written);
     const current = (meaning.success ? meaning.data : written) as Record<string, unknown>;
-    const target = patchedValue(current, patch, within);
+    const target = patchedValue(current, patch, within, written as Record<string, unknown>);
     return editConfigText(existing === undefined ? undefined : base, target, current, schemaModeline(def, slot.path));
   };
 
@@ -809,6 +809,20 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (declaration === undefined) return { kind: 'refused', reason: 'not_declared', issues: [] };
     const slot = slotFor(declaration, name);
     if (slot === undefined) return { kind: 'refused', reason: 'bad_name', issues: [] };
+    // Never guessed at: a `within` that is not a list would otherwise replace a section the caller meant to merge.
+    if (!isWithinList(edit.within))
+      return {
+        kind: 'refused',
+        reason: 'schema',
+        issues: [
+          {
+            path: slot.path,
+            severity: 'error',
+            message: '`within` must be a list of top-level key names',
+            fix: 'name the sections to merge as a list',
+          },
+        ],
+      };
     return await serial(async () => {
       const entry = settled.get(slot.path);
       const heldNow = entry?.evaluated.held;

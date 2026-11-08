@@ -97,6 +97,30 @@ describe('patchedValue with within: a named top-level mapping merges ONE level d
     }
   });
 
+  test('a merge extends the FILE’s own mapping (base), never the schema-parsed one: no default is written by a merge', () => {
+    // parsed = what the schema made of the file (defaults filled in); file = what the file itself holds
+    const parsed = { enabled: true, caps: { daily: 10, price: 2 } };
+    const file = { enabled: true };
+    const merged = patchedValue(parsed, { caps: { daily: 3 } }, ['caps'], file);
+    expect(merged.caps).toEqual({ daily: 3 });
+    // the same section the plain patch writes
+    expect(merged.caps).toEqual(patchedValue(parsed, { caps: { daily: 3 } }).caps);
+    // a section the file has keeps its own sub-keys, and only those
+    expect(patchedValue(parsed, { caps: { weekly: 9 } }, ['caps'], { caps: { daily: 5 } }).caps).toEqual({
+      daily: 5,
+      weekly: 9,
+    });
+  });
+
+  test('a `within` that is not a list names nothing: a string is never read as its letters', () => {
+    // 'ab' would name the keys `a` and `b` if it were spread into a set of its characters
+    const asString = 'ab' as unknown as readonly string[];
+    const start = { a: { keep: 1 }, b: { keep: 2 }, ab: { keep: 3 } };
+    const patch = { a: { added: 1 }, b: { added: 2 }, ab: { added: 3 } };
+    expect(patchedValue(start, patch, asString)).toEqual(patchedValue(start, patch));
+    expect(patchedValue(start, patch, asString)).toEqual(patch);
+  });
+
   test('neither input is changed', () => {
     const before = structuredClone(current);
     const patch = { caps: { daily: 1, price: undefined } };

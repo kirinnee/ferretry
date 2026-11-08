@@ -106,3 +106,14 @@ test('the testing host keeps the sub-keys a within save does not name, and refus
   expect(config.file(wardenDef)).toEqual({ enabled: true, caps: { daily: 4, price: 2 } });
   await host.stop();
 });
+
+test('the testing host refuses a within that is not a list, as the real writer does, and writes nothing', async () => {
+  const { host, config } = await testing();
+  const refused = await config.writeAsOwner(wardenDef, undefined, {
+    patch: { caps: { daily: 3 } },
+    within: 'caps' as unknown as readonly string[],
+  });
+  expect(refused).toMatchObject({ kind: 'refused', reason: 'schema' });
+  expect(config.file(wardenDef)).toEqual(START);
+  await host.stop();
+});

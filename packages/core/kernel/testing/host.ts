@@ -55,7 +55,7 @@ import type {
   CarrierListenerPort,
 } from '../contract/ports.ts';
 import { readConfigText } from '../host/config/yaml-text.ts';
-import { patchedValue } from '../host/config/patch.ts';
+import { isWithinList, patchedValue } from '../host/config/patch.ts';
 import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
 import { createIdentitySigner, signerFor } from '../host/session/signer.ts';
 import {
@@ -667,6 +667,13 @@ async function start(world: World): Promise<TestHost> {
       // The in-memory world holds no edit held for the owner, so the owner's patch is a write of that patch (merged
       // one level deep into the keys `within` names, as the real writer merges it).
       async writeAsOwner(def, name, edit, writeOptions = {}) {
+        // As the real writer: a `within` that is not a list is refused, never read as something else.
+        if (!isWithinList(edit.within))
+          return {
+            kind: 'refused',
+            reason: 'schema',
+            issues: [{ path: keyOf(def), message: '`within` must be a list of top-level key names' }],
+          };
         return await write(def, name, { patch: edit.patch }, writeOptions, edit.within);
       },
       async remove(def, name, writeOptions = {}) {

@@ -297,6 +297,62 @@ describe('writeAsOwner within: refused whole, nothing written, no value in any a
   });
 });
 
+describe('writeAsOwner within: a merge writes no schema default into a section the file lacks', () => {
+  const NO_CAPS = 'enabled: true\n';
+
+  test('with no edit held: a save into an absent section is what a plain write of the same patch makes', async () => {
+    const merged = harness();
+    const plain = harness();
+    await merged.start(NO_CAPS);
+    await plain.start(NO_CAPS);
+    const patch = { caps: { daily: 3 } };
+    expect((await merged.port.writeAsOwner(wardenDef, undefined, { patch, within: ['caps'] })).kind).toBe('written');
+    expect((await plain.port.write(wardenDef, undefined, { patch })).kind).toBe('written');
+    expect(merged.disk()).toBe(plain.disk());
+    expect(merged.disk()).not.toContain('price');
+    expect(merged.port.file(wardenDef)?.caps).toEqual({ daily: 3, price: 2 });
+  });
+
+  test('with an edit held, BOTH versions: neither gets a default written into the section it lacks', async () => {
+    const h = harness();
+    await h.start(NO_CAPS);
+    // the held version lowers the guard; neither version has a caps section
+    h.fs.seed(PATH, 'enabled: true\nguard:\n  level: low\n');
+    await h.files.reload();
+    expect(h.port.fileState(wardenDef)).toMatchObject({ state: 'held', sentences: ['lowers the guard'] });
+    const outcome = await h.port.writeAsOwner(wardenDef, undefined, {
+      patch: { caps: { weekly: 20 } },
+      within: ['caps'],
+    });
+    expect(outcome.kind).toBe('written');
+    // the held version (the disk) gained the patch's sub-key only: no default price, no default daily
+    expect(h.disk()).toContain('weekly: 20');
+    expect(h.disk()).not.toContain('price');
+    expect(h.disk()).not.toContain('daily');
+    // the version in effect reads as the schema's defaults plus the sub-key
+    expect(h.port.file(wardenDef)?.caps).toEqual({ daily: 10, price: 2, weekly: 20 });
+  });
+});
+
+describe('writeAsOwner within: a `within` that is not a list is refused whole, never read as its letters', () => {
+  test('a string `within` refuses and writes nothing, with or without an edit held', async () => {
+    for (const held of [false, true]) {
+      const h = harness();
+      await h.start();
+      if (held) await h.holdPrice();
+      const before = { disk: h.disk(), inEffect: h.port.file(wardenDef), held: h.files.held() };
+      const outcome = await h.port.writeAsOwner(wardenDef, undefined, {
+        patch: { caps: { daily: 3 } },
+        within: 'caps' as unknown as readonly string[],
+      });
+      expect(outcome).toMatchObject({ kind: 'refused', reason: 'schema' });
+      expect(h.disk()).toBe(before.disk);
+      expect(h.port.file(wardenDef)).toEqual(before.inEffect);
+      expect(h.files.held()).toEqual(before.held);
+    }
+  });
+});
+
 describe('writeAsOwner without within: byte-identical to before (golden)', () => {
   test('with an edit held: both versions are exactly what the plain patch made of them', async () => {
     const h = harness();

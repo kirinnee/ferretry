@@ -301,8 +301,10 @@ export interface ConfigPort {
    * removes it), and every sub-key it does not name is kept, so a section saved beside a held edit never puts the held
    * version's other sub-keys back to what is in effect (the 2026-10-29 price incident). A named key whose new or
    * current value is not a mapping is replaced as a plain patch replaces it; a key not named is replaced as before.
-   * Without `within` the patch is exactly what it was. The schema, the loosening judgement, Gate's judge and the
-   * conflict check all run on the MERGED versions, and both are written or neither, as for any patch.
+   * A merge extends the mapping the file itself holds, so a section the file lacks gets no schema defaults written
+   * into it. A `within` that is not a list is refused (`schema`), never guessed at. Without `within` the patch is
+   * exactly what it was. The schema, the loosening judgement and Gate's judge run on the MERGED versions; the conflict
+   * check is made, on the disk's etag, before either version is patched. Both are written or neither, as for any patch.
    */
   writeAsOwner(
     def: ConfigFileDef<any> | ConfigCollectionDef<any>,
