@@ -625,3 +625,29 @@ describe('useOptionalRouter', () => {
     }
   });
 });
+
+describe('RouterProvider onAddress (shell contract S3)', () => {
+  it('is called after every history write and on Back/Forward, before the new route draws', async () => {
+    setPath('/d/daemon-a/session/one');
+    const heard: string[] = [];
+    let controller: ReturnType<typeof useRouter> | undefined;
+    function Grab() {
+      controller = useRouter();
+      return null;
+    }
+    const view = await mount(
+      <RouterProvider parseRoute={parse} onAddress={() => heard.push(window.location.href)}>
+        <Grab />
+      </RouterProvider>,
+    );
+    await interact(() => controller?.navigate('/d/daemon-a/projects#deep/x'));
+    await interact(() => controller?.navigate('/d/daemon-a/session/two', { replace: true }));
+    await interact(() => {
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    expect(heard).toHaveLength(3);
+    expect(heard[0]).toContain('/d/daemon-a/projects#deep/x');
+    expect(heard[1]).toContain('/d/daemon-a/session/two');
+    await view.unmount();
+  });
+});

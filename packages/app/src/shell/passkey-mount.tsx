@@ -29,20 +29,18 @@ const NOTHING_LOCKED: readonly string[] = Object.freeze([]);
 const unsubscribed = () => () => {};
 
 /**
- * Every machine with a request waiting on an unlock, for a list that shows it as locked (today's `useLockedMachines`).
- * Empty outside a shell, or when Access gave no passkey handler.
+ * Every machine that wants its unlock, for a list that shows it as locked (today's `useLockedMachines`): THE one locked
+ * set, the grants cache's (S1, R3 m5) — a machine whose grants read answered `401 unlock_required`, whether or not a
+ * request of its is parked (a parked request always got that refusal first). Empty outside a shell.
  *
  * GAP(access): nothing consumes this yet (G95). The update dot asks locked machines too, where today it skipped them
  * (rebuild-ref App.tsx:1099 `useLockedMachines`), and the settings machine rows and the machine switcher
  * (App.tsx:1961, :2637) do not mark a locked machine either. Drawing them is the app shell's and Access's, not Gate's.
  */
 export function useLockedDaemons(): readonly string[] {
-  const handler = useOptionalShell()?.runtime.passkey()?.handler;
-  return useSyncExternalStore(
-    handler === undefined ? unsubscribed : handler.subscribe,
-    () => handler?.locked() ?? NOTHING_LOCKED,
-    () => handler?.locked() ?? NOTHING_LOCKED,
-  );
+  const runtime = useOptionalShell()?.runtime;
+  const read = useCallback(() => runtime?.lockedDaemons() ?? NOTHING_LOCKED, [runtime]);
+  return useSyncExternalStore(runtime === undefined ? unsubscribed : runtime.subscribe, read, read);
 }
 
 /**
@@ -57,7 +55,11 @@ export function usePasskeyAsk(): ((daemon: string, request: PasskeyAsk) => Promi
   const ask = useCallback(
     async (daemon: string, request: PasskeyAsk): Promise<boolean> => {
       const paired: PairedDaemon | undefined = runtime?.daemons.get(daemon);
-      return handler !== undefined && paired !== undefined ? await handler.ask(paired, request) : false;
+      if (handler === undefined || paired === undefined) return false;
+      const confirmed = await handler.ask(paired, request);
+      // A confirm the shell forwarded is a re-read trigger for that machine's grants (S1).
+      if (confirmed) runtime?.noteConfirmed(daemon);
+      return confirmed;
     },
     [handler, runtime],
   );

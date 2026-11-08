@@ -10,6 +10,8 @@ export const isSharingTab = (value: string | undefined): value is SharingTab =>
   value !== undefined && (SHARING_TABS as readonly string[]).includes(value);
 
 export const JOIN_PATH = '/join';
+/** The join screen's id in the manifest: the screen a share link's fragment and a hand-off are carried to. */
+export const JOIN_SCREEN_ID = 'join';
 export const SHARED_PATH = '/shared';
 
 /** `/d/<daemon>/sharing[/<tab>]` */

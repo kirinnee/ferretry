@@ -1,7 +1,7 @@
 /**
  * The Warden client of any paired daemon, kept where the views can reach it. A page that reads several daemons asks
  * for each one's client by its connection; the screen is handed the client of the daemon it is on, and the shell
- * supplies the others (`useDaemonClients` in `@ferretry/app`).
+ * supplies the others (`useEveryDaemon` in `@ferretry/app`).
  */
 
 import type { PluginClient } from '@ferretry/kernel/manifest';
