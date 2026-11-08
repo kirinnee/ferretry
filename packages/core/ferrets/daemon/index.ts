@@ -117,6 +117,7 @@ import { applicableInstructions, outdatedSectionIds, sectionDigests } from './li
 import type { LaunchInstructionSectionId } from './lib/protocol/session.ts';
 import { lifecycleStatus, withLifecycleStatus } from './lib/ferrets/session-document.ts';
 import { AUTO_RESUME_JOB, buildAutoResume } from './modules/auto-resume.ts';
+import { relaunchSettings } from './modules/relaunch-settings.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
@@ -673,6 +674,16 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         ferret => registry.get(ferret),
         async ferret => await movedTarget(async () => await sessionStore.readConfig(ferret as unknown as SessionId)),
       ),
+      // The relaunch-settings read (W2-c, RULING #27 Q9): the ferret's own harness compares what it launched under with
+      // its settings now; Ferrets reads no harness file. The caller check is `mayAct` below, as for every move route.
+      launch: relaunchSettings({
+        harnessOf: ferret => registry.get(ferret)?.harness,
+        harness: key => {
+          const found = hooks.provider(Harnesses, key);
+          return found === 'unavailable' ? undefined : found;
+        },
+        after: (delayMs, fire) => kernel.clock.after(milliseconds(delayMs), fire),
+      }),
     }),
   );
   // These routes fork, hand over, move or read the conversation of the ferret they name, so — like resume and stop — a

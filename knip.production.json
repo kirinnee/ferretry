@@ -89,9 +89,7 @@
         "daemon/lib/session/runtime-control/index.ts",
         "daemon/lib/session/runtime-control/ledger.ts",
         "daemon/lib/session/runtime-control/policy.ts",
-        "daemon/lib/session/runtime-control/service.ts",
-        "daemon/adapters/session/launch/index.ts",
-        "daemon/adapters/session/launch/file-launch-settings.ts"
+        "daemon/lib/session/runtime-control/service.ts"
       ]
     },
     "packages/plugins/agenda": {

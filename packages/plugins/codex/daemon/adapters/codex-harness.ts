@@ -11,6 +11,7 @@ import type {
   Delivery,
   Harness,
   HarnessInstall,
+  HarnessLaunchSettings,
   HarnessMissing,
   HomePlan,
   LaunchSpec,
@@ -23,8 +24,9 @@ import type {
 import { codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import { buildCodexLaunchArgv, tomlTables } from '../lib/index.ts';
-import type { HarnessConfig } from '../../contract/index.ts';
+import { CODEX_LAUNCH_SETTINGS, type HarnessConfig } from '../../contract/index.ts';
 import { codexFixedArguments } from '../lib/fixed-layer.ts';
+import { compareCodexLaunchSettings, codexLaunchSettingsRecord } from '../lib/launch-settings.ts';
 import { codexCorrelationArguments } from '../lib/transcript/rollout.ts';
 import { CodexRollouts } from './rollouts.ts';
 import {
@@ -49,6 +51,10 @@ export interface CodexHarnessOptions {
 /** A ferret id is one plain name before it names a folder (the S45 grammar Claude Code's home uses too). */
 const PLAIN_FERRET = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
 
+/** A launch record is two fingerprints (~180 bytes); one larger than this is not one, and is never read. */
+const MAX_LAUNCH_RECORD_BYTES = 4 * 1024;
+const UNKNOWN_LAUNCH: HarnessLaunchSettings = { kind: 'unknown' };
+
 /** Codex's `AGENTS.md`: the instructions every launch writes into the ferret's home. */
 function agentsDocument(spec: LaunchSpec): string {
   const sections = [
@@ -71,10 +77,15 @@ function configDocument(spec: LaunchSpec): string {
 
 export function codexHarness(options: CodexHarnessOptions): Harness {
   const { kernel, locate, probe, update } = options;
+  const permissionModeNow = (): HarnessConfig['permissionMode'] => options.permissionMode?.() ?? 'auto';
   const rollouts = new CodexRollouts(kernel, options.historyDirectory ?? (async () => undefined));
 
   /** `CODEX_HOME` is set by an `env` prefix: the Vault's environment is an opaque handle this code cannot add to. */
-  const command = async (spec: LaunchSpec, resume?: string): Promise<Result<readonly string[], StartRefusal>> => {
+  const command = async (
+    spec: LaunchSpec,
+    permissionMode: HarnessConfig['permissionMode'],
+    resume?: string,
+  ): Promise<Result<readonly string[], StartRefusal>> => {
     const location = await locate();
     if (location.outcome !== 'located') return err('unavailable');
     return ok([
@@ -82,10 +93,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
       `CODEX_HOME=${spec.home}`,
       ...buildCodexLaunchArgv({
         executable: location.path,
-        harnessFlags: [
-          ...codexFixedArguments(options.permissionMode?.() ?? 'auto', spec.folder),
-          ...codexCorrelationArguments(spec.home),
-        ],
+        harnessFlags: [...codexFixedArguments(permissionMode, spec.folder), ...codexCorrelationArguments(spec.home)],
         ...(resume === undefined ? {} : { resume }),
         ...(spec.model === undefined ? {} : { model: spec.model }),
         ...(spec.effort === undefined ? {} : { effort: spec.effort }),
@@ -99,10 +107,13 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     env: ChildEnvironment,
     harnessConversation?: string,
   ): Promise<Result<Started, StartRefusal>> => {
-    const argv = await command(spec, harnessConversation);
+    // ONE read of the permission mode per launch: the argv and the record describe the same setting.
+    const permissionMode = permissionModeNow();
+    const argv = await command(spec, permissionMode, harnessConversation);
     if (!argv.ok) return argv;
     await ensureHome(spec);
     await rollouts.launched(spec, harnessConversation);
+    await recordLaunchSettings(spec.ferret, permissionMode);
     const running =
       harnessConversation === undefined
         ? await runner.start({ ferret: spec.ferret, command: argv.value, cwd: spec.folder, env })
@@ -110,6 +121,26 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     if (!running.ok) return running;
     // Codex mints its own conversation id after launch; Conversation finds it, so none is claimed here.
     return ok({ running: running.value, ...(harnessConversation === undefined ? {} : { harnessConversation }) });
+  };
+
+  /**
+   * Records what this launch runs under, before the process starts (W2-c). A launch never fails over it: when the record
+   * cannot be written, the one an earlier launch left is removed, so the answer for this process is `unknown` and never
+   * an older launch's.
+   */
+  const recordLaunchSettings = async (
+    ferret: FerretId,
+    permissionMode: HarnessConfig['permissionMode'],
+  ): Promise<void> => {
+    try {
+      await kernel.state.write(CODEX_LAUNCH_SETTINGS, codexLaunchSettingsRecord(permissionMode), ferret);
+    } catch {
+      try {
+        await kernel.state.remove(CODEX_LAUNCH_SETTINGS, ferret);
+      } catch {
+        // Nothing more can be done: the read then finds whatever is left, and a damaged record reads as unknown.
+      }
+    }
   };
 
   const refused = (id: string, reason: string): Delivery => ({ status: 'refused', id, reason });
@@ -211,6 +242,24 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     // Today's RuntimeSupervisedLauncher: a pane that died starting because Codex could not reach the network is told
     // so in words. The sentence is fixed text; the screen is only matched, never quoted.
     startFailure: screen => codexLaunchFailure(screen),
+
+    /**
+     * Whether a relaunch would run this ferret on other settings of this plugin's than its last start or resume did
+     * (`Harness.launchSettings`, W2-c). Names sections only. Total: no record, a record too large to be one, a damaged
+     * one or any failure is `unknown`, and what failed is dropped unread.
+     */
+    async launchSettings(ferret: FerretId): Promise<HarnessLaunchSettings> {
+      try {
+        if (!PLAIN_FERRET.test(ferret)) return UNKNOWN_LAUNCH;
+        const size = (await kernel.state.version(CODEX_LAUNCH_SETTINGS, ferret))?.size;
+        if (size === undefined || size > MAX_LAUNCH_RECORD_BYTES) return UNKNOWN_LAUNCH;
+        const recorded = await kernel.state.read(CODEX_LAUNCH_SETTINGS, ferret);
+        if (!recorded.ok || recorded.value === undefined) return UNKNOWN_LAUNCH;
+        return compareCodexLaunchSettings(recorded.value, codexLaunchSettingsRecord(permissionModeNow()));
+      } catch {
+        return UNKNOWN_LAUNCH;
+      }
+    },
 
     transcript: rollouts.transcript,
     transcriptStamp: rollouts.stamp,

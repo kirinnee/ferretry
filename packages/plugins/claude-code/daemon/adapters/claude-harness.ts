@@ -6,6 +6,7 @@ import type {
   Harness,
   HarnessDialog as FerretDialog,
   HarnessInstall,
+  HarnessLaunchSettings,
   HarnessMissing,
   HarnessTranscriptStamp,
   HarnessTranscriptTail,
@@ -33,11 +34,13 @@ import type {
   RootHandle,
   RootsPort,
   SpawnPort,
+  StatePort,
 } from '@ferretry/kernel/contract';
 import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import {
   CLAUDE_CODE_CONFIG,
   CLAUDE_CODE_HOOKS,
+  CLAUDE_CODE_LAUNCH_SETTINGS,
   CLAUDE_CODE_SETTINGS,
   type HarnessConfig,
 } from '../../contract/index.ts';
@@ -45,6 +48,11 @@ import type { DialogAnswerService } from '../lib/dialog/service.ts';
 import { MAX_HOME_DOCUMENT_BYTES as MAX_CLAUDE_JSON_BYTES, mergeClaudeJson } from '../lib/harness/claude-json.ts';
 import { claudeTranscriptPath, isConversationId } from '../lib/harness/claude-path.ts';
 import { HOME_FILES, homeText, launchCommand } from '../lib/harness/launch.ts';
+import {
+  compareLaunchSettings,
+  type LaunchSettingsInputs,
+  launchSettingsRecord,
+} from '../lib/harness/launch-settings.ts';
 import { parseEntries, parseTail, parseUsage, windowHoldsOneCutRecord } from '../lib/harness/transcript.ts';
 import { parseHarnessDialog } from '../lib/pane/harness-dialog.ts';
 import { parsePermissionPrompt } from '../lib/pane/permission-prompt.ts';
@@ -56,6 +64,8 @@ import type { PaneDirectory } from './tmux-pane.ts';
 export interface ClaudeHarnessDeps {
   readonly roots: RootsPort;
   readonly config: ConfigPort;
+  /** This plugin's own state: what each ferret was last launched under (`launch-settings/<ferret>.json`). */
+  readonly state: Pick<StatePort, 'read' | 'write' | 'remove' | 'version'>;
   readonly spawn: SpawnPort;
   readonly clock: Clock;
   readonly redaction: Redaction;
@@ -76,6 +86,9 @@ const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
 /** How much of the end of a transcript one tail read takes: a turn's records are near the end. */
 const TAIL_READ_BYTES = 512 * 1024;
 const FIRST_RECORDS_BYTES = 16 * 1024;
+/** A launch record is four fingerprints (~330 bytes); one larger than this is not one, and is never read. */
+const MAX_LAUNCH_RECORD_BYTES = 4 * 1024;
+const UNKNOWN_LAUNCH: HarnessLaunchSettings = { kind: 'unknown' };
 
 const configFile = CLAUDE_CODE_CONFIG as unknown as ConfigFileDef<HarnessConfig>;
 const settingsCollection = CLAUDE_CODE_SETTINGS as never;
@@ -134,16 +147,21 @@ export class ClaudeHarness implements Harness {
   }
 
   async prepareHome(spec: LaunchSpec): Promise<HomePlan> {
+    return await this.prepareHomeFrom(spec, this.launchInputs());
+  }
+
+  /** The home written from ONE read of this plugin's configuration, the same read the argv and the record are built from. */
+  private async prepareHomeFrom(spec: LaunchSpec, inputs: LaunchSettingsInputs): Promise<HomePlan> {
     const home = await this.ensureHome(spec);
     // GAP (skills): `skill` parts are not materialized. `copyTree` takes only this plugin's own root handles, and no
     // root this manifest declares reaches a skill source; it waits for the Skills plugin to hand one over.
     const text = homeText({
       folder: spec.folder,
-      permissionMode: this.deps.config.file(configFile)?.permissionMode ?? 'auto',
+      permissionMode: inputs.permissionMode,
       instructions: spec.instructions,
       parts: spec.parts,
-      settings: this.deps.config.collection(settingsCollection) as never,
-      hooks: this.deps.config.collection(hooksCollection) as never,
+      settings: inputs.settings as never,
+      hooks: inputs.hooks as never,
       effort: spec.effort,
     });
     const files: FencedPath[] = [];
@@ -304,18 +322,21 @@ export class ClaudeHarness implements Harness {
     if (!isConversationId(conversation.id)) throw new Error('the conversation id must be one plain name (S45)');
     const found = await this.discover();
     if (!found.found) return err('unavailable');
-    await this.prepareHome(spec);
-    const config = this.deps.config.file(configFile);
+    // ONE read of the configuration per launch: the home, the argv and the record all describe the same settings, so a
+    // reload between them cannot leave a record that differs from what the process runs on.
+    const inputs = this.launchInputs();
+    await this.prepareHomeFrom(spec, inputs);
     const command = launchCommand({
       binary: found.binary,
       home: spec.home,
-      permissionMode: config?.permissionMode ?? 'auto',
+      permissionMode: inputs.permissionMode,
       model: spec.model,
       hasMcp: spec.parts.some(part => part.kind === 'mcp'),
       conversation,
       readable: spec.readable,
     });
     const spec2 = { ferret: spec.ferret, command, cwd: spec.folder, env };
+    await this.recordLaunchSettings(spec.ferret, inputs);
     // Persist only the identity and cwd we chose, so a fresh daemon reads the same exact transcript.
     const home = this.home(spec.ferret);
     await home.writeText(
@@ -411,6 +432,51 @@ export class ClaudeHarness implements Harness {
     if (records.length === 0 && partial && windowHoldsOneCutRecord(text))
       return { kind: 'read', records: [{ kind: 'work' }] };
     return { kind: 'read', records: records.slice(-limit) };
+  }
+
+  /**
+   * Whether a relaunch would run this ferret on other settings of this plugin's than its last start or resume did
+   * (`Harness.launchSettings`, W2-c): the fingerprints recorded then against the ones the configuration gives now. Names
+   * sections only. Total: no record, a record too large to be one, a damaged one or any failure is `unknown`, and what
+   * failed is dropped unread.
+   */
+  async launchSettings(ferret: FerretId): Promise<HarnessLaunchSettings> {
+    try {
+      if (!isConversationId(ferret)) return UNKNOWN_LAUNCH;
+      const size = (await this.deps.state.version(CLAUDE_CODE_LAUNCH_SETTINGS, ferret))?.size;
+      if (size === undefined || size > MAX_LAUNCH_RECORD_BYTES) return UNKNOWN_LAUNCH;
+      const recorded = await this.deps.state.read(CLAUDE_CODE_LAUNCH_SETTINGS, ferret);
+      if (!recorded.ok || recorded.value === undefined) return UNKNOWN_LAUNCH;
+      return compareLaunchSettings(recorded.value, launchSettingsRecord(this.launchInputs()));
+    } catch {
+      return UNKNOWN_LAUNCH;
+    }
+  }
+
+  /** The settings a launch now runs under, from this plugin's own configuration (the effort is the launch's, not here). */
+  private launchInputs(): LaunchSettingsInputs {
+    return {
+      permissionMode: this.deps.config.file(configFile)?.permissionMode ?? 'auto',
+      settings: this.deps.config.collection(settingsCollection) as never,
+      hooks: this.deps.config.collection(hooksCollection) as never,
+    };
+  }
+
+  /**
+   * Records what this launch runs under, before the process starts. A launch never fails over it: when the record
+   * cannot be written, the one an earlier launch left is removed, so the answer for this process is `unknown` and
+   * never an older launch's.
+   */
+  private async recordLaunchSettings(ferret: FerretId, inputs: LaunchSettingsInputs): Promise<void> {
+    try {
+      await this.deps.state.write(CLAUDE_CODE_LAUNCH_SETTINGS, launchSettingsRecord(inputs), ferret);
+    } catch {
+      try {
+        await this.deps.state.remove(CLAUDE_CODE_LAUNCH_SETTINGS, ferret);
+      } catch {
+        // Nothing more can be done: the read then finds whatever is left, and a damaged record reads as unknown.
+      }
+    }
   }
 
   /** The exact transcript of the assigned id in its encoded cwd, including after a daemon restart; never one found by guessing. */

@@ -7,6 +7,7 @@ import {
   CODEX_FAST_CATALOG,
   CODEX_READ_MODELS,
   CODEX_ROLLOUTS,
+  CODEX_LAUNCH_SETTINGS,
   CODEX_SETTINGS,
   CodexPort,
   CodexUpdateFinished,
@@ -70,7 +71,7 @@ export default definePlugin({
   },
 
   data: {
-    state: [CODEX_AGENT_HOMES, CODEX_DISCOVERY, CODEX_FAST_CATALOG, CODEX_ROLLOUTS],
+    state: [CODEX_AGENT_HOMES, CODEX_DISCOVERY, CODEX_FAST_CATALOG, CODEX_ROLLOUTS, CODEX_LAUNCH_SETTINGS],
     config: [CODEX_CONFIG, CODEX_SETTINGS],
     readModels: CODEX_READ_MODELS,
     publishes: [CodexUpdateFinished],

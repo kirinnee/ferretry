@@ -128,8 +128,8 @@ export interface SessionMoveNeeds {
   readonly sessions: SessionDirectorySubsystem;
   /** The SAME service the revive uses. */
   readonly resume: Pick<SessionResumeService, 'resume'>;
-  /** The SAME rebuild a revive runs, asked whether it would change anything. */
-  readonly launch: SessionLaunchService;
+  /** The relaunch-settings read (W2-c): asked whether a relaunch would run the ferret on other harness settings. */
+  readonly launch: Pick<SessionLaunchService, 'drift'>;
   readonly preflight: MovePreflight;
   /** Puts one Ferretry-authored message in the session's queue (a closure over the queue and its deliverer). */
   readonly askAgent: SessionMoveParts['askAgent'];
@@ -240,8 +240,8 @@ interface SessionMoveParts {
   readonly signals: ProcessSignalPort;
   /** Serializes whole moves of one session, so two cannot restamp the same document. */
   readonly serial: KeyedSerialExecutor;
-  /** The SAME rebuild a revive runs, asked whether it would change anything. */
-  readonly launch: SessionLaunchService;
+  /** The relaunch-settings read (W2-c): asked whether a relaunch would run the ferret on other harness settings. */
+  readonly launch: Pick<SessionLaunchService, 'drift'>;
   /** The binary name a person drives, which an account resolution is typed with. */
   readonly clientName: string;
 }
