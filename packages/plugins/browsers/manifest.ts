@@ -251,7 +251,9 @@ export default definePlugin({
         summary: 'print a page’s visible text, its accessibility tree, or a snapshot with refs',
       }),
       verb('browser page screenshot', { summary: 'save a screenshot of a page' }),
-      verb('browser page dialog', { summary: 'answer the dialog a page is waiting on (alert, confirm, prompt)' }),
+      verb('browser page dialog', {
+        summary: 'answer the dialog a page is waiting on: accept or dismiss it, with the reply to type if it asks one',
+      }),
       verb('browser page tabs', { summary: 'list the pages and their popups, or adopt a popup under a name' }),
       verb('browser page wait', {
         summary: 'wait for an element, text, an address, a load state or a time; exits 1 on timeout',
