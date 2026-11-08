@@ -20,6 +20,7 @@ import { bootHost, realAdapters } from '@ferretry/kernel/host';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { fixedClock } from '@ferretry/kernel/testing';
 import { auditKind } from '../../../../contract/index.ts';
+import { bearerDigest } from '../../../../daemon/lib/api/authentication.ts';
 import { FERRET, FERRET_TOKEN, local, world } from '../support.ts';
 
 const roots: string[] = [];
@@ -117,13 +118,43 @@ test('R-0244 T-0034 a ferret’s write through POST /v1/agent/config is recorded
   }
 });
 
-test('R-0244 a call refused before the handler (no credential) leaves no record; a refused body is recorded by agent', async () => {
+test('R-0244 a call Gate refuses before the handler is recorded as today: no credential, then a revoked ferret token', async () => {
+  // Today's audited-route decorator wrapped the whole `POST /v1/agent/config` handler, and the credential check ran
+  // inside it, so a 401 and a 403 were recorded `fleet.configured` / `agent-config`, refused, naming nobody (R4 m2).
   const w = world();
   const host = await boot(w);
   try {
-    const anonymous = await host.dispatch({ ...post({ tool: 'config.read' }), headers: new Map() });
+    const anonymous = await host.dispatch({ ...post({ tool: 'config.read', note: MARKER }), headers: new Map() });
     expect(anonymous.status).toBe(401);
-    expect(w.recorded).toEqual([]);
+    expect(w.recorded).toHaveLength(1);
+
+    w.ferrets.revoke(bearerDigest(FERRET_TOKEN));
+    const revoked = await host.dispatch(post({ tool: 'config.write', path: 'voice.yaml', text: `note: ${MARKER}\n` }));
+    // Exactly one status: Gate refuses a revoked bearer as unauthenticated, before the handler. (Today's handler, which
+    // checked the credential itself, answered 403 for a presented credential it could not resolve.)
+    expect(revoked.status).toBe(401);
+    expect(w.recorded).toHaveLength(2);
+
+    for (const [index, status] of [anonymous.status, revoked.status].entries()) {
+      const draft = w.recorded[index];
+      expect(draft?.event).toBe(auditKind('fleet.configured'));
+      expect(draft?.outcome).toBe('refused');
+      expect(draft?.actor).toEqual({ kind: 'anonymous' });
+      // Names and ids only: the action and the status, never a ferret it could not prove, a token or the body.
+      expect(draft?.detail).toEqual({ action: 'agent-config', status });
+    }
+    expect(JSON.stringify(w.recorded)).not.toContain(MARKER);
+    expect(JSON.stringify(w.recorded)).not.toContain(FERRET_TOKEN);
+    expect(JSON.stringify(w.recorded)).not.toContain(bearerDigest(FERRET_TOKEN));
+  } finally {
+    await host.stop();
+  }
+});
+
+test('R-0244 a refused body is recorded by agent, naming the ferret, never the body', async () => {
+  const w = world();
+  const host = await boot(w);
+  try {
     const garbage = await host.dispatch(post({ tool: 'nope', note: MARKER }));
     expect(garbage.status).toBe(400);
     expect(w.recorded).toHaveLength(1);

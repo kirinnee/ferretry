@@ -62,7 +62,12 @@ export interface EvaluateInput {
   /** sha256 of the text's UTF-8 bytes, hex. */
   digest(text: string): string;
   readonly binary: string;
+  /** How a text of this file is checked, when the caller keeps checks it already made; else {@link checkConfigText}. */
+  check?(text: string): ReturnType<typeof checkConfigText>;
 }
+
+const checkOf = (input: EvaluateInput, text: string): ReturnType<typeof checkConfigText> =>
+  input.check?.(text) ?? checkConfigText(input.def, input.path, text, input.binary);
 
 interface Candidate {
   readonly value: unknown;
@@ -80,7 +85,7 @@ export function defaultsOf(def: ConfigDef): unknown {
 function acceptedCandidate(input: EvaluateInput): Candidate | undefined {
   const accepted = input.accepted;
   if (accepted === undefined) return undefined;
-  const checked = checkConfigText(input.def, input.path, accepted.text, input.binary);
+  const checked = checkOf(input, accepted.text);
   return checked.ok ? { value: checked.value, text: accepted.text, etag: accepted.etag } : undefined;
 }
 
@@ -125,7 +130,7 @@ export function evaluateConfig(input: EvaluateInput): EvaluatedConfig {
     return { state: 'absent', value: undefined, inEffect: undefined, issues: [], accepted: undefined };
   }
 
-  const checked = checkConfigText(def, path, disk.text, input.binary);
+  const checked = checkOf(input, disk.text);
   if (!checked.ok) return kept('invalid', previous, checked.issues);
   const etag = input.digest(disk.text);
   if (etag !== previous?.etag) {

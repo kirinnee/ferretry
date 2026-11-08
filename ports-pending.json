@@ -22,7 +22,8 @@
     "access",
     "voice",
     "projects",
-    "updates"
+    "updates",
+    "lessons"
   ],
   "pendingReasons": {
     "runtimes": [
@@ -116,7 +117,8 @@
       "GAP(owner?): the ferret-list row actions (today's sessions bar row-actions-host.tsx) and the combined Info tab Surfaces (terminals and browser pages, who drives, take over and hand back) have no owner: no 5.0 plugin draws a sidebar ferret list for row actions to hang on, and Surfaces is believed to be split into Terminals' and Browsers' own panels; the owner confirms or names one",
       "GAP(live): production wires no LiveActivitySource into GET /v1/events (packages/core/ferrets/daemon/index.ts passes no extras), so ?live=1 is accepted and sends no live frames today; G161 holds because nothing is sent, and a test with a fake source pins what a wired one may send",
       "GAP(ferrets): daemon/adapters/session/lifecycle/process-incarnation.ts (the pane process start identity that tells a reused PID apart: Linux /proc start ticks, macOS ps start seconds) is ported and tested but nothing builds it until Ferrets composes the durable terminal pane reaper (daemon/adapters/session/lifecycle/durable-terminal-pane-reap.ts) that reads it (gustavo)",
-      "GAP(ferrets): the shipped default and compact layouts (Layouts: layouts/*.yaml, contract/builtins.ts) have no `ferrets` nav item and hold `panels` in the side column, because no manifest declares a ferret list or a ferret screen (Ferrets declares only `new-ferret` and `move`); when Ferrets declares one, add it to the nav items there and to the side.holds of the default layout, and the layout test against the generated surfaces keeps the ids honest"
+      "GAP(ferrets): the shipped default and compact layouts (Layouts: layouts/*.yaml, contract/builtins.ts) have no `ferrets` nav item and hold `panels` in the side column, because no manifest declares a ferret list or a ferret screen (Ferrets declares only `new-ferret` and `move`); when Ferrets declares one, add it to the nav items there and to the side.holds of the default layout, and the layout test against the generated surfaces keeps the ids honest",
+      "GAP(ferrets): Conversation's `conversation-hypermedia` launch part records FY_HYPERMEDIA in Ferrets' launch environment only when the owner SET the ferret's switch; with none set it says nothing (by design: the mode default stands), and that mode default is written at the pane (daemon/lib/session/lifecycle/policy.ts sessionPaneEnvironment) and never recorded, so `instructions` reads Hypermedia as off for an interactive ferret whose owner set no switch although its pane was handed FY_HYPERMEDIA=1 (daemon/lib/agent-control/launch-environment.ts derives only FY_SESSION_MODE)"
     ],
     "conversation": [
       "conversation app half: all four ports have landed — C1 (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app), C2 (the composer, its menus over reference.catalog, attachments, drafts, the send outbox, Conversation Settings, the attachments panel and the chat-width panel), C3 (the chat screen and transcript) and C4 (the queue, compact-at and hypermedia panels, the question renderer, work search in the command bar, the Conversations screen)",
@@ -163,7 +165,8 @@
       "GAP(agenda-nav) and GAP(agenda-drawer): the Inbox nav entry, the needs-you group and the in-chat drawer have no 5.0 shell or Conversation slot to mount in",
       "GAP(answer-files), GAP(sign-in-rule-sweep), GAP(push-delivery), GAP(notification-open), GAP(item-opened): answer uploads, the sign-in rule sweep and push delivery/open run through ports Conversation, Accounts and Access must bind (Access's agendaItemOpenedHandler is an app function its contract does not expose, so opening an ask does not yet close this device's own buzz lines); the notification filter's sentence says the switch is that machine's own, as the rows are Access's now; app/NEEDS-APP-SHELL.txt lists every open gap",
       "knip.production.json keeps these app files out of its unused-file report until their wire lands (app/NEEDS-APP-SHELL.txt names each gap): app/components/agenda-message.tsx (GAP(agenda): Agenda's card drawn in Conversation's conversation.row slot); app/hooks/use-agenda-deep-link.ts and app/lib/agenda-deep-link.ts (the shell root reads the fragment); app/hooks/use-agenda-replies.ts and app/features/agenda/agenda-replies-notice.tsx (the held-replies notice waits for the conversation surface); app/features/agenda/agenda.tsx, app/hooks/use-agenda.ts, app/features/agenda/agenda-line.tsx and app/lib/agenda-chat.ts (GAP(agenda-drawer): the in-chat agenda line and drawer have no mount); app/hooks/use-answered-suggestion-sweep.ts (GAP(sign-in-rule-sweep)); app/hooks/use-notifications.ts, app/hooks/use-notification-open.ts, app/lib/notification-ledger.ts, app/lib/notification-open.ts, app/lib/notification-preferences.ts and app/lib/notify.ts (GAP(notification-open)); app/lib/push-delivery.ts (GAP(push-delivery)); app/lib/notification-tap.ts (GAP(notification-open)); app/lib/item-conversation.ts (GAP(agenda-history-conversation)); app/features/agenda/agenda-inbox-composer.tsx and app/lib/answer-chip.ts (GAP(agenda-composer)); app/features/agenda/agenda-nav.tsx (GAP(agenda-nav)); app/features/permission-request/approval-card.tsx and app/lib/permission-request.ts (a copy of Claude Code's approval card, unmounted until the lead decides who keeps it)",
-      "GAP(agenda-harness-prompt): the harness-prompt asks read and type into a ferret's transcript and stay unported until Conversation provides those seams (daemon/index.ts), so the reserved sourceRef grammar they need, app/lib/agenda-source-refs.ts, waits for them"
+      "GAP(agenda-harness-prompt): the harness-prompt asks read and type into a ferret's transcript and stay unported until Conversation provides those seams (daemon/index.ts), so the reserved sourceRef grammar they need, app/lib/agenda-source-refs.ts, waits for them",
+      "GAP(agenda): Agenda does not contribute its launch flag FY_AGENDA as a `launch.parts` part, so Ferrets' launch environment never records it and `instructions` tells every ferret it was not handed that section's switch (packages/core/ferrets/daemon/index.ts, RULING #30)"
     ],
     "skills": [
       "Add skills: the page’s other group, the skills of the catalogs this device subscribes to, and a skill row’s Publish / Uninstall / “installed from” in its ⋯ are Catalogs’ rows; they need Catalogs’ app half and a row contribution, and the half has no Catalogs edge",
@@ -265,6 +268,9 @@
     "updates": [
       "GAP(updates): app/lib/changelog.ts is not reached by a What's new surface (today: packages/pwa/src/features/whats-new/whats-new-host.tsx:21 and whats-new-sheet.tsx:22) (owner: kaizen, app shell)",
       "GAP(updates): app/lib/install-prompt.ts is not reached by an install-as-app prompt (today: packages/pwa/src/main.tsx:58, packages/pwa/src/App.tsx:211, packages/pwa/src/features/install/install-app.tsx:19) (owner: kaizen, app shell)"
+    ],
+    "lessons": [
+      "GAP(lessons) (owner: nelly): Lessons does not contribute its launch flag FY_LEARNING_PASSIVE as a `launch.parts` part, so Ferrets' launch environment never records it and `instructions` reports the Lessons section as off for every ferret (packages/core/ferrets/daemon/index.ts, RULING #30)"
     ]
   },
   "pendingHalves": {

@@ -10,7 +10,50 @@
  *
  * Pure: text in, text out.
  */
-import { type Document, isMap, isNode, isScalar, isSeq, LineCounter, type Node, parseDocument } from 'yaml';
+import {
+  type Alias,
+  type Document,
+  type ErrorCode,
+  isAlias,
+  isCollection,
+  isMap,
+  isNode,
+  isPair,
+  isScalar,
+  isSeq,
+  LineCounter,
+  type Node,
+  parseDocument,
+  type YAMLMap,
+  type YAMLSeq,
+} from 'yaml';
+
+/**
+ * The most a configuration file may hold, in UTF-8 bytes (today's `CONFIG_FILE_MAX_BYTES`). It is checked BEFORE
+ * anything reads the text — the parser, the alias walk, the raw-secret scan — at every door that hands a text in: the
+ * disk read at boot and reload, an accepted record read back, `config_read`, `config_validate` and `config_write`.
+ * Every cost below is then bounded by it: a file over it is refused in one fixed sentence and never parsed.
+ */
+export const CONFIG_FILE_MAX_BYTES = 256 * 1024;
+
+/** What a text over {@link CONFIG_FILE_MAX_BYTES} is told, in a FIXED sentence: nothing of the text. */
+export const CONFIG_TOO_LARGE = `the file is larger than the ${String(CONFIG_FILE_MAX_BYTES / 1024)} KiB a configuration file may be`;
+
+/**
+ * Whether `text` is over {@link CONFIG_FILE_MAX_BYTES} in UTF-8. Bounded whatever the text: a string longer than the cap
+ * in UTF-16 units is over it (every unit is at least one byte), and a shorter one is counted, stopping at the cap.
+ */
+export function configTextTooLarge(text: string): boolean {
+  if (text.length > CONFIG_FILE_MAX_BYTES) return true;
+  let bytes = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const unit = text.charCodeAt(index);
+    // A surrogate pair is 4 bytes, 2 per unit; the rest of the BMP is 1–3.
+    bytes += unit < 0x80 ? 1 : unit < 0x800 || (unit >= 0xd800 && unit <= 0xdfff) ? 2 : 3;
+    if (bytes > CONFIG_FILE_MAX_BYTES) return true;
+  }
+  return false;
+}
 
 /** A 1-based place in a file. */
 export interface TextPosition {
@@ -31,59 +74,355 @@ export interface ConfigSyntaxError {
   readonly position?: TextPosition;
 }
 
-/** Read with YAML 1.2's core schema: `off` and `no` are strings, not booleans, wherever they are read. */
-const PARSE_OPTIONS = { version: '1.2', uniqueKeys: true, prettyErrors: false } as const;
+/**
+ * Read with YAML 1.2's core schema: `off` and `no` are strings, not booleans, wherever they are read. A key written
+ * twice is still refused, by {@link duplicateKeys}: the parser's own check compares every key with every key before it
+ * in the same mapping, so one flat mapping of a few hundred KiB would take seconds to read.
+ *
+ * `resolveKnownTags: false`: a YAML 1.1 tag (`!!omap`, `!!set`, `!!pairs`, `!!binary`, `!!timestamp`) is NOT
+ * resolved while the text is parsed — its value is read as the plain list, mapping or string it is written as, like any
+ * other tag this file cannot use. The library resolves those tags inside the parse, before anything here can bound
+ * them, and its `!!omap` check compares every key with every key before it: 256 KiB of one took seconds. No
+ * configuration value is a Set, a Map, bytes or a Date (each is JSON-shaped), so nothing a file means is lost; the core
+ * tags (`!!str`, `!!int`, …) still resolve.
+ */
+const PARSE_OPTIONS = {
+  version: '1.2',
+  uniqueKeys: false,
+  resolveKnownTags: false,
+  prettyErrors: false,
+  logLevel: 'error',
+} as const;
 
-/** Parse one file. A document that does not parse answers its syntax errors and nothing else. */
+/** What an alias that cannot be read is, in words that never name the alias: a name can be anything a person typed. */
+const ALIAS_UNRESOLVED = 'an alias (*name) names an anchor (&name) that is not set before it';
+const ALIAS_LOOP = 'an alias (*name) sits inside the anchor (&name) it names, so its value never ends';
+const ALIAS_EXCESSIVE = 'the aliases (*name) in this file expand too far to read';
+
+/**
+ * How far aliases may expand a file, in CHARACTERS: its value, every alias read out in full, may weigh this much plus
+ * {@link ALIAS_EXPANSION_FACTOR} per character of its text, where a value weighs 1 and a string 1 more per character.
+ * A file without aliases weighs at most about 2 per character (a value takes at least one character to write, a string
+ * at least its own length), and re-using a block a few times stays far inside it; an alias bomb multiplies at every
+ * step and leaves it after a few — and so does one long string aliased many times, which counting values alone missed
+ * (one 128 KiB string times 18 000 aliases was "18 000 values", and gigabytes once read out).
+ */
+const ALIAS_EXPANSION_FLOOR = 10_000;
+const ALIAS_EXPANSION_FACTOR = 2;
+
+/**
+ * What each thing the parser refuses is, in a FIXED sentence. The parser's own words quote the file — a tag, an
+ * anchor, an alias, an escape, a key — and a file can hold a key pasted by mistake, so they never leave this module:
+ * an issue is one of these sentences and a line number, never a word of the file.
+ */
+const SYNTAX_SENTENCES: Readonly<Record<ErrorCode, string>> = {
+  ALIAS_PROPS: 'an alias (*name) cannot carry an anchor or a tag',
+  BAD_ALIAS: 'an alias or anchor name is empty or ends in a colon',
+  BAD_COLLECTION_TYPE: 'a tag names a kind of collection that does not match the value',
+  BAD_DIRECTIVE: 'a % directive line is not one YAML knows',
+  BAD_DQ_ESCAPE: 'a double-quoted value holds an escape (\\) that is not valid',
+  BAD_INDENT: 'the indentation is wrong',
+  BAD_PROP_ORDER: 'an anchor or tag is in the wrong place',
+  BAD_SCALAR_START: 'a plain value starts with a character that must be quoted',
+  BLOCK_AS_IMPLICIT_KEY: 'a block value is used as a key',
+  BLOCK_IN_FLOW: 'a block value sits inside [ ] or { }',
+  DUPLICATE_KEY: 'a key is written twice in the same mapping',
+  IMPOSSIBLE: 'the text cannot be read as YAML',
+  KEY_OVER_1024_CHARS: 'a key is longer than 1024 characters',
+  MISSING_CHAR: 'a closing quote, bracket or brace is missing',
+  MULTILINE_IMPLICIT_KEY: 'a key runs over more than one line',
+  MULTIPLE_ANCHORS: 'a value has more than one anchor (&name)',
+  MULTIPLE_DOCS: 'the file holds more than one document (---)',
+  MULTIPLE_TAGS: 'a value has more than one tag',
+  NON_STRING_KEY: 'a key is not a plain string',
+  RESOURCE_EXHAUSTION: 'the file is too deeply nested or too large to read',
+  TAB_AS_INDENT: 'a tab is used for indentation; use spaces',
+  TAG_RESOLVE_FAILED: 'a tag (!name) is not one this file can use, or its value does not fit it',
+  UNEXPECTED_TOKEN: 'there is something here the YAML grammar does not expect',
+};
+const SYNTAX_UNKNOWN = 'the text cannot be read as YAML';
+
+/**
+ * Every key written a second time in its mapping, in text order, by the parser's own rule (two keys are the same when
+ * both are scalars with the same value) — but each mapping's keys go through one set, so the cost is linear.
+ */
+function duplicateKeys(document: Document): readonly Node[] {
+  const found: Node[] = [];
+  const pending: unknown[] = [document.contents];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (isPair(node)) {
+      pending.push(node.value, node.key);
+      continue;
+    }
+    if (!isCollection(node)) continue;
+    if (isMap(node)) {
+      const seen = new Set<unknown>();
+      for (const { key } of node.items) {
+        // NaN is not equal to itself, so the parser never calls two `.nan` keys the same.
+        if (!isScalar(key) || Number.isNaN(key.value)) continue;
+        if (seen.has(key.value)) found.push(key);
+        else seen.add(key.value);
+      }
+    }
+    for (let index = node.items.length - 1; index >= 0; index -= 1) pending.push(node.items[index]);
+  }
+  return found.sort((left, right) => (left.range?.[0] ?? 0) - (right.range?.[0] ?? 0));
+}
+
+/** Why a file's aliases cannot be read, and where. */
+interface AliasFault {
+  readonly message: string;
+  readonly at: Node | undefined;
+}
+
+/** A collection's turn on the walk: entered (anchor recorded, items queued) or left (its expanded size totted up). */
+type Step = { readonly node: unknown; readonly leaving: false } | { readonly node: Collection; readonly leaving: true };
+
+type Collection = YAMLMap | YAMLSeq;
+
+/**
+ * Every alias in `document` resolved in ONE walk in document order — or the first one that cannot be read.
+ *
+ * The walk is the library's order (a node before its items, a pair's key before its value), and an anchor is recorded
+ * when its node is entered, so the anchor an alias resolves to is the last one recorded by then: exactly the one the
+ * library would pick. Then:
+ * - no anchor recorded under its name: the alias is unresolved;
+ * - its anchor's node is still open (the alias sits inside it): the alias loops. This is the ONLY way a value can reach
+ *   itself — any other anchor an alias names was closed before the alias began, so following aliases only ever moves
+ *   to text that ends earlier, and cannot come back;
+ * - the value, every alias read out, weighs more than the expansion budget: the aliases expand too far. A collection is
+ *   totted up when it is left, from the weights of its items, which are known by then — an alias's is its anchor's;
+ * - a key is a mapping or a list (or an alias to one): refused as a key that is not a plain string.
+ *
+ * Each node is entered once and left once and each alias looked up once, so the cost is linear in the file. The
+ * library's own alias resolution is not: it walks the whole document again for each alias, so it is never asked to.
+ */
+function resolveAliases(
+  document: Document,
+  characters: number,
+):
+  | { readonly ok: true; readonly targets: ReadonlyMap<Alias, Node> }
+  | { readonly ok: false; readonly fault: AliasFault } {
+  const anchors = new Map<string, Node>();
+  const open = new Set<Node>();
+  const targets = new Map<Alias, Node>();
+  /** Each closed collection's weight with every alias read out; a scalar is 1, and a string 1 more per character. */
+  const expanded = new Map<Node, number>();
+  const sizeOf = (item: unknown): number => {
+    if (isPair(item)) return sizeOf(item.key) + sizeOf(item.value);
+    if (isAlias(item)) return sizeOf(targets.get(item));
+    if (isCollection(item)) return expanded.get(item) ?? 0;
+    if (!isScalar(item)) return 0;
+    return 1 + (typeof item.value === 'string' ? item.value.length : 0);
+  };
+  const budget = ALIAS_EXPANSION_FLOOR + ALIAS_EXPANSION_FACTOR * characters;
+  const steps: Step[] = [{ node: document.contents, leaving: false }];
+  for (let step = steps.pop(); step !== undefined; step = steps.pop()) {
+    const { node } = step;
+    if (step.leaving) {
+      let total = 1;
+      for (const item of step.node.items) {
+        total += sizeOf(item);
+        if (total > budget) return { ok: false, fault: { message: ALIAS_EXCESSIVE, at: firstNodeOf(item) } };
+      }
+      expanded.set(step.node, total);
+      open.delete(step.node);
+      continue;
+    }
+    if (isAlias(node)) {
+      const target = anchors.get(node.source);
+      if (target === undefined) return { ok: false, fault: { message: ALIAS_UNRESOLVED, at: node } };
+      if (open.has(target)) return { ok: false, fault: { message: ALIAS_LOOP, at: node } };
+      targets.set(node, target);
+    } else if (isPair(node)) {
+      // A key that is a mapping or a list (written, or an alias to one) is refused here, before the value is built: no
+      // configuration value can hold one (it is JSON-shaped), and the library would stringify each such key with a copy
+      // of every anchor in the document, which costs anchors × keys.
+      const { key } = node;
+      if (isCollection(key)) return { ok: false, fault: { message: SYNTAX_SENTENCES.NON_STRING_KEY, at: key } };
+      if (isAlias(key)) {
+        // An alias key to a collection still open is a loop, and is said as one when the alias itself is reached.
+        const target = anchors.get(key.source);
+        if (isCollection(target) && !open.has(target))
+          return { ok: false, fault: { message: SYNTAX_SENTENCES.NON_STRING_KEY, at: key } };
+      }
+      steps.push({ node: node.value, leaving: false }, { node: node.key, leaving: false });
+    } else if (isNode(node)) {
+      if (node.anchor !== undefined) anchors.set(node.anchor, node);
+      if (isCollection(node)) {
+        open.add(node);
+        steps.push({ node, leaving: true });
+        for (let index = node.items.length - 1; index >= 0; index -= 1) {
+          steps.push({ node: node.items[index], leaving: false });
+        }
+      }
+    }
+  }
+  return { ok: true, targets };
+}
+
+/** An item's first node, for a position: a pair's key when it is written, else its value. */
+function firstNodeOf(item: unknown): Node | undefined {
+  if (isPair(item)) return isNode(item.key) ? item.key : isNode(item.value) ? item.value : undefined;
+  return isNode(item) ? item : undefined;
+}
+
+/** An alias error, at the node it names when there is one, else at the top of the file. */
+function aliasError(lineCounter: LineCounter, fault: AliasFault): ConfigSyntaxError {
+  const start = fault.at?.range?.[0];
+  const position = start === undefined ? { line: 1, col: 1 } : lineCounter.linePos(start);
+  return { message: fault.message, position: { line: position.line, column: position.col } };
+}
+
+/**
+ * Parse one file. A document that does not parse answers its syntax errors and nothing else — and so does one whose
+ * aliases cannot be read (an alias to an anchor that is not set, an alias inside its own anchor, or too many): a
+ * broken file is refused and its last good version stays in effect, it never throws into a reload.
+ */
 export function readConfigText(
   text: string,
 ):
   | { readonly ok: true; readonly read: ReadConfigText }
   | { readonly ok: false; readonly errors: readonly ConfigSyntaxError[] } {
+  return readText(text).read;
+}
+
+type ConfigTextRead = ReturnType<typeof readConfigText>;
+
+/**
+ * A file read to be edited: its read, and the text an edit of it starts from — `undefined` when
+ * {@link editConfigText} would replace it whole (over the cap, not YAML, or a key written twice), so the edit need
+ * not parse it a second time to find that out. One parse, where reading then editing a broken file took two.
+ */
+export function readConfigTextToEdit(text: string): {
+  readonly read: ConfigTextRead;
+  readonly base: string | undefined;
+} {
+  const { read, whole } = readText(text);
+  return { read, base: whole ? undefined : text };
+}
+
+/** One read; `whole` says the text has no structure an edit could keep. */
+function readText(text: string): { readonly read: ConfigTextRead; readonly whole: boolean } {
+  // Bounded before anything reads it: every cost below is linear in a text this size.
+  if (configTextTooLarge(text)) return { read: { ok: false, errors: [{ message: CONFIG_TOO_LARGE }] }, whole: true };
   const lineCounter = new LineCounter();
   const document = parseDocument(text, { ...PARSE_OPTIONS, lineCounter });
   if (document.errors.length > 0) {
     return {
-      ok: false,
-      errors: document.errors.map(error => {
-        const position = lineCounter.linePos(error.pos[0]);
-        // The parser's message ends with an excerpt of the line; the location says the same thing.
-        return {
-          message: error.message.split('\n')[0] ?? error.message,
-          position: { line: position.line, column: position.col },
-        };
-      }),
+      whole: true,
+      read: {
+        ok: false,
+        errors: document.errors.map(error => {
+          const position = lineCounter.linePos(error.pos[0]);
+          // Never the parser's own message: it quotes the file.
+          return {
+            message: SYNTAX_SENTENCES[error.code] ?? SYNTAX_UNKNOWN,
+            position: { line: position.line, column: position.col },
+          };
+        }),
+      },
     };
   }
+  const duplicates = duplicateKeys(document);
+  if (duplicates.length > 0) {
+    return {
+      whole: true,
+      read: {
+        ok: false,
+        errors: duplicates.map(key => {
+          const position = lineCounter.linePos(key.range?.[0] ?? 0);
+          return { message: SYNTAX_SENTENCES.DUPLICATE_KEY, position: { line: position.line, column: position.col } };
+        }),
+      },
+    };
+  }
+  return { whole: false, read: readParsed(document, lineCounter, text) };
+}
+
+/** The value of a document that parsed, its aliases resolved within the budget, and how to locate a path in it. */
+function readParsed(document: Document, lineCounter: LineCounter, text: string): ConfigTextRead {
   const located = (node: unknown): TextPosition | undefined => {
     if (!isNode(node) || node.range === undefined || node.range === null) return undefined;
     const position = lineCounter.linePos(node.range[0]);
     return { line: position.line, column: position.col };
   };
+  // Every alias is resolved here, in one linear walk, BEFORE the value is built: the library's own resolution is
+  // quadratic, and its count of aliases has a blind spot (an anchor whose items alias an empty one counts as nothing).
+  const aliases = resolveAliases(document, text.length);
+  if (!aliases.ok) return { ok: false, errors: [aliasError(lineCounter, aliases.fault)] };
+  for (const [alias, target] of aliases.targets) {
+    // The library would look each alias up again, walking the whole document every time: hand it the answer instead.
+    alias.resolve = () => target as ReturnType<Alias['resolve']>;
+  }
+  // The walk above has bounded the expansion, so the library's own count (and its walk per anchor) is switched off.
+  // An empty file is an empty mapping: every setting left at its default.
+  let value: unknown;
+  try {
+    value = document.toJS({ maxAliasCount: -1 }) ?? {};
+  } catch {
+    // Not expected once every alias is resolved; if the library throws anyway, the file is refused, not the reload.
+    return { ok: false, errors: [{ message: SYNTAX_UNKNOWN, position: { line: 1, column: 1 } }] };
+  }
+  const pairs = pairIndex();
   return {
     ok: true,
     read: {
-      // An empty file is an empty mapping: every setting left at its default.
-      value: document.toJS() ?? {},
+      value,
       locate: path => {
-        for (let depth = path.length; depth > 0; depth -= 1) {
-          const prefix = path.slice(0, depth);
-          // A key is where a person looks ("line 4: bogus"); an item in a list has no key, so its value.
-          const position = located(keyNode(document, prefix)) ?? located(document.getIn(prefix as unknown[], true));
-          if (position !== undefined) return position;
+        // Walked down from the top, one step per part: each mapping's keys are indexed once, the first time a path
+        // goes through it, so locating every issue of a file costs the depth of each path, never the width of the
+        // mappings on it (a lookup that scanned the keys made 20 000 issues in one mapping cost seconds).
+        let node: unknown = document.contents;
+        let deepest = located(node) ?? { line: 1, column: 1 };
+        for (const part of path) {
+          let next: unknown;
+          if (isMap(node)) {
+            const pair = pairs(node, part);
+            if (pair === undefined) break;
+            // A key is where a person looks ("line 4: bogus"); an item in a list has no key, so its value.
+            deepest = located(pair.key) ?? located(pair.value) ?? deepest;
+            next = pair.value;
+          } else if (isSeq(node)) {
+            const index = itemIndex(part);
+            next = index === undefined ? undefined : node.items[index];
+            if (next === undefined) break;
+            deepest = located(next) ?? deepest;
+          } else break;
+          node = next;
         }
-        return located(document.contents) ?? { line: 1, column: 1 };
+        return deepest;
       },
     },
   };
 }
 
-/** The KEY node of the pair at `path`, when its parent is a mapping. */
-function keyNode(document: Document, path: readonly PropertyKey[]): Node | undefined {
-  const parent = path.length === 1 ? document.contents : document.getIn(path.slice(0, -1) as unknown[], true);
-  if (!isMap(parent)) return undefined;
-  const pair = parent.items.find(item => isScalar(item.key) && item.key.value === path.at(-1));
-  return isNode(pair?.key) ? pair.key : undefined;
+type MapPair = YAMLMap['items'][number];
+
+/**
+ * A lookup of a mapping's pair by its key, as the library's `getIn` finds it (the first pair whose key is a scalar of
+ * that value), built for a mapping the first time it is asked about and kept: one pass over its keys, ever.
+ */
+function pairIndex(): (map: YAMLMap, key: PropertyKey) => MapPair | undefined {
+  const indexes = new Map<YAMLMap, Map<unknown, MapPair>>();
+  return (map, key) => {
+    let index = indexes.get(map);
+    if (index === undefined) {
+      index = new Map();
+      for (const pair of map.items) {
+        if (isScalar(pair.key) && !index.has(pair.key.value)) index.set(pair.key.value, pair);
+      }
+      indexes.set(map, index);
+    }
+    return index.get(key);
+  };
+}
+
+/** A list index the way the library reads one: a whole number, or a string of one, not below zero. */
+function itemIndex(part: PropertyKey): number | undefined {
+  const index = typeof part === 'string' && part !== '' ? Number(part) : part;
+  return typeof index === 'number' && Number.isInteger(index) && index >= 0 ? index : undefined;
 }
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
@@ -160,8 +499,10 @@ export function editConfigText(
   current: unknown,
   modeline: string | undefined,
 ): string {
-  let document: Document = parseDocument(existing ?? '', PARSE_OPTIONS);
-  if (document.errors.length > 0) document = parseDocument('', PARSE_OPTIONS);
+  // A text over the cap is never parsed: like one that does not parse, it is replaced whole.
+  const readable = existing !== undefined && !configTextTooLarge(existing);
+  let document: Document = parseDocument(readable ? existing : '', PARSE_OPTIONS);
+  if (document.errors.length > 0 || duplicateKeys(document).length > 0) document = parseDocument('', PARSE_OPTIONS);
   if (!isMap(document.contents)) document.contents = document.createNode({});
   editValue(document, [], target, current);
   // The parser attaches a comment directly above the first key to that key, not to the document, so
@@ -181,8 +522,13 @@ export function editConfigText(
  * mapping: a file nobody can read is fixed by a person, not overwritten by a verb.
  */
 export function setConfigKey(text: string, key: string, value: unknown): string {
+  if (configTextTooLarge(text)) throw new Error(`the file does not parse: ${CONFIG_TOO_LARGE}`);
   const document: Document = parseDocument(text, PARSE_OPTIONS);
-  if (document.errors.length > 0) throw new Error(`the file does not parse: ${document.errors[0]?.message ?? ''}`);
+  // The parser's message quotes the file; the line is enough for a person to find it.
+  const error = document.errors[0];
+  if (error !== undefined)
+    throw new Error(`the file does not parse: ${SYNTAX_SENTENCES[error.code] ?? SYNTAX_UNKNOWN}`);
+  if (duplicateKeys(document).length > 0) throw new Error(`the file does not parse: ${SYNTAX_SENTENCES.DUPLICATE_KEY}`);
   if (document.contents === null) document.contents = document.createNode({});
   if (!isMap(document.contents)) throw new Error('the file is not a mapping of keys');
   if (value === undefined) document.delete(key);

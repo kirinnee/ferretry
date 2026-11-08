@@ -340,6 +340,13 @@ export interface ConfigFileRead {
   readonly status: ConfigFileStatus;
   /** What is wrong with the file, located (an invalid or unreadable file). Absent: none to show. */
   readonly issues?: readonly ConfigFileIssue[];
+  /**
+   * The version IN EFFECT as its text spells it out, before any default fills a gap: what an owner actually wrote, read
+   * by the kernel's own bounded reader (the size cap, the alias budget, no YAML 1.1 tags). Absent when nothing is in
+   * effect. A reader that needs to know what was written uses this, never a parse of `text` of its own: `text` is the
+   * disk's, and a hand-written file there may be one that the kernel refused because reading it would never end.
+   */
+  readonly written?: unknown;
 }
 
 /** An edit held for the owner (the tighter version stays in effect until it is confirmed or discarded). */
