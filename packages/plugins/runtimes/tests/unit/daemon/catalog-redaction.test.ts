@@ -219,63 +219,191 @@ describe('component text redaction', () => {
       });
     });
 
-    // The whole family, generated: every separator, indicator (with and without a comment), position of the
-    // indicator, indent and line ending, under a name that announces a secret and under one that does not.
+    // Ruling #36, round 3: a block of the family opened inside an outer block under a name that announces a secret,
+    // its indicator no deeper than its own name, so it runs past the outer block: it is read on its own.
+    it('S26 should hide a block of the family opened inside an outer secret block, its indicator shallower than its name: password: |⏎  PASSWORD⏎= |⏎    value', () => {
+      // Assert
+      should(shownFor('password: |\n  PASSWORD\n= |\n    fake-block-value-0000\nnext: fake-shown-0000')).eql({
+        text: `password: |\n  ${HIDDEN}\n= |\n    ${HIDDEN}\nnext: fake-shown-0000`,
+        redacted: true,
+      });
+      should(shownFor('token: |\n  password:\n|\n    fake-block-value-0000')).eql({
+        text: `token: |\n  ${HIDDEN}\n|\n    ${HIDDEN}`,
+        redacted: true,
+      });
+      should(shownFor('token: |\r\n  PASSWORD\r\n=\r\n|\r\n    fake-block-value-0000')).eql({
+        text: `token: |\r\n  ${HIDDEN}\r\n=\r\n|\r\n    ${HIDDEN}`,
+        redacted: true,
+      });
+      should(shownFor('secret: |\n\tx123456789\n token\n= |\n  fake-block-value-0000')).eql({
+        text: `secret: |\n\t${HIDDEN}\n token\n= |\n  ${HIDDEN}`,
+        redacted: true,
+      });
+    });
+
+    // Ruling #36, round 3: a line that opens a block is still read as the value it always was, so it hides at least
+    // the first word it always hid, even when the line as a whole holds a pointer and is no secret.
+    it('S26 should keep hiding the first word today hides on a line that opens a block: password:⏎|12345678 # ${secret:X}', () => {
+      // Assert
+      for (const [input, expected] of [
+        ['password:\n|12345678 # ${secret:FAKE}', `password:\n${HIDDEN} # \${secret:FAKE}`],
+        ['PASSWORD\n= |12345678 # ${secret:FAKE}', `PASSWORD\n= ${HIDDEN} # \${secret:FAKE}`],
+        ['token:\n>2345678 #${secret:FAKE}', `token:\n${HIDDEN} #\${secret:FAKE}`],
+        [
+          'PASSWORD=\n|2345678\t#${secret:FAKE}\n  fake-block-value-0000',
+          `PASSWORD=\n${HIDDEN}\t#\${secret:FAKE}\n  ${HIDDEN}`,
+        ],
+      ] as const) {
+        should(shownFor(input)).eql({ text: expected, redacted: true });
+      }
+    });
+
+    // Ruling #36, round 3: a commented block is read beside the reading of the name its comment ends in.
+    it('S26 should hide a block whose comment ends in a name and its separator: password: | # see note:⏎  value', () => {
+      // Assert
+      should(shownFor('password: | # see note:\n  fake-block-value-0000\nnext: fake-shown-0000')).eql({
+        text: `password: | # see note:\n  ${HIDDEN}\nnext: fake-shown-0000`,
+        redacted: true,
+      });
+      should(shownFor('password: | # e.g.:\n  fake-block-value-0000')).eql({
+        text: `password: | # e.g.:\n  ${HIDDEN}`,
+        redacted: true,
+      });
+      // The name the comment ends in keeps its own reading, under a block name that announces no secret too.
+      should(shownFor('mode: | # see token:\n  fake-value-0000\n  plain-line-0000')).eql({
+        text: `mode: | # see token:\n  ${HIDDEN}\n  plain-line-0000`,
+        redacted: true,
+      });
+    });
+
+    // The whole family, generated: every separator, gap before the indicator, indicator (with and without a
+    // comment, one ending in a name and its separator), position of the indicator (shallower than the name too),
+    // base indent, block indent and line ending, alone or inside an outer block, under a name that announces a
+    // secret and under one that does not.
     const SEPARATORS = [':', '='];
+    const GAPS = [' ', '', '\t'];
     const INDICATORS = ['|', '|-', '>'];
-    const COMMENTS = ['', ' # fake comment'];
+    const COMMENTS = ['', ' # fake comment', ' # see fake-note:'];
+    const BASES = ['', '  ', '\t'];
     const INDENTS = ['  ', '\t'];
     const ENDINGS = ['\n', '\r\n'];
-    /** The lines from the name to the indicator, for each place the indicator can stand. */
+    const WRAPPED = [false, true];
+    interface Shape {
+      readonly name: string;
+      readonly separator: string;
+      readonly gap: string;
+      readonly indicator: string;
+      readonly base: string;
+      readonly indent: string;
+    }
+    /**
+     * The lines from the name to the indicator, for each place the indicator can stand: whether a gap can stand
+     * between the separator and the indicator (they share a line), and whether it stands shallower than the name.
+     */
     const POSITIONS: Readonly<
-      Record<string, (name: string, separator: string, indicator: string, indent: string) => string[]>
+      Record<string, { readonly gapped: boolean; readonly shallow: boolean; readonly lines: (s: Shape) => string[] }>
     > = {
-      'same line': (name, separator, indicator) => [`${name}${separator} ${indicator}`],
-      'next line': (name, separator, indicator) => [name, `${separator} ${indicator}`],
-      'own line, indented': (name, separator, indicator, indent) => [`${name}${separator}`, `${indent}${indicator}`],
-      'own line, at the name': (name, separator, indicator) => [`${name}${separator}`, indicator],
-      'own line after a separator line': (name, separator, indicator) => [name, separator, indicator],
-      'own line after a separator line, indented': (name, separator, indicator, indent) => [
-        name,
-        separator,
-        `${indent}${indicator}`,
-      ],
+      'same line': {
+        gapped: true,
+        shallow: false,
+        lines: s => [`${s.base}${s.name}${s.separator}${s.gap}${s.indicator}`],
+      },
+      'next line': {
+        gapped: true,
+        shallow: false,
+        lines: s => [`${s.base}${s.name}`, `${s.base}${s.separator}${s.gap}${s.indicator}`],
+      },
+      'next line, shallower than the name': {
+        gapped: true,
+        shallow: true,
+        lines: s => [`${s.base}${s.name}`, `${s.separator}${s.gap}${s.indicator}`],
+      },
+      'own line, indented': {
+        gapped: false,
+        shallow: false,
+        lines: s => [`${s.base}${s.name}${s.separator}`, `${s.base}${s.indent}${s.indicator}`],
+      },
+      'own line, at the name': {
+        gapped: false,
+        shallow: false,
+        lines: s => [`${s.base}${s.name}${s.separator}`, `${s.base}${s.indicator}`],
+      },
+      'own line, shallower than the name': {
+        gapped: false,
+        shallow: true,
+        lines: s => [`${s.base}${s.name}${s.separator}`, s.indicator],
+      },
+      'own line after a separator line': {
+        gapped: false,
+        shallow: false,
+        lines: s => [`${s.base}${s.name}`, `${s.base}${s.separator}`, `${s.base}${s.indicator}`],
+      },
+      'own line after a separator line, indented': {
+        gapped: false,
+        shallow: false,
+        lines: s => [`${s.base}${s.name}`, `${s.base}${s.separator}`, `${s.base}${s.indent}${s.indicator}`],
+      },
+      'own line after a separator line, shallower than the name': {
+        gapped: false,
+        shallow: true,
+        lines: s => [`${s.base}${s.name}`, s.separator, s.indicator],
+      },
     };
-    const family = Object.entries(POSITIONS).flatMap(([position, opener]) =>
-      SEPARATORS.flatMap(separator =>
-        INDICATORS.flatMap(indicator =>
-          COMMENTS.flatMap(comment =>
-            INDENTS.flatMap(indent =>
-              ENDINGS.map(ending => ({ position, opener, separator, indicator: indicator + comment, indent, ending })),
+    const family = Object.entries(POSITIONS).flatMap(([position, { gapped, shallow, lines }]) =>
+      BASES.filter(base => !shallow || base !== '').flatMap(base =>
+        (gapped ? GAPS : [' ']).flatMap(gap =>
+          SEPARATORS.flatMap(separator =>
+            INDICATORS.flatMap(indicator =>
+              COMMENTS.flatMap(comment =>
+                INDENTS.flatMap(indent =>
+                  ENDINGS.flatMap(ending =>
+                    WRAPPED.map(wrapped => ({
+                      position,
+                      opener: (name: string) =>
+                        lines({ name, separator, gap, indicator: indicator + comment, base, indent }),
+                      base,
+                      indent,
+                      ending,
+                      wrapped,
+                    })),
+                  ),
+                ),
+              ),
             ),
           ),
         ),
       ),
     );
+    /** A line as written, or hidden whole after its indent. */
+    const asWrittenOrHidden = (line: string | undefined, written: string): boolean =>
+      line === written || line === `${/^\s*/u.exec(written)?.[0]}${HIDDEN}`;
 
     it(`S26 should hide every value line of every block in the family (${family.length} shapes), and nothing after it`, () => {
       const leaks: string[] = [];
-      for (const { position, opener, separator, indicator, indent, ending } of family) {
+      for (const { position, opener, base, indent, ending, wrapped } of family) {
         // Arrange
-        const head = opener('PASSWORD', separator, indicator, indent);
-        const values = [`${indent}fake-block-value-0001`, '', `${indent}${indent}fake-block-value-0002`];
-        const input = [...head, ...values, 'after: fake-shown-0000', ''].join(ending);
+        const wrap = wrapped ? ['api_token: |'] : [];
+        const head = opener('PASSWORD');
+        const values = [`${base}${indent}fake-block-value-0001`, '', `${base}${indent}${indent}fake-block-value-0002`];
+        const input = [...wrap, ...head, ...values, 'after: fake-shown-0000', ''].join(ending);
 
         // Act
         const actual = shownFor(input);
 
-        // Assert: the name line and the line after the block as written, every value line hidden, and a line that
-        // opens the block either as written or hidden whole (one of eight characters or more is read as a block line).
-        const lines = actual.text.split(ending);
-        const opensRight = lines
-          .slice(1, head.length)
-          .every((line, at) => line === head[at + 1] || line === `${/^\s*/u.exec(head[at + 1] ?? '')?.[0]}${HIDDEN}`);
+        // Assert: the outer line, the name line (unless the outer block holds it) and the line after the block as
+        // written, every value line hidden, and a line that opens the block either as written or hidden whole (one
+        // of eight characters or more is read as a block line).
+        const lines = actual.text.split(ending).slice(wrap.length);
+        const insideOuter = wrapped && base !== '';
+        const opensRight =
+          (insideOuter ? asWrittenOrHidden(lines[0], head[0] ?? '') : lines[0] === head[0]) &&
+          head.slice(1).every((line, at) => asWrittenOrHidden(lines[at + 1], line));
         const expected = [
-          head[0],
-          ...lines.slice(1, head.length),
-          `${indent}${HIDDEN}`,
+          ...wrap,
+          ...lines.slice(0, head.length),
+          `${base}${indent}${HIDDEN}`,
           '',
-          `${indent}${indent}${HIDDEN}`,
+          `${base}${indent}${indent}${HIDDEN}`,
           'after: fake-shown-0000',
           '',
         ];
@@ -288,10 +416,15 @@ describe('component text redaction', () => {
 
     it(`S26 should hide nothing of any block in the family (${family.length} shapes) under a name that announces no secret`, () => {
       const touched: string[] = [];
-      for (const { opener, separator, indicator, indent, ending } of family) {
+      for (const { opener, base, indent, ending, wrapped } of family) {
         // Arrange
-        const head = opener('mode', separator, indicator, indent);
-        const input = [...head, `${indent}plain-block-text-0001`, 'after: plain-text-0000'].join(ending);
+        const wrap = wrapped ? ['notes: |'] : [];
+        const input = [
+          ...wrap,
+          ...opener('mode'),
+          `${base}${indent}plain-block-text-0001`,
+          'after: plain-text-0000',
+        ].join(ending);
 
         // Act
         const actual = shownFor(input);

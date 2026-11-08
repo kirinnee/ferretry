@@ -374,49 +374,63 @@ function isContextFreeSecret(match: string, offset: number, whole: string): bool
   return !ALPHANUMERIC.test(whole.charAt(offset - 1)) && DIGIT.test(match);
 }
 
+/** Where a name reads its value: the line it is on and how far in. */
+interface Reading {
+  readonly name: string;
+  readonly line: number;
+  readonly from: number;
+}
+
+/** A block scalar a name opens: the line its indicator stands on. */
+interface Block {
+  readonly name: string;
+  readonly line: number;
+}
+
 /**
- * Where the value of a name that ends its line is: the line it is on and how far in, whether it opens a block
- * scalar, and the name. The name ends the line itself (`password =`, `password: |`), or stands alone with its
- * separator starting the next line (`PASSWORD⏎= x`, `PASSWORD⏎= |`). For a block, the line is the one its
- * indicator stands on: the name's own, the separator's line after it, or a line of its own after either
- * (`password:⏎  |`, `PASSWORD⏎=⏎|`); a comment may follow the indicator (`password: | # note`), and the line is
- * read that way only when it is read no other way, so a name the comment ends in keeps the value it always had.
+ * Where the values of a name that ends its line are. The name ends the line itself (`password =`, `password: |`),
+ * or stands alone with its separator starting the next line (`PASSWORD⏎= x`, `PASSWORD⏎= |`).
+ *
+ * `value` is the value it reads on one line, as it always did: the line after it (`password:⏎x`), the separator's
+ * line (`PASSWORD⏎= x`) or the line after a separator alone (`PASSWORD⏎=⏎x`). `blocks` are the block scalars it
+ * opens, each at the line its indicator stands on: the name's own (`password: |`), the separator's line after it
+ * (`PASSWORD⏎= |`), or a line of its own after either (`password:⏎  |`, `PASSWORD⏎=⏎|`). A value that is only an
+ * indicator, with or without a comment, opens a block as well, and is still read as the value it always was, so a
+ * line that opens a block hides at least what it always hid. A comment may follow the indicator on the name's own
+ * line (`password: | # note`); that block is read beside any other reading of the line, so a name the comment ends
+ * in (`password: | # see note:`) keeps the value it always had.
  */
-function opening(
-  parts: readonly string[],
-  index: number,
-): { name: string; block: boolean; line: number; from: number } | undefined {
+function opening(parts: readonly string[], index: number): { value?: Reading; blocks: readonly Block[] } {
   const next = (after: number): number => {
     let at = after + 2;
     while (at < parts.length && (parts[at] ?? '').trim() === '') at += 2;
     return at;
   };
-  /** The value on the line at `at`, from its start: a block when that line is only an indicator. */
-  const onItsOwn = (name: string, at: number) => ({
-    name,
-    block: BLOCK_OPENER.test((parts[at] ?? '').trim()),
-    line: at,
-    from: 0,
-  });
   const line = parts[index] ?? '';
+  const blocks: Block[] = [];
+  let value: Reading | undefined;
   const opens = OPENS_VALUE.exec(line);
   const opened = opens?.[1]?.replace(LEADING_DIGITS, '');
   if (opened) {
-    return opens?.[2] === undefined
-      ? onItsOwn(opened, next(index))
-      : { name: opened, block: true, line: index, from: 0 };
+    if (opens?.[2] === undefined) value = { name: opened, line: next(index), from: 0 };
+    else blocks.push({ name: opened, line: index });
+  } else {
+    const alone = NAME_ENDS.exec(line)?.[1]?.replace(LEADING_DIGITS, '');
+    const at = next(index);
+    const separator = alone ? STARTS_WITH_SEPARATOR.exec(parts[at] ?? '') : null;
+    if (alone && separator) {
+      const rest = (parts[at] ?? '').slice(separator[0].length);
+      if (rest.trim() === '') value = { name: alone, line: next(at), from: 0 };
+      else if (BLOCK_INDICATOR.test(rest.trim())) blocks.push({ name: alone, line: at });
+      else value = { name: alone, line: at, from: separator[0].length };
+    }
   }
-  const alone = NAME_ENDS.exec(line)?.[1]?.replace(LEADING_DIGITS, '');
-  const at = next(index);
-  const separator = alone ? STARTS_WITH_SEPARATOR.exec(parts[at] ?? '') : null;
-  if (alone && separator) {
-    const rest = (parts[at] ?? '').slice(separator[0].length);
-    if (rest.trim() === '') return onItsOwn(alone, next(at));
-    if (BLOCK_OPENER.test(rest.trim())) return { name: alone, block: true, line: at, from: 0 };
-    return { name: alone, block: false, line: at, from: separator[0].length };
+  if (value && BLOCK_OPENER.test((parts[value.line] ?? '').slice(value.from).trim())) {
+    blocks.push({ name: value.name, line: value.line });
   }
   const commented = OPENS_COMMENTED_BLOCK.exec(line)?.[1]?.replace(LEADING_DIGITS, '');
-  return commented ? { name: commented, block: true, line: index, from: 0 } : undefined;
+  if (commented) blocks.push({ name: commented, line: index });
+  return value === undefined ? { blocks } : { value, blocks };
 }
 
 /** Whether the name at `at` is the inside of a pointer (`${secret:TOKEN}`), which is no name and value. */
@@ -427,10 +441,11 @@ const insidePointer = (text: string, at: number): boolean =>
  * The value of a name that ends its line, on the lines after it (`password:⏎hunter2`, `password =⏎x`,
  * `PASSWORD⏎= x`, and a block `password: |⏎  x` or `PASSWORD⏎= |⏎  x`). A name is read as it was written (a value
  * after it on its line may be hidden by now), and a next line that is a key of its own is read on its own. One pass
- * over the lines, each read once: the block under a name that announces a secret is read as a whole, and a block
- * opened deeper inside it is not read again (it ends inside it, and what the outer name hides the inner one cannot
- * show), and the block under any other name is not read at all. A block opened on a line that opens the outer one
- * and stands no deeper than its name (`password=⏎| # token: |`) can run past it, so it is read on its own.
+ * over the lines: the block under a name that announces a secret is read as a whole, and a block opened deeper
+ * inside it whose indicator stands inside it too is not read again (it ends inside it, and what the outer name hides
+ * the inner one cannot show), and the block under any other name is not read at all. A block whose indicator stands
+ * past the outer one (`password: |⏎  PASSWORD⏎= |`), or that is opened on a line that opens the outer one and stands
+ * no deeper than its name (`password=⏎| # token: |`), can run past it, so it is read on its own.
  */
 function redactNextLines(
   original: string,
@@ -442,47 +457,47 @@ function redactNextLines(
   let redacted = false;
   let covered = -1;
   let coveredBelow = -1;
+  /** The value `reading` names on its line, hidden when it is a secret. */
+  const readValue = ({ name, line: at, from }: Reading): void => {
+    const line = parts[at] ?? '';
+    const rest = line.slice(from);
+    const value = FIRST_VALUE.exec(rest);
+    if (value?.[2] === HIDDEN_TEXT) return;
+    const start = from + (value?.[1]?.length ?? 0);
+    // A token already hidden at the head of the run (`ghp_x{y`) leaves the rest of its run showing: hide that too.
+    const headHidden = value?.[2]?.startsWith(HIDDEN_TEXT) === true;
+    if (
+      value === null ||
+      (!headHidden &&
+        ((from === 0 && KEY_LINE.test(rest)) || isPointer(line, start) || !isSecret(name, value[2] ?? '')))
+    ) {
+      return;
+    }
+    parts[at] = `${line.slice(0, start)}${HIDDEN_TEXT}${line.slice(from + value[0].length)}`;
+    redacted = true;
+  };
   for (let index = 0; index < parts.length; index += 2) {
     const opens = opening(asWritten, index);
-    if (opens === undefined) continue;
-    if (!opens.block) {
-      const line = parts[opens.line] ?? '';
-      const rest = line.slice(opens.from);
-      const value = FIRST_VALUE.exec(rest);
-      if (value?.[2] === HIDDEN_TEXT) continue;
-      const start = opens.from + (value?.[1]?.length ?? 0);
-      // A token already hidden at the head of the run (`ghp_x{y`) leaves the rest of its run showing: hide that too.
-      const headHidden = value?.[2]?.startsWith(HIDDEN_TEXT) === true;
-      if (
-        value === null ||
-        (!headHidden &&
-          ((opens.from === 0 && KEY_LINE.test(rest)) ||
-            isPointer(line, start) ||
-            !isSecret(opens.name, value[2] ?? '')))
-      ) {
-        continue;
-      }
-      parts[opens.line] = `${line.slice(0, start)}${HIDDEN_TEXT}${line.slice(opens.from + value[0].length)}`;
-      redacted = true;
-      continue;
-    }
     const indent = indentOf(parts[index] ?? '');
-    if ((index <= covered && indent > coveredBelow) || !isSecret(opens.name, BLOCK_PROBE)) continue;
-    let last = index;
-    for (let next = index + 2; next < parts.length; next += 2) {
-      const line = parts[next] ?? '';
-      if (line.trim() === '') continue;
-      // The lines up to the one that holds the indicator (`PASSWORD⏎= |`, `password:⏎|`, `PASSWORD⏎=⏎|`) open the
-      // block, so they never end it: each is read like any line of the block, as it always was when it stood deeper
-      // than the name.
-      if (next > opens.line && indentOf(line) <= indent) break;
-      last = next;
-      if (!isSecret(opens.name, line.trim())) continue;
-      parts[next] = `${line.slice(0, indentOf(line))}${HIDDEN_TEXT}`;
-      redacted = true;
+    for (const block of opens.blocks) {
+      if ((block.line <= covered && indent > coveredBelow) || !isSecret(block.name, BLOCK_PROBE)) continue;
+      let last = index;
+      for (let next = index + 2; next < parts.length; next += 2) {
+        const line = parts[next] ?? '';
+        if (line.trim() === '') continue;
+        // The lines up to the one that holds the indicator (`PASSWORD⏎= |`, `password:⏎|`, `PASSWORD⏎=⏎|`) open
+        // the block, so they never end it: each is read like any line of the block, as it always was when it stood
+        // deeper than the name.
+        if (next > block.line && indentOf(line) <= indent) break;
+        last = next;
+        if (!isSecret(block.name, line.trim())) continue;
+        parts[next] = `${line.slice(0, indentOf(line))}${HIDDEN_TEXT}`;
+        redacted = true;
+      }
+      covered = last;
+      coveredBelow = indent;
     }
-    covered = last;
-    coveredBelow = indent;
+    if (opens.value) readValue(opens.value);
   }
   return { text: parts.join(''), redacted };
 }

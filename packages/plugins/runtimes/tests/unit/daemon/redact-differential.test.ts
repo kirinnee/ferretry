@@ -6,9 +6,10 @@
  * THE ORACLE IS A SUPERSET, not equality, and only on the lines of one family of blocks (ruling #36): today leaks a
  * block under a name that announces a secret when its indicator is not on the name's own line, or carries a comment
  * (`PASSWORD⏎= |⏎  value`, `password:⏎  |⏎    value`, `PASSWORD⏎=⏎|⏎  value`, `password: | # note⏎  value`
- * all show `value`), and 5.0 hides it. So on the lines of such a block — from its name to the last line before the
- * first one that stands no deeper than the name, computed here from the text alone ({@link tightenedLines}), never
- * from the code under test — 5.0 must hide at least every byte today hides (it may hide more). On every other line,
+ * all show `value`), and 5.0 hides it. So on the lines of such a block — from the line after its name (the name's own
+ * line is never the block's) to the last line before the first one that stands no deeper than the name, computed
+ * here from the text alone ({@link tightenedLines}), never from the code under test — 5.0 must hide at least every
+ * byte today hides (it may hide more). On every other line,
  * and in every text without such a block, its output must equal today's exactly. Nothing is carved out: every
  * generated text is checked. Today's own S26 held today to hide at least what the older rule of main hid, so 5.0
  * hiding at least what today hides keeps that floor too.
@@ -97,7 +98,8 @@ const LEADS = [
 ];
 const GAPS = ['', '', ' ', '  ', '\t', '\n', '\r', '\r\n', '\n  ', '\n\n', '\r\r', ' \n '];
 const MARKS = [':', '=', ':', '=', ':='];
-const BLOCKS = ['', '', '', '', '|', '>-', '|+', '>2', '| # note', '>- #c'];
+/** Indicators, with and without a comment; the last is a value today hides the first word of, its comment a pointer. */
+const BLOCKS = ['', '', '', '', '|', '>-', '|+', '>2', '| # note', '>- #c', '>-1234567 # ${secret:API_KEY}'];
 const PARENTS = ['db', 'auth', 'env', 'mcp.servers', 'x'];
 const QUOTES = ['', '"', "'"];
 /** True pointers, which may stay, and `${NAME<op>default}` forms whose default is a value (`%` is the value). */
@@ -209,7 +211,6 @@ const ENDS_IN_NAME = /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*$/u;
 const ENDS_IN_COMMENTED_BLOCK =
   /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*[:=][ \t]*[|>][-+0-9]*[ \t]+#.*$/u;
 const SEPARATOR_ONLY = /^[ \t]*[:=][ \t]*$/u;
-const SEPARATOR_THEN = /^[ \t]*[:=]/u;
 const SEPARATOR_AND_INDICATOR = new RegExp(`^[ \\t]*[:=][ \\t]*${INDICATOR}[ \\t]*$`, 'u');
 const INDICATOR_ONLY = new RegExp(`^[ \\t]*${INDICATOR}[ \\t]*$`, 'u');
 const announcesSecret = (name: string): boolean => looksSecret(name.replace(/^[0-9.-]+/u, ''), 'x'.repeat(8));
@@ -220,10 +221,11 @@ const announcesSecret = (name: string): boolean => looksSecret(name.replace(/^[0
  * - `NAME⏎= |` — a separator and an indicator on the line after a line that ends in the name;
  * - `NAME⏎=⏎|` — a separator alone on that line, and an indicator alone on the next;
  * - `name:⏎|` — a line that ends in the name and its separator, and an indicator alone on the next;
- * - `name: | # note` — an indicator with a comment on the name's own line, when the comment's last word is read no
- *   other way (no separator line follows it);
- * and each block runs from the name's line to the last line before the first one, after the indicator's, that stands
- * no deeper than the name. A same-line block with no comment (`password: |`) is no member: today already reads it.
+ * - `name: | # note` — an indicator with a comment on the name's own line, whatever the comment's last word is read
+ *   as besides (`name: | # see note:`, `name: | # token⏎= x`);
+ * and each block runs from the line after the name's — the name's line is never the block's, so it must equal today's
+ * — to the last line before the first one, after the indicator's, that stands no deeper than the name. A same-line
+ * block with no comment (`password: |`) is no member: today already reads it.
  */
 function tightenedLines(text: string): ReadonlySet<number> {
   const lines = text.split(BREAK);
@@ -232,38 +234,40 @@ function tightenedLines(text: string): ReadonlySet<number> {
     while (next < lines.length && (lines[next] ?? '').trim() === '') next += 1;
     return next;
   };
-  const indicatorLine = (at: number): number | undefined => {
+  /** The lines the indicators of the family's blocks named on the line at `at` stand on. */
+  const indicatorLines = (at: number): number[] => {
     const line = lines[at] ?? '';
+    const found: number[] = [];
+    const commented = ENDS_IN_COMMENTED_BLOCK.exec(line)?.[1];
+    if (commented !== undefined && announcesSecret(commented)) found.push(at);
     const separator = ENDS_IN_SEPARATOR.exec(line);
+    const next = after(at);
     if (separator?.[1] !== undefined && separator[1].replace(/^[0-9.-]+/u, '') !== '') {
-      const next = after(at);
-      return separator[2] === undefined && announcesSecret(separator[1]) && INDICATOR_ONLY.test(lines[next] ?? '')
-        ? next
-        : undefined;
+      if (separator[2] === undefined && announcesSecret(separator[1]) && INDICATOR_ONLY.test(lines[next] ?? '')) {
+        found.push(next);
+      }
+      return found;
     }
     const name = ENDS_IN_NAME.exec(line)?.[1];
-    const next = after(at);
-    if (name !== undefined && name.replace(/^[0-9.-]+/u, '') !== '' && SEPARATOR_THEN.test(lines[next] ?? '')) {
-      if (!announcesSecret(name)) return undefined;
-      if (SEPARATOR_AND_INDICATOR.test(lines[next] ?? '')) return next;
-      const own = after(next);
-      return SEPARATOR_ONLY.test(lines[next] ?? '') && INDICATOR_ONLY.test(lines[own] ?? '') ? own : undefined;
+    if (name === undefined || name.replace(/^[0-9.-]+/u, '') === '' || !announcesSecret(name)) return found;
+    if (SEPARATOR_AND_INDICATOR.test(lines[next] ?? '')) found.push(next);
+    else if (SEPARATOR_ONLY.test(lines[next] ?? '') && INDICATOR_ONLY.test(lines[after(next)] ?? '')) {
+      found.push(after(next));
     }
-    const commented = ENDS_IN_COMMENTED_BLOCK.exec(line)?.[1];
-    return commented !== undefined && announcesSecret(commented) ? at : undefined;
+    return found;
   };
   const tightened = new Set<number>();
   for (let at = 0; at < lines.length; at += 1) {
-    const opens = indicatorLine(at);
-    if (opens === undefined) continue;
     const indent = (lines[at] ?? '').length - (lines[at] ?? '').trimStart().length;
-    let end = opens;
-    for (let next = opens + 1; next < lines.length; next += 1) {
-      const line = lines[next] ?? '';
-      if (line.trim() !== '' && line.length - line.trimStart().length <= indent) break;
-      end = next;
+    for (const opens of indicatorLines(at)) {
+      let end = opens;
+      for (let next = opens + 1; next < lines.length; next += 1) {
+        const line = lines[next] ?? '';
+        if (line.trim() !== '' && line.length - line.trimStart().length <= indent) break;
+        end = next;
+      }
+      for (let line = at + 1; line <= end; line += 1) tightened.add(line);
     }
-    for (let line = at; line <= end; line += 1) tightened.add(line);
   }
   return tightened;
 }
@@ -389,15 +393,19 @@ describe('component text redaction never hides less than today', () => {
     should(breach(text)).be.undefined();
   });
 
-  it('S26 should mark only the lines of a tightened block, from its name to the last line deeper than it', () => {
+  it('S26 should mark only the lines of a tightened block, from the line after its name to the last line deeper than it', () => {
     // Assert
-    should([...tightenedLines('a: 1\nPASSWORD\n= |\n  v\n\n  w\nnext: x\n  y')]).deepEqual([1, 2, 3, 4, 5]);
-    should([...tightenedLines('token:\r\n  | # c\r\n    v\r\ntail')]).deepEqual([0, 1, 2]);
-    should([...tightenedLines('PASSWORD\n=\n|\n  v')]).deepEqual([0, 1, 2, 3]);
-    should([...tightenedLines('secret: >- # c\n\tv\nend')]).deepEqual([0, 1]);
-    should([...tightenedLines('PASSWORD\n= |')]).deepEqual([0, 1]);
+    should([...tightenedLines('a: 1\nPASSWORD\n= |\n  v\n\n  w\nnext: x\n  y')]).deepEqual([2, 3, 4, 5]);
+    should([...tightenedLines('token:\r\n  | # c\r\n    v\r\ntail')]).deepEqual([1, 2]);
+    should([...tightenedLines('PASSWORD\n=\n|\n  v')]).deepEqual([1, 2, 3]);
+    should([...tightenedLines('secret: >- # c\n\tv\nend')]).deepEqual([1]);
+    should([...tightenedLines('PASSWORD\n= |')]).deepEqual([1]);
+    // A comment whose last word is a name and its separator: the commented block is a member all the same.
+    should([...tightenedLines('password: | # see note:\n  v\nend')]).deepEqual([1]);
+    // Inside an outer block, its indicator shallower than its name: the inner block is a member of its own.
+    should([...tightenedLines('password: |\n  PASSWORD\n= |\n    v\nend')]).deepEqual([2, 3]);
     // No member: a same-line block today reads, a name that announces no secret, a separator with a value, a
-    // comment whose last word is a name with a separator line after it, and no indicator at all.
+    // commented block that a separator line at its name's indent ends at once, and no indicator at all.
     should(tightenedLines('password: |\n  v').size).equal(0);
     should(tightenedLines('mode\n= |\n  v').size).equal(0);
     should(tightenedLines('PASSWORD\n= x\n  v').size).equal(0);
