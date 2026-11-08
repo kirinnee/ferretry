@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@ferretry/kernel": "workspace:*",
+    "@ferretry/plugin-conversation": "workspace:*",
     "@ferretry/plugin-layouts": "workspace:*",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.468.0",

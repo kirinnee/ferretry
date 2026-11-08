@@ -47,6 +47,10 @@ describe('terminals manifest', () => {
       'reference.catalog:%terminal',
     ]);
   });
+  test('declares the tmux-release doctor row and selftest, and takes no contributed doctor hook', () => {
+    expect(manifest.doctor).toContain('tmux-release');
+    expect(manifest.selftest).toEqual(['tmux-release']);
+  });
   test('uses neither Browsers nor the Warden, so their optional uses of Terminals make no cycle', () => {
     const edges = [...Object.keys(manifest.needs), ...Object.keys((manifest as { uses?: object }).uses ?? {})];
     expect(edges).not.toContain('browsers');

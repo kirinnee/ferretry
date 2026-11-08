@@ -41,7 +41,7 @@ import {
   fyRenderMediaMime,
   fyRenderRasterRefusal,
 } from './fy-render.ts';
-import { FY_RENDER_HTML_COMPONENT_CSS } from './fy-render-html-kit.ts';
+import { FY_RENDER_HTML_COMPONENT_CSS } from '@ferretry/app';
 import { fragmentParsingPolicy } from '@ferretry/app/ui';
 
 /** Elements a static explanation never needs and that could run, frame, submit or retarget. */
@@ -81,7 +81,7 @@ const FORBID_ATTR = ['action', 'formaction', 'srcset', 'ping', 'background', 'po
 
 const SANITIZE: Config = {
   ALLOW_DATA_ATTR: false,
-  // The three the theme kit's components read (`lib/fy-render-html-kit.ts`): plain words a selector
+  // The three the theme kit's components read (`@ferretry/app` (html-kit.ts)): plain words a selector
   // matches and `attr()` prints, never a URL or a handler.
   ADD_ATTR: ['data-tone', 'data-label', 'data-value'],
   FORBID_ATTR,

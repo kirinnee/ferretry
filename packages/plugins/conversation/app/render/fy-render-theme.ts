@@ -1,6 +1,6 @@
 /**
  * READS THE THEME OFF THE PAGE, as data an illustration library can use — the DOM half of
- * `lib/fy-render-palette.ts`.
+ * `@ferretry/app` (palette.ts).
  *
  * A token is read from the element the illustration sits in (custom properties inherit, so a swatch
  * preview reads its own family) and RESOLVED to a hex literal, because neither consumer can take what
@@ -14,7 +14,7 @@
  * other resolves to `''`, which every consumer treats as "use your own default".
  */
 
-import { HEX_LITERAL, type ResolvedTheme, THEME_TOKENS, type ThemeToken } from './fy-render-palette.ts';
+import { HEX_LITERAL, type ResolvedTheme, THEME_TOKENS, type FyRenderThemeToken } from '@ferretry/app';
 
 let pixel: CanvasRenderingContext2D | null | undefined;
 
@@ -82,7 +82,7 @@ export const documentThemeName = (): string =>
  */
 export function readTheme(element: Element | null, canvas: CanvasRenderingContext2D | null = context()): ResolvedTheme {
   const mode = documentThemeName().includes('light') ? 'light' : 'dark';
-  const colors = Object.fromEntries(THEME_TOKENS.map(token => [token, ''])) as Record<ThemeToken, string>;
+  const colors = Object.fromEntries(THEME_TOKENS.map(token => [token, ''])) as Record<FyRenderThemeToken, string>;
   const unread: ResolvedTheme = { backdrop: '', colors, font: '', mode, radius: 0 };
   const target = element ?? (typeof document === 'undefined' ? null : document.documentElement);
   if (target === null || typeof getComputedStyle !== 'function') return unread;

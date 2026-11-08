@@ -1,10 +1,10 @@
 # The built-in default layout (design §5.3). With Layouts off, the app shell uses its own copy of this one.
 id: default
-nav: { side: left, style: rail, items: [agenda, ferrets, board, insights, settings] }
-side: { show: wide-only, holds: ferret }
+nav: { side: left, style: rail, items: [agenda, board, insights, settings] }
+side: { show: wide-only, holds: panels }
 top: [daemon-picker, search]
 composer.tools: [attachments, dictation, runtime-picker, composer-quota]
 panels:
-  ferret.side: [ferret-agenda, cards-of-ferret, files, ferret-warden, sitrep, usage]
+  ferret.side: [ferret-agenda, cards-of-ferret, files, ferret-warden, queue, insights]
 density: comfortable
-phone: { nav: { side: bottom, items: [agenda, ferrets, board] } }
+phone: { nav: { side: bottom, items: [agenda, board] } }

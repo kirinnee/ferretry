@@ -743,5 +743,26 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     detail: { action: 'config-confirm' },
     responseConfigKind: 'path',
   },
-  { method: 'POST', path: '/v1/agent/config', event: 'fleet.configured', detail: { action: 'agent-config' } },
+  // Today's `POST /v1/agent/config` rule (`fleet.configured`, `action: agent-config`), one per kernel config tool. A
+  // tool's call is told under `POST /v1/tools/<plugin>/<tool>`, and so is a call through `POST /v1/agent/config`: its
+  // handler records it as the tool the body names, with that tool's admitted standing (the Dispatcher admits the
+  // route with none, so a route record would name nobody: round-3 review N2b).
+  {
+    method: 'POST',
+    path: '/v1/tools/kernel/config_read',
+    event: 'fleet.configured',
+    detail: { action: 'agent-config' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/tools/kernel/config_validate',
+    event: 'fleet.configured',
+    detail: { action: 'agent-config' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/tools/kernel/config_write',
+    event: 'fleet.configured',
+    detail: { action: 'agent-config' },
+  },
 ];

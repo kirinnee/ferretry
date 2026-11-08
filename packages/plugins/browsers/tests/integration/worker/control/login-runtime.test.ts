@@ -12,7 +12,7 @@ import {
 } from '../../../../daemon/worker/control/adapters/login-runtime.ts';
 import type { BrowserLoginChild } from '../../../../daemon/worker/control/adapters/login-window.ts';
 import { BrowserControlError } from '../../../../daemon/worker/control/policy.ts';
-import { unprovenListenerProver } from '../../../support/listener-prover.ts';
+import { hostListenerProver, unprovenListenerProver } from '../../../support/listener-prover.ts';
 import { loginProcesses } from '../../../support/process-workers.ts';
 
 /** The window's processes and time on real children (`kernel.spawn` and the clock, as the daemon half binds them). */
@@ -886,7 +886,7 @@ describe('NodeBrowserLoginRuntime', () => {
       // Arrange: the port was taken before x11vnc (pid 4242, which holds nothing) could bind it.
       const root = await workspace();
       const subject = new NodeBrowserLoginRuntime({
-        listenerProver: unprovenListenerProver(),
+        listenerProver: hostListenerProver(),
         processes: PROCESSES,
         display: fakeDisplay(),
         secretsDirectory: root,

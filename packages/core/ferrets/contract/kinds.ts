@@ -78,7 +78,17 @@ export interface RunningFerret {
   readonly startedAt: Instant;
 }
 
-export type StartRefusal = 'unavailable' | 'failed' | 'limits';
+/**
+ * Why a runner did not start a ferret: CLOSED, so a runner can never mint a reason. `real_harness` is a daemon a test
+ * booted refusing a launch that would reach (or could not be proved not to reach) the owner's real Claude Code or
+ * Codex; Ferrets answers it with {@link REAL_HARNESS_REFUSED} as the start's reason.
+ */
+export type StartRefusal = 'unavailable' | 'failed' | 'limits' | 'real_harness';
+
+/** The start failure's reason for a `real_harness` refusal; the runner logs the harness and the path it found. */
+export const REAL_HARNESS_REFUSED =
+  'test mode refused to launch a real claude/codex: a test must put a fake claude/codex first on the daemon PATH, ' +
+  'and set no PATH of its own, before it starts a session';
 
 /**
  * One message for a running ferret's pane (today's `TmuxPaneDelivery.deliver`): the text pasted and submitted, the

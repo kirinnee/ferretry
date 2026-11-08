@@ -12,8 +12,7 @@
  *           alone, which shows that card's children grouped by lane
  */
 
-import { FY_RENDER_LIMITS } from './fy-render-bounds.ts';
-import { parseReferenceToken } from '@ferretry/app';
+import { FY_RENDER_LIMITS, parseReferenceToken } from '@ferretry/app';
 
 export type FyRenderEmbedSpec =
   | { readonly kind: 'card'; readonly id: string }

@@ -6,8 +6,9 @@
  *   ?kind=choice|reply         a one-row answer (default), or an answer in words (the composer is the answer)
  *   ?touch=1                   the card is swipeable
  *
- * The chat at its tail (Conversation's `Transcript` beside this half's `AgendaLine`) is not drawn here: the shell
- * composes the two (`packages/app/tests/integration/fixtures/chat-tail-scene.tsx`).
+ * The chat at its tail (Conversation's `Transcript` beside this half's `AgendaLine`) is not drawn here: neither plugin
+ * imports the other, so Conversation's own scene draws the transcript against a stand-in row
+ * (`packages/plugins/conversation/tests/integration/app/fixtures/chat-tail-scene.tsx`).
  */
 
 import { createRoot } from 'react-dom/client';

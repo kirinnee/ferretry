@@ -27,7 +27,7 @@
     "packages/app": {
       "entry": ["src/main.tsx", "src/worker/service-worker.ts", "scripts/**/*.ts", "tests/**/*.test.{ts,tsx}"],
       "project": ["**/*.{ts,tsx,css}"],
-      "ignore": ["tests/integration/fixtures/chat-tail-scene.tsx", "tests/support/dom-leak-guard.ts"]
+      "ignore": ["tests/support/dom-leak-guard.ts"]
     },
     "packages/core/gate": {
       "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],

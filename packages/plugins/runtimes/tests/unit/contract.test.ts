@@ -111,6 +111,16 @@ describe('runtimes contract', () => {
     expect(runtimeFileLoosens(undefined, file('a'))).toEqual([]);
   });
 
+  test('T-0034 a shell newly entered is held, on a new file too; dropping or keeping it is not', () => {
+    const file = (shell?: string) => RuntimeFileSchema.parse({ login: 'a', profile: 'p', ...(shell ? { shell } : {}) });
+    const held = ['a runtime now enters the shell "dev"'];
+    expect(runtimeFileLoosens(undefined, file('dev'))).toEqual(held);
+    expect(runtimeFileLoosens(file(), file('dev'))).toEqual(held);
+    expect(runtimeFileLoosens(file('ops'), file('dev'))).toEqual(held);
+    expect(runtimeFileLoosens(file('dev'), file('dev'))).toEqual([]);
+    expect(runtimeFileLoosens(file('dev'), file())).toEqual([]);
+  });
+
   test('a change names one intent and is strict', () => {
     expect(AccountChangeRequestSchema.safeParse({ change: { kind: 'runtime.remove', name: 'x' } }).success).toBe(true);
     expect(

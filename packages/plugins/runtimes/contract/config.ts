@@ -164,11 +164,18 @@ export function runtimeLoosening(
 /**
  * The `loosens` the kernel's config layer calls with (before, after) only. It cannot see a budget, so it FAILS CLOSED:
  * any change of login is reported as a possible loosening (the owner confirms it); the daemon half refines it with
- * {@link runtimeLoosening} and the real lookup. A new file loosens nothing (a runtime nobody had counted for nothing).
+ * {@link runtimeLoosening} and the real lookup. A new file's login loosens nothing (a runtime nobody had counted for
+ * nothing). A shell newly entered (Q18, new in 5.0, so no rule of today's) is held too, on a new file as well: the
+ * shell's build then runs with this runtime's login in its environment, which the owner approved for other runtimes
+ * only. Dropping the shell, or keeping the same one, loosens nothing.
  */
-export const runtimeFileLoosens = (before: RuntimeFile | undefined, after: RuntimeFile): readonly string[] =>
-  before === undefined || before.login === after.login
+export const runtimeFileLoosens = (before: RuntimeFile | undefined, after: RuntimeFile): readonly string[] => [
+  ...(before === undefined || before.login === after.login
     ? []
     : [
         `a runtime moves off login "${before.login}" to "${after.login}", which may leave a budget that counts and stops it`,
-      ];
+      ]),
+  ...(after.shell === undefined || after.shell === before?.shell
+    ? []
+    : [`a runtime now enters the shell "${after.shell}"`]),
+];

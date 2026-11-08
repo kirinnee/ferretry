@@ -19,9 +19,8 @@
 
 import { parse } from 'yaml';
 import { z } from 'zod';
-import { FY_RENDER_LIMITS } from './fy-render-bounds.ts';
+import { CHART_PALETTE_SLOTS, CHART_TONES, type ChartTone, FY_RENDER_LIMITS } from '@ferretry/app';
 import { CHART_FORMATS, type ChartFormat } from './fy-render-chart-format.ts';
-import { CHART_PALETTE_SLOTS, CHART_TONES, type ChartTone } from './fy-render-palette.ts';
 
 const CHART_KINDS = ['line', 'bar', 'area', 'pie', 'doughnut', 'scatter', 'radar'] as const;
 type ChartKind = (typeof CHART_KINDS)[number];

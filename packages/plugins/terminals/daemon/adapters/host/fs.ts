@@ -33,3 +33,8 @@ export const hostUserId: number | undefined = process.getuid?.();
 export function signalProcess(pid: number, signal: 'SIGTERM'): void {
   process.kill(pid, signal);
 }
+
+/** Finds a bare command name on the colon-separated search path it is GIVEN (never this process's own `PATH`). */
+export function locateCommand(name: string, searchPath: string): string | undefined {
+  return Bun.which(name, { PATH: searchPath }) ?? undefined;
+}

@@ -8,6 +8,7 @@ import type { CarrierDial, SessionKeyRotation } from '../session/session-transpo
 import type { SocketLike } from '../session/direct-dial.ts';
 import type { WebCryptoRelayCrypto } from '../session/webcrypto.ts';
 import type { OwnerPayload, PrivateKeyHandle, RelayCrypto } from '../session/wire/index.ts';
+import type { ShellPluginClient } from '../client/daemon-client.ts';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
 import { PASSKEY_TAKERS, type PasskeyPorts, type PasskeyProvision } from '../passkey/passkey.ts';
 
@@ -320,16 +321,25 @@ export interface RegisteredPasskey {
 }
 
 /**
+ * What the composition root hands {@link registeredPasskey}: {@link PasskeyPorts} except that the client is asked for BY
+ * plugin, so the host never names the provider (the registry does).
+ */
+export type PasskeyHostPorts = Omit<PasskeyPorts, 'client'> & {
+  readonly clientOf: (daemon: string, plugin: string) => ShellPluginClient | undefined;
+};
+
+/**
  * Builds the ONE passkey provision (G105: one prompt, no second implementation): Access's, from the generated surfaces
  * registry. A provision from any other plugin is ignored; one that throws is left out, and then a passkey refusal is
  * simply returned as it came (nothing asks).
  */
-export function registeredPasskey(surfaces: readonly SurfaceEntry[], ports: PasskeyPorts): RegisteredPasskey {
+export function registeredPasskey(surfaces: readonly SurfaceEntry[], host: PasskeyHostPorts): RegisteredPasskey {
+  const { clientOf, ...rest } = host;
   for (const entry of surfaces) {
     const make = shellProvidesOf(entry)?.passkey;
     if (make === undefined || !PASSKEY_TAKERS.includes(entry.id)) continue;
     try {
-      return { passkey: make(ports), failures: [] };
+      return { passkey: make({ ...rest, client: daemon => clientOf(daemon, entry.id) }), failures: [] };
     } catch (error) {
       return {
         passkey: undefined,

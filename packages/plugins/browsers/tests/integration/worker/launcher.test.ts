@@ -16,7 +16,7 @@ import type { ResolvedBrowserProxy } from '../../../daemon/proxy/index.ts';
 import type { BrowserAutomation } from '../../../daemon/pages/automation.ts';
 import { BrowserTransportError } from '../../../daemon/worker/protocol.ts';
 import type { ChildHandle } from '@ferretry/kernel/contract';
-import { unprovenListenerProver } from '../../support/listener-prover.ts';
+import { hostListenerProver, unprovenListenerProver } from '../../support/listener-prover.ts';
 import { launcherPorts, processWorkers } from '../../support/process-workers.ts';
 
 /** The same scriptable worker the client tier drives, as a worker PROCESS the way the daemon half starts one
@@ -335,7 +335,7 @@ describe('NodeSessionBrowserLauncher', () => {
         async () => {
           throw new Error('the worker must not be reached');
         },
-        { ...PORT, cdpPort: async () => port },
+        { ...PORT, listenerProver: hostListenerProver(), cdpPort: async () => port },
       );
 
       try {

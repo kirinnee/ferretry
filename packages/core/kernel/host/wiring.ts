@@ -123,6 +123,7 @@ export function configService(home: string, fs: StateFs, clock: Clock, log: Log,
       secretReferences: plugin => service.secretReferences(plugin),
       credentialRecordReferences: plugin => service.credentialRecordReferences(plugin),
       writer: () => service.writer(),
+      status: () => service.status(),
       reload: () => service.reload(),
       startWatching: () => service.startWatching(),
     };

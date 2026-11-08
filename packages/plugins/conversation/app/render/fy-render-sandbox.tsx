@@ -71,7 +71,7 @@ import {
   type FyRenderBlock as ParsedBlock,
   parseFyRenderSandboxMessage,
 } from './fy-render.ts';
-import type { MermaidThemeVariables } from './fy-render-palette.ts';
+import type { MermaidThemeVariables } from '@ferretry/app';
 
 /**
  * The static shell, served from this origin by the Pages deployment.

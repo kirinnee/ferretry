@@ -1,7 +1,7 @@
 import type { DaemonImplementation } from '../manifest/implement.ts';
 import { copiedClock } from './adapters/clock.ts';
 import { nodeFs } from './adapters/node-fs.ts';
-import { bunWorkers } from './adapters/process.ts';
+import { bunSpawn, bunWorkers } from './adapters/process.ts';
 import { nodeTempDirs } from './adapters/temp-dir.ts';
 import { checkHost, processAlive, tcpProbe } from './check.ts';
 import { checkDeadlineMs, loadRegistry, runPluginChecks } from './check-plugins.ts';
@@ -74,6 +74,8 @@ export async function runCheck(run: CheckRun): Promise<number> {
           implementations,
           facts: { home, host, port, version: run.version, platform: process.platform, arch: process.arch },
           workers: bunWorkers(),
+          // The check's children see its PATH and nothing else of the daemon's environment.
+          spawn: bunSpawn({ PATH: process.env.PATH ?? '/usr/bin:/bin' }),
           tempDirs,
           clock: copiedClock(arm, disarm, nowMs),
         },

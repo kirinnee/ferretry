@@ -5,6 +5,9 @@
  * Subpaths: `@ferretry/app/ui` (the shared UI kit) and `@ferretry/app/testing` (fakes for the connect interface).
  */
 
+// ─── the fy-render sandbox shells' and Conversation's shared numbers, palette and HTML kit ───────────────────────────
+export * from './fy-render/index.ts';
+
 // ─── reaching a daemon: what Access and Connections provide (§4.8, §4.13) ─────────────────────────────────────────
 export {
   CARRIER_TAKERS,

@@ -4,7 +4,7 @@ import type { ControlTimer } from './control-tmux-process.ts';
 import type { TmuxReleaseReading } from '../../lib/tmux/version.ts';
 
 /** Long enough for a loaded host, short enough that a wedged tmux cannot hold a doctor report. */
-const DEFAULT_TIMEOUT_MS = 2_000;
+export const DEFAULT_RELEASE_TIMEOUT_MS = 2_000;
 
 const TIMED_OUT = Symbol('timed out');
 
@@ -26,7 +26,9 @@ async function within<T>(work: Promise<T>, timeoutMs: number, after: ControlTime
  *
  * NEITHER STARTS ANYTHING. `-V` prints and exits; `display-message` against a socket nobody serves
  * fails with "no server running" rather than starting one, which is read as "no server to judge".
- * Every failure is an absent answer, never a guess, and each question is bounded.
+ * Every failure is an absent answer, never a guess, and each question is bounded: the `-V` child is killed
+ * when its bound passes, and `releaseReader` hands both children the same bound as the spawn port's own timeout,
+ * so a wedged server's `display-message` client is killed too rather than left running.
  */
 export class TmuxReleaseReader {
   constructor(
@@ -34,7 +36,7 @@ export class TmuxReleaseReader {
     private readonly executable: string,
     private readonly server: TmuxCommandPort,
     private readonly after: ControlTimer,
-    private readonly timeoutMs = DEFAULT_TIMEOUT_MS,
+    private readonly timeoutMs = DEFAULT_RELEASE_TIMEOUT_MS,
   ) {}
 
   async read(): Promise<TmuxReleaseReading> {

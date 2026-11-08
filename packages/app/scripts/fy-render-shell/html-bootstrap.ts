@@ -34,14 +34,8 @@
  * has run is something the page could have replaced. The port send in
  * particular is bound before any author byte arrives.
  */
-import {
-  FY_RENDER_LIMITS,
-  FY_RENDER_SANDBOX_LIMITS,
-} from '../../../plugins/conversation/app/render/fy-render-bounds.ts';
-import {
-  admittedFyRenderHtmlTokens,
-  FY_RENDER_HTML_TOKENS,
-} from '../../../plugins/conversation/app/render/fy-render-html-kit.ts';
+import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS } from '../../src/fy-render/bounds.ts';
+import { admittedFyRenderHtmlTokens, FY_RENDER_HTML_TOKENS } from '../../src/fy-render/html-kit.ts';
 
 type Reply =
   | { kind: 'shell-ready' }
@@ -152,7 +146,7 @@ type Reply =
 
   /**
    * THE APP'S THEME AS THE PAGE'S VARIABLES, so a page written with `var(--fg)`,
-   * `var(--accent)` or a kit class (`src/lib/fy-render-html-kit.ts`, inlined into
+   * `var(--accent)` or a kit class (`packages/app/src/fy-render/html-kit.ts`, inlined into
    * this document's head at build time) reads as part of the message. Each token
    * the parent sends is admitted by the kit's one rule — a listed name, a bounded
    * value that cannot name a resource — and set on the root as `--name`; a token
