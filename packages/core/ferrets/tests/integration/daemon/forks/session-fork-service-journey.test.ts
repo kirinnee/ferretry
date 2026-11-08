@@ -1,5 +1,7 @@
 import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, sep } from 'node:path';
 import type { Redaction } from '@ferretry/kernel/contract';
 import type { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
@@ -303,6 +305,15 @@ function besideTheTranscript(snapshot: Snapshot): Snapshot {
 }
 
 const hex = (bytes: Uint8Array | string): string => Buffer.from(bytes).toString('hex');
+
+/** Every regular file under a folder, by its path relative to it, sorted; a folder that is not there holds none. */
+function filesUnder(root: string): [string, Uint8Array][] {
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { recursive: true, encoding: 'utf8' })
+    .filter(relative => statSync(join(root, relative)).isFile())
+    .sort()
+    .map(relative => [relative.split(sep).join('/'), readFileSync(join(root, relative))]);
+}
 
 /** The one transcript path the source's provenance pins. A name, never a place on disk. */
 const TRANSCRIPT_FILE = '/fleet/homes/source/projects/source.jsonl';
@@ -894,6 +905,14 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
         if (key.startsWith(`${SOURCE_ID}/`) || key.startsWith(`${DESCENDANT_ID}/`)) into[key] = hex(text);
       for (const [key, bytes] of folder.bytes)
         if (key.startsWith(`${SOURCE_ID}/`) || key.startsWith(`${DESCENDANT_ID}/`)) into[key] = hex(bytes);
+      // Each ferret's REAL private folder on the sessions root: the source's own first turn lives there, beside the
+      // store, so a fork that rewrote or removed it would otherwise go unseen.
+      for (const id of [SOURCE_ID, DESCENDANT_ID])
+        for (const [relative, bytes] of filesUnder(opened.sessionDirectory(id))) {
+          const at = `${id}/${relative}`;
+          if (at in into) throw new Error(`${at} is both a state file and a file in the ferret's folder`);
+          into[at] = hex(bytes);
+        }
       for (const [key, bytes] of attachments.files)
         if (key.startsWith(`${SOURCE_ID}/`)) into[`attachments/${key}`] = hex(bytes);
       return into;
