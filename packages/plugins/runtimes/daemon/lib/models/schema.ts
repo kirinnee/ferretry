@@ -21,16 +21,16 @@ export type { ModelCatalogFile };
  * Claude Code's tier slots and the variable each is set through. `subagent` is the model Claude Code's
  * subagents run on. Pinned by Ferretry so `/model opus` lands on the catalog's model on every backend.
  */
-export const CLAUDE_TIER_VARIABLES = {
+const CLAUDE_TIER_VARIABLES = {
   opus: 'ANTHROPIC_DEFAULT_OPUS_MODEL',
   sonnet: 'ANTHROPIC_DEFAULT_SONNET_MODEL',
   haiku: 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   subagent: 'CLAUDE_CODE_SUBAGENT_MODEL',
 } as const;
-export type ClaudeTierSlot = keyof typeof CLAUDE_TIER_VARIABLES;
+type ClaudeTierSlot = keyof typeof CLAUDE_TIER_VARIABLES;
 
 /** A slot's value without its context suffix: the catalog id it names. */
-export const slotModelId = (value: string): string => value.replace(/\[[^\]]*\]$/u, '');
+const slotModelId = (value: string): string => value.replace(/\[[^\]]*\]$/u, '');
 
 /** A catalog, read: its id (the file name) and where it came from. */
 export interface ModelCatalog extends ModelCatalogFile {

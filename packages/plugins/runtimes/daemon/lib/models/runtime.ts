@@ -48,7 +48,7 @@ export interface RuntimeModelEntry {
 }
 
 /** The catalog a runtime's models came from, as a picker names it. */
-export interface RuntimeModelCatalogSource {
+interface RuntimeModelCatalogSource {
   readonly id: string;
   readonly label: string;
   readonly origin: ModelCatalog['origin'];

@@ -45,7 +45,7 @@ export interface HostFiles {
 }
 
 /** Looking a bare command name up on this machine's `PATH`. GAP(kernel): `kernel.spawn` may not run `which`. */
-export interface CommandLocator {
+interface CommandLocator {
   which(name: string): string | undefined;
 }
 
@@ -55,7 +55,7 @@ export interface CommandLocator {
  * GAP(kernel): `kernel.state` serves only declared `state/runtimes/…` files and there is no config WRITE port, so a
  * path under `fleet/` or `config/` has no home. The kernel's atomic file writer is not exported to plugins.
  */
-export interface TextStore {
+interface TextStore {
   /** `null` when the file does not exist. */
   read(path: string): Promise<string | null>;
   write(path: string, text: string): Promise<void>;
@@ -64,7 +64,7 @@ export interface TextStore {
 // ─── the configuration files (kernel-owned) ──────────────────────────────────────────────────────────────────────
 
 /** One configuration file edit: its path under `config/`, the new text (`undefined` removes it) and the etag it was composed against. */
-export interface ConfigFileEdit {
+interface ConfigFileEdit {
   readonly path: string;
   readonly content: string | undefined;
   readonly expect: string;
@@ -78,7 +78,7 @@ export interface ConfigFileEdit {
  * acknowledgement of a written file are kernel-owned, and plugins have no config WRITE port. This is the shape the
  * catalogue needs of them.
  */
-export interface ConfigLoad<Model, Files = unknown> {
+interface ConfigLoad<Model, Files = unknown> {
   readonly evaluation: {
     /** How many fleet files the load found; zero is a machine with no fleet files yet. */
     readonly fleetFiles: number;
@@ -99,29 +99,6 @@ export interface ConfigFilesPort<Model> {
   mentionsRenamed(load: ConfigLoad<Model>, rename: RuntimeRename): readonly ConfigFileEdit[];
   acknowledge(path: string, content: string): void;
   acknowledgeRemoval(path: string): void;
-}
-
-/**
- * The kernel's config service as a Clone's settings merge uses it: the same service `PUT /v1/config/file` writes through.
- *
- * GAP(kernel): plugins have no config WRITE port; only the kernel's host can write `config/**`.
- */
-export interface ConfigFileService {
-  file(path: string): Promise<{ readonly exists: boolean; readonly text: string; readonly etag: string }>;
-  inEffect(): Promise<{
-    readonly evaluation: { readonly effective: Readonly<Record<'warden' | 'learning' | 'voice', unknown>> };
-  }>;
-  validate(
-    path: string,
-    text: string,
-  ): Promise<readonly { readonly severity: 'error' | 'warning'; readonly message: string; readonly line?: number }[]>;
-  write(
-    path: string,
-    text: string,
-    ifMatch: string,
-    mayLoosen: boolean,
-    as: 'owner',
-  ): Promise<{ readonly outcome: 'applied' | 'pending' }>;
 }
 
 // ─── the provisioner's disk (descriptors) ────────────────────────────────────────────────────────────────────────
@@ -178,7 +155,7 @@ export interface ProvisionerDisk {
 // ─── the provisioner's kernel-owned helpers ──────────────────────────────────────────────────────────────────────
 
 /** How a file is opened through a checked folder. */
-export type FileOpening = 'read' | 'new';
+type FileOpening = 'read' | 'new';
 
 /**
  * A folder that was opened and checked: every entry in it is reached THROUGH it, never by what its path names later.
@@ -228,7 +205,7 @@ export interface ResolvedSourceFence {
 }
 
 /** Why the guard refused a source. */
-export type SourceRefusalRule = 'state-home' | 'hard-link' | 'changed' | 'not-found' | 'loop' | 'too-many';
+type SourceRefusalRule = 'state-home' | 'hard-link' | 'changed' | 'not-found' | 'loop' | 'too-many';
 
 /** Where the folders of a plan's destinations are opened and checked. */
 export interface DestinationFolders {
@@ -275,7 +252,7 @@ export interface ApplyLockOptions {
 
 /** The shared-history side of an apply; `conversation` owns it. */
 export type SharedHistoryRequest = NonNullable<FleetApplyPlan['sharedHistoryRequests']>[number];
-export type SharedHistoryPreview = FleetApplyPreview['sharedHistory'][number];
+type SharedHistoryPreview = FleetApplyPreview['sharedHistory'][number];
 
 /** GAP(conversation): the shared-history migration and its file-system adapter live with the lease store. */
 export interface SharedHistoryPooling {
@@ -356,18 +333,18 @@ export const refusedHostFiles: HostFiles = {
 };
 
 /** A {@link TextStore} that refuses every call. GAP(kernel): no state file is declared for the fleet's records. */
-export const refusedTextStore: TextStore = {
+const refusedTextStore: TextStore = {
   read: async () => await Promise.reject(missing("the fleet's record files")),
   write: async () => await Promise.reject(missing("the fleet's record files")),
 };
 
 /** A {@link CommandLocator} that refuses. GAP(kernel): `kernel.spawn` may not run `which`. */
-export const refusedCommandLocator: CommandLocator = { which: refuse("the search of this machine's PATH") };
+const refusedCommandLocator: CommandLocator = { which: refuse("the search of this machine's PATH") };
 
 const refusedFiles = refuse("the provisioner's file calls");
 
 /** A {@link ProvisionerDisk} that refuses every call. */
-export const refusedProvisionerDisk: ProvisionerDisk = {
+const refusedProvisionerDisk: ProvisionerDisk = {
   realpath: async () => await Promise.reject(missing("the provisioner's file calls")),
   statIsDirectory: async () => await Promise.reject(missing("the provisioner's file calls")),
   readText: async () => await Promise.reject(missing("the provisioner's file calls")),

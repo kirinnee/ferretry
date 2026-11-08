@@ -305,8 +305,7 @@ export function budgetHoldsOf(deps: Pick<FleetCatalogServiceDeps, 'budgetHolds'>
 // ── Running sessions ─────────────────────────────────────────────────────────────────────────────
 
 /** How many of these sessions are still running. */
-export const countRunningSessions = (statuses: readonly SessionStatus[]): number =>
-  statuses.filter(sessionRunning).length;
+const countRunningSessions = (statuses: readonly SessionStatus[]): number => statuses.filter(sessionRunning).length;
 
 /**
  * Whether a planned manifest says what the published one already says, the moment it was made
@@ -324,7 +323,7 @@ export function harnessCommandsOf(
   };
 }
 
-export function sameManifest(planned: { readonly generatedAt: string }, published: unknown): boolean {
+function sameManifest(planned: { readonly generatedAt: string }, published: unknown): boolean {
   if (published === null || typeof published !== 'object') return false;
   const { generatedAt: _planned, ...next } = planned;
   const { generatedAt: _published, ...current } = published as { readonly generatedAt?: unknown };
@@ -430,7 +429,7 @@ const textUsers = (model: AccountModel, change: AccountPlanChange | LoginRemoval
  * has one built — but "nobody could tell me where this caller stands" must never render as an open
  * Apply button.
  */
-export function machineAuthority(governance: CallerGovernance | undefined): MachineAuthority {
+function machineAuthority(governance: CallerGovernance | undefined): MachineAuthority {
   if (governance === undefined) return { mayApply: false, applyRefusal: 'undetermined' };
   const configure = governance.decide(cap('fleet', 'configure'));
   return { mayApply: configure.allowed, applyRefusal: configure.refusal };

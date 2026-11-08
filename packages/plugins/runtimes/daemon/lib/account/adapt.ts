@@ -122,14 +122,14 @@ export type AdaptedEntry =
     };
 
 /** A key written into every runtime that is not behaviour (§8.3), and so never shown as a layer. */
-export interface PlumbingEntry {
+interface PlumbingEntry {
   readonly key: string;
   readonly path: readonly string[];
   readonly value: unknown;
 }
 
 /** A value from the profile's settings that adaptation replaced. Information, as a conflict is. */
-export interface AdaptOverride {
+interface AdaptOverride {
   readonly key: string;
   readonly path: readonly string[];
   readonly value: unknown;
@@ -139,7 +139,7 @@ export interface AdaptOverride {
 }
 
 /** Why a runtime's files cannot be written as asked. Each one blocks the materialisation. */
-export type AdaptProblem =
+type AdaptProblem =
   | { readonly kind: 'harness-mismatch'; readonly message: string }
   | { readonly kind: 'unread'; readonly reference: LayerReferenceText; readonly message: string }
   | {

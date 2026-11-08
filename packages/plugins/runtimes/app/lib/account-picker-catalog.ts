@@ -20,8 +20,6 @@ import { type LocalModels, RuntimeCatalogSchema, type RuntimeView } from '../../
 import type { RuntimesClient } from './client.ts';
 import type { PickerModel } from './picker-model.ts';
 
-export type { PickerModel } from './picker-model.ts';
-
 /** One runtime a ferret can be started on, as the picker reads it. */
 export interface PickerAccount {
   /** The runtime's stable id. */
@@ -68,8 +66,8 @@ export interface AccountPickerHealthCatalog {
   readonly error: string | null;
 }
 
-export const PICKER_LOGINS_ROUTE = 'GET /v1/logins' as const;
-export const PICKER_CHECK_ROUTE = 'POST /v1/logins/:loginId/check' as const;
+const PICKER_LOGINS_ROUTE = 'GET /v1/logins' as const;
+const PICKER_CHECK_ROUTE = 'POST /v1/logins/:loginId/check' as const;
 
 /** One runtime as the picker reads it. A model set's models are offered; the harness default offers none. */
 export const pickerAccount = (runtime: RuntimeView): PickerAccount => ({

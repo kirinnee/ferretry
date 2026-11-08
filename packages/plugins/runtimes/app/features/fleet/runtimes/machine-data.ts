@@ -40,7 +40,7 @@ type MachineDataState =
   | { readonly kind: 'failed'; readonly sentence: string; readonly last: MachineData | null };
 
 /** Every login on this machine (Logins' list). */
-export const readLogins = async (client: RuntimesClient): Promise<LoginList> =>
+const readLogins = async (client: RuntimesClient): Promise<LoginList> =>
   LoginListSchema.parse(await client.call('GET /v1/logins'));
 
 /** The four reads, together. Throws what the first failing read threw. */

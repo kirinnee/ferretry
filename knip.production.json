@@ -169,7 +169,25 @@
     },
     "packages/plugins/runtimes": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "daemon/adapters/account-model-files.ts",
+        "daemon/adapters/file-provisioner.ts",
+        "daemon/adapters/host-harness-scan.ts",
+        "daemon/adapters/manifest-file.ts",
+        "daemon/adapters/ports.ts",
+        "daemon/adapters/runtime-ids-file.ts",
+        "daemon/adapters/runtime-session-records.ts",
+        "daemon/adapters/setup-files.ts",
+        "daemon/lib/env-profiles.ts",
+        "daemon/lib/harness-env.ts",
+        "daemon/lib/harness.ts",
+        "daemon/lib/identity.ts",
+        "daemon/lib/account/store-inspection.ts",
+        "daemon/lib/presets/detect.ts",
+        "daemon/lib/presets/login.ts",
+        "daemon/lib/presets/catalog.ts"
+      ]
     },
     "packages/plugins/updates": {
       "entry": ["app/views/*.tsx"],

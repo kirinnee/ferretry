@@ -37,11 +37,11 @@ import {
 import type { SessionCrypto } from '../kernel-wire/index.ts';
 
 /** First four bytes of every envelope: the format and its version. */
-export const LINK_ENVELOPE_MAGIC = 'FYL1' as const;
+const LINK_ENVELOPE_MAGIC = 'FYL1' as const;
 /** Domain-separates the envelope's AEAD key from every other key derived from the same secret. */
-export const LINK_BUNDLE_KEY_LABEL = 'ferretry-link-bundle-key-v1' as const;
+const LINK_BUNDLE_KEY_LABEL = 'ferretry-link-bundle-key-v1' as const;
 /** Domain-separates the fetch token from the envelope key. */
-export const LINK_FETCH_TOKEN_LABEL = 'ferretry-link-fetch-v1' as const;
+const LINK_FETCH_TOKEN_LABEL = 'ferretry-link-fetch-v1' as const;
 /** The first bytes of the associated data, ended by a zero byte. */
 export const LINK_ENVELOPE_AAD_LABEL = 'ferretry-link-envelope-v1' as const;
 
@@ -52,7 +52,7 @@ export const LINK_ENVELOPE_MAX_BYTES = 3 * 1024 * 1024;
 
 export const LINK_SECRET_BYTES = 32;
 export const LINK_BUNDLE_ID_BYTES = 16;
-export const LINK_FETCH_TOKEN_BYTES = 32;
+const LINK_FETCH_TOKEN_BYTES = 32;
 const NONCE_BYTES = 12;
 const TAG_BYTES = 16;
 const HEADER_BYTES = LINK_ENVELOPE_MAGIC.length + 4 + NONCE_BYTES;
@@ -74,7 +74,7 @@ export function mintLinkSecrets(crypto: SessionCrypto): LinkSecrets {
   };
 }
 
-export type LinkEnvelopeRefusal =
+type LinkEnvelopeRefusal =
   | 'link_too_big'
   | 'malformed_secret'
   | 'malformed_envelope'

@@ -21,12 +21,6 @@ const documentSchema = (owner: z.ZodType<string>) =>
     unlocks: z.array(z.strictObject({ deviceId: owner, unlockedAt: InstantSchema })).max(10_000),
   });
 
-/** Where a ledger lives and whose unlocks it keeps. The default is the paired devices'. */
-export interface UnlockLedgerPlacement {
-  readonly path: string;
-  readonly owner: z.ZodType<string>;
-}
-
 /** The unlock ledger could not be read as unlocks. */
 class UnlockLedgerDamaged extends Error {
   constructor(message: string) {

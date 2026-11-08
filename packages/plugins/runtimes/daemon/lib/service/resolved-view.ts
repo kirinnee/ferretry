@@ -19,7 +19,7 @@ import { looksSecret } from '../account/import.ts';
 import type { ResolvedEntry, ResolvedField, ResolvedSetter } from '../../../contract/index.ts';
 
 /** What a hidden value is replaced by. */
-export const RESOLVED_HIDDEN_TEXT = '‹hidden›';
+const RESOLVED_HIDDEN_TEXT = '‹hidden›';
 
 const shown = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value));
 

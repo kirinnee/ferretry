@@ -47,7 +47,7 @@ export const CODEX_MODEL_CATALOG_FILE = 'codex-model-catalog.json';
  * The one owner of that fact — a machine's own `config/models/<id>.yaml` for these ids changes the
  * chip's labels and tiers, never the in-chat list.
  */
-export const CODEX_NATIVE_MODEL_CATALOGS: ReadonlySet<string> = new Set(['openai', 'azure-openai']);
+const CODEX_NATIVE_MODEL_CATALOGS: ReadonlySet<string> = new Set(['openai', 'azure-openai']);
 
 /** What Codex shows beside a reasoning level. The words are Codex's own for the levels it ships. */
 const EFFORT_WORDS: Readonly<Record<string, string>> = {
@@ -64,7 +64,7 @@ const EFFORT_WORDS: Readonly<Record<string, string>> = {
 const TIER_WORDS = { best: 'Best', balanced: 'Balanced', fast: 'Fast' } as const;
 
 /** `1000000` → `1M`, `1050000` → `1.05M`, `128000` → `128K`. */
-export function contextWords(tokens: number): string {
+function contextWords(tokens: number): string {
   if (tokens >= 1_000_000) return `${Number((tokens / 1_000_000).toFixed(2))}M`;
   return `${Math.max(1, Math.round(tokens / 1_000))}K`;
 }

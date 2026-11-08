@@ -47,8 +47,6 @@ const SecretTemplateSchema = NonEmptyString.check(ctx => {
 
 /** Opaque, stable, per-account identity. The only key any consumer may join on. */
 export const AccountIdSchema = z.uuid();
-export type AccountId = z.infer<typeof AccountIdSchema>;
-
 /** The agent harness an account drives. */
 export const HarnessKindSchema = z.enum(['claude', 'codex']);
 export type HarnessKind = z.infer<typeof HarnessKindSchema>;
@@ -64,7 +62,7 @@ export const harnessKeyOfKind = (kind: HarnessKind): HarnessKey => (kind === 'cl
  * literally called `auto-something` is not automatically an `auto` lane, and renaming a lane never
  * silently empties a caller's selection.
  */
-export const AccountModeSchema = z.enum(['interactive', 'auto']);
+const AccountModeSchema = z.enum(['interactive', 'auto']);
 export type AccountMode = z.infer<typeof AccountModeSchema>;
 
 /**
@@ -101,7 +99,7 @@ export const FleetManifestModelSchema = z.discriminatedUnion('available', [
 export type FleetManifestModel = z.infer<typeof FleetManifestModelSchema>;
 
 /** The catalog a runtime's models came from (docs/model-catalog.md). */
-export const FleetManifestModelCatalogSchema = z.strictObject({
+const FleetManifestModelCatalogSchema = z.strictObject({
   id: NonEmptyString,
   label: NonEmptyString,
   /** Whether the provider serves ids beyond the list, so a picker offers "Custom id…". */
@@ -383,7 +381,7 @@ export function wrapperName(account: FleetManifestAccount): string {
  * {@link FleetManifestAccount}, and a second `basename` call elsewhere is how two consumers come to
  * disagree about what an account is called on a host whose separator is not the one they assumed.
  */
-export function wrapperNameOf(publishedPath: string): string {
+function wrapperNameOf(publishedPath: string): string {
   return basename(publishedPath);
 }
 

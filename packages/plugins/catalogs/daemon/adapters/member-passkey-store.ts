@@ -33,14 +33,8 @@ const documentSchemas = (owner: z.ZodType<string>) => {
   return { record, document: z.strictObject({ schemaVersion: z.literal(1), passkeys: z.array(record) }) };
 };
 
-/** Where a store lives and whose keys it holds. The default is the paired devices'. */
-export interface PasskeyStorePlacement {
-  readonly path: string;
-  readonly owner: z.ZodType<string>;
-}
-
 /** The passkey document could not be read as passkeys. A state to report, never an empty list. */
-export class PasskeyStoreDamaged extends Error {
+class PasskeyStoreDamaged extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'PasskeyStoreDamaged';

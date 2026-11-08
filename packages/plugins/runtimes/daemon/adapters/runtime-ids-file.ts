@@ -6,12 +6,8 @@ import type { HostFiles } from './ports.ts';
  * (`lib/fleet/start-resolution.ts`, `lib/index.ts` of the old daemon); these are the one method of each that this file
  * satisfies, kept local until the Ferrets contract names them.
  */
-export interface RuntimeNamesPort {
+interface RuntimeNamesPort {
   ids(): Promise<RuntimeIds | undefined>;
-}
-
-export interface AccountInventoryPort<Account> {
-  accounts(): Promise<readonly Account[]>;
 }
 
 /**
@@ -38,24 +34,5 @@ export class RuntimeIdsFile implements RuntimeNamesPort {
         cause: error,
       });
     }
-  }
-}
-
-/**
- * The fleet's account inventory with its runtime names beside it: the ONE inventory a daemon shares,
- * so every start resolves an old wrapper name without any call site passing a second thing.
- */
-export class RuntimeAwareAccountInventory<Account> implements AccountInventoryPort<Account>, RuntimeNamesPort {
-  constructor(
-    private readonly inventory: AccountInventoryPort<Account>,
-    private readonly names: RuntimeNamesPort,
-  ) {}
-
-  async accounts(): Promise<readonly Account[]> {
-    return await this.inventory.accounts();
-  }
-
-  async ids(): Promise<RuntimeIds | undefined> {
-    return await this.names.ids();
   }
 }

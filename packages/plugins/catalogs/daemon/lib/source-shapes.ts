@@ -1,4 +1,4 @@
-export interface ClaudeOAuthClient {
+interface ClaudeOAuthClient {
   readonly clientId: string;
   readonly callbackPort?: number;
 }

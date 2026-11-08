@@ -15,11 +15,11 @@ import { type CborValue, isCborMap } from './cbor.ts';
 export type PasskeyAlgorithm = -7 | -8 | -257;
 
 export const ES256: PasskeyAlgorithm = -7;
-export const EDDSA: PasskeyAlgorithm = -8;
-export const RS256: PasskeyAlgorithm = -257;
+const EDDSA: PasskeyAlgorithm = -8;
+const RS256: PasskeyAlgorithm = -257;
 
 /** True when `value` is one of the three accepted COSE algorithms. */
-export function isPasskeyAlgorithm(value: unknown): value is PasskeyAlgorithm {
+function isPasskeyAlgorithm(value: unknown): value is PasskeyAlgorithm {
   return value === ES256 || value === EDDSA || value === RS256;
 }
 

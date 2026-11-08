@@ -41,7 +41,7 @@ import type { AccountMode, FleetManifestAccount, HarnessKind } from './manifest.
  * A token that expires during the command that just decided it was fine is not fine, and a clock a
  * minute out of step should not produce a `valid` reading either.
  */
-export const CREDENTIAL_EXPIRY_SKEW_MS = 60_000;
+const CREDENTIAL_EXPIRY_SKEW_MS = 60_000;
 
 /**
  * What is known about one home's credential.
@@ -50,7 +50,7 @@ export const CREDENTIAL_EXPIRY_SKEW_MS = 60_000;
  * way to renew it. `unreadable` means *unknown*: the read failed, or what came back could not be
  * understood. The two are never merged, because one is safe to overwrite and the other is not.
  */
-export type CredentialState = 'valid' | 'refreshable' | 'missing' | 'unreadable';
+type CredentialState = 'valid' | 'refreshable' | 'missing' | 'unreadable';
 
 export interface CredentialReading {
   readonly state: CredentialState;
@@ -109,7 +109,7 @@ function classifyTokens(shape: CredentialTokenShape, now: number): CredentialRea
 }
 
 /** Which tokens a credential holds and when its access token expires. Presence flags, never a token. */
-export interface CredentialTokenShape {
+interface CredentialTokenShape {
   readonly kind: 'tokens';
   readonly hasAccess: boolean;
   readonly hasRefresh: boolean;
@@ -253,7 +253,7 @@ export interface FleetIdentityMemberStatus {
  * *and* at least one home could not be read, so "nobody is logged in" is a guess. It asks a human to
  * look rather than opening a browser or overwriting anything.
  */
-export type FleetIdentityVerdict =
+type FleetIdentityVerdict =
   | { readonly kind: 'no-login'; readonly reason: string }
   | { readonly kind: 'complete' }
   | { readonly kind: 'sync'; readonly donor: FleetIdentityMember }

@@ -29,7 +29,7 @@ import type { DaemonIdentity, SessionCrypto } from '../kernel-wire/index.ts';
 import { parseDaemonId, publicKeyMatchesDaemonId } from '../kernel-wire/index.ts';
 import { LINK_ENVELOPE_MAX_BYTES } from './link-bundle.ts';
 
-export const LINK_STORE_PROTOCOL_ID = 'ferretry-link-store/1' as const;
+const LINK_STORE_PROTOCOL_ID = 'ferretry-link-store/1' as const;
 export const LINK_STORE_VERSION = 1 as const;
 
 /** `GET`, public, no-store, CORS `*`: whether this store takes new links at all. */
@@ -55,7 +55,7 @@ export const LINK_STORE_STATUS_LABEL = 'ferretry-link-store-status-v1' as const;
 /** How long a challenge nonce may be signed and spent. It is single-use within that window. */
 export const LINK_STORE_CHALLENGE_SECONDS = 60;
 /** The most links one status call asks about. */
-export const LINK_STORE_STATUS_MAX_IDS = 64;
+const LINK_STORE_STATUS_MAX_IDS = 64;
 /** The most the JSON metadata of an upload may be. */
 export const LINK_UPLOAD_METADATA_MAX_BYTES = 4 * 1024;
 
@@ -75,18 +75,12 @@ export const LinkStoreAdvertisementSchema = z.strictObject({
   maxEnvelopeBytes: z.number().int().min(1),
   maxLiveLinks: z.number().int().min(1),
 });
-export type LinkStoreAdvertisement = z.infer<typeof LinkStoreAdvertisementSchema>;
-
 export const LinkStoreChallengeRequestSchema = z.strictObject({ daemonId: DaemonIdField });
-export type LinkStoreChallengeRequest = z.infer<typeof LinkStoreChallengeRequestSchema>;
-
 export const LinkStoreChallengeSchema = z.strictObject({
   version: z.literal(LINK_STORE_VERSION),
   nonce: base64UrlOfLength(NONCE_BYTES),
   deadlineSeconds: z.number().int().min(1).max(LINK_STORE_CHALLENGE_SECONDS),
 });
-export type LinkStoreChallenge = z.infer<typeof LinkStoreChallengeSchema>;
-
 const SignedFields = {
   daemonId: DaemonIdField,
   publicKey: base64UrlOfLength(ED25519_SPKI_BYTES),
@@ -94,9 +88,9 @@ const SignedFields = {
   signature: base64UrlOfLength(ED25519_SIGNATURE_BYTES),
 };
 
-export const LINK_UPLOAD_ACTIONS = ['create', 'replace'] as const;
-export const LinkUploadActionSchema = z.enum(LINK_UPLOAD_ACTIONS);
-export type LinkUploadAction = z.infer<typeof LinkUploadActionSchema>;
+const LINK_UPLOAD_ACTIONS = ['create', 'replace'] as const;
+const LinkUploadActionSchema = z.enum(LINK_UPLOAD_ACTIONS);
+type LinkUploadAction = z.infer<typeof LinkUploadActionSchema>;
 
 /**
  * The JSON half of an upload. `installCap` is the store's to enforce and is NOT in the signed link
@@ -138,16 +132,12 @@ export const LinkUploadMetadataSchema = z
 export type LinkUploadMetadata = z.infer<typeof LinkUploadMetadataSchema>;
 
 export const LinkDeleteRequestSchema = z.strictObject(SignedFields);
-export type LinkDeleteRequest = z.infer<typeof LinkDeleteRequestSchema>;
-
 export const LinkStatusRequestSchema = z.strictObject({
   ...SignedFields,
   bundleIds: z.array(LinkBundleIdSchema).min(1).max(LINK_STORE_STATUS_MAX_IDS),
 });
-export type LinkStatusRequest = z.infer<typeof LinkStatusRequestSchema>;
-
-export const LINK_STORE_LINK_STATES = ['live', 'used', 'ended', 'lapsed', 'unknown'] as const;
-export const LinkStoreLinkStateSchema = z.enum(LINK_STORE_LINK_STATES);
+const LINK_STORE_LINK_STATES = ['live', 'used', 'ended', 'lapsed', 'unknown'] as const;
+const LinkStoreLinkStateSchema = z.enum(LINK_STORE_LINK_STATES);
 export type LinkStoreLinkState = z.infer<typeof LinkStoreLinkStateSchema>;
 
 export const LinkStatusSchema = z.strictObject({
@@ -170,8 +160,6 @@ export type LinkStatus = z.infer<typeof LinkStatusSchema>;
 
 /** `POST …/peek` and `POST …/fetch` body. */
 export const LinkFetchRequestSchema = z.strictObject({ token: base64UrlOfLength(32) });
-export type LinkFetchRequest = z.infer<typeof LinkFetchRequestSchema>;
-
 export const LinkPeekSchema = z.strictObject({
   version: z.literal(LINK_STORE_VERSION),
   kind: CatalogLinkKindSchema,
@@ -203,8 +191,6 @@ export type LinkStoreRefusalCode = z.infer<typeof LinkStoreRefusalCodeSchema>;
 export const LinkStoreRefusalSchema = z.strictObject({
   error: z.strictObject({ code: LinkStoreRefusalCodeSchema, message: z.string().min(1).max(512) }),
 });
-export type LinkStoreRefusal = z.infer<typeof LinkStoreRefusalSchema>;
-
 /** The HTTP status and the sentence each refusal carries. One place, so the Worker and a daemon agree. */
 export const LINK_STORE_REFUSAL_DETAIL: Readonly<Record<LinkStoreRefusalCode, { status: number; message: string }>> = {
   link_store_unavailable: {

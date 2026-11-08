@@ -23,7 +23,7 @@ export interface Machine {
 }
 
 export const PREVIEW = 'POST /v1/runtimes/profiles/preview';
-export const PROPOSE = 'POST /v1/runtimes/proposals';
+const PROPOSE = 'POST /v1/runtimes/proposals';
 
 export const scriptedMachine = (overrides: Partial<Machine> = {}): Machine => ({
   catalog: studioCatalog(),

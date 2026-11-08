@@ -41,7 +41,7 @@ export interface IAccountOutput {
 }
 
 /** Asking a person something. Never used off a terminal. */
-export interface IAccountPrompt {
+interface IAccountPrompt {
   ask(message: string): Promise<string>;
 }
 

@@ -187,7 +187,7 @@ export interface LinkStoreFailure {
   readonly message: string;
 }
 
-export type LinkStoreSuccess =
+type LinkStoreSuccess =
   | { readonly ok: true; readonly kind: 'challenge'; readonly nonce: string; readonly deadlineSeconds: number }
   | { readonly ok: true; readonly kind: 'nonce-spent' }
   | { readonly ok: true; readonly kind: 'stored'; readonly sequence: number }

@@ -27,13 +27,13 @@
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
 
 /** How many proposals one daemon will hold at once, across every client. */
-export const MAX_OPEN_PROPOSALS = 8;
+const MAX_OPEN_PROPOSALS = 8;
 /** How many applied changes are remembered, so a repeat apply is told it already happened. */
 const MAX_CONSUMED_TOMBSTONES = 16;
 /** How many times a repeated handle is tolerated before the identity source is called broken. */
 const ID_MINT_ATTEMPTS = 4;
 /** How long a reviewed change stays applicable. Long enough to read, short enough to be current. */
-export const PROPOSAL_TTL_SECONDS = 15 * 60;
+const PROPOSAL_TTL_SECONDS = 15 * 60;
 
 type FleetProposalState = 'pending' | 'consumed';
 
