@@ -97,6 +97,17 @@ async function refusal(promise: Promise<unknown>): Promise<SessionEffectLedgerEr
   throw new Error('expected the ledger to refuse, but it resolved');
 }
 
+/** The error a promise rejects with, whatever its kind; fails if it resolves. */
+async function refusalOf(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise;
+  } catch (error) {
+    if (error instanceof Error) return error;
+    throw error;
+  }
+  throw new Error('expected the ledger to refuse, but it resolved');
+}
+
 async function held(sessions: string, effect: SessionEffectKey = key): Promise<Record<string, unknown>> {
   const file = join(sessions, effect.sessionId, 'effects', `${effectFileName(effect.effectId)}.json`);
   return JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
@@ -272,7 +283,8 @@ describe('FileSessionEffectLedger', () => {
 
     // Assert: a settled record claims keystrokes reached an agent, and this one never did.
     should(refused.message).match(/was never begun/u);
-    should(await stat(join(sessions, SESSION)).catch(() => undefined)).equal(undefined);
+    // The ferret's own folder is made before the ledger is consulted (U2), so it exists; nothing is written below it.
+    should(await readdir(join(sessions, SESSION))).eql([]);
   });
 
   it('should refuse to settle an effect held for a different act', async () => {
@@ -618,20 +630,30 @@ describe('FileSessionEffectLedger', () => {
   });
 
   it('should keep two sessions and two effects on one session apart', async () => {
-    // Arrange
-    const { subject, sessions } = await ledger('separate');
+    // Arrange: one ledger per ferret, both on the same `sessions` root, each over its own folder.
+    const { subject, sessions, home } = await ledger('separate');
     const sibling: SessionEffectKey = { sessionId: SESSION, effectId: 'turn-1' };
     const elsewhere: SessionEffectKey = { sessionId: OTHER_SESSION, effectId: EFFECT };
+    const { root: otherRoot } = await diskSessionsRoot(dirname(home), OTHER_SESSION);
+    const other = new FileSessionEffectLedger(otherRoot, OTHER_SESSION);
 
     // Act
     await subject.begin(key, FINGERPRINT, BEGUN_AT);
     await subject.settle(key, FINGERPRINT, SETTLED_AT);
+    const crossed = await refusalOf(subject.inspect(elsewhere, FINGERPRINT));
 
-    // Assert: neither neighbour is answered from this one's record.
+    // Assert: a handle is one ferret's, so asking it about another ferret is refused, not answered 'unclaimed' ...
+    should(crossed.constructor).equal(Error);
+    should(crossed.message).equal(
+      'the session effect ledger was asked about session 20260806-other through the folder of 20260806-target',
+    );
+    // ... a sibling effect on the same session is not answered from this one's record ...
     should(await subject.inspect(sibling, FINGERPRINT)).equal('unclaimed');
-    should(await subject.inspect(elsewhere, FINGERPRINT)).equal('unclaimed');
+    // ... and the other ferret, through ITS OWN folder, has no record of the effect this one settled.
+    should(await other.inspect(elsewhere, FINGERPRINT)).equal('unclaimed');
+    should(await subject.inspect(key, FINGERPRINT)).equal('settled');
     should(await readdir(join(sessions, SESSION, 'effects'))).eql([`${effectFileName(EFFECT)}.json`]);
-    should(await readdir(sessions)).eql([SESSION]);
+    should(await readdir(sessions)).eql([OTHER_SESSION, SESSION]);
   });
 });
 
