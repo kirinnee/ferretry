@@ -2,10 +2,11 @@
  * `browsers.yaml` THROUGH THE KERNEL'S CONFIG FILE SERVICE (docs/config-files.md): the browser's mode and proxy are
  * read and written as the one document they live in, against the digest they were read at.
  *
- * ASSUMED, NOT DECLARED HERE: the service's routes keep today's keys — `GET /v1/config/file?path=` and
- * `PUT /v1/config/file` — and the client reaches them by key like any route. While no compiled manifest declares them
- * the shell's client refuses the call before sending, and the tab says so; this is the ONE file to change when the
- * kernel declares its routes. Credentials are only ever `${secret:NAME}` references: the schema refuses a value.
+ * The routes are the KERNEL's (D2 #3): `GET /v1/config/file?path=` and `PUT /v1/config/file`, declared by
+ * `@ferretry/kernel/plugin` and reached by key like any route. No plugin declares them; the kernel resolves the path
+ * to the file this plugin declares (`browsers.yaml`) and Gate answers who may read or write it. The shell client
+ * carries no headers, so the etag travels in the body. Credentials are only ever `${secret:NAME}` references: the
+ * schema refuses a value.
  */
 
 import { parse, parseDocument } from 'yaml';
