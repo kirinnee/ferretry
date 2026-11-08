@@ -219,16 +219,60 @@ export type PlainPaste =
   | { readonly kind: 'take'; readonly value: string }
   | { readonly kind: 'withheld'; readonly reason: WithheldReason };
 
+/** The last name word that says a variable IS a credential (`…_TOKEN`), as opposed to one that is about one (`…_AUTH`). */
+const FINAL_CREDENTIAL_WORDS: ReadonlySet<string> = new Set([
+  'TOKEN',
+  'SECRET',
+  'PASSWORD',
+  'PASSWD',
+  'APIKEY',
+  'CREDENTIAL',
+  'CREDENTIALS',
+  'COOKIE',
+  'PAT',
+]);
+
+/**
+ * Whether a variable's NAME ENDS in a credential word (`GATEWAY_TOKEN`) or pair (`ANTHROPIC_API_KEY`). Only such a name
+ * is refused at any length: `AUTH` and `AUTHORIZATION` (`SKIP_BEDROCK_AUTH=1`) and a credential word in the middle
+ * (`API_KEY_HELPER_TTL_MS`) name a flag or a setting, and stay on {@link looksSecret}'s minimum-length rule.
+ */
+function namesACredentialAtEnd(name: string): boolean {
+  const words = name
+    .toUpperCase()
+    .split(/[^A-Z0-9]+/u)
+    .filter(Boolean);
+  const last = words.at(-1) ?? '';
+  return FINAL_CREDENTIAL_WORDS.has(last) || SECRET_NAME_PAIRS.has(`${words.at(-2) ?? ''}_${last}`);
+}
+
 /**
  * THE rule for a value headed for a PLAIN field (one owner, shared by this browser's paste and the daemon's
- * backstop `assertNoRawSecrets`, which refuses `credential-name`, `token-shape` and `url-userinfo`): a variable the preset
- * deliberately leaves empty keeps its `''`; a credential-named variable or a value with a token shape is never taken,
- * however short, unless the whole value is one reference (`${secret:NAME}`); a URL with a user or a query string is not taken. It returns the
- * verdict, never the value in a sentence.
+ * backstop `assertNoRawSecrets`, which refuses `credential-name`, `token-shape` and `url-userinfo`): a variable the
+ * preset deliberately leaves empty keeps its `''`; a value with a token shape is never taken, at any length. In
+ * `'prefill'` (the browser's paste) a variable whose name ENDS in a credential word is never taken either, however
+ * short, and the person types a placeholder themselves. In `'stored'` (the daemon) such a name is refused only at
+ * 8 characters or more, since a shorter value is a placeholder (`ollama`), and a value that holds a
+ * `${secret:NAME}` among other text is let through. `AUTH`-style flags and a credential word mid-name go by
+ * {@link looksSecret} (eight characters and more) in both. A URL with a user or a query string is not taken. It returns
+ * the verdict, never the value in a sentence.
  */
-export function plainPaste(name: string, value: string, allowEmpty: boolean): PlainPaste {
+export function plainPaste(
+  name: string,
+  value: string,
+  allowEmpty: boolean,
+  mode: 'prefill' | 'stored' = 'prefill',
+): PlainPaste {
   if (value !== '' && !INDIRECT_VALUE.test(value.trim())) {
-    if (namesACredential(name)) return { kind: 'withheld', reason: 'credential-name' };
+    const stored = mode === 'stored';
+    const referenced = stored && secretReferencesIn(value).length > 0;
+    // A STORED value under 8 characters is a placeholder (`ollama`), as the secret store cannot hold one either.
+    const longEnough = !stored || value.length >= MIN_SECRET_VALUE_LENGTH;
+    const midName =
+      value.length >= MIN_SECRET_VALUE_LENGTH && secretReferencesIn(value).length === 0 && namesACredential(name);
+    if ((!referenced && longEnough && namesACredentialAtEnd(name)) || midName) {
+      return { kind: 'withheld', reason: 'credential-name' };
+    }
     if (hasTokenShape(value)) return { kind: 'withheld', reason: 'token-shape' };
   }
   const carried = urlCarries(value);

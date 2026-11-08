@@ -33,6 +33,36 @@ describe('urlCarries', () => {
 });
 
 describe('plainPaste', () => {
+  it('refuses at any length only a name that ENDS in a credential word, and judges AUTH and mid-name words by length', () => {
+    expect(plainPaste('GATEWAY_TOKEN', 'abc', false)).toEqual({ kind: 'withheld', reason: 'credential-name' });
+    expect(plainPaste('GATEWAY_TOKEN', 'abc', false, 'stored')).toEqual({ kind: 'take', value: 'abc' });
+    expect(plainPaste('GATEWAY_TOKEN', 'abcdefgh', false, 'stored')).toEqual({
+      kind: 'withheld',
+      reason: 'credential-name',
+    });
+    expect(plainPaste('GATEWAY_TOKEN', 'sk-1', false, 'stored')).toEqual({ kind: 'withheld', reason: 'token-shape' });
+    expect(plainPaste('SKIP_BEDROCK_AUTH', '1', false)).toEqual({ kind: 'take', value: '1' });
+    expect(plainPaste('CLAUDE_CODE_API_KEY_HELPER_TTL_MS', '3600000', false)).toEqual({
+      kind: 'take',
+      value: '3600000',
+    });
+    expect(plainPaste('GATEWAY_AUTH', 'longer-than-eight', false)).toEqual({
+      kind: 'withheld',
+      reason: 'credential-name',
+    });
+  });
+
+  it('lets a value with a reference inside it through the name rule only when it is stored', () => {
+    expect(plainPaste('GATEWAY_TOKEN', 'Bearer ${secret:K}', false)).toEqual({
+      kind: 'withheld',
+      reason: 'credential-name',
+    });
+    expect(plainPaste('GATEWAY_TOKEN', 'Bearer ${secret:K}', false, 'stored')).toEqual({
+      kind: 'take',
+      value: 'Bearer ${secret:K}',
+    });
+  });
+
   it('takes an ordinary value as it is', () => {
     expect(plainPaste('ANTHROPIC_BASE_URL', 'https://api.z.ai/api/anthropic', false)).toEqual({
       kind: 'take',

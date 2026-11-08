@@ -236,7 +236,8 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
   const [catalog, setCatalog] = useState<ProviderPresetCatalog | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [choosing, setChoosing] = useState<string | null>(null);
-  const [prefill, setPrefill] = useState<Prefill | undefined>(undefined);
+  // A paste is held for the preset it picked and for no other: another preset's form never reads it.
+  const [held, setHeld] = useState<{ readonly presetId: string; readonly prefill: Prefill } | undefined>(undefined);
   const [added, setAdded] = useState<string | null>(null);
 
   useEffect(() => {
@@ -257,7 +258,7 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
   const done = (id: string): void => {
     setAdded(id);
     setChoosing(null);
-    setPrefill(undefined);
+    setHeld(undefined);
     onAdded?.(id);
   };
 
@@ -268,11 +269,11 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
         <PasteVariables
           presets={catalog.presets}
           onBack={() => {
-            setPrefill(undefined);
+            setHeld(undefined);
             setChoosing(null);
           }}
           onContinue={(presetId, filled) => {
-            setPrefill(filled);
+            setHeld({ presetId, prefill: filled });
             setChoosing(presetId);
           }}
         />
@@ -322,10 +323,10 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
                             <PresetForm
                               client={client}
                               preset={preset}
-                              {...(prefill === undefined ? {} : { prefill })}
+                              {...(held === undefined || held.presetId !== preset.id ? {} : { prefill: held.prefill })}
                               onAdded={done}
                               onCancel={() => {
-                                setPrefill(undefined);
+                                setHeld(undefined);
                                 setChoosing(null);
                               }}
                             />

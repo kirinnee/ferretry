@@ -604,6 +604,79 @@ describe('the add-login panel', () => {
     await view.unmount();
   });
 
+  it('keeps a paste for the preset it picked: another preset opened from the list starts from its own defaults', async () => {
+    const baseUrl = (value?: string) => ({
+      name: 'ANTHROPIC_BASE_URL',
+      kind: 'plain',
+      ...(value === undefined ? {} : { value }),
+      required: true,
+      allowEmpty: false,
+      harnesses: ['claude-code'],
+    });
+    const zai = {
+      ...PRESET,
+      detect: { hosts: ['api.z.ai'], variables: ['ZAI_API_KEY'], keyPrefixes: [] },
+      variables: [
+        baseUrl(),
+        {
+          name: 'ANTHROPIC_AUTH_TOKEN',
+          kind: 'secret',
+          secret: 'ZAI_API_KEY',
+          required: true,
+          allowEmpty: false,
+          harnesses: ['claude-code'],
+        },
+      ],
+    };
+    const openrouter = {
+      ...PRESET,
+      id: 'openrouter',
+      label: 'OpenRouter',
+      variables: [
+        baseUrl('https://openrouter.ai/api'),
+        {
+          name: 'ANTHROPIC_AUTH_TOKEN',
+          kind: 'secret',
+          secret: 'OPENROUTER_API_KEY',
+          required: true,
+          allowEmpty: false,
+          harnesses: ['claude-code'],
+        },
+      ],
+    };
+    const client = scripted({
+      'GET /v1/logins/presets': { presets: [zai, openrouter] },
+      [LIST]: loginList(),
+      [GRANTS]: OPEN,
+    });
+    const view = await mount(<AddLoginPanel client={client} />);
+    await until(() => view.container.querySelector('[data-add-login-preset]') !== null, 'the presets');
+    await click(view.container.querySelector('[data-add-login-paste]'), 'Paste');
+    const box = must(view.container.querySelector('[data-paste-input]') as HTMLTextAreaElement | null, 'the box');
+    await interact(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(
+        box,
+        'export ANTHROPIC_BASE_URL=https://api.z.ai/api/paas/v4\nexport ZAI_API_KEY=sk-zai-very-secret',
+      );
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click(view.container.querySelector('[data-paste-read]'), 'Read');
+    await click(view.container.querySelector('[data-paste-continue]'), 'Continue');
+    expect(view.container.querySelector('[data-add-login-form="zai-glm"] [data-paste-secrets]')).not.toBeNull();
+    // Change of mind: open the OTHER provider by hand.
+    await click(view.container.querySelector('[data-add-login-use="openrouter"]'), 'Use this provider');
+    const form = must(view.container.querySelector('[data-add-login-form="openrouter"]'), 'the form');
+    expect(form.querySelector('[data-paste-secrets]')).toBeNull();
+    expect(form.querySelector('[data-paste-withheld]')).toBeNull();
+    expect(Array.from(form.querySelectorAll('input')).map(field => field.value)).toEqual([
+      'https://openrouter.ai/api',
+      '${secret:OPENROUTER_API_KEY}',
+      '',
+    ]);
+    await view.unmount();
+  });
+
   it('shows the daemon’s refusal in its own words and adds nothing when it refuses', async () => {
     const added: string[] = [];
     const refused = Object.assign(new Error('claude-login is already a login on this machine. Use claude-login-2?'), {

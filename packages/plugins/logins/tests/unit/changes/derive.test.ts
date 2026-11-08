@@ -3,6 +3,9 @@ import should from 'should';
 import type { LoginFile } from '../../../contract/index.ts';
 import { deriveLoginChange, LoginChangeRefusal, type LoginChangeFacts } from '../../../daemon/lib/changes/derive.ts';
 import { builtInPresets } from '../../../daemon/lib/presets/catalog.ts';
+import { presetHarnesses } from '../../../daemon/lib/presets/schema.ts';
+import { harnessKey } from '../../../daemon/lib/shared/harness.ts';
+import { filledEnv } from '../../support/preset-env.ts';
 
 const FILES = new Map<string, LoginFile>([
   ['work', { harness: 'claude-code', store: 'ferretry', label: 'Work' }],
@@ -108,6 +111,72 @@ describe('deriveLoginChange', () => {
     );
 
     should(message).startWith('ANTHROPIC_API_KEY in login short looks like a secret');
+    should(message).not.containEql('sk-1234');
+  });
+
+  it('should accept a short placeholder under a credential name, as the secret store cannot hold one', () => {
+    for (const value of ['ollama', 'hunter2']) {
+      const edit = deriveLoginChange(
+        FILES,
+        { kind: 'login.add', id: 'tiny', harness: 'codex', store: 'environment', env: { OPENAI_API_KEY: value } },
+        facts(),
+      );
+
+      should(edit.writes).have.length(1);
+    }
+  });
+
+  it('should still tell a long raw key to put it in the secret store', () => {
+    should(
+      refusal(() =>
+        deriveLoginChange(
+          FILES,
+          {
+            kind: 'login.add',
+            id: 'long',
+            harness: 'codex',
+            store: 'environment',
+            env: { OPENAI_API_KEY: 'hunter22x' },
+          },
+          facts(),
+        ),
+      ),
+    ).containEql('Save it in this machine');
+  });
+
+  it('should accept a documented flag whose name only mentions auth or a key, and a composite reference', () => {
+    const env = {
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1',
+      CLAUDE_CODE_API_KEY_HELPER_TTL_MS: '3600000',
+      GATEWAY_AUTH: 'Bearer ${secret:K}',
+      GATEWAY_TOKEN: 'Bearer ${secret:K}',
+    };
+    const edit = deriveLoginChange(
+      FILES,
+      { kind: 'login.add', id: 'flags', harness: 'claude-code', store: 'environment', env },
+      facts(),
+    );
+
+    should(edit.writes).have.length(1);
+  });
+
+  it('should refuse a token-shaped value under a name that is not a credential, at any length', () => {
+    const message = refusal(() =>
+      deriveLoginChange(
+        FILES,
+        {
+          kind: 'login.add',
+          id: 'shape',
+          harness: 'claude-code',
+          store: 'environment',
+          env: { GATEWAY_NOTE: 'sk-1234' },
+        },
+        facts(),
+      ),
+    );
+
+    should(message).startWith('GATEWAY_NOTE in login shape looks like a secret');
     should(message).not.containEql('sk-1234');
   });
 
@@ -320,5 +389,29 @@ describe("deriveLoginChange: login.env (today's credential.env, owned here)", ()
         ),
       ),
     ).match(/ANTHROPIC_AUTH_TOKEN is needed/u);
+  });
+});
+
+describe('deriveLoginChange: every shipped preset', () => {
+  const offered = builtInPresets().filter(entry => entry.unavailable === undefined);
+  const halves = offered.flatMap(entry => presetHarnesses(entry).map(half => [entry.id, half] as const));
+  it.each(halves)('should add a login from the %s preset on its %s half through the daemon rules', (id, half) => {
+    const entry = offered.find(candidate => candidate.id === id);
+    if (entry === undefined) throw new Error(`no preset ${id}`);
+    const edit = deriveLoginChange(
+      FILES,
+      {
+        kind: 'login.add',
+        id: 'from-preset',
+        harness: harnessKey(half),
+        store: 'environment',
+        preset: id,
+        env: filledEnv(entry),
+        ...(entry.cloudCredential === undefined ? {} : { cloudCredential: entry.cloudCredential.suggested }),
+      },
+      facts(),
+    );
+
+    should(edit.writes).have.length(1);
   });
 });
