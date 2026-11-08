@@ -15,14 +15,23 @@
  * and a call of an exported parser the ledger had allowed. This walks the syntax tree (`oxc-parser`: this repository's
  * `typescript` is the native compiler, which has no JavaScript API) and follows names the way the language does.
  *
- * WHAT COUNTS, in every tracked product file under `packages/` that is not a test, a fixture or test support:
+ * WHAT COUNTS, in every tracked product file under `packages/`, and in the `testing/` support product code may import
+ * (`kernel/testing`, the app shell's `src/testing`, a contract's `testing`) — not in a test or a `tests/` or `fixtures/`
+ * folder:
  * - any use of Bun's `YAML` but its `stringify` (writing YAML reads nothing), however it is reached: `Bun.YAML`,
  *   `Bun['YAML']`, `globalThis.Bun.YAML`, an import of `YAML` from `'bun'` under any name, a namespace/default/dynamic
  *   import or `require` of `'bun'` (then `.YAML`), a name bound to `Bun` (`const b = Bun`), a destructure out of any of
  *   these (any depth, any layout, a rest element, a computed key), and a computed key it cannot read;
  * - any `YAML.parse`-family member (`parse`, `parseDocument`, `load`, …) of a name that holds a YAML module;
  * - any import, re-export, dynamic import or `require` of a module whose bare name contains `yaml` (`yaml`,
- *   `js-yaml`, `@std/yaml`, `yamljs`, …), type-only imports included: they are the first step.
+ *   `js-yaml`, `@std/yaml`, `yamljs`, …), type-only imports included: they are the first step;
+ * - the same through every plain loader: `require`, `import.meta.require` (Bun), `module.require`,
+ *   `createRequire(import.meta.url)` (under any name it is imported as) and a name bound to any of them;
+ * - a dynamic `import()` or loader call whose module name is built at run time. Bun's module loader is itself a YAML
+ *   parser (a `.yaml` path, `with { type: 'yaml' }`), so loading a path read off the disk parses a text a person may
+ *   have written. Allowed: a view loader that stays in its own folder's `.tsx` files (`import(\`./views/${name}.tsx\`)`).
+ *   A STATIC `.yaml`/`.yml` load (not read `with { type: 'text' }` or `'file'`) and any `type: 'yaml'` load count too,
+ *   but they name a file committed in this repository, never a person's text: the ledger lists them with that reason.
  *
  * THE LEDGER (`scripts/validate/raw-yaml-allowlist.txt`) has three kinds of line, each `… # reason`:
  * - `path  # reason`: the FILE may parse YAML itself;
@@ -34,10 +43,13 @@
  *   parser without a line fails; a line whose export, or whose listed caller, is gone fails; a line without a reason
  *   fails. So the ledger stays the true inventory of who can reach a raw parser.
  *
- * DECLARED GAPS (a tree walk is not an interpreter): a module specifier built at run time (`import(name)`), a name
- * passed through a call (`Reflect.get(Bun, 'YAML')`, `Object.values(Bun)`, a callback parameter other than the
- * `.then` of a `'bun'` import), and a ledgered parser reached through a function of an allowed caller that itself is
- * exported (the caller's ledger line is the review; its own importers are not followed).
+ * DECLARED GAPS (a tree walk is not an interpreter; the real guard is the kernel's one bounded reader): `Bun` or
+ * `globalThis` handed on whole (a call argument, a literal, a parameter default, a field: `Reflect.get(Bun, 'YAML')`,
+ * `const g = globalThis; g.Bun`), `eval` and `new Function` of a string, `require.resolve` and a loader reached
+ * through a destructure of `import.meta`, a ledgered file that parks its parser on `globalThis` or exports it by a later
+ * assignment or a `namespace`, an import by absolute path, a package name or a `Worker` URL (only relative paths are
+ * followed), a YAML library whose name has no `yaml` in it, and a ledgered parser reached through a function of an
+ * allowed caller that itself is exported (the caller's ledger line is the review; its own importers are not followed).
  *
  * Usage: `bun scripts/validate/no-raw-yaml.ts <repo root>`; exits 0 clean, 1 a violation, 2 a broken gate.
  */
@@ -93,11 +105,15 @@ export interface FileFacts {
   readonly unparsable?: string;
 }
 
-/** Whether a tracked path is product code this gate covers (not a test, a fixture or test support). */
+/**
+ * Whether a tracked path is code this gate covers: product code, and the `testing/` support product code may import
+ * (`context-imports` lets a kernel area import `kernel/testing`, and the app shell its own `src/testing`). A test, and
+ * whatever sits in a `tests/` or `fixtures/` folder, is out: no product file loads one.
+ */
 export function inScope(path: string): boolean {
   if (!path.startsWith('packages/') || !/\.(?:[cm]?[jt]s|[jt]sx)$/u.test(path)) return false;
   if (/\.test\.[cm]?[jt]sx?$/u.test(path)) return false;
-  return !path.split('/').some(part => part === 'tests' || part === 'testing' || part === 'fixtures');
+  return !path.split('/').some(part => part === 'tests' || part === 'fixtures');
 }
 
 /** A syntax-tree node as `oxc-parser` spells it: ESTree, with TypeScript's own node types beside. */
@@ -149,6 +165,10 @@ function staticName(node: unknown): string | undefined {
   }
   return undefined;
 }
+
+/** A module specifier written as a literal — a string or a template with no holes; a name (`import(path)`) is none. */
+const literalName = (node: unknown): string | undefined =>
+  isNode(node) && node.type !== 'Identifier' ? staticName(node) : undefined;
 
 /** The name a member access spells: `a.b` and `a['b']` are `b`; `a[k]` is none. */
 const memberName = (member: Node): string | undefined =>
@@ -309,22 +329,136 @@ export function scanFile(path: string, text: string): FileFacts {
   /** Names bound to Bun's `YAML` object. */
   const bunYamlNames = new Set<string>();
 
+  /** Names bound to a module loader: `require`, `const r = require`, `const r = createRequire(import.meta.url)`. */
+  const requireNames = new Set<string>(['require']);
+  /** Names bound to `node:module`'s `createRequire` (`import { createRequire as cr } from 'node:module'`). */
+  const createRequireNames = new Set<string>(['createRequire']);
+  const isImportMeta = (node: unknown): boolean =>
+    isNode(node) &&
+    node.type === 'MetaProperty' &&
+    staticName(node.meta) === 'import' &&
+    staticName(node.property) === 'meta';
+  const unwrap = (node: unknown): unknown => {
+    let at = node;
+    while (isNode(at) && TRANSPARENT.has(at.type) && at.type !== 'AwaitExpression') at = at.expression;
+    return at;
+  };
+  const isCreateRequire = (callee: unknown): boolean => {
+    const at = unwrap(callee);
+    if (!isNode(at)) return false;
+    if (at.type === 'Identifier') return createRequireNames.has(at.name as string);
+    return at.type === 'MemberExpression' && memberName(at) === 'createRequire';
+  };
+  /** Whether a callee loads a module the way `require` does: the plain forms Bun and Node offer. */
+  const isRequire = (callee: unknown): boolean => {
+    const at = unwrap(callee);
+    if (!isNode(at)) return false;
+    if (at.type === 'Identifier') return requireNames.has(at.name as string);
+    if (at.type === 'MemberExpression')
+      // `import.meta.require(…)` (Bun) and `module.require(…)`.
+      return (
+        memberName(at) === 'require' &&
+        (isImportMeta(at.object) || (isNode(at.object) && staticName(at.object) === 'module'))
+      );
+    // `createRequire(import.meta.url)(…)`.
+    return at.type === 'CallExpression' && isCreateRequire(at.callee);
+  };
+
   const specifierOf = (node: Node): string | undefined => {
-    if (node.type === 'ImportDeclaration' || node.type === 'ExportAllDeclaration') return staticName(node.source);
-    if (node.type === 'ExportNamedDeclaration') return isNode(node.source) ? staticName(node.source) : undefined;
-    if (node.type === 'ImportExpression') return staticName(node.source);
+    if (node.type === 'ImportDeclaration' || node.type === 'ExportAllDeclaration') return literalName(node.source);
+    if (node.type === 'ExportNamedDeclaration') return isNode(node.source) ? literalName(node.source) : undefined;
+    if (node.type === 'ImportExpression') return literalName(node.source);
     if (node.type === 'TSImportEqualsDeclaration') {
       const reference = node.moduleReference;
       return isNode(reference) && reference.type === 'TSExternalModuleReference'
-        ? staticName(reference.expression)
+        ? literalName(reference.expression)
         : undefined;
     }
-    if (node.type === 'CallExpression' && isNode(node.callee) && node.callee.type === 'Identifier') {
-      if (node.callee.name !== 'require') return undefined;
+    if (node.type === 'CallExpression' && isRequire(node.callee)) {
       const [first] = (node.arguments as unknown[] | undefined) ?? [];
-      return staticName(first);
+      return literalName(first);
     }
     return undefined;
+  };
+
+  /**
+   * A load whose module name is built at run time: `import(path)`, `require(\`${home}/gate.yaml\`)`. Bun's loader is
+   * itself a YAML parser (a `.yaml` path, or `with { type: 'yaml' }`), so a load of a path read off the disk is a
+   * parse of a text a person may have written. The one shape allowed is a view loader that cannot leave its own
+   * folder's `.tsx` files: a template that starts `./`, ends `.tsx`, and holds no `..`.
+   */
+  // A file that declares a `require` of its own (`const require = async (id) => …`) calls that, not the loader. Names are
+  // file-wide, so its bare `require(x)` is not read as a load of a built path; a literal `require('yaml')` still counts.
+  const declaresRequire = nodes.some(
+    ({ node, parent, key }) =>
+      node.type === 'Identifier' &&
+      node.name === 'require' &&
+      (bound.has(node) || (declaresOnly(parent, key) && key === 'id')),
+  );
+  const ownRequire = (callee: unknown): boolean => {
+    const at = unwrap(callee);
+    return declaresRequire && isNode(at) && at.type === 'Identifier' && at.name === 'require';
+  };
+  const builtAtRunTime = (node: Node): boolean => {
+    const source =
+      node.type === 'ImportExpression'
+        ? node.source
+        : node.type === 'CallExpression' && isRequire(node.callee) && !ownRequire(node.callee)
+          ? ((node.arguments as unknown[] | undefined) ?? [])[0]
+          : undefined;
+    if (!isNode(source) || literalName(source) !== undefined) return false;
+    if (source.type !== 'TemplateLiteral') return true;
+    const quasis = ((source.quasis as Node[] | undefined) ?? []).map(
+      quasi => (quasi.value as { cooked?: unknown } | undefined)?.cooked,
+    );
+    const first = quasis[0];
+    const last = quasis.at(-1);
+    const viewLoader =
+      typeof first === 'string' &&
+      typeof last === 'string' &&
+      first.startsWith('./') &&
+      last.endsWith('.tsx') &&
+      quasis.every(quasi => typeof quasi === 'string' && !quasi.includes('..'));
+    return !viewLoader;
+  };
+
+  /** The `type` an import's attributes name (`with { type: 'text' }`): a string, `null` when it cannot be read. */
+  const attributeType = (node: Node): string | null | undefined => {
+    if (node.type === 'ImportExpression') {
+      const options = node.options;
+      if (!isNode(options)) return undefined;
+      if (options.type !== 'ObjectExpression') return null;
+      const withEntry = ((options.properties as Node[] | undefined) ?? []).find(
+        property => property.type === 'Property' && ['with', 'assert'].includes(keyName(property) ?? ''),
+      );
+      if (withEntry === undefined) return undefined;
+      if (!isNode(withEntry.value) || withEntry.value.type !== 'ObjectExpression') return null;
+      const typeEntry = ((withEntry.value.properties as Node[] | undefined) ?? []).find(
+        property => property.type === 'Property' && keyName(property) === 'type',
+      );
+      return typeEntry === undefined ? undefined : (staticName(typeEntry.value) ?? null);
+    }
+    const typeEntry = ((node.attributes as Node[] | undefined) ?? []).find(item => staticName(item.key) === 'type');
+    return typeEntry === undefined ? undefined : (staticName(typeEntry.value) ?? null);
+  };
+
+  /**
+   * A load Bun's module loader answers with a parse: a `.yaml`/`.yml` path that is not read as text or as a file
+   * path, or any load that asks for `type: 'yaml'`. A committed file is no person's text, so this is a use the ledger
+   * may list with its reason — counted so that it is listed.
+   */
+  const loadsYamlFile = (node: Node): boolean => {
+    const loads =
+      node.type === 'ImportDeclaration' ||
+      node.type === 'ImportExpression' ||
+      node.type === 'ExportAllDeclaration' ||
+      (node.type === 'ExportNamedDeclaration' && isNode(node.source)) ||
+      (node.type === 'CallExpression' && isRequire(node.callee));
+    if (!loads || node.importKind === 'type' || node.exportKind === 'type') return false;
+    const type = node.type === 'CallExpression' ? undefined : attributeType(node);
+    if (type === 'yaml' || type === 'yml' || type === null) return true;
+    const specifier = specifierOf(node);
+    return specifier !== undefined && /\.ya?ml(?:[?#].*)?$/iu.test(specifier) && type !== 'text' && type !== 'file';
   };
 
   /** What an expression holds, when it holds Bun, a YAML module, or a YAML parse function. */
@@ -410,8 +544,14 @@ export function scanFile(path: string, text: string): FileFacts {
   // Imports first, then the bindings those lead to, until nothing new is learned.
   for (const { node } of nodes) {
     if (node.type !== 'ImportDeclaration') continue;
-    const specifier = staticName(node.source);
+    const specifier = literalName(node.source);
     if (specifier === undefined) continue;
+    if (specifier === 'module' || specifier === 'node:module')
+      for (const specifierNode of (node.specifiers as Node[] | undefined) ?? [])
+        if (specifierNode.type === 'ImportSpecifier' && staticName(specifierNode.imported) === 'createRequire') {
+          const local = staticName(specifierNode.local);
+          if (local !== undefined) createRequireNames.add(local);
+        }
     const library = isYamlLibrary(specifier);
     if (specifier !== 'bun' && !library) continue;
     for (const specifierNode of (node.specifiers as Node[] | undefined) ?? []) {
@@ -431,13 +571,30 @@ export function scanFile(path: string, text: string): FileFacts {
       else if (imported === 'default') remember(local, 'yaml', true);
     }
   }
+  const bindingSites = nodes.filter(
+    ({ node }) => node.type === 'VariableDeclarator' || (node.type === 'AssignmentExpression' && node.operator === '='),
+  );
   for (let changed = true; changed; ) {
     changed = false;
-    for (const { node } of nodes) {
-      if (node.type === 'VariableDeclarator' && node.init !== null && node.init !== undefined)
-        changed = takeOut(node.id, holds(node.init)) || changed;
-      else if (node.type === 'AssignmentExpression' && node.operator === '=')
-        changed = takeOut(node.left, holds(node.right)) || changed;
+    for (const { node } of bindingSites) {
+      const [target, value] =
+        node.type === 'VariableDeclarator'
+          ? [node.id, node.init]
+          : node.type === 'AssignmentExpression' && node.operator === '='
+            ? [node.left, node.right]
+            : [undefined, undefined];
+      if (value === null || value === undefined) continue;
+      // A name for a loader (`const r = require`, `const r = createRequire(import.meta.url)`): its calls load too.
+      if (
+        isNode(target) &&
+        target.type === 'Identifier' &&
+        isRequire(value) &&
+        !requireNames.has(target.name as string)
+      ) {
+        requireNames.add(target.name as string);
+        changed = true;
+      }
+      changed = takeOut(target, holds(value)) || changed;
     }
   }
 
@@ -469,6 +626,7 @@ export function scanFile(path: string, text: string): FileFacts {
   };
 
   for (const { node, parent, key } of nodes) {
+    if (builtAtRunTime(node) || loadsYamlFile(node)) use(node, false);
     const specifier = specifierOf(node);
     if (specifier !== undefined) {
       if (isYamlLibrary(specifier)) use(node, false);

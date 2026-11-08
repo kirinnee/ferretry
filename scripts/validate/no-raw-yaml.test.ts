@@ -99,6 +99,35 @@ describe('every way past the old line matcher is found', () => {
     'jsr: @std/yaml': "import { parse } from 'jsr:@std/yaml';",
     yamljs: "import YAML from 'yamljs';",
     'another yaml package': "import { load } from 'some-yaml-reader';",
+    // Bun's module loader parses YAML itself (guard review M1): a path read off the disk, or a YAML file it loads.
+    'a module name built at run time': 'const m = await import(path);',
+    'a module name built at run time, template': 'const m = await import(`${home}/gate.yaml`);',
+    'a module name built at run time, require': 'const m = require(path);',
+    'a module name built at run time, import.meta.require': 'const m = import.meta.require(path);',
+    'a view loader that climbs out of its folder': 'const v = await import(`./views/${name}/../../x.tsx`);',
+    'a view loader that is not a tsx file': 'const v = await import(`./views/${name}`);',
+    'a static .yaml import': "import cfg from './gate.yaml';",
+    'a static .yml require': "const cfg = require('./gate.yml');",
+    'a static .yaml dynamic import': "const cfg = await import('./gate.yaml');",
+    'a static .yaml re-export': "export { default } from './gate.yaml';",
+    'an import with type yaml': "import cfg from './gate.txt' with { type: 'yaml' };",
+    'a dynamic import with type yaml': "const cfg = await import('./gate.txt', { with: { type: 'yaml' } });",
+    'import attributes it cannot read': "const cfg = await import('./gate.txt', options);",
+    // The plain loaders besides a bare `require` (guard review M2).
+    'import.meta.require of bun': "const v = import.meta.require('bun').YAML.parse(text);",
+    'import.meta.require of yaml': "const y = import.meta.require('yaml');",
+    'module.require of yaml': "const y = module.require('yaml');",
+    'createRequire, called at once':
+      "import { createRequire } from 'node:module';\nconst y = createRequire(import.meta.url)('yaml');",
+    'createRequire, renamed and bound':
+      "import { createRequire as cr } from 'node:module';\nconst r = cr(import.meta.url);\nr('yaml');",
+    'createRequire, through a namespace':
+      "import * as m from 'node:module';\nm.createRequire(import.meta.url)('yaml');",
+    'a name for require': "const r = require;\nr('yaml');",
+    'a name for import.meta.require, of bun':
+      "const r = import.meta.require;\nconst B = r('bun');\nB.YAML.parse(text);",
+    'a required bun bound to a name': "const B = require('bun');\nB.YAML.parse(text);",
+    'a required bun bound by import.meta.require': "const B = import.meta.require('bun');\nconst { YAML } = B;",
   };
   for (const [shape, text] of Object.entries(SHAPES))
     test(shape, () => {
@@ -118,6 +147,14 @@ describe('every way past the old line matcher is found', () => {
     'other Bun members': "const f = Bun.file('x'); const { spawn } = Bun;",
     'a property that is only named YAML': 'const o = { YAML: 1 }; o.YAML;',
     'a type that mentions it': "type T = typeof import('yaml');\nconst x: typeof Bun.YAML = 1 as never;",
+    'a view loader in its own folder': 'const v = (name: string) => import(`./views/${name}.tsx`);',
+    'a .yaml read as text': "import catalog from './catalog.yaml' with { type: 'text' };",
+    'a .yaml path as a file': "import where from './catalog.yaml' with { type: 'file' };",
+    'a .yaml read as text, dynamic': "const t = await import('./catalog.yaml', { with: { type: 'text' } });",
+    'a method that is only named require': 'await this.require(file);\npanes.require(ferret);',
+    'import.meta.url': 'const here = new URL(import.meta.url);',
+    'a function of its own named require': 'const require = async (id: string) => id;\nawait require(ferretId);',
+    'a type-only import of a .yaml path': "import type Gate from './gate.yaml';",
   };
   for (const [name, text] of Object.entries(FINE))
     test(`not a parse: ${name}`, () => {
@@ -128,18 +165,29 @@ describe('every way past the old line matcher is found', () => {
     expect(planted('const = ;')).toEqual([expect.stringContaining('would not parse')]);
   });
 
+  test('a parse in testing/ support is a use: product code may import it', () => {
+    const at = 'packages/core/kernel/testing/host.ts';
+    expect(planted("import { parse as parseYaml } from 'yaml';\nparseYaml(edit);", at)).toEqual([
+      expect.stringContaining(`${at}:1:`),
+    ]);
+    expect(planted('const v = Bun.YAML.parse(edit);', 'packages/app/src/testing/dom.ts')).toHaveLength(1);
+  });
+
   test('uses are located by line, once per line', () => {
     const facts = scanFile(PATH, 'a;\nconst v = Bun.YAML.parse(Bun.YAML.parse(t));\nconst {\n YAML } = Bun;');
     expect(facts.uses.map(use => use.line)).toEqual([2, 4]);
     expect(facts.uses[0]?.text).toBe('const v = Bun.YAML.parse(Bun.YAML.parse(t));');
   });
 
-  test('tests, fixtures and test support are out of scope; product code anywhere under packages is in', () => {
+  test('tests and fixtures are out of scope; product code, and the testing/ support it may import, are in', () => {
     expect(inScope('packages/core/gate/daemon/index.ts')).toBe(true);
     expect(inScope('packages/plugins/x/app/a.tsx')).toBe(true);
     expect(inScope('packages/plugins/x/app/a.mjs')).toBe(true);
     expect(inScope('packages/core/gate/tests/unit/a.test.ts')).toBe(false);
-    expect(inScope('packages/core/kernel/testing/host.ts')).toBe(false);
+    // context-imports lets a kernel area import kernel/testing, and the app shell its src/testing (guard review M3).
+    expect(inScope('packages/core/kernel/testing/host.ts')).toBe(true);
+    expect(inScope('packages/app/src/testing/dom.ts')).toBe(true);
+    expect(inScope('packages/plugins/x/contract/testing/index.ts')).toBe(true);
     expect(inScope('packages/plugins/x/daemon/a.test.ts')).toBe(false);
     expect(inScope('packages/plugins/x/tests/fixtures/a.ts')).toBe(false);
     expect(inScope('scripts/ci/gate-hooks.ts')).toBe(false);
@@ -160,6 +208,14 @@ describe('the ledger', () => {
     expect(findings([{ path: planted2.path, text: 'x\n' }], `${planted2.path}  # was safe\n`)).toEqual([
       `${LEDGER}: ${planted2.path} no longer parses YAML itself; remove its line`,
     ]);
+  });
+
+  test('a static .yaml import of a committed file passes once the ledger says so', () => {
+    const file = { path: 'packages/plugins/x/daemon/defaults.ts', text: "import defaults from './defaults.yaml';\n" };
+    expect(findings([file], '')).toEqual([expect.stringContaining(`${file.path}:1:`)]);
+    expect(
+      findings([file], `${file.path}  # a YAML file committed in this repository, never a person's text\n`),
+    ).toEqual([]);
   });
 
   test('reads path, path::export and callers; comments and blanks skipped; twice and malformed refused', () => {
@@ -230,6 +286,11 @@ describe('laundering through a ledgered parser', () => {
     're-export renamed': "export { readIt as read } from './reader.ts';",
     're-export *': "export * from './reader.ts';",
     'a js specifier for a ts file': "import { readIt } from './reader.js';\nreadIt('x');",
+    'import.meta.require': "const r = import.meta.require('./reader.ts');",
+    'module.require': "const r = module.require('./reader.ts');",
+    createRequire:
+      "import { createRequire } from 'node:module';\nconst r = createRequire(import.meta.url)('./reader.ts');",
+    'a name for require': "const load = require;\nconst r = load('./reader.ts');",
   };
   for (const [shape, text] of Object.entries(LAUNDERERS))
     test(`an unlisted importer is flagged: ${shape}`, () => {
