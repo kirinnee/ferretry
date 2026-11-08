@@ -24,11 +24,11 @@ import {
 } from '../../../../app/composer/composer-autocomplete.ts';
 import { ComposerAutocompletePopover } from '../../../../app/composer/composer-autocomplete-popover.tsx';
 import { createDirectReferenceProviders } from '../../../../app/composer/composer-autocomplete-providers.ts';
-import { type DaemonId, ReferenceSurfaceProvider } from '@ferretry/app';
+import { type DaemonId, ReferenceSurfaceProvider, ScreenHrefProvider } from '@ferretry/app';
 import { transcriptEntriesFromLog } from '../../../../app/chat/chat-refresh.ts';
 import { Transcript } from '../../../../app/chat/transcript.tsx';
 import { fleetAgentResolver } from '../../../support/app/agents.ts';
-import type { ComposerReferenceTask } from '../../../../app/composer/composer-reference-catalogs.ts';
+import type { ReferenceCatalogEntry } from '../../../../contract/index.ts';
 import { daemonConnection } from '../../../../app/composer/seam.ts';
 import { daemonFerretScope } from '../../../../app/composer/seam.ts';
 import type { TranscriptEntry } from '../../../../app/chat/transcript-entries.ts';
@@ -149,26 +149,30 @@ const TITLES = [
   'Rename the daemon flag',
 ];
 
-const busyProject = (): ComposerReferenceTask[] =>
-  Array.from({ length: 64 }, (_, index) => ({
-    id: `F${index + 1}`,
-    title: `${TITLES[index % TITLES.length]} ${index + 1}`,
-    summary: index % 5 === 0 ? 'relay fingerprint allowlist' : '',
-    lane: LANES[index % LANES.length] ?? 'Todo',
-    closed: false,
-    active: index % 7 === 0,
-    assignee: index % 2 === 0 ? null : 'zelda',
-    touchedAt: new Date(NOW - index * MINUTE).toISOString(),
-    agentAsked: index >= 50,
-    legacyId: null,
-  }));
+/**
+ * A busy project's `&` catalog, as the cards' provider (Board) answers it: in the board's order (active first, then
+ * most recently touched), every fifth card summarised with "relay fingerprint allowlist", and the last fourteen asked
+ * by an agent rather than the owner.
+ */
+const busyProject = (): readonly ReferenceCatalogEntry[] =>
+  Array.from({ length: 64 }, (_, index): ReferenceCatalogEntry => {
+    const summary = index % 5 === 0 ? 'relay fingerprint allowlist' : '';
+    const lane = LANES[index % LANES.length] ?? 'Todo';
+    return {
+      token: `F${index + 1}`,
+      label: `${TITLES[index % TITLES.length]} ${index + 1}`,
+      detail: [lane, index % 2 === 0 ? '' : 'zelda', summary].filter(Boolean).join(' · '),
+      ...(index >= 50 ? { agentAsked: true } : {}),
+    };
+  });
 
 const manyRows = (included: boolean, query: string): ComposerAutocompleteCandidate[] => {
   const scope = daemonFerretScope(daemon, SESSION);
   const [, , sigil] = createDirectReferenceProviders({
     daemon,
     scope,
-    getTasks: busyProject,
+    getCatalog: prefix => (prefix === '&' ? busyProject() : undefined),
+    hostedPrefixes: ['&'],
     getIncludeAgentTasks: () => included,
   });
   const match: ComposerTriggerMatch = {
@@ -254,6 +258,10 @@ const ferretryEntries = (): TranscriptEntry[] =>
       by: { kind: 'ferretry' as const, feature },
     },
   }));
+/** Where a screen lives, outside a shell: the peer's "Open chat" link needs an address to be a real link. */
+const sceneHref = (daemon: string, plugin: string, screen: string, params: Readonly<Record<string, string>> = {}) =>
+  `/${daemon}/${plugin}/${screen}?${new URLSearchParams(params).toString()}`;
+
 function Scene() {
   if (params.get('picker') === '1') return <Picker />;
   return (
@@ -266,13 +274,15 @@ function Scene() {
           onNavigate: () => undefined,
         }}
       >
-        <Transcript
-          agentName="Janella"
-          daemonId={daemon.daemonId}
-          entries={params.get('ferretry') === '1' ? ferretryEntries() : entries()}
-          onSubmit={async () => true}
-          sessionId={SESSION}
-        />
+        <ScreenHrefProvider href={sceneHref}>
+          <Transcript
+            agentName="Janella"
+            daemonId={daemon.daemonId}
+            entries={params.get('ferretry') === '1' ? ferretryEntries() : entries()}
+            onSubmit={async () => true}
+            sessionId={SESSION}
+          />
+        </ScreenHrefProvider>
       </ReferenceSurfaceProvider>
     </div>
   );
