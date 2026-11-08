@@ -1,9 +1,13 @@
 import { expect, test } from 'bun:test';
-import type { HookDecision } from '@ferretry/kernel/contract';
-import { FerretsPort, FerretTokensFile, StartDecide, type StartDecideInput } from '../../../../contract/index.ts';
+import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
+import { FerretsPort, FerretTokensFile, StartDecide } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner, ferretId } from '../../../../contract/testing/index.ts';
-import { HELPER_ADMISSION_SENTENCES, type HelperAdmission } from '../../../../daemon/lib/ferrets/helper-admission.ts';
-import { host as plainHost, record } from './route-fixture.ts';
+import { fakePacks, host as plainHost, record } from './route-fixture.ts';
+
+/**
+ * RULING #43: a helper's admission is Packs' OWN answer on the kernel's `start.decide`; Ferrets only consumes it. No
+ * answer from Packs (absent, a hang, a throw, garbage) is 503 `helper_admission_unavailable`, never an allow.
+ */
 
 /** The route fixture with readable (empty) credential state, so a start or resume can issue a token. */
 const host = async (...args: Parameters<typeof plainHost>) => {
@@ -12,27 +16,36 @@ const host = async (...args: Parameters<typeof plainHost>) => {
   return await h.restart();
 };
 
-/** An injected admission that records what it was asked and answers `answer`. */
-const admission = (answer: HookDecision = { allow: true }) => {
-  const asked: StartDecideInput[] = [];
-  const seam: HelperAdmission = {
-    admit: async input => {
-      asked.push(input);
-      return answer;
-    },
-  };
-  return { asked, seam };
-};
-
-test('G12 R-0332 helper starts fail closed when Packs admission is absent, including the provided port', async () => {
-  const runner = new FakeRunner();
-  const h = await host([record('lead')], { harness: new FakeHarness(), runner });
-  const answer = await h.request('POST', '/v1/ferrets', {
+const childStart = async (h: Awaited<ReturnType<typeof host>>) =>
+  await h.request('POST', '/v1/ferrets', {
     headers: { 'x-fy-request-id': 'helper' },
     body: { parent: 'lead', folder: '/work/child' },
   });
+
+/** Another plugin taking `start.decide` (not Packs), answering `answer` at `priority`. */
+const otherTaker = (id: string, answer: unknown, priority?: number) =>
+  implementDaemon(
+    definePlugin({
+      id,
+      title: `${id} (fake)`,
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: StartDecide, ...(priority === undefined ? {} : { priority }) }] },
+    }),
+    { build: () => ({ hooks: { 'start.decide': async () => answer as never } }) },
+  );
+
+const expectUnanswered = (answer: { status: number; json: <T>() => T }) => {
   expect(answer.status).toBe(503);
   expect(answer.json<{ code: string }>().code).toBe('helper_admission_unavailable');
+};
+
+test('G12 R-0332 helper starts fail closed when Packs is absent, including the provided port', async () => {
+  const runner = new FakeRunner();
+  const h = await host([record('lead')], { harness: new FakeHarness(), runner });
+  expectUnanswered(await childStart(h));
   await expect(
     h.provided(FerretsPort).start({
       folder: '/work/child',
@@ -44,48 +57,84 @@ test('G12 R-0332 helper starts fail closed when Packs admission is absent, inclu
   expect((await h.request('GET', '/v1/ferrets')).json<unknown[]>()).toHaveLength(1);
 });
 
-test('G12 R-0332 a child start is asked of the injected helper admission, and starts when it admits', async () => {
+test("G12 R-0332 a child starts on Packs' own yes on start.decide, which saw the child with its parent", async () => {
   // Arrange
   const runner = new FakeRunner();
-  const { asked, seam } = admission();
-  const h = await host([record('lead')], { harness: new FakeHarness(), runner, helperAdmission: seam });
+  const packs = fakePacks();
+  const h = await host([record('lead')], { harness: new FakeHarness(), runner, plugins: [packs.plugin] });
 
   // Act
-  const answer = await h.request('POST', '/v1/ferrets', {
-    headers: { 'x-fy-request-id': 'helper' },
-    body: { parent: 'lead', folder: '/work/child' },
-  });
+  const answer = await childStart(h);
 
-  // Assert: admitted, so the child starts; the admission saw the child with its parent.
+  // Assert
   expect(answer.status).toBeLessThan(300);
-  expect(asked).toHaveLength(1);
-  expect(asked[0]).toMatchObject({ parent: 'lead', role: 'helper', by: 'owner', folder: '/work/child' });
+  expect(packs.asked).toHaveLength(1);
+  expect(packs.asked[0]).toMatchObject({ parent: 'lead', role: 'helper', by: 'owner', folder: '/work/child' });
   expect(runner.starts).toBe(1);
 });
 
-test('G12 R-0332 an injected admission that says no refuses the child with its reason and launches nothing', async () => {
+test("G12 R-0332 Packs' own no refuses the child with its reason and launches nothing", async () => {
   // Arrange
   const runner = new FakeRunner();
-  const { seam } = admission({ allow: false, reason: 'the lead has as many helpers as it may' });
-  const h = await host([record('lead')], { harness: new FakeHarness(), runner, helperAdmission: seam });
+  const packs = fakePacks(() => ({ allow: false, reason: 'the lead has as many helpers as it may' }));
+  const h = await host([record('lead')], { harness: new FakeHarness(), runner, plugins: [packs.plugin] });
 
   // Act
-  const answer = await h.request('POST', '/v1/ferrets', {
-    headers: { 'x-fy-request-id': 'helper' },
-    body: { parent: 'lead', folder: '/work/child' },
-  });
+  const answer = await childStart(h);
 
   // Assert
   expect(answer.status).toBeGreaterThanOrEqual(400);
+  expect(answer.status).toBeLessThan(500);
   expect(JSON.stringify(answer.json())).toContain('the lead has as many helpers as it may');
   expect(runner.starts).toBe(0);
   expect((await h.request('GET', '/v1/ferrets')).json<unknown[]>()).toHaveLength(1);
 });
 
-test('G12 a lead start never asks the helper admission', async () => {
+test('G12 R-0332 a yes from any other start.decide taker never admits a child: only Packs answers for it', async () => {
+  // Arrange: no Packs; a plugin that is not Packs says yes.
+  const runner = new FakeRunner();
+  const h = await host([record('lead')], {
+    harness: new FakeHarness(),
+    runner,
+    plugins: [otherTaker('board', { allow: true })],
+  });
+
+  // Act + Assert
+  expectUnanswered(await childStart(h));
+  expect(runner.starts).toBe(0);
+});
+
+test("G12 R-0332 Packs' yes does not outvote a later taker's no, and a no asked before Packs stands", async () => {
+  // Arrange: Packs admits; a lower-priority taker refuses (one host), a higher-priority one refuses (another).
+  const later = await host([record('lead')], {
+    harness: new FakeHarness(),
+    runner: new FakeRunner(),
+    plugins: [fakePacks().plugin, otherTaker('usage', { allow: false, reason: 'over budget' }, 10)],
+  });
+  const earlierPacks = fakePacks();
+  const earlier = await host([record('lead')], {
+    harness: new FakeHarness(),
+    runner: new FakeRunner(),
+    plugins: [earlierPacks.plugin, otherTaker('board', { allow: false, reason: 'the card is closed' }, 90)],
+  });
+
+  // Act
+  const afterPacks = await childStart(later);
+  const beforePacks = await childStart(earlier);
+
+  // Assert: both are refused with the refusing taker's reason; Packs was never asked behind the earlier no.
+  expect(afterPacks.status).toBeGreaterThanOrEqual(400);
+  expect(afterPacks.status).toBeLessThan(500);
+  expect(JSON.stringify(afterPacks.json())).toContain('over budget');
+  expect(beforePacks.status).toBeGreaterThanOrEqual(400);
+  expect(beforePacks.status).toBeLessThan(500);
+  expect(JSON.stringify(beforePacks.json())).toContain('the card is closed');
+  expect(earlierPacks.asked).toHaveLength(0);
+});
+
+test('G12 a lead start needs no helper admission: it starts with Packs absent', async () => {
   // Arrange
-  const { asked, seam } = admission({ allow: false, reason: 'never asked' });
-  const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner(), helperAdmission: seam });
+  const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
 
   // Act
   const answer = await h.request('POST', '/v1/ferrets', {
@@ -95,52 +144,57 @@ test('G12 a lead start never asks the helper admission', async () => {
 
   // Assert
   expect(answer.status).toBeLessThan(300);
-  expect(asked).toHaveLength(0);
 });
 
-test('G12 a Warden resume of a child goes through the same helper admission (unbound: 503; injected: asked, then relaunched)', async () => {
-  // Arrange: a stopped child under a lead, once with nothing bound and once with an admitting seam.
-  const child = { ...record('child', 'lead'), state: 'stopped' as const };
-  const unboundRunner = new FakeRunner();
-  const unbound = await host([record('lead'), child], { harness: new FakeHarness(), runner: unboundRunner });
+test('G12 R-0332 a parentless role:helper start needs Packs too: 503 with Packs absent, started on its yes', async () => {
+  // Arrange: no parent, only `role: 'helper'` (the owner route takes `role`; Packs' clean-up builder starts this way).
+  const request = { headers: { 'x-fy-request-id': 'helper-role' }, body: { role: 'helper', folder: '/work/role' } };
+  const absentRunner = new FakeRunner();
+  const absent = await host([], { harness: new FakeHarness(), runner: absentRunner });
   const runner = new FakeRunner();
-  const { asked, seam } = admission();
-  const bound = await host([record('lead'), child], { harness: new FakeHarness(), runner, helperAdmission: seam });
-  const warden = { automatic: true, actor: 'warden' } as const;
+  const packs = fakePacks();
+  const present = await host([], { harness: new FakeHarness(), runner, plugins: [packs.plugin] });
 
   // Act
-  const refused = unbound.provided(FerretsPort).resume(ferretId('child'), 'carry on', warden);
-  const resumed = await bound.provided(FerretsPort).resume(ferretId('child'), 'carry on', warden);
+  const refused = await absent.request('POST', '/v1/ferrets', request);
+  const admitted = await present.request('POST', '/v1/ferrets', request);
 
-  // Assert: unbound, the resume fails closed before any launch; bound, the admission is asked as a resume, then it runs.
-  await expect(refused).rejects.toMatchObject({ status: 503, code: 'helper_admission_unavailable' });
-  expect(unboundRunner.starts).toBe(0);
-  expect(resumed.ok).toBe(true);
-  expect(asked).toHaveLength(1);
-  expect(asked[0]).toMatchObject({ ferret: 'child', parent: 'lead', role: 'helper', by: 'resume' });
+  // Assert
+  expectUnanswered(refused);
+  expect(absentRunner.starts).toBe(0);
+  expect((await absent.request('GET', '/v1/ferrets')).json<unknown[]>()).toHaveLength(0);
+  expect(admitted.status).toBeLessThan(300);
+  expect(packs.asked[0]).toMatchObject({ role: 'helper', folder: '/work/role' });
+  expect(packs.asked[0]?.parent).toBeUndefined();
   expect(runner.starts).toBe(1);
 });
 
-/** An admission that answers whatever it is given (garbage included), and says when it was asked. */
-const answering = (answer: () => unknown) => {
-  let asked!: () => void;
-  const wasAsked = new Promise<void>(resolve => {
-    asked = resolve;
+test('G12 a Warden resume of a child goes through the same admission (Packs absent: 503; present: asked, then relaunched)', async () => {
+  // Arrange: a stopped child under a lead, once with no Packs and once with an admitting one.
+  const child = { ...record('child', 'lead'), state: 'stopped' as const };
+  const absentRunner = new FakeRunner();
+  const absent = await host([record('lead'), child], { harness: new FakeHarness(), runner: absentRunner });
+  const runner = new FakeRunner();
+  const packs = fakePacks();
+  const present = await host([record('lead'), child], {
+    harness: new FakeHarness(),
+    runner,
+    plugins: [packs.plugin],
   });
-  const seam = {
-    admit: async () => {
-      asked();
-      return (await answer()) as HookDecision;
-    },
-  } satisfies HelperAdmission;
-  return { seam, wasAsked };
-};
+  const warden = { automatic: true, actor: 'warden' } as const;
 
-const childStart = async (h: Awaited<ReturnType<typeof host>>) =>
-  await h.request('POST', '/v1/ferrets', {
-    headers: { 'x-fy-request-id': 'helper' },
-    body: { parent: 'lead', folder: '/work/child' },
-  });
+  // Act
+  const refused = absent.provided(FerretsPort).resume(ferretId('child'), 'carry on', warden);
+  const resumed = await present.provided(FerretsPort).resume(ferretId('child'), 'carry on', warden);
+
+  // Assert
+  await expect(refused).rejects.toMatchObject({ status: 503, code: 'helper_admission_unavailable' });
+  expect(absentRunner.starts).toBe(0);
+  expect(resumed.ok).toBe(true);
+  expect(packs.asked).toHaveLength(1);
+  expect(packs.asked[0]).toMatchObject({ ferret: 'child', parent: 'lead', role: 'helper', by: 'resume' });
+  expect(runner.starts).toBe(1);
+});
 
 for (const [name, garbage] of [
   ["{ allow: 'yes' }", { allow: 'yes' }],
@@ -150,49 +204,41 @@ for (const [name, garbage] of [
   ['null', null],
   ["'allow'", 'allow'],
 ] as const) {
-  test(`G12 R-0332 an admission that answers ${name} refuses the child with the fixed sentence and launches nothing`, async () => {
-    // Arrange: an admission whose answer is not a decision (truthy garbage included).
+  test(`G12 R-0332 a Packs that answers ${name} is no answer: the child is refused 503 and nothing launches`, async () => {
+    // Arrange
     const runner = new FakeRunner();
-    const { seam } = answering(() => garbage);
-    const h = await host([record('lead')], { harness: new FakeHarness(), runner, helperAdmission: seam });
+    const packs = fakePacks(() => garbage);
+    const h = await host([record('lead')], { harness: new FakeHarness(), runner, plugins: [packs.plugin] });
 
-    // Act
-    const answer = await childStart(h);
-
-    // Assert: only `allow === true` admits; anything else is a no with the kernel's sentence.
-    expect(answer.status).toBeGreaterThanOrEqual(400);
-    expect(answer.status).toBeLessThan(500);
-    expect(JSON.stringify(answer.json())).toContain(HELPER_ADMISSION_SENTENCES.refused);
+    // Act + Assert
+    expectUnanswered(await childStart(h));
     expect(runner.starts).toBe(0);
     expect((await h.request('GET', '/v1/ferrets')).json<unknown[]>()).toHaveLength(1);
   });
 }
 
-test('G12 R-0332 an admission that throws refuses the child with the fixed sentence, never its own message', async () => {
+test('G12 R-0332 a Packs that throws is no answer: 503 with the fixed sentence, never its own message', async () => {
   // Arrange
   const runner = new FakeRunner();
-  const { seam } = answering(() => {
+  const packs = fakePacks(() => {
     throw new Error('internal detail that must not be served');
   });
-  const h = await host([record('lead')], { harness: new FakeHarness(), runner, helperAdmission: seam });
+  const h = await host([record('lead')], { harness: new FakeHarness(), runner, plugins: [packs.plugin] });
 
   // Act
   const answer = await childStart(h);
 
   // Assert
-  expect(answer.status).toBeGreaterThanOrEqual(400);
-  expect(answer.status).toBeLessThan(500);
-  const served = JSON.stringify(answer.json());
-  expect(served).toContain(HELPER_ADMISSION_SENTENCES.threw);
-  expect(served).not.toContain('internal detail');
+  expectUnanswered(answer);
+  expect(JSON.stringify(answer.json())).not.toContain('internal detail');
   expect(runner.starts).toBe(0);
 });
 
-test('G12 R-0332 a no keeps only a string reason and a string code', async () => {
+test("G12 R-0332 Packs' own no keeps only a string reason and a string code", async () => {
   // Arrange: a no whose reason is not a string and whose code is a number.
   const runner = new FakeRunner();
-  const { seam } = answering(() => ({ allow: false, reason: { nested: 'object' }, code: 7 }));
-  const h = await host([record('lead')], { harness: new FakeHarness(), runner, helperAdmission: seam });
+  const packs = fakePacks(() => ({ allow: false, reason: { nested: 'object' }, code: 7 }));
+  const h = await host([record('lead')], { harness: new FakeHarness(), runner, plugins: [packs.plugin] });
 
   // Act
   const answer = await childStart(h);
@@ -200,40 +246,44 @@ test('G12 R-0332 a no keeps only a string reason and a string code', async () =>
   // Assert
   const served = JSON.stringify(answer.json());
   expect(answer.status).toBeGreaterThanOrEqual(400);
-  expect(served).toContain(HELPER_ADMISSION_SENTENCES.refused);
+  expect(answer.status).toBeLessThan(500);
+  expect(served).toContain('packs refused.');
   expect(served).not.toContain('nested');
   expect(runner.starts).toBe(0);
 });
 
-test('G12 R-0332 an admission that never answers refuses the child once StartDecide bound passes', async () => {
-  // Arrange: an admission that hangs for ever.
+test('G12 R-0332 a Packs that never answers is no answer once the start.decide bound passes', async () => {
+  // Arrange
   const runner = new FakeRunner();
-  const { seam, wasAsked } = answering(async () => await new Promise<never>(() => {}));
-  const h = await host([record('lead')], { harness: new FakeHarness(), runner, helperAdmission: seam });
+  const packs = fakePacks(async () => await new Promise<never>(() => {}));
+  const h = await host([record('lead')], { harness: new FakeHarness(), runner, plugins: [packs.plugin] });
 
-  // Act: the start waits on the admission; the kernel's clock passes the start.decide bound.
-  const pending = childStart(h);
-  await wasAsked;
-  await h.clock.advance(StartDecide.timeoutMs);
-  const answer = await pending;
+  // Act
+  const answer = await childStart(h);
 
   // Assert
-  expect(answer.status).toBeGreaterThanOrEqual(400);
-  expect(answer.status).toBeLessThan(500);
-  expect(JSON.stringify(answer.json())).toContain(HELPER_ADMISSION_SENTENCES.timeout);
+  expectUnanswered(answer);
+  expect(packs.asked).toHaveLength(1);
   expect(runner.starts).toBe(0);
   expect((await h.request('GET', '/v1/ferrets')).json<unknown[]>()).toHaveLength(1);
 });
 
-test('G12 R-0332 a resume whose admission hangs is refused at the bound, so a stop queued behind it still answers', async () => {
-  // Arrange: a stopped child; its resume holds the child's queue while the admission hangs.
+test('G12 R-0332 a resume whose Packs hangs is refused at the bound, so a stop queued behind it still answers', async () => {
+  // Arrange: a stopped child; its resume holds the child's queue while Packs hangs.
   const child = { ...record('child', 'lead'), state: 'stopped' as const };
   const runner = new FakeRunner();
-  const { seam, wasAsked } = answering(async () => await new Promise<never>(() => {}));
-  const h = await host([record('lead'), child], { harness: new FakeHarness(), runner, helperAdmission: seam });
+  let asked!: () => void;
+  const wasAsked = new Promise<void>(resolve => {
+    asked = resolve;
+  });
+  const packs = fakePacks(async () => {
+    asked();
+    return await new Promise<never>(() => {});
+  });
+  const h = await host([record('lead'), child], { harness: new FakeHarness(), runner, plugins: [packs.plugin] });
   const port = h.provided(FerretsPort);
 
-  // Act: a Warden revive waits on the admission; a stop of the same ferret queues behind it.
+  // Act: a Warden revive waits on Packs; a stop of the same ferret queues behind it.
   const resumed = port.resume(ferretId('child'), 'carry on', { automatic: true, actor: 'warden' });
   await wasAsked;
   let stopped = false;
@@ -242,13 +292,10 @@ test('G12 R-0332 a resume whose admission hangs is refused at the bound, so a st
   });
   await Promise.resolve();
   expect(stopped).toBe(false);
-  await h.clock.advance(StartDecide.timeoutMs);
 
-  // Assert: the resume is a refusal (nothing relaunched), and the stop behind it ran.
-  const result = await resumed;
+  // Assert: the resume fails closed (nothing relaunched), and the stop behind it ran.
+  await expect(resumed).rejects.toMatchObject({ status: 503, code: 'helper_admission_unavailable' });
   await stop;
-  expect(result.ok).toBe(false);
-  if (!result.ok) expect(result.error.reason).toBe(HELPER_ADMISSION_SENTENCES.timeout);
   expect(stopped).toBe(true);
   expect(runner.starts).toBe(0);
 });
@@ -256,13 +303,10 @@ test('G12 R-0332 a resume whose admission hangs is refused at the bound, so a st
 test('G12 R-0332 only allow === true admits: an allow with extra fields still starts the child', async () => {
   // Arrange
   const runner = new FakeRunner();
-  const { seam } = answering(() => ({ allow: true, reason: 'ignored' }));
-  const h = await host([record('lead')], { harness: new FakeHarness(), runner, helperAdmission: seam });
+  const packs = fakePacks(() => ({ allow: true, reason: 'ignored' }));
+  const h = await host([record('lead')], { harness: new FakeHarness(), runner, plugins: [packs.plugin] });
 
-  // Act
-  const answer = await childStart(h);
-
-  // Assert
-  expect(answer.status).toBeLessThan(300);
+  // Act + Assert
+  expect((await childStart(h)).status).toBeLessThan(300);
   expect(runner.starts).toBe(1);
 });

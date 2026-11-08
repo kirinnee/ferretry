@@ -3,7 +3,9 @@ import { err, ok } from '@ferretry/std';
 import type {
   ContributeHook,
   Contribution,
+  DecideAnswer,
   DecideHook,
+  DecideTakerAnswer,
   HookDecision,
   HookDef,
   ObserveHook,
@@ -222,6 +224,10 @@ export class HookEngine {
         offered(hook);
         return await this.decide(hook, input);
       },
+      decideAnswered: async (hook, input) => {
+        offered(hook);
+        return await this.decideAnswered(hook, input);
+      },
       transform: async (hook, value) => {
         offered(hook);
         return await this.transform(hook, value);
@@ -297,28 +303,51 @@ export class HookEngine {
   }
 
   async decide<I>(hook: DecideHook<string, I>, input: I): Promise<HookDecision> {
+    return (await this.decideAnswered(hook, input)).decision;
+  }
+
+  /** The one decide rule: the first no wins; each live taker reached is listed with how it answered. */
+  async decideAnswered<I>(hook: DecideHook<string, I>, input: I): Promise<DecideAnswer> {
+    const answers: DecideTakerAnswer[] = [];
+    const settle = (plugin: string, outcome: DecideTakerAnswer['outcome'], decision: HookDecision): DecideAnswer => {
+      answers.push({ plugin, outcome });
+      return { decision, answers };
+    };
     for (const taker of this.ordered(hook)) {
       // A failed taker of a decide hook says no (§3.4 failed); a skeleton one is a no-op the suite marks skeleton.
       if (taker.state === 'failed')
-        return { allow: false, reason: `${taker.plugin} is not running, so it cannot agree to this.` };
+        return settle(taker.plugin, 'unanswered', {
+          allow: false,
+          reason: `${taker.plugin} is not running, so it cannot agree to this.`,
+        });
       if (taker.state !== 'live') continue;
       const handler = taker.handler as (input: I) => HookDecision | Promise<HookDecision>;
       const answer = await this.bounded(() => handler(input), this.timeoutOf(hook));
       if (taker.state !== 'live')
-        return { allow: false, reason: `${taker.plugin} is not running, so it cannot agree to this.` };
-      if (answer === 'timeout') return { allow: false, reason: `${taker.plugin} did not answer in time.` };
-      if (answer === 'threw') return { allow: false, reason: `${taker.plugin} failed while deciding.` };
+        return settle(taker.plugin, 'unanswered', {
+          allow: false,
+          reason: `${taker.plugin} is not running, so it cannot agree to this.`,
+        });
+      if (answer === 'timeout')
+        return settle(taker.plugin, 'unanswered', { allow: false, reason: `${taker.plugin} did not answer in time.` });
+      if (answer === 'threw')
+        return settle(taker.plugin, 'unanswered', { allow: false, reason: `${taker.plugin} failed while deciding.` });
       const decision = answer.value;
       if (decision === null || typeof decision !== 'object' || decision.allow !== true) {
         const refusal = decision !== null && typeof decision === 'object' && decision.allow === false;
         const reason = refusal && typeof decision.reason === 'string' ? decision.reason : `${taker.plugin} refused.`;
         // A string code passes through untouched (the offerer parses it); any other type is dropped.
-        return refusal && typeof decision.code === 'string'
-          ? { allow: false, reason, code: decision.code }
-          : { allow: false, reason };
+        return settle(
+          taker.plugin,
+          refusal ? 'refused' : 'unanswered',
+          refusal && typeof decision.code === 'string'
+            ? { allow: false, reason, code: decision.code }
+            : { allow: false, reason },
+        );
       }
+      answers.push({ plugin: taker.plugin, outcome: 'allowed' });
     }
-    return { allow: true };
+    return { decision: { allow: true }, answers };
   }
 
   async transform<V>(hook: TransformHook<string, V>, value: V): Promise<Result<V, string>> {

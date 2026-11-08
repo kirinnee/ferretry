@@ -66,6 +66,23 @@ export type HookDecision =
 
 export const ALLOW: HookDecision = Object.freeze({ allow: true });
 
+/**
+ * How one live taker of a decide hook answered, in the order it was asked (ADDITIVE). `allowed` is its own
+ * `allow === true`; `refused` is its own `{ allow: false }`; `unanswered` is everything the kernel turned into a no for it
+ * (it failed, stopped running, timed out, threw, or answered something that is not a decision). A skeleton taker, or one
+ * the walk never reached because an earlier taker said no, is not listed.
+ */
+export interface DecideTakerAnswer {
+  readonly plugin: string;
+  readonly outcome: 'allowed' | 'refused' | 'unanswered';
+}
+
+/** A decide hook's decision (exactly what `decide` answers), and who answered what on the way to it. */
+export interface DecideAnswer {
+  readonly decision: HookDecision;
+  readonly answers: readonly DecideTakerAnswer[];
+}
+
 interface HookBase<Name extends string, Mode extends HookMode> {
   readonly kind: 'hook';
   readonly name: Name;

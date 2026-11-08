@@ -26,7 +26,7 @@ import { packInstructed } from './lib/admission.ts';
 import type { ModelCatalogView } from './lib/catalog.ts';
 import { CleanUpService } from './lib/cleanup/service.ts';
 import { GuideFileService } from './lib/cleanup/file.ts';
-import { launchEnvironment, startDecision } from './lib/hooks.ts';
+import { launchEnvironment, limitedParent, startDecision } from './lib/hooks.ts';
 import { ProbeCache } from './lib/probe.ts';
 import { PACK_ROUTING_MAX_AGE_MS, PackRoutingKeep } from './lib/routing-keep.ts';
 import { readFerretResult, ResultUncheckedError } from './lib/result.ts';
@@ -233,12 +233,13 @@ export default implementDaemon(manifest, {
         },
       },
       hooks: {
-        // Admission: a child's depth and how many its parent may have, whichever command started it.
-        'start.decide': async input =>
-          startDecision(
-            input.parent === undefined ? undefined : await packFerrets.parent(input.parent),
-            config().limits,
-          ),
+        // Admission (RULING #43): Packs' OWN yes here is the only thing that admits a helper; Ferrets refuses a child
+        // Packs did not answer for. A started child's depth and how many its parent may have, whichever command started
+        // it; a resume is answered yes without the limits, as today.
+        'start.decide': async input => {
+          const parent = limitedParent(input);
+          return startDecision(parent === undefined ? undefined : await packFerrets.parent(parent), config().limits);
+        },
         // What a ferret is TOLD about Pack mode, decided at every launch. The learning miner, the clean-up ferret and a
         // warden's lineage are never told (today's `ordinaryFerret`), so none of them can start helpers unattended.
         'launch.parts': () => [

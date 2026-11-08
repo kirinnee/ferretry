@@ -3,6 +3,18 @@ import type { PackConfig } from '../../contract/index.ts';
 import { admitChild, type PackLaunchFacts, packLaunchDefault, type ParentFacts } from './admission.ts';
 
 /**
+ * Whose limits a `start.decide` is judged against: the parent of a START. A resume relaunches a ferret that was
+ * already admitted, so it is not limited again (today: `pack.admit` ran on the start path only, `fyd.ts:2643`; the
+ * resume services never asked it). Packs still ANSWERS a resume, and that answer is the child's admission (RULING #43).
+ */
+export function limitedParent(input: {
+  readonly parent?: string | undefined;
+  readonly by: string;
+}): string | undefined {
+  return input.by === 'resume' ? undefined : input.parent;
+}
+
+/**
  * `start.decide`: a child's depth and how many its parent may have, whichever command started it. A start with no
  * parent, or whose parent is not known here, is not Pack mode's to refuse.
  */
