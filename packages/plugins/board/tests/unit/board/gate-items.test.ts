@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import type { AskDraft } from '@ferretry/core-asks/contract';
-import type { Card, CardId } from '../../../contract/index.ts';
+import type { Card, CardActionRequest, CardId } from '../../../contract/index.ts';
 import should from 'should';
 import {
   type BoardCaller,
@@ -49,6 +49,8 @@ class Obligations implements CardObligations {
   private readonly state = new Map<string, 'open' | 'answered' | 'withdrawn'>();
   private readonly ledger = new Map<string, OpenCardAskEntry>();
   failing = false;
+  openFails = false;
+  withdrawFails = false;
 
   /** With `turns`, every raise and close takes the ferret's turn, as Asks' own do. */
   constructor(private readonly turns?: AsksTurns) {}
@@ -75,6 +77,7 @@ class Obligations implements CardObligations {
   }
 
   async withdraw(entry: string): Promise<void> {
+    if (this.withdrawFails) throw new Error('Asks cannot withdraw');
     await this.turn(this.ferretOf(entry), async () => {
       if (this.state.get(entry) === 'open') this.state.set(entry, 'withdrawn');
     });
@@ -85,6 +88,7 @@ class Obligations implements CardObligations {
   }
 
   async open(cardId?: CardId): Promise<readonly OpenCardAskEntry[]> {
+    if (this.openFails && cardId === undefined) throw new Error('Asks cannot list');
     return [...this.ledger.values()].filter(
       each => this.state.get(each.entry) === 'open' && (cardId === undefined || each.cardId === cardId),
     );
@@ -125,14 +129,28 @@ const external = (overrides: Partial<Card> = {}): Card => {
 
 const fixture = (
   cards: readonly Card[],
-  options: { readonly noCarrier?: boolean; readonly turns?: AsksTurns } = {},
+  options: {
+    readonly noCarrier?: boolean;
+    readonly turns?: AsksTurns;
+    readonly toldFails?: boolean;
+    readonly carryFails?: boolean;
+    readonly actFails?: (request: CardActionRequest) => boolean;
+  } = {},
 ) => {
   const store = new MemoryBoardStore(cards);
   const obligations = new Obligations(options.turns);
   const warnings: string[] = [];
   const told: { readonly card: string; readonly message: string; readonly key: string }[] = [];
   let gates: GateItems | undefined;
-  const service = new BoardService(world({ store, gates: { written: async id => await gates?.written(id) } }));
+  const service = new BoardService(
+    world({
+      store,
+      gates: { written: async id => await gates?.written(id) },
+      attachments: {
+        describe: async (_ferret, ids) => ids.map(id => ({ id, filename: 'shot.png', mime: 'image/png' })),
+      },
+    }),
+  );
   const read = async (id: CardId): Promise<GateCard | undefined> => {
     const stored = store.cards.get(id);
     if (stored === undefined) return undefined;
@@ -150,6 +168,7 @@ const fixture = (
     cards: async () =>
       (await Promise.all([...store.cards.keys()].map(read))).flatMap(each => (each === undefined ? [] : [each])),
     act: async (id, request, caller, expect) => {
+      if (options.actFails?.(request) === true) throw new Error('the board refused');
       await service.act(id, request, caller, expect);
     },
     closeNothingToTry: async (id, expect, reason) => await service.closeWhereNothingToTry(id, expect, reason),
@@ -160,13 +179,21 @@ const fixture = (
     lanes: stageGateLanes,
     words: {
       told: async (task, message, key) => {
+        if (options.toldFails === true) throw new Error('the ferret cannot be told');
         told.push({ card: task.id, message, key });
       },
     },
     homes: { of: async ferret => ferret },
     ...(options.noCarrier === true
       ? {}
-      : { files: { carry: async (_from: string, _to: string, ids: readonly string[]) => ids } }),
+      : {
+          files: {
+            carry: async (_from: string, _to: string, ids: readonly string[]) => {
+              if (options.carryFails === true) throw new Error('the file is gone');
+              return ids;
+            },
+          },
+        }),
     diagnostics: { warn: message => warnings.push(message) },
   });
   const answer = async (entry: string, overrides: Partial<GateAnswer> = {}) => {
@@ -543,5 +570,154 @@ describe('#1552 (models Asks’ per-ferret turn, its KeyedSerialQueue) an answer
     // The next write of that ferret's board takes its turn and returns.
     await within(w.obligations.withdraw('gate:F9:tested:1'));
     should(w.obligations.openEntries()).be.empty();
+  });
+});
+
+describe('a gate that cannot reach its neighbours says so and goes on', () => {
+  it('should warn, not throw, when the sweep cannot list the open asks', async () => {
+    const { world: w } = await atTest();
+    w.obligations.openFails = true;
+
+    await w.gates.sweep();
+
+    should(w.warnings.some(warning => warning.includes('the sweep of stray card asks failed'))).be.true();
+  });
+
+  it('should warn and go on to the next card when one card’s ask cannot be put', async () => {
+    const w = fixture([external({ id: 'F1' as CardId, laneId: 'tested' })]);
+    w.obligations.failing = true;
+
+    should(await w.gates.backfill()).equal(0);
+
+    should(w.warnings.some(warning => warning.includes('could not be put'))).be.true();
+  });
+
+  it('should withdraw the stale twin and keep the ask for the gate the card is at now', async () => {
+    const { world: w, entry } = await atTest();
+    await w.obligations.raise({
+      source: 'card',
+      kind: 'choice',
+      entry: 'gate:F1:tested:0',
+      ferret: 'grandchild',
+      ref: { card: 'F1' },
+    } as unknown as AskDraft);
+    should(w.obligations.openEntries()).containEql('gate:F1:tested:0');
+
+    await w.gates.sweep();
+
+    should(w.obligations.openEntries()).eql([entry]);
+  });
+
+  it('should warn when a stale ask cannot be taken back after a refused answer', async () => {
+    const { world: w, entry } = await atTest();
+    await w.service.act('F1', { action: 'move', to: 'implement', reason: 'back' }, OWNER);
+    w.obligations.withdrawFails = true;
+
+    const outcome = await w.answer(entry, { choice: 'Done' });
+    await new Promise(resolve => setTimeout(resolve, 5));
+
+    should(outcome).match({ handled: true, refused: { code: 'moved-on' } });
+    should(w.warnings.some(warning => warning.includes('could not follow the answer'))).be.true();
+  });
+});
+
+describe('an answer the board or the ferret does not take', () => {
+  it('should refuse as not-moved, and look at the card’s ask again, when the board refuses the move', async () => {
+    const w = fixture([external()], { actFails: request => request.action === 'move' });
+    await w.service.trigger('F1', 'release.running');
+    const [open] = await w.obligations.open('F1');
+
+    const outcome = await w.answer(open?.entry ?? '', { choice: 'Done' });
+
+    should(outcome).match({ handled: true, refused: { code: 'not-moved' } });
+    should(JSON.stringify(outcome)).containEql('the board refused');
+    should(w.stored().laneId).equal('tested');
+  });
+
+  it('should warn that the ferret was not told of a Done, and still apply it', async () => {
+    const w = fixture([external()], { toldFails: true });
+    await w.service.trigger('F1', 'release.running');
+    const [open] = await w.obligations.open('F1');
+
+    const outcome = await w.answer(open?.entry ?? '', { choice: 'Done' });
+
+    should(outcome).eql({ handled: true, applied: true });
+    should(w.stored().laneId).equal('closed');
+    should(w.warnings.some(warning => warning.includes('could not tell'))).be.true();
+  });
+
+  it('should refuse an answer that names no option and brings no words', async () => {
+    const { world: w, entry } = await atTest();
+
+    const outcome = await w.answer(entry, {});
+
+    should(outcome).match({ handled: true, refused: { code: 'invalid' } });
+    should(JSON.stringify(outcome)).containEql('is answered with one of its options');
+  });
+
+  it('should warn when the owner’s Not yet words are not kept, and when the ferret is not told them', async () => {
+    const w = fixture([external({ laneId: 'todo' })], {
+      toldFails: true,
+      actFails: request => request.action === 'clarify',
+    });
+    await w.service.act('F1', { action: 'move', to: 'plan', reason: 'plan first' }, OWNER);
+    const [open] = await w.obligations.open('F1');
+
+    const outcome = await w.answer(open?.entry ?? '', { choice: 'Not yet', text: 'after lunch' });
+
+    should(outcome).eql({ handled: true, applied: true });
+    should(w.warnings.some(warning => warning.includes('were not kept'))).be.true();
+    should(w.warnings.some(warning => warning.includes('could not tell'))).be.true();
+  });
+});
+
+describe('the files a Not good brings', () => {
+  const att = { from: 'grandchild', ids: [`att_${'a'.repeat(64)}`] };
+
+  it('should refuse files uploaded to a different ferret than the ask’s', async () => {
+    const { world: w, entry } = await atTest();
+
+    const outcome = await w.answer(entry, {
+      choice: 'Not good',
+      text: 'clipped',
+      attachments: { from: 'someone-else', ids: att.ids },
+    });
+
+    should(outcome).match({ handled: true, refused: { code: 'invalid' } });
+    should(JSON.stringify(outcome)).containEql('uploaded to the ferret it is on');
+  });
+
+  it('should refuse files where this daemon cannot carry them', async () => {
+    const w = fixture([external()], { noCarrier: true });
+    await w.service.trigger('F1', 'release.running');
+    const [open] = await w.obligations.open('F1');
+
+    const outcome = await w.answer(open?.entry ?? '', { choice: 'Not good', text: 'clipped', attachments: att });
+
+    should(outcome).match({ handled: true, refused: { code: 'invalid' } });
+    should(JSON.stringify(outcome)).containEql('cannot carry files');
+  });
+
+  it('should leave the card where it is when a file cannot be carried to its ferret', async () => {
+    const w = fixture([external()], { carryFails: true });
+    await w.service.trigger('F1', 'release.running');
+    const [open] = await w.obligations.open('F1');
+
+    const outcome = await w.answer(open?.entry ?? '', { choice: 'Not good', text: 'clipped', attachments: att });
+
+    should(outcome).match({ handled: true, refused: { code: 'not-moved' } });
+    should(JSON.stringify(outcome)).containEql('a file could not be carried');
+    should(w.stored().laneId).equal('tested');
+  });
+
+  it('should carry the files to the card’s ferret and reopen with them', async () => {
+    const w = fixture([external()]);
+    await w.service.trigger('F1', 'release.running');
+    const [open] = await w.obligations.open('F1');
+
+    const outcome = await w.answer(open?.entry ?? '', { choice: 'Not good', text: 'clipped', attachments: att });
+
+    should(outcome).eql({ handled: true, applied: true });
+    should(w.stored().laneId).not.equal('tested');
   });
 });

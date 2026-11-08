@@ -1,6 +1,17 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { ferretStateOf, toWireAgenda, toWireBlessing, toWireFlag, toWireRun } from '../../daemon/lib/wire-map.ts';
+import {
+  ferretStateOf,
+  toWireAgenda,
+  toWireBlessing,
+  toWireFlag,
+  toWireInvestigate,
+  toWireLeave,
+  toWireRun,
+  toWireStatus,
+  toWireVerdicts,
+} from '../../daemon/lib/wire-map.ts';
+import { harness } from './sweep-harness.ts';
 import { wardenFleetSession, TurnOrdinals } from '../../daemon/fleet.ts';
 import { ferretId, T0 } from '@ferretry/core-ferrets/contract/testing';
 
@@ -186,5 +197,82 @@ describe('a ferret as the sweep reads it', () => {
 
     // Assert
     should([first, same, next]).eql([1, 1, 2]);
+  });
+});
+
+describe('the rest of the words on the wire', () => {
+  it('should read a finished session as a stopped ferret', () => {
+    should(ferretStateOf('completed')).equal('stopped');
+    should(ferretStateOf('stopped')).equal('stopped');
+  });
+
+  it('should answer a status with no Jev checks without the field', async () => {
+    const subject = harness({});
+    const wire = toWireStatus({ ...(await subject.service.status()), jevChecks: undefined });
+    should(wire).not.have.property('jevChecks');
+    should(wire.flags).be.an.Array();
+  });
+
+  it('should name verdicts, an investigation and a leave by their ferrets', () => {
+    const verdicts = toWireVerdicts([
+      { at: '2026-11-06T10:00:00.000Z', targetSession: 'f1', teammate: 'rae', verdict: 'nudged', reportPath: 'r.md' },
+    ] as never);
+    should(verdicts).eql([
+      { at: '2026-11-06T10:00:00.000Z', target: 'f1', name: 'rae', verdict: 'nudged', reportPath: 'r.md' },
+    ]);
+    should(
+      toWireInvestigate({ sessionId: 'f1', state: 'running', wardenSession: 'w1', message: 'on it' } as never),
+    ).eql({
+      ferret: 'f1',
+      state: 'running',
+      warden: 'w1',
+      message: 'on it',
+    });
+    const leave = toWireLeave({
+      blessing: { sessionId: 'f1', kinds: ['unattended_question'], expiresAt: '2026-11-06T10:00:00.000Z', by: 'owner' },
+      message: 'left alone',
+    } as never);
+    should(leave.blessing.ferret).equal('f1');
+    should(leave.message).equal('left alone');
+  });
+
+  it('should carry the warden that judged an agenda item under its ferret name', () => {
+    const view = toWireAgenda({
+      generatedAt: '2026-11-06T10:00:00.000Z',
+      outcome: 'items',
+      boardsWithParseErrors: [],
+      verdictCoverage: { limit: 40, truncated: false },
+      items: [
+        {
+          sessionId: 'f1',
+          id: 'i1',
+          source: 'question',
+          subject: 's',
+          why: 'w',
+          waitingSince: '2026-11-06T09:00:00.000Z',
+          howToResolve: 'h',
+          sessionStatus: 'thinking',
+          judgement: {
+            state: 'judged',
+            reason: 'fine',
+            judgedBy: { wardenSessionId: 'w1' },
+          },
+        },
+        {
+          sessionId: 'f2',
+          id: 'i2',
+          source: 'task',
+          subject: 's',
+          why: 'w',
+          waitingSince: '2026-11-06T09:00:00.000Z',
+          howToResolve: 'h',
+          judgement: { state: 'judged', reason: 'fine' },
+        },
+      ],
+    } as never);
+    should(view.items[0]?.ferretState).equal('working');
+    should(view.items[0]?.judgement?.judgedBy).eql({ warden: 'w1' });
+    should(view.items[1]?.judgement).not.have.property('judgedBy');
+    should(view.items[1]?.source).equal('card');
   });
 });
