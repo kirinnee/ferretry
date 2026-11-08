@@ -64,12 +64,30 @@ function isPrivateRoot(name: RootName): boolean {
   return name === 'sessions';
 }
 
-/** A ferret's own folder name under `sessions`: the ferret-id shape (one plain segment, no `.`, `..`, `/`, `\`, NUL). */
-const SESSION_FOLDER = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
+/**
+ * A ferret's own folder name under `sessions`: the MINTED ferret-id shape, lower case only (one plain segment, no `.`,
+ * `..`, `/`, `\`, NUL). Lower case only because a case-insensitive disk (macOS APFS) would make `ABC-1` and `abc-1`
+ * one folder; ids are minted lower case (base-36 time + lower-case hex), so nothing real is refused.
+ */
+const SESSION_FOLDER = /^[a-z0-9][a-z0-9_-]{0,127}$/u;
 
 /** The one segment a `sessions` handle may be scoped to, or nothing when the given subfolder is not exactly that. */
 function sessionFolder(subfolder: string | undefined): string | undefined {
   return subfolder !== undefined && SESSION_FOLDER.test(subfolder) ? subfolder : undefined;
+}
+
+/**
+ * The folder below an internal root's anchor that a handle scoped to `subfolder` names, or `undefined` when the
+ * scope is refused. One fact for production and for the testing host, so a plugin test sees the isolation production
+ * enforces. `sessions`: exactly one minted-id segment. `agent-homes`: one relative path (never absolute, never `..`,
+ * no NUL), or none for the whole base. Any other root takes no such scope: it answers `''`.
+ */
+export function scopedSubfolder(name: RootName, subfolder: string | undefined): string | undefined {
+  if (name === 'sessions') return sessionFolder(subfolder);
+  if (name !== 'agent-homes') return '';
+  if (subfolder === undefined || subfolder === '') return '';
+  if (subfolder.startsWith('/') || subfolder.includes('\0') || subfolder.split('/').includes('..')) return undefined;
+  return subfolder;
 }
 const DEFAULT_COPY_ENTRIES = 10_000;
 const windowOk = (offset: number, length: number): boolean =>
@@ -1380,13 +1398,6 @@ export function rootsPortFor(
       if (!allowed.has(name)) throw new RootError('not_declared');
       if (!mayHoldRoot(layout.plugin, name)) throw new RootError('not_declared');
       const subfolder = scope?.subfolder;
-      const internalSubfolder = (): string | undefined => {
-        // An internal root's subfolder is one relative path below its anchor: never absolute, never `..`, no NUL.
-        if (subfolder === undefined || subfolder === '') return '';
-        if (subfolder.startsWith('/') || subfolder.includes('\0') || subfolder.split('/').includes('..'))
-          return undefined;
-        return subfolder;
-      };
       const internal = internalRootBase(home, layout.plugin, name);
       const anchor = ((): string | undefined => {
         if (internal !== undefined) return home;
@@ -1395,14 +1406,14 @@ export function rootsPortFor(
       const base = (): string | undefined => {
         switch (name) {
           case 'agent-homes': {
-            const below = internalSubfolder();
+            const below = scopedSubfolder(name, subfolder);
             return below === undefined || internal === undefined
               ? undefined
               : absolute(join(internal, below), 'a root');
           }
           case 'sessions': {
             // One ferret's own folder and nothing else: never the whole base, never a nested path.
-            const below = sessionFolder(subfolder);
+            const below = scopedSubfolder(name, subfolder);
             return below === undefined || internal === undefined
               ? undefined
               : absolute(join(internal, below), 'a root');
