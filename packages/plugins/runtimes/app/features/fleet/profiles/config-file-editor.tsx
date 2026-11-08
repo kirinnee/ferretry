@@ -166,7 +166,9 @@ export function ConfigFileEditor({
   }, [client, path, reads]);
 
   // Changed on the machine — a hand edit, `fy`, another device — and read again in place, unless the person has
-  // started editing: their draft stays, and saving it says the file moved under them.
+  // started editing: their draft stays, and saving it says the file moved under them. It hears `runtimes.changed`, which
+  // names a profile only when its PARSED value moved, so an edit held for the owner or a newly broken file is read on
+  // the next open (GAP(kernel), ports-pending.json).
   useMachineChanges(client, ['catalogue'], () => {
     if (load.status !== 'ready' || draft !== load.file.text) return;
     readConfigFile(client, path).then(

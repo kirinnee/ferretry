@@ -10,6 +10,7 @@ import {
   ConfigFileEditor,
 } from '../../../../../../app/features/fleet/profiles/config-file-editor.tsx';
 import type { RuntimesClient } from '../../../../../../app/lib/client.ts';
+import { RuntimesChanged } from '../../../../../../contract/index.ts';
 import { createProfilesSettings } from '../../../../../../app/views/profiles-settings.tsx';
 import runtimesManifest from '../../../../../../manifest.ts';
 import type { Mounted } from '../../../../support/dom.ts';
@@ -184,6 +185,53 @@ describe('Edit as YAML over the kernel’s /v1/config/file', () => {
     expect(root.querySelector('[data-config-submit]')?.hasAttribute('disabled')).toBe(true);
   });
 
+  it('reads the file again in place when the machine says a profile moved, and keeps a draft the person started', async () => {
+    // Arrange: a client that hears this machine's runtimes.changed.
+    const calls: Call[] = [];
+    const script: Script = {};
+    const listeners = new Set<(payload: unknown) => void>();
+    const client = {
+      ...configClient(script, calls),
+      subscribe: (event: { name: string }, listener: (payload: unknown) => void) => {
+        if (event.name === RuntimesChanged.name) listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    } as unknown as RuntimesClient;
+    mounted = await mountSettled(
+      <ConfigFileEditor client={client} path={PATH} onClose={() => {}} onChanged={() => {}} />,
+    );
+    const root = document as ParentNode;
+    const field = () => (root.querySelector('[data-config-editor-text]') as HTMLTextAreaElement).value;
+    const moved = async () => {
+      for (const listener of listeners) listener({ runtimes: [], profiles: ['Default'], modelSets: [] });
+      await settle();
+    };
+
+    // Act: another editor changed the file; the untouched draft follows it.
+    const edited = '# edited elsewhere\nlayers: []\n';
+    script.read = {
+      path: PATH,
+      absolutePath: `/home/fy/config/${PATH}`,
+      exists: true,
+      text: edited,
+      etag: 'e9',
+      issues: [],
+    };
+    await moved();
+
+    // Assert
+    expect(field()).toBe(edited);
+    expect(calls.filter(call => call.route === GET)).toHaveLength(2);
+
+    // Act: the person starts editing, then the file moves again; their draft stays.
+    await type(root, '[data-config-editor-text]', `${edited}# mine\n`);
+    await moved();
+
+    // Assert
+    expect(field()).toBe(`${edited}# mine\n`);
+    expect(calls.filter(call => call.route === GET)).toHaveLength(2);
+  });
+
   it('Cancel closes it', async () => {
     const { events, root } = await editor();
     await click(root, '[data-config-cancel]');
@@ -206,5 +254,27 @@ describe('Settings › Profiles offers Edit as YAML', () => {
     expect(calls.some(call => call.route === GET && call.query?.path === PATH)).toBe(true);
     await click(root, '[data-config-cancel]');
     expect(root.querySelector('[data-config-editor]')).toBeNull();
+  });
+
+  it('reads the profiles again after a save there, so the page shows what the file now says', async () => {
+    // Arrange
+    const machine = scriptedMachine();
+    const calls: Call[] = [];
+    const Settings = createProfilesSettings(configClient({}, calls, machineClient(machine))) as () => ReactNode;
+    mounted = await mountSettled(<Settings />);
+    await settle();
+    const root = document as ParentNode;
+    await click(root, '[data-profile-row="Default"]');
+    await click(root, '[data-profile-yaml]');
+    const reads = () => machine.calls.filter(call => call.route === 'GET /v1/runtimes/profiles').length;
+    const before = reads();
+
+    // Act
+    await type(root, '[data-config-editor-text]', `${TEXT}  - mcp/notes\n`);
+    await click(root, '[data-config-submit]');
+
+    // Assert
+    expect(sent(calls, PUT)).toEqual({ path: PATH, text: `${TEXT}  - mcp/notes\n`, etag: 'e1' });
+    expect(reads()).toBeGreaterThan(before);
   });
 });
