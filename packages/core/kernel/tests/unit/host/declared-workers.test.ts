@@ -66,6 +66,39 @@ describe('compiled: a plugin starts only the worker programs it declares', () =>
     expect(started).toEqual([]);
   });
 
+  test('the URL checked is the URL started: an options getter that retargets it after the check changes nothing', () => {
+    const { workers, started } = world(true, DECLARED);
+    const url = new URL('file:///$bunfs/worker/pdf-decrypt.worker.ts');
+    const options = {
+      get name() {
+        // Plugin code, run between the stem check and the start: it points the caller's URL out of the binary.
+        url.pathname = '/x/..%2F..%2Fevil.ts';
+        return undefined;
+      },
+    };
+    workers.start(url, options as never);
+    expect(started).toEqual(['file:///$bunfs/worker/pdf-decrypt.worker.ts']);
+  });
+
+  test('a URL is read once: one whose every reading answers differently starts what was checked, or nothing', () => {
+    const { workers, started } = world(true, DECLARED);
+    const readings = ['file:///$bunfs/worker/pdf-decrypt.worker.ts', 'file:///x/evil.worker.ts'];
+    let read = 0;
+    const shifting = new URL(readings[0] as string);
+    const hostile = new Proxy(shifting, {
+      get: (target, key) => {
+        if (key === 'href' || key === 'pathname' || key === 'protocol') {
+          const now = new URL(readings[Math.min(read, readings.length - 1)] as string);
+          read += 1;
+          return now[key];
+        }
+        return Reflect.get(target, key);
+      },
+    });
+    workers.start(hostile);
+    expect(started).toEqual(['file:///$bunfs/worker/pdf-decrypt.worker.ts']);
+  });
+
   test("a URL that is not a file URL is not this rule's to judge", () => {
     const { workers, started } = world(true, DECLARED);
     workers.start(new URL('https://example.test/x.worker.js'));

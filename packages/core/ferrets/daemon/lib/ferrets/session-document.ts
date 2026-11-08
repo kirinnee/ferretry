@@ -1,7 +1,7 @@
 import type { FerretDetails, FerretRecord, FerretState } from '../../../contract/index.ts';
 import type { SessionConfig } from '../protocol/session.ts';
 import type { SessionStatus } from '../protocol/session-base.ts';
-import { isTurnStatus } from '../session/peers/turn.ts';
+import { reviveRuling } from '../protocol/session-revive.ts';
 
 /**
  * The supervision fields today's start wrote into every session document it made (today's `SESSION_START_DEFAULTS`,
@@ -41,22 +41,33 @@ function sessionStatusOf(state: FerretState): SessionStatus {
   }
 }
 
+/** Statuses of a session on its way up: made, starting, or being retried. */
+const ON_ITS_WAY_UP: ReadonlySet<SessionStatus> = new Set<SessionStatus>(['created', 'starting', 'retrying']);
+
 /**
  * The session status a ferret's state document moves to when its LIFECYCLE moves (U4), or `undefined` to leave it: the
  * document is made once with the status of that moment (`starting`), and today's lifecycle moved it to `running` when
  * the launch settled and to `stopped` at a stop. Only those edges are followed. A turn (`working` ↔ `idle`) is the
- * turn watch's `turnState`, never a status, and a status something else decided (`rate_limited`, `awaiting_question`,
- * `kill_failed`, …) is left as it is — except by a stop, which ends every live one. Pure.
+ * turn watch's `turnState`, never a status, and a status something else decided on a live session (`rate_limited`,
+ * `awaiting_question`, …) is left as it is — except by a stop, which ends every live one.
+ *
+ * A REVIVE brings the document back from every status the one revive rule (`reviveRuling`, behind every Resume button)
+ * calls revivable — `stopped`, `completed`, `failed`, `stalled` — as today's resume set `starting` from each
+ * (`R/src/lib/session/resume/service.ts:232`); left there, the ferret would never be watched again. `kill_failed` is
+ * NEVER moved by these edges: it says a stop was not confirmed, and no registry edge confirms one, so clearing it would
+ * erase the only record that an old pane may still be alive (today refused that resume outright). Pure.
  */
 export function lifecycleStatus(current: SessionStatus, state: FerretState): SessionStatus | undefined {
+  if (current === 'kill_failed') return undefined;
+  const ended = reviveRuling(current).revivable;
   switch (state) {
     case 'starting':
-      return current === 'stopped' ? 'starting' : undefined;
+      return ended ? 'starting' : undefined;
     case 'working':
     case 'idle':
-      return current === 'starting' || current === 'stopped' ? 'running' : undefined;
+      return ended || ON_ITS_WAY_UP.has(current) ? 'running' : undefined;
     case 'stopped':
-      return current === 'starting' || isTurnStatus(current) ? 'stopped' : undefined;
+      return ended ? undefined : 'stopped';
   }
 }
 

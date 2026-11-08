@@ -360,4 +360,16 @@ describe('U4: Ferrets’ own delivery wakes the turn watch', () => {
 
     expect(told).toEqual([f.id]);
   });
+
+  test('a queue that landed, and only that one, tells the watch the pane was typed into', async () => {
+    const f = await running();
+    const told: string[] = [];
+    f.ports.delivered = ferret => void told.push(ferret);
+
+    expect((await f.seam.queue('queued words')).ok).toBe(true);
+    f.runner.fail = { kind: 'composer_occupied', draft: 'mine' };
+    expect((await f.seam.queue('refused words')).ok).toBe(false);
+
+    expect(told).toEqual([f.id]);
+  });
 });

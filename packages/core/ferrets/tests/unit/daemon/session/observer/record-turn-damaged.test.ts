@@ -186,54 +186,84 @@ describe('recordTurnChange over a damaged state.json (today’s rule, R/src/adap
     should(await storage.readState(healthy)).have.property('turnState', 'your-turn');
   });
 
-  it('the inline host backs a damaged ferret off for real: one warning per 10 s, not one per 2 s tick', async () => {
-    // Arrange: one live ferret whose pane shows its idle prompt, so its turn must end, but its document is damaged.
+  it('one damaged state.json among 30 does not stop the watch for the other 29, and is said ONCE until its damage changes', async () => {
+    // Arrange: thirty live ferrets mid-turn, every pane drawing (a turn in progress, nothing to record).
     const { storage, folder } = await opened();
-    const broken = await working(storage, 'damaged-5');
+    const ids = [];
+    for (let n = 0; n < 30; n += 1) ids.push(await working(storage, `fleet-${n}`));
+    const broken = ids[7] as (typeof ids)[number];
     const runner = new FakeRunner();
-    const record = {
-      format: 1,
-      id: broken as unknown as FerretId,
-      name: broken,
-      role: 'lead',
-      harness: 'claude-code',
-      runner: 'tmux',
-      folder: '/work/damaged-5',
-      state: 'working',
-      handle: runner.adoptable(broken as unknown as FerretId),
-      createdAt: RECORD_T0,
-      stateAt: RECORD_T0,
-    } as FerretRecord;
+    const records = new Map<string, FerretRecord>(
+      ids.map(id => [
+        id,
+        {
+          format: 1,
+          id: id as unknown as FerretId,
+          name: id,
+          role: 'lead',
+          harness: 'claude-code',
+          runner: 'tmux',
+          folder: `/work/${id}`,
+          state: 'working',
+          handle: runner.adoptable(id as unknown as FerretId),
+          createdAt: RECORD_T0,
+          stateAt: RECORD_T0,
+        } as FerretRecord,
+      ]),
+    );
+    const followed: string[] = [];
     const log = new RecordingLog();
     let nowMs = Date.parse(AT);
     const { host } = buildTurnWatch({
       storage,
       tail: MID_TURN_TAIL,
-      record: () => record,
+      record: ferret => records.get(ferret),
       runner: () => runner,
-      turnObserved: async () => undefined,
+      turnObserved: async (ferret, turn) => void followed.push(`${ferret}:${turn}`),
       clock: { now: () => new Date(nowMs).toISOString() },
       every: () => () => undefined,
       yieldToLoop: async () => undefined,
       log,
     });
-    // The turn ends on the second idle look; the document is damaged before that second look records it.
+    for (const record of records.values())
+      runner.screens.set(record.handle as never, { frame: 'w', working: true, atPrompt: false, permission: false });
     await host.turns.run();
+    // One document is damaged behind the daemon's back (a value the parser's account quotes), then every turn ends.
+    folder.plant(
+      FerretStateFile,
+      JSON.stringify({ format: 1, id: broken, status: 'running', turn: 1, turnState: CONTENT }),
+      broken,
+    );
+    runner.screens.clear();
+    const warnings = () => log.lines.filter(line => line.level === 'warn');
+    const ticks = async (count: number) => {
+      for (let tick = 0; tick < count; tick += 1) {
+        nowMs += 2_000;
+        await host.turns.run();
+      }
+    };
+
+    // Act: the two looks that end a turn (the idle prompt seen, then confirmed).
+    await ticks(2);
+
+    // Assert: the other 29 turns all ended on that same tick, the damaged one in the middle of them notwithstanding.
+    const healthy = ids.filter(id => id !== broken);
+    should([...followed].sort()).deepEqual(healthy.map(id => `${id}:your-turn`).sort());
+    for (const id of healthy) should(await storage.readState(id)).have.property('turnState', 'your-turn');
+
+    // Act + Assert: the rest of a minute of 2 s ticks: the damaged one is said once, by file only.
+    await ticks(28);
+    should(followed).have.length(29);
+    should(warnings()).have.length(1);
+    should(warnings()[0]?.fields).deepEqual({ ferret: broken, file: warnings()[0]?.fields?.file });
+    should(String(warnings()[0]?.fields?.file)).endWith('state.json');
+
+    // Act + Assert: its damage changes (no longer JSON at all): said once more, and not again.
     folder.plant(FerretStateFile, '{"turnState": "', broken);
-    const warnings = () => log.lines.filter(line => line.level === 'warn').length;
-
-    // Act: a tick every 2 s for 20 s.
-    const seen: number[] = [];
-    for (let tick = 0; tick < 10; tick += 1) {
-      nowMs += 2_000;
-      await host.turns.run();
-      seen.push(warnings());
-    }
-
-    // Assert: reported at the first failure, then once each 10 s, never on every tick.
-    should(seen.at(-1)).be.belowOrEqual(3);
-    should(seen.at(-1)).be.aboveOrEqual(2);
-    should(seen[1]).equal(seen[0]);
-    should(seen[2]).equal(seen[0]);
+    await ticks(30);
+    should(warnings()).have.length(2);
+    should(warnings()[1]?.fields?.ferret).equal(broken);
+    should(JSON.stringify(log.lines)).not.containEql(CONTENT);
+    should(folder.raw(FerretStateFile, broken)).equal('{"turnState": "');
   });
 });

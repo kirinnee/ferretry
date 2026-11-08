@@ -26,6 +26,13 @@ function subject(options: { readonly session?: string; readonly watched?: boolea
   let activityAt = NOW_SECONDS - 5;
   let dead = false;
   let held = false;
+  /** The next tmux question of each kind waits for its release (`facts`: the pane-facts question). */
+  const gates = new Map<'capture-pane' | 'facts', Promise<void>>();
+  const gate = async (kind: 'capture-pane' | 'facts') => {
+    const waiting = gates.get(kind);
+    gates.delete(kind);
+    await waiting;
+  };
   const holds: InputHolds = { decide: () => (held ? { refused: 'input_pending' } : 'allow') };
   const masked: string[] = [];
   const redaction: Redaction = {
@@ -45,15 +52,20 @@ function subject(options: { readonly session?: string; readonly watched?: boolea
       execute: async args => {
         calls.push(args);
         const format = args.at(-1) ?? '';
-        if (args[0] === 'display-message' && format.startsWith('#{pane_id}|'))
+        if (args[0] === 'display-message' && format.startsWith('#{pane_id}|')) {
+          await gate('facts');
           return {
             code: 0,
             stdout: `%7|4242|${dead ? 1 : 0}|${options.session ?? 'fy-f-hadi'}|1000\n`,
             stderr: '',
           };
+        }
         if (args[0] === 'display-message')
           return { code: 0, stdout: `${dead ? 1 : 0}||1|22|40|120|${activityAt}|0|%7|4242\n`, stderr: '' };
-        if (args[0] === 'capture-pane') return { code: 0, stdout: screen, stderr: '' };
+        if (args[0] === 'capture-pane') {
+          await gate('capture-pane');
+          return { code: 0, stdout: screen, stderr: '' };
+        }
         if (args[0] === 'send-keys' || args[0] === 'kill-session') return { code: 0, stdout: '', stderr: '' };
         throw new Error(`a look must not run ${args[0]}`);
       },
@@ -101,6 +113,12 @@ function subject(options: { readonly session?: string; readonly watched?: boolea
     },
     hold: () => {
       held = true;
+    },
+    /** Holds the next question of that kind until the answer is called. */
+    holdNext: (kind: 'capture-pane' | 'facts') => {
+      let release = () => {};
+      gates.set(kind, new Promise<void>(resolve => (release = resolve)));
+      return () => release();
     },
   };
 }
@@ -177,6 +195,61 @@ describe('TmuxRunner.look (U4, the turn watch read)', () => {
     // Assert: an unchanged frame would have been served from memory; a stop forgot it.
     should(afterPolite).equal(2);
     should(pane.captures()).equal(3);
+  });
+
+  it('should not put back the pane text a stop forgot when a look was in flight across the stop', async () => {
+    // Arrange: a look waiting on its capture.
+    const pane = subject();
+    const release = pane.holdNext('capture-pane');
+    const inFlight = pane.runner.look(pane.handle);
+    await Bun.sleep(0);
+
+    // Act: the pane is stopped while the capture is out, then the capture lands.
+    await pane.runner.stop(pane.handle, 'polite');
+    release();
+    await inFlight;
+    await pane.runner.look(pane.handle);
+
+    // Assert: the look after the stop captured again: nothing was served from memory.
+    should(pane.captures()).equal(2);
+  });
+
+  it('should keep no pane text from a look that fell wholly inside a stop', async () => {
+    // Arrange: a stop waiting on its pane facts.
+    const pane = subject();
+    const release = pane.holdNext('facts');
+    const stopping = pane.runner.stop(pane.handle, 'polite');
+    await Bun.sleep(0);
+
+    // Act: a whole look runs (and captures) while the stop is out, then the stop ends.
+    await pane.runner.look(pane.handle);
+    release();
+    await stopping;
+    await pane.runner.look(pane.handle);
+
+    // Assert
+    should(pane.captures()).equal(2);
+  });
+
+  it('should keep no pane text from a look that began inside a stop and landed after it', async () => {
+    // Arrange: a stop waiting on its pane facts, and a look begun meanwhile, waiting on its capture.
+    const pane = subject();
+    const releaseStop = pane.holdNext('facts');
+    const stopping = pane.runner.stop(pane.handle, 'polite');
+    await Bun.sleep(0);
+    const releaseCapture = pane.holdNext('capture-pane');
+    const inFlight = pane.runner.look(pane.handle);
+    await Bun.sleep(0);
+
+    // Act: the stop ends first, then the capture lands.
+    releaseStop();
+    await stopping;
+    releaseCapture();
+    await inFlight;
+    await pane.runner.look(pane.handle);
+
+    // Assert
+    should(pane.captures()).equal(2);
   });
 
   it('should never read a pane that is not a ferret’s own (a person’s shell)', async () => {

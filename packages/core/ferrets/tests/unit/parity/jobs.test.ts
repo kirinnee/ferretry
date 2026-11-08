@@ -21,6 +21,7 @@ import type { Result } from '@ferretry/std';
 import {
   FerretChanged,
   type FerretChangedPayload,
+  FerretStateFile,
   FerretsPort,
   Harnesses,
   type RunnerHandle,
@@ -190,6 +191,35 @@ describe('the turn watch (U4, ruling #27 Q3: mounted in Ferrets)', () => {
     await tick(h);
     expect((await h.provided(FerretsPort).get(id))?.state).toBe('working');
     expect(heard.at(-1)).toEqual({ ferret: id, state: 'working', previous: 'idle', change: 'state' });
+    await h.stop();
+  });
+
+  test("a document left starting by a crash is brought to its ferret's state when the watch arms, and its turns are watched", async () => {
+    const { h, runner } = await host();
+    const id = await start(h, 'gale');
+    const handle = (await h.provided(FerretsPort).handle(id)) as RunnerHandle;
+    await h.settle();
+    // The crash window: the registry wrote the ferret's state, the status lane never did.
+    const folder = h.state('ferrets');
+    const document = JSON.parse(folder.raw(FerretStateFile, id) ?? '{}') as Record<string, unknown>;
+    expect(document.status).toBe('running');
+    folder.plant(FerretStateFile, JSON.stringify({ ...document, status: 'starting' }), id);
+
+    await h.runJob(TURN_WATCH_JOB);
+    await h.settle();
+    // The status lane runs off the job, as every edge's does: a few turns of the loop, bounded.
+    for (
+      let turn = 0;
+      turn < 50 && JSON.parse(folder.raw(FerretStateFile, id) ?? '{}').status === 'starting';
+      turn += 1
+    )
+      await Bun.sleep(0);
+    expect(JSON.parse(folder.raw(FerretStateFile, id) ?? '{}').status).toBe('running');
+
+    // And its turn is now recorded: the pane draws, so the ferret is seen working.
+    runner.screens.set(handle, working('w1'));
+    await tick(h);
+    expect(JSON.parse(folder.raw(FerretStateFile, id) ?? '{}').turnState).toBe('working');
     await h.stop();
   });
 

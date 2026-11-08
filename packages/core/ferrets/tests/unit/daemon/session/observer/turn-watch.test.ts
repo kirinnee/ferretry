@@ -35,15 +35,24 @@ function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', t
   const failed: SessionId[] = [];
   let yields = 0;
   const broken = new Set<SessionId>();
+  /** A session whose writer throws a failure carrying this key (a damaged document, named by its damage). */
+  const damaged = new Map<SessionId, string>();
+  /** The next look waits for this before it answers (a look in flight). */
+  let gate: Promise<void> | undefined;
   const ports: PacedTurnPorts = {
     sessions: async () => [...state].map(([id, each]) => ({ id, state: each })),
     transcript: async id => transcripts.get(id),
     pane: async id => {
       looked.push(id);
+      const waiting = gate;
+      gate = undefined;
+      await waiting;
       if (broken.has(id)) throw new Error('the pane could not be read');
       return panes.has(id) ? panes.get(id) : IDLE;
     },
     record: async (id, change) => {
+      const damage = damaged.get(id);
+      if (damage !== undefined) throw Object.assign(new Error('the document is damaged'), { damage });
       recorded.push({ id, change });
       state.set(id, { ...(state.get(id) as TurnFacts), turnState: change.to });
       return true;
@@ -53,6 +62,7 @@ function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', t
       yields += 1;
     },
     failed: id => void failed.push(id),
+    failureKey: error => (error as { damage?: string }).damage,
   };
   const watcher = new PacedTurnWatcher(ports);
   const tick = async () => {
@@ -70,6 +80,13 @@ function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', t
     recorded,
     failed,
     broken,
+    damaged,
+    /** Holds the next look open until the answer is called. */
+    holdNextLook: () => {
+      let release = () => {};
+      gate = new Promise<void>(resolve => (release = resolve));
+      return () => release();
+    },
     yields: () => yields,
     id: (raw: string) => parseSessionId(raw),
   };
@@ -175,6 +192,37 @@ describe('PacedTurnWatcher', () => {
     should(subject.watcher.delayOf(id)).equal(TURN_WATCH_INTERVAL_MS);
   });
 
+  it('should not lose a wake that lands while that pane’s look is in flight: the next tick looks again', async () => {
+    // Arrange: a quiet pane, backed off to 10 s, its due look held open.
+    const subject = fleet(['woken-2']);
+    for (let at = 0; at < 16; at += 1) await subject.tick();
+    const id = subject.id('woken-2');
+    while (subject.watcher.delayOf(id) === TURN_WATCH_QUIET_MAX_MS) {
+      const before = subject.looked.length;
+      const release = subject.holdNextLook();
+      const ticking = subject.tick();
+      await Bun.sleep(0);
+      if (subject.looked.length === before) {
+        // Not due on this tick: nothing was held.
+        release();
+        await ticking;
+        continue;
+      }
+
+      // Act: Ferrets typed into the pane while the look was out, then the look lands.
+      subject.watcher.wake(id);
+      release();
+      await ticking;
+      break;
+    }
+    const lookedAfter = subject.looked.length;
+    await subject.tick();
+
+    // Assert: the wake was kept: the wait starts over at 2 s and the very next tick looks.
+    should(subject.looked.length).equal(lookedAfter + 1);
+    should(subject.watcher.delayOf(id)).equal(TURN_WATCH_INTERVAL_MS);
+  });
+
   it('should never slow the second look an unconfirmed end of turn waits for', async () => {
     // Arrange: the record says working and the transcript's newest record is the agent mid-turn; the pane now shows
     // only an idle prompt, so the end of turn is unconfirmed.
@@ -263,6 +311,31 @@ describe('PacedTurnWatcher', () => {
     should(subject.looked).have.length(2);
     should([...due.failures.keys()]).deepEqual([subject.id('bad-2')]);
     should(subject.watcher.delayOf(subject.id('bad-2'))).equal(TURN_WATCH_QUIET_MAX_MS);
+  });
+
+  it('should tell a keyed failure once, again only when its key changes or after the ferret recorded a turn', async () => {
+    // Arrange: the pane says the turn ended, but the writer meets a damaged document every time it is due.
+    const subject = fleet(['damaged-7'], { status: 'running', turn: 1, turnState: 'working' });
+    const id = subject.id('damaged-7');
+    subject.damaged.set(id, 'damage-a');
+
+    // Act + Assert: a minute of ticks (six due looks, each meeting the same damage) is told once.
+    for (let at = 0; at < 30; at += 1) await subject.tick();
+    should(subject.failed).deepEqual([id]);
+
+    // Act + Assert: the damage changes: told once more, at its next due look, and not again.
+    subject.damaged.set(id, 'damage-b');
+    for (let at = 0; at < 30; at += 1) await subject.tick();
+    should(subject.failed).deepEqual([id, id]);
+
+    // Act + Assert: mended (the turn is recorded), then damaged again the same way: told again.
+    subject.damaged.delete(id);
+    for (let at = 0; at < 6; at += 1) await subject.tick();
+    should(subject.recorded.map(each => each.change.to)).deepEqual(['your-turn']);
+    subject.state.set(id, { status: 'running', turn: 2, turnState: 'working' });
+    subject.damaged.set(id, 'damage-b');
+    for (let at = 0; at < 6; at += 1) await subject.tick();
+    should(subject.failed).deepEqual([id, id, id]);
   });
 
   it('should clear a stopped ferret without looking at its pane', async () => {
