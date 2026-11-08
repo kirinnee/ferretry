@@ -16,10 +16,14 @@
 
 const SOURCE_EXTENSION = /\.[cm]?[jt]sx?$/u;
 
-/** The embedded file name of the worker program at `url`: its file stem and `.js`. */
+/**
+ * The embedded file name of the worker program at `url`: its file stem and `.js`. A name that decodes to a path
+ * (an escaped `/` or a `\`) throws: resolved beside the entry it would climb out of the binary (`..%2F..%2Fx`).
+ */
 export function embeddedWorkerFile(url: URL): string {
-  const name = url.pathname.slice(url.pathname.lastIndexOf('/') + 1);
-  return `${decodeURIComponent(name).replace(SOURCE_EXTENSION, '')}.js`;
+  const name = decodeURIComponent(url.pathname.slice(url.pathname.lastIndexOf('/') + 1));
+  if (/[/\\]/u.test(name)) throw new TypeError('a worker program is named by its file name alone, not by a path');
+  return `${name.replace(SOURCE_EXTENSION, '')}.js`;
 }
 
 /** Whether `moduleUrl` (this module's own by default) is a bundled one: a source module ends in `.ts`. */
