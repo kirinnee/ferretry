@@ -177,3 +177,78 @@ describe('warden.yaml as read', () => {
     should(read.intervalMinutes).equal(DEFAULT_WARDEN_CONFIG.intervalMinutes);
   });
 });
+
+describe('an owner’s save while warden.yaml holds another edit (docs/config-files.md rule 3)', () => {
+  /** A port whose file holds an edit for the owner; `writeAsOwner` answers `result` and records what it was sent. */
+  const heldPort = (result: ConfigWriteOutcome) => {
+    const owner: unknown[] = [];
+    const plain: unknown[] = [];
+    const port = {
+      file: () => ({ enabled: true }),
+      fileState: () => ({ state: 'held', inEffect: true, sentences: ['a bigger daily cap'] }),
+      write: async (_def: unknown, _name: unknown, edit: ConfigEdit) => {
+        plain.push(edit);
+        return written;
+      },
+      writeAsOwner: async (_def: unknown, name: unknown, edit: { readonly patch: unknown }) => {
+        owner.push({ name, patch: edit.patch });
+        return result;
+      },
+    } as unknown as ConfigPort;
+    return { store: new ConfigWardenConfigStore(port), owner, plain };
+  };
+
+  it('should make a top-level save to BOTH versions through writeAsOwner, sending only the keys the owner changed', async () => {
+    const { store, owner, plain } = heldPort({
+      kind: 'written',
+      etag: 'e2',
+      loosened: [],
+      stillHeld: { id: 'warden.yaml@e2', sentences: ['a bigger daily cap'] },
+    });
+
+    const waiting = await store.write({ ...DEFAULT_WARDEN_CONFIG, enabled: false, intervalMinutes: 5 }, {
+      enabled: false,
+      intervalMinutes: 5,
+    } as WardenConfigPatch);
+
+    // In effect at once: the held edit rode along and still waits, so nothing of THIS save is said to wait.
+    should(waiting).eql([]);
+    should(owner).eql([{ name: undefined, patch: { enabled: false, intervalMinutes: 5 } }]);
+    should(plain).have.length(0);
+  });
+
+  it('should answer what waits when the owner’s own patch loosens and the judge holds it with the held edit', async () => {
+    const { store } = heldPort({
+      kind: 'held',
+      etag: 'e3',
+      id: 'warden.yaml@e3',
+      sentences: ['the warden is switched on'],
+    });
+
+    should(await store.write({ ...DEFAULT_WARDEN_CONFIG, enabled: true }, { enabled: true } as WardenConfigPatch)).eql([
+      'the warden is switched on',
+    ]);
+  });
+
+  it('should tell the owner to save again when the file moved since the kernel last read it', async () => {
+    const { store } = heldPort({ kind: 'conflict' });
+
+    await store.write(DEFAULT_WARDEN_CONFIG, { enabled: false } as WardenConfigPatch).then(
+      () => should.fail('', '', 'should have been refused'),
+      (error: unknown) => should(error).be.instanceOf(WardenConfigMoved),
+    );
+  });
+
+  it('should refuse a save that changes a section, writing nothing, since a whole section would undo the held one', async () => {
+    const { store, owner, plain } = heldPort({ kind: 'written', etag: 'e', loosened: [] });
+
+    await store
+      .write(DEFAULT_WARDEN_CONFIG, { enabled: false, caps: { investigationUsdPerDay: 1 } } as WardenConfigPatch)
+      .then(
+        () => should.fail('', '', 'should have been refused'),
+        (error: unknown) => should(error).be.instanceOf(WardenConfigHeld),
+      );
+    should(owner).have.length(0);
+    should(plain).have.length(0);
+  });
+});
