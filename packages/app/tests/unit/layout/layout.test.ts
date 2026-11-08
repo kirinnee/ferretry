@@ -21,7 +21,11 @@ function plugin(id: string, ui: NonNullable<Manifest['ui']>): SurfaceEntry {
 }
 
 const surfaces = [
-  plugin('agenda', { screens: [{ id: 'agenda', path: 'agenda', nav: { label: 'Agenda', order: 1 } }] }),
+  plugin('agenda', {
+    screens: [{ id: 'agenda', path: 'agenda', nav: { label: 'Agenda', order: 1 } }],
+    panels: [{ id: 'ferret-agenda', slot: 'ferret.side', order: 0 }],
+  }),
+  plugin('warden', { panels: [{ id: 'ferret-warden', slot: 'ferret.side', order: 5 }] }),
   plugin('ferrets', {
     screens: [
       { id: 'ferrets', path: 'ferrets' },
@@ -180,7 +184,14 @@ describe('the frame plan', () => {
       'settings',
     ]);
     expect(plan.side.holds).toMatchObject({ kind: 'screen', screen: { plugin: 'ferrets', id: 'ferret' } });
-    expect(plan.panels('ferret.side').map(p => p.id)).toEqual(['cards-of-ferret', 'files', 'sitrep', 'usage']);
+    expect(plan.panels('ferret.side').map(p => p.id)).toEqual([
+      'ferret-agenda',
+      'cards-of-ferret',
+      'files',
+      'ferret-warden',
+      'sitrep',
+      'usage',
+    ]);
     expect(plan.panels('composer.tools').map(p => p.id)).toEqual([
       'attachments',
       'dictation',
@@ -195,7 +206,7 @@ describe('the frame plan', () => {
       planFrame(layout, views)
         .panels('ferret.side')
         .map(p => p.id),
-    ).toEqual(['cards-of-ferret', 'files', 'sitrep', 'usage']);
+    ).toEqual(['ferret-agenda', 'cards-of-ferret', 'files', 'sitrep', 'usage', 'ferret-warden']);
   });
 
   test('a screen id two plugins declare is reachable only qualified', () => {

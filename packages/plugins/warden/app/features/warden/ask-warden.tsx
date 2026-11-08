@@ -1,8 +1,8 @@
 /**
  * Actions › Warden › "Ask the Warden to investigate now…" — the Warden's one row in a ferret's Actions
- * menu, contributed through the ferret-actions registry rather than written into it.
+ * menu, offered through Ferrets' `ferrets.actions-row` slot (views/warden-ferret.tsx) rather than written into it.
  *
- * The row opens a small form (the registry's popover on a desktop, its sheet on a phone): what the
+ * The row opens a small form (a dialog): what the
  * investigator should look at, optional notes, and the cost line read from the Warden's own status. The
  * request is P5's `POST /v1/warden/investigate`; once the daemon has taken it, a toast says where the
  * report will land, because nothing on this screen changes until it does.
@@ -14,12 +14,9 @@
 
 import type { WardenInvestigateRequest, WardenInvestigateView, WardenStatusView } from '../../wire.ts';
 import { Shield } from 'lucide-react';
-import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { CoreActionContext, FerretActionContribution, FerretActionFormHost } from '../../lib/ferret-actions.ts';
+import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
+import type { FerretActionFormHost } from '../../lib/ferret-actions.ts';
 import { failureMessage, FormFailure, FormField, FormFoot } from '../../lib/form-parts.tsx';
-import { type GrantsView, readGrants } from '../../lib/grants.ts';
-import type { DaemonConnection } from '../../lib/machine.ts';
-import { useDaemonReach, useWardenClientFactory, type WardenClientFactory } from '../../lib/warden-client-context.tsx';
 import {
   ASK_WARDEN_FOCI,
   ASK_WARDEN_NOTES_MAX,
@@ -29,7 +26,6 @@ import {
   askWardenInvestigatorLine,
   askWardenNote,
   askWardenQueuedSentence,
-  mayAskWarden,
 } from './ask-warden-model.ts';
 
 export const ASK_WARDEN_ACTION_ID = 'warden-investigate';
@@ -146,81 +142,5 @@ export function AskWardenForm({
         submitting={submitting}
       />
     </form>
-  );
-}
-
-/** The registry row, bound to one machine's Warden calls. */
-export const askWardenContribution = (ports: AskWardenPorts): FerretActionContribution<CoreActionContext> => ({
-  group: 'warden',
-  order: 10,
-  build: context =>
-    context.canControl
-      ? {
-          kind: 'form',
-          id: ASK_WARDEN_ACTION_ID,
-          label: 'Ask the Warden to investigate now…',
-          title: `Ask the Warden to investigate ${context.name}`,
-          icon: Shield,
-          render: (host: FerretActionFormHost) => (
-            <AskWardenForm host={host} name={context.name} ports={ports} ferret={context.view.config.id} />
-          ),
-        }
-      : null,
-});
-
-/** The Warden client of a machine: the two routes the form calls. */
-export type AskWardenClientFactory = WardenClientFactory;
-
-const NONE: readonly FerretActionContribution<CoreActionContext>[] = [];
-
-/**
- * The Warden's contributions to one machine's ferrets: the row when this caller may ask, else none.
- *
- * KEYED BY THE MACHINE. An answer read for one daemon is never used for another — switching machines
- * offers nothing until the new one has answered — and a grants read that fails offers nothing: the
- * Warden page is still there and says what went wrong in full.
- */
-export function useAskWardenActions(
-  connection: DaemonConnection,
-  createClient?: AskWardenClientFactory,
-  injectedGrantsOf?: (connection: DaemonConnection) => Promise<GrantsView>,
-): readonly FerretActionContribution<CoreActionContext>[] {
-  const reach = useDaemonReach();
-  const grantsOf = useMemo(
-    () => injectedGrantsOf ?? (async (connection: DaemonConnection) => await readGrants(await reach(connection))),
-    [injectedGrantsOf, reach],
-  );
-  const routedClient = useWardenClientFactory();
-  const factory: AskWardenClientFactory = createClient ?? routedClient;
-  const daemonId = connection.daemonId;
-  // The connection object can be re-created for the same machine; reads are keyed by its id.
-  const latest = useRef(connection);
-  latest.current = connection;
-  const [answer, setAnswer] = useState<{ readonly daemonId: string; readonly allowed: boolean } | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the read is asked again when the client factory changes
-  useEffect(() => {
-    let live = true;
-    void grantsOf(latest.current)
-      .then(grants => mayAskWarden(grants))
-      .catch(() => false)
-      .then((allowed: boolean) => {
-        if (live) setAnswer({ daemonId, allowed });
-      });
-    return () => {
-      live = false;
-    };
-  }, [daemonId, factory, grantsOf]);
-  const allowed = answer !== null && answer.daemonId === daemonId && answer.allowed;
-  return useMemo(
-    () =>
-      allowed
-        ? [
-            askWardenContribution({
-              status: async () => await (await factory(latest.current)).status(),
-              investigate: async request => await (await factory(latest.current)).investigate(request),
-            }),
-          ]
-        : NONE,
-    [allowed, factory],
   );
 }
