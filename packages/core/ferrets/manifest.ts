@@ -6,7 +6,9 @@ import { z } from 'zod';
 import { definePlugin, panel, route, screen, socket, tool, verb } from '@ferretry/kernel/manifest';
 import {
   ArchiveFile,
+  AutoResumeDecide,
   AutoResumeFile,
+  AutoResumeSummaryFile,
   FerretChanged,
   FerretStopping,
   FerretStarted,
@@ -471,6 +473,7 @@ export default definePlugin({
       SystemCallsignsFile,
       ArchiveFile,
       AutoResumeFile,
+      AutoResumeSummaryFile,
       RestartsFile,
       WorktreesFile,
       ForkFiles,
@@ -502,6 +505,7 @@ export default definePlugin({
       { hook: Logins },
       { hook: LaunchParts },
       { hook: StartDecide },
+      { hook: AutoResumeDecide },
       { hook: SitrepLines },
       { hook: FerretChanged },
       { hook: FerretStopping },

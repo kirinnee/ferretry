@@ -394,7 +394,16 @@ export interface ServiceResumeOptions extends Omit<ResumeOptions, 'actor'> {
    * never authority. Absent: `unknown`, so the turn names no author.
    */
   readonly actor?: ResumeActor;
+  /**
+   * The state the ferret must STILL be in, judged under its own queue before anything is decided (today's auto-resume
+   * `expectedStatus: 'failed'`): false refuses the resume with nothing written or launched. The auto-resume sets it, so
+   * a person who stopped, resumed or archived the ferret in the meantime wins (W2-a).
+   */
+  readonly expect?: (record: FerretRecord) => boolean;
 }
+
+/** Why a resume that found the ferret no longer in the state its caller expected was refused (W2-a). */
+const NO_LONGER_OWED = 'it is no longer owed this resume: it was stopped, resumed or ended by something else first';
 
 class ResumeRefusal extends Error {
   constructor(readonly failure: StartFailure) {
@@ -681,6 +690,33 @@ export class FerretsService implements FerretsApi {
   }
 
   /**
+   * Settles a ferret whose terminal the runner PROVED gone (W2-a, today's `TmuxSessionExitObserver.settle` for a `gone`
+   * pane): stopped, its end cause `terminal_gone`, and today's `session.exited` journal event after the record is
+   * durable. A COMPARE-AND-SET under the ferret's own queue: only while it is still live on exactly `handle`. Anything
+   * that moved in between (a stop, a resume that relaunched it on another pane) wins, and false is answered. Nothing is
+   * killed or launched: the pane is already gone. Its attachments are released as a stop releases them.
+   */
+  async settleGone(ferret: FerretId, handle: string, exited: { readonly from: string; readonly reason: string }) {
+    return await this.serial.run(ferret, async () => {
+      await this.ports.ready?.();
+      const record = this.registry.get(ferret);
+      if (record === undefined || (record.state !== 'working' && record.state !== 'idle') || record.handle !== handle)
+        return false;
+      this.ports.stopping?.(ferret);
+      await this.settle(record, 'stopped', 'stopped', { kind: 'terminal_gone' });
+      await this.ports.history?.(ferret, 'session.exited', {
+        reason: exited.reason,
+        from: exited.from,
+        status: 'failed',
+        pane: 'gone',
+        exitCode: null,
+        signal: null,
+      });
+      return true;
+    });
+  }
+
+  /**
    * Revives a stopped ferret. A `message` is recorded with today's `session.resumed` event; delivering it into the
    * conversation is the Conversation's (not wired in this build).
    */
@@ -739,6 +775,7 @@ export class FerretsService implements FerretsApi {
     await this.ports.ready?.();
     const found = this.registry.get(ferret);
     if (found === undefined) return failed('refused', `no ferret ${ferret}`);
+    if (options?.expect !== undefined && !options.expect(found)) return failed('refused', NO_LONGER_OWED);
     // A plain resume of a running ferret is the send shortcut: nothing to relaunch. Only a move gives it up, and then
     // the live pane is stopped first (never a second pane beside it).
     const replacing = found.state !== 'stopped';
