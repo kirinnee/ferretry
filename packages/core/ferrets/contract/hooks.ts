@@ -49,8 +49,20 @@ export const StartDecideInputSchema = z.strictObject({
   folder: z.string().min(1),
   /** Who asked for the start. */
   by: z.enum(['owner', 'ferret', 'pack', 'board', 'resume']),
+  /** The model the start NAMED (`options.model`); absent when it named none (the harness then picks its own). */
+  model: z.string().min(1).optional(),
+  /** The start asked for the harness's fast mode (`options.fast`); absent when it did not. */
+  fast: z.boolean().optional(),
 });
 export type StartDecideInput = z.infer<typeof StartDecideInputSchema>;
+
+/**
+ * The refusal codes a `start.decide` taker may attach to its `no`: CLOSED, declared here, so a plugin can never mint a
+ * code or a status. `unservable_model` is a start that asked for something its model cannot give (fast mode on a model
+ * without it); Ferrets answers it `409 unservable_model`. A code outside this list reads as a plain `refused`.
+ */
+export const StartRefusalCodeSchema = z.enum(['unservable_model']);
+export type StartRefusalCode = z.infer<typeof StartRefusalCodeSchema>;
 
 /** Board, Packs, Usage may refuse a start (a budget, a pause, a card rule). Not on the security path. */
 export const StartDecide = defineHook('start.decide', { mode: 'decide', input: StartDecideInputSchema });

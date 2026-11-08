@@ -71,12 +71,15 @@ export async function host(
     readonly pinner?: Parameters<typeof testHost>[0]['pinner'];
     /** Answers the Git the file browser runs. */
     readonly spawn?: Parameters<typeof testHost>[0]['spawn'];
+    /** More plugins on the host (a fake taker of a Ferrets hook). */
+    readonly plugins?: Parameters<typeof testHost>[0]['plugins'];
   } = {},
 ): Promise<TestHost> {
   const plugins = [
     ferrets,
     ...(extra.harness === undefined ? [] : [harnessPlugin(extra.harness)]),
     ...(extra.runner === undefined ? [] : [runnerPlugin(extra.runner)]),
+    ...(extra.plugins ?? []),
   ];
   const first = await testHost({
     plugins,

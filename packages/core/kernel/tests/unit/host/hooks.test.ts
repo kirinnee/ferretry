@@ -97,6 +97,39 @@ describe('the hooks engine (§3.5)', () => {
     expect(order).toEqual(['p2', 'p1']);
   });
 
+  test('decide: a no may carry a string code, passed through untouched; any other type is dropped; the kernel never reads it', async () => {
+    const taker = plugin('p1', { takes: [{ hook: Decide }] });
+    const { engine } = HookEngine.plan([offerer, taker], silentLog, manualDeadline());
+    let answer: unknown = { allow: false, reason: 'no', code: 'unservable_model' };
+    engine.attach('p1', { 't.decide': () => answer as never }, 'live');
+    expect(await engine.invokerFor('gate').decide(Decide, undefined)).toEqual({
+      allow: false,
+      reason: 'no',
+      code: 'unservable_model',
+    });
+    for (const odd of [7, { x: 1 }, null, ['a']]) {
+      answer = { allow: false, reason: 'no', code: odd };
+      expect(await engine.invokerFor('gate').decide(Decide, undefined)).toEqual({ allow: false, reason: 'no' });
+    }
+  });
+
+  test('decide: a failed, timed-out or throwing taker never carries a code', async () => {
+    const taker = plugin('p1', { takes: [{ hook: Decide }] });
+    const { engine } = HookEngine.plan([offerer, taker], silentLog, manualDeadline());
+    engine.attach(
+      'p1',
+      {
+        't.decide': () => {
+          throw Object.assign(new Error('boom'), { code: 'unservable_model' });
+        },
+      },
+      'live',
+    );
+    const answer = await engine.invokerFor('gate').decide(Decide, undefined);
+    expect(answer.allow).toBe(false);
+    expect(answer).not.toHaveProperty('code');
+  });
+
   test('decide: a throw is a no, a timeout is a no, a failed taker is a no', async () => {
     const deadline = manualDeadline();
     const taker = plugin('p1', { takes: [{ hook: Decide }] });

@@ -38,7 +38,9 @@ import { useCallback, useSyncExternalStore } from 'react';
 import { z } from 'zod';
 import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx';
 import { stepUpAct } from './lib/grants.ts';
+import { ACCESS_ROUTE_KEYS } from './daemon-scope.tsx';
 import { routeRequestClient } from './lib/route-request.ts';
+import { PairPhoneHost } from './pair-phone-host.tsx';
 import {
   fetchSecuritySettings,
   stepUpStaysSentence,
@@ -103,7 +105,7 @@ export function accessPasskey(ports: PasskeyPorts): PasskeyProvision {
   const client = async (daemon: DaemonConnection): Promise<StepUpClient> => {
     const routed = ports.client(daemon.daemonId);
     if (routed === undefined) throw new Error(PASSKEY_UNREACHABLE);
-    return routeRequestClient(routed);
+    return routeRequestClient(routed, ACCESS_ROUTE_KEYS);
   };
   const ceremonyPorts = { client, credentials: ports.credentials, origin: ports.origin };
   const stepUp = new StepUpGate({
@@ -185,6 +187,8 @@ export function accessPasskey(ports: PasskeyPorts): PasskeyProvision {
         <StepUpDialog gate={stepUp} machineName={machineName} />
         {/* The same prompt, for a machine that asks for a passkey on opening (`unlock_required`). */}
         <StepUpDialog gate={unlockGate} copy={UNLOCK_COPY} machineName={machineName} />
+        {/* "Pair a phone" from the command bar opens its sheet here, over whatever page the person is on. */}
+        <PairPhoneHost ports={ports} />
       </>
     );
   }
