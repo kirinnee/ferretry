@@ -165,7 +165,8 @@
     "usage": [
       "S175, S176, S177 and S178 stay skipped (rows.test.ts) until the Logins sign-in usage read, the housekeeping worker and job runner (Ferrets) and the Vault sealed read are ported",
       "all 61 usage parity rows stay un-flipped until each is proved by name in a usage test",
-      "GAP(ferrets): the Info tab Usage and the ferret's limits (a ferret record carries none) are Usage's `ferret.side` panel; not contributed yet"
+      "GAP(ferrets): the Info tab Usage and the ferret's limits (a ferret record carries none) are Usage's `ferret.side` panel; not contributed yet",
+      "GAP(usage): compaction history (F-0130) is Usage's (ruling #27): the Ferrets StorageLiveActivitySource has no history until Usage adds it (owner: nelly)"
     ],
     "onboarding": [
       "10 parity rows have no test files: tests/unit/parity/app.test.tsx, commands.test.ts and storage.test.ts do not exist, and R-0092 is not proved yet",

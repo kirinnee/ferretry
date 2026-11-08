@@ -5,6 +5,7 @@ import type { EventDef } from '@ferretry/kernel/contract';
 import { type StartedDaemon, startDaemon } from '../../../../../scripts/test/two-release/daemon.ts';
 import { builds, hits, hitTotal, resetCounters } from '../../../../../scripts/test/two-release/hits.ts';
 import { buildReleases, type Release } from '../../../../../scripts/test/two-release/releases.ts';
+import { UPDATE_DAEMON_COMMAND } from '../../../src/client/sentences.ts';
 import { DaemonCallError } from '../../../src/client/transport.ts';
 import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
@@ -35,7 +36,8 @@ const CORE_IDS = ['kernel', 'gate', 'asks', 'vault', 'ferrets', 'access', 'conne
 const FIXTURE_IDS = ['alpha', 'beta', 'gamma', 'delta'] as const;
 const OLDER = '4.9.0';
 const NEWER = '5.1.0';
-const UPDATE = '`fy daemon update`';
+/** The remedy the app names for an older daemon: its own constant, the one fact (redesign §9.6: `fy update`). */
+const UPDATE = `\`${UPDATE_DAEMON_COMMAND}\``;
 
 let A: Release;
 let Bb: Release;
