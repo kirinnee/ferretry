@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { HarnessWrapperSource } from '../../../../../daemon/lib/session/peers/transcript-launch.ts';
 import { FIXED_SETTINGS_FILE, RUNTIME_STATE_DIRECTORY } from '../../../../../daemon/lib/session/peers/fleet.ts';
 import should from 'should';
+import { DiskFileSystem } from '../../../../support/daemon/disk-file-system.ts';
 import { FileLaunchSettingsDigest } from '../../../../../daemon/adapters/session/launch/file-launch-settings.ts';
 
 /** Today's conversation-plugin `FileHarnessWrapperSource` (`adapters/session/transcript/`), restated: a wrapper's text, or nothing for a binary. */
@@ -40,7 +41,7 @@ describe('FileLaunchSettingsDigest', () => {
   it('should change when the wrapper or its fixed settings file change, and only then', async () => {
     // Arrange
     const { wrapper, fixed } = await fleet();
-    const subject = new FileLaunchSettingsDigest(new FileHarnessWrapperSource(), {});
+    const subject = new FileLaunchSettingsDigest(new FileHarnessWrapperSource(), {}, new DiskFileSystem());
     await writeFile(fixed, '{"permissions":{"deny":[]}}');
 
     // Act
@@ -61,7 +62,7 @@ describe('FileLaunchSettingsDigest', () => {
   it('should digest a runtime with no fixed layer, and say nothing for a wrapper it cannot read', async () => {
     // Arrange
     const { wrapper } = await fleet();
-    const subject = new FileLaunchSettingsDigest(new FileHarnessWrapperSource(), {});
+    const subject = new FileLaunchSettingsDigest(new FileHarnessWrapperSource(), {}, new DiskFileSystem());
 
     // Act / Assert
     should(await subject.digest(wrapper, 'claude')).match(/^[0-9a-f]{64}$/u);
@@ -75,7 +76,7 @@ describe('FileLaunchSettingsDigest.fixedSettings', () => {
   it('should hand back the fixed settings text exactly, empty for a login without one', async () => {
     // Arrange
     const { wrapper, fixed } = await fleet();
-    const subject = new FileLaunchSettingsDigest(new FileHarnessWrapperSource(), {});
+    const subject = new FileLaunchSettingsDigest(new FileHarnessWrapperSource(), {}, new DiskFileSystem());
 
     // Act
     const none = await subject.fixedSettings(wrapper, 'claude');
@@ -90,7 +91,7 @@ describe('FileLaunchSettingsDigest.fixedSettings', () => {
   it('should say nothing for a wrapper it cannot read, and an empty overlay for one exporting no home', async () => {
     // Arrange
     const { wrapper } = await fleet();
-    const subject = new FileLaunchSettingsDigest(new FileHarnessWrapperSource(), {});
+    const subject = new FileLaunchSettingsDigest(new FileHarnessWrapperSource(), {}, new DiskFileSystem());
 
     // Act / Assert — the codex reading of a claude wrapper finds no CODEX_HOME, so there is no file to look for.
     should(await subject.fixedSettings(`${wrapper}-missing`, 'claude')).be.undefined();
@@ -101,7 +102,7 @@ describe('FileLaunchSettingsDigest.fixedSettings', () => {
     // Arrange — a directory where the file should be: a read error that is not "no such file".
     const { wrapper, fixed } = await fleet();
     await mkdir(fixed, { recursive: true });
-    const subject = new FileLaunchSettingsDigest(new FileHarnessWrapperSource(), {});
+    const subject = new FileLaunchSettingsDigest(new FileHarnessWrapperSource(), {}, new DiskFileSystem());
 
     // Act / Assert
     should(await subject.fixedSettings(wrapper, 'claude')).be.undefined();

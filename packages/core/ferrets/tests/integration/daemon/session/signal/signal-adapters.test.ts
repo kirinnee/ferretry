@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
+import { DiskFileSystem } from '../../../../support/daemon/disk-file-system.ts';
 import {
   FileSignalArtifacts,
   LauncherSignalTerminal,
@@ -70,7 +71,7 @@ describe('the signal artifact store', () => {
     // Arrange
     const home = await mkdtemp(join(tmpdir(), 'ferretry-signal-files-'));
     homes.add(home);
-    const store = new FileSignalArtifacts(() => home, clock);
+    const store = new FileSignalArtifacts(() => home, clock, new DiskFileSystem());
 
     // Act
     await store.writeSummary(ID, '  shipped the port  ');
@@ -95,7 +96,7 @@ describe('the signal artifact store', () => {
     // Arrange
     const home = await mkdtemp(join(tmpdir(), 'ferretry-signal-marker-'));
     homes.add(home);
-    const store = new FileSignalArtifacts(() => home, clock);
+    const store = new FileSignalArtifacts(() => home, clock, new DiskFileSystem());
 
     // Act
     await store.markDone(ID, 4);
@@ -113,7 +114,7 @@ describe('the signal artifact store', () => {
     // Arrange
     const home = await mkdtemp(join(tmpdir(), 'ferretry-signal-question-'));
     homes.add(home);
-    const store = new FileSignalArtifacts(() => home, clock);
+    const store = new FileSignalArtifacts(() => home, clock, new DiskFileSystem());
 
     // Act
     await store.raiseQuestion(ID, 'which branch?');

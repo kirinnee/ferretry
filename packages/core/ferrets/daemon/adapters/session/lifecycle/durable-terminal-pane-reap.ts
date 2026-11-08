@@ -10,7 +10,6 @@ import {
 } from '../../../lib/session/peers/tmux-lifecycle.ts';
 import { hasSafeTerminalPaneIdentity } from '../../../lib/session/reap.ts';
 import { parseSessionId, type SessionId } from '../../../lib/session-id.ts';
-import { processIncarnationFor } from './process-incarnation.ts';
 import type {
   DurableTerminalSession,
   ObservedTerminalPane,
@@ -70,7 +69,7 @@ export class DurableTerminalPaneRegistrar {
     private readonly tmux: TmuxController,
     private readonly files: FileSystemPort,
     private readonly paths: FoundationPaths,
-    private readonly incarnation: ProcessIncarnation = processIncarnationFor(),
+    private readonly incarnation: ProcessIncarnation,
   ) {}
 
   async register(record: SessionLifecycleRecord): Promise<void> {
@@ -280,7 +279,7 @@ export class ExactTmuxPaneReaper implements RegisteredPaneObserver, ExactTermina
 
   constructor(
     private readonly tmux: TmuxController,
-    private readonly incarnation: ProcessIncarnation = processIncarnationFor(),
+    private readonly incarnation: ProcessIncarnation,
   ) {}
 
   async observe(registration: RegisteredTerminalPane): Promise<ObservedTerminalPane | undefined> {

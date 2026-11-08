@@ -1,6 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import type { FileSystemPort } from '../../../lib/ports.ts';
 import type { QueueAuthor } from '../../../lib/protocol/session.ts';
 import type { ResumeTurnStore } from '../../../lib/session/resume/types.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
@@ -18,7 +17,7 @@ const MARKERS = ['done', 'needs-help', 'process-exit'] as const;
 export class FileResumeTurnStore implements ResumeTurnStore {
   constructor(
     private readonly sessionDirectory: (id: SessionId) => string,
-    private readonly uniqueId: () => string = randomUUID,
+    private readonly fileSystem: Pick<FileSystemPort, 'ensureDirectory' | 'writeTextAtomic' | 'removeFile'>,
   ) {}
 
   file(id: SessionId, turn: number): string {
@@ -27,7 +26,7 @@ export class FileResumeTurnStore implements ResumeTurnStore {
 
   async writeTurn(id: SessionId, turn: number, document: string, by?: QueueAuthor): Promise<string> {
     const file = this.file(id, turn);
-    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+    await this.fileSystem.ensureDirectory(dirname(file), 0o700);
     // Who the turn is from sits BESIDE it, never in it: the agent reads the document, the app reads this.
     if (by !== undefined) await this.atomically(authorFile(file), `${JSON.stringify(by)}\n`);
     await this.atomically(file, document);
@@ -35,14 +34,12 @@ export class FileResumeTurnStore implements ResumeTurnStore {
   }
 
   private async atomically(file: string, contents: string): Promise<void> {
-    const temporary = `${file}.${this.uniqueId()}.tmp`;
-    await writeFile(temporary, contents, { encoding: 'utf8', mode: 0o600 });
-    await rename(temporary, file);
+    await this.fileSystem.writeTextAtomic(file, contents);
   }
 
   async clearMarkers(id: SessionId): Promise<void> {
     const directory = this.sessionDirectory(id);
-    for (const marker of MARKERS) await rm(join(directory, `${marker}.marker`), { force: true });
+    for (const marker of MARKERS) await this.fileSystem.removeFile(join(directory, `${marker}.marker`));
   }
 }
 

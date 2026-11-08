@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import type { FileSystemPort } from '../../../lib/ports.ts';
 import type { SessionMonitorService } from '../../../lib/session/monitor/service.ts';
 import type { SessionMonitorSettings } from '../../../lib/session/monitor/settings.ts';
 import type { MonitorLoop, MonitorTickReport } from '../../../lib/session/monitor/types.ts';
@@ -26,7 +26,7 @@ export class MonitorTickRunner implements MonitorLoop {
     /** Absolute path of this daemon's monitor record, inside its own state home. */
     private readonly file: string,
     private readonly settings: SessionMonitorSettings,
-    private readonly uniqueId: () => string = randomUUID,
+    private readonly fileSystem: Pick<FileSystemPort, 'ensureDirectory' | 'writeTextAtomic'>,
   ) {}
 
   /** The cadence the composition root must fire this on: the loop's own, never the caller's choice. */
@@ -60,33 +60,29 @@ export class MonitorTickRunner implements MonitorLoop {
    */
   async publish(report: MonitorTickReport | undefined): Promise<void> {
     const health = this.monitor.health();
-    await writeJsonAtomic(
-      this.file,
-      {
-        armed: health.armed,
-        overdue: health.overdue,
-        ticks: health.ticks,
-        sinceLastTickMs: health.sinceLastTickMs,
-        parked: health.parked,
-        consecutiveFailures: health.consecutiveFailures,
-        ...(health.lastTickAt === undefined ? {} : { lastTickAt: health.lastTickAt }),
-        ...(health.lastFailure === undefined ? {} : { lastFailure: health.lastFailure }),
-        ...(report === undefined
-          ? {}
-          : {
-              lastTick: {
-                at: report.at,
-                tick: report.tick,
-                parked: report.parked,
-                expired: report.expired,
-                heartbeats: report.heartbeats,
-                held: report.held,
-                failures: Object.fromEntries(report.failures),
-                ...(report.sinceLastTickMs === undefined ? {} : { sinceLastTickMs: report.sinceLastTickMs }),
-              },
-            }),
-      },
-      this.uniqueId,
-    );
+    await writeJsonAtomic(this.fileSystem, this.file, {
+      armed: health.armed,
+      overdue: health.overdue,
+      ticks: health.ticks,
+      sinceLastTickMs: health.sinceLastTickMs,
+      parked: health.parked,
+      consecutiveFailures: health.consecutiveFailures,
+      ...(health.lastTickAt === undefined ? {} : { lastTickAt: health.lastTickAt }),
+      ...(health.lastFailure === undefined ? {} : { lastFailure: health.lastFailure }),
+      ...(report === undefined
+        ? {}
+        : {
+            lastTick: {
+              at: report.at,
+              tick: report.tick,
+              parked: report.parked,
+              expired: report.expired,
+              heartbeats: report.heartbeats,
+              held: report.held,
+              failures: Object.fromEntries(report.failures),
+              ...(report.sinceLastTickMs === undefined ? {} : { sinceLastTickMs: report.sinceLastTickMs }),
+            },
+          }),
+    });
   }
 }
