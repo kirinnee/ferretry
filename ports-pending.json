@@ -163,10 +163,19 @@
     ],
     "layouts": [
       "GAP(ferrets): the Files side tab (Ferrets' `files` panel on `ferret.side`, order 40) is hidden until the ferret.side panel layout lists it"
+    ],
+    "catalogs": [
+      "GAP(connections): a publisher this browser is not paired with is unreachable: the shell offers no member transport yet. @ferretry/app declares MemberCarriers (connect/member.ts) and ShellProvides.member, Connections-only and not implemented; with none the join, join-options and member session walks answer unreachable and send nothing, so a share code is never spent. Connections implements legs() in today's order (relay-join.ts joinCandidates/memberCandidates/inWalkOrder l.98-135) and the drive loop (relay-carrier.ts driveRelaySession l.508, relayTunnelRequest l.350, relayResponse l.389, browserHeartbeat l.189)",
+      "GAP(shell): the shell mounts no daemon-less screen (ScreenView draws the skeleton line when a screen has no daemon), so /join (where a share link lands) and /shared (what is shared with this browser) are built but not reachable until it does; Subscriptions on the daemon's sharing page lists the same publishers",
+      "GAP(runtimes): Install from a file or a publisher offers a runtime and profile only when the host names them (InstallHost.runtimes); Runtimes' profile list is not read because Catalogs has no edge to it, so the runtime choice is empty in the app",
+      "GAP(projects): Install offers a project only when the host names it (InstallHost.projects); Projects' list is not read because Catalogs' app has no edge to it",
+      "GAP(skills): My catalogs' Publish skills picker lists nothing (it says Skills has not offered its list) until Skills offers the machine skills list through its contract; the skill rows' Publish / Uninstall / installed-from in Skills and MCP are those halves' to contribute, and a copy of a skill from this machine (local-skill-installs) is Skills'",
+      "GAP(access): this device's id is not read for the Sharing-off command (it keeps its <device> placeholder), the browser is named plainly (Browser) when it joins a publisher, and the share QR is drawn by qrcode-generator in this half, not by Access's encoder; the passkey ceremony wrappers (createPasskey / assertPasskey) were moved into @ferretry/app (passkey/ceremony.ts) as a second copy of Access's lib/passkeys.ts until Access repoints",
+      "GAP(shell): the page theme switch on the Sharing page is not drawn (the shell offers none to a screen)",
+      "tests/integration/app: catalog-review.visual.test.tsx and the versions screenshot harness are moved and never run locally; the visual suite reads the design-system sheet alone until @ferretry/app/testing/browser builds the app stylesheet"
     ]
   },
   "pendingHalves": {
-    "catalogs": ["app"],
     "shells": ["app"],
     "layouts": ["app"],
     "gate": ["app"],

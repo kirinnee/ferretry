@@ -82,6 +82,23 @@ describe('the providers the shell takes', () => {
     expect(got.failures).toEqual([]);
   });
 
+  test('member carriers only from Connections, and none offered is none (a publisher is then unreachable)', () => {
+    const carriers = {
+      legs: () => [],
+      tunnelRequest: () => ({}),
+      tunnelResponse: () => new Response(null),
+      deviceKeyHandle: () => ({}) as never,
+    };
+    const impostor = { ...carriers };
+    const got = registeredConnect(
+      [entry('catalogs', { member: () => impostor }), entry('connections', { member: () => carriers })],
+      ports(),
+    );
+    expect(got.member).toBe(carriers);
+    expect(registeredConnect([entry('catalogs', { member: () => impostor })], ports()).member).toBeUndefined();
+    expect(registeredConnect([], ports()).member).toBeUndefined();
+  });
+
   test('a skeleton half provides nothing, and a provider that throws is left out and said', () => {
     const got = registeredConnect(
       [

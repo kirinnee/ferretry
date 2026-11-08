@@ -33,7 +33,11 @@ export {
   type RelayClientSocket,
   RelayPairingRefusedError,
   type RelayPairingOutcome,
+  RelayClientSession,
+  type RelayClientSessionDependencies,
+  RelayJoinRefusedError,
   RelaySessionError,
+  type RelayTunnelAnswer,
   RelayStreamRefusedError,
   type SessionDeviceClaim,
 } from './session/session-client.ts';
@@ -49,7 +53,7 @@ export {
   type SessionKeyRotation,
   toBase64Url,
 } from './session/session-transport.ts';
-export { RelayKeyHandleError } from './session/webcrypto.ts';
+export { RelayKeyHandleError, WebCryptoRelayCrypto } from './session/webcrypto.ts';
 export {
   DaemonIdSchema,
   HEARTBEAT_GRACE_SECONDS,
@@ -330,3 +334,7 @@ export { useChatScrollSlot } from './scroll/chat-scroll.ts';
 export * from './scroll/transcript-follow.ts';
 export * from './scroll/use-stick-to-bottom.ts';
 export { RECONNECTING_GRACE_MS } from './shared/reconnecting-grace.ts';
+export * from './passkey/ceremony.ts';
+
+// ─── a member session to a publisher this browser is not paired with (Connections provides; not implemented yet) ───
+export * from './connect/member.ts';

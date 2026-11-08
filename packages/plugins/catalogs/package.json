@@ -25,7 +25,19 @@
     "@ferretry/plugin-access": "workspace:*",
     "@ferretry/plugin-connections": "workspace:*",
     "@ferretry/plugin-projects": "workspace:*",
-    "qrcode-generator": "^2.0.4"
+    "qrcode-generator": "^2.0.4",
+    "@ferretry/app": "workspace:*",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^20.11.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/react-test-renderer": "^19.0.0",
+    "react-test-renderer": "^19.0.0",
+    "playwright-core": "1.62.1"
+  }
 }

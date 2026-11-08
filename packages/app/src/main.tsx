@@ -15,6 +15,7 @@ import { createRoot } from 'react-dom/client';
 import { connector, type DirectDial, pairOverCarriers, pairOverDirect } from './connect/connector.ts';
 import { directoryFetch } from './connect/directory.ts';
 import { registeredConnect, registeredPasskey } from './connect/provides.ts';
+import { setMemberCarriers } from './connect/member.ts';
 import { DaemonList } from './daemons/daemon-list.ts';
 import { generated } from './generated/surfaces.ts';
 import { DeviceLayoutStore } from './layout/device-layout.ts';
@@ -94,6 +95,7 @@ const registered = registeredConnect(generated.surfaces, {
   pair: pairOverCarriers(crypto, direct, after, () => registered.pairing),
   ...(directory === undefined ? {} : { directory }),
 });
+setMemberCarriers(registered.member);
 for (const failure of registered.failures)
   console.warn(`${failure.plugin} could not set up its connect part: ${failure.reason}`);
 
