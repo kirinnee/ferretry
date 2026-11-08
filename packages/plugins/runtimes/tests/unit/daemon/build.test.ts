@@ -463,7 +463,7 @@ describe('the runtimes daemon', () => {
     await clock.advance(30 * 60_000);
     await quiet(host);
 
-    // Assert: the runtime still came back, and the operator is told once why a login's timed switch is not watched.
+    // Assert: the runtime still came back, and the operator is told why a login's timed switch is not watched.
     should(changed()).deepEqual(named('codex-work'));
     const warned = host.logs.filter(
       entry => entry.level === 'warn' && entry.message.includes('the logins could not be read'),

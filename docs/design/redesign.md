@@ -1564,6 +1564,13 @@ dusk-layout/
   (§10.3): every declared route answers `unavailable`, every hook entry is a no-op the conformance suite marks
   `skeleton`, and the global `manifest-match` check accepts a skeleton half only while the plugin is listed in
   `ports-pending.json`, which may only shrink.
+- **Open gaps are sorted by root cause** (lead ruling #50, 2026-11-08): every `pendingReasons` line starts with
+  the one piece of work that closes it, and lines are ordered by it — `[mount]` (built, but the app shell has no
+  mount point for it), `[kernel: <capability>]` (a host capability the kernel does not offer), `[cross: <plugin>]`
+  (a half the named plugin must contribute to another), `[compose]` (ported, but the plugin's own daemon does not
+  compose it), `[cli]` (CLI verbs not declared), `[tests]` (only tests or captures missing), `[own]` (the plugin's
+  own remaining work). Progress is reported per bucket, and work is cut as one unit per bucket (one shell mount
+  pass, one kernel batch with one security review, one unit per contributing plugin), not line by line.
 - **Guarantee fixtures**: every row of Appendix D that a package owns has a test whose name contains the row id
   (`I103 wait predicate sees masked text`, in **Terminals**). `fy check` fails a kept row with no test. A row's owner
   is the package whose code **enforces** it, row by row, never the section it came from (review r8 finding 1): the

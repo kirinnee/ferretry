@@ -100,7 +100,7 @@ describe('warden.yaml changes in flight', () => {
       (error: unknown) => {
         should(error).be.instanceOf(WardenConfigHeld);
         should((error as Error).message).equal(
-          'warden.yaml has a change waiting for your approval; confirm or discard it first, then save again.',
+          'this save names no setting, so nothing was changed; warden.yaml still has a change waiting for your approval (confirm or discard it, or change a setting and save again).',
         );
       },
     );

@@ -49,7 +49,8 @@ export { DEFAULT_WARDEN_REVIVE, WardenClearedBySchema, WardenConfigSchema, Warde
 export { WardenJevActsSchema };
 export type { SessionStatus, WardenConfig };
 export const WardenAutoMoveTriggerSchema = z.enum(WARDEN_AUTO_MOVE_TRIGGERS);
-const WARDEN_CONFIG_SECTIONS = [
+/** The settings that are mappings of sub-settings: the one list that decides merge-by-sub-key vs whole (Warden's adapters import it). */
+export const WARDEN_CONFIG_SECTIONS = [
   'revive',
   'autoMove',
   'layers',

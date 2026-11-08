@@ -1,7 +1,8 @@
 /**
  * Switches itself back on (docs/disabling.md): a login or runtime disabled `until` a time must be
  * published available again when that time comes, with no edit. This holds ONE timer, set for the
- * earliest `until` still ahead; when it fires the fleet is republished and the next one is set.
+ * earliest `until` not yet published (it may already be past, and then it fires at once); when it fires the fleet is
+ * republished and the next one is set.
  *
  * The clock and the timer are injected, so a test drives time by hand.
  */
@@ -12,7 +13,7 @@ import { disabledUntilMs, nextDisableExpiry } from '../account/disabled.ts';
 const MAX_TIMER_MS = 2_147_483_647;
 
 export interface DisableExpiryDeps {
-  /** The earliest `until` still ahead (ms), or `undefined` when none will fall due. */
+  /** The earliest `until` not yet published (ms; may already be past), or `undefined` when none will fall due. */
   next(): Promise<number | undefined>;
   now(): number;
   /** Publish the fleet again so the switch that expired reads as on. */
