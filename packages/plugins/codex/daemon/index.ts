@@ -4,6 +4,7 @@ import manifest from '../manifest.ts';
 import {
   CODEX_CONFIG,
   CODEX_DISCOVERY,
+  CODEX_FAST_CATALOG,
   CodexUpdateFinished,
   type CodexApi,
   type Discovery,
@@ -15,7 +16,6 @@ import { HostCodexFacts } from './adapters/facts.ts';
 import { HostPrograms } from './adapters/host-programs.ts';
 import { NpmCodexLatest } from './adapters/npm-latest.ts';
 import { packageRunner } from './adapters/package-run.ts';
-import { minutes } from '@ferretry/std';
 import { HostCodexProbe } from './adapters/probe.ts';
 import { CodexAppServerCatalog } from './adapters/app-server-catalog.ts';
 import { HeldFastCatalog } from './adapters/held-catalog.ts';
@@ -23,8 +23,8 @@ import { codexUpdateRoutes, HarnessUpdateService, locateCodex } from './lib/inde
 import { fastStartDecision } from './lib/fast-mode.ts';
 import { codexProjectApprovals } from './lib/project-approvals.ts';
 
-/** How often the held catalog is read again: the five minutes Codex's own on-disk model cache lasts. */
-const CATALOG_REFRESH = minutes(5);
+/** The one job that reads the held catalog: once at boot, then each time a fast start finds it missing or stale. */
+const CATALOG_JOB = 'codex-fast-catalog';
 
 export default implementDaemon(manifest, {
   build(ctx) {
@@ -83,10 +83,12 @@ export default implementDaemon(manifest, {
       return read.ok ? read.value : undefined;
     };
 
-    // The live model catalog a fast start is judged against, HELD so a start never waits for it: read once at boot and
-    // again on a timer by this plugin's own jobs (the child's 10 s bound lives there). The child runs in its own created
-    // folder under `agent-homes` with a scrubbed environment and a throwaway HOME — never the daemon user's real HOME,
-    // so never `~/.codex` (GAP(codex): it is the login-less catalog, declared in ports-pending.json).
+    // The live model catalog a fast start is judged against, HELD so a start never waits for it. The last good read is
+    // kept in this plugin's own state (the model list only) and loaded here, so a start right after a boot decides from it
+    // at once. It is read at boot and then only when a fast start finds the held copy missing or older than five minutes
+    // (the job is kicked, fire and forget); the child runs on the worker lane, honours the stop signal, and lives in its own
+    // created folder under `agent-homes` with a scrubbed environment and a throwaway HOME — never the daemon user's real
+    // HOME, so never `~/.codex` (GAP(codex): it is the login-less catalog, declared in ports-pending.json).
     const appServer = new CodexAppServerCatalog({
       spawn: kernel.spawn,
       clock: kernel.clock,
@@ -97,17 +99,26 @@ export default implementDaemon(manifest, {
       workspace: kernel.roots.root('agent-homes', { subfolder: 'catalog' }),
       environment: name => host.environment(name),
       locate,
-      read: async (binary, cwd, env) => await appServer.models(binary, cwd, env),
+      read: async (binary, cwd, env, signal) => await appServer.models(binary, cwd, env, signal),
+      nowMs: () => kernel.clock.nowMs(),
+      now: () => kernel.clock.now(),
+      load: async () => {
+        const read = await kernel.state.read(CODEX_FAST_CATALOG);
+        return read.ok ? read.value : undefined;
+      },
+      save: async file => {
+        await kernel.state.write(CODEX_FAST_CATALOG, file);
+      },
+      requestRefresh: () => kernel.jobs.kick(CATALOG_JOB),
+      warn: message => kernel.log.warn(message),
     });
-    const refreshCatalog = async (): Promise<void> => {
-      try {
-        await catalog.refresh();
-      } catch {
-        kernel.log.warn('the Codex model catalog could not be read; fast starts on Codex are not checked until it can');
-      }
-    };
-    kernel.jobs.add({ id: 'codex-fast-catalog-boot', schedule: { onceAfterStart: true }, run: refreshCatalog });
-    kernel.jobs.add({ id: 'codex-fast-catalog', schedule: { every: CATALOG_REFRESH }, run: refreshCatalog });
+    void catalog.loaded();
+    kernel.jobs.add({
+      id: CATALOG_JOB,
+      schedule: { onceAfterStart: true },
+      lane: 'worker',
+      run: async signal => await catalog.refresh(signal),
+    });
 
     const start: typeof service.start = async request => {
       const result = await service.start(request);
@@ -132,7 +143,13 @@ export default implementDaemon(manifest, {
       // answers `not-taken` for a Codex launch without asking, so this is the contract's answer, not MCP's gate.
       provides: { codex: { view, discovery, approvedProjectServers: codexProjectApprovals } },
       hooks: {
-        'start.decide': input => fastStartDecision(input, () => catalog.held()),
+        'start.decide': async input => {
+          // Only a fast Codex start looks at the catalog; any other start is answered without touching it.
+          if (input.harness !== 'codex' || input.fast !== true) return fastStartDecision(input, () => undefined);
+          await catalog.loaded();
+          catalog.refreshIfStale();
+          return fastStartDecision(input, () => catalog.held());
+        },
         'harnesses:codex': codexHarness({
           kernel,
           locate,

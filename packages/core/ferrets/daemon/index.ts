@@ -424,6 +424,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         sessionGit,
         () => kernel.clock.nowMs(),
       ),
+    redaction: kernel.redaction,
     reach: async call => {
       const id = await pathFerret(call);
       agentMayReach(call, id);

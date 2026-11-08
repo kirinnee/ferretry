@@ -50,6 +50,8 @@ const REAP_GRACE_MS = 250;
 /** A deadline that fired. A resolved sentinel rather than a rejection, so a race the read wins
  *  cannot leave a rejected promise nobody handled. */
 const EXPIRED = Symbol('codex-catalog-deadline');
+/** The caller's abort signal fired (a daemon stop): the same race, a different sentence. */
+const ABORTED = Symbol('codex-catalog-aborted');
 
 /** What one exchange ended as. Assembling the message from this, rather than throwing from inside
  *  the loop, is what keeps "timed out" and "ended early" two distinct sentences with one author. */
@@ -57,7 +59,8 @@ type ConverseOutcome =
   | { readonly kind: 'complete'; readonly choices: readonly RuntimeModelChoice[] }
   /** The child's stdout reached EOF before the catalog was complete. */
   | { readonly kind: 'ended' }
-  | { readonly kind: 'expired' };
+  | { readonly kind: 'expired' }
+  | { readonly kind: 'aborted' };
 
 /** Sub-second deadlines are real — the tests use them — and `Math.round(ms / 1000)` renders every
  *  one of them as `0s`, which reads as "no deadline at all". */
@@ -83,11 +86,15 @@ export class CodexAppServerCatalog {
     binary: string,
     cwd: FencedPath,
     env?: Readonly<Record<string, string>>,
+    signal?: AbortSignal,
   ): Promise<readonly RuntimeModelChoice[]> {
     if (!isAbsolute(binary))
       throw new CodexModelCatalogError('the Codex model catalog probe needs an absolute wrapper path');
     if (!isAbsolute(cwd))
       throw new CodexModelCatalogError('the Codex model catalog probe needs an absolute session directory');
+
+    // A stop that came before the start spawns nothing.
+    if (signal?.aborted === true) throw new CodexModelCatalogError('the Codex model catalog probe was stopped');
 
     const timeoutMs = this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     // The child sees `env` when one is given (a scrubbed one, for a read no login asked for); otherwise what the
@@ -116,8 +123,15 @@ export class CodexAppServerCatalog {
     };
 
     let cancelDeadline: () => void = () => undefined;
-    const deadline = new Promise<typeof EXPIRED>(resolve => {
-      cancelDeadline = this.options.clock.after(milliseconds(timeoutMs), () => resolve(EXPIRED));
+    const deadline = new Promise<typeof EXPIRED | typeof ABORTED>(resolve => {
+      const cancelTimer = this.options.clock.after(milliseconds(timeoutMs), () => resolve(EXPIRED));
+      const abort = (): void => resolve(ABORTED);
+      if (signal?.aborted === true) abort();
+      signal?.addEventListener('abort', abort, { once: true });
+      cancelDeadline = () => {
+        cancelTimer();
+        signal?.removeEventListener('abort', abort);
+      };
     });
 
     // THE OUTER `finally` IS THE ONE THAT RELEASES STDERR, and it is outermost so that every exit —
@@ -140,6 +154,7 @@ export class CodexAppServerCatalog {
       // knows only that the exchange is over, and Codex usually says why on the way out. Both endings
       // get it, because "it timed out, and here is what it was complaining about" is strictly more
       // than "it timed out" — and reading it can no longer reintroduce a hang.
+      if (outcome.kind === 'aborted') throw new CodexModelCatalogError('the Codex model catalog probe was stopped');
       const detail = await this.#lastDiagnostic(stderr.settled, diagnostics);
       if (outcome.kind === 'expired')
         throw new CodexModelCatalogError(
@@ -167,7 +182,7 @@ export class CodexAppServerCatalog {
     stdout: ReadableStream<Uint8Array>,
     exchange: CodexModelListExchange,
     write: (message: unknown) => void,
-    deadline: Promise<typeof EXPIRED>,
+    deadline: Promise<typeof EXPIRED | typeof ABORTED>,
   ): Promise<ConverseOutcome> {
     const reader = stdout.getReader();
     const decoder = new TextDecoder();
@@ -176,6 +191,7 @@ export class CodexAppServerCatalog {
       for (;;) {
         const next = await Promise.race([reader.read(), deadline]);
         if (next === EXPIRED) return { kind: 'expired' };
+        if (next === ABORTED) return { kind: 'aborted' };
         if (next.done) return { kind: 'ended' };
         buffer += decoder.decode(next.value, { stream: true });
         for (;;) {

@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { StartDecide, type StartDecideInput } from '@ferretry/core-ferrets/contract';
-import { fastStartDecision } from '../../daemon/lib/fast-mode.ts';
+import { CATALOG_LOADING, fastStartDecision } from '../../daemon/lib/fast-mode.ts';
 import type { RuntimeModelChoice } from '../../daemon/lib/models.ts';
 import manifest from '../../manifest.ts';
 
 /**
  * Codex takes Ferrets' `start.decide`: a start that asks for fast mode on a model the live catalog says has none is
- * refused with the code Ferrets maps to `409 unservable_model`. A catalog that cannot be read refuses nothing.
+ * refused with the code Ferrets maps to `409 unservable_model`. With no catalog held at all, a fast start is refused at once (#35).
  */
 
 const input = (more: Partial<StartDecideInput> = {}): StartDecideInput => ({
@@ -48,10 +48,28 @@ describe('codex takes start.decide', () => {
     expect(fastStartDecision(input({ fast: true }), slowDefault)).toMatchObject({ allow: false });
   });
 
-  test('(no guarantees row) a catalog not loaded yet refuses nothing (GAP(codex): today a cold or failed read refused nothing)', () => {
-    const notLoaded = (): undefined => undefined;
-    expect(fastStartDecision(input({ model: 'gpt-daybreak', fast: true }), notLoaded)).toEqual({ allow: true });
-    expect(fastStartDecision(input({ fast: true }), notLoaded)).toEqual({ allow: true });
+  test('(no guarantees row) #35 a fast start with NO catalog held is refused at once, with the loading sentence and the existing code', () => {
+    const none = (): undefined => undefined;
+    const refused = {
+      allow: false,
+      reason: "Codex's model list is still loading; try again in a few seconds",
+      code: 'unservable_model',
+    };
+    expect(CATALOG_LOADING).toBe(refused.reason);
+    expect(fastStartDecision(input({ model: 'gpt-daybreak', fast: true }), none)).toEqual(refused);
+    expect(fastStartDecision(input({ model: 'gpt-6-sol', fast: true }), none)).toEqual(refused);
+    expect(fastStartDecision(input({ fast: true }), none)).toEqual(refused);
+  });
+
+  test('(no guarantees row) #35 a start that did not ask for fast, or is not Codex, is never held up by a missing catalog', () => {
+    const none = (): undefined => undefined;
+    expect(fastStartDecision(input({ model: 'gpt-daybreak' }), none)).toEqual({ allow: true });
+    expect(fastStartDecision(input({ model: 'gpt-daybreak', fast: false }), none)).toEqual({ allow: true });
+    expect(fastStartDecision(input({ harness: 'claude-code', model: 'x', fast: true }), none)).toEqual({ allow: true });
+  });
+
+  test('(no guarantees row) a held catalog that does not list the named model refuses nothing', () => {
+    expect(fastStartDecision(input({ model: 'gpt-unlisted', fast: true }), catalog)).toEqual({ allow: true });
   });
 
   test('(no guarantees row) the catalog is consulted only for a start that asked for fast on Codex', () => {

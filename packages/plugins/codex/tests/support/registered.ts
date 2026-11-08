@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Harness, LaunchSpec, Runner, RunSpec } from '@ferretry/core-ferrets/contract';
 import type { FencedPath, KernelPorts, RootHandle } from '@ferretry/kernel/contract';
 import { err, instantFromEpochMs, ok } from '@ferretry/std';
+import { catalogSpawn, type Started } from './catalog-child.ts';
 import daemon from '../../daemon/index.ts';
 import manifest from '../../manifest.ts';
 
@@ -23,6 +24,11 @@ export function registeredCodex() {
   let permissionMode = 'auto';
   let redactionFails = false;
   let sleepAction: (() => void) | undefined;
+  let sleepFree = false;
+  let nowMs = 0;
+  const kicks: string[] = [];
+  const catalogChildren: Started[] = [];
+  const childSpawn = catalogSpawn(catalogChildren);
   const at = instantFromEpochMs(0);
   const base = `${home}/state/codex/agent-homes`;
   const root = (name: string, scope?: { subfolder?: string }): RootHandle => {
@@ -90,6 +96,7 @@ export function registeredCodex() {
       remove: async path => {
         files.delete(path);
       },
+      makeDirectory: async () => undefined,
       ensurePrivateDirectory: async path => {
         privateDirectories.push(path);
       },
@@ -100,16 +107,17 @@ export function registeredCodex() {
   const warnings: string[] = [];
   const kernel = {
     roots: { root },
-    jobs: { add: (job: (typeof jobs)[number]) => void jobs.push(job), kick: () => undefined },
+    jobs: { add: (job: (typeof jobs)[number]) => void jobs.push(job), kick: (id: string) => void kicks.push(id) },
     log: { warn: (message: string) => void warnings.push(message) },
     state: {
-      read: async (_def: unknown, name: string) => ok(state.get(name)),
-      write: async (_def: unknown, value: unknown, name: string) => {
-        state.set(name, structuredClone(value));
+      read: async (def: { name: string }, name?: string) => ok(state.get(name ?? def.name)),
+      write: async (def: { name: string }, value: unknown, name?: string) => {
+        state.set(name ?? def.name, structuredClone(value));
       },
     },
     config: { file: () => ({ permissionMode, searchPaths: [] }) },
     spawn: {
+      start: childSpawn.start,
       run: async (program: string, args: string[]) => ({
         exitCode: 0,
         signal: null,
@@ -130,8 +138,10 @@ export function registeredCodex() {
     },
     clock: {
       now: () => at,
-      nowMs: () => 0,
+      nowMs: () => nowMs,
+      after: () => () => undefined,
       sleep: async (_delay: unknown, signal?: AbortSignal) => {
+        if (sleepFree) return;
         if (!signal?.aborted) {
           if (sleepAction === undefined) throw new Error('unexpected poll');
           sleepAction();
@@ -170,6 +180,9 @@ export function registeredCodex() {
     build,
     buildHalf,
     jobs,
+    kicks,
+    catalogChildren,
+    state,
     warnings,
     files,
     reads,
@@ -183,6 +196,13 @@ export function registeredCodex() {
     base,
     onSleep: (fn: () => void) => {
       sleepAction = fn;
+    },
+    /** Let the clock's sleep return at once (the catalog child's reaping grace sleeps). */
+    freeSleep: () => {
+      sleepFree = true;
+    },
+    setNowMs: (ms: number) => {
+      nowMs = ms;
     },
     mode: (mode: string) => {
       permissionMode = mode;

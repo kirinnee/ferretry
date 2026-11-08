@@ -24,26 +24,103 @@ const message = (text: string) =>
   line('response_item', { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
 
 describe('the registered Codex harness', () => {
-  test('(no guarantees row) the held fast-start catalog is read by jobs of its own, and start.decide answers at once before any read has landed', async () => {
+  const LOADING = "Codex's model list is still loading; try again in a few seconds";
+  const fastInput = (more: Record<string, unknown> = {}) => ({
+    ferret: 'f1',
+    name: 'wren',
+    role: 'lead',
+    harness: 'codex',
+    folder: '/w',
+    by: 'owner',
+    model: 'gpt-x',
+    fast: true,
+    ...more,
+  });
+  const decideOf = (half: { hooks: unknown }) =>
+    (half.hooks as Record<string, (input: unknown) => Promise<unknown>>)['start.decide'] as (
+      input: unknown,
+    ) => Promise<unknown>;
+  const persistedCatalog = (box: ReturnType<typeof fixture>, readAtMs = 0) =>
+    box.state.set('fastCatalog', {
+      format: 1,
+      readAt: new Date(readAtMs).toISOString(),
+      choices: [
+        { value: 'gpt-x', label: 'GPT-X', reasoningEfforts: [], fast: false },
+        { value: 'gpt-y', label: 'GPT-Y', reasoningEfforts: [], fast: true },
+      ],
+    });
+
+  test('(no guarantees row) the held fast-start catalog is read by ONE job on the worker lane, once after start; there is no timer', () => {
     const box = fixture();
-    const half = box.buildHalf();
-    expect(box.jobs.map(job => job.id).sort()).toEqual(['codex-fast-catalog', 'codex-fast-catalog-boot']);
-    expect(box.jobs.find(job => job.id === 'codex-fast-catalog-boot')?.schedule).toEqual({ onceAfterStart: true });
-    expect(box.jobs.find(job => job.id === 'codex-fast-catalog')?.schedule).toEqual({ every: 300_000 });
-    const decide = (half.hooks as unknown as Record<string, (input: unknown) => unknown>)['start.decide'];
-    const input = {
-      ferret: 'f1',
-      name: 'wren',
-      role: 'lead',
-      harness: 'codex',
-      folder: '/w',
-      by: 'owner',
-      model: 'gpt-x',
-      fast: true,
-    };
-    // Nothing has been read: not a promise, and not a refusal (GAP(codex)).
-    expect(decide?.(input)).toEqual({ allow: true });
-    box.cleanup();
+    box.buildHalf();
+    expect(box.jobs.map(job => job.id)).toEqual(['codex-fast-catalog']);
+    expect(box.jobs[0]).toMatchObject({ schedule: { onceAfterStart: true }, lane: 'worker' });
+  });
+
+  test('(no guarantees row) #35 with NOTHING persisted and no read landed, a fast Codex start is refused at once; a start that did not ask for fast is not', async () => {
+    const box = fixture();
+    const decide = decideOf(box.buildHalf());
+    expect(await decide(fastInput())).toEqual({ allow: false, reason: LOADING, code: 'unservable_model' });
+    expect(await decide(fastInput({ fast: false }))).toEqual({ allow: true });
+    expect(await decide(fastInput({ fast: undefined }))).toEqual({ allow: true });
+    // Asking for the catalog is what the refusal triggers: the job is kicked, not waited for.
+    expect(box.kicks).toEqual(['codex-fast-catalog']);
+  });
+
+  test('(no guarantees row) #35 a persisted catalog decides a fast start at once, before any job has run', async () => {
+    const box = fixture();
+    persistedCatalog(box);
+    const decide = decideOf(box.buildHalf());
+    expect(await decide(fastInput({ model: 'gpt-x' }))).toEqual({
+      allow: false,
+      reason: 'GPT-X has no fast mode',
+      code: 'unservable_model',
+    });
+    expect(await decide(fastInput({ model: 'gpt-y' }))).toEqual({ allow: true });
+    expect(box.catalogChildren).toHaveLength(0);
+    // Fresh, so no read is asked for.
+    expect(box.kicks).toEqual([]);
+  });
+
+  test('(no guarantees row) #35 a stale persisted catalog is refreshed in the background, and the start is answered from what is held', async () => {
+    const box = fixture();
+    persistedCatalog(box, 0);
+    box.setNowMs(300_001);
+    const decide = decideOf(box.buildHalf());
+    expect(await decide(fastInput({ model: 'gpt-x' }))).toMatchObject({
+      allow: false,
+      reason: 'GPT-X has no fast mode',
+    });
+    expect(box.kicks).toEqual(['codex-fast-catalog']);
+    expect(box.catalogChildren).toHaveLength(0);
+  });
+
+  test('(no guarantees row) the boot job reads the catalog in the plugin folder with a throwaway HOME, keeps it in state, and a stop signal is passed to the child', async () => {
+    const box = fixture();
+    box.freeSleep();
+    const decide = decideOf(box.buildHalf());
+    expect(await decide(fastInput())).toMatchObject({ allow: false, reason: LOADING });
+    const job = box.jobs.find(candidate => candidate.id === 'codex-fast-catalog');
+    await job?.run(new AbortController().signal);
+    expect(box.catalogChildren).toHaveLength(1);
+    const child = box.catalogChildren[0];
+    expect(child?.cwd?.startsWith(`${box.base}/catalog/`)).toBe(true);
+    expect(child?.env?.HOME?.startsWith(`${box.base}/catalog/`)).toBe(true);
+    expect(child?.env?.HOME).not.toBe('/fixture-owner');
+    expect(box.state.get('fastCatalog')).toMatchObject({ format: 1, choices: [{ value: 'gpt-6-sol' }] });
+    // The read landed, so the next fast start is decided from it.
+    expect(await decide(fastInput({ model: 'gpt-6-sol' }))).toEqual({ allow: true });
+    expect(await decide(fastInput({ model: 'gpt-x' }))).toEqual({ allow: true });
+
+    const stopped = fixture();
+    stopped.freeSleep();
+    stopped.buildHalf();
+    const controller = new AbortController();
+    controller.abort();
+    const stoppedJob = stopped.jobs.find(candidate => candidate.id === 'codex-fast-catalog');
+    await stoppedJob?.run(controller.signal);
+    expect(stopped.state.get('fastCatalog')).toBeUndefined();
+    expect(stopped.warnings).toHaveLength(1);
   });
 
   test('S42 homeFor names state/codex/agent-homes/<ferret> through its own root; the home is made private before any launch and no other home is used', async () => {

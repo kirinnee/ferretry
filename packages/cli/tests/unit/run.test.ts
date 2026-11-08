@@ -1,8 +1,17 @@
 import { describe, it } from 'bun:test';
 import { defineEvent } from '@ferretry/kernel/contract';
-import { definePlugin, implementCli, type PluginClient, socket, verb } from '@ferretry/kernel/manifest';
+import {
+  definePlugin,
+  implementCli,
+  type PluginClient,
+  type PluginSocket,
+  type PluginSocketListeners,
+  socket,
+  verb,
+} from '@ferretry/kernel/manifest';
 import should from 'should';
 import { z } from 'zod';
+import type { FollowingClient } from '../../src/lib/client.ts';
 import { runFy } from '../../src/lib/run.ts';
 import {
   boardEntry,
@@ -12,6 +21,7 @@ import {
   fakeWorld,
   FeedingTransport,
   inventoryOf,
+  RecordingTransport,
   registryOf,
   skeletonEntry,
 } from './fakes.ts';
@@ -314,5 +324,168 @@ describe('runFy', () => {
     const { world, io } = fakeWorld({ registry: registryOf(skeletonEntry(loop)) });
     should(await runFy(['spin'], world)).equal(1);
     should(io.stderr()).containEql('too many times');
+  });
+});
+
+describe('the client a plugin verb is handed opens its connection lazily', () => {
+  const streaming = definePlugin({
+    ...boardManifest,
+    actions: { ...boardManifest.actions, sockets: [socket('GET /v1/cards/:id/stream', { ...SCOPE, caller: 'any' })] },
+  });
+
+  /** A verb run that keeps the client it was handed, in a world whose transport and connection a test shapes. */
+  async function withClient(options: { transport?: RecordingTransport; refuse?: string } = {}) {
+    const calls: { client?: FollowingClient } = {};
+    const half = implementCli(streaming, {
+      build: ctx => {
+        calls.client = ctx.client as FollowingClient;
+        return { verbs: { board: async () => 0, 'card move': async () => 0, 'card show': async () => 0 } };
+      },
+    });
+    const made = fakeWorld({
+      registry: registryOf(entry(streaming, 'h-board', half)),
+      inventory: inventoryOf({ id: 'board', contract: 'h-board' }),
+      ...(options.transport === undefined ? {} : { transport: options.transport }),
+    });
+    const world =
+      options.refuse === undefined
+        ? made.world
+        : {
+            ...made.world,
+            connect: async () => {
+              throw new Error(options.refuse);
+            },
+          };
+    await runFy(['board'], world);
+    const client = calls.client as FollowingClient;
+    return { client, ...made };
+  }
+
+  const moved = defineEvent('board.moved', z.strictObject({ id: z.string() }));
+
+  class SocketTransport extends RecordingTransport {
+    readonly opened: { path: string; listeners: PluginSocketListeners }[] = [];
+    readonly sent2: (string | Uint8Array)[] = [];
+    readonly closes: { code?: number; reason?: string }[] = [];
+    socket(path: string, listeners: PluginSocketListeners): PluginSocket {
+      this.opened.push({ path, listeners });
+      return {
+        send: frame => {
+          this.sent2.push(frame);
+        },
+        close: (code, reason) => {
+          this.closes.push({
+            ...(code === undefined ? {} : { code }),
+            ...(reason === undefined ? {} : { reason }),
+          });
+        },
+      };
+    }
+  }
+
+  it('ends a follow with the words of a refused connection', async () => {
+    const { client } = await withClient({ refuse: 'the daemon is unreachable' });
+    const ended: string[] = [];
+
+    client.follow(
+      moved,
+      () => undefined,
+      reason => ended.push(reason),
+    );
+    await Bun.sleep(10);
+
+    should(ended).deepEqual(['the daemon is unreachable']);
+  });
+
+  it('ends a follow over a connection that cannot hold a feed, with the reason', async () => {
+    const { client } = await withClient();
+    const ended: string[] = [];
+
+    client.follow(
+      moved,
+      () => undefined,
+      reason => ended.push(reason),
+    );
+    await Bun.sleep(10);
+
+    should(ended).deepEqual(['fy does not subscribe to events on this connection']);
+  });
+
+  it('opens no feed for a follow cancelled before the connection was ready, and closes the one a cancel finds open', async () => {
+    const transport = new FeedingTransport();
+    const { client } = await withClient({ transport });
+
+    client.follow(
+      moved,
+      () => undefined,
+      () => undefined,
+    )();
+    await Bun.sleep(10);
+    should(transport.opened).equal(0);
+
+    const cancel = client.follow(
+      moved,
+      () => undefined,
+      () => undefined,
+    );
+    await Bun.sleep(10);
+    should(transport.opened).equal(1);
+    cancel();
+    should(transport.cancelled).equal(1);
+  });
+
+  it('runs a declared tool through the connection, and refuses an undeclared one before connecting', async () => {
+    const { client, transport, connects } = await withClient();
+
+    await client.tool('card_show', { id: 'a' });
+    should(transport.sent).deepEqual([
+      { method: 'POST', path: '/v1/agent/tools', body: { tool: 'card_show', input: { id: 'a' } } },
+    ]);
+    should(connects).have.length(1);
+    await should(client.tool('nope', {})).be.rejectedWith(/no plugin declares the tool/u);
+    should(connects).have.length(1);
+  });
+
+  it('opens a socket once the connection is ready, passes sends and a close on, and ignores a send before then', async () => {
+    const transport = new SocketTransport();
+    const { client } = await withClient({ transport });
+
+    const stream = client.socket?.('GET /v1/cards/:id/stream', { id: 'a' }, { onFrame: () => {}, onClose: () => {} });
+    stream?.send('too early');
+    await Bun.sleep(10);
+    stream?.send('ping');
+    stream?.close(1000, 'done');
+
+    should(transport.opened.map(open => open.path)).deepEqual(['/v1/cards/a/stream']);
+    should(transport.sent2).deepEqual(['ping']);
+    should(transport.closes).deepEqual([{ code: 1000, reason: 'done' }]);
+  });
+
+  it('never opens a socket closed before the connection was ready', async () => {
+    const transport = new SocketTransport();
+    const { client } = await withClient({ transport });
+
+    client.socket?.('GET /v1/cards/:id/stream', { id: 'a' }, { onFrame: () => {}, onClose: () => {} }).close();
+    await Bun.sleep(10);
+
+    should(transport.opened).deepEqual([]);
+  });
+
+  it('tells a socket’s listener why when the connection is refused, or the transport cannot hold a stream', async () => {
+    const refused: string[] = [];
+    const refusing = await withClient({ refuse: 'the daemon is unreachable' });
+    refusing.client.socket?.(
+      'GET /v1/cards/:id/stream',
+      { id: 'a' },
+      { onFrame: () => {}, onClose: r => refused.push(r) },
+    );
+    await Bun.sleep(10);
+    should(refused).deepEqual(['the daemon is unreachable']);
+
+    const unable: string[] = [];
+    const plain = await withClient();
+    plain.client.socket?.('GET /v1/cards/:id/stream', { id: 'a' }, { onFrame: () => {}, onClose: r => unable.push(r) });
+    await Bun.sleep(10);
+    should(unable).deepEqual(['fy does not open streams on this connection']);
   });
 });

@@ -42,10 +42,16 @@ export interface RestartSubject {
   readonly revision?: string | undefined;
 }
 
+/**
+ * The ONE sentence a refused restart is queued with. It is fixed text: nothing a port knows about the work in flight
+ * (a path, a command, a name) is ever interpolated into it, so the queued detail shows nobody anything but this.
+ */
+export const RESTART_BUSY_DETAIL = 'A restart now would lose work that is still in flight.';
+
 /** Thrown by {@link RestartPorts.restart} when the in-flight inventory refuses: work a restart would lose. */
 export class RestartBusy extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor() {
+    super(RESTART_BUSY_DETAIL);
     this.name = 'RestartBusy';
   }
 }
@@ -180,8 +186,14 @@ export class RestartService {
     for (const subject of targets) {
       // A person asking again starts the ferret's backoff over: the drain may try it at its next tick.
       this.#retries.delete(subject.id);
-      const wait = (reason: RestartQueueReason, detail?: string): void => {
-        queued.push({ id: subject.id, ...named(subject), reason, ...(detail === undefined ? {} : { detail }) });
+      // read-scoped: none — the only detail ever queued is RestartBusy's one fixed sentence, no interpolated text
+      const wait = (reason: RestartQueueReason): void => {
+        queued.push({
+          id: subject.id,
+          ...named(subject),
+          reason,
+          ...(reason === 'in-flight' ? { detail: RESTART_BUSY_DETAIL } : {}),
+        });
         waiting.set(subject.id, {
           id: subject.id,
           ...named(subject),
@@ -199,7 +211,7 @@ export class RestartService {
           restarted.push({ id: subject.id, ...named(subject) });
           waiting.delete(subject.id);
         } catch (error) {
-          if (error instanceof RestartBusy) wait('in-flight', error.message);
+          if (error instanceof RestartBusy) wait('in-flight');
           else failed.push({ id: subject.id, ...named(subject), reason: message(error) });
         }
       }

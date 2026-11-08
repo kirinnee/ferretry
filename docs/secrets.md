@@ -95,6 +95,34 @@ Each read opens the vault **once**: a whole page of a journal or a transcript is
 open (`SecretRedactor.batch`), and the opened values are let go when that read returns. Nothing
 caches them between reads, so plaintext lives no longer than the read that needed it.
 
+### A file or diff that holds a value: refused to an agent, masked for a person
+
+`GET /v1/ferrets/:id/fs/file` and `fs/diff` mask every vault value found **whole** in the text (or, for a file that
+is not text, in its bytes), one `*` per character, as Terminals does. In a diff the section heading git prints after a
+hunk header's closing `@@` is read as the line before the hunk's first line, so a value split between that heading and
+the leading context is found whole and masked in both places. An **agent** is refused instead: a masked copy
+looks like ordinary content and could be written back over the real file, so the answer is a 403 with the code
+`holds_secret` and one sentence that names the path only, whatever the count of values. A **person** keeps the masked
+text, and the file answer says `redacted: true`; the app says "private values masked — this is not the file" and offers
+no download or open of the masked bytes. Matching is whole-value only, never a prefix or a piece.
+
+- **The whole-value oracle — GAP.** The refusal and the mask both tell a caller "this file contains a vault value", so an
+  agent that writes a guess into its own worktree can confirm a WHOLE-value guess. That is negligible for a
+  high-entropy secret and real for a short one (a PIN). Not closed: closing it would mean not saying so.
+- **A diff for an agent also asks the two sides.** `fs/diff` runs the file check over the HEAD bytes and the working
+  bytes the service has already read (no further read) and refuses with `holds_secret` if either holds a vault value,
+  whatever part of it the diff shows. A person's diff is masked, never refused.
+- Not found, so not masked: a value inside compressed bytes, in a UTF-16 file, or a non-ASCII value in bytes that are
+  not valid UTF-8 (valid UTF-8 is masked as text even when it holds a NUL), and, in a person's diff, a value the diff
+  shows only in part (a file, or one side of a diff, that holds only part of a value is shown as it is, even when the
+  other side holds it whole — apart from an identical line, which takes the other side's mask). A section heading that
+  git does not pick (a line that starts with a digit or a symbol is skipped) is not part of the diff, so a value
+  split across it is the same partial.
+  A value is found in a CRLF file whether it was stored with `\r` (a CRLF key file, `token\r`) or without (LF), and a CRLF-stored value in an LF file: all
+  three looks are made and the coverage is their union; the `\r` and the line breaks are kept in the output, so a masked
+  multi-line value keeps one mask per line. Positions are
+  UTF-16 units, as Vault's own starring counts them.
+
 ### Text a component shows: recognised by shape
 
 A component's text on the fleet view (a settings file, an instructions file, a server's command) was

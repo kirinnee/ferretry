@@ -246,3 +246,83 @@ describe('the guarded client opens a socket route', () => {
     should(closed).deepEqual([{ reason: 'invalid input', code: 1008 }]);
   });
 });
+
+describe('a stream whose package changes state while it is open', () => {
+  const off = inventoryOf({ id: 'tracks', on: false, contract: 'h-tracks' });
+
+  async function openStream(transport: StreamingTransport, current: () => typeof healthy) {
+    const { deps } = depsOf(registry, current, { transport });
+    const heard: (string | Uint8Array)[] = [];
+    const closed: string[] = [];
+    pluginClient(deps, 'tracks').socket(
+      'GET /v1/tracks/:id/stream',
+      { id: 'a' },
+      { onFrame: frame => heard.push(frame), onClose: reason => closed.push(reason) },
+    );
+    await settle();
+    return { deps, heard, closed };
+  }
+
+  it('ends the stream with the paused sentence when a frame arrives and the package is still not allowed', async () => {
+    // Arrange
+    const transport = new StreamingTransport();
+    let current = healthy;
+    const { deps, heard, closed } = await openStream(transport, () => current);
+    current = off;
+    deps.inventory.invalidate();
+    await deps.inventory.current();
+
+    // Act
+    transport.opened[0]?.listeners.onFrame('late');
+    await settle();
+
+    // Assert
+    should(heard).deepEqual([]);
+    should(closed).have.length(1);
+    should(closed[0]).match(/off/iu);
+    should(transport.closes).have.length(1);
+  });
+
+  it('still hands the frame over when the re-read shows the package allowed again', async () => {
+    // Arrange
+    const transport = new StreamingTransport();
+    let current = healthy;
+    const { deps, heard, closed } = await openStream(transport, () => current);
+    current = off;
+    deps.inventory.invalidate();
+    await deps.inventory.current();
+    current = healthy;
+
+    // Act
+    transport.opened[0]?.listeners.onFrame('back');
+    await settle();
+
+    // Assert
+    should(heard).deepEqual(['back']);
+    should(closed).deepEqual([]);
+  });
+
+  it('tells the listener why when the transport fails to open the stream', async () => {
+    // Arrange
+    const transport = new StreamingTransport();
+    transport.socket = () => {
+      throw new Error('no route to the daemon');
+    };
+
+    // Act
+    const { closed } = await openStream(transport, () => healthy);
+
+    // Assert
+    should(closed).deepEqual(['no route to the daemon']);
+  });
+
+  it('tells the listener a non-error reason as its text', async () => {
+    const transport = new StreamingTransport();
+    transport.socket = () => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      throw 'refused';
+    };
+    const { closed } = await openStream(transport, () => healthy);
+    should(closed).deepEqual(['refused']);
+  });
+});

@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { FakeRedaction } from '@ferretry/core-vault/contract/testing';
 import { ApiError, type ApiResponse } from '@ferretry/kernel/contract';
 import should from 'should';
 import {
@@ -75,7 +76,7 @@ function fixture(root: FakeRootOptions = { tree: treeOf(['a.ts', textFile('body\
       cwd: '/work/mine',
       ...(fence === undefined ? {} : { fence }),
     });
-    return sessionFilesystemRoutes({ filesystem, reach });
+    return sessionFilesystemRoutes({ filesystem, reach, redaction: new FakeRedaction(new Map()) });
   };
   const agent = routesFor(FENCE);
   const human = routesFor();

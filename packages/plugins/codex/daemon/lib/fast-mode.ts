@@ -59,9 +59,9 @@ export function fastInForce(view: FastView, choice: RuntimeModelChoice | undefin
 /**
  * Why a START that asks for fast mode cannot have it on the model it resolved, or nothing.
  *
- * Only an explicit 'no' refuses. The answer is the live catalog's, which a start reads only when it asked for fast
- * mode; a model the catalog does not list, or a catalog that could not be read, is let through — the session then runs
- * on the tier it was given and its chip reports what the harness says.
+ * Only an explicit 'no' refuses. The answer is the live catalog's, which a start looks at only when it asked for fast
+ * mode; a model the held catalog does not list is let through — the session then runs on the tier it was given and its
+ * chip reports what the harness says. (No catalog at all is refused earlier, in {@link fastStartDecision}.)
  */
 export function fastStartRefusal(model: string, choices: readonly RuntimeModelChoice[]): string | undefined {
   const choice = catalogChoice({ harness: 'codex', source: 'codex-app-server', choices }, model);
@@ -80,15 +80,19 @@ export function fastModeFacts(view: FastView, catalog: RuntimeModelCatalog): Fas
   };
 }
 
+/** What a fast start is told while no catalog is in hand (never loaded from disk, never read). */
+export const CATALOG_LOADING = "Codex's model list is still loading; try again in a few seconds";
+
 /**
  * The `start.decide` answer for a start that asks for fast mode: refuse it, with the code Ferrets maps to `409
- * unservable_model`, when the live Codex catalog says the model has none. Only this harness's own starts, and only when
- * fast was asked (the catalog costs a child, so a start that did not ask never reads it).
+ * unservable_model`, when the live Codex catalog says the model has none — or when there is no catalog to ask yet.
+ * Only this harness's own starts, and only when fast was asked (a start that did not ask is never held up by it).
  *
  * The model is the one the start NAMED, else the catalog's own default. `held` is the catalog already in hand (a start
- * decides in the kernel's default 200 ms and never waits for a read); `undefined` means none has been read yet, which
- * refuses nothing — as today's cold or failed read did (rebuild-ref `bin/fyd.ts:2692`, `.catch(() => [])`, then
- * `fastStartRefusal` answers `undefined` for a model the catalog does not list). GAP(codex) in `ports-pending.json`.
+ * decides in the kernel's default 200 ms and never waits for a read). `undefined` means none is held: the first boot
+ * ever, or no read has ever worked. Fast is never allowed unverified, so that REFUSES at once with {@link CATALOG_LOADING}
+ * (britnee, #35). Today a cold read waited, and a failed one allowed (rebuild-ref `bin/fyd.ts:2692`, `.catch(() => [])`);
+ * both are tightened on purpose. A catalog that is held but does not list the model refuses nothing, as today.
  */
 export function fastStartDecision(
   input: StartDecideInput,
@@ -96,7 +100,7 @@ export function fastStartDecision(
 ): HookDecision {
   if (input.harness !== 'codex' || input.fast !== true) return ALLOW;
   const choices = held();
-  if (choices === undefined) return ALLOW;
+  if (choices === undefined) return { allow: false, reason: CATALOG_LOADING, code: UNSERVABLE_MODEL };
   const model = input.model ?? choices.find(choice => choice.isDefault === true)?.value;
   if (model === undefined) return ALLOW;
   const refusal = fastStartRefusal(model, choices);

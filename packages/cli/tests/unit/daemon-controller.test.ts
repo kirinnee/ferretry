@@ -9,6 +9,7 @@ import type {
   LocalUpdateHealth,
   ResetCounts,
   ResetTreeMeasure,
+  SessionTerminalEnding,
 } from '../../src/lib/daemon/ports.ts';
 import { DirectSupervisor, SystemdSupervisor } from '../../src/lib/daemon/supervisor.ts';
 import { CapturedOutput, FakePrompt, SteppingClock } from './update/support.ts';
@@ -23,14 +24,33 @@ interface Options {
   /** What the process port answers to "does this pid hold the daemon lock": absent means yes. */
   readonly holdsOpen?: boolean | undefined;
   /** What the shell launcher comes to when a verb needs the home made. */
-  readonly launch?: 'ok' | 'fails' | 'up-but-no-home';
+  readonly launch?: 'ok' | 'fails' | 'up-but-no-home' | 'absent';
   /** A nix-shell offer answering with this alternative executable. */
   readonly nixOffer?: string;
   /** The protocol the serving daemon reports. */
   readonly protocol?: number;
   readonly counts?: ResetCounts | undefined;
   readonly binary?: 'found' | 'missing';
+  /** The version the serving daemon reports. */
+  readonly runningVersion?: string;
+  /** How the private terminal server ends. */
+  readonly terminals?: SessionTerminalEnding;
+  /** Contending lifecycle commands: the claims wait, reclaim a stale one, and leave residue on release. */
+  readonly contended?: boolean;
+  /** Nix: the executable is a store path and pinning it fails with this. */
+  readonly pinFails?: string;
+  /** How many stop attempts (a signal, a manager stop or kill) the daemon ignores before it goes down. */
+  readonly ignoreStops?: number;
+  /** What the service manager says, call by call, over what the daemon would imply; `always` once the queue is spent. */
+  readonly manager?: {
+    readonly queue?: readonly ManagerSays[];
+    readonly always?: ManagerSays;
+  };
+  /** A start or restart that brings no daemon up. */
+  readonly startsNothing?: boolean;
 }
+
+type ManagerSays = 'other' | 'inactive' | 'running' | 'failed';
 
 const MEASURED: ResetTreeMeasure = { kind: 'measured', files: 3, bytes: 3_000_000, escapingLinks: [] };
 
@@ -50,12 +70,31 @@ async function harness(options: Options = {}) {
   const trail: string[] = [];
   const disk = new Map<string, string>();
   let current: LocalUpdateHealth | undefined =
-    options.running === false ? undefined : { protocol: options.protocol ?? 1, version: '5.0.0', pid: 4321 };
+    options.running === false
+      ? undefined
+      : { protocol: options.protocol ?? 1, version: options.runningVersion ?? '5.0.0', pid: 4321 };
+  let ignored = options.ignoreStops ?? 0;
+  const managerQueue = [...(options.manager?.queue ?? [])];
+  const stopOnce = (): void => {
+    if (ignored > 0) ignored -= 1;
+    else current = undefined;
+  };
   const processes: IDaemonProcessPort = {
     run: async argv => {
       trail.push(`run:${argv.join(' ')}`);
-      if (argv.includes('stop')) current = undefined;
-      if (argv.includes('start') || argv.includes('restart')) current = { protocol: 1, version: '5.0.1', pid: 4322 };
+      if (argv.includes('stop') || argv.includes('kill')) stopOnce();
+      if ((argv.includes('start') || argv.includes('restart')) && options.startsNothing !== true)
+        current = { protocol: 1, version: '5.0.1', pid: 4322 };
+      const says = argv.includes('show') ? (managerQueue.shift() ?? options.manager?.always) : undefined;
+      if (says !== undefined) {
+        const shown = {
+          other: 'ActiveState=active\nMainPID=9999',
+          running: 'ActiveState=active\nMainPID=7777',
+          failed: 'ActiveState=failed\nMainPID=0',
+          inactive: 'ActiveState=inactive\nMainPID=0',
+        }[says];
+        return { code: 0, stdout: `LoadState=loaded\n${shown}`, stderr: '' };
+      }
       return {
         code: 0,
         stdout: `LoadState=loaded\nActiveState=${current === undefined ? 'inactive' : 'active'}\nMainPID=${current?.pid ?? 0}`,
@@ -64,12 +103,12 @@ async function harness(options: Options = {}) {
     },
     spawnDetached: async () => {
       trail.push('spawn');
-      current = { protocol: 1, version: '5.0.1', pid: 4322 };
+      if (options.startsNothing !== true) current = { protocol: 1, version: '5.0.1', pid: 4322 };
       return { pid: 4322 };
     },
     signal: (pid, signal) => {
       trail.push(`signal:${String(pid)}:${signal}`);
-      current = undefined;
+      stopOnce();
       return true;
     },
     alive: () => current !== undefined,
@@ -128,14 +167,22 @@ async function harness(options: Options = {}) {
         return 0;
       },
     },
-    nix: { realPath: async path => path, pin: async () => undefined, release: async () => {} },
+    nix: {
+      realPath: async path => (options.pinFails === undefined ? path : `/nix/store/${'a'.repeat(32)}-ferretry/bin/fyd`),
+      pin: async () => options.pinFails,
+      release: async () => {},
+    },
     lifecycle: {
       acquire: async request => {
         locks.push(`${request.verb}:${request.lockPath}`);
+        if (options.contended === true) {
+          request.waiting?.('pid 11');
+          request.reclaimed?.('pid 12');
+        }
         return {
           release: async () => {
             releases.push(request.lockPath);
-            return undefined;
+            return options.contended === true ? `${request.lockPath}.stale` : undefined;
           },
         };
       },
@@ -160,18 +207,21 @@ async function harness(options: Options = {}) {
     sessionTerminals: {
       end: async socket => {
         trail.push(`end-terminals:${socket}`);
-        return { kind: 'ended' };
+        return options.terminals ?? { kind: 'ended' };
       },
     },
     claims,
-    launcher: async () => {
-      trail.push('launch');
-      if (options.launch === 'fails') return { started: false, why: 'cannot find fyd beside this program' };
-      // A launcher that comes to "up" without making this home: another home's daemon answered on the default address.
-      if (options.launch !== 'up-but-no-home') homeState = 'claimed';
-      current = { protocol: 1, version: '5.0.0', pid: 4399 };
-      return { started: true };
-    },
+    launcher:
+      options.launch === 'absent'
+        ? undefined
+        : async () => {
+            trail.push('launch');
+            if (options.launch === 'fails') return { started: false, why: 'cannot find fyd beside this program' };
+            // A launcher that comes to "up" without making this home: another home's daemon answered on the default address.
+            if (options.launch !== 'up-but-no-home') homeState = 'claimed';
+            current = { protocol: 1, version: '5.0.0', pid: 4399 };
+            return { started: true };
+          },
     nixShellOffer: {
       offer: async found => {
         trail.push(`offer:${found.path}:claims=${String(locks.length)}`);
@@ -566,5 +616,120 @@ describe('fy daemon install and the nix shell (V-0233)', () => {
     await h.controller.install();
     expect(h.trail).toContain('offer:/fake/bin/fyd:claims=0');
     expect(h.disk.get(h.layout.systemdUnitFile)).toContain('/fake/bin/fyd');
+  });
+});
+
+describe('what the controller says when the host will not cooperate', () => {
+  test('V-0244 a daemon that ignores the first stop is pressed harder, saying so', async () => {
+    const h = await harness({ ignoreStops: 1 });
+    await h.controller.stop();
+    expect(h.out.text).toContain('warn: fyd has not stopped; escalating to an unconditional kill');
+    expect(h.trail.filter(line => line.startsWith('signal'))).toEqual(['signal:4321:SIGTERM', 'signal:4321:SIGKILL']);
+    expect(h.out.text).toContain('ok: fyd stopped');
+  });
+
+  test('V-0244 a daemon that never stops is reported as not stopped, with where to look, and no success', async () => {
+    const h = await harness({ ignoreStops: 1_000 });
+    await expect(h.controller.stop()).rejects.toThrow(`fyd did not stop within 20s; inspect ${h.layout.logFile}`);
+    expect(h.out.text).not.toContain('ok: fyd stopped');
+  });
+
+  test('V-0237 restarting a daemon that is not running says so and starts it', async () => {
+    const h = await harness({ running: false });
+    await h.controller.restart();
+    expect(h.out.text).toContain('warn: fyd was not running; starting it');
+    expect(h.out.text).toContain('ok: fyd restarted (pid 4322)');
+  });
+
+  test('V-0237 a start that brings up nothing times out naming the log, after saying it is still initializing', async () => {
+    const h = await harness({ running: false, startsNothing: true });
+    await expect(h.controller.restart()).rejects.toThrow(
+      `fyd did not become ready within 90s; inspect ${h.layout.logFile}`,
+    );
+    expect(h.out.text).toMatch(/warn: fyd starting — still initializing \(\d+s\); waiting up to 90s…/u);
+  });
+
+  test('V-0237 a process seen running that then exits during startup is reported as exited, not as slow', async () => {
+    const h = await harness({
+      installed: true,
+      running: false,
+      startsNothing: true,
+      manager: { queue: ['running', 'running', 'failed'], always: 'failed' },
+    });
+    await expect(h.controller.restart()).rejects.toThrow(
+      `fyd started but its process exited during startup; inspect ${h.layout.logFile}`,
+    );
+  });
+
+  test('V-0237 a daemon the manager did not start is handed over, and a manager that then cannot take the home says so', async () => {
+    const h = await harness({ installed: true, manager: { always: 'inactive' } });
+    await expect(h.controller.restart()).rejects.toThrow(
+      "pid 4322 serves /fake/user/fy outside systemd, so systemd's own daemon could not take the state home; run fy daemon restart to hand it over",
+    );
+    expect(h.out.text).toContain(
+      'warn: fyd pid 4322 serves /fake/user/fy outside systemd; stopping it so systemd owns the daemon',
+    );
+    expect(h.trail).toContain('signal:4322:SIGTERM');
+  });
+
+  test('V-0244 stopping hands over a daemon the manager did not start, then stops the manager’s own if it respawned one', async () => {
+    const h = await harness({ installed: true, manager: { queue: ['other', 'other'] } });
+    await h.controller.stop();
+    expect(h.out.text).toContain('outside systemd; stopping it so systemd owns the daemon');
+    expect(h.trail).toContain('signal:4322:SIGTERM');
+    expect(h.trail.some(line => line.startsWith('run:systemctl') && line.includes(' stop '))).toBe(true);
+    expect(h.out.text).toContain('ok: fyd stopped');
+  });
+
+  test('V-0233 a host that cannot launch the daemon at all says it cannot create the home', async () => {
+    const h = await harness({ running: false, home: 'absent', launch: 'absent' });
+    await expect(h.controller.install()).rejects.toThrow('fyd cannot be started here to create /fake/user/fy');
+  });
+
+  test('V-0236 says it could not end the ferret terminal server, and how to end it by hand, but still resets', async () => {
+    const h = await harness({ yes: true, terminals: { kind: 'failed', reason: 'permission denied' } } as never);
+    await h.controller.reset({ yes: true });
+    expect(h.out.text).toContain(
+      'could not end the fyd ferret terminal server at /fake/user/fy/state/terminals/tmux.sock (permission denied)',
+    );
+    expect(h.out.text).toContain('kill-server');
+    expect(h.out.text).toContain('fyd reset: removed');
+  });
+
+  test('V-0236 says nothing about terminals when there was no server to end', async () => {
+    const h = await harness({ terminals: { kind: 'none' } });
+    await h.controller.reset({ yes: true });
+    expect(h.out.text).not.toContain('terminal server');
+    expect(h.out.text).toContain('fyd reset: removed');
+  });
+
+  test('V-0233 says a Nix closure could not be pinned and how to have Nix hold it instead, and installs anyway', async () => {
+    const h = await harness({ running: false, pinFails: 'nix-store: no permission' });
+    await h.controller.install();
+    expect(h.out.text).toContain(
+      'runtime closure could not be pinned against garbage collection (nix-store: no permission)',
+    );
+    expect(h.out.text).toContain('nix profile install');
+    expect(h.out.text).toContain('user service installed');
+  });
+
+  test('V-0244 tells a person about a lifecycle claim it waited for, reclaimed, and could not release', async () => {
+    const h = await harness({ contended: true });
+    await h.controller.stop();
+    expect(h.out.text).toContain('fyd stop is waiting up to 140s for another lifecycle command to finish (pid 11)');
+    expect(h.out.text).toContain('fyd stop removed a lifecycle claim left behind by pid 12');
+    expect(h.out.text).toContain('fyd lifecycle claim');
+    expect(h.out.text).toContain('could not be released; remove it once no fyd lifecycle command is running');
+  });
+
+  test('V-0251 a stopped daemon is said to be stopped, and a running one that is the installed one is said so', async () => {
+    const stopped = await harness({ running: false });
+    await stopped.controller.which({});
+    expect(stopped.out.text).toContain('running: daemon is not running');
+    expect(stopped.out.text).not.toContain('the running daemon is the installed one');
+
+    const current = await harness({ runningVersion: '5.0.1' });
+    await current.controller.which({});
+    expect(current.out.text).toContain('the running daemon is the installed one');
   });
 });

@@ -198,4 +198,23 @@ describe('the files panel', () => {
     expect(calls.every(call => call.ferretId === 'ferret-7')).toBe(true);
     await view.unmount();
   });
+
+  it('S47 a redacted file says private values are masked and that this is not the file', async () => {
+    fixture.files = { 'config.env.example': { path: 'config.env.example', content: MASKED, redacted: true } };
+    const view = await openFile();
+    try {
+      expect(view.container.textContent).toContain('private values masked — this is not the file');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('S47 a file that is not redacted shows no masked notice', async () => {
+    const view = await openFile();
+    try {
+      expect(view.container.textContent).not.toContain('private values masked');
+    } finally {
+      await view.unmount();
+    }
+  });
 });
