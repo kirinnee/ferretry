@@ -334,3 +334,41 @@ describe('reading a damaged document', () => {
     should(message).not.containEql(TOKEN);
   });
 });
+
+describe('opening an entry that was never sealed', () => {
+  it('S141 should refuse an entry with an empty iv as undecipherable and name the field, never a value', async () => {
+    // Arrange — the key exists, so the refusal can only come from the entry itself.
+    const { directory, vault: opened, files } = await vault('empty-iv');
+    await directory.put('TOKEN', TOKEN);
+    const cipher = new WebCryptoSecretCipher(new FileSecretKey(files));
+
+    // Act / Assert
+    await cipher.openAll({ TOKEN: { iv: '', ciphertext: 'AAAA' } }).then(
+      () => should.fail('', '', 'an empty iv must refuse'),
+      (error: unknown) => {
+        should((error as SecretStoreError).failure).equal('undecipherable');
+        should((error as Error).message).equal('a sealed secret has an empty iv');
+      },
+    );
+    should((await opened.values()).get('TOKEN')).equal(TOKEN);
+  });
+});
+
+describe('opening entries whose key file has gone', () => {
+  it('S141 should refuse the open as key_missing and name the first entry, never an empty vault', async () => {
+    // Arrange
+    const v = await vault('cipher-key-gone');
+    await v.directory.put('TOKEN', TOKEN);
+    const cipher = new WebCryptoSecretCipher(new FileSecretKey(v.files));
+    await rm(join(v.folder, SECRETS_KEY));
+
+    // Act / Assert — the cipher alone, below the document store's own check.
+    await cipher.openAll({ TOKEN: { iv: 'AAAA', ciphertext: 'AAAA' } }).then(
+      () => should.fail('', '', 'a missing key must refuse'),
+      (error: unknown) => {
+        should((error as SecretStoreError).failure).equal('key_missing');
+        should((error as Error).message).equal('the vault key is gone, so TOKEN cannot be opened');
+      },
+    );
+  });
+});
