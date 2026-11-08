@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import type { RootHandle, RootName } from '@ferretry/kernel/contract';
 import { HistoryConversationFiles } from '../../../../daemon/adapters/moves/history-conversation-files.ts';
 import type { MoveCodexRollouts } from '../../../../daemon/lib/moves/ports.ts';
 import { MemoryHistoryRoots } from '../../../support/daemon/memory-history-roots.ts';
@@ -195,5 +196,69 @@ describe('HistoryConversationFiles', () => {
     should(write).be.instanceOf(Error);
     should(roots.text('/elsewhere/x.jsonl')).be.undefined();
     should(roots.scopes).deepEqual([]);
+  });
+});
+
+/** A root whose `stat` fails, as a home that vanished or a mount that went away mid-move would. */
+class StatFailingRoots extends MemoryHistoryRoots {
+  override root(name: RootName, scope?: { readonly subfolder?: string }): RootHandle {
+    return {
+      ...super.root(name, scope),
+      stat: async () => {
+        throw new Error('stat failed');
+      },
+    } as RootHandle;
+  }
+}
+
+describe('HistoryConversationFiles when a root cannot answer', () => {
+  it('should say a file is not written when its root cannot stat it', async () => {
+    // Arrange
+    const roots = new StatFailingRoots();
+    roots.plant('/homes/target/a.jsonl', 'present');
+
+    // Act
+    const written = await over(roots).written('/homes/target/a.jsonl');
+
+    // Assert
+    should(written).be.false();
+  });
+
+  it('should read nothing from a file its root can stat but cannot read', async () => {
+    // Arrange
+    const roots = new MemoryHistoryRoots();
+    roots.plant('/homes/origin/sealed.jsonl', 'content');
+    roots.unreadable.add('/homes/origin/sealed.jsonl');
+
+    // Act
+    const read = await over(roots).read('/homes/origin/sealed.jsonl', 1_000);
+
+    // Assert
+    should(read).be.undefined();
+  });
+
+  it('should sort a Codex rollout last when its modification time cannot be read or the file has vanished', async () => {
+    // Arrange
+    const gone = '/homes/codex/sessions/2026/10/20/rollout-gone.jsonl';
+    const rollouts: MoveCodexRollouts = {
+      candidates: async () => [
+        { id: 'thread-gone', file: gone, correlated: false },
+        { id: 'thread-here', file: '/homes/codex/sessions/rollout-here.jsonl', correlated: true },
+      ],
+    };
+    const vanished = new MemoryHistoryRoots();
+    vanished.plant('/homes/codex/sessions/rollout-here.jsonl', '{}', 1_800_000_000);
+    const failing = new StatFailingRoots();
+
+    // Act
+    const missing = await over(vanished, rollouts).prior('codex', '/homes/codex', '/work/repo', SESSION);
+    const unreadable = await over(failing, rollouts).prior('codex', '/homes/codex', '/work/repo', SESSION);
+
+    // Assert
+    should(missing.map(entry => [entry.id, entry.modifiedMs])).deepEqual([
+      ['thread-gone', 0],
+      ['thread-here', 1_800_000_000_000],
+    ]);
+    should(unreadable.map(entry => entry.modifiedMs)).deepEqual([0, 0]);
   });
 });

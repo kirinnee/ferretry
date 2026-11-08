@@ -412,18 +412,21 @@ describe('the relay carrier over real sockets', () => {
     await waitFor(() => peer.pings === 1, 'the keepalive ping');
     h.clock.advance(10_000);
 
-    // Assert
+    // Assert — read BEFORE the event loop turns. The first redial is immediate, so the advance that fired the deadline
+    // also ran it: dial 2 is already out, and once it claims, `carrying` rightly clears the detail. Nothing it does
+    // can land until this test yields, so here the status still says why dial 1 was dropped.
+    should(h.carrier.status().detail).match(/stopped answering/u);
+    should(h.lines).containEql(
+      'relay https://relay.example: liveness: no reply within 10.0s of the ping — dropping the socket',
+    );
+    should(h.taps).have.length(2);
     await waitFor(() => peer.closed !== undefined, 'the rendezvous to see the daemon drop the socket');
     should(peer.closed).deepEqual({
       code: SESSION_CLOSE_CODES.heartbeatTimeout,
       reason: 'no answer within the heartbeat deadline',
     });
-    should(h.carrier.status().detail).match(/stopped answering/u);
-    should(h.lines).containEql(
-      'relay https://relay.example: liveness: no reply within 10.0s of the ping — dropping the socket',
-    );
-    h.redial(2);
     await h.peerAt(1);
+    await h.carrying();
   });
 
   it('should drop a socket at its first tick when the clock shows it was silent past the grace window', async () => {
@@ -461,17 +464,22 @@ describe('the relay carrier over real sockets', () => {
     await h.delivered(0, before + 1);
     h.clock.advance(10_000);
 
-    // Assert
+    // Assert — read before the event loop turns: the immediate redial already went out with this advance, and its
+    // accepted claim would rightly clear the detail (see the silent-socket case above).
+    should(h.carrier.status().detail).match(/stopped confirming the claim/u);
+    should(h.lines).containEql(
+      'relay https://relay.example: liveness: the edge answered but the rendezvous did not confirm the claim within 10.0s — dropping the socket to claim again',
+    );
+    should(h.taps).have.length(2);
     await waitFor(() => peer.closed !== undefined, 'the rendezvous to see the daemon drop the socket');
     should(peer.closed).deepEqual({
       code: SESSION_CLOSE_CODES.heartbeatTimeout,
       reason: 'the rendezvous did not confirm the claim',
     });
-    should(h.carrier.status().detail).match(/stopped confirming the claim/u);
-    should(h.lines).containEql(
-      'relay https://relay.example: liveness: the edge answered but the rendezvous did not confirm the claim within 10.0s — dropping the socket to claim again',
-    );
-    h.redial(2);
+    // Claims again, offering the token the dropped socket was issued so the rendezvous can supersede it.
+    const again = await h.peerAt(1);
+    await waitFor(() => again.claims.length === 1, 'the second claim');
+    should(again.claims[0]?.replaces).equal(HANDOVER);
   });
 
   it('should abandon a dial whose route accepts the connection and never answers, and dial again', async () => {

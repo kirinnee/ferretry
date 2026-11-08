@@ -16,12 +16,6 @@ import { type SessionId, tryParseSessionId } from '../../../lib/session-id.ts';
 import type { SessionProvenanceRecord, SessionProvenanceStore } from '../../../lib/session/provenance/recorder.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
 
-function fields(document: unknown): Readonly<Record<string, unknown>> {
-  return typeof document === 'object' && document !== null && !Array.isArray(document)
-    ? (document as Readonly<Record<string, unknown>>)
-    : {};
-}
-
 export class StorageSessionProvenanceStore implements SessionProvenanceStore {
   constructor(private readonly storage: DaemonStorage) {}
 
@@ -60,7 +54,9 @@ export class StorageSessionProvenanceStore implements SessionProvenanceStore {
     // nothing is raised: the caller asked to record a fact about a session that cannot exist.
     if (id === undefined) return;
     await this.storage.updateConfig(id, current => {
-      const { label: _dropped, ...rest } = fields(current);
+      // The store reads the document through the config schema before it calls this, so `current` is always a whole
+      // configuration object: a damaged or non-object document is refused there and never reaches the merge.
+      const { label: _dropped, ...rest } = current as Readonly<Record<string, unknown>>;
       return {
         ...rest,
         ...(record.provenance === undefined ? {} : { provenance: record.provenance }),
