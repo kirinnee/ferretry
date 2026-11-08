@@ -86,6 +86,8 @@ export class FileMutationJournal implements MutationJournal {
   constructor(
     private readonly disk: FleetDisk,
     private readonly assertWritable: (target: string) => Promise<void>,
+    /** How many entries a tree seal describes before it gives up; a test lowers it to reach the bound. */
+    private readonly maxSealEntries = MAX_SEAL_ENTRIES,
   ) {}
 
   /** Mark where the next operation's captures begin, so they can be sealed together. */
@@ -159,7 +161,7 @@ export class FileMutationJournal implements MutationJournal {
   ): Promise<boolean> {
     const found = await this.disk.entries(directory);
     for (const entry of found.toSorted((left, right) => left.name.localeCompare(right.name))) {
-      if (walk.visited >= MAX_SEAL_ENTRIES) return true;
+      if (walk.visited >= this.maxSealEntries) return true;
       walk.visited += 1;
       const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
       hasher.update(`${fingerprintOf(relative, entry)}\n`);

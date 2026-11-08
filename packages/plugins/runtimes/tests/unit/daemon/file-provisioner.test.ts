@@ -8,7 +8,7 @@
  * linked, and nothing reads it).
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { lstat, mkdir, readdir, readFile, readlink, realpath, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, readFile, readlink, realpath, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { FleetApplyFailureError, type FleetApplyPlan } from '../../../daemon/lib/provisioning.ts';
 import type { FleetManifest } from '../../../daemon/lib/manifest.ts';
@@ -433,6 +433,23 @@ describe('FileFleetProvisioner over the fleet root', () => {
     expect(await readFile(join(world.fleet, 'bin', 'a'), 'utf8')).toBe('2');
   });
 
+  it('gives a copied file the mode the plan asked for, narrowed to the owner', async () => {
+    const world = await fleetWorld();
+    await mkdir(join(world.fleet, 'assets'), { recursive: true });
+    await writeFile(join(world.fleet, 'assets', 'note.md'), 'note');
+    const destination = join(world.fleet, 'homes', 'one', 'note.md');
+
+    await world
+      .provisioner()
+      .apply(
+        planFor(world, [
+          { kind: 'copy', source: join(world.fleet, 'assets', 'note.md'), path: destination, mode: 0o400 },
+        ]),
+      );
+
+    expect((await stat(destination)).mode & 0o777).toBe(0o400);
+  });
+
   it('copies a folder whole and publishes it by moving it onto a free name, leaving no staged copy behind', async () => {
     const world = await fleetWorld();
     const skill = join(world.fleet, 'assets', 'skills', 'review');
@@ -440,9 +457,12 @@ describe('FileFleetProvisioner over the fleet root', () => {
     await writeFile(join(skill, 'SKILL.md'), '---\nname: review\n---\n');
     await writeFile(join(skill, 'nested', 'a.txt'), 'a');
     await symlink('/etc/hostname', join(skill, 'link-inside'));
+    // A template linked out of a read-only store arrives read-only; the copied root is made writable for its owner.
+    await chmod(skill, 0o555);
     const destination = join(world.fleet, 'homes', 'one', 'skills', 'review');
 
     await world.provisioner().apply(planFor(world, [{ kind: 'copy', source: skill, path: destination }]));
+    await chmod(skill, 0o755);
 
     expect((await tree(destination)).toSorted()).toEqual([
       'SKILL.md = ---\nname: review\n---\n',

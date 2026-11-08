@@ -93,6 +93,27 @@ describe('the mutation journal', () => {
     expect(await readdir(folder)).toEqual([]);
   });
 
+  it('keeps a tree it cannot summarise: not knowing is not the same as knowing it is ours', async () => {
+    const world = await fleetWorld();
+    const folder = join(world.fleet, 'skills');
+    await mkdir(join(folder, 'one'), { recursive: true });
+    await writeFile(join(folder, 'one', 'a.md'), 'a');
+    await writeFile(join(folder, 'b.md'), 'b');
+    const journal = new FileMutationJournal(world.disk, async () => undefined, 1);
+    const mark = journal.beginOperation();
+    await journal.capture(folder);
+    await mkdir(folder);
+    await writeFile(join(folder, 'new.md'), 'mine');
+    await writeFile(join(folder, 'new2.md'), 'mine too');
+    await sealed(journal, mark);
+
+    const outcome = await journal.rollback();
+
+    expect(outcome.unrestored[0]?.reason).toMatch(/changed after this apply wrote it/u);
+    expect(await readFile(join(folder, 'new.md'), 'utf8')).toBe('mine');
+    expect(await readFile(join(outcome.unrestored[0]?.backup as string, 'b.md'), 'utf8')).toBe('b');
+  });
+
   it('removes a folder it created only while it is still empty', async () => {
     const world = await fleetWorld();
     const journal = journalOf(world);
