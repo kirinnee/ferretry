@@ -120,10 +120,61 @@ describe('component text redaction', () => {
       should(shownFor('name: |\n  plain text here\n')).eql({ text: 'name: |\n  plain text here\n', redacted: false });
     });
 
-    // FINDING (also in today's `packages/daemon/src/lib/fleet/catalog.ts`): a block whose `|` follows a separator on the
-    // line AFTER its name leaks. `opening` returns that line for the block, but the block branch of `redactNextLines`
-    // scans from the line after the NAME, meets the `= |` line at the name's own indent and stops at once.
-    it.todo('should hide a block whose indicator follows a separator on the line after its name: PASSWORD⏎= |⏎  value');
+    // Ruling #36, tightened by design: today (`packages/daemon/src/lib/fleet/catalog.ts`) leaks a block whose indicator
+    // follows a separator on the line AFTER its name: the block was read from the line after the NAME, met the `= |`
+    // line at the name's own indent and stopped at once. The separator line opens the block, so it no longer ends it.
+    it('S26 should hide a block whose indicator follows a separator on the line after its name: PASSWORD⏎= |⏎  value', () => {
+      // Act
+      const actual = shownFor('PASSWORD\n= |\n  fake-block-value-0000\nnext: fake-shown-0000');
+
+      // Assert
+      should(actual).eql({ text: `PASSWORD\n= |\n  ${HIDDEN}\nnext: fake-shown-0000`, redacted: true });
+    });
+
+    it('S26 should hide that block when its lines end in CRLF', () => {
+      // Act
+      const actual = shownFor('PASSWORD\r\n= |\r\n  fake-block-value-0000\r\nnext: ok\r\n');
+
+      // Assert
+      should(actual).eql({ text: `PASSWORD\r\n= |\r\n  ${HIDDEN}\r\nnext: ok\r\n`, redacted: true });
+    });
+
+    it('S26 should hide that block when it is indented with tabs', () => {
+      // Act
+      const actual = shownFor('\tPASSWORD\n\t= |\n\t\tfake-block-value-0000\n\tnext: ok');
+
+      // Assert
+      should(actual).eql({ text: `\tPASSWORD\n\t= |\n\t\t${HIDDEN}\n\tnext: ok`, redacted: true });
+    });
+
+    it('S26 should hide that block when the indicator is stuck to its separator: PASSWORD⏎=|', () => {
+      // Act
+      const actual = shownFor('PASSWORD\n=|\n  fake-block-value-0000\ntoken\n:>-\n  fake-block-value-1111');
+
+      // Assert
+      should(actual).eql({ text: `PASSWORD\n=|\n  ${HIDDEN}\ntoken\n:>-\n  ${HIDDEN}`, redacted: true });
+    });
+
+    it('S26 should hide every line of that block when it runs to the end of the text, and leave one with no lines', () => {
+      // Assert
+      should(shownFor('PASSWORD\n= |\n  fake-line-one-0000\n\n  fake-line-two-0000')).eql({
+        text: `PASSWORD\n= |\n  ${HIDDEN}\n\n  ${HIDDEN}`,
+        redacted: true,
+      });
+      should(shownFor('PASSWORD\n= |')).eql({ text: 'PASSWORD\n= |', redacted: false });
+      should(shownFor('PASSWORD\n= |\n')).eql({ text: 'PASSWORD\n= |\n', redacted: false });
+    });
+
+    it('S26 should hide nothing of that shape under a name that announces no secret, nor after the block ends', () => {
+      // Assert
+      for (const input of [
+        'username\n= |\n  plain-block-text-0000\nnext: ok',
+        'mode\r\n=|\r\n\tplain-block-text-0000',
+        'PASSWORD\n= |\nplain-sibling-text-0000',
+      ]) {
+        should(shownFor(input)).eql({ text: input, redacted: false });
+      }
+    });
   });
 
   describe('a ${NAME<op>default} expansion', () => {

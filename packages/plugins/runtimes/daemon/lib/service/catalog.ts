@@ -373,7 +373,8 @@ function isContextFreeSecret(match: string, offset: number, whole: string): bool
 /**
  * Where the value of a name that ends its line is: the line it is on and how far in, whether it opens a block
  * scalar, and the name. The name ends the line itself (`password =`, `password: |`), or stands alone with its
- * separator starting the next line (`PASSWORD⏎= x`).
+ * separator starting the next line (`PASSWORD⏎= x`, `PASSWORD⏎= |`). For a block, the line is the one its
+ * indicator stands on: the name's own, or the separator's line after it.
  */
 function opening(
   parts: readonly string[],
@@ -387,7 +388,10 @@ function opening(
   const line = parts[index] ?? '';
   const opens = OPENS_VALUE.exec(line);
   const opened = opens?.[1]?.replace(LEADING_DIGITS, '');
-  if (opened) return { name: opened, block: opens?.[2] !== undefined, line: next(index), from: 0 };
+  if (opened) {
+    const block = opens?.[2] !== undefined;
+    return { name: opened, block, line: block ? index : next(index), from: 0 };
+  }
   const alone = NAME_ENDS.exec(line)?.[1]?.replace(LEADING_DIGITS, '');
   if (!alone) return undefined;
   const at = next(index);
@@ -405,8 +409,8 @@ const insidePointer = (text: string, at: number): boolean =>
 
 /**
  * The value of a name that ends its line, on the lines after it (`password:⏎hunter2`, `password =⏎x`,
- * `PASSWORD⏎= x`, and a block `password: |⏎  x`). A name is read as it was written (a value after it on its line
- * may be hidden by now), and a next line that is a key of its own is read on its own. One pass
+ * `PASSWORD⏎= x`, and a block `password: |⏎  x` or `PASSWORD⏎= |⏎  x`). A name is read as it was written (a value
+ * after it on its line may be hidden by now), and a next line that is a key of its own is read on its own. One pass
  * over the lines, each read once: the block under a name that announces a secret is read as a whole, and a block
  * opened inside it is not read again (it ends inside it, and what the outer name hides the inner one cannot
  * show), and the block under any other name is not read at all.
@@ -450,7 +454,9 @@ function redactNextLines(
     for (let next = index + 2; next < parts.length; next += 2) {
       const line = parts[next] ?? '';
       if (line.trim() === '') continue;
-      if (indentOf(line) <= indent) break;
+      // The separator line that holds the indicator (`PASSWORD⏎= |`) opens the block, so it never ends it: it is read
+      // like any line of the block, as it always was when it stood deeper than the name.
+      if (next !== opens.line && indentOf(line) <= indent) break;
       last = next;
       if (!isSecret(opens.name, line.trim())) continue;
       parts[next] = `${line.slice(0, indentOf(line))}${HIDDEN_TEXT}`;
