@@ -21,6 +21,7 @@ import {
   type TunnelStatusView,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { webrtcSelftest } from './adapters/webrtc/selftest.ts';
 import { RelayCarrier, type RelayWebSocketFactory } from './adapters/relay/bun-relay-carrier.ts';
 import { HostedRelayDirectory } from './adapters/relay/hosted-relay-directory.ts';
 import { nativeRelaySocket, randomSessionBytes } from './adapters/relay/native.ts';
@@ -357,4 +358,7 @@ export function kernelConnectionBindings(kernel: KernelPorts): ConnectionBinding
     ...(config?.direct?.port === undefined ? {} : { port: config.direct.port }),
   };
 }
-export default implementDaemon(manifest, { build: ctx => buildConnections(ctx, kernelConnectionBindings(ctx.kernel)) });
+export default implementDaemon(manifest, {
+  build: ctx => buildConnections(ctx, kernelConnectionBindings(ctx.kernel)),
+  selftest: { webrtc: webrtcSelftest },
+});

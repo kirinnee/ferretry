@@ -312,5 +312,13 @@ export interface Manifest {
   readonly onboarding?: readonly OnboardingDecl[];
   readonly doctor?: readonly string[];
 
+  // `fyd --check` seams (DECISIONS-2 #22). None of them runs at boot.
+  /** Ids of PURE descriptive `fyd --check` lines: the half implements `preflight: { [id]: (facts) => lines }`. */
+  readonly preflight?: readonly string[];
+  /** Ids of bounded probes ONLY `fyd --check` runs: the half implements `selftest: { [id]: { label, run } }`. */
+  readonly selftest?: readonly string[];
+  /** Ids of the worker thread programs this plugin embeds: the half implements `workers: { [id]: URL }`, which `fyd --check` starts. */
+  readonly workers?: readonly string[];
+
   readonly permissions?: Permissions;
 }

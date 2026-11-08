@@ -641,6 +641,11 @@ export interface WorkerStartOptions {
    * inside this plugin's state folder; an undeclared or non-sqlite file refuses the start. No path is passed in.
    */
   readonly state?: readonly WorkerStateGrant[];
+  /**
+   * The worker's whole environment. Absent, a worker sees the process environment (a Bun `Worker` copies it); given,
+   * it sees only these variables, `{}` being none. `fyd --check` starts its probes with `{}`.
+   */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 export interface WorkersPort {
