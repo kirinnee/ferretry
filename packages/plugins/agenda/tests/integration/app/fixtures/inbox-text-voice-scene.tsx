@@ -11,8 +11,8 @@ import { AgendaCard } from '../../../../app/features/agenda/agenda-card.tsx';
 import { AgendaInboxComposer } from '../../../../app/features/agenda/agenda-inbox-composer.tsx';
 import { AgendaSwipeDeck } from '../../../../app/features/agenda/agenda-swipe-deck.tsx';
 import { daemonConnection } from '../../../../app/shell.ts';
-import { DEFAULT_STT_SETTINGS } from '../../../../app/shell.ts';
 import { agendaItem, choices, inboxCard } from '../../../support/app/agenda-inbox.tsx';
+import { WithFakeComposer } from '../../../support/app/composer-port.tsx';
 import { sessionView } from '../../../support/app/sessions.ts';
 
 const params = new URLSearchParams(window.location.search);
@@ -26,6 +26,8 @@ const item = agendaItem('A47', {
 const view = sessionView('sess-1', { config: { teammate: 'zoe', name: 'Fix the build' } });
 const card = inboxCard(item, view);
 const daemon = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'device' });
+/** Dictation switched on, as Voice's defaults have it; the Inbox only passes it through to the host composer. */
+const DICTATION = { enabled: true };
 const phone = window.innerWidth < 768;
 
 function Scene() {
@@ -40,14 +42,16 @@ function Scene() {
         />
       </div>
       <div style={{ marginTop: 'auto' }}>
-        <AgendaInboxComposer
-          clientFor={async () => ({ send: async () => ({}) as never })}
-          compact={phone}
-          connection={daemon}
-          dictationSettings={DEFAULT_STT_SETTINGS}
-          itemId={'A47' as AgendaId}
-          view={view}
-        />
+        <WithFakeComposer>
+          <AgendaInboxComposer
+            clientFor={async () => ({ send: async () => ({}) as never })}
+            compact={phone}
+            connection={daemon}
+            dictationSettings={DICTATION}
+            itemId={'A47' as AgendaId}
+            view={view}
+          />
+        </WithFakeComposer>
       </div>
     </div>
   );
