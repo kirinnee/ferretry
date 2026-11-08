@@ -36,7 +36,7 @@ export interface ClientConnection {
 const LATE_EVENT = /^Cannot find object to "[A-Za-z]+": [A-Za-z]+@[0-9a-f]+$/u;
 
 /** True for exactly the error `Connection.dispatch` throws for an event addressed to a dropped object. */
-export const isLateEventError = (error: unknown): boolean => error instanceof Error && LATE_EVENT.test(error.message);
+const isLateEventError = (error: unknown): boolean => error instanceof Error && LATE_EVENT.test(error.message);
 
 const guarded = new WeakSet<object>();
 
