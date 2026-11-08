@@ -97,6 +97,8 @@ function kernelRoot(
     syncDirectory: record('syncDirectory'),
     fileIdentity: record('fileIdentity'),
     remove: record('remove'),
+    linkTo: record('linkTo'),
+    setMode: record('setMode'),
   };
 }
 

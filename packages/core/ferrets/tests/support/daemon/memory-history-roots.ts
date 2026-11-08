@@ -36,6 +36,10 @@ export class MemoryHistoryRoots implements RootsPort {
     return file === undefined ? undefined : new TextDecoder().decode(file.bytes);
   }
 
+  harnessFile(): never {
+    throw new Error('the history roots fixture has no harness file');
+  }
+
   share(): Promise<SharedTree> {
     return Promise.reject(new Error('the history roots share nothing'));
   }

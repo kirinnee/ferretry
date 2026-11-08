@@ -107,6 +107,7 @@ export class VirtualFs {
             return { bytes: bytes.slice(start, start + length), size: bytes.length };
           },
           sync: unused,
+          chmod: unused,
           close: async () => undefined,
         };
       },

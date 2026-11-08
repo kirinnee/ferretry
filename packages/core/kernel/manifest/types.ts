@@ -270,6 +270,13 @@ export interface Permissions {
    * member is refused naming the plugin.
    */
   readonly processes?: ProcessesPermission;
+  /**
+   * The basenames `kernel.roots.harnessFile` may open beside a harness home (Runtimes: `['.claude.json']`, the file
+   * Claude keeps its user-scope MCP servers in, BESIDE `~/.claude`). Each is matched exactly, as one plain file name;
+   * `'*'`, a pattern, a path, `.` or `..` is a name that matches no file. Only with `harness-home` in `roots` and only
+   * for the plugin that may hold it. Absent: every `harnessFile` is refused.
+   */
+  readonly harnessFiles?: readonly string[];
   /** It reads the running build's facts and launches the self-update through `kernel.updateHost` (Updates). */
   readonly updateHost?: true;
 }

@@ -50,6 +50,8 @@ export interface OpenedFile {
   readWindow(offset: number, length: number): Promise<{ readonly bytes: Uint8Array; readonly size: number }>;
   /** `fsync` of THIS descriptor: what was read from it is on the disk, not only in the page cache. */
   sync(): Promise<void>;
+  /** Sets this file's permission bits through the descriptor (`fchmod`), never by name (`RootHandle.setMode`). */
+  chmod(mode: number): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -274,6 +276,7 @@ export function nodeFs(
           return { bytes: buffer.subarray(0, bytesRead), size };
         },
         sync: async () => await handle.sync(),
+        chmod: async mode => await handle.chmod(mode),
         close: async () => await handle.close(),
       };
     },

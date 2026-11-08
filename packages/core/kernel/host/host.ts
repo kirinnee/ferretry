@@ -687,6 +687,9 @@ async function bootLocked(
       {
         random: adapters.random,
         ...(pins === undefined ? {} : { pins }),
+        ...(manifest.permissions?.harnessFiles === undefined
+          ? {}
+          : { harnessFiles: manifest.permissions.harnessFiles }),
         // Shared trees (`kernel.roots.share`): only a manifest that declares it mints; its own opaque named trees are the
         // only state it may share; every tree it minted is revoked when it stops.
         shareTrees: manifest.permissions?.shareTrees === true,

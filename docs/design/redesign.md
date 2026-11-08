@@ -2513,22 +2513,35 @@ The boot-trace test asserts this order from the manifests.
 A subsystem's own `state/<id>/` and declared config are its own. Anything else is a declared **root**, handed as a
 scoped handle:
 
-| Root              | Kind                   | Holder                                          | Where it may reach                                                                                                                                                                              |
-| ----------------- | ---------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent-homes`     | internal               | each harness plugin, its own subfolder          | only `state/<harness>/agent-homes/`; Conversation reads a transcript only through the harness's `TranscriptReader`                                                                              |
-| `harness-history` | owner's, read-only     | each harness plugin                             | only that harness's documented history folders of **this** user (links, §6.2); links not followed out                                                                                           |
-| `worktrees`       | internal               | Ferrets                                         | only `<FY_HOME>-worktrees/`                                                                                                                                                                     |
-| `work`            | owner's                | Ferrets, and through it a ferret's tools        | only the folder `WorkFolders` allows for that ferret: the one it was started in, checked against the fence                                                                                      |
-| `imports`         | owner's, one operation | Skills, Catalogs, Conversation, `fy plugin add` | only the path the owner named, once                                                                                                                                                             |
-| `downloads`       | internal               | Browsers                                        | only its staging folder                                                                                                                                                                         |
-| `fleet`           | internal               | Runtimes alone                                  | only `<FY_HOME>/fleet/` (wrappers, one harness home per runtime under `homes/<id>/`, assets, setup records); a handle may be scoped to one relative folder in it                                |
-| `harness-home`    | owner's, read-only     | Runtimes alone                                  | only the ONE harness home the caller names (absolute: `CLAUDE_CONFIG_DIR` or `~/.claude`, `CODEX_HOME` or `~/.codex`), for the first-run scan; links not followed out, refused inside the fence |
+| Root              | Kind                   | Holder                                          | Where it may reach                                                                                                                                                                                                                                         |
+| ----------------- | ---------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent-homes`     | internal               | each harness plugin, its own subfolder          | only `state/<harness>/agent-homes/`; Conversation reads a transcript only through the harness's `TranscriptReader`                                                                                                                                         |
+| `harness-history` | owner's, read-only     | each harness plugin                             | only that harness's documented history folders of **this** user (links, §6.2); links not followed out                                                                                                                                                      |
+| `worktrees`       | internal               | Ferrets                                         | only `<FY_HOME>-worktrees/`                                                                                                                                                                                                                                |
+| `work`            | owner's                | Ferrets, and through it a ferret's tools        | only the folder `WorkFolders` allows for that ferret: the one it was started in, checked against the fence                                                                                                                                                 |
+| `imports`         | owner's, one operation | Skills, Catalogs, Conversation, `fy plugin add` | only the path the owner named, once                                                                                                                                                                                                                        |
+| `downloads`       | internal               | Browsers                                        | only its staging folder                                                                                                                                                                                                                                    |
+| `fleet`           | internal               | Runtimes alone                                  | only `<FY_HOME>/fleet/` (wrappers, one harness home per runtime under `homes/<id>/`, assets, setup records); a handle may be scoped to one relative folder in it                                                                                           |
+| `harness-home`    | owner's, read-only     | Runtimes alone                                  | only the ONE harness home the caller names (absolute: `CLAUDE_CONFIG_DIR` or `~/.claude`, `CODEX_HOME` or `~/.codex`), for the first-run scan; links not followed out, refused inside the fence; plus, through `harnessFile`, each declared file beside it |
 
 - Every handle resolves symlinks before checking, refuses `..`, and keeps today's link and device-file checks.
 - `fleet` and `harness-home` are new in 5.0 (the Runtimes catalogue and first-run scan read and write through them
   instead of raw paths). `fleet` is an internal root at a fixed place, not under `state/<id>/`: its base must be exactly
   `<FY_HOME>/fleet` with no link from the home down to it, and it is already one of the fence's pinned paths, so no
   owner's root reaches it. Both are refused to any plugin but Runtimes whatever its manifest declares.
+- The provisioner's three descriptor calls are root members, not raw paths:
+  - `linkTo(at, { root, path, dangling? })` writes the "stored once, never copied" link from a runtime home to the
+    host's credential or history. Its text is the REAL path of a name in one of the SAME plugin's own handles (never
+    free text; `copyTree`'s `link` rule, for a file too). It writes only into `fleet` or `agent-homes`, only where
+    nothing is at the name, with no link on the way, through the folder's checked no-follow descriptor. A missing
+    target only with `dangling` (an empty sign-in slot), and its folder must exist.
+  - `setMode(path, mode)` is an `fchmod` through an `O_NOFOLLOW` descriptor proven to be what was looked at. It keeps
+    `mode & 0o700` on an internal root and `mode & 0o777` elsewhere, never setuid/setgid/sticky. It is refused on a
+    read-only root and for a file with a second hard link.
+  - `kernel.roots.harnessFile(absolutePath)` (`permissions.harnessFiles`, by exact basename, Runtimes with
+    `harness-home` only) reads ONE file beside a harness home (`~/.claude.json` sits beside `~/.claude`), read-only.
+    Its folder is never listable. The leaf is never a link, never a second hard link, never a device, and the name
+    is checked again after the open. A hard link (`GuardedFolder.link`) stays refused: copy, or `linkTo`.
 - A plugin that must know whether a command is installed asks `kernel.paths.which(name, { directories? })`
   (`permissions.which`): one plain command name, the caller's absolute folders then the daemon's `PATH`, empty and
   relative entries dropped, at most 64 folders, the first regular executable file wins. No shell, nothing executed;
