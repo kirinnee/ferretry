@@ -42,7 +42,11 @@ afterAll(() => {
 });
 const ws = (
   packages: readonly FixturePackage[],
-  options?: { pending?: readonly string[]; pendingReasons?: Readonly<Record<string, readonly string[]>> },
+  options?: {
+    pending?: readonly string[];
+    pendingReasons?: Readonly<Record<string, readonly string[]>>;
+    pendingHalves?: Readonly<Record<string, readonly string[]>>;
+  },
 ): Fixture => {
   const f = fixture(packages, options);
   made.push(f);
@@ -90,6 +94,8 @@ describe('manifest-match', () => {
   });
 });
 
+const ALL = ['daemon', 'app', 'cli'];
+
 describe('ports-pending', () => {
   test('planted: the list grew, names a non-subsystem, and keeps a fully ported plugin', async () => {
     const ported = `import { implementApp, implementCli } from '${SDK}';`;
@@ -103,7 +109,7 @@ describe('ports-pending', () => {
         },
         { id: 'beta' },
       ],
-      { pending: ['alpha', 'beta', 'ghost'] },
+      { pending: ['alpha', 'beta', 'ghost'], pendingHalves: { beta: ALL } },
     );
     f.write('base.json', JSON.stringify({ format: 1, pending: ['alpha', 'ghost'] }));
     const found = messages(await run(portsPending, f, { base: `file:${join(f.root, 'base.json')}` }));
@@ -134,15 +140,59 @@ describe('ports-pending', () => {
       'alpha has no skeleton half left',
     );
 
-    const stray = ws([{ id: 'beta' }], { pending: ['beta'], pendingReasons: { alpha: ['a reason for nobody'] } });
+    const stray = ws([{ id: 'beta' }], {
+      pending: ['beta'],
+      pendingHalves: { beta: ALL },
+      pendingReasons: { alpha: ['a reason for nobody'] },
+    });
     stray.write('base.json', JSON.stringify({ format: 1, pending: ['beta'] }));
     expect(messages(await run(portsPending, stray, { base: `file:${join(stray.root, 'base.json')}` }))).toContain(
       'alpha has reasons but is not listed in "pending"',
     );
   });
+  test('planted: a skeleton half pendingHalves does not name fails; so does a name for a real half', async () => {
+    const real = (fn: string) =>
+      `import { ${fn} } from '${SDK}';\nimport manifest from '../manifest.ts';\nexport default ${fn}(manifest, { build: () => ({}) });\n`;
+    const alpha = {
+      id: 'alpha',
+      daemon: real('implementDaemon'),
+      app: real('implementApp'),
+      cli: real('implementCli'),
+    };
+    const base = JSON.stringify({ format: 1, pending: ['alpha', 'beta'] });
+    const unnamed = ws([alpha, { id: 'beta' }], {
+      pending: ['alpha', 'beta'],
+      pendingHalves: { beta: ['daemon', 'app'] },
+    });
+    unnamed.write('base.json', base);
+    const missing = messages(await run(portsPending, unnamed, { base: `file:${join(unnamed.root, 'base.json')}` }));
+    expect(missing).toContain('cli half of beta is a skeleton but ports-pending.json pendingHalves does not name it');
+    expect(missing).not.toContain('daemon half of beta');
+    const overnamed = ws([alpha, { id: 'beta' }], {
+      pending: ['alpha', 'beta'],
+      pendingHalves: { alpha: ['app'], beta: ALL },
+    });
+    overnamed.write(
+      'base.json',
+      JSON.stringify({ format: 1, pending: ['alpha', 'beta'], pendingHalves: { alpha: ['app'], beta: ALL } }),
+    );
+    expect(
+      messages(await run(portsPending, overnamed, { base: `file:${join(overnamed.root, 'base.json')}` })),
+    ).toContain('pendingHalves names the app half of alpha, but it is a real half');
+  });
+  test('pendingHalves only shrinks: a re-added entry fails, the one-time correction passes', async () => {
+    const f = ws([{ id: 'alpha' }, { id: 'catalogs' }], {
+      pending: ['alpha', 'catalogs'],
+      pendingHalves: { alpha: ['app'], catalogs: ['app'] },
+    });
+    f.write('base.json', JSON.stringify({ format: 1, pending: ['alpha', 'catalogs'] }));
+    const found = messages(await run(portsPending, f, { base: `file:${join(f.root, 'base.json')}` }));
+    expect(found).toContain('pendingHalves alpha app was added; pendingHalves may only shrink');
+    expect(found).not.toContain('pendingHalves catalogs app was added');
+  });
   test('a shrinking list of skeletons passes', async () => {
-    const f = ws([{ id: 'beta' }], { pending: ['beta'] });
-    f.write('base.json', JSON.stringify({ format: 1, pending: ['alpha', 'beta'] }));
+    const f = ws([{ id: 'beta' }], { pending: ['beta'], pendingHalves: { beta: ALL } });
+    f.write('base.json', JSON.stringify({ format: 1, pending: ['alpha', 'beta'], pendingHalves: { beta: ALL } }));
     expect(messages(await run(portsPending, f, { base: `file:${join(f.root, 'base.json')}` }))).toBe('');
   });
 });
