@@ -221,7 +221,10 @@ export function workersFor(
   const live = new Set<() => void>();
   let registered = false;
   return {
-    start: (moduleUrl, options) => {
+    start: (given, options) => {
+      // ONE reading of the URL, checked and started: the caller's own URL is mutable, and reading `options` below runs
+      // the caller's getters, which could retarget it between the stem check and the start.
+      const moduleUrl = new URL(given.href);
       if (declared !== undefined && moduleUrl.protocol === 'file:' && (declared.compiled ?? isCompiledModule())) {
         const stem = stemOf(moduleUrl);
         const known = Object.values(declared.urls() ?? {}).map(stemOf);
