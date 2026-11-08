@@ -4,6 +4,7 @@
  *
  *   packages/core/kernel/src/generated/plugins.ts   daemon halves in start order + contract hashes
  *   packages/core/kernel/src/generated/glossary.ts  every manifest's words
+ *   packages/core/kernel/src/generated/client-binary.ts  the client binary name (`bin` key of packages/cli/package.json)
  *   packages/cli/src/generated/commands.ts          CLI halves + contract hashes
  *   packages/app/src/generated/surfaces.ts          app halves + contract hashes
  *   generated/hooks.md                              offers, takers and their order
@@ -47,6 +48,7 @@ import {
 export const GENERATED = {
   plugins: 'packages/core/kernel/src/generated/plugins.ts',
   glossary: 'packages/core/kernel/src/generated/glossary.ts',
+  clientBinary: 'packages/core/kernel/src/generated/client-binary.ts',
   commands: 'packages/cli/src/generated/commands.ts',
   surfaces: 'packages/app/src/generated/surfaces.ts',
   hooks: 'generated/hooks.md',
@@ -275,6 +277,21 @@ function glossary(model: Model): string {
   ].join('\n');
 }
 
+/** The client binary name, the first `bin` key of packages/cli/package.json (CLAUDE.md two-name model), never a literal. */
+export function clientBinary(model: Model): string {
+  const manifest = JSON.parse(readFileSync(join(model.ws.root, 'packages/cli/package.json'), 'utf8')) as {
+    bin?: Readonly<Record<string, string>>;
+  };
+  const name = Object.keys(manifest.bin ?? {})[0];
+  if (name === undefined) throw new Error('packages/cli/package.json declares no bin entry');
+  return [
+    HEADER,
+    '/** The client binary name, single-sourced from the `bin` key of packages/cli/package.json. */',
+    `export const CLIENT_BINARY = ${JSON.stringify(name)};`,
+    '',
+  ].join('\n');
+}
+
 function hooksMarkdown(model: Model): string {
   const order = hookOrder(model.graph);
   const lines = [
@@ -325,6 +342,7 @@ export function generateGlobal(model: Model): ReadonlyMap<string, string> {
       halfRegistry(model, GENERATED.plugins, 'daemon', 'DaemonImplementation', 'daemonImplementations'),
     ],
     [GENERATED.glossary, glossary(model)],
+    [GENERATED.clientBinary, clientBinary(model)],
     [GENERATED.commands, commandsRegistry(model)],
     [GENERATED.surfaces, surfacesRegistry(model)],
     [GENERATED.hooks, hooksMarkdown(model)],
