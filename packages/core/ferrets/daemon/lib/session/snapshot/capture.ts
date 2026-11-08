@@ -1,7 +1,8 @@
-import type { Log, Redaction, RedactionScope } from '@ferretry/kernel/contract';
+import type { Log, Redaction } from '@ferretry/kernel/contract';
 import { type Duration, milliseconds } from '@ferretry/std';
 import { RUNNER_LOOK_STATUS_BYTES, type FerretId, type Runner, type RunnerHandle } from '../../../../contract/index.ts';
 import { type SessionId, tryParseSessionId } from '../../session-id.ts';
+import { maskedScreen } from './screen-mask.ts';
 import type { LastSnapshotWriter } from './types.ts';
 
 /**
@@ -12,16 +13,6 @@ export const LAST_SNAPSHOT_MAX_CHARS = RUNNER_LOOK_STATUS_BYTES;
 
 /** How long a stop waits for its last-screen capture before it goes on without one. */
 const LAST_SNAPSHOT_CAPTURE_BOUND = milliseconds(2_000);
-
-/**
- * A captured frame masked as TEXT and then as ROWS, inside the one read scope it is given. `capture-pane` (no `-J`)
- * hands a line wider than the pane back as two rows, so a value printed near the right edge arrives split by a
- * `\n` that `text` cannot see across. `lines` matches the rows as one run (joined with nothing between them), so
- * each half of a wrapped value is starred in its own row. A run it matches across a REAL line break only adds `*`.
- */
-function maskedFrame(scope: RedactionScope, frame: string): string {
-  return scope.lines(scope.text(frame).split('\n')).join('\n');
-}
 
 /**
  * The text a capture keeps: the last {@link LAST_SNAPSHOT_MAX_CHARS} characters of an ALREADY MASKED frame. Cut after
@@ -54,7 +45,7 @@ type CaptureOutcome = 'written' | 'nothing' | 'failed' | 'timed-out';
  * The ferret's last screen, kept when it stops (today's `launcher.snapshot` before every stop, completion and pane
  * replacement, writing `last-snapshot.txt`): ONE look at the live pane through the runner's own `Runner.look` (which
  * reads inside `kernel.act(terminal %n, 'read')` and masks inside one `Redaction.read`), masked AGAIN here inside one
- * `Redaction.read`, as text and as rows ({@link maskedFrame}), before anything is written, cut to {@link LAST_SNAPSHOT_MAX_CHARS}, and written to the ferret's own
+ * `Redaction.read` by {@link maskedScreen} (a value wrapped by tmux or by the harness UI included), before anything is written, cut to {@link LAST_SNAPSHOT_MAX_CHARS}, and written to the ferret's own
  * folder only.
  *
  * BEST EFFORT AND TOTAL. A stop never waits on it longer than its bound and never fails because of it: a pane already
@@ -101,7 +92,7 @@ export class LastSnapshotCapture {
     const screen = look?.status;
     // Today's rule: only a frame actually observed on a live pane is kept; a blank one is not evidence of anything.
     if (screen === undefined || screen.trim() === '') return 'nothing';
-    const masked = await this.deps.redaction.read(scope => maskedFrame(scope, screen));
+    const masked = await this.deps.redaction.read(scope => maskedScreen(scope, screen));
     if (typeof masked !== 'string' || masked.trim() === '') return 'nothing';
     // The bound is checked here, before the write starts; a write already begun is not called back (see the class).
     if (abandoned.aborted) return 'nothing';

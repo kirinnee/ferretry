@@ -96,6 +96,38 @@ describe('F-0326 the last screen a stop keeps (last-snapshot.txt)', () => {
     ]);
   });
 
+  test('F-0326 a value the harness UI broke inside its indent (⎿ then 5 spaces, over 3 rows) or its │ … │ box reaches the file in no row', async () => {
+    // Claude Code hard-breaks a word longer than its box and starts each continuation row with the box's indent.
+    const long = `FAKEJWTcapture.${'a1B2c3D4e5F6g7H8i9J0'.repeat(10)}`;
+    const indented = [`  ⎿  ${long.slice(0, 75)}`, `     ${long.slice(75, 150)}`, `     ${long.slice(150)}`];
+    const boxed = [`│ ${WRAPPED.slice(0, 28)} │`, `│ ${WRAPPED.slice(28).padEnd(28)} │`];
+    const w = world({
+      redaction: new FakeRedaction(
+        new Map([
+          ['JWT' as SecretName, long],
+          ['GH_TOKEN' as SecretName, WRAPPED],
+        ]),
+      ),
+    });
+    await w.capture.capture(
+      FERRET,
+      runnerLooking(async () => screen([...indented, '', ...boxed, '> '].join('\n'))),
+      HANDLE,
+    );
+    const kept = w.written[0]?.text ?? '';
+    for (const value of [long, WRAPPED])
+      for (let at = 0; at + 8 <= value.length; at += 1) expect(kept).not.toContain(value.slice(at, at + 8));
+    expect(kept.split('\n')).toEqual([
+      `  ⎿  ${'*'.repeat(75)}`,
+      `     ${'*'.repeat(75)}`,
+      `     ${'*'.repeat(long.length - 150)}`,
+      '',
+      `│ ${'*'.repeat(28)} │`,
+      `│ ${'*'.repeat(WRAPPED.length - 28).padEnd(28)} │`,
+      '> ',
+    ]);
+  });
+
   test('F-0326 the screen is masked before anything is written, even when the runner handed it over unmasked', async () => {
     const w = world();
     await w.capture.capture(

@@ -1,0 +1,161 @@
+import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { FakeRedaction } from '@ferretry/core-vault/contract/testing';
+import type { SecretName } from '@ferretry/core-vault/contract';
+import { maskedScreen } from '../../../../../daemon/lib/session/snapshot/screen-mask.ts';
+
+const WIDTH = 80;
+/** A 213-character token, the length of a short JWT: three rows of an 80-column harness box. Fake. */
+const LONG = `FAKEJWTprobe.${'x9Y8w7V6u5T4s3R2q1P0'.repeat(10)}`;
+/** A 40-character token. Fake. */
+const SHORT = 'ghp_FAKEBOXfixtureAAAABBBBCCCCDDDDEEEE12';
+/** A password, and a longer value that holds it. Fake. */
+const PASSWORD = 'FAKEpw-0f9e8d7c';
+const URL = `postgres://appuser:${PASSWORD}@db-FAKEPROBE-host.internal:5432/app`;
+/** A passphrase with spaces: a word-wrapping UI breaks it at a space, which capture-pane trims off the row's end. */
+const PASSPHRASE = 'correct horse FAKEPROBE battery staple';
+
+const vault = (values: Record<string, string>) =>
+  new FakeRedaction(new Map(Object.entries(values).map(([name, value]) => [name as SecretName, value])));
+
+/**
+ * `value` laid out the way Claude Code (Ink) and Codex (ratatui) hard-break a word longer than their box: the first
+ * row starts with `lead`, every continuation row with `indent`, each row at most `width` wide inside `right`.
+ */
+function hardBroken(lead: string, indent: string, value: string, right = '', width = WIDTH): string[] {
+  const rows: string[] = [];
+  let rest = value;
+  let prefix = lead;
+  while (rest.length > 0) {
+    const room = width - prefix.length - right.length;
+    const piece = rest.slice(0, room);
+    rest = rest.slice(room);
+    rows.push(
+      `${prefix}${piece}${right === '' ? '' : `${piece.length < room ? ' '.repeat(room - piece.length) : ''}${right}`}`,
+    );
+    prefix = indent;
+  }
+  return rows;
+}
+
+async function mask(screen: string, values: Record<string, string>): Promise<string> {
+  return await vault(values).read(scope => maskedScreen(scope, screen));
+}
+
+/** No piece of `value` 8 characters or longer survives anywhere in `out`. */
+function noPieceOf(value: string, out: string): void {
+  for (let at = 0; at + 8 <= value.length; at += 1) expect(out).not.toContain(value.slice(at, at + 8));
+}
+
+describe('F-0326 the screen masker: a value the harness UI wrapped inside its indent or box', () => {
+  test("F-0326 a 213-character value in Claude Code's ⎿ tool result, continued under a 5-space indent, is starred in every row", async () => {
+    const rows = ['⏺ Bash(echo $TOKEN)', ...hardBroken('  ⎿  ', '     ', LONG), '', '> '];
+    expect(rows.length).toBe(6);
+    const out = await mask(rows.join('\n'), { TOKEN: LONG });
+    noPieceOf(LONG, out);
+    const kept = out.split('\n');
+    // Every row keeps its width and its gutter: only the value's characters became `*`.
+    expect(kept.map(row => row.length)).toEqual(rows.map(row => row.length));
+    expect(kept[1]?.startsWith('  ⎿  ***')).toBe(true);
+    expect(kept[2]?.startsWith('     ***')).toBe(true);
+    expect(kept[3]?.startsWith('     ***')).toBe(true);
+    expect(kept[0]).toBe('⏺ Bash(echo $TOKEN)');
+  });
+
+  test('F-0326 a value in a reply (⏺ then a 2-space indent) is starred in both rows', async () => {
+    const rows = hardBroken('⏺ Your token is ', '  ', `${SHORT}${SHORT.slice(4)}${SHORT.slice(4)}`);
+    const value = `${SHORT}${SHORT.slice(4)}${SHORT.slice(4)}`;
+    expect(rows.length).toBe(2);
+    const out = await mask(rows.join('\n'), { TOKEN: value });
+    noPieceOf(value, out);
+    expect(out.split('\n')[0]?.startsWith('⏺ Your token is ****')).toBe(true);
+  });
+
+  test('F-0326 a value split across two rows of a │ … │ box is starred in both rows and the borders stay', async () => {
+    const rows = [
+      '╭──────────────────────────────╮',
+      ...hardBroken('│ ', '│ ', SHORT, ' │', 32),
+      '╰──────────────────────────────╯',
+    ];
+    expect(rows.length).toBe(4);
+    const out = await mask(rows.join('\n'), { TOKEN: SHORT });
+    noPieceOf(SHORT, out);
+    expect(out.split('\n')).toEqual([
+      rows[0] ?? '',
+      `│ ${'*'.repeat(28)} │`,
+      `│ ${'*'.repeat(SHORT.length - 28)}${' '.repeat(28 - (SHORT.length - 28))} │`,
+      rows[3] ?? '',
+    ]);
+  });
+
+  test("F-0326 Codex's └ tool output, continued under its indent, is starred in every row", async () => {
+    const rows = ['• Ran env | grep TOKEN', ...hardBroken('  └ TOKEN=', '    ', LONG)];
+    const out = await mask(rows.join('\n'), { TOKEN: LONG });
+    noPieceOf(LONG, out);
+    expect(out.split('\n')[1]?.startsWith('  └ TOKEN=***')).toBe(true);
+  });
+
+  test('F-0326 a value tmux wrapped at the pane edge (no gutter) is still starred in both rows', async () => {
+    const rows = [`${'x'.repeat(60)}${SHORT.slice(0, 20)}`, `${SHORT.slice(20)} and the rest`];
+    const out = await mask(rows.join('\n'), { TOKEN: SHORT });
+    expect(out.split('\n')).toEqual([
+      `${'x'.repeat(60)}${'*'.repeat(20)}`,
+      `${'*'.repeat(SHORT.length - 20)} and the rest`,
+    ]);
+  });
+
+  test('F-0326 a value that stands whole in one row keeps its [redacted:NAME] marker', async () => {
+    const out = await mask(`plain ${SHORT} here\n> `, { GH_TOKEN: SHORT });
+    expect(out).toBe('plain [redacted:GH_TOKEN] here\n> ');
+  });
+
+  test('F-0326 a longer wrapped value that holds a shorter vault value leaks none of its rest', async () => {
+    // The password stands whole in the first row and the URL that holds it wraps: a text pass run first would turn
+    // the password into its marker and leave the rest of the URL unmatchable.
+    const rows = hardBroken('  ⎿  DATABASE_URL=', '     ', URL, '', 60);
+    expect(rows.length).toBe(2);
+    expect(rows[0]).toContain(PASSWORD);
+    const out = await mask(rows.join('\n'), { PW: PASSWORD, DATABASE_URL: URL });
+    noPieceOf(URL, out);
+    expect(out).not.toContain('postgres://appuser:');
+    expect(out).not.toContain('@db-FAKEPROBE-host.internal:5432/app');
+  });
+
+  test('F-0326 a value broken at a space that capture-pane trimmed off the row end is starred in both rows', async () => {
+    // Word-wrapped after FAKEPROBE: the space is gone from the end of the first row.
+    const rows = ['  ⎿  passphrase: correct horse FAKEPROBE', '     battery staple', '> '];
+    const out = await mask(rows.join('\n'), { PASS: PASSPHRASE });
+    expect(out).not.toContain('FAKEPROBE');
+    expect(out).not.toContain('battery');
+    expect(out).not.toContain('correct horse');
+    expect(out.split('\n')[2]).toBe('> ');
+  });
+
+  test('F-0326 a multi-line value printed across real line breaks is masked', async () => {
+    const pem = 'FAKEKEYline-one-AAAA\nFAKEKEYline-two-BBBB';
+    const out = await mask(`$ cat key\n${pem}\n$ `, { KEY: pem });
+    expect(out).not.toContain('FAKEKEYline');
+  });
+
+  test('F-0326 a * the screen already showed is not taken for a mask, and a row with no value is untouched', async () => {
+    const screen = '**bold** text\n  ⎿  nothing secret here\n│ a box │';
+    expect(await mask(screen, { TOKEN: SHORT })).toBe(screen);
+  });
+
+  test('F-0326 a masker whose lines come back another length is not trusted: the whole piece is hidden', async () => {
+    const out = await new FakeRedaction(new Map()).read(scope =>
+      maskedScreen({ ...scope, lines: lines => lines.map(line => `${line}!`) }, `  ⎿  ${SHORT}\n> `),
+    );
+    expect(out).not.toContain(SHORT.slice(0, 8));
+  });
+});
+
+describe('F-0326 #U4 one screen masker for the last screen and the live look', () => {
+  test('F-0326 #U4 the Ferrets and Terminals copies of screen-mask.ts are the same bytes', () => {
+    const packages = join(import.meta.dir, '../../../../../../..');
+    const ferrets = readFileSync(join(packages, 'core/ferrets/daemon/lib/session/snapshot/screen-mask.ts'), 'utf8');
+    const terminals = readFileSync(join(packages, 'plugins/terminals/daemon/lib/tmux/screen-mask.ts'), 'utf8');
+    expect(terminals).toBe(ferrets);
+  });
+});

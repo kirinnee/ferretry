@@ -176,6 +176,46 @@ describe('TmuxRunner.look (U4, the turn watch read)', () => {
     should(look?.status).containEql('*'.repeat(tail.length));
   });
 
+  it('#U4 look masks a value the harness UI broke inside its indent (2 and 3 rows) or its │ … │ box before the screen is parsed', async () => {
+    // Arrange: Claude Code hard-breaks a word longer than its box; each continuation row starts with the box's indent.
+    const long = `FAKEJWTlook.${'Z9y8X7w6V5u4T3s2R1q0'.repeat(10)}`;
+    const token = 'ghp_FAKELOOKboxAAAABBBBCCCCDDDDEEEE12345';
+    const reply = `FAKEreply-${'k'.repeat(90)}`;
+    const rows = [
+      '⏺ Bash(env)',
+      `  ⎿  ${long.slice(0, 75)}`,
+      `     ${long.slice(75, 150)}`,
+      `     ${long.slice(150)}`,
+      `⏺ ${reply.slice(0, 78)}`,
+      `  ${reply.slice(78)}`,
+      `│ ${token.slice(0, 28)} │`,
+      `│ ${token.slice(28).padEnd(28)} │`,
+      '> ',
+    ];
+    const pane = subject({
+      redaction: new FakeRedaction(
+        new Map([
+          ['JWT' as SecretName, long],
+          ['GH_TOKEN' as SecretName, token],
+          ['REPLY' as SecretName, reply],
+        ]),
+      ),
+      screen: `${rows.join('\n')}\n`,
+    });
+
+    // Act
+    const look = await pane.runner.look(pane.handle);
+
+    // Assert: no piece of any value is in any field of the look; the gutters and borders stay where they stood.
+    should(look).be.ok();
+    const answered = JSON.stringify(look);
+    for (const value of [long, token, reply])
+      for (let at = 0; at + 8 <= value.length; at += 1) should(answered).not.containEql(value.slice(at, at + 8));
+    should(look?.status).containEql(`  ⎿  ${'*'.repeat(75)}`);
+    should(look?.status).containEql(`│ ${'*'.repeat(28)} │`);
+    should(look?.status).containEql(`⏺ ${'*'.repeat(78)}`);
+  });
+
   it('#U4 look under a Vault hold reads nothing: no tmux question, no capture, no answer', async () => {
     // Arrange
     const pane = subject();
