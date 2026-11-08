@@ -237,10 +237,13 @@ describe('the turn watch (U4, ruling #27 Q3: mounted in Ferrets)', () => {
     const { h, runner } = await host();
     const id = await start(h, 'cyra');
     await h.request('POST', `/v1/ferrets/${id}/stop`, { body: {} });
+    // The stop itself looks once, before the pane goes, to keep its last screen (F-0326); the watch never does after.
+    const atStop = [...runner.looked];
+    expect(atStop.length).toBe(1);
     await h.runJob(TURN_WATCH_JOB);
     await tick(h);
     await tick(h);
-    expect(runner.looked).toEqual([]);
+    expect(runner.looked).toEqual(atStop);
     await h.stop();
   });
 
