@@ -64,6 +64,16 @@ export interface ResolvedQuota {
 }
 
 /**
+ * The dashboard only needs to resolve one row's quota. Keeping this narrow
+ * lets its connected page pass a `DaemonUsageStore` without exposing that
+ * store's private feed index.
+ * @pending usage: SessionQuotaResolver in app/lib/usage.ts is imported by the unmerged branch rebuild/port-ferrets-b (core/ferrets/app/components/session-dashboard*.tsx), so it stays until that branch lands
+ */
+export interface SessionQuotaResolver {
+  quotaFor(daemonId: DaemonId, view: QuotaSubject): ResolvedQuota | null;
+}
+
+/**
  * Fields whose presence proves the monitor loop has stamped this session.
  * Reset timestamps are deliberately excluded: a reset instant with no
  * percentage, limit or auth answer is not something a badge can render.

@@ -39,7 +39,8 @@ export interface WardenVerdictView {
   readonly spawn?: WardenVerdictSpawnInfo;
 }
 
-interface WardenReportRequest {
+/** @pending warden: WardenReportRequest in app/features/warden/warden-verdicts.tsx is imported by the unmerged branch rebuild/port-ferrets-b (core/ferrets/app/components/session-dashboard.tsx, sessions-page.tsx), so it stays until that branch lands */
+export interface WardenReportRequest {
   readonly connection: DaemonConnection;
   readonly verdict: WardenVerdictView;
 }

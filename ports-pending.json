@@ -47,7 +47,8 @@
       "an owner's own save is refused while the kernel holds another edit, instead of today's both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged write (Gate's judgeConfigWrite judges the whole patched file, so an owner's plain save over a held edit could otherwise put that edit into effect); a broken file or a hand edit the kernel has not reloaded yet is overwritten with the value in effect (every setting is written from the settings in effect plus the owner's patch), never put into effect, but lost (a file with a top-level key the schema does not know is refused instead; the owner repairs it by hand); refusing a write over a file that moved since the kernel's last reload, so such an edit is held instead, waits on the kernel",
       "no stream of configuration changes reaches an app half: the settings card reads on mount, after its own save and when the tab becomes visible again, not the moment another editor (the CLI, a file edit) changes warden.yaml",
       "GAP(warden): daemon/lib/auto-move-failures.ts is not reached by the auto-move service (the machine item of moves that could not be made) (owner: warden port)",
-      "GAP(warden): daemon/lib/orphan-list.ts is not reached by the machine-wide Asks item (the orphaned-card list) (owner: warden port)"
+      "GAP(warden): daemon/lib/orphan-list.ts is not reached by the machine-wide Asks item (the orphaned-card list) (owner: warden port)",
+      "GAP(warden): WardenReportRequest in app/features/warden/warden-verdicts.tsx is imported by the unmerged branch rebuild/port-ferrets-b (core/ferrets/app/components/session-dashboard.tsx, sessions-page.tsx), so it stays until that branch lands (owner: nelly)"
     ],
     "claude-code": [
       "GAP(skills): selected skill parts are not materialized into the ferret home; copyTree takes only this plugin's own root handles, and no root the manifest declares reaches a skill source",
@@ -176,7 +177,8 @@
       "GAP(usage): daemon/adapters/usage/provider-quota/index.ts is not reached by the daemon composition (daemon/index.ts imports the adapter files directly, only tests import this index) (owner: usage port)",
       "GAP(usage): daemon/lib/performance/fallbacks.ts is not reached by the performance profile report (the probe is not composed yet) (owner: usage port)",
       "GAP(usage): daemon/lib/performance/sampler-tee.ts is not reached by the performance profile report (the probe is not composed yet) (owner: usage port)",
-      "GAP(usage): compaction history (F-0130) is Usage's (ruling #27): the Ferrets StorageLiveActivitySource has no history until Usage adds it (owner: nelly)"
+      "GAP(usage): compaction history (F-0130) is Usage's (ruling #27): the Ferrets StorageLiveActivitySource has no history until Usage adds it (owner: nelly)",
+      "GAP(usage): SessionQuotaResolver in app/lib/usage.ts is imported by the unmerged branch rebuild/port-ferrets-b (core/ferrets/app/components/session-dashboard*.tsx), so it stays until that branch lands (owner: nelly)"
     ],
     "onboarding": [
       "10 parity rows have no test files: tests/unit/parity/app.test.tsx, commands.test.ts and storage.test.ts do not exist, and R-0092 is not proved yet",
@@ -228,7 +230,8 @@
       "GAP(board): app/lib/board-move.ts is not reached by the agenda answer handlers (no Board panel calls them) (owner: board port)",
       "GAP(board): app/lib/card-reference-context.ts is not reached by the card reference proof (no Board view mounts it) (owner: board port)",
       "GAP(board): app/lib/lane-proposal-link.ts is not reached by the lane-proposal ask (no view opens the lane editor from it) (owner: board port)",
-      "GAP(board): cli/lib/lane-guide.ts is not reached by `task move --help` (no CLI verb prints it) (owner: board port)"
+      "GAP(board): cli/lib/lane-guide.ts is not reached by `task move --help` (no CLI verb prints it) (owner: board port)",
+      "GAP(board): linkNudgePullRequests in app/lib/board-nudge.ts is imported by the unmerged branch rebuild/port-ferrets-b (core/ferrets/app/components/agent-message-rows.tsx), so it stays until that branch lands (owner: nelly)"
     ],
     "voice": [
       "GAP(voice): app/components/auto-read-chip.tsx is not reached by a chat surface (no manifest panel mounts auto-read) (owner: voice port)",
