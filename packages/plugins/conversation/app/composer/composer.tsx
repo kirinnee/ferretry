@@ -38,7 +38,7 @@ import {
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { ArrowUp, Plus, Zap } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { transformTextIndex } from '../../contract/index.ts';
+import { type ComposerAccount, type ComposerToolsProps, transformTextIndex } from '../../contract/index.ts';
 import { useOptionalConversationClient } from '../client.ts';
 import { uploadAttachment as uploadFerretAttachment } from './attachment-upload.ts';
 import { formatAttachmentSize } from './attachments.ts';
@@ -246,6 +246,8 @@ export interface ComposerProps {
    * so a failed one throws the sentence the box shows, and its draft is the host's `draftStore`.
    */
   readonly detached?: DetachedComposer;
+  /** The account this ferret runs on, handed to the `composer.tools` panels (Usage reads its quota from it). */
+  readonly account?: ComposerAccount;
   /** Focus the field when the composer first appears: a box opened by a press is there to be typed in. */
   readonly autoFocus?: boolean;
 }
@@ -427,6 +429,7 @@ export function Composer({
   placeholder = 'Message this ferret',
   draftStore = documentDraftStore,
   draftSlot,
+  account,
   onSent,
   onSending,
   onSendFailed,
@@ -1395,7 +1398,12 @@ export function Composer({
   const tools = slotted ? (
     <ComposerDraftProvider binding={draftBinding}>
       <ComposerAttachContext.Provider value={attachButton}>
-        <PanelSlot daemon={daemon.daemonId} slot="composer.tools" subject={ferretId} />
+        <PanelSlot
+          daemon={daemon.daemonId}
+          slot="composer.tools"
+          subject={ferretId}
+          {...(account === undefined ? {} : { props: { account } satisfies ComposerToolsProps })}
+        />
       </ComposerAttachContext.Provider>
     </ComposerDraftProvider>
   ) : (

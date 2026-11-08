@@ -12,7 +12,6 @@
     "agenda",
     "board",
     "warden",
-    "usage",
     "catalogs",
     "mcp",
     "skills",
@@ -110,7 +109,6 @@
       "GAP(links): the harness history lists how many transcripts were skipped and each entry's turns, not today's per-harness skip reasons or recorded event count (the finders describe turns, not events)",
       "GAP(agenda): lead decision Q9 has Agenda offer an agenda.conversation slot that Conversation contributes a panel to; Agenda declares no such slot yet, so nothing is contributed",
       "GAP(ferrets): Ferrets' displayCallsign, form parts and setup-note UI are copied into Conversation (app/links/callsign.ts, app/compact-at/form-parts.tsx, app/links/link-ui.tsx) because neither its contract nor @ferretry/app exports them",
-      "GAP(packs): the conversation.row slot carries no tool calls, so Packs' Pack card (today reads entry.tools/sent) does not draw; adding masked tool calls to ConversationRowEntry is decided with the Packs slot contribution (its own security look)",
       "GAP(ferrets): Conversation contributes panels to Ferrets' `ferrets.actions-row` slot (props `{ ferret, name, canControl, offer }`; a panel offers a plain-data row while its action applies): Fork into a new ferret (cut through the latest message on the same login; needs the transcript's message point and selection binding), Interrupt (turn.interrupt) and Compact memory at — none contributes a row yet",
       "GAP(ferrets): Continue-conversation (resume a finished ferret's conversation as a new one) is Conversation's own surface over the daemon's start route and Ferrets' ferrets.move-account slot; it is not drawn yet, nor is Conversation's context menu among the Actions rows",
       "GAP(ferrets): Conversation contributes the current-ferret file and card search to Ferrets' `ferrets.files-search` slot (props `{ ferret, openFile }`, mounted above the file browser's bar); no panel is contributed yet",
@@ -170,16 +168,5 @@
     ]
   },
   "pendingHalves": {},
-  "pendingAppPorts": [
-    {
-      "plugin": "packs",
-      "path": "packages/plugins/packs/app/components/pack-call.tsx",
-      "reason": "the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card"
-    },
-    {
-      "plugin": "packs",
-      "path": "packages/plugins/packs/tests/unit/app/pack-call.test.tsx",
-      "reason": "the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card"
-    }
-  ]
+  "pendingAppPorts": []
 }

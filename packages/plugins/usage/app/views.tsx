@@ -5,6 +5,7 @@
  * half with; none reaches a daemon any other way.
  */
 import { useOptionalRouter } from '@ferretry/app';
+import type { ComposerAccount } from '@ferretry/plugin-conversation/contract';
 import { createElement, type ReactNode } from 'react';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { SessionAnalyticsSurface } from './features/analytics/session-analytics-surface.tsx';
@@ -16,6 +17,7 @@ import type { PerformanceRecorder } from './lib/performance/recorder.ts';
 import type { DaemonUsageStore } from './lib/usage-store.ts';
 import { type InsightsView, type UsageClient, useDaemonConnection } from './shell.ts';
 import { InsightsFrame } from './shell/insights-frame.tsx';
+import { ComposerQuota } from './shell/composer-quota.tsx';
 import { QuotaReadout } from './shell/quota-readout.tsx';
 
 const noNavigate = (): void => undefined;
@@ -61,6 +63,29 @@ export function QuotaPanel({ store, subject }: { readonly store: DaemonUsageStor
   const quota =
     account === undefined ? null : store.quotaFor(connection.daemonId, { state: {}, config: { agent: account.agent } });
   return createElement(QuotaReadout, { quota, showUnknown: true, className: 'text-meta' });
+}
+
+/**
+ * `composer.tools:composer-quota`: the quota of the account THIS ferret runs on, on the composer's context row. Today's
+ * composer read it from the session itself: the usage the ferret's monitor stamped, else the feed row of `config.agent`.
+ * Conversation's composer hands both as `account` (`ComposerToolsProps`; `subject` is the ferret id, which no feed row
+ * is named after). Without an account, or when the feed does not name it, it says "usage unknown": the account nearest
+ * its limit is not that ferret's, so it is never drawn as the composer's own (unknown is not a confident number).
+ */
+export function ComposerQuotaPanel({
+  store,
+  account,
+}: {
+  readonly store: DaemonUsageStore;
+  readonly account?: ComposerAccount;
+}) {
+  const connection = useDaemonConnection();
+  useUsage(store, connection);
+  const quota =
+    account === undefined
+      ? null
+      : store.quotaFor(connection.daemonId, { state: account.usage ?? {}, config: { agent: account.agent } });
+  return createElement(ComposerQuota, { quota });
 }
 
 export function BudgetsTab({ client }: { readonly client: UsageClient }): ReactNode {

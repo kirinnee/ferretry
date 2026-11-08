@@ -227,6 +227,52 @@ describe('usage parity · Model pricing and the session surface', () => {
     await view.unmount();
   });
 
+  it('the composer quota is a composer.tools panel that shows the account its ferret runs on, and says unknown otherwise', async () => {
+    expect(manifest.ui.panels.find(entry => entry.id === 'composer-quota')).toMatchObject({ slot: 'composer.tools' });
+    const feedOf = () => ({
+      at: '2026-08-01T09:00:00.000Z',
+      stale: false,
+      accounts: [{ agent: 'claude-auto-work', fiveHourPercent: 42, weeklyPercent: 10, atLimit: false, authOk: true }],
+    });
+    const { half } = halfOver({ 'GET /v1/usage': feedOf });
+    // The subject is the FERRET'S id, as the composer sends it; the account it runs on rides in `account`.
+    const named = await mount(
+      asElement(
+        half.panels['composer-quota']({ subject: 'ferret-7', account: { agent: 'claude-auto-work' } } as never),
+      ),
+    );
+    await settle();
+    expect(named.container.textContent).toContain('5h 42%');
+    await named.unmount();
+    // A ferret whose account the feed does not name is NOT given the account nearest its limit: its usage is unknown.
+    const other = await mount(
+      asElement(
+        half.panels['composer-quota']({ subject: 'ferret-7', account: { agent: 'some-other-login' } } as never),
+      ),
+    );
+    await settle();
+    expect(other.container.textContent).toContain('usage unknown');
+    expect(other.container.textContent).not.toContain('42%');
+    await other.unmount();
+    // A ferret id alone (no account handed) is never an account name: usage unknown.
+    const bare = await mount(asElement(half.panels['composer-quota']({ subject: 'claude-auto-work' })));
+    await settle();
+    expect(bare.container.textContent).toContain('usage unknown');
+    await bare.unmount();
+    // The usage the ferret's own monitor stamped wins, as it did on today's session page.
+    const stamped = await mount(
+      asElement(
+        half.panels['composer-quota']({
+          subject: 'ferret-7',
+          account: { agent: 'some-other-login', usage: { usage5hPercent: 7, usageWeeklyPercent: 3 } },
+        } as never),
+      ),
+    );
+    await settle();
+    expect(stamped.container.textContent).toContain('5h 7%');
+    await stamped.unmount();
+  });
+
   it('S-0228 SessionAnalyticsSurface prices the ferret beside it, then with its children', async () => {
     const { half, client } = halfOver({
       [INSIGHTS]: (call: RecordedCall) =>
