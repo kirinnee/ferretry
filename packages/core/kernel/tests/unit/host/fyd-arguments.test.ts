@@ -48,7 +48,7 @@ test('an unknown argument is refused 64 with the usage, before boot', () => {
 });
 
 test('a mode this daemon does not serve yet is refused 64, never ignored', () => {
-  for (const argv of [['--print-config'], ['--host', '0.0.0.0'], ['--log-level', 'warn']]) {
+  for (const argv of [['--host', '0.0.0.0'], ['--log-level', 'warn']]) {
     const answer = run(...argv);
     expect(answer.code).toBe(64);
     expect(answer.err).toContain('is not served by this daemon yet');

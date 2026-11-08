@@ -247,7 +247,7 @@ No unresolved Commander declarations.
 | V-0509 | V | fyd --host | packages/daemon/src/lib/runtime/arguments.ts:108 | runtime | packages/core/kernel | fyd --host | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-overrides.test.ts | [ ] |
 | V-0510 | V | fyd --log-level | packages/daemon/src/lib/runtime/arguments.ts:115 | runtime | packages/core/kernel | fyd --log-level | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-overrides.test.ts | [ ] |
 | V-0511 | V | fyd --port | packages/daemon/src/lib/runtime/arguments.ts:110 | runtime | packages/core/kernel | fyd --port | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-arguments.test.ts | [x] |
-| V-0512 | V | fyd --print-config | packages/daemon/src/lib/runtime/arguments.ts:122 | runtime | packages/core/kernel | fyd --print-config | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-print-config.test.ts | [ ] |
+| V-0512 | V | fyd --print-config | packages/daemon/src/lib/runtime/arguments.ts:122 | runtime | packages/core/kernel | fyd --print-config | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-print-config.test.ts | [x] |
 | V-0513 | V | fyd --version | packages/daemon/src/lib/runtime/arguments.ts:139 | runtime | packages/core/kernel | fyd --version | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-arguments.test.ts | [x] |
 
 ## gate (40)

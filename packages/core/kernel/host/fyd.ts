@@ -14,6 +14,7 @@ import { checkHost, processAlive, tcpProbe } from './check.ts';
 import { bootHost } from './host.ts';
 import { parseBackgroundDelay } from './jobs.ts';
 import { listenLocal } from './listener.ts';
+import { renderSettings, resolveSettings } from './settings.ts';
 import { bootTimings } from './session/timings.ts';
 import { fileLogSink, realAdapters } from './wiring.ts';
 
@@ -23,7 +24,6 @@ interface GeneratedRegistry {
 }
 
 const VERSION = '5.0.0';
-const DEFAULT_PORT = 7457;
 /** The client's binary name: the `bin` key of `packages/cli/package.json` (see `binaries.ts`), unless the operator names it. */
 const BINARY = process.env.FY_BINARY_NAME ?? PRODUCT_BINARIES.client;
 
@@ -37,7 +37,6 @@ async function main(): Promise<number> {
   }
   const { configFile, host: hostOverride, logLevel } = answer.overrides;
   const unserved = [
-    answer.kind === 'print-config' && '--print-config',
     configFile !== undefined && '--config',
     hostOverride !== undefined && '--host',
     logLevel !== undefined && '--log-level',
@@ -46,12 +45,17 @@ async function main(): Promise<number> {
     process.stderr.write(`${usage.daemonName}: ${unserved.join(', ')} is not served by this daemon yet.\n`);
     return EXIT_USAGE;
   }
-  const home = (process.env.FY_HOME ?? `${homedir()}/.ferretry`).replace(/\/+$/, '');
-  const port = answer.overrides.port ?? Number(process.env.FY_PORT ?? DEFAULT_PORT);
-  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
-    process.stderr.write(`${usage.daemonName}: FY_PORT ${String(port)} is not a port number.\n`);
+  const resolved = resolveSettings(process.env, answer.overrides, homedir());
+  if (resolved.kind === 'refused') {
+    process.stderr.write(`${usage.daemonName}: ${resolved.sentence}\n`);
     return EXIT_USAGE;
   }
+  if (answer.kind === 'print-config') {
+    for (const line of renderSettings(resolved.settings)) process.stdout.write(`${line}\n`);
+    return 0;
+  }
+  const home = resolved.settings.home.value;
+  const port = resolved.settings.port.value;
   if (answer.kind === 'check')
     return await checkHost({
       fs: nodeFs(() => crypto.randomUUID()),
