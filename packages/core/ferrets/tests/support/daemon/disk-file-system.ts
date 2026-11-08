@@ -9,7 +9,7 @@ import { appendFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:f
 import { dirname } from 'node:path';
 import type { FileSystemPort } from '../../../daemon/lib/ports.ts';
 
-export type DiskFileSystemPort = Pick<
+type DiskFileSystemPort = Pick<
   FileSystemPort,
   'ensureDirectory' | 'writeTextAtomic' | 'appendLineDurable' | 'removeFile' | 'readText'
 >;

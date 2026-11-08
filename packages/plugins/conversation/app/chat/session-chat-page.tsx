@@ -100,7 +100,7 @@ export interface SessionChatPageProps {
 }
 
 /** The account a ferret runs on, as the composer's tools may read it: its name and the usage its monitor stamped. */
-export const composerAccountOf = (session: FerretView): ComposerAccount => {
+const composerAccountOf = (session: FerretView): ComposerAccount => {
   const { state } = session;
   const usage = {
     ...(state.usageAuthOk === undefined ? {} : { usageAuthOk: state.usageAuthOk }),

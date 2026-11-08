@@ -35,7 +35,6 @@ import { NonNegativeIntegerSchema } from './common.ts';
  * A search term is something a person typed, and a substring scan over every task's prose is linear in
  * this number times the board. Refusing beyond it is cheaper than truncating, because a truncated query
  * answers a question nobody asked and looks like a working search returning wrong rows.
- * @pending ferrets: Session search inside the files tab is not ported
  */
 export const MAX_SESSION_SEARCH_QUERY_LENGTH = 200;
 
@@ -120,7 +119,6 @@ export function sessionSearchTaskHaystack(task: SessionSearchTask): string {
 
 /**
  * Everything about one indexed file a query is matched against: its name and its path.
- * @pending ferrets: Session search inside the files tab is not ported
  */
 export function sessionSearchFileHaystack(file: SessionFileIndexEntry): string {
   return `${file.name}\n${file.path}`;
@@ -134,7 +132,6 @@ export function sessionSearchFileHaystack(file: SessionFileIndexEntry): string {
  * daemon's answer differ from what a client's own highlighting shows. A blank query matches NOTHING
  * rather than everything — an empty box is a question that has not been asked yet, and answering it with
  * the whole session is the one result a reader can never act on.
- * @pending ferrets: Session search inside the files tab is not ported
  */
 export function matchesSessionSearchQuery(haystack: string, query: string): boolean {
   const parsed = FerretSearchQuerySchema.safeParse(query);
