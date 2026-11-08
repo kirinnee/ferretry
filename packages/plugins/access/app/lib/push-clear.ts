@@ -23,8 +23,8 @@
  *
  * ## ONE MACHINE, ITS OWN TAGS
  *
- * A machine's worker turns each named tag into that machine's namespace (`fy-push:<daemonId>:<tag>`, the one
- * `machineNotification` shows under), so a clear can only ever take down what that same machine showed.
+ * A machine's worker turns each named tag into that machine's namespace (`fy-push:<daemonId>:<tag>`, the one a
+ * machine's push is shown under), so a clear can only ever take down what that same machine showed.
  */
 
 import { type PushClearPayload, pushServiceAllowsSilent } from '../../contract/index.ts';

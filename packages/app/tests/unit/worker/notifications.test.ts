@@ -320,7 +320,7 @@ const HOME = `${ORIGIN}/d/sha256%3Awork%2Fone`;
 describe('notificationUrl (a push’s url is NOT trusted: only an accepted route under the machine opens)', () => {
   it('places the daemon’s machine-relative chat path under its machine, with its ask', () => {
     expect(notificationUrl('/ferrets/f1/chat?ask=A3', ORIGIN, WORK)).toBe(`${HOME}/ferrets/f1/chat?ask=A3`);
-    expect(notificationUrl('/ferrets/a%20b/chat?ask=A12', ORIGIN, WORK)).toBe(`${HOME}/ferrets/a%20b/chat?ask=A12`);
+    expect(notificationUrl('/ferrets/a_b-9/chat?ask=A12', ORIGIN, WORK)).toBe(`${HOME}/ferrets/a_b-9/chat?ask=A12`);
     expect(notificationUrl('/ferrets/f1/chat', ORIGIN, WORK)).toBe(`${HOME}/ferrets/f1/chat`);
   });
 
@@ -334,6 +334,38 @@ describe('notificationUrl (a push’s url is NOT trusted: only an accepted route
 
   it('places a machine ask’s Agenda link under its machine, ask kept', () => {
     expect(notificationUrl('/agenda?ask=A3', ORIGIN, WORK)).toBe(`${HOME}/agenda?ask=A3`);
+  });
+
+  it('NIT-5: opens the Agenda page already under this machine, with and without its ask', () => {
+    const own = HOME.slice(ORIGIN.length);
+    expect(notificationUrl(`${own}/agenda?ask=A3`, ORIGIN, WORK)).toBe(`${HOME}/agenda?ask=A3`);
+    expect(notificationUrl(`${own}/agenda`, ORIGIN, WORK)).toBe(`${HOME}/agenda`);
+    expect(notificationUrl(`${own}/agenda/`, ORIGIN, WORK)).toBe(`${HOME}/agenda`);
+  });
+
+  it('NIT-1: a ferret id is a ferret id and an ask is an ask, nothing wider', () => {
+    for (const named of [
+      '/ferrets/a%20b/chat',
+      '/ferrets/%3F%23x/chat',
+      '/ferrets/f1%40evil.test/chat',
+      '/ferrets/%252e%252e/chat',
+      '/ferrets/%E2%80%AEx/chat',
+      '/ferrets/%C2%85/chat',
+      '/ferrets/-lead/chat',
+      '/ferrets/_lead/chat',
+      `/ferrets/${'a'.repeat(129)}/chat`,
+      '/ferrets/f1/chat?ask=a3',
+      '/ferrets/f1/chat?ask=A0',
+      '/ferrets/f1/chat?ask=A03',
+      '/ferrets/f1/chat?ask=3',
+      '/agenda?ask=B3',
+    ]) {
+      expect(notificationUrl(named, ORIGIN, WORK)).toBe(APP);
+    }
+    expect(notificationUrl(`/ferrets/${'a'.repeat(128)}/chat`, ORIGIN, WORK)).toBe(
+      `${HOME}/ferrets/${'a'.repeat(128)}/chat`,
+    );
+    expect(notificationUrl('/ferrets/9_x-Y/chat?ask=A10', ORIGIN, WORK)).toBe(`${HOME}/ferrets/9_x-Y/chat?ask=A10`);
   });
 
   it('rebuilds the address from the accepted route: nothing else the push said survives', () => {
@@ -409,6 +441,11 @@ describe('notificationUrl (a push’s url is NOT trusted: only an accepted route
       `/ferrets/f1/chat?ask=${'A'.repeat(40)}`,
       `/ferrets/${'a'.repeat(2_000)}/chat`,
       '/agenda/f1/A3',
+      '/agenda/..',
+      '/agenda/%2e%2e/d/other',
+      '/agendax',
+      '/%61genda',
+      '/d/other/agenda?ask=A3',
       undefined,
       42,
       null,
@@ -441,7 +478,59 @@ describe('notificationClickUrl (a tap reads back only what the worker wrote)', (
     ]) {
       expect(notificationClickUrl(foreign, ORIGIN, WORK)).toBe(APP);
     }
-    expect(notificationClickUrl(stored, ORIGIN, null)).toBe(APP);
+  });
+
+  it('resolves a relative address a page stored against this site', () => {
+    expect(notificationClickUrl('/d/sha256%3Awork%2Fone/ferrets/f1/chat?ask=A3', ORIGIN, WORK)).toBe(
+      `${HOME}/ferrets/f1/chat?ask=A3`,
+    );
+    expect(notificationClickUrl('/ferrets/f1/chat?ask=A3', ORIGIN, WORK)).toBe(`${HOME}/ferrets/f1/chat?ask=A3`);
+  });
+});
+
+describe('notificationClickUrl on the app-wide registration (the page-shown lines)', () => {
+  // The worker holds no pairings: it keeps an address only when it names a machine's page from the closed list, rebuilt;
+  // the page then refuses a machine this browser never paired (`notificationTapTarget`).
+  it('keeps a page-shown line’s chat, so “needs input” for a machine’s ferret still opens it', () => {
+    expect(notificationClickUrl(`${HOME}/ferrets/f1/chat?ask=A3`, ORIGIN, null)).toBe(`${HOME}/ferrets/f1/chat?ask=A3`);
+    expect(notificationClickUrl(`${HOME}/agenda?ask=A3`, ORIGIN, null)).toBe(`${HOME}/agenda?ask=A3`);
+    expect(notificationClickUrl(HOME, ORIGIN, null)).toBe(HOME);
+  });
+
+  it('resolves a relative stored address against the site', () => {
+    expect(notificationClickUrl('/d/sha256%3Awork%2Fone/ferrets/f1/chat?ask=A3', ORIGIN, null)).toBe(
+      `${HOME}/ferrets/f1/chat?ask=A3`,
+    );
+  });
+
+  it('rebuilds it: nothing else the stored address said survives', () => {
+    expect(notificationClickUrl(`${HOME}/ferrets/f1/chat?ask=A3&next=https://evil.test#frag`, ORIGIN, null)).toBe(
+      `${HOME}/ferrets/f1/chat?ask=A3`,
+    );
+  });
+
+  it('opens the app for a machine-relative address (no machine to be relative to) and for every hostile shape', () => {
+    for (const hostile of [
+      '/ferrets/f1/chat?ask=A3',
+      '/agenda?ask=A3',
+      'https://evil.test/d/x/ferrets/f1/chat',
+      '//evil.test/d/x',
+      'javascript:alert(1)',
+      `${ORIGIN}/settings`,
+      `${ORIGIN}/d/x/settings/access`,
+      `${ORIGIN}/d/x/ferrets/../../d/y`,
+      `${ORIGIN}/d/x/ferrets/%2e%2e/chat`,
+      `${ORIGIN}/d/x/ferrets/a%2Fb/chat`,
+      `${ORIGIN}/d/x/ferrets/f1/chat?ask=../x`,
+      `${ORIGIN}/d/%2e%2e/ferrets/f1/chat`,
+      `${ORIGIN}/d//ferrets/f1/chat`,
+      `${ORIGIN}/d/x/join`,
+      `${ORIGIN}/`,
+      undefined,
+      7,
+    ]) {
+      expect(notificationClickUrl(hostile, ORIGIN, null)).toBe(APP);
+    }
   });
 });
 

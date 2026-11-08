@@ -1,32 +1,11 @@
-import { z } from 'zod';
+import { type PushEnvelope, PushEnvelopeSchema } from '@ferretry/kernel/contract/push-envelope';
 
 /**
- * THE ONE PUSH ENVELOPE THE SHELL'S WORKER MAY READ. The worker runs no plugin code and imports no plugin contract, so
- * the few words it shows and the one page it may open are declared HERE, as strict data. A plugin's own push payload
- * (Access's `PushNotificationPayloadSchema`) carries these three fields with the same caps (a contract may not import the
- * app, so a unit test pins the two together) and adds fields only the plugin and the daemon read.
- *
- * - `title` and `body` are the notification's words — the same text today's worker shows (rebuild reference
- *   `lib/notify.ts` `showGroupedNotification`: `payload.title`, `payload.body`), composed by the daemon. They carry no
- *   secret, token or pairing code; a pairing code is never pushed.
- * - `url` is a page NAMED RELATIVE TO THE MACHINE'S OWN PAGES (`/ferrets/<id>/chat?ask=A3`). It is a request, not an
- *   address: the worker opens it only after its route parse accepts it (`notificationUrl`).
- *
- * Strict and length-capped: a field that is missing, not a string, or over its cap makes the whole payload unreadable,
- * and an unreadable push is shown plainly with no page. A push payload is not trusted input.
+ * THE PUSH ENVELOPE THE SHELL'S WORKER READS is declared once, in the kernel contract (`@ferretry/kernel/contract`:
+ * `PushEnvelopeSchema`, its caps), because Access's push payload carries the same three fields and a cap that two programs
+ * repeat can drift. The worker runs no plugin code and imports no plugin contract; it imports that one file by its own
+ * subpath, so its signed graph holds the envelope and zod and not the contract barrel.
  */
-export const PUSH_TITLE_MAX = 200;
-export const PUSH_BODY_MAX = 1_000;
-export const PUSH_URL_MAX = 1_024;
-
-const PushEnvelopeShape = {
-  title: z.string().min(1).max(PUSH_TITLE_MAX),
-  body: z.string().max(PUSH_BODY_MAX),
-  url: z.string().min(1).max(PUSH_URL_MAX),
-};
-
-export const PushEnvelopeSchema = z.strictObject(PushEnvelopeShape);
-export type PushEnvelope = z.infer<typeof PushEnvelopeSchema>;
 
 /**
  * The envelope inside a push's JSON, or `null` when the push carries none. A real payload also names an event key, a

@@ -4,8 +4,8 @@ import {
   PUSH_TITLE_MAX,
   PUSH_URL_MAX,
   PushEnvelopeSchema,
-  readPushEnvelope,
-} from '../../../src/worker/push-envelope.ts';
+} from '@ferretry/kernel/contract/push-envelope';
+import { readPushEnvelope } from '../../../src/worker/push-envelope.ts';
 
 const good = { title: 'Deploy approval', body: 'Ship the build?', url: '/ferrets/f1/chat?ask=A3' };
 

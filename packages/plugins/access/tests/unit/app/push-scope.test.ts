@@ -3,33 +3,19 @@
  * say and open (docs/cross-daemon.md §4a–§4c).
  */
 import { describe, expect, it } from 'bun:test';
-import type { PushNotificationPayload } from '../../../contract/index.ts';
 import { daemonId, NOTIFICATION_BADGE, NOTIFICATION_ICON } from '../../../app/shell-pairing.ts';
 import {
   FILTERED_PUSH_TAG_PREFIX,
   filteredPushNotification,
   isPushScope,
-  machineNotification,
   PUSH_SCOPE_ROOT,
   pushMachineOf,
   pushScopePath,
   pushWorkerUrl,
-  unreadablePushTitle,
-  unverifiedNotification,
 } from '../../../app/lib/push-scope.ts';
 
 const ORIGIN = 'https://ferretry.example.test';
 const WORK = { daemonId: 'sha256:work/one', label: 'Work laptop' };
-
-const payload: PushNotificationPayload = {
-  version: 1,
-  eventKey: 'e1',
-  title: 'A new device was paired',
-  body: 'Pixel 9 can now reach this machine.',
-  tag: 'pairing',
-  url: '/',
-  count: 1,
-};
 
 describe('the per-machine scope and worker address', () => {
   it('puts each machine under its own escaped scope, never a page the app serves', () => {
@@ -73,32 +59,6 @@ describe('pushMachineOf', () => {
   });
 });
 
-describe('machineNotification', () => {
-  it('titles it with the reader’s label, keeps its tag in the machine’s namespace and a link it may not open sent to the app', () => {
-    expect(machineNotification({ ...payload, url: 'https://evil.test/' }, WORK, ORIGIN)).toEqual({
-      ...payload,
-      title: 'Work laptop · A new device was paired',
-      tag: 'fy-push:sha256%3Awork%2Fone:pairing',
-      url: `${ORIGIN}/app/`,
-    });
-  });
-
-  it('keeps a link that is already one of the machine’s own pages', () => {
-    const own = `/d/${encodeURIComponent(WORK.daemonId)}/ferrets/s1/chat`;
-    expect(machineNotification({ ...payload, url: own }, WORK, ORIGIN).url).toBe(`${ORIGIN}${own}`);
-  });
-
-  it('cannot reuse another machine’s tag, so it can never replace that machine’s notification', () => {
-    const other = { daemonId: 'sha256:home', label: 'Home' };
-    expect(machineNotification(payload, WORK, ORIGIN).tag).not.toBe(machineNotification(payload, other, ORIGIN).tag);
-  });
-
-  it('titles a push nobody composed by the machine it came through', () => {
-    expect(unreadablePushTitle(WORK)).toBe('Work laptop · Ferretry');
-    expect(unreadablePushTitle(null)).toBe('Unverified · Ferretry');
-  });
-});
-
 describe('the quiet notification’s mark', () => {
   it('carries the Ferretry mark on the quiet notification too', () => {
     const shown = filteredPushNotification(WORK, ORIGIN);
@@ -134,18 +94,5 @@ describe('filteredPushNotification', () => {
     expect(filteredPushNotification(WORK, ORIGIN).options.tag).not.toBe(
       filteredPushNotification(other, ORIGIN).options.tag,
     );
-  });
-});
-
-describe('unverifiedNotification (review M3)', () => {
-  it('titles a push to the app-wide registration Unverified, keeps it out of every machine’s tags, opens the app', () => {
-    const shown = unverifiedNotification({ ...payload, url: '/d/sha256%3Ahome/settings' }, ORIGIN);
-    expect(shown).toEqual({
-      ...payload,
-      title: 'Unverified · A new device was paired',
-      tag: 'fy-push-unverified:pairing',
-      url: `${ORIGIN}/app/`,
-    });
-    expect(shown.tag.startsWith('fy-push:')).toBe(false);
   });
 });

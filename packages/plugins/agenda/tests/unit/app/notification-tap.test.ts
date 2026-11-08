@@ -5,9 +5,10 @@
  * (`/d/<daemon>/ferrets/<ferret>/chat?ask=A3`).
  */
 import { describe, expect, it } from 'bun:test';
-import { PUSH_TAP_SCREENS } from '@ferretry/app';
+import { notificationUrl, PUSH_ASK_PATTERN, PUSH_TAP_SCREENS } from '@ferretry/app';
 import {
   type AgendaId,
+  AgendaIdSchema,
   agendaNotificationPath,
   MACHINE_AGENDA_ID,
   sessionNotificationPath,
@@ -17,12 +18,8 @@ import agendaManifest from '../../../manifest.ts';
 import type { NotificationPayload as PushNotificationPayload } from '../../../app/lib/notify.ts';
 import { inboxTargetFromSearch, inboxTargetPath } from '../../../app/lib/agenda-inbox.ts';
 import { NOTIFICATION_BADGE, NOTIFICATION_ICON, showGroupedNotification } from '../../../app/lib/notify.ts';
-import {
-  filteredPushNotification,
-  machineNotification,
-  unverifiedNotification,
-} from '../../../app/lib/notification-tap.ts';
-import { daemonId, notificationUrl } from '../../../app/shell.ts';
+import { filteredPushNotification } from '../../../app/lib/notification-tap.ts';
+import { daemonId } from '../../../app/shell.ts';
 
 const ORIGIN = 'https://ferretry.example.test';
 const MACHINE = { daemonId: 'laptop', label: 'Laptop' };
@@ -83,11 +80,33 @@ describe('a tap, per kind of push', () => {
     expect(notificationUrl(askBuzzPath('s1', A3), ORIGIN, MACHINE)).toBe(`${HOME}/ferrets/s1/chat?ask=A3`);
     expect(notificationUrl(askBuzzPath('', A3), ORIGIN, MACHINE)).toBe(`${HOME}/agenda?ask=A3`);
     expect(notificationUrl(askBuzzPath(MACHINE_AGENDA_ID, A3), ORIGIN, MACHINE)).toBe(`${HOME}/agenda?ask=A3`);
-    expect(notificationUrl(agendaNotificationPath('a b', 'A12' as AgendaId), ORIGIN, MACHINE)).toBe(
-      `${HOME}/ferrets/a%20b/chat?ask=A12`,
+    expect(notificationUrl(agendaNotificationPath('a-b', 'A12' as AgendaId), ORIGIN, MACHINE)).toBe(
+      `${HOME}/ferrets/a-b/chat?ask=A12`,
     );
     expect(notificationUrl(sessionNotificationPath('s1'), ORIGIN, MACHINE)).toBe(`${HOME}/ferrets/s1/chat`);
     expect(notificationUrl(agendaNotificationPath('s1', A3), ORIGIN, null)).toBe(`${ORIGIN}/app/`);
+  });
+
+  it('NIT-1: the ask a tap may carry is exactly an Agenda id, the way Asks spells it', () => {
+    for (const candidate of [
+      'A1',
+      'A3',
+      'A12',
+      'A0',
+      'A',
+      'a3',
+      '3',
+      'A03',
+      'A3x',
+      'A-3',
+      ' A3',
+      'A3 ',
+      '',
+      'A٣',
+      `A${'9'.repeat(40)}`,
+    ]) {
+      expect(PUSH_ASK_PATTERN.test(candidate)).toBe(AgendaIdSchema.safeParse(candidate).success);
+    }
   });
 
   it('S2: the screens a push may name are the paths the manifests declare', () => {
@@ -148,21 +167,14 @@ describe('every notification wears the Ferretry mark', () => {
   it('shows the app icon and the monochrome badge, whatever the kind', async () => {
     for (const kind of ['attention', 'agenda', 'question', 'failed', 'completed', 'device-paired'] as const) {
       const { shown, registration } = recorder();
-      await showGroupedNotification(
-        registration as never,
-        machineNotification(push({ kind, sessionId: 's1' }), MACHINE, ORIGIN),
-      );
+      await showGroupedNotification(registration as never, push({ kind, sessionId: 's1' }));
       expect(shown).toHaveLength(1);
       expect(shown[0]?.options.icon).toBe(NOTIFICATION_ICON);
       expect(shown[0]?.options.badge).toBe(NOTIFICATION_BADGE);
     }
   });
 
-  it('shows it on a push no machine could vouch for, and on the quiet one', async () => {
-    const { shown, registration } = recorder();
-    await showGroupedNotification(registration as never, unverifiedNotification(push({ kind: 'attention' }), ORIGIN));
-    expect(shown[0]?.options.icon).toBe(NOTIFICATION_ICON);
-    expect(shown[0]?.options.badge).toBe(NOTIFICATION_BADGE);
+  it('shows it on the quiet one', () => {
     const quiet = filteredPushNotification(MACHINE, ORIGIN);
     expect(quiet.options.icon).toBe(NOTIFICATION_ICON);
     expect(quiet.options.badge).toBe(NOTIFICATION_BADGE);

@@ -18,6 +18,7 @@ import {
   type NotificationOpenSource,
 } from '../../../app/lib/notification-open.ts';
 import { useRouter } from '../../../app/shell.ts';
+import { PUSH_TAP_SCREENS, routeTable } from '@ferretry/app';
 import { ensureDom, interact, type Mounted, mount, RouterProvider } from '@ferretry/app/testing';
 
 ensureDom();
@@ -32,10 +33,13 @@ afterEach(async () => {
   window.history.replaceState({}, '', '/');
 });
 
+/** The shell's route table and the machines this browser has paired. */
+const TAP = { routes: routeTable(PUSH_TAP_SCREENS), isPaired: (daemon: string) => daemon === 'laptop' };
+
 /** The root's routing: every open the inbox holds is navigated to in the app. */
 function OpenRouting() {
   const { navigate } = useRouter();
-  useNotificationOpen(null, window.location.origin, navigate);
+  useNotificationOpen(null, window.location.origin, navigate, TAP);
   return null;
 }
 
@@ -59,7 +63,7 @@ describe('the app root’s notification open', () => {
     };
     await mountRoot(worker);
     const acks: unknown[] = [];
-    const expected = '/notification-target?x=1';
+    const expected = '/d/laptop/ferrets/f1/chat?ask=A3';
 
     // Act
     await interact(() => {

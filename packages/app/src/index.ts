@@ -176,17 +176,11 @@ export {
   notificationClickUrl,
   notificationUrl,
   presentPush,
+  PUSH_ASK_PATTERN,
+  PUSH_FERRET_PATTERN,
   type PushMachine,
   pushMachineOf,
 } from './worker/notifications.ts';
-export {
-  PUSH_BODY_MAX,
-  PUSH_TITLE_MAX,
-  PUSH_URL_MAX,
-  type PushEnvelope,
-  PushEnvelopeSchema,
-  readPushEnvelope,
-} from './worker/push-envelope.ts';
 
 // ─── the reference grammar (docs/reference-standard.md) ───────────────────────────────────────────────────────────
 export * from './references/grammar.ts';

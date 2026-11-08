@@ -142,13 +142,14 @@ interface Shown {
     readonly kind: string;
     /** The address the app rendered this route for: equal to `path` once the render has caught up. */
     readonly path: string;
-    readonly attention: string | null;
     readonly daemon?: string;
     readonly screen?: { readonly plugin: string; readonly id: string };
     readonly params?: Readonly<Record<string, string>>;
     readonly entry: string;
   } | null;
   readonly opens: readonly string[];
+  /** The asks the chat's Agenda panel is ringing (`[data-agenda-focused]`): what the reader sees focused. */
+  readonly rung: readonly string[];
 }
 
 const shown = async (page: Page): Promise<Shown> =>
@@ -158,6 +159,9 @@ const shown = async (page: Page): Promise<Shown> =>
       path: `${location.pathname}${location.search}`,
       route: raw === undefined ? null : JSON.parse(raw),
       opens: (globalThis as unknown as { __notificationOpens?: string[] }).__notificationOpens ?? [],
+      rung: [...document.querySelectorAll('[data-agenda-focused]')].map(
+        row => row.getAttribute('data-agenda-row') ?? '',
+      ),
     };
   });
 
@@ -170,7 +174,18 @@ const settledOn = async (page: Page, path: string, timeout = 60_000): Promise<Sh
     await pause(50);
     last = await shown(page).catch(() => null);
   }
-  return last ?? { path: 'unreadable', route: null, opens: [] };
+  return last ?? { path: 'unreadable', route: null, opens: [], rung: [] };
+};
+
+/** Waits for the chat's Agenda panel to ring an ask, once it has read the ferret's agenda. */
+const ringing = async (page: Page, timeout = 30_000): Promise<readonly string[]> => {
+  const deadline = Date.now() + timeout;
+  let last = await shown(page).catch(() => null);
+  while (Date.now() < deadline && (last?.rung.length ?? 0) === 0) {
+    await pause(50);
+    last = await shown(page).catch(() => null);
+  }
+  return last?.rung ?? [];
 };
 
 /**
@@ -466,21 +481,20 @@ const ASK = {
 } as const;
 /**
  * Where a tap on that push lands: the ferret's chat on the machine that sent it, AT the ask (`?ask=`). The 5.0 router
- * (`routeTable` in @ferretry/app) draws it as Conversation's `chat` screen on that daemon; the scene reads the ask from
- * the address with the Agenda's own `agendaTargetFromSearch`.
+ * (`routeTable` in @ferretry/app) draws it as Conversation's `chat` screen on that daemon, and the chat's side panel (the
+ * real `ferret-agenda` panel, mounted by the scene) rings the ask's row.
  */
 const BETA_ASK = '/d/beta/ferrets/mvb9x0-c0ffee01/chat?ask=A3';
 const ALPHA_ASK = '/d/alpha/ferrets/mvb9x0-c0ffee01/chat?ask=A2';
-const chatRoute = (daemon: string, ferret: string, path: string, attention: string | null) => ({
+const chatRoute = (daemon: string, ferret: string, path: string) => ({
   kind: 'screen',
   daemon,
   screen: { plugin: 'conversation', id: 'chat' },
   params: { ferret },
   path,
-  attention,
 });
-const BETA_ROUTE = chatRoute('beta', 'mvb9x0-c0ffee01', BETA_ASK, 'A3');
-const ALPHA_ROUTE = chatRoute('alpha', 'mvb9x0-c0ffee01', ALPHA_ASK, 'A2');
+const BETA_ROUTE = chatRoute('beta', 'mvb9x0-c0ffee01', BETA_ASK);
+const ALPHA_ROUTE = chatRoute('alpha', 'mvb9x0-c0ffee01', ALPHA_ASK);
 
 describe('a notification tap opens its conversation on the machine that sent it', () => {
   beforeAll(async () => {
@@ -508,6 +522,8 @@ describe('a notification tap opens its conversation on the machine that sent it'
     await window.goto(opened[0] ?? '');
     const landed = await settledOn(window, BETA_ASK);
     expect(landed.route).toMatchObject(BETA_ROUTE);
+    // The chat opened AT the ask: its Agenda panel rings A3, and nothing else.
+    expect(await ringing(window)).toEqual(['A3']);
     await browserProfile.context.close();
   });
 
@@ -648,7 +664,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
   ] as const;
   // Independent profiles, so the cases run side by side instead of paying each boot in turn.
   lane(
-    'a daemon that names no page still opens the conversation the push is about, or that machine’s sessions',
+    'a daemon that names a page it may not open still opens the app, and one that names its home opens that machine’s home',
     async () => {
       const outcomes = await Promise.allSettled(
         [...OTHER_PAGES, ...REFUSED_PAGES.map(refused => ({ ...refused, kind: 'home' }))].map(
@@ -693,6 +709,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const landed = await settledOn(app, BETA_ASK);
 
     expect(landed.route).toMatchObject(BETA_ROUTE);
+    expect(await ringing(app)).toEqual(['A3']);
     await browserProfile.context.close();
   });
 
@@ -712,30 +729,55 @@ describe('a notification tap opens its conversation on the machine that sent it'
     await browserProfile.context.close();
   });
 
-  lane(
-    'a notification the page showed through the app-wide worker opens the app, whatever address it carries',
-    async () => {
+  // The page watcher shows its “needs input / failed / done” lines through the app-wide registration, with its own deep
+  // link (`notify.ts`: `data.url`). The worker holds no pairings, so it keeps only an address on its closed list
+  // (a machine's chat, Agenda page or home, rebuilt) and the page — which does — refuses a machine it never paired.
+  for (const { name, stored, expected, kind } of [
+    {
+      name: 'a page-shown line for a paired machine’s ferret opens its chat',
+      stored: '/d/beta/ferrets/mvb9x0-c0ffee01/chat?ask=A3',
+      expected: BETA_ASK,
+      kind: 'screen',
+    },
+    {
+      name: 'a page-shown line with extra query words opens the same chat, without them',
+      stored: '/d/beta/ferrets/mvb9x0-c0ffee01/chat?ask=A3&next=https://evil.test',
+      expected: BETA_ASK,
+      kind: 'screen',
+    },
+    {
+      name: 'a page-shown line for a machine this browser never paired opens the app',
+      stored: '/d/stranger/ferrets/mvb9x0-c0ffee01/chat?ask=A3',
+      expected: '/app/',
+      kind: 'home',
+    },
+    {
+      name: 'a page-shown line carrying a hostile address opens the app',
+      stored: 'https://evil.test/d/beta/ferrets/mvb9x0-c0ffee01/chat',
+      expected: '/app/',
+      kind: 'home',
+    },
+  ] as const) {
+    lane(`${name}, through the app-wide worker`, async () => {
       const browserProfile = await profile();
       const app = await appAt(browserProfile, '/d/alpha');
       await retire(browserProfile);
-      // The page watcher shows through the app-wide registration, with the app's own path
-      // (`notification-ledger.ts` → `notify.ts`).
-      await app.evaluate(async () => {
+      await app.evaluate(async (url: string) => {
         const registration = await navigator.serviceWorker.getRegistration();
         await registration?.showNotification('Needs input', {
           tag: 'session-needs',
-          data: { url: '/d/beta/ferrets/mvb9x0-c0ffee01/chat', sessionId: 'mvb9x0-c0ffee01', eventKey: 'k', count: 1 },
+          data: { url, sessionId: 'mvb9x0-c0ffee01', eventKey: 'k', count: 1 },
         });
-      });
+      }, stored);
 
       await tap(browserProfile, '/', '/sw.verified.js');
-      // The app-wide registration knows no machine, so a tap on it never opens a machine's page: the app.
-      const landed = await settledOn(app, '/app/');
+      const landed = await settledOn(app, expected);
 
-      expect(landed.route?.kind).toBe('home');
+      expect(landed.path).toBe(expected);
+      expect(landed.route?.kind).toBe(kind);
       await browserProfile.context.close();
-    },
-  );
+    });
+  }
 
   /**
    * WHY A FIX TO THE WORKER NEVER REACHED A PHONE THAT WAS ALREADY ENROLLED. A browser re-checks a

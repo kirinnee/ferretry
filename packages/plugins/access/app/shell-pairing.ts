@@ -304,7 +304,7 @@ export const notificationBrand = (): { readonly icon: string; readonly badge: st
 export const daemonHomePath = (id: DaemonId): string => `/d/${encodeURIComponent(id)}`;
 
 /** The shell's route table and its tap check: `@ferretry/app`. A tap is decided by the router that draws the page. */
-export { notificationUrl, type PushMachine, pushMachineOf } from '@ferretry/app';
+export { type PushMachine, pushMachineOf } from '@ferretry/app';
 
 // ─── 7. advertisement notices (today: `protocol/src/lib/advertisement.ts`; `cli/shell.ts` holds the same copy) ──
 

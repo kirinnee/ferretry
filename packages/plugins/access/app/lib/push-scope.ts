@@ -23,15 +23,7 @@
  * Pure: the page and the worker both call these, and neither reads a global here.
  */
 
-import type { PushNotificationPayload } from '../../contract/index.ts';
-import {
-  type DaemonId,
-  daemonHomePath,
-  notificationBrand,
-  notificationUrl,
-  type PushMachine,
-  pushMachineOf,
-} from '../shell-pairing.ts';
+import { type DaemonId, daemonHomePath, notificationBrand, type PushMachine, pushMachineOf } from '../shell-pairing.ts';
 
 /** The path every per-machine push registration lives under. Never a page the app serves. */
 export const PUSH_SCOPE_ROOT = '/push/';
@@ -55,39 +47,8 @@ export const machineHomeUrl = (machine: PushMachine | null, origin: string): str
 /** Whether a registration scope URL is a per-machine push scope. */
 export const isPushScope = (scope: string): boolean => pushMachineOf(scope, scope) !== null;
 
-/**
- * A push as THIS machine's worker shows it: titled with the reader's label for the machine, tagged
- * inside its namespace, and pointing only at its own pages. The daemon's own words stay in the body.
- */
-export const machineNotification = (
-  payload: PushNotificationPayload,
-  machine: PushMachine,
-  origin: string,
-): PushNotificationPayload => ({
-  ...payload,
-  title: `${machine.label} · ${payload.title}`,
-  tag: `fy-push:${encodeURIComponent(machine.daemonId)}:${payload.tag}`,
-  url: notificationUrl(payload.url, origin, machine),
-});
-
 /** What a push that reached the app-wide registration says it is: from no machine this browser can name. */
 const UNVERIFIED = 'Unverified';
-
-/** What a push nobody composed is shown as, so a subscription is never punished for a silent push. */
-export const unreadablePushTitle = (machine: PushMachine | null): string =>
-  machine === null ? `${UNVERIFIED} · Ferretry` : `${machine.label} · Ferretry`;
-
-/**
- * A push that reached the APP-WIDE registration: the old shared subscription, before it was dropped
- * (docs/cross-daemon.md §4b). Nothing says which machine sent it, so it is titled "Unverified", kept out
- * of every machine's tag namespace, and opens only the app itself — never one machine's pages.
- */
-export const unverifiedNotification = (payload: PushNotificationPayload, origin: string): PushNotificationPayload => ({
-  ...payload,
-  title: `${UNVERIFIED} · ${payload.title}`,
-  tag: `fy-push-unverified:${payload.tag}`,
-  url: new URL('/app/', origin).href,
-});
 
 /** The fixed, per-machine tag every filtered push collapses into — see `filteredPushNotification`. */
 export const FILTERED_PUSH_TAG_PREFIX = 'fy-quiet:';

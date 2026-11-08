@@ -138,7 +138,7 @@ async function startWorker(options: { readonly scope?: string; readonly script?:
   return { signed, listeners, order, shown, opened, dispatch, inputs, state: () => state };
 }
 
-test('the guarded release worker has exactly its shell inputs plus zod, with no plugin import graph', async () => {
+test('the guarded release worker has exactly its shell inputs, the kernel contract’s push envelope and zod, with no plugin import graph', async () => {
   const worker = await startWorker();
   const app = realpathSync(join(root, 'packages/app'));
   const zod = realpathSync(resolve(Bun.resolveSync('zod/package.json', app), '..'));
@@ -158,9 +158,10 @@ test('the guarded release worker has exactly its shell inputs plus zod, with no 
     'src/worker/push-envelope.ts',
     'src/worker/service-worker.ts',
   ]);
+  const envelope = realpathSync(Bun.resolveSync('@ferretry/kernel/contract/push-envelope', app));
   const libraries = [...worker.inputs].filter(path => !shell.includes(path));
-  expect(libraries.length).toBeGreaterThan(0);
-  expect(libraries.every(path => path.startsWith(`${zod}/`))).toBe(true);
+  expect(libraries).toContain(envelope);
+  expect(libraries.every(path => path === envelope || path.startsWith(`${zod}/`))).toBe(true);
 });
 
 test('the release worker guard refuses a transitive non-worker import even without a plugin worker file', async () => {
@@ -351,6 +352,30 @@ test('the app-wide registration’s push always opens /app/, whatever page it na
     { url: `${APP_ORIGIN}/app/` },
   ]);
   expect(appWide.shown.map(notification => notification.title)).toEqual(Array(3).fill('Unverified · Deploy approval'));
+});
+
+test('S2 a line the page itself showed under the app-wide registration opens its chat; a hostile stored address opens /app/', async () => {
+  const appWide = await startWorker();
+  const tap = async (url: unknown): Promise<void> =>
+    appWide.dispatch('notificationclick', { notification: { data: { url }, close: () => {} } });
+  // The page watcher’s “needs input” line for a machine’s ferret: absolute, or relative to the site.
+  await tap(`${APP_ORIGIN}/d/abc/ferrets/f1/chat?ask=A3`);
+  await tap('/d/abc/ferrets/f1/chat?ask=A3');
+  // Whatever else is stored: not this site, not a machine’s closed list, not an address at all.
+  for (const hostile of [
+    'https://evil.test/d/abc/ferrets/f1/chat',
+    '//evil.test/d/abc',
+    'javascript:alert(1)',
+    `${APP_ORIGIN}/d/abc/ferrets/../../d/other`,
+    `${APP_ORIGIN}/ferrets/f1/chat`,
+    7,
+  ])
+    await tap(hostile);
+  expect(appWide.opened).toEqual([
+    `${APP_ORIGIN}/d/abc/ferrets/f1/chat?ask=A3`,
+    `${APP_ORIGIN}/d/abc/ferrets/f1/chat?ask=A3`,
+    ...Array(6).fill(`${APP_ORIGIN}/app/`),
+  ]);
 });
 
 test('a push whose payload is not readable JSON, or has no envelope, is shown plainly with no page', async () => {
