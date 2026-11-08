@@ -51,7 +51,7 @@ test('a mode this daemon does not serve yet is refused 64, never ignored', () =>
   for (const argv of [['--config', '/x/daemon.json']]) {
     const answer = run(...argv);
     expect(answer.code).toBe(64);
-    expect(answer.err).toContain('is not served by this daemon yet');
+    expect(answer.err).toContain('--config is not served');
     expect(answer.touched).toBe(false);
   }
 });
