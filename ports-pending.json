@@ -23,7 +23,8 @@
     "access",
     "voice",
     "projects",
-    "updates"
+    "updates",
+    "lessons"
   ],
   "pendingReasons": {
     "runtimes": [
@@ -118,7 +119,7 @@
       "GAP(live): production wires no LiveActivitySource into GET /v1/events (packages/core/ferrets/daemon/index.ts passes no extras), so ?live=1 is accepted and sends no live frames today; G161 holds because nothing is sent, and a test with a fake source pins what a wired one may send",
       "GAP(ferrets): daemon/adapters/session/lifecycle/process-incarnation.ts (the pane process start identity that tells a reused PID apart: Linux /proc start ticks, macOS ps start seconds) is ported and tested but nothing builds it until Ferrets composes the durable terminal pane reaper (daemon/adapters/session/lifecycle/durable-terminal-pane-reap.ts) that reads it (gustavo)",
       "GAP(ferrets): the shipped default and compact layouts (Layouts: layouts/*.yaml, contract/builtins.ts) have no `ferrets` nav item and hold `panels` in the side column, because no manifest declares a ferret list or a ferret screen (Ferrets declares only `new-ferret` and `move`); when Ferrets declares one, add it to the nav items there and to the side.holds of the default layout, and the layout test against the generated surfaces keeps the ids honest",
-      "GAP(lessons): Lessons does not contribute its launch flag FY_LEARNING_PASSIVE as a `launch.parts` part, so Ferrets' launch environment never records it and `instructions` tells every ferret it was not handed that section's switch (packages/core/ferrets/daemon/index.ts, RULING #30); listed here because Lessons is no longer in \"pending\" and Ferrets' launch store is the one that waits for it"
+      "GAP(ferrets): Conversation's `conversation-hypermedia` launch part records FY_HYPERMEDIA in Ferrets' launch environment only when the owner SET the ferret's switch; with none set it says nothing (by design: the mode default stands), and that mode default is written at the pane (daemon/lib/session/lifecycle/policy.ts sessionPaneEnvironment) and never recorded, so `instructions` reads Hypermedia as off for an interactive ferret whose owner set no switch although its pane was handed FY_HYPERMEDIA=1 (daemon/lib/agent-control/launch-environment.ts derives only FY_SESSION_MODE)"
     ],
     "conversation": [
       "conversation app half: all four ports have landed — C1 (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app), C2 (the composer, its menus over reference.catalog, attachments, drafts, the send outbox, Conversation Settings, the attachments panel and the chat-width panel), C3 (the chat screen and transcript) and C4 (the queue, compact-at and hypermedia panels, the question renderer, work search in the command bar, the Conversations screen)",
@@ -146,8 +147,7 @@
       "GAP(ferrets): the chat's reference surface proves neither :agent nor @file (app/chat/reference-surface.ts), so the fy-render media read that goes through the same proof waits: app/render/fy-render-workspace-media.ts and app/render/workspace-path.ts",
       "GAP(app-shell): no other surface calls Conversation's Add to chat yet (Board's side tab carries its own copy), so app/composer/composer-references.ts waits for the shared Add to chat action",
       "GAP(app-shell): Settings › Appearance › Message marks (S-0509) has no settings slot to mount in, so app/chat/message-marks-legend.tsx waits for it",
-      "GAP(attachments): the initial-attachments path (daemon/attachments/lib/initial-attachments.ts) is not composed into the daemon yet, so its bounded inflate adapter daemon/attachments/adapters/raw-deflate.ts waits for it",
-      "GAP(conversation): Conversation does not contribute its launch flag FY_HYPERMEDIA as a `launch.parts` part (`hypermediaLaunchEnvironment` is not registered), so Ferrets' launch environment never records it and `instructions` tells every ferret it was not handed that section's switch (packages/core/ferrets/daemon/index.ts, RULING #30)"
+      "GAP(attachments): the initial-attachments path (daemon/attachments/lib/initial-attachments.ts) is not composed into the daemon yet, so its bounded inflate adapter daemon/attachments/adapters/raw-deflate.ts waits for it"
     ],
     "accounts": [
       "GAP(board): the sign-in rule suggestion sheet does not offer the project scope, because the app half has no Board read (\"any\" and \"this ferret\" are offered)",
@@ -264,6 +264,9 @@
     "updates": [
       "GAP(updates): app/lib/changelog.ts is not reached by a What's new surface (today: packages/pwa/src/features/whats-new/whats-new-host.tsx:21 and whats-new-sheet.tsx:22) (owner: kaizen, app shell)",
       "GAP(updates): app/lib/install-prompt.ts is not reached by an install-as-app prompt (today: packages/pwa/src/main.tsx:58, packages/pwa/src/App.tsx:211, packages/pwa/src/features/install/install-app.tsx:19) (owner: kaizen, app shell)"
+    ],
+    "lessons": [
+      "GAP(lessons) (owner: nelly): Lessons does not contribute its launch flag FY_LEARNING_PASSIVE as a `launch.parts` part, so Ferrets' launch environment never records it and `instructions` reports the Lessons section as off for every ferret (packages/core/ferrets/daemon/index.ts, RULING #30)"
     ]
   },
   "pendingHalves": {

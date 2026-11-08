@@ -37,7 +37,7 @@ export class LaunchEnvironmentStore implements LaunchEnvironmentRecord {
 
 /**
  * The switches Ferrets itself can derive from a ferret's record: its mode. Every section switch belongs to the plugin
- * that contributes it as a launch part (Pack today), so none is guessed here; a section whose owner does not contribute
+ * that contributes it as a launch part (Pack and Conversation today), so none is guessed here; a section whose owner does not contribute
  * yet is simply absent, and `instructions` then says the pane was not handed the switches.
  */
 export function switchesOfRecord(record: FerretRecord | undefined): Readonly<Record<string, string>> {
