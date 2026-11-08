@@ -16,14 +16,32 @@ import type { RedactionScope } from '@ferretry/kernel/contract';
  * Masking is POSITIONAL: a covered character becomes `*` on the diff line it came from, one mask per original
  * line, so line counts and hunk headers stay true. Headers and hunk headers (which can carry a source line) are
  * masked one line at a time.
+ *
+ * Positions are UTF-16 code UNITS, exactly as the scope reports them (Vault's own starring walks units): a character
+ * outside the BMP is two places, never one. A CRLF line is matched without its `\r` (the scope sees the value as it
+ * was stored with LF) and the `\r` is kept in the output.
  */
 export function redactedDiffText(diff: string, scope: RedactionScope): string {
+  return redactedDiff(diff, scope).text;
+}
+
+/**
+ * The masked diff and whether the scope reported ANY coverage. The second answer is the one a refusal rests on: it
+ * never depends on how the masked text compares to the original.
+ */
+export function redactedDiff(
+  diff: string,
+  scope: RedactionScope,
+): { readonly text: string; readonly covered: boolean } {
   const out: string[] = [];
+  let covered = false;
   let body: Body[] = [];
   let inHunk = false;
 
   const flush = (): void => {
-    out.push(...maskHunk(body, scope));
+    const hunk = maskHunk(body, scope);
+    if (hunk.covered) covered = true;
+    out.push(...hunk.lines);
     body = [];
   };
 
@@ -43,17 +61,19 @@ export function redactedDiffText(diff: string, scope: RedactionScope): string {
     }
     flush();
     if (line.startsWith('@@')) inHunk = true;
-    out.push(maskLine(line, scope));
+    const masked = maskLine(line, scope);
+    if (masked !== line) covered = true;
+    out.push(masked);
   }
   flush();
-  return out.join('\n');
+  return { text: out.join('\n'), covered };
 }
 
 type Marker = ' ' | '+' | '-' | '\\';
 
 /** One header line masked the way the body is: a positional `*` per covered character, same length. */
 function maskLine(line: string, scope: RedactionScope): string {
-  const [masked] = scope.lines([line + '\n']);
+  const [masked] = scope.lines([`${line}\n`]);
   return masked === undefined ? line : masked.slice(0, line.length);
 }
 interface Body {
@@ -65,19 +85,23 @@ interface Body {
 /** Which characters of each entry a look covers, entry by entry (the scope keeps every string's length). */
 function look(entries: readonly number[], body: readonly Body[], scope: RedactionScope, covered: boolean[][]): void {
   if (entries.length === 0) return;
-  const texts = entries.map(at => (body[at]?.text ?? '') + '\n');
+  // A CRLF line is matched without its `\r`; the `\r` is never covered, so positions line up.
+  const texts = entries.map(at => `${(body[at]?.text ?? '').replace(/\r$/, '')}\n`);
   const masked = scope.lines(texts);
   entries.forEach((at, position) => {
     const before = texts[position] ?? '';
     const after = masked[position] ?? before;
     const row = covered[at];
     if (row === undefined) return;
-    for (let char = 0; char < before.length - 1; char++) if (after[char] !== before[char]) row[char] = true;
+    for (let unit = 0; unit < before.length - 1; unit++) if (after[unit] !== before[unit]) row[unit] = true;
   });
 }
 
-function maskHunk(body: readonly Body[], scope: RedactionScope): string[] {
-  if (body.length === 0) return [];
+function maskHunk(
+  body: readonly Body[],
+  scope: RedactionScope,
+): { readonly lines: string[]; readonly covered: boolean } {
+  if (body.length === 0) return { lines: [], covered: false };
   const covered = body.map(entry => Array.from<boolean>({ length: entry.text.length }).fill(false));
   // The no-newline marker is not content: it takes no part in any look.
   const all = body.flatMap((entry, at) => (entry.marker === '\\' ? [] : [at]));
@@ -103,10 +127,35 @@ function maskHunk(body: readonly Body[], scope: RedactionScope): string[] {
     scope,
     covered,
   );
-  return body.map((entry, at) => {
+  // The same text on both sides of a hunk is the same text: a removed line takes the coverage of an added line that
+  // reads the same (and the other way round), so a partial copy never sits in clear beside its own mask.
+  const seen = new Map<string, boolean[]>();
+  for (const [at, entry] of body.entries()) {
+    const row = covered[at];
+    if (row === undefined || (entry.marker !== '+' && entry.marker !== '-')) continue;
+    const peer = seen.get(entry.text);
+    if (peer === undefined) seen.set(entry.text, row);
+    else for (const [index, unit] of row.entries()) peer[index] = unit || peer[index] === true;
+  }
+  for (const [at, entry] of body.entries()) {
+    const row = covered[at];
+    const peer = entry.marker === '+' || entry.marker === '-' ? seen.get(entry.text) : undefined;
+    if (row !== undefined && peer !== undefined) for (const [index, unit] of peer.entries()) row[index] = unit;
+  }
+  let any = false;
+  const lines = body.map((entry, at) => {
     const row = covered[at] ?? [];
-    if (entry.marker === '\\') return maskLine(entry.line, scope);
+    if (entry.marker === '\\') {
+      const masked = maskLine(entry.line, scope);
+      if (masked !== entry.line) any = true;
+      return masked;
+    }
     if (!row.includes(true)) return entry.line;
-    return entry.line.charAt(0) + [...entry.text].map((char, index) => (row[index] === true ? '*' : char)).join('');
+    any = true;
+    // Walk code UNITS, as the scope does: a code-point walk would shift the mask after any astral character.
+    let masked = entry.line.charAt(0);
+    for (let unit = 0; unit < entry.text.length; unit++) masked += row[unit] === true ? '*' : entry.text.charAt(unit);
+    return masked;
   });
+  return { lines, covered: any };
 }

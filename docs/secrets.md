@@ -108,7 +108,10 @@ no download or open of the masked bytes. Matching is whole-value only, never a p
   agent that writes a guess into its own worktree can confirm a WHOLE-value guess. That is negligible for a
   high-entropy secret and real for a short one (a PIN). Not closed: closing it would mean not saying so.
 - Not found, so not masked: a value inside compressed bytes, in a UTF-16 file, or a non-ASCII value in a file that is not
-  UTF-8, and a value a diff shows only in part.
+  UTF-8, and a value a diff shows only in part (a file, or one side of a diff, that holds only part of a value is shown
+  as it is, even when the other side holds it whole — apart from an identical line, which takes the other side's mask).
+  A multi-line value is found in a CRLF file (the `\r` is left out of the look and kept in the output). Positions are
+  UTF-16 units, as Vault's own starring counts them.
 
 ### Text a component shows: recognised by shape
 

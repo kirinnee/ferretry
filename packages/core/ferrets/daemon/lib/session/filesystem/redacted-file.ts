@@ -9,9 +9,20 @@ import type { RedactionScope } from '@ferretry/kernel/contract';
  * same look.
  */
 export function redactedFileText(text: string, scope: RedactionScope): string {
-  const lines = text.split('\n').map((line, at, all) => (at < all.length - 1 ? line + '\n' : line));
-  const masked = scope.lines(lines);
-  return masked.join('');
+  const lines = text.split('\n').map((line, at, all) => (at < all.length - 1 ? `${line}\n` : line));
+  // A CRLF file is matched as if it were LF (a multi-line value is stored with LF): the `\r` before each `\n` is
+  // left out of the look and put back, so lengths and positions stay true.
+  const crs = lines.map(line => /\r\n?$/.test(line));
+  const seen = lines.map((line, at) => (crs[at] === true ? line.replace(/\r(\n?)$/, '$1') : line));
+  const masked = scope.lines(seen);
+  return masked
+    .map((line, at) => {
+      const original = lines[at] ?? '';
+      if (crs[at] !== true) return line;
+      // CRLF: the `\r` goes back before the final character (the `\n`, or a `*` standing where a masked `\n` was).
+      return original.endsWith('\r\n') ? `${line.slice(0, -1)}\r${line.slice(-1)}` : `${line}\r`;
+    })
+    .join('');
 }
 
 /**

@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { FakeRedaction } from '@ferretry/core-vault/contract/testing';
 import should from 'should';
-import { redactedDiffText } from '../../../../../daemon/lib/session/filesystem/index.ts';
+import { redactedDiff, redactedDiffText } from '../../../../../daemon/lib/session/filesystem/index.ts';
 
 /** FAKE fixture values only. Assertions are booleans so a failure never prints them. */
 const ONE_LINE = 'fixture-one-line-secret-0002';
@@ -121,5 +121,50 @@ describe('the outbound diff projection (R-0150)', () => {
     should(out.includes(ONE_LINE)).be.false();
     should(out.includes('redacted')).be.false();
     should(out.includes('*'.repeat(ONE_LINE.length))).be.true();
+  });
+
+  it('R-0150 astral characters before a value do not shift the diff mask (+ line and context line)', async () => {
+    for (const count of [1, 5, 30]) {
+      const lead = '😀'.repeat(count);
+      for (const marker of ['+', ' ']) {
+        const raw = `@@ -1 +1 @@\n${marker}${lead}${ONE_LINE}\n`;
+        const out = await project(raw);
+        should(out.includes(ONE_LINE)).be.false();
+        should(out.includes(ONE_LINE.slice(0, 4))).be.false();
+        should(out === `@@ -1 +1 @@\n${marker}${lead}${'*'.repeat(ONE_LINE.length)}\n`).be.true();
+      }
+    }
+  });
+
+  it('R-0150 coverage is reported by the scope, even when 30 astral characters precede the value', async () => {
+    const raw = `@@ -1 +1 @@\n+${'😀'.repeat(30)}${ONE_LINE}\n`;
+    const covered = await new FakeRedaction(new Map([['ONE' as never, ONE_LINE]])).read(
+      scope => redactedDiff(raw, scope).covered,
+    );
+    const clean = await new FakeRedaction(new Map([['ONE' as never, ONE_LINE]])).read(
+      scope => redactedDiff('@@ -1 +1 @@\n+nothing here\n', scope).covered,
+    );
+    should(covered).be.true();
+    should(clean).be.false();
+  });
+
+  it('R-0150 the old side partial copy of a value takes the mask of the same line on the new side', async () => {
+    const THIRD = 'fixture-third-row-0005';
+    // old file: FIRST, SECOND (no EOL); new file: FIRST, SECOND, THIRD. The value is all three lines.
+    const raw = `@@ -1,2 +1,3 @@\n ${FIRST}\n-${SECOND}\n\\ No newline at end of file\n+${SECOND}\n+${THIRD}\n`;
+    const out = await new FakeRedaction(new Map([['V' as never, `${FIRST}\n${SECOND}\n${THIRD}`]])).read(scope =>
+      redactedDiffText(raw, scope),
+    );
+    should(out.includes(FIRST)).be.false();
+    should(out.includes(SECOND)).be.false();
+    should(out.includes(THIRD)).be.false();
+  });
+
+  it('R-0150 a multi-line value in a CRLF diff is masked and the CR is kept', async () => {
+    const raw = `@@ -0,0 +1,2 @@\n+${FIRST}\r\n+${SECOND}\r\n`;
+    const out = await project(raw);
+    should(out.includes(FIRST)).be.false();
+    should(out.includes(SECOND)).be.false();
+    should(out === `@@ -0,0 +1,2 @@\n+${'*'.repeat(FIRST.length)}\r\n+${'*'.repeat(SECOND.length)}\r\n`).be.true();
   });
 });

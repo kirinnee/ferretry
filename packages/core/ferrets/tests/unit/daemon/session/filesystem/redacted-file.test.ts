@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { FakeRedaction } from '@ferretry/core-vault/contract/testing';
 import should from 'should';
-import { redactedFileBase64 } from '../../../../../daemon/lib/session/filesystem/redacted-file.ts';
+import { redactedFileBase64, redactedFileText } from '../../../../../daemon/lib/session/filesystem/redacted-file.ts';
 
 /** FAKE fixture values only. Assertions are booleans so a failure never prints them. */
 const ONE_LINE = 'fixture-one-line-secret-0002';
@@ -37,5 +37,17 @@ describe('the outbound file projection, base64 (R-0151)', () => {
   it('R-0151 a binary file with no vault value is served byte for byte', async () => {
     const bytes = Buffer.from([0, 1, 2, 0xff, 0xfe, 0x80]);
     should((await mask(bytes, ONE_LINE)).equals(bytes)).be.true();
+  });
+
+  it('R-0151 a multi-line value in a CRLF file is masked, and the CRs and the length are kept', async () => {
+    const text = `head\r\n${FIRST}\r\n${SECOND}\r\ntail\r\n`;
+    const out = await new FakeRedaction(new Map([['V' as never, `${FIRST}\n${SECOND}`]])).read(scope =>
+      redactedFileText(text, scope),
+    );
+    should(out.includes(FIRST)).be.false();
+    should(out.includes(SECOND)).be.false();
+    should(out.length === text.length).be.true();
+    // the newline inside the value is masked like any other covered character; its CR stays before it
+    should(out === `head\r\n${'*'.repeat(FIRST.length)}\r*${'*'.repeat(SECOND.length)}\r\ntail\r\n`).be.true();
   });
 });

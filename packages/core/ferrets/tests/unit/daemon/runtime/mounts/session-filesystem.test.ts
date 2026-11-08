@@ -365,6 +365,122 @@ describe('the diff route', () => {
     should(refusal).eql({ status: 403, code: 'holds_secret' });
   });
 
+  it('R-0150 an agent diff with 30 astral characters before a value is still a 403 holds_secret', async () => {
+    const raw = `@@ -1 +1 @@\n+${'😀'.repeat(30)}${FIXTURE_SECRET}\n`;
+    const { ask } = fixture(
+      { tree: tree() },
+      { isTracked: () => true, diffSnapshots: () => ({ diff: raw, truncated: false }) },
+      agent,
+      withSecret(),
+    );
+
+    const refusal = await refusalOf(ask(DIFF, { query: { path: 'a.ts' } }));
+
+    should(refusal?.status === 403 && refusal?.code === 'holds_secret').be.true();
+  });
+
+  it('R-0150 the agent diff refusal is the one sentence naming the path only, never the value', async () => {
+    const raw = `@@ -1 +1 @@\n+${FIXTURE_SECRET}\n`;
+    const { ask } = fixture(
+      { tree: tree() },
+      { isTracked: () => true, diffSnapshots: () => ({ diff: raw, truncated: false }) },
+      agent,
+      withSecret(),
+    );
+
+    const message = await ask(DIFF, { query: { path: 'a.ts' } }).then(
+      () => '',
+      (error: unknown) => (error instanceof Error ? error.message : ''),
+    );
+
+    should(message === 'a.ts holds a private value, so it is not served to an agent.').be.true();
+    should(message.includes(FIXTURE_SECRET)).be.false();
+  });
+
+  it('R-0151 an agent file read gives the same sentence for one value, two values and a repeat', async () => {
+    const SECOND_SECRET = 'fixture-second-secret-value-0002';
+    const redaction = () =>
+      new FakeRedaction(
+        new Map([
+          [FIXTURE_NAME, FIXTURE_SECRET],
+          ['SECOND_FIXTURE' as never, SECOND_SECRET],
+        ]),
+      );
+    const messageFor = async (content: string): Promise<string> => {
+      const { ask } = fixture(
+        { tree: treeOf(['a.ts', textFile(content)]) },
+        { isTracked: () => true },
+        agent,
+        redaction(),
+      );
+      return await ask(FILE, { query: { path: 'a.ts' } }).then(
+        () => '',
+        (error: unknown) => (error instanceof Error ? error.message : ''),
+      );
+    };
+
+    const one = await messageFor(`${FIXTURE_SECRET}\n`);
+    const two = await messageFor(`${FIXTURE_SECRET}\n${SECOND_SECRET}\n`);
+    const repeat = await messageFor(`${FIXTURE_SECRET}\n${FIXTURE_SECRET}\n${SECOND_SECRET}\n`);
+
+    should(one === 'a.ts holds a private value, so it is not served to an agent.').be.true();
+    should(two === one && repeat === one).be.true();
+    should([one, two, repeat].some(m => m.includes(FIXTURE_SECRET) || m.includes(SECOND_SECRET))).be.false();
+  });
+
+  it('R-0151 an agent base64 read of a NUL file holding a value is a 403 holds_secret', async () => {
+    const { ask } = fixture(
+      { tree: treeOf(['a.bin', textFile(`${FIXTURE_SECRET}\n\0`)]) },
+      { isTracked: () => true },
+      agent,
+      withSecret(),
+    );
+
+    const refusal = await refusalOf(ask(FILE, { query: { path: 'a.bin', format: 'base64' } }));
+
+    should(refusal?.status === 403 && refusal?.code === 'holds_secret').be.true();
+  });
+
+  it('R-0150 R-0151 astral characters, combining marks and CRLF around a value: masked for a person, 403 for an agent', async () => {
+    const shapes = ['😀'.repeat(30), 'e\u0301'.repeat(30), '😀e\u0301'.repeat(10), '\r', '😀\u0301\r'];
+    for (const lead of shapes) {
+      const body = `${lead}${FIXTURE_SECRET}${lead}\r\n`;
+      const raw = `@@ -1 +1 @@\n+${body}`;
+      for (const reach of [person, agent]) {
+        const { ask } = fixture(
+          { tree: treeOf(['a.ts', textFile(body)]) },
+          { isTracked: () => true, diffSnapshots: () => ({ diff: raw, truncated: false }) },
+          reach,
+          withSecret(),
+        );
+        for (const [key, query] of [
+          [FILE, { path: 'a.ts' }],
+          [FILE, { path: 'a.ts', format: 'base64' }],
+          [DIFF, { path: 'a.ts' }],
+        ] as const) {
+          if (reach === agent) {
+            const refusal = await refusalOf(ask(key, { query }));
+            should(refusal?.status === 403 && refusal?.code === 'holds_secret').be.true();
+          } else {
+            const response = await ask(key, { query });
+            const wire = String(response.body);
+            const bytes = Buffer.from(
+              wire.includes('"base64"') ? String(JSON.parse(String(response.body)).base64) : '',
+              'base64',
+            );
+            should(String(response.body).includes(FIXTURE_SECRET)).be.false();
+            should(bytes.toString('latin1').includes(FIXTURE_SECRET)).be.false();
+            should(
+              (bytes.length > 0 ? bytes.toString('latin1') : String(response.body)).includes(
+                '*'.repeat(FIXTURE_SECRET.length),
+              ),
+            ).be.true();
+          }
+        }
+      }
+    }
+  });
+
   it('R-0150 an agent still reads a diff that holds no vault value', async () => {
     const { ask } = fixture(
       { tree: tree() },

@@ -15,7 +15,7 @@ import {
   type FsErrorCode,
   MAX_FILE_BYTES,
   type FsFileView,
-  redactedDiffText,
+  redactedDiff,
   redactedFileBase64,
   redactedFileText,
   type SessionFilesystem,
@@ -177,8 +177,9 @@ async function diff(filesystem: SessionFilesystem, deps: FileBrowserDeps, contex
 
 /** The one place diff text leaves the daemon: masked through the read's scope. */
 function diffResponse(text: string, scope: RedactionScope, agent: boolean, path: string): ApiResponse {
-  const masked = redactedDiffText(text, scope);
-  if (agent && masked !== text) throw holdsSecret(path);
+  const { text: masked, covered } = redactedDiff(text, scope);
+  // The refusal rests on what the scope reported, never on whether the masked text differs from the original.
+  if (agent && covered) throw holdsSecret(path);
   return textResponse(masked);
 }
 

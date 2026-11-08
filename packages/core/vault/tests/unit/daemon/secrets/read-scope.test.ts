@@ -106,6 +106,26 @@ describe('the read-scoped redaction', () => {
     should(masked.rows[1]?.join('')).equal(`${'*'.repeat(TOKEN.length - 8)}x`);
   });
 
+  it('R-0151 only the WHOLE value is matched: a prefix or a piece of it is left alone', async () => {
+    const redaction = new VaultRedaction(source({ TOKEN }));
+
+    const out = await redaction.read(scope => scope.lines([TOKEN.slice(0, -3), TOKEN.slice(3), TOKEN]));
+
+    should(out[0] === TOKEN.slice(0, -3)).be.true();
+    should(out[1] === TOKEN.slice(3)).be.true();
+    should(out[2] === '*'.repeat(TOKEN.length)).be.true();
+  });
+
+  it('R-0150 R-0151 the real scope counts UTF-16 units: astral characters before a value keep the mask on the value', async () => {
+    const redaction = new VaultRedaction(source({ TOKEN }));
+    const lead = '😀'.repeat(30);
+
+    const out = await redaction.read(scope => scope.lines([`${lead}${TOKEN}\n`]));
+
+    should((out[0] ?? '').includes(TOKEN)).be.false();
+    should(out[0] === `${lead}${'*'.repeat(TOKEN.length)}\n`).be.true();
+  });
+
   it('should mask lines keeping each length, across a wrap', () => {
     const lines = maskLines([`one ${TOKEN.slice(0, 5)}`, `${TOKEN.slice(5)} two`], [TOKEN]);
     should(lines).deepEqual([`one ${'*'.repeat(5)}`, `${'*'.repeat(TOKEN.length - 5)} two`]);
@@ -284,15 +304,5 @@ describe('the output guard', () => {
     should(last.status).equal(409);
     should(last.body).containEql(WITHHELD_SENTENCE);
     should(last.body).not.containEql('the old pane');
-  });
-
-  it('R-0151 only the WHOLE value is matched: a prefix or a piece of it is left alone', async () => {
-    const redaction = new VaultRedaction(source({ TOKEN }));
-
-    const out = await redaction.read(scope => scope.lines([TOKEN.slice(0, -3), TOKEN.slice(3), TOKEN]));
-
-    should(out[0]).eql(TOKEN.slice(0, -3));
-    should(out[1]).eql(TOKEN.slice(3));
-    should(out[2]).eql('*'.repeat(TOKEN.length));
   });
 });

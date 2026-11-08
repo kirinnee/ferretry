@@ -36,6 +36,8 @@ const FsFileSchema = z.looseObject({
   denied: z.boolean().optional(),
   ignored: z.boolean().optional(),
   reason: z.string().optional(),
+  /** Set when the daemon masked private values in the bytes: they are NOT the file. */
+  redacted: z.boolean().optional(),
   rule: z.string().optional(),
   tooLarge: z.boolean().optional(),
 });
@@ -56,6 +58,9 @@ const PATH_REFUSALS: Readonly<Record<string, string>> = {
   escapes_root: 'it resolves outside the session folder (a link pointing out of it)',
   ignored: 'Git ignores it',
 };
+
+/** The same sentence the files feature shows for a masked file. */
+const MASKED_RULE = 'private values masked — this is not the file';
 
 export const readWorkspaceMedia = async (
   client: PluginClient,
@@ -95,6 +100,8 @@ export const readWorkspaceMedia = async (
   }
   if (file.denied === true || file.ignored === true || file.reason !== undefined)
     return { ok: false, reason: 'not-served', ...(file.rule === undefined ? {} : { rule: file.rule }) };
+  // Masked bytes are not the file: never show them as it, and never offer them to open or download (a PDF row would).
+  if (file.redacted === true) return { ok: false, reason: 'not-served', rule: MASKED_RULE };
   if (file.tooLarge === true) return { ok: false, reason: 'too-large' };
   if (file.base64 === undefined) return { ok: false, reason: 'unavailable' };
   try {
