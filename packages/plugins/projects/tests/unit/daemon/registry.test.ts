@@ -1,42 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { Instant } from '@ferretry/std';
-import type { ProjectInfo, ProjectsFile } from '../../../contract/index.ts';
-import type { RegistryStore } from '../../../daemon/lib/ports.ts';
-import { ProjectRegistry } from '../../../daemon/lib/registry.ts';
-import { fakeMachine } from './support.ts';
-
-/** The registry file in memory, with the same one-at-a-time update the kernel's state port gives. */
-function memoryStore(initial: readonly ProjectInfo[] = []): RegistryStore & { file: ProjectsFile; reads: number } {
-  let chain: Promise<unknown> = Promise.resolve();
-  const store = {
-    file: { format: 1, projects: [...initial] } as ProjectsFile,
-    reads: 0,
-    read: async () => store.file.projects,
-    update: (change: (current: ProjectsFile) => ProjectsFile) => {
-      const run = chain.then(async () => {
-        await Promise.resolve();
-        store.file = change(store.file);
-      });
-      chain = run.catch(() => undefined);
-      return run;
-    },
-  };
-  return store;
-}
-
-function registry(machine = fakeMachine(), store = memoryStore()) {
-  let counter = 0;
-  const said: string[] = [];
-  const instance = new ProjectRegistry({
-    store,
-    folders: machine,
-    clock: { now: () => '2026-11-07T09:00:00.000Z' as Instant },
-    newId: () => `00000000-0000-4000-8000-${(++counter).toString(16).padStart(12, '0')}`,
-    registered: id => said.push(`registered ${id}`),
-    removed: id => said.push(`removed ${id}`),
-  });
-  return { registry: instance, store, said, machine };
-}
+import { fakeMachine, registryOver as registry } from './support.ts';
 
 describe('ProjectRegistry project-path boundary', () => {
   test('rejects a relative path before the filesystem or git is touched', async () => {
@@ -194,5 +157,18 @@ describe('ProjectRegistry removal', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('not_found');
     expect(said).toEqual([]);
+  });
+});
+
+describe('ProjectRegistry lookup', () => {
+  test('finds a registered project by id, and nothing for an id it does not hold', async () => {
+    const { registry: projects } = registry(fakeMachine(['/w/p', '/w/q']));
+    const first = await projects.register({ kind: 'existing-folder', path: '/w/p' });
+    const second = await projects.register({ kind: 'existing-folder', path: '/w/q' });
+    if (!first.ok || !second.ok) throw new Error('setup');
+
+    expect(await projects.find(second.value.id)).toEqual(second.value);
+    expect(await projects.find('00000000-0000-4000-8000-0000000000ff' as never)).toBeUndefined();
+    expect((await projects.list()).map(project => project.path)).toEqual(['/w/p', '/w/q']);
   });
 });

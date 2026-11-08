@@ -19,6 +19,7 @@ import {
   DEFAULT_GATE_CONFIG,
   FULL_DEVICE_GRANTS,
   type GateConfig,
+  type WardenRemedyAuthorizer,
 } from '../../../contract/index.ts';
 import {
   FakeDeviceProvider,
@@ -114,6 +115,8 @@ export interface World {
   readonly audits: AuditDraft[];
   readonly recorded: AuditDraft[];
   policy: GateConfig | undefined;
+  /** The warden-remedy authorizer the daemon was built with; absent until a test wires one. */
+  remedies: WardenRemedyAuthorizer | undefined;
   now: Instant;
   devicesOff: boolean;
   /** No `step-up:device` provider (Access off), or one that throws. */
@@ -136,6 +139,7 @@ export function world(initial: Partial<Pick<World, 'policy'>> = {}): World {
     audits,
     recorded,
     policy: 'policy' in initial ? initial.policy : DEFAULT_GATE_CONFIG,
+    remedies: undefined,
     now: T0,
     devicesOff: false,
     stepUpsOff: false,
@@ -163,6 +167,7 @@ export function world(initial: Partial<Pick<World, 'policy'>> = {}): World {
     devices: () => credentialWatch.follow('device', state.devicesOff ? undefined : devices),
     members: () => credentialWatch.follow('member', members as never),
     policy: () => state.policy,
+    remedies: () => state.remedies,
     stepUps: new FailClosedStepUps(() => {
       if (state.stepUpsOff === 'throwing') throw new Error('the step-up provider failed');
       return state.stepUpsOff ? undefined : stepUps;
