@@ -381,7 +381,7 @@ export function wrapperName(account: FleetManifestAccount): string {
  * {@link FleetManifestAccount}, and a second `basename` call elsewhere is how two consumers come to
  * disagree about what an account is called on a host whose separator is not the one they assumed.
  */
-function wrapperNameOf(publishedPath: string): string {
+export function wrapperNameOf(publishedPath: string): string {
   return basename(publishedPath);
 }
 

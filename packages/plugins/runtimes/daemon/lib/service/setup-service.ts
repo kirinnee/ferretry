@@ -161,7 +161,7 @@ const SETTINGS_KIND = { 'warden.yaml': 'warden', 'learning.yaml': 'learning', 'v
  * A write is validated, refused if the file moved since it was read, and HELD when it loosens and the caller
  * may not confirm it in the same act.
  */
-interface CloneConfigFiles {
+export interface CloneConfigFiles {
   file(path: string): Promise<{ readonly exists: boolean; readonly text: string; readonly etag: string }>;
   /** What is in effect now, for judging a loosening. */
   effective(): Promise<Readonly<Record<'warden' | 'learning' | 'voice', unknown>>>;

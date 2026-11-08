@@ -5,11 +5,16 @@
  * Reads only: every write the setup service makes goes through the provisioner, inside its rollback
  * boundary.
  */
-
+import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
-import type { FolderReading } from '../lib/service/setup-service.ts';
-
-import type { HostFiles } from './ports.ts';
+import type {
+  CloneConfigFiles,
+  FleetSetupServiceDeps,
+  FolderReading,
+  SetupCatalogDeps,
+} from '../lib/service/setup-service.ts';
+import { HostHarnessScanner } from './host-harness-scan.ts';
+import type { AdapterHost, ApplyLockOptions, ConfigFileService, HostFiles } from './ports.ts';
 
 /** The largest file a folder read carries; a larger one is skipped and named. */
 const MAX_FOLDER_FILE_BYTES = 256 * 1024;
@@ -81,4 +86,149 @@ export async function skillItemsIn(
     if ((await files.lstat(join(directory, name)))?.kind === 'directory') items.push(name);
   }
   return items.toSorted();
+}
+
+/**
+ * The configuration files a copy merges settings into, over the daemon's one {@link ConfigFileService}: the very
+ * service `PUT /v1/config/file` writes through, so a copy is validated, refused if the file moved, and held when
+ * it loosens exactly as an edit is. It writes as the owner (`'owner'`): the route that reached it is a person's.
+ *
+ * GAP(kernel): that service is the kernel's config layer; plugins have no config write port.
+ *
+ * @pending runtimes: plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host
+ */
+export function cloneConfigFilesOver(service: ConfigFileService): CloneConfigFiles {
+  return {
+    file: async path => {
+      const view = await service.file(path);
+      return { exists: view.exists, text: view.text, etag: view.etag };
+    },
+    effective: async () => {
+      const { effective } = (await service.inEffect()).evaluation;
+      return { warden: effective.warden, learning: effective.learning, voice: effective.voice };
+    },
+    validate: async (path, text) =>
+      (await service.validate(path, text)).map(issue => ({
+        severity: issue.severity,
+        message: issue.message,
+        ...(issue.line === undefined ? {} : { line: issue.line }),
+      })),
+    write: async (path, text, ifMatch, mayLoosen) => {
+      const written = await service.write(path, text, ifMatch, mayLoosen, 'owner');
+      return { outcome: written.outcome };
+    },
+  };
+}
+
+/** What the composition root hands the setup service: its own collaborators, never a second copy. *
+ * @pending runtimes: plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host
+ */
+export interface FileFleetSetupOptions {
+  /** The host: its files, command lookup, record store and the provisioner's apply claim (`./ports.ts`). */
+  readonly host: AdapterHost;
+  /** The catalogue's collaborators, so both surfaces read and write one machine the same way. */
+  readonly catalog: SetupCatalogDeps;
+  /** `CLAUDE_CONFIG_DIR` / `CODEX_HOME` as this daemon inherited them. */
+  readonly claudeConfigDir?: string;
+  readonly codexHome?: string;
+  /** Safe Logins contract facts; host sign-in files stay opaque. */
+  readonly logins: Pick<import('@ferretry/plugin-logins/contract').LoginsApi, 'list'>;
+  /** How long the clone record's update waits for a running fleet apply; a test shortens it. */
+  readonly lockOptions?: ApplyLockOptions;
+  readonly tools: FleetSetupServiceDeps['tools'];
+  /** The configuration files a copy merges settings into; absent, a copy carrying one is refused. */
+  readonly configFiles?: CloneConfigFiles;
+  /** This daemon's id as it reports itself; absent until pairing identity is open. */
+  readonly daemonId: () => string | undefined;
+  /** The secret store's management side. */
+  readonly secrets: {
+    list(): Promise<readonly { readonly name: string; readonly createdAt: string; readonly updatedAt: string }[]>;
+    put(name: string, value: string): Promise<unknown>;
+  };
+}
+
+const sha256 = (text: string): string => new Bun.CryptoHasher('sha256').update(text).digest('hex');
+
+/** The largest host document the import reads; anything larger is reported, never truncated. */
+const MAX_HOST_DOCUMENT_BYTES = 1024 * 1024;
+
+/** The setup service's collaborators over this machine's files. *
+ * @pending runtimes: plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host
+ */
+export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupServiceDeps {
+  const { catalog, host } = options;
+  const keyWriter = host.texts;
+  // The claim every fleet apply takes, keyed the one way the provisioner keys it (beside the manifest).
+  const applyLock = host.provisioner.kernel.applyLockFor(catalog.layout.manifestPath, options.lockOptions);
+  // One read-modify-write of the clone record while holding the fleet apply claim. An apply publishes this same
+  // file inside that claim, so while it is held no apply can land between the read and the write: the change is
+  // made from what the last apply left, and the next apply's own revision check refuses a plan older than it.
+  // Two updates in this daemon take the claim one after the other, so neither reads what the other is about to write.
+  const exclusively = async (
+    path: string,
+    change: (current: string | undefined) => string | undefined,
+  ): Promise<boolean> => {
+    const token = await applyLock.acquire();
+    let wrote = false;
+    let failure: { readonly error: unknown } | undefined;
+    try {
+      const next = change((await keyWriter.read(path)) ?? undefined);
+      if (next !== undefined) {
+        await keyWriter.write(path, next);
+        wrote = true;
+      }
+    } catch (error) {
+      failure = { error };
+    }
+    const residue = await applyLock.release(token);
+    if (failure !== undefined) throw failure.error;
+    // A claim that could not be cleared blocks every later apply; say so rather than lose it.
+    if (residue !== undefined) {
+      throw new Error(`the record update finished, but the exclusive apply claim at ${residue} could not be cleared`);
+    }
+    return wrote;
+  };
+  const layout = catalog.layout;
+  const scanner = new HostHarnessScanner({
+    files: host.files,
+    userHome: layout.userHome,
+    ...(options.claudeConfigDir === undefined ? {} : { claudeConfigDir: options.claudeConfigDir }),
+    ...(options.codexHome === undefined ? {} : { codexHome: options.codexHome }),
+    // A harness through the daemon's one rule, never a second detector; an MCP command on `PATH`.
+    commands: {
+      resolve: name => (name === 'claude' || name === 'codex' ? catalog.locate(name) : host.commands.which(name)),
+    },
+    logins: options.logins,
+    maxDocumentBytes: MAX_HOST_DOCUMENT_BYTES,
+  });
+  return {
+    catalog,
+    ...(options.configFiles === undefined ? {} : { configFiles: options.configFiles }),
+    scan: async () => await scanner.scan(),
+    tools: options.tools,
+    secrets: {
+      names: async () => (await options.secrets.list()).map(secret => secret.name),
+      held: async () =>
+        (await options.secrets.list()).map(({ name, createdAt, updatedAt }) => ({ name, createdAt, updatedAt })),
+      put: async (name, value) => {
+        await options.secrets.put(name, value);
+      },
+    },
+    readFolder: async path => await readTextFolder(host.files, path),
+    skillItems: async () => await skillItemsIn(host.files, join(layout.assetsDirectory, 'skills')),
+    digest: sha256,
+    daemonId: options.daemonId,
+    randomBytes: length => new Uint8Array(randomBytes(length)),
+    exportKeys: {
+      read: async path => (await keyWriter.read(path)) ?? undefined,
+      write: async (path, text) => {
+        await keyWriter.write(path, text);
+      },
+    },
+    cloneBase: {
+      read: async path => (await keyWriter.read(path)) ?? undefined,
+      // Under the fleet apply claim: one at a time, and never between an apply's read and its publish.
+      update: exclusively,
+    },
+  };
 }

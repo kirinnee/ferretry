@@ -101,6 +101,29 @@ export interface ConfigFilesPort<Model> {
   acknowledgeRemoval(path: string): void;
 }
 
+/**
+ * The kernel's config service as a Clone's settings merge uses it: the same service `PUT /v1/config/file` writes through.
+ *
+ * GAP(kernel): plugins have no config WRITE port; only the kernel's host can write `config/**`.
+ */
+export interface ConfigFileService {
+  file(path: string): Promise<{ readonly exists: boolean; readonly text: string; readonly etag: string }>;
+  inEffect(): Promise<{
+    readonly evaluation: { readonly effective: Readonly<Record<'warden' | 'learning' | 'voice', unknown>> };
+  }>;
+  validate(
+    path: string,
+    text: string,
+  ): Promise<readonly { readonly severity: 'error' | 'warning'; readonly message: string; readonly line?: number }[]>;
+  write(
+    path: string,
+    text: string,
+    ifMatch: string,
+    mayLoosen: boolean,
+    as: 'owner',
+  ): Promise<{ readonly outcome: 'applied' | 'pending' }>;
+}
+
 // ─── the provisioner's disk (descriptors) ────────────────────────────────────────────────────────────────────────
 
 /** Which file an entry is: what kind, and the device and inode that name it whatever path reached it. */
