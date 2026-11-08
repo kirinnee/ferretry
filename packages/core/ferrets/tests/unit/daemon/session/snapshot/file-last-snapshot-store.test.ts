@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { link, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { diskSessionsRoot } from '@ferretry/kernel/testing';
 import {
@@ -77,6 +77,26 @@ describe('F-0326 the last-snapshot file on the sessions root', () => {
     expect(await store.read(FERRET)).toEqual({ kind: 'unreadable' });
     await expect(store.write(FERRET, 'frame')).rejects.toThrow();
     await expect(store.write(OTHER, 'frame')).rejects.toThrow('through the folder of');
-    expect(await store.read(OTHER).catch(() => 'refused')).toBe('refused');
+    // A read is total: another ferret's id is absent from this handle, never a rejection that names both sessions.
+    expect(await store.read(OTHER)).toEqual({ kind: 'absent' });
+  });
+
+  test('F-0326 a read makes no folder: a ferret that never kept a frame has none, and that is absent', async () => {
+    const { folder, store } = await fresh();
+    expect(await store.read(FERRET)).toEqual({ kind: 'absent' });
+    await expect(lstat(folder)).rejects.toThrow();
+    expect(await store.read(OTHER)).toEqual({ kind: 'absent' });
+    await expect(lstat(folder)).rejects.toThrow();
+  });
+
+  test('F-0326 a read narrows no folder: a wider folder stays as it is until a write holds it to 0700', async () => {
+    const { folder, store } = await fresh();
+    await mkdir(folder, { recursive: true, mode: 0o755 });
+    await chmod(folder, 0o755);
+    await writeFile(`${folder}/last-snapshot.txt`, 'kept frame', { mode: 0o600 });
+    expect(await store.read(FERRET)).toEqual({ kind: 'read', text: 'kept frame' });
+    expect(await mode(folder)).toBe(0o755);
+    await store.write(FERRET, 'next frame');
+    expect(await mode(folder)).toBe(0o700);
   });
 });

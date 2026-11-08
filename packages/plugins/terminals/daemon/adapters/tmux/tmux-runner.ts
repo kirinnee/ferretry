@@ -22,6 +22,7 @@ import {
   type ActRunner,
   type Log,
   type Redaction,
+  type RedactionScope,
   type RefusalCode,
   REFUSAL_SENTENCES,
   type SpawnPort,
@@ -135,6 +136,16 @@ const STOP_KEYS: ReadonlySet<string> = new Set(HARNESS_STOP_KEYS);
 /** tmux session names for ferrets (today's `tmuxSessionPrefix` and `maxTmuxSessionNameLength`). */
 const FERRET_TMUX_PREFIX = 'fy-';
 const MAX_TMUX_SESSION_NAME_LENGTH = 80;
+
+/**
+ * A captured pane masked as TEXT and then as ROWS, inside the one read scope it is given. `capture-pane` (no `-J`)
+ * hands a line wider than the pane back as two rows, so a value printed near the right edge arrives split by a `\n`
+ * that `text` cannot see across. `lines` matches the rows as one run (joined with nothing between them), so each
+ * half of a wrapped value is starred in its own row. A run it matches across a REAL line break only adds `*`.
+ */
+function maskedPane(scope: RedactionScope, visible: string): string {
+  return scope.lines(scope.text(visible).split('\n')).join('\n');
+}
 
 /** A pane id as tmux prints one. */
 const PANE_ID = /^%(?:0|[1-9][0-9]*)$/u;
@@ -399,7 +410,7 @@ export class TmuxRunner implements Runner {
   /**
    * One look at the live ferret pane behind `handle` for the turn watch (`Runner.look`): the activity stamp, the screen
    * captured again only when it may have changed (re-proving then that the pane is still a live ferret's own), masked
-   * and parsed. Everything inside ONE act on the pane: a hold refuses the whole read and nothing is captured. Total: a
+   * as text and as rows (a value wrapped at the pane's edge included) and only then parsed. Everything inside ONE act on the pane: a hold refuses the whole read and nothing is captured. Total: a
    * pane that is gone, dead, not a ferret's, unreadable or held answers `undefined`. Never writes.
    */
   async look(handle: RunnerHandle): Promise<RunnerLook | undefined> {
@@ -436,7 +447,7 @@ export class TmuxRunner implements Runner {
         const visible = frame.visible;
         return await watch.redaction.read(scope => ({
           kind: 'content' as const,
-          data: turnLookOf(paneStateFrom(activity, scope.text(visible)), watch.digest) as never,
+          data: turnLookOf(paneStateFrom(activity, maskedPane(scope, visible)), watch.digest) as never,
         }));
       })
       .catch(() => undefined);

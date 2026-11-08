@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { FakeRedaction } from '@ferretry/core-vault/contract/testing';
+import type { SecretName } from '@ferretry/core-vault/contract';
 import type { Redaction, RedactionScope } from '@ferretry/kernel/contract';
 import { type Duration, milliseconds } from '@ferretry/std';
 import type { FerretId, Runner, RunnerHandle, RunnerLook } from '../../../../../contract/index.ts';
@@ -64,7 +66,36 @@ function world(options: { redaction?: Pick<Redaction, 'read'>; failWrite?: boole
   return { capture, written, logs };
 }
 
+/** A 40-character token, as an agent's `echo $TOKEN` would print it: long enough to wrap at an 80-column pane's edge. */
+const WRAPPED = 'ghp_FAKEWRAPfixtureAAAABBBBCCCCDDDDEEEE';
+const WRAP_HEAD = WRAPPED.slice(0, 20);
+const WRAP_TAIL = WRAPPED.slice(20);
+
 describe('F-0326 the last screen a stop keeps (last-snapshot.txt)', () => {
+  test('F-0326 a value wrapped across two pane rows is masked in both rows before it is written', async () => {
+    // capture-pane without -J: the token printed at column 60 of an 80-column row comes back split by a \n.
+    const first = `${'x'.repeat(60)}${WRAP_HEAD}`;
+    const second = `${WRAP_TAIL} and the rest`;
+    const unwrapped = `plain ${WRAPPED}`;
+    // The Vault's own conformance fake: `text` masks within a row only, `lines` matches the rows as one run.
+    const w = world({ redaction: new FakeRedaction(new Map([['GH_TOKEN' as SecretName, WRAPPED]])) });
+    await w.capture.capture(
+      FERRET,
+      runnerLooking(async () => screen(`${first}\n${second}\n${unwrapped}`)),
+      HANDLE,
+    );
+    const kept = w.written[0]?.text ?? '';
+    expect(kept).not.toContain(WRAP_HEAD);
+    expect(kept).not.toContain(WRAP_TAIL);
+    expect(kept).not.toContain(WRAPPED);
+    // Each half is starred in its own row, so the rows keep their place and their width.
+    expect(kept.split('\n')).toEqual([
+      `${'x'.repeat(60)}${'*'.repeat(WRAP_HEAD.length)}`,
+      `${'*'.repeat(WRAP_TAIL.length)} and the rest`,
+      'plain [redacted:GH_TOKEN]',
+    ]);
+  });
+
   test('F-0326 the screen is masked before anything is written, even when the runner handed it over unmasked', async () => {
     const w = world();
     await w.capture.capture(

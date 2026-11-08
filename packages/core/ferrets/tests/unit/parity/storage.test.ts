@@ -23,6 +23,8 @@ import { OwnFolder } from '../../../daemon/adapters/session/sessions-root.ts';
 import { FileResumeTurnStore } from '../../../daemon/adapters/session/resume/file-resume-turn-store.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
 import type { RedactionScope } from '@ferretry/kernel/contract';
+import { FakeRedaction } from '@ferretry/core-vault/contract/testing';
+import type { SecretName } from '@ferretry/core-vault/contract';
 import type { FerretId, Runner, RunnerHandle, RunnerLook } from '../../../contract/index.ts';
 import { FileLastSnapshotStore } from '../../../daemon/adapters/session/snapshot/file-last-snapshot-store.ts';
 import { LastSnapshotCapture } from '../../../daemon/lib/session/snapshot/index.ts';
@@ -149,6 +151,25 @@ describe('session-private files parity (the internal sessions root, state/ferret
     expect(await readFile(`${folder}/last-snapshot.txt`, 'utf8')).toBe(`> ${'*'.repeat(value.length)}`);
     expect(await mode(`${folder}/last-snapshot.txt`)).toBe(0o600);
     expect(await mode(folder)).toBe(0o700);
+  });
+
+  test('F-0326 last-snapshot.txt: a value wrapped across two pane rows reaches the file in neither half', async () => {
+    const { root, folder } = await sessionsRoot();
+    const value = 'ghp_FAKEPARITYwrapAAAABBBBCCCCDDDDEEEE12';
+    const [head, tail] = [value.slice(0, 20), value.slice(20)];
+    // capture-pane (no -J) splits a line wider than the pane: the value starts at column 60 of an 80-column row.
+    const status = `${'.'.repeat(60)}${head}\n${tail}\n> `;
+    const look: RunnerLook = { frame: 'f', working: false, atPrompt: true, permission: false, status };
+    await new LastSnapshotCapture({
+      store: id => new FileLastSnapshotStore(root, id),
+      redaction: new FakeRedaction(new Map([['GH_TOKEN' as SecretName, value]])),
+      sleep: async () => await new Promise<void>(() => {}),
+      log: { warn: () => {} },
+    }).capture(FERRET as unknown as FerretId, { look: async () => look } as unknown as Runner, '%1' as RunnerHandle);
+    const kept = await readFile(`${folder}/last-snapshot.txt`, 'utf8');
+    expect(kept).not.toContain(head);
+    expect(kept).not.toContain(tail);
+    expect(kept).toBe(`${'.'.repeat(60)}${'*'.repeat(head.length)}\n${'*'.repeat(tail.length)}\n> `);
   });
 
   test('F-0303 the per-ferret folder is state/ferrets/sessions/{ferret}, held 0700 when the ferret starts even if it was wider', async () => {

@@ -1,4 +1,4 @@
-import type { FencedPath, RootHandle } from '@ferretry/kernel/contract';
+import type { FencedPath, RootHandle, RootLstat } from '@ferretry/kernel/contract';
 import type { SessionId } from '../../../lib/session-id.ts';
 import {
   LAST_SNAPSHOT_MAX_CHARS,
@@ -16,6 +16,13 @@ const LAST_SNAPSHOT_FILE = 'last-snapshot.txt';
  * (three bytes per UTF-16 unit). A longer text is refused on write, and a longer file is unreadable, never cut.
  */
 export const LAST_SNAPSHOT_MAX_BYTES = LAST_SNAPSHOT_MAX_CHARS * 3;
+
+/** The kernel's refusal word, read structurally: this plugin may not import the kernel's host. */
+function refusalOf(error: unknown): string | undefined {
+  if (!(error instanceof Error) || error.name !== 'RootError') return undefined;
+  const refusal = (error as { readonly refusal?: unknown }).refusal;
+  return typeof refusal === 'string' ? refusal : undefined;
+}
 
 /** What this store asks of the kernel's root. */
 export type LastSnapshotRoot = Pick<
@@ -39,6 +46,12 @@ export type LastSnapshotRoot = Pick<
  * of this folder (the credential beside it).
  *
  * A missing file stays missing evidence: this store never makes a blank frame for it. ONE HANDLE, ONE FERRET.
+ *
+ * A READ IS TOTAL AND CHANGES NOTHING. It answers `absent`, `unreadable` or `read` and never throws: another
+ * ferret's id is `absent` (this handle holds no frame of it), and the error names no session. It makes no folder
+ * and narrows no mode: a ferret that never kept a frame has no folder, and that is `absent` too. The text it
+ * answers is what was masked when the frame was KEPT; a reader that serves it masks it again, because a value added
+ * to the Vault after the capture is not masked in the file.
  */
 export class FileLastSnapshotStore implements LastSnapshotReader, LastSnapshotWriter {
   private readonly folder: OwnFolder;
@@ -70,11 +83,11 @@ export class FileLastSnapshotStore implements LastSnapshotReader, LastSnapshotWr
   }
 
   async read(id: string): Promise<StoredLastSnapshot> {
-    const target = this.file(id as SessionId);
+    if (id !== this.ferret) return { kind: 'absent' };
     try {
-      await this.folder.ensure();
-      const leaf = await this.root.lstat(target);
-      if (leaf === undefined) return { kind: 'absent' };
+      const target = this.file(id as SessionId);
+      const leaf = await this.leaf(target);
+      if (leaf === 'no-folder' || leaf === undefined) return { kind: 'absent' };
       if (leaf.kind !== 'file' || leaf.links !== 1 || leaf.size > LAST_SNAPSHOT_MAX_BYTES)
         return { kind: 'unreadable' };
       const bytes = await this.root.readDurable(target, LAST_SNAPSHOT_MAX_BYTES + 1, async held => {
@@ -95,6 +108,19 @@ export class FileLastSnapshotStore implements LastSnapshotReader, LastSnapshotWr
     } catch {
       // Never the error's words: a filesystem error can quote a path, and a decoder's a fragment of the screen.
       return { kind: 'unreadable' };
+    }
+  }
+
+  /**
+   * The leaf's own kind, or `no-folder` when the ferret's folder is not there yet: the kernel refuses a name below a
+   * scoped folder that does not exist (`outside`), and a read must not make it to ask.
+   */
+  private async leaf(target: FencedPath): Promise<RootLstat | undefined | 'no-folder'> {
+    try {
+      return await this.root.lstat(target);
+    } catch (error) {
+      if (refusalOf(error) === 'outside') return 'no-folder';
+      throw error;
     }
   }
 }

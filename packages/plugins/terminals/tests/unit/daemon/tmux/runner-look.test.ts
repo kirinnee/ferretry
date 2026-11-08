@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RunnerHandle } from '@ferretry/core-ferrets/contract';
 import type { InputHolds, Redaction } from '@ferretry/kernel/contract';
+import { FakeRedaction } from '@ferretry/core-vault/contract/testing';
+import type { SecretName } from '@ferretry/core-vault/contract';
 import { type ActRecord, testActRunner, TestMintedIds } from '@ferretry/kernel/testing';
 import should from 'should';
 import { TmuxRunner } from '../../../../daemon/adapters/tmux/tmux-runner.ts';
@@ -18,11 +20,18 @@ const NOW = '2026-11-08T10:00:00.000Z';
 const NOW_SECONDS = Date.parse(NOW) / 1_000;
 
 /** A pane in memory, read through the runner's own tmux questions: what it shows and every question asked of it. */
-function subject(options: { readonly session?: string; readonly watched?: boolean } = {}) {
+function subject(
+  options: {
+    readonly session?: string;
+    readonly watched?: boolean;
+    readonly redaction?: Redaction;
+    readonly screen?: string;
+  } = {},
+) {
   const handle = '%7' as RunnerHandle;
   const calls: (readonly string[])[] = [];
   const acts: ActRecord[] = [];
-  let screen = PERMISSION;
+  let screen = options.screen ?? PERMISSION;
   let activityAt = NOW_SECONDS - 5;
   let dead = false;
   let held = false;
@@ -92,7 +101,7 @@ function subject(options: { readonly session?: string; readonly watched?: boolea
               minted: new TestMintedIds(),
               record: act => acts.push(act),
             }),
-            redaction,
+            redaction: options.redaction ?? redaction,
             digest: text => `digest:${text.length}:${text.includes(SECRET) ? 'raw' : 'masked'}`,
           },
         }),
@@ -143,6 +152,28 @@ describe('TmuxRunner.look (U4, the turn watch read)', () => {
     should(JSON.stringify(look)).containEql('*'.repeat(SECRET.length));
     // Every tmux question named the pane by its id.
     should(pane.calls.every(call => call.includes('%7'))).be.true();
+  });
+
+  it('#U4 look masks a value wrapped across two pane rows in both rows before the screen is parsed', async () => {
+    // Arrange: capture-pane (no -J) splits the 40-character token printed at column 60 of an 80-column row.
+    const token = 'ghp_FAKELOOKwrapAAAABBBBCCCCDDDDEEEE1234';
+    const [head, tail] = [token.slice(0, 20), token.slice(20)];
+    const pane = subject({
+      // The Vault's own conformance fake: `text` masks within a row only, `lines` matches the rows as one run.
+      redaction: new FakeRedaction(new Map([['GH_TOKEN' as SecretName, token]])),
+      screen: `$ echo $GH_TOKEN\n${'.'.repeat(60)}${head}\n${tail}\n> \n`,
+    });
+
+    // Act
+    const look = await pane.runner.look(pane.handle);
+
+    // Assert: neither half of the token is in any field of the look, and each half was starred where it stood.
+    should(look).be.ok();
+    const answered = JSON.stringify(look);
+    should(answered).not.containEql(head);
+    should(answered).not.containEql(tail);
+    should(look?.status).containEql(`${'.'.repeat(60)}${'*'.repeat(head.length)}`);
+    should(look?.status).containEql('*'.repeat(tail.length));
   });
 
   it('#U4 look under a Vault hold reads nothing: no tmux question, no capture, no answer', async () => {
