@@ -326,5 +326,6 @@ export default definePlugin({
   // The harness plugins read their own history through `harness-history` (links); `imports` is the one path the owner
   // names for an attachment, once (§7.7). Transcripts are read only through the harness's `TranscriptReader`.
   doctor: ['conversation-store', 'conversation-search-index'],
+  workers: ['pdf-decrypt'],
   permissions: { roots: ['harness-history', 'imports'] },
 });

@@ -8,9 +8,8 @@ import { homedir } from 'node:os';
 import type { DaemonImplementation } from '../manifest/implement.ts';
 import { toolEnvironment } from './adapters/process.ts';
 import { answerArguments, EXIT_USAGE } from './arguments.ts';
-import { nodeFs } from './adapters/node-fs.ts';
 import { PRODUCT_BINARIES } from './binaries.ts';
-import { checkHost, processAlive, tcpProbe } from './check.ts';
+import { runCheck } from './check-run.ts';
 import { bootHost } from './host.ts';
 import { parseBackgroundDelay } from './jobs.ts';
 import { listenLocal } from './listener.ts';
@@ -50,17 +49,18 @@ async function main(): Promise<number> {
   }
   const home = resolved.settings.home.value;
   const port = resolved.settings.port.value;
-  if (answer.kind === 'check')
-    return await checkHost({
-      fs: nodeFs(() => crypto.randomUUID()),
+  if (answer.kind === 'check') {
+    // The registry is read here (and not at boot) only so the plugins' preflights, selftests and workers can be asked.
+    const registry = (await import('../src/generated/plugins.ts')) as unknown as GeneratedRegistry;
+    return await runCheck({
       home,
       host: resolved.settings.host.value,
       port,
       daemonName: usage.daemonName,
-      probe: tcpProbe,
-      alive: processAlive,
-      say: line => void process.stdout.write(`${line}\n`),
+      version: VERSION,
+      implementations: registry.daemonImplementations,
     });
+  }
   // Nothing is written before the home is decided (§9.3): until boot creates `logs/`, a line is dropped.
   const sink = filterByLevel(
     fileLogSink(line => {
