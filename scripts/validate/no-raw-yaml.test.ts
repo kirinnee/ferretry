@@ -51,6 +51,11 @@ describe('the raw-YAML gate on this repository', () => {
     for (const path of ORIGINAL_LEDGER) expect(files.has(path), path).toBe(true);
     // The app copies parse text the daemon SERVES, and it serves a refused text too: "checked" was never true.
     for (const [path, reason] of files) expect(reason, path).not.toMatch(/already checked/iu);
+    // And they say what is true of them (kac2 R9 m3): browser side, bounded by the cap, able to stall the tab.
+    for (const app of ['usage', 'voice', 'browsers']) {
+      const [path, reason] = [...files].find(([key]) => key.startsWith(`packages/plugins/${app}/app/`)) ?? [];
+      expect(reason, path).toMatch(/person's own browser.*256 KiB cap.*stall that tab, never the daemon/u);
+    }
   });
 });
 
@@ -145,6 +150,39 @@ describe('every way past the old line matcher is found', () => {
       "const r = import.meta.require;\nconst B = r('bun');\nB.YAML.parse(text);",
     'a required bun bound to a name': "const B = require('bun');\nB.YAML.parse(text);",
     'a required bun bound by import.meta.require': "const B = import.meta.require('bun');\nconst { YAML } = B;",
+    // Guard R2 chores: a view loader outside app code, a loader handed on as a value, and the forms of loader names.
+    'a view loader in daemon code (a hole can be ../gate.yaml?)':
+      'const v = (name: string) => import(`./views/${name}.tsx`);',
+    'require.call with a run-time path': 'const m = require.call(null, path);',
+    'require.apply': 'const m = require.apply(null, [path]);',
+    'require.bind': 'const load = require.bind(null);\nload(path);',
+    'import.meta.require.call': 'const m = import.meta.require.call(null, path);',
+    'module.require.call': 'const m = module.require.call(module, path);',
+    'a loader mapped over paths': 'const all = paths.map(require);',
+    'import.meta.require mapped over paths': 'const all = paths.map(import.meta.require);',
+    'a loader handed to a function in brackets': 'run((require as NodeRequire));',
+    'a createRequire loader handed on':
+      "import { createRequire } from 'node:module';\nrun(createRequire(import.meta.url));",
+    'a name for a loader handed on': 'const r = require;\nrun(r);',
+    'createRequire renamed by a destructure of a dynamic import':
+      "const { createRequire: cr } = await import('node:module');\ncr(import.meta.url)('yaml');",
+    'createRequire renamed by a destructure of a dynamic import, run-time path':
+      "const { createRequire: cr } = await import('node:module');\nconst m = cr(import.meta.url)(path);",
+    'createRequire renamed by a destructure of a require':
+      "const { createRequire: cr } = require('node:module');\ncr(import.meta.url)(path);",
+    'createRequire given another name':
+      "import { createRequire } from 'node:module';\nconst cr = createRequire;\ncr(import.meta.url)(path);",
+    'import.meta in brackets': "const y = (import.meta).require('bun').YAML.parse(text);",
+    'import.meta in brackets, run-time path': 'const m = (import.meta).require(path);',
+    'module in brackets': 'const m = (module).require(path);',
+    'a require parameter in ANOTHER function does not hide the loader':
+      'function g(require: unknown) {\n  return require;\n}\nconst m = require(path);',
+    'a require declared in another block does not hide the loader':
+      'function g() {\n  const require = (x: string) => x;\n  return require;\n}\nconst m = require(path);',
+    'a let require given a loader afterwards':
+      "import { createRequire } from 'node:module';\nlet require;\nrequire = createRequire(import.meta.url);\nconst m = require(path);",
+    'a var require given a loader afterwards':
+      "import { createRequire } from 'node:module';\nvar require;\nrequire = createRequire(import.meta.url);\nconst m = require(path);",
   };
   for (const [shape, text] of Object.entries(SHAPES))
     test(shape, () => {
@@ -164,19 +202,49 @@ describe('every way past the old line matcher is found', () => {
     'other Bun members': "const f = Bun.file('x'); const { spawn } = Bun;",
     'a property that is only named YAML': 'const o = { YAML: 1 }; o.YAML;',
     'a type that mentions it': "type T = typeof import('yaml');\nconst x: typeof Bun.YAML = 1 as never;",
-    'a view loader in its own folder': 'const v = (name: string) => import(`./views/${name}.tsx`);',
+
     'a .yaml read as text': "import catalog from './catalog.yaml' with { type: 'text' };",
     'a .yaml path as a file': "import where from './catalog.yaml' with { type: 'file' };",
     'a .yaml read as text, dynamic': "const t = await import('./catalog.yaml', { with: { type: 'text' } });",
     'a method that is only named require': 'await this.require(file);\npanes.require(ferret);',
     'import.meta.url': 'const here = new URL(import.meta.url);',
     'a function of its own named require': 'const require = async (id: string) => id;\nawait require(ferretId);',
+    'a parameter named require, used inside its function':
+      'function g(require: (id: string) => string) {\n  return require(path);\n}',
+    'an arrow parameter named require': 'const g = (require: (id: string) => string) => require(path);',
+    'a block-scoped require used inside its block': '{\n  const require = (x: string) => x;\n  require(path);\n}',
+    'a function declaration named require': 'function require(id: string) {\n  return id;\n}\nrequire(path);',
+    'a require in a catch clause': 'try {\n  run();\n} catch (require) {\n  require(path);\n}',
+    'typeof require': "if (typeof require !== 'undefined') run();",
+    'require.resolve': "const where = require.resolve('x');",
+    'a loader given a name': "const r = require;\nr('./x.ts');",
+    'createRequire called at once with a literal path':
+      "import { createRequire } from 'node:module';\ncreateRequire(import.meta.url)('./x.ts');",
     'a type-only import of a .yaml path': "import type Gate from './gate.yaml';",
   };
   for (const [name, text] of Object.entries(FINE))
     test(`not a parse: ${name}`, () => {
       expect(planted(text), text).toEqual([]);
     });
+
+  test('a view loader is fine in code that runs in a browser (a bundled chunk, never a file on a disk)', () => {
+    const load = 'export const v = (name: string) => import(`./views/${name}.tsx`);';
+    for (const app of [
+      'packages/plugins/x/app/index.ts',
+      'packages/core/ferrets/app/index.ts',
+      'packages/app/src/shells/index.ts',
+    ])
+      expect(planted(load, app), app).toEqual([]);
+    // The same text outside app code can be handed ../gate.yaml? (Bun drops the query and parses the file).
+    for (const daemon of [
+      'packages/plugins/x/daemon/index.ts',
+      'packages/plugins/x/cli/index.ts',
+      'packages/core/kernel/host/a.ts',
+    ])
+      expect(planted(load, daemon), daemon).toHaveLength(1);
+    // A folder that merely ends in "app" is not app code.
+    expect(planted(load, 'packages/plugins/x/daemon/webapp/index.ts')).toHaveLength(1);
+  });
 
   test('a file that would not parse is refused, never counted as clean', () => {
     expect(planted('const = ;')).toEqual([expect.stringContaining('would not parse')]);

@@ -2,12 +2,18 @@ import { expect, test } from 'bun:test';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { FerretsPort, FerretTokensFile, StartDecide } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner, ferretId } from '../../../../contract/testing/index.ts';
+import { HELPER_ADMISSION_ANSWERER } from '../../../../daemon/lib/ferrets/helper-admission.ts';
 import { fakePacks, host as plainHost, record } from './route-fixture.ts';
 
 /**
  * RULING #43: a helper's admission is Packs' OWN answer on the kernel's `start.decide`; Ferrets only consumes it. No
  * answer from Packs (absent, a hang, a throw, garbage) is 503 `helper_admission_unavailable`, never an allow.
  */
+
+test("the answerer a helper's admission is read from is Packs' manifest id, 'packs'", () => {
+  // The fake Packs in this tier and the integration tier write `'packs'` out; Packs' own tests pin its manifest id to the same literal.
+  expect(HELPER_ADMISSION_ANSWERER).toBe('packs');
+});
 
 /** The route fixture with readable (empty) credential state, so a start or resume can issue a token. */
 const host = async (...args: Parameters<typeof plainHost>) => {

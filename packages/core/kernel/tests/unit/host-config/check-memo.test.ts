@@ -274,27 +274,34 @@ describe("a plugin's patch of a hand-written broken file parses it once", () => 
     }
   });
 
-  test('T-0034 the patch write of a 256 KiB broken file answers in well under a second', async () => {
+  test('T-0034 the patch write of a 256 KiB broken file costs one parse, not two', async () => {
+    // A wall-clock bound is a measurement of the box as much as of the code (5.3 s under load, 0.3 s alone), so the
+    // bound is a RATIO to what one parse costs on this box right now, and a noisy attempt is measured again: parsing
+    // twice costs about 2x in every attempt, a busy moment costs one.
+    const ATTEMPTS = 3;
     for (const [label, text] of broken.slice(0, 2)) {
-      const { fs, files } = world();
-      fs.seed(VOICE, 'limit: 7\n');
-      await files.reload();
-      fs.seed(VOICE, text);
-      await files.reload();
-      // What ONE parse of this text costs on this box, now: the floor the patch write must stay near.
-      const once = Math.min(
-        timedSync(() => readConfigText(text)),
-        timedSync(() => readConfigText(text)),
-      );
-      Bun.gc(true);
-      const started = performance.now();
-      const outcome = await files.port('voice').write(voiceDef, undefined, { patch: { limit: 3 } });
-      const spent = performance.now() - started;
-      expect(outcome.kind, label).toBe('written');
-      expect(files.port('voice').file(voiceDef)?.limit).toBe(3);
-      // Two parses of the file took 1.06–1.24 s on a loaded box: the write now costs one, plus a little.
-      expect(spent, label).toBeLessThan(once * 1.6 + 100);
-      expect(spent, label).toBeLessThan(1_500);
+      let best = Number.POSITIVE_INFINITY;
+      for (let attempt = 0; attempt < ATTEMPTS && best >= 1.6; attempt += 1) {
+        const { fs, files } = world();
+        fs.seed(VOICE, 'limit: 7\n');
+        await files.reload();
+        fs.seed(VOICE, text);
+        await files.reload();
+        // What ONE parse of this text costs on this box, now: the floor the patch write must stay near.
+        const once = Math.min(
+          timedSync(() => readConfigText(text)),
+          timedSync(() => readConfigText(text)),
+        );
+        Bun.gc(true);
+        const started = performance.now();
+        const outcome = await files.port('voice').write(voiceDef, undefined, { patch: { limit: 3 } });
+        const spent = performance.now() - started;
+        expect(outcome.kind, label).toBe('written');
+        expect(files.port('voice').file(voiceDef)?.limit).toBe(3);
+        // A little over one parse: two parses of the file took 1.06–1.24 s on a loaded box and cost twice `once`.
+        best = Math.min(best, (spent - 100) / Math.max(once, 1));
+      }
+      expect(best, label).toBeLessThan(1.6);
     }
-  });
+  }, 120_000);
 });

@@ -15,7 +15,13 @@ import { defineConfig } from '../../../contract/index.ts';
 import { agentConfig } from '../../../host/config/agent.ts';
 import { checkConfigText, countProblems, MAX_CONFIG_ISSUES, moreIssues } from '../../../host/config/check.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
-import { CONFIG_FILE_MAX_BYTES, readConfigText } from '../../../host/config/yaml-text.ts';
+import {
+  CONFIG_FILE_MAX_BYTES,
+  editConfigText,
+  MAX_SYNTAX_ERRORS,
+  readConfigText,
+  setConfigKey,
+} from '../../../host/config/yaml-text.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { filled } from './schema-texts.ts';
 import { captureLog, HOME, manualClock } from './support.ts';
@@ -240,5 +246,88 @@ describe("the agent's door counts every problem and lists no more than the cap",
     expect(countProblems(listing.issues ?? [])).toBe(210);
     // The rest are counted at the first file left out, where config_read lists them.
     expect(listing.issues?.at(-1)?.path).toBe('logins/a.yaml');
+  });
+});
+
+describe('a flood of % directive lines is refused without being parsed', () => {
+  const directives = (count: number): string => `${'%FOO x\n'.repeat(count)}---\nenv: {}\n`;
+  const FLOOD = 'a % directive line is not one YAML knows';
+
+  test('T-0034 64 directive lines still read; the 65th is refused in the fixed sentence, at its own line', () => {
+    expect(readConfigText(directives(64)).ok).toBe(true);
+    const refused = readConfigText(directives(65));
+    expect(refused).toEqual({ ok: false, errors: [{ message: FLOOD, position: { line: 65, column: 1 } }] });
+  });
+
+  test('T-0034 the line is found in every line ending YAML knows', () => {
+    for (const ending of ['\n', '\r\n', '\r']) {
+      const text = `${'%FOO x'.concat(ending).repeat(70)}---${ending}env: {}${ending}`;
+      expect(readConfigText(text)).toEqual({
+        ok: false,
+        errors: [{ message: FLOOD, position: { line: 65, column: 1 } }],
+      });
+    }
+  });
+
+  test('T-0034 a % that does not start a line is not a directive', () => {
+    expect(readConfigText(`env:\n${'  K: "100% 50%"\n'.repeat(1)}${'# %\n'.repeat(100)}`).ok).toBe(true);
+  });
+
+  test('T-0034 256 KiB of bare % lines answers in under the bound, at the check, and is told as a directive', () => {
+    const text = '%\n'.repeat(CONFIG_FILE_MAX_BYTES / 2);
+    const { result, ms } = checked(text);
+    expect(ms).toBeLessThan(250);
+    const issues = issuesOf(result);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.message).toBe(`this is not valid YAML: ${FLOOD}`);
+    expect(issues[0]?.line).toBe(65);
+  });
+
+  test('T-0034 an edit replaces such a text whole, and setting a key in it refuses', () => {
+    const text = directives(70);
+    expect(editConfigText(text, { env: {} }, {}, undefined)).toBe('env: {}\n');
+    expect(() => setConfigKey(text, 'env', {})).toThrow(`the file does not parse: ${FLOOD}`);
+  });
+});
+
+describe('only the first MAX_CONFIG_ISSUES syntax errors are built; the rest are counted', () => {
+  test('T-0033 a soup of 100 000 errors lists the cap and counts every other one', () => {
+    const text = '"\n'.repeat(100_000);
+    const refused = readConfigText(text);
+    if (refused.ok) throw new Error('expected a refusal');
+    expect(refused.errors).toHaveLength(MAX_SYNTAX_ERRORS);
+    expect(refused.errors.length + (refused.omitted ?? 0)).toBeGreaterThan(MAX_SYNTAX_ERRORS);
+  });
+
+  test('T-0033 a few errors are all listed, with nothing omitted', () => {
+    const refused = readConfigText('a: "\nb: "\n');
+    if (refused.ok) throw new Error('expected a refusal');
+    expect(refused.errors.length).toBeGreaterThan(0);
+    expect(refused.omitted).toBeUndefined();
+  });
+});
+
+describe('an unknown key is quoted to at most 64 characters, and its length said', () => {
+  test('T-0033 a 250 KiB key is cut in the message and in the fix, and the answer stays small', () => {
+    const key = 'k'.repeat(250 * 1024);
+    const { result, ms } = checked(`? ${key}\n: 1\n`);
+    expect(ms).toBeLessThan(BOUND_MS);
+    const [issue] = issuesOf(result);
+    const cut = `"${'k'.repeat(64)}…" (${String(key.length)} characters)`;
+    expect(issue?.message).toBe(`Unrecognized key: ${cut}`);
+    expect(issue?.fix).toBe(`remove ${cut} — this file has no such setting`);
+    expect(JSON.stringify(result).length).toBeLessThan(2 * 1024);
+  });
+
+  test('T-0033 ten long keys together stay a few KiB', () => {
+    const text = Array.from({ length: 10 }, (_, index) => `${String(index).repeat(20_000)}: 1\n`).join('');
+    const { result } = checked(text);
+    expect(JSON.stringify(result).length).toBeLessThan(4 * 1024);
+  });
+
+  test('T-0033 a key of exactly 64 characters is quoted whole', () => {
+    const key = 'z'.repeat(64);
+    const issues = issuesOf(checked(`${key}: 1\n`).result);
+    expect(issues[0]?.fix).toBe(`remove "${key}" — this file has no such setting`);
   });
 });
