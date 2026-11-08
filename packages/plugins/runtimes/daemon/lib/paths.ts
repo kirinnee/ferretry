@@ -22,7 +22,7 @@ const HOME_ALIASES = ['~', '$HOME'] as const;
  * and the provisioner enforces the write boundary with a resolved-path containment check. This
  * function only normalizes.
  */
-export function expandPath(value: string, userHome: string, base: string): string {
+function expandPath(value: string, userHome: string, base: string): string {
   for (const alias of HOME_ALIASES) {
     if (value === alias) return normalize(userHome);
   }

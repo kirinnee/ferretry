@@ -18,11 +18,3 @@ export const FLEET_STARTER_MODELS: Readonly<Record<HarnessKind, string>> = {
   claude: 'claude-opus-5',
   codex: 'gpt-5.6',
 };
-
-/**
- * What a harness is called where a person reads it, rather than where a schema does.
- *
- * EXPORTED because several surfaces put it in front of somebody. Private copies of one label is how
- * "Claude" and "Claude Code" end up on one screen describing the same thing.
- */
-export const HARNESS_LABEL: Readonly<Record<HarnessKind, string>> = { claude: 'Claude', codex: 'Codex' };

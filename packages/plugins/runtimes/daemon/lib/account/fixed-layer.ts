@@ -80,7 +80,7 @@ import type { AgentPermissions } from './schema.ts';
 import { AGENDA_ENV, HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV, SESSION_MODE_ENV } from './pane-contract.ts';
 
 /** What one fixed-layer entry is for, as the read-only lock shows it. */
-export type FixedEntryPurpose =
+type FixedEntryPurpose =
   | 'permission-mode'
   | 'skip-prompt'
   | 'trust'
@@ -123,7 +123,7 @@ export interface FixedLayer {
 }
 
 /** Why an agent runtime cannot be launched as asked. */
-export interface FixedLayerRefusal {
+interface FixedLayerRefusal {
   readonly kind: 'claude-auto-mode-unsupported';
   readonly message: string;
 }
@@ -151,7 +151,7 @@ export type FixedLayerInput =
     };
 
 /** Claude's spelling of each Agent permissions choice (§3.6). */
-export const CLAUDE_PERMISSION_MODES: Readonly<Record<AgentPermissions, string>> = {
+const CLAUDE_PERMISSION_MODES: Readonly<Record<AgentPermissions, string>> = {
   auto: 'auto',
   skip: 'bypassPermissions',
 };
@@ -195,7 +195,7 @@ export const codexNoticeOverride = (): string =>
   `notice={${CODEX_HIDDEN_NOTICES.map(key => `${/^[A-Za-z0-9_-]+$/.test(key) ? key : tomlString(key)}=true`).join(',')}}`;
 
 /** Codex's spelling of each Agent permissions choice (§3.6). */
-export const CODEX_PERMISSIONS: Readonly<
+const CODEX_PERMISSIONS: Readonly<
   Record<AgentPermissions, { readonly approvalPolicy: string; readonly sandboxMode: string }>
 > = {
   auto: { approvalPolicy: 'on-request', sandboxMode: 'workspace-write' },
@@ -211,13 +211,13 @@ export const CODEX_PERMISSIONS: Readonly<
 export const CLAUDE_NO_QUESTIONS_FLAG = '--disallowed-tools=AskUserQuestion';
 
 /** Claude's "start Remote Control in every session" preference. */
-export const CLAUDE_REMOTE_CONTROL_KEY = 'remoteControlAtStartup';
+const CLAUDE_REMOTE_CONTROL_KEY = 'remoteControlAtStartup';
 
 /**
  * The launch variable naming the file a ferret's question hook writes, set by the daemon per session
  * (its own state folder). Unset — a person's own terminal, an older daemon — the hook writes nothing.
  */
-export const QUESTION_ASKED_FILE_ENV = 'FY_QUESTION_FILE';
+const QUESTION_ASKED_FILE_ENV = 'FY_QUESTION_FILE';
 
 /**
  * The hook that tells the daemon a question is open. Claude Code 2.1.281 keeps an `AskUserQuestion` call
@@ -250,10 +250,10 @@ export const CODEX_NO_ALT_SCREEN_FLAG = '--no-alt-screen';
 const CARRIED_FLAGS: ReadonlySet<string> = new Set([CLAUDE_NO_QUESTIONS_FLAG, CODEX_NO_ALT_SCREEN_FLAG]);
 
 /** The name the Ferretry tools server is registered under, in both harnesses. */
-export const FERRETRY_MCP_SERVER = 'ferretry';
+const FERRETRY_MCP_SERVER = 'ferretry';
 
 /** How the harness starts the tools server: the `fy` the wrapper already uses, as `fy mcp serve`. */
-export const FERRETRY_MCP_ARGS: readonly string[] = ['mcp', 'serve'];
+const FERRETRY_MCP_ARGS: readonly string[] = ['mcp', 'serve'];
 
 /**
  * The variables the tools server needs from the agent's environment: where the daemon is, and the
@@ -694,7 +694,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
 // ── Applying it ──────────────────────────────────────────────────────────────────────────────────
 
 /** A user value the fixed layer overrides, shown struck through (E24). */
-export type FixedOverride =
+type FixedOverride =
   | {
       readonly kind: 'setting';
       readonly key: string;

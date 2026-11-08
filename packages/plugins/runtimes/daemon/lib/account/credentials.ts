@@ -37,7 +37,7 @@
  */
 import { isAbsolute, join } from 'node:path';
 import type { HarnessKind } from '../manifest.ts';
-import { CREDENTIALS_DIRECTORY, ferretryCredentialDirectory } from './credential-directory.ts';
+import { ferretryCredentialDirectory } from './credential-directory.ts';
 import {
   cloudCredentialEnvironment,
   codexProviderArgs,
@@ -47,16 +47,14 @@ import {
 import { credentialHalf } from './halves.ts';
 import type { Credential } from './schema.ts';
 
-export { CREDENTIALS_DIRECTORY, ferretryCredentialDirectory };
-
 /** The undocumented variable that moves Claude's credential store away from its config dir (§9.5). */
-export const CLAUDE_SECURE_STORAGE_VARIABLE = 'CLAUDE_SECURESTORAGE_CONFIG_DIR';
+const CLAUDE_SECURE_STORAGE_VARIABLE = 'CLAUDE_SECURESTORAGE_CONFIG_DIR';
 
 /** The secure-storage value that selects the person's OWN Claude login: empty, never a path. */
-export const HOST_CLAUDE_SECURE_STORAGE = '';
+const HOST_CLAUDE_SECURE_STORAGE = '';
 
 /** The file Claude keeps a credential in, inside its storage directory. */
-export const CLAUDE_CREDENTIAL_FILE = '.credentials.json';
+const CLAUDE_CREDENTIAL_FILE = '.credentials.json';
 
 /** The file Codex keeps a credential in, inside its home. */
 export const CODEX_CREDENTIAL_FILE = 'auth.json';
@@ -79,7 +77,7 @@ export interface CredentialStorePaths {
 }
 
 /** A Claude credential kept in a store: the person's own (`host`) or Ferretry's (`ferretry`). */
-export interface ClaudeStoreResolution {
+interface ClaudeStoreResolution {
   readonly harness: 'claude';
   readonly store: 'host' | 'ferretry';
   /** The exact value every runtime on this credential exports as {@link CLAUDE_SECURE_STORAGE_VARIABLE}. */
@@ -93,7 +91,7 @@ export interface ClaudeStoreResolution {
 }
 
 /** A Codex credential kept in ONE canonical `auth.json`; every runtime's own `auth.json` links to it. */
-export interface CodexStoreResolution {
+interface CodexStoreResolution {
   readonly harness: 'codex';
   readonly store: 'host' | 'ferretry';
   readonly canonicalFile: string;
@@ -105,7 +103,7 @@ export interface CodexStoreResolution {
  * variable its cloud credential reference is handed over as and, for Codex, the launch flags that
  * point it at its model provider (`./environment.ts`).
  */
-export interface EnvironmentStoreResolution {
+interface EnvironmentStoreResolution {
   readonly harness: HarnessKind;
   readonly store: 'environment';
   /** A secret travels as a `${secret:NAME}` reference, never a value. */
@@ -119,14 +117,14 @@ export interface EnvironmentStoreResolution {
 }
 
 /** A `host` Codex credential on a machine whose Codex home cannot be named: nothing to share. */
-export interface UnavailableStoreResolution {
+interface UnavailableStoreResolution {
   readonly harness: 'codex';
   readonly store: 'host';
   readonly unavailable: string;
 }
 
 /** A resolution that has a login on disk (or in a keychain) to read. */
-export type StoredCredentialResolution = ClaudeStoreResolution | CodexStoreResolution;
+type StoredCredentialResolution = ClaudeStoreResolution | CodexStoreResolution;
 
 /** Where one credential's login lives and how a runtime reaches it. */
 export type CredentialStoreResolution =
@@ -147,19 +145,13 @@ export function hostCodexHome(codexHomeVariable: string | undefined, userHome: s
   return isAbsolute(named) ? join(named) : undefined;
 }
 
-/** The person's own Codex `auth.json`, or `undefined` when their Codex home cannot be named. */
-export function hostCodexCredentialFile(codexHomeVariable: string | undefined, userHome: string): string | undefined {
-  const home = hostCodexHome(codexHomeVariable, userHome);
-  return home === undefined ? undefined : join(home, CODEX_CREDENTIAL_FILE);
-}
-
 /**
  * The directory Claude reads its store from for one secure-storage value.
  *
  * The harness's own rule: the value itself, or `<home>/.claude` when it is empty, in Unicode NFC. The
  * NFC matters because the macOS keychain item name is a hash of this exact string.
  */
-export function claudeStorageDirectory(secureStorage: string, userHome: string): string {
+function claudeStorageDirectory(secureStorage: string, userHome: string): string {
   return (secureStorage.length > 0 ? secureStorage : join(userHome, '.claude')).normalize('NFC');
 }
 

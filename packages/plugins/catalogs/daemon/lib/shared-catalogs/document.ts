@@ -54,7 +54,7 @@ import { CatalogRefusal } from './refusal.ts';
  * The file's version. A build that does not know `joinedAtMax` or retirement fails closed on a file it cannot read
  * instead of reading it and writing it back without them.
  */
-export const CATALOGS_SCHEMA_VERSION = 1;
+const CATALOGS_SCHEMA_VERSION = 1;
 
 const BindingSchema = z.strictObject({
   /** The digest the catalog's signed manifest lists: it covers the item's catalog, id and version number. */
@@ -124,7 +124,7 @@ const StoredCatalogSchema = z.strictObject({
 export type StoredCatalog = z.infer<typeof StoredCatalogSchema>;
 
 /** Why an id may not be used, when it is the placeholder a shared copy is stored under. */
-export function placeholderProblem(kind: 'catalog' | 'item', id: string): string | undefined {
+function placeholderProblem(kind: 'catalog' | 'item', id: string): string | undefined {
   const placeholder = kind === 'catalog' ? NORMALISED_CATALOG_ID : NORMALISED_ITEM_ID;
   return id === placeholder
     ? `${id} is the placeholder id a shared copy is stored under, so it cannot be a ${kind} id`

@@ -42,16 +42,16 @@ export const CATALOG_DIFF_MAX_LINES = 20_000;
 export const CATALOG_DIFF_MAX_STEPS = 8_000_000;
 
 /** Unchanged lines shown either side of a change. */
-export const CATALOG_DIFF_CONTEXT = 3;
+const CATALOG_DIFF_CONTEXT = 3;
 
-export const CatalogChangeLineSchema = z.strictObject({
+const CatalogChangeLineSchema = z.strictObject({
   kind: z.enum(['context', 'add', 'remove']),
   text: z.string(),
 });
-export type CatalogChangeLine = z.infer<typeof CatalogChangeLineSchema>;
+type CatalogChangeLine = z.infer<typeof CatalogChangeLineSchema>;
 
 /** Unified-diff shaped: 1-based start lines, and the lines each side holds in this hunk. */
-export const CatalogChangeHunkSchema = z.strictObject({
+const CatalogChangeHunkSchema = z.strictObject({
   beforeStart: z.number().int().min(1),
   beforeLines: z.number().int().min(0),
   afterStart: z.number().int().min(1),
@@ -61,10 +61,8 @@ export const CatalogChangeHunkSchema = z.strictObject({
 export type CatalogChangeHunk = z.infer<typeof CatalogChangeHunkSchema>;
 
 /** What deserves a second look: a command or address, a script, or a file a tool obeys on its own. */
-export const CatalogChangeFlagSchema = z.enum(['command', 'script', 'runs-on-its-own']);
-export type CatalogChangeFlag = z.infer<typeof CatalogChangeFlagSchema>;
-
-export const CatalogChangeSchema = z.strictObject({
+const CatalogChangeFlagSchema = z.enum(['command', 'script', 'runs-on-its-own']);
+const CatalogChangeSchema = z.strictObject({
   label: z.string().min(1),
   change: z.enum(['added', 'removed', 'changed']),
   document: z.boolean(),

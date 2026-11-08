@@ -20,11 +20,11 @@ import {
 import { z } from 'zod';
 import { linkStoreSiteProblem } from './store-origin.ts';
 
-export const LINKS_SCHEMA_VERSION = 1;
+const LINKS_SCHEMA_VERSION = 1;
 /** Links that are not live and are still remembered, so the list can say what happened to them. */
 export const LINKS_ENDED_KEPT_MAX = 500;
 /** The most the file holds: every live link and every remembered one. */
-export const LINKS_DOCUMENT_MAX = CATALOG_LINKS_MAX_LIVE + LINKS_ENDED_KEPT_MAX;
+const LINKS_DOCUMENT_MAX = CATALOG_LINKS_MAX_LIVE + LINKS_ENDED_KEPT_MAX;
 /** How long an ended, used or expired link is remembered. */
 export const LINK_FORGET_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -46,9 +46,9 @@ const PendingUploadSchema = z.strictObject({
 export type PendingUpload = z.infer<typeof PendingUploadSchema>;
 
 /** `identity-changed`: this machine's identity changed, so the store no longer takes this link's owner (docs/catalogs.md § Links). */
-export const LINK_END_REASONS = ['owner', 'expired', 'used', 'item-gone', 'identity-changed'] as const;
+const LINK_END_REASONS = ['owner', 'expired', 'used', 'item-gone', 'identity-changed'] as const;
 
-export const StoredLinkSchema = z.strictObject({
+const StoredLinkSchema = z.strictObject({
   linkId: CatalogLinkIdSchema,
   itemId: SharedCatalogItemIdSchema,
   name: CatalogItemNameSchema,

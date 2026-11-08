@@ -68,7 +68,7 @@ export function renderModelSetList(components: readonly ComponentView[], binaryN
  *
  * Parsed through the shared schema, so a missing field is refused here in words rather than as a daemon error.
  */
-export function modelSetInput(invocation: VerbInvocation, current: ComponentView | undefined): ComponentInput {
+function modelSetInput(invocation: VerbInvocation, current: ComponentView | undefined): ComponentInput {
   const was = current?.detail.kind === KIND ? current.detail : undefined;
   const given = flagList(invocation.options, 'model');
   const models = given.length > 0 ? given : was === undefined ? [] : [...was.models];

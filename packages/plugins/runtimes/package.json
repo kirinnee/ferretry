@@ -26,7 +26,6 @@
     "@ferretry/plugin-logins": "workspace:*",
     "@ferretry/plugin-usage": "workspace:*",
     "smol-toml": "1.7.1",
-    "yaml": "2.9.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "lucide-react": "^0.468.0",

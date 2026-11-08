@@ -59,7 +59,7 @@ export interface FileEditorProps {
 }
 
 /** `POST /v1/runtimes/profiles/preview`: a profile's layers before it is saved, resolved per harness. Writes nothing. */
-export const previewProfileDraft = async (
+const previewProfileDraft = async (
   client: RuntimesClient,
   request: { readonly layers: readonly string[]; readonly editing?: string },
 ): Promise<ProfileDraftView> =>

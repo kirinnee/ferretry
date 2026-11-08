@@ -102,10 +102,10 @@ export function cloudCredentialSentence(reference: CloudCredentialReference): st
  * Codex's own providers, which it configures itself: naming one is all it takes. A table under one
  * of these ids would override Codex's built-in definition, so it is refused.
  */
-export const CODEX_BUILT_IN_PROVIDERS = ['openai', 'ollama', 'lmstudio', 'amazon-bedrock'] as const;
+const CODEX_BUILT_IN_PROVIDERS = ['openai', 'ollama', 'lmstudio', 'amazon-bedrock'] as const;
 
 /** The one `wire_api` Codex accepts: `chat` was removed in 2026 (docs/provider-presets.md). */
-export const CODEX_WIRE_API = 'responses' as const;
+const CODEX_WIRE_API = 'responses' as const;
 
 const PROVIDER_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 
@@ -118,7 +118,7 @@ export function templatePlaceholders(template: string): readonly string[] {
 }
 
 /** Whether `url` may carry a bearer token: HTTPS, or plain HTTP to this machine. */
-export function isCredentialSafeUrl(url: string): boolean {
+function isCredentialSafeUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     return parsed.protocol === 'https:' || (parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname));

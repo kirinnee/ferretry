@@ -11,12 +11,12 @@ const base64UrlOf = (byteLength: number): z.ZodString =>
     .regex(/^[A-Za-z0-9_-]+$/u, 'not base64url')
     .length(Math.ceil((byteLength * 4) / 3), 'wrong encoded length');
 
-export const DeviceKeySchema = base64UrlOf(ED25519_SPKI_BYTES).refine(
+const DeviceKeySchema = base64UrlOf(ED25519_SPKI_BYTES).refine(
   text => deviceKeyBytes(text) !== null,
   'not an Ed25519 public key',
 );
 
-export function deviceKeyBytes(text: string): Uint8Array | null {
+function deviceKeyBytes(text: string): Uint8Array | null {
   const bytes = fromBase64UrlFixed(text, ED25519_SPKI_BYTES);
   if (bytes === null) return null;
   return ED25519_SPKI_PREFIX.every((byte, index) => bytes[index] === byte) ? bytes : null;

@@ -12,7 +12,7 @@
 import { type UsageAccountView, UsageFeedViewSchema } from '@ferretry/plugin-usage/contract';
 import { type RuntimesClient, callFailure } from './client.ts';
 
-export const USAGE_FEED_ROUTE = 'GET /v1/usage' as const;
+const USAGE_FEED_ROUTE = 'GET /v1/usage' as const;
 
 /** The code the shell's client throws, unsent, for a call to a plugin that is off on this daemon. */
 const PLUGIN_OFF = 'plugin_paused';

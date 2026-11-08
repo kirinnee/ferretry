@@ -77,7 +77,7 @@ const nameSchema = () =>
 export const RuntimeNameSchema = nameSchema();
 
 /** A credential's id. The same grammar as a runtime name; see {@link RuntimeNameSchema}. */
-export const CredentialIdSchema = nameSchema();
+const CredentialIdSchema = nameSchema();
 
 /**
  * A record whose KEYS are names, each checked with a sentence that says what is wrong with it.
@@ -119,7 +119,7 @@ export type AgentPermissions = z.infer<typeof AgentPermissionsSchema>;
  * defaults) — never read as a security boundary against the operator's own agents, only as a kill
  * switch for one kind of thing they do.
  */
-export const AgentControlSchema = z
+const AgentControlSchema = z
   .strictObject({
     terminals: z.boolean().default(true),
     browsers: z.boolean().default(true),
@@ -140,8 +140,6 @@ export const AgentControlSchema = z
     pageScripts: z.boolean().default(false),
   })
   .prefault({});
-export type AgentControl = z.infer<typeof AgentControlSchema>;
-
 /**
  * "Conversations" (Settings › Machine): how Ferretry treats the CLIs' own history on this computer.
  *
@@ -150,22 +148,20 @@ export type AgentControl = z.infer<typeof AgentControlSchema>;
  * `fy import conversations` runs, never on a timer). Nothing is adopted until the owner continues one.
  * On by default; switching it off hides them from Continue and nothing else.
  */
-export const ConversationsSchema = z
+const ConversationsSchema = z
   .strictObject({
     listComputer: z.boolean().default(true),
   })
   .prefault({});
-export type Conversations = z.infer<typeof ConversationsSchema>;
-
 /**
  * The runtime name Ferretry's first run gives the first Claude Code it imports (§4.3 step 4's
  * suggestion). Not a schema default — a machine that never imported this way has no such runtime —
  * but the one name {@link resolveDefaultRuntime} tries when the machine named no default itself.
  */
-export const DEFAULT_RUNTIME_NAME = 'claude-default';
+const DEFAULT_RUNTIME_NAME = 'claude-default';
 
 /** The machine's settings, as a shape `machine.yaml` extends with `advanced` (`../config-files/kinds.ts`). */
-export const MACHINE_SHAPE = {
+const MACHINE_SHAPE = {
   agentPermissions: AgentPermissionsSchema.default('auto'),
   /**
    * "Default runtime for new agents" (T): the runtime a session starts on when nobody names one.
@@ -266,9 +262,7 @@ export function agendaNudgeEnabled(machine: Pick<Machine, 'agendaNudge' | 'atten
  * - `ferretry` — a login Ferretry signed in, under `<FY_HOME>/fleet/credentials/<id>/`.
  * - `environment` — no login at all: the credential's own `env` authenticates every runtime on it.
  */
-export const CredentialStoreSchema = z.enum(['host', 'ferretry', 'environment']);
-export type CredentialStore = z.infer<typeof CredentialStoreSchema>;
-
+const CredentialStoreSchema = z.enum(['host', 'ferretry', 'environment']);
 /**
  * Set by Clone (C8, L2) on everything it copies: where it came from. Display only.
  *
@@ -290,7 +284,7 @@ const CLONE_ORIGIN_SHAPE = {
  * from the caller. Display and provenance only; nothing is matched against it but the next install of the
  * same item. Editing the component by hand drops it, because the component is no longer what was published.
  */
-export const InstalledFromSchema = z.strictObject({
+const InstalledFromSchema = z.strictObject({
   publisher: NonEmptyString,
   publisherName: NonEmptyString,
   catalogId: NonEmptyString,
@@ -301,18 +295,14 @@ export const InstalledFromSchema = z.strictObject({
   version: z.number().int().min(1),
   digest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
 });
-export type InstalledFrom = z.infer<typeof InstalledFromSchema>;
-
 /**
  * One CLI's half of an environment login with halves (`./halves.ts`): the variables that CLI is given
  * beyond the login's shared `env`, and — Codex only — the model provider it is pointed at.
  */
-export const CredentialHalfSchema = z.strictObject({
+const CredentialHalfSchema = z.strictObject({
   env: EnvSchema.optional(),
   codexProvider: CodexProviderSchema.optional(),
 });
-export type CredentialHalfFile = z.infer<typeof CredentialHalfSchema>;
-
 /**
  * One login to one harness on this machine (C1, C2) — or, for an environment login with halves, to
  * both. Stored exactly once; every runtime that names it reads that one store.
@@ -447,14 +437,14 @@ export type Credential = z.infer<typeof CredentialSchema>;
  * of a layer reference (`instructions/main`, `modelSets/heavy`).
  */
 export const COMPONENT_KINDS = CONFIG_COMPONENT_KINDS;
-export const ComponentKindSchema = z.enum(COMPONENT_KINDS);
+const ComponentKindSchema = z.enum(COMPONENT_KINDS);
 export type ComponentKind = z.infer<typeof ComponentKindSchema>;
 
 /** A component file, relative to the asset tree unless it starts with `/`, `~` or `$HOME`. */
 const ComponentFileSchema = NonEmptyString;
 
 /** Instructions (generic, K2): one document, optionally narrowed to one harness (K3). */
-export const InstructionsComponentSchema = z.strictObject({
+const InstructionsComponentSchema = z.strictObject({
   file: ComponentFileSchema,
   harness: HarnessKindSchema.optional(),
   ...CLONE_ORIGIN_SHAPE,
@@ -468,7 +458,7 @@ export type InstructionsComponent = z.infer<typeof InstructionsComponentSchema>;
  * keychain, is a `${secret:NAME}` reference to the daemon's secret store and never a value
  * (docs/mcp-oauth.md#a-client-registered-by-hand).
  */
-export const McpOAuthClientSchema = z.strictObject({
+const McpOAuthClientSchema = z.strictObject({
   clientId: NonEmptyString.max(512),
   clientSecret: z
     .string()
@@ -480,14 +470,12 @@ export const McpOAuthClientSchema = z.strictObject({
   /** The redirect registered with the provider is then `http://localhost:<callbackPort>/callback`. */
   callbackPort: z.number().int().min(1024).max(65535).optional(),
 });
-export type McpOAuthClient = z.infer<typeof McpOAuthClientSchema>;
-
 /**
  * One MCP server (generic, K2): either a command Ferretry's runtimes start (`command` + `args`) or a
  * server they reach at a `url`. Exactly one of the two, because a server that is both is a server
  * nobody can say how to start.
  */
-export const McpComponentSchema = z
+const McpComponentSchema = z
   .strictObject({
     command: NonEmptyString.optional(),
     args: z.array(z.string()).optional(),
@@ -552,7 +540,7 @@ export const McpComponentSchema = z
 export type McpComponent = z.infer<typeof McpComponentSchema>;
 
 /** Skills (generic, K2): a selection of items from the skills store, each landing under its own name. */
-export const SkillsComponentSchema = z
+const SkillsComponentSchema = z
   .strictObject({
     items: z.array(SafeNameSchema).min(1),
     harness: HarnessKindSchema.optional(),
@@ -588,7 +576,7 @@ export type SkillsComponent = z.infer<typeof SkillsComponentSchema>;
  *   `${secret:NAME}` reference, never a value, and the variables that bind a runtime to its config
  *   directory or its credential are refused (`RESERVED_ENV_NAMES`).
  */
-export const SettingsComponentSchema = z
+const SettingsComponentSchema = z
   .strictObject({
     harness: HarnessKindSchema,
     file: ComponentFileSchema.optional(),
@@ -613,7 +601,7 @@ export type SettingsComponent = z.infer<typeof SettingsComponentSchema>;
  * Hooks (one harness, K2): a hooks `file`, or a `directory` of the scripts hooks run. Exactly one,
  * because each lands at its own place in a runtime's config directory and one component is one thing.
  */
-export const HooksComponentSchema = z
+const HooksComponentSchema = z
   .strictObject({
     harness: HarnessKindSchema,
     file: ComponentFileSchema.optional(),
@@ -634,7 +622,7 @@ export const HooksComponentSchema = z
 export type HooksComponent = z.infer<typeof HooksComponentSchema>;
 
 /** A model set (K2, K8): model ids and the one a runtime uses when nobody names one. */
-export const ModelSetComponentSchema = z
+const ModelSetComponentSchema = z
   .strictObject({
     models: z.array(NonEmptyString).min(1),
     default: NonEmptyString,
@@ -666,9 +654,9 @@ export const ModelSetComponentSchema = z
 export type ModelSetComponent = z.infer<typeof ModelSetComponentSchema>;
 
 /** The component name grammar: safe as a path component, and never containing the layer separator. */
-export const ComponentNameSchema = SafeNameSchema;
+const ComponentNameSchema = SafeNameSchema;
 
-export const ComponentsSchema = z
+const ComponentsSchema = z
   .strictObject({
     instructions: namedRecord(InstructionsComponentSchema, ComponentNameSchema, 'component name').default({}),
     mcp: namedRecord(McpComponentSchema, ComponentNameSchema, 'component name').default({}),
@@ -686,7 +674,7 @@ export type ComponentOf<K extends ComponentKind> = Components[K][string];
 // ── Profile ──────────────────────────────────────────────────────────────────────────────────────
 
 /** The first half of a layer reference that names another profile used as a base (P1). */
-export const PROFILE_LAYER_PREFIX = 'profile' as const;
+const PROFILE_LAYER_PREFIX = 'profile' as const;
 
 /** A layer reference as written: `<kind>/<name>` for a component, `profile/<name>` for a base. */
 export type LayerReferenceText = `${ComponentKind}/${string}` | `${typeof PROFILE_LAYER_PREFIX}/${string}`;
@@ -719,7 +707,7 @@ export function layerReferenceText(reference: LayerReference): LayerReferenceTex
     : `${reference.componentKind}/${reference.name}`;
 }
 
-export const LayerReferenceTextSchema = z.string().check(ctx => {
+const LayerReferenceTextSchema = z.string().check(ctx => {
   if (parseLayerReference(ctx.value) === undefined) {
     ctx.issues.push({
       code: 'custom',
@@ -739,7 +727,7 @@ export const LayerReferenceTextSchema = z.string().check(ctx => {
  * The product calls this a **Profile**. The code says `LayeredProfile` only because version 1's own
  * `Profile` (`../config.ts`) is exported from the same barrel until the old model is retired.
  */
-export const LayeredProfileSchema = z.strictObject({
+const LayeredProfileSchema = z.strictObject({
   layers: z.array(LayerReferenceTextSchema).default([]),
   /**
    * Where a profile's ferret's harness compacts its own conversation, in tokens, or `auto` for the harness's
@@ -760,7 +748,7 @@ export type LayeredProfile = z.infer<typeof LayeredProfileSchema>;
  * out, it is the one its profile is scoped to, else the login's own `harness` (`./scope.ts`
  * `runtimeHarness`).
  */
-export const RuntimeSchema = z.strictObject({
+const RuntimeSchema = z.strictObject({
   credential: CredentialIdSchema,
   profile: ComponentNameSchema,
   harness: HarnessKindSchema.optional(),
@@ -784,15 +772,13 @@ export type Runtime = z.infer<typeof RuntimeSchema>;
  * A thin executable that runs one runtime with extra flags prepended. Named by RUNTIME NAME, because
  * runtime ids are not in the config (R6).
  */
-export const RuntimeCommandSchema = z.strictObject({
+const RuntimeCommandSchema = z.strictObject({
   wrapper: RuntimeNameSchema,
   runtime: RuntimeNameSchema,
   flags: z.array(NonEmptyString).default([]),
 });
-export type RuntimeCommand = z.infer<typeof RuntimeCommandSchema>;
-
 /** Everything a beginner never sees, carried over from version 1. */
-export const AdvancedSchema = z
+const AdvancedSchema = z
   .strictObject({
     /** Shell file every wrapper sources before it runs, so `$NAME` references resolve. */
     secretsFile: NonEmptyString.optional(),
@@ -803,8 +789,6 @@ export const AdvancedSchema = z
     path: z.strictObject({ announce: z.boolean().default(true) }).prefault({}),
   })
   .prefault({});
-export type Advanced = z.infer<typeof AdvancedSchema>;
-
 // ── The whole document ───────────────────────────────────────────────────────────────────────────
 
 type Issue = { code: 'custom'; message: string; input: unknown; path: (string | number)[] };

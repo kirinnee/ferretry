@@ -88,7 +88,7 @@ const PROBE_SHAPE = {
  * - `local` — one unauthenticated read of a server on this machine;
  * - `none` — no test is offered, and `reason` says why.
  */
-export const PresetTestSchema = z.discriminatedUnion('kind', [
+const PresetTestSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('request'), ...PROBE_SHAPE }),
   z.strictObject({
     kind: z.literal('inference'),
@@ -99,7 +99,7 @@ export const PresetTestSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('local'), url: z.string().min(1).max(512), note: Text }),
   z.strictObject({ kind: z.literal('none'), reason: Text }),
 ]);
-export type PresetTest = z.infer<typeof PresetTestSchema>;
+type PresetTest = z.infer<typeof PresetTestSchema>;
 
 const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/u;
 
@@ -116,7 +116,7 @@ const HOST = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:
  *   family of them written `DEEPSEEK_*`;
  * - `keyPrefixes` — the documented start of the provider's keys (`sk-or-`). Only checked, never shown.
  */
-export const PresetDetectSchema = z.strictObject({
+const PresetDetectSchema = z.strictObject({
   hosts: z.array(z.string().regex(HOST, { message: 'write a host name, such as api.example.com' })).default([]),
   /** A name, or a family of names written `PREFIX_*`. */
   variables: z
@@ -128,14 +128,14 @@ export const PresetDetectSchema = z.strictObject({
     .default([]),
   keyPrefixes: z.array(z.string().regex(/^[A-Za-z0-9_-]{3,24}$/u)).default([]),
 });
-export type PresetDetect = z.infer<typeof PresetDetectSchema>;
+type PresetDetect = z.infer<typeof PresetDetectSchema>;
 
 /**
  * One CLI's half of a preset: what a login made from it gives Claude Code, or Codex, at launch. A
  * provider that serves both (an Anthropic-compatible endpoint AND a Responses endpoint) has both
  * halves, so ONE login with ONE secret drives either CLI.
  */
-export const PresetHalfSchema = z.strictObject({
+const PresetHalfSchema = z.strictObject({
   /** This CLI's own guide at the provider, when it has one apart from the preset's `docs`. */
   docs: z.url().optional(),
   env: z.record(EnvNameSchema, PresetVariableSchema).default({}),
@@ -146,8 +146,6 @@ export const PresetHalfSchema = z.strictObject({
   /** Set when this half cannot be used: why, and what to use instead. The other half still can. */
   unavailable: Text.optional(),
 });
-export type PresetHalfFile = z.infer<typeof PresetHalfSchema>;
-
 const HARNESSES = ['claude', 'codex'] as const;
 
 /**

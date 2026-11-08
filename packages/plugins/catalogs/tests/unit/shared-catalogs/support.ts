@@ -171,16 +171,6 @@ export async function rig(overrides: Partial<SharedCatalogDeps> = {}): Promise<R
   return Object.assign(state, { service });
 }
 
-/** An MCP component with a harness, the one kind of server whose harness a shared item carries. */
-export const harnessServer = (name: string): McpSourceServer => ({
-  id: `id-component-${name}`,
-  name,
-  scope: 'component',
-  harness: 'claude',
-  declaration: null,
-  component: { command: 'npx', args: ['-y', name], env: {}, harness: 'claude' },
-});
-
 function testSigningIdentity(
   identity: import('../../../worker/src/kernel-wire/index.ts').DaemonIdentity,
 ): CatalogSigningIdentity {

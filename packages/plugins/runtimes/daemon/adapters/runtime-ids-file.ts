@@ -1,18 +1,6 @@
 import { parseRuntimeIds, type RuntimeIds } from '../lib/account/ids.ts';
+import type { AccountInventoryPort, RuntimeNamesPort } from '../lib/service/publication.ts';
 import type { HostFiles } from './ports.ts';
-
-/**
- * GAP(ferrets): the start-resolution port that reads runtime names and the account inventory port belong to Ferrets
- * (`lib/fleet/start-resolution.ts`, `lib/index.ts` of the old daemon); these are the one method of each that this file
- * satisfies, kept local until the Ferrets contract names them.
- */
-export interface RuntimeNamesPort {
-  ids(): Promise<RuntimeIds | undefined>;
-}
-
-export interface AccountInventoryPort<Account> {
-  accounts(): Promise<readonly Account[]>;
-}
 
 /**
  * The fleet's `ids.json` (docs/design/account-model.md R6), read so a start can resolve a runtime by
@@ -44,6 +32,8 @@ export class RuntimeIdsFile implements RuntimeNamesPort {
 /**
  * The fleet's account inventory with its runtime names beside it: the ONE inventory a daemon shares,
  * so every start resolves an old wrapper name without any call site passing a second thing.
+ *
+ * @pending runtimes: has no apply to guard until the config write port exists
  */
 export class RuntimeAwareAccountInventory<Account> implements AccountInventoryPort<Account>, RuntimeNamesPort {
   constructor(
