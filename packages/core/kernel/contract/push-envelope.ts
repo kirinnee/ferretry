@@ -42,8 +42,9 @@ export type PushEnvelope = z.infer<typeof PushEnvelopeSchema>;
  * (`fy-push:<daemon>:<tag>`), so one machine's tag can never name another machine's line.
  *
  * The charset is the one a notification tag, a URL component and a log line all carry without escaping: ASCII letters,
- * digits and `.`, `_`, `:`, `-`. No space, no `/`, no `#`, no control or non-ASCII character. A sender composes tags
- * through this schema, so a tag outside it is refused WHERE IT IS SENT, never silently unreadable at the worker.
+ * digits and `.`, `_`, `:`, `-`. No space, no `/`, no `#`, no control or non-ASCII character. A sender whose tag falls
+ * outside it sends the push UNTAGGED (Access: `fittingPushTag`) and never refuses the push for its tag: an untagged line is
+ * not replaced or cleared by tag, but it is shown, and a refused push is a lost alert.
  */
 export const PUSH_TAG_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 export const PushTagSchema = z.string().regex(PUSH_TAG_PATTERN);

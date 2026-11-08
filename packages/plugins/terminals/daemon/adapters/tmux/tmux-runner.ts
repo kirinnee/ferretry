@@ -29,6 +29,7 @@ import {
 import { targetRef } from '@ferretry/core-vault/contract';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { sessionTarget } from '../../lib/tmux/address.ts';
+import { maskedScreen } from '../../lib/tmux/screen-mask.ts';
 import { killSessionArguments, paneActivityFormat, remainOnExitArguments } from '../../lib/tmux/commands.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../lib/tmux/contracts.ts';
 import { TmuxController } from '../../lib/tmux/controller.ts';
@@ -399,7 +400,8 @@ export class TmuxRunner implements Runner {
   /**
    * One look at the live ferret pane behind `handle` for the turn watch (`Runner.look`): the activity stamp, the screen
    * captured again only when it may have changed (re-proving then that the pane is still a live ferret's own), masked
-   * and parsed. Everything inside ONE act on the pane: a hold refuses the whole read and nothing is captured. Total: a
+   * by `maskedScreen` (a value wrapped at the pane's edge, or broken by the harness UI inside its indent or box,
+   * included) and only then parsed. Everything inside ONE act on the pane: a hold refuses the whole read and nothing is captured. Total: a
    * pane that is gone, dead, not a ferret's, unreadable or held answers `undefined`. Never writes.
    */
   async look(handle: RunnerHandle): Promise<RunnerLook | undefined> {
@@ -436,7 +438,7 @@ export class TmuxRunner implements Runner {
         const visible = frame.visible;
         return await watch.redaction.read(scope => ({
           kind: 'content' as const,
-          data: turnLookOf(paneStateFrom(activity, scope.text(visible)), watch.digest) as never,
+          data: turnLookOf(paneStateFrom(activity, maskedScreen(scope, visible)), watch.digest) as never,
         }));
       })
       .catch(() => undefined);

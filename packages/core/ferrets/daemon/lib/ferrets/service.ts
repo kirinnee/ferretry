@@ -146,6 +146,12 @@ export interface FerretsPorts {
   delivered?(ferret: FerretId): void;
   /** A stop of this ferret is being attempted (`ferret.stopping`), before anything in it can fail. */
   stopping?(ferret: FerretId): void;
+  /**
+   * Keeps the ferret's last screen (`last-snapshot.txt`, today's `launcher.snapshot`) just before its pane is stopped
+   * or replaced: masked, bounded, best effort. It never rejects and never holds a stop past its own bound. Unbound:
+   * nothing is kept.
+   */
+  lastSnapshot?(ferret: FerretId, runner: Runner, handle: RunnerHandle): Promise<void>;
   /** `ferret.started` (additive, D2 #12): told once a start's record is written, before its launch. */
   started?(payload: FerretStartedPayload): void;
   /** Writes a ferret's `details.json` (its start options and title). */
@@ -708,8 +714,10 @@ export class FerretsService implements FerretsApi {
     const runner = this.ports.runner();
     if (record.handle !== undefined && (harness === undefined || runner === undefined))
       throw new ApiError(503, 'the harness or runner needed to stop this ferret is unavailable', 'plugin_unavailable');
-    if (record.handle !== undefined && harness !== undefined && runner !== undefined)
+    if (record.handle !== undefined && harness !== undefined && runner !== undefined) {
+      await this.keepLastScreen(ferret, runner, record.handle as RunnerHandle);
       await harness.stop(ferret, record.handle as RunnerHandle, runner, how);
+    }
     await this.settle(record, 'stopped', 'stopped', cause);
     // Today's `session.stopped` journal event, with the reason the caller gave or the lifecycle default.
     await this.ports.history?.(ferret, 'session.stopped', { reason: reason?.trim() || DEFAULT_STOP_REASON });
@@ -1059,10 +1067,21 @@ export class FerretsService implements FerretsApi {
         'the harness or runner needed to replace this ferret\x27s pane is unavailable',
         'plugin_unavailable',
       );
-    if (record.handle !== undefined && harness !== undefined && runner !== undefined)
+    if (record.handle !== undefined && harness !== undefined && runner !== undefined) {
+      await this.keepLastScreen(record.id, runner, record.handle as RunnerHandle);
       await harness.stop(record.id, record.handle as RunnerHandle, runner, 'now');
+    }
     await this.settle(record, 'stopped', 'stopped', { kind: 'stopped' });
     return this.registry.get(record.id) as FerretRecord;
+  }
+
+  /**
+   * Today's order: the final frame is captured first, then the pane is stopped (every stop, `signal done`'s completion,
+   * a Warden or budget stop and a pane a move replaces all come through here). Best effort: whatever the capture does,
+   * the stop goes on.
+   */
+  private async keepLastScreen(ferret: FerretId, runner: Runner, handle: RunnerHandle): Promise<void> {
+    await this.ports.lastSnapshot?.(ferret, runner, handle).catch(() => undefined);
   }
 
   /** A caller that is a ferret reaches only itself and its helpers (the same rule as stop and resume). */
