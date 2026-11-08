@@ -216,6 +216,14 @@ export interface ResolverEntry {
 /** A `permissions.spawn` entry: a program, or what installed items name. A resolver reaches hosts, never programs. */
 export type SpawnEntry = string | { readonly items: ItemKind };
 
+/**
+ * `permissions.processes`: the environment variables, by exact name, `kernel.processes.usersOf` may match. A name is
+ * a plain variable name (`[A-Za-z_][A-Za-z0-9_]*`); anything else, `'*'` included, matches no variable.
+ */
+export interface ProcessesPermission {
+  readonly environment: readonly string[];
+}
+
 /** What it may touch outside its own folder (§3.7). Anything undeclared is refused by the kernel ports. */
 export interface Permissions {
   readonly roots?: readonly RootName[];
@@ -255,6 +263,13 @@ export interface Permissions {
    * is refused by name.
    */
   readonly shareTrees?: true;
+  /**
+   * It asks `kernel.processes` about this user's live processes and SIGTERMs one that runs from its own folder
+   * (Runtimes: an ended Codex ferret's app-server pair). `environment` lists, by exact name, the variables `usersOf`
+   * may match (`CODEX_HOME`); nothing else is matched, and `'*'` is a name that matches no variable. Absent: every
+   * member is refused naming the plugin.
+   */
+  readonly processes?: ProcessesPermission;
   /** It reads the running build's facts and launches the self-update through `kernel.updateHost` (Updates). */
   readonly updateHost?: true;
 }

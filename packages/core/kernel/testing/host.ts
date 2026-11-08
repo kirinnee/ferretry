@@ -19,6 +19,7 @@ import type { ContractSurface, HostFactsPort, UpdateHostPort } from '../contract
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
 import { gatedPaths, gatedWhich } from '../host/paths.ts';
 import { whichCommand } from '../host/which.ts';
+import { NO_PROCESS_TABLE, type ProcessTable, processesPortFor } from '../host/processes.ts';
 import { undeclaredUpdateHost } from '../host/adapters/update-host.ts';
 import { PRODUCT_BINARIES } from '../host/binaries.ts';
 import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
@@ -166,6 +167,11 @@ export interface TestHostOptions {
   readonly secrets?: readonly string[];
   /** What `kernel.hostFacts` answers to a plugin that declared `permissions.hostFacts`. Absent: every read refuses. */
   readonly hostFacts?: HostFactsPort;
+  /**
+   * The process table `kernel.processes` asks for a plugin that declared `permissions.processes` (`testProcessTable`).
+   * Absent: nothing is listed or signalled. The rule over it is the real host's (`host/processes.ts`).
+   */
+  readonly processes?: ProcessTable;
   /** What `kernel.updateHost` answers to a plugin that declared `permissions.updateHost`. */
   readonly updateHost?: UpdateHostPort;
   /** What `kernel.timings` answers. Default: the shipped numbers (`DEFAULT_DAEMON_TIMINGS`). */
@@ -849,6 +855,26 @@ async function start(world: World): Promise<TestHost> {
       readonly prefix: string | undefined;
     }
   >();
+  /**
+   * The test world's own-root check: a folder of a handle made for `plugin`, inside its scope, that exists (a file is
+   * beneath it). The world has no links, so its one spelling is the path itself.
+   */
+  const testFolderSpellings = async (
+    plugin: string,
+    folder: { readonly root: RootHandle; readonly path: string },
+  ): Promise<readonly string[] | undefined> => {
+    const known = testHandles.get(folder.root);
+    if (known === undefined || known.plugin !== plugin || known.prefix === undefined) return undefined;
+    const path = folder.path;
+    if (
+      typeof path !== 'string' ||
+      path.split('/').includes('..') ||
+      (path !== known.prefix && !path.startsWith(`${known.prefix}/`))
+    )
+      throw new Error(`${path} is outside the root`);
+    if (![...world.roots.keys()].some(key => key.startsWith(`${path}/`))) throw new Error(`no such folder ${path}`);
+    return [path];
+  };
   /** Every tree a test plugin minted: the files it holds now (a flat copy), and where it came from. */
   const sharedTrees = new SharedTrees<{
     readonly files: () => readonly (readonly [string, string])[];
@@ -1203,6 +1229,12 @@ async function start(world: World): Promise<TestHost> {
         manifest.permissions?.hostFacts === true && options.hostFacts !== undefined
           ? options.hostFacts
           : undeclaredHostFacts(manifest.id, options.hostFacts ?? NO_HOST_FACTS),
+      processes: processesPortFor(
+        manifest.id,
+        manifest.permissions?.processes,
+        testFolderSpellings,
+        options.processes ?? NO_PROCESS_TABLE,
+      ),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
       // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in
       secrets: ownSecretsPort(

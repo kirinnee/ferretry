@@ -57,6 +57,7 @@ import {
   SharedTrees,
   shareableRoot,
 } from './shared-trees.ts';
+import type { OwnFolderSpellings } from './processes.ts';
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
 const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports', 'harness-home']);
@@ -784,6 +785,8 @@ interface SourceAccess {
   readonly ferret?: FerretId;
   readonly real: (path: FencedPath) => Promise<Checked>;
   readonly realParent: (path: FencedPath) => Promise<Checked>;
+  /** An EXISTING folder of this handle, held open and checked (`kernel.processes`): its real path and its lexical one. */
+  readonly folder: (path: FencedPath) => Promise<readonly string[]>;
 }
 
 /** Every handle the kernel made, with the plugin it was made for and its checked resolvers (for `copyTree`). */
@@ -1379,9 +1382,29 @@ function rootHandle(setup: HandleSetup): RootHandle {
     ...(setup.ferret === undefined ? {} : { ferret: setup.ferret }),
     real: path => real(path),
     realParent: path => realParent(path),
+    folder: async path => {
+      const { full, scope } = await real(path);
+      // Held open and checked as `copyTree`'s source is: a folder, the one at that real path, inside the root.
+      const held = await openCheckedFolder(scope, full);
+      await held.close();
+      const root = base();
+      const lexical = root === undefined ? undefined : lexicalInRoot(home, root, ownerRoot, path);
+      return lexical?.ok === true && lexical.value !== full ? [full, lexical.value] : [full];
+    },
   });
   return handle;
 }
+
+/**
+ * `kernel.processes`' own-root check ({@link OwnFolderSpellings}): the spellings of an existing folder of a handle the
+ * kernel made for `plugin` (its real path first, then the path as the root names it), or `undefined` for any other
+ * handle — another plugin's, or an object that only looks like one. A path the root refuses throws its refusal.
+ */
+export const ownFolderSpellings: OwnFolderSpellings = async (plugin, folder) => {
+  const known = HANDLES.get(folder.root);
+  if (known === undefined || known.plugin !== plugin) return undefined;
+  return await known.folder(folder.path);
+};
 
 /**
  * The one place a plugin's own state folder under the home is named: `<home>/state/<plugin>`. Its internal roots sit
@@ -1644,5 +1667,6 @@ function stateTreeAccess(
     if (!within(parent.scope.base.real, full)) refuse('link_escape');
     return { full, scope: parent.scope };
   };
-  return { plugin, real, realParent };
+  // Never in the handle table, so `kernel.processes`' own-root check never reaches a shared tree's folder.
+  return { plugin, real, realParent, folder: async () => refuse('not_declared') };
 }

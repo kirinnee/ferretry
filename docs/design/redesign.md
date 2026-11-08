@@ -1530,6 +1530,7 @@ fy plugin check <path>               runs the data-plugin checks without install
 | Network          | only its declared hosts, through `kernel.fetch`                                                                                                                                                                                  | `banned-globals` (no `fetch`, sockets)                                                                        |
 | Processes        | only its declared programs, through `kernel.spawn` (inside a ferret's limits when it acts for one)                                                                                                                               | `banned-globals` (no `Bun.spawn`)                                                                             |
 | Commands on PATH | only with `permissions.which`, through `kernel.paths.which`: a bounded lookup that never executes (§7.7)                                                                                                                         | `gatedWhich` (refused by name without it); `banned-globals` keeps `process.env` out                           |
+| Other processes  | only with `permissions.processes`, through `kernel.processes`: pids and yes/no answers, SIGTERM to a process running from the plugin's own folder (§7.7)                                                                         | `processesPortFor` (refused by name without it); no member returns a command line or an environment           |
 | Shared folders   | only with `permissions.shareTrees`, one folder of its OWN `work`/`imports` handle or own opaque named tree, through `kernel.roots.share`; the receiver materializes it with `RootHandle.copyShared` into an internal root (§7.7) | the roots port (`host/shared-trees.ts`): a kernel-held table, so a tree cannot be forged or rebuilt from JSON |
 | Secret values    | by name only, through the Vault's `run` and `authorizeFetch`; never a value                                                                                                                                                      | Vault port has no getter                                                                                      |
 | Output           | every route and frame through the Gate and the final check; reads of pane or page text through `Redaction` (§7.3)                                                                                                                | descriptor `guard`; `plugin-graph` check                                                                      |
@@ -2526,6 +2527,15 @@ scoped handle:
   (`permissions.which`): one plain command name, the caller's absolute folders then the daemon's `PATH`, empty and
   relative entries dropped, at most 64 folders, the first regular executable file wins. No shell, nothing executed;
   the answer is a path or absent, never the `PATH`.
+- A plugin that must stop what a child it started left behind (Runtimes: an ended Codex ferret's app-server pair)
+  asks `kernel.processes` (`permissions.processes`, listing by exact name the environment variables it may match).
+  Today's Codex stopper's rules, held by the kernel: `usersOf(variable, folder)` answers the pids of this user's
+  processes whose environment holds exactly `variable=<the folder's real path>`, the folder being one of the plugin's
+  OWN root handles (never free text, so no guessing oracle); `runsFrom(pid, folder)` answers yes/no; `terminate` sends
+  SIGTERM, and only SIGTERM, after reading the command line again and finding it still starts with the folder's path
+  plus `/`. Never pid 0 or 1, the daemon or its ancestors, never another uid; `environ` and `cmdline` are read by the
+  kernel (`/proc`, or an absolute `ps` run with an empty environment) and never returned. A pid reused between that
+  check and the signal is the declared residual (no pidfd binding in Bun).
 - A folder one plugin owns reaches another as a **shared tree** (kernel batch #10): the owner mints it with
   `kernel.roots.share` (`permissions.shareTrees`; only a folder of one of its OWN `work` or `imports` handles, or one
   name of its own opaque named tree such as Skills' `installed/*`), and the receiver brings it into one of its
