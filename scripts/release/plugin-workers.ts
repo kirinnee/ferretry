@@ -78,7 +78,24 @@ export function pluginWorkers(
         problems.push(`${plugin} worker "${id}" names ${source}, which does not exist`);
         continue;
       }
-      found.push({ plugin, id, source, file: embeddedWorkerFile(url) });
+      let file: string;
+      try {
+        file = embeddedWorkerFile(url);
+      } catch {
+        problems.push(
+          `${plugin} worker "${id}" has a file name that is not valid text, so no program can be found by it`,
+        );
+        continue;
+      }
+      // The kernel finds the program by building a URL from this name: a `#` or `?` there would start a fragment or a
+      // query, and a `%` can break the decoding, so the program would be found at the wrong path or not at all.
+      if (/[#?%]/u.test(file)) {
+        problems.push(
+          `${plugin} worker "${id}" is a file whose name has a #, ? or % in it; the embedded program is found by that name, so rename the file`,
+        );
+        continue;
+      }
+      found.push({ plugin, id, source, file });
     }
   }
   const owners = new Map<string, string>([
