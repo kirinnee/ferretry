@@ -970,6 +970,24 @@ async function bootLocked(
         new Map(),
       );
     },
+    recordTool: (name, request, decision, status) => {
+      const entry = tools.get(`kernel/${name}`);
+      if (entry === undefined || !('record' in entry.decl.audit)) return;
+      try {
+        bindings.admission()?.recorded?.({
+          table: 'tool',
+          descriptor: { ...entry.decl, method: 'POST', path: `/v1/tools/kernel/${name}` },
+          request,
+          params: new Map(),
+          standing: decision.standing,
+          actor: decision.actor,
+          ...(request.principal === undefined ? {} : { principal: request.principal }),
+          status,
+        });
+      } catch {
+        // The record is Gate's; the answer stands.
+      }
+    },
     doctor: async () => doctorReport([...bootNotes, ...(await doctorLines(records, hooks, jobs, data.refused))]),
     liveness: () => ({
       status: phase === 'started' ? 'ok' : 'starting',

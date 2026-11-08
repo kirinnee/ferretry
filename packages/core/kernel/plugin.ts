@@ -141,8 +141,10 @@ export default definePlugin({
         caller: 'any',
         privilegedOnly: true,
         noStore: true,
-        // Today's `fleet.configured` with `action: agent-config` (Gate's audited-route rule): names and ids only.
-        audit: { record: FLEET_CONFIGURED },
+        // The Dispatcher admits this route with no standing (`minimum: 'none'`), so ITS record would name nobody
+        // (round-3 review N2b). The handler records instead, as the tool the body names, with the standing that tool
+        // was admitted with: today's `fleet.configured`, `action: agent-config`, `by: agent` and the ferret.
+        audit: { skip: "recorded by the handler as the tool it names, with that tool's admitted standing" },
         guard: { none: 'file names, etags, located issues and what waits for the owner; never a secret value' },
       }),
       // §1.3.

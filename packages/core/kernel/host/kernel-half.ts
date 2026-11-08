@@ -65,6 +65,17 @@ export interface KernelHalfSources {
   readonly agentConfig: AgentConfigSources;
   /** Admits a call to one of the KERNEL's own agent tools by its declaration, as the tool door would (the standing, or Gate's refusal). */
   admitTool(name: string, request: ApiRequest): AdmissionDecision;
+  /**
+   * Tells Gate about one call to a kernel tool made through `POST /v1/agent/config`, as the tool door tells it
+   * (`Admission.recorded`, table `tool`), with the standing `admitTool` gave: the record names the ferret. Never
+   * the body. Never changes the answer.
+   */
+  recordTool(
+    name: string,
+    request: ApiRequest,
+    decision: Extract<AdmissionDecision, { readonly outcome: 'admitted' }>,
+    status: number,
+  ): void;
 }
 
 /** The most a tool call's body may be. */
@@ -115,11 +126,23 @@ export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<Kernel
       const decision = sources.admitTool(AGENT_CONFIG_TOOL_OF['config.read'], call.request);
       // Gate's refusal, with today's code and words for a call that carries no credential (round-2 m-c).
       if (decision.outcome === 'refused') return agentDoorRefusal(decision.response);
-      // Then the ferret and the owner's switch, still before the body (today's order: credential, switch, body).
-      const door = agentConfig(sources.agentConfig);
-      await door.authorize(decision.standing);
-      const body = await parseBody(call.request, AgentConfigCallSchema, { maxBytes: 2 * 256 * 1024 });
-      return jsonResponse(await door.act(body));
+      // Recorded here, not by the Dispatcher (which admitted the route with no standing): as the tool the body names
+      // (`config_read`'s until the body is read), with the standing that admitted the caller (round-3 review N2b).
+      let tool: AgentConfigToolName = AGENT_CONFIG_TOOL_OF['config.read'];
+      let status = 200;
+      try {
+        // Then the ferret and the owner's switch, still before the body (today's order: credential, switch, body).
+        const door = agentConfig(sources.agentConfig);
+        await door.authorize(decision.standing);
+        const body = await parseBody(call.request, AgentConfigCallSchema, { maxBytes: 2 * 256 * 1024 });
+        tool = AGENT_CONFIG_TOOL_OF[body.tool];
+        return jsonResponse(await door.act(body));
+      } catch (error) {
+        status = error instanceof ApiError ? error.status : 500;
+        throw error;
+      } finally {
+        sources.recordTool(tool, call.request, decision, status);
+      }
     },
     'GET /v1/health': async () => jsonResponse({ protocol: PROTOCOL, version: sources.version } satisfies Health),
     'GET /healthz': async () => {

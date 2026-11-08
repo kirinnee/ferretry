@@ -15,8 +15,6 @@
  * - `harness-claude-code.yaml`, `harness-codex.yaml` (today machine.yaml's agent permissions): each also holds the
  *   harness `binary` and `searchPaths`, which today lived in `daemon.json` where no agent reached, and its `loosens`
  *   judges only the permission mode. Mapping it would let an agent choose the program every new ferret launches.
- * - `conversation.yaml`: its one switch (keep in sync) is new in 5.0; today's machine.yaml had none (the shared draft
- *   was always on), so it is not one of today's entries.
  * - `components/instructions/<n>`: now `config/instructions/<n>.md`, which no plugin declares as a config file.
  * - `presets/<n>.yaml`: no declared successor (Logins to rule whether `endpoints/` is one).
  *
@@ -35,6 +33,9 @@ const FILES: ReadonlyMap<string, string> = new Map([
   ['accounts.yaml', 'account-defaults.yaml'],
   ['runtimes.yaml', "machine.yaml's default runtime"],
   ['agenda.yaml', "machine.yaml's agenda mode and agenda check"],
+  // Today's machine.yaml `conversations.listComputer` ("Keep in sync", docs/migration/v4-formats.md): no rule of
+  // today's judged it, and 5.0's `neverLoosens` holds nothing either, so parity maps it.
+  ['conversation.yaml', "machine.yaml's conversations.listComputer (keep in sync)"],
 ]);
 
 /** The named-file folders (`<folder>/<name>.yaml`), each with the entry of today's it holds. */

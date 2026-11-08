@@ -128,10 +128,13 @@ describe('the descriptors are today’s', () => {
     expect(declared?.capability).toBeUndefined();
   });
 
-  test('R-0244 T-0034 the route and each config tool are audited as today’s route was: fleet.configured', () => {
-    // Today every agent config call went through `POST /v1/agent/config`, recorded `fleet.configured` (round-2 N2).
+  test('R-0244 T-0034 each config tool is audited as today’s route was: fleet.configured; the route records as the tool', () => {
+    // Today every agent config call went through `POST /v1/agent/config`, recorded `fleet.configured` (round-2 N2). The
+    // Dispatcher admits that route with no standing, so its handler records the call as the tool it names (round-3 N2b).
     const recorded = { record: policyRef('audit', 'fleet.configured') };
-    expect(route('POST /v1/agent/config')?.audit).toEqual(recorded);
+    expect(route('POST /v1/agent/config')?.audit).toEqual({
+      skip: "recorded by the handler as the tool it names, with that tool's admitted standing",
+    });
     for (const name of ['config_read', 'config_validate', 'config_write']) expect(tool(name)?.audit).toEqual(recorded);
   });
 
@@ -551,6 +554,7 @@ describe('the files an agent may name are today’s and no more (C2)', () => {
       'accounts.yaml',
       'runtimes.yaml',
       'agenda.yaml',
+      'conversation.yaml',
       'logins/work.yaml',
       'profiles/p.yaml',
       'runtimes/r.yaml',
@@ -578,7 +582,6 @@ describe('the files an agent may name are today’s and no more (C2)', () => {
       'usage.yaml',
       'harness-claude-code.yaml',
       'harness-codex.yaml',
-      'conversation.yaml',
       'instructions/x.yaml',
       'endpoints/x.yaml',
       // No today equivalent at all.

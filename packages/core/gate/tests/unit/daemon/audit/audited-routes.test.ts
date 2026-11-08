@@ -121,8 +121,12 @@ describe('an agent’s config call is recorded as today’s route was (round-2 r
   const ferretStanding: CallStanding = {
     credential: { kind: 'authenticated', tokenClass: 'ferret', ferret: 'wren' } as CallStanding['credential'],
   };
+  test('R-0244 POST /v1/agent/config is not recorded by the Dispatcher (no standing there): its handler records as the tool', async () => {
+    const declared = await declaredRoutes();
+    expect(declared.get('POST /v1/agent/config')).toEqual({ records: false });
+    expect(AUDITED_ROUTES.some(rule => rule.path === '/v1/agent/config')).toBe(false);
+  });
   for (const path of [
-    '/v1/agent/config',
     '/v1/tools/kernel/config_read',
     '/v1/tools/kernel/config_validate',
     '/v1/tools/kernel/config_write',
