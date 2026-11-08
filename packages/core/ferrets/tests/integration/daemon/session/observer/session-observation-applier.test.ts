@@ -9,7 +9,10 @@
 import { afterEach, describe, it } from 'bun:test';
 import type { SessionState } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import { SessionObservationApplier } from '../../../../../daemon/adapters/session/observer/session-observation-applier.ts';
+import {
+  recordTurnChange,
+  SessionObservationApplier,
+} from '../../../../../daemon/adapters/session/observer/session-observation-applier.ts';
 import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import type { DaemonStorage } from '../../../../../daemon/adapters/storage/session-storage.ts';
 import { type QuestionPatch, stepQuestion } from '../../../../../daemon/lib/session/observer/question.ts';
@@ -337,5 +340,67 @@ describe('a session parked on the usage-limit dialog, over real storage', () => 
 
     // Assert
     should(limits.size).equal(0);
+  });
+});
+
+describe('recording a turn change that carries what the pane shows', () => {
+  const request = {
+    id: '0123456789abcdef',
+    harness: 'claude',
+    tool: 'Bash',
+    action: 'run',
+    question: 'Do you want to proceed?',
+    options: [
+      { number: 1, label: 'Yes', kind: 'allow' },
+      { number: 2, label: 'No', kind: 'deny' },
+    ],
+    selected: 1,
+  } as never;
+
+  it('should record the prompt and the permission request beside the new turn state, and clear them with it', async () => {
+    // Arrange
+    const storage = await openStorage();
+    await storage.writeState(ID, { id: ID, status: 'running', turn: 1, turnState: 'working' });
+
+    // Act
+    const parked = await recordTurnChange(
+      storage,
+      ID,
+      { from: 'working', to: 'needs-input', prompt: 'Trust this folder?', request },
+      NOW,
+    );
+    const during = (await storage.readState(ID)) as Record<string, unknown>;
+    const cleared = await recordTurnChange(storage, ID, { from: 'needs-input', to: 'working' }, NOW);
+    const after = (await storage.readState(ID)) as Record<string, unknown>;
+
+    // Assert
+    should([parked, cleared]).deepEqual([true, true]);
+    should(during).containEql({ turnState: 'needs-input', turnPrompt: 'Trust this folder?' });
+    should(during.permissionRequest).deepEqual(request);
+    should(after.turnState).equal('working');
+    should(Object.hasOwn(after, 'turnPrompt')).be.false();
+    should(Object.hasOwn(after, 'permissionRequest')).be.false();
+  });
+
+  it('should raise a storage failure while deciding a question patch rather than call the document damaged', async () => {
+    // Arrange: only a refused document is "nothing written"; a store that cannot answer is a fault the observer must see.
+    const failing = {
+      updateState: async () => {
+        throw new Error('the state home is unreachable');
+      },
+      append: async () => undefined as never,
+    };
+    const subject = new SessionObservationApplier(
+      failing as never,
+      { all: noReceipts, append: async () => undefined },
+      new KeyedSerialExecutor(),
+      SCRIPTED_QUESTIONS,
+    );
+
+    // Act
+    const failure = await subject.apply(ID, patchFor({}, [question]), NOW).catch((error: unknown) => error);
+
+    // Assert
+    should((failure as Error).message).equal('the state home is unreachable');
   });
 });

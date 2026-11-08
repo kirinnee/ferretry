@@ -1698,3 +1698,27 @@ describe('SessionForkTargetBinder', () => {
     });
   });
 });
+
+describe('reporting a completed fork whose view cannot be built', () => {
+  it('should refuse to report a target whose view the session read cannot answer, whether it fails or finds nothing', async () => {
+    // Arrange: the whole fork completed and re-proves; only the view the report is built from is gone.
+    const subject = await harness('unviewable');
+    await drive(subject);
+    const viewless = (view: SessionForkTargetBinderPorts['view']): SessionForkBoundTarget =>
+      new SessionForkTargetBinder({ ...subject.ports, view }).bind(TARGET_ID, subject.plan);
+
+    // Act
+    const failing = await refusal(
+      viewless(async () => {
+        throw new Error('the documents could not be parsed');
+      }).lifecycle.view(),
+    );
+    const missing = await refusal(viewless(async () => undefined).lifecycle.view());
+
+    // Assert
+    for (const refused of [failing, missing])
+      should(refused.message).equal(
+        `target ${TARGET_ID} was written but its documents do not satisfy the protocol, so this fork cannot be reported`,
+      );
+  });
+});
