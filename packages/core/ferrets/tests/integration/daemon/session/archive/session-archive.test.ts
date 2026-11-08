@@ -7,6 +7,7 @@ import type { IndexedSession } from '../../../../../daemon/lib/storage-types.ts'
 import type { OpenCardStanding } from '../../../../../daemon/lib/session/peers/board.ts';
 import { sessionView } from '../../../../support/daemon/session-view.ts';
 import { archiveDeadline } from '../../../../support/daemon/archive-deadline.ts';
+import { RecordingLog } from '../../../../support/daemon/storage.ts';
 
 const NOW = Date.parse('2026-11-06T12:00:00.000Z');
 const HOUR = 3_600_000;
@@ -224,5 +225,121 @@ describe('a whole pass over a family of sessions', () => {
     await archive.subsystem.run?.();
 
     should(left).deepEqual([]);
+  });
+});
+
+describe('the session archive when a document cannot be read, or Board and Agenda do not answer', () => {
+  it('should leave an unreadable archived session out of the list and count what was skipped', async () => {
+    const log = new RecordingLog();
+    const archived = [row('older-1', ago(90)), row('newer-1', ago(30))];
+    const storage = { ...fakeStorage(archived), readConfig: async () => await Promise.reject(new Error('damaged')) };
+    const { subsystem } = createSessionArchive({
+      directory: id => createSessionPaths(paths, id).directory,
+      storage: storage as never,
+      clock: { nowMs: () => NOW },
+      afterMs: undefined,
+      passLimit: 200,
+      sources: { pinned: async () => new Map(), hasOpenAgendaItem: async () => false },
+      yieldToLoop: async () => undefined,
+      ...archiveDeadline(),
+      log,
+    });
+
+    should(await subsystem.list(10)).deepEqual([]);
+    should(log.lines).have.length(1);
+    should(log.lines[0]).containEql({ level: 'warn' });
+    should(log.lines[0]?.fields).deepEqual({ skipped: 2 });
+  });
+
+  it('should keep every ferret asked about when the keeps check outlives its deadline, and archive none', async () => {
+    const OLD = ago(72);
+    const archivedBatches: string[][] = [];
+    const storage = {
+      archivedCount: () => 0,
+      listArchivedSessions: () => [],
+      findSession: () => undefined,
+      listSessions: () => [{ id: parseSessionId('free-1') }],
+      readConfig: async () =>
+        sessionView('free-1', { mode: 'auto', teammate: 'mika' }, { status: 'completed', finishedAt: OLD })
+          .config as never,
+      readState: async () =>
+        sessionView('free-1', { mode: 'auto', teammate: 'mika' }, { status: 'completed', finishedAt: OLD })
+          .state as never,
+      archiveSessions: async (ids: readonly string[]) => {
+        archivedBatches.push([...ids]);
+        return [...ids];
+      },
+    };
+    let deadlineArmed = 0;
+    let cancelled = 0;
+    const { subsystem } = createSessionArchive({
+      directory: id => createSessionPaths(paths, id).directory,
+      storage: storage as never,
+      clock: { nowMs: () => NOW },
+      afterMs: 24 * HOUR,
+      passLimit: 200,
+      // Agenda never answers: only the deadline can end the check.
+      sources: {
+        pinned: async () => new Map(),
+        board: async () => [],
+        hasOpenAgendaItem: () => new Promise<boolean>(() => {}),
+      },
+      yieldToLoop: async () => undefined,
+      after: (_delayMs, fire) => {
+        deadlineArmed += 1;
+        queueMicrotask(fire);
+        return () => {
+          cancelled += 1;
+        };
+      },
+      keepsDeadlineMs: 5,
+      log: new RecordingLog(),
+    });
+
+    const result = await subsystem.run?.();
+
+    should(deadlineArmed).be.aboveOrEqual(1);
+    should(cancelled).equal(deadlineArmed);
+    should(result?.archived).equal(0);
+    should(archivedBatches.flat()).deepEqual([]);
+  });
+
+  it('should keep every ferret asked about when the pass is stopped before the check starts', async () => {
+    const OLD = ago(72);
+    const archivedBatches: string[][] = [];
+    const agendaAsked: string[] = [];
+    const view = sessionView('free-1', { mode: 'auto', teammate: 'mika' }, { status: 'completed', finishedAt: OLD });
+    const { subsystem } = createSessionArchive({
+      directory: id => createSessionPaths(paths, id).directory,
+      storage: {
+        archivedCount: () => 0,
+        listArchivedSessions: () => [],
+        findSession: () => undefined,
+        listSessions: () => [{ id: parseSessionId('free-1') }],
+        readConfig: async () => view.config as never,
+        readState: async () => view.state as never,
+        archiveSessions: async (ids: readonly string[]) => {
+          archivedBatches.push([...ids]);
+          return [...ids];
+        },
+      } as never,
+      clock: { nowMs: () => NOW },
+      afterMs: 24 * HOUR,
+      passLimit: 200,
+      sources: {
+        pinned: async () => new Map(),
+        board: async () => [],
+        hasOpenAgendaItem: async id => (agendaAsked.push(id), false),
+      },
+      yieldToLoop: async () => undefined,
+      ...archiveDeadline(),
+    });
+    const stopped = new AbortController();
+    stopped.abort();
+
+    await subsystem.run?.(stopped.signal);
+
+    should(archivedBatches.flat()).deepEqual([]);
+    should(agendaAsked).deepEqual([]);
   });
 });
