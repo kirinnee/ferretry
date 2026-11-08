@@ -18,9 +18,9 @@ const UNTIL_DATE = z.iso.date();
 const UNTIL_INSTANT = z.iso.datetime({ offset: true });
 
 /** The longest reason a person may give. */
-export const DISABLED_REASON_LIMIT = 200;
+const DISABLED_REASON_LIMIT = 200;
 
-export const DisabledSchema = z.strictObject({
+const DisabledSchema = z.strictObject({
   /** Why, in the person's words: shown beside the switch and in every refusal. */
   reason: z.string().trim().min(1).max(DISABLED_REASON_LIMIT).optional(),
   /** When it switches itself back on. Absent: it stays off until someone enables it. */
@@ -45,27 +45,4 @@ export function activeDisable(disabled: Disabled | undefined, now: number): Disa
   if (disabled === undefined) return undefined;
   const until = disabledUntilMs(disabled.until);
   return until !== undefined && until <= now ? undefined : disabled;
-}
-
-/** The earliest `until` still in the future across these blocks, or `undefined` when none will fall due. */
-export function nextDisableExpiry(blocks: readonly (Disabled | undefined)[], now: number): number | undefined {
-  const due = blocks
-    .map(block => disabledUntilMs(block?.until))
-    .filter((ms): ms is number => ms !== undefined && ms > now);
-  return due.length === 0 ? undefined : Math.min(...due);
-}
-
-/** `until` as a short calendar date for a sentence (UTC, `2026-11-01`). */
-const untilWords = (until: string): string => {
-  const ms = disabledUntilMs(until);
-  if (ms === undefined) return until;
-  const iso = new Date(ms).toISOString();
-  return iso.endsWith('T00:00:00.000Z') ? iso.slice(0, 10) : `${iso.slice(0, 16).replace('T', ' ')} UTC`;
-};
-
-/** "disabled (spend limit reached) until 2026-11-01" — the clause every refusal and row builds on. */
-export function disabledPhrase(disabled: Disabled): string {
-  const why = disabled.reason === undefined ? '' : ` (${disabled.reason})`;
-  const until = disabled.until === undefined ? '' : ` until ${untilWords(disabled.until)}`;
-  return `disabled${why}${until}`;
 }

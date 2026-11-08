@@ -38,7 +38,7 @@ import {
   type LoginRecipeProposal,
   type LoginMethodRecord,
   LOGIN_RECIPE_PROPOSALS_MAX,
-  MAX_ACCOUNTS,
+  MAX_LOGIN_ENTRIES,
   MAX_SIGN_INS,
   MAX_SIGN_INS_PER_ACCOUNT,
   type PatchTwoFactorKeyRequest,
@@ -110,22 +110,22 @@ export class LoginEntryError extends Error {
 }
 
 /** A FRESH sealed name for one value of one field: the account's immutable key, the field, a random generation. */
-export function freshSealedName(key: string, role: 'password' | 'totp'): string {
+function freshSealedName(key: string, role: 'password' | 'totp'): string {
   return `${key}_${role === 'password' ? 'PASSWORD' : 'TOTP'}_${randomBytes(4).toString('hex').toUpperCase()}`;
 }
 
 /** A fresh immutable account key: 96 random bits. */
-export function randomLoginKey(): string {
+function randomLoginKey(): string {
   return `L${randomBytes(12).toString('hex').toUpperCase()}`;
 }
 
 /** A fresh sign-in id: 64 random bits. */
-export function randomSignInId(): SignInId {
+function randomSignInId(): SignInId {
   return `si_${randomBytes(8).toString('hex')}`;
 }
 
 /** A fresh 2FA key id: 48 random bits. */
-export function randomTwoFactorId(): string {
+function randomTwoFactorId(): string {
   return `tf_${randomBytes(6).toString('hex')}`;
 }
 
@@ -134,7 +134,7 @@ export function randomTwoFactorId(): string {
  * password AND every 2FA key's seed. This is the list a sweep KEEPS. A walk of its own that missed one field would
  * make the next sweep delete that field's ciphertext on every account — every saved 2FA seed at the next boot.
  */
-export function referencedSeals(index: Pick<AccountIndexDocument, 'accounts'>): ReadonlySet<string> {
+function referencedSeals(index: Pick<AccountIndexDocument, 'accounts'>): ReadonlySet<string> {
   const names = new Set<string>();
   for (const account of Object.values(index.accounts)) for (const name of sealedNamesOf(account)) names.add(name);
   return names;
@@ -286,18 +286,8 @@ export function signInsOf(
   return Object.entries(signIns).filter(([, signIn]) => signIn.account === key);
 }
 
-/** The account's sign-ins with its site ones first: the first is its PRIMARY (what the compat projection reads). */
-export function primaryFirst(
-  own: readonly (readonly [SignInId, SignInRecord])[],
-): readonly (readonly [SignInId, SignInRecord])[] {
-  return [
-    ...own.filter(([, signIn]) => signIn.place.kind === 'site'),
-    ...own.filter(([, signIn]) => signIn.place.kind !== 'site'),
-  ];
-}
-
 /** An account as the owner reads it: which fields exist, its 2FA keys without their seals, its sign-ins. */
-export function accountSummary(
+function accountSummary(
   id: AccountId,
   account: AccountRecord,
   signIns: Readonly<Record<string, SignInRecord>>,
@@ -316,7 +306,7 @@ export function accountSummary(
 }
 
 /** A sign-in as the owner reads it: its provider by handle (and that provider's first site sign-in). */
-export function signInSummary(
+function signInSummary(
   id: SignInId,
   signIn: SignInRecord,
   accounts: Readonly<Record<string, AccountRecord>>,
@@ -360,7 +350,7 @@ export function signInSummary(
 }
 
 /** The method a sign-in stores, from the method an owner wrote: the provider by KEY, checked to exist. */
-export function methodRecord(
+function methodRecord(
   method: LoginMethod,
   accounts: Readonly<Record<string, AccountRecord>>,
   self: AccountId,
@@ -387,7 +377,7 @@ const factsAt = (signIn: Pick<SignInRecord, 'observed'>, place: Place): SignInRe
  * included. The counter is kept while there is no recipe (no reader shows it then), so a recipe set after a clear never
  * gets a version an earlier recipe had: (sign-in, version) names one text, ever.
  */
-export function withRecipe(signIn: SignInRecord, recipe: string | null | undefined, at: string): SignInRecord {
+function withRecipe(signIn: SignInRecord, recipe: string | null | undefined, at: string): SignInRecord {
   if (recipe === undefined) return signIn;
   const { recipe: _old, recipeBy: _by, recipeVersion, ...rest } = signIn;
   // The same text written again is the owner's now, but it is not a change: its version stays. Nor is clearing none.
@@ -592,8 +582,8 @@ export class AccountDirectory {
   /** The account half of a change, on a draft: create (with a label) or update label, username and password. */
   async applyAccount(draft: AccountDraft, id: AccountId, change: PutAccountRequest): Promise<AccountRecord> {
     const existing = Object.hasOwn(draft.accounts, id) ? draft.accounts[id] : undefined;
-    if (existing === undefined && Object.keys(draft.accounts).length >= MAX_ACCOUNTS)
-      throw new SecretStoreError('full', `this daemon already keeps ${String(MAX_ACCOUNTS)} accounts`);
+    if (existing === undefined && Object.keys(draft.accounts).length >= MAX_LOGIN_ENTRIES)
+      throw new SecretStoreError('full', `this daemon already keeps ${String(MAX_LOGIN_ENTRIES)} accounts`);
     if (existing === undefined && change.label === undefined)
       throw new LoginEntryError('label_required', `a new account needs a label; ${id} does not exist yet`);
     const key = existing?.key ?? this.newKey();
@@ -1229,7 +1219,7 @@ function dropApart(draft: AccountDraft, key: string): void {
   }
 }
 
-export function proposeOn(
+function proposeOn(
   draft: AccountDraft,
   id: SignInId,
   signIn: SignInRecord,
@@ -1245,7 +1235,7 @@ export function proposeOn(
   return { applied: false, dropped };
 }
 
-export function cardOn(draft: AccountDraft, id: SignInId, proposalId: string, agendaItemId: string): void {
+function cardOn(draft: AccountDraft, id: SignInId, proposalId: string, agendaItemId: string): void {
   const signIn = Object.hasOwn(draft.signIns, id) ? draft.signIns[id] : undefined;
   if (signIn?.proposals?.some(proposal => proposal.id === proposalId) !== true) return;
   const proposals = signIn.proposals.map(proposal =>
@@ -1254,7 +1244,7 @@ export function cardOn(draft: AccountDraft, id: SignInId, proposalId: string, ag
   draft.signIns[id] = { ...signIn, proposals };
 }
 
-export function decideOn(
+function decideOn(
   draft: AccountDraft,
   id: SignInId,
   signIn: SignInRecord,

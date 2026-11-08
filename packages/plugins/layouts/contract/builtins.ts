@@ -12,7 +12,7 @@ export const DEFAULT_LAYOUT = LayoutSchema.parse({
   side: { show: 'wide-only', holds: 'ferret' },
   top: ['daemon-picker', 'search'],
   'composer.tools': ['attachments', 'dictation', 'runtime-picker', 'composer-quota'],
-  panels: { 'ferret.side': ['cards-of-ferret', 'files', 'sitrep', 'usage'] },
+  panels: { 'ferret.side': ['ferret-agenda', 'cards-of-ferret', 'files', 'ferret-warden', 'sitrep', 'usage'] },
   density: 'comfortable',
   phone: { nav: { side: 'bottom', items: ['agenda', 'ferrets', 'board'] } },
 });

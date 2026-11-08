@@ -2,7 +2,7 @@ import { type AskId, AskIdSchema, type AsksApi, type EntryId, type SourceKey } f
 import type { TwoFactorSeedAgendaPort, TwoFactorSeedCard } from './two-factor-seeds.ts';
 
 /** The ask source every Accounts card is raised under (the manifest's `ask.sources:sign-in-approval`). */
-export const SIGN_IN_APPROVAL_SOURCE = 'sign-in-approval' as SourceKey;
+const SIGN_IN_APPROVAL_SOURCE = 'sign-in-approval' as SourceKey;
 
 /**
  * A staged 2FA seed's card on the owner's agenda (docs/secrets.md, "2FA keys"). Every word is the daemon's: which

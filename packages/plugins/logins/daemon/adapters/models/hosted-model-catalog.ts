@@ -13,7 +13,7 @@ import { milliseconds } from '@ferretry/std';
 import type { Bytes, ModelCatalogFetchPort } from '../../lib/models/published.ts';
 
 /** Long enough for a slow link, short enough that a down host never holds anything up. */
-export const MODEL_CATALOG_FETCH_TIMEOUT_MS = 8_000;
+const MODEL_CATALOG_FETCH_TIMEOUT_MS = 8_000;
 
 export class HostedModelCatalog implements ModelCatalogFetchPort {
   constructor(

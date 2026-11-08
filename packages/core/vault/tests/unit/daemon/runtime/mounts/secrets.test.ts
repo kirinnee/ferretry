@@ -15,16 +15,12 @@ import { WebCryptoCloneCrypto } from '../../../../../daemon/adapters/secrets/web
 import { MAX_REQUEST_BODY_BYTES } from '../../../../../daemon/lib/api/body.ts';
 import type { DaemonIdentity } from '../../../../../daemon/lib/secrets/clone-crypto.ts';
 import { secretRouteHandlers } from '../../../../../daemon/lib/runtime/mounts/secrets.ts';
-import {
-  ChildEnvironments,
-  NO_REFERENCES,
-  SecretDirectory,
-  SecretExportService,
-  SecretImportService,
-  SecretStoreError,
-  SecretUseService,
-  SecretVault,
-} from '../../../../../daemon/lib/secrets/index.ts';
+import { ChildEnvironments } from '../../../../../daemon/lib/secrets/child-environments.ts';
+import { NO_REFERENCES } from '../../../../../daemon/lib/secrets/view.ts';
+import { SecretDirectory, SecretVault } from '../../../../../daemon/lib/secrets/vault.ts';
+import { SecretExportService, SecretImportService } from '../../../../../daemon/lib/secrets/clone.ts';
+import { SecretStoreError } from '../../../../../daemon/lib/secrets/types.ts';
+import { SecretUseService } from '../../../../../daemon/lib/secrets/use.ts';
 import { EchoSecretChildRunner, FakeSecretCipher, MemorySecretDocuments } from '../../support.ts';
 
 /**

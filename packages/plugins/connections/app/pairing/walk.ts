@@ -37,7 +37,7 @@ import { ConnectionMethodSchema } from '../lib/connection.ts';
 import { type PairingLegFailure, PairingUnreachableError } from './unreachable.ts';
 
 /** How long the direct leg may take: a private address from cellular is dropped, not refused (today's value). */
-export const DIRECT_PAIRING_TIMEOUT_MS = DIRECT_SESSION_DEADLINE_MS;
+const DIRECT_PAIRING_TIMEOUT_MS = DIRECT_SESSION_DEADLINE_MS;
 
 /** One carrier first contact may cross. */
 export interface PairingCandidate {

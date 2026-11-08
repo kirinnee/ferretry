@@ -30,7 +30,8 @@ import { type AppSession, openApp } from './session.ts';
  * stream route. They turn green when the gap lands; none is skipped. G4 (Catalogs' member table) is a `todo`.
  */
 
-const CORE_IDS = ['kernel', 'gate', 'asks', 'vault', 'ferrets', 'access'] as const;
+/** The packages every release carries unchanged: the core pieces, Access, and Connections (its direct carrier serves the paired session). */
+const CORE_IDS = ['kernel', 'gate', 'asks', 'vault', 'ferrets', 'access', 'connections'] as const;
 const FIXTURE_IDS = ['alpha', 'beta', 'gamma', 'delta'] as const;
 const OLDER = '4.9.0';
 const NEWER = '5.1.0';
@@ -495,7 +496,7 @@ describe('(e) a limited device reads the inventory: daemon A', () => {
   });
   afterAll(stopAll);
 
-  test('G1 the limited device’s inventory is the core pieces, Access and the one plugin its grants admit', () => {
+  test('G1 the limited device’s inventory is the core pieces, Access, Connections (`GET /v1/carriers` asks no capability) and the one plugin its grants admit', () => {
     const connection = limited.session.runtime.connection(limited.session.daemonId);
     if (connection.kind !== 'connected' || connection.client.inventory?.kind !== 'read')
       throw new Error('no inventory');

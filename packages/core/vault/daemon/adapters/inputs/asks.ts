@@ -17,7 +17,7 @@ export const INPUT_ASK_SOURCE = 'input' as SourceKey;
  * A card's context: the daemon's own line first when it has one (why a task plan did not fill it), then the login it
  * follows, then the agent's prompt, always last, after {@link INPUT_PROMPT_MARKER} (today's `agenda-adapter.ts`).
  */
-export const contextOf = (card: Pick<InputCard, 'prompt' | 'chain'>, line?: string): string =>
+const contextOf = (card: Pick<InputCard, 'prompt' | 'chain'>, line?: string): string =>
   [
     ...(line === undefined ? [] : [line]),
     ...(card.chain === undefined ? [] : [`This follows ${card.chain} in the same login.`]),

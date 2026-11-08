@@ -4,12 +4,12 @@ import {
   HOSTED_CONTROL_OUTAGE_GRACE_MS,
   HOSTED_RESERVATION_RENEW_MS,
   HostedRelayControlDurableObject,
-  type RelayEnvironment,
-  type RelayRuntime,
   RendezvousDurableObject,
   relayFetch,
+  type RelayEnvironment,
+  type RelayRuntime,
   workersRuntime,
-} from '../../../worker/src/adapters/index.ts';
+} from '../../../worker/src/adapters/worker.ts';
 import {
   type ControlMessage,
   claimContextForChallenge,

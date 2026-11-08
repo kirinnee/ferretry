@@ -45,7 +45,7 @@ export const LoginMatchSchema = z
 export type LoginMatch = z.infer<typeof LoginMatchSchema>;
 
 /** The fields an entry can hold, and which of them are secret. */
-export const LOGIN_FIELD_ROLES = ['username', 'password', 'totp'] as const;
+const LOGIN_FIELD_ROLES = ['username', 'password', 'totp'] as const;
 export const LoginFieldRoleSchema = z.enum(LOGIN_FIELD_ROLES);
 export type LoginFieldRole = z.infer<typeof LoginFieldRoleSchema>;
 
@@ -64,9 +64,6 @@ export type TotpParameters = z.infer<typeof TotpParametersSchema>;
  */
 export const LOGIN_TOTP_WARNING =
   "Keeping the password and the 2FA key in the same place means one compromise of this machine's vault defeats both factors.";
-
-/** The same warning, short, under every "Use code from Ferretry" button on a code card. */
-export const LOGIN_ONE_FACTOR_WARNING = 'Password and code both come from this machine: together they are one factor.';
 
 /**
  * THE ONE-FACTOR SENTENCE UNDER A TICKED CODE, on a task-plan line and on a standing rule alike, verbatim: Ferretry
@@ -201,11 +198,8 @@ export const LoginMethodChangeSchema = LoginMethodSchema.refine(
   { path: ['name'], message: PASSKEYS_OFF },
 );
 
-/** The method an entry reads as: one saved before methods existed signs in with its password. */
-export const PASSWORD_METHOD: LoginMethod = { kind: 'password' };
-
 /** "Sign in with Google", "Sign in with Okta (SSO)" or "Password", without the provider entry. */
-export function loginMethodWords(method: LoginMethod): string {
+function loginMethodWords(method: LoginMethod): string {
   return method.kind === 'sso' ? `Sign in with ${method.name ?? 'SSO'} (SSO)` : LOGIN_METHOD_LABELS[method.kind];
 }
 
@@ -226,8 +220,8 @@ export const LoginPasswordSchema = z
  * Why a card's primary offer is first (accounts.ts `chosenSignIn`): the ferret named it, a project, folder or
  * site default chose it, or it is the only account that signs in here. Absent on every other offer.
  */
-export const SIGN_IN_CHOICE_REASONS = ['ferret', 'project', 'folder', 'site', 'only'] as const;
-export const SignInChoiceReasonSchema = z.enum(SIGN_IN_CHOICE_REASONS);
+const SIGN_IN_CHOICE_REASONS = ['ferret', 'project', 'folder', 'site', 'only'] as const;
+const SignInChoiceReasonSchema = z.enum(SIGN_IN_CHOICE_REASONS);
 export type SignInChoiceReason = z.infer<typeof SignInChoiceReasonSchema>;
 
 /** The longest project name a card's "Default for <project>" carries. */
@@ -251,14 +245,13 @@ export const SIGN_IN_PROJECT_MAX_LENGTH = 128;
  * saw it (`worked`, `failed`); absent: never tried. Owner view only, like the whole offer: a ferret never learns that a
  * seed exists.
  */
-export const InputCodeKeySchema = z.strictObject({
+const InputCodeKeySchema = z.strictObject({
   factor: TwoFactorIdSchema,
   label: oneLine(TWO_FACTOR_LABEL_MAX_LENGTH),
   checked: z.enum(['worked', 'failed']).optional(),
 });
-export type InputCodeKey = z.infer<typeof InputCodeKeySchema>;
 
-export const InputSavedOfferSchema = z
+const InputSavedOfferSchema = z
   .strictObject({
     id: LoginEntryIdSchema,
     label: oneLine(LOGIN_LABEL_MAX_LENGTH),
@@ -307,23 +300,21 @@ export const InputSavedOfferSchema = z
     if (offer.project !== undefined && offer.why !== 'project')
       context.addIssue({ code: 'custom', path: ['project'], message: 'a project is named only by a project default' });
   });
-export type InputSavedOffer = z.infer<typeof InputSavedOfferSchema>;
 
 /** A saved login named by another: its handle and its label, never what it holds. */
-export const LoginEntryRefSchema = z.strictObject({ id: LoginEntryIdSchema, label: oneLine(LOGIN_LABEL_MAX_LENGTH) });
+const LoginEntryRefSchema = z.strictObject({ id: LoginEntryIdSchema, label: oneLine(LOGIN_LABEL_MAX_LENGTH) });
 export type LoginEntryRef = z.infer<typeof LoginEntryRefSchema>;
 
 /**
  * How the saved login this target is for signs in, when it is not a plain password: the card says "Sign in with
  * Google via 'Google (kirin@…)'", so the owner sees the ferret should be on the provider's page, not typing here.
  */
-export const InputSignInSchema = z.strictObject({
+const InputSignInSchema = z.strictObject({
   id: LoginEntryIdSchema,
   label: oneLine(LOGIN_LABEL_MAX_LENGTH),
   method: LoginMethodSchema,
   via: LoginEntryRefSchema.optional(),
 });
-export type InputSignIn = z.infer<typeof InputSignInSchema>;
 
 /**
  * What an input card knows about saved logins, as the owner reads it (never the agent): the target's key
@@ -376,7 +367,6 @@ export const InputSavedSchema = z.strictObject({
    */
   project: z.strictObject({ id: z.string().min(1).max(200), name: oneLine(SIGN_IN_PROJECT_MAX_LENGTH) }).optional(),
 });
-export type InputSaved = z.infer<typeof InputSavedSchema>;
 
 /** The site a hint is asked for: a host, a URL or a `program@host`, as a key a saved login could match. */
 export function loginHintSite(text: string): LoginMatch | undefined {

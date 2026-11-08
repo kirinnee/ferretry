@@ -9,7 +9,7 @@
  * GAP: the grants bound what a worker gets through these ports; the thread itself is in-process and is NOT a
  * sandbox (same as the sqlite `state` grant). It can still import `node:fs`, call the global `fetch` or start its
  * own `Worker`. The boundary for plugin code is the repo's lints (`banned-globals`, `fetch-binding`,
- * `no-sync-io`) and the worker bundle diet test. Grants end when the plugin fails or stops.
+ * `no-sync-io`) and the worker bundle diet test. Grants end when the plugin's lifecycle stops (or it fails to build); a wait still pending when the channel closes is rejected with `WorkerGrantRefusal('closed')`.
  */
 import { workerData } from 'node:worker_threads';
 import type { StateFileDef } from './contract/define.ts';
@@ -96,6 +96,8 @@ export interface WorkerRootHandle {
   lstat(path: string): Promise<RootLstat | undefined>;
 }
 
+const CLOSED_MESSAGE = 'the grant channel to the kernel is closed';
+
 interface Pending {
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: unknown) => void;
@@ -104,10 +106,18 @@ interface Pending {
 /** One grant channel's client: numbers each request, matches each answer, and ends every wait when the channel closes. */
 class GrantChannel {
   private next = 0;
+  private closed = false;
   private readonly pending = new Map<number, Pending>();
   constructor(private readonly port: MessagePort) {
     port.onmessage = (event: MessageEvent<WorkerGrantResponse>): void => {
       const answer = event.data;
+      if ('closed' in answer) {
+        this.closed = true;
+        const waiting = [...this.pending.values()];
+        this.pending.clear();
+        for (const wait of waiting) wait.reject(new WorkerGrantRefusal('closed', CLOSED_MESSAGE));
+        return;
+      }
       const waiting = this.pending.get(answer.id);
       if (waiting === undefined) return;
       this.pending.delete(answer.id);
@@ -119,6 +129,7 @@ class GrantChannel {
   ask(request: (id: number) => WorkerGrantRequest, signal?: AbortSignal | null): Promise<unknown> {
     const id = this.next++;
     return new Promise((resolve, reject) => {
+      if (this.closed) return reject(new WorkerGrantRefusal('closed', CLOSED_MESSAGE));
       if (signal?.aborted === true) return reject(signal.reason);
       this.pending.set(id, { resolve, reject });
       signal?.addEventListener(

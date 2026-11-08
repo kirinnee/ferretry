@@ -1,20 +1,3 @@
-/**
- * THE KERNEL'S LISTENING SOCKETS, read from `/proc/net/tcp` and `/proc/net/tcp6`.
- *
- * On a host several people share, a loopback port is not "my program" — it is whichever process bound
- * it, and any local account can bind a free loopback port. Nothing in TCP can tell the two apart, but the
- * kernel's table names the uid that opened every socket, and the socket's inode, which the owning process
- * holds as a `socket:[<inode>]` link under `/proc/<pid>/fd`.
- *
- * ONE PARSER, two judges: the CLI asks whose daemon a credential is about to be sent to
- * (`packages/cli/src/lib/daemon/listener-owner.ts`), and the daemon asks whether the browser it just
- * spawned is the program that took its port (`packages/daemon/src/lib/browser/control/listener-proof.ts`).
- * The text is passed in, so this is tested on fixture text rather than on a real port.
- */
-
-/** Where Linux publishes its TCP socket tables; a host with neither (macOS) publishes none. */
-export const PROC_TCP_TABLES = ['/proc/net/tcp', '/proc/net/tcp6'] as const;
-
 /** One listening socket, as the kernel's table records it. */
 export interface TcpListener {
   readonly port: number;
@@ -36,7 +19,7 @@ const LISTEN_STATE = '0A';
  * `0100007F`; each word is reversed back into network order before it is judged. The uid is the eighth
  * column and the inode the tenth. A line that does not have the table's shape is skipped, never guessed at.
  */
-export function parseTcpListeners(table: string): readonly TcpListener[] {
+function parseTcpListeners(table: string): readonly TcpListener[] {
   const listeners: TcpListener[] = [];
   for (const line of table.split('\n').slice(1)) {
     const fields = line.trim().split(/\s+/u);

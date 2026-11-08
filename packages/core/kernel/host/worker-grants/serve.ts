@@ -6,10 +6,12 @@ import { RootError } from '../roots.ts';
 import {
   MAX_GRANT_BODY_BYTES,
   MAX_GRANT_IN_FLIGHT,
+  MAX_GRANT_MESSAGES_PER_WINDOW,
   MAX_GRANT_REFUSALS_PER_WINDOW,
   GRANT_REFUSAL_WINDOW_MS,
   type WorkerFetchAnswer,
   type WorkerFetchInit,
+  type WorkerGrantClosed,
   type WorkerGrantResponse,
   type WorkerGrantsData,
 } from './wire.ts';
@@ -24,7 +26,7 @@ export interface WorkerGrantSources {
   readonly declaresNetwork: boolean;
   /** The manifest's own host check (`hostPermitted`), asked with the hostname and the `host:port`. */
   readonly mayReach: (hostname: string, host: string) => boolean;
-  /** Milliseconds from a monotonic clock, for the refusal window. Absent, the bound counts for the channel's whole life. */
+  /** Milliseconds from the clock, for the flood windows. Absent, the bound counts for the channel's whole life. */
   readonly nowMs?: () => number;
   /** Told once, with the plugin id, when a channel was closed for flooding the main thread with refused requests. */
   readonly flooded?: (plugin: string) => void;
@@ -190,27 +192,39 @@ export function serveWorkerGrants(
   const inFlight = new Map<number, AbortController>();
   let open = true;
   const close = (): void => {
+    if (!open) return;
     open = false;
     for (const controller of inFlight.values()) controller.abort();
     inFlight.clear();
+    // Told before the port goes: a worker that outlives the channel must not wait on it for ever.
+    channel.port1.postMessage({ closed: true } satisfies WorkerGrantClosed);
     channel.port1.close();
   };
 
-  let windowStart = 0;
-  let refusals = 0;
-  /** Counts one refused request; past the bound in one window the channel ends, so a flood costs the main thread no more. */
-  const tally = (): void => {
-    const at = sources.nowMs?.() ?? 0;
-    if (at - windowStart >= GRANT_REFUSAL_WINDOW_MS) {
-      windowStart = at;
-      refusals = 0;
-    }
-    refusals += 1;
-    if (refusals > MAX_GRANT_REFUSALS_PER_WINDOW && open) {
-      close();
-      sources.flooded?.(sources.plugin);
-    }
+  /** A per-channel rate window: counts one event and says whether this window is now past `bound`. */
+  const windowed = (bound: number): (() => boolean) => {
+    let windowStart = 0;
+    let count = 0;
+    return () => {
+      const at = sources.nowMs?.() ?? 0;
+      // A clock that stepped back starts a new window rather than adding up across the gap.
+      if (at < windowStart || at - windowStart >= GRANT_REFUSAL_WINDOW_MS) {
+        windowStart = at;
+        count = 0;
+      }
+      count += 1;
+      return count > bound;
+    };
   };
+  const overRefusals = windowed(MAX_GRANT_REFUSALS_PER_WINDOW);
+  const overMessages = windowed(MAX_GRANT_MESSAGES_PER_WINDOW);
+  /** Past either bound in one window the channel ends, so a flood costs the main thread no more. */
+  const flood = (over: boolean): void => {
+    if (!over || !open) return;
+    close();
+    sources.flooded?.(sources.plugin);
+  };
+  const tally = (): void => flood(overRefusals());
 
   const reply = (response: WorkerGrantResponse): void => {
     if (open) channel.port1.postMessage(response);
@@ -298,6 +312,9 @@ export function serveWorkerGrants(
   };
 
   channel.port1.onmessage = (event: MessageEvent): undefined => {
+    // Every message counts, a cancel and a served read too, not only a refusal.
+    flood(overMessages());
+    if (!open) return undefined;
     const raw = event.data as { id?: unknown } | null;
     const id = typeof raw?.id === 'number' && Number.isInteger(raw.id) && raw.id >= 0 ? raw.id : -1;
     const parsed = Envelope.safeParse(raw);

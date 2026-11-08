@@ -4,7 +4,7 @@ import {
   classifyStreamLink,
   parseProcStat,
   parsePsDetailTable,
-} from '../../../../../daemon/adapters/session/processes/index.ts';
+} from '../../../../../daemon/adapters/session/processes/process-tree.ts';
 
 /**
  * THE PURE PARTS OF THE PROCESS-TREE ADAPTERS: reading `/proc/<pid>/stat`, naming what a descriptor's

@@ -20,14 +20,14 @@ import {
  */
 const MAX_TUNNEL_DATA_BYTES = 49_101;
 
-export const MAX_INPUT_MESSAGE_BYTES = 256 * 1024;
-export const MAX_QUEUED_INPUT_BYTES = 1024 * 1024;
+const MAX_INPUT_MESSAGE_BYTES = 256 * 1024;
+const MAX_QUEUED_INPUT_BYTES = 1024 * 1024;
 /**
  * Frames are disposable state, not a replay stream: admit no bytes behind an already-buffered
  * socket, and keep exactly one latest envelope so recovery paints the current page.
  */
-export const MAX_BUFFERED_BYTES = 0;
-export const FRAME_RECOVERY_POLL_MS = 16;
+const MAX_BUFFERED_BYTES = 0;
+const FRAME_RECOVERY_POLL_MS = 16;
 
 const sameBytes = (left: Uint8Array, right: Uint8Array): boolean => {
   if (left.byteLength !== right.byteLength) return false;

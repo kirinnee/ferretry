@@ -102,7 +102,7 @@ const AUTO_NUDGE_ROW = /^\s*[│|]?\s*([>›❯»])?\s*(yes, set auto mode as my
  * choice no daemon gets to make. The fixed layer stops the dialog appearing at all; this is for a
  * runtime that has not been re-applied since, or a harness that brings it back another way.
  */
-export function autoDefaultNudgeAction(pane: string): StartupDialogAction | undefined {
+function autoDefaultNudgeAction(pane: string): StartupDialogAction | undefined {
   if (!pane.toLowerCase().includes('make auto mode your default permission mode?')) return undefined;
   const options = pane.split('\n').flatMap(line => {
     const match = AUTO_NUDGE_ROW.exec(line);

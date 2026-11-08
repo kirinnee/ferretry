@@ -82,7 +82,7 @@ export const AEAD_KEY_BYTES = 32 as const;
 export const AEAD_NONCE_BYTES = 12 as const;
 export const AEAD_TAG_BYTES = 16 as const;
 /** Ed25519 material: a 44-byte SPKI encoding of the public key and a 64-byte signature. */
-export const ED25519_SPKI_BYTES = 44 as const;
+const ED25519_SPKI_BYTES = 44 as const;
 export const ED25519_SIGNATURE_BYTES = 64 as const;
 
 const DAEMON_ID_PREFIX = 'fy_daemon_';
@@ -97,7 +97,7 @@ export async function daemonIdFromPublicKey(crypto: CloneCrypto, publicKeySpki: 
 }
 
 /** Parse an identifier a peer supplied. Returns null rather than a value that only looks like one. */
-export function parseDaemonId(value: string): string | null {
+function parseDaemonId(value: string): string | null {
   return DAEMON_ID_PATTERN.test(value) ? value : null;
 }
 

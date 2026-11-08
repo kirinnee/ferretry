@@ -2,6 +2,9 @@
 @import './themes.css';
 @import './highlight.css';
 @import './shell.css';
+/* Every plugin app half's own stylesheets (GENERATED from each `app/styles.css`), before Tailwind's layers exactly as today's
+   PWA imported every feature stylesheet here. The shared component classes are `ui/design-system.css`, loaded after. */
+@import '../generated/plugin-styles.css';
 
 /* Tailwind's layers, before the base elements below, as in today's PWA. The component classes are
    `ui/design-system.css`, loaded after this file. */

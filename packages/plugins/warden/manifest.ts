@@ -6,7 +6,7 @@ import { TerminalsPort } from '@ferretry/plugin-terminals/contract';
 import { VoicePort } from '@ferretry/plugin-voice/contract';
 import { appAction, definePlugin, panel, route, screen, settingsTab } from '@ferretry/kernel/manifest';
 import { AsksPort } from '@ferretry/core-asks/contract';
-import { FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
+import { ACTIONS_ROW_SLOT, FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { GatePort } from '@ferretry/core-gate/contract';
 import { UsagePort } from './contract/others.ts';
 import {
@@ -167,6 +167,9 @@ export default definePlugin({
     panels: [
       panel('daemon.status', { id: 'warden-strip', order: 60 }),
       panel('daemon.status', { id: 'warden-verdicts', order: 61 }),
+      // Ferrets' own pages: the Warden's word about a ferret in its Info, and its row in the Actions ▾ menu.
+      panel('ferret.side', { id: 'ferret-warden', order: 30 }),
+      panel(ACTIONS_ROW_SLOT, { id: 'ask-warden-row', order: 90 }),
     ],
     settings: [settingsTab('warden', { label: 'Warden', order: 60 })],
   },

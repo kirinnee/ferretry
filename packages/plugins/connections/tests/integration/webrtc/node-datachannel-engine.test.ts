@@ -14,12 +14,12 @@ import { describe, it } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import should from 'should';
 import {
+  NodeDataChannelEngine,
+  loadNodeDataChannel,
   type EngineDataChannel,
   type EnginePeerConnection,
-  loadNodeDataChannel,
-  NodeDataChannelEngine,
   type NodeDataChannelModule,
-} from '../../../daemon/adapters/webrtc/index.ts';
+} from '../../../daemon/adapters/webrtc/node-datachannel-engine.ts';
 import {
   WEBRTC_SELF_TEST_CHANNEL,
   WebRtcEngineUnavailable,

@@ -7,7 +7,7 @@ export interface TerminalSlotsOptions {
   readonly json?: boolean;
 }
 
-export const SLOT_ROUTES = {
+const SLOT_ROUTES = {
   holders: 'GET /v1/terminals',
   closeFinished: 'POST /v1/terminals/close-finished',
 } as const;

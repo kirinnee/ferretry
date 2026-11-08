@@ -43,7 +43,7 @@ type SignInLine = Extract<TaskPlanLine, { readonly kind: 'sign-in' | 'terminal-s
  * after the submit, twice or more (the daemon's own looks only, #1183). The identities with history, or `undefined`
  * for none: then the first fill must pass every check and pins the form.
  */
-export function historyIdentities(signIn: Pick<SignInSummary, 'place' | 'observed'>): readonly string[] | undefined {
+function historyIdentities(signIn: Pick<SignInSummary, 'place' | 'observed'>): readonly string[] | undefined {
   const keys = new Set(placeKeys(signIn.place));
   const seen = (signIn.observed ?? []).filter(
     (fact: LoginObserved) =>
@@ -70,7 +70,7 @@ function lastSecondFactor(signIn: Pick<SignInSummary, 'place' | 'observed'>): Ta
 const isPassword = (signIn: SignInSummary): boolean => signIn.method.kind === 'password' && signIn.via === undefined;
 
 /** The candidate the owner's card shows for one sign-in. OWNER VIEW ONLY: `can` and `history` say what is held. */
-export function candidateOf(signIn: SignInSummary, account: AccountSummary): TaskPlanCandidate {
+function candidateOf(signIn: SignInSummary, account: AccountSummary): TaskPlanCandidate {
   const factor = lastSecondFactor(signIn);
   return {
     signIn: signIn.id,

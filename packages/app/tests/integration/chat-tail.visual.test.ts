@@ -16,21 +16,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 
 /** This file's folder: the scene paths below are relative to it, and the builder runs here. */
 const packageRoot = import.meta.dir;
 
-/**
- * The component classes the chat is drawn with. The builder's `app.css` is the shell stylesheet alone (Tailwind and the
- * theme tokens); the shell loads the design system beside it (`main.tsx`) and Agenda's row and pill are its own sheet.
- */
-const chatStylesheets = [
-  resolve(packageRoot, '../../src/ui/design-system.css'),
-  resolve(packageRoot, '../../../plugins/agenda/app/features/agenda/agenda-chat.css'),
-];
 const shotsDir = process.env.FY_CHAT_TAIL_SHOTS_DIR ?? '';
 
 const SCENE_CSS = `
@@ -57,8 +49,7 @@ const build = async (): Promise<{ readonly css: string; readonly js: string }> =
   ]);
   if (code !== 0) throw new Error(`the chat-tail scene did not build (${code}):\n${stderr}\n${stdout}`);
   const manifest = JSON.parse(stdout.trim().split('\n').at(-1) as string) as { css: string; js: string };
-  const sheets = await Promise.all(chatStylesheets.map(async path => await readFile(path, 'utf8')));
-  return { css: [await readFile(manifest.css, 'utf8'), ...sheets].join('\n'), js: await readFile(manifest.js, 'utf8') };
+  return { css: await readFile(manifest.css, 'utf8'), js: await readFile(manifest.js, 'utf8') };
 };
 
 beforeAll(async () => {

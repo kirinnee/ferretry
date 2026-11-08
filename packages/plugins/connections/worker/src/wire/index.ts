@@ -5,4 +5,3 @@ export * from './identity.ts';
 export * from './claim.ts';
 export * from './frames.ts';
 export * from './flow.ts';
-export * from './handshake.ts';

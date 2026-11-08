@@ -7,11 +7,14 @@ import {
   resolveBrowserPorts,
 } from '../wire/ports.ts';
 
+/** @pending browsers: GAP(daemon): daemon/holds/site.ts, daemon/stream/socket-downstream.ts, daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet (the holds site key, the viewer socket transport and the loopback firewall status) (the file's OUTSIDE_THE_KERNEL exemption is permanent, #20; only its consumer is pending) */
 export const LOOPBACK_FIREWALL_SERVICE = 'ferretry-loopback-firewall';
+/** @pending browsers: GAP(daemon): daemon/holds/site.ts, daemon/stream/socket-downstream.ts, daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet (the holds site key, the viewer socket transport and the loopback firewall status) (the file's OUTSIDE_THE_KERNEL exemption is permanent, #20; only its consumer is pending) */
 export const LOOPBACK_FIREWALL_VERIFY_TIMER = 'ferretry-loopback-firewall-verify.timer';
 
-/** How often the daemon re-reads the marker, and how old a verification may be before it counts as not running. */
+/** How often the daemon re-reads the marker, and how old a verification may be before it counts as not running. @pending browsers: GAP(daemon): daemon/holds/site.ts, daemon/stream/socket-downstream.ts, daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet (the holds site key, the viewer socket transport and the loopback firewall status) (the file's OUTSIDE_THE_KERNEL exemption is permanent, #20; only its consumer is pending) */
 export const LOOPBACK_FIREWALL_CHECK_MS = 5 * 60_000;
+/** @pending browsers: GAP(daemon): daemon/holds/site.ts, daemon/stream/socket-downstream.ts, daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet (the holds site key, the viewer socket transport and the loopback firewall status) (the file's OUTSIDE_THE_KERNEL exemption is permanent, #20; only its consumer is pending) */
 export const LOOPBACK_FIREWALL_VERIFIED_MAX_AGE_MS = 15 * 60_000;
 
 /** The marker as the host holds it: parsed, or `undefined` when there is none or it is not one. */

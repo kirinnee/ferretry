@@ -13,7 +13,7 @@ import type {
   RelaySocket,
   RelayStorage,
   RelayStoragePutOptions,
-} from '../../../worker/src/adapters/index.ts';
+} from '../../../worker/src/adapters/worker.ts';
 import { decodeFrame, type SessionFrame } from '../../../worker/src/lib/index.ts';
 import { relayCrypto } from './identities.ts';
 

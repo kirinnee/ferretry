@@ -1,10 +1,11 @@
 import { implementApp } from '@ferretry/kernel/manifest';
 import { createElement } from 'react';
 import manifest from '../manifest.ts';
-import { browserTerminalDeckHost, SessionTerminalDeck } from './components/session-terminal-deck.tsx';
+import { browserTerminalDeckHost } from './components/session-terminal-deck.tsx';
+import { ConsolePanel, ProcessesPanel, TerminalsPanel } from './features/workspace/terminal-panels.tsx';
 import { TerminalSlotsSettings } from './features/settings/terminal-slots-settings.tsx';
 import { pluginTerminalDeckDependencies, pluginTerminalSlotsClient } from './lib/plugin-client.ts';
-import { daemonConnection, daemonSessionScope } from './shell.ts';
+import { daemonConnection } from './shell.ts';
 
 /**
  * The daemon a half's views speak to. The shell builds one half per daemon (§9.6) and hands it that daemon's own
@@ -27,11 +28,11 @@ export default implementApp(manifest, {
         terminals: ({ subject }) =>
           subject === undefined
             ? null
-            : createElement(SessionTerminalDeck, {
-                connection: THIS_DAEMON,
-                scope: daemonSessionScope(THIS_DAEMON, subject),
-                dependencies,
-              }),
+            : createElement(TerminalsPanel, { connection: THIS_DAEMON, subject, dependencies }),
+        console: ({ subject }) =>
+          subject === undefined ? null : createElement(ConsolePanel, { connection: THIS_DAEMON, subject, client }),
+        processes: ({ subject }) =>
+          subject === undefined ? null : createElement(ProcessesPanel, { connection: THIS_DAEMON, subject, client }),
       },
       settings: {
         terminals: () =>

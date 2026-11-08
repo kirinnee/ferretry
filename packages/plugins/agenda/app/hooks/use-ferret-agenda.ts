@@ -12,6 +12,8 @@ import { daemonSessionScope } from '../lib/machine.ts';
 
 export interface FerretAgenda {
   readonly model: AgendaTabModel;
+  /** The read was refused or never answered: the model is empty because nothing was read, not because nothing is asked. */
+  readonly failed: boolean;
   /** The lead whose agenda this sub-ferret's items are on. */
   readonly lead?: { readonly id: string; readonly name: string };
 }
@@ -31,6 +33,8 @@ export const useFerretAgenda = (runtime: AgendaRuntime, ferret: string | undefin
     useCallback(() => store.getSnapshot(), [store]),
   );
   const board = scope === undefined ? undefined : store.agenda(scope);
+  // A refresh that fails keeps the board already read; only a board never read is refused.
+  const failed = scope !== undefined && board === undefined && store.status(scope) === 'error';
   const fleet = useSyncExternalStore(runtime.ferrets.subscribe, runtime.ferrets.getSnapshot);
   return useMemo(() => {
     if (scope === undefined) return null;
@@ -46,9 +50,10 @@ export const useFerretAgenda = (runtime: AgendaRuntime, ferret: string | undefin
     const parent = view?.config.parent === undefined ? undefined : views.find(v => v.config.id === view.config.parent);
     return {
       model,
+      failed,
       ...(parent === undefined
         ? {}
         : { lead: { id: parent.config.id, name: sessionsBarNames(parent).ferret ?? sessionsBarNames(parent).title } }),
     };
-  }, [scope, board, fleet, runtime]);
+  }, [scope, board, failed, fleet, runtime]);
 };

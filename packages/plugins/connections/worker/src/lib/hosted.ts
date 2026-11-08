@@ -157,11 +157,10 @@ export function hostedRelayConnection(advertisement: HostedRelayAdvertisement): 
     : { kind: 'relay', relayUrl: advertisement.relayUrl, operator: 'hosted' };
 }
 
-export const HostedRelayUsageWindowSchema = z.strictObject({
+const HostedRelayUsageWindowSchema = z.strictObject({
   startedAt: TimestampSchema,
   bytes: SafeCountSchema,
 });
-export type HostedRelayUsageWindow = z.infer<typeof HostedRelayUsageWindowSchema>;
 
 /**
  * The three refusal counters answer three different questions and deliberately overlap.
@@ -684,7 +683,7 @@ export const HOSTED_RELAY_BANDWIDTH_REASONS = {
     day: 'hosted relay global daily bandwidth ceiling is reached',
   },
 } as const;
-export const HOSTED_RELAY_RESETS_MARK = '; resets ' as const;
+const HOSTED_RELAY_RESETS_MARK = '; resets ' as const;
 
 /**
  * A byte-ceiling refusal reason with its reset instant. The longest is 91 characters, inside the

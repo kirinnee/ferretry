@@ -22,7 +22,7 @@ export interface OwnerStep {
 }
 
 /** The drop-in the commands write. Numbered after the common `50-` so it is read later and wins. */
-export const OWNER_STEP_DROP_IN = '60-ferretry-memory.conf';
+const OWNER_STEP_DROP_IN = '60-ferretry-memory.conf';
 
 /** Undefined when nothing above the daemon holds the budget below the machine's RAM. */
 export function ownerStep(host: CgroupHostFacts, uid: number): OwnerStep | undefined {

@@ -95,13 +95,13 @@ export interface SignInRuleStore {
 }
 
 /** The account store, as rules read it: the listing with each account's immutable key. Never a value. */
-export interface SignInRuleAccountsPort {
+interface SignInRuleAccountsPort {
   /** Rejects when the store cannot tell. */
   listing(): Promise<RuleListing>;
 }
 
 /** Whether a passkey exists to approve a rule with: on any paired device, or on this one. */
-export interface SignInRulePasskeysPort {
+interface SignInRulePasskeysPort {
   any(): Promise<boolean>;
   of(deviceId: string): Promise<boolean>;
 }

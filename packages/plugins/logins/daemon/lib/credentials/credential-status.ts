@@ -73,7 +73,7 @@ const epochMilliseconds = z.number().int().nonnegative();
 
 // ── The words ────────────────────────────────────────────────────────────────────────────────────
 
-export const CredentialStatusWordSchema = z.enum(['ready', 'refresh_due', 'needs_sign_in', 'checking']);
+const CredentialStatusWordSchema = z.enum(['ready', 'refresh_due', 'needs_sign_in', 'checking']);
 export type CredentialStatusWord = z.infer<typeof CredentialStatusWordSchema>;
 
 /** The product's words, exactly (§2, §4.1 rule 7). Every surface renders these and no others. */
@@ -88,7 +88,7 @@ export const CREDENTIAL_STATUS_LABELS: Readonly<Record<CredentialStatusWord, str
  * WHY the word is what it is, as a closed set: the daemon publishes a code and each surface owns the
  * sentence. Never a provider message, never anything derived from credential material.
  */
-export const CredentialStatusReasonSchema = z.enum([
+const CredentialStatusReasonSchema = z.enum([
   // ready
   /** Claude: the free usage read answered for this token. */
   'provider_accepted',
@@ -139,17 +139,16 @@ export type CredentialStatusReason = z.infer<typeof CredentialStatusReasonSchema
 // ── The memory a status needs ────────────────────────────────────────────────────────────────────
 
 /** A conclusion some check reached, kept so an inconclusive check later shows it with its age. */
-export const CredentialConclusionSchema = z.strictObject({
+const CredentialConclusionSchema = z.strictObject({
   word: z.enum(['ready', 'needs_sign_in']),
   reason: CredentialStatusReasonSchema,
   at: epochMilliseconds,
   /** The local credential digest it was measured against: what stops it landing on a new login. */
   fingerprint: z.string().min(1).optional(),
 });
-export type CredentialConclusion = z.infer<typeof CredentialConclusionSchema>;
 
 /** A Codex refresh observed to fail permanently, and the file state it failed against. */
-export const CodexRefreshFailureRecordSchema = z.strictObject({
+const CodexRefreshFailureRecordSchema = z.strictObject({
   failure: z.enum(['expired', 'revoked', 'rejected']),
   at: epochMilliseconds,
   /** The canonical file's `last_refresh` at the time. A later one means a refresh succeeded since. */
@@ -157,18 +156,12 @@ export const CodexRefreshFailureRecordSchema = z.strictObject({
   /** The canonical file's digest at the time. A different one means the login was replaced. */
   fingerprint: z.string().min(1).optional(),
 });
-export type CodexRefreshFailureRecord = z.infer<typeof CodexRefreshFailureRecordSchema>;
+type CodexRefreshFailureRecord = z.infer<typeof CodexRefreshFailureRecordSchema>;
 
 /** Where a usage reading came from. The first two are passive; the last two are the free reads. */
-export const CredentialUsageSourceSchema = z.enum([
-  'claude-statusline',
-  'codex-rollout',
-  'anthropic-usage',
-  'codex-usage',
-]);
-export type CredentialUsageSource = z.infer<typeof CredentialUsageSourceSchema>;
+const CredentialUsageSourceSchema = z.enum(['claude-statusline', 'codex-rollout', 'anthropic-usage', 'codex-usage']);
 
-export const CredentialUsageReadingSchema = z.strictObject({
+const CredentialUsageReadingSchema = z.strictObject({
   source: CredentialUsageSourceSchema,
   at: epochMilliseconds,
   fiveHour: FleetUsageWindowSchema.optional(),
@@ -177,7 +170,7 @@ export const CredentialUsageReadingSchema = z.strictObject({
 export type CredentialUsageReading = z.infer<typeof CredentialUsageReadingSchema>;
 
 /** Everything one credential's status is decided from beyond its local read. Small, and serialisable. */
-export const CredentialStatusHeadSchema = z.strictObject({
+const CredentialStatusHeadSchema = z.strictObject({
   conclusion: CredentialConclusionSchema.optional(),
   /** The newest check, conclusive or not. */
   lastCheck: z.strictObject({ at: epochMilliseconds, conclusive: z.boolean() }).optional(),
@@ -191,7 +184,7 @@ export type CredentialStatusHead = z.infer<typeof CredentialStatusHeadSchema>;
 export const CREDENTIAL_NEGATIVE_FRESH_MS = FLEET_HEALTH_FRESH_MS;
 
 /** Codex's own rule: an access token this close to `exp` is refreshed at the next start. */
-export const CODEX_REFRESH_LEEWAY_MS = 5 * 60 * 1_000;
+const CODEX_REFRESH_LEEWAY_MS = 5 * 60 * 1_000;
 
 /** Codex's own rule when the access token carries no readable `exp`. */
 export const CODEX_LAST_REFRESH_MAX_AGE_MS = 8 * 24 * 60 * 60 * 1_000;
@@ -298,7 +291,7 @@ export interface LocalCredentialFacts {
 }
 
 /** The facts of a store that could not be read at all. Unreadable condemns nothing. */
-export const UNREADABLE_CREDENTIAL_FACTS: LocalCredentialFacts = {
+const UNREADABLE_CREDENTIAL_FACTS: LocalCredentialFacts = {
   shape: { kind: 'decided', reading: { state: 'unreadable' } },
   codex: { state: 'unreadable' },
 };
@@ -329,7 +322,7 @@ export function localReadingAt(facts: LocalCredentialFacts, now: number): LocalC
 // ── The decision ─────────────────────────────────────────────────────────────────────────────────
 
 /** One credential's published status. */
-export const CredentialStatusSchema = z.strictObject({
+const CredentialStatusSchema = z.strictObject({
   word: CredentialStatusWordSchema,
   reason: CredentialStatusReasonSchema,
   /** When the evidence behind the word was observed, when there is an instant to name. */
@@ -550,7 +543,7 @@ export function codexFileAdvanced(
 // ── Usage ────────────────────────────────────────────────────────────────────────────────────────
 
 /** One credential's two windows. A window with no `usedPercent` is UNKNOWN, never 0%. */
-export const CredentialUsageSchema = z.strictObject({
+const CredentialUsageSchema = z.strictObject({
   fiveHour: FleetUsageWindowSchema,
   weekly: FleetUsageWindowSchema,
   source: CredentialUsageSourceSchema.optional(),
@@ -627,7 +620,7 @@ export function activeUsageReading(
 // ── The service ──────────────────────────────────────────────────────────────────────────────────
 
 /** Where heads are kept. The daemon decides how durable; {@link InMemoryCredentialStatusStore} is one. */
-export interface CredentialStatusStore {
+interface CredentialStatusStore {
   read(id: string): Promise<CredentialStatusHead | undefined>;
   write(id: string, head: CredentialStatusHead): Promise<void>;
 }
@@ -652,13 +645,13 @@ export interface CredentialSubject {
 }
 
 /** How a local read treats facts kept from an earlier read of the same store. */
-export interface CredentialReadOptions {
+interface CredentialReadOptions {
   /** Read the store itself. A Codex refresh judges itself by the file before and after, so it must. */
   readonly fresh?: boolean;
 }
 
 /** The free read's answer, and the facts of the very material whose token it sent: ONE read of the store. */
-export interface ActiveUsageRead {
+interface ActiveUsageRead {
   readonly result: FleetUsageProbeResult;
   readonly local: LocalCredentialFacts;
 }

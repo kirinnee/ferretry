@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { CLOUDFLARE_API_BASE, CloudflareFetchTunnelApi } from '../../../worker/src/adapters/index.ts';
+import { CLOUDFLARE_API_BASE, CloudflareFetchTunnelApi } from '../../../worker/src/adapters/cloudflare-tunnel-api.ts';
 import { type TunnelAccount, TunnelAccountSchema, tunnelIngress } from '../../../worker/src/lib/index.ts';
 
 const TOKEN = 'cf-api-token-never-logged';

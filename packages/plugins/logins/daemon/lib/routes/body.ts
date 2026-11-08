@@ -2,7 +2,7 @@ import { ApiError, type ApiRequest } from '@ferretry/kernel/contract';
 import type { z } from 'zod';
 
 /** The largest request body any login route accepts: a sign-in code, an address, a Test consent. */
-export const MAX_LOGIN_BODY_BYTES = 64 * 1024;
+const MAX_LOGIN_BODY_BYTES = 64 * 1024;
 
 /**
  * Parses a request body against a schema (today's `parseBody`). The schema is the boundary: a body that does not

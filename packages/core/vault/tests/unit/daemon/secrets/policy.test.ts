@@ -12,8 +12,8 @@ import {
   redactJsonValue,
   redactSecretValues,
   resolveChildEnvironment,
-  UnknownSecretError,
-} from '../../../../daemon/lib/secrets/index.ts';
+} from '../../../../daemon/lib/secrets/policy.ts';
+import { UnknownSecretError } from '../../../../daemon/lib/secrets/types.ts';
 
 const TOKEN = 'sk-live-0123456789';
 const OTHER = 'pw-abcdefghij';

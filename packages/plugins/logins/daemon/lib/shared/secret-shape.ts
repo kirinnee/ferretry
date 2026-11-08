@@ -28,13 +28,6 @@ export interface SecretFinding {
   readonly path: readonly (string | number)[];
 }
 
-/** What a person is told to do instead, in one sentence. */
-export const RAW_SECRET_FIX =
-  'store the value with `fy secret set NAME`, then write ${secret:NAME} here instead — a secret value never goes in a configuration file';
-
-/** What the finding is, in one sentence that never includes the value. */
-export const RAW_SECRET_MESSAGE = 'this looks like a raw secret (an API key or token)';
-
 const KNOWN_SHAPES: readonly RegExp[] = [
   /\bsk-ant-[A-Za-z0-9_-]{8,}/u,
   /\bsk-or-[A-Za-z0-9_-]{8,}/u,
@@ -62,7 +55,7 @@ const MIN_SECRET_LENGTH = 16;
 const ENTROPY_THRESHOLD = 3.5;
 
 /** Shannon entropy of a string, in bits per character. */
-export function shannonEntropy(value: string): number {
+function shannonEntropy(value: string): number {
   const characters = [...value];
   const counts = new Map<string, number>();
   for (const character of characters) counts.set(character, (counts.get(character) ?? 0) + 1);

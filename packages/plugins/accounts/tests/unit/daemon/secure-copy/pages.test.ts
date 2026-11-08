@@ -7,13 +7,11 @@ import {
 import should from 'should';
 import { EphemeralValues } from '../support/masking.ts';
 import type { BrowserCopyRead } from '../../../../daemon/lib/local-ports.ts';
-import {
-  BrowserCopyPages,
-  type CopyPageRead,
-  PageCopyRecords,
-  SecureCopyError,
-  SecureCopyService,
-} from '../../../../daemon/lib/index.ts';
+import { BrowserCopyPages } from '../../../../daemon/lib/secure-copy/browser-pages.ts';
+import { type CopyPageRead } from '../../../../daemon/lib/secure-copy/ports.ts';
+import { PageCopyRecords } from '../../../../daemon/lib/secure-copy/page-records.ts';
+import { SecureCopyError } from '../../../../daemon/lib/secure-copy/errors.ts';
+import { SecureCopyService } from '../../../../daemon/lib/secure-copy/service.ts';
 
 const TOKEN = 'ghp_PAGE-SEALED-UNIQUE-55b0';
 const SESSION = 's1';

@@ -7,7 +7,7 @@
 import { type LocalModels, LocalModelsSchema } from '../../contract/index.ts';
 import type { LoginsClient } from './client.ts';
 
-export const LOCAL_MODELS_REFRESH_ROUTE = 'POST /v1/models/local/refresh' as const;
+const LOCAL_MODELS_REFRESH_ROUTE = 'POST /v1/models/local/refresh' as const;
 
 export const refreshLocalModels = async (client: LoginsClient): Promise<LocalModels> =>
   LocalModelsSchema.parse(await client.call(LOCAL_MODELS_REFRESH_ROUTE, { body: {} }));

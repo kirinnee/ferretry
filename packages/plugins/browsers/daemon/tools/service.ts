@@ -87,12 +87,12 @@ export interface BrowserToolAnswer {
 }
 
 /** "What agents may control" (Ferrets' machine switches). */
-export interface AgentControlPolicy {
+interface AgentControlPolicy {
   allows(kind: 'browser' | 'files' | 'scripts'): Promise<boolean>;
 }
 
 /** Who each page signs in (part b's `TypedIdentities`, I154/I155). */
-export interface TypedIdentityLedger {
+interface TypedIdentityLedger {
   typed(sessionId: string, pageId: string, host: string, text: string): void;
   seen(sessionId: string, pageId: string, host: string | undefined): void;
   cleared(sessionId: string, pageId: string): void;
@@ -111,7 +111,7 @@ export interface ActedPage {
  * Today's `loginActs`: told BEFORE a ferret's call that may change a page runs (`script`: a page script), and placed on
  * the page it touched once the call is over (`undefined`: every page). Bound to `VaultApi.pageActed` (I98–I100).
  */
-export interface PageActs {
+interface PageActs {
   acted(sessionId: string, script: boolean): { placed(page: ActedPage | undefined): void } | undefined;
 }
 
@@ -134,7 +134,7 @@ const actsOnPage = (call: BrowserToolCall): boolean =>
   !LEAVES_PAGES.has(call.tool) && !(call.tool === 'browser.tabs' && call.action === 'list');
 
 /** Where a page script ran, for the Vault's standing fill rules (today's `scriptedOrigins`). */
-export interface ScriptedOrigins {
+interface ScriptedOrigins {
   running?(): () => void;
   scriptedOn(host: string | undefined): void;
 }
@@ -214,7 +214,7 @@ const FILE_TOOLS: ReadonlySet<BrowserToolCall['tool']> = new Set(['browser.uploa
 const LISTING_TOOLS: ReadonlySet<BrowserToolCall['tool']> = new Set(['browser.list']);
 
 /** Each tool's `Op` (§4.7; the manifest names the same). */
-export const TOOL_OPS: Readonly<Record<BrowserToolCall['tool'], Op>> = {
+const TOOL_OPS: Readonly<Record<BrowserToolCall['tool'], Op>> = {
   'browser.list': 'read',
   'browser.open': 'open',
   'browser.navigate': 'navigate',
@@ -274,19 +274,19 @@ const MAX_OPENER_DEPTH = 8;
 const plural = (count: number, word: string): string => `${String(count)} ${word}${count === 1 ? '' : 's'}`;
 
 /** A surface as a person writes it: `%browser:app`. */
-export const surfaceReference = (key: string): string => `%browser:${key}`;
+const surfaceReference = (key: string): string => `%browser:${key}`;
 
 /** Whether this agent opened the surface itself — the attestation the daemon recorded, never a claim. */
 const openedByAgent = (openedBy: SurfaceOpener | undefined, sessionId: string): boolean =>
   openedBy?.by === 'agent' && openedBy.sessionId === sessionId;
 
 /** Keeps the tail of a log: the newest output is what matters. */
-export function clipOutput(text: string, limit: number = AGENT_TOOL_MAX_OUTPUT_CHARS): string {
+function clipOutput(text: string, limit: number = AGENT_TOOL_MAX_OUTPUT_CHARS): string {
   return text.length <= limit ? text : text.slice(text.length - limit);
 }
 
 /** Keeps the START of a page's accessibility tree or snapshot, on a line boundary. */
-export function clipReading(text: string, limit: number = AGENT_TOOL_MAX_OUTPUT_CHARS): string {
+function clipReading(text: string, limit: number = AGENT_TOOL_MAX_OUTPUT_CHARS): string {
   if (text.length <= limit) return text;
   const head = text.slice(0, limit);
   const lastLine = head.lastIndexOf('\n');
@@ -297,13 +297,13 @@ export function clipReading(text: string, limit: number = AGENT_TOOL_MAX_OUTPUT_
 const CONTROL_SETTING = { browser: 'Browsers', files: 'Files' } as const;
 
 /** The plain sentence an agent is told when the machine's settings switch a kind of control off. */
-export function controlRefusal(kind: 'browser' | 'files'): string {
+function controlRefusal(kind: 'browser' | 'files'): string {
   const setting = CONTROL_SETTING[kind];
   return `This machine does not let agents control ${setting.toLowerCase()}: "What agents may control › ${setting}" is off in this machine's settings. Ask the person to turn it on if you need it.`;
 }
 
 /** What an agent is told when it asks for `browser.eval` and the owner has not turned Page scripts on. */
-export function pageScriptsRefusal(binaryName: string): string {
+function pageScriptsRefusal(binaryName: string): string {
   return `browser.eval is off on this machine: "What agents may control › Page scripts" is off, and only the owner can turn it on — in the app (Settings › this machine › What agents may control › Page scripts), with \`${binaryName} machine set agent-control scripts on\`, or with agentControl.pageScripts: true in machine.yaml. Turning it on waits for their confirmation, because a page script can read what a page holds, sign-ins on the shared profile included. Ask them if you need it; the other browser tools work without it.`;
 }
 
@@ -1250,7 +1250,7 @@ function dialogNote(dialog: BrowserDialogInfo | undefined, scrubbedMessage: stri
 }
 
 /** The browser's own action for a page tool's call. */
-export function pageActionOf(call: Extract<BrowserToolCall, { readonly tool: PageToolName }>): BrowserPageAction {
+function pageActionOf(call: Extract<BrowserToolCall, { readonly tool: PageToolName }>): BrowserPageAction {
   const element = elementOfCall(call);
   switch (call.tool) {
     case 'browser.navigate':
@@ -1434,7 +1434,7 @@ function shown(surfaces: readonly AgentSurface[]): BrowserToolAnswer {
  * The subsystems' own refusals, in this domain's words — or nothing, for a genuine defect, which stays itself so it
  * surfaces as the failure it is. A refused act (a hold) answers its fixed sentence (I120).
  */
-export function translate(error: unknown): BrowserToolError | undefined {
+function translate(error: unknown): BrowserToolError | undefined {
   if (error instanceof BrowserToolError) return error;
   if (error instanceof BrowserTransportError) return fromWorker(error);
   if (error instanceof ApiError && error.status === 409) return new BrowserToolError('conflict', error.message);
@@ -1471,7 +1471,7 @@ function fromWorker(error: BrowserTransportError): BrowserToolError {
 }
 
 /** One sentence: what is missing, and how to fix it. */
-export function browserUnavailable(reason: string): string {
+function browserUnavailable(reason: string): string {
   const first = (reason.split('\n')[0] ?? '').trim().slice(0, 200);
   return `Browser tools could not start a browser on this machine (${first || 'no reason given'}): install Google Chrome or set FY_CHROME_BIN to a Chrome binary, then try again.`;
 }

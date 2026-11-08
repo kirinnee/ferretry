@@ -238,14 +238,6 @@ export interface TerminalStreamHandlers {
   onRefused(status: number, body: string): void;
 }
 
-export type TerminalStreamAttach = (
-  daemon: DaemonConnection,
-  scope: DaemonSessionScope,
-  terminalId: string,
-  handlers: TerminalStreamHandlers,
-  options?: TerminalAttachOptions,
-) => Promise<TerminalStream>;
-
 /** `reveal` asks the daemon to show THIS viewer a quarantined terminal. It is per connection and audited. */
 export interface TerminalAttachOptions {
   readonly reveal?: boolean;

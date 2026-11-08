@@ -225,13 +225,15 @@ describe('app half: the screen and the Settings tab', () => {
     expect(Object.keys(half.settings)).toEqual(manifest.ui.settings.map(tab => tab.id));
   });
 
-  test('the dashboard strip and verdicts are declared in today’s place (daemon.status) and implemented as lazy panels', async () => {
+  test('the dashboard strip and verdicts (daemon.status) and the Warden’s two contributions to Ferrets’ pages (ferret.side, ferrets.actions-row) are declared and implemented as lazy panels', async () => {
     expect(manifest.ui.panels).toEqual([
       { slot: 'daemon.status', id: 'warden-strip', order: 60 },
       { slot: 'daemon.status', id: 'warden-verdicts', order: 61 },
+      { slot: 'ferret.side', id: 'ferret-warden', order: 30 },
+      { slot: 'ferrets.actions-row', id: 'ask-warden-row', order: 90 },
     ]);
     expect(Object.keys(half.panels)).toEqual(manifest.ui.panels.map(panel => panel.id));
-    for (const panel of [half.panels['warden-strip'], half.panels['warden-verdicts']]) {
+    for (const panel of Object.values(half.panels)) {
       let thrown: unknown;
       try {
         panel({});

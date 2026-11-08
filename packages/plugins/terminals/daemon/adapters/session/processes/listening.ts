@@ -35,7 +35,7 @@ export class ProcfsListeningProbe {
 }
 
 /** The socket inodes a `/proc/net/tcp`-format table lists in state `0A` (LISTEN). */
-export function listeningInodes(table: string): readonly string[] {
+function listeningInodes(table: string): readonly string[] {
   const inodes: string[] = [];
   for (const line of table.split('\n').slice(1)) {
     const fields = line.trim().split(/\s+/u);
