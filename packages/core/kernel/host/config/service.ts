@@ -547,18 +547,31 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
    * Puts every file of a write set and its accepted record back as they were before the set (`journal`), then removes
    * the record. Idempotent: run again after a stop part-way through, it writes the same texts and records.
    */
-  const rollBack = async (journal: WriteSetJournal): Promise<void> => {
+  const rollBack = async (journal: WriteSetJournal): Promise<readonly string[]> => {
+    // A file is put back only while it still holds what the set wrote (or already its prior): one the owner changed
+    // since is theirs, and is left as it is.
+    const kept: string[] = [];
+    const putBack: (typeof journal.documents)[number][] = [];
     for (const document of journal.documents) {
       const absolute = `${root}/${document.path}`;
+      const current = await fs.readText(absolute).catch(() => undefined);
+      const now = current === undefined ? null : digest(current);
+      const before = document.prior === null ? null : digest(document.prior);
+      if (now !== document.written && now !== before) {
+        kept.push(document.path);
+        continue;
+      }
+      putBack.push(document);
       if (document.prior === null) await fs.remove(absolute);
       else await fs.writeAtomic(absolute, document.prior, PRIVATE_FILE_MODE);
     }
-    for (const document of journal.documents) {
+    for (const document of putBack) {
       const name = acceptedName(document.path);
       if (document.accepted === null) await state.remove(acceptedConfigFile, name);
       else await state.write(acceptedConfigFile, document.accepted, name);
     }
     await journalState.remove(configWriteSetFile);
+    return kept;
   };
 
   /**
@@ -577,9 +590,10 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     }
     journalDamageSaid = false;
     if (read.value === undefined) return;
-    await rollBack(read.value);
+    const kept = await rollBack(read.value);
     log.warn(
-      `config: a write set of ${read.value.documents.length} file(s) for ${read.value.plugin} did not finish; every one of them was put back as it was`,
+      `config: a write set of ${read.value.documents.length} file(s) for ${read.value.plugin} did not finish; ${String(read.value.documents.length - kept.length)} of them were put back as they were` +
+        (kept.length === 0 ? '' : `, and ${String(kept.length)} changed since were left as they are`),
     );
   };
 
@@ -1165,6 +1179,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
           path: item.slot.path,
           prior: item.prior ?? null,
           accepted: item.stored ?? null,
+          written: item.text === undefined ? null : digest(item.text),
         })),
       };
       await journalState.write(configWriteSetFile, journal);

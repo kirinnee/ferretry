@@ -92,3 +92,16 @@ export function detachedHandle(pid: number): ChildHandle {
     closePipes: () => undefined,
   };
 }
+
+/**
+ * Whether a spawn asks for a detached child: only an exact `true` does. `undefined` is an ordinary child; any other
+ * value (`false` included, which the type does not allow) is refused outright rather than read as either answer.
+ */
+export function detachedAsked<T extends { readonly detached?: unknown }>(
+  options: T | undefined,
+): options is T & { readonly detached: true } {
+  const asked = options?.detached;
+  if (asked === undefined) return false;
+  if (asked !== true) throw new Error('SpawnOptions.detached is true or absent, never another value.');
+  return true;
+}

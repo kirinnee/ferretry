@@ -1,26 +1,16 @@
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { isKernelMadeRoot } from '../host/internal-roots.ts';
-import { isReadOnlyRoot, mayHoldRoot, RootError, scopedSubfolder } from '../host/roots.ts';
+import { DEFAULT_COPY_ENTRIES, isReadOnlyRoot, mayHoldRoot, RootError, scopedSubfolder } from '../host/roots.ts';
 import { harnessFileRefusal, permittedMode, takesLinks } from '../host/root-rules.ts';
-import {
-  ownStateTree,
-  receivingRoot,
-  refuseShared,
-  type SharedOrigin,
-  SHARED_TREE_LINK_RULE,
-  sharedLinkAllowed,
-  type SharedTreeLinkRule,
-  SharedTrees,
-  shareableRoot,
-} from '../host/shared-trees.ts';
+import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { failureResponse } from '../host/responses.ts';
 import type { ContractSurface, FetchPort, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
 import { gatedOverrides, gatedPaths, gatedWhich } from '../host/paths.ts';
 import { handleReaders, locateCommand, whichCommand, whichForCommand } from '../host/which.ts';
-import { NO_PROCESS_TABLE, type ProcessTable, processesPortFor } from '../host/processes.ts';
+import { NO_PROCESS_TABLE, PROCESS_FOLDER_ROOTS, type ProcessTable, processesPortFor } from '../host/processes.ts';
 import { undeclaredUpdateHost } from '../host/adapters/update-host.ts';
 import { PRODUCT_BINARIES } from '../host/binaries.ts';
 import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
@@ -110,7 +100,7 @@ import {
   spawnPermitted,
 } from '../host/permissions.ts';
 import { scratchPort } from '../host/scratch.ts';
-import { type DetachedCall, detachedHandle, detachedRefusal } from '../host/detached.ts';
+import { type DetachedCall, detachedAsked, detachedHandle, detachedRefusal } from '../host/detached.ts';
 import { PinRegistry } from '../host/pins.ts';
 import { type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
 import { matchingHook } from '../host/hooks.ts';
@@ -216,8 +206,6 @@ export interface TestHostOptions {
    * `childEnvironments`, else none, so every handle is `unprovable`.
    */
   readonly childEnvironments?: ChildEnvironmentOpener;
-  /** `RootHandle.copyShared`'s link rule, as the real host's `sharedTreeLinks`. Default: `SHARED_TREE_LINK_RULE`. */
-  readonly sharedTreeLinks?: SharedTreeLinkRule;
   /** `kernel.scratch`. Default: real private temp folders, as the daemon's. */
   readonly scratch?: ScratchPort;
   /** What the owner's installed items name, for `permissions.spawn`/`network` `{ items }` entries. Default: none. */
@@ -1024,6 +1012,7 @@ async function start(world: World): Promise<TestHost> {
   ): Promise<readonly string[] | undefined> => {
     const known = testHandles.get(folder.root);
     if (known === undefined || known.plugin !== plugin || known.prefix === undefined) return undefined;
+    if (!PROCESS_FOLDER_ROOTS.has(known.root)) return undefined;
     const path = folder.path;
     if (
       typeof path !== 'string' ||
@@ -1087,9 +1076,7 @@ async function start(world: World): Promise<TestHost> {
   /** Every tree a test plugin minted: the files it holds now (a flat copy), and where it came from. */
   const sharedTrees = new SharedTrees<{
     readonly files: () => readonly (readonly [string, string])[];
-    readonly origin: SharedOrigin;
   }>();
-  const linkRule = options.sharedTreeLinks ?? SHARED_TREE_LINK_RULE;
   const rootsFor = (manifest: Manifest): KernelPorts['roots'] => {
     // As the real host: every tree a plugin minted is revoked when the host stops it.
     const life = { live: true };
@@ -1104,22 +1091,6 @@ async function start(world: World): Promise<TestHost> {
       harnessFile: absolutePath => testHarnessFile(manifest, absolutePath),
       share: async source => {
         if (manifest.permissions?.shareTrees !== true) return refuseShared('not_permitted');
-        if ('root' in source) {
-          const known = testHandles.get(source.root);
-          if (known === undefined || known.plugin !== manifest.id) return refuseShared('not_own');
-          if (!shareableRoot(known.root)) return refuseShared('not_shareable');
-          const from = source.path as string;
-          if (known.prefix === undefined || !(from === known.prefix || from.startsWith(`${known.prefix}/`)))
-            throw new Error(`${from} is outside the ${known.root} root`);
-          const files = () => under(from, world.roots);
-          if (files().length === 0) throw new Error(`no such folder ${from}`);
-          const origin: SharedOrigin = {
-            kind: 'root',
-            root: known.root,
-            ...(known.ferret === undefined ? {} : { ferret: known.ferret }),
-          };
-          return sharedTrees.mint(from.slice(from.lastIndexOf('/') + 1), { files, origin }, life);
-        }
         const folder = ownStateTree(manifest.data?.state ?? [], source.state, source.name);
         if (folder === undefined) return refuseShared('not_own');
         const state = world.states.get(manifest.id);
@@ -1137,7 +1108,7 @@ async function start(world: World): Promise<TestHost> {
               ];
         if (files().length === 0 && state?.directories.has(folder) !== true)
           throw new Error(`no such folder ${folder}`);
-        return sharedTrees.mint(folder.slice(folder.lastIndexOf('/') + 1), { files, origin: { kind: 'state' } }, life);
+        return sharedTrees.mint(folder.slice(folder.lastIndexOf('/') + 1), { files }, life);
       },
       root(name, scope) {
         if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name))
@@ -1229,16 +1200,24 @@ async function start(world: World): Promise<TestHost> {
           copyShared: async (tree, to, copyOptions) => {
             if (!receivingRoot(name)) return refuseShared('not_internal');
             const shared = sharedTrees.open(tree);
-            const receiver = {
-              root: name,
-              ...(scope?.ferret === undefined ? {} : { ferret: scope.ferret }),
-              ...(scope?.subfolder === undefined ? {} : { subfolder: scope.subfolder }),
-            };
+            // As production: the destination lies inside the receiving handle's scope, is NEW, and the walk is bounded.
+            const place = ownPath(to);
+            if (world.roots.has(place) || testLinks.has(place) || testFolderExists(place))
+              throw new RootError('outside');
+            const files = shared.files();
+            const folders = new Set(
+              files.flatMap(([key]) =>
+                key
+                  .split('/')
+                  .slice(0, -1)
+                  .map((_, index, parts) => parts.slice(0, index + 1).join('/')),
+              ),
+            );
+            if (files.length + folders.size > (copyOptions?.maxEntries ?? DEFAULT_COPY_ENTRIES))
+              throw new RootError('outside');
             // the test roots are one flat map: a link and a copy both put every file under `to`
-            for (const [key, value] of shared.files()) world.roots.set(`${to}/${key}`, value);
-            return copyOptions?.link === true && sharedLinkAllowed(linkRule, shared.origin, receiver)
-              ? 'linked'
-              : 'copied';
+            for (const [key, value] of files) world.roots.set(`${to}/${key}`, value);
+            return copyOptions?.link === true ? 'linked' : 'copied';
           },
           copyTree: async (_source, from, to, copyOptions) => {
             // the test roots are one flat map: copy (or, for a link, alias) every file under `from`
@@ -1288,6 +1267,7 @@ async function start(world: World): Promise<TestHost> {
             testLinks.set(place, to);
           },
           setMode: async (path, mode) => {
+            if (manifest.permissions?.setMode !== true) throw new RootError('not_declared');
             if (isReadOnlyRoot(name)) throw new RootError('read_only');
             const bits = permittedMode(isKernelMadeRoot(name), mode);
             if (bits === undefined) throw new RootError('outside');
@@ -1373,7 +1353,7 @@ async function start(world: World): Promise<TestHost> {
       },
       spawn: {
         async run(program, args, spawnOptions) {
-          if (spawnOptions?.detached !== undefined)
+          if (detachedAsked(spawnOptions))
             refuseDetached(manifest, options.items ?? NO_ITEMS, 'run', program, spawnOptions);
           if (
             !spawnPermitted(
@@ -1387,7 +1367,7 @@ async function start(world: World): Promise<TestHost> {
           return options.spawn(program, args, spawnOptions);
         },
         async runBytes(program, args, spawnOptions) {
-          if (spawnOptions?.detached !== undefined)
+          if (detachedAsked(spawnOptions))
             refuseDetached(manifest, options.items ?? NO_ITEMS, 'runBytes', program, spawnOptions);
           const result = await this.run(program, args, spawnOptions);
           const all = new TextEncoder().encode(result.stdout);
@@ -1402,7 +1382,7 @@ async function start(world: World): Promise<TestHost> {
           };
         },
         start(program, args, spawnOptions): ChildHandle {
-          if (spawnOptions?.detached !== undefined) {
+          if (detachedAsked(spawnOptions)) {
             refuseDetached(manifest, options.items ?? NO_ITEMS, 'start', program, spawnOptions);
             if (options.detachedStart === undefined)
               throw new Error(`${manifest.id}: detached ${program} with no detachedStart fake`);
@@ -1484,8 +1464,8 @@ async function start(world: World): Promise<TestHost> {
                 try {
                   // As the real host: the Vault's bound opener (a loaded Vault's `childEnvironments`), else the option.
                   const opener =
-                    options.childEnvironments ??
-                    (providedBy.get(ChildEnvironmentPort.name) as ChildEnvironmentOpener | undefined);
+                    (providedBy.get(ChildEnvironmentPort.name) as ChildEnvironmentOpener | undefined) ??
+                    options.childEnvironments;
                   searchPath = opener?.searchPathOf(env, handleReaders(manifest.id, manifests));
                 } catch {
                   searchPath = undefined;

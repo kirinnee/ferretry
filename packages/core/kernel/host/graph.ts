@@ -14,7 +14,8 @@ export interface GraphRefusal {
     | 'duplicate'
     | 'needs-refused'
     | 'hook'
-    | 'kernel-only-port';
+    | 'kernel-only-port'
+    | 'kernel-event';
   readonly sentence: string;
 }
 
@@ -97,6 +98,18 @@ export function planGraph(
         plugin: manifest.id,
         reason: 'kernel-only-port',
         sentence: `${manifest.title} asks for ${asked.name}, which only the kernel may hold.`,
+      });
+  }
+
+  // A `kernel.*` event is the kernel's own: a plugin that declares one would forge it and move its discovery gate.
+  for (const manifest of byId.values()) {
+    if (refused.has(manifest.id) || manifest.id === 'kernel') continue;
+    const claimed = (manifest.data?.publishes ?? []).find(event => event.name.startsWith('kernel.'));
+    if (claimed !== undefined)
+      refuse({
+        plugin: manifest.id,
+        reason: 'kernel-event',
+        sentence: `${manifest.title} publishes ${claimed.name}, which only the kernel may publish.`,
       });
   }
 

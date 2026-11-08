@@ -401,6 +401,28 @@ describe('writeAll: a stop mid-set honours the last good version of every docume
     expect(next.log.lines.some(line => line.includes('did not finish'))).toBe(true);
   });
 
+  test('a file the owner changed while the daemon was down is left as they made it; the rest of the set is put back', async () => {
+    const base = createMemoryHostFs();
+    const first = harness({ base });
+    await first.start();
+    const dying = harness({ base, fs: dyingDisk(base, (op, path) => op === 'remove' && path === JOURNAL, true) });
+    await dying.files.reload();
+    await expect(
+      dying.port.writeAll([
+        { def: updatesDef, edit: 'limit: 1\n' },
+        { def: loginsDef, name: 'b', edit: 'budget: 1\n' },
+      ]),
+    ).rejects.toThrow();
+    // while the daemon is down the owner tightens updates.yaml by hand
+    await base.writeAtomic(UPDATES, 'limit: 2\n', 0o600);
+    const next = harness({ base });
+    await next.files.reload();
+    expect(base.snapshot().get(UPDATES)).toBe('limit: 2\n');
+    expect(base.snapshot().get(`${HOME}/config/logins/b.yaml`)).toBeUndefined();
+    expect(base.snapshot().get(JOURNAL)).toBeUndefined();
+    expect(next.log.lines.some(line => line.includes('1 changed since were left as they are'))).toBe(true);
+  });
+
   test('stopped after every file and record but before the commit: still put back whole (the removal IS the commit)', async () => {
     const base = createMemoryHostFs();
     const first = harness({ base });

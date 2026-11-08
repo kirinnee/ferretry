@@ -152,6 +152,17 @@ describe('detached spawn: who may start one', () => {
   });
 });
 
+describe('detached spawn: only an exact true detaches', () => {
+  test('detached: false is neither read as a detached start nor as an ordinary one: it is refused, and nothing starts', async () => {
+    const { base, port } = browsers();
+    const asked = { detached: false } as unknown as SpawnOptions;
+    expect(() => port.start('xdg-open', ['x'], asked)).toThrow('true or absent');
+    await expect(port.run('xdg-open', ['x'], asked)).rejects.toThrow('true or absent');
+    expect(base.started).toEqual([]);
+    expect(base.ran).toEqual([]);
+  });
+});
+
 describe('detached spawn: each refused combination', () => {
   const pin = { install: () => () => undefined } as unknown as PinnedWorkingDirectory;
   const combos: readonly (readonly [string, SpawnOptions, string])[] = [

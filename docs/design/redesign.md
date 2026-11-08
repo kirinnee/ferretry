@@ -2556,7 +2556,10 @@ scoped handle:
     with the handle's `PATH` and nothing else, only for a handle minted for the caller or for a plugin offering a hook
     the caller takes (readers computed from the declared manifests), and never a `PATH` built from a `${secret:…}`
     reference. The answer is `found`, `absent` or `unprovable` (every unreadable handle alike), so a guard fails
-    closed; the daemon's own `PATH` is not searched.
+    closed; the daemon's own `PATH` is not searched. The offering-plugin edge is a DECLARED WIDENING
+    against the design's "only for a handle minted for THIS plugin" (ruling #52 amendment, accepted by the lead): it is read
+    from the boot manifests only, answers PATH visibility for one command (never a value of the handle's environment),
+    and a plugin with no such edge answers `unprovable`.
 - A plugin that must stop what a child it started left behind (Runtimes: an ended Codex ferret's app-server pair)
   asks `kernel.processes` (`permissions.processes`, listing by exact name the environment variables it may match).
   Today's Codex stopper's rules, held by the kernel: `usersOf(variable, folder)` answers the pids of this user's
@@ -2566,16 +2569,16 @@ scoped handle:
   plus `/`. Never pid 0 or 1, the daemon or its ancestors, never another uid; `environ` and `cmdline` are read by the
   kernel (`/proc`, or an absolute `ps` run with an empty environment) and never returned. A pid reused between that
   check and the signal is the declared residual (no pidfd binding in Bun).
-- A folder one plugin owns reaches another as a **shared tree** (kernel batch #10): the owner mints it with
-  `kernel.roots.share` (`permissions.shareTrees`; only a folder of one of its OWN `work` or `imports` handles, or one
-  name of its own opaque named tree such as Skills' `installed/*`), and the receiver brings it into one of its
+- A folder of a plugin's OWN state reaches another plugin as a **shared tree** (kernel batch #10): the owner mints it with
+  `kernel.roots.share` (`permissions.shareTrees`; only one name of its own opaque named tree such as Skills'
+  `installed/*`, never a kernel-made root's folder such as `credentials` or `sessions`, and never a folder of an owner's
+  root: a project skill is not shared, owner decision !A466), and the receiver brings it into one of its
   internal roots (`agent-homes`) with `RootHandle.copyShared`, under `copyTree`'s rules (no link followed inside, a
   hard-linked file skipped, `maxEntries`, both ends fenced). A tree is opaque and held in a kernel table, so a copy or
   a JSON round trip (`{ shared: <folder name> }`) opens nothing, and every tree is revoked when its minter stops. A
-  link instead of a copy is made only when the link rule allows it: by default (`link-internal`, #52 Q5) only from the
-  minter's own state, so a project skill is always COPIED (tightened from today, which linked it); `link-own` (the
-  owner's choice, !A466) also links a project folder that is the receiving ferret's own work folder into that ferret's
-  own home. Copy is the fallback whenever a link is not allowed.
+  link instead of a copy is made when one is asked for: the one link rule (every tree is the minter's own internal state
+  and every destination is `agent-homes`, so there is no switch). A link lets the harness child write into the shared
+  folder, so "read-only" holds for a copy only (a declared GAP).
 - An owner's root refuses everything inside **the fence**: the live `FY_HOME`, every `<FY_HOME>-before-*` folder and
   every `state/<id>-before-*` folder (§9.3), for every caller including the owner's own `fy` imports. An internal
   root reaches its own subtree only.

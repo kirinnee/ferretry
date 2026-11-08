@@ -733,6 +733,7 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   // The configuration files (docs/config-files.md). Nothing from the body — no path, no text — is
   // recorded: which file changed is the file's own business, and its text may be what was wrong.
   { method: 'PUT', path: '/v1/config/file', event: 'fleet.configured', detail: { action: 'config-write' } },
+  { method: 'DELETE', path: '/v1/config/file', event: 'fleet.configured', detail: { action: 'config-remove' } },
   // Each rewrites models-guide.yaml, as an edit through the configuration routes would.
   { method: 'POST', path: '/v1/pack/routing/accept', event: 'fleet.configured', detail: { action: 'routing-accept' } },
   { method: 'POST', path: '/v1/pack/routing/undo', event: 'fleet.configured', detail: { action: 'routing-undo' } },

@@ -37,7 +37,7 @@ const halves = (seen: Seen) => [
       api: 5,
       core: false,
       kinds: [],
-      permissions: { roots: ['fleet', 'harness-home', 'downloads'], harnessFiles: ['.claude.json'] },
+      permissions: { roots: ['fleet', 'harness-home', 'downloads'], harnessFiles: ['.claude.json'], setMode: true },
     }),
     {
       build: ({ kernel }) => {

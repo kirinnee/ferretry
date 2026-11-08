@@ -16,7 +16,7 @@
  * (`./adapters/process-table.ts`, `./roots.ts`) and the testing host from its own world: the same function decides
  * for both.
  */
-import type { OwnFolder, ProcessesPort, ProcessSignalOutcome } from '../contract/ports.ts';
+import type { OwnFolder, ProcessesPort, ProcessSignalOutcome, RootName } from '../contract/ports.ts';
 import type { ProcessesPermission } from '../manifest/types.ts';
 import { PermissionError } from './permissions.ts';
 
@@ -53,6 +53,9 @@ export const NO_PROCESS_TABLE: ProcessTable = Object.freeze({
   withEnvironment: async () => undefined,
   sigterm: async (): Promise<ProcessSignalOutcome> => 'refused',
 });
+
+/** The roots whose folders `kernel.processes` accepts: the ones the kernel bases itself, never a caller-scoped owner root. */
+export const PROCESS_FOLDER_ROOTS: ReadonlySet<RootName> = new Set<RootName>(['fleet', 'agent-homes']);
 
 /**
  * Every spelling of an {@link OwnFolder} the kernel accepts (its real path, and the path as the root names it), or

@@ -285,6 +285,13 @@ export interface Permissions {
    */
   readonly harnessFiles?: readonly string[];
   /**
+   * It may change the permission bits of an EXISTING name in its writable roots (`RootHandle.setMode`: the harness
+   * launch step that makes a copied tool executable). Opt-in: a plugin that holds a writable owner root (`work`,
+   * `worktrees`) could otherwise widen an existing folder or file there. `'*'` grants none. Absent: `setMode` is refused
+   * with `not_declared`.
+   */
+  readonly setMode?: true;
+  /**
    * The programs `kernel.spawn.start` may start DETACHED (`SpawnOptions.detached`: its own process group, outliving the
    * daemon; Browsers: the platform link opener, `xdg-open` / `open`). Each must also be in `spawn`. Matched as `spawn`
    * matches a name; `'*'` or any pattern names no program, for a core piece too. Absent: every detached start is refused.

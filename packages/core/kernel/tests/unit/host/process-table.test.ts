@@ -131,6 +131,12 @@ describe('process table: macOS ps', () => {
     return { table, runs };
   };
 
+  test('a value holding whitespace cannot be matched from ps -E output: the answer is "cannot tell", never "nobody"', async () => {
+    const { table, runs } = macTable(() => ({ code: 0, stdout: `4242 ${UID} codex CODEX_HOME=/Users/a/My Home/x\n` }));
+    expect(await table.withEnvironment(['CODEX_HOME=/Users/a/My Home/x'])).toBeUndefined();
+    expect(runs).toEqual([]);
+  });
+
   test('ps is called with an empty env and an absolute path, and a relative ps is never run', async () => {
     const { table, runs } = macTable(() => ({ code: 0, stdout: `${UID} /usr/bin/true\n` }));
     expect(await table.commandLine(4242)).toBe('/usr/bin/true');

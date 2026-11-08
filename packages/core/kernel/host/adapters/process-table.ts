@@ -144,6 +144,9 @@ export function hostProcessTable(options: ProcessTableOptions): ProcessTable {
         }
         return users;
       }
+      // `ps -E` joins the environment with spaces: a value holding whitespace cannot be told from the next word, so the
+      // honest answer is "cannot tell" (`undefined`), never "nobody uses it" (`[]`).
+      if (entries.some(entry => /\s/u.test(entry))) return undefined;
       const out = await ps(['-wwEx', '-o', 'pid=,uid=,command=']);
       if (out === undefined) return undefined;
       const users: number[] = [];

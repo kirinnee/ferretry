@@ -45,7 +45,7 @@ async function fresh() {
   await mkdir(`${owner}/.claude/projects`, { mode: 0o700 });
   const fs = nodeFs(() => crypto.randomUUID());
   const port = (plugin: string, declared: readonly RootName[] = DECLARED): RootsPort =>
-    rootsPortFor(fs, { home, plugin, worktrees: `${home}-worktrees` }, declared, () => undefined);
+    rootsPortFor(fs, { home, plugin, worktrees: `${home}-worktrees` }, declared, () => undefined, { setMode: true });
   await ensureInternalRootBases(fs, { home, plugin: 'runtimes' }, DECLARED);
   const runtimes = port('runtimes');
   const fleet = runtimes.root('fleet');
@@ -242,6 +242,21 @@ describe('RootHandle.linkTo', () => {
 });
 
 describe('RootHandle.setMode', () => {
+  test('setMode is opt-in: a plugin that did not declare permissions.setMode is refused, and nothing changes', async () => {
+    const f = await fresh();
+    const file = at(f.fleet, 'homes/claude-a/settings.json');
+    await f.fleet.writeText(file, '{}');
+    const before = (await stat(file)).mode & 0o7777;
+    const plain = rootsPortFor(
+      f.fs,
+      { home: f.home, plugin: 'runtimes', worktrees: `${f.home}-worktrees` },
+      DECLARED,
+      () => undefined,
+    ).root('fleet');
+    expect(await refusalOf(() => plain.setMode(file, 0o600))).toBe('not_declared');
+    expect((await stat(file)).mode & 0o7777).toBe(before);
+  });
+
   test('an internal root keeps only 0o700: group, other, setuid, setgid and sticky bits are dropped', async () => {
     const f = await fresh();
     const file = at(f.fleet, 'homes/claude-a/settings.json');
@@ -320,6 +335,7 @@ describe('RootHandle.setMode', () => {
       { home: f.home, plugin: 'runtimes', worktrees: `${f.home}-worktrees` },
       DECLARED,
       () => undefined,
+      { setMode: true },
     ).root('fleet');
     expect(await refusalOf(() => fleet.setMode(at(fleet, 'homes/claude-a/swap.json'), 0o400))).toBe('changed');
     expect(swapped).toBe(true);

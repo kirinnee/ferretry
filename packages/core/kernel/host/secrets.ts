@@ -132,6 +132,8 @@ export function ownSecretsPort(
     const url = new URL(request.url);
     if (!sending.mayReach(url.hostname, url.host)) return refused('destination');
     if (carriesHeader(request.headers, placement.header)) return refused('placement');
+    // A caller `Host` header is never forwarded: the connection goes to the declared host, and nothing re-aims it.
+    if (carriesHeader(request.headers, 'host')) return refused('destination');
     const found = await owned(secret);
     if ('refused' in found) return refused(found.refused);
     if ('damaged' in found) return { kind: 'vault_damaged' };

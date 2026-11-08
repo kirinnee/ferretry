@@ -160,13 +160,16 @@ export function handleReaders(
  * own PATH is not searched: a pane whose handle sets PATH sees that one). `searchPath` is the Vault's answer for this
  * plugin's readers; `undefined` (a foreign, forged, spent or secret-derived handle, or one that sets no PATH) is
  * `unprovable`, never `absent`, so a guard that must prove a negative fails closed. A PATH with no folder this lookup
- * may search is `unprovable` too. The PATH itself never leaves.
+ * may search is `unprovable` too, and so is a name that is not a bare command name (a `/`, an `@`, a space). The PATH
+ * itself never leaves.
  */
 export async function whichForCommand(
   name: unknown,
   searchPath: string | undefined,
   probe: ExecutableProbe,
 ): Promise<HandleLookup> {
+  // A name this lookup never searches for (a `/`, an `@`, a space) proves nothing about this PATH: `unprovable`, never `absent`.
+  if (!isCommandName(name)) return { kind: 'unprovable' };
   if (typeof searchPath !== 'string' || searchDirectories(searchPath).length === 0) return { kind: 'unprovable' };
   const found = await whichCommand(name, { path: searchPath }, probe);
   return found === undefined ? { kind: 'absent' } : { kind: 'found', path: found };

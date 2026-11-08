@@ -3,7 +3,6 @@ import { err, instantFromEpochMs, ok } from '@ferretry/std';
 import { basename, dirname, join, posix, relative } from 'node:path';
 import type { FencedPath, FolderRefusal, WorkFolders } from '../contract/bound.ts';
 import type { StateFileDef } from '../contract/define.ts';
-import type { FerretId } from '../contract/ids.ts';
 import {
   type ComponentIdentity,
   FsError,
@@ -49,18 +48,8 @@ import {
 } from './fence-guard.ts';
 import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-roots.ts';
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
-import {
-  ownStateTree,
-  receivingRoot,
-  refuseShared,
-  type SharedOrigin,
-  SHARED_TREE_LINK_RULE,
-  sharedLinkAllowed,
-  type SharedTreeLinkRule,
-  SharedTrees,
-  shareableRoot,
-} from './shared-trees.ts';
-import type { OwnFolderSpellings } from './processes.ts';
+import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from './shared-trees.ts';
+import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS } from './processes.ts';
 import { harnessFileRefusal, permittedMode, takesLinks } from './root-rules.ts';
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
@@ -121,7 +110,7 @@ export function scopedSubfolder(name: RootName, subfolder: string | undefined): 
   if (subfolder.startsWith('/') || subfolder.includes('\0') || subfolder.split('/').includes('..')) return undefined;
   return subfolder;
 }
-const DEFAULT_COPY_ENTRIES = 10_000;
+export const DEFAULT_COPY_ENTRIES = 10_000;
 const windowOk = (offset: number, length: number): boolean =>
   Number.isSafeInteger(offset) &&
   offset >= 0 &&
@@ -789,9 +778,8 @@ interface Checked {
 /** What `copyTree` may ask of a SOURCE handle: its own checks, never a path of its own choosing. */
 interface SourceAccess {
   readonly plugin: string;
-  /** The root the handle is on, and the ferret a `work` handle is scoped to (`RootsPort.share`'s origin). */
+  /** The root the handle is on (`kernel.processes` accepts only some). */
   readonly root?: RootName;
-  readonly ferret?: FerretId;
   readonly real: (path: FencedPath) => Promise<Checked>;
   readonly realParent: (path: FencedPath) => Promise<Checked>;
   /** An EXISTING folder of this handle, held open and checked (`kernel.processes`): its real path and its lexical one. */
@@ -807,7 +795,6 @@ const HANDLES = new WeakMap<object, SourceAccess>();
 interface SharedEntry {
   readonly source: SourceAccess;
   readonly from: FencedPath;
-  readonly origin: SharedOrigin;
 }
 
 /** Every shared tree the kernel minted (`RootsPort.share`), known by identity only. */
@@ -825,10 +812,8 @@ interface HandleSetup {
   readonly immutable: () => Promise<readonly string[]>;
   readonly random: () => string;
   readonly pins: PinRegistry | undefined;
-  /** The scope the handle was made with, for `copyShared`'s link rule. */
-  readonly ferret?: FerretId;
-  readonly subfolder?: string;
-  readonly linkRule: SharedTreeLinkRule;
+  /** Whether the plugin declared `permissions.setMode`. */
+  readonly setMode?: boolean;
 }
 
 /** What a held owner's root needs to judge every walk beneath it: the disk, the home it must not reach, the proven stores. */
@@ -1187,7 +1172,7 @@ function harnessFileHandle(setup: HarnessFileSetup): RootFileHandle {
 }
 
 function rootHandle(setup: HandleSetup): RootHandle {
-  const { fs, home, name, plugin, base, anchor, scopedParent, check, immutable, random, pins, linkRule } = setup;
+  const { fs, home, name, plugin, base, anchor, scopedParent, check, immutable, random, pins } = setup;
   const ownerRoot = OWNER_ROOTS.has(name);
   const readOnly = READ_ONLY_ROOTS.has(name);
   /**
@@ -1434,12 +1419,8 @@ function rootHandle(setup: HandleSetup): RootHandle {
       });
       await checkedSource.close();
       const target = await realParent(to, true);
-      const receiver = {
-        root: name,
-        ...(setup.ferret === undefined ? {} : { ferret: setup.ferret }),
-        ...(setup.subfolder === undefined ? {} : { subfolder: setup.subfolder }),
-      };
-      if (options?.link === true && sharedLinkAllowed(linkRule, shared.origin, receiver)) {
+      // THE link rule: every shared tree is the minter's own internal state and the destination is `agent-homes`.
+      if (options?.link === true) {
         // As the copy does, the missing folders on the way are made (0700) through the checked folder above them.
         const made = await openFolderMaking(target.scope, dirname(target.full), 0o700, true);
         try {
@@ -1550,6 +1531,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
       }
     },
     setMode: async (path: FencedPath, mode: number) => {
+      if (setup.setMode !== true) return refuse('not_declared');
       writable();
       const bits = permittedMode(isKernelMadeRoot(name), mode);
       if (bits === undefined) return refuse('outside');
@@ -1579,7 +1561,6 @@ function rootHandle(setup: HandleSetup): RootHandle {
   HANDLES.set(handle, {
     plugin,
     root: name,
-    ...(setup.ferret === undefined ? {} : { ferret: setup.ferret }),
     real: path => real(path),
     realParent: path => realParent(path),
     folder: async path => {
@@ -1604,6 +1585,8 @@ function rootHandle(setup: HandleSetup): RootHandle {
 export const ownFolderSpellings: OwnFolderSpellings = async (plugin, folder) => {
   const known = HANDLES.get(folder.root);
   if (known === undefined || known.plugin !== plugin) return undefined;
+  // Only a root the kernel itself bases (`fleet`, `agent-homes`): an owner root (`harness-home`) is any folder the caller names.
+  if (known.root === undefined || !PROCESS_FOLDER_ROOTS.has(known.root)) return undefined;
   return await known.folder(folder.path);
 };
 
@@ -1709,14 +1692,14 @@ export interface RootsOptions {
   readonly pins?: PinRegistry;
   /** The manifest's `permissions.harnessFiles`, for `RootsPort.harnessFile`; absent, every one is refused. */
   readonly harnessFiles?: readonly string[];
+  /** Whether the manifest declared `permissions.setMode`; absent, `RootHandle.setMode` is refused `not_declared`. */
+  readonly setMode?: boolean;
   /** Whether the manifest declares `permissions.shareTrees` (`RootsPort.share`); absent, every share is refused. */
   readonly shareTrees?: boolean;
   /** The plugin's declared state files: a shared named tree must be one of its own opaque ones. */
   readonly stateFiles?: readonly StateFileDef[];
   /** Told the plugin's stop: every tree it minted is revoked then. Absent, its trees live as long as the port. */
   readonly onStop?: (fn: () => void) => void;
-  /** `copyShared`'s link rule. Absent: {@link SHARED_TREE_LINK_RULE}. */
-  readonly linkRule?: SharedTreeLinkRule;
 }
 
 /** The roots port for one plugin: only roots its manifest declared (§3.7); anything else throws. */
@@ -1733,7 +1716,6 @@ export function rootsPortFor(
   const immutable = (): Promise<readonly string[]> =>
     (proven ??= resolveImmutableRoots(fs, options.hardLinkRoots ?? HARD_LINK_ROOTS).catch(() => []));
   const home = absolute(layout.home, 'the home');
-  const linkRule = options.linkRule ?? SHARED_TREE_LINK_RULE;
   // Every tree this plugin mints lives until it stops.
   const life = { live: true };
   options.onStop?.(() => {
@@ -1754,25 +1736,12 @@ export function rootsPortFor(
     },
     share: async (source: SharedTreeSource) => {
       if (options.shareTrees !== true) return refuseShared('not_permitted');
-      if ('root' in source) {
-        const known = HANDLES.get(source.root);
-        if (known === undefined || known.plugin !== layout.plugin || known.root === undefined)
-          return refuseShared('not_own');
-        if (!shareableRoot(known.root)) return refuseShared('not_shareable');
-        await existingFolder(known, source.path);
-        const origin: SharedOrigin = {
-          kind: 'root',
-          root: known.root,
-          ...(known.ferret === undefined ? {} : { ferret: known.ferret }),
-        };
-        return SHARED.mint(basename(source.path), { source: known, from: source.path, origin }, life);
-      }
       const folder = ownStateTree(options.stateFiles ?? [], source.state, source.name);
       if (folder === undefined) return refuseShared('not_own');
       const base = absolute(join(pluginStateFolder(home, layout.plugin), folder), 'a shared tree');
       const access = stateTreeAccess(fs, home, layout.plugin, base, immutable);
       await existingFolder(access, base as FencedPath);
-      return SHARED.mint(basename(base), { source: access, from: base as FencedPath, origin: { kind: 'state' } }, life);
+      return SHARED.mint(basename(base), { source: access, from: base as FencedPath }, life);
     },
     root: (name, scope) => {
       if (!allowed.has(name)) throw new RootError('not_declared');
@@ -1838,9 +1807,7 @@ export function rootsPortFor(
         immutable,
         random,
         pins: options.pins,
-        ...(scope?.ferret === undefined ? {} : { ferret: scope.ferret }),
-        ...(subfolder === undefined ? {} : { subfolder }),
-        linkRule,
+        ...(options.setMode === true ? { setMode: true } : {}),
       });
     },
   };

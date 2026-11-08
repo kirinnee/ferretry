@@ -9,7 +9,7 @@ import { WORKER_GRANTS_KEY } from './worker-grants/wire.ts';
 import type { ItemKind, PermissionEntry } from '../manifest/types.ts';
 import { hostAllowed, programAmong, programName, WILDCARD } from '../manifest/reach.ts';
 import type { PinRegistry } from './pins.ts';
-import { type DetachedCall, detachedNotOffered, detachedRefusal } from './detached.ts';
+import { type DetachedCall, detachedAsked, detachedNotOffered, detachedRefusal } from './detached.ts';
 
 export { hostAllowed, WILDCARD };
 
@@ -122,7 +122,7 @@ export function restrictSpawn(
   /** Refuses an undeclared program, and a pinned cwd this plugin's roots did not mint; a Linux pin's alias is used. */
   const check = <O extends SpawnOptions | undefined>(program: string, options: O): O => {
     // A detached start is offered only by `allowDetachedSpawn` around this port; through this one it is refused.
-    if (options?.detached !== undefined) throw new PermissionError(detachedNotOffered(plugin, program));
+    if (detachedAsked(options)) throw new PermissionError(detachedNotOffered(plugin, program));
     if (!spawnPermitted(declared, items, program))
       throw new PermissionError(`${plugin} may not run ${programName(program)}: its manifest does not declare it.`);
     const cwd = options?.cwd;
@@ -167,15 +167,15 @@ export function allowDetachedSpawn(
   };
   return {
     run: async (program, args, options) => {
-      if (options?.detached !== undefined) judge('run', program, options);
+      if (detachedAsked(options)) judge('run', program, options);
       return await restricted.run(program, args, options);
     },
     runBytes: async (program, args, options) => {
-      if (options?.detached !== undefined) judge('runBytes', program, options);
+      if (detachedAsked(options)) judge('runBytes', program, options);
       return await restricted.runBytes(program, args, options);
     },
     start: (program, args, options) => {
-      if (options?.detached === undefined) return restricted.start(program, args, options);
+      if (!detachedAsked(options)) return restricted.start(program, args, options);
       judge('start', program, options);
       const handle = base.start(program, args, options);
       started(programName(program), handle.pid);

@@ -13,7 +13,7 @@ import type {
   WorkerHandle,
   WorkersPort,
 } from '../../contract/ports.ts';
-import { detachedHandle, plainEnvironment } from '../detached.ts';
+import { detachedAsked, detachedHandle, plainEnvironment } from '../detached.ts';
 import { embeddedWorkerUrl } from './embedded-worker.ts';
 
 /**
@@ -137,7 +137,7 @@ export function bunSpawn(
   const env = (program: string, options?: SpawnOptions): Record<string, string> =>
     childEnvironment(program, baseEnv, tools, resolveEnv(options?.env, opener()));
   const start = (program: string, args: readonly string[], options?: SpawnOptions): ChildHandle => {
-    if (options?.detached !== undefined) return startDetached(program, args, options, env);
+    if (detachedAsked(options)) return startDetached(program, args, options, env);
     const cwd = options?.cwd;
     // A pin is installed for exactly the one spawn statement, no await inside the bracket, and the child is given
     // `.`: it inherits the held directory and resolves `.` against it, never a name re-resolved after the fact.
@@ -186,7 +186,7 @@ export function bunSpawn(
   return {
     start,
     runBytes: async (program, args, options): Promise<SpawnBytesResult> => {
-      if (options?.detached !== undefined) throw new Error('A detached child is started with start, never runBytes.');
+      if (detachedAsked(options)) throw new Error('A detached child is started with start, never runBytes.');
       const maxStdout = checkedLimit(options?.maxStdoutBytes, DEFAULT_STDOUT_LIMIT, 'maxStdoutBytes');
       const maxStderr = checkedLimit(options?.maxStderrBytes, DEFAULT_STDERR_LIMIT, 'maxStderrBytes');
       // The timeout is ours (SIGKILL, then stop reading): a grandchild holding the pipe cannot hang the caller.
@@ -221,7 +221,7 @@ export function bunSpawn(
       }
     },
     run: async (program, args, options): Promise<SpawnResult> => {
-      if (options?.detached !== undefined) throw new Error('A detached child is started with start, never run.');
+      if (detachedAsked(options)) throw new Error('A detached child is started with start, never run.');
       const child = start(program, args, options);
       const [stdout, stderr, exitCode] = await Promise.all([
         new Response(child.stdout).text(),

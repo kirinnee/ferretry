@@ -811,9 +811,9 @@ export interface RootsPort {
   /**
    * Mints a {@link SharedTree}: ONE existing folder of this plugin's own, handed read-only to whoever receives it
    * (Skills' skill folder in a launch part, for the harness that materializes it with `RootHandle.copyShared`). Only
-   * with `permissions.shareTrees`, and only from what this plugin owns: a folder of one of ITS OWN `work` or `imports`
-   * handles (a root handle another plugin made, or any other root, is refused), or one name of one of its own declared
-   * `opaque` named trees (`installed/*`). Valid until this plugin stops.
+   * with `permissions.shareTrees`, and only from what this plugin owns: one name of one of its own declared
+   * `opaque` named trees (`installed/*`), never a kernel-made root's folder (`credentials`, `sessions`) and never a folder
+   * of an owner's root (a project, an imports folder). Valid until this plugin stops.
    */
   share(source: SharedTreeSource): Promise<SharedTree>;
 }
@@ -821,7 +821,7 @@ export interface RootsPort {
 declare const sharedTreeBrand: unique symbol;
 
 /**
- * One folder an owner plugin shares, read-only, with the plugin that receives it (§7.7, kernel batch #10). Opaque and
+ * One folder of its own state a plugin shares, with the plugin that receives it (§7.7, kernel batch #10). Opaque and
  * unforgeable, like a Vault {@link ChildEnvironment}: no field, kept in a kernel table, so a copy, a spread or a JSON
  * round trip (it serialises as `{ shared: <folder name> }` only, never a path) is nothing the kernel will open.
  */
@@ -829,12 +829,14 @@ export interface SharedTree {
   readonly [sharedTreeBrand]: true;
 }
 
-/** What {@link RootsPort.share} shares: a folder of one of the minter's own root handles, or one of its own named trees. */
-export type SharedTreeSource =
-  | { readonly root: RootHandle; readonly path: FencedPath }
-  | { readonly state: StateFileDef; readonly name: string };
+/** What {@link RootsPort.share} shares: one name of one of the minter's own opaque named trees. */
+export type SharedTreeSource = { readonly state: StateFileDef; readonly name: string };
 
-/** What {@link RootHandle.copyShared} made at the destination: a copy, or (allowed by the link rule) one link. */
+/**
+ * What {@link RootHandle.copyShared} made at the destination: a copy, or (when a link was asked for) one link. A link
+ * lets the harness child write into the shared folder, so every ferret sharing it sees the change: "read-only" holds
+ * for a copy only (a declared GAP).
+ */
 export type SharedTreeCopied = 'copied' | 'linked';
 
 // events ───────────────────────────────────────────────────────────────────────────────────────────────────────────

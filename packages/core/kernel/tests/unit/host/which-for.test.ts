@@ -48,7 +48,10 @@ describe('K18 whichForCommand: the handle’s PATH only, failing closed', () => 
       path: '/opt/fake/claude',
     });
     expect(await whichForCommand('codex', path, probe([]))).toEqual({ kind: 'absent' });
-    expect(await whichForCommand('../claude', path, probe(['/opt/fake/../claude']))).toEqual({ kind: 'absent' });
+    for (const name of ['../claude', '/opt/fake/claude', 'cla@ude', 'cla ude', ''])
+      expect(await whichForCommand(name, path, probe(['/opt/fake/claude', '/opt/fake/../claude']))).toEqual({
+        kind: 'unprovable',
+      });
   });
 
   test('the 64-folder bound holds on a handle’s PATH too', async () => {
@@ -59,6 +62,19 @@ describe('K18 whichForCommand: the handle’s PATH only, failing closed', () => 
 
   test('the PATH itself never comes back: an absent answer names no folder of it', async () => {
     const answer = await whichForCommand('claude', `/${SENTINEL}/bin:/usr/${SENTINEL}`, probe([]));
+    expect(JSON.stringify(answer)).not.toContain(SENTINEL);
+  });
+});
+
+describe('K18 whichFor answers path visibility only', () => {
+  test('the answer carries a found path or a kind, never a value of the handle’s environment', async () => {
+    const answer = await whichForCommand(
+      'claude',
+      `/${SENTINEL}/bin:/opt/fake`,
+      async path => path === '/opt/fake/claude',
+    );
+    expect(answer).toEqual({ kind: 'found', path: '/opt/fake/claude' });
+    expect(Object.keys(answer).sort()).toEqual(['kind', 'path']);
     expect(JSON.stringify(answer)).not.toContain(SENTINEL);
   });
 });
@@ -81,6 +97,16 @@ describe('K18 handleReaders: the plugin itself and each one offering a hook it t
     expect(handleReaders('bare', manifests)).toEqual(['bare']);
     expect(handleReaders('unknown', manifests)).toEqual(['unknown']);
     expect(Object.isFrozen(handleReaders('runner', manifests))).toBe(true);
+  });
+
+  test('the edge is static: it comes from the declared hooks alone, so a later change to the list moves nothing', () => {
+    const list = [...manifests];
+    const before = handleReaders('runner', list);
+    list.push({ id: 'late', hooks: { offers: [{ hook: Launch }] } });
+    expect(before).toEqual(['runner', 'launcher']);
+    expect(handleReaders('runner', manifests)).toEqual(before);
+    // a plugin with no hook of either kind reads only its own handles
+    expect(handleReaders('bare', manifests)).toEqual(['bare']);
   });
 });
 

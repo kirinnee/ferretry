@@ -169,6 +169,18 @@ describe('NN2 D2 #19 kernel.secrets.send: the kernel places the credential, the 
     await host.stop();
   });
 
+  test('a caller Host header, in any case, is refused: nothing re-aims the connection', async () => {
+    const { host, secrets, sent, asked } = await world();
+    for (const name of ['Host', 'host', 'HOST'])
+      expect(await secrets.send('JEV_KEY', { ...POST, headers: { [name]: 'evil.test' } })).toEqual({
+        kind: 'refused',
+        refused: 'destination',
+      });
+    expect(sent).toEqual([]);
+    expect(asked).toEqual([]);
+    await host.stop();
+  });
+
   test('a redirect is answered, never followed: one request, sent with redirect manual', async () => {
     const { host, secrets, sent } = await world(
       () => new Response(null, { status: 307, headers: { location: 'https://evil.test/steal' } }),

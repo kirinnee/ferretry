@@ -251,6 +251,21 @@ describe('processes: the real host’s own-root check', () => {
     await expect(ownFolderSpellings('runtimes', { root: f.root, path: f.at('homes/missing') })).rejects.toThrow();
   });
 
+  test('an owner-root (harness-home) folder is refused, even one the caller scoped to a folder it holds', async () => {
+    const f = await fleet();
+    const outside = `${f.parent}/outside`;
+    await mkdir(`${outside}/bin`, { recursive: true });
+    const owner = rootsPortFor(
+      nodeFs(() => crypto.randomUUID()),
+      { home: f.home, plugin: 'runtimes', worktrees: `${f.home}-worktrees` },
+      ['harness-home'],
+      () => undefined,
+    ).root('harness-home', { subfolder: outside });
+    const resolved = owner.resolve('bin');
+    if (!resolved.ok) throw new Error(resolved.error);
+    expect(await ownFolderSpellings('runtimes', { root: owner, path: resolved.value })).toBeUndefined();
+  });
+
   test('a link inside the root to a folder outside it is refused, never followed out', async () => {
     const f = await fleet();
     await mkdir(`${f.parent}/outside`);
