@@ -25,11 +25,12 @@
  *     the open window is brought forward and routed in the app — no second window, no reload;
  *   - several windows: the app window is the one routed, never the landing page beside it;
  *   - each machine's notification opens only its own machine's conversation;
- *   - a daemon that names no page (`url: '/'`, before #768 and `fy attention notify`) still opens the
- *     conversation the push is about; one about no conversation opens that machine's sessions;
+ *   - a push's `url` is not trusted: the worker opens only the machine's own chat (or home) after the shell's route parse
+ *     accepts it, and the app (`/app/`) for anything else — `/`, the old `/session/` spelling, another machine's page, an
+ *     encoded climb, a foreign address;
  *   - a window still starting when the tap lands is routed once it is up, without a second window;
  *   - a window with no app wiring (an app too old to know the message) still ends on the conversation;
- *   - a notification the PAGE showed (the page watcher's needs-input / failed) opens its conversation;
+ *   - a notification the PAGE showed through the app-wide worker opens the app, whatever address it carries;
  *   - a machine's push worker takes a new release only when the app asks for one — loading the app
  *     never re-checks it — which is why the app's reconcile asks at every start.
  */
@@ -460,6 +461,7 @@ const ASK = {
   kind: 'attention',
   title: '“Builder”: Pick a release window',
   tag: 'agenda-mvb9x0-c0ffee01',
+  body: 'Ship the build?',
   url: '/ferrets/mvb9x0-c0ffee01/chat?ask=A3',
 } as const;
 /**
@@ -598,44 +600,48 @@ describe('a notification tap opens its conversation on the machine that sent it'
   });
 
   /**
-   * A DAEMON THAT NAMES NO PAGE. Before #768 every push carried `url: '/'`, an ask included, and
-   * `fy attention notify` still did; a machine that has not been updated sends exactly that.
+   * A PUSH THE WORKER WILL NOT OPEN. Its `url` is not trusted: only the machine's own chat (or its home) opens, and
+   * anything else — `/`, the old `/session/` spelling, another machine's page, a foreign address — opens the app.
    */
-  const UNNAMED_PAGES = [
+  const REFUSED_PAGES = [
     {
-      name: 'an older daemon’s ask (url "/", a session)',
-      payload: { sessionId: 'mvb9x0-c0ffee01', kind: 'question', title: 'Needs you', tag: 't', url: '/' },
-      expected: '/d/beta/ferrets/mvb9x0-c0ffee01/chat',
-      kind: 'screen',
+      name: 'a push that names only "/"',
+      payload: { ...ASK, url: '/' },
+      expected: '/app/',
     },
+    {
+      // There is no /session/ alias: that path is no route the shell draws, so it opens the app.
+      name: 'the old /session/ spelling of an ask',
+      payload: { ...ASK, url: '/session/mvb9x0-c0ffee01?attention=A3' },
+      expected: '/app/',
+    },
+    {
+      name: 'another machine’s page',
+      payload: { ...ASK, url: '/d/alpha/ferrets/mva1-aaaa0001/chat?ask=A2' },
+      expected: '/app/',
+    },
+    {
+      name: 'an encoded climb out of the machine',
+      payload: { ...ASK, url: '/ferrets/%2e%2e/%2e%2e/%2e%2e/d/alpha/ferrets/mva1-aaaa0001/chat' },
+      expected: '/app/',
+    },
+    {
+      name: 'a foreign address',
+      payload: { ...ASK, url: 'https://evil.example/d/beta' },
+      expected: '/app/',
+    },
+  ] as const;
+  // The accepted pages that are not a ferret's chat at an ask.
+  const OTHER_PAGES = [
     {
       name: 'a conversation link with no item',
-      payload: {
-        sessionId: 'mvb9x0-c0ffee01',
-        kind: 'failed',
-        title: 'Failed',
-        tag: 't',
-        url: '/ferrets/mvb9x0-c0ffee01/chat',
-      },
+      payload: { ...ASK, url: '/ferrets/mvb9x0-c0ffee01/chat' },
       expected: '/d/beta/ferrets/mvb9x0-c0ffee01/chat',
       kind: 'screen',
     },
     {
-      // There is no /session/ alias: that path is outside the machine's pages, so the push opens the chat it is about.
-      name: 'the old /session/ spelling of an ask',
-      payload: {
-        sessionId: 'mvb9x0-c0ffee01',
-        kind: 'attention',
-        title: 'Needs you',
-        tag: 't',
-        url: '/session/mvb9x0-c0ffee01?attention=A3',
-      },
-      expected: '/d/beta/ferrets/mvb9x0-c0ffee01/chat',
-      kind: 'screen',
-    },
-    {
-      name: 'a push about no conversation (kind only)',
-      payload: { kind: 'device-paired', title: 'A new device was paired', tag: 't', url: '/' },
+      name: 'the machine’s home',
+      payload: { ...ASK, url: '/d/beta' },
       expected: '/d/beta',
       kind: 'daemon-home',
     },
@@ -645,26 +651,28 @@ describe('a notification tap opens its conversation on the machine that sent it'
     'a daemon that names no page still opens the conversation the push is about, or that machine’s sessions',
     async () => {
       const outcomes = await Promise.allSettled(
-        UNNAMED_PAGES.map(async ({ name, payload, expected, kind }) => {
-          const browserProfile = await profile();
-          try {
-            const app = await appAt(browserProfile, '/d/alpha/ferrets/mva1-aaaa0001/chat');
-            await retire(browserProfile);
-            await push(browserProfile, 'beta', payload);
+        [...OTHER_PAGES, ...REFUSED_PAGES.map(refused => ({ ...refused, kind: 'home' }))].map(
+          async ({ name, payload, expected, kind }) => {
+            const browserProfile = await profile();
+            try {
+              const app = await appAt(browserProfile, '/d/alpha/ferrets/mva1-aaaa0001/chat');
+              await retire(browserProfile);
+              await push(browserProfile, 'beta', payload);
 
-            await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
-            const landed = await settledOn(app, expected);
+              await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
+              const landed = await settledOn(app, expected);
 
-            expect(landed.path).toBe(expected);
-            // The machine is in the address (`landed.path`, above); the route is the one the 5.0 router resolves it to.
-            expect(landed.route?.kind).toBe(kind);
-          } catch (error) {
-            if (error instanceof Error) error.message = `[${name} → ${expected}] ${error.message}`;
-            throw error;
-          } finally {
-            await browserProfile.context.close();
-          }
-        }),
+              expect(landed.path).toBe(expected);
+              // The machine is in the address (`landed.path`, above); the route is the one the 5.0 router resolves it to.
+              expect(landed.route?.kind).toBe(kind);
+            } catch (error) {
+              if (error instanceof Error) error.message = `[${name} → ${expected}] ${error.message}`;
+              throw error;
+            } finally {
+              await browserProfile.context.close();
+            }
+          },
+        ),
       );
       for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
     },
@@ -705,7 +713,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
   });
 
   lane(
-    'a notification the page showed (needs input, failed) opens its conversation through the app’s worker',
+    'a notification the page showed through the app-wide worker opens the app, whatever address it carries',
     async () => {
       const browserProfile = await profile();
       const app = await appAt(browserProfile, '/d/alpha');
@@ -721,11 +729,10 @@ describe('a notification tap opens its conversation on the machine that sent it'
       });
 
       await tap(browserProfile, '/', '/sw.verified.js');
-      const landed = await settledOn(app, '/d/beta/ferrets/mvb9x0-c0ffee01/chat');
+      // The app-wide registration knows no machine, so a tap on it never opens a machine's page: the app.
+      const landed = await settledOn(app, '/app/');
 
-      expect(landed.route).toMatchObject(
-        chatRoute('beta', 'mvb9x0-c0ffee01', '/d/beta/ferrets/mvb9x0-c0ffee01/chat', null),
-      );
+      expect(landed.route?.kind).toBe('home');
       await browserProfile.context.close();
     },
   );

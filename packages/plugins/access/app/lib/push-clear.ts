@@ -29,7 +29,7 @@
 
 import { type PushClearPayload, pushServiceAllowsSilent } from '../../contract/index.ts';
 import { notificationBrand } from '../shell-pairing.ts';
-import { notificationUrl, type PushMachine } from './push-scope.ts';
+import { machineHomeUrl, type PushMachine } from './push-scope.ts';
 
 /** The fixed, per-machine tag the quiet line goes under when nothing of the item's was showing. */
 export const HANDLED_TAG_PREFIX = 'fy-handled:';
@@ -66,7 +66,7 @@ export const handledNotification = (
     tag,
     silent: true,
     renotify: false,
-    data: { url: notificationUrl(undefined, origin, machine), handled: true },
+    data: { url: machineHomeUrl(machine, origin), handled: true },
   },
 });
 

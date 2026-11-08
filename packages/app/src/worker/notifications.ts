@@ -7,18 +7,22 @@
  * VAPID key of the daemon that made it. So each machine gets its own registration of the SAME signed worker file at
  * `/push/<daemonId>/`, and the worker learns which machine it serves from its own registration scope — which this
  * browser chose, never a push. It then titles every notification with the reader's own label for that machine (carried
- * in the worker script's query), and a tap opens only that machine's own pages (`/d/<daemonId>`), whatever URL a
- * notification named. A push that reaches the app-wide registration (`/`) is titled "Unverified" and opens only the app.
+ * in the worker script's query), and a tap opens only a page the shell's route parse accepts under that machine (`/d/<daemonId>`),
+ * whatever URL a push named. A push that reaches the app-wide registration (`/`) is titled "Unverified" and ALWAYS opens the
+ * app (`/app/`), whatever it named.
  *
  * NO PLUGIN CODE RUNS IN THIS WORKER. Every byte here is the shell's own and part of the signed release. A plugin that
  * needs worker behaviour (Agenda's notification kinds, a `clear` push, this device's notification filter) asks for it as
- * declarative data the worker interprets — later, in that plugin's contract. Until a push payload is in a contract, every
- * push is shown the way today's worker shows a payload it cannot read: plainly, so a subscription that received a push
- * is never left showing nothing (the browser penalises that and eventually revokes it).
+ * declarative data the worker interprets — later, in that plugin's contract. The one such datum today is the push envelope
+ * (`push-envelope.ts`: `title`, `body`, `url`, strict). A payload that has none is shown the way today's worker shows
+ * one it cannot read: plainly, so a subscription that received a push is never left showing nothing (the browser
+ * penalises that and eventually revokes it).
  */
 
-import { daemonHomeHref, HOME_HREF } from '../router/routes.ts';
+import { daemonHomeHref, HOME_HREF, routeTable } from '../router/routes.ts';
+import { PUSH_TAP_SCREENS } from '../router/tap-target.ts';
 import { NOTIFICATION_OPEN_ACK, NOTIFICATION_OPEN_MESSAGE, PUSH_LABEL_PARAMETER, PUSH_SCOPE_ROOT } from './facts.ts';
+import { PUSH_URL_MAX, readPushEnvelope } from './push-envelope.ts';
 
 export { NOTIFICATION_OPEN_ACK, NOTIFICATION_OPEN_MESSAGE, PUSH_SCOPE_ROOT } from './facts.ts';
 
@@ -71,37 +75,138 @@ export const unreadablePushTitle = (machine: PushMachine | null): string =>
 /** The body of that notification. */
 export const UNREADABLE_PUSH_BODY = 'Something is waiting in your Agenda.';
 
-const withinMachine = (pathname: string, machine: PushMachine): boolean => {
-  const root = daemonHomeHref(machine.daemonId);
-  return pathname === root || pathname.startsWith(`${root}/`);
+/** The screens a push may name, as the shell's own route parse knows them (see `PUSH_TAP_SCREENS`). */
+const TAP_ROUTES = routeTable(PUSH_TAP_SCREENS);
+
+/** The most `?ask=` may carry: an Agenda id. The app reads no more of the query than this one parameter. */
+const ASK_PATTERN = /^[A-Za-z0-9]{1,32}$/u;
+const PATH_CHARACTERS = /^[A-Za-z0-9._~%/-]*$/u;
+/** A decoded segment that is a separator or a control character (code 0-31 or 127) is no ferret or machine name. */
+const isUnsafeSegment = (decoded: string): boolean =>
+  [...decoded].some(character => {
+    const code = character.codePointAt(0) ?? 0;
+    return character === '/' || character === '\\' || code <= 0x1f || code === 0x7f;
+  });
+
+const sameMachine = (segment: string | undefined, machine: PushMachine): boolean => {
+  try {
+    return segment !== undefined && decodeURIComponent(segment) === machine.daemonId;
+  } catch {
+    return false;
+  }
+};
+
+/** The raw value of the one query parameter a tap reads, `ask`; any other parameter is ignored. */
+const askIn = (query: string): string | null => {
+  for (const pair of query.split('&')) {
+    const at = pair.indexOf('=');
+    if (at > 0 && pair.slice(0, at) === 'ask') return pair.slice(at + 1);
+  }
+  return null;
+};
+
+const appHome = (origin: string): string => new URL(HOME_HREF, origin).href;
+
+const decodeSegment = (segment: string): string | null => {
+  try {
+    const decoded = decodeURIComponent(segment);
+    return decoded === '' || decoded === '.' || decoded === '..' || isUnsafeSegment(decoded) ? null : decoded;
+  } catch {
+    return null;
+  }
 };
 
 /**
- * The pages a daemon names RELATIVE TO ITS OWN PAGES, since it never knows which name a browser files it under: a
- * ferret's chat (`/ferrets/<id>/chat?ask=A3`) and the machine's Agenda (`/agenda?ask=A3`, a machine ask). A machine's
- * worker places them under that machine. The app serves no page of its own at either root, so neither is an ordinary
- * address.
+ * Where a push's `url` asks to go, as a path under `machine` plus an optional `ask`, or `null` when it names nothing
+ * the shell's route parse accepts. The grammar is closed: the machine's home (`/d/<id>`) and the screens in
+ * {@link PUSH_TAP_SCREENS}, named relative to the machine (`/ferrets/<id>/chat?ask=A3`) or already under it
+ * (`/d/<id>/ferrets/<id>/chat?ask=A3`). Nothing is passed through: the address is REBUILT from the parsed route, so
+ * only an accepted route, one `ask`, and nothing else the push said can reach the tap.
  */
-const isMachineRelative = (path: string): boolean =>
-  path.startsWith('/ferrets/') || path === '/agenda' || path.startsWith('/agenda/');
-
-const machineRelative = (raw: string, machine: PushMachine | null): string =>
-  machine !== null && isMachineRelative(raw.split(/[?#]/u, 1)[0] ?? '')
-    ? `${daemonHomeHref(machine.daemonId)}${raw}`
-    : raw;
+const machineTarget = (raw: string, machine: PushMachine): { path: string; ask: string | null } | null => {
+  if (raw.length > PUSH_URL_MAX || !raw.startsWith('/') || raw.startsWith('//')) return null;
+  const parts = /^([^?#]*)(?:\?([^#]*))?(?:#[\s\S]*)?$/u.exec(raw);
+  const pathname = parts?.[1];
+  if (pathname === undefined || !PATH_CHARACTERS.test(pathname)) return null;
+  const segments = (pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname)
+    .slice(1)
+    .split('/');
+  const first = segments[0];
+  let absolute = segments;
+  if (first === 'ferrets' || first === 'agenda') {
+    if (segments.some(segment => decodeSegment(segment) === null)) return null;
+    absolute = ['d', encodeURIComponent(machine.daemonId), ...segments];
+  } else {
+    // The machine's own id is compared as the shell encodes it: an id may itself hold a `/` (as `%2F`), which no other segment may.
+    if (
+      first !== 'd' ||
+      !sameMachine(segments[1], machine) ||
+      segments.slice(2).some(segment => decodeSegment(segment) === null)
+    )
+      return null;
+  }
+  const query = parts?.[2];
+  const ask = query === undefined ? null : askIn(query);
+  if (ask !== null && !ASK_PATTERN.test(ask)) return null;
+  const route = TAP_ROUTES.parse(`/${absolute.join('/')}`);
+  if (route.kind === 'daemon-home' && route.daemon === machine.daemonId && ask === null) {
+    return { path: daemonHomeHref(machine.daemonId), ask };
+  }
+  if (route.kind === 'screen' && route.daemon === machine.daemonId) {
+    return { path: TAP_ROUTES.href(route.screen, route.params, route.daemon), ask };
+  }
+  return null;
+};
 
 /**
- * Where a notification tap may go: only this site, and — for a machine's own worker — only that machine's pages.
- * A ferret's page a daemon names relative to its own pages opens under that machine. Anything else opens that
- * machine's home, or — when the notification belongs to no machine — the app itself.
+ * Where a notification tap may go, decided from a push's `url` — NOT TRUSTED INPUT. A tap opens only this site, and
+ * only a page the shell's route parse accepts and that belongs to the machine whose worker received the push:
+ * that machine's home or a screen in {@link PUSH_TAP_SCREENS} under it. Anything else — another origin, `javascript:`,
+ * `//host`, a backslash, encoded or literal traversal, an encoded slash, another machine's page, an unknown route, `/`
+ * — opens the app (`/app/`).
+ *
+ * The app-wide registration knows no machine and its pushes are named "Unverified", so it ALWAYS opens the app,
+ * whatever the push says.
  */
 export const notificationUrl = (raw: unknown, origin: string, machine: PushMachine | null): string => {
-  const fallback = new URL(machine === null ? HOME_HREF : daemonHomeHref(machine.daemonId), origin);
-  const target = typeof raw === 'string' ? URL.parse(machineRelative(raw, machine), origin) : null;
-  if (target === null || target.origin !== origin) return fallback.href;
-  if (machine === null && isMachineRelative(target.pathname)) return fallback.href;
-  if (machine !== null && !withinMachine(target.pathname, machine)) return fallback.href;
-  return target.href;
+  if (machine === null || typeof raw !== 'string') return appHome(origin);
+  const target = machineTarget(raw, machine);
+  if (target === null) return appHome(origin);
+  return new URL(target.ask === null ? target.path : `${target.path}?ask=${target.ask}`, origin).href;
+};
+
+/**
+ * The `data.url` a notification carries back to its click: the worker wrote it (an absolute address from
+ * {@link notificationUrl}) and reads it back through the same rule, so a notification with no `data`, or one a page
+ * showed with a foreign address, still opens only what the rule allows.
+ */
+export const notificationClickUrl = (stored: unknown, origin: string, machine: PushMachine | null): string => {
+  const url = typeof stored === 'string' ? URL.parse(stored) : null;
+  if (url === null || url.origin !== origin) return appHome(origin);
+  return notificationUrl(`${url.pathname}${url.search}`, origin, machine);
+};
+
+/** What the worker shows for a push, and the page its tap carries. `url` is absent when the push named none it could read. */
+export interface PushPresentation {
+  readonly title: string;
+  readonly body: string;
+  readonly data?: { readonly url: string };
+}
+
+/**
+ * How one push is shown. A machine's worker titles the daemon's own words with the reader's label for the machine and
+ * carries the page they named (checked); the app-wide registration says "Unverified" and carries `/app/` whatever the
+ * push named; a payload with no readable envelope is shown plainly with no page, so a subscription that received a push
+ * is never left showing nothing.
+ */
+export const presentPush = (json: unknown, origin: string, machine: PushMachine | null): PushPresentation => {
+  const envelope = readPushEnvelope(json);
+  if (envelope === null) return { title: unreadablePushTitle(machine), body: UNREADABLE_PUSH_BODY };
+  return {
+    title: `${machine === null ? UNVERIFIED : machine.label} · ${envelope.title}`,
+    body: envelope.body,
+    data: { url: notificationUrl(envelope.url, origin, machine) },
+  };
 };
 
 // ─── a tap opens its page inside the running app, not by reloading it ─────────────────────────────────────────────

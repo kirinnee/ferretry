@@ -147,13 +147,24 @@ export function pushUrgencyFor(subject: PushSubject): PushUrgency {
  */
 export const PUSH_URGENT_TTL_SECONDS = 600;
 
+/**
+ * The SHELL WORKER's push envelope: `title`, `body`, `url`, the only fields the signed service worker reads of a push. The
+ * worker declares it strict and length-capped in `@ferretry/app` (`packages/app/src/worker/push-envelope.ts`); a contract
+ * may import only zod, std and contracts, so these caps repeat the worker's, and `tests/unit/app/push-envelope-caps.test.ts`
+ * pins that the two accept and refuse the same values. The title and body carry no secret, token or pairing code.
+ */
+export const PushEnvelopeFields = {
+  title: z.string().min(1).max(200),
+  body: z.string().max(1_000),
+  url: z.string().min(1).max(1_024),
+};
+
+/** Every payload is the envelope plus the fields only this plugin and the daemon read. */
 const PushPayloadBaseShape = {
   version: z.literal(1),
   eventKey: z.string().min(1),
-  title: z.string().min(1),
-  body: z.string(),
+  ...PushEnvelopeFields,
   tag: z.string().min(1),
-  url: z.string().min(1),
   count: PositiveIntegerSchema,
   /**
    * A high-priority push: the service worker asks the platform to keep it on screen and to sound again. Only `high`

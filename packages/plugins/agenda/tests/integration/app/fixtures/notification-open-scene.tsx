@@ -21,7 +21,7 @@
 import { useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { NotificationOpenContext, useNotificationOpen } from '../../../../app/hooks/use-notification-open.ts';
-import { agendaTargetFromSearch } from '../../../../app/lib/agenda-inbox.ts';
+import { useAskFocus } from '../../../../app/features/agenda/use-ask-focus.ts';
 import { attachNotificationOpens, NotificationOpenInbox } from '../../../../app/lib/notification-open.ts';
 import type { ScreenRef } from '@ferretry/app';
 import { RouterProvider } from '@ferretry/app/testing/router';
@@ -54,6 +54,8 @@ const inbox = wired
 
 function Shown() {
   const { route, navigate, entryKey } = useRouter();
+  // The ask the chat focuses on arrival: the Agenda's own reader of `?ask=`, which the real chat screen mounts.
+  const focus = useAskFocus();
   // `AppShell`: the router's own navigate, as the app passes it.
   const open = useCallback(
     (to: string): void => {
@@ -69,7 +71,7 @@ function Shown() {
       data-route={JSON.stringify({
         ...route,
         path: `${window.location.pathname}${window.location.search}`,
-        attention: agendaTargetFromSearch(window.location.search),
+        attention: focus?.target ?? null,
         entry: entryKey,
       })}
     />

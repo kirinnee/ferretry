@@ -13,9 +13,11 @@ import {
   type NotificationOpenEnvironment,
   type NotificationWindow,
   notificationBrand,
+  notificationClickUrl,
   notificationUrl,
   notificationWindow,
   openInWindow,
+  presentPush,
   PUSH_SCOPE_ROOT,
   pushMachineOf,
   unreadablePushTitle,
@@ -86,33 +88,6 @@ describe('pushMachineOf', () => {
     expect(unreadablePushTitle(WORK)).toBe('Work laptop · Ferretry');
     expect(unreadablePushTitle(null)).toBe('Unverified · Ferretry');
     expect(notificationBrand()).toEqual({ icon: NOTIFICATION_ICON, badge: NOTIFICATION_BADGE });
-  });
-});
-
-describe('notificationUrl (only this site; only this machine)', () => {
-  it('opens this site’s own page, and the app for anything off this site', () => {
-    expect(notificationUrl('/d/x/board', ORIGIN, null)).toBe(`${ORIGIN}/d/x/board`);
-    expect(notificationUrl('https://evil.test/phish', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
-    expect(notificationUrl('//evil.test/phish', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
-    expect(notificationUrl('javascript:alert(1)', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
-    expect(notificationUrl(undefined, ORIGIN, null)).toBe(`${ORIGIN}/app/`);
-    expect(notificationUrl(42, ORIGIN, null)).toBe(`${ORIGIN}/app/`);
-  });
-
-  it('keeps a machine inside its own pages, even through a climbing or look-alike path', () => {
-    const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
-    expect(notificationUrl(`${home}/board`, ORIGIN, WORK)).toBe(`${home}/board`);
-    expect(notificationUrl(home, ORIGIN, WORK)).toBe(home);
-    for (const elsewhere of [
-      '/d/sha256%3Ahome/settings',
-      `/d/sha256%3Awork%2Fone/../../d/other`,
-      '/d/sha256%3Awork%2Fone-evil/x',
-      '/',
-      'https://evil.test/',
-      undefined,
-    ]) {
-      expect(notificationUrl(elsewhere, ORIGIN, WORK)).toBe(home);
-    }
   });
 });
 
@@ -339,25 +314,196 @@ describe('notificationWindow', () => {
   });
 });
 
-describe('notificationUrl (an ask’s push opens the ferret’s chat, AT the ask)', () => {
-  const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
+const APP = `${ORIGIN}/app/`;
+const HOME = `${ORIGIN}/d/sha256%3Awork%2Fone`;
 
-  it('places the daemon’s machine-relative chat path under its machine, query kept', () => {
-    expect(notificationUrl('/ferrets/f1/chat?ask=A3', ORIGIN, WORK)).toBe(`${home}/ferrets/f1/chat?ask=A3`);
-    expect(notificationUrl('/ferrets/a%20b/chat?ask=A12', ORIGIN, WORK)).toBe(`${home}/ferrets/a%20b/chat?ask=A12`);
+describe('notificationUrl (a push’s url is NOT trusted: only an accepted route under the machine opens)', () => {
+  it('places the daemon’s machine-relative chat path under its machine, with its ask', () => {
+    expect(notificationUrl('/ferrets/f1/chat?ask=A3', ORIGIN, WORK)).toBe(`${HOME}/ferrets/f1/chat?ask=A3`);
+    expect(notificationUrl('/ferrets/a%20b/chat?ask=A12', ORIGIN, WORK)).toBe(`${HOME}/ferrets/a%20b/chat?ask=A12`);
+    expect(notificationUrl('/ferrets/f1/chat', ORIGIN, WORK)).toBe(`${HOME}/ferrets/f1/chat`);
   });
 
-  it('opens the machine’s home for a machine-relative path that climbs out, and the app for a worker with no machine', () => {
-    expect(notificationUrl('/ferrets/../../d/other', ORIGIN, WORK)).toBe(home);
-    expect(notificationUrl('/ferrets/f1/chat?ask=A3', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
+  it('opens a page already under this machine, and the machine home', () => {
+    expect(notificationUrl(`${HOME.slice(ORIGIN.length)}/ferrets/f1/chat?ask=A3`, ORIGIN, WORK)).toBe(
+      `${HOME}/ferrets/f1/chat?ask=A3`,
+    );
+    expect(notificationUrl(HOME.slice(ORIGIN.length), ORIGIN, WORK)).toBe(HOME);
+    expect(notificationUrl(`${HOME.slice(ORIGIN.length)}/`, ORIGIN, WORK)).toBe(HOME);
   });
 
-  it('places a machine ask’s Agenda link under its machine, ask kept; the app-wide worker opens the app', () => {
-    expect(notificationUrl('/agenda?ask=A3', ORIGIN, WORK)).toBe(`${home}/agenda?ask=A3`);
-    expect(notificationUrl('/agenda?ask=A3', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
+  it('places a machine ask’s Agenda link under its machine, ask kept', () => {
+    expect(notificationUrl('/agenda?ask=A3', ORIGIN, WORK)).toBe(`${HOME}/agenda?ask=A3`);
   });
 
-  it('has no /session/ alias: that path is only ever outside the machine', () => {
-    expect(notificationUrl('/session/f1?ask=A3', ORIGIN, WORK)).toBe(home);
+  it('rebuilds the address from the accepted route: nothing else the push said survives', () => {
+    expect(notificationUrl('/ferrets/f1/chat?ask=A3&next=https://evil.test#frag', ORIGIN, WORK)).toBe(
+      `${HOME}/ferrets/f1/chat?ask=A3`,
+    );
+    expect(notificationUrl('/ferrets/f1/chat?other=1', ORIGIN, WORK)).toBe(`${HOME}/ferrets/f1/chat`);
+  });
+
+  it('opens the app, whatever the push named, for the app-wide registration', () => {
+    for (const named of [
+      '/ferrets/f1/chat?ask=A3',
+      '/agenda?ask=A3',
+      '/d/other/ferrets/x/chat',
+      '/ferrets/../../../d/other/ferrets/x/chat',
+      '/ferrets/%2e%2e/%2e%2e/%2e%2e/d/other',
+      '/d/laptop/settings/access',
+      'https://evil.test/',
+      undefined,
+    ]) {
+      expect(notificationUrl(named, ORIGIN, null)).toBe(APP);
+    }
+  });
+
+  it('opens the app for every hostile or unknown address — none is passed through', () => {
+    for (const hostile of [
+      'https://evil.test/d/sha256%3Awork%2Fone',
+      'http://127.0.0.1/ferrets/x/chat',
+      '//evil.test/ferrets/x',
+      '//evil.test/phish',
+      '\\\\evil.test',
+      '/\\evil.test',
+      '\\ferrets\\x\\chat',
+      '/ferrets\\..\\..\\..\\d\\other',
+      ' //evil.test',
+      '\t/ferrets/x/chat',
+      '/ferrets/x/chat\n',
+      'javascript:alert(1)',
+      'data:text/html,hi',
+      '/ferrets/../../../d/other/ferrets/x/chat',
+      '/ferrets/../../d/other',
+      '/ferrets/%2e%2e/%2e%2e/%2e%2e/d/other',
+      '/ferrets/%2E%2E/chat',
+      '/ferrets/./chat',
+      '/ferrets/..%2F..%2Fd%2Fother/chat',
+      '/ferrets/x%2Fy/chat',
+      '/ferrets/x%5Cy/chat',
+      '/ferrets/%00/chat',
+      '/ferrets/%E0%A4%A/chat',
+      '/ferrets//chat',
+      '/ferrets/f1/chat/extra',
+      '/ferrets/f1',
+      '/ferrets',
+      '/d/other/ferrets/x/chat',
+      '/d/sha256%3Awork%2Fone/../../d/other',
+      '/d/sha256%3Awork%2Fone/%2e%2e/other',
+      '/d/sha256%3Awork%2Fone-evil/x',
+      '/d/sha256%3Awork',
+      '/d/other',
+      '/D/sha256%3Awork%2Fone',
+      '/app/d/sha256%3Awork%2Fone/ferrets/x/chat',
+      '/d/sha256%3Awork%2Fone/settings/access',
+      '/d/sha256%3Awork%2Fone/board',
+      '/d/sha256%3Awork%2Fone/session/f1?ask=A3',
+      '/session/f1?ask=A3',
+      '/join#c=123',
+      '/settings',
+      '/',
+      '',
+      'not a url',
+      '/ferrets/f1/chat?ask=A3%0d%0a',
+      '/ferrets/f1/chat?ask=../../x',
+      `/ferrets/f1/chat?ask=${'A'.repeat(40)}`,
+      `/ferrets/${'a'.repeat(2_000)}/chat`,
+      '/agenda/f1/A3',
+      undefined,
+      42,
+      null,
+      {},
+    ]) {
+      expect(notificationUrl(hostile, ORIGIN, WORK)).toBe(APP);
+    }
+  });
+
+  it('has no /session/ alias, and a machine home carries no ask', () => {
+    expect(notificationUrl('/session/f1?ask=A3', ORIGIN, WORK)).toBe(APP);
+    expect(notificationUrl(`${HOME.slice(ORIGIN.length)}?ask=A3`, ORIGIN, WORK)).toBe(APP);
+  });
+});
+
+describe('notificationClickUrl (a tap reads back only what the worker wrote)', () => {
+  it('opens the address the worker stored, and the app for anything it did not write', () => {
+    const stored = `${HOME}/ferrets/f1/chat?ask=A3`;
+    expect(notificationClickUrl(stored, ORIGIN, WORK)).toBe(stored);
+    expect(notificationClickUrl(HOME, ORIGIN, WORK)).toBe(HOME);
+    for (const foreign of [
+      'https://evil.test/d/sha256%3Awork%2Fone',
+      `${ORIGIN}/d/other/ferrets/x/chat`,
+      `${ORIGIN}/d/sha256%3Awork%2Fone/../../d/other`,
+      `${ORIGIN}/settings`,
+      'javascript:alert(1)',
+      '//evil.test',
+      undefined,
+      7,
+    ]) {
+      expect(notificationClickUrl(foreign, ORIGIN, WORK)).toBe(APP);
+    }
+    expect(notificationClickUrl(stored, ORIGIN, null)).toBe(APP);
+  });
+});
+
+describe('presentPush (the envelope is the worker’s whole view of a push)', () => {
+  const sent = {
+    version: 1,
+    eventKey: 'e1',
+    title: 'Deploy approval',
+    body: 'Ship the build?',
+    tag: 'agenda-A3',
+    url: '/ferrets/f1/chat?ask=A3',
+    count: 1,
+  };
+
+  it('shows a machine’s push under its label and carries the page it named, checked', () => {
+    expect(presentPush(sent, ORIGIN, WORK)).toEqual({
+      title: 'Work laptop · Deploy approval',
+      body: 'Ship the build?',
+      data: { url: `${HOME}/ferrets/f1/chat?ask=A3` },
+    });
+  });
+
+  it('carries the app, not the named page, for the app-wide registration — however hostile the page', () => {
+    for (const url of [
+      '/ferrets/f1/chat?ask=A3',
+      '/d/laptop/settings/access',
+      '/ferrets/../../../d/other/ferrets/x/chat',
+    ]) {
+      expect(presentPush({ ...sent, url }, ORIGIN, null)).toEqual({
+        title: 'Unverified · Deploy approval',
+        body: 'Ship the build?',
+        data: { url: APP },
+      });
+    }
+  });
+
+  it('carries the app for a machine’s push that names a page it may not open', () => {
+    expect(presentPush({ ...sent, url: '/d/other/ferrets/x/chat' }, ORIGIN, WORK).data).toEqual({ url: APP });
+    expect(presentPush({ ...sent, url: 'https://evil.test/' }, ORIGIN, WORK).data).toEqual({ url: APP });
+  });
+
+  it('shows a payload with no readable envelope plainly, with no page', () => {
+    for (const junk of [
+      null,
+      undefined,
+      'text',
+      42,
+      [],
+      {},
+      { title: 'only a title' },
+      { ...sent, title: 7 },
+      { ...sent, body: undefined },
+      { ...sent, url: '' },
+      { ...sent, title: 'x'.repeat(201) },
+      { ...sent, body: 'x'.repeat(1_001) },
+      { ...sent, url: `/${'x'.repeat(1_100)}` },
+    ]) {
+      expect(presentPush(junk, ORIGIN, WORK)).toEqual({
+        title: 'Work laptop · Ferretry',
+        body: 'Something is waiting in your Agenda.',
+      });
+    }
+    expect(presentPush({}, ORIGIN, null).title).toBe('Unverified · Ferretry');
   });
 });

@@ -171,7 +171,22 @@ export {
   type RouteTable,
   routeTable,
 } from './router/routes.ts';
-export { notificationTapTarget } from './router/tap-target.ts';
+export { notificationTapTarget, PUSH_TAP_SCREENS } from './router/tap-target.ts';
+export {
+  notificationClickUrl,
+  notificationUrl,
+  presentPush,
+  type PushMachine,
+  pushMachineOf,
+} from './worker/notifications.ts';
+export {
+  PUSH_BODY_MAX,
+  PUSH_TITLE_MAX,
+  PUSH_URL_MAX,
+  type PushEnvelope,
+  PushEnvelopeSchema,
+  readPushEnvelope,
+} from './worker/push-envelope.ts';
 
 // ─── the reference grammar (docs/reference-standard.md) ───────────────────────────────────────────────────────────
 export * from './references/grammar.ts';

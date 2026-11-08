@@ -314,7 +314,7 @@ export const daemonFerretChatPath = (id: DaemonId, ferret: string): string =>
   `${daemonHomePath(id)}/ferrets/${encodeURIComponent(requireNonEmpty(ferret, 'ferret'))}/chat`;
 
 /** The shell's route table and its tap check: `@ferretry/app`. A tap is decided by the router that draws the page. */
-export { notificationTapTarget, type RouteTable } from '@ferretry/app';
+export { notificationUrl, type PushMachine, pushMachineOf, type RouteTable } from '@ferretry/app';
 
 // ─── 7. advertisement notices (today: `protocol/src/lib/advertisement.ts`; `cli/shell.ts` holds the same copy) ──
 
@@ -393,13 +393,7 @@ export { cn } from './shell-grants.ts';
 // ─── 9. shell components and hooks (today: `pwa/src/shell/*`, `pwa/src/hooks/*`; spine-app-shell: `src/shell/`) ─
 
 /** The shell's bottom sheet, the Ferretry mark, and the layout and viewport hooks: `@ferretry/app/ui`. */
-export {
-  BottomSheet,
-  BrandMark,
-  useAppViewport,
-  useKeyboardOpen,
-  useLayoutMode,
-} from '@ferretry/app/ui';
+export { BottomSheet, BrandMark, useAppViewport, useKeyboardOpen, useLayoutMode } from '@ferretry/app/ui';
 
 /** The sessions bar the pairing harness opens its sheet from. STAND-IN: the shell holds no feature, and this bar is one. */
 export function SessionsBar(_props: Readonly<Record<string, unknown>>): ReactNode {

@@ -1,20 +1,22 @@
 import { describe, expect, test } from 'bun:test';
-import type { ScreenRef } from '../../../src/layout/engine.ts';
 import { routeTable } from '../../../src/router/routes.ts';
-import { notificationTapTarget } from '../../../src/router/tap-target.ts';
+import { notificationTapTarget, PUSH_TAP_SCREENS } from '../../../src/router/tap-target.ts';
 
 const ORIGIN = 'https://ferretry.example.test';
-const chat: ScreenRef = { plugin: 'conversation', id: 'chat', path: 'ferrets/:ferret/chat', label: 'Chat' };
-const routes = routeTable([chat]);
-const tap = (allowed: string): string => notificationTapTarget(allowed, ORIGIN, routes);
+const routes = routeTable([
+  ...PUSH_TAP_SCREENS,
+  { plugin: 'access', id: 'join', path: '/join', label: 'Join' },
+  { plugin: 'board', id: 'card', path: 'board/:card', label: 'Board' },
+]);
+const PAIRED = new Set(['laptop', 'a b']);
+const tap = (allowed: string): string => notificationTapTarget(allowed, ORIGIN, routes, daemon => PAIRED.has(daemon));
 
 describe('notificationTapTarget', () => {
-  test('a good address: the ferret’s chat AT the ask opens exactly as named, query and all', () => {
+  test('a good address under a paired machine: the ferret’s chat AT the ask opens exactly as named, query and all', () => {
     expect(tap(`${ORIGIN}/d/laptop/ferrets/f1/chat?ask=A3`)).toBe(`${ORIGIN}/d/laptop/ferrets/f1/chat?ask=A3`);
     expect(routes.parse('/d/laptop/ferrets/f1/chat')).toMatchObject({
       kind: 'screen',
       daemon: 'laptop',
-      screen: chat,
       params: { ferret: 'f1' },
     });
   });
@@ -22,9 +24,19 @@ describe('notificationTapTarget', () => {
   test('the shell’s own pages open as named', () => {
     expect(tap(`${ORIGIN}/d/laptop`)).toBe(`${ORIGIN}/d/laptop`);
     expect(tap(`${ORIGIN}/app/`)).toBe(`${ORIGIN}/app/`);
+    expect(tap(`${ORIGIN}/settings`)).toBe(`${ORIGIN}/settings`);
   });
 
-  test('a page the router does not draw opens its machine’s home — the old /session/ path included', () => {
+  test('N1: the landing page, a daemon-less screen and an unpaired machine are not passed through from a push', () => {
+    expect(tap(`${ORIGIN}/`)).toBe(`${ORIGIN}/app/`);
+    expect(tap(`${ORIGIN}/join#c=123`)).toBe(`${ORIGIN}/app/`);
+    expect(tap('/join#c=123')).toBe(`${ORIGIN}/app/`);
+    expect(tap(`${ORIGIN}/d/nobody`)).toBe(`${ORIGIN}/app/`);
+    expect(tap(`${ORIGIN}/d/nobody/ferrets/f1/chat?ask=A3`)).toBe(`${ORIGIN}/app/`);
+    expect(tap(`${ORIGIN}/d/nobody/zzz`)).toBe(`${ORIGIN}/app/`);
+  });
+
+  test('a page the router does not draw opens its paired machine’s home — the old /session/ path included', () => {
     expect(tap(`${ORIGIN}/d/laptop/session/f1?ask=A3`)).toBe(`${ORIGIN}/d/laptop`);
     expect(tap(`${ORIGIN}/d/laptop/nowhere`)).toBe(`${ORIGIN}/d/laptop`);
     expect(tap(`${ORIGIN}/d/a%20b/ferrets`)).toBe(`${ORIGIN}/d/a%20b`);
@@ -58,6 +70,6 @@ describe('notificationTapTarget', () => {
         throw new Error('boom');
       },
     };
-    expect(notificationTapTarget(`${ORIGIN}/d/laptop`, ORIGIN, broken)).toBe(`${ORIGIN}/app/`);
+    expect(notificationTapTarget(`${ORIGIN}/d/laptop`, ORIGIN, broken, () => true)).toBe(`${ORIGIN}/app/`);
   });
 });
