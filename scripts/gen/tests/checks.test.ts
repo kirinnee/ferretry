@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { contextFor, parseArgs } from '../lib/check.ts';
 import type { Finding } from '../lib/graph.ts';
 import { check as actRunner } from '../../validate/act-runner.ts';
+import { appHookFindings } from '../../validate/app-hooks.ts';
 import { bannedIn, check as bannedGlobals } from '../../validate/banned-globals.ts';
 import { check as contextImports } from '../../validate/context-imports.ts';
 import { check as contractConsumes } from '../../validate/contract-consumes.ts';
@@ -1251,5 +1252,57 @@ describe('fy check package scope and the release hash compare', () => {
     expect(diff).toEqual({ changed: ['board'], added: ['fresh'], removed: ['gone'] });
     expect(releaseNotes(diff)).toContain('**board** changed');
     expect(releaseNotes({ changed: [], added: [], removed: [] })).toContain("No plugin's contract changed.");
+  });
+});
+
+// ─── app-hooks ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+describe('app-hooks', () => {
+  const fn = (value: unknown) => typeof value === 'object' && value !== null && 'go' in value;
+  const offers = [{ plugin: 'agenda', hooks: { 'agenda.card-answer': fn } }];
+  const gives = (plugin: string, name: string, value: unknown = { go: () => undefined }) => ({
+    plugin,
+    hooks: { [name]: () => value },
+  });
+  const found = (...args: Parameters<typeof appHookFindings>) => appHookFindings(...args).map(x => x.message);
+
+  test('one provider of an offered hook, with the shape, passes', () => {
+    expect(found(offers, [gives('board', 'agenda.card-answer')])).toEqual([]);
+  });
+  test('planted: an offered hook with no provider is found (the feature would be silently off)', () => {
+    expect(found(offers, [])).toEqual([expect.stringContaining('"agenda.card-answer" has no provider')]);
+  });
+  test('planted: a second provider of one hook is found, naming both', () => {
+    const two = found(offers, [gives('board', 'agenda.card-answer'), gives('other', 'agenda.card-answer')]);
+    expect(two).toEqual([expect.stringContaining('2 providers (board, other)')]);
+  });
+  test('planted: a renamed hook is found on both sides', () => {
+    const renamed = found(offers, [gives('board', 'agenda.card-reply')]);
+    expect(renamed).toContain(
+      'provides app hook "agenda.card-reply", which agenda does not offer (renamed or misspelled?)',
+    );
+    expect(renamed.some(m => m.includes('"agenda.card-answer" has no provider'))).toBe(true);
+    expect(found(offers, [gives('board', 'elsewhere.thing'), gives('board2', 'agenda.card-answer')])).toEqual([
+      'provides app hook "elsewhere.thing", which no plugin offers',
+    ]);
+  });
+  test('planted: a provided value without the shape, and a factory that throws, are found', () => {
+    expect(found(offers, [gives('board', 'agenda.card-answer', {})])).toEqual([
+      'app hook "agenda.card-answer" builds a value without the shape agenda reads',
+    ]);
+    const throws = {
+      plugin: 'board',
+      hooks: {
+        'agenda.card-answer': () => {
+          throw new Error('boom');
+        },
+      },
+    };
+    expect(found(offers, [throws])).toEqual(['app hook "agenda.card-answer" failed to build: boom']);
+  });
+  test('planted: an offered name outside the offerer prefix is found', () => {
+    expect(found([{ plugin: 'agenda', hooks: { 'board.thing': fn } }], [gives('board', 'board.thing')])).toEqual([
+      'offers app hook "board.thing", which is not named "agenda.<name>"',
+    ]);
   });
 });

@@ -21,7 +21,7 @@ export interface BoardRuntime {
   readonly ferrets: () => Promise<readonly FerretRow[]>;
 }
 
-export const createBoardRuntime = (client: PluginClient): BoardRuntime => {
+const createBoardRuntime = (client: PluginClient): BoardRuntime => {
   const store = new DaemonBoardStore(clientBoardPort(client));
   client.subscribe(BoardChanged, payload => store.noteEvent(THIS_MACHINE.daemonId, payload));
   return {
@@ -43,4 +43,18 @@ export const createBoardRuntime = (client: PluginClient): BoardRuntime => {
       }
     },
   };
+};
+
+const RUNTIMES = new WeakMap<object, BoardRuntime>();
+
+/**
+ * The ONE runtime of a client: the shell builds a half's views and its app hooks (`shell.hooks`) over the same client,
+ * so both read one store and one `board.changed` subscription. A replaced client (a new connection) gets its own.
+ */
+export const boardRuntimeOf = (client: PluginClient): BoardRuntime => {
+  const known = RUNTIMES.get(client);
+  if (known !== undefined) return known;
+  const runtime = createBoardRuntime(client);
+  RUNTIMES.set(client, runtime);
+  return runtime;
 };

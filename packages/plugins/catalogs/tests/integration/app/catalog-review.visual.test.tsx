@@ -1,45 +1,16 @@
 /** The catalog review at phone and desktop widths, light and dark: it never scrolls sideways and every warning says it in words. */
-import { beforeAll, describe, it } from 'bun:test';
+import { afterAll, beforeAll, describe, it } from 'bun:test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Browser } from 'playwright-core';
-import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
+import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 
-import { ReviewBody, WarningList } from '../../../app/features/catalogs/catalog-review-view.tsx';
-import { installPreview } from '../../unit/app/support/catalog-views.ts';
-// GAP(app): the shell offers no stylesheet builder to a plugin's visual suite yet; the design system sheet alone is read, so
-// the Tailwind utilities these views use are absent and this suite is not run until `@ferretry/app/testing/browser` builds one.
-const appStylesheet = async (): Promise<string> =>
-  await Bun.file(new URL('../../../../../app/src/ui/design-system.css', import.meta.url)).text();
-import { chromium } from 'playwright-core';
+import { reviewPreview } from './fixtures/catalog-review-cases.ts';
 
-/** GAP(app): the shell's one shared Chromium (`@ferretry/app/testing/browser`) is outside the public test API, so this suite launches its own. */
-const sharedChromium = async (): Promise<Browser> => await chromium.launch();
-
-const HIDDEN = String.fromCodePoint(0x202e);
-const LONG_PATH = `/home/someone/.claude/skills/${'very-long-folder-name/'.repeat(6)}SKILL.md`;
-
-const preview = installPreview({
-  review: [
-    { label: 'Skill file SKILL.md', text: `# tools\nRun ${LONG_PATH} ${HIDDEN}fdp.sh\n`, document: true },
-    { label: 'Starts', text: `npx -y acme-mcp --config ${LONG_PATH}`, document: false },
-    { label: 'Environment ACME_TOKEN', text: '${secret:ACME_TOKEN}', document: false },
-  ],
-  warnings: [
-    { code: 'older-version', text: 'This is version 1. You have version 2 installed.' },
-    { code: 'hidden-characters', text: 'SKILL.md holds a hidden text-direction character. It is shown marked below.' },
-    { code: 'carries-scripts', text: 'This skill carries a script, scripts/split.sh. A ferret may run it.' },
-    { code: 'unpinned-package', text: 'npx fetches the newest acme-mcp every time it starts.' },
-  ],
-});
-
-const documentFor = (css: string, theme: string): string => `<!doctype html>
-<html data-theme="${theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head>
-<body><div id="root" class="flex flex-col gap-sm p-panel">${renderToStaticMarkup(
-  <>
-    <WarningList warnings={preview.warnings} />
-    <ReviewBody entries={preview.review} />
-  </>,
-)}</div></body></html>`;
+/** This file's folder: the scene path below is relative to it, and the builder runs here. */
+const packageRoot = import.meta.dir;
 
 const viewports = [
   { width: 390, height: 844 },
@@ -48,49 +19,77 @@ const viewports = [
 const themes = ['studio-light', 'studio-dark'] as const;
 
 let browser: Browser;
-let css = '';
+let directory = '';
+let server: ReturnType<typeof Bun.serve> | undefined;
+
+/**
+ * The app's real stylesheet (Tailwind over every app half, then the design system) and the scene, built by the shell's
+ * one scene builder in a child process — never a compile inside this runner.
+ */
+const build = async (): Promise<{ readonly css: string; readonly js: string }> => {
+  directory = await mkdtemp(join(tmpdir(), 'ferretry-catalog-review-'));
+  const child = Bun.spawn(
+    [process.execPath, sceneBuilder, '--out', directory, '--entry', 'fixtures/catalog-review-scene.tsx'],
+    { cwd: packageRoot, stderr: 'pipe', stdout: 'pipe' },
+  );
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  if (code !== 0) throw new Error(`the catalog review scene did not build (${code}):\n${stderr}\n${stdout}`);
+  const manifest = JSON.parse(stdout.trim().split('\n').at(-1) as string) as { css: string; js: string };
+  return { css: await readFile(manifest.css, 'utf8'), js: await readFile(manifest.js, 'utf8') };
+};
 
 describe('catalog review', () => {
   beforeAll(async () => {
+    // The process's one Chromium (`@ferretry/app/testing/browser`): this file never launches or closes its own.
     browser = await sharedChromium();
-    css = await appStylesheet();
-  }, 120_000);
+    const { css, js } = await build();
+    const page = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/app.js"></script></body></html>`;
+    server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch: request => {
+        const path = new URL(request.url).pathname;
+        if (path === '/app.js') return new Response(js, { headers: { 'content-type': 'text/javascript' } });
+        if (path === '/') return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+        return new Response('not here', { status: 404 });
+      },
+    });
+  }, 180_000);
+
+  afterAll(async () => {
+    server?.stop(true);
+    if (directory !== '') await rm(directory, { force: true, recursive: true });
+  });
 
   it('never scrolls sideways, and each warning has an icon and a label', async () => {
+    const origin = server?.url.origin ?? '';
     for (const theme of themes) {
-      const html = documentFor(css, theme);
-      const server = Bun.serve({
-        hostname: '127.0.0.1',
-        port: 0,
-        fetch: () => new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
-      });
-      try {
-        for (const viewport of viewports) {
-          const context = await browser.newContext({ viewport, reducedMotion: 'reduce' });
-          try {
-            await context.route('**/*', async route =>
-              new URL(route.request().url()).origin !== server.url.origin
-                ? await route.abort()
-                : await route.continue(),
-            );
-            const page = await context.newPage();
-            await page.goto(server.url.toString());
-            const metrics = await page.evaluate<{ inner: number; scroll: number }>(
-              '({ inner: innerWidth, scroll: document.documentElement.scrollWidth })',
-            );
-            should(metrics.scroll).be.belowOrEqual(metrics.inner);
-            should(await page.locator('[data-warning]').count()).equal(preview.warnings.length);
-            for (const item of await page.locator('[data-warning]').all()) {
-              should(await item.locator('svg').count()).equal(1);
-              should((await item.innerText()).trim().split('\n').length).be.aboveOrEqual(2);
-            }
-            should(await page.locator('[data-hidden-marker]').count()).be.aboveOrEqual(1);
-          } finally {
-            await context.close();
+      for (const viewport of viewports) {
+        const context = await browser.newContext({ viewport, reducedMotion: 'reduce' });
+        try {
+          await context.route('**/*', async route =>
+            new URL(route.request().url()).origin !== origin ? await route.abort() : await route.continue(),
+          );
+          const page = await context.newPage();
+          await page.goto(`${origin}/?theme=${theme}`);
+          await page.waitForSelector('html[data-scene-ready="1"]');
+          const metrics = await page.evaluate<{ inner: number; scroll: number }>(
+            '({ inner: innerWidth, scroll: document.documentElement.scrollWidth })',
+          );
+          should(metrics.scroll).be.belowOrEqual(metrics.inner);
+          should(await page.locator('[data-warning]').count()).equal(reviewPreview.warnings.length);
+          for (const item of await page.locator('[data-warning]').all()) {
+            should(await item.locator('svg').count()).equal(1);
+            should((await item.innerText()).trim().split('\n').length).be.aboveOrEqual(2);
           }
+          should(await page.locator('[data-hidden-marker]').count()).be.aboveOrEqual(1);
+        } finally {
+          await context.close();
         }
-      } finally {
-        server.stop(true);
       }
     }
   }, 180_000);

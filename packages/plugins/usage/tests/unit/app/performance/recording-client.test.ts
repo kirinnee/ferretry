@@ -109,4 +109,14 @@ describe('jsonBytes', () => {
     // Assert — `"a€😀"` is 2 + 1 + 3 + 4; `{"q":"é"}` is 10 bytes with é as two; `[1,2]` 5; `12` 2.
     should(actual).eql([0, 0, 10, 10, 5, 2]);
   });
+
+  it('should weigh nothing for a value that cannot be serialised or serialises to nothing', () => {
+    // Arrange
+    const circular: Record<string, unknown> = {};
+    circular['self'] = circular;
+    const unserialisable: unknown[] = [circular, 10n, () => 1];
+
+    // Act + Assert
+    should(unserialisable.map(jsonBytes)).eql([0, 0, 0]);
+  });
 });
