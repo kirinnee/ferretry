@@ -12,6 +12,7 @@ import {
   SkillsItemSchema,
 } from './wire.ts';
 
+export * from './slots.ts';
 export * from './wire.ts';
 
 export const SKILLS = 'skills' as const;

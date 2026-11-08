@@ -3,10 +3,11 @@ import { VaultPort, SealedDocumentsPort } from '@ferretry/core-vault/contract';
 import { CatalogLinkKeys, CatalogInstallPrefs } from './contract/storage.ts';
 import { CatalogsConfigFile } from './contract/config.ts';
 import { defineState, SessionModes } from '@ferretry/kernel/contract';
-import { definePlugin, memberRoute, route, screen, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, memberRoute, panel, route, screen, verb } from '@ferretry/kernel/manifest';
 import { AccessPort } from '@ferretry/plugin-access/contract';
 import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
+import { SKILLS_ADD_SLOT, SkillsPort } from '@ferretry/plugin-skills/contract';
 import {
   AUDIT,
   CATALOGS_WORDS,
@@ -65,7 +66,8 @@ export default definePlugin({
   // every link-store host, so making, refreshing or deleting a download link fails closed.
   needs: { access: AccessPort, gate: GatePort, vault: VaultPort, sealed: SealedDocumentsPort },
   /** Projects is optional: off, an install can only target the project folders the item providers name. */
-  uses: { connections: ConnectionsPort, projects: ProjectsPort },
+  // Skills: the app half reads the skills.add slot's props shape (add-skills page); no daemon call.
+  uses: { connections: ConnectionsPort, projects: ProjectsPort, skills: SkillsPort },
   provides: { catalogs: CatalogsPort },
 
   // The install mapping offers the person the NAMES of their secrets for a `${secret:NAME}` placeholder (never a value),
@@ -569,8 +571,12 @@ export default definePlugin({
   },
 
   ui: {
+    // "+ Add skills" in a ferret's Skills tab: Skills offers the slot, Catalogs contributes the way in.
+    panels: [panel(SKILLS_ADD_SLOT, { id: 'add-skills', order: 10 })],
     screens: [
       screen('sharing', { path: 'sharing/:tab?', nav: { label: 'Sharing', icon: 'share-2', order: 20 } }),
+      // Reached from Skills' `skills.add` slot (the panel above); the ferret's place rides in the query.
+      screen('add-skills', { path: 'ferrets/:ferret/add-skills' }),
       // Daemon-less on purpose: a share link lands here, and what is shared with this browser spans daemons.
       screen('join', { path: '/join', daemonless: true }),
       screen('shared', { path: '/shared', daemonless: true }),

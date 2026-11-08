@@ -25,6 +25,7 @@
     "@ferretry/plugin-access": "workspace:*",
     "@ferretry/plugin-connections": "workspace:*",
     "@ferretry/plugin-projects": "workspace:*",
+    "@ferretry/plugin-skills": "workspace:*",
     "qrcode-generator": "^2.0.4",
     "@ferretry/app": "workspace:*",
     "lucide-react": "^0.468.0",

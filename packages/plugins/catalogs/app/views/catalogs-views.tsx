@@ -49,7 +49,7 @@ function useInstallMachines(): readonly InstallMachine[] {
 }
 
 /** Installs go through THAT machine's own client: this one's, or another paired daemon's by the shell. */
-function useInstallHost(own: CatalogClient, ownId: string): InstallHost {
+export function useInstallHost(own: CatalogClient, ownId: string): InstallHost {
   const clientOf = useDaemonClients('catalogs');
   return useMemo(
     () => ({

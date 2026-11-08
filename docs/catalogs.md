@@ -1341,6 +1341,11 @@ ACTIVE in this session … the add button is too overloaded").
 
 ### + Add skills, the page (&B131 A2)
 
+In 5.0 the page is Catalogs' (`plugins/catalogs/app/features/add-skills/`, screen `add-skills` at
+`/d/<daemon>/ferrets/<id>/add-skills`). Skills' panel offers the slot `skills.add` beside its "N active" line and
+Catalogs contributes the **+ Add skills** button to it; the ferret's folder, harness, runtime and where its skills come
+from ride in the query. The page below is otherwise as it was, less the "from this machine" group.
+
 The Skills tab has one **+ Add skills** button by its "N active in this session" line. It goes to a page of its own,
 **Add skills** at `/d/<daemon>/session/<id>/skills` (`features/context-rail/add-skills-page.tsx`), with **Back to the
 session** and **Refresh** at the top; the install review stays a sheet over it. The page:

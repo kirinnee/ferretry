@@ -5,8 +5,16 @@
  * skill into the composer — the harness's own spelling, `/name` for Claude and `$name` for Codex (`skillInsertText`) —
  * and nothing else: there is deliberately no send. It says where the skill came from (This project, This account or
  * Ferretry) and, when a same-named one elsewhere wins, that it is not active; Open reads its SKILL.md.
+ * The header offers the `skills.add` slot (contract/slots.ts): a plugin that knows another place skills come from puts
+ * its "+ Add skills" there.
  */
-import { type ComposerQuoteTarget, composerQuoteTarget, daemonFerretScope, daemonOfClient } from '@ferretry/app';
+import {
+  type ComposerQuoteTarget,
+  composerQuoteTarget,
+  daemonFerretScope,
+  daemonOfClient,
+  PanelSlot,
+} from '@ferretry/app';
 import {
   Button,
   type ContextRead,
@@ -18,7 +26,12 @@ import {
 } from '@ferretry/app/ui';
 import type { AppComponent, PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useMemo, useState } from 'react';
-import type { FerretSkillsInventory, SkillEntry } from '../../contract/index.ts';
+import {
+  SKILLS_ADD_SLOT,
+  type FerretSkillsInventory,
+  type SkillEntry,
+  type SkillsAddSlotProps,
+} from '../../contract/index.ts';
 import { readFerretSkillsInventory, readSkillFile } from '../lib/client.ts';
 import {
   activeSkillsLine,
@@ -104,6 +117,7 @@ function SkillsList({
   onChipChange,
   onUse,
   onOpen,
+  addSlot,
   searchDebounceMs,
 }: {
   readonly read: ContextRead<FerretSkillsInventory>;
@@ -113,6 +127,7 @@ function SkillsList({
   readonly onChipChange: (chip: SkillChip) => void;
   readonly onUse: (invocation: string) => void;
   readonly onOpen: (skill: SkillEntry) => void;
+  readonly addSlot?: ReactNode;
   readonly searchDebounceMs?: number;
 }): ReactNode {
   const { load, reload } = read;
@@ -146,6 +161,7 @@ function SkillsList({
         <p className="m-0 min-w-0 text-2xs text-faint" data-context-skills-active="">
           {activeSkillsLine(inventory)}
         </p>
+        {addSlot}
       </div>
       {visible.length === 0 ? (
         <ContextNote>{contextEmptyCopy(NO_SKILLS, total, query, chipLabel)}</ContextNote>
@@ -196,6 +212,26 @@ function FerretSkills({
     return daemonId === undefined ? null : daemonFerretScope({ daemonId }, ferretId);
   }, [client, ferretId]);
 
+  const daemon = daemonOfClient(client);
+  const inventory = read.load.kind === 'ready' ? read.load.value : undefined;
+  const addSlot =
+    daemon === undefined || inventory === undefined ? undefined : (
+      <PanelSlot
+        daemon={daemon}
+        slot={SKILLS_ADD_SLOT}
+        subject={ferretId}
+        props={
+          {
+            ferret: ferretId,
+            folder: inventory.folder,
+            harness: inventory.harness,
+            ...(inventory.runtime === undefined ? {} : { runtime: inventory.runtime }),
+            scopes: [...new Set(inventory.skills.map(skill => skill.scope))],
+          } satisfies SkillsAddSlotProps
+        }
+      />
+    );
+
   const use = (invocation: string): void => {
     const delivered = insertIntoComposer(scope === null ? null : composerQuoteTarget(scope), invocation);
     setNote(delivered ? `Put ${invocation} in the chat box.` : `Open this ferret’s chat to use ${invocation}.`);
@@ -211,6 +247,7 @@ function FerretSkills({
         onChipChange={setChip}
         onUse={use}
         onOpen={setOpened}
+        addSlot={addSlot}
       />
       {note === null ? null : (
         <p className="m-0 py-xs text-meta text-muted" role="status" data-context-skill-note="">

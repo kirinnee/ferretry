@@ -34,6 +34,7 @@ import {
   usageBarText,
 } from '../lib/logins-view.ts';
 import { Badge, Button, ChangeApplyPanel, cn } from '../ui.ts';
+import { useSignInsLogin } from '../lib/sign-ins-route.ts';
 import { AddLoginPanel } from './add-login-panel.tsx';
 import { DisableControl, LabelEditor, RemoveZone, SignOutZone } from './login-changes-panels.tsx';
 import { useLoginChanges } from '../lib/login-changes.ts';
@@ -300,6 +301,8 @@ export interface SignInsTabProps {
   /** Supplied in tests. */
   readonly now?: () => number;
   readonly pollMs?: number;
+  /** The browser whose address names the page to open. Supplied in tests. */
+  readonly browser?: Window;
 }
 
 type ReadState =
@@ -307,10 +310,12 @@ type ReadState =
   | { readonly kind: 'failed'; readonly sentence: string }
   | { readonly kind: 'ready'; readonly list: Awaited<ReturnType<typeof readLogins>> };
 
-export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs }: SignInsTabProps) {
+export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs, browser }: SignInsTabProps) {
   const [state, setState] = useState<ReadState>({ kind: 'loading' });
-  const [detail, setDetail] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  // The page the address names, and the way the tab opens one: a link from another tab (Runtimes'
+  // "Add a new login in Sign-ins", a runtime's login that needs sign-in) lands on the login's page.
+  const [detail, openDetail] = useSignInsLogin(state.kind === 'ready' ? state.list.machine : null, browser);
 
   const reload = useCallback(async (): Promise<void> => {
     try {
@@ -347,7 +352,7 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs }
         machineName={list.machine}
         client={client}
         reload={reload}
-        onBack={() => setDetail(null)}
+        onBack={() => openDetail(null)}
         now={now()}
         clock={now}
         {...(pollMs === undefined ? {} : { pollMs })}
@@ -371,7 +376,7 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs }
           client={client}
           onAdded={id => {
             setAdding(false);
-            setDetail(id);
+            openDetail(id);
             void reload();
           }}
         />
@@ -411,7 +416,7 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs }
               <ul className="m-0 mt-2 flex list-none flex-col gap-2 p-0">
                 {group.logins.map(item => (
                   <li key={item.id}>
-                    <LoginRow login={item} now={now()} onOpen={() => setDetail(item.id)} />
+                    <LoginRow login={item} now={now()} onOpen={() => openDetail(item.id)} />
                   </li>
                 ))}
               </ul>
