@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { AgendaRollupStore } from '../../../app/lib/agenda-rollup.ts';
 import { AgendaFerretStore } from '../../../app/lib/ferret-store.ts';
 import { daemonConnection } from '../../../app/shell.ts';
-import { listClock } from '../../../../../app/tests/support/list-refresh.ts';
+import { listClock } from '../../support/app/list-clock.ts';
 import { agendaItem } from '../../support/app/agenda-inbox.tsx';
 import { callFromFetch } from '../../support/app/call-from-fetch.ts';
 
