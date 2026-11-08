@@ -22,6 +22,10 @@ import { FileSessionEnvironmentStore } from '../../../daemon/adapters/session/li
 import { OwnFolder } from '../../../daemon/adapters/session/sessions-root.ts';
 import { FileResumeTurnStore } from '../../../daemon/adapters/session/resume/file-resume-turn-store.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
+import type { RedactionScope } from '@ferretry/kernel/contract';
+import type { FerretId, Runner, RunnerHandle, RunnerLook } from '../../../contract/index.ts';
+import { FileLastSnapshotStore } from '../../../daemon/adapters/session/snapshot/file-last-snapshot-store.ts';
+import { LastSnapshotCapture } from '../../../daemon/lib/session/snapshot/index.ts';
 import {
   archiveWorld,
   finishFerret,
@@ -126,6 +130,26 @@ describe('session-private files parity (the internal sessions root, state/ferret
       await new FileResumeTurnStore(root, FERRET).clearMarkers(FERRET);
       await expect(lstat(`${folder}/${marker}.marker`)).rejects.toThrow();
     });
+
+  test('F-0326 FY_HOME/state/ferrets/sessions/{ferret}/last-snapshot.txt: the screen a stop looked at, masked, 0600', async () => {
+    const { root, folder } = await sessionsRoot();
+    const value = 'sk-parity-fixture-value';
+    const look: RunnerLook = { frame: 'f', working: false, atPrompt: true, permission: false, status: `> ${value}` };
+    await new LastSnapshotCapture({
+      store: id => new FileLastSnapshotStore(root, id),
+      redaction: {
+        read: async <T>(fn: (scope: RedactionScope) => T | Promise<T>) => {
+          const text = (s: string) => s.split(value).join('*'.repeat(value.length));
+          return await fn({ text, cells: grid => grid, lines: lines => lines.map(text) });
+        },
+      },
+      sleep: async () => await new Promise<void>(() => {}),
+      log: { warn: () => {} },
+    }).capture(FERRET as unknown as FerretId, { look: async () => look } as unknown as Runner, '%1' as RunnerHandle);
+    expect(await readFile(`${folder}/last-snapshot.txt`, 'utf8')).toBe(`> ${'*'.repeat(value.length)}`);
+    expect(await mode(`${folder}/last-snapshot.txt`)).toBe(0o600);
+    expect(await mode(folder)).toBe(0o700);
+  });
 
   test('F-0303 the per-ferret folder is state/ferrets/sessions/{ferret}, held 0700 when the ferret starts even if it was wider', async () => {
     const { root, folder } = await sessionsRoot();

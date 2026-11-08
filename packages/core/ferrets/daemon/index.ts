@@ -112,6 +112,8 @@ import { SessionStateSchema } from './lib/protocol/session.ts';
 import { promptOf } from './lib/ferrets/prompt.ts';
 import { buildTurnWatch, turnWatchFailureFields } from './modules/turn-watch.ts';
 import { buildLiveEvents } from './modules/live-events.ts';
+import { FileLastSnapshotStore } from './adapters/session/snapshot/file-last-snapshot-store.ts';
+import { LastSnapshotCapture } from './lib/session/snapshot/capture.ts';
 import { HarnessTranscript } from './adapters/session/live/harness-transcript.ts';
 import { applicableInstructions, outdatedSectionIds, sectionDigests } from './lib/ferrets/launch-sections.ts';
 import type { LaunchInstructionSectionId } from './lib/protocol/session.ts';
@@ -374,6 +376,15 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       );
   };
 
+  // The ferret's last screen, kept as it stops (F-0326): one `Runner.look` (an act on the pane, masked by the runner),
+  // masked again here, written 0600 to its own folder on the sessions root, bounded by the kernel clock.
+  const lastSnapshots = new LastSnapshotCapture({
+    store: id => new FileLastSnapshotStore(sessionFiles.root(id), id),
+    redaction: kernel.redaction,
+    sleep: async (delay, signal) => await kernel.clock.sleep(delay, signal),
+    log,
+  });
+
   // Bound once the turn watch is built below: a delivery into a ferret's pane brings its next look forward.
   let wakeTurnWatch: ((ferret: FerretId) => void) | undefined;
   // Bound once the harness transcript is built below: a stopped ferret's remembered transcript and tail are dropped.
@@ -433,6 +444,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     stopping: ferret => {
       hooks.observe(FerretStopping, { ferret });
     },
+    lastSnapshot: async (ferret, runner, handle) => await lastSnapshots.capture(ferret, runner, handle),
     started: payload => {
       hooks.observe(FerretStarted, payload);
     },
