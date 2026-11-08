@@ -300,21 +300,11 @@ export const notificationBrand = (): { readonly icon: string; readonly badge: st
   badge: NOTIFICATION_BADGE,
 });
 
-/** The id the machine agenda goes by. COPY of today's `isMachineAgendaId`; REPLACE WITH the Agenda contract's. */
-export const isMachineAgendaId = (sessionId: string): boolean => sessionId === 'machine-agenda';
-
 /** A machine's home page. COPY. */
 export const daemonHomePath = (id: DaemonId): string => `/d/${encodeURIComponent(id)}`;
 
-/** A machine's Agenda page (Agenda's `agenda` screen). */
-export const daemonAgendaPath = (id: DaemonId): string => `${daemonHomePath(id)}/agenda`;
-
-/** One ferret's chat (Conversation's `chat` screen, `ferrets/:ferret/chat`; a push opens it AT an ask with `?ask=`). */
-export const daemonFerretChatPath = (id: DaemonId, ferret: string): string =>
-  `${daemonHomePath(id)}/ferrets/${encodeURIComponent(requireNonEmpty(ferret, 'ferret'))}/chat`;
-
 /** The shell's route table and its tap check: `@ferretry/app`. A tap is decided by the router that draws the page. */
-export { notificationUrl, type PushMachine, pushMachineOf, type RouteTable } from '@ferretry/app';
+export { notificationUrl, type PushMachine, pushMachineOf } from '@ferretry/app';
 
 // ─── 7. advertisement notices (today: `protocol/src/lib/advertisement.ts`; `cli/shell.ts` holds the same copy) ──
 

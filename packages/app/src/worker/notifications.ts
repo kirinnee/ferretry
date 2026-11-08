@@ -73,7 +73,7 @@ export const unreadablePushTitle = (machine: PushMachine | null): string =>
   machine === null ? `${UNVERIFIED} · Ferretry` : `${machine.label} · Ferretry`;
 
 /** The body of that notification. */
-export const UNREADABLE_PUSH_BODY = 'Something is waiting in your Agenda.';
+const UNREADABLE_PUSH_BODY = 'Something is waiting in your Agenda.';
 
 /** The screens a push may name, as the shell's own route parse knows them (see `PUSH_TAP_SCREENS`). */
 const TAP_ROUTES = routeTable(PUSH_TAP_SCREENS);

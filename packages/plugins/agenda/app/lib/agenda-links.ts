@@ -10,7 +10,7 @@ import { useMemo } from 'react';
 import { daemonHomeHref, useScreenHref } from '../shell.ts';
 
 /** A machine's Agenda page (the manifest's daemon-relative `agenda` screen). */
-export const agendaPagePath = (daemonId: string): string => `${daemonHomeHref(daemonId)}/agenda`;
+const agendaPagePath = (daemonId: string): string => `${daemonHomeHref(daemonId)}/agenda`;
 
 export interface AgendaLinks {
   /** A ferret's chat; the Agenda page when Conversation is not installed. */
