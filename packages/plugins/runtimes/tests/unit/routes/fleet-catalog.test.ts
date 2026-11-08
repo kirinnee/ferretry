@@ -25,7 +25,7 @@ import {
   FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
 } from '../../../daemon/lib/service/catalog-service.ts';
-import { type CatalogFacts, componentCatalog } from '../../../daemon/lib/service/catalog.ts';
+import { type CatalogFacts, componentCatalog, runtimeCatalog } from '../../../daemon/lib/service/catalog.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { type Hosted, hostRuntimes, PROPOSAL_ID } from './support.ts';
 
@@ -554,4 +554,70 @@ describe('the components read — no credential in a flag or argument for any ca
     should([flag.status, arg.status]).deepEqual([400, 400]);
     should(calls.proposed).be.empty();
   });
+});
+
+// ── A credential in a flag the fixed layer drops (R-0082, review r1 F5) ─────────────────────────────────
+//
+// `GET /v1/runtimes` is `fleet.use`, `caller=any`, and names each profile flag the fixed layer supersedes in the
+// runtime's `fixedLayer.overridden`. Those words go through the same command-line rule, so the REAL projection
+// (`runtimeCatalog`) behind the route answers no credential written into one.
+
+const DROPPED_MODEL = parseAccountModel({
+  version: 1,
+  credentials: {
+    'claude-a': { harness: 'claude', store: 'ferretry' },
+    'codex-a': { harness: 'codex', store: 'ferretry' },
+  },
+  components: {
+    settings: {
+      cl: {
+        harness: 'claude',
+        file: 'components/settings/cl.json',
+        flags: ['--permission-mode', LEAK_TOKEN, `--permission-mode=${LEAK_TOKEN}`],
+      },
+      cx: {
+        harness: 'codex',
+        file: 'components/settings/cx.toml',
+        flags: ['-c', `mcp_servers.ferretry.env.API_KEY=${LEAK_SECRET}`],
+      },
+    },
+  },
+  profiles: { cl: { layers: ['settings/cl'] }, cx: { layers: ['settings/cx'] } },
+  runtimes: {
+    'claude-run': { credential: 'claude-a', profile: 'cl', agent: true },
+    'codex-run': { credential: 'codex-a', profile: 'cx', agent: true },
+  },
+});
+
+describe('the runtimes read — no credential in a flag the fixed layer drops, for any caller (R-0082, review r1 F5)', () => {
+  const callers: readonly [string, CallStanding][] = [
+    ['a ferret token', ferretStanding('f1' as never)],
+    ['a --limited paired device', deviceStanding('phone', LIMITED_DEVICE_GRANTS, true)],
+  ];
+
+  for (const [who, standing] of callers) {
+    it(`R-0082 should answer ${who} the runtimes with each dropped flag's value hidden and the flag named`, async () => {
+      // Arrange
+      const facts = { ...LEAK_FACTS, tools: { claude: '/usr/bin/claude', codex: '/usr/bin/codex' } };
+      const { assembly } = stub({ runtimes: async () => runtimeCatalog(DROPPED_MODEL, facts) });
+      const hosted = await hostRuntimes(assembly);
+      hosted.as(standing);
+
+      // Act
+      const response = await hosted.host.request('GET', '/v1/runtimes');
+      const text = JSON.stringify(json(response));
+
+      // Assert
+      should(response.status).equal(200);
+      should(text).not.containEql(LEAK_SECRET);
+      should(text).not.containEql('not-a-real-key-0000');
+      for (const kept of [
+        '--permission-mode ‹hidden›',
+        '--permission-mode=‹hidden›',
+        'mcp_servers.ferretry.env.API_KEY=‹hidden›',
+      ]) {
+        should(text).containEql(kept);
+      }
+    });
+  }
 });

@@ -860,6 +860,16 @@ const VIEW_FY_COMMAND = 'fy';
 
 const OVERRIDE_SENTENCE = (from: string): string => `From your ${from} · Overridden for agents by Ferretry`;
 
+/**
+ * A profile flag the fixed layer dropped, as `GET /v1/runtimes` names it: its words through the one command-line
+ * rule (`./command-line.ts`), so `--append-system-prompt=sk-…` or `--append-system-prompt`, `sk-…` loses its value in
+ * the key and the value both, for every caller.
+ */
+function overriddenFlag(tokens: readonly string[]): { readonly key: string; readonly value: string } {
+  const shown = shownWords(tokens).map(word => word.text);
+  return { key: shown[0] as string, value: shown.join(' ') };
+}
+
 function fixedLayerView(
   model: AccountModel,
   harness: HarnessKind,
@@ -895,8 +905,7 @@ function fixedLayerView(
                 sentence: OVERRIDE_SENTENCE(entry.layer.name),
               }
             : {
-                key: entry.tokens[0] as string,
-                value: entry.tokens.join(' '),
+                ...overriddenFlag(entry.tokens),
                 from: entry.layer.name,
                 sentence: OVERRIDE_SENTENCE(entry.layer.name),
               },
