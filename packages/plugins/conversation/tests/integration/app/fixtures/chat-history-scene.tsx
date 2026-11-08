@@ -1,6 +1,6 @@
 /**
  * The browser entry for "I can't scroll up further": the REAL `Transcript` and the REAL chat refresh
- * (`startSessionWorkspaceRefresh`), over a daemon that pages a long conversation exactly as `log-page`
+ * (`startChatRefresh`), over a daemon that pages a long conversation exactly as `log-page`
  * does — whole records, the newest `limit` before a byte, a `start` to ask before next time.
  *
  * The conversation is `TOTAL` records: questions, answers, and runs of tool calls that collapse into one
@@ -17,9 +17,9 @@
 import type { FerretView } from '@ferretry/core-ferrets/contract';
 import type { LogPageOptions, LogPage, SessionLogSearch } from '../../../../contract/index.ts';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChatSearch, type ChatSearchPort } from '../../../src/components/chat-search.tsx';
+import { ChatSearch, type ChatSearchPort } from '../../../../app/search/chat-search.tsx';
 import { createRoot } from 'react-dom/client';
-import { startSessionWorkspaceRefresh } from '../../../../app/chat/chat-refresh.ts';
+import { startChatRefresh } from '../../../../app/chat/chat-refresh.ts';
 import { Transcript } from '../../../../app/chat/transcript.tsx';
 import type { TranscriptHistoryControl } from '../../../../app/chat/transcript-history-row.tsx';
 import type { TranscriptEntry } from '../../../../app/chat/transcript-entries.ts';
@@ -120,15 +120,14 @@ const searchRecords = async (query: string, options: { readonly who: string; rea
 function Scene() {
   const [entries, setEntries] = useState<readonly TranscriptEntry[]>([]);
   const [status, setStatus] = useState<TranscriptHistoryStatus>('unavailable');
-  const [control, setControl] = useState<ReturnType<typeof startSessionWorkspaceRefresh> | null>(null);
+  const [control, setControl] = useState<ReturnType<typeof startChatRefresh> | null>(null);
   useEffect(() => {
-    const refresh = startSessionWorkspaceRefresh({
+    const refresh = startChatRefresh({
       api: {
-        logs: async () => '',
         logPage,
         get: async () => ({ config: { id: 's' } }) as FerretView,
       },
-      sessionId: 's',
+      ferretId: 's',
       environment: {
         visible: () => true,
         setInterval: () => 0,
