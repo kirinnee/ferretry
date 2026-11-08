@@ -100,7 +100,15 @@ export function buildBrowsers(
     return kernel.spawn.start(command.program, [...command.args, ...args], { env });
   };
   // Who holds a loopback port, proved from the kernel's `/proc` reads (`kernel.hostFacts`).
-  const listenerProver = new ProcListenerProver(kernel.hostFacts);
+  // Only closures over the five reads the prover makes, so the object it holds cannot be cast back to the whole port.
+  const hostFacts = kernel.hostFacts;
+  const listenerProver = new ProcListenerProver({
+    pids: async () => await hostFacts.pids(),
+    procFile: async (pid, file) => await hostFacts.procFile(pid, file),
+    procSystemFile: async file => await hostFacts.procSystemFile(file),
+    procFds: async pid => await hostFacts.procFds(pid),
+    procFdLink: async (pid, fd) => await hostFacts.procFdLink(pid, fd),
+  });
   const launcher =
     seams.launcher ??
     new NodeSessionBrowserLauncher(

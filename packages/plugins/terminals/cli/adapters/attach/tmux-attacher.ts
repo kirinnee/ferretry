@@ -28,6 +28,11 @@ export interface TmuxAttachProcess {
   processStart(pid: number): Promise<ProcessStart>;
 }
 
+/** The one variable the attach reads from fy own process: the tmux record of the pane fy is run in. */
+export function ambientTmuxEnvironment(): Readonly<Record<string, string | undefined>> {
+  return { TMUX: process.env.TMUX };
+}
+
 /** The socket portion of tmux's `TMUX=/path/socket,pid,index` environment record. */
 export function currentTmuxSocket(value: string | undefined): string | undefined {
   if (value === undefined || value === '') return undefined;

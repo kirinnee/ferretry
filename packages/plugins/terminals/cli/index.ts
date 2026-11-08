@@ -1,6 +1,6 @@
 import { implementCli } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
-import { BunTmuxAttachProcess, ExactTmuxAttacher } from './adapters/attach/tmux-attacher.ts';
+import { ambientTmuxEnvironment, BunTmuxAttachProcess, ExactTmuxAttacher } from './adapters/attach/tmux-attacher.ts';
 import { TerminalToolsClient } from './lib/agent-tools/client.ts';
 import { TerminalVerbs } from './lib/agent-tools/controller.ts';
 import { UsageError, Words } from './lib/args.ts';
@@ -17,7 +17,7 @@ export default implementCli(manifest, {
     const slots = new TerminalSlotsController(client, io);
     const attach = new AttachController(
       client,
-      new ExactTmuxAttacher(new BunTmuxAttachProcess(), process.env, message => io.err(`${message}\n`)),
+      new ExactTmuxAttacher(new BunTmuxAttachProcess(), ambientTmuxEnvironment(), message => io.err(`${message}\n`)),
       io,
     );
     return {

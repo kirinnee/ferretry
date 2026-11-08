@@ -2,6 +2,7 @@ import { afterEach, describe, it, onTestFinished } from 'bun:test';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import should from 'should';
 import { ProxySignInRelay } from '../../../daemon/proxy/adapters/sign-in-relay.ts';
+import { noHolder } from '../../support/listener-prover.ts';
 
 /** Every peer here is a loopback fake: the relay is exercised against sockets, never against a network. */
 const servers: Server[] = [];
@@ -83,7 +84,12 @@ async function exchange(relayPort: number, open: string, then: string | undefine
 }
 
 async function relay(scheme: 'http' | 'socks5', port: number, password = 'pass'): Promise<ProxySignInRelay> {
-  const started = await ProxySignInRelay.start({ scheme, host: '127.0.0.1', port }, { username: 'user', password });
+  const started = await ProxySignInRelay.start(
+    { scheme, host: '127.0.0.1', port },
+    { username: 'user', password },
+    undefined,
+    { holder: noHolder },
+  );
   relays.push(started);
   return started;
 }
@@ -111,7 +117,7 @@ describe('ProxySignInRelay', () => {
       { scheme: 'http', host: '127.0.0.1', port: proxy },
       { username: 'user', password: 'pass' },
       undefined,
-      { port: wanted },
+      { port: wanted, holder: noHolder },
     );
     relays.push(fixed);
     const free = await relay('http', proxy);
@@ -213,6 +219,7 @@ describe('ProxySignInRelay', () => {
       { scheme: 'https', host: '127.0.0.1', port: silent },
       { username: 'user', password: 'pass' },
       50,
+      { holder: noHolder },
     );
     relays.push(started);
     const reply = await exchange(started.port, 'CONNECT example.test:443 HTTP/1.1\r\nHost: x\r\n\r\n', undefined);
@@ -237,13 +244,16 @@ describe('ProxySignInRelay', () => {
       );
     });
 
-    it("should read the holder from this host's socket table by default", async () => {
+    it('should name the holder the injected holder reports', async () => {
       // Arrange
       const taken = await listen(createServer());
       const holder = process.platform === 'linux' ? ` \\(uid ${String(process.getuid?.())}\\)` : '';
 
       // Act
-      const started = ProxySignInRelay.start(UPSTREAM, CREDENTIALS, 50, { port: taken });
+      const started = ProxySignInRelay.start(UPSTREAM, CREDENTIALS, 50, {
+        port: taken,
+        holder: async () => process.getuid?.(),
+      });
 
       // Assert
       await should(started).be.rejectedWith(
@@ -253,7 +263,7 @@ describe('ProxySignInRelay', () => {
 
     it('should pass on a bind failure that is not a taken port', async () => {
       // Arrange / Act
-      const failure = await ProxySignInRelay.start(UPSTREAM, CREDENTIALS, 50, { port: 70_000 }).then(
+      const failure = await ProxySignInRelay.start(UPSTREAM, CREDENTIALS, 50, { port: 70_000, holder: noHolder }).then(
         () => undefined,
         (error: unknown) => error,
       );

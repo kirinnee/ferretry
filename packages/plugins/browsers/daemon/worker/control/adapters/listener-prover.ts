@@ -21,7 +21,7 @@ export interface ListenerProverPort {
 const SOCKET_LINK = /^socket:\[(\d+)\]$/u;
 
 /**
- * Reads the kernel's evidence (through `kernel.hostFacts`; with none, the host proves nothing and every answer is `unknown`) for `lib/browser/control/listener-proof.ts`: the socket tables, and the socket
+ * Reads the kernel's evidence (through `kernel.hostFacts`, which is REQUIRED: a prover with no evidence would answer `unknown`, and a caller that falls back on `unknown` must be handed a prover on purpose) for `lib/browser/control/listener-proof.ts`: the socket tables, and the socket
  * inodes held by the spawned process and its descendants (`/proc/<pid>/fd` links). Descendants count because a
  * supervised child is not always the pid the daemon holds — x11vnc runs under `timeout(1)`, which forks it.
  *
@@ -32,7 +32,7 @@ export class ProcListenerProver implements ListenerProverPort {
   private readonly uid: () => number | undefined;
 
   constructor(
-    private readonly facts?: ListenerHostFacts,
+    private readonly facts: ListenerHostFacts,
     options: ListenerProverOptions = {},
   ) {
     this.uid = options.uid ?? (() => process.getuid?.());
@@ -59,7 +59,6 @@ export class ProcListenerProver implements ListenerProverPort {
 
   private async tables(): Promise<readonly string[] | undefined> {
     const facts = this.facts;
-    if (facts === undefined) return undefined;
     const tables = await Promise.all(
       (['net/tcp', 'net/tcp6'] as const).map(table => facts.procSystemFile(table).catch(() => undefined)),
     );
@@ -69,7 +68,6 @@ export class ProcListenerProver implements ListenerProverPort {
 
   private async socketInodes(pid: number): Promise<ReadonlySet<number>> {
     const facts = this.facts;
-    if (facts === undefined) return new Set();
     const entries = await facts.procFds(pid).catch(() => []);
     const links = await Promise.all(entries.map(entry => facts.procFdLink(pid, entry).catch(() => '')));
     const inodes = new Set<number>();
@@ -82,7 +80,7 @@ export class ProcListenerProver implements ListenerProverPort {
 
   /** Every process descended from `pid`, read from each `/proc/<n>/stat`'s parent field. */
   private async descendants(pid: number): Promise<readonly number[]> {
-    const entries = (await this.facts?.pids().catch(() => [])) ?? [];
+    const entries = await this.facts.pids().catch(() => []);
     const parents = await Promise.all(entries.map(async entry => [entry, await this.parentOf(entry)] as const));
     const found: number[] = [];
     const frontier = [pid];
@@ -97,7 +95,7 @@ export class ProcListenerProver implements ListenerProverPort {
   }
 
   private async parentOf(entry: number): Promise<number | undefined> {
-    const stat = (await this.facts?.procFile(entry, 'stat').catch(() => '')) ?? '';
+    const stat = await this.facts.procFile(entry, 'stat').catch(() => '');
     // `pid (comm) state ppid …` — the command name may hold spaces and parentheses, so the fields are read from
     // after its LAST closing parenthesis.
     const ppid = stat

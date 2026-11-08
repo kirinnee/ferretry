@@ -86,7 +86,9 @@ const lease = (released: string[]): BrowserProfileLease => ({
   },
 });
 
-function world(options: { readonly modes?: SessionBrowserModeOptions; readonly chromeIgnoresTerm?: boolean } = {}) {
+function world(
+  options: { readonly modes?: Partial<SessionBrowserModeOptions>; readonly chromeIgnoresTerm?: boolean } = {},
+) {
   const acquired: string[] = [];
   const released: string[] = [];
   const spawned: { program: string; args: readonly string[]; options?: SpawnOptions }[] = [];

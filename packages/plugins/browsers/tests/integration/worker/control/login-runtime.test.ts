@@ -11,8 +11,8 @@ import {
   XvfbDisplay,
 } from '../../../../daemon/worker/control/adapters/login-runtime.ts';
 import type { BrowserLoginChild } from '../../../../daemon/worker/control/adapters/login-window.ts';
-import type { ListenerProverPort } from '../../../../daemon/worker/control/adapters/listener-prover.ts';
 import { BrowserControlError } from '../../../../daemon/worker/control/policy.ts';
+import { unprovenListenerProver } from '../../../support/listener-prover.ts';
 import { loginProcesses } from '../../../support/process-workers.ts';
 
 /** The window's processes and time on real children (`kernel.spawn` and the clock, as the daemon half binds them). */
@@ -477,17 +477,12 @@ function fakeDisplay(): BrowserDisplayPort & { closed: number } {
   return port;
 }
 
-/** A host with no `/proc` to prove a listener from (macOS): the runtime falls back to a connection probe. */
-const UNPROVABLE: ListenerProverPort = {
-  prove: async () => ({ kind: 'unknown' }),
-  holder: async () => undefined,
-};
-
 describe('NodeBrowserLoginRuntime', () => {
   it('should describe this host from its own environment by default', async () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
@@ -506,7 +501,12 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const display = fakeDisplay();
-    const subject = new NodeBrowserLoginRuntime({ processes: PROCESSES, display, secretsDirectory: root });
+    const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
+      processes: PROCESSES,
+      display,
+      secretsDirectory: root,
+    });
 
     // Act
     const resolved = await subject.display();
@@ -527,18 +527,21 @@ describe('NodeBrowserLoginRuntime', () => {
 
     // Act
     const chosen = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       ...base,
       chromeOverride: () => override,
       exists: candidate => candidate === override,
     }).chromeExecutable();
     const discovered = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       ...base,
       exists: candidate => candidate === '/usr/bin/chromium',
     }).chromeExecutable();
     const missing = () =>
       new NodeBrowserLoginRuntime({
+        listenerProver: unprovenListenerProver(),
         processes: PROCESSES,
         ...base,
         environmentSource: { PATH: '' },
@@ -557,11 +560,13 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const absent = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
     });
     const present = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
@@ -585,6 +590,7 @@ describe('NodeBrowserLoginRuntime', () => {
     const failing = await script(root, 'broken', 'exit 3');
     const silent = await script(root, 'silent', 'exit 0');
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
@@ -613,6 +619,7 @@ describe('NodeBrowserLoginRuntime', () => {
       `printf 'HOME=%s\\n' "$HOME" > '${record}'\nprintf 'LANG=[%s]\\n' "$LANG" >> '${record}'`,
     );
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: { ...PROCESSES, spawn: bunSpawn({}) },
       display: fakeDisplay(),
       secretsDirectory: root,
@@ -632,6 +639,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
@@ -652,6 +660,7 @@ describe('NodeBrowserLoginRuntime', () => {
     const root = await workspace();
     const ports = { cdp: 20_004, relay: 20_005, vnc: 20_006 };
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
@@ -669,6 +678,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
@@ -686,6 +696,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
@@ -705,6 +716,7 @@ describe('NodeBrowserLoginRuntime', () => {
     const root = await workspace();
     const directory = join(root, 'browser');
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: directory,
@@ -733,6 +745,7 @@ describe('NodeBrowserLoginRuntime', () => {
     await writeFile(stale, 'old\n');
     await chmod(stale, 0o644);
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: directory,
@@ -752,6 +765,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
@@ -775,6 +789,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // check — and it is written by the wait's own sleep port, so no real time decides when.
     let polls = 0;
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
@@ -800,6 +815,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
@@ -821,6 +837,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
@@ -845,6 +862,7 @@ describe('NodeBrowserLoginRuntime', () => {
       // Arrange
       const root = await workspace();
       const subject = new NodeBrowserLoginRuntime({
+        listenerProver: unprovenListenerProver(),
         processes: PROCESSES,
         display: fakeDisplay(),
         secretsDirectory: root,
@@ -868,6 +886,7 @@ describe('NodeBrowserLoginRuntime', () => {
       // Arrange: the port was taken before x11vnc (pid 4242, which holds nothing) could bind it.
       const root = await workspace();
       const subject = new NodeBrowserLoginRuntime({
+        listenerProver: unprovenListenerProver(),
         processes: PROCESSES,
         display: fakeDisplay(),
         secretsDirectory: root,
@@ -890,11 +909,11 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
       pollIntervalMs: 1,
-      listenerProver: UNPROVABLE,
     });
     const server = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data: () => undefined } });
 
@@ -910,10 +929,10 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,
-      listenerProver: UNPROVABLE,
       readinessTimeoutMs: 3,
       pollIntervalMs: 1,
       now: tickingClock(2),
@@ -931,6 +950,7 @@ describe('NodeBrowserLoginRuntime', () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
+      listenerProver: unprovenListenerProver(),
       processes: PROCESSES,
       display: fakeDisplay(),
       secretsDirectory: root,

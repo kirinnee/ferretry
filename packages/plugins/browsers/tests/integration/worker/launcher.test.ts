@@ -16,6 +16,7 @@ import type { ResolvedBrowserProxy } from '../../../daemon/proxy/index.ts';
 import type { BrowserAutomation } from '../../../daemon/pages/automation.ts';
 import { BrowserTransportError } from '../../../daemon/worker/protocol.ts';
 import type { ChildHandle } from '@ferretry/kernel/contract';
+import { unprovenListenerProver } from '../../support/listener-prover.ts';
 import { launcherPorts, processWorkers } from '../../support/process-workers.ts';
 
 /** The same scriptable worker the client tier drives, as a worker PROCESS the way the daemon half starts one
@@ -33,10 +34,10 @@ afterEach(() => {
 const PORTS = launcherPorts({ misbehave: () => misbehave });
 
 /** The shipped launcher gives a Chrome that ignores SIGTERM two seconds before SIGKILL; these cases only need the escalation. */
-const SHORT_SHUTDOWN = { shutdownTimeoutMs: 250 };
+const SHORT_SHUTDOWN = { shutdownTimeoutMs: 250, listenerProver: unprovenListenerProver() };
 /** The machine's DevTools transport, named outright where a case is about one of them. */
-const PIPE = { transport: async () => 'pipe' as const };
-const PORT = { transport: async () => 'port' as const };
+const PIPE = { transport: async () => 'pipe' as const, listenerProver: unprovenListenerProver() };
+const PORT = { transport: async () => 'port' as const, listenerProver: unprovenListenerProver() };
 /** Says every listener is the spawned Chrome's, so a test of something else is not judged by this host's sockets. */
 const OWN_LISTENER = { prove: async () => ({ kind: 'proven' as const }), holder: async () => undefined };
 
@@ -363,6 +364,7 @@ describe('NodeSessionBrowserLauncher', () => {
       async () => worker as never,
       {
         platform: 'linux',
+        listenerProver: unprovenListenerProver(),
         transport: async () => {
           throw new Error('machine.yaml is mid-write');
         },
@@ -385,12 +387,19 @@ describe('NodeSessionBrowserLauncher', () => {
     const chrome = await fakeChrome();
     const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
     roots.push(root);
-    const launcher = new NodeSessionBrowserLauncher(new BrowserProfileStore(root), WORKERS.start, PORTS, {
-      FY_CHROME_BIN: chrome,
-      DISPLAY: ':99',
-      PATH: process.env.PATH,
-      HOME: process.env.HOME,
-    });
+    const launcher = new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(root),
+      WORKERS.start,
+      PORTS,
+      {
+        FY_CHROME_BIN: chrome,
+        DISPLAY: ':99',
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+      },
+      undefined,
+      { listenerProver: unprovenListenerProver() },
+    );
 
     // Act — a real worker process, started and handshaken by the launcher's own client.
     const browser = await launcher.launch({ width: 800, height: 600 });
@@ -478,6 +487,7 @@ describe('NodeSessionBrowserLauncher', () => {
       // A display IS available: the agent browser is headless anyway, so every window keeps painting.
       { FY_CHROME_BIN: chrome, DISPLAY: ':99', PATH: process.env.PATH, HOME: process.env.HOME },
       async () => worker as never,
+      { listenerProver: unprovenListenerProver() },
     );
 
     // Act
@@ -664,7 +674,7 @@ describe('NodeSessionBrowserLauncher', () => {
         PORTS,
         environment(chrome),
         async () => worker as never,
-        { platform: 'linux', proxy: async () => proxy },
+        { platform: 'linux', proxy: async () => proxy, listenerProver: unprovenListenerProver() },
       );
       const browser = await launcher.launch({ width: 800, height: 600 });
       opened.push(browser);
@@ -710,7 +720,9 @@ describe('NodeSessionBrowserLauncher', () => {
 
   describe('Browser mode', () => {
     /** A launcher over a recording fake Chrome, in the given mode, with an injected worker. */
-    async function modeLauncher(modes: ConstructorParameters<typeof NodeSessionBrowserLauncher>[5]) {
+    async function modeLauncher(
+      modes: Omit<ConstructorParameters<typeof NodeSessionBrowserLauncher>[5], 'listenerProver'>,
+    ) {
       const chrome = await fakeChrome({ recordArguments: true });
       const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
       roots.push(root);
@@ -722,7 +734,7 @@ describe('NodeSessionBrowserLauncher', () => {
         // The host's own DISPLAY is set, and must never be what a real window draws on.
         environment(chrome),
         async () => worker as never,
-        modes,
+        { listenerProver: unprovenListenerProver(), ...modes },
       );
       return { chrome, root, launcher };
     }
@@ -833,12 +845,19 @@ describe('NodeSessionBrowserLauncher', () => {
     const chrome = await fakeChrome();
     const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
     roots.push(root);
-    const launcher = new NodeSessionBrowserLauncher(new BrowserProfileStore(root), WORKERS.start, PORTS, {
-      FY_CHROME_BIN: chrome,
-      DISPLAY: ':99',
-      PATH: process.env.PATH,
-      HOME: process.env.HOME,
-    });
+    const launcher = new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(root),
+      WORKERS.start,
+      PORTS,
+      {
+        FY_CHROME_BIN: chrome,
+        DISPLAY: ':99',
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+      },
+      undefined,
+      { listenerProver: unprovenListenerProver() },
+    );
     const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
     const frames: BrowserScreencastFrame[] = [];
@@ -919,6 +938,7 @@ describe('NodeSessionBrowserLauncher', () => {
         worker = await BrowserWorkerClient.connect(options);
         return worker;
       },
+      { listenerProver: unprovenListenerProver() },
     );
     const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
@@ -989,6 +1009,7 @@ describe('NodeSessionBrowserLauncher', () => {
         chromePid = await leasedChromePid(root);
         throw new Error('the worker refused to connect');
       },
+      { listenerProver: unprovenListenerProver() },
     );
 
     // Act
@@ -1021,6 +1042,7 @@ describe('NodeSessionBrowserLauncher', () => {
       PORTS,
       environment(chrome),
       async () => worker as never,
+      { listenerProver: unprovenListenerProver() },
     );
     const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
@@ -1060,6 +1082,7 @@ describe('NodeSessionBrowserLauncher', () => {
       PORTS,
       environment(chrome),
       async () => worker as never,
+      { listenerProver: unprovenListenerProver() },
     );
     const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
@@ -1174,6 +1197,7 @@ exit 7
           chromePid = await leasedChromePid(root);
           throw new Error('the worker refused to connect');
         },
+        { listenerProver: unprovenListenerProver() },
       );
 
       // Act
@@ -1198,6 +1222,7 @@ exit 7
         PORTS,
         environment(chrome),
         async () => ({ unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined }) as never,
+        { listenerProver: unprovenListenerProver() },
       );
 
       // Act
@@ -1235,7 +1260,6 @@ describe('shared browser limits at the actual child launch seams', () => {
       },
       {
         ...PORT,
-        listenerProver: OWN_LISTENER,
         ...SHORT_SHUTDOWN,
         limits: {
           browserCommand: async command => {

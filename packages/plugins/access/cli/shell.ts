@@ -14,15 +14,13 @@
  *    half imports them too).
  * 3. Commander's option reading (`readInvocation`) — the manifest declares a verb's words only, so unknown options,
  *    missing arguments and too many arguments are refused here with commander's own sentences and exit code 1.
- * 4. The host facilities `CliContext` does not carry (`hostFacilities`): the binary and product names, a clock, a
+ * 4. The host facilities `CliContext` does not carry (`hostFacilities`, in `adapters/host.ts`): the binary and product names, a clock, a
  *    terminal prompt, a live progress line and the state home (`<FY_HOME>`). They reach `Date.now`, `setTimeout`,
- *    `process.env` and `homedir` directly, which `banned-globals` refuses: REPLACE WITH CliContext ports.
+ *    `process.env` and `homedir` directly. They live in `adapters/host.ts`, the one file of this half that `banned-globals`
+ *    exempts for fy at the person terminal; this file keeps only the types.
  */
-import { homedir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
-import { createInterface } from 'node:readline/promises';
 import type { PluginClient, TerminalIo, VerbHandler, VerbInvocation } from '@ferretry/kernel/manifest';
-import { type Duration, milliseconds } from '@ferretry/std';
+import type { Duration } from '@ferretry/std';
 import { type AdvertisementRefusal, WILDCARD_BIND_HOST } from '../contract/index.ts';
 
 // ─── 1. the client's errors ───────────────────────────────────────────────────────────────────────────────────────
@@ -290,7 +288,7 @@ export function verbHandler(
  * REPLACE WITH: `CliContext.binary` (the shell has it as `identity.binary`) and a state-home root.
  */
 export const BINARY_NAME = 'fy';
-const PRODUCT_NAME = 'ferretry';
+export const PRODUCT_NAME = 'ferretry';
 
 /** Today's `SystemMillisecondClock`, over the clock and timer the shell hands every half. */
 export interface HostClock {
@@ -322,42 +320,4 @@ export interface HostFacilities {
 export interface ShellTime {
   readonly clock?: { nowMs(): number };
   sleep?(delay: Duration, signal?: AbortSignal): Promise<void>;
-}
-
-/** The facilities, bound to this process. Every global reach of the CLI half is here or in `adapters/`. */
-export function hostFacilities(io: TerminalIo, time: ShellTime): HostFacilities {
-  return {
-    clock: {
-      now: () => {
-        if (time.clock === undefined) throw new Error('this fy shell has no clock yet; update fy');
-        return time.clock.nowMs();
-      },
-      sleep: async wait => {
-        if (time.sleep === undefined) throw new Error('this fy shell has no timer yet; update fy');
-        await time.sleep(milliseconds(wait));
-      },
-    },
-    prompt: {
-      async ask(message) {
-        const reader = createInterface({ input: process.stdin, output: process.stdout });
-        try {
-          return await reader.question(`? ${message} `);
-        } finally {
-          reader.close();
-        }
-      },
-    },
-    progress: {
-      // Ora off a terminal prints `- text` per start and the symbol line per ending; on one it rewrites one line.
-      start: text => io.err(io.isTty ? `\r\u001b[2K- ${text}` : `- ${text}\n`),
-      succeed: text => io.err(`${io.isTty ? '\r\u001b[2K' : ''}✔ ${text}\n`),
-      fail: text => io.err(`${io.isTty ? '\r\u001b[2K' : ''}✖ ${text}\n`),
-    },
-    stateHome() {
-      const pinned = process.env.FY_HOME?.trim();
-      if (pinned === undefined || pinned === '') return join(homedir(), `.${PRODUCT_NAME}`);
-      if (!isAbsolute(pinned)) throw new Error('FY_HOME must be an absolute path');
-      return pinned;
-    },
-  };
 }

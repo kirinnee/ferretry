@@ -14,7 +14,8 @@ import { ProtocolPairingGateway } from './lib/pair/gateway.ts';
 import { passkeyVerbs } from './lib/passkey/commands.ts';
 import { PasskeyController } from './lib/passkey/controller.ts';
 import { ProtocolPasskeyGateway } from './lib/passkey/gateway.ts';
-import { BINARY_NAME, ExitStatus, hostFacilities } from './shell.ts';
+import { hostFacilities } from './adapters/host.ts';
+import { BINARY_NAME, ExitStatus } from './shell.ts';
 
 /**
  * Access's `fy` half (§2.3): `fy pair`, `fy device ls|grant|revoke`, `fy passkey window`. Today's composition root

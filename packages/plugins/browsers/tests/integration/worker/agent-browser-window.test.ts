@@ -12,6 +12,7 @@ import { XvfbDisplay } from '../../../daemon/worker/control/adapters/login-runti
 import { NodeSessionBrowserLauncher } from '../../../daemon/worker/launcher.ts';
 import { BrowserSessionService } from '../../../daemon/pages/service.ts';
 import { waitFor } from '../../support/wait-for.ts';
+import { unprovenListenerProver } from '../../support/listener-prover.ts';
 
 /**
  * BROWSER MODE "REAL WINDOW", AGAINST A REAL HEADED CHROME ON A REAL XVFB (docs/browser-mode.md).
@@ -74,7 +75,13 @@ describe.if(process.platform === 'linux')('the agent browser as a real window, i
         undefined,
         // Over the loopback PORT, named outright: the default, and the transport whose `navigator.webdriver`
         // stays false. The DevTools pipe is refused for now (launcher.test.ts; GAP).
-        { mode: async () => 'window', display, platform: 'linux', transport: async () => 'port' },
+        {
+          mode: async () => 'window',
+          display,
+          platform: 'linux',
+          transport: async () => 'port',
+          listenerProver: unprovenListenerProver(),
+        },
       ),
       () => Date.now(),
     );
