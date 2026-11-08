@@ -165,6 +165,143 @@ describe('component text redaction', () => {
       should(shownFor('PASSWORD\n= |\n')).eql({ text: 'PASSWORD\n= |\n', redacted: false });
     });
 
+    // Ruling #36 amended: three more shapes that today leaks the same way, and 5.0 hides.
+    it('S26 should hide a block whose indicator carries a comment: password: | # note⏎  value', () => {
+      // Act
+      const actual = shownFor('password: | # fake note\n  fake-block-value-0000\nnext: fake-shown-0000');
+
+      // Assert
+      should(actual).eql({ text: `password: | # fake note\n  ${HIDDEN}\nnext: fake-shown-0000`, redacted: true });
+    });
+
+    it('S26 should hide a block whose indicator stands on a line of its own after its name: password:⏎  |⏎    value', () => {
+      // Act
+      const actual = shownFor('password:\n  |\n    fake-block-value-0000\nnext: fake-shown-0000');
+
+      // Assert
+      should(actual).eql({ text: `password:\n  |\n    ${HIDDEN}\nnext: fake-shown-0000`, redacted: true });
+    });
+
+    it('S26 should hide a block whose separator and indicator each stand on a line of their own: PASSWORD⏎=⏎|⏎  value', () => {
+      // Act
+      const actual = shownFor('PASSWORD\n=\n|\n  fake-block-value-0000\nnext: fake-shown-0000');
+
+      // Assert
+      should(actual).eql({ text: `PASSWORD\n=\n|\n  ${HIDDEN}\nnext: fake-shown-0000`, redacted: true });
+    });
+
+    it('S26 should hide a separator line of eight characters or more as a line of its block: PASSWORD⏎=        |⏎  value', () => {
+      // Assert: the line that opens the block is read like any line of it, as a deeper `  = |` always was; one of
+      // seven characters is too short to hide.
+      should(shownFor('PASSWORD\n=        |\n  fake-block-value-0000')).eql({
+        text: `PASSWORD\n${HIDDEN}\n  ${HIDDEN}`,
+        redacted: true,
+      });
+      should(shownFor('PASSWORD\n=     |\n  fake-block-value-0000')).eql({
+        text: `PASSWORD\n=     |\n  ${HIDDEN}`,
+        redacted: true,
+      });
+    });
+
+    it('S26 should keep reading the name a comment ends in when a separator follows it: x: | # token⏎= value', () => {
+      // Assert: the comment's last word keeps the value it always had, so the commented block takes nothing from it.
+      should(shownFor('mode: | # token\n= fake-value-0000\n  plain-line-0000')).eql({
+        text: `mode: | # token\n= ${HIDDEN}\n  plain-line-0000`,
+        redacted: true,
+      });
+    });
+
+    it('S26 should read a block opened on a line that opens its outer block, no deeper than its name: password=⏎| # token: |', () => {
+      // Assert: the indicator line is read as the outer block's, and the block it opens runs past the outer one.
+      should(shownFor(' password=\n| # token: |\n fake-block-value-0000\nnext: ok')).eql({
+        text: ` password=\n${HIDDEN}\n ${HIDDEN}\nnext: ok`,
+        redacted: true,
+      });
+    });
+
+    // The whole family, generated: every separator, indicator (with and without a comment), position of the
+    // indicator, indent and line ending, under a name that announces a secret and under one that does not.
+    const SEPARATORS = [':', '='];
+    const INDICATORS = ['|', '|-', '>'];
+    const COMMENTS = ['', ' # fake comment'];
+    const INDENTS = ['  ', '\t'];
+    const ENDINGS = ['\n', '\r\n'];
+    /** The lines from the name to the indicator, for each place the indicator can stand. */
+    const POSITIONS: Readonly<
+      Record<string, (name: string, separator: string, indicator: string, indent: string) => string[]>
+    > = {
+      'same line': (name, separator, indicator) => [`${name}${separator} ${indicator}`],
+      'next line': (name, separator, indicator) => [name, `${separator} ${indicator}`],
+      'own line, indented': (name, separator, indicator, indent) => [`${name}${separator}`, `${indent}${indicator}`],
+      'own line, at the name': (name, separator, indicator) => [`${name}${separator}`, indicator],
+      'own line after a separator line': (name, separator, indicator) => [name, separator, indicator],
+      'own line after a separator line, indented': (name, separator, indicator, indent) => [
+        name,
+        separator,
+        `${indent}${indicator}`,
+      ],
+    };
+    const family = Object.entries(POSITIONS).flatMap(([position, opener]) =>
+      SEPARATORS.flatMap(separator =>
+        INDICATORS.flatMap(indicator =>
+          COMMENTS.flatMap(comment =>
+            INDENTS.flatMap(indent =>
+              ENDINGS.map(ending => ({ position, opener, separator, indicator: indicator + comment, indent, ending })),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    it(`S26 should hide every value line of every block in the family (${family.length} shapes), and nothing after it`, () => {
+      const leaks: string[] = [];
+      for (const { position, opener, separator, indicator, indent, ending } of family) {
+        // Arrange
+        const head = opener('PASSWORD', separator, indicator, indent);
+        const values = [`${indent}fake-block-value-0001`, '', `${indent}${indent}fake-block-value-0002`];
+        const input = [...head, ...values, 'after: fake-shown-0000', ''].join(ending);
+
+        // Act
+        const actual = shownFor(input);
+
+        // Assert: the name line and the line after the block as written, every value line hidden, and a line that
+        // opens the block either as written or hidden whole (one of eight characters or more is read as a block line).
+        const lines = actual.text.split(ending);
+        const opensRight = lines
+          .slice(1, head.length)
+          .every((line, at) => line === head[at + 1] || line === `${/^\s*/u.exec(head[at + 1] ?? '')?.[0]}${HIDDEN}`);
+        const expected = [
+          head[0],
+          ...lines.slice(1, head.length),
+          `${indent}${HIDDEN}`,
+          '',
+          `${indent}${indent}${HIDDEN}`,
+          'after: fake-shown-0000',
+          '',
+        ];
+        if (!opensRight || actual.text !== expected.join(ending) || !actual.redacted) {
+          leaks.push(`${position}: ${JSON.stringify(input)} -> ${JSON.stringify(actual.text)}`);
+        }
+      }
+      should(leaks).deepEqual([]);
+    });
+
+    it(`S26 should hide nothing of any block in the family (${family.length} shapes) under a name that announces no secret`, () => {
+      const touched: string[] = [];
+      for (const { opener, separator, indicator, indent, ending } of family) {
+        // Arrange
+        const head = opener('mode', separator, indicator, indent);
+        const input = [...head, `${indent}plain-block-text-0001`, 'after: plain-text-0000'].join(ending);
+
+        // Act
+        const actual = shownFor(input);
+
+        // Assert
+        if (actual.text !== input || actual.redacted) touched.push(JSON.stringify(input));
+      }
+      should(touched).deepEqual([]);
+    });
+
     it('S26 should hide nothing of that shape under a name that announces no secret, nor after the block ends', () => {
       // Assert
       for (const input of [

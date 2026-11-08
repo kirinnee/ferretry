@@ -3,12 +3,15 @@
  * component's text (the components read, the one door that text leaves by) to today's `redactText`, frozen in
  * `redact-today.ts`.
  *
- * THE ORACLE IS A SUPERSET, not equality, and only for one shape (ruling #36): today leaks a block whose indicator
- * follows a separator on the line AFTER its name (`PASSWORD⏎= |⏎  value` shows `value`), and 5.0 hides it. So where
- * a text holds that shape, 5.0 must hide at least every byte today hides (it may hide more); everywhere else its
- * output must equal today's exactly. The shape is not carved out: every generated text is checked, that one only
- * against the weaker of the two oracles. Today's own S26 held today to hide at least what the older rule of main
- * hid, so 5.0 hiding at least what today hides keeps that floor too.
+ * THE ORACLE IS A SUPERSET, not equality, and only on the lines of one family of blocks (ruling #36): today leaks a
+ * block under a name that announces a secret when its indicator is not on the name's own line, or carries a comment
+ * (`PASSWORD⏎= |⏎  value`, `password:⏎  |⏎    value`, `PASSWORD⏎=⏎|⏎  value`, `password: | # note⏎  value`
+ * all show `value`), and 5.0 hides it. So on the lines of such a block — from its name to the last line before the
+ * first one that stands no deeper than the name, computed here from the text alone ({@link tightenedLines}), never
+ * from the code under test — 5.0 must hide at least every byte today hides (it may hide more). On every other line,
+ * and in every text without such a block, its output must equal today's exactly. Nothing is carved out: every
+ * generated text is checked. Today's own S26 held today to hide at least what the older rule of main hid, so 5.0
+ * hiding at least what today hides keeps that floor too.
  *
  * Every secret value here is an obviously fake one.
  */
@@ -16,6 +19,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { componentCatalog } from '../../../daemon/lib/service/catalog.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
+import { looksSecret } from '../../../daemon/lib/account/import.ts';
 import { redactTodayText } from './redact-today.ts';
 
 const HIDDEN = '‹hidden›';
@@ -93,7 +97,7 @@ const LEADS = [
 ];
 const GAPS = ['', '', ' ', '  ', '\t', '\n', '\r', '\r\n', '\n  ', '\n\n', '\r\r', ' \n '];
 const MARKS = [':', '=', ':', '=', ':='];
-const BLOCKS = ['', '', '', '', '|', '>-', '|+', '>2'];
+const BLOCKS = ['', '', '', '', '|', '>-', '|+', '>2', '| # note', '>- #c'];
 const PARENTS = ['db', 'auth', 'env', 'mcp.servers', 'x'];
 const QUOTES = ['', '"', "'"];
 /** True pointers, which may stay, and `${NAME<op>default}` forms whose default is a value (`%` is the value). */
@@ -195,12 +199,74 @@ function soup(next: () => number): string {
   return text;
 }
 
+const BREAK = /\r\n|\r|\n/u;
+const KEPT_BREAK = /(\r\n|\r|\n)/u;
+/** An indicator, with or without a comment after it: `|`, `>-`, `| # note`. */
+const INDICATOR = '[|>][-+0-9]*(?:[ \\t]+#.*)?';
+/** A line that ends in a name and its separator, the indicator of a block after them when there is one. */
+const ENDS_IN_SEPARATOR = /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*[:=][ \t]*([|>][-+0-9]*)?[ \t]*$/u;
+const ENDS_IN_NAME = /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*$/u;
+const ENDS_IN_COMMENTED_BLOCK =
+  /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*[:=][ \t]*[|>][-+0-9]*[ \t]+#.*$/u;
+const SEPARATOR_ONLY = /^[ \t]*[:=][ \t]*$/u;
+const SEPARATOR_THEN = /^[ \t]*[:=]/u;
+const SEPARATOR_AND_INDICATOR = new RegExp(`^[ \\t]*[:=][ \\t]*${INDICATOR}[ \\t]*$`, 'u');
+const INDICATOR_ONLY = new RegExp(`^[ \\t]*${INDICATOR}[ \\t]*$`, 'u');
+const announcesSecret = (name: string): boolean => looksSecret(name.replace(/^[0-9.-]+/u, ''), 'x'.repeat(8));
+
 /**
- * The tightened shape (#36): a line that is only a separator and a block indicator (`= |`, `:>-`), after a line
- * that ends in a name, with only blank lines between them.
+ * Which lines of `text` (split at its line breaks) stand in a block of the tightened family (#36), read from the text
+ * alone: a name that announces a secret and then, with only blank lines between,
+ * - `NAME⏎= |` — a separator and an indicator on the line after a line that ends in the name;
+ * - `NAME⏎=⏎|` — a separator alone on that line, and an indicator alone on the next;
+ * - `name:⏎|` — a line that ends in the name and its separator, and an indicator alone on the next;
+ * - `name: | # note` — an indicator with a comment on the name's own line, when the comment's last word is read no
+ *   other way (no separator line follows it);
+ * and each block runs from the name's line to the last line before the first one, after the indicator's, that stands
+ * no deeper than the name. A same-line block with no comment (`password: |`) is no member: today already reads it.
  */
-const TIGHTENED =
-  /[A-Za-z0-9_.-]["']?[ \t]*(?:\r\n|\r|\n)(?:[ \t]*(?:\r\n|\r|\n))*[ \t]*[:=][ \t]*[|>][-+0-9]*[ \t]*(?:\r\n|\r|\n|$)/u;
+function tightenedLines(text: string): ReadonlySet<number> {
+  const lines = text.split(BREAK);
+  const after = (at: number): number => {
+    let next = at + 1;
+    while (next < lines.length && (lines[next] ?? '').trim() === '') next += 1;
+    return next;
+  };
+  const indicatorLine = (at: number): number | undefined => {
+    const line = lines[at] ?? '';
+    const separator = ENDS_IN_SEPARATOR.exec(line);
+    if (separator?.[1] !== undefined && separator[1].replace(/^[0-9.-]+/u, '') !== '') {
+      const next = after(at);
+      return separator[2] === undefined && announcesSecret(separator[1]) && INDICATOR_ONLY.test(lines[next] ?? '')
+        ? next
+        : undefined;
+    }
+    const name = ENDS_IN_NAME.exec(line)?.[1];
+    const next = after(at);
+    if (name !== undefined && name.replace(/^[0-9.-]+/u, '') !== '' && SEPARATOR_THEN.test(lines[next] ?? '')) {
+      if (!announcesSecret(name)) return undefined;
+      if (SEPARATOR_AND_INDICATOR.test(lines[next] ?? '')) return next;
+      const own = after(next);
+      return SEPARATOR_ONLY.test(lines[next] ?? '') && INDICATOR_ONLY.test(lines[own] ?? '') ? own : undefined;
+    }
+    const commented = ENDS_IN_COMMENTED_BLOCK.exec(line)?.[1];
+    return commented !== undefined && announcesSecret(commented) ? at : undefined;
+  };
+  const tightened = new Set<number>();
+  for (let at = 0; at < lines.length; at += 1) {
+    const opens = indicatorLine(at);
+    if (opens === undefined) continue;
+    const indent = (lines[at] ?? '').length - (lines[at] ?? '').trimStart().length;
+    let end = opens;
+    for (let next = opens + 1; next < lines.length; next += 1) {
+      const line = lines[next] ?? '';
+      if (line.trim() !== '' && line.length - line.trimStart().length <= indent) break;
+      end = next;
+    }
+    for (let line = at; line <= end; line += 1) tightened.add(line);
+  }
+  return tightened;
+}
 
 /**
  * Whether `wider` hides at least every byte `today` hides: it is `today` with more of its shown text cut out, so
@@ -224,14 +290,32 @@ function hidesAtLeast(today: string, wider: string): boolean {
   return today.length - last.length >= at + 1 && today.endsWith(last);
 }
 
-/** Why 5.0's output for `text` breaks the oracle, or undefined when it holds. */
+/**
+ * Why 5.0's output for `text` breaks the oracle, or undefined when it holds: line by line (nothing generated holds a
+ * private-key header, the one cut that can take a line break with it, so the breaks of the two outputs line up), equal
+ * to today's off the tightened lines and hiding at least what today hides on them, and redacted exactly when today is
+ * or a tightened line differs.
+ */
 function breach(text: string): string | undefined {
   const today = redactTodayText(text);
   const shown = shownFor(text);
   if (shown.text === today.text && shown.redacted === today.redacted) return undefined;
-  if (!TIGHTENED.test(text)) return 'differs from today outside the tightened shape';
-  if (!hidesAtLeast(today.text, shown.text) || (today.redacted && !shown.redacted)) return 'shows what today hides';
-  return undefined;
+  const tightened = tightenedLines(text);
+  const todays = today.text.split(KEPT_BREAK);
+  const shownParts = shown.text.split(KEPT_BREAK);
+  if (todays.length !== shownParts.length) return 'breaks its lines apart from today';
+  let differs = false;
+  for (let part = 0; part < todays.length; part += 1) {
+    const was = todays[part] ?? '';
+    const is = shownParts[part] ?? '';
+    if (was === is) continue;
+    if (part % 2 === 1 || !tightened.has(part / 2)) return 'differs from today outside the tightened lines';
+    if (!hidesAtLeast(was, is)) return 'shows what today hides';
+    differs = true;
+  }
+  return shown.redacted === (today.redacted || differs)
+    ? undefined
+    : 'says it hid something when it hid what today did';
 }
 
 /** The smallest text that still breaks the oracle the same way: characters taken out one at a time while it does. */
@@ -250,18 +334,25 @@ function minimal(text: string, why: string): string {
   return smallest;
 }
 
-/** The first few texts of `cases` that break the oracle, each cut down, and how many held the tightened shape. */
+/**
+ * The first few texts of `cases` that break the oracle, each cut down; how many held a tightened line, and how many
+ * of those 5.0 shows differently from today (so the superset branch was taken, not only reached).
+ */
 function breaches(shape: (next: () => number) => string, seed: number, cases: number) {
   const next = seeded(seed);
   const failures: string[] = [];
   let tightened = 0;
+  let differed = 0;
   for (let count = 0; count < cases && failures.length < 5; count += 1) {
     const text = shape(next);
-    if (TIGHTENED.test(text)) tightened += 1;
+    if (tightenedLines(text).size > 0) {
+      tightened += 1;
+      if (shownFor(text).text !== redactTodayText(text).text) differed += 1;
+    }
     const why = breach(text);
     if (why !== undefined) failures.push(`${why}: ${JSON.stringify(minimal(text, why))}`);
   }
-  return { failures, tightened };
+  return { failures, tightened, differed };
 }
 
 // A review can re-run either with another seed and a larger count: `REDACT_FUZZ_SEED=7 REDACT_FUZZ_CASES=100000`.
@@ -269,16 +360,17 @@ const SEED = Number(process.env.REDACT_FUZZ_SEED ?? 0x5eed);
 const CASES = Number(process.env.REDACT_FUZZ_CASES ?? 20_000);
 
 describe('component text redaction never hides less than today', () => {
-  it('S26 should hide every byte today hides, and equal today outside the tightened shape, over structured texts', () => {
+  it('S26 should hide every byte today hides, and equal today off the tightened lines, over structured texts', () => {
     // Act
     const result = breaches(generate, SEED, CASES);
 
     // Assert
     should(result.failures).deepEqual([]);
     should(result.tightened).be.above(0);
+    should(result.differed).be.above(0);
   });
 
-  it('S26 should hide every byte today hides, and equal today outside the tightened shape, over unstructured texts', () => {
+  it('S26 should hide every byte today hides, and equal today off the tightened lines, over unstructured texts', () => {
     // Assert
     should(breaches(soup, SEED ^ 0x50f7, CASES).failures).deepEqual([]);
   });
@@ -295,6 +387,24 @@ describe('component text redaction never hides less than today', () => {
     should(today).equal(text);
     should(shown).equal(`PASSWORD\n= |\n  ${HIDDEN}\nnext: ok`);
     should(breach(text)).be.undefined();
+  });
+
+  it('S26 should mark only the lines of a tightened block, from its name to the last line deeper than it', () => {
+    // Assert
+    should([...tightenedLines('a: 1\nPASSWORD\n= |\n  v\n\n  w\nnext: x\n  y')]).deepEqual([1, 2, 3, 4, 5]);
+    should([...tightenedLines('token:\r\n  | # c\r\n    v\r\ntail')]).deepEqual([0, 1, 2]);
+    should([...tightenedLines('PASSWORD\n=\n|\n  v')]).deepEqual([0, 1, 2, 3]);
+    should([...tightenedLines('secret: >- # c\n\tv\nend')]).deepEqual([0, 1]);
+    should([...tightenedLines('PASSWORD\n= |')]).deepEqual([0, 1]);
+    // No member: a same-line block today reads, a name that announces no secret, a separator with a value, a
+    // comment whose last word is a name with a separator line after it, and no indicator at all.
+    should(tightenedLines('password: |\n  v').size).equal(0);
+    should(tightenedLines('mode\n= |\n  v').size).equal(0);
+    should(tightenedLines('PASSWORD\n= x\n  v').size).equal(0);
+    should(tightenedLines('PASSWORD:\n  x\n  v').size).equal(0);
+    should(tightenedLines('password: | # note\n= x').size).equal(0);
+    should(tightenedLines('9:\n|\n  v').size).equal(0);
+    should(tightenedLines('PASSWORD\n=\nx').size).equal(0);
   });
 
   it('S26 should count a byte today hides and 5.0 shows as a breach of the superset', () => {
