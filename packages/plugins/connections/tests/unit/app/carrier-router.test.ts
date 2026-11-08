@@ -255,9 +255,6 @@ describe('hosted relay discovery (R580)', () => {
     const before = names.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
     const stand = (name: (typeof names)[number], value: unknown): void =>
       void Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
-    stand('window', target('window'));
-    stand('document', { ...target('document'), visibilityState: 'visible' });
-    stand('navigator', { connection: target('connection') });
     const ports = {
       openSocket: () => {
         throw new Error('nothing dials here');
@@ -267,6 +264,10 @@ describe('hosted relay discovery (R580)', () => {
       daemons: { registerCache: () => () => {} },
     } as unknown as ConnectPorts;
     try {
+      // Inside the try, so a swap that throws half-way still has every global put back.
+      stand('window', target('window'));
+      stand('document', { ...target('document'), visibilityState: 'visible' });
+      stand('navigator', { connection: target('connection') });
       (connections as unknown as { shell: Required<import('@ferretry/app').ShellProvides> }).shell.carriers(ports);
     } finally {
       for (const [name, descriptor] of before) {
