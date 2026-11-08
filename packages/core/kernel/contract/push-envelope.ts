@@ -7,7 +7,12 @@ import { z } from 'zod';
  *
  * - `title` and `body` are the notification's words, composed by the daemon. They carry no secret, token or pairing code.
  * - `url` is a page NAMED RELATIVE TO THE MACHINE'S OWN PAGES (`/ferrets/<id>/chat?ask=A3`). It is a request, not an
- *   address: the shell opens it only after its own route parse accepts it.
+ *   address: the shell opens it only after its own route parse accepts it. THE SCHEMA BOUNDS ONLY ITS LENGTH; the grammar
+ *   belongs to the shell's route parse (`PUSH_TAP_SCREENS`), and an address it refuses opens the app, so it is deliberately
+ *   not checked here (that would turn "opens the app" into "unreadable push").
+ *
+ * The caps count UTF-16 code units and are a safety bound, not a size budget: a push service accepts roughly 4 KiB of
+ * encrypted payload, and the sender owns fitting that.
  *
  * Strict and length-capped: a field that is missing, not a string, or over its cap makes the whole envelope unreadable,
  * and an unreadable push is shown plainly with no page. A push payload is not trusted input.
