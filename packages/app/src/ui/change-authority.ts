@@ -11,8 +11,11 @@
  * Pure apart from the one read.
  */
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { z } from 'zod';
+import { daemonOfClient } from '../connect/daemon-of.ts';
+import { useOptionalShell } from '../shell/context.tsx';
+import type { Authority } from '../shell/view-place.tsx';
 
 /** Gate's route. The shell's client sends it as it sends every route key, under the caller's own session. */
 export const GRANTS_ROUTE = 'GET /v1/grants' as const;
@@ -94,18 +97,59 @@ export const readChangeAuthority = async (client: Pick<PluginClient, 'call'>): P
   }
 };
 
-/** The authority for one machine's client; `null` while it is being read. A new client starts over. */
+/**
+ * The shell's tri-state authority (S1) in this module's older vocabulary (R2 m3), so the callers of
+ * {@link useChangeAuthority} keep their type: `unknown` is `null` (loading, as before); `locked` is `step-up`
+ * ("allowed once this device confirms with its passkey"); the others as they are.
+ */
+export function changeAuthorityFrom(authority: Authority): ChangeAuthority | null {
+  switch (authority.kind) {
+    case 'unknown':
+      return null;
+    case 'locked':
+    case 'step-up':
+      return STEP_UP;
+    case 'open':
+      return OPEN;
+    case 'unreadable':
+      return UNREADABLE;
+    case 'refused':
+      return authority;
+  }
+}
+
+const OPEN: ChangeAuthority = Object.freeze({ kind: 'open' });
+const STEP_UP: ChangeAuthority = Object.freeze({ kind: 'step-up' });
+const UNREADABLE: ChangeAuthority = Object.freeze({ kind: 'unreadable' });
+const noSubscription = (): (() => void) => () => {};
+
+/**
+ * The authority for one machine's client; `null` while it is being read. A new client starts over.
+ *
+ * Inside an app shell, for a client the shell issued, it is a thin read of the shell's ONE per-daemon grants cache
+ * (S1, M6) for `fleet`/`configure`: no second `GET /v1/grants`. Outside a shell, or for a client the shell did not
+ * issue (a plugin's own harness, a suite's fake), it reads as it always did: its own `GET /v1/grants` (R3 m4).
+ */
 export function useChangeAuthority(client: Pick<PluginClient, 'call'>): ChangeAuthority | null {
-  const [authority, setAuthority] = useState<ChangeAuthority | null>(null);
+  const runtime = useOptionalShell()?.runtime;
+  const daemon = daemonOfClient(client);
+  const cached = runtime !== undefined && daemon !== undefined;
+  const readCache = useCallback(
+    () => (runtime === undefined || daemon === undefined ? null : runtime.authority(daemon, 'fleet', 'configure')),
+    [runtime, daemon],
+  );
+  const fromCache = useSyncExternalStore(cached ? runtime.subscribe : noSubscription, readCache, readCache);
+  const [own, setOwn] = useState<ChangeAuthority | null>(null);
   useEffect(() => {
+    if (cached) return;
     let live = true;
-    setAuthority(null);
+    setOwn(null);
     void readChangeAuthority(client).then(next => {
-      if (live) setAuthority(next);
+      if (live) setOwn(next);
     });
     return () => {
       live = false;
     };
-  }, [client]);
-  return authority;
+  }, [client, cached]);
+  return fromCache === null ? own : changeAuthorityFrom(fromCache);
 }

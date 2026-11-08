@@ -147,6 +147,16 @@ export type { PluginCommandContext, PluginCommandSource } from './shell/command-
 export { type AppHookContext, type AppHookProvider, type AppHookProviders, useAppHook } from './shell/app-hooks.ts';
 /** @public This device's theme, read on any screen, daemon-less ones included (§5.2: a device setting; shell contract S9). */
 export { type DeviceTheme, useDeviceTheme } from './shell/device-context.tsx';
+/** @public Where a per-daemon view is drawn — its machine, feed and authority — and how a control shows for it (§5.2; shell contract S1). */
+export {
+  type Authority,
+  type Axis,
+  CAPABILITY_NAMES,
+  type CapabilityName,
+  controlState,
+  useViewPlace,
+  type ViewPlace,
+} from './shell/view-place.tsx';
 export {
   COLOUR_TOKENS,
   SPACING_TOKENS,

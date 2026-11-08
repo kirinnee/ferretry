@@ -38,6 +38,35 @@ const HealthEnvelopeSchema = z.object({ protocol: z.number().int(), version: z.s
 
 export const INVENTORY_ROUTE = 'GET /v1/plugins';
 export const HEALTH_ROUTE = 'GET /v1/health';
+/** Gate's grants read (`GET /v1/grants`): authenticated, not capability-gated, behind the unlock. */
+const GRANTS_PATH = '/v1/grants';
+/** The package that owns the grants read: the shell's own read admits as it, caller and owner alike. */
+const GATE_PACKAGE = 'gate';
+
+/**
+ * What this client tells the shell's grants cache (shell contract S1) about the answers it sees, so a stale control
+ * heals: a confirm the person gave, a machine that wants its unlock, a capability refusal. Each answer-borne signal
+ * carries the GENERATION its request was sent under; a confirm bumps the generation, so an answer to a request sent
+ * before the unlock can be told apart and ignored.
+ */
+export type AuthoritySignal =
+  | { readonly kind: 'confirmed' }
+  | { readonly kind: 'locked'; readonly generation: number }
+  | { readonly kind: 'refused'; readonly generation: number };
+
+/** The shell's own grants read: the answer (none when nothing came back), the handler's reading, its generation. */
+export interface GrantsRead {
+  readonly generation: number;
+  readonly answer: TransportAnswer | undefined;
+  readonly need: PasskeyNeed | undefined;
+}
+
+/** A capability refusal from Gate's admission (`grant_not_granted`, `grant_step_up_required`, …). */
+const isCapabilityRefusal = (answer: TransportAnswer): boolean => {
+  if (answer.status !== 403 || typeof answer.body !== 'object' || answer.body === null) return false;
+  const code = (answer.body as { readonly code?: unknown }).code;
+  return typeof code === 'string' && code.startsWith('grant_');
+};
 
 /** The agenda channel header and the one value it may carry (the Asks contract's `AGENDA_CHANNEL_HEADER` / `AGENDA_CHANNEL_VERSION`). */
 const AGENDA_CHANNEL_HEADER = 'x-fy-agenda-channel';
@@ -142,6 +171,9 @@ export class DaemonClient {
   readonly #liveListeners = new Set<(live: boolean) => void>();
   #stopReconnect: (() => void) | undefined;
   #stopped = false;
+  /** Bumped by every passkey confirm the shell hears of (S1, R3 m2). */
+  #generation = 0;
+  readonly #authorityListeners = new Set<(signal: AuthoritySignal) => void>();
 
   constructor(options: DaemonClientOptions) {
     this.#transport = options.transport;
@@ -196,6 +228,55 @@ export class DaemonClient {
 
   standing(id: string): Standing {
     return this.#standings.get(id) ?? { state: 'blocked', reason: 'missing' };
+  }
+
+  /** The generation requests are sent under now; bumped by every confirm (S1). */
+  get generation(): number {
+    return this.#generation;
+  }
+
+  /** Whether the daemon's event feed is live right now (the view place's `online`). */
+  get feedLive(): boolean {
+    return this.#feedLive;
+  }
+
+  /** Fires on every change of {@link feedLive}. */
+  onFeedLive(listener: (live: boolean) => void): () => void {
+    this.#liveListeners.add(listener);
+    return () => this.#liveListeners.delete(listener);
+  }
+
+  /** Fires on every {@link AuthoritySignal}: the grants cache's re-read triggers. */
+  onAuthority(listener: (signal: AuthoritySignal) => void): () => void {
+    this.#authorityListeners.add(listener);
+    return () => this.#authorityListeners.delete(listener);
+  }
+
+  /**
+   * A confirm the person gave for this machine OUTSIDE this client's own pause (the shell's explicit unlock, a
+   * press's asked step-up): the generation moves on, and the grants are re-read.
+   */
+  noteConfirmed(): void {
+    this.#generation += 1;
+    this.#signal({ kind: 'confirmed' });
+  }
+
+  /**
+   * THE SHELL'S OWN GRANTS READ (S1, R3 m3), NEVER PAUSED. A method of this class only — `forPackage` hands no plugin
+   * a way to it — so no plugin can send a request that skips the passkey's pause. It admits as Gate, caller and owner
+   * both, so a paused plugin never hides it; a `401 unlock_required` comes back at once with the handler's reading of
+   * it (the machine is `locked`), never held for a prompt. It lets nothing through: it only reads.
+   */
+  async readGrants(_options: { readonly noPause: true }): Promise<GrantsRead> {
+    await this.#admit(GATE_PACKAGE, GATE_PACKAGE);
+    const generation = this.#generation;
+    let answer: TransportAnswer | undefined;
+    try {
+      answer = await this.#transport.request({ method: 'GET', path: GRANTS_PATH });
+    } catch {
+      answer = undefined;
+    }
+    return { generation, answer, need: answer === undefined ? undefined : this.#need(answer) };
   }
 
   /** Fires after every inventory change; the shell re-renders from {@link standing}. */
@@ -295,10 +376,10 @@ export class DaemonClient {
     // A resend is the same request, its request id included: the daemon sees one act asked twice, never two acts.
     const answer = await this.#confirmed(
       background ? 'background' : requestOrigin(method),
-      await this.#transport.request(request),
+      await this.#sent(request),
       async () => {
         await this.#admit(caller, owner);
-        return await this.#transport.request(request);
+        return await this.#sent(request);
       },
       init.signal,
     );
@@ -335,6 +416,19 @@ export class DaemonClient {
     return await resend();
   }
 
+  /** One request, its answer told to the grants cache under the generation it was sent in. */
+  async #sent(request: Parameters<DaemonTransport['request']>[0]): Promise<TransportAnswer> {
+    const generation = this.#generation;
+    const answer = await this.#transport.request(request);
+    if (answer.status === 401 && this.#need(answer)?.kind === 'unlock') this.#signal({ kind: 'locked', generation });
+    else if (isCapabilityRefusal(answer)) this.#signal({ kind: 'refused', generation });
+    return answer;
+  }
+
+  #signal(signal: AuthoritySignal): void {
+    for (const listener of [...this.#authorityListeners]) listener(signal);
+  }
+
   /** The handler's reading of a refusal; a handler that throws reads it as no passkey need at all. */
   #need(answer: TransportAnswer): PasskeyNeed | undefined {
     try {
@@ -354,11 +448,14 @@ export class DaemonClient {
   async #confirm(need: PasskeyNeed, origin: PromptOrigin, signal?: AbortSignal): Promise<boolean> {
     const passkey = this.#passkey;
     if (passkey === undefined || this.#stopped) return false;
+    let confirmed: boolean;
     try {
-      return (await untilAborted(passkey.handler.confirm(passkey.daemon, need, origin), signal, false)) === true;
+      confirmed = (await untilAborted(passkey.handler.confirm(passkey.daemon, need, origin), signal, false)) === true;
     } catch {
-      return false;
+      confirmed = false;
     }
+    if (confirmed) this.noteConfirmed();
+    return confirmed;
   }
 
   #subscribe<Name extends string, Payload>(

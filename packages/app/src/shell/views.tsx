@@ -3,6 +3,7 @@ import { Component, type ErrorInfo, type ReactNode } from 'react';
 import type { PanelRef, ScreenRef } from '../layout/engine.ts';
 import { useRouter } from '../router/router.tsx';
 import { useOptionalShell, useRuntimeVersion, useShell, WithoutShell } from './context.tsx';
+import { WithViewPlace } from './view-place.tsx';
 
 /**
  * WHERE PLUGIN VIEWS ARE DRAWN. Every plugin screen, panel and settings tab goes through {@link PluginView}, which
@@ -66,9 +67,12 @@ export function PluginView({ daemon, plugin, section, id, props }: PluginViewPro
   const view = half[section][id] as ((p: Record<string, unknown>) => ReactNode) | undefined;
   if (view === undefined) return <ShellLine>{skeletonSentence(title)}</ShellLine>;
   const Rendered = view;
+  // Where the view is drawn (S1): ITS daemon's machine, feed and authority, never the selected daemon's.
   return (
     <ViewBoundary title={title}>
-      <Rendered {...props} />
+      <WithViewPlace place={runtime.place(daemon)}>
+        <Rendered {...props} />
+      </WithViewPlace>
     </ViewBoundary>
   );
 }

@@ -36,7 +36,7 @@ export interface InstallPromptHolder {
 export const NO_INSTALL_PROMPT: InstallPromptHolder = Object.freeze({ current: () => undefined });
 
 /** The paired list and the selected id, read-only, and no client (MA4: clients come only via `reach`). */
-export type DaemonListView = Pick<DaemonList, 'snapshot' | 'subscribe'>;
+type DaemonListView = Pick<DaemonList, 'snapshot' | 'subscribe'>;
 
 export interface DeviceContextValue {
   /** This device's theme preference (`fy:app:theme`), injected by the composition root. */

@@ -2,7 +2,10 @@ import { type ClientOrigin, DaemonClient, type ShellPluginClient } from '../clie
 import type { Standing } from '../client/inventory.ts';
 import { blockedLine, remedyFor, type Remedy, wholeDaemonSentence } from '../client/sentences.ts';
 import type { DaemonTransport } from '../client/transport.ts';
-import type { DaemonList, PairedDaemon } from '../daemons/daemon-list.ts';
+import { type DaemonList, daemonTitle, type PairedDaemon } from '../daemons/daemon-list.ts';
+import type { RouteDecl } from '@ferretry/kernel/manifest';
+import { GrantsCache } from './grants-cache.ts';
+import type { Authority, Axis, CapabilityName, ViewPlace } from './view-place.tsx';
 import { type BuiltHalf, HalfCache } from '../surfaces/halves.ts';
 import { indexSurfaces, type SurfaceEntry } from '../surfaces/registry.ts';
 import { DaemonLayouts } from '../layout/daemon-layout.ts';
@@ -42,7 +45,16 @@ export interface ShellRuntimeOptions {
     readonly views: ReadonlyMap<string, View<DaemonlessScreenProps>>;
     readonly location: () => string;
   };
+  /**
+   * Calls its listener each time the app comes back to the foreground (`visibilitychange` to visible): a re-read
+   * trigger for every machine's grants (S1). Absent, that trigger never fires.
+   */
+  readonly onVisible?: (listener: () => void) => () => void;
 }
+
+const UNKNOWN: Authority = Object.freeze({ kind: 'unknown' });
+const OPEN: Authority = Object.freeze({ kind: 'open' });
+const NOT_GRANTED: Authority = Object.freeze({ kind: 'refused', refusal: 'not-granted' });
 
 type Connection =
   | { readonly kind: 'connecting' }
@@ -60,6 +72,12 @@ export class ShellRuntime {
   readonly #connections = new Map<string, Connection>();
   readonly #halves: HalfCache;
   readonly #hooks = new AppHookCache();
+  /** THE one per-daemon grants cache (S1): every authority answer reads it. */
+  readonly #grants = new GrantsCache(() => this.#changed());
+  /** Every route a compiled manifest declares, by key: what `authorityOf` reads a capability from. */
+  readonly #routes: ReadonlyMap<string, RouteDecl>;
+  readonly #places = new Map<string, { readonly version: number; readonly place: ViewPlace }>();
+  #handlerWatched = false;
   /** The owner's layout per daemon (the Layouts plugin), read through each daemon's guarded client. */
   readonly layouts: DaemonLayouts;
   readonly #listeners = new Set<() => void>();
@@ -79,6 +97,10 @@ export class ShellRuntime {
       (daemon, id) => this.standing(daemon, id),
     );
     this.layouts = new DaemonLayouts(this);
+    this.#routes = new Map(
+      options.surfaces.flatMap(entry => entry.manifest.actions?.routes ?? []).map(route => [route.key, route]),
+    );
+    options.onVisible?.(() => this.#grants.refreshAll());
     this.daemons.registerCache({ clearDaemon: daemon => this.#drop(daemon) });
     this.daemons.subscribe(() => this.#changed());
   }
@@ -177,6 +199,86 @@ export class ShellRuntime {
     return this.#halves.client(daemon, packageId, origin);
   }
 
+  /** Whether the daemon's event feed is live (a view's `online`). */
+  online(daemon: string): boolean {
+    const connection = this.#connections.get(daemon);
+    return connection?.kind === 'connected' && connection.client.feedLive;
+  }
+
+  /** What this device may do with (capability, axis) on this daemon, from the one grants cache. */
+  authority(daemon: string, capability: CapabilityName, axis: Axis): Authority {
+    return this.#grants.authority(daemon, capability, axis);
+  }
+
+  /**
+   * The authority of a route a compiled manifest declares: `not-granted` from the descriptor alone for an
+   * `admin-token` route (a paired device's class is never one); the machine's unlock or first read for a route no
+   * capability governs; the grants row for a governed one. An undeclared route is `unknown`, never `open`.
+   */
+  authorityOf(daemon: string, route: string): Authority {
+    const declared = this.#routes.get(route);
+    if (declared === undefined) return UNKNOWN;
+    if (declared.minimum === 'admin-token') return NOT_GRANTED;
+    const demand = declared.capability;
+    if (demand !== undefined) return this.#grants.authority(daemon, demand.capability, demand.axis);
+    const machine = this.#grants.authority(daemon, 'fleet', 'use');
+    return machine.kind === 'unknown' || machine.kind === 'locked' ? machine : OPEN;
+  }
+
+  /** THE one locked set (R3 m5): every machine whose grants read answered "unlock first". */
+  lockedDaemons(): readonly string[] {
+    return this.#grants.locked();
+  }
+
+  /**
+   * The person's explicit unlock of one machine (a press, never on mount): the handler's own `confirm` with origin
+   * `explicit`, which asks at once and settles that machine's waiting reads. It does NOT move the passkey's focus —
+   * only `PasskeyMount` does (MA6). A `true` re-reads that machine's grants.
+   */
+  async unlock(daemon: string): Promise<boolean> {
+    const handler = this.#passkey()?.handler;
+    const paired = this.daemons.get(daemon);
+    if (handler === undefined || paired === undefined) return false;
+    let confirmed: boolean;
+    try {
+      confirmed = (await handler.confirm(paired, { kind: 'unlock' }, 'explicit')) === true;
+    } catch {
+      confirmed = false;
+    }
+    if (confirmed) this.noteConfirmed(daemon);
+    return confirmed;
+  }
+
+  /** A press on one machine: on a `locked` machine the unlock comes first, and a dismissed one runs nothing. */
+  async press<T>(daemon: string, act: () => Promise<T>): Promise<T | undefined> {
+    if (this.#grants.isLocked(daemon) && !(await this.unlock(daemon))) return undefined;
+    return await act();
+  }
+
+  /** A confirm the shell forwarded for this machine outside a client's pause (`usePasskeyAsk`): re-read its grants. */
+  noteConfirmed(daemon: string): void {
+    const connection = this.#connections.get(daemon);
+    if (connection?.kind === 'connected') connection.client.noteConfirmed();
+  }
+
+  /** Where a per-daemon view of this daemon is drawn: the same object until the runtime next changes. */
+  place(daemon: string): ViewPlace {
+    const version = this.#version;
+    const known = this.#places.get(daemon);
+    if (known !== undefined && known.version === version) return known.place;
+    const paired = this.daemons.get(daemon);
+    const place: ViewPlace = {
+      daemon,
+      machine: paired === undefined ? daemon : daemonTitle(paired),
+      online: this.online(daemon),
+      authority: (capability, axis) => this.authority(daemon, capability, axis),
+      authorityOf: route => this.authorityOf(daemon, route),
+      press: act => this.press(daemon, act),
+    };
+    this.#places.set(daemon, { version, place });
+    return place;
+  }
+
   async #open(paired: PairedDaemon, connecting: Connection): Promise<void> {
     let transport: DaemonTransport | undefined;
     try {
@@ -202,11 +304,24 @@ export class ShellRuntime {
       ...(handler === undefined ? {} : { passkey: { daemon: paired, handler } }),
     });
     // An inventory change (start, a reconnect, `kernel.plugins-changed`) rebuilds the halves and hooks; the clients stay.
+    // It is also a re-read trigger for the machine's grants, the first read included.
+    this.#grants.attach(paired.daemon, client);
     client.onChange(() => {
       this.#halves.clearDaemon(paired.daemon);
       this.#hooks.clearDaemon(paired.daemon);
+      this.#grants.refresh(paired.daemon);
       this.#changed();
     });
+    // The feed coming back is a re-read trigger; every change of it re-renders the views' `online`.
+    client.onFeedLive(live => {
+      if (live) this.#grants.refresh(paired.daemon);
+      this.#changed();
+    });
+    // Best effort: the handler's own change (a prompt settled) re-reads the machines that wait on their unlock.
+    if (handler !== undefined && !this.#handlerWatched) {
+      this.#handlerWatched = true;
+      handler.subscribe(() => this.#grants.refreshLocked());
+    }
     this.#connections.set(paired.daemon, { kind: 'connected', client, transport });
     this.#changed();
     await client.start();
@@ -229,6 +344,8 @@ export class ShellRuntime {
       connection.transport.close?.();
     }
     this.#connections.delete(daemon);
+    this.#grants.drop(daemon);
+    this.#places.delete(daemon);
     // The only place a daemon's clients go: a re-pair opens a new connection, so its clients are new objects.
     this.#halves.dropDaemon(daemon);
     this.#hooks.clearDaemon(daemon);

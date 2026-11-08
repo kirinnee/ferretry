@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import type { Authority, ViewPlace } from '@ferretry/app';
+import { WithViewPlace } from '@ferretry/app/testing';
+import { useState } from 'react';
 import type { ChangeResult, StageResult } from '../../../../../../app/features/fleet/shell/apply-change.ts';
 import {
   type AccountChanges,
@@ -7,7 +10,7 @@ import {
 } from '../../../../../../app/features/fleet/shell/apply-change-panel.tsx';
 import type { RuntimesClient } from '../../../../../../app/lib/client.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
-import { APPLIED, CHANGE_ID, machine, machineWith, scripted, stagedFrom } from '../account-support.ts';
+import { APPLIED, type Call, CHANGE_ID, machine, machineWith, scripted, stagedFrom } from '../account-support.ts';
 
 const CHANGE = {
   kind: 'machine.settings',
@@ -267,5 +270,41 @@ describe('useAccountChanges', () => {
     });
     expect(result).toMatchObject({ kind: 'applied' });
     await pending.unmount();
+  });
+});
+
+describe('useAccountChanges drawn in the app (shell contract S1)', () => {
+  it("takes what this browser may change from the view's place, and reads no machine view for it", async () => {
+    const calls: Call[] = [];
+    const client = scripted({ [MACHINE]: machine() }, calls);
+    const probe: Probe = { current: null };
+    let set: (next: Authority) => void = () => {};
+    function Placed() {
+      const [authority, setAuthority] = useState<Authority>({ kind: 'unknown' });
+      set = setAuthority;
+      const place: ViewPlace = {
+        daemon: 'd1',
+        machine: 'studio-mac',
+        online: true,
+        authority: () => authority,
+        authorityOf: () => authority,
+        press: act => act(),
+      };
+      return (
+        <WithViewPlace place={place}>
+          <HookHost client={client} probe={probe} />
+        </WithViewPlace>
+      );
+    }
+    const view = await mount(<Placed />);
+    await settle();
+    const shown = () => view.container.querySelector('[data-authority]')?.getAttribute('data-authority');
+    expect(shown()).toBe('reading');
+    await interact(() => set({ kind: 'locked' }));
+    expect(shown()).toBe('step-up');
+    await interact(() => set({ kind: 'refused', refusal: 'device-not-granted' }));
+    expect(shown()).toBe('refused');
+    expect(calls).toEqual([]);
+    await view.unmount();
   });
 });
