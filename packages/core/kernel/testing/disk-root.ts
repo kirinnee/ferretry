@@ -5,7 +5,7 @@ import type { FerretId } from '../contract/ids.ts';
 import type { PathsPort, RootHandle } from '../contract/ports.ts';
 import { type HostFs, nodeFs } from '../host/adapters/node-fs.ts';
 import { checkDirectory } from '../host/paths.ts';
-import { rootsPortFor } from '../host/roots.ts';
+import { ensureInternalRootBases, rootsPortFor } from '../host/roots.ts';
 
 /** A real-disk root for a test: the handle, and the folder it is rooted at. */
 export interface DiskRoot {
@@ -49,4 +49,30 @@ export async function diskRoot(parent: string, observe: (disk: HostFs) => HostFs
 export function diskPaths(): Pick<PathsPort, 'checkDirectory'> {
   const disk = nodeFs(() => 'x');
   return { checkDirectory: async absolutePath => await checkDirectory(disk, absolutePath) };
+}
+
+/**
+ * A REAL `sessions` root for one ferret's folder (the kernel's own fenced implementation, the internal root Ferrets
+ * keeps a session's plaintext credential in): `<parent>/home/state/ferrets/sessions/<subfolder>`, the base made
+ * `0700` the way the host makes it at boot. For the tests of an adapter that asserts `root.internal`.
+ */
+export async function diskSessionsRoot(
+  parent: string,
+  subfolder: string,
+  observe: (disk: HostFs) => HostFs = disk => disk,
+): Promise<DiskRoot> {
+  const home = `${parent}/home`;
+  const layout = { home, plugin: 'ferrets', worktrees: `${parent}/worktrees` };
+  const disk = nodeFs(() => 'x');
+  await mkdir(`${home}/state`, { recursive: true, mode: 0o700 });
+  const refused = await ensureInternalRootBases(disk, layout, ['sessions']);
+  if (refused.length > 0) throw new Error(`the sessions base was refused: ${refused[0]?.refusal ?? 'unknown'}`);
+  let counter = 0;
+  const root = rootsPortFor(observe(disk), layout, ['sessions'], () => undefined, {
+    random: () => {
+      counter += 1;
+      return `t${String(counter)}`;
+    },
+  }).root('sessions', { subfolder });
+  return { root, folder: `${home}/state/ferrets/sessions/${subfolder}` };
 }
