@@ -327,3 +327,57 @@ describe('what a person reads and copies', () => {
     expect(carrierDropsReport([])).toBe('No connection drops recorded on this device.');
   });
 });
+
+describe('the browser storage a drop log defaults to', () => {
+  const withLocalStorage = (descriptor: PropertyDescriptor | undefined, run: () => void) => {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    if (descriptor === undefined) Reflect.deleteProperty(globalThis, 'localStorage');
+    else Object.defineProperty(globalThis, 'localStorage', { ...descriptor, configurable: true });
+    try {
+      run();
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(globalThis, 'localStorage');
+      else Object.defineProperty(globalThis, 'localStorage', previous);
+    }
+  };
+
+  it('keeps nothing across a reload, and does not fail, when reading localStorage throws', () => {
+    withLocalStorage(
+      {
+        get: () => {
+          throw new Error('storage is blocked');
+        },
+      },
+      () => {
+        const { environment } = page();
+        const log = new CarrierDropLog(environment);
+        log.dropped(MACHINE, 'tunnel', 'stream', END);
+        expect(log.snapshot()).toHaveLength(1);
+      },
+    );
+  });
+
+  it('keeps nothing when localStorage is not a storage', () => {
+    withLocalStorage({ value: { getItem: 1 } }, () => {
+      const log = new CarrierDropLog(page().environment);
+      log.dropped(MACHINE, 'tunnel', 'stream', END);
+      expect(log.snapshot()).toHaveLength(1);
+    });
+  });
+});
+
+describe('the browser storage a drop log defaults to, when the browser has a working one', () => {
+  it('keeps the drops in it', () => {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    const kept = memoryStorage();
+    Object.defineProperty(globalThis, 'localStorage', { value: kept, configurable: true });
+    try {
+      const log = new CarrierDropLog(page().environment);
+      log.dropped(MACHINE, 'tunnel', 'stream', END);
+      expect(kept.items.has(CARRIER_DROPS_KEY)).toBe(true);
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(globalThis, 'localStorage');
+      else Object.defineProperty(globalThis, 'localStorage', previous);
+    }
+  });
+});
