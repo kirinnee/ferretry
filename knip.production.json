@@ -160,11 +160,6 @@
         "daemon/lib/env-profiles.ts",
         "daemon/lib/harness-env.ts",
         "daemon/lib/harness.ts",
-        "daemon/lib/identity.ts",
-        "daemon/lib/account/store-inspection.ts",
-        "daemon/lib/presets/detect.ts",
-        "daemon/lib/presets/login.ts",
-        "daemon/lib/presets/catalog.ts",
         "daemon/lib/service/publication.ts"
       ]
     },
@@ -201,7 +196,6 @@
       "entry": ["app/surfaces.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
       "ignore": [
-        "app/search/session-search.tsx",
         "app/composer/composer-references.ts",
         "app/render/fy-render-workspace-media.ts",
         "app/render/workspace-path.ts",

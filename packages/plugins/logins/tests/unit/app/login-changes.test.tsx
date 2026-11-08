@@ -1,8 +1,18 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { SignInsTab } from '../../../app/features/sign-ins-tab.tsx';
 import { login, loginList } from '../cli/fakes.ts';
 import { interact, mount, must } from '../support/dom.ts';
 import { type Call, scripted } from './support/client.ts';
+
+// Opening a login writes its address, so the window's hash is reset around every test here: the
+// tab must never start on a page a previous test happened to leave behind, nor leave one behind.
+beforeEach(() => {
+  window.history.pushState({}, '', '/');
+});
+afterEach(() => {
+  window.location.hash = '';
+  window.history.pushState({}, '', '/');
+});
 
 const LIST = 'GET /v1/logins';
 const GRANTS = 'GET /v1/grants';
@@ -48,6 +58,9 @@ const type = async (element: Element | null, value: string): Promise<void> => {
 };
 
 const openPage = async (routes: Record<string, unknown>, calls: Call[] = []) => {
+  // Start from the list: a remount inside one test must not open on the page the address still
+  // names from the round before.
+  window.history.pushState({}, '', '/');
   const view = await mount(
     <SignInsTab client={scripted(routes, calls)} now={() => Date.parse('2026-11-01T10:00:00.000Z')} />,
   );

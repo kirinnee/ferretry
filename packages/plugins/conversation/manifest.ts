@@ -19,6 +19,7 @@ import {
   COMPOSER_ACTED_AUDIT,
   CONVERSATION_CONFIG,
   CONVERSATION_STATE,
+  AGENDA_CONVERSATION_SLOT,
   ConversationPort,
   DRAFT_EDITED_AUDIT,
   DraftChanged,
@@ -47,7 +48,15 @@ import {
   TurnEnded,
 } from './contract/index.ts';
 import { AskAnswered, AsksPort, AskSources } from '@ferretry/core-asks/contract';
-import { FerretChanged, FerretsPort, FerretStopping, LaunchParts, SitrepLines } from '@ferretry/core-ferrets/contract';
+import {
+  ACTIONS_ROW_SLOT,
+  FerretChanged,
+  FerretsPort,
+  FerretStopping,
+  FILES_SEARCH_SLOT,
+  LaunchParts,
+  SitrepLines,
+} from '@ferretry/core-ferrets/contract';
 
 // Shared descriptor pieces. The fields answer independent questions (§7.1); only what repeats is shared.
 const FERRET = { minimum: 'operator', caller: 'any', noStore: true } as const;
@@ -304,6 +313,11 @@ export default definePlugin({
       panel('ferret.toolbar', { id: 'hypermedia', order: 25 }),
       // This device's conversation width (lead decision Q11).
       panel('device.settings', { id: 'chat-width', order: 20 }),
+      // Contributions to other plugins' slots (§5.2), each by the offerer's slot name: Ferrets' file browser gets the
+      // current-ferret search, its Actions ▾ menu gets Interrupt, and Agenda's ask page gets the ferret's conversation.
+      panel(FILES_SEARCH_SLOT, { id: 'files-search', order: 10 }),
+      panel(ACTIONS_ROW_SLOT, { id: 'interrupt-row', order: 10 }),
+      panel(AGENDA_CONVERSATION_SLOT, { id: 'agenda-conversation', order: 10 }),
     ],
     settings: [settingsTab('conversation', { label: 'Conversation', order: 20 })],
     renderers: [renderer('ask', { source: 'question' })],

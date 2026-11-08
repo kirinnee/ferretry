@@ -6,8 +6,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ModelCatalogFileSchema } from '@ferretry/plugin-logins/contract';
-import { builtInPresets as presetsFromTexts } from '../../../../daemon/lib/presets/catalog.ts';
 import type { ModelCatalog } from '../../../../daemon/lib/models/schema.ts';
+import {
+  type ProviderPreset,
+  ProviderPresetFileSchema,
+  presetFromFile,
+} from '../../../../daemon/lib/presets/schema.ts';
 import { configText } from './config-text.ts';
 
 const text = (folder: string, id: string): string => readFileSync(join(import.meta.dir, folder, `${id}.yaml`), 'utf8');
@@ -58,7 +62,17 @@ export const BUILT_IN_PRESET_TEXTS: Readonly<Record<string, string>> = Object.fr
   Object.fromEntries(PRESET_IDS.map(id => [id, text('presets', id)])),
 );
 
-export const builtInPresets = () => presetsFromTexts(configText, BUILT_IN_PRESET_TEXTS);
+/** The shipped preset texts, checked into presets the same way Logins' own catalogue reads a file. */
+export function builtInPresets(): readonly ProviderPreset[] {
+  return Object.entries(BUILT_IN_PRESET_TEXTS).map(([id, presetText]) => {
+    const read = configText.read(presetText);
+    if (!read.ok) throw new Error(`preset ${id} does not parse: ${read.errors.map(error => error.message).join('; ')}`);
+    const parsed = ProviderPresetFileSchema.safeParse(read.read.value);
+    if (!parsed.success)
+      throw new Error(`preset ${id} does not check: ${parsed.error.issues.map(issue => issue.message).join('; ')}`);
+    return presetFromFile(id, parsed.data, 'built-in');
+  });
+}
 
 export function builtInModelCatalogs(): Readonly<Record<string, ModelCatalog>> {
   return Object.fromEntries(

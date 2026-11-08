@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { LoginEnvironment } from '../../../contract/index.ts';
 import { SignInsTab } from '../../../app/features/sign-ins-tab.tsx';
 import { login, loginList } from '../cli/fakes.ts';
@@ -7,6 +7,16 @@ import { type Call, scripted } from './support/client.ts';
 import { localModelsFixture as n } from './support/local-models.ts';
 
 // The read-only cases of the Sign-ins tab: what the list and a login's page SHOW.
+
+// Opening a login writes its address, so the window's hash is reset around every test here: the
+// tab must never start on a page a previous test happened to leave behind, nor leave one behind.
+beforeEach(() => {
+  window.history.pushState({}, '', '/');
+});
+afterEach(() => {
+  window.location.hash = '';
+  window.history.pushState({}, '', '/');
+});
 
 const LIST = 'GET /v1/logins';
 const REFRESH = 'POST /v1/models/local/refresh';
