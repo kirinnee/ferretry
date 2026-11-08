@@ -687,6 +687,17 @@ export interface RootHandle {
    * skipped, modes kept) or, with `link`, one link at `to` to the source folder's real path. Both ends are fenced.
    */
   copyTree(source: RootHandle, from: FencedPath, to: FencedPath, options?: TreeCopyOptions): Promise<void>;
+  /**
+   * Materializes a {@link SharedTree} another plugin minted (`RootsPort.share`: Skills' skill folder) at `to` in THIS
+   * root, which must be an internal, writable root (`agent-homes`): any other is refused. A copy keeps `copyTree`'s
+   * rules exactly (each file read off the disk through a checked descriptor, a link inside skipped, a file with a
+   * second hard link skipped, modes kept, `maxEntries`, both ends fenced, a NEW folder at `to`). `link` asks for one
+   * link at `to` to the tree's real path instead; it is made only when the kernel's shared-tree link rule allows it for
+   * this tree and this handle (a tree from the minter's own state; and only if the owner chose so, a project folder
+   * that is the receiving ferret's own work folder), and otherwise the tree is COPIED. The answer says which was made.
+   * A tree that is forged, rebuilt from its JSON, or whose minter stopped is refused.
+   */
+  copyShared(tree: SharedTree, to: FencedPath, options?: TreeCopyOptions): Promise<SharedTreeCopied>;
   /** A folder made (or narrowed) to `0700`, refused when a link or a file is at the name. */
   ensurePrivateDirectory(path: FencedPath): Promise<void>;
   list(path: FencedPath): Promise<readonly string[]>;
@@ -711,7 +722,34 @@ export interface RootHandle {
 export interface RootsPort {
   /** Only roots the manifest declared in `permissions.roots`; anything else throws at build. */
   root(name: RootName, scope?: { readonly ferret?: FerretId; readonly subfolder?: string }): RootHandle;
+  /**
+   * Mints a {@link SharedTree}: ONE existing folder of this plugin's own, handed read-only to whoever receives it
+   * (Skills' skill folder in a launch part, for the harness that materializes it with `RootHandle.copyShared`). Only
+   * with `permissions.shareTrees`, and only from what this plugin owns: a folder of one of ITS OWN `work` or `imports`
+   * handles (a root handle another plugin made, or any other root, is refused), or one name of one of its own declared
+   * `opaque` named trees (`installed/*`). Valid until this plugin stops.
+   */
+  share(source: SharedTreeSource): Promise<SharedTree>;
 }
+
+declare const sharedTreeBrand: unique symbol;
+
+/**
+ * One folder an owner plugin shares, read-only, with the plugin that receives it (§7.7, kernel batch #10). Opaque and
+ * unforgeable, like a Vault {@link ChildEnvironment}: no field, kept in a kernel table, so a copy, a spread or a JSON
+ * round trip (it serialises as `{ shared: <folder name> }` only, never a path) is nothing the kernel will open.
+ */
+export interface SharedTree {
+  readonly [sharedTreeBrand]: true;
+}
+
+/** What {@link RootsPort.share} shares: a folder of one of the minter's own root handles, or one of its own named trees. */
+export type SharedTreeSource =
+  | { readonly root: RootHandle; readonly path: FencedPath }
+  | { readonly state: StateFileDef; readonly name: string };
+
+/** What {@link RootHandle.copyShared} made at the destination: a copy, or (allowed by the link rule) one link. */
+export type SharedTreeCopied = 'copied' | 'linked';
 
 // events ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 

@@ -2,6 +2,8 @@ import type { Result } from '@ferretry/std';
 import { err, instantFromEpochMs, ok } from '@ferretry/std';
 import { basename, dirname, join, posix, relative } from 'node:path';
 import type { FencedPath, FolderRefusal, WorkFolders } from '../contract/bound.ts';
+import type { StateFileDef } from '../contract/define.ts';
+import type { FerretId } from '../contract/ids.ts';
 import {
   type ComponentIdentity,
   FsError,
@@ -26,6 +28,7 @@ import type {
   RootPublished,
   RootPublishOptions,
   RootWriteOptions,
+  SharedTreeSource,
 } from '../contract/ports.ts';
 import type { FileIdentity, HostFs, OpenedDirectory, OpenedFile } from './adapters/node-fs.ts';
 import {
@@ -43,6 +46,17 @@ import {
 } from './fence-guard.ts';
 import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-roots.ts';
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
+import {
+  ownStateTree,
+  receivingRoot,
+  refuseShared,
+  type SharedOrigin,
+  SHARED_TREE_LINK_RULE,
+  sharedLinkAllowed,
+  type SharedTreeLinkRule,
+  SharedTrees,
+  shareableRoot,
+} from './shared-trees.ts';
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
 const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports', 'harness-home']);
@@ -765,12 +779,25 @@ interface Checked {
 /** What `copyTree` may ask of a SOURCE handle: its own checks, never a path of its own choosing. */
 interface SourceAccess {
   readonly plugin: string;
+  /** The root the handle is on, and the ferret a `work` handle is scoped to (`RootsPort.share`'s origin). */
+  readonly root?: RootName;
+  readonly ferret?: FerretId;
   readonly real: (path: FencedPath) => Promise<Checked>;
   readonly realParent: (path: FencedPath) => Promise<Checked>;
 }
 
 /** Every handle the kernel made, with the plugin it was made for and its checked resolvers (for `copyTree`). */
 const HANDLES = new WeakMap<object, SourceAccess>();
+
+/** One minted shared tree: how to reach its folder again (the minter's own checks), and where it came from. */
+interface SharedEntry {
+  readonly source: SourceAccess;
+  readonly from: FencedPath;
+  readonly origin: SharedOrigin;
+}
+
+/** Every shared tree the kernel minted (`RootsPort.share`), known by identity only. */
+const SHARED = new SharedTrees<SharedEntry>();
 
 interface HandleSetup {
   readonly fs: HostFs;
@@ -784,6 +811,10 @@ interface HandleSetup {
   readonly immutable: () => Promise<readonly string[]>;
   readonly random: () => string;
   readonly pins: PinRegistry | undefined;
+  /** The scope the handle was made with, for `copyShared`'s link rule. */
+  readonly ferret?: FerretId;
+  readonly subfolder?: string;
+  readonly linkRule: SharedTreeLinkRule;
 }
 
 /** What a held owner's root needs to judge every walk beneath it: the disk, the home it must not reach, the proven stores. */
@@ -982,7 +1013,7 @@ const HARD_LINK_RETRIES = 20;
 const HARD_LINK_RETRY_MS = 5;
 
 function rootHandle(setup: HandleSetup): RootHandle {
-  const { fs, home, name, plugin, base, anchor, scopedParent, check, immutable, random, pins } = setup;
+  const { fs, home, name, plugin, base, anchor, scopedParent, check, immutable, random, pins, linkRule } = setup;
   const ownerRoot = OWNER_ROOTS.has(name);
   const readOnly = READ_ONLY_ROOTS.has(name);
   /**
@@ -1217,6 +1248,38 @@ function rootHandle(setup: HandleSetup): RootHandle {
       if ((await leafIdentity(target.scope, target.full)) !== undefined) refuse('outside');
       await copyInto(known, from, to, { left: options?.maxEntries ?? DEFAULT_COPY_ENTRIES });
     },
+    copyShared: async (tree, to, options) => {
+      // The destination: an internal root the kernel makes, writable. Checked before the tree is even looked at.
+      if (!receivingRoot(name)) return refuseShared('not_internal');
+      writable();
+      const shared = SHARED.open(tree);
+      const sourceFolder = await shared.source.real(shared.from);
+      const checkedSource = await openCheckedFolder(sourceFolder.scope, sourceFolder.full).catch((error: unknown) => {
+        if (error instanceof RootError && error.refusal === 'not_a_file') refuse('outside');
+        throw error;
+      });
+      await checkedSource.close();
+      const target = await realParent(to, true);
+      const receiver = {
+        root: name,
+        ...(setup.ferret === undefined ? {} : { ferret: setup.ferret }),
+        ...(setup.subfolder === undefined ? {} : { subfolder: setup.subfolder }),
+      };
+      if (options?.link === true && sharedLinkAllowed(linkRule, shared.origin, receiver)) {
+        // As the copy does, the missing folders on the way are made (0700) through the checked folder above them.
+        const made = await openFolderMaking(target.scope, dirname(target.full), 0o700, true);
+        try {
+          await fs.symlink(sourceFolder.full, await entry(target.scope, made.folder, made.real, basename(target.full)));
+        } finally {
+          await made.folder.close();
+        }
+        return 'linked';
+      }
+      // A copy lands in a NEW folder: nothing already there (a planted link) can redirect what it writes.
+      if ((await leafIdentity(target.scope, target.full)) !== undefined) refuse('outside');
+      await copyInto(shared.source, shared.from, to, { left: options?.maxEntries ?? DEFAULT_COPY_ENTRIES });
+      return 'copied';
+    },
     ensurePrivateDirectory: async path => {
       writable();
       // A handle scoped to one folder of a private root (a ferret's `sessions` folder) can name ITS OWN folder: it is made
@@ -1310,7 +1373,13 @@ function rootHandle(setup: HandleSetup): RootHandle {
         : fencedPin(pinned, { fs, home, immutable });
     },
   };
-  HANDLES.set(handle, { plugin, real: path => real(path), realParent: path => realParent(path) });
+  HANDLES.set(handle, {
+    plugin,
+    root: name,
+    ...(setup.ferret === undefined ? {} : { ferret: setup.ferret }),
+    real: path => real(path),
+    realParent: path => realParent(path),
+  });
   return handle;
 }
 
@@ -1414,6 +1483,14 @@ export interface RootsOptions {
   readonly hardLinkRoots?: readonly string[];
   /** The kernel's pin registry, for `RootHandle.pin`; absent, every pin is refused. */
   readonly pins?: PinRegistry;
+  /** Whether the manifest declares `permissions.shareTrees` (`RootsPort.share`); absent, every share is refused. */
+  readonly shareTrees?: boolean;
+  /** The plugin's declared state files: a shared named tree must be one of its own opaque ones. */
+  readonly stateFiles?: readonly StateFileDef[];
+  /** Told the plugin's stop: every tree it minted is revoked then. Absent, its trees live as long as the port. */
+  readonly onStop?: (fn: () => void) => void;
+  /** `copyShared`'s link rule. Absent: {@link SHARED_TREE_LINK_RULE}. */
+  readonly linkRule?: SharedTreeLinkRule;
 }
 
 /** The roots port for one plugin: only roots its manifest declared (§3.7); anything else throws. */
@@ -1430,7 +1507,35 @@ export function rootsPortFor(
   const immutable = (): Promise<readonly string[]> =>
     (proven ??= resolveImmutableRoots(fs, options.hardLinkRoots ?? HARD_LINK_ROOTS).catch(() => []));
   const home = absolute(layout.home, 'the home');
+  const linkRule = options.linkRule ?? SHARED_TREE_LINK_RULE;
+  // Every tree this plugin mints lives until it stops.
+  const life = { live: true };
+  options.onStop?.(() => {
+    life.live = false;
+  });
   return {
+    share: async (source: SharedTreeSource) => {
+      if (options.shareTrees !== true) return refuseShared('not_permitted');
+      if ('root' in source) {
+        const known = HANDLES.get(source.root);
+        if (known === undefined || known.plugin !== layout.plugin || known.root === undefined)
+          return refuseShared('not_own');
+        if (!shareableRoot(known.root)) return refuseShared('not_shareable');
+        await existingFolder(known, source.path);
+        const origin: SharedOrigin = {
+          kind: 'root',
+          root: known.root,
+          ...(known.ferret === undefined ? {} : { ferret: known.ferret }),
+        };
+        return SHARED.mint(basename(source.path), { source: known, from: source.path, origin }, life);
+      }
+      const folder = ownStateTree(options.stateFiles ?? [], source.state, source.name);
+      if (folder === undefined) return refuseShared('not_own');
+      const base = absolute(join(pluginStateFolder(home, layout.plugin), folder), 'a shared tree');
+      const access = stateTreeAccess(fs, home, layout.plugin, base, immutable);
+      await existingFolder(access, base as FencedPath);
+      return SHARED.mint(basename(base), { source: access, from: base as FencedPath, origin: { kind: 'state' } }, life);
+    },
     root: (name, scope) => {
       if (!allowed.has(name)) throw new RootError('not_declared');
       if (!mayHoldRoot(layout.plugin, name)) throw new RootError('not_declared');
@@ -1495,7 +1600,49 @@ export function rootsPortFor(
         immutable,
         random,
         pins: options.pins,
+        ...(scope?.ferret === undefined ? {} : { ferret: scope.ferret }),
+        ...(subfolder === undefined ? {} : { subfolder }),
+        linkRule,
       });
     },
   };
+}
+
+/** A shared tree's folder must exist, be a folder, and pass its source's own checks NOW (at mint, as at every copy). */
+async function existingFolder(source: SourceAccess, path: FencedPath): Promise<void> {
+  const folder = await source.real(path);
+  const opened = await openCheckedFolder(folder.scope, folder.full).catch((error: unknown) => {
+    if (error instanceof RootError && error.refusal === 'not_a_file') refuse('outside');
+    throw error;
+  });
+  await opened.close();
+}
+
+/**
+ * How a shared named tree of the minter's own state (`<home>/state/<plugin>/installed/<name>`) is reached: exactly as an
+ * internal root is — anchored at the home, the base EXACTLY where it is named with no link from the home down to it,
+ * and every name below resolved and checked again at each call (a link inside is never followed out).
+ */
+function stateTreeAccess(
+  fs: HostFs,
+  home: string,
+  plugin: string,
+  base: string,
+  immutable: () => Promise<readonly string[]>,
+): SourceAccess {
+  const real = async (path: FencedPath): Promise<Checked> => {
+    const resolved = await resolveChecked(fs, home, base, false, path, home);
+    if (!resolved.ok) return refuse(resolved.error);
+    return { full: resolved.value.full, scope: { fs, base: resolved.value.base, ownerRoot: false, immutable } };
+  };
+  const realParent = async (path: FencedPath): Promise<Checked> => {
+    const slash = path.lastIndexOf('/');
+    const leaf = path.slice(slash + 1);
+    if (slash <= 0 || leaf === '' || leaf === '.' || leaf === '..') return await real(path);
+    const parent = await real(path.slice(0, slash) as FencedPath);
+    const full = join(parent.full, leaf);
+    if (!within(parent.scope.base.real, full)) refuse('link_escape');
+    return { full, scope: parent.scope };
+  };
+  return { plugin, real, realParent };
 }

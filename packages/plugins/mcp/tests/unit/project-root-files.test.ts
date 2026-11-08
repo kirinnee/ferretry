@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { FencedPath, RootHandle } from '@ferretry/kernel/contract';
+import type { FencedPath, RootHandle, SharedTree } from '@ferretry/kernel/contract';
 import { type Instant, ok } from '@ferretry/std';
 import { RootMcpHarnessDocuments } from '../../daemon/adapters/harness-documents.ts';
 import { mcpFileOnly, projectRootMcpFile } from '../../daemon/adapters/project-root-files.ts';
@@ -82,6 +82,10 @@ function kernelRoot(
     writeBytes: record('writeBytes'),
     copyTree: async () => {
       calls.push('copyTree');
+    },
+    copyShared: async () => {
+      calls.push('copyShared');
+      return 'copied';
     },
     ensurePrivateDirectory: record('ensurePrivateDirectory'),
     makeDirectory: record('makeDirectory'),
@@ -166,6 +170,7 @@ describe('mcpFileOnly: a kernel root narrowed to the one .mcp.json', () => {
     await expect(root.writeText(file.value, '{}')).rejects.toThrow(/does not write/u);
     await expect(root.writeBytes(file.value, new Uint8Array())).rejects.toThrow(/does not write/u);
     await expect(root.copyTree(source, file.value, file.value)).rejects.toThrow(/does not copy/u);
+    await expect(root.copyShared({} as SharedTree, file.value)).rejects.toThrow(/does not copy/u);
     await expect(root.makeDirectory(file.value)).rejects.toThrow(/does not make a folder/u);
     await expect(root.ensurePrivateDirectory(file.value)).rejects.toThrow(/does not make a folder/u);
     await expect(root.pin(file.value)).rejects.toThrow(/does not hold a folder open/u);

@@ -114,6 +114,7 @@ import {
 import type { HostStatePort } from './state/state-port.ts';
 import { openHome, probeHome } from './home.ts';
 import { ensureInternalRootBases, rootsPortFor } from './roots.ts';
+import type { SharedTreeLinkRule } from './shared-trees.ts';
 import { PinRegistry } from './pins.ts';
 import { FsError, type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
 import type { PathsPort, ScratchPort } from '../contract/ports.ts';
@@ -241,6 +242,11 @@ export interface HostOptions {
   readonly pid?: number;
   /** `<home>-worktrees` unless given. */
   readonly worktrees?: string;
+  /**
+   * `RootHandle.copyShared`'s link rule (Q5, the owner's !A466): a typed value only, never read from a file or the
+   * environment. Absent: `SHARED_TREE_LINK_RULE` (`link-internal`).
+   */
+  readonly sharedTreeLinks?: SharedTreeLinkRule;
   /** `FYD_TEST_TIMINGS` as `fyd` parsed it (R247); absent is the shipped numbers exactly. */
   readonly timings?: DaemonTimings;
   /** `FYD_BACKGROUND_DELAY_SECONDS` as `fyd` parsed it: when the `worker` job lane opens after start. */
@@ -644,7 +650,16 @@ async function bootLocked(
       { home, plugin: manifest.id, worktrees: options.worktrees ?? `${home}-worktrees` },
       manifest.permissions?.roots ?? [],
       () => bound.workFolders,
-      { random: adapters.random, ...(pins === undefined ? {} : { pins }) },
+      {
+        random: adapters.random,
+        ...(pins === undefined ? {} : { pins }),
+        // Shared trees (`kernel.roots.share`): only a manifest that declares it mints; its own opaque named trees are the
+        // only state it may share; every tree it minted is revoked when it stops.
+        shareTrees: manifest.permissions?.shareTrees === true,
+        stateFiles: manifest.data?.state ?? [],
+        onStop: fn => lifecycle.onStop(fn),
+        ...(options.sharedTreeLinks === undefined ? {} : { linkRule: options.sharedTreeLinks }),
+      },
     );
     const declaredNetwork = effectivePermissions(manifest.id, manifest.permissions?.network ?? []);
     const fetchPort = restrictFetch(manifest.id, declaredNetwork, adapters.fetch, items, resolversOf(manifest.id));

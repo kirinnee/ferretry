@@ -249,6 +249,12 @@ export interface Permissions {
    * does not declare it is refused by name.
    */
   readonly which?: true;
+  /**
+   * It mints shared trees through `kernel.roots.share` (Skills: one skill folder handed, read-only, to the harness that
+   * receives the launch part). It hands another plugin read of a folder it owns, so a plugin that does not declare it
+   * is refused by name.
+   */
+  readonly shareTrees?: true;
   /** It reads the running build's facts and launches the self-update through `kernel.updateHost` (Updates). */
   readonly updateHost?: true;
 }
