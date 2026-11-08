@@ -11,7 +11,7 @@ import type { TurnStateChange } from '../../../lib/session/observer/turn.ts';
 import type { AnswerLedger } from '../../../lib/session/peers/question.ts';
 import { isTurnStatus, limitPatch } from '../../../lib/session/peers/turn.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
-import type { DaemonStorage } from '../../storage/session-storage.ts';
+import { type DaemonStorage, InvalidStateDocumentError } from '../../storage/session-storage.ts';
 
 /** The storage writes a patch is applied through: the same locked path every other writer takes. */
 export type ObservationStorage = Pick<DaemonStorage, 'updateState' | 'append'>;
@@ -126,16 +126,22 @@ export class SessionObservationApplier {
     if (!patch.writes) return false;
     const decidedFrom = { ...patch, records: receipts.records };
     let written = false;
-    await this.storage.updateState(id, raw => {
-      const verified = SessionStateSchema.safeParse(raw);
-      if (!verified.success) return raw;
-      const decided = questionDocumentPatch(verified.data, decidedFrom, this.questions);
-      if (decided === undefined) return raw;
-      const next: Record<string, unknown> = { ...(raw as Record<string, unknown>), ...decided.fields };
-      for (const field of decided.removals) delete next[field];
-      written = true;
-      return next as typeof raw;
-    });
+    try {
+      await this.storage.updateState(id, raw => {
+        const verified = SessionStateSchema.safeParse(raw);
+        if (!verified.success) return raw;
+        const decided = questionDocumentPatch(verified.data, decidedFrom, this.questions);
+        if (decided === undefined) return raw;
+        const next: Record<string, unknown> = { ...(raw as Record<string, unknown>), ...decided.fields };
+        for (const field of decided.removals) delete next[field];
+        written = true;
+        return next as typeof raw;
+      });
+    } catch (error) {
+      // A document the schema refuses is damaged: storage refuses to read it, and nothing is written over it.
+      if (error instanceof InvalidStateDocumentError) return false;
+      throw error;
+    }
     return written;
   }
 }

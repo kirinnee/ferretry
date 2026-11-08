@@ -18,7 +18,7 @@ import {
   type SelftestProbe,
 } from '../../../manifest/index.ts';
 import { fixedClock } from '../../../testing/clock.ts';
-import { systemClock } from '../../../host/adapters/clock.ts';
+import { copiedClock, systemClock } from '../../../host/adapters/clock.ts';
 
 /**
  * `fyd --check`'s plugin seams (DECISIONS-2 #22, R689): pure preflight lines, bounded selftests that only `--check`
@@ -273,7 +273,10 @@ describe('selftest: bounded, in its own temp directory, only under --check', () 
         let listener: ((message: unknown) => void) | undefined;
         return {
           post: () => queueMicrotask(() => listener?.({ ok: true, probe: true })),
-          onMessage: given => ((listener = given), () => {}),
+          onMessage: given => {
+            listener = given;
+            return () => {};
+          },
           onExit: () => () => {},
           terminate: async () => {},
         };
@@ -311,8 +314,14 @@ describe('workers: the kernel starts and stops each embedded worker', () => {
         let exit: ((e: { code: number; reason?: string }) => void) | undefined;
         return {
           post: () => answer(() => {}, { message: m => message?.(m), exit: e => exit?.(e) }),
-          onMessage: given => ((message = given), () => {}),
-          onExit: given => ((exit = given), () => {}),
+          onMessage: given => {
+            message = given;
+            return () => {};
+          },
+          onExit: given => {
+            exit = given;
+            return () => {};
+          },
           terminate: async () => void terminated.push(url.href),
         };
       },
@@ -341,18 +350,18 @@ describe('workers: the kernel starts and stops each embedded worker', () => {
     const out = await lines(
       deps(withWorkers({ housekeeping: new URL('file:///h.ts') }), { workers: port, workerTimeoutMs: 30 }),
     );
-    expect(out).toEqual(['workers      ! housekeeping did not start — no answer within 30 ms']);
+    expect(out).toEqual(['workers      ! housekeeping did not start — no answer within 30 ms.']);
     expect(terminated).toEqual(['file:///h.ts']);
   });
 
   test('R689 a worker that crashes, answers wrongly or cannot be created is named with the reason', async () => {
     const crash = fakeWorkers((_, h) => h.exit({ code: 1, reason: 'ModuleNotFound\nresolving x' }));
     expect(await lines(deps(withWorkers({ a: new URL('file:///a.ts') }), { workers: crash.port }))).toEqual([
-      'workers      ! a did not start — it failed: ModuleNotFound resolving x',
+      'workers      ! a did not start — it failed: ModuleNotFound resolving x.',
     ]);
     const wrong = fakeWorkers((_, h) => h.message({ nothing: true }));
     expect(await lines(deps(withWorkers({ a: new URL('file:///a.ts') }), { workers: wrong.port }))).toEqual([
-      'workers      ! a did not start — it started but did not answer the probe',
+      'workers      ! a did not start — it started but did not answer the probe.',
     ]);
     const refused: WorkersPort = {
       start: () => {
@@ -360,7 +369,7 @@ describe('workers: the kernel starts and stops each embedded worker', () => {
       },
     };
     expect(await lines(deps(withWorkers({ a: new URL('file:///a.ts') }), { workers: refused }))).toEqual([
-      'workers      ! a did not start — it could not be created: no such module',
+      'workers      ! a did not start — it could not be created: no such module.',
     ]);
   });
 
@@ -394,8 +403,21 @@ describe('nothing here runs at boot, and the check changes no exit code', () => 
       implementations: [
         implementDaemon(manifest, {
           build: () => ({}),
-          preflight: { p: () => (calls.push('preflight'), []) },
-          selftest: { s: { label: 's', run: async () => (calls.push('selftest'), 'x') } },
+          preflight: {
+            p: () => {
+              calls.push('preflight');
+              return [];
+            },
+          },
+          selftest: {
+            s: {
+              label: 's',
+              run: async () => {
+                calls.push('selftest');
+                return 'x';
+              },
+            },
+          },
           workers: { w: new URL('file:///w.ts') },
         }),
       ],
@@ -618,7 +640,7 @@ describe('M2: the kernel timeout cannot be switched off from inside a selftest',
     expect(out).toEqual([
       'tamper       done',
       'hang         ! it did not finish within 40 ms',
-      'workers      ! stuck did not start — no answer within 40 ms',
+      'workers      ! stuck did not start — no answer within 40 ms.',
     ]);
     expect(frozen).toBe(true);
     expect(tamperRefused).toBe(3);
@@ -730,7 +752,7 @@ describe('m1-m6: hardening', () => {
       const out = await lines(
         deps([implementation('w', { workers: { a: new URL('file:///a.ts') } })], { workers: port }),
       );
-      expect(out).toEqual([`workers      ! a did not start — its handle failed: ${where} broke`]);
+      expect(out).toEqual([`workers      ! a did not start — its handle failed: ${where} broke.`]);
       expect(terminated).toBe(1);
     }
   });
@@ -834,5 +856,97 @@ describe('m1-m6: hardening', () => {
     await lines(deps([implementation('w', { workers: { a: new URL('file:///a.ts') } })], { workers: port }));
     expect(seen).toEqual({ name: 'a-probe', env: {} });
     expect(Object.keys(seen as object)).not.toContain('state');
+  });
+});
+
+describe('follow-up: the kernel owns its timers and its sentence', () => {
+  test('R689 a selftest that patches globalThis.setTimeout cannot switch off the NEXT selftest timeout', async () => {
+    const realSetTimeout = globalThis.setTimeout;
+    const realClearTimeout = globalThis.clearTimeout;
+    // what runCheck does: copy the timer functions before any plugin runs, build the clock from the copies
+    const clock = copiedClock(realSetTimeout, realClearTimeout, Date.now.bind(Date));
+    try {
+      const out = await lines(
+        deps(
+          [
+            implementation('s', {
+              selftest: {
+                patch: {
+                  label: 'patch',
+                  run: async () => {
+                    globalThis.setTimeout = (() => 0) as unknown as typeof setTimeout;
+                    globalThis.clearTimeout = (() => {}) as typeof clearTimeout;
+                    return 'patched';
+                  },
+                },
+                hang: { label: 'hang', run: () => new Promise<string>(() => {}) },
+              },
+            }),
+          ],
+          { clock, selftestTimeoutMs: 100 },
+        ),
+      );
+      expect(out[0]).toBe('patch        patched');
+      expect(out[1]).toBe('hang         ! it did not finish within 100 ms');
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      globalThis.clearTimeout = realClearTimeout;
+    }
+  });
+
+  test('R689 a worker failure reason that ends in " ready" can never end the workers line in " ready"', async () => {
+    for (const reason of ['store not ready', 'not ready.', 'ready  ']) {
+      const port: WorkersPort = {
+        start: (): WorkerHandle => ({
+          post: () => {},
+          onMessage: () => () => {},
+          onExit: given => {
+            queueMicrotask(() => given({ code: 1, reason }));
+            return () => {};
+          },
+          terminate: async () => {},
+        }),
+      };
+      const out = await lines(
+        deps([implementation('w', { workers: { housekeeping: new URL('file:///a.ts') } })], { workers: port }),
+      );
+      expect(out).toHaveLength(1);
+      expect(out[0]).toStartWith('workers      ! housekeeping did not start');
+      expect(out[0]).not.toMatch(/ ready$/);
+      expect(out[0]).toMatch(/\.$/);
+    }
+  });
+
+  test('R689 the probe timer is disarmed when onMessage or onExit throws', async () => {
+    for (const throwing of ['onMessage', 'onExit'] as const) {
+      let armed = 0;
+      const clock = {
+        nowMs: () => 0,
+        after: () => {
+          armed += 1;
+          return () => {
+            armed -= 1;
+          };
+        },
+      };
+      const port: WorkersPort = {
+        start: (): WorkerHandle => ({
+          post: () => {},
+          onMessage: () => {
+            if (throwing === 'onMessage') throw new Error('no listener');
+            return () => {};
+          },
+          onExit: () => {
+            throw new Error('no exit');
+          },
+          terminate: async () => {},
+        }),
+      };
+      const out = await lines(
+        deps([implementation('w', { workers: { a: new URL('file:///a.ts') } })], { workers: port, clock }),
+      );
+      expect(out[0]).toContain('its handle failed');
+      expect(armed).toBe(0);
+    }
   });
 });

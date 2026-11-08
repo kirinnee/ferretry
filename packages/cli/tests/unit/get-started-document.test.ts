@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { registry } from '../../../../../cli/src/generated/commands.ts';
-import { buildVerbTable } from '../../../../../cli/src/lib/verbs.ts';
+import { registry } from '../../src/generated/commands.ts';
+import { buildVerbTable } from '../../src/lib/verbs.ts';
 
-const pluginDir = join(import.meta.dir, '../../..');
+/** Onboarding's static page, read as a file: the CLI owns the verbs this test checks the page against. */
+const pluginDir = join(import.meta.dir, '../../../plugins/onboarding');
 const page = readFileSync(join(pluginDir, 'app/get-started/index.html'), 'utf8');
 /** The prompt's golden copy. Changing the prompt means changing this file too, in the same review. */
 const goldenPrompt = readFileSync(join(pluginDir, 'tests/fixtures/agent-setup-prompt.txt'), 'utf8').replace(/\n$/, '');

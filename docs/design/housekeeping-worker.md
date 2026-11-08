@@ -300,6 +300,23 @@ still better for three reasons:
   authorised. This is unverified (§5.3). If it is true, today every `security` read can stall the loop;
 - sha256, zstd decompression and rollout parsing leave the main-thread profile.
 
+#### 2.4.1 What the kernel's worker grants do and do not enforce (GAP)
+
+In 5.0 the worker gets `roots` (read-only) and `network` through `kernel.workers.start`, served over one channel
+the kernel keeps the main end of (`rootPort(id)`, `fetchPort()` from `@ferretry/kernel/worker`). That channel is a
+**grant**, not a **sandbox**:
+
+- Through the channel a worker gets only its declared roots (relative paths, read ops) and the plugin's own manifest
+  hosts (no `Host` header, 8 MiB each way, a flood of refused requests ends the channel). A forged message or a second
+  `rootPort` gets nothing more. The grants end when the plugin fails or stops.
+- The thread is **in-process**. It can still import `node:fs`, call the global `fetch` or start a `Worker`. What keeps
+  plugin code off those is the repo lints (`banned-globals`, `fetch-binding`, `no-sync-io`) and the worker bundle diet
+  test, the same as for the sqlite `state` grant. Rule 1 above (the adapter that yields material runs only inside the
+  worker) therefore rests on those checks, not on the grant.
+- The main-thread `kernel.fetch` still forwards a `Host` header a plugin sets; only the worker channel refuses it.
+
+Declared as GAP(kernel) in `ports-pending.json`.
+
 ### 2.5 Crash, timeout, fallback
 
 This follows stage 3 §3.3:
