@@ -58,6 +58,38 @@ describe('a login environment', () => {
     }
   });
 
+  it('should refuse a non-POSIX name in a login file, a harness half, login.add and login.env, naming the key only', () => {
+    for (const bad of ['BAD-NAME', 'A=B', '1ST']) {
+      const env = { [bad]: SECRET_VALUE };
+      const results = [
+        LoginFileSchema.safeParse({ harness: 'claude-code', store: 'environment', env }),
+        LoginHalfSchema.safeParse({ env }),
+        LoginChangeSchema.safeParse({
+          kind: 'login.add',
+          id: 'work',
+          harness: 'claude-code',
+          store: 'environment',
+          env,
+        }),
+        LoginChangeSchema.safeParse({ kind: 'login.env', id: 'work', env }),
+      ];
+      for (const result of results) {
+        const issues = refusal(result);
+        should(issues.some(issue => issue.message === `"${bad}" must be a POSIX environment variable name`)).be.true();
+        should(JSON.stringify(issues)).not.containEql(SECRET_VALUE);
+      }
+    }
+  });
+
+  it('should report both a bad name and a reserved name when a file has both', () => {
+    const env = { 'BAD-NAME': 'x', CODEX_HOME: 'y' };
+    const messages = refusal(LoginFileSchema.safeParse({ harness: 'claude-code', store: 'environment', env })).map(
+      issue => issue.message,
+    );
+    should(messages.some(m => m.includes('"BAD-NAME" must be a POSIX environment variable name'))).be.true();
+    should(messages.some(m => m.includes('"CODEX_HOME" is reserved'))).be.true();
+  });
+
   it('should accept ordinary variables, a well-formed secret reference and a kept variable', () => {
     const env = { API_KEY: '${secret:WORK_KEY}', REGION: 'eu-west-1' };
     should(LoginFileSchema.safeParse({ harness: 'claude-code', store: 'environment', env }).success).be.true();

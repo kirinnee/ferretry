@@ -445,7 +445,8 @@ export type LoginCheckRequest = z.infer<typeof LoginCheckRequestSchema>;
 // what was previewed. The seven intents are the ones a person makes of a single login; a runtime's switch or removal
 // along with it (today's `switchRuntimes`/`removeRuntimes`) is Runtimes' to carry out before it asks for the removal.
 
-const EnvNameSchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/u, 'a POSIX environment variable name');
+const POSIX_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+const EnvNameSchema = z.string().regex(POSIX_ENV_NAME, 'a POSIX environment variable name');
 
 /**
  * Variables a login's environment may never set, because Ferretry sets them and a second writer would lie. The first
@@ -469,7 +470,14 @@ const refuseUnsafeEnvironment = (ctx: {
   readonly issues: z.core.$ZodRawIssue[];
 }): void => {
   for (const [name, value] of Object.entries(ctx.value)) {
-    if ((RESERVED_LOGIN_ENV_NAMES as readonly string[]).includes(name)) {
+    if (!POSIX_ENV_NAME.test(name)) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `"${name}" must be a POSIX environment variable name`,
+        input: name,
+        path: [name],
+      });
+    } else if ((RESERVED_LOGIN_ENV_NAMES as readonly string[]).includes(name)) {
       ctx.issues.push({
         code: 'custom',
         message: `"${name}" is reserved: Ferretry sets it for the runtime itself`,
@@ -487,8 +495,16 @@ const refuseUnsafeEnvironment = (ctx: {
   }
 };
 
+/**
+ * The ONE builder of a login's environment record, for the login file, the harness half, `login.add` and `login.env`:
+ * the key is any string up to 128 characters at the record, and `refuseUnsafeEnvironment` refuses every unsafe key (not
+ * POSIX, reserved) and value (malformed reference) together, so a file with two faults reports both.
+ */
+const loginEnvironment = <V extends z.ZodType>(value: V) =>
+  z.record(z.string().max(128), value).check(refuseUnsafeEnvironment);
+
 /** A login's environment: POSIX names, plain values or `${secret:NAME}` references, no reserved variable. */
-export const LoginEnvSchema = z.record(EnvNameSchema, z.string()).check(refuseUnsafeEnvironment);
+export const LoginEnvSchema = loginEnvironment(z.string());
 
 const ChangeLabelSchema = NonEmptyStringSchema.max(200);
 
@@ -504,7 +520,7 @@ export const LoginChangeSchema = z.discriminatedUnion('kind', [
     /** `store: environment` only: the preset it is made from. */
     preset: NonEmptyStringSchema.max(64).optional(),
     /** `store: environment` only: each variable as a plain value or a `${secret:NAME}` reference. */
-    env: z.record(z.string().max(128), z.string().max(4096)).check(refuseUnsafeEnvironment).optional(),
+    env: loginEnvironment(z.string().max(4096)).optional(),
     /** `store: environment` only: `aws-profile:<name>`, `gcloud-adc[:<path>]` or `azure-cli`. */
     cloudCredential: NonEmptyStringSchema.max(512).optional(),
   }),
@@ -516,9 +532,7 @@ export const LoginChangeSchema = z.discriminatedUnion('kind', [
      */
     kind: z.literal('login.env'),
     id: NonEmptyStringSchema,
-    env: z
-      .record(z.string().max(128), z.union([z.string().max(4096), z.strictObject({ keep: z.literal(true) })]))
-      .check(refuseUnsafeEnvironment),
+    env: loginEnvironment(z.union([z.string().max(4096), z.strictObject({ keep: z.literal(true) })])),
     cloudCredential: NonEmptyStringSchema.max(512).nullable().optional(),
   }),
   z.strictObject({ kind: z.literal('login.label'), id: NonEmptyStringSchema, label: ChangeLabelSchema.nullable() }),
