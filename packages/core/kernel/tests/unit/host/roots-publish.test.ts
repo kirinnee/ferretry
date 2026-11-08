@@ -705,9 +705,13 @@ describe('adopting the private name an interrupted adoption left', () => {
     const { root, work } = await world(undefined, 'downloads');
     await root.publish(at(root, 'd/r.json'), encoder.encode('one'), { exclusive: true });
     await writeFile(`${work}/d/.r.json.0f3a.adopt`, 'stranger');
+    // A stranger's hard link elsewhere gives the leaf nlink 2, so the read really reaches adoption and must compare inodes.
+    await mkdir(`${work}/e`);
+    await link(`${work}/d/r.json`, `${work}/e/elsewhere`);
 
-    expect(Buffer.from((await root.readDurable(at(root, 'd/r.json')))?.bytes ?? []).toString()).toBe('one');
+    expect(await refusalOf(async () => await root.readDurable(at(root, 'd/r.json')))).toBe('refused:hard_link');
     expect(await readFile(`${work}/d/.r.json.0f3a.adopt`, 'utf8')).toBe('stranger');
+    expect(await readFile(`${work}/e/elsewhere`, 'utf8')).toBe('one');
   });
 
   test('a failed unlink of the moved-aside name is not reported as removed', async () => {
