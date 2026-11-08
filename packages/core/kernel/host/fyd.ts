@@ -35,7 +35,9 @@ async function main(): Promise<number> {
     return answer.exitCode;
   }
   if (answer.overrides.configFile !== undefined) {
-    process.stderr.write(`${usage.daemonName}: --config is not an option in 5.0: configuration is read from $FY_HOME/config/ (one file per building block), so there is no single document to point at. Remove --config from the unit file or script that passes it.\n`);
+    process.stderr.write(
+      `${usage.daemonName}: --config is not an option in 5.0: configuration is read from $FY_HOME/config/ (one file per building block), so there is no single document to point at. Remove --config from the unit file or script that passes it.\n`,
+    );
     return EXIT_USAGE;
   }
   const resolved = resolveSettings(process.env, answer.overrides, homedir());
@@ -50,15 +52,16 @@ async function main(): Promise<number> {
   const home = resolved.settings.home.value;
   const port = resolved.settings.port.value;
   if (answer.kind === 'check') {
-    // The registry is read here (and not at boot) only so the plugins' preflights, selftests and workers can be asked.
-    const registry = (await import('../src/generated/plugins.ts')) as unknown as GeneratedRegistry;
+    // The registry is read by `--check` (and not at boot) only so the plugins' preflights, selftests and workers can
+    // be asked, and only AFTER the home and address verdict is printed: a module that fails to load costs a line.
     return await runCheck({
       home,
       host: resolved.settings.host.value,
       port,
       daemonName: usage.daemonName,
       version: VERSION,
-      implementations: registry.daemonImplementations,
+      loadImplementations: async () =>
+        ((await import('../src/generated/plugins.ts')) as unknown as GeneratedRegistry).daemonImplementations,
     });
   }
   // Nothing is written before the home is decided (§9.3): until boot creates `logs/`, a line is dropped.

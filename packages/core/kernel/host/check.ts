@@ -42,8 +42,11 @@ export interface CheckOptions {
   /** Whether a process exists; `process.kill(pid, 0)` in the real world. */
   readonly alive: (pid: number) => boolean;
   readonly say: (line: string) => void;
-  /** What the plugins add after the home and address lines: preflights, selftests, workers (`check-plugins.ts`). */
-  readonly plugins?: (say: (line: string) => void) => Promise<void>;
+  /**
+   * What the plugins add after the home and address lines: preflights, selftests, workers (`check-plugins.ts`). It is
+   * told the verdict already printed, so the host can arm its exit with that code before any plugin code runs.
+   */
+  readonly plugins?: (say: (line: string) => void, verdict: number) => Promise<void>;
 }
 
 export const tcpProbe: AddressProbe = (host, port) =>
@@ -70,7 +73,7 @@ export const processAlive = (pid: number): boolean => {
  */
 export async function checkHost(options: CheckOptions): Promise<number> {
   const exit = await checkAddress(options);
-  await options.plugins?.(options.say);
+  await options.plugins?.(options.say, exit);
   return exit;
 }
 
@@ -112,7 +115,9 @@ async function checkAddress(options: CheckOptions): Promise<number> {
   }
   if (owner !== undefined && owner.port === options.port) {
     say(`address      ${where}  (taken — another ${options.daemonName}, pid ${owner.pid})`);
-    say(`! Another ${options.daemonName} already serves ${where}. Stop it with \`fy daemon stop\`, or choose another port with --port.`);
+    say(
+      `! Another ${options.daemonName} already serves ${where}. Stop it with \`fy daemon stop\`, or choose another port with --port.`,
+    );
     return Math.max(exit, EXIT_ALREADY_SERVING);
   }
   say(`address      ${where}  (taken — by something that is not a ${options.daemonName})`);

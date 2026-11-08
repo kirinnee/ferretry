@@ -186,7 +186,12 @@ export interface PreflightFacts {
   readonly arch: string;
 }
 
-/** One line `fyd --check` prints: `label` names it (≤ 24 characters, unique across the run), `text` says what was found. */
+/**
+ * One line `fyd --check` prints. `label` is single-spaced lowercase words of at most 11 characters, unique across the
+ * run, and the kernel renders the label column itself. A label whose first word is `state`, `address`, `workers`,
+ * `webrtc`, `plugin` or `plugins` is refused (the smoke judges those lines); `webrtc` alone belongs to Connections'
+ * `webrtc` selftest. `text` says what was found.
+ */
 export interface CheckLine {
   readonly label: string;
   readonly text: string;
@@ -205,6 +210,12 @@ export type PreflightRun = (facts: PreflightFacts) => readonly CheckLine[];
  * address. A selftest listens on loopback with port 0 only, reaches nothing beyond loopback, and releases every
  * socket, thread and file before it returns. The kernel cannot sandbox in-process code, so these last rules are
  * reviewed, not enforced; the timeout, the temp directory and the absence of state and ports are enforced.
+ *
+ * Both this object and its `clock` are frozen, and every selftest gets its own: the kernel's timeout runs on a timer
+ * it took before any plugin was loaded, so nothing done to what a selftest was handed can lengthen or cancel it. A
+ * selftest must stop writing to `tempDir` once `signal` aborts (the host removes the directory again before it exits).
+ * What no in-process code can stop is a module that replaces `globalThis.setTimeout` or `process.exit` while it loads:
+ * the host's own exit uses copies taken before the registry is read, and code review keeps the rest honest.
  */
 export interface SelftestEnvironment {
   readonly tempDir: string;

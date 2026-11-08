@@ -256,6 +256,7 @@ export function bunWorkers(): WorkersPort {
       const data = (options as { readonly workerData?: unknown } | undefined)?.workerData;
       const worker = new Worker(moduleUrl, {
         ...(options?.name === undefined ? {} : { name: options.name }),
+        ...(options?.env === undefined ? {} : { env: { ...options.env } }),
         ...(data === undefined ? {} : { workerData: data }),
       } as WorkerOptions);
       return {
