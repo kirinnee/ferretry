@@ -22,6 +22,7 @@ import {
   RestartsFile,
   FerretHistoryFiles,
   type FerretRecord,
+  type FerretState,
   FerretsChanged,
   FerretTokensFile,
   type HarnessKey,
@@ -98,9 +99,16 @@ import { fleetEventsAccept, followableFerret, HistoryEventSource } from './modul
 import { ferretsPort } from './lib/ferrets/port.ts';
 import { ferretsMoveResume, movedTarget } from './lib/ferrets/move-resume.ts';
 import type { ResumeActor } from './lib/session/resume/types.ts';
+import { SessionStateSchema } from './lib/protocol/session.ts';
+import { promptOf } from './lib/ferrets/prompt.ts';
+import { buildTurnWatch, turnWatchFailureFields } from './modules/turn-watch.ts';
+import { lifecycleStatus } from './lib/ferrets/session-document.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
+
+/** The job that arms the turn watch once the daemon serves (today's `activities.run('turn watcher', …)`, J-0001). */
+export const TURN_WATCH_JOB = 'ferrets.turn-watch';
 
 /**
  * The ferret behind a call, from Gate's standing (`ferretOf`, today's `agentSessionOf`): a ferret's own token, or the
@@ -310,6 +318,33 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     async ferret => switchesOfRecord(registry.get(ferret)),
   );
 
+  // The state document's LIFECYCLE status follows the registry (U4): made `starting`, it moves to `running` once the
+  // launch settles and to `stopped` at a stop, as today's lifecycle moved it (`lifecycleStatus`). The turn watch's writer
+  // re-reads that status under the lock, so a document left `starting` would never be given a turn. One lane per
+  // ferret, in the order the registry changed; a ferret with no document yet is left alone.
+  const statusLane = new KeyedSerialExecutor();
+  const followStatus = (ferret: FerretId, state: FerretState): void => {
+    const id = tryParseSessionId(ferret);
+    if (id === undefined) return;
+    void statusLane
+      .run(ferret, async () => {
+        if ((await sessionStore.readState(id).catch(() => undefined)) === undefined) return;
+        await sessionStore.updateState(id, raw => {
+          const current = SessionStateSchema.safeParse(raw);
+          const next = current.success ? lifecycleStatus(current.data.status, state) : undefined;
+          return next === undefined ? raw : { ...(raw as Record<string, unknown>), status: next };
+        });
+      })
+      .catch((error: unknown) =>
+        log.warn("a ferret's state document could not follow its lifecycle", {
+          ferret,
+          ...turnWatchFailureFields(error),
+        }),
+      );
+  };
+
+  // Bound once the turn watch is built below: a delivery into a ferret's pane brings its next look forward.
+  let wakeTurnWatch: ((ferret: FerretId) => void) | undefined;
   const service = new FerretsService(registry, tokens, {
     launchEnvironment,
     ready,
@@ -352,7 +387,9 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       if (!path.startsWith('/')) return err('the folder must be an absolute path');
       return ok(path as FencedPath);
     },
+    delivered: ferret => wakeTurnWatch?.(ferret),
     changed: payload => {
+      followStatus(payload.ferret, payload.state);
       hooks.observe(FerretChanged, payload);
     },
     stopping: ferret => {
@@ -398,8 +435,44 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         ...(options.actor === undefined ? {} : { actor: options.actor }),
         ...(options.movedBy === undefined ? {} : { movedBy: options.movedBy }),
       }),
+    // What the pane is asking (`FerretsApi.prompt`, U4): the turn watch's record, masked again on the way out.
+    promptState: async ferret => {
+      const state = SessionStateSchema.safeParse(
+        await sessionStore.readState(ferret as unknown as SessionId).catch(() => undefined),
+      );
+      if (!state.success) return {};
+      return await kernel.redaction.read(scope => promptOf(state.data, text => scope.text(text)));
+    },
     vault: needs.vault,
     asks: needs.asks,
+  });
+
+  // The turn watch (U4, RULING #44): the session observer's turn part on the main thread, every live ferret's pane looked
+  // at through `Runner.look` at today's 2 s tick (a quiet pane backing off to 10 s), one pane per turn of the loop.
+  // Armed once the daemon serves (today's `observer.arm()` after the first monitor tick), closed when it stops.
+  const turnWatch = buildTurnWatch({
+    storage: sessionStore,
+    record: ferret => registry.get(ferret),
+    runner: () => {
+      const found = hooks.provider(Runners, 'tmux');
+      return found === 'unavailable' ? undefined : found;
+    },
+    turnObserved: async (ferret, turn) => await service.turnObserved(ferret, turn),
+    clock: { now: () => kernel.clock.now() },
+    every: (intervalMs, tick) => kernel.clock.every(milliseconds(intervalMs), tick),
+    yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
+    log,
+  });
+  wakeTurnWatch = turnWatch.wake;
+  kernel.jobs.add({
+    id: TURN_WATCH_JOB,
+    schedule: { onceAfterStart: true },
+    run: async () => {
+      await ready();
+      await storeLoaded.catch(() => undefined);
+      turnWatch.host.arm();
+      kernel.lifecycle.onStop(async () => await turnWatch.host.close());
+    },
   });
 
   // G24: the same bounded read as today's subtree API, masked whole before excerpts are cut.
