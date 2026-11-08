@@ -313,10 +313,13 @@ const WORD = /[^\s"'`,;()[\]{}<>]+/gu;
 /**
  * A private-key block (its header, the base64 body and its footer when there is one) and any well-known token
  * ({@link SECRET_TOKEN_SOURCE}), wherever either stands: no name, separator or word boundary is needed. Every
- * part is a linear class, so a long run of one costs a single pass.
+ * part is a linear class, so a long run of one costs a single pass. A key's body runs over line breaks written as
+ * escapes too (`\n`, `\r`: a service account's JSON), and over a word an earlier pass hid already (a body line that
+ * starts the way a token does, `eyJ…`, `AIza…`): each of the three starts with a character no other one does, so the
+ * body stays one linear pass.
  */
 const PRIVATE_KEY_HEADER_SOURCE = '-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----';
-const PRIVATE_KEY_SOURCE = `${PRIVATE_KEY_HEADER_SOURCE}[A-Za-z0-9+/=\\s]*(?:-----END [A-Z ]{0,40}PRIVATE KEY-----)?`;
+const PRIVATE_KEY_SOURCE = `${PRIVATE_KEY_HEADER_SOURCE}(?:[A-Za-z0-9+/=\\s]|\\\\[nr]|${HIDDEN_TEXT})*(?:-----END [A-Z ]{0,40}PRIVATE KEY-----)?`;
 const CONTEXT_FREE_SECRET = new RegExp(`${PRIVATE_KEY_SOURCE}|${SECRET_TOKEN_SOURCE}`, 'gu');
 /**
  * A private-key block alone, and its header where it starts: what a name's reading never cuts into, so the key is
@@ -336,6 +339,10 @@ const BLOCK_INDICATOR = /^[|>][-+0-9]*$/u;
 const BLOCK_OPENER = /^[|>][-+0-9]*(?:[ \t]+#.*)?$/u;
 /** A line that opens a block value and comments on it (`password: | # note`). */
 const OPENS_COMMENTED_BLOCK = /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*[:=][ \t]*[|>][-+0-9]*[ \t]+#.*$/u;
+/** A line that ends in a name, its separator and a comment (`password: # note`): its value is on a line after it. */
+const OPENS_COMMENTED_VALUE = /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*[:=][ \t]+#.*$/u;
+/** A line that is a comment and nothing else (`# note`, `  # note`). */
+const COMMENT_LINE = /^[ \t]*#/u;
 /**
  * YAML node properties — a tag (`!vault`, `!!str`, `!<tag:yaml.org,2002:str>`) and an anchor (`&pw`), one or both, in
  * either order — before a value or a block indicator (`password: !vault |`, `password: &pw !!str fake`). Each is a run
@@ -348,11 +355,12 @@ const PROPERTIES = new RegExp(`^[ \\t]*${PROPERTY}(?:[ \\t]+${PROPERTY})?(?:[ \\
 /** The same, standing where a name's separator ends, and an opening quote after them when there is one. */
 const PROPERTIES_AT = new RegExp(`(?:${PROPERTY}[ \\t]+){1,2}["']?`, 'uy');
 /**
- * A line that ends in a name, its separator and node properties, with or without a block indicator (and a comment)
- * after them (`password: !vault |`, `password: &pw`): what follows the separator is group 2.
+ * A line that ends in a name, its separator and node properties, with or without a block indicator after them, and
+ * with or without a comment after those (`password: !vault |`, `password: &pw`, `password: &pw # note`): what follows
+ * the separator is group 2.
  */
 const OPENS_AFTER_PROPERTIES = new RegExp(
-  `(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \\t]*[:=]([ \\t]*${PROPERTY}(?:[ \\t]+${PROPERTY})?(?:[ \\t]+[|>][-+0-9]*(?:[ \\t]+#.*)?)?[ \\t]*)$`,
+  `(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \\t]*[:=]([ \\t]*${PROPERTY}(?:[ \\t]+${PROPERTY})?(?:[ \\t]+[|>][-+0-9]*)?(?:[ \\t]+#.*)?[ \\t]*)$`,
   'u',
 );
 /** A value as {@link ASSIGNMENT} looks at it, read where node properties end. */
@@ -433,19 +441,34 @@ interface Block {
  * line (`password: !vault |`, `password: &pw⏎  fake`) or at the head of the value it reads (`PASSWORD⏎= !!str fake`,
  * `password:⏎  !!binary |`). Then the block they open is read, or the value after them (`properties`), or — when
  * they end the line — the value on the next line, beside every reading above, which stays as it was.
+ *
+ * A comment may stand between a name and its value (`password: # note⏎  fake`, `password:⏎  # note⏎  fake`,
+ * `password: &pw # note⏎  fake`, `password: # note⏎  |⏎    fake`): the value, block or node properties on the first
+ * line after it that is neither blank nor a comment are read beside the reading that met the comment, which stays as
+ * it was. A line that is a comment itself names nothing past comments (a name in it is no key), so a run of comment
+ * lines is passed over once, not once from each.
+ *
+ * `readings` are read only under a name that announces a secret, as a block is.
  */
 function opening(
   parts: readonly string[],
   index: number,
-): { value?: Reading; blocks: readonly Block[]; properties: readonly Reading[] } {
+): { value?: Reading; blocks: readonly Block[]; readings: readonly Reading[] } {
   const next = (after: number): number => {
     let at = after + 2;
     while (at < parts.length && (parts[at] ?? '').trim() === '') at += 2;
     return at;
   };
   const line = parts[index] ?? '';
+  const inComment = COMMENT_LINE.test(line);
+  /** The line after `at` that a value is read on: the next that is neither blank nor (past a name) a comment. */
+  const valueLine = (at: number): number => {
+    let to = next(at);
+    while (!inComment && to < parts.length && COMMENT_LINE.test(parts[to] ?? '')) to = next(to);
+    return to;
+  };
   const blocks: Block[] = [];
-  const properties: Reading[] = [];
+  const readings: Reading[] = [];
   let value: Reading | undefined;
   const opens = OPENS_VALUE.exec(line);
   const opened = opens?.[1]?.replace(LEADING_DIGITS, '');
@@ -468,22 +491,46 @@ function opening(
   }
   const commented = OPENS_COMMENTED_BLOCK.exec(line)?.[1]?.replace(LEADING_DIGITS, '');
   if (commented) blocks.push({ name: commented, line: index });
-  /** What node properties at `from` of line `at` lead to: the block they open, or the value after them. */
+  /** What `name` reads on the line a value is read on after line `at`: the block opened there, or the value. */
+  const below = (name: string, at: number): void => {
+    const to = valueLine(at);
+    if (BLOCK_OPENER.test((parts[to] ?? '').trim())) blocks.push({ name, line: to });
+    else readings.push({ name, line: to, from: 0 });
+  };
+  /**
+   * What node properties at `from` of line `at` lead to: the block they open, the value after them, or — when they
+   * end the line, a comment after them or not — what is below them.
+   */
   const afterProperties = (name: string, at: number, from: number): void => {
     const rest = (parts[at] ?? '').slice(from);
     const found = PROPERTIES.exec(rest);
     if (found === null) return;
     const after = rest.slice(found[0].length).trim();
     if (BLOCK_OPENER.test(after)) blocks.push({ name, line: at });
-    else if (after !== '') properties.push({ name, line: at, from, properties: true });
-    else if (BLOCK_OPENER.test((parts[next(at)] ?? '').trim())) blocks.push({ name, line: next(at) });
-    else properties.push({ name, line: next(at), from: 0 });
+    else if (after === '' || after.startsWith('#')) below(name, at);
+    else readings.push({ name, line: at, from, properties: true });
+  };
+  /** What `name` reads past a comment that ends line `at`: what is below it, and node properties at its head. */
+  const pastComment = (name: string, at: number): void => {
+    afterProperties(name, valueLine(at), 0);
+    below(name, at);
   };
   if (value) afterProperties(value.name, value.line, value.from);
   const tagged = OPENS_AFTER_PROPERTIES.exec(line);
   const named = tagged?.[1]?.replace(LEADING_DIGITS, '');
   if (named) afterProperties(named, index, line.length - (tagged?.[2]?.length ?? 0));
-  return value === undefined ? { blocks, properties } : { value, blocks, properties };
+  if (!inComment) {
+    if (value && commentsFrom(parts[value.line] ?? '', value.from)) pastComment(value.name, value.line);
+    const noted = OPENS_COMMENTED_VALUE.exec(line)?.[1]?.replace(LEADING_DIGITS, '');
+    if (noted) pastComment(noted, index);
+  }
+  return value === undefined ? { blocks, readings } : { value, blocks, readings };
+}
+
+/** Whether `line` holds a comment and nothing else from `from` on: a `#` at the head of the line, or after a space. */
+function commentsFrom(line: string, from: number): boolean {
+  const at = from + indentOf(line.slice(from));
+  return line.charAt(at) === '#' && (at === 0 || line.charAt(at - 1) === ' ' || line.charAt(at - 1) === '\t');
 }
 
 /** Whether the name at `at` is the inside of a pointer (`${secret:TOKEN}`), which is no name and value. */
@@ -638,7 +685,7 @@ function redactNextLines(
       coveredBelow = indent;
     }
     // Only under a name that announces a secret, as a block is: what today hides by its shape alone it still does.
-    for (const reading of opens.properties) if (isSecret(reading.name, BLOCK_PROBE)) readValue(reading);
+    for (const reading of opens.readings) if (isSecret(reading.name, BLOCK_PROBE)) readValue(reading);
     if (opens.value) readValue(opens.value);
   }
   return { text: parts.join(''), redacted };

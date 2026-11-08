@@ -9,6 +9,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { componentCatalog } from '../../../daemon/lib/service/catalog.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
+import { AFTER_KEY, KEY_BODY_MARK, privateKeyShapes } from './redact-private-keys.ts';
 
 const MODEL = parseAccountModel({ version: 1, components: { instructions: { notes: { file: 'notes.md' } } } });
 const HIDDEN = '‹hidden›';
@@ -403,6 +404,55 @@ describe('component text redaction', () => {
       }
     });
 
+    // Ruling #36, r5: a key's body ran past no line break written as an escape, nor past a word an earlier pass hid,
+    // so its body showed where today's shows it too. Under a name that announces a secret and under any other.
+    it('S26 should cut a private key whole when its line breaks are escapes: "private_key": "-----BEGIN…\\n…\\n-----END…"', () => {
+      // Assert
+      const key = '-----BEGIN PRIVATE KEY-----\\nMIIEvQfakefakefake\\nMIIEfakebody2\\n-----END PRIVATE KEY-----';
+      for (const [input, expected] of [
+        [
+          `{"private_key": "${key}\\n", "client_email": "fake@example.invalid"}`,
+          `{"private_key": "${HIDDEN}\\n", "client_email": "fake@example.invalid"}`,
+        ],
+        [`private_key: ${key}\nnext: ok`, `private_key: ${HIDDEN}\nnext: ok`],
+        [`TOKEN=${key.replaceAll('\\n', '\\r\\n')}`, `TOKEN=${HIDDEN}`],
+        [`"key": "${key}"`, `"key": "${HIDDEN}"`],
+      ] as const) {
+        should(shownFor(input)).eql({ text: expected, redacted: true });
+      }
+    });
+
+    it('S26 should cut a private key whole when a body line starts the way a token does: eyJ…, AIza…', () => {
+      // Assert
+      const key = (line: string) =>
+        `-----BEGIN RSA PRIVATE KEY-----\nMIIEfakefake\n${line}\nMIIEfakebody2\n-----END RSA PRIVATE KEY-----`;
+      for (const [input, expected] of [
+        [`password: ${key('eyJfakefakefake')}\nnext: ok`, `password: ${HIDDEN}\nnext: ok`],
+        [`PASSWORD\n= |\n  ${key('AIzaFakefakefakefake')}\nnext: ok`, `PASSWORD\n= |\n  ${HIDDEN}\nnext: ok`],
+        [key('eyJfakefakefake'), HIDDEN],
+      ] as const) {
+        should(shownFor(input)).eql({ text: expected, redacted: true });
+      }
+    });
+
+    it(`S26 should cut every private key shape whole (${privateKeyShapes().length} shapes), and nothing after it`, () => {
+      const leaks: string[] = [];
+      for (const { shape, text, shown } of privateKeyShapes()) {
+        // Act
+        const actual = shownFor(text);
+
+        // Assert
+        const right =
+          !actual.text.includes(KEY_BODY_MARK) &&
+          !actual.text.includes('PRIVATE KEY') &&
+          shown.every(piece => actual.text.includes(piece)) &&
+          actual.text.endsWith(AFTER_KEY) &&
+          actual.redacted;
+        if (!right) leaks.push(`${shape}: ${JSON.stringify(text)} -> ${JSON.stringify(actual.text)}`);
+      }
+      should(leaks).deepEqual([]);
+    });
+
     // The whole family, generated: every separator, gap before the indicator, indicator (with and without a
     // comment, one ending in a name and its separator), position of the indicator (shallower than the name too),
     // base indent, block indent and line ending, alone or inside an outer block, under a name that announces a
@@ -773,6 +823,211 @@ describe('component text redaction', () => {
           // Arrange
           const wrap = wrapped ? ['notes: |'] : [];
           const input = [...wrap, ...head('mode', 'plain-inline-text-0001'), 'after: plain-text-0000'].join(ending);
+
+          // Act
+          const actual = shownFor(input);
+
+          // Assert
+          if (actual.text !== input || actual.redacted) touched.push(JSON.stringify(input));
+        }
+        should(touched).deepEqual([]);
+      },
+      FAMILY_TIMEOUT,
+    );
+
+    // Ruling #36, r5: a comment between a name and its value — after the separator, after node properties, or on lines
+    // of its own — hid nothing of the value YAML reads past it; today shows it the same way.
+    it('S26 should hide the value a comment stands before: password: # note⏎  value, password:⏎  # note⏎  value, password: &a # c⏎  value', () => {
+      // Assert
+      for (const [input, expected] of [
+        ['password: # fake note\n  fake-value-0000', `password: # fake note\n  ${HIDDEN}`],
+        ['password: #note\n  fake-value-0000', `password: #note\n  ${HIDDEN}`],
+        [
+          'password: # fake note\n  # more fake notes\n\n  fake-value-0000',
+          `password: # fake note\n  # more fake notes\n\n  ${HIDDEN}`,
+        ],
+        ['password:\n  # fake note\n  fake-value-0000', `password:\n  # fake note\n  ${HIDDEN}`],
+        ['password: &a # fake note\n  fake-value-0000', `password: &a # fake note\n  ${HIDDEN}`],
+        ['password: !!str # c\n  fake-value-0000', `password: !!str # c\n  ${HIDDEN}`],
+        ['password: &a\n  # fake note\n  fake-value-0000', `password: &a\n  # fake note\n  ${HIDDEN}`],
+        ['password: # c\n  &a fake-value-0000', `password: # c\n  &a ${HIDDEN}`],
+        ['password: # c\n  "fake-value-0000"', `password: # c\n  "${HIDDEN}"`],
+        [
+          'db:\n  password: # fake note\n    fake-value-0000\n  user: bob',
+          `db:\n  password: # fake note\n    ${HIDDEN}\n  user: bob`,
+        ],
+        ['api_token: # c\r\n\t# d\r\n\tfake-value-0000', `api_token: # c\r\n\t# d\r\n\t${HIDDEN}`],
+        ['PASSWORD\n= # fake note\n  fake-value-0000', `PASSWORD\n= # fake note\n  ${HIDDEN}`],
+        ['PASSWORD\n=\n# fake note\nfake-value-0000', `PASSWORD\n=\n# fake note\n${HIDDEN}`],
+        ['PASSWORD\n= &a # c\n  fake-value-0000', `PASSWORD\n= &a # c\n  ${HIDDEN}`],
+      ] as const) {
+        should(shownFor(input)).eql({ text: expected, redacted: true });
+      }
+    });
+
+    it('S26 should hide the block a comment stands before: password: # c⏎  |⏎    value', () => {
+      // Assert: a line between the name and the block's last line is read like any line of the block, as it always was
+      // when it stood deeper than the name, so a comment of eight characters or more there is hidden whole.
+      for (const [input, expected] of [
+        [
+          'password: # c\n  |\n    fake-block-value-0000\nnext: fake-shown-0000',
+          `password: # c\n  |\n    ${HIDDEN}\nnext: fake-shown-0000`,
+        ],
+        ['password:\n  # fake note\n  >-\n    fake-block-value-0000', `password:\n  ${HIDDEN}\n  >-\n    ${HIDDEN}`],
+        ['password: &a # c\n  |\n    fake-block-value-0000', `password: &a # c\n  |\n    ${HIDDEN}`],
+        ['password: # c\n  &a |\n    fake-block-value-0000', `password: # c\n  &a |\n    ${HIDDEN}`],
+        ['PASSWORD\n= # c\n  |\n    fake-block-value-0000', `PASSWORD\n= # c\n  |\n    ${HIDDEN}`],
+      ] as const) {
+        should(shownFor(input)).eql({ text: expected, redacted: true });
+      }
+    });
+
+    it('S26 should read nothing past a comment under a name that announces no secret, from a comment line, into a key or a pointer, or past a # glued to its separator', () => {
+      // Assert
+      for (const input of [
+        'mode: # fake note\n  plain-value-0000',
+        'mode:\n  # fake note\n  |\n    plain-block-text-0000',
+        // A name in a line that is a comment is no key.
+        '# password: # fake note\n  plain-value-0000',
+        '# password:\n# fake note\nplain-value-0000',
+        'password: # fake note\nuser: plain-user-0000',
+        'password: # fake note\n  ${secret:FAKE}',
+        // `password:#c` is no key and its comment (YAML), and `=#c` a value (an environment file).
+        'password:# fake-note\n  plain-value-0000',
+        'password: # fake note',
+      ]) {
+        should(shownFor(input)).eql({ text: input, redacted: false });
+      }
+      should(shownFor('PASSWORD\n=#fake-note\n  plain-value-0000')).eql({
+        text: `PASSWORD\n=${HIDDEN}\n  plain-value-0000`,
+        redacted: true,
+      });
+    });
+
+    // A comment between a name and its value, generated (r5): on the name's line or on its separator's line (after
+    // node properties or not), and none, one or two comment lines of their own (at the name, deeper, shallower, with a
+    // blank line and a tab) — crossed with every separator, the space before the comment, what the value line holds (a
+    // value, a quoted one, node properties and a value, a block indicator with or without a comment, node properties
+    // and an indicator), base indent, value indent, line ending and outer block.
+    const NOTE = '# fake note';
+    const NOTE_GAPS = [' ', '\t'];
+    const LEAD_PROPERTIES = ['', '&a ', '!!str &a '];
+    const NOTE_LEADS: Readonly<Record<string, (s: NoteShape) => string[]>> = {
+      'name line': s => [`${s.base}${s.name}${s.separator}${s.gap}${s.properties}${s.note}`],
+      'separator line': s => [`${s.base}${s.name}`, `${s.base}${s.separator}${s.gap}${s.properties}${s.note}`],
+    };
+    const NOTE_LINES: readonly ((base: string, indent: string) => string[])[] = [
+      () => [],
+      base => [`${base}${NOTE}`],
+      (base, indent) => [`${base}${indent}${NOTE}`],
+      (base, indent) => [`${base}${indent}${NOTE}`, '', `${base}\t${NOTE} two`],
+      () => [NOTE],
+    ];
+    /** What the value line holds, and the lines after it; whether it opens a block, and holds node properties. */
+    const NOTE_TARGETS: readonly { readonly block: boolean; readonly properties: boolean; readonly opener: string }[] =
+      [
+        { block: false, properties: false, opener: '' },
+        { block: false, properties: false, opener: '"' },
+        { block: false, properties: true, opener: '&a ' },
+        { block: false, properties: true, opener: '!!str &a ' },
+        { block: true, properties: false, opener: '|' },
+        { block: true, properties: false, opener: '>-' },
+        { block: true, properties: false, opener: '| # fake comment' },
+        { block: true, properties: true, opener: '!!str |' },
+      ];
+    interface NoteShape {
+      readonly name: string;
+      readonly separator: string;
+      readonly gap: string;
+      readonly properties: string;
+      readonly note: string;
+      readonly base: string;
+    }
+    const noteFamily = Object.entries(NOTE_LEADS).flatMap(([lead, leadLines]) =>
+      BASES.flatMap(base =>
+        SEPARATORS.flatMap(separator =>
+          [{ gap: ' ', note: '' }, ...NOTE_GAPS.map(gap => ({ gap, note: NOTE }))].flatMap(({ gap, note }) =>
+            LEAD_PROPERTIES.flatMap(properties =>
+              NOTE_LINES.flatMap((noteLines, layout) =>
+                NOTE_TARGETS.filter(target => properties === '' || !target.properties)
+                  .filter(() => note !== '' || layout > 0)
+                  .flatMap(target =>
+                    INDENTS.flatMap(indent =>
+                      ENDINGS.flatMap(ending =>
+                        WRAPPED.map(wrapped => ({
+                          shape: `${lead}, layout ${String(layout)}, ${JSON.stringify(target.opener)}`,
+                          target,
+                          base,
+                          indent,
+                          ending,
+                          wrapped,
+                          head: (name: string) => [
+                            ...leadLines({ name, separator, gap, properties, note, base }),
+                            ...noteLines(base, indent),
+                          ],
+                          value: (value: string) =>
+                            target.block
+                              ? [`${base}${indent}${target.opener}`, `${base}${indent}${indent}${value}`]
+                              : [`${base}${indent}${target.opener}${value}${target.opener === '"' ? '"' : ''}`],
+                        })),
+                      ),
+                    ),
+                  ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    it(
+      `S26 should hide the value past every comment in the family (${noteFamily.length} shapes), and nothing else`,
+      () => {
+        const leaks: string[] = [];
+        for (const { shape, target, base, ending, wrapped, head, value } of noteFamily) {
+          // Arrange
+          const wrap = wrapped ? ['api_token: |'] : [];
+          const named = head('PASSWORD');
+          const written = [...wrap, ...named, ...value(VALUE), 'after: fake-shown-0000', ''];
+          const input = written.join(ending);
+
+          // Act
+          const actual = shownFor(input);
+
+          // Assert: the name line as written, the lines to the value as written (or, in a block or inside the outer
+          // one, hidden whole), the value hidden, and the line after it as written.
+          const lines = actual.text.split(ending);
+          const insideOuter = wrapped && base !== '';
+          const right = written.every((line, at) => {
+            const shown = lines[at];
+            const own = at - wrap.length;
+            const before = own >= 0 && at < written.length - 2;
+            const whole = before && (insideOuter || (target.block && own > 0));
+            return (
+              asWritten(shown, line) ||
+              asWritten(shown, line.replace(VALUE, HIDDEN)) ||
+              (whole && asWrittenOrHidden(shown, line))
+            );
+          });
+          if (!right || lines.length !== written.length || actual.text.includes(VALUE) || !actual.redacted) {
+            leaks.push(`${shape}: ${JSON.stringify(input)} -> ${JSON.stringify(actual.text)}`);
+          }
+        }
+        should(leaks).deepEqual([]);
+      },
+      FAMILY_TIMEOUT,
+    );
+
+    it(
+      `S26 should hide nothing past any comment in the family (${noteFamily.length} shapes) under a name that announces no secret`,
+      () => {
+        const touched: string[] = [];
+        for (const { ending, wrapped, head, value } of noteFamily) {
+          // Arrange
+          const wrap = wrapped ? ['notes: |'] : [];
+          const input = [...wrap, ...head('mode'), ...value('plain-inline-text-0001'), 'after: plain-text-0000'].join(
+            ending,
+          );
 
           // Act
           const actual = shownFor(input);

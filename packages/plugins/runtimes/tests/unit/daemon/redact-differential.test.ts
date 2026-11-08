@@ -19,6 +19,14 @@
  * `password: !!str value`, `password: &a⏎  value`). Today reads the properties as the value and shows what follows
  * them; 5.0 hides it. Those lines are tightened too ({@link tightenedLines}).
  *
+ * And a third (#36, r5): a comment between such a name and its value (`password: # note⏎  value`,
+ * `password:⏎  # note⏎  value`, `password: &a # note⏎  value`, `password: # note⏎  |⏎    value`). YAML reads the value
+ * past the comment; today shows it, and 5.0 hides it. The lines read past the comment are tightened too.
+ *
+ * A private key's cut can take line breaks with it, so no generated text here holds one, and keys are held to the
+ * floor on the whole text instead, over every shape of `redact-private-keys.ts` (#36, r5: escaped breaks, a body
+ * line that starts the way a token does).
+ *
  * Every secret value here is an obviously fake one.
  */
 import { describe, it } from 'bun:test';
@@ -27,6 +35,7 @@ import { componentCatalog } from '../../../daemon/lib/service/catalog.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { looksSecret } from '../../../daemon/lib/account/import.ts';
 import { redactTodayText } from './redact-today.ts';
+import { privateKeyShapes } from './redact-private-keys.ts';
 
 const HIDDEN = '‹hidden›';
 const MODEL = parseAccountModel({ version: 1, components: { instructions: { notes: { file: 'notes.md' } } } });
@@ -121,6 +130,27 @@ const BLOCKS = [
 ];
 /** YAML node properties before an indicator or a value (#36, amendment 3): tags, anchors, both in either order. */
 const NODE_PROPERTIES = ['', '', '', '', '', '!!str ', '&a ', '!vault ', '!!binary ', '&a !!str ', '!!str &a ', '!\t'];
+/**
+ * A comment between a name and its value (#36, r5): after the separator or node properties, on lines of its own, both,
+ * with blank lines, CRLF and tabs, glued to what stands before it (no comment), and a name inside one.
+ */
+const NOTES = [
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  ' # note\n',
+  ' # note\n  ',
+  '\t#note\r\n\t',
+  '\n# note\n',
+  '\n  # note\n\n\t# more\r\n  ',
+  ' # a\n  # b\n',
+  '#glued\n',
+  ' # see token:\n',
+  '\n# password: # c\n',
+];
 const PARENTS = ['db', 'auth', 'env', 'mcp.servers', 'x'];
 const QUOTES = ['', '"', "'"];
 /** True pointers, which may stay, and `${NAME<op>default}` forms whose default is a value (`%` is the value). */
@@ -182,6 +212,8 @@ const SOUP = [
   '&a',
   '!vault',
   '!',
+  ' # c',
+  '\n# c\n',
   ...POINTERS,
   ...EXPANSIONS.map(form => form.replace('%', 'hunter2hunter2xyz')),
 ];
@@ -204,7 +236,7 @@ function generate(next: () => number): string {
   for (let at = 0; at < entries; at += 1) {
     const quote = pick(QUOTES);
     if (next() < 0.25) text += `${pick(PARENTS)}:${pick(BREAKS)}`;
-    const separator = `${pick(GAPS)}${pick(MARKS)}${pick(GAPS)}${pick(NODE_PROPERTIES)}${pick(BLOCKS)}${pick(GAPS)}`;
+    const separator = `${pick(GAPS)}${pick(MARKS)}${pick(GAPS)}${pick(NODE_PROPERTIES)}${pick(BLOCKS)}${pick(NOTES)}${pick(GAPS)}`;
     const value = pick(SECRET_VALUES);
     const shape = next();
     const written = shape < 0.15 ? pick(EXPANSIONS).replace('%', value) : shape < 0.25 ? pick(POINTERS) : value;
@@ -248,11 +280,17 @@ const NAMED_PROPERTY = new RegExp(
   `(?<![A-Za-z0-9_.-])[0-9.-]*([A-Za-z_][A-Za-z0-9_.-]*)["']?[ \\t]*[:=][ \\t]*["']?(?=${PROPERTY}[ \\t])`,
   'gu',
 );
-/** A line that ends in a name, its separator and node properties, an indicator after them or not. */
+/** A line that ends in a name, its separator and node properties, an indicator after them or not, a comment or not. */
 const ENDS_IN_PROPERTIES = new RegExp(
-  `(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \\t]*[:=][ \\t]*(${PROPERTIES}(?:[ \\t]+${INDICATOR})?)[ \\t]*$`,
+  `(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \\t]*[:=][ \\t]*(${PROPERTIES}(?:[ \\t]+[|>][-+0-9]*)?(?:[ \\t]+#.*)?)[ \\t]*$`,
   'u',
 );
+/** A line that is a comment and nothing else. */
+const COMMENT_ONLY = /^[ \t]*#/u;
+/** A line that ends in a name, its separator and a comment after a space or a tab (`password: # note`). */
+const ENDS_IN_COMMENT = /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*[:=][ \t]+#.*$/u;
+/** A separator at the head of a line and a comment after a space or a tab (`= # note`). */
+const SEPARATOR_AND_COMMENT = /^[ \t]*[:=][ \t]+#/u;
 const STARTS_WITH_PROPERTIES = new RegExp(`^[ \\t]*${PROPERTIES}(?:[ \\t]+|$)`, 'u');
 
 /**
@@ -273,6 +311,16 @@ const STARTS_WITH_PROPERTIES = new RegExp(`^[ \\t]*${PROPERTIES}(?:[ \\t]+|$)`, 
  * property follows its separator (`password: !!str value`), the line a value is read on when it starts with
  * properties (`password:⏎!!str value`, `NAME⏎= &a value`), and the line after one that properties end
  * (`password: &a⏎value`, `NAME⏎= !!str⏎value`).
+ *
+ * And (r5) past a comment between such a name and its value — after its separator (`password: # note`, `NAME⏎= # note`),
+ * after node properties (`password: &a # note`), or on lines of their own (`password:⏎# note`, `NAME⏎=⏎# note`) — the
+ * first line after it that is neither blank nor a comment: the block opened there (from the name line + 1, as above),
+ * the value after node properties there, or the value there (that line alone). From a line that is a comment itself,
+ * nothing is read past comments (a name in it is no key), and a line that properties end looks only past blank lines
+ * from there.
+ *
+ * One width by design: a line holding `secret: !x ` anywhere is tightened whole (`NAMED_PROPERTY`), so on that line
+ * any extra hiding passes here, and its exactness rests on the generated families of `catalog-redaction.test.ts`.
  */
 function tightenedLines(text: string): ReadonlySet<number> {
   const lines = text.split(BREAK);
@@ -281,21 +329,41 @@ function tightenedLines(text: string): ReadonlySet<number> {
     while (next < lines.length && (lines[next] ?? '').trim() === '') next += 1;
     return next;
   };
+  /** The first line after `at` that is neither blank nor a comment. */
+  const pastComments = (at: number): number => {
+    let next = after(at);
+    while (next < lines.length && COMMENT_ONLY.test(lines[next] ?? '')) next = after(next);
+    return next;
+  };
   const tightened = new Set<number>();
   /** Blocks of the family named on the line at `at`, each at the line its indicator stands on. */
   const indicatorLines = (at: number): number[] => {
     const line = lines[at] ?? '';
     const found: number[] = [];
+    const inComment = COMMENT_ONLY.test(line);
+    /** The line a value is read on after line `on`: a block opens there, or that line is tightened. */
+    const below = (on: number): void => {
+      const to = inComment ? after(on) : pastComments(on);
+      if (INDICATOR_ONLY.test(lines[to] ?? '')) found.push(to);
+      else tightened.add(to);
+    };
     /** What node properties at the head of `content`, standing on line `on`, lead to. */
     const properties = (on: number, content: string): void => {
       const head = STARTS_WITH_PROPERTIES.exec(content);
       if (head === null) return;
       const rest = content.slice(head[0].length);
       if (INDICATOR_ONLY.test(rest)) found.push(on);
-      else if (rest.trim() !== '') tightened.add(on);
-      else if (INDICATOR_ONLY.test(lines[after(on)] ?? '')) found.push(after(on));
-      else tightened.add(after(on));
+      else if (rest.trim() !== '' && !rest.trimStart().startsWith('#')) tightened.add(on);
+      else below(on);
     };
+    /** What is read past a comment that ends line `on` (r5). */
+    const pastComment = (on: number): void => {
+      if (inComment) return;
+      properties(pastComments(on), lines[pastComments(on)] ?? '');
+      below(on);
+    };
+    const noted = ENDS_IN_COMMENT.exec(line)?.[1];
+    if (noted !== undefined && noted.replace(/^[0-9.-]+/u, '') !== '' && announcesSecret(noted)) pastComment(at);
     const commented = ENDS_IN_COMMENTED_BLOCK.exec(line)?.[1];
     if (commented !== undefined && announcesSecret(commented)) found.push(at);
     const tagged = ENDS_IN_PROPERTIES.exec(line);
@@ -308,6 +376,7 @@ function tightenedLines(text: string): ReadonlySet<number> {
       if (separator[2] === undefined && announcesSecret(separator[1])) {
         if (INDICATOR_ONLY.test(lines[next] ?? '')) found.push(next);
         properties(next, lines[next] ?? '');
+        if (COMMENT_ONLY.test(lines[next] ?? '')) pastComment(next);
       }
       return found;
     }
@@ -318,7 +387,11 @@ function tightenedLines(text: string): ReadonlySet<number> {
     else if (SEPARATOR_ONLY.test(lines[next] ?? '')) {
       if (INDICATOR_ONLY.test(lines[after(next)] ?? '')) found.push(after(next));
       properties(after(next), lines[after(next)] ?? '');
-    } else if (separated !== null) properties(next, (lines[next] ?? '').slice(separated[0].length));
+      if (COMMENT_ONLY.test(lines[after(next)] ?? '')) pastComment(after(next));
+    } else if (separated !== null) {
+      properties(next, (lines[next] ?? '').slice(separated[0].length));
+      if (SEPARATOR_AND_COMMENT.test(lines[next] ?? '')) pastComment(next);
+    }
     return found;
   };
   for (let at = 0; at < lines.length; at += 1) {
@@ -492,6 +565,36 @@ describe('component text redaction never hides less than today', () => {
     should(tightenedLines('password: | # note\n= x').size).equal(0);
     should(tightenedLines('9:\n|\n  v').size).equal(0);
     should(tightenedLines('PASSWORD\n=\nx').size).equal(0);
+  });
+
+  it('S26 should mark the line read past a comment between a name and its value, and a block opened there', () => {
+    // Assert: a value line alone, and a block from the name line + 1.
+    should([...tightenedLines('password: # c\n  # d\n\n  v\nend')]).deepEqual([3]);
+    should([...tightenedLines('password:\n  # c\n  v')]).deepEqual([2]);
+    should([...tightenedLines('password: &a # c\n  v')]).deepEqual([0, 1]);
+    should([...tightenedLines('PASSWORD\n= # c\n  v')]).deepEqual([2]);
+    should([...tightenedLines('PASSWORD\n=\n# c\nv')]).deepEqual([3]);
+    should([...tightenedLines('password: # c\n  &a v')]).deepEqual([1]);
+    should([...tightenedLines('password: # c\n  |\n    v\nend')]).deepEqual([1, 2]);
+    // No member: a name that announces no secret, a name inside a comment line, a # glued to its separator.
+    should(tightenedLines('mode: # c\n  v').size).equal(0);
+    should(tightenedLines('# password: # c\n  v').size).equal(0);
+    should(tightenedLines('password:# c\n  v').size).equal(0);
+    should(tightenedLines('PASSWORD\n=# c\n  v').size).equal(0);
+  });
+
+  it(`S26 should hide every byte today hides of every private key shape (${privateKeyShapes().length} shapes)`, () => {
+    // Act
+    const breaches = privateKeyShapes().flatMap(({ shape, text }) => {
+      const today = redactTodayText(text);
+      const shown = shownFor(text);
+      return hidesAtLeast(today.text, shown.text) && (shown.redacted || !today.redacted)
+        ? []
+        : [`${shape}: ${JSON.stringify(today.text)} -> ${JSON.stringify(shown.text)}`];
+    });
+
+    // Assert
+    should(breaches).deepEqual([]);
   });
 
   it('S26 should count a byte today hides and 5.0 shows as a breach of the superset', () => {
