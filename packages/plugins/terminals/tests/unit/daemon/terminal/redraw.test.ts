@@ -3,9 +3,9 @@ import should from 'should';
 import {
   parseTerminalCapture,
   planTerminalRedraw,
-  type TerminalCapture,
   terminalFullRedraw,
-} from '../../../../daemon/lib/terminal/index.ts';
+  type TerminalCapture,
+} from '../../../../daemon/lib/terminal/redraw.ts';
 
 const ESC = '\u001b';
 const FULL = `${ESC}[3J${ESC}[2J${ESC}[H`;

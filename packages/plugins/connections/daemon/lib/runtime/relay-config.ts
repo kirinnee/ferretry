@@ -45,7 +45,7 @@ export const ConfiguredRelayCarrierSchema = z.strictObject({
   reconnectSeconds: ReconnectSecondsSchema,
 });
 
-export const DaemonRelayCarrierSchema = z.union([DiscoveredRelayCarrierSchema, ConfiguredRelayCarrierSchema]);
+const DaemonRelayCarrierSchema = z.union([DiscoveredRelayCarrierSchema, ConfiguredRelayCarrierSchema]);
 export type DaemonRelayCarrierEntry = z.output<typeof DaemonRelayCarrierSchema>;
 
 /**

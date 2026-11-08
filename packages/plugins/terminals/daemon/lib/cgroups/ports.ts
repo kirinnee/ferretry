@@ -64,9 +64,6 @@ export interface CgroupHostFacts {
   readonly ownCgroup?: string;
 }
 
-/** Whether the user's systemd manager answers, which is what a scope launch needs. */
-export type UserManagerProbe = { readonly ok: true } | { readonly ok: false; readonly reason: string };
-
 /** What `memory.events` of one cgroup counted (kernel cgroup-v2 documentation). */
 export interface MemoryEvents {
   /** Times usage went over `memory.high` and the cgroup was throttled and reclaimed. */
@@ -93,7 +90,7 @@ export interface AppliedCaps {
 }
 
 /** Whether the voice worker's slice is live, so its weight is one the kernel is applying. */
-export type VoiceState = 'running' | 'not-running' | 'unknown';
+type VoiceState = 'running' | 'not-running' | 'unknown';
 
 /**
  * The CPU weights the kernel holds for the two services beside the fleet, read back from their cgroups —

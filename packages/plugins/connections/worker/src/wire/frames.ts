@@ -20,7 +20,7 @@
  * the payload without decoding it. The other two kinds are hop-by-hop and are meant to be read.
  */
 
-import { bytesEqual, concatBytes, fromBase64UrlFixed, readUint64, toBase64Url, writeUint64 } from './binary.ts';
+import { bytesEqual, concatBytes, readUint64, toBase64Url, writeUint64 } from './binary.ts';
 import {
   FRAME_HEADER_BYTES,
   FRAME_MAGIC,
@@ -43,14 +43,9 @@ export const FRAME_KINDS = {
   credit: 0x04,
 } as const;
 
-export type FrameKind = (typeof FRAME_KINDS)[keyof typeof FRAME_KINDS];
+type FrameKind = (typeof FRAME_KINDS)[keyof typeof FRAME_KINDS];
 
 const FRAME_KIND_VALUES: readonly number[] = Object.values(FRAME_KINDS);
-
-/** The two kinds that belong to the end-to-end stream and therefore consume a sequence number. */
-export function isEndToEndKind(kind: FrameKind): boolean {
-  return kind === FRAME_KINDS.handshake || kind === FRAME_KINDS.data;
-}
 
 /** A session identifier as bytes, with its base64url spelling for maps and log lines. */
 export interface SessionId {
@@ -72,11 +67,6 @@ export function sessionIdFromBytes(bytes: Uint8Array): SessionId | null {
   return { bytes: copy, text: toBase64Url(copy) };
 }
 
-export function sessionIdFromText(text: string): SessionId | null {
-  const bytes = fromBase64UrlFixed(text, SESSION_ID_BYTES);
-  return bytes === null ? null : { bytes, text };
-}
-
 export function isRendezvousSessionId(sessionId: SessionId): boolean {
   return bytesEqual(sessionId.bytes, ZERO_SESSION_BYTES);
 }
@@ -93,7 +83,7 @@ export type FrameDecodeResult =
   | { readonly ok: false; readonly code: SessionCloseCode; readonly reason: string };
 
 /** Build the 28-byte header on its own, because it is also the AEAD associated data. */
-export function encodeFrameHeader(kind: FrameKind, sessionId: SessionId, sequence: number): Uint8Array {
+function encodeFrameHeader(kind: FrameKind, sessionId: SessionId, sequence: number): Uint8Array {
   const header = new Uint8Array(FRAME_HEADER_BYTES);
   header[0] = FRAME_MAGIC;
   header[1] = FRAME_VERSION;

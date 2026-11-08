@@ -97,7 +97,7 @@ const NO_RELAY_SENTENCE =
  * Each leg gets one sentence, in the order it was tried. A walk with no relay leg says so too,
  * because "the relay was never tried" and "the relay failed" have different remedies.
  */
-export const describePairingUnreachable = (legs: readonly PairingLegFailure[]): string => {
+const describePairingUnreachable = (legs: readonly PairingLegFailure[]): string => {
   const sentences = legs.map(leg => (leg.kind === 'direct' ? directSentence(leg) : relaySentence(leg)));
   if (!legs.some(leg => leg.kind === 'relay')) sentences.push(NO_RELAY_SENTENCE);
   return sentences.join(' ');

@@ -39,32 +39,3 @@ export function grantCredit(window: SendWindow, frames: number): SendWindow {
   const ceiling = window.sent + CREDIT_WINDOW_FRAMES;
   return { ...window, allowed: Math.min(window.allowed + frames, ceiling) };
 }
-
-/** What a receiver owes its peer: frames consumed but not yet credited back. */
-export interface ReceiveWindow {
-  readonly consumed: number;
-  readonly credited: number;
-}
-
-export function newReceiveWindow(): ReceiveWindow {
-  return { consumed: 0, credited: 0 };
-}
-
-export function recordConsumed(window: ReceiveWindow): ReceiveWindow {
-  return { ...window, consumed: window.consumed + 1 };
-}
-
-/**
- * How much credit to return now, or zero to stay quiet.
- *
- * Credit is returned in batches of half a window. Returning one credit per frame would double the
- * frame count on the wire for no gain; waiting for the whole window would stall the sender.
- */
-export function creditToReturn(window: ReceiveWindow): number {
-  const owed = window.consumed - window.credited;
-  return owed >= Math.floor(CREDIT_WINDOW_FRAMES / 2) ? owed : 0;
-}
-
-export function recordCredited(window: ReceiveWindow, frames: number): ReceiveWindow {
-  return { ...window, credited: window.credited + frames };
-}

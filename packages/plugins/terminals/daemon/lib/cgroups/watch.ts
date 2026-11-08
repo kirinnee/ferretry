@@ -40,7 +40,7 @@ export const THROTTLE_MEMORY_MS = 90_000;
 const PRESSURE_FRACTION = 0.7;
 const KEPT_KILLS = 20;
 
-export interface SlowedFerret {
+interface SlowedFerret {
   readonly sessionId: string;
   readonly callsign?: string;
 }

@@ -117,7 +117,7 @@ export interface DetachedLauncherPort {
 }
 
 /** Where the `link.opened` record goes (Gate keeps it; Gate stamps the time). */
-export interface OpenUrlAudit {
+interface OpenUrlAudit {
   record(draft: AuditDraft): Promise<void>;
 }
 

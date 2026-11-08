@@ -197,7 +197,7 @@ export interface SessionTerminalDeckProps {
 }
 
 /** Typing into, and focusing, the one shell a host is showing. */
-export interface TerminalInputPort {
+interface TerminalInputPort {
   readonly write: (data: string) => void;
   readonly focus: () => void;
 }

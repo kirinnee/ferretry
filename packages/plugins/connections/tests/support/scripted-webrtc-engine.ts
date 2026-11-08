@@ -2,7 +2,7 @@ import type {
   EngineDataChannel,
   EnginePeerConnection,
   NodeDataChannelModule,
-} from '../../daemon/adapters/webrtc/index.ts';
+} from '../../daemon/adapters/webrtc/node-datachannel-engine.ts';
 
 /** A peer whose gathering a case scripts: what it announces, and what description it ends with. */
 export function scriptedModule(script: {

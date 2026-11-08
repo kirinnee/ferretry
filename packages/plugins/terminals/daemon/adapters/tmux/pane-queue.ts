@@ -59,7 +59,7 @@ const DEFAULTS = {
 } as const;
 
 /** A message could not be put into the pane's queue, and the message says which half failed. */
-export class PaneQueueError extends Error {
+class PaneQueueError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'PaneQueueError';

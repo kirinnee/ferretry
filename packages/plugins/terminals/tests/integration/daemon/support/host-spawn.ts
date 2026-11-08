@@ -30,7 +30,7 @@ export const realAfter: ControlTimer = (milliseconds, fn) => {
 };
 
 /** A long-lived control client started with `Bun.spawn`, as the kernel's `spawn.start` starts one. */
-export function spawnControlChild(argv: readonly string[]): ControlChild {
+function spawnControlChild(argv: readonly string[]): ControlChild {
   const child = Bun.spawn([...argv], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
   return {
     stdin: { write: text => child.stdin.write(text), flush: () => child.stdin.flush() },

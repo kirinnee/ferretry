@@ -51,9 +51,9 @@ export const RELAY_CONNECT_DEADLINE_MS = 15_000;
 export const RELAY_PONG_DEADLINE_MS = 10_000;
 
 /** The redial schedule: the first redial is immediate, then equal jitter on `BASE × 2^(attempt − 1)`. */
-export const RELAY_REDIAL_BASE_MS = 500;
-export const RELAY_REDIAL_CEILING_MIN_MS = 1_000;
-export const RELAY_REDIAL_CEILING_MAX_MS = 10_000;
+const RELAY_REDIAL_BASE_MS = 500;
+const RELAY_REDIAL_CEILING_MIN_MS = 1_000;
+const RELAY_REDIAL_CEILING_MAX_MS = 10_000;
 const RELAY_REDIAL_CEILING_FALLBACK_MS = 5_000;
 
 export type RelayCarrierDecision =

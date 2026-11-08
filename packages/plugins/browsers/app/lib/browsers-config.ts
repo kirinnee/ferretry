@@ -18,7 +18,7 @@ import {
 } from '../../contract/index.ts';
 import type { CallClient } from './clients.ts';
 
-export const BROWSERS_FILE = 'browsers.yaml';
+const BROWSERS_FILE = 'browsers.yaml';
 
 const NonEmpty = z.string().min(1);
 
@@ -51,7 +51,7 @@ export interface BrowsersChange {
 }
 
 /** The document with the change made, comments and order kept. Pure. */
-export function editedBrowsersText(text: string, change: BrowsersChange): string {
+function editedBrowsersText(text: string, change: BrowsersChange): string {
   const document = parseDocument(text);
   if (change.mode !== undefined) document.set('mode', change.mode);
   if (change.proxy === null) document.delete('proxy');

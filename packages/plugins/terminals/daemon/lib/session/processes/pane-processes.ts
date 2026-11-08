@@ -68,12 +68,12 @@ function programName(argv: string): string {
   return basename(head(argv)).replace(/^-/u, '');
 }
 
-export function isShellProcess(argv: string): boolean {
+function isShellProcess(argv: string): boolean {
   return SHELLS.has(programName(argv));
 }
 
 /** A Chrome-family browser, by the executable it runs (a `.app` bundle's binary included). */
-export function isBrowserProcess(argv: string): boolean {
+function isBrowserProcess(argv: string): boolean {
   const program = programName(argv);
   if (BROWSERS.test(program)) return true;
   return /\/(?:Google Chrome|Chromium)(?: for Testing)?\.app\//u.test(argv);

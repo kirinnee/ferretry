@@ -1,10 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  type HostedRelayControlNamespace,
-  type RelayEnvironment,
-  relayFetch,
-} from '../../../worker/src/adapters/index.ts';
+import { type HostedRelayControlNamespace } from '../../../worker/src/adapters/hosted-control.ts';
+import { relayFetch, type RelayEnvironment } from '../../../worker/src/adapters/worker.ts';
 import relayWorker, { HostedRelayControlDurableObject } from '../../../worker/src/adapters/worker.ts';
 import {
   type ControlMessage,

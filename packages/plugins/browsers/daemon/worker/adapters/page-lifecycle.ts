@@ -488,7 +488,7 @@ export interface EmulationTargets {
 
 type Media = NonNullable<BrowserEmulation['media']>;
 
-export const DEFAULT_EMULATED_VIEWPORT = { width: 1280, height: 800 } as const;
+const DEFAULT_EMULATED_VIEWPORT = { width: 1280, height: 800 } as const;
 
 /**
  * One page's emulation. Media features are remembered here because Chrome replaces the whole set on each

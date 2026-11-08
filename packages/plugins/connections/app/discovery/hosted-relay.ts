@@ -52,7 +52,7 @@ export const HOSTED_RELAY_PATH = '/v1/default-relay';
 export const HOSTED_RELAY_ADVERTISEMENT_VERSION = 1;
 
 /** How long the page waits before treating silence as "does not know". */
-export const HOSTED_RELAY_TIMEOUT_MS = 4_000;
+const HOSTED_RELAY_TIMEOUT_MS = 4_000;
 
 /**
  * What this page knows about the fallback carrier.

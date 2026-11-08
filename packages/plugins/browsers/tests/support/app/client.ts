@@ -20,7 +20,7 @@ export interface RecordedCall {
 
 type Init = NonNullable<RecordedCall['init']>;
 
-export interface Heard {
+interface Heard {
   /** Delivers an event to everyone listening for it. */
   readonly emit: <Payload>(event: EventDef<string, Payload>, payload: Payload) => void;
   readonly listening: () => number;
@@ -67,12 +67,6 @@ export function recordingClient(reply: (route: string, init: Init | undefined) =
     },
   };
   return { calls, client, heard };
-}
-
-/** The same, answering from a list in turn (the last repeats). */
-export function scriptedClient(...answers: readonly unknown[]) {
-  let index = 0;
-  return recordingClient(() => answers[Math.min(index++, answers.length - 1)]);
 }
 
 /** A refusal as the shell raises it. */

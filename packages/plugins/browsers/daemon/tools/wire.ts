@@ -59,7 +59,7 @@ import { AGENT_TOOL_MAX_URL_CHARS, AskOwnerMessageSchema } from '../../contract/
  */
 
 /** Only web pages: an agent has no business opening `file:`, `javascript:` or `chrome:` URLs. */
-export const AgentUrlSchema = z
+const AgentUrlSchema = z
   .string()
   .max(AGENT_TOOL_MAX_URL_CHARS)
   .refine(
@@ -79,22 +79,21 @@ const ElementTargetShape = { selector: SelectorSchema.optional(), ref: BrowserRe
  * A file an upload names: a path inside the session's own folder (relative to it, or absolute under it), or
  * an attachment the owner put in this session's chat (`att_` and its sha-256).
  */
-export const ATTACHMENT_ID_PATTERN = /^att_[a-f0-9]{64}$/u;
-export const AgentUploadFileSchema = z.union([
+const ATTACHMENT_ID_PATTERN = /^att_[a-f0-9]{64}$/u;
+const AgentUploadFileSchema = z.union([
   z.string().trim().min(1).max(AGENT_TOOL_MAX_PATH_CHARS),
   z.strictObject({ attachment: z.string().regex(ATTACHMENT_ID_PATTERN, 'an attachment id is att_ and 64 hex digits') }),
 ]);
 export type AgentUploadFile = z.infer<typeof AgentUploadFileSchema>;
 
 /** How `browser.upload` hands files over: into a file input (or a file chooser), or dropped on a dropzone. */
-export const BrowserUploadModeSchema = z.enum(['input', 'drop']);
-export type BrowserUploadMode = z.infer<typeof BrowserUploadModeSchema>;
+const BrowserUploadModeSchema = z.enum(['input', 'drop']);
 
 /** Where a saved file goes: a path inside the session's own folder. */
 const SaveAsSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_PATH_CHARS);
 
 /** Where in history `browser.navigate` goes instead of to a URL. */
-export const BrowserHistoryStepSchema = z.enum(['back', 'forward', 'reload']);
+const BrowserHistoryStepSchema = z.enum(['back', 'forward', 'reload']);
 
 export const BrowserToolCallSchema = z.discriminatedUnion('tool', [
   z.strictObject({ tool: z.literal('browser.list') }),

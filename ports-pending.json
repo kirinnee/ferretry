@@ -17,7 +17,10 @@
     "shells",
     "layouts",
     "runtimes",
-    "onboarding"
+    "onboarding",
+    "terminals",
+    "usage",
+    "board"
   ],
   "pendingReasons": {
     "runtimes": [
@@ -62,9 +65,10 @@
       "the app's environment-variable editor (editing a login's `env` after it is made), the provider grid and one-click add, and the budget editor (Usage's) are not ported; the add panel makes a sign-in login or a provider login from a preset"
     ],
     "connections": [
-      "GAP(kernel): the tunnel carrier cannot run: the kernel offers no port to bind its own loopback listener (serving only the session route, every arrival remote) and none to find cloudflared (FY_CLOUDFLARED, PATH); the daemon half composes the carrier and says so out loud until a port exists",
+      "GAP(kernel): the tunnel carrier cannot run: the kernel offers no port to bind its own loopback listener (serving only the session route, every arrival remote) and none to find cloudflared (FY_CLOUDFLARED, PATH; daemon/adapters/tunnel/cloudflared-locator.ts is that finder); the daemon half composes the carrier and says so out loud until a port exists",
       "GAP(parity): the J-, S- and V-0245 rows still point at tests/unit/parity files that are not written",
-      "GAP(parity): R88 reconnect nudge and WebRTC networkChanged not wired: back online or back in the foreground, a daemon that is reconnecting waits for its backoff timer instead of being retried at once (today's connectionHealth.reconnecting/retryNow and webrtc networkChanged are passed to watchConnectionSignals; the app half builds no ConnectionHealth yet, so index.ts passes explicit no-ops)"
+      "GAP(parity): R88 reconnect nudge and WebRTC networkChanged not wired: back online or back in the foreground, a daemon that is reconnecting waits for its backoff timer instead of being retried at once (today's connectionHealth.reconnecting/retryNow and webrtc networkChanged are passed to watchConnectionSignals; the app half builds no ConnectionHealth yet, so index.ts passes explicit no-ops)",
+      "GAP(app): app/lib/tunnel-switch.ts and app/lib/webrtc-carrier.ts are ported and tested but the app half builds no tunnel switch or WebRTC dialer yet"
     ],
     "browsers": [
       "GAP(kernel): the link opener (POST /v1/system/open-url) is not detached from the daemon, as today's was (detached, unref'd): kernel SpawnOptions has no `detached`, so stopping the daemon's process group can take the opener, and a browser it started directly, down with it; needs the kernel's additive detached spawn",
@@ -72,7 +76,8 @@
       "GAP(shell): today's link-behaviour facility (open a link in the in-app browser or the real one) is not in @ferretry/app, so the in-app link sheet and workspace host are ported but nothing in the shell mounts them yet",
       "GAP(app): the human sign-in window (Real window login) is ported as a client and a model; the panel does not offer the button until the shell can open an external window",
       "GAP(tests): today's visual tests browser-mode.visual, browser-proxy.visual and browser-tab.visual (tests/integration/features), with browser-pane-jumpy.visual and browser-tab-bars.visual, are not moved: plugin app halves have no visual harness yet",
-      "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" (and \"This machine will ask you to confirm with your passkey\") where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\""
+      "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" (and \"This machine will ask you to confirm with your passkey\") where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\"",
+      "GAP(daemon): daemon/holds/site.ts, daemon/stream/socket-downstream.ts, daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet (the holds site key, the viewer socket transport and the loopback firewall status)"
     ],
     "ferrets": [
       "Info tabs Agenda, Tasks, Usage, Context, Surfaces and Warden are not ported in Ferrets: each is a `ferret.side` panel its owning plugin contributes (Agenda, Board, Usage, Conversation, Warden track theirs; Surfaces is Terminals' and Browsers' own panels), and the contract types they read stay in Ferrets until those panels take them (contract/view/agenda.ts, contract/view/board-refs.ts, contract/view/fleet-credentials.ts, contract/view/session-live.ts)",
@@ -170,6 +175,10 @@
     ],
     "layouts": [
       "GAP(ferrets): the Files side tab (Ferrets' `files` panel on `ferret.side`, order 40) is hidden until the ferret.side panel layout lists it"
+    ],
+    "terminals": [
+      "GAP(ferrets): the tmux adapters daemon/adapters/tmux/pane-queue.ts, daemon/adapters/tmux/harness-launch-guard.ts, daemon/adapters/tmux/forget-ferret-identity.ts and daemon/adapters/tmux/tmux-release-reader.ts are ported and tested but nothing composes them until Ferrets wires the deliver and runner seams (gustavo)",
+      "GAP(app): app/components/terminal-snapshot.tsx and app/components/terminal-snapshot-model.ts (S-0270), app/features/workspace/phone/terminal-key-bar.tsx, app/features/workspace/phone/terminal-keys.ts and app/lib/session-processes.ts are ported and tested but no surface mounts them until the app wiring (kaizen) lands"
     ]
   },
   "pendingHalves": {

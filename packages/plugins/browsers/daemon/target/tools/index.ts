@@ -86,7 +86,7 @@ export interface PageToolHost {
 }
 
 /** Who a page signs in, as the ferret typed it (`../sign-in/identities.ts`). */
-export interface PageIdentities {
+interface PageIdentities {
   typed(ferret: string, pageId: string, host: string, text: string): void;
   cleared(ferret: string, pageId: string): void;
 }
@@ -95,7 +95,7 @@ export interface PageIdentities {
  * A push approval (`push: true`): Accounts owns approvals; Browsers only reads the number a provider's page shows.
  * Absent: the tool says so.
  */
-export interface PageApprovals {
+interface PageApprovals {
   raise(caller: PageCaller, page: ResolvedPage, push: BrowserPushApprovalInput): Promise<{ readonly summary: string }>;
 }
 
@@ -108,12 +108,12 @@ export interface ActedPage {
 }
 
 /** One act, told before it runs; `placed` says which page once the call is over (`undefined`: every page). */
-export interface ActNote {
+interface ActNote {
   placed(page: ActedPage | undefined): void;
 }
 
 /** Today's `loginActs`: told each time a ferret drives a page, before the act. `script` is a page script's. */
-export interface PageActs {
+interface PageActs {
   acted(ferret: FerretId, script: boolean): ActNote | undefined;
 }
 
@@ -143,7 +143,7 @@ type IdentityAfter = 'clear' | { readonly host: string; readonly username: strin
  * WHO THE PAGE IS SIGNING IN after an input act (today's `identityAfter`, I154): kept from the agent's type or fill into
  * ONE identifier box, never beside a password field; cleared by anything else, and by any act of a person.
  */
-export function identityAfter(action: PageInputAction, outcome: PageInputOutcome, byAgent: boolean): IdentityAfter {
+function identityAfter(action: PageInputAction, outcome: PageInputOutcome, byAgent: boolean): IdentityAfter {
   if (!byAgent || outcome.passwordField === true) return 'clear';
   if (action.action === 'type')
     return outcome.identifierHost === undefined ? 'clear' : { host: outcome.identifierHost, username: action.text };

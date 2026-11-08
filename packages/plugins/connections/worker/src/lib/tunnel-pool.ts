@@ -337,7 +337,7 @@ export function tunnelRowVerdict(
 
 // ─── the operator's view ──────────────────────────────────────────────────────────────────────
 
-export const TunnelOperatorAccountSchema = z.strictObject({
+const TunnelOperatorAccountSchema = z.strictObject({
   name: z.string(),
   zone: z.string(),
   accepting: z.boolean(),

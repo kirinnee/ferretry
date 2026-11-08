@@ -7,7 +7,7 @@ import type { z } from 'zod';
  */
 
 /** The bound for a route whose payload is caller-supplied text (today's `MAX_TEXT_BODY_BYTES`). */
-export const MAX_TEXT_BODY_BYTES = 512 * 1024;
+const MAX_TEXT_BODY_BYTES = 512 * 1024;
 
 /** Parses a body against a schema. */
 export async function parseBody<Schema extends z.ZodType>(

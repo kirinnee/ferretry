@@ -18,7 +18,7 @@ import type { BrowserPageSummary, BrowserStatus } from '../../../contract/wire/b
 import { EyeOff, Globe2, Plus, X } from 'lucide-react';
 import { remotePageLabel } from '../../lib/remote-browser.ts';
 /** An agent acting on a page right now, by the name a person calls it. */
-export interface AgentControlDriver {
+interface AgentControlDriver {
   readonly name: string;
 }
 

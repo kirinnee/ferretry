@@ -26,10 +26,10 @@ export const GIBIBYTE = 1024 ** 3;
  * A size as written in `limits.yaml`: a byte count, a size string (`40G`, `512M`, `1.5GiB`), a percent
  * of the user's memory budget (`25%`), or `infinity` for no cap.
  */
-export type LimitSizeText = number | string;
+type LimitSizeText = number | string;
 
 /** What a written size means. */
-export type ParsedLimitSize =
+type ParsedLimitSize =
   | { readonly kind: 'bytes'; readonly bytes: number }
   | { readonly kind: 'percent'; readonly percent: number }
   | { readonly kind: 'unlimited' };
@@ -45,7 +45,7 @@ const UNIT_BYTES: Readonly<Record<string, number>> = {
 const SIZE_TEXT = /^(\d+(?:\.\d+)?)\s*(%|[KMGT](?:i?B)?|B)?$/iu;
 
 /** What a written size means, or `undefined` when it is not a size. Total over every value. */
-export function parseLimitSize(value: unknown): ParsedLimitSize | undefined {
+function parseLimitSize(value: unknown): ParsedLimitSize | undefined {
   if (typeof value === 'number')
     return Number.isInteger(value) && value > 0 ? { kind: 'bytes', bytes: value } : undefined;
   if (typeof value !== 'string') return undefined;
@@ -75,7 +75,7 @@ const CpuPercentSchema = z.number().finite().gt(0).max(100);
 // ── limits.yaml ──────────────────────────────────────────────────────────────────────────────────
 
 /** The caps on all ferrets taken together (`<product>_fleet.slice`). */
-export const FleetLimitsFileSchema = z.strictObject({
+const FleetLimitsFileSchema = z.strictObject({
   /** CPU share against the daemon (100) and voice (200) when the machine is busy. */
   cpuWeight: WeightSchema.optional(),
   /** Past this the kernel slows every ferret down to reclaim memory. */
@@ -87,10 +87,9 @@ export const FleetLimitsFileSchema = z.strictObject({
   tasksMax: TasksSchema.optional(),
   cpuPercent: CpuPercentSchema.optional(),
 });
-export type FleetLimitsFile = z.infer<typeof FleetLimitsFileSchema>;
 
 /** The caps on each ferret (`<product>-agent-*.scope`). */
-export const FerretLimitsFileSchema = z.strictObject({
+const FerretLimitsFileSchema = z.strictObject({
   cpuWeight: WeightSchema.optional(),
   /** The weight of a ferret a person started, so their own ferret beats a sub-ferret. */
   interactiveCpuWeight: WeightSchema.optional(),
@@ -99,9 +98,8 @@ export const FerretLimitsFileSchema = z.strictObject({
   tasksMax: TasksSchema.optional(),
   cpuPercent: CpuPercentSchema.optional(),
 });
-export type FerretLimitsFile = z.infer<typeof FerretLimitsFileSchema>;
 
-export const LimitsFileSchema = z.strictObject({
+const LimitsFileSchema = z.strictObject({
   /** The switch. Absent means on; `false` is held for the owner to confirm. */
   enabled: z.boolean().optional(),
   fleet: FleetLimitsFileSchema.optional(),
@@ -109,11 +107,10 @@ export const LimitsFileSchema = z.strictObject({
   /** Run harnesses at the lowest best-effort disk priority. Absent means on; `false` is held. */
   ionice: z.boolean().optional(),
 });
-export type LimitsFile = z.infer<typeof LimitsFileSchema>;
+type LimitsFile = z.infer<typeof LimitsFileSchema>;
 
 /** What a machine with no `limits.yaml` behaves as: limits on, every number computed. */
 export type LimitsConfig = LimitsFile;
-export const DEFAULT_LIMITS_CONFIG: LimitsConfig = {};
 
 // ── The numbers ──────────────────────────────────────────────────────────────────────────────────
 
@@ -122,11 +119,11 @@ export const DEFAULT_LIMITS_CONFIG: LimitsConfig = {};
  * daemon's own is NOT a constant here — its unit sets it, so the view reads it back from the kernel.
  */
 export const VOICE_CPU_WEIGHT = 200;
-export const DEFAULT_FLEET_CPU_WEIGHT = 50;
-export const DEFAULT_FERRET_CPU_WEIGHT = 100;
-export const DEFAULT_INTERACTIVE_CPU_WEIGHT = 200;
-export const DEFAULT_FLEET_TASKS_MAX = 16_384;
-export const DEFAULT_FERRET_TASKS_MAX = 4_096;
+const DEFAULT_FLEET_CPU_WEIGHT = 50;
+const DEFAULT_FERRET_CPU_WEIGHT = 100;
+const DEFAULT_INTERACTIVE_CPU_WEIGHT = 200;
+const DEFAULT_FLEET_TASKS_MAX = 16_384;
+const DEFAULT_FERRET_TASKS_MAX = 4_096;
 
 /** What the machine gives the user to spend. Measured by the daemon (`memoryCeilingBytes`). */
 export interface LimitsHost {
@@ -314,7 +311,7 @@ const DEFAULT_PERCENTS: Readonly<Record<string, number>> = {
  * is a tightening and applies at once. Without it (`fy config check` on another host) only an edit
  * that is provably not looser passes.
  */
-export function limitsLoosening(before: LimitsConfig, after: LimitsConfig, ceilingBytes?: number): readonly string[] {
+function limitsLoosening(before: LimitsConfig, after: LimitsConfig, ceilingBytes?: number): readonly string[] {
   const sentences: string[] = [];
   const was = resolveLimits(before, { memoryCeilingBytes: ceilingBytes ?? GIBIBYTE });
   const now = resolveLimits(after, { memoryCeilingBytes: ceilingBytes ?? GIBIBYTE });
@@ -348,13 +345,12 @@ export function limitsLoosening(before: LimitsConfig, after: LimitsConfig, ceili
 const NullableBytes = NonNegativeIntegerSchema.nullable();
 
 /** What kind of enforcement this machine gives. */
-export const LIMITS_ENFORCEMENTS = ['cgroups', 'priority', 'none'] as const;
-export const LimitsEnforcementSchema = z.enum(LIMITS_ENFORCEMENTS);
-export type LimitsEnforcement = z.infer<typeof LimitsEnforcementSchema>;
+const LIMITS_ENFORCEMENTS = ['cgroups', 'priority', 'none'] as const;
+const LimitsEnforcementSchema = z.enum(LIMITS_ENFORCEMENTS);
 
 /** Whether disk priority can do anything on the disk the state home is on. */
-export const LIMITS_DISK_EFFECTS = ['full', 'class-only', 'none', 'unknown'] as const;
-export const LimitsDiskEffectSchema = z.enum(LIMITS_DISK_EFFECTS);
+const LIMITS_DISK_EFFECTS = ['full', 'class-only', 'none', 'unknown'] as const;
+const LimitsDiskEffectSchema = z.enum(LIMITS_DISK_EFFECTS);
 export type LimitsDiskEffect = z.infer<typeof LimitsDiskEffectSchema>;
 
 const FleetLimitsViewFields = z.object({

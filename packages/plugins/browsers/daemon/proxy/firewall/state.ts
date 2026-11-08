@@ -7,12 +7,10 @@ import {
   resolveBrowserPorts,
 } from '../wire/ports.ts';
 
-export const LOOPBACK_FIREWALL_SERVICE = 'ferretry-loopback-firewall';
-export const LOOPBACK_FIREWALL_VERIFY_TIMER = 'ferretry-loopback-firewall-verify.timer';
+const LOOPBACK_FIREWALL_SERVICE = 'ferretry-loopback-firewall';
+const LOOPBACK_FIREWALL_VERIFY_TIMER = 'ferretry-loopback-firewall-verify.timer';
 
-/** How often the daemon re-reads the marker, and how old a verification may be before it counts as not running. */
-export const LOOPBACK_FIREWALL_CHECK_MS = 5 * 60_000;
-export const LOOPBACK_FIREWALL_VERIFIED_MAX_AGE_MS = 15 * 60_000;
+const LOOPBACK_FIREWALL_VERIFIED_MAX_AGE_MS = 15 * 60_000;
 
 /** The marker as the host holds it: parsed, or `undefined` when there is none or it is not one. */
 export interface LoopbackMarkerReader {

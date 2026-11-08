@@ -43,7 +43,7 @@ const PANE_PADDING_X_PX = 24;
 const POLL_MS = 3_000;
 
 /** The daemon read, injected so tests and the visual harness never open a socket. */
-export type PaneSnapshotReader = (daemon: DaemonConnection, scope: DaemonSessionScope) => Promise<string>;
+type PaneSnapshotReader = (daemon: DaemonConnection, scope: DaemonSessionScope) => Promise<string>;
 
 export interface TerminalSnapshotViewProps {
   daemon: DaemonConnection;

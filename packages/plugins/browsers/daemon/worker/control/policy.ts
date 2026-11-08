@@ -1,10 +1,10 @@
 import { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, type BrowserViewport } from '../../../contract/wire/browser.ts';
 import { type BrowserMode } from '../../../contract/index.ts';
 
-export const browserLoginDefaultMinutes = 15;
-export const browserLoginMaximumMinutes = 60;
-export const browserLoginUrl = 'https://accounts.google.com/';
-export const vncSupervisorKillAfterSeconds = 10;
+const browserLoginDefaultMinutes = 15;
+const browserLoginMaximumMinutes = 60;
+const browserLoginUrl = 'https://accounts.google.com/';
+const vncSupervisorKillAfterSeconds = 10;
 
 const vncPasswordAlphabet = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const vncPasswordLength = 8;

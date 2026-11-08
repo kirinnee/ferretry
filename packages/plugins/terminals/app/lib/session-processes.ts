@@ -112,16 +112,13 @@ export const processErrorText = (error: unknown): string => {
   return error instanceof Error ? error.message : String(error);
 };
 
-export const isForbidden = (error: unknown): boolean =>
-  (error instanceof DaemonCallError && error.status === 403) || grantRefusalNotice(error) !== null;
-
 /** The command as the agent wrote it when there is one. */
 export const processTitle = (entry: SessionProcess): string => entry.label ?? entry.command;
 
 type ProcessGroupKey = SessionProcess['kind'] | 'ended';
 
 /** One top-level entry with the processes it started, in the order the list shows them. */
-export interface ProcessRow {
+interface ProcessRow {
   readonly process: SessionProcess;
   readonly children: readonly SessionProcess[];
 }

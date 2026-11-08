@@ -11,7 +11,7 @@ export type TerminalsStateFile = StateFileDef<'terminals', TerminalsState>;
  * a takeover or a hand-over outlives a daemon restart. Each event is parsed again on replay (`SurfaceControl`), so a
  * damaged entry is skipped rather than believed. At most {@link KEPT_PER_FERRET} per ferret: the newest decide.
  */
-export const KEPT_PER_FERRET = SURFACE_EVENTS_KEPT_PER_FERRET;
+const KEPT_PER_FERRET = SURFACE_EVENTS_KEPT_PER_FERRET;
 
 const EMPTY: TerminalsState = { panes: {}, events: {} };
 

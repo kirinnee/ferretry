@@ -24,7 +24,7 @@ import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, Posit
  * - `helper` — something the harness keeps for the whole session: an MCP server, a language server,
  *   Codex's app server, a browser an MCP server drives.
  */
-export const SessionProcessKindSchema = z.enum(['command', 'background', 'server', 'helper']);
+const SessionProcessKindSchema = z.enum(['command', 'background', 'server', 'helper']);
 export type SessionProcessKind = z.infer<typeof SessionProcessKindSchema>;
 
 /**
@@ -33,7 +33,7 @@ export type SessionProcessKind = z.infer<typeof SessionProcessKindSchema>;
  * and its parent has not collected it, and `exited` is gone — kept for a while so its output can still
  * be read.
  */
-export const SessionProcessStateSchema = z.enum(['running', 'sleeping', 'stopped', 'zombie', 'exited']);
+const SessionProcessStateSchema = z.enum(['running', 'sleeping', 'stopped', 'zombie', 'exited']);
 export type SessionProcessState = z.infer<typeof SessionProcessStateSchema>;
 
 /**
@@ -44,10 +44,9 @@ export type SessionProcessState = z.infer<typeof SessionProcessStateSchema>;
  * - `transcript` — it has exited, and the conversation transcript recorded what the tool returned.
  * - `none` — nothing can be read without stealing it; `reason` says why in words a person can act on.
  */
-export const SessionProcessOutputSourceSchema = z.enum(['file', 'transcript', 'none']);
-export type SessionProcessOutputSource = z.infer<typeof SessionProcessOutputSourceSchema>;
+const SessionProcessOutputSourceSchema = z.enum(['file', 'transcript', 'none']);
 
-export const SessionProcessOutputAvailabilitySchema = z.strictObject({
+const SessionProcessOutputAvailabilitySchema = z.strictObject({
   source: SessionProcessOutputSourceSchema,
   /** Set when `source` is `none`: why there is nothing to read, e.g. "Writes to the terminal — see Console". */
   reason: z.string().min(1).max(200).optional(),
@@ -60,13 +59,12 @@ export type SessionProcessOutputAvailability = z.infer<typeof SessionProcessOutp
  * id never names two processes — Stop relies on that.
  */
 export const SessionProcessIdSchema = z.string().regex(/^[1-9][0-9]{0,9}\.[0-9]{1,20}$/u);
-export type SessionProcessId = z.infer<typeof SessionProcessIdSchema>;
 
 /** The longest command line a list carries, in UTF-16 code units; a longer one is cut and says so. */
 export const SESSION_PROCESS_COMMAND_MAX = 2_000;
 
 /** How an exited process ended, when anything recorded it. */
-export const SessionProcessExitSchema = z.strictObject({
+const SessionProcessExitSchema = z.strictObject({
   /** The exit code, when known. */
   code: z.number().int().optional(),
   /** `true` when it failed (a non-zero code, or the harness marked the result an error). */
@@ -74,7 +72,7 @@ export const SessionProcessExitSchema = z.strictObject({
 });
 export type SessionProcessExit = z.infer<typeof SessionProcessExitSchema>;
 
-export const SessionProcessSchema = z.strictObject({
+const SessionProcessSchema = z.strictObject({
   id: SessionProcessIdSchema,
   pid: PositiveIntegerSchema,
   /** The process this one was started by, when that is listed too; absent for a top-level entry. */
@@ -151,10 +149,6 @@ export const SessionProcessOutputSchema = z.strictObject({
 });
 export type SessionProcessOutput = z.infer<typeof SessionProcessOutputSchema>;
 
-export const SessionProcessOutputQuerySchema = z.strictObject({
-  after: z.coerce.number().int().nonnegative().optional(),
-});
-
 /**
  * Stopping one process: SIGTERM to it and every process below it, deepest first. The daemon first proves
  * again that the id's pid is still under this ferret's pane AND still has the same start time, so a pid
@@ -185,13 +179,12 @@ export type SessionAttachTarget = z.infer<typeof SessionAttachTargetSchema>;
  * paste is the large case, and a client splits anything longer into ordered writes rather than the
  * daemon accepting an unbounded body into a tmux argument vector.
  */
-export const SESSION_CONSOLE_INPUT_MAX = 4_096;
+const SESSION_CONSOLE_INPUT_MAX = 4_096;
 
 /** Typing into a session's OWN pane — the agent's Claude / Codex CLI — from wherever the reader is. */
 export const SessionConsoleInputRequestSchema = z.strictObject({
   data: z.string().min(1).max(SESSION_CONSOLE_INPUT_MAX),
 });
-export type SessionConsoleInputRequest = z.infer<typeof SessionConsoleInputRequestSchema>;
 
 /** How many bytes reached the pane: the UTF-8 length of `data`, never the bytes themselves. */
 export const SessionConsoleInputResultSchema = z.strictObject({

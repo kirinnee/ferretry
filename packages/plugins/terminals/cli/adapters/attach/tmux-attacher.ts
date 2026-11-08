@@ -142,7 +142,7 @@ export class ExactTmuxAttacher implements ITerminalAttacher {
 }
 
 /** Linux: the kernel's start time in clock ticks; macOS: the second `ps` reads. Same reading as the daemon's. */
-export class HostProcessIncarnation implements ProcessIncarnation {
+class HostProcessIncarnation implements ProcessIncarnation {
   constructor(private readonly platform: string = process.platform) {}
 
   async startOf(pid: number): Promise<number | undefined> {

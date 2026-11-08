@@ -59,7 +59,7 @@ type Entry = {
 /** How long an act waits for a download it just started to show its size before reporting it as running. */
 export const DOWNLOAD_SETTLE_MS = 3_000;
 /** How long a save waits for a running download, or for one to start. */
-export const DOWNLOAD_CLAIM_WAIT_MS = 45_000;
+const DOWNLOAD_CLAIM_WAIT_MS = 45_000;
 const POLL_MS = 100;
 
 export class DownloadStage {

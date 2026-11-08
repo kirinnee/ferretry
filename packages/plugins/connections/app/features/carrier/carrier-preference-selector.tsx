@@ -20,12 +20,11 @@ import { Check } from 'lucide-react';
 import { useId, useState } from 'react';
 import { CARRIER_PREFERENCE_LABEL, CARRIER_PREFERENCES, type CarrierPreference } from '../../lib/carrier-preference.ts';
 import { cn } from '../../lib/class-names.ts';
-import type { TunnelStatusView } from '../../../contract/index.ts';
-type TunnelSwitchState = { readonly kind: 'unknown' } | { readonly kind: 'known'; readonly view: TunnelStatusView };
+
 import { Button } from '../../shell/primitives.tsx';
 
 /** What each preference does, in one line. WebRTC's says the relay only introduces — §15's own words. */
-export const CARRIER_PREFERENCE_DESCRIPTION: Readonly<Record<CarrierPreference, string>> = {
+const CARRIER_PREFERENCE_DESCRIPTION: Readonly<Record<CarrierPreference, string>> = {
   auto: 'Direct first, then WebRTC, then a Cloudflare tunnel, then a relay — whichever answers.',
   webrtc: 'Peer to peer. The relay is used only to introduce the two ends.',
   tunnel: 'Through this machine’s Cloudflare tunnel, and nothing else.',
@@ -46,7 +45,7 @@ export interface CarrierPreferenceAvailability {
 }
 
 /** One machine's tunnel switch, as a selector offers it. */
-export interface TunnelSwitchOffer {
+interface TunnelSwitchOffer {
   /** The daemon's one line about its tunnel — "Tunnel: off (opt-in) — turn on with …" when it is off. */
   readonly sentence: string;
   /** Whether the tunnel is switched off for this machine, which is the opt-in default. */
@@ -55,26 +54,8 @@ export interface TunnelSwitchOffer {
   readonly turnOn: () => Promise<void>;
 }
 
-/**
- * A machine's switch as a selector offers it, or nothing until the machine has answered — and nothing
- * for a daemon older than the switch, whose tunnel was never opt-in.
- */
-export const tunnelSwitchOffer = (
-  state: TunnelSwitchState | undefined,
-  turnOn: () => Promise<unknown>,
-): TunnelSwitchOffer | undefined =>
-  state?.kind === 'known'
-    ? {
-        sentence: state.view.sentence,
-        off: !state.view.enabled,
-        turnOn: async () => {
-          await turnOn();
-        },
-      }
-    : undefined;
-
 /** Asked when a preference that walks the tunnel is chosen for a machine whose tunnel is off. */
-export const TUNNEL_OFFER_QUESTION = 'Turn on a Cloudflare tunnel for this machine?';
+const TUNNEL_OFFER_QUESTION = 'Turn on a Cloudflare tunnel for this machine?';
 
 /** What saying yes does, and how to undo it. */
 const TUNNEL_OFFER_DETAIL =
@@ -82,13 +63,13 @@ const TUNNEL_OFFER_DETAIL =
   'encrypted session and cannot read it. Turn it off again at the machine with fy daemon tunnel off.';
 
 /** Said under Tunnel only for a machine whose tunnel is switched off. */
-export const TUNNEL_OFF_NOTE = 'Off for this machine — tunnels are opt-in.';
+const TUNNEL_OFF_NOTE = 'Off for this machine — tunnels are opt-in.';
 
 /** The preferences that walk a tunnel, and so are worth turning one on for. */
-export const walksTunnel = (preference: CarrierPreference): boolean => preference === 'tunnel' || preference === 'auto';
+const walksTunnel = (preference: CarrierPreference): boolean => preference === 'tunnel' || preference === 'auto';
 
 /** Said under WebRTC only in a build with no dialer. */
-export const WEBRTC_UNAVAILABLE_NOTE = 'WebRTC isn’t available in this build yet.';
+const WEBRTC_UNAVAILABLE_NOTE = 'WebRTC isn’t available in this build yet.';
 
 export interface CarrierPreferenceSelectorProps {
   readonly value: CarrierPreference;
@@ -100,10 +81,7 @@ export interface CarrierPreferenceSelectorProps {
   readonly legendHidden?: boolean;
 }
 
-export const noteFor = (
-  preference: CarrierPreference,
-  availability: CarrierPreferenceAvailability,
-): string | undefined => {
+const noteFor = (preference: CarrierPreference, availability: CarrierPreferenceAvailability): string | undefined => {
   if (preference === 'webrtc' && !availability.webrtc) return WEBRTC_UNAVAILABLE_NOTE;
   if (preference === 'tunnel') return availability.tunnel?.off === true ? TUNNEL_OFF_NOTE : availability.tunnelNote;
   return undefined;
@@ -113,7 +91,7 @@ export const noteFor = (
  * "Turn on a Cloudflare tunnel for this machine?" — asked under the group, never as a modal: the choice
  * is already made and kept, and this is only whether to give it a tunnel to walk.
  */
-export function TunnelOffer({ offer }: { readonly offer: TunnelSwitchOffer }) {
+function TunnelOffer({ offer }: { readonly offer: TunnelSwitchOffer }) {
   const id = useId();
   const [phase, setPhase] = useState<'asking' | 'working' | 'dismissed'>('asking');
   const [error, setError] = useState<string | undefined>(undefined);
