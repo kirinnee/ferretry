@@ -4,6 +4,7 @@ import { GLOBAL_LESSONS_DOCUMENT } from '../../../contract/index.ts';
 import type { Proposal } from '../../../daemon/lib/index.ts';
 import {
   applyMinerOutput,
+  parseMinerOutput,
   titleHash,
   type Observation,
   type SessionDigest,
@@ -421,5 +422,35 @@ describe('learning aggregation', () => {
       should(actual.proposals.map(entry => entry.project)).deepEqual(['/repo-b', '/repo-a']);
       should(actual.stats).match({ proposalsCreated: 1, proposalsStrengthened: 0 });
     });
+  });
+});
+
+describe('parseMinerOutput', () => {
+  const observation = { key: 'o1', ferretId: 's1', kind: 'correction', gist: 'g', quote: 'q' };
+  const proposal = { title: 'Use bun', ruleText: 'Use bun, not Python.', observationKeys: ['o1'] };
+
+  it('should keep the entries that parse and drop only the malformed ones', () => {
+    // Arrange
+    const value = { observations: [observation, { key: 7 }, 'junk'], proposals: [{ title: 'no rule' }, proposal] };
+
+    // Act
+    const output = parseMinerOutput(value);
+
+    // Assert
+    should(output).eql({ observations: [observation], proposals: [proposal] });
+  });
+
+  it('should leave out a list the miner did not write rather than invent an empty one', () => {
+    // Act + Assert
+    should(parseMinerOutput({ observations: [observation] })).eql({ observations: [observation] });
+    should(parseMinerOutput({ proposals: [proposal] })).eql({ proposals: [proposal] });
+    should(parseMinerOutput({})).eql({});
+  });
+
+  it('should say a document that is not a miner output at all is not one', () => {
+    // Act + Assert
+    should(parseMinerOutput('not json object')).be.undefined();
+    should(parseMinerOutput(null)).be.undefined();
+    should(parseMinerOutput({ observations: 'many' })).be.undefined();
   });
 });
