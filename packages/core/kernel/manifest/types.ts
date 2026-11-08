@@ -258,12 +258,25 @@ export interface Permissions {
    */
   readonly which?: true;
   /**
+   * It mints shared trees through `kernel.roots.share` (Skills: one skill folder handed, read-only, to the harness that
+   * receives the launch part). It hands another plugin read of a folder it owns, so a plugin that does not declare it
+   * is refused by name.
+   */
+  readonly shareTrees?: true;
+  /**
    * It asks `kernel.processes` about this user's live processes and SIGTERMs one that runs from its own folder
    * (Runtimes: an ended Codex ferret's app-server pair). `environment` lists, by exact name, the variables `usersOf`
    * may match (`CODEX_HOME`); nothing else is matched, and `'*'` is a name that matches no variable. Absent: every
    * member is refused naming the plugin.
    */
   readonly processes?: ProcessesPermission;
+  /**
+   * The basenames `kernel.roots.harnessFile` may open beside a harness home (Runtimes: `['.claude.json']`, the file
+   * Claude keeps its user-scope MCP servers in, BESIDE `~/.claude`). Each is matched exactly, as one plain file name;
+   * `'*'`, a pattern, a path, `.` or `..` is a name that matches no file. Only with `harness-home` in `roots` and only
+   * for the plugin that may hold it. Absent: every `harnessFile` is refused.
+   */
+  readonly harnessFiles?: readonly string[];
   /** It reads the running build's facts and launches the self-update through `kernel.updateHost` (Updates). */
   readonly updateHost?: true;
 }

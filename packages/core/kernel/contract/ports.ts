@@ -533,6 +533,41 @@ export type RootName =
    */
   | 'harness-home';
 
+/**
+ * {@link RootHandle.linkTo}'s target: a name in one of THIS plugin's own root handles (maybe the same one). The link
+ * written points at its REAL path, resolved and fenced by that handle, never at text the caller chose.
+ */
+export interface RootLinkTarget {
+  readonly root: RootHandle;
+  readonly path: FencedPath;
+  /**
+   * The target may not exist yet (today's credential link: an empty sign-in slot's file is written by the harness
+   * THROUGH the link). Its folder must exist and is resolved and fenced; the missing leaf is judged by name. Without
+   * it a missing target is refused, so a link never dangles by accident.
+   */
+  readonly dangling?: true;
+}
+
+/**
+ * {@link RootsPort.harnessFile}: ONE file of the host's harness setup, read-only, and nothing beside it — no path
+ * argument, no listing, no write. Every read goes through one held descriptor of a regular file with exactly one name
+ * (`links === 1`) that is not a link; anything else is refused.
+ */
+export interface RootFileHandle {
+  readonly name: 'harness-home';
+  /** The file's absolute path, as the caller named it (never followed). */
+  readonly path: string;
+  stat(): Promise<RootStat | undefined>;
+  lstat(): Promise<RootLstat | undefined>;
+  readText(limitBytes?: number): Promise<string>;
+  readBytes(limitOrWindow?: number | RootReadWindow): Promise<Uint8Array>;
+  fileIdentity(): Promise<RootIdentity | undefined>;
+  readDurable<T = RootDurableRead>(
+    limitBytes?: number,
+    hold?: (read: RootDurableHeld) => Promise<T>,
+  ): Promise<T | undefined>;
+}
+
 /** `RootHandle.copyTree`: what to bring, and how. */
 export interface TreeCopyOptions {
   /** Link the destination name to the source folder (today's skill link into a runtime home) instead of copying. */
@@ -692,6 +727,17 @@ export interface RootHandle {
    * skipped, modes kept) or, with `link`, one link at `to` to the source folder's real path. Both ends are fenced.
    */
   copyTree(source: RootHandle, from: FencedPath, to: FencedPath, options?: TreeCopyOptions): Promise<void>;
+  /**
+   * Materializes a {@link SharedTree} another plugin minted (`RootsPort.share`: Skills' skill folder) at `to` in THIS
+   * root, which must be an internal, writable root (`agent-homes`): any other is refused. A copy keeps `copyTree`'s
+   * rules exactly (each file read off the disk through a checked descriptor, a link inside skipped, a file with a
+   * second hard link skipped, modes kept, `maxEntries`, both ends fenced, a NEW folder at `to`). `link` asks for one
+   * link at `to` to the tree's real path instead; it is made only when the kernel's shared-tree link rule allows it for
+   * this tree and this handle (a tree from the minter's own state; and only if the owner chose so, a project folder
+   * that is the receiving ferret's own work folder), and otherwise the tree is COPIED. The answer says which was made.
+   * A tree that is forged, rebuilt from its JSON, or whose minter stopped is refused.
+   */
+  copyShared(tree: SharedTree, to: FencedPath, options?: TreeCopyOptions): Promise<SharedTreeCopied>;
   /** A folder made (or narrowed) to `0700`, refused when a link or a file is at the name. */
   ensurePrivateDirectory(path: FencedPath): Promise<void>;
   list(path: FencedPath): Promise<readonly string[]>;
@@ -711,12 +757,65 @@ export interface RootHandle {
    */
   pin(path: FencedPath, options?: PinOptions): Promise<HeldRoot>;
   remove(path: FencedPath): Promise<void>;
+  /**
+   * A symlink at `at` (today's "stored once, never copied" link from a runtime home to the host's credential or
+   * history) whose text is the REAL path of `target` in one of THIS plugin's own root handles — the rule `copyTree`'s
+   * `link` keeps for a folder, for a file too. Only into an internal, writable root that takes links (`fleet`,
+   * `agent-homes`); any other root refuses `read_only`, and another plugin's handle (or a look-alike) `not_declared`.
+   * `at`'s folder must exist and be reached with no link on the way inside the root (`link_escape`); the link is made
+   * through that folder's checked, no-follow descriptor, and refused when anything (a link included) is at the name.
+   * A child that follows the link is the harness; the kernel's own reads still never follow it out of the root.
+   */
+  linkTo(at: FencedPath, target: RootLinkTarget): Promise<void>;
+  /**
+   * `fchmod` of an EXISTING file or folder at `path`, through a descriptor opened without following a link (a link at
+   * the name is refused, never followed): today's provisioner keeping or narrowing a mode. Only permission bits: an
+   * internal root keeps `mode & 0o700` (no group or other bit, ever), any other writable root `mode & 0o777` (never
+   * setuid, setgid or sticky). Refused on a read-only root (`read_only`), for a file with a second hard link
+   * (`hard_link`: its mode is also another name's) and for a mode that is not an integer in `0..0o7777`.
+   */
+  setMode(path: FencedPath, mode: number): Promise<void>;
 }
 
 export interface RootsPort {
   /** Only roots the manifest declared in `permissions.roots`; anything else throws at build. */
   root(name: RootName, scope?: { readonly ferret?: FerretId; readonly subfolder?: string }): RootHandle;
+  /**
+   * A read-only handle on exactly ONE file beside a harness home (`~/.claude.json`, which sits BESIDE `~/.claude`, so
+   * no `harness-home` scope reaches it): only for a plugin that may hold `harness-home` (Runtimes) and declared it in
+   * `permissions.roots`, and only for a basename listed in `permissions.harnessFiles`. The path must be absolute,
+   * normalized and outside the fence. Its folder is never listable: the handle names that one file and nothing else.
+   * Throws `not_declared` (or `outside` / `fenced` for the path) at the call.
+   */
+  harnessFile(absolutePath: string): RootFileHandle;
+  /**
+   * Mints a {@link SharedTree}: ONE existing folder of this plugin's own, handed read-only to whoever receives it
+   * (Skills' skill folder in a launch part, for the harness that materializes it with `RootHandle.copyShared`). Only
+   * with `permissions.shareTrees`, and only from what this plugin owns: a folder of one of ITS OWN `work` or `imports`
+   * handles (a root handle another plugin made, or any other root, is refused), or one name of one of its own declared
+   * `opaque` named trees (`installed/*`). Valid until this plugin stops.
+   */
+  share(source: SharedTreeSource): Promise<SharedTree>;
 }
+
+declare const sharedTreeBrand: unique symbol;
+
+/**
+ * One folder an owner plugin shares, read-only, with the plugin that receives it (§7.7, kernel batch #10). Opaque and
+ * unforgeable, like a Vault {@link ChildEnvironment}: no field, kept in a kernel table, so a copy, a spread or a JSON
+ * round trip (it serialises as `{ shared: <folder name> }` only, never a path) is nothing the kernel will open.
+ */
+export interface SharedTree {
+  readonly [sharedTreeBrand]: true;
+}
+
+/** What {@link RootsPort.share} shares: a folder of one of the minter's own root handles, or one of its own named trees. */
+export type SharedTreeSource =
+  | { readonly root: RootHandle; readonly path: FencedPath }
+  | { readonly state: StateFileDef; readonly name: string };
+
+/** What {@link RootHandle.copyShared} made at the destination: a copy, or (allowed by the link rule) one link. */
+export type SharedTreeCopied = 'copied' | 'linked';
 
 // events ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 

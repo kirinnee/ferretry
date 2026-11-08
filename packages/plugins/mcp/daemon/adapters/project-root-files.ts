@@ -91,6 +91,7 @@ export function mcpFileOnly(handle: RootHandle): RootHandle {
     writeText: refuse('write'),
     writeBytes: refuse('write'),
     copyTree: refuse('copy'),
+    copyShared: refuse('copy'),
     ensurePrivateDirectory: refuse('make a folder'),
     makeDirectory: refuse('make a folder'),
     pin: refuse('hold a folder open'),
@@ -99,6 +100,8 @@ export function mcpFileOnly(handle: RootHandle): RootHandle {
     syncDirectory: refuse('syncDirectory'),
     fileIdentity: refuse('fileIdentity'),
     remove: refuse('remove'),
+    linkTo: refuse('link'),
+    setMode: refuse('change a mode'),
   };
 }
 

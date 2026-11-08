@@ -1,7 +1,19 @@
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { isKernelMadeRoot } from '../host/internal-roots.ts';
-import { mayHoldRoot, scopedSubfolder } from '../host/roots.ts';
+import { isReadOnlyRoot, mayHoldRoot, RootError, scopedSubfolder } from '../host/roots.ts';
+import { harnessFileRefusal, permittedMode, takesLinks } from '../host/root-rules.ts';
+import {
+  ownStateTree,
+  receivingRoot,
+  refuseShared,
+  type SharedOrigin,
+  SHARED_TREE_LINK_RULE,
+  sharedLinkAllowed,
+  type SharedTreeLinkRule,
+  SharedTrees,
+  shareableRoot,
+} from '../host/shared-trees.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { failureResponse } from '../host/responses.ts';
 import type { ContractSurface, FetchPort, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
@@ -55,6 +67,8 @@ import type {
   KernelPorts,
   Log,
   LogFields,
+  RootDurableHeld,
+  RootFileHandle,
   RootHandle,
   RootName,
   SpawnOptions,
@@ -87,7 +101,7 @@ import { scratchPort } from '../host/scratch.ts';
 import { PinRegistry } from '../host/pins.ts';
 import { type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
 import { matchingHook } from '../host/hooks.ts';
-import { CORE_IDS } from '../contract/ids.ts';
+import { CORE_IDS, type FerretId } from '../contract/ids.ts';
 import { KERNEL_NEEDER, neederOf, ProvidedPerNeeder } from '../host/needer.ts';
 import type { ScratchPort } from '../contract/ports.ts';
 import { testIdentity } from './identity.ts';
@@ -144,12 +158,21 @@ export interface TestHostOptions {
   readonly pinner?: SessionRootPinner;
   /** What `kernel.paths.home()` answers. Default: `/home/owner`. */
   readonly ownerHome?: string;
+  /**
+   * The files `kernel.roots.harnessFile` reads, by absolute path (`/home/owner/.claude.json` → its text). The rule
+   * over the path is the real host's (`host/root-rules.ts`); a path not here reads as absent. Default: none.
+   */
+  readonly harnessFiles?: Readonly<Record<string, string>>;
+  /** The kernel home the test roots' fence is judged against (`harnessFile` refuses a path in it). Default: `/test-home`. */
+  readonly fenceHome?: string;
   /** The directories `kernel.paths.checkDirectory` accepts: the absolute path asked → its real path. Default: none. */
   readonly directories?: Readonly<Record<string, string>>;
   /** The absolute paths `kernel.paths.which` finds executable. Default: none. */
   readonly executables?: readonly string[];
   /** The `PATH` `kernel.paths.which` searches after the caller's own folders. Default: none. */
   readonly searchPath?: string;
+  /** `RootHandle.copyShared`'s link rule, as the real host's `sharedTreeLinks`. Default: `SHARED_TREE_LINK_RULE`. */
+  readonly sharedTreeLinks?: SharedTreeLinkRule;
   /** `kernel.scratch`. Default: real private temp folders, as the daemon's. */
   readonly scratch?: ScratchPort;
   /** What the owner's installed items name, for `permissions.spawn`/`network` `{ items }` entries. Default: none. */
@@ -838,8 +861,16 @@ async function start(world: World): Promise<TestHost> {
   /** The test roots' stand-in inodes, so `fileIdentity` can tell two publishes of one name apart. */
   const inodes = new Map<string, bigint>();
   let nextInode = 0n;
-  /** Every test root handle made, with its plugin and its scope's prefix (`kernel.processes`' own-root check). */
-  const testHandles = new WeakMap<object, { readonly plugin: string; readonly prefix: string }>();
+  /** The test roots each handle was made for: its plugin, root, scope and key prefix (for `share` / `copyShared`). */
+  const testHandles = new WeakMap<
+    object,
+    {
+      readonly plugin: string;
+      readonly root: RootName;
+      readonly ferret?: FerretId;
+      readonly prefix: string | undefined;
+    }
+  >();
   /**
    * The test world's own-root check: a folder of a handle made for `plugin`, inside its scope, that exists (a file is
    * beneath it). The world has no links, so its one spelling is the path itself.
@@ -849,7 +880,7 @@ async function start(world: World): Promise<TestHost> {
     folder: { readonly root: RootHandle; readonly path: string },
   ): Promise<readonly string[] | undefined> => {
     const known = testHandles.get(folder.root);
-    if (known === undefined || known.plugin !== plugin) return undefined;
+    if (known === undefined || known.plugin !== plugin || known.prefix === undefined) return undefined;
     const path = folder.path;
     if (
       typeof path !== 'string' ||
@@ -860,119 +891,284 @@ async function start(world: World): Promise<TestHost> {
     if (![...world.roots.keys()].some(key => key.startsWith(`${path}/`))) throw new Error(`no such folder ${path}`);
     return [path];
   };
-  const rootsFor = (manifest: Manifest): KernelPorts['roots'] => ({
-    root(name, scope) {
-      if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name))
-        throw new Error(`${manifest.id}: root ${name} is not declared`);
-      // The same scope rule as production (`scopedSubfolder`): a `sessions` handle is one minted ferret folder, an
-      // `agent-homes` handle one relative path. Each scope is its own namespace, so a test can prove two ferrets do not
-      // see each other; a refused scope resolves nothing.
-      const below = scopedSubfolder(name, scope?.subfolder);
-      const prefix = below === undefined ? undefined : below === '' ? `/${name}` : `/${name}/${below}`;
-      const fileStat = (path: string) => ({
-        kind: 'file' as const,
-        size: (world.roots.get(path) ?? '').length,
-        modified: clock.now(),
-        mode: 0o600,
-        links: 1,
-      });
-      const handle: RootHandle = {
-        name,
-        internal: isKernelMadeRoot(name),
-        resolve(relative) {
-          if (prefix === undefined || relative.startsWith('/') || relative.split('/').includes('..'))
-            return { ok: false, error: 'outside' };
-          return { ok: true, value: `${prefix}/${relative}` as never };
-        },
-        readText: async path => {
-          const text = world.roots.get(path);
-          if (text === undefined) throw new Error(`no such file ${path}`);
-          return text;
-        },
-        readBytes: async (path, limit) => {
-          const bytes = new TextEncoder().encode(await handle.readText(path));
-          if (typeof limit === 'number') return bytes.slice(0, limit);
-          if (limit === undefined) return bytes;
-          if (limit.length > MAX_ROOT_WINDOW_BYTES || limit.offset < 0 || limit.length < 0)
-            throw new Error('the window is out of range');
-          return bytes.slice(limit.offset, limit.offset + limit.length);
-        },
-        readTail: async (path, maxBytes) => {
-          if (maxBytes > MAX_ROOT_WINDOW_BYTES || maxBytes < 0) throw new Error('the tail is out of range');
-          const bytes = new TextEncoder().encode(await handle.readText(path));
-          return { bytes: bytes.slice(Math.max(0, bytes.length - maxBytes)), size: bytes.length };
-        },
-        writeText: async (path, text, writeOptions) => {
-          if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
-          if (writeOptions?.replaceExisting === true && !world.roots.has(path)) throw new Error(`no such file ${path}`);
-          world.roots.set(path, text);
-        },
-        writeBytes: async (path, bytes, writeOptions) => {
-          if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
-          if (writeOptions?.replaceExisting === true && !world.roots.has(path)) throw new Error(`no such file ${path}`);
-          world.roots.set(path, new TextDecoder().decode(bytes));
-        },
-        publish: async (path, bytes, publishOptions) => {
-          if (publishOptions?.exclusive === true && world.roots.has(path)) return { outcome: 'exists' };
-          world.roots.set(path, new TextDecoder().decode(bytes));
-          nextInode += 1n;
-          const inode = nextInode;
-          inodes.set(path, inode);
-          return { outcome: 'published', identity: { device: 1n, inode } };
-        },
-        readDurable: async (path, limit, hold) => {
-          const text = world.roots.get(path);
-          if (text === undefined) return undefined;
-          const bytes = new TextEncoder().encode(text);
-          const identity = { device: 1n, inode: inodes.get(path) ?? 0n };
-          const read = { bytes: limit === undefined ? bytes : bytes.slice(0, limit), identity };
-          if (hold === undefined) return read as never;
-          return await hold({
-            ...read,
-            stillNames: async () => world.roots.has(path) && (inodes.get(path) ?? 0n) === identity.inode,
-          });
-        },
-        syncDirectory: async () => {},
-        fileIdentity: async path => (world.roots.has(path) ? { device: 1n, inode: inodes.get(path) ?? 0n } : undefined),
-        copyTree: async (_source, from, to, copyOptions) => {
-          // the test roots are one flat map: copy (or, for a link, alias) every file under `from`
-          for (const [key, text] of [...world.roots])
-            if (key.startsWith(`${from}/`)) world.roots.set(`${to}${key.slice(from.length)}`, text);
-          void copyOptions;
-        },
-        ensurePrivateDirectory: async () => {},
-        lstat: async path => {
-          if (world.roots.has(path)) return fileStat(path);
-          return [...world.roots.keys()].some(p => p.startsWith(`${path}/`))
-            ? { kind: 'directory', size: 0, modified: clock.now(), mode: 0o700, links: 1 }
-            : undefined;
-        },
-        makeDirectory: async () => {},
-        realPath: async path => {
-          if (!world.roots.has(path) && ![...world.roots.keys()].some(p => p.startsWith(`${path}/`)))
-            throw new Error(`no such file ${path}`);
+  /** `linkTo`'s links in the test world: the link's path → the target path it points at. */
+  const testLinks = new Map<string, string>();
+  /** `setMode`'s modes in the test world, by path; a path never set keeps the default (`0o600` for a file). */
+  const testModes = new Map<string, number>();
+  const testFolderExists = (path: string): boolean => [...world.roots.keys()].some(key => key.startsWith(`${path}/`));
+  const testHarnessFile = (manifest: Manifest, absolutePath: string): RootFileHandle => {
+    const refusal = harnessFileRefusal({
+      plugin: manifest.id,
+      mayHold: mayHoldRoot(manifest.id, 'harness-home'),
+      roots: manifest.permissions?.roots ?? [],
+      names: manifest.permissions?.harnessFiles,
+      home: options.fenceHome ?? '/test-home',
+      absolutePath,
+    });
+    if (refusal !== undefined) throw new RootError(refusal);
+    const text = (): string | undefined => options.harnessFiles?.[absolutePath];
+    const stat = () => {
+      const found = text();
+      return found === undefined
+        ? undefined
+        : { kind: 'file' as const, size: found.length, modified: clock.now(), mode: 0o600, links: 1 };
+    };
+    const bytes = (): Uint8Array => {
+      const found = text();
+      if (found === undefined) throw new Error(`no such file ${absolutePath}`);
+      return new TextEncoder().encode(found);
+    };
+    const identity = () => (text() === undefined ? undefined : { device: 1n, inode: 1n });
+    return Object.freeze({
+      name: 'harness-home' as const,
+      path: absolutePath,
+      stat: async () => stat(),
+      lstat: async () => stat(),
+      readText: async (limit?: number) => new TextDecoder().decode(bytes().slice(0, limit)),
+      readBytes: async (limit?: number | { readonly offset: number; readonly length: number }) => {
+        if (typeof limit === 'number') return bytes().slice(0, limit);
+        if (limit === undefined) return bytes();
+        if (limit.length > MAX_ROOT_WINDOW_BYTES || limit.offset < 0 || limit.length < 0)
+          throw new RootError('outside');
+        return bytes().slice(limit.offset, limit.offset + limit.length);
+      },
+      fileIdentity: async () => identity(),
+      readDurable: async <T>(limit?: number, hold?: (read: RootDurableHeld) => Promise<T>) => {
+        if (text() === undefined) return undefined;
+        const read = { bytes: bytes().slice(0, limit), identity: { device: 1n, inode: 1n } };
+        if (hold === undefined) return read as T;
+        return await hold({ ...read, stillNames: async () => identity() !== undefined });
+      },
+    });
+  };
+  /** Every tree a test plugin minted: the files it holds now (a flat copy), and where it came from. */
+  const sharedTrees = new SharedTrees<{
+    readonly files: () => readonly (readonly [string, string])[];
+    readonly origin: SharedOrigin;
+  }>();
+  const linkRule = options.sharedTreeLinks ?? SHARED_TREE_LINK_RULE;
+  const rootsFor = (manifest: Manifest): KernelPorts['roots'] => {
+    // As the real host: every tree a plugin minted is revoked when the host stops it.
+    const life = { live: true };
+    stopHandlers.push(() => {
+      life.live = false;
+    });
+    const under = (folder: string, entries: Iterable<readonly [string, string]>): (readonly [string, string])[] =>
+      [...entries]
+        .filter(([key]) => key.startsWith(`${folder}/`))
+        .map(([key, value]) => [key.slice(folder.length + 1), value]);
+    return {
+      harnessFile: absolutePath => testHarnessFile(manifest, absolutePath),
+      share: async source => {
+        if (manifest.permissions?.shareTrees !== true) return refuseShared('not_permitted');
+        if ('root' in source) {
+          const known = testHandles.get(source.root);
+          if (known === undefined || known.plugin !== manifest.id) return refuseShared('not_own');
+          if (!shareableRoot(known.root)) return refuseShared('not_shareable');
+          const from = source.path as string;
+          if (known.prefix === undefined || !(from === known.prefix || from.startsWith(`${known.prefix}/`)))
+            throw new Error(`${from} is outside the ${known.root} root`);
+          const files = () => under(from, world.roots);
+          if (files().length === 0) throw new Error(`no such folder ${from}`);
+          const origin: SharedOrigin = {
+            kind: 'root',
+            root: known.root,
+            ...(known.ferret === undefined ? {} : { ferret: known.ferret }),
+          };
+          return sharedTrees.mint(from.slice(from.lastIndexOf('/') + 1), { files, origin }, life);
+        }
+        const folder = ownStateTree(manifest.data?.state ?? [], source.state, source.name);
+        if (folder === undefined) return refuseShared('not_own');
+        const state = world.states.get(manifest.id);
+        const decoder = new TextDecoder();
+        // A planted link in the test store is metadata only and never copied, as the real copy skips a link.
+        const files = () =>
+          state === undefined
+            ? []
+            : [
+                ...under(folder, state.files),
+                ...under(
+                  folder,
+                  [...state.bytes].map(([key, bytes]): readonly [string, string] => [key, decoder.decode(bytes)]),
+                ),
+              ];
+        if (files().length === 0 && state?.directories.has(folder) !== true)
+          throw new Error(`no such folder ${folder}`);
+        return sharedTrees.mint(folder.slice(folder.lastIndexOf('/') + 1), { files, origin: { kind: 'state' } }, life);
+      },
+      root(name, scope) {
+        if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name))
+          throw new Error(`${manifest.id}: root ${name} is not declared`);
+        // The same scope rule as production (`scopedSubfolder`): a `sessions` handle is one minted ferret folder, an
+        // `agent-homes` handle one relative path. Each scope is its own namespace, so a test can prove two ferrets do not
+        // see each other; a refused scope resolves nothing.
+        const below = scopedSubfolder(name, scope?.subfolder);
+        const prefix = below === undefined ? undefined : below === '' ? `/${name}` : `/${name}/${below}`;
+        const fileStat = (path: string) => ({
+          kind: 'file' as const,
+          size: (world.roots.get(path) ?? '').length,
+          modified: clock.now(),
+          mode: testModes.get(path) ?? 0o600,
+          links: 1,
+        });
+        /** A path of THIS handle's scope (no `..`), or the refusal production makes for one outside it. */
+        const ownPath = (path: string): string => {
+          if (
+            prefix === undefined ||
+            typeof path !== 'string' ||
+            path.split('/').includes('..') ||
+            !path.startsWith(`${prefix}/`)
+          )
+            throw new RootError('outside');
           return path;
-        },
-        list: async path =>
-          [...world.roots.keys()].filter(p => p.startsWith(`${path}/`)).map(p => p.slice(path.length + 1)),
-        entries: async path =>
-          [...world.roots.keys()]
-            .filter(p => p.startsWith(`${path}/`))
-            .map(p => ({ name: p.slice(path.length + 1), ...fileStat(p) })),
-        stat: async path => (world.roots.has(path) ? fileStat(path) : undefined),
-        remove: async path => {
-          world.roots.delete(path);
-        },
-        pin: async (path, pinOptions) => {
-          // The test world keeps no state home, so its pin fences nothing beneath the root.
-          const held = await pins.pin(manifest.id, path, pinOptions);
-          return Object.freeze({ ...held, fenced: async (rels: readonly string[]) => rels.map(() => false) });
-        },
-      };
-      if (prefix !== undefined) testHandles.set(handle, { plugin: manifest.id, prefix });
-      return handle;
-    },
-  });
+        };
+        const handle: RootHandle = {
+          name,
+          internal: isKernelMadeRoot(name),
+          resolve(relative) {
+            if (prefix === undefined || relative.startsWith('/') || relative.split('/').includes('..'))
+              return { ok: false, error: 'outside' };
+            return { ok: true, value: `${prefix}/${relative}` as never };
+          },
+          readText: async path => {
+            const text = world.roots.get(path);
+            if (text === undefined) throw new Error(`no such file ${path}`);
+            return text;
+          },
+          readBytes: async (path, limit) => {
+            const bytes = new TextEncoder().encode(await handle.readText(path));
+            if (typeof limit === 'number') return bytes.slice(0, limit);
+            if (limit === undefined) return bytes;
+            if (limit.length > MAX_ROOT_WINDOW_BYTES || limit.offset < 0 || limit.length < 0)
+              throw new Error('the window is out of range');
+            return bytes.slice(limit.offset, limit.offset + limit.length);
+          },
+          readTail: async (path, maxBytes) => {
+            if (maxBytes > MAX_ROOT_WINDOW_BYTES || maxBytes < 0) throw new Error('the tail is out of range');
+            const bytes = new TextEncoder().encode(await handle.readText(path));
+            return { bytes: bytes.slice(Math.max(0, bytes.length - maxBytes)), size: bytes.length };
+          },
+          writeText: async (path, text, writeOptions) => {
+            if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
+            if (writeOptions?.replaceExisting === true && !world.roots.has(path))
+              throw new Error(`no such file ${path}`);
+            world.roots.set(path, text);
+          },
+          writeBytes: async (path, bytes, writeOptions) => {
+            if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
+            if (writeOptions?.replaceExisting === true && !world.roots.has(path))
+              throw new Error(`no such file ${path}`);
+            world.roots.set(path, new TextDecoder().decode(bytes));
+          },
+          publish: async (path, bytes, publishOptions) => {
+            if (publishOptions?.exclusive === true && world.roots.has(path)) return { outcome: 'exists' };
+            world.roots.set(path, new TextDecoder().decode(bytes));
+            nextInode += 1n;
+            const inode = nextInode;
+            inodes.set(path, inode);
+            return { outcome: 'published', identity: { device: 1n, inode } };
+          },
+          readDurable: async (path, limit, hold) => {
+            const text = world.roots.get(path);
+            if (text === undefined) return undefined;
+            const bytes = new TextEncoder().encode(text);
+            const identity = { device: 1n, inode: inodes.get(path) ?? 0n };
+            const read = { bytes: limit === undefined ? bytes : bytes.slice(0, limit), identity };
+            if (hold === undefined) return read as never;
+            return await hold({
+              ...read,
+              stillNames: async () => world.roots.has(path) && (inodes.get(path) ?? 0n) === identity.inode,
+            });
+          },
+          syncDirectory: async () => {},
+          fileIdentity: async path =>
+            world.roots.has(path) ? { device: 1n, inode: inodes.get(path) ?? 0n } : undefined,
+          copyShared: async (tree, to, copyOptions) => {
+            if (!receivingRoot(name)) return refuseShared('not_internal');
+            const shared = sharedTrees.open(tree);
+            const receiver = {
+              root: name,
+              ...(scope?.ferret === undefined ? {} : { ferret: scope.ferret }),
+              ...(scope?.subfolder === undefined ? {} : { subfolder: scope.subfolder }),
+            };
+            // the test roots are one flat map: a link and a copy both put every file under `to`
+            for (const [key, value] of shared.files()) world.roots.set(`${to}/${key}`, value);
+            return copyOptions?.link === true && sharedLinkAllowed(linkRule, shared.origin, receiver)
+              ? 'linked'
+              : 'copied';
+          },
+          copyTree: async (_source, from, to, copyOptions) => {
+            // the test roots are one flat map: copy (or, for a link, alias) every file under `from`
+            for (const [key, text] of [...world.roots])
+              if (key.startsWith(`${from}/`)) world.roots.set(`${to}${key.slice(from.length)}`, text);
+            void copyOptions;
+          },
+          ensurePrivateDirectory: async () => {},
+          lstat: async path => {
+            if (testLinks.has(path)) return { kind: 'symlink', size: 0, modified: clock.now(), mode: 0o777, links: 1 };
+            if (world.roots.has(path)) return fileStat(path);
+            return [...world.roots.keys()].some(p => p.startsWith(`${path}/`))
+              ? { kind: 'directory', size: 0, modified: clock.now(), mode: 0o700, links: 1 }
+              : undefined;
+          },
+          makeDirectory: async () => {},
+          realPath: async path => {
+            if (!world.roots.has(path) && ![...world.roots.keys()].some(p => p.startsWith(`${path}/`)))
+              throw new Error(`no such file ${path}`);
+            return path;
+          },
+          list: async path =>
+            [...world.roots.keys()].filter(p => p.startsWith(`${path}/`)).map(p => p.slice(path.length + 1)),
+          entries: async path =>
+            [...world.roots.keys()]
+              .filter(p => p.startsWith(`${path}/`))
+              .map(p => ({ name: p.slice(path.length + 1), ...fileStat(p) })),
+          stat: async path => (world.roots.has(path) ? fileStat(path) : undefined),
+          remove: async path => {
+            world.roots.delete(path);
+          },
+          // The real host's rules (`host/root-rules.ts`) over the flat test world, with the same refusals.
+          linkTo: async (at, target) => {
+            if (isReadOnlyRoot(name) || !takesLinks(name)) throw new RootError('read_only');
+            const known = testHandles.get(target?.root ?? {});
+            if (known === undefined || known.plugin !== manifest.id) throw new RootError('not_declared');
+            const to = target.path as string;
+            const within = known.prefix;
+            if (within === undefined || to.split('/').includes('..') || (to !== within && !to.startsWith(`${within}/`)))
+              throw new RootError('outside');
+            if (testLinks.has(to)) throw new RootError('link_escape');
+            if (!world.roots.has(to) && !testFolderExists(to) && target.dangling !== true)
+              throw new RootError('outside');
+            const place = ownPath(at);
+            if (world.roots.has(place) || testFolderExists(place) || testLinks.has(place))
+              throw new RootError('outside');
+            testLinks.set(place, to);
+          },
+          setMode: async (path, mode) => {
+            if (isReadOnlyRoot(name)) throw new RootError('read_only');
+            const bits = permittedMode(isKernelMadeRoot(name), mode);
+            if (bits === undefined) throw new RootError('outside');
+            const place = ownPath(path);
+            if (testLinks.has(place)) throw new RootError('link_escape');
+            if (!world.roots.has(place) && !testFolderExists(place)) throw new RootError('outside');
+            testModes.set(place, bits);
+          },
+          pin: async (path, pinOptions) => {
+            // The test world keeps no state home, so its pin fences nothing beneath the root.
+            const held = await pins.pin(manifest.id, path, pinOptions);
+            return Object.freeze({ ...held, fenced: async (rels: readonly string[]) => rels.map(() => false) });
+          },
+        };
+        testHandles.set(handle, {
+          plugin: manifest.id,
+          root: name,
+          ...(scope?.ferret === undefined ? {} : { ferret: scope.ferret }),
+          prefix,
+        });
+        return handle;
+      },
+    };
+  };
 
   const kernelFor = (manifest: Manifest): KernelPorts => {
     let state = world.states.get(manifest.id);
