@@ -124,7 +124,7 @@ describe('buzzes', () => {
     for (let i = 0; i < 3; i++) host.emit(AsksChanged, { ferret: 'f1', askId: ref.id, state: 'open' });
     await host.settle();
     expect(acc?.buzzed).toEqual([
-      { tag: 'agenda-f1:A1', title: 'Badge colour', body: 'Badge colour', url: '/agenda/f1/A1' },
+      { tag: 'agenda-f1:A1', title: 'Badge colour', body: 'Badge colour', url: '/ferrets/f1/chat?ask=A1' },
     ]);
     expect(host.published.filter(each => each.event === 'agenda.buzzed')).toHaveLength(1);
   });
