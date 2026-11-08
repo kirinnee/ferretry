@@ -12,11 +12,8 @@ import type { InputTargetFacts } from '@ferretry/core-vault/contract';
  * the value is sent: only which nodes to look at, and the answer is one word.
  */
 
-/** What came of the check: a field still held something and was emptied; nothing holds it; or it could not be told. */
-export type ClearOutcome = 'cleared' | 'moved' | 'unknown';
-
 /** One password field a fill typed into, by node. Never the value. */
-export interface ClearField {
+interface ClearField {
   readonly frameId: string;
   readonly backendNodeId: number;
 }

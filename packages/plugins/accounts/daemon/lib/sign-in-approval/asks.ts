@@ -30,7 +30,7 @@ import type { TaskPlanAgendaPort, TaskPlanCard } from '../task-plans/service.ts'
 
 export const SIGN_IN_APPROVAL_SOURCE = 'sign-in-approval' as SourceKey;
 
-export type SignInApprovalAskRef = z.infer<typeof SignInApprovalRefSchema>;
+type SignInApprovalAskRef = z.infer<typeof SignInApprovalRefSchema>;
 
 /** What Accounts registers under `ask.sources:sign-in-approval`. No form: an answer here approves nothing. */
 export const signInApprovalSource: AskSourceSpec = {

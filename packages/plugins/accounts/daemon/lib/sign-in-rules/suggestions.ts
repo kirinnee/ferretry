@@ -127,7 +127,7 @@ const HOUR_MS = 3_600_000;
 /** The one refusal for a sign-in no rule could cover, whatever the reason, so the ferret learns only what it can read. */
 const UNCOVERABLE_WORDS = 'No standing rule can cover this sign-in.';
 /** The one note every suggestion card closes with, at its expiry, whatever the owner did. */
-export const SUGGESTION_EXPIRED_NOTE = 'This suggestion expired.';
+const SUGGESTION_EXPIRED_NOTE = 'This suggestion expired.';
 const randomSuggestionId = (): SignInRuleSuggestionId => `srg_${randomBytes(8).toString('hex')}`;
 
 const oneLine = (text: string, max: number): string => {

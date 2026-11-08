@@ -20,7 +20,7 @@ const epochMilliseconds = finiteNumber.int().nonnegative();
  * mapped at the adapter rather than travelling as a number is that a consumer holding a number
  * writes its own table, and two tables are how `403` becomes a re-login for somebody.
  */
-export const FleetCredentialSignalSchema = z.enum([
+const FleetCredentialSignalSchema = z.enum([
   /** The provider answered for this token: it is currently accepted. */
   'accepted',
   /**
@@ -44,7 +44,7 @@ export const FleetCredentialSignalSchema = z.enum([
 export type FleetCredentialSignal = z.infer<typeof FleetCredentialSignalSchema>;
 
 /** JSON value kinds retained in a response fingerprint. Values themselves never travel. */
-export const ProviderResponseJsonTypeSchema = z.enum(['null', 'boolean', 'number', 'string', 'array', 'object']);
+const ProviderResponseJsonTypeSchema = z.enum(['null', 'boolean', 'number', 'string', 'array', 'object']);
 export type ProviderResponseJsonType = z.infer<typeof ProviderResponseJsonTypeSchema>;
 
 export const ProviderResponseHeaderNameSchema = z.enum([
@@ -84,9 +84,8 @@ export const ProviderResponseHeaderNameSchema = z.enum([
   'x-envoy-upstream-service-time',
   'x-request-id',
 ]);
-export type ProviderResponseHeaderName = z.infer<typeof ProviderResponseHeaderNameSchema>;
 
-export const ProviderResponseContentTypeSchema = z.enum([
+const ProviderResponseContentTypeSchema = z.enum([
   'application/json',
   'application/*+json',
   'application/octet-stream',
@@ -119,14 +118,14 @@ const responseJsonPath = z
   .regex(new RegExp(`^${responseJsonPathSegment}(?:\\.${responseJsonPathSegment})?$`, 'u'));
 
 /** A header's authentication challenge, reduced to non-secret protocol words. */
-export const ProviderAuthenticationShapeSchema = z.strictObject({
+const ProviderAuthenticationShapeSchema = z.strictObject({
   scheme: z.enum(['bearer', 'other']),
   errorCode: z.enum(['insufficient_scope', 'invalid_request', 'invalid_token', 'other']).optional(),
 });
 export type ProviderAuthenticationShape = z.infer<typeof ProviderAuthenticationShapeSchema>;
 
 /** The only response header VALUES permitted to survive. Every other header contributes its name only. */
-export const ProviderResponseHeaderValuesSchema = z.strictObject({
+const ProviderResponseHeaderValuesSchema = z.strictObject({
   cfMitigated: z.enum(['challenge', 'other']).optional(),
   retryAfter: z.enum(['seconds', 'http-date', 'other']).optional(),
   retryAfterMs: z.enum(['milliseconds', 'other']).optional(),
@@ -136,14 +135,14 @@ export const ProviderResponseHeaderValuesSchema = z.strictObject({
 export type ProviderResponseHeaderValues = z.infer<typeof ProviderResponseHeaderValuesSchema>;
 
 /** One key path and only the kind of value behind it — never the value. */
-export const ProviderResponseJsonFieldSchema = z.strictObject({
+const ProviderResponseJsonFieldSchema = z.strictObject({
   path: responseJsonPath,
   type: ProviderResponseJsonTypeSchema,
 });
 export type ProviderResponseJsonField = z.infer<typeof ProviderResponseJsonFieldSchema>;
 
 /** A bounded JSON outline plus the provider's code-like error labels, when present. */
-export const ProviderResponseJsonShapeSchema = z.strictObject({
+const ProviderResponseJsonShapeSchema = z.strictObject({
   type: ProviderResponseJsonTypeSchema,
   fields: z.array(ProviderResponseJsonFieldSchema).max(64),
   fieldsTruncated: z.literal(true).optional(),
@@ -238,19 +237,9 @@ export function isAtLimit(
 
 // ── The account model: usage per credential (docs/design/account-model.md §8.1.3, §8.2.3) ───────
 
-/**
- * The file, inside `<fleet>/credentials/<id>/`, that a passive reading of one credential's usage is
- * written to. The SAME directory for every store: a `host` Claude credential's own store is the
- * person's `~/.claude`, and nothing Ferretry measures is ever written there.
- */
-export const CREDENTIAL_USAGE_FILE = 'usage.json';
-
-/** The variable every runtime's wrapper exports naming its credential, inherited by the statusLine child. */
-export const CREDENTIAL_ENV = 'FY_CREDENTIAL';
-
 /** The subcommand Claude's `statusLine.command` runs, and the option naming the person's own command. */
-export const STATUSLINE_SUBCOMMAND = 'statusline';
-export const STATUSLINE_THEN_OPTION = '--then';
+const STATUSLINE_SUBCOMMAND = 'statusline';
+const STATUSLINE_THEN_OPTION = '--then';
 
 /**
  * The `statusLine.command` every Claude runtime is materialised with (a plumbing key, §8.3).
@@ -269,8 +258,7 @@ export function claudeStatuslineCommand(binary: string, ownCommand?: string): st
 }
 
 /** Where a passive reading came from. Each is free: nothing was requested to produce it. */
-export const PassiveUsageSourceSchema = z.enum(['claude-statusline', 'codex-rollout']);
-export type PassiveUsageSource = z.infer<typeof PassiveUsageSourceSchema>;
+const PassiveUsageSourceSchema = z.enum(['claude-statusline', 'codex-rollout']);
 
 /**
  * One passive reading of one credential's two windows, exactly as `usage.json` holds it.

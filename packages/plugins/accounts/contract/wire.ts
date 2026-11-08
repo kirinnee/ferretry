@@ -51,7 +51,6 @@ export const PlanIdSchema = z.string().regex(/^[0-9a-f]{32}$/u);
 // ─── places ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const MAX_LOGIN_ENTRIES = 256;
-export const MAX_ACCOUNTS = MAX_LOGIN_ENTRIES;
 export const MAX_SIGN_INS = 512;
 export const MAX_SIGN_INS_PER_ACCOUNT = 16;
 export const LOGIN_MATCH_MAX = 16;
@@ -73,7 +72,6 @@ export const LoginDomainSchema = z
   .regex(/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::[0-9]{1,5})?$/u, 'a web host, lowercase, like app.vercel.com');
 export type LoginDomain = z.infer<typeof LoginDomainSchema>;
 
-export const PlaceKeySchema = LoginMatchSchema;
 export type PlaceKey = LoginMatch;
 
 export const SitePlaceSchema = z
@@ -162,8 +160,8 @@ export type SignInApprovalRef = z.infer<typeof SignInApprovalRefSchema>;
 const hasDotSegment = (path: string): boolean => path.split('/').some(segment => segment === '.' || segment === '..');
 
 const DefaultsMapSchema = z
-  .record(PlaceKeySchema, AccountIdSchema)
-  .refine(map => Object.keys(map).length <= MAX_ACCOUNTS, `at most ${String(MAX_ACCOUNTS)} lines`);
+  .record(LoginMatchSchema, AccountIdSchema)
+  .refine(map => Object.keys(map).length <= MAX_LOGIN_ENTRIES, `at most ${String(MAX_LOGIN_ENTRIES)} lines`);
 
 /**
  * WHICH ACCOUNT A SIGN-IN CARD OFFERS FIRST, as the owner wrote it. It orders buttons only: the owner's tap is still

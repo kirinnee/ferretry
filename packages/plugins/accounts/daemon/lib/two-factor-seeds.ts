@@ -76,7 +76,7 @@ export interface StageCaller {
 }
 
 /** Most seeds one caller holds staged at once, so one caller cannot take the whole table. */
-export const MAX_STAGES_PER_CALLER = 2;
+const MAX_STAGES_PER_CALLER = 2;
 
 /** How a paired device names itself as a {@link StageCaller}. */
 export const DEVICE_OWNER = 'device:';

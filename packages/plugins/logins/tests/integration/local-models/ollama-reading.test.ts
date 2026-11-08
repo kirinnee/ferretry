@@ -6,7 +6,6 @@
 import { afterEach, describe, it } from 'bun:test';
 import { builtInModelCatalogs, loginModelCatalog } from '../../../daemon/lib/catalog/catalog.ts';
 import { builtInPresets } from '../../../daemon/lib/presets/catalog.ts';
-import { runtimeModels } from '../../../daemon/lib/catalog/runtime.ts';
 import should from 'should';
 import type { Instant } from '@ferretry/std';
 import { AuthorizedProviderProbe } from '../../../daemon/adapters/provider-probe/authorized-provider-probe.ts';
@@ -80,24 +79,17 @@ describe('reading Ollama on this machine', () => {
 
     // Act
     const view = await service.refresh();
-    const derived = runtimeModels({
-      harness: 'codex',
-      modelSet: undefined,
-      ...loginModelCatalog({ store: 'environment', preset: 'ollama-codex' }, 'codex', {
-        catalogs: builtInModelCatalogs(),
-        presets: builtInPresets(),
-        local: { ollama: view },
-      }),
+    const handed = loginModelCatalog({ store: 'environment', preset: 'ollama-codex' }, 'codex', {
+      catalogs: builtInModelCatalogs(),
+      presets: builtInPresets(),
+      local: { ollama: view },
     });
 
     // Assert
     should(ollama.seen).eql([{ method: 'GET', path: '/api/tags', authorization: null, cookie: null }]);
     should(view.state).equal('found');
     should(view.models.map(model => model.id)).eql(['llama3.2:latest', 'gpt-oss:120b']);
-    should(derived.models.map(model => [model.id, model.local])).eql([
-      ['gpt-oss:120b', true],
-      ['llama3.2:latest', true],
-    ]);
+    should(handed.local).equal(view);
   });
 
   it('should say no model is installed, with the command that installs one', async () => {

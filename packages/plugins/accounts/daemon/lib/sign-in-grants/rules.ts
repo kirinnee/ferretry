@@ -31,7 +31,7 @@ import { UNFILED_PROJECT_ID } from '../local-ports.ts';
  */
 
 /** The rule service, as the fills need it (`SignInRuleService`). */
-export interface RuleGrantRules {
+interface RuleGrantRules {
   fillable(): readonly SignInRuleRecord[];
   verified(id: SignInRuleId, revision: number): boolean;
   fillCheck(

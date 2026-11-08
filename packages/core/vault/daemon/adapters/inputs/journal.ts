@@ -40,7 +40,7 @@ const TYPE_OF_STATE: Readonly<Record<InputRequestRecord['state'], InputEvent['ty
 };
 
 /** The request as the record keeps it: what the ferret asked for, with the card's own words and no value. */
-export function raiseOf(request: InputRequest): InputRaise {
+function raiseOf(request: InputRequest): InputRaise {
   return {
     target: request.target,
     prompt: request.prompt,

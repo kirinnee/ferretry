@@ -1,12 +1,9 @@
 import { describe, it } from 'bun:test';
 import type { InputTarget, InputTargetFacts, SecretName } from '../../../../contract/index.ts';
 import should from 'should';
-import {
-  InputTargetRouter,
-  type SecretStoreDirectory,
-  SecretStoreTarget,
-  type TerminalInputTargetPort,
-} from '../../../../daemon/lib/inputs/index.ts';
+import { InputTargetRouter } from '../../../../daemon/lib/inputs/target-router.ts';
+import { type SecretStoreDirectory, SecretStoreTarget } from '../../../../daemon/lib/inputs/secret-store-target.ts';
+import type { TerminalInputTargetPort } from '../../../../daemon/lib/inputs/ports.ts';
 import { SESSION } from './support.ts';
 
 const NAME = 'VERCEL_TOKEN' as SecretName;

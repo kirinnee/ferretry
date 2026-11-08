@@ -6,7 +6,9 @@ import {
   type PasteRuleSettings,
 } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { type PasteRuleCaller, PasteRuleService, routeOf, SecureCopyError } from '../../../../daemon/lib/index.ts';
+import { type PasteRuleCaller, PasteRuleService } from '../../../../daemon/lib/secure-copy/rules.ts';
+import { routeOf } from '../../../../daemon/lib/task-plans/words.ts';
+import { SecureCopyError } from '../../../../daemon/lib/secure-copy/errors.ts';
 import { FACTS } from '../support/facts.ts';
 import type { InputTargetFacts } from '@ferretry/core-vault/contract';
 

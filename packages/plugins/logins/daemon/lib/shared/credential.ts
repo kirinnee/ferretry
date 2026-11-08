@@ -19,9 +19,6 @@ import {
 } from './halves.ts';
 import { type HarnessKind, harnessKind } from './harness.ts';
 
-/** Where a login is kept (C3): the host's own sign-in, Ferretry's own copy, or environment variables. */
-export type CredentialStore = LoginFile['store'];
-
 export type Credential = Omit<LoginFile, 'harness'> & { readonly harness: HarnessKind };
 
 /** A parsed login file as the code's {@link Credential}. */

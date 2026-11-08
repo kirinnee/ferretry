@@ -4,7 +4,7 @@
  */
 import { z } from 'zod';
 
-export const ANALYTICS_PRICING_PROVIDERS = [
+const ANALYTICS_PRICING_PROVIDERS = [
   'openai',
   'anthropic',
   'deepseek',
@@ -14,7 +14,6 @@ export const ANALYTICS_PRICING_PROVIDERS = [
   'alibaba',
 ] as const;
 export const AnalyticsPricingProviderSchema = z.enum(ANALYTICS_PRICING_PROVIDERS);
-export type AnalyticsPricingProvider = z.infer<typeof AnalyticsPricingProviderSchema>;
 
 export const AnalyticsPricingSourceUrlSchema = z
   .url()

@@ -126,7 +126,7 @@ const pasteRulePasskeyWords = (staged: PasteRuleStaged): PasskeyWords => ({
 
 /** The passkey act each kind of stage is bound to. */
 const STAGE_ACTS = { rule: 'approve-paste-rule', 'profile-targets': 'allow-profile-targets' } as const;
-export type PasteRuleStageAct = (typeof STAGE_ACTS)[keyof typeof STAGE_ACTS];
+type PasteRuleStageAct = (typeof STAGE_ACTS)[keyof typeof STAGE_ACTS];
 
 /** Asks for the passkey for `act` bound to a stage, showing the daemon's words; `false` when dismissed. */
 export type PasteRuleAsk = (stage: PasteRuleStageId, words: PasskeyWords, act: PasteRuleStageAct) => Promise<boolean>;

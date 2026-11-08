@@ -14,7 +14,7 @@ import type { PluginClient, TerminalIo, VerbHandler, VerbInvocation } from '@fer
 // ─── 1. the client's errors ───────────────────────────────────────────────────────────────────────────────────────
 
 /** The daemon did not answer at all. Copied from today's `fy-api-client.ts`. */
-export class FyTransportError extends Error {
+class FyTransportError extends Error {
   override readonly name = 'FyTransportError';
   constructor(
     message: string,
@@ -97,7 +97,7 @@ export interface ReadVerb {
 const camel = (flag: string): string => flag.replace(/-([a-z])/gu, (_, letter: string) => letter.toUpperCase());
 
 /** The verb's words, or commander's refusal sentence for them. Pure. */
-export function readInvocation(invocation: VerbInvocation, shape: VerbShape): ReadVerb | { readonly refused: string } {
+function readInvocation(invocation: VerbInvocation, shape: VerbShape): ReadVerb | { readonly refused: string } {
   const options: Record<string, string | boolean | readonly string[]> = {};
   for (const [given, value] of Object.entries(invocation.options)) {
     const name = shape.aliases?.[given] ?? given;
