@@ -322,6 +322,68 @@ describe('a resume Ferrets did not answer cleanly', () => {
     // Assert
     should(refused).eql({ ok: false, reason: 'revive refused: no login' });
   });
+
+  it('should count a revive when Ferrets relaunched the ferret and then answered no (its turn’s pointer did not land)', async () => {
+    // Arrange: Ferrets commits the relaunch (says `relaunching`), then the pointer to the turn does not reach the pane.
+    const { ferrets, resume, acted } = subject();
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.resume = async (_ferret, _message, options) => {
+      options?.decided?.('relaunching');
+      return err({ code: 'failed', reason: 'the turn could not be handed over' } as never);
+    };
+
+    // Act
+    const revived = await resume('f1', 'carry on');
+
+    // Assert: counted (cooldown, crash_repeat and the breaker see it), with the reason in its caveat; nothing said.
+    should(revived.ok).be.true();
+    should((revived as { caveat?: string }).caveat).containEql('counts as a revive');
+    should((revived as { caveat?: string }).caveat).containEql('the turn could not be handed over');
+    should(acted).eql([]);
+  });
+
+  it('should not count a revive Ferrets refused before it decided anything, nor one it answered no while running', async () => {
+    // Arrange: one refusal with no decision told, one after `running` (nothing relaunched).
+    const { ferrets, resume } = subject();
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.add({ id: ferretId('f2'), state: 'stopped' });
+    ferrets.resume = async (ferret, _message, options) => {
+      if (ferret === ferretId('f2')) options?.decided?.('running');
+      return err({ code: 'refused', reason: 'not now' } as never);
+    };
+
+    // Act
+    const before = await resume('f1', 'carry on');
+    const running = await resume('f2', 'carry on');
+
+    // Assert: nothing started, so neither is a revive.
+    should(before).eql({ ok: false, reason: 'revive refused: not now' });
+    should(running).eql({ ok: false, reason: 'revive refused: not now' });
+  });
+
+  it('should record a resume and a restart that relaunched and then failed as failed remedies', async () => {
+    // Arrange: one stopped ferret to resume, one working ferret to restart (stop, then the same resume).
+    const { ferrets, remedies, acted } = subject();
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.add({ id: ferretId('f2'), state: 'working' });
+    ferrets.resume = async (_ferret, _message, options) => {
+      options?.decided?.('relaunching');
+      return err({ code: 'failed', reason: 'the turn could not be handed over' } as never);
+    };
+
+    // Act
+    const resumed = await remedies.resume('f1', 'carry on').catch((error: unknown) => error);
+    const restarted = await remedies.restart('f2', 'carry on').catch((error: unknown) => error);
+
+    // Assert: the remedy rows stay `failed` (more honest than today's `done`), with the relaunch named in the error.
+    should((resumed as Error).message).eql(
+      'resume relaunched the ferret, then failed: the turn could not be handed over',
+    );
+    should((restarted as Error).message).eql(
+      'restart relaunched the ferret, then failed: the turn could not be handed over',
+    );
+    should(acted).eql(['f1 resume failed', 'f2 restart failed']);
+  });
 });
 
 describe('the Warden’s resumes are automatic and its own (ResumeOptions.automatic, ResumeOptions.actor)', () => {

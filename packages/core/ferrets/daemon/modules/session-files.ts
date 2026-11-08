@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { ApiError, type Log, type RootHandle, type RootsPort } from '@ferretry/kernel/contract';
-import { FERRET_SESSIONS_ROOT } from '../../contract/sessions-root.ts';
+import { FERRET_READABLE_FOLDERS, FERRET_SESSIONS_ROOT } from '../../contract/sessions-root.ts';
 import { type Duration, milliseconds } from '@ferretry/std';
 import { FileSessionEffectLedger } from '../adapters/session/effects/file-session-effect-ledger.ts';
 import {
@@ -148,6 +148,14 @@ export class SessionFiles {
       prepare: async ferret => await this.prepare(ferret),
       stamp: async request => await this.stampAtStart(request),
       carry: async ferret => await this.carryOnResume(ferret),
+      readable: async ferret => {
+        const own = this.root(parseSessionId(ferret));
+        return FERRET_READABLE_FOLDERS.map(folder => {
+          const resolved = own.resolve(folder);
+          if (!resolved.ok) throw new Error('a hand-off folder of this ferret could not be named');
+          return resolved.value;
+        });
+      },
       assign: async (ferret, prompt) => {
         const id = parseSessionId(ferret);
         return firstTurnInstruction(await this.taskStore(id).writeAssignedTask(id, assignedTaskDocument(prompt)));
