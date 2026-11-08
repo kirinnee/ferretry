@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { FerretSummary } from '../../../../contract/index.ts';
 import { WaitController, type WaitPorts } from '../../../../cli/lib/wait/controller.ts';
-import { decideWait } from '../../../../cli/lib/wait/decide.ts';
+import { decideWait, renderWaitOutcome } from '../../../../cli/lib/wait/decide.ts';
 import { sessionView } from '../session/session-fixtures.ts';
 
 /** Today's `fy wait` (reads/wait.ts, reads/controller.ts) over Ferrets' four states. */
@@ -184,5 +184,13 @@ describe('the deadline bounds a read in flight', () => {
     expect(handed).toBe(deadline.signal);
     expect(code).toBe(124);
     expect(cancelled).toBe(true);
+  });
+});
+
+describe('how an ended wait is explained', () => {
+  test('a ferret that ended without its named deliverable says the deliverable never appeared', () => {
+    expect(renderWaitOutcome({ kind: 'ended', state: 'stopped', marker: 'out.md' })).toBe(
+      'the ferret is stopped and out.md never appeared',
+    );
   });
 });
