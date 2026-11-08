@@ -37,8 +37,6 @@
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}"],
       "ignore": [
-        "daemon/lib/session/auto-resume/**",
-        "daemon/adapters/session/auto-resume/**",
         "daemon/lib/session/events/service.ts",
         "daemon/lib/session/peers/reads.ts",
         "daemon/lib/session/observer/facts.ts",

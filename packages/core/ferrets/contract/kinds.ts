@@ -267,6 +267,15 @@ export interface Runner {
    * watched, and the ferret's turn is decided from what else is known.
    */
   look?(handle: RunnerHandle): Promise<RunnerLook | undefined>;
+  /**
+   * Additive (W2-a, today's `TmuxSessionExitObserver.exitOf` `gone` proof): whether the runner PROVES that `ferret`'s own
+   * terminal is not there at all (tmux: the ferret's session cannot be found, or the private server is not running,
+   * which takes every pane with it). `false` for a live terminal, one tmux kept dead with an exit status (an agent that
+   * ended on its own), and for ANY answer that proves nothing (a refused socket, a server that went away mid-request).
+   * Asked by the ferret, never by a handle, because a handle can name another pane after the server restarted. It only
+   * asks: nothing is started, typed or killed. Absent: nothing is ever proven gone, so nothing is auto-resumed.
+   */
+  gone?(ferret: FerretId): Promise<boolean>;
 }
 
 /**

@@ -16,9 +16,11 @@ const AutoResumeCandidateSchema = z.strictObject({
 });
 export type AutoResumeCandidate = z.infer<typeof AutoResumeCandidateSchema>;
 
-/** The durable list of sessions still owed an auto-resume, written before any of them is attempted. */
+/**
+ * The durable list of sessions still owed an auto-resume, written before any of them is attempted. The kernel's state
+ * port stamps and checks the document's `format: 1`, so the body carries no `version` of its own (today's carried one).
+ */
 export const AutoResumeLedgerSchema = z.strictObject({
-  version: z.literal(1),
   candidates: z.array(AutoResumeCandidateSchema),
 });
 

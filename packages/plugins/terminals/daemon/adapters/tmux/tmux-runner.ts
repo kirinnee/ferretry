@@ -1,5 +1,6 @@
 import {
   type AttachRefusal,
+  type FerretId,
   type DeliveryOutcome,
   HARNESS_STOP_KEYS,
   type QueueOutcome,
@@ -31,6 +32,7 @@ import { sessionTarget } from '../../lib/tmux/address.ts';
 import { killSessionArguments, paneActivityFormat, remainOnExitArguments } from '../../lib/tmux/commands.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../lib/tmux/contracts.ts';
 import { TmuxController } from '../../lib/tmux/controller.ts';
+import { isTmuxServerAbsent } from '../../lib/tmux/server-absent.ts';
 import { scriptLine } from '../../lib/tmux/script.ts';
 import { guardedWriteArguments, GUARD_REFUSED } from '../../lib/tmux/write-guard.ts';
 import { TERMINAL_TMUX_PREFIX } from '../../lib/terminal/runtime-policy.ts';
@@ -275,6 +277,25 @@ export class TmuxRunner implements Runner {
     if (!PANE_ID.test(handle)) return false;
     const facts = await this.facts(handle);
     return facts !== undefined && !facts.dead;
+  }
+
+  /**
+   * Whether the ferret's own tmux session is PROVEN not there (W2-a, today's `TmuxSessionExitObserver.exitOf` `gone`):
+   * tmux answers that it cannot find the session, or that the private server is not running (which takes every pane
+   * with it). Asked by the ferret's session name, never by the handle: pane ids start again when the server does, so a
+   * stale handle can name another ferret's pane. A live session, one tmux kept with a dead pane, and every refusal that
+   * proves nothing (a socket this daemon may not open, a server that went away mid-request) answer false. Only asks.
+   */
+  async gone(ferret: FerretId): Promise<boolean> {
+    let session: string;
+    try {
+      session = ferretTmuxSession(ferret);
+    } catch {
+      return false;
+    }
+    const present = await this.options.tmux.execute(['has-session', '-t', session]).catch(() => undefined);
+    if (present === undefined || present.code === 0) return false;
+    return /can't find session/iu.test(present.stderr) || isTmuxServerAbsent(present.stderr);
   }
 
   async deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome> {

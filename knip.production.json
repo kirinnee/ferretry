@@ -41,9 +41,6 @@
       "entry": ["app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
       "ignore": [
-        "daemon/lib/session/auto-resume/**",
-        "daemon/adapters/session/auto-resume/**",
-        "daemon/lib/protocol/auto-resume.ts",
         "daemon/adapters/session/lifecycle/process-incarnation.ts",
         "daemon/adapters/session/resume/tmux-resume-launcher.ts",
         "daemon/lib/session/health/watched-panes.ts",
