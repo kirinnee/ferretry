@@ -1,6 +1,6 @@
 /** R520 / R537 / G161: `GET /v1/events` — the journal stream, over each ferret's history.jsonl and Ferrets' append edge. */
 import { describe, expect, test } from 'bun:test';
-import type { CallContext, SocketDownstream } from '@ferretry/kernel/contract';
+import { ApiError, type CallContext, type SocketDownstream } from '@ferretry/kernel/contract';
 import { queryFrom } from '@ferretry/kernel/contract';
 import { state } from '@ferretry/kernel/host';
 import { FerretHistoryFiles } from '../../../../contract/state.ts';
@@ -362,6 +362,46 @@ describe('G161 live frames widen nothing', () => {
     outputSource: 'transcript',
     compaction: { phase: 'done', endedAt: NOW },
   };
+
+  test('G161 a wired live source sends only the frames the schema allows, and nothing for a ferret the caller may not see', async () => {
+    const { source } = world();
+    const asked: string[] = [];
+    let sampled = 0;
+    const accept = fleetEventsAccept(source, { after: () => ({ cancel: () => undefined }) }, id => id === 'wren', {
+      live: {
+        sample: async () => {
+          sampled += 1;
+          return undefined;
+        },
+      },
+      mayFollow: (_call, id) => {
+        asked.push(id);
+        throw new ApiError(403, 'a ferret acts only on itself and its helpers', 'forbidden');
+      },
+    });
+
+    // A live readout and a transcript signal are refused before any frame (the refusal is raised by the accept itself).
+    for (const flag of ['live', 'transcript'])
+      await expect(
+        accept(
+          call([
+            ['sessionId', 'wren'],
+            [flag, '1'],
+          ]),
+        ),
+      ).rejects.toMatchObject({ status: 403, code: 'forbidden' });
+    // The journal stream and the fleet stream are not asked: only a live readout and a transcript signal are.
+    await accept(call([['sessionId', 'wren']]));
+    await accept(call([]));
+    expect(asked).toEqual(['wren', 'wren']);
+    expect(sampled).toBe(0);
+  });
+
+  test('G161 a reading the schema refuses is dropped, never sent', async () => {
+    const { live, feed } = await openLive(() => ({ ...FULL_READING, pane: 'raw pane text', verb: 'v'.repeat(500) }));
+    expect(live()).toEqual([]);
+    expect(feed.frames.map(frame => FyEventStreamFrameSchema.parse(frame).kind)).not.toContain('live');
+  });
 
   test('G161 the socket descriptor’s minimum is operator, the same as the ferret read Gate admits at', () => {
     const declared = ferretsManifest.actions?.sockets?.find(entry => entry.key === 'GET /v1/events');

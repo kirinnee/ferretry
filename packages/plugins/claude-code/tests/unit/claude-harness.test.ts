@@ -543,6 +543,66 @@ describe('ClaudeHarness', () => {
     expect(entries.length).toBe(2);
   });
 
+  test('U5 the transcript stamp and tail name only the assigned conversation, and carry no text', async () => {
+    const { harness, writeHome } = build();
+    expect(await harness.transcriptStamp(FERRET)).toBeUndefined();
+    expect(await harness.transcriptTail(FERRET, 10)).toEqual({ kind: 'unresolved' });
+
+    await harness.start(spec(), runner({}), {} as never);
+    await writeHome(
+      'projects/-work/conv-1.jsonl',
+      `${JSON.stringify({ type: 'user', uuid: 'u1', timestamp: T, message: { content: 'my SECRET here' } })}\n${JSON.stringify(
+        {
+          type: 'assistant',
+          uuid: 'a1',
+          timestamp: T,
+          message: {
+            id: 'm1',
+            content: [{ type: 'text', text: 'SECRET reply' }],
+            stop_reason: 'end_turn',
+            usage: { input_tokens: 3, output_tokens: 1 },
+          },
+        },
+      )}\n`,
+    );
+
+    const stamp = await harness.transcriptStamp(FERRET);
+    expect(stamp?.file).toEndWith('conv-1.jsonl');
+    expect(stamp?.size).toBeGreaterThan(0);
+    const tail = await harness.transcriptTail(FERRET, 10);
+    if (tail.kind !== 'read') throw new Error('the tail reads');
+    expect(tail.records.map(record => record.kind)).toEqual(['message', 'message', 'usage', 'turn']);
+    expect(JSON.stringify(tail)).not.toContain('SECRET');
+  });
+
+  test('U5 a newest record larger than the tail window reads as a turn at work, with no wider read', async () => {
+    const { harness, writeHome } = build();
+    await harness.start(spec(), runner({}), {} as never);
+    const done = JSON.stringify({
+      type: 'assistant',
+      uuid: 'a0',
+      timestamp: T,
+      message: { id: 'm0', content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' },
+    });
+    const bigResult = (bytes: number) =>
+      JSON.stringify({
+        type: 'user',
+        uuid: 'u9',
+        timestamp: T,
+        message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'x'.repeat(bytes) }] },
+      });
+
+    // 600 KB: past the 512 KB window. The window is never widened (one wider parse is a >5 ms slice on the main thread),
+    // so the older end-of-turn record behind it is NOT seen: the turn is at work, never "no transcript".
+    await writeHome('projects/-work/conv-1.jsonl', `${done}\n${bigResult(600 * 1024)}\n`);
+    const cut = await harness.transcriptTail(FERRET, 10);
+    expect(cut).toEqual({ kind: 'read', records: [{ kind: 'work' }] });
+
+    // 5 MB: the same answer.
+    await writeHome('projects/-work/conv-1.jsonl', `${done}\n${bigResult(5 * 1024 * 1024)}\n`);
+    expect(await harness.transcriptTail(FERRET, 10)).toEqual({ kind: 'read', records: [{ kind: 'work' }] });
+  });
+
   test('dialogs.current finds nothing on an empty pane and answer refuses a prompt that is gone', async () => {
     const { harness, panes } = build();
     panes.remember(FERRET, '%7');

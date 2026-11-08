@@ -213,6 +213,8 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     startFailure: screen => codexLaunchFailure(screen),
 
     transcript: rollouts.transcript,
+    transcriptStamp: rollouts.stamp,
+    transcriptTail: rollouts.tail,
     usage: rollouts.usage,
     conversations: rollouts.conversations,
   };

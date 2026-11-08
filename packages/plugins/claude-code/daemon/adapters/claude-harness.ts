@@ -7,6 +7,8 @@ import type {
   HarnessDialog as FerretDialog,
   HarnessInstall,
   HarnessMissing,
+  HarnessTranscriptStamp,
+  HarnessTranscriptTail,
   HomePlan,
   LaunchSpec,
   OutboundMessage,
@@ -43,7 +45,7 @@ import type { DialogAnswerService } from '../lib/dialog/service.ts';
 import { MAX_HOME_DOCUMENT_BYTES as MAX_CLAUDE_JSON_BYTES, mergeClaudeJson } from '../lib/harness/claude-json.ts';
 import { claudeTranscriptPath, isConversationId } from '../lib/harness/claude-path.ts';
 import { HOME_FILES, homeText, launchCommand } from '../lib/harness/launch.ts';
-import { parseEntries, parseUsage } from '../lib/harness/transcript.ts';
+import { parseEntries, parseTail, parseUsage, windowHoldsOneCutRecord } from '../lib/harness/transcript.ts';
 import { parseHarnessDialog } from '../lib/pane/harness-dialog.ts';
 import { parsePermissionPrompt } from '../lib/pane/permission-prompt.ts';
 import type { PermissionAnswerService } from '../lib/permission/service.ts';
@@ -71,6 +73,8 @@ export interface ClaudeHarnessDeps {
 
 const TMUX_TIMEOUT_MS = 5_000;
 const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
+/** How much of the end of a transcript one tail read takes: a turn's records are near the end. */
+const TAIL_READ_BYTES = 512 * 1024;
 const FIRST_RECORDS_BYTES = 16 * 1024;
 
 const configFile = CLAUDE_CODE_CONFIG as unknown as ConfigFileDef<HarnessConfig>;
@@ -382,8 +386,37 @@ export class ClaudeHarness implements Harness {
     }
   }
 
-  /** Read only the assigned id in its encoded cwd, including after a daemon restart. */
-  private async transcriptText(ferret: FerretId): Promise<string | undefined> {
+  /** One stat of the transcript this ferret's assigned conversation wrote (`Harness.transcriptStamp`). */
+  async transcriptStamp(ferret: FerretId): Promise<HarnessTranscriptStamp | undefined> {
+    const found = await this.transcriptFile(ferret);
+    if (found === undefined) return undefined;
+    const stat = await found.home.stat(found.file).catch(() => undefined);
+    return stat?.kind === 'file'
+      ? { file: found.file, size: stat.size, mtimeMs: Date.parse(stat.modified) }
+      : undefined;
+  }
+
+  /** The newest `limit` records of that transcript, without their text (`Harness.transcriptTail`). */
+  async transcriptTail(ferret: FerretId, limit: number): Promise<HarnessTranscriptTail> {
+    const found = await this.transcriptFile(ferret);
+    if (found === undefined) return { kind: 'unresolved' };
+    const tail = await found.home.readTail(found.file, TAIL_READ_BYTES).catch(() => undefined);
+    if (tail === undefined) return { kind: 'unreadable' };
+    const text = new TextDecoder().decode(tail.bytes);
+    const partial = tail.size > tail.bytes.length;
+    const records = parseTail(text, partial);
+    // The newest record is larger than the window and none of it is whole: something big is being written, which is a
+    // turn at work (never "no transcript", so the pane alone cannot end it). The window is never widened: one wider
+    // parse is a synchronous slice on the daemon's main thread (ruling #44).
+    if (records.length === 0 && partial && windowHoldsOneCutRecord(text))
+      return { kind: 'read', records: [{ kind: 'work' }] };
+    return { kind: 'read', records: records.slice(-limit) };
+  }
+
+  /** The exact transcript of the assigned id in its encoded cwd, including after a daemon restart; never one found by guessing. */
+  private async transcriptFile(
+    ferret: FerretId,
+  ): Promise<{ readonly home: RootHandle; readonly file: FencedPath } | undefined> {
     const home = this.home(ferret);
     const binding = home.resolve(HOME_FILES.conversation);
     if (!binding.ok) return undefined;
@@ -398,7 +431,13 @@ export class ClaudeHarness implements Harness {
     if (format !== 1 || !isConversationId(id) || typeof cwd !== 'string' || !cwd.startsWith('/')) return undefined;
     const file = home.resolve(claudeTranscriptPath(cwd, id));
     if (!file.ok || (await home.stat(file.value))?.kind !== 'file') return undefined;
-    return await home.readText(file.value, MAX_TRANSCRIPT_BYTES);
+    return { home, file: file.value };
+  }
+
+  /** Read only the assigned id in its encoded cwd, including after a daemon restart. */
+  private async transcriptText(ferret: FerretId): Promise<string | undefined> {
+    const found = await this.transcriptFile(ferret);
+    return found === undefined ? undefined : await found.home.readText(found.file, MAX_TRANSCRIPT_BYTES);
   }
 
   /** Entries, already masked when they leave the reader. */

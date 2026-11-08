@@ -2,6 +2,7 @@
 import type {
   FoundConversation,
   Harness,
+  HarnessTailRecord,
   LaunchSpec,
   TranscriptEntry,
   TurnUsage,
@@ -11,6 +12,7 @@ import { seconds, type Instant, type JsonValue } from '@ferretry/std';
 import { CODEX_ROLLOUTS, type CodexRolloutBinding as Binding } from '../../contract/index.ts';
 import { CodexTranscriptParser } from '../lib/transcript/codex.ts';
 import { selectCodexRollout } from '../lib/transcript/rollout.ts';
+import { tailRecordOf } from '../lib/transcript/tail-record.ts';
 
 const MAX_ROLLOUTS = 4_000;
 const MAX_DIRECTORIES = 8_000;
@@ -22,6 +24,10 @@ const MAX_DIRECTORIES = 8_000;
  */
 const HEAD_BYTES = 32 * 1024;
 const TAIL_BYTES = 256 * 1024;
+/** How long the proof of which rollout is a ferret's may be reused by the stamp and the tail (reads always prove afresh). */
+const PROOF_REUSE_MS = 5_000;
+/** How much of the end of a rollout one tail read takes: a turn's records are near the end. */
+const TAIL_READ_BYTES = 512 * 1024;
 const decoder = new TextDecoder();
 
 interface Rollout {
@@ -129,6 +135,8 @@ export class CodexRollouts {
     const ownHome = owner.resolve('');
     if (!home.ok || !ownHome.ok || home.value !== ownHome.value)
       throw new Error('Codex rollout ownership could not be placed in the ferret home');
+    // A new launch (a resume names its own conversation) may prove another rollout: forget the one remembered.
+    this.#proved.delete(spec.ferret);
     const root = this.kernel.roots.root('agent-homes', { subfolder: `${spec.ferret}/sessions` });
     const existing = await rollouts(root, '');
     await this.kernel.state.write(
@@ -143,12 +151,30 @@ export class CodexRollouts {
     );
   }
 
-  private async owned(ferret: FerretId): Promise<OwnedRollout | undefined> {
+  /** The rollout proved to be the ferret's, found once and remembered: a stamp asked every half second must not walk the home. */
+  readonly #proved = new Map<FerretId, { readonly rollout: Rollout; readonly provedAtMs: number }>();
+
+  /**
+   * The rollout proved to be this ferret's (never guessed by folder or recency), or `undefined` while none is. A read
+   * (`remembered` false) proves it afresh every time, so ambiguity is seen the moment it appears; the stamp and the tail,
+   * asked every half second, may rely on a proof at most {@link PROOF_REUSE_MS} old.
+   */
+  private async proved(
+    ferret: FerretId,
+    remembered = false,
+  ): Promise<{ readonly root: RootHandle; readonly rollout: Rollout } | undefined> {
+    const root = this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` });
+    const known = this.#proved.get(ferret);
+    if (remembered && known !== undefined && Date.parse(this.kernel.clock.now()) - known.provedAtMs < PROOF_REUSE_MS) {
+      const stat = await root.stat(known.rollout.file).catch(() => undefined);
+      if (stat?.kind === 'file')
+        return { root, rollout: { ...known.rollout, size: stat.size, modified: stat.modified } };
+    }
+    this.#proved.delete(ferret);
     const binding = await this.binding(ferret);
     if (binding === undefined) return undefined;
     const ownHome = this.owner(ferret).resolve('');
     if (!ownHome.ok || ownHome.value !== binding.home) return undefined;
-    const root = this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` });
     const candidates = await rollouts(root, '');
     let chosen: Rollout | undefined;
     if (binding.native !== undefined) {
@@ -163,9 +189,64 @@ export class CodexRollouts {
       chosen = selected === undefined ? undefined : candidates.find(candidate => candidate.file === selected.file);
     }
     if (chosen === undefined) return undefined;
-    const text = await root.readText(chosen.file).catch(() => undefined);
-    return text === undefined ? undefined : { ...chosen, text };
+    const nowMs = Date.parse(this.kernel.clock.now());
+    // A proof older than PROOF_REUSE_MS is proved again before it is used, so it is dead weight: dropped here.
+    for (const [other, entry] of this.#proved)
+      if (nowMs - entry.provedAtMs >= PROOF_REUSE_MS) this.#proved.delete(other);
+    this.#proved.set(ferret, { rollout: chosen, provedAtMs: nowMs });
+    return { root, rollout: chosen };
   }
+
+  private async owned(ferret: FerretId): Promise<OwnedRollout | undefined> {
+    const found = await this.proved(ferret);
+    if (found === undefined) return undefined;
+    const text = await found.root.readText(found.rollout.file).catch(() => undefined);
+    return text === undefined ? undefined : { ...found.rollout, text };
+  }
+
+  /** One stat of the proved rollout (`Harness.transcriptStamp`). */
+  readonly stamp: NonNullable<Harness['transcriptStamp']> = async ferret => {
+    const found = await this.proved(ferret, true).catch(() => undefined);
+    if (found === undefined) return undefined;
+    return { file: found.rollout.file, size: found.rollout.size, mtimeMs: Date.parse(found.rollout.modified) };
+  };
+
+  /** The newest `limit` records of the proved rollout, without their text (`Harness.transcriptTail`). */
+  readonly tail: NonNullable<Harness['transcriptTail']> = async (ferret, limit) => {
+    const found = await this.proved(ferret, true).catch(() => undefined);
+    if (found === undefined) return { kind: 'unresolved' };
+    const read = await found.root.readTail(found.rollout.file, TAIL_READ_BYTES).catch(() => undefined);
+    if (read === undefined) return { kind: 'unreadable' };
+    const lines = decoder.decode(read.bytes).split('\n');
+    const partial = read.size > read.bytes.length;
+    // The newest record is larger than the window and none of it is whole: something big is being written, which is a
+    // turn at work (never "no records", so one idle-looking frame cannot end it). The window is never widened.
+    if (partial && lines.slice(1).every(line => line.trim() === ''))
+      return { kind: 'read', records: [{ kind: 'work' }] };
+    // The window may start mid-record, and the last line may be one the harness has not finished: neither is read.
+    if (partial) lines.shift();
+    lines.pop();
+    // The one sentence a record may carry is masked whole, then cut, before it leaves the harness.
+    const records = await this.kernel.redaction.read(scope => {
+      const parsed: HarnessTailRecord[] = [];
+      for (const [index, line] of lines.entries()) {
+        try {
+          for (const event of this.#parser.parseRecord(JSON.parse(line), {
+            source: found.rollout.file,
+            line: index + 1,
+            sessionId: found.rollout.id,
+          }).events) {
+            const record = tailRecordOf(event, text => scope.text(text));
+            if (record !== undefined) parsed.push(record);
+          }
+        } catch {
+          /* A line that is not a record says nothing about the turn. */
+        }
+      }
+      return parsed;
+    });
+    return { kind: 'read', records: records.slice(-limit) };
+  };
 
   private events(rollout: OwnedRollout) {
     // Ignore only the unflushed suffix, so a partially appended record is seen once it is complete.

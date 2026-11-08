@@ -225,6 +225,13 @@ describe('the registered Codex harness', () => {
       },
     ]);
     expect(await harness.usage.turns(spec.ferret, '2026-11-01T00:00:00.000Z' as never)).toEqual([]);
+    // U5: the stamp names the proved rollout, and the tail carries kinds and counts, never the answer's words.
+    expect((await harness.transcriptStamp?.(spec.ferret))?.file).toBe(file);
+    const tail = await harness.transcriptTail?.(spec.ferret, 50);
+    if (tail?.kind !== 'read') throw new Error('the tail reads');
+    expect(tail.records.map(record => record.kind)).toContain('turn');
+    expect(tail.records.find(record => record.kind === 'usage')).toMatchObject({ inputTokens: 20, outputTokens: 5 });
+    expect(JSON.stringify(tail)).not.toContain('answer');
     const history = '/fixture-owner/.codex/sessions/2026/10/20/rollout-import.jsonl';
     box.files.set(history, header('import-native', '/another-home'));
     expect(await harness.conversations.list('/work/project' as never)).toEqual([
@@ -234,6 +241,28 @@ describe('the registered Codex harness', () => {
     expect(box.rootsUsed.every(root => ['agent-homes', 'harness-history'].includes(root.name))).toBe(true);
     expect(box.reads.every(path => path.endsWith('.jsonl') || path.endsWith('rollout-binding.json'))).toBe(true);
     expect((await box.build().transcript.read(spec.ferret)).length).toBe(entries.length);
+  });
+
+  test('U5 a newest record larger than the tail window reads as a turn at work, never as no records', async () => {
+    const box = fixture();
+    const harness = box.build();
+    const spec = box.spec();
+    await harness.start(spec, box.runner, ENV);
+    const file = `${spec.home}/sessions/2026/10/20/rollout-native.jsonl`;
+    const big = (bytes: number) =>
+      line('response_item', { type: 'function_call_output', call_id: 'c1', output: 'x'.repeat(bytes) });
+    box.files.set(file, header('native-id', spec.home) + message('done') + big(600 * 1024));
+
+    const tail = await harness.transcriptTail?.(spec.ferret, 50);
+
+    // 600 KB: past the 512 KB window, so no whole record is read. The turn is at work, not "no transcript".
+    expect(tail).toEqual({ kind: 'read', records: [{ kind: 'work' }] });
+
+    // A small record after it brings the window back to ordinary records.
+    box.files.set(file, `${box.files.get(file)}${message('next')}`);
+    const after = await harness.transcriptTail?.(spec.ferret, 50);
+    if (after?.kind !== 'read') throw new Error('the tail reads');
+    expect(after.records).not.toEqual([{ kind: 'work' }]);
   });
 
   test('refuses the baseline, same-folder strangers and ambiguous ownership; resumes only the native id after restart', async () => {

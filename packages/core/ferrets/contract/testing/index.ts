@@ -13,6 +13,9 @@ import {
   type DeliveryOutcome,
   HARNESS_STOP_KEYS,
   type HarnessStop,
+  type HarnessTailRecord,
+  type HarnessTranscriptStamp,
+  type HarnessTranscriptTail,
   type RunnerDelivery,
   type RunnerDeliveryFailure,
   type Delivery,
@@ -292,6 +295,20 @@ export class FakeHarness implements Harness {
   readonly #seen = new Set<string>();
   /** The harness's turn stop; a test sets it to `undefined` for a harness that names none. */
   turnStop: HarnessStop | undefined = { key: 'Escape', safeWhenIdle: true };
+  /** The transcript this fake proves for a ferret (U5): a test sets one to prove it; a ferret with none has no transcript. */
+  readonly transcripts = new Map<FerretId, { stamp: HarnessTranscriptStamp; records: readonly HarnessTailRecord[] }>();
+  /** How many times each half of the transcript was asked for, so a test sees what a sample cost. */
+  readonly stamped: FerretId[] = [];
+  readonly tailed: FerretId[] = [];
+  async transcriptStamp(ferret: FerretId): Promise<HarnessTranscriptStamp | undefined> {
+    this.stamped.push(ferret);
+    return this.transcripts.get(ferret)?.stamp;
+  }
+  async transcriptTail(ferret: FerretId, limit: number): Promise<HarnessTranscriptTail> {
+    this.tailed.push(ferret);
+    const found = this.transcripts.get(ferret);
+    return found === undefined ? { kind: 'unresolved' } : { kind: 'read', records: found.records.slice(-limit) };
+  }
   constructor(
     readonly key: HarnessKey = 'claude-code',
     /** This harness's own `agent-homes` folder: `homeFor` answers `<homes>/<ferret>`. */

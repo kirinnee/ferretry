@@ -12,8 +12,13 @@
  *
  * WHAT IS NOT (each refuses, never a stand-in that answers): the question part (`project` / `questions`: its policy and
  * answer ledger are Conversation's), the liveness look (Terminals' `liveness` serves the Warden) and the send evidence
- * (Conversation's send tracker). The transcript half of a turn look reads as "not proved" until U5 wires the
- * transcript through the `harness-history` root, so a turn is decided from the pane alone.
+ * (Conversation's send tracker).
+ *
+ * THE TRANSCRIPT HALF (U5): the turn fold reads the transcript's tail through the harness that wrote it
+ * (`Harness.transcriptTail`), so a turn is decided from the pane AND the transcript, as today: one idle-looking frame
+ * between two spinner redraws cannot end a turn while the transcript's newest record says the agent is mid-turn. A ferret
+ * whose harness proves no transcript (none offered, none bound yet, unreadable) is decided from the pane alone, which is
+ * what today does for a session with no proved transcript.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
@@ -31,6 +36,7 @@ import { PacedTurnWatcher } from '../lib/session/observer/turn-watch.ts';
 import type { SessionTurnState } from '../lib/protocol/session.ts';
 import type { TurnPaneEvidence } from '../lib/session/peers/turn.ts';
 import type { SessionId } from '../lib/session-id.ts';
+import type { SessionTranscriptTail } from '../lib/session/peers/reads.ts';
 
 /**
  * The async context of the daemon's own start, taken while this module loads (outside every call). The kernel stamps an
@@ -42,6 +48,8 @@ const outsideAnyCall = AsyncLocalStorage.snapshot();
 
 export interface TurnWatchDeps {
   readonly storage: DaemonStorage;
+  /** The transcript tail through the harness that wrote it (`HarnessTranscript.tail`). */
+  readonly tail: SessionTranscriptTail;
   /** The registry's record of a ferret: which runner and handle its pane is, and whether it still runs. */
   readonly record: (ferret: FerretId) => FerretRecord | undefined;
   readonly runner: () => Runner | undefined;
@@ -129,8 +137,7 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
       storage: deps.storage,
       // The question pass is not mounted: it looks at no session.
       questionRoster: () => [],
-      // GAP(ports-pending: Ferrets, U5): the transcript is not proved to be any ferret's yet.
-      tail: { tail: async () => ({ kind: 'unresolved' }) },
+      tail: deps.tail,
       pane,
       answers: answersNotMounted,
       answerSerial: { runIfIdle: refused('The answer queue of the session observer') },
@@ -145,7 +152,7 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
       },
       clock: deps.clock,
       yieldToLoop: deps.yieldToLoop,
-      // The live readout's frame is U5's (`StorageLiveActivitySource`): no frame is kept for it here.
+      // The live readout asks the runner for its own look (`modules/live-events.ts`): no frame is kept for it here.
       paneState: async () => undefined,
       sendEvidence: { read: refused('The send evidence of the session observer') },
       every: (intervalMs, tick) => outsideAnyCall(() => deps.every(intervalMs, tick)),

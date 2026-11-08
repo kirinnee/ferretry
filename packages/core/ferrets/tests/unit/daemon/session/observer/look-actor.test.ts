@@ -48,6 +48,7 @@ describe('the turn watch looks as the observer’s own actor', () => {
     let timer: (() => void) | undefined;
     const { host } = buildTurnWatch({
       storage: made.storage,
+      tail: { tail: async () => ({ kind: 'unresolved' }) },
       record: () => record,
       runner: () => runner,
       turnObserved: async () => undefined,
