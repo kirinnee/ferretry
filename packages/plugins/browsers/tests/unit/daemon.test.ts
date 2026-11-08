@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from 'bun:test';
 import { FakeGate, ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
-import type { FerretId } from '@ferretry/kernel/contract';
+import type { AgentControlKind, AgentControlReader, FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { ferret, type TestCaller, type TestHost, testHost } from '@ferretry/kernel/testing';
 import should from 'should';
@@ -12,6 +12,12 @@ import { Tabs } from '../support/tabs.ts';
 
 /** A vault secret the stand-in redaction masks. */
 const SECRET = 'hunter2-token';
+
+/** The owner's switches with every kind on (the fixture default); a test names the kinds it leaves off. */
+const ALL_ON: AgentControlReader = { allows: async () => true };
+const only = (...on: readonly AgentControlKind[]): AgentControlReader => ({
+  allows: async (_ferret, kind) => on.includes(kind),
+});
 
 /** The ferrets Browsers knows of: a page belongs to one, and a call about any other is refused. */
 const FERRETS = { get: async (id: string) => (id === 'f1' || id === 'f2' ? { name: id } : undefined) };
@@ -27,7 +33,9 @@ const as = (id: string): { readonly as: TestCaller } => {
   return { as: ferret(id) };
 };
 
-async function built(): Promise<{ host: TestHost; tabs: Tabs; identities: TypedIdentities; vault: FakeVault }> {
+async function built(
+  control: AgentControlReader | null = ALL_ON,
+): Promise<{ host: TestHost; tabs: Tabs; identities: TypedIdentities; vault: FakeVault }> {
   const vault = new FakeVault();
   const tabs = new Tabs();
   const identities = new TypedIdentities(() => Date.parse('2026-11-07T10:00:00.000Z'));
@@ -39,7 +47,7 @@ async function built(): Promise<{ host: TestHost; tabs: Tabs; identities: TypedI
   );
   const host = await testHost({
     plugins: [half],
-    uses: { ferrets: FERRETS },
+    uses: { ferrets: FERRETS, ...(control === null ? {} : { agentControl: control }) },
     fakes: { vault, gate: new FakeGate() },
     gate,
     secrets: [SECRET],
@@ -148,6 +156,36 @@ describe('the browsers daemon half', () => {
     should(typed.isError).be.true();
     should(typed.text).containEql('There is no %browser:app in this session');
     should(world.tabs.typed).deepEqual([]);
+  });
+
+  it('AC1 refuses a ferret browser_open with today’s sentence when "What agents may control › Browsers" is off', async () => {
+    // Arrange
+    const world = await built(only('files', 'scripts'));
+    host = world.host;
+
+    // Act
+    const refused = await host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, as('f1'));
+
+    // Assert
+    should(refused.isError).be.true();
+    should(refused.text).containEql(
+      'This machine does not let agents control browsers: "What agents may control › Browsers" is off',
+    );
+  });
+
+  it('AC3 refuses a ferret browser_open when Ferrets is not serving the agent-control port (fails closed)', async () => {
+    // Arrange
+    const world = await built(null);
+    host = world.host;
+
+    // Act
+    const refused = await host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, as('f1'));
+
+    // Assert
+    should(refused.isError).be.true();
+    should(refused.text).containEql(
+      'This machine does not let agents control browsers: "What agents may control › Browsers" is off',
+    );
   });
 
   it('I155 should keep the one ledger: a ferret’s type into an identifier box is kept, and the runtime clears it on a toolbar act', async () => {

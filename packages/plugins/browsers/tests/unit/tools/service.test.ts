@@ -10,9 +10,17 @@ import type { BrowserActGuard } from '../../../daemon/pages/service.ts';
 import type { BrowserInputEvent } from '../../../contract/wire/browser.ts';
 import { heldViewerHost } from '../../../daemon/stream/held-host.ts';
 import { nodeStagedFiles } from '../../../daemon/tools/adapters/staged-files.ts';
+import { agentControlPolicy } from '../../../daemon/tools/agent-control.ts';
 import { SurfaceControl } from '../../../daemon/tools/control.ts';
 import { rootFiles } from '../../../daemon/tools/files.ts';
-import { ApiError, type CallContext, type FerretId } from '@ferretry/kernel/contract';
+import {
+  ApiError,
+  agentControlRefusal,
+  type AgentControlKind,
+  type AgentControlReader,
+  type CallContext,
+  type FerretId,
+} from '@ferretry/kernel/contract';
 import { holdSentence, PageHeld } from '../../../daemon/holds/index.ts';
 import { controlRoutes, toolHandler } from '../../../daemon/tools/index.ts';
 import { BrowserToolError, BrowserTools, type BrowserToolPorts } from '../../../daemon/tools/service.ts';
@@ -149,7 +157,13 @@ afterEach(async () => {
 });
 
 async function harness(
-  options: { readonly allows?: boolean; readonly policy?: (kind: string) => boolean; readonly vault?: FakeVault } = {},
+  options: {
+    readonly allows?: boolean;
+    readonly policy?: (kind: string) => boolean;
+    /** The owner's switches as core's AgentControlPort answers them (the real policy); `undefined` is an unbound port. */
+    readonly control?: () => AgentControlReader | undefined;
+    readonly vault?: FakeVault;
+  } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'ferretry-browser-tools-'));
   roots.push(root);
@@ -165,7 +179,10 @@ async function harness(
       { now: () => clock.nowMs() },
     ),
     kernel: kernel.kernel,
-    policy: { allows: async kind => options.policy?.(kind) ?? options.allows ?? true },
+    policy:
+      options.control === undefined
+        ? { allows: async (_ferret, kind) => options.policy?.(kind) ?? options.allows ?? true }
+        : agentControlPolicy(options.control),
     files: rootFiles(workRoots(work, join(work, '.fy')), nodeStagedFiles(join(root, 'upload'), clock)),
     binaryName: 'fy',
     // Bound as the daemon half binds them: the Vault's sign-in lock hears scripts and page acts (I98–I100).
@@ -505,5 +522,150 @@ describe('the browser tools — what a ferret did to a page, told to the Vault�
     const acts = vault.pageActs.slice(told);
     should(acts).have.length(1);
     should(acts[0]?.placed).deepEqual({ id: 'p1', hosts: ['accounts.example.test'] });
+  });
+});
+
+/** The owner's switches as Ferrets' reader answers them: only `on` kinds are allowed; every ask is recorded. */
+function switches(...on: readonly AgentControlKind[]) {
+  const asked: Array<[string, AgentControlKind]> = [];
+  const reader: AgentControlReader = {
+    allows: async (ferret, kind) => {
+      asked.push([ferret, kind]);
+      return on.includes(kind);
+    },
+  };
+  return { asked, reader };
+}
+
+// Today's refusal: rebuild-ref packages/daemon/src/lib/agent-tools/service.ts:436-437 throws
+// `AgentToolError('forbidden', controlRefusal(kind))`, the sentence at policy.ts:96-101.
+const BROWSERS_OFF =
+  'This machine does not let agents control browsers: "What agents may control › Browsers" is off in this machine\'s settings. Ask the person to turn it on if you need it.';
+const FILES_OFF =
+  'This machine does not let agents control files: "What agents may control › Files" is off in this machine\'s settings. Ask the person to turn it on if you need it.';
+
+describe('the browser tools follow core’s AgentControlPort (What agents may control)', () => {
+  it('AC1 refuses a ferret every page tool, with today’s code and sentence, while Browsers is off', async () => {
+    // Arrange
+    const { reader, asked } = switches('files', 'scripts');
+    const { tools } = await harness({ control: () => reader });
+
+    // Act
+    const refused = await refusal(tools.call(agent, { tool: 'browser.open', name: 'app' }));
+    const typing = await refusal(tools.pageFor(agent, 'app'));
+
+    // Assert
+    should(refused.code).equal('forbidden');
+    should(refused.message).equal(BROWSERS_OFF);
+    should(refused.message).equal(agentControlRefusal('browser'));
+    should(typing.code).equal('forbidden');
+    should(typing.message).equal(BROWSERS_OFF);
+    should(asked[0]).deepEqual(['s1', 'browser']);
+  });
+
+  it('AC2 allows the same call while Browsers is on', async () => {
+    // Arrange
+    const { reader } = switches('browser');
+    const { tools } = await harness({ control: () => reader });
+
+    // Act
+    const opened = await tools.call(agent, { tool: 'browser.open', name: 'app' });
+
+    // Assert
+    should(opened.summary).be.a.String();
+  });
+
+  it('AC3 refuses a ferret when the port is unbound (fails closed)', async () => {
+    // Arrange
+    const { tools } = await harness({ control: () => undefined });
+
+    // Act
+    const refused = await refusal(tools.call(agent, { tool: 'browser.open', name: 'app' }));
+    const script = await refusal(tools.call(person, { tool: 'browser.eval', name: 'app', function: '() => 1' }));
+
+    // Assert
+    should(refused.code).equal('forbidden');
+    should(refused.message).equal(BROWSERS_OFF);
+    should(script.code).equal('forbidden');
+  });
+
+  it('AC3 refuses when the reader throws or answers anything but a plain yes', async () => {
+    // Arrange
+    const throwing = await harness({
+      control: () => ({
+        allows: async () => {
+          throw new Error('limits.yaml unreadable');
+        },
+      }),
+    });
+    const undetermined = await harness({ control: () => ({ allows: async () => undefined as never }) });
+
+    // Act
+    const thrown = await refusal(throwing.tools.call(agent, { tool: 'browser.open', name: 'app' }));
+    const unknown = await refusal(undetermined.tools.call(agent, { tool: 'browser.open', name: 'app' }));
+
+    // Assert
+    should(thrown.message).equal(BROWSERS_OFF);
+    should(unknown.message).equal(BROWSERS_OFF);
+  });
+
+  it('AC4 file transfer follows Files alone, and page scripts follow Page scripts alone', async () => {
+    // Arrange — Browsers on, Files off, Page scripts off
+    const base = switches('browser');
+    const { tools, work } = await harness({ control: () => base.reader });
+    await writeFile(join(work, 'hello.txt'), 'hello');
+    await tools.call(agent, { tool: 'browser.open', name: 'up' });
+
+    // Act
+    const upload = await refusal(
+      tools.call(agent, { tool: 'browser.upload', name: 'up', selector: '#f', files: ['hello.txt'] }),
+    );
+    const script = await refusal(tools.call(agent, { tool: 'browser.eval', name: 'up', function: '() => 1' }));
+    const read = await tools.call(agent, { tool: 'browser.read', name: 'up', mode: 'text' });
+
+    // Assert — each refused for its OWN switch; the page tool is untouched
+    should(upload.message).equal(FILES_OFF);
+    should(script.message).containEql('Page scripts');
+    should(script.message).not.equal(upload.message);
+    should(read.summary).be.a.String();
+  });
+
+  it('AC4 turning Files on lets uploads through while scripts stay off; turning Page scripts on lets eval through', async () => {
+    // Arrange
+    const filesOn = await harness({ control: () => switches('browser', 'files').reader });
+    await writeFile(join(filesOn.work, 'hello.txt'), 'hello');
+    await filesOn.tools.call(agent, { tool: 'browser.open', name: 'up' });
+    const scriptsOn = await harness({ control: () => switches('browser', 'scripts').reader });
+    await scriptsOn.tools.call(agent, { tool: 'browser.open', name: 'up' });
+
+    // Act
+    await filesOn.tools.call(agent, { tool: 'browser.upload', name: 'up', selector: '#f', files: ['hello.txt'] });
+    const stillOff = await refusal(
+      filesOn.tools.call(agent, { tool: 'browser.eval', name: 'up', function: '() => 1' }),
+    );
+    const evaled = await scriptsOn.tools.call(agent, { tool: 'browser.eval', name: 'up', function: '() => 1' });
+    const noFiles = await refusal(
+      scriptsOn.tools.call(agent, { tool: 'browser.upload', name: 'up', selector: '#f', files: ['hello.txt'] }),
+    );
+
+    // Assert
+    should(filesOn.browser.uploads).have.length(1);
+    should(stillOff.message).containEql('Page scripts');
+    should(evaled.summary).be.a.String();
+    should(noFiles.message).equal(FILES_OFF);
+  });
+
+  it('AC5 reads the switch fresh on every call: turning Browsers off refuses the very next act', async () => {
+    // Arrange
+    let on = true;
+    const { tools } = await harness({ control: () => ({ allows: async (_ferret, kind) => on && kind === 'browser' }) });
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+
+    // Act
+    on = false;
+    const refused = await refusal(tools.call(agent, { tool: 'browser.read', name: 'app', mode: 'text' }));
+
+    // Assert
+    should(refused.message).equal(BROWSERS_OFF);
   });
 });

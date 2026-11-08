@@ -18,6 +18,7 @@ import { SurfaceControl } from './tools/control.ts';
 import { rootFiles } from './tools/files.ts';
 import { controlRoutes, toolHandlers } from './tools/index.ts';
 import { pageToolHost } from './tools/page-host.ts';
+import { agentControlPolicy } from './tools/agent-control.ts';
 import { BrowserTools } from './tools/service.ts';
 import type { RecordedSurfaceEvent } from './tools/types.ts';
 import { processHost } from './adapters/host.ts';
@@ -223,9 +224,9 @@ export function buildBrowsers(
     browser: pages,
     control,
     kernel,
-    // GAP: "What agents may control" is Ferrets' machine switches and no port reads them yet. Browsers is on (an
-    // enabled Browsers plugin is the owner's yes); Files and Page scripts, off by default today, fail closed.
-    policy: { allows: async kind => kind === 'browser' },
+    // "What agents may control" is read from core's AgentControlPort on every call; unbound, or an answer that is not a
+    // plain yes, refuses (fail closed).
+    policy: agentControlPolicy(() => ctx.uses.agentControl.current()),
     files: rootFiles(kernel.roots, nodeStagedFiles(host.uploadDirectory, kernel.clock)),
     binaryName: 'fy',
     typedIdentities: identities,

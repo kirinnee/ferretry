@@ -87,8 +87,8 @@ export interface BrowserToolAnswer {
 }
 
 /** "What agents may control" (Ferrets' machine switches). */
-interface AgentControlPolicy {
-  allows(kind: 'browser' | 'files' | 'scripts'): Promise<boolean>;
+export interface AgentControlPolicy {
+  allows(ferret: string, kind: 'browser' | 'files' | 'scripts'): Promise<boolean>;
 }
 
 /** Who each page signs in (part b's `TypedIdentities`, I154/I155). */
@@ -314,13 +314,21 @@ export class BrowserTools {
     let note: { placed(page: ActedPage | undefined): void } | undefined;
     const seen: { surface?: ResolvedSurface } = {};
     try {
-      if (caller.kind === 'agent' && !LISTING_TOOLS.has(call.tool) && !(await this.ports.policy.allows('browser')))
+      if (
+        caller.kind === 'agent' &&
+        !LISTING_TOOLS.has(call.tool) &&
+        !(await this.ports.policy.allows(caller.sessionId, 'browser'))
+      )
         throw new BrowserToolError('forbidden', controlRefusal('browser'));
-      if (caller.kind === 'agent' && FILE_TOOLS.has(call.tool) && !(await this.ports.policy.allows('files')))
+      if (
+        caller.kind === 'agent' &&
+        FILE_TOOLS.has(call.tool) &&
+        !(await this.ports.policy.allows(caller.sessionId, 'files'))
+      )
         throw new BrowserToolError('forbidden', controlRefusal('files'));
       // Page scripts are the owner's to allow for EVERY caller: a paired device with the browser grant
       // must not read the shared profile's sign-ins through a script while the owner has them off.
-      if (call.tool === 'browser.eval' && !(await this.ports.policy.allows('scripts')))
+      if (call.tool === 'browser.eval' && !(await this.ports.policy.allows(caller.sessionId, 'scripts')))
         throw new BrowserToolError('forbidden', pageScriptsRefusal(this.ports.binaryName));
       // Told BEFORE anything runs, for a ferret's call that may change a page: a sign-in's after-submit facts the
       // ferret could have steered are not kept. Until the call ends it counts on every page (I100).
@@ -427,7 +435,7 @@ export class BrowserTools {
    */
   async pageFor(caller: ToolCaller, key: string): Promise<ResolvedSurface> {
     try {
-      if (caller.kind === 'agent' && !(await this.ports.policy.allows('browser')))
+      if (caller.kind === 'agent' && !(await this.ports.policy.allows(caller.sessionId, 'browser')))
         throw new BrowserToolError('forbidden', controlRefusal('browser'));
       const surface = await this.resolve(caller.sessionId, key);
       if (caller.kind === 'agent') await this.assertAgentMay(caller.sessionId, surface);
