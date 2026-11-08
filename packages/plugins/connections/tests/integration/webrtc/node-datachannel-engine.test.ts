@@ -563,4 +563,37 @@ describe('the node-datachannel engine’s lifetime', () => {
     // Assert
     should(loads).equal(0);
   });
+
+  it('should mark the engine broken when the library cannot stop, and refuse every later offer saying so', async () => {
+    // Arrange
+    const { module } = fakeModule(channel => {
+      channel.opened?.();
+      channel.received?.(channel.sent[0] ?? '');
+    });
+    let cleaned = 0;
+    const subject = new NodeDataChannelEngine({
+      clock,
+      load: async () => ({
+        ...module,
+        cleanup: () => {
+          cleaned += 1;
+          throw new Error('libdatachannel error# cleanup timeout (possible deadlock)\n  at native');
+        },
+      }),
+    });
+    await subject.selfTest();
+
+    // Act
+    subject.release();
+    subject.release();
+    const refused: unknown = await subject.answer('offer', []).catch((error: unknown) => error);
+
+    // Assert
+    should(cleaned).equal(1);
+    should(refused).be.instanceOf(WebRtcEngineUnavailable);
+    should((refused as Error).message).equal(
+      'the WebRTC engine did not stop cleanly (libdatachannel error# cleanup timeout (possible deadlock)); ' +
+        'restart the daemon to use peer-to-peer connections again',
+    );
+  });
 });

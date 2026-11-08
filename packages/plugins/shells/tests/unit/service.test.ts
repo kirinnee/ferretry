@@ -409,3 +409,66 @@ describe('every outcome the kernel’s config writer can give', () => {
     }
   });
 });
+
+describe('what the service does when its stores fail it', () => {
+  const lockedWeb = async () => {
+    const h = withWeb();
+    await h.service.add({ name: 'web', item: ShellItemSchema.parse(webItem) });
+    return h;
+  };
+  const stateOf = (h: ReturnType<typeof shellsHarness>) => h.state.port as unknown as Record<string, unknown>;
+
+  test('a lock that cannot be read is logged and treated as no lock', async () => {
+    const h = await lockedWeb();
+    stateOf(h).read = async () => ({ ok: false as const, error: { reason: 'disk' } });
+    const parts = await h.service.launchParts('web');
+    expect(parts[0]).toMatchObject({ kind: 'instruction', id: 'shell-web' });
+    expect(JSON.stringify(parts)).toContain('it has not been locked');
+  });
+
+  test('a damaged cache entry is rebuilt instead of trusted', async () => {
+    const h = await lockedWeb();
+    await h.service.build('web');
+    for (const key of h.state.files.keys()) if (key.startsWith('cache/')) h.state.files.set(key, '{not json');
+    const again = await h.service.build('web');
+    expect(again.ok && again.value.outcome).toBe('built');
+    expect(h.nix.builds).toBe(2);
+  });
+
+  test('a cache entry kept as bytes is read, and non-string values in it are dropped', async () => {
+    const h = await lockedWeb();
+    await h.service.build('web');
+    for (const key of h.state.files.keys())
+      if (key.startsWith('cache/'))
+        h.state.files.set(key, new TextEncoder().encode(JSON.stringify({ PATH: '/p', N: 1 })));
+    const again = await h.service.build('web');
+    expect(again.ok && again.value.outcome).toBe('cached');
+    expect(h.nix.builds).toBe(1);
+  });
+
+  test('a launch that throws while preparing the shell still starts the ferret, with a word on why', async () => {
+    const h = await lockedWeb();
+    h.nix.facts = async () => {
+      throw new Error('nix exploded');
+    };
+    const parts = await h.service.launchParts('web');
+    expect(parts).toHaveLength(1);
+    expect(JSON.stringify(parts)).toContain('it could not be prepared');
+    expect(JSON.stringify(parts)).not.toContain('nix exploded');
+    h.nix.facts = async () => {
+      throw 'not an error object';
+    };
+    expect(JSON.stringify(await h.service.launchParts('web'))).toContain('it could not be prepared');
+  });
+
+  test('a relock whose approval does not show up in the effective config is refused as changed', async () => {
+    const h = shellsHarness({ initial: { 'shells/web': { flake: 'github:me/shells#web', floating: true } } });
+    h.nix.metadata.set('github:me/shells', flakeFacts());
+    // The writer says "written" but the effective config never gains the approved hash.
+    const port = h.tree.port as unknown as Record<string, unknown>;
+    port.write = async () => ({ kind: 'written', etag: 'e', loosened: [] });
+    const result = await h.service.relock('web', { expectedHash: HASH_A });
+    expect(!result.ok && result.refusal).toMatchObject({ status: 409, code: SHELL_CODES.hashChanged });
+    expect(h.state.files.has('locks/web.json')).toBe(false);
+  });
+});

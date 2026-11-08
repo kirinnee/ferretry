@@ -960,3 +960,32 @@ describe('tmux pane delivery — a one-line paste Claude draws with no count (&B
     should(server.modal).equal(prompt);
   });
 });
+
+describe('tmux pane delivery — text that joins a literal turn before Enter', () => {
+  /** A pane where, once the fill has seen its literal land, a person types beside it before the first Enter. */
+  class PersonTypesAfterLanding extends FakeTmuxServer {
+    // One frame is two captures (its text and its colours): the landing frame is the first two showing the payload.
+    private capturesShowingPayload = 0;
+    constructor(private readonly payload: string) {
+      super();
+    }
+    override async execute(argv: readonly string[], stdin?: string) {
+      if (argv[0] === 'capture-pane' && this.composer === this.payload && ++this.capturesShowingPayload === 3)
+        this.composer = `${this.payload} and a question I was in the middle of`;
+      return await super.execute(argv, stdin);
+    }
+  }
+
+  it('should press no Enter, and say other text joined it, when a person typed beside a literal that had landed', async () => {
+    const server = new PersonTypesAfterLanding('continue');
+    const { subject } = delivery(server);
+
+    const refused: unknown = await subject.deliver(SESSION, 'continue').catch((error: unknown) => error);
+
+    should(refused).be.instanceOf(ComposerUnconfirmedError);
+    should((refused as ComposerUnconfirmedError).message).match(/other text joined it in the composer before Enter/u);
+    should(enters(server)).equal(0);
+    should(server.submitted).be.empty();
+    should(literals(server)).equal(1);
+  });
+});

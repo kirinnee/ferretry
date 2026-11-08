@@ -255,6 +255,8 @@ describe('remote browser transport', () => {
       },
     });
     const socket = remoteBrowserSocketFactory(daemon, daemonSessionScope(daemon, 'same/session'));
+    sockets.daemon.open();
+    expect(socket.readyState).toBe(1);
     expect(() => socket.send('{}')).not.toThrow();
   });
 

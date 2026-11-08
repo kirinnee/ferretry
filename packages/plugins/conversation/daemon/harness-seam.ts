@@ -4,8 +4,12 @@ import type {
   FerretsApi,
   HarnessDeliveryFailure,
   HarnessRefusal,
+  PaneNotReadyReason,
+  QueueOutcome,
 } from '@ferretry/core-ferrets/contract';
 import { ApiError, REFUSAL_SENTENCES } from '@ferretry/kernel/contract';
+import type { TurnStopped } from './delivery/lib/interrupt.ts';
+import { composerOccupiedRefusal, composerUnreadableRefusal } from './delivery/lib/service.ts';
 import { SessionSendError } from './delivery/lib/mounts/session-send.ts';
 import { tryParseSessionId } from './seams/ferret-id.ts';
 
@@ -15,8 +19,8 @@ import { tryParseSessionId } from './seams/ferret-id.ts';
  * apply there), so this file wraps NOTHING in an act of its own: an outer act on that terminal would wait on the inner
  * one and neither would settle.
  *
- * The seam is the one place a refusal of the harness becomes Conversation's words, so every route and the port answer a
- * pane that is gone, a hold or a plugin that is off the same way.
+ * The seam is the one place an answer of the harness becomes Conversation's words, so every route and the port answer a
+ * pane that is gone, a hold, a pane that never came to a prompt or a plugin that is off the same way.
  */
 export interface TerminalSeam {
   /**
@@ -28,54 +32,83 @@ export interface TerminalSeam {
 }
 
 /**
- * Which of the seam's two actions are live. Both wait CLOSED: Ferrets' `deliver` answers only `no_pane` and
- * `plugin_unavailable` and THROWS for every other refusal (a busy pane, a dialog, a draft in the composer, a hold), so a
- * refusal that typed nothing is indistinguishable from a send that was typed; and its `interrupt` presses the runner's
- * raw `C-c`, which quits an idle Codex, where today presses the harness's own stop key and only on a pane doing work.
- * Each opens when Ferrets answers a closed refusal taxonomy for `deliver` and a safe `interrupt`.
+ * Which of the seam's two actions are live. Ferrets' `deliver` answers a closed taxonomy (nothing typed, or typed and
+ * not proven) and its `interrupt` presses the harness's own stop key under the harness's rule, so the daemon wires
+ * {@link HARNESS_OPEN}. A closed action answers 503 before anything is opened, typed or kept.
  */
 export interface HarnessGate {
   readonly send: boolean;
   readonly interrupt: boolean;
 }
 
-/**
- * Both actions wait: a send and an interrupt answer 503 until Ferrets' seam is safe to use. This is the ONE value the
- * daemon wires (`daemon/index.ts`): opening the gate is changing that line to {@link HARNESS_OPEN}. The test
- * `tests/unit/daemon/harness-gate.test.ts` fails the day Ferrets answers a closed refusal taxonomy, so the removal
- * cannot be forgotten.
- */
-export const HARNESS_PENDING: HarnessGate = { send: false, interrupt: false };
-
-/** Both actions live: what the gate becomes once Ferrets answers a closed refusal for a send and presses a safe stop. */
+/** Both actions live: what the daemon wires (`daemon/index.ts`). */
 export const HARNESS_OPEN: HarnessGate = { send: true, interrupt: true };
 
-/** Said by a send while the gate is closed: what is unavailable and why, in the person's words. */
+/** Said by a send while its gate is closed: what is unavailable and why, in the person's words. */
 export const SEND_UNAVAILABLE =
   "Sending a message to a ferret from here is not available yet: this machine cannot yet tell safely whether the ferret is busy, waiting at a dialog or holding a draft, so a message could be lost or typed twice. Type it in the ferret's terminal for now.";
 
-/** Said by an interrupt while the gate is closed. */
+/** Said by an interrupt while its gate is closed. */
 export const INTERRUPT_UNAVAILABLE =
   "Stopping a ferret's turn from here is not available yet: this machine cannot yet tell safely whether the ferret is working or waiting at its prompt, so a stop could quit the agent instead. Stop it in the ferret's terminal for now.";
 
-/** Said by a send that carries files, a label, the send-now flag or a reply request: they would be dropped. */
+/**
+ * Said by a send that carries what the seam does not type yet: files, the fyi label (which holds a message to the
+ * turn's end), the send-now flag or a reply request. Each would be dropped and the message still reported as sent.
+ */
 export const SEND_EXTRAS_UNAVAILABLE =
-  "Sending files, a label, the send-now flag or a reply request is not available yet: they would be dropped and the message still reported as sent. Send the message alone, or type it in the ferret's terminal.";
+  "Sending files, an fyi message held to the turn's end, the send-now flag or a reply request is not available yet: they would be dropped and the message still reported as sent. Send the message alone (as an action or a blocker), or type it in the ferret's terminal.";
+
+/**
+ * ONE FIXED SENTENCE PER REASON a pane never came to a prompt. Nothing of the message was typed, so the same send may
+ * go again. Today's answer quoted the runner's message (the terminal session's name, a dialog's prompt line); this
+ * answer says only the closed reason and the remedy.
+ */
+export const NOT_READY_SENTENCES: Readonly<Record<PaneNotReadyReason, string>> = {
+  busy: 'the agent never came to a prompt: it is still working on its turn, so nothing was typed; send it again once its turn ends',
+  dialog:
+    'the agent never came to a prompt: it is waiting at a dialog on its screen, so nothing was typed; answer the prompt on its screen, then send it again',
+  exited:
+    'the agent never came to a prompt: its terminal has gone, so nothing was typed; revive the ferret, then send it again',
+};
+
+/**
+ * Said when the message WAS typed and nothing proved it landed. It is never typed again: it may be in the agent's box
+ * now, or still on its way there. Retry, Clear and Enter on a send are not served from here yet, so the person is sent
+ * to the ferret's terminal.
+ */
+export const UNCONFIRMED_SENTENCE =
+  "the message was typed into the agent's box, but the agent has not shown it there yet, so it was not typed again. It may still appear: check the ferret's terminal before sending it again";
+
+/** Said when the message was typed and stayed in the agent's box after Enter: the agent has not read it. */
+export const STRANDED_SENTENCE =
+  "the message was typed into the agent's box but stayed there after Enter, so the agent has not read it and it was not typed again. Press Enter on it in the ferret's terminal, or clear it there before sending it again";
+
+/** Said by a stop the harness could not press because the ferret's terminal could not be reached or held still. */
+const INTERRUPT_NO_PANE =
+  "the ferret's turn could not be stopped: its terminal is gone, or its screen changed under the stop, so nothing was pressed. Try Stop again, or revive the ferret if it has stopped";
 
 /** One ferret's terminal, as Ferrets opened it. */
 interface BoundTerminal {
   /**
-   * Types one message. Throws the answer the send routes give for a refusal (nothing was typed), or {@link MaybeTyped}
-   * when the runner threw while it wrote.
+   * Types one message. Throws the answer the send routes give for a refusal (nothing was typed), {@link Unconfirmed}
+   * when it was typed and not proven, or {@link MaybeTyped} when the runner failed in a way nobody could classify.
    */
   deliver(text: string): Promise<DeliveryOutcome>;
-  /** Presses the harness's interrupt. Throws as {@link BoundTerminal.deliver} does for a refusal. */
-  interrupt(): Promise<void>;
+  /**
+   * Puts one message into the BUSY pane's own queue (Ferrets' `queue`, the runner's `TmuxPaneQueue`), which the
+   * harness submits at its next turn boundary. Answers what the pane proved, or `undefined` when this runner cannot
+   * queue (nothing typed). Throws exactly as {@link deliver} does.
+   */
+  queue(text: string): Promise<QueueOutcome | undefined>;
+  /** Presses the harness's stop under its own rule and says what it did. Throws the answer for a refusal. */
+  interrupt(): Promise<TurnStopped>;
 }
 
 /**
- * The runner threw while it wrote: keys may already have gone to the pane, so the send's fate is UNCERTAIN rather than
- * absent, and its record must stay (a withdrawal would invite a duplicate retry). `answer` is what the caller is told.
+ * The runner failed in a way nobody could classify: keys may already have gone to the pane, so the send's fate is
+ * UNCERTAIN rather than absent, and its record must stay (a withdrawal would invite a duplicate retry). `answer` is what
+ * the caller is told.
  */
 export class MaybeTyped extends Error {
   constructor(readonly answer: Error) {
@@ -84,15 +117,38 @@ export class MaybeTyped extends Error {
   }
 }
 
+/**
+ * The pane never came to a prompt because the agent is still working on its turn: NOTHING was typed, proven, so the
+ * caller may put the message in the harness's own queue instead (today's busy path). `answer` is what the caller is
+ * told when it does not.
+ */
+export class PaneBusy extends Error {
+  constructor(readonly answer: Error) {
+    super(answer.message);
+    this.name = 'PaneBusy';
+  }
+}
+
+/**
+ * The message WAS typed and nothing proved it landed (Ferrets' `HarnessUnconfirmed`). Neither a refusal nor a failure:
+ * the record stays, settled as unaccounted, and the answer names the send so the person can act on exactly it.
+ */
+export class Unconfirmed extends Error {
+  constructor(readonly stranded: boolean) {
+    super(stranded ? STRANDED_SENTENCE : UNCONFIRMED_SENTENCE);
+    this.name = 'Unconfirmed';
+  }
+}
+
 /** Said when this daemon's Ferrets offers no harness seam (it is optional on the port). */
 const SEAM_OFF =
   "Ferrets does not offer a way to reach this ferret's terminal, so Conversation cannot type into it yet.";
 
 /** A harness refusal, in the words and status today's send routes give for that case. */
-function refusalAnswer(ferret: string, refusal: HarnessRefusal): Error {
+function refusalAnswer(refusal: HarnessRefusal, noPane: string): Error {
   switch (refusal.refused) {
     case 'no_pane':
-      return new SessionSendError('refused', `session ${ferret} has no live agent to type into; revive it first`);
+      return new SessionSendError('refused', noPane);
     case 'plugin_unavailable':
       return new ApiError(503, "the runner that owns this ferret's terminal is off", 'plugin_unavailable');
     default:
@@ -101,24 +157,36 @@ function refusalAnswer(ferret: string, refusal: HarnessRefusal): Error {
 }
 
 /**
- * BRIDGE, until the gate opens (the Conversation merge replaces it with the real 409 mapping): Ferrets' deliver now
- * answers a closed failure where it used to throw — typed-but-unconfirmed, a pane not ready, a composer holding a draft
- * or unreadable. Each is answered exactly as the throw it replaces was: the maybe-typed failure, whose record stays.
- * Only the closed kind is said, never the draft. A {@link HarnessRefusal} passes on to {@link refusalAnswer} as before.
+ * Every delivery failure Ferrets can answer, as the send routes answer it (today's `sendRefusal` over the classes these
+ * replace): typed and not proven is {@link Unconfirmed} (409 `send_unconfirmed`, record kept); a pane that never came
+ * to a prompt or a composer that could not be read is 409 `send_refused` (nothing typed); a composer that held the
+ * person's own text is 409 `composer_occupied` with that draft, and the draft goes nowhere else; any other refusal is
+ * {@link refusalAnswer}'s. Exhaustive: a new kind in Ferrets' taxonomy does not compile until it is answered here.
  */
-function deliveryRefusal(failure: HarnessDeliveryFailure): HarnessRefusal | MaybeTyped {
-  if ('unconfirmed' in failure)
-    return new MaybeTyped(new SessionSendError('failed', 'the message was typed but its landing was not confirmed'));
-  if (
-    failure.refused === 'not_ready' ||
-    failure.refused === 'composer_occupied' ||
-    failure.refused === 'composer_unreadable'
-  )
-    return new MaybeTyped(
-      new SessionSendError('failed', `the ferret's terminal did not take the message (${failure.refused})`),
-    );
-  return failure;
+function deliveryAnswer(ferret: string, failure: HarnessDeliveryFailure): Error {
+  if ('unconfirmed' in failure) return new Unconfirmed(failure.stranded);
+  switch (failure.refused) {
+    case 'not_ready':
+      return new SessionSendError('refused', NOT_READY_SENTENCES[failure.why]);
+    case 'composer_occupied': {
+      const refusal = composerOccupiedRefusal(failure.draft);
+      return new SessionSendError('refused', refusal.message, refusal.draft);
+    }
+    case 'composer_unreadable':
+      return new SessionSendError('refused', composerUnreadableRefusal().message);
+    default:
+      return refusalAnswer(failure, `session ${ferret} has no live agent to type into; revive it first`);
+  }
 }
+
+/** A rejection is a failure nobody could classify: what reached the pane is uncertain, so the record stays. */
+const uncertain = (error: unknown): never => {
+  throw new MaybeTyped(
+    error instanceof ApiError || error instanceof SessionSendError
+      ? error
+      : new SessionSendError('failed', error instanceof Error ? error.message : String(error)),
+  );
+};
 
 export function terminalSeam(ferrets: Pick<FerretsApi, 'harness'>): TerminalSeam {
   /** The ferret's harness, or the answer for why there is none. */
@@ -134,23 +202,25 @@ export function terminalSeam(ferrets: Pick<FerretsApi, 'harness'>): TerminalSeam
       const harness = await open(ferret);
       return {
         deliver: async text => {
-          const delivered = await harness.deliver({ text }).catch((error: unknown) => {
-            // A refusal Ferrets already worded passes as it is; any other failure of the write is a send that failed.
-            throw new MaybeTyped(
-              error instanceof ApiError || error instanceof SessionSendError
-                ? error
-                : new SessionSendError('failed', error instanceof Error ? error.message : String(error)),
-            );
-          });
-          if (!delivered.ok) {
-            const refusal = deliveryRefusal(delivered.error);
-            throw refusal instanceof MaybeTyped ? refusal : refusalAnswer(ferret, refusal);
-          }
-          return delivered.value;
+          const delivered = await harness.deliver({ text }).catch(uncertain);
+          if (delivered.ok) return delivered.value;
+          const answer = deliveryAnswer(ferret, delivered.error);
+          const busy = 'refused' in delivered.error && delivered.error.refused === 'not_ready';
+          throw busy && delivered.error.why === 'busy' ? new PaneBusy(answer) : answer;
+        },
+        queue: async text => {
+          const queued = await harness.queue(text).catch(uncertain);
+          if (queued.ok) return queued.value;
+          if ('refused' in queued.error && queued.error.refused === 'plugin_unavailable') return undefined;
+          throw deliveryAnswer(ferret, queued.error);
         },
         interrupt: async () => {
           const interrupted = await harness.interrupt();
-          if (!interrupted.ok) throw refusalAnswer(ferret, interrupted.error);
+          if (!interrupted.ok) throw refusalAnswer(interrupted.error, INTERRUPT_NO_PANE);
+          return {
+            pressed: interrupted.value.pressed,
+            ...(interrupted.value.working === undefined ? {} : { working: interrupted.value.working }),
+          };
         },
       };
     },

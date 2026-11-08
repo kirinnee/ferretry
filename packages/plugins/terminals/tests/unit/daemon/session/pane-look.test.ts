@@ -27,6 +27,8 @@ function subject(
     readonly refusal?: Error;
     readonly absent?: boolean;
     readonly tree?: ProcessTreeRead;
+    /** The walk of the tree itself fails, as a table that cannot be read does. */
+    readonly walkThrows?: Error;
   } = {},
 ) {
   const asked = { proofs: [] as string[], walked: [] as number[], screens: [] as string[], absent: [] as string[] };
@@ -48,6 +50,7 @@ function subject(
     tree: {
       tree: async rootPid => {
         asked.walked.push(rootPid);
+        if (options.walkThrows !== undefined) throw options.walkThrows;
         latest = options.rowsAt?.(asked.walked.length) ?? options.rows ?? [HARNESS_ROW, MCP_ROW];
         return options.tree ?? { kind: 'read', rows: latest };
       },
@@ -362,5 +365,31 @@ describe('a browser re-proved just before Browsers signals it (paneBrowserStill:
     // Assert
     should(answers.every(answer => !answer.still && answer.why === 'not-proved')).be.true();
     should(asked.walked).eql([]);
+  });
+});
+
+describe('a walk of the pane that fails', () => {
+  it('should be unobservable, saying so, and read no screen and prove no browser still', async () => {
+    // Arrange
+    const { look, asked } = subject({ walkThrows: new Error('ps vanished'), screen: 'not to be read' });
+
+    // Act
+    const observed = await look.processes('f1');
+    const sample = await look.liveness('f1');
+    const still = await look.still('f1', { pid: 701, start: 1 });
+
+    // Assert
+    should(observed).eql({ kind: 'unobservable', reason: 'the pane could not be inspected: ps vanished' });
+    should(sample).eql({});
+    should(asked.screens).eql([]);
+    should(still).eql({ still: false, why: 'gone' });
+  });
+
+  it('should say a non-error failure in words too', async () => {
+    const { look } = subject({ walkThrows: 'plain text' as unknown as Error });
+    should(await look.processes('f1')).eql({
+      kind: 'unobservable',
+      reason: 'the pane could not be inspected: plain text',
+    });
   });
 });
