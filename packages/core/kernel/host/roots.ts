@@ -41,14 +41,22 @@ import {
   same,
   within,
 } from './fence-guard.ts';
-import { isInternalRoot } from './internal-roots.ts';
+import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-roots.ts';
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
-const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports']);
-const READ_ONLY_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'imports']);
-/** Internal roots only one plugin may have, whatever another manifest declares. */
-const ROOT_OWNERS: Partial<Record<RootName, string>> = { credentials: 'logins', sessions: 'ferrets' };
+const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports', 'harness-home']);
+const READ_ONLY_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'imports', 'harness-home']);
+/**
+ * Roots only one plugin may have, whatever another manifest declares: the sign-in material (Logins), the session
+ * folders (Ferrets), and the fleet folder and the host harness homes the fleet is set up from (Runtimes).
+ */
+const ROOT_OWNERS: Partial<Record<RootName, string>> = {
+  credentials: 'logins',
+  sessions: 'ferrets',
+  fleet: 'runtimes',
+  'harness-home': 'runtimes',
+};
 
 /**
  * Whether a plugin may hold a root: an owned root (`credentials`, `sessions`) is its owner's alone. One fact, read by
@@ -79,12 +87,12 @@ function sessionFolder(subfolder: string | undefined): string | undefined {
 /**
  * The folder below an internal root's anchor that a handle scoped to `subfolder` names, or `undefined` when the
  * scope is refused. One fact for production and for the testing host, so a plugin test sees the isolation production
- * enforces. `sessions`: exactly one minted-id segment. `agent-homes`: one relative path (never absolute, never `..`,
- * no NUL), or none for the whole base. Any other root takes no such scope: it answers `''`.
+ * enforces. `sessions`: exactly one minted-id segment. `agent-homes` and `fleet`: one relative path (never absolute, never
+ * `..`, no NUL), or none for the whole base. Any other root takes no such scope: it answers `''`.
  */
 export function scopedSubfolder(name: RootName, subfolder: string | undefined): string | undefined {
   if (name === 'sessions') return sessionFolder(subfolder);
-  if (name !== 'agent-homes') return '';
+  if (name !== 'agent-homes' && name !== 'fleet') return '';
   if (subfolder === undefined || subfolder === '') return '';
   if (subfolder.startsWith('/') || subfolder.includes('\0') || subfolder.split('/').includes('..')) return undefined;
   return subfolder;
@@ -1014,7 +1022,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
         if (error instanceof RootError && error.refusal === 'hard_link') {
           // Only a root this kernel publishes into (internal, writable) can hold its OWN leftover; a read-only, an
           // owner's or an outside root (`worktrees`) never loses a name to a read. At most one adoption per call.
-          if (!adoptionTried && !readOnly && isInternalRoot(name)) {
+          if (!adoptionTried && !readOnly && isKernelMadeRoot(name)) {
             adoptionTried = true;
             const adopted = await real(path)
               .then(async ({ full, scope }) => await adoptLeftoverName(scope, full, random))
@@ -1147,7 +1155,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
   };
   const handle: RootHandle = {
     name,
-    internal: isInternalRoot(name),
+    internal: isKernelMadeRoot(name),
     resolve: relativePath => {
       const root = base();
       if (root === undefined) return err(name === 'work' ? 'unknown_ferret' : 'outside');
@@ -1316,10 +1324,13 @@ export function pluginStateFolder(home: string, plugin: string): string {
 
 /**
  * The one place the base of an internal root under the home is named: `<home>/state/<plugin>/<name>` for the roots
- * the kernel makes (`agent-homes`, `downloads`, `credentials`, `sessions`), nothing for any other root. Both the folder the kernel
+ * the kernel makes per plugin (`agent-homes`, `downloads`, `credentials`, `sessions`), `<home>/<folder>` for one it makes at
+ * a fixed place (`fleet`: `<home>/fleet`, {@link HOME_ROOT_FOLDERS}), nothing for any other root. Both the folder the kernel
  * makes at boot and the base the roots port serves are this fact.
  */
 function internalRootBase(home: string, plugin: string, name: RootName): string | undefined {
+  const fixed = HOME_ROOT_FOLDERS[name];
+  if (fixed !== undefined) return `${home.replace(/\/+$/u, '')}/${fixed}`;
   return isInternalRoot(name) ? `${home.replace(/\/+$/u, '')}/${internalRootFolder(plugin, name)}` : undefined;
 }
 
@@ -1431,7 +1442,8 @@ export function rootsPortFor(
       })();
       const base = (): string | undefined => {
         switch (name) {
-          case 'agent-homes': {
+          case 'agent-homes':
+          case 'fleet': {
             const below = scopedSubfolder(name, subfolder);
             return below === undefined || internal === undefined
               ? undefined
@@ -1452,8 +1464,10 @@ export function rootsPortFor(
           case 'work':
             return scope?.ferret === undefined ? undefined : workFolders()?.folderOf(scope.ferret);
           case 'harness-history':
+          case 'harness-home':
           case 'imports':
-            // The owner-named folder, or the harness's documented history folder: absolute, given by the caller.
+            // The owner-named folder, the harness's documented history folder, or the harness's own home (CLAUDE_CONFIG_DIR,
+            // CODEX_HOME or the default under the owner's home): absolute, given by the caller.
             return subfolder?.startsWith('/') === true && !subfolder.includes('\0')
               ? absolute(subfolder, 'a root')
               : undefined;
@@ -1464,7 +1478,9 @@ export function rootsPortFor(
         return workFolders()?.check(scope.ferret, path) ?? err('unknown_ferret');
       };
       const scopedParent =
-        (name === 'agent-homes' || name === 'sessions') && subfolder !== undefined && subfolder !== ''
+        (name === 'agent-homes' || name === 'fleet' || name === 'sessions') &&
+        subfolder !== undefined &&
+        subfolder !== ''
           ? internal
           : undefined;
       return rootHandle({

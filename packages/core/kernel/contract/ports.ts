@@ -322,7 +322,93 @@ export interface ConfigPort {
     name: string | undefined,
     options?: { readonly ifMatch?: string; readonly refuseIfHeld?: true },
   ): Promise<ConfigWriteOutcome>;
+  /**
+   * Writes SEVERAL of its own declared files as ONE act: every document lands, or none does (a change that spans a
+   * runtime, its profile and its model set, which must never be half in effect). Each document is checked exactly as
+   * {@link write} checks one — its own def (`not_declared`), its name (`bad_name`), YAML, a raw secret, the schema, its
+   * own `ifMatch` — and judged for loosening exactly as {@link write} and {@link writeAsOwner} are: against the version
+   * in effect, by the same Gate judge with the call's actor, and an added `${secret:NAME}` is held for the owner
+   * whatever the judge says. Every document is checked and judged BEFORE anything is written, so:
+   *
+   * - one document refused refuses the set (`refused`, naming that document), nothing written;
+   * - one document stale (its `ifMatch`, or the disk moved since the last reload) is a `conflict` naming it, nothing
+   *   written;
+   * - one document the judge would HOLD holds the WHOLE set (`held`): nothing in the set is written or takes effect,
+   *   and the outcome names every document that would be held, what each loosens, and says that the set is held.
+   *   Nothing is left on disk for the owner to confirm: the caller has the owner make the change in an act Gate's judge
+   *   lets through (a step-up), and it is then written whole.
+   *
+   * A document whose file has ANOTHER edit already held for the owner refuses the set (`already_held`): a set never
+   * discards a held edit and never carries one into effect. A document whose file cannot be read (a link, over the
+   * size cap) refuses it (`unreadable`), because the set could not put it back. The same file named twice refuses it
+   * (`duplicate`). An empty set is `written` with no documents.
+   *
+   * CRASH: before the first file is touched the kernel records the set's intent (each file's text and accepted record
+   * as they were) in its own state; the record is removed only once every file and every accepted record is written,
+   * and that removal is the commit. A daemon that stops anywhere before it — between two files included — puts every
+   * file of the set and its accepted record back as they were on its next load (boot loads first), so the last good
+   * version of every document is what is in effect, and none of the set is. A failure that does not stop the daemon
+   * (a disk error) puts them back at once and throws.
+   */
+  writeAll(documents: readonly ConfigWriteAllDocument[]): Promise<ConfigWriteAllOutcome>;
 }
+
+/** One document of a {@link ConfigPort.writeAll}: which of its own files, the edit (or its removal), the etag read. */
+export interface ConfigWriteAllDocument {
+  readonly def: ConfigFileDef<any> | ConfigCollectionDef<any>;
+  /** The collection item; `undefined` for a file. */
+  readonly name?: string;
+  /** A whole new YAML text, a patch of top-level keys, or the file's removal (judged like {@link ConfigPort.remove}). */
+  readonly edit: ConfigEdit | { readonly remove: true };
+  /** The etag the caller read this document at (`'absent'` for "nothing there"). */
+  readonly ifMatch?: string;
+}
+
+/** Where one document of a set is: its file under `config/` and, for a collection item, its name. Never a value. */
+export interface ConfigDocumentRef {
+  readonly path: string;
+  readonly name?: string;
+}
+
+/**
+ * What a {@link ConfigPort.writeAll} did, never thrown (only a disk failure the set was put back from throws):
+ * `written` (every document is in effect), `held` (one or more would be held, so NONE was written: `sentence` says so
+ * in words), `conflict` (that document moved since it was read), `refused` (that document, or the set, does not check).
+ */
+export type ConfigWriteAllOutcome =
+  | {
+      readonly kind: 'written';
+      readonly documents: readonly (ConfigDocumentRef & {
+        readonly etag: string;
+        readonly removed: boolean;
+        /** What this document loosened, when the judge let it into effect. */
+        readonly loosened: readonly string[];
+      })[];
+    }
+  | {
+      readonly kind: 'held';
+      /** Every document that would be held, and what each would loosen. */
+      readonly held: readonly (ConfigDocumentRef & { readonly sentences: readonly string[] })[];
+      /** The plain sentence: which document(s) loosen, that the set is held and that nothing in it was written. */
+      readonly sentence: string;
+    }
+  | ({ readonly kind: 'conflict' } & ConfigDocumentRef)
+  | {
+      readonly kind: 'refused';
+      readonly reason:
+        | 'yaml'
+        | 'raw_secret'
+        | 'schema'
+        | 'not_declared'
+        | 'bad_name'
+        | 'not_a_mapping'
+        | 'duplicate'
+        | 'already_held'
+        | 'unreadable';
+      /** The document refused; absent only when the document named no def this plugin declared. */
+      readonly document?: ConfigDocumentRef;
+      readonly issues: readonly ConfigWriteIssue[];
+    };
 
 /** One declared config file or collection item, named for the writer. */
 export interface ConfigTarget {
@@ -425,7 +511,22 @@ export type RootName =
    * Ferrets' per-ferret session folders (`state/ferrets/sessions/<ferret>`, the plaintext session credential file
    * among them): Ferrets alone, even if another plugin declares it.
    */
-  | 'sessions';
+  | 'sessions'
+  /**
+   * The fleet folder (`<home>/fleet`: the wrappers in `bin/`, one harness home per runtime in `homes/<id>/`, `assets/`,
+   * `shared/`, `setup/`, `ids.json`, `manifest.json`): Runtimes alone, even if another plugin declares it. Internal and
+   * writable, made `0700` by the kernel, and reached exactly as `agent-homes` is — every call through checked,
+   * no-follow descriptors, no link anywhere from the home down to it. A handle may be scoped to ONE relative folder in
+   * it (`{ subfolder: 'homes/<id>' }`: one runtime's harness home and nothing beside it).
+   */
+  | 'fleet'
+  /**
+   * One harness's OWN home on this machine, as the harness itself resolves it (`CLAUDE_CONFIG_DIR` or `~/.claude`,
+   * `CODEX_HOME` or `~/.codex`), for the first-run import's scan: an owner's root, READ-ONLY, Runtimes alone. The
+   * handle is scoped to the ABSOLUTE folder the caller names (`{ subfolder: '/home/me/.claude' }`, exactly as
+   * `harness-history` is), refuses everything inside the fence, and never follows a link out of that folder.
+   */
+  | 'harness-home';
 
 /** `RootHandle.copyTree`: what to bring, and how. */
 export interface TreeCopyOptions {
@@ -529,9 +630,9 @@ export interface RootDurableHeld extends RootDurableRead {
 export interface RootHandle {
   readonly name: RootName;
   /**
-   * `true` for a root the kernel makes under the home (`agent-homes`, `downloads`, `credentials`, `sessions`), `false`
-   * for an owner's root (`work`, `imports`, `harness-history`) or one outside the home (`worktrees`). A consumer that
-   * must never sit on an owner's folder asserts it.
+   * `true` for a root the kernel makes under the home (`agent-homes`, `downloads`, `credentials`, `sessions`, `fleet`),
+   * `false` for an owner's root (`work`, `imports`, `harness-history`, `harness-home`) or one outside the home
+   * (`worktrees`). A consumer that must never sit on an owner's folder asserts it.
    */
   readonly internal: boolean;
   resolve(relative: string): Result<FencedPath, FolderRefusal>;
@@ -1030,6 +1131,15 @@ export interface PathsPort {
    * are refused with a sentence the owner can read.
    */
   checkDirectory(absolutePath: string): Promise<Result<CheckedDirectory, DirectoryRefusal>>;
+  /**
+   * A bare executable NAME (`npx`, `claude`) resolved to the path a shell would run, under the kernel's control: only
+   * for a manifest with `permissions.which`. The caller's `directories` (absolute; a harness's configured search
+   * folders) are searched first, then the daemon's inherited `PATH`; an empty, relative or odd entry is never searched,
+   * at most 64 folders are, and the first regular file (links followed) this process may execute wins. A name that is
+   * a path, or not one plain command name, is not looked up. NOTHING is executed and no shell is involved; the answer is
+   * that path or `undefined`, never the `PATH` itself.
+   */
+  which(name: string, options?: { readonly directories?: readonly string[] }): Promise<string | undefined>;
 }
 
 /** {@link PathsPort.checkDirectory} accepted: the canonical path. */

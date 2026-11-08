@@ -12,6 +12,7 @@ import { updateHostFor } from './adapters/update-host.ts';
 import { createConfigFiles } from './config/index.ts';
 import type { ConfigJudge, HostAdapters, HostConfig, PluginStateHandle } from './host.ts';
 import { type LogSink, scopedLog } from './log.ts';
+import { nodeExecutableProbe } from './adapters/executable.ts';
 import {
   createNodeHostFs,
   createStatePort,
@@ -159,6 +160,9 @@ export function realAdapters(
     websocket: bunWebSockets(),
     hostname: () => hostname(),
     ownerHome: () => homedir(),
+    // Today's lookup: the daemon's own PATH, read at each call (`Bun.which(name, { PATH: process.env.PATH })`).
+    searchPath: () => process.env.PATH,
+    executable: nodeExecutableProbe,
     pinner: platformRootPinner(),
     scratch: scratchPort(),
     hostFacts: nodeHostFacts({ launchGuard: launchGuardFor({ home }) }),

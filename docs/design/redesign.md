@@ -1522,18 +1522,19 @@ fy plugin check <path>               runs the data-plugin checks without install
 
 ### 3.7 Isolation: what a plugin may touch
 
-| Thing            | Rule                                                                                                              | Enforced by                                                                        |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Other subsystems | only through contracts and the ports it declared; no lookup by name                                               | package exports + `context-imports` check                                          |
-| Its own state    | `state/<id>/` through the `state` port; nobody else's folder                                                      | kernel `state` port; `roots` check                                                 |
-| Other folders    | only its declared `roots`, through the `roots` port, fenced (§7.7)                                                | kernel `roots` port, `banned-globals` check (no `fs`, `os.homedir`, `process.env`) |
-| Network          | only its declared hosts, through `kernel.fetch`                                                                   | `banned-globals` (no `fetch`, sockets)                                             |
-| Processes        | only its declared programs, through `kernel.spawn` (inside a ferret's limits when it acts for one)                | `banned-globals` (no `Bun.spawn`)                                                  |
-| Secret values    | by name only, through the Vault's `run` and `authorizeFetch`; never a value                                       | Vault port has no getter                                                           |
-| Output           | every route and frame through the Gate and the final check; reads of pane or page text through `Redaction` (§7.3) | descriptor `guard`; `plugin-graph` check                                           |
-| Tool acts        | only through `kernel.act(target, op, fn)`, which asks the holds per operation and actor (§4.7)                    | act runner type; tool conformance suite                                            |
-| Hooks            | only declared hooks; bounded time                                                                                 | hooks engine                                                                       |
-| Data plugins     | run nothing; their items are inert until installed into a ferret's launch                                         | loader (no code path)                                                              |
+| Thing            | Rule                                                                                                              | Enforced by                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Other subsystems | only through contracts and the ports it declared; no lookup by name                                               | package exports + `context-imports` check                                           |
+| Its own state    | `state/<id>/` through the `state` port; nobody else's folder                                                      | kernel `state` port; `roots` check                                                  |
+| Other folders    | only its declared `roots`, through the `roots` port, fenced (§7.7)                                                | kernel `roots` port, `banned-globals` check (no `fs`, `os.homedir`, `process.env`)  |
+| Network          | only its declared hosts, through `kernel.fetch`                                                                   | `banned-globals` (no `fetch`, sockets)                                              |
+| Processes        | only its declared programs, through `kernel.spawn` (inside a ferret's limits when it acts for one)                | `banned-globals` (no `Bun.spawn`)                                                   |
+| Commands on PATH | only with `permissions.which`, through `kernel.paths.which`: a bounded lookup that never executes (§7.7)          | `gatedWhich` (refused by name without it); `banned-globals` keeps `process.env` out |
+| Secret values    | by name only, through the Vault's `run` and `authorizeFetch`; never a value                                       | Vault port has no getter                                                            |
+| Output           | every route and frame through the Gate and the final check; reads of pane or page text through `Redaction` (§7.3) | descriptor `guard`; `plugin-graph` check                                            |
+| Tool acts        | only through `kernel.act(target, op, fn)`, which asks the holds per operation and actor (§4.7)                    | act runner type; tool conformance suite                                             |
+| Hooks            | only declared hooks; bounded time                                                                                 | hooks engine                                                                        |
+| Data plugins     | run nothing; their items are inert until installed into a ferret's launch                                         | loader (no code path)                                                               |
 
 ### 3.8 Packaging
 
@@ -2492,16 +2493,26 @@ The boot-trace test asserts this order from the manifests.
 A subsystem's own `state/<id>/` and declared config are its own. Anything else is a declared **root**, handed as a
 scoped handle:
 
-| Root              | Kind                   | Holder                                          | Where it may reach                                                                                                 |
-| ----------------- | ---------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `agent-homes`     | internal               | each harness plugin, its own subfolder          | only `state/<harness>/agent-homes/`; Conversation reads a transcript only through the harness's `TranscriptReader` |
-| `harness-history` | owner's, read-only     | each harness plugin                             | only that harness's documented history folders of **this** user (links, §6.2); links not followed out              |
-| `worktrees`       | internal               | Ferrets                                         | only `<FY_HOME>-worktrees/`                                                                                        |
-| `work`            | owner's                | Ferrets, and through it a ferret's tools        | only the folder `WorkFolders` allows for that ferret: the one it was started in, checked against the fence         |
-| `imports`         | owner's, one operation | Skills, Catalogs, Conversation, `fy plugin add` | only the path the owner named, once                                                                                |
-| `downloads`       | internal               | Browsers                                        | only its staging folder                                                                                            |
+| Root              | Kind                   | Holder                                          | Where it may reach                                                                                                                                                                              |
+| ----------------- | ---------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent-homes`     | internal               | each harness plugin, its own subfolder          | only `state/<harness>/agent-homes/`; Conversation reads a transcript only through the harness's `TranscriptReader`                                                                              |
+| `harness-history` | owner's, read-only     | each harness plugin                             | only that harness's documented history folders of **this** user (links, §6.2); links not followed out                                                                                           |
+| `worktrees`       | internal               | Ferrets                                         | only `<FY_HOME>-worktrees/`                                                                                                                                                                     |
+| `work`            | owner's                | Ferrets, and through it a ferret's tools        | only the folder `WorkFolders` allows for that ferret: the one it was started in, checked against the fence                                                                                      |
+| `imports`         | owner's, one operation | Skills, Catalogs, Conversation, `fy plugin add` | only the path the owner named, once                                                                                                                                                             |
+| `downloads`       | internal               | Browsers                                        | only its staging folder                                                                                                                                                                         |
+| `fleet`           | internal               | Runtimes alone                                  | only `<FY_HOME>/fleet/` (wrappers, one harness home per runtime under `homes/<id>/`, assets, setup records); a handle may be scoped to one relative folder in it                                |
+| `harness-home`    | owner's, read-only     | Runtimes alone                                  | only the ONE harness home the caller names (absolute: `CLAUDE_CONFIG_DIR` or `~/.claude`, `CODEX_HOME` or `~/.codex`), for the first-run scan; links not followed out, refused inside the fence |
 
 - Every handle resolves symlinks before checking, refuses `..`, and keeps today's link and device-file checks.
+- `fleet` and `harness-home` are new in 5.0 (the Runtimes catalogue and first-run scan read and write through them
+  instead of raw paths). `fleet` is an internal root at a fixed place, not under `state/<id>/`: its base must be exactly
+  `<FY_HOME>/fleet` with no link from the home down to it, and it is already one of the fence's pinned paths, so no
+  owner's root reaches it. Both are refused to any plugin but Runtimes whatever its manifest declares.
+- A plugin that must know whether a command is installed asks `kernel.paths.which(name, { directories? })`
+  (`permissions.which`): one plain command name, the caller's absolute folders then the daemon's `PATH`, empty and
+  relative entries dropped, at most 64 folders, the first regular executable file wins. No shell, nothing executed;
+  the answer is a path or absent, never the `PATH`.
 - An owner's root refuses everything inside **the fence**: the live `FY_HOME`, every `<FY_HOME>-before-*` folder and
   every `state/<id>-before-*` folder (§9.3), for every caller including the owner's own `fy` imports. An internal
   root reaches its own subtree only.

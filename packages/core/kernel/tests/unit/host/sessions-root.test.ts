@@ -235,14 +235,23 @@ describe('K1 RootHandle.internal', () => {
       downloads: true,
       credentials: true,
       sessions: true,
+      fleet: true,
       'harness-history': false,
+      'harness-home': false,
       worktrees: false,
       work: false,
       imports: false,
     };
     for (const name of Object.keys(expected) as RootName[]) {
-      // credentials and sessions have an owner; every other plugin gets its own name
-      const plugin = name === 'credentials' ? 'logins' : name === 'sessions' ? 'ferrets' : 'codex';
+      // credentials, sessions, fleet and harness-home have an owner; every other plugin gets its own name
+      const plugin =
+        name === 'credentials'
+          ? 'logins'
+          : name === 'sessions'
+            ? 'ferrets'
+            : name === 'fleet' || name === 'harness-home'
+              ? 'runtimes'
+              : 'codex';
       const handle = f.port(plugin, [name]).root(name, { subfolder: '/tmp/fixture' });
       expect({ name, internal: handle.internal }).toEqual({ name, internal: expected[name] });
     }

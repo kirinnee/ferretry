@@ -56,7 +56,8 @@ import type { Manifest, Needer, ToolDecl } from '../manifest/types.ts';
 import kernelManifest, { PluginsConfig, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
-import { checkDirectory, gatedPaths } from './paths.ts';
+import { checkDirectory, gatedPaths, gatedWhich } from './paths.ts';
+import { type ExecutableProbe, whichCommand } from './which.ts';
 import { currentActor, currentStanding, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
 import { type InstalledItems, installedItemReach } from './items.ts';
@@ -192,6 +193,10 @@ export interface HostAdapters {
   readonly hostname?: () => string;
   /** The owner's home directory (`homedir()`), for `kernel.paths.home()`. Absent: the process's `HOME`, else `/`. */
   readonly ownerHome?: () => string;
+  /** The daemon's inherited `PATH`, for `kernel.paths.which`. Absent: only the caller's own folders are searched. */
+  readonly searchPath?: () => string | undefined;
+  /** Whether a path is a regular file this process may execute, for `kernel.paths.which`. Absent: nothing is found. */
+  readonly executable?: ExecutableProbe;
   /** `kernel.hostFacts` (`/proc`, `/sys`). Absent: every read refuses. */
   readonly hostFacts?: HostFactsPort;
   /** Gzips an opted-in route's answer. Absent: every answer is plain. */
@@ -616,6 +621,15 @@ async function bootLocked(
   const ownerPaths: PathsPort = Object.freeze({
     home: () => adapters.ownerHome?.() ?? process.env.HOME ?? '/',
     checkDirectory: async (absolutePath: string) => await checkDirectory(adapters.fs, absolutePath),
+    // No probe wired (a test host that gave none): nothing is found, never a guess.
+    which: async (name: string, whichOptions?: { readonly directories?: readonly string[] }) =>
+      adapters.executable === undefined
+        ? undefined
+        : await whichCommand(
+            name,
+            { path: adapters.searchPath?.(), directories: whichOptions?.directories ?? [] },
+            adapters.executable,
+          ),
   });
   /** A plugin's own `resolvers` section, read at each call (unset during build: nothing resolves yet). */
   const resolversOf =
@@ -687,7 +701,11 @@ async function bootLocked(
         stopping: () => lifecycle.stopping(),
       }),
       identity: identityPort,
-      paths: gatedPaths(manifest.id, manifest.permissions?.checkDirectory === true, ownerPaths),
+      paths: gatedWhich(
+        manifest.id,
+        manifest.permissions?.which === true,
+        gatedPaths(manifest.id, manifest.permissions?.checkDirectory === true, ownerPaths),
+      ),
       updateHost: updateHostOf(manifest, adapters, options.version),
       hostFacts:
         manifest.permissions?.hostFacts === true

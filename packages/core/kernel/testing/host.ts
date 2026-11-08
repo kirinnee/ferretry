@@ -1,12 +1,13 @@
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
-import { isInternalRoot } from '../host/internal-roots.ts';
+import { isKernelMadeRoot } from '../host/internal-roots.ts';
 import { mayHoldRoot, scopedSubfolder } from '../host/roots.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { failureResponse } from '../host/responses.ts';
 import type { ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
-import { gatedPaths } from '../host/paths.ts';
+import { gatedPaths, gatedWhich } from '../host/paths.ts';
+import { whichCommand } from '../host/which.ts';
 import { undeclaredUpdateHost } from '../host/adapters/update-host.ts';
 import { PRODUCT_BINARIES } from '../host/binaries.ts';
 import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
@@ -42,6 +43,7 @@ import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError, errorResponse, finalised, headersFrom, queryFrom } from '../contract/http.ts';
 import type {
   ChildHandle,
+  ConfigDocumentRef,
   ConfigPort,
   KernelPorts,
   Log,
@@ -56,6 +58,15 @@ import type {
 } from '../contract/ports.ts';
 import { readConfigText } from '../host/config/yaml-text.ts';
 import { isWithinList, patchedValue } from '../host/config/patch.ts';
+import {
+  type DocumentVerdict,
+  DUPLICATE_ISSUE,
+  firstStop,
+  heldSet,
+  judgeSet,
+  refusedDocument,
+  repeatedDocument,
+} from '../host/config/write-all.ts';
 import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
 import { createIdentitySigner, signerFor } from '../host/session/signer.ts';
 import {
@@ -128,6 +139,10 @@ export interface TestHostOptions {
   readonly ownerHome?: string;
   /** The directories `kernel.paths.checkDirectory` accepts: the absolute path asked → its real path. Default: none. */
   readonly directories?: Readonly<Record<string, string>>;
+  /** The absolute paths `kernel.paths.which` finds executable. Default: none. */
+  readonly executables?: readonly string[];
+  /** The `PATH` `kernel.paths.which` searches after the caller's own folders. Default: none. */
+  readonly searchPath?: string;
   /** `kernel.scratch`. Default: real private temp folders, as the daemon's. */
   readonly scratch?: ScratchPort;
   /** What the owner's installed items name, for `permissions.spawn`/`network` `{ items }` entries. Default: none. */
@@ -703,6 +718,100 @@ async function start(world: World): Promise<TestHost> {
         for (const listener of configListeners.get(key) ?? []) listener();
         return { kind: 'written', etag: 'absent', loosened: sentences };
       },
+      // The real writer's set over the in-memory values: each document checked as `write` checks one, every one before
+      // any lands, and the set's answer decided by the SAME rule (`host/config/write-all.ts`). The world holds nothing
+      // held and nothing unreadable, so `already_held` and `unreadable` never arise here.
+      async writeAll(documents) {
+        const refs: ConfigDocumentRef[] = [];
+        for (const document of documents) {
+          const { def, name } = document;
+          if (!declared.includes(def)) return refusedDocument('not_declared', { path: keyOf(def) });
+          if (def.shape === 'collection' && (name === undefined || !def.name.test(name)))
+            return refusedDocument('bad_name', { path: keyOf(def), ...(name === undefined ? {} : { name }) });
+          refs.push(
+            def.shape === 'file'
+              ? { path: def.file }
+              : { path: `${def.collection}/${name as string}.yaml`, name: name as string },
+          );
+        }
+        const twice = repeatedDocument(refs);
+        if (twice !== undefined)
+          return refusedDocument('duplicate', { path: twice.path }, [DUPLICATE_ISSUE(twice.path)]);
+        const nexts: unknown[] = [];
+        const verdicts: DocumentVerdict[] = documents.map((document, index): DocumentVerdict => {
+          const { def, name, edit } = document;
+          const ref = refs[index] as ConfigDocumentRef;
+          const all = world.config.get(keyOf(def)) as Record<string, unknown> | undefined;
+          const before = def.shape === 'file' ? all : all?.[name as string];
+          if (document.ifMatch !== undefined && document.ifMatch !== JSON.stringify(before ?? null))
+            return { kind: 'conflict', ...ref };
+          const prior = before === undefined ? undefined : def.schema.safeParse(before);
+          const priorValue = prior?.success === true ? prior.data : undefined;
+          if (typeof edit === 'object' && 'remove' in edit) {
+            const defaults = def.schema.safeParse({});
+            nexts[index] = undefined;
+            const loosens =
+              prior?.success === true
+                ? judgeLoosening(def, prior.data, defaults.success ? defaults.data : undefined)
+                : [];
+            return { kind: 'ready', document: ref, removal: true, loosens, added: [] };
+          }
+          let next: unknown;
+          if (typeof edit === 'string') {
+            const read = readConfigText(edit);
+            if (!read.ok) return refusedDocument('yaml', ref, [{ path: ref.path, message: 'this is not YAML' }]);
+            next = read.read.value ?? {};
+          } else next = patchedValue((before as Record<string, unknown> | undefined) ?? {}, edit.patch);
+          const checked = def.schema.safeParse(next);
+          if (!checked.success)
+            return refusedDocument(
+              'schema',
+              ref,
+              checked.error.issues.map(issue => ({ path: ref.path, message: issue.message })),
+            );
+          nexts[index] = next;
+          const added = addedSecretReferenceSentences(priorValue, checked.data);
+          return {
+            kind: 'ready',
+            document: ref,
+            removal: false,
+            loosens: [...judgeLoosening(def, priorValue, checked.data), ...added],
+            added,
+          };
+        });
+        const stop = firstStop(verdicts);
+        if (stop !== undefined) return stop;
+        const ready = verdicts as Extract<DocumentVerdict, { kind: 'ready' }>[];
+        const judgement = judgeSet(ready, document =>
+          judged(manifest.id, document.document.path, document.removal, document.loosens),
+        );
+        if (judgement.held.length > 0) return heldSet(judgement, documents.length);
+        // All checked and judged: every document lands, then each file's listeners hear it once.
+        const touched = new Set<string>();
+        for (const [index, document] of documents.entries()) {
+          const { def, name } = document;
+          const key = keyOf(def);
+          const next = nexts[index];
+          touched.add(key);
+          if (def.shape === 'file') {
+            if (next === undefined) world.config.delete(key);
+            else world.config.set(key, next);
+            continue;
+          }
+          const { [name as string]: _gone, ...rest } = (world.config.get(key) ?? {}) as Record<string, unknown>;
+          world.config.set(key, next === undefined ? rest : { ...rest, [name as string]: next });
+        }
+        for (const key of touched) for (const listener of configListeners.get(key) ?? []) listener();
+        return {
+          kind: 'written',
+          documents: ready.map((document, index) => ({
+            ...document.document,
+            etag: nexts[index] === undefined ? 'absent' : JSON.stringify(nexts[index]),
+            removed: document.removal,
+            loosened: judgement.loosened[index] ?? [],
+          })),
+        };
+      },
     };
   };
 
@@ -735,7 +844,7 @@ async function start(world: World): Promise<TestHost> {
       });
       const handle: RootHandle = {
         name,
-        internal: isInternalRoot(name),
+        internal: isKernelMadeRoot(name),
         resolve(relative) {
           if (prefix === undefined || relative.startsWith('/') || relative.split('/').includes('..'))
             return { ok: false, error: 'outside' };
@@ -951,28 +1060,40 @@ async function start(world: World): Promise<TestHost> {
         },
       },
       identity,
-      paths: gatedPaths(
+      paths: gatedWhich(
         manifest.id,
-        manifest.permissions?.checkDirectory === true,
-        Object.freeze({
-          home: () => options.ownerHome ?? '/home/owner',
-          // The test world keeps no disk: a directory is one the test named in `options.directories` (its real path).
-          checkDirectory: async (absolutePath: string) => {
-            const requested = absolutePath.trim();
-            if (!requested.startsWith('/'))
-              return err({
-                reason: 'not_absolute' as const,
-                message: `session working directory must be absolute: ${JSON.stringify(absolutePath)}`,
-              });
-            const real = options.directories?.[requested];
-            return real === undefined
-              ? err({
-                  reason: 'not_a_directory' as const,
-                  message: `session working directory is not a directory: ${requested}`,
-                })
-              : ok({ realPath: real });
-          },
-        }),
+        manifest.permissions?.which === true,
+        gatedPaths(
+          manifest.id,
+          manifest.permissions?.checkDirectory === true,
+          Object.freeze({
+            home: () => options.ownerHome ?? '/home/owner',
+            // The real lookup (`host/which.ts`) over the test world: an executable is one the test named in
+            // `options.executables`, and `PATH` is `options.searchPath`.
+            which: async (name: string, whichOptions?: { readonly directories?: readonly string[] }) =>
+              await whichCommand(
+                name,
+                { path: options.searchPath, directories: whichOptions?.directories ?? [] },
+                async path => (options.executables ?? []).includes(path),
+              ),
+            // The test world keeps no disk: a directory is one the test named in `options.directories` (its real path).
+            checkDirectory: async (absolutePath: string) => {
+              const requested = absolutePath.trim();
+              if (!requested.startsWith('/'))
+                return err({
+                  reason: 'not_absolute' as const,
+                  message: `session working directory must be absolute: ${JSON.stringify(absolutePath)}`,
+                });
+              const real = options.directories?.[requested];
+              return real === undefined
+                ? err({
+                    reason: 'not_a_directory' as const,
+                    message: `session working directory is not a directory: ${requested}`,
+                  })
+                : ok({ realPath: real });
+            },
+          }),
+        ),
       ),
       updateHost:
         manifest.permissions?.updateHost === true && options.updateHost !== undefined
