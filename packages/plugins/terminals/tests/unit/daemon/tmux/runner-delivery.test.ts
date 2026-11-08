@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { diedParked, type RunnerHandle } from '@ferretry/core-ferrets/contract';
+import { diedParked, type RunnerHandle, runnerDeliveryFailure } from '@ferretry/core-ferrets/contract';
 import type { InputHolds } from '@ferretry/kernel/contract';
 import { type ActRecord, testActRunner, TestMintedIds } from '@ferretry/kernel/testing';
 import { TmuxRunner } from '../../../../daemon/adapters/tmux/tmux-runner.ts';
@@ -38,7 +38,7 @@ function scriptWords(script: string): string[] {
 }
 
 // This fixture is an in-memory composer; no tmux process or real sleep is used.
-function subject() {
+function subject(options: { readonly unguarded?: boolean } = {}) {
   const server = new FakeTmuxServer();
   const acts: ActRecord[] = [];
   const handle = '%7' as RunnerHandle;
@@ -113,15 +113,18 @@ function subject() {
     socketPath: '/fixture/tmux.sock',
     instantOf: () => 'now' as never,
     now: () => 'now' as never,
-    delivery: {
-      act: testActRunner({
-        holds: () => holds,
-        actor: () => 'ferret',
-        minted: new TestMintedIds(),
-        record: act => acts.push(act),
-      }),
-      sleep: async ms => server.advance(ms),
-    },
+    delivery:
+      options.unguarded === true
+        ? undefined
+        : {
+            act: testActRunner({
+              holds: () => holds,
+              actor: () => 'ferret',
+              minted: new TestMintedIds(),
+              record: act => acts.push(act),
+            }),
+            sleep: async ms => server.advance(ms),
+          },
   });
   return {
     runner,
@@ -414,5 +417,150 @@ describe('settleStartup (e) the tmux runner waits out a parked startup and write
     shell.replace({ session: 'fy-webterm-person' });
     expect(await shell.runner.lastScreen(shell.handle)).toBe('');
     expect(await shell.runner.lastScreen('not-a-pane' as RunnerHandle)).toBe('');
+  });
+});
+
+/** What a runner rejection says through the contract, or `'resolved'` when it did not reject. */
+async function failureOf(promise: Promise<unknown>): Promise<unknown> {
+  return await promise.then(
+    () => 'resolved',
+    (error: unknown) => runnerDeliveryFailure(error),
+  );
+}
+
+const typedAnything = (world: ReturnType<typeof subject>): boolean =>
+  world.server.calls.some(call => ['send-keys', 'load-buffer', 'paste-buffer'].includes(call[0] ?? ''));
+
+describe('harness-refusals: every rejection the tmux runner knows the cause of carries the closed failure', () => {
+  it('harness-refusals a held pane types nothing and says the act’s own code, not the tmux error text', async () => {
+    const world = subject();
+    world.hold();
+
+    expect(await failureOf(world.runner.deliver(world.handle, { text: 'work' }))).toEqual({
+      kind: 'held',
+      code: 'input_pending',
+    });
+    expect(typedAnything(world)).toBe(false);
+    expect(await failureOf(world.runner.queue(world.handle, 'work'))).toEqual({ kind: 'held', code: 'input_pending' });
+    expect(typedAnything(world)).toBe(false);
+  });
+
+  it('harness-refusals a hold met AFTER the payload was typed is typed-but-unconfirmed, never a nothing-typed hold', async () => {
+    const world = subject();
+    world.holdAfterPayload();
+
+    expect(await failureOf(world.runner.deliver(world.handle, { text: 'one send' }))).toEqual({
+      kind: 'unconfirmed',
+      stranded: false,
+    });
+  });
+
+  it('harness-refusals a stranded send is unconfirmed and stranded; a gone pane is not_ready/exited', async () => {
+    const stranded = subject();
+    stranded.server.swallowEnters = 100;
+    expect(await failureOf(stranded.runner.deliver(stranded.handle, { text: 'one send' }))).toEqual({
+      kind: 'unconfirmed',
+      stranded: true,
+    });
+
+    const gone = subject();
+    gone.server.alive = false;
+    expect(await failureOf(gone.runner.deliver(gone.handle, { text: 'one send' }))).toEqual({
+      kind: 'not_ready',
+      why: 'exited',
+    });
+  });
+
+  it('harness-refusals a runner with no act runner bound writes nothing and says holds_unavailable (fail closed)', async () => {
+    const world = subject({ unguarded: true });
+
+    expect(await failureOf(world.runner.deliver(world.handle, { text: 'work' }))).toEqual({
+      kind: 'held',
+      code: 'holds_unavailable',
+    });
+    expect(await failureOf(world.runner.stopTurn(world.handle, { key: 'Escape', whenIdle: true }))).toEqual({
+      kind: 'held',
+      code: 'holds_unavailable',
+    });
+    expect(typedAnything(world)).toBe(false);
+  });
+});
+
+describe('harness-refusals: stopTurn presses the harness’s stop key under shouldPressStopKey, and never C-c', () => {
+  const keys = (world: ReturnType<typeof subject>) =>
+    world.server.calls.filter(call => call[0] === 'send-keys').map(call => call.at(-1));
+
+  it('harness-refusals shouldPressStopKey: a working pane gets exactly one Escape, acted on the exact pane', async () => {
+    const world = subject();
+    world.server.working = true;
+
+    expect(await world.runner.stopTurn(world.handle, { key: 'Escape', whenIdle: false })).toEqual({
+      pressed: true,
+      working: true,
+    });
+    expect(keys(world)).toEqual(['Escape']);
+    expect(world.server.calls.some(call => call.includes('C-c'))).toBe(false);
+    expect(world.acts).toHaveLength(1);
+    expect(world.acts[0]).toMatchObject({ op: 'keys', target: { key: world.handle }, outcome: 'ran' });
+    expect(world.guards).toHaveLength(1);
+  });
+
+  it('harness-refusals shouldPressStopKey: an idle pane whose key is not harmless there is never pressed (Codex quits on it)', async () => {
+    const world = subject();
+    world.server.working = false;
+
+    expect(await world.runner.stopTurn(world.handle, { key: 'Escape', whenIdle: false })).toEqual({
+      pressed: false,
+      working: false,
+    });
+    expect(keys(world)).toEqual([]);
+    expect(world.acts).toEqual([]);
+  });
+
+  it('harness-refusals shouldPressStopKey: an idle pane is pressed when the key is harmless there', async () => {
+    const world = subject();
+    world.server.working = false;
+
+    expect(await world.runner.stopTurn(world.handle, { key: 'Escape', whenIdle: true })).toEqual({
+      pressed: true,
+      working: false,
+    });
+    expect(keys(world)).toEqual(['Escape']);
+  });
+
+  it('harness-refusals a held pane presses nothing and says the hold’s code', async () => {
+    const world = subject();
+    world.server.working = true;
+    world.hold();
+
+    expect(await failureOf(world.runner.stopTurn(world.handle, { key: 'Escape', whenIdle: true }))).toEqual({
+      kind: 'held',
+      code: 'input_pending',
+    });
+    expect(keys(world)).toEqual([]);
+  });
+
+  it('harness-refusals a gone pane or a person’s shell is not_ready/exited, with no key', async () => {
+    for (const change of ['absent', 'person'] as const) {
+      const world = subject();
+      if (change === 'absent') world.server.alive = false;
+      else world.replace({ session: 'fy-webterm-person' });
+      expect(await failureOf(world.runner.stopTurn(world.handle, { key: 'Escape', whenIdle: true }))).toEqual({
+        kind: 'not_ready',
+        why: 'exited',
+      });
+      expect(keys(world)).toEqual([]);
+    }
+  });
+
+  it('harness-refusals no caller can make a stop press C-c or any key outside the closed set', async () => {
+    for (const key of ['C-c', 'Enter', 'y']) {
+      const world = subject();
+      world.server.working = true;
+      await expect(world.runner.stopTurn(world.handle, { key: key as 'Escape', whenIdle: true })).rejects.toThrow(
+        'not a harness stop key',
+      );
+      expect(world.server.calls).toEqual([]);
+    }
   });
 });

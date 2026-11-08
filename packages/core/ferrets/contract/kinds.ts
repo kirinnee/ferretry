@@ -1,4 +1,11 @@
-import type { FencedPath, FerretId, InstructionEntry } from '@ferretry/kernel/contract';
+import {
+  type FencedPath,
+  type FerretId,
+  type InstructionEntry,
+  REFUSAL_CODES,
+  type RefusalCode,
+} from '@ferretry/kernel/contract';
+import { z } from 'zod';
 import type { ChildEnvironment, InputRequestId } from '@ferretry/core-vault/contract';
 import type { Brand, Instant, JsonValue, Result } from '@ferretry/std';
 import type { FerretRole, HarnessKey, LoginKindKey, PackId, RunnerKey } from './ids.ts';
@@ -110,6 +117,81 @@ export type DeliveryOutcome = 'turn-started' | 'handled-local';
  * when the turn ends); `left`, it left the composer and no queue shows it, so only the transcript can say where it went.
  */
 export type QueueOutcome = 'held' | 'typed' | 'left';
+/** What a pane that never came to a prompt was doing instead (today's `SendNotReadyCause`): at work, behind a dialog, gone. */
+export const PANE_NOT_READY_REASONS = ['busy', 'dialog', 'exited'] as const;
+export type PaneNotReadyReason = (typeof PANE_NOT_READY_REASONS)[number];
+
+/**
+ * Why a runner's delivery, queue or stop did not do what was asked, CLOSED (today's `SendComposerOccupied`,
+ * `SendComposerUnreadable`, `SendPaneNotReady` and `SendLandingUnconfirmed`, plus the hold the runner's own act met).
+ * Every kind but `unconfirmed` typed NOTHING of the message, so the same message may go again; `unconfirmed` typed it and
+ * nothing proved it landed (`stranded`: it is still in the composer after every Enter), so it must never be typed again.
+ * `draft` is what the person had in the composer, carried only so a refusal can show it back to them as today does.
+ */
+export type RunnerDeliveryFailure =
+  | { readonly kind: 'not_ready'; readonly why: PaneNotReadyReason }
+  | { readonly kind: 'composer_occupied'; readonly draft: string }
+  | { readonly kind: 'composer_unreadable' }
+  | { readonly kind: 'held'; readonly code: RefusalCode }
+  | { readonly kind: 'unconfirmed'; readonly stranded: boolean };
+
+const RunnerDeliveryFailureSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('not_ready'), why: z.enum(PANE_NOT_READY_REASONS) }),
+  z.strictObject({ kind: z.literal('composer_occupied'), draft: z.string() }),
+  z.strictObject({ kind: z.literal('composer_unreadable') }),
+  z.strictObject({ kind: z.literal('held'), code: z.enum(REFUSAL_CODES) }),
+  z.strictObject({ kind: z.literal('unconfirmed'), stranded: z.boolean() }),
+]);
+
+/**
+ * The closed failure a runner's rejection carries on its `deliveryFailure` field, or `undefined` for any other
+ * rejection (one that says nothing about whether keys went). Parsed, never trusted: a field that is not exactly one of
+ * the closed kinds reads as no answer at all, so a runner can never mint a reason (as {@link diedParked} reads `parked`).
+ */
+export function runnerDeliveryFailure(error: unknown): RunnerDeliveryFailure | undefined {
+  if (typeof error !== 'object' || error === null || !('deliveryFailure' in error)) return undefined;
+  const parsed = RunnerDeliveryFailureSchema.safeParse(error.deliveryFailure);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * The stop keys a runner may press for a harness, CLOSED: `Escape` ends the current turn in both harness TUIs. `C-c`
+ * is deliberately absent — it is the QUIT path (Codex exits on it at an idle prompt), so no harness can ask for it.
+ */
+export const HARNESS_STOP_KEYS = ['Escape'] as const;
+export type HarnessStopKey = (typeof HARNESS_STOP_KEYS)[number];
+
+/** How a harness's turn is stopped: its key, and whether that key is harmless at an idle prompt. */
+export interface HarnessStop {
+  readonly key: HarnessStopKey;
+  /**
+   * The key does nothing harmful at an idle prompt (Claude Code: it clears a half-typed composer or closes a menu,
+   * which is what "stop" means to the person at an interactive pane). `false` for Codex, which can QUIT on it there.
+   */
+  readonly safeWhenIdle: boolean;
+}
+
+/** One stop a runner is asked to press: the key, and whether it may be pressed at a pane that shows no active work. */
+export interface RunnerStop {
+  readonly key: HarnessStopKey;
+  readonly whenIdle: boolean;
+}
+
+/** What a stop did: whether the key was pressed, and whether the pane still showed active work after (unread: absent). */
+export interface RunnerStopOutcome {
+  readonly pressed: boolean;
+  readonly working?: boolean;
+}
+
+/**
+ * Today's `shouldPressStopKey`, the rule every stop obeys: press only while the pane shows active work, or where the
+ * key is harmless at an idle prompt. IT IS A SAFETY RULE: a stop key sent to a pane that was merely believed to be working
+ * can QUIT the agent it was asked to pause.
+ */
+export function shouldPressStopKey(working: boolean, stop: RunnerStop): boolean {
+  return working || stop.whenIdle;
+}
+
 /** Why `attach` would not adopt a handle: nothing there, not a ferret of ours, or not the ferret named. */
 export type AttachRefusal = 'gone' | 'not-a-ferret' | 'mismatch' | 'unsupported';
 
@@ -124,10 +206,16 @@ export interface Runner {
   resume(spec: RunSpec, harnessConversationId: string): Promise<Result<RunningFerret, StartRefusal>>;
   attach(handle: RunnerHandle): Promise<Result<RunningFerret, AttachRefusal>>;
   alive(handle: RunnerHandle): Promise<boolean>;
+  /**
+   * A raw process signal: `interrupt` is the runner's own interrupt key (tmux: `C-c`), which can QUIT a harness at an
+   * idle prompt. Never a harness's turn stop: that is {@link Runner.stopTurn}.
+   */
   signal(handle: RunnerHandle, signal: 'interrupt' | 'terminate'): Promise<void>;
   /**
    * Delivers one message into the ferret's pane (today's tmux paste-and-keys delivery, which Conversation and the
-   * harnesses call). A handle with nothing behind it rejects; it never starts anything.
+   * harnesses call). A handle with nothing behind it rejects; it never starts anything. A rejection that knows what
+   * happened carries a {@link RunnerDeliveryFailure} on its `deliveryFailure` field (read it with
+   * {@link runnerDeliveryFailure}): every kind but `unconfirmed` typed nothing of the message.
    */
   deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome>;
   /**
@@ -135,8 +223,18 @@ export interface Runner {
    * it when its turn ends. Like `deliver`, the runner guards EVERY write it makes with `kernel.act` on that pane itself,
    * so a caller must not wrap it in a second act (the two would wait on each other). A handle with nothing behind it
    * rejects; it never starts anything. Absent: the runner cannot queue, and the harness seam answers `plugin_unavailable`.
+   * Its rejections carry a {@link RunnerDeliveryFailure} exactly as `deliver`'s do.
    */
   queue?(handle: RunnerHandle, text: string): Promise<QueueOutcome>;
+  /**
+   * Additive (harness-refusals, today's `TmuxSendTerminal.pressStopKey` under `shouldPressStopKey`): reads the ferret's
+   * pane ONCE and presses `stop.key` — exactly one keystroke, never `C-c`, never retried — only when
+   * {@link shouldPressStopKey} says so for what it read; then reads the pane again for `working`. Like `deliver`, the
+   * runner guards the write with `kernel.act` on that pane itself, so a caller must not wrap it in a second act. A pane
+   * that is gone rejects with `not_ready`/`exited`, a hold its act meets with `held` (nothing pressed), both on
+   * `deliveryFailure`. Absent: the runner cannot stop a turn safely, and the harness seam refuses `plugin_unavailable`.
+   */
+  stopTurn?(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerStopOutcome>;
   /**
    * Additive (U3, today's `SessionLifecycleLauncher.settled`): waits, boundedly, until the harness has finished its OWN
    * startup after the first turn was delivered. Delivery is not startup: Codex takes a submission while it is still
@@ -308,6 +406,12 @@ export interface Harness {
    * FIXED sentence of the harness's own: it never quotes the screen. Absent: no harness explanation.
    */
   startFailure?(screen: string): string | undefined;
+  /**
+   * Additive (harness-refusals): how this harness's turn is stopped — the key (today's `Escape` in both TUIs) and
+   * whether it is harmless at an idle prompt (today's `STOP_KEY_SAFE_WHEN_IDLE`, Claude Code only). Absent: the harness
+   * names no safe stop, and an interrupt is refused rather than guessed.
+   */
+  readonly turnStop?: HarnessStop;
   readonly transcript: TranscriptReader;
   readonly usage: UsageReader;
   readonly dialogs?: DialogReader;
