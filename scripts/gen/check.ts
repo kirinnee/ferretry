@@ -37,6 +37,7 @@ import { check as portsPending } from '../validate/ports-pending.ts';
 import { check as readScoped } from '../validate/read-scoped.ts';
 import { check as registriesFresh } from '../validate/registries-fresh.ts';
 import { check as screenPaths } from '../validate/screen-paths.ts';
+import { check as shellProvides } from '../validate/shell-provides.ts';
 import { check as words } from '../validate/words.ts';
 import { type Check, type Finding, contextFor, parseArgs, report } from './lib/check.ts';
 import { generatePackage, writeFiles } from './registries.ts';
@@ -48,6 +49,7 @@ export const CHECKS: readonly Check[] = [
   contractGraph,
   pluginGraph,
   appHooks,
+  shellProvides,
   coreClosed,
   manifestMatch,
   screenPaths,
@@ -73,6 +75,7 @@ const SCOPED = new Set([
   'contract-consumes',
   'manifest-match',
   'app-hooks',
+  'shell-provides',
   'screen-paths',
   'read-scoped',
   'act-runner',

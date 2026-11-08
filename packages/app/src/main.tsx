@@ -29,12 +29,12 @@ import type { KeyValueStore } from './storage/records.ts';
 import { preloadThemeFonts } from './theme/fonts.ts';
 import { ThemePreferenceStore } from './theme/preferences.ts';
 import { installPortraitLock } from './ui/lib/orientation-lock.ts';
+import { whenBackOnScreen } from './ui/hooks/use-document-visible.ts';
 import './styles/index.css';
 import './ui/design-system.css';
 
 const host = document.getElementById('root');
-// A document without `#root` is not this app's document; a silent fallback would hide what is serving the HTML.
-if (!host) throw new Error('missing #root — the host document is not this app’s index.html');
+if (!host) throw new Error('missing #root — the host document is not this app’s index.html'); // never a silent fallback
 
 /** This origin's localStorage, or `null` where the browser refuses it (a private window, a sandbox). */
 function localStore(): KeyValueStore | null {
@@ -104,7 +104,7 @@ for (const failure of [...registered.failures, ...daemonless.failures])
   console.warn(`${failure.plugin} could not set up its connect part: ${failure.reason}`);
 // The one passkey prompt (Access's): its ceremony rides Access's own guarded client, read from the runtime per call.
 const passkey = registeredPasskey(generated.surfaces, {
-  clientOf: (daemon, plugin) => runtime.packageClient(daemon, plugin),
+  clientOf: (daemon, plugin) => runtime.client(daemon, plugin),
   daemons,
   origin: window.location.origin,
   credentials: {
@@ -122,6 +122,8 @@ const runtime = new ShellRuntime({
   connect: connector({ crypto, claims: registered.claims, carriers: registered.carriers, direct }),
   passkey: () => passkey.passkey,
   daemonless: { views: daemonless.views, location: () => window.location.href },
+  onVisible: whenBackOnScreen(document),
+  address: window, // the declared fragments leave the address bar here, before the first render (S3)
 });
 
 const themes = new ThemePreferenceStore(storage);
@@ -135,10 +137,8 @@ preloadThemeFonts(themes.snapshot().family);
 // A phone held sideways gets today's portrait gate (the app is drawn for an upright phone).
 installPortraitLock(window, document);
 themes.subscribe(() => preloadThemeFonts(themes.snapshot().family));
-
-// The signed-release service worker (docs/pwa-release-signing.md), built to /sw.verified.js by
-// scripts/build-release.ts. Absent in `vite dev`, where there is no signed release to check. Its URL goes through the
-// `fy-worker` Trusted Types policy: `_headers` requires one at every script sink, a registration included.
+// The signed-release service worker (docs/pwa-release-signing.md, built by scripts/build-release.ts; absent in `vite
+// dev`). Its URL goes through the `fy-worker` Trusted Types policy, which `_headers` requires at every script sink.
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   void navigator.serviceWorker.register(trustedWorkerUrl('/sw.verified.js'), { scope: '/' }).catch(() => {});
 }

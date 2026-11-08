@@ -16,7 +16,7 @@ import type { DaemonConnection, DaemonId } from './machine.ts';
 import { ListRefresh, type ListRefreshEnvironment, browserListRefreshEnvironment } from '../shell.ts';
 
 /** One machine's ferrets as the inbox reads them: `null` until the first list read answers. */
-interface FleetMachine {
+export interface FleetMachine {
   readonly sessions: readonly FerretView[] | null;
 }
 

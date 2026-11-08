@@ -3,7 +3,7 @@
  * own client (`@ferretry/app` records the machine of every client it hands out), so a view built here can only reach
  * the machine it was built for. Every daemon call goes through that client by route key — no fetch, no store.
  */
-import { daemonOfClient, type PairedDaemon, usePairedDaemons } from '@ferretry/app';
+import { type PairedDaemon, usePairedDaemons, useViewPlace } from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import type { PairingClient } from './features/settings/add-device-api.ts';
@@ -30,9 +30,12 @@ export const connectionRecord = (paired: PairedDaemon): DaemonConnectionRecord =
   lastSelectedAt: paired.lastSelectedAt,
 });
 
-/** The machine `client` talks to, as a connection record; `undefined` for a client the shell did not make. */
-export function useMachineOf(client: PluginClient): DaemonConnectionRecord | undefined {
-  const id = daemonOfClient(client);
+/**
+ * The machine this view is drawn for (its place, shell contract S1), as a connection record; `undefined` outside a
+ * per-daemon view (a harness, a suite).
+ */
+export function useMachineOf(): DaemonConnectionRecord | undefined {
+  const id = useViewPlace()?.daemon;
   const paired = usePairedDaemons().find(candidate => candidate.daemon === id);
   return paired === undefined ? undefined : connectionRecord(paired);
 }

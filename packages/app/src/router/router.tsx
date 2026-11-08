@@ -40,6 +40,8 @@ export interface RouterProviderProps {
   readonly newEntryKey?: () => string;
   /** Where the trail survives a reload. Defaults to this tab's `sessionStorage`, when the browser allows it. */
   readonly trailStorage?: RouterTrailStorage | null;
+  /** Called after every history write this router makes and on Back/Forward, before the new route renders (S3). */
+  readonly onAddress?: () => void;
 }
 
 /** One history entry this router has seen: its identity and the pathname it showed. */
@@ -119,6 +121,7 @@ export function RouterProvider({
   parseRoute,
   newEntryKey = defaultEntryKey,
   trailStorage = browserTrailStorage(browser),
+  onAddress,
 }: RouterProviderProps) {
   const [route, setRoute] = useState<Route>(() => parseRoute(browser.location.pathname));
   const trail = useRef<(TrailEntry | null)[] | null>(null);
@@ -130,12 +133,13 @@ export function RouterProvider({
 
   useEffect(() => {
     const readLocation = (): void => {
+      onAddress?.();
       setEntry(current => adopt(browser, trail.current ?? [], trailStorage, newEntryKey, current.fyIndex + 1));
       setRoute(parseRoute(browser.location.pathname));
     };
     browser.addEventListener('popstate', readLocation);
     return () => browser.removeEventListener('popstate', readLocation);
-  }, [browser, newEntryKey, parseRoute, trailStorage]);
+  }, [browser, newEntryKey, onAddress, parseRoute, trailStorage]);
 
   const write = useCallback(
     (to: string, replace: boolean, at: EntryState): EntryState => {
@@ -146,13 +150,15 @@ export function RouterProvider({
       const kept = replace ? ownState(browser.history.state) : {};
       if (replace) browser.history.replaceState({ ...kept, ...next }, '', to);
       else browser.history.pushState(next, '', to);
+      // The new entry's address is read (a declared fragment leaves it) before anything draws there.
+      onAddress?.();
       const list = (trail.current ?? []).slice(0, replace ? fyIndex : at.fyIndex + 1);
       list[fyIndex] = { key: next.fyEntry, path: browser.location.pathname };
       trail.current = list;
       saveTrail(trailStorage, list);
       return next;
     },
-    [browser, newEntryKey, trailStorage],
+    [browser, newEntryKey, onAddress, trailStorage],
   );
 
   const entryRef = useRef(entry);
