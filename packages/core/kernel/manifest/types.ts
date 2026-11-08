@@ -258,6 +258,13 @@ export interface Permissions {
    */
   readonly which?: true;
   /**
+   * The operator variables `kernel.paths.locate` may read as one command's override (Connections:
+   * `['FY_CLOUDFLARED']`), by exact name, each `^FY_[A-Z0-9_]{1,60}$`; `'*'`, a pattern or any other spelling is a
+   * name that matches no variable, for a core plugin too. Only with `which`. Absent: every `locate` is refused, and no
+   * other variable is ever read.
+   */
+  readonly whichOverrides?: readonly string[];
+  /**
    * It mints shared trees through `kernel.roots.share` (Skills: one skill folder handed, read-only, to the harness that
    * receives the launch part). It hands another plugin read of a folder it owns, so a plugin that does not declare it
    * is refused by name.

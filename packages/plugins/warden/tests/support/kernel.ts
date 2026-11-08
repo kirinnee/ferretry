@@ -111,6 +111,11 @@ export function fakeKernel(options: { readonly config?: ConfigPort; readonly sta
     redaction: { read: async (fn: (scope: { text(s: string): string }) => unknown) => await fn({ text: s => s }) },
     jobs: { add: () => undefined, kick: () => undefined },
     lifecycle: { onStop: () => undefined, stopping: () => false, signal: new AbortController().signal },
+    // No warden.yaml names a key here: the kernel answers not_configured, the guard not_set, and nothing is sent.
+    secrets: {
+      resolve: async () => ({ refused: 'not_configured' }),
+      send: async () => ({ kind: 'refused', refused: 'not_configured' }),
+    },
   } as unknown as KernelPorts;
   return { kernel, clock, published, logged };
 }

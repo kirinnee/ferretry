@@ -136,6 +136,8 @@ describe('which: gated by permissions.which', () => {
     home: () => '/h',
     checkDirectory: async () => ({ ok: true as const, value: { realPath: '/x' } }),
     which: async () => '/usr/bin/npx',
+    locate: async () => ({ kind: 'absent' as const }),
+    whichFor: async () => ({ kind: 'unprovable' as const }),
   };
 
   test('a declared plugin is answered; an undeclared one is refused naming the plugin, its other calls kept', async () => {

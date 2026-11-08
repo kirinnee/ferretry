@@ -50,7 +50,7 @@ import {
   UndeclaredProgramError,
   UndeclaredSecretError,
 } from './lib/secrets/reach.ts';
-import { ChildEnvironments } from './lib/secrets/child-environments.ts';
+import { ChildEnvironments, namesSecret } from './lib/secrets/child-environments.ts';
 import { type SecretCloneIdentitySource, SecretExportService, SecretImportService } from './lib/secrets/clone.ts';
 import { HoldRegistry } from './lib/secrets/output-guard.ts';
 import { launchEnvironment } from './lib/secrets/policy.ts';
@@ -158,16 +158,32 @@ export default implementDaemon(manifest, {
     /**
      * `${secret:NAME}` in a ferret child's environment (S62–S64): every name resolved, or the launch refused. A
      * variable whose whole value is `${secret?:NAME}` is set when held and left out when not (`launchEnvironment`).
+     *
+     * The handle records the plugin it was minted for (`requester`: the needer this port was built for) and whether its
+     * `PATH` as asked named a secret, so `searchPathOf` (Q7) answers only the kernel's readers for that plugin and
+     * never a secret-derived PATH. A call with no requester mints a handle no plugin may search.
      */
+    const mintChildEnvironment = async (
+      env: Readonly<Record<string, string>>,
+      requester: string | undefined,
+    ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>> => {
+      // ONE reading of the caller's object: the PATH judged for a secret reference is the PATH that is resolved.
+      const asked: Readonly<Record<string, string>> = Object.freeze({ ...env });
+      const values = await vault.values();
+      const resolved = launchEnvironment(asked, values);
+      if (!resolved.ok) return err({ unknown: resolved.unknown });
+      return ok(
+        environments.mint(resolved.value, {
+          ...(requester === undefined ? {} : { requester }),
+          pathFromSecret: namesSecret(asked.PATH),
+        }),
+      );
+    };
     const childEnvironment = async (
       _ferret: FerretId,
       env: Readonly<Record<string, string>>,
-    ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>> => {
-      const values = await vault.values();
-      const resolved = launchEnvironment(env, values);
-      if (!resolved.ok) return err({ unknown: resolved.unknown });
-      return ok(environments.mint(resolved.value));
-    };
+    ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>> =>
+      await mintChildEnvironment(env, undefined);
 
     /**
      * The kernel's own `${secret:NAME}` lookup (`kernel.secrets`): the value for a NAME, as today's consumers took it
@@ -231,7 +247,10 @@ export default implementDaemon(manifest, {
      * today's Vault refuses a host, secret or program it does not allow.
      */
     const apiFor = (needer: Needer): VaultApi => {
-      if (isCoreNeeder(needer)) return full;
+      // Every needer's handles name it as their requester (`searchPathOf`), the core ones included.
+      const ownChildEnvironment: VaultApi['childEnvironment'] = async (_ferret, env) =>
+        await mintChildEnvironment(env, needer.id);
+      if (isCoreNeeder(needer)) return { ...full, childEnvironment: ownChildEnvironment };
       return {
         ...full,
         // LIST reach: the secrets this needer may use or mints itself. WRITE reach is narrower: only the names it MINTS, so a
@@ -281,7 +300,7 @@ export default implementDaemon(manifest, {
           const env = SecretUseRequestSchema.shape.env.parse({ ...asked });
           const refused = secretsNamedBy({ secrets: [], env }).filter(name => !mayUseSecret(needer, name));
           if (refused.length > 0) return err({ unknown: refused });
-          return await full.childEnvironment(ferret, env);
+          return await ownChildEnvironment(ferret, env);
         },
       };
     };

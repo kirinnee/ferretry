@@ -35,7 +35,7 @@ import {
   mergeWardenConfig,
   type WardenConfig,
   type WardenConfigPatch,
-  WardenFileSchema,
+  WardenSettingsPatchSchema,
   WardenConfigSchema,
   type WardenLogin,
 } from './protocol.ts';
@@ -120,7 +120,7 @@ export function applyWardenConfigPatch(config: WardenConfig, patch: WardenConfig
 
 /** Parses a patch as an operator stated it, refusing unknown fields. */
 export function parseWardenConfigPatch(value: unknown): WardenConfigPatch {
-  return WardenFileSchema.parse(value);
+  return WardenSettingsPatchSchema.parse(value);
 }
 
 /** The investigation login in effect, and the failover order it heads. */

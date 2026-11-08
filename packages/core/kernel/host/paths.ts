@@ -2,6 +2,7 @@ import { err, ok, type Result } from '@ferretry/std';
 import { isAbsolute } from 'node:path';
 import type { CheckedDirectory, DirectoryRefusal, PathsPort } from '../contract/ports.ts';
 import type { HostFs } from './adapters/node-fs.ts';
+import { mayReadOverride } from './which.ts';
 
 /**
  * `kernel.paths.checkDirectory` (today's session working-directory resolver, rule for rule): the path is trimmed; a
@@ -39,23 +40,46 @@ export function gatedPaths(plugin: string, declared: boolean, base: PathsPort): 
     checkDirectory: async () => {
       throw new Error(`${plugin} did not declare permissions.checkDirectory, so it probes no absolute path.`);
     },
-    // Gated on its own permission ({@link gatedWhich}), never by this one.
+    // Gated on their own permission ({@link gatedWhich}), never by this one.
     which: base.which,
+    locate: base.locate,
+    whichFor: base.whichFor,
   });
 }
 
 /**
- * `kernel.paths.which` for one plugin: the lookup itself (`./which.ts`) only for a manifest that declares
- * `permissions.which`; any other plugin's call is refused naming the plugin, as `checkDirectory` is. It tells what is
- * installed where, which a plugin that never asked has no business learning.
+ * `kernel.paths.which`, `locate` and `whichFor` for one plugin: the lookups themselves (`./which.ts`) only for a
+ * manifest that declares `permissions.which`; any other plugin's call is refused naming the plugin, as
+ * `checkDirectory` is. They tell what is installed where, which a plugin that never asked has no business learning.
  */
 export function gatedWhich(plugin: string, declared: boolean, base: PathsPort): PathsPort {
   if (declared) return base;
+  const refused = async (): Promise<never> => {
+    throw new Error(`${plugin} did not declare permissions.which, so it looks no command up.`);
+  };
   return Object.freeze({
     home: base.home,
     checkDirectory: base.checkDirectory,
-    which: async () => {
-      throw new Error(`${plugin} did not declare permissions.which, so it looks no command up.`);
+    which: refused,
+    locate: refused,
+    whichFor: refused,
+  });
+}
+
+/**
+ * `kernel.paths.locate`'s variable gate: only a variable this plugin declared in `permissions.whichOverrides`, by
+ * exact name ({@link mayReadOverride}); any other is refused naming the plugin BEFORE anything is read.
+ */
+export function gatedOverrides(plugin: string, declared: readonly string[] | undefined, base: PathsPort): PathsPort {
+  return Object.freeze({
+    ...base,
+    locate: async (name: string, options: Parameters<PathsPort['locate']>[1]) => {
+      const variable: unknown = options?.override;
+      if (!mayReadOverride(declared, variable))
+        throw new Error(
+          `${plugin} asked for an override variable its permissions.whichOverrides does not declare, so it reads no override.`,
+        );
+      return await base.locate(name, { ...options, override: variable });
     },
   });
 }

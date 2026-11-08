@@ -16,22 +16,30 @@ import {
 } from '../host/shared-trees.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { failureResponse } from '../host/responses.ts';
-import type { ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
+import type { ContractSurface, FetchPort, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
-import { gatedPaths, gatedWhich } from '../host/paths.ts';
-import { whichCommand } from '../host/which.ts';
+import { gatedOverrides, gatedPaths, gatedWhich } from '../host/paths.ts';
+import { handleReaders, locateCommand, whichCommand, whichForCommand } from '../host/which.ts';
 import { NO_PROCESS_TABLE, type ProcessTable, processesPortFor } from '../host/processes.ts';
 import { undeclaredUpdateHost } from '../host/adapters/update-host.ts';
 import { PRODUCT_BINARIES } from '../host/binaries.ts';
 import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
 import type { DaemonTimings } from '../contract/ports.ts';
 import { DEFAULT_DAEMON_TIMINGS } from '../host/session/timings.ts';
-import { addedSecretReferenceSentences, ownSecretsPort, secretReferencesIn } from '../host/secrets.ts';
+import {
+  addedSecretReferenceSentences,
+  exactNetworkHosts,
+  ownSecretsPort,
+  secretReferencesIn,
+} from '../host/secrets.ts';
+import { outboundSecretTransport } from '../host/adapters/outbound-secret.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { err, hours, instantFromEpochMs, ok } from '@ferretry/std';
 import type { Actor, HoldDecision, RefusalCode, TargetRef } from '../contract/act.ts';
 import type {
   Admission,
+  ChildEnvironment,
+  ChildEnvironmentOpener,
   GuardStamp,
   InputHolds,
   OutputGuard,
@@ -39,7 +47,7 @@ import type {
   RedactionScope,
   WorkFolders,
 } from '../contract/bound.ts';
-import { KERNEL_ONLY_PORTS, WITHHELD_SENTENCE } from '../contract/bound.ts';
+import { ChildEnvironmentPort, KERNEL_ONLY_PORTS, WITHHELD_SENTENCE } from '../contract/bound.ts';
 import type {
   ConfigCollectionDef,
   ConfigFileDef,
@@ -198,6 +206,16 @@ export interface TestHostOptions {
   readonly executables?: readonly string[];
   /** The `PATH` `kernel.paths.which` searches after the caller's own folders. Default: none. */
   readonly searchPath?: string;
+  /**
+   * The operator's environment `kernel.paths.locate` reads an override from (`FY_CLOUDFLARED` → its value); only a
+   * variable the manifest declared in `permissions.whichOverrides` is ever asked. Default: none set.
+   */
+  readonly operatorVariables?: Readonly<Record<string, string>>;
+  /**
+   * The Vault's handle opener, for `kernel.paths.whichFor` (`searchPathOf`). Default: a loaded Vault's provided
+   * `childEnvironments`, else none, so every handle is `unprovable`.
+   */
+  readonly childEnvironments?: ChildEnvironmentOpener;
   /** `RootHandle.copyShared`'s link rule, as the real host's `sharedTreeLinks`. Default: `SHARED_TREE_LINK_RULE`. */
   readonly sharedTreeLinks?: SharedTreeLinkRule;
   /** `kernel.scratch`. Default: real private temp folders, as the daemon's. */
@@ -219,7 +237,7 @@ export interface TestHostOptions {
   readonly updateHost?: UpdateHostPort;
   /** What `kernel.timings` answers. Default: the shipped numbers (`DEFAULT_DAEMON_TIMINGS`). */
   readonly timings?: DaemonTimings;
-  /** The Vault stand-in for `kernel.secrets.resolve`: name to value. Absent, every declared and configured name is `unknown`. */
+  /** The Vault stand-in for `kernel.secrets` (`resolve` and `send`): name to value. Absent, every declared and configured name is `unknown`. */
   readonly vault?: Readonly<Record<string, string>>;
   /** The contract hash per package, as `kernel.contract.hash()` answers its own plugin (`surface` is `'member'` for the member-surface hash). Default: `unhashed`. */
   readonly contractHash?: (id: string, surface?: ContractSurface) => string;
@@ -1302,6 +1320,29 @@ async function start(world: World): Promise<TestHost> {
       world.states.set(manifest.id, state);
     }
     const publishes = new Set((manifest.data?.publishes ?? []).map(event => event.name));
+    const declaredNetwork = effectivePermissions(manifest.id, manifest.permissions?.network ?? []);
+    const mayReach = (hostname: string, host: string): boolean =>
+      hostPermitted(
+        declaredNetwork,
+        options.items ?? NO_ITEMS,
+        hostname,
+        name =>
+          (
+            built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
+              | Readonly<Record<string, (() => readonly string[]) | undefined>>
+              | undefined
+          )?.[name],
+        host,
+      );
+    const fetchPort: FetchPort = {
+      async request(url, init) {
+        const parsed = new URL(url);
+        if (!mayReach(parsed.hostname, parsed.host))
+          throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
+        if (options.fetch === undefined) throw new Error(`${manifest.id}: fetch ${parsed.host} with no fetch fake`);
+        return options.fetch(parsed, init);
+      },
+    };
     return {
       clock,
       log: logFor(manifest.id),
@@ -1372,28 +1413,7 @@ async function start(world: World): Promise<TestHost> {
           );
         },
       },
-      fetch: {
-        async request(url, init) {
-          const parsed = new URL(url);
-          if (
-            !hostPermitted(
-              effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
-              options.items ?? NO_ITEMS,
-              parsed.hostname,
-              name =>
-                (
-                  built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
-                    | undefined
-                )?.[name],
-              parsed.host,
-            )
-          )
-            throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
-          if (options.fetch === undefined) throw new Error(`${manifest.id}: fetch ${parsed.host} with no fetch fake`);
-          return options.fetch(parsed, init);
-        },
-      },
+      fetch: fetchPort,
       scratch: options.scratch ?? scratchPort('fy-test-'),
       websocket: {
         connect(url) {
@@ -1432,33 +1452,66 @@ async function start(world: World): Promise<TestHost> {
         gatedPaths(
           manifest.id,
           manifest.permissions?.checkDirectory === true,
-          Object.freeze({
-            home: () => options.ownerHome ?? '/home/owner',
-            // The real lookup (`host/which.ts`) over the test world: an executable is one the test named in
-            // `options.executables`, and `PATH` is `options.searchPath`.
-            which: async (name: string, whichOptions?: { readonly directories?: readonly string[] }) =>
-              await whichCommand(
-                name,
-                { path: options.searchPath, directories: whichOptions?.directories ?? [] },
-                async path => (options.executables ?? []).includes(path),
-              ),
-            // The test world keeps no disk: a directory is one the test named in `options.directories` (its real path).
-            checkDirectory: async (absolutePath: string) => {
-              const requested = absolutePath.trim();
-              if (!requested.startsWith('/'))
-                return err({
-                  reason: 'not_absolute' as const,
-                  message: `session working directory must be absolute: ${JSON.stringify(absolutePath)}`,
-                });
-              const real = options.directories?.[requested];
-              return real === undefined
-                ? err({
-                    reason: 'not_a_directory' as const,
-                    message: `session working directory is not a directory: ${requested}`,
-                  })
-                : ok({ realPath: real });
-            },
-          }),
+          gatedOverrides(
+            manifest.id,
+            manifest.permissions?.whichOverrides,
+            Object.freeze({
+              home: () => options.ownerHome ?? '/home/owner',
+              // The real lookup (`host/which.ts`) over the test world: an executable is one the test named in
+              // `options.executables`, and `PATH` is `options.searchPath`.
+              which: async (name: string, whichOptions?: { readonly directories?: readonly string[] }) =>
+                await whichCommand(
+                  name,
+                  { path: options.searchPath, directories: whichOptions?.directories ?? [] },
+                  async path => (options.executables ?? []).includes(path),
+                ),
+              // The real rules (`host/which.ts`) over the test world, behind the real gates below.
+              locate: async (
+                name: string,
+                locateOptions: { readonly override: string; readonly directories?: readonly string[] },
+              ) =>
+                await locateCommand(name, locateOptions, {
+                  variable: variable =>
+                    Object.hasOwn(options.operatorVariables ?? {}, variable)
+                      ? options.operatorVariables?.[variable]
+                      : undefined,
+                  path: options.searchPath,
+                  probe: async path => (options.executables ?? []).includes(path),
+                }),
+              // Readers from the plugins under test's DECLARED manifests, as the real host computes them.
+              whichFor: async (name: string, env: ChildEnvironment) => {
+                let searchPath: string | undefined;
+                try {
+                  // As the real host: the Vault's bound opener (a loaded Vault's `childEnvironments`), else the option.
+                  const opener =
+                    options.childEnvironments ??
+                    (providedBy.get(ChildEnvironmentPort.name) as ChildEnvironmentOpener | undefined);
+                  searchPath = opener?.searchPathOf(env, handleReaders(manifest.id, manifests));
+                } catch {
+                  searchPath = undefined;
+                }
+                return await whichForCommand(name, searchPath, async path =>
+                  (options.executables ?? []).includes(path),
+                );
+              },
+              // The test world keeps no disk: a directory is one the test named in `options.directories` (its real path).
+              checkDirectory: async (absolutePath: string) => {
+                const requested = absolutePath.trim();
+                if (!requested.startsWith('/'))
+                  return err({
+                    reason: 'not_absolute' as const,
+                    message: `session working directory must be absolute: ${JSON.stringify(absolutePath)}`,
+                  });
+                const real = options.directories?.[requested];
+                return real === undefined
+                  ? err({
+                      reason: 'not_a_directory' as const,
+                      message: `session working directory is not a directory: ${requested}`,
+                    })
+                  : ok({ realPath: real });
+              },
+            }),
+          ),
         ),
       ),
       updateHost:
@@ -1476,11 +1529,18 @@ async function start(world: World): Promise<TestHost> {
         options.processes ?? NO_PROCESS_TABLE,
       ),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
-      // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in
+      // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in;
+      // `send` places the value through this plugin's own fetch guard and `options.fetch`, as the real host does
       secrets: ownSecretsPort(
         manifest.permissions?.secrets ?? [],
         () => ownedReferences(manifest),
         () => (options.vault === undefined ? undefined : { resolve: async name => options.vault?.[name] }),
+        {
+          hosts: exactNetworkHosts(declaredNetwork),
+          mayReach,
+          transport: outboundSecretTransport(fetchPort, clock),
+          log: logFor(manifest.id),
+        },
       ),
       signer: signerFor(manifest.id, identitySigner),
       act: testActRunner({
