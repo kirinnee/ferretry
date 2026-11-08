@@ -27,7 +27,7 @@ const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/u;
  * picker can type it into a pane and a wrapper can pass it as one argument.
  */
 export const MODEL_ID_PATTERN = /^[A-Za-z0-9~][A-Za-z0-9._:~/@+-]{0,159}$/u;
-export const ModelIdSchema = z
+const ModelIdSchema = z
   .string()
   .regex(MODEL_ID_PATTERN, { message: 'a model id is letters, digits and . _ : ~ / @ + -, without spaces' });
 
@@ -37,9 +37,8 @@ const SlotValueSchema = z.string().regex(/^[A-Za-z0-9~][A-Za-z0-9._:~/@+-]{0,159
 });
 
 /** Where a model sits in a picker: the most capable, the everyday one, the quick one. */
-export const ModelTierSchema = z.enum(['best', 'balanced', 'fast']);
+const ModelTierSchema = z.enum(['best', 'balanced', 'fast']);
 export type ModelTier = z.infer<typeof ModelTierSchema>;
-export const MODEL_TIERS: readonly ModelTier[] = ModelTierSchema.options;
 
 /** A reasoning effort a CLI accepts (`/effort high`, `model_reasoning_effort = "high"`). */
 const EffortSchema = z.string().regex(/^[a-z]{2,12}$/u);
@@ -114,7 +113,7 @@ export const CatalogPriceSchema = z
 export type CatalogPrice = z.infer<typeof CatalogPriceSchema>;
 
 /** One model. `efforts` is empty for a model whose reasoning cannot be adjusted — no effort is offered. */
-export const CatalogModelSchema = z
+const CatalogModelSchema = z
   .strictObject({
     id: ModelIdSchema,
     label: z.string().min(1).max(80),
@@ -169,13 +168,13 @@ export type CatalogModel = z.infer<typeof CatalogModelSchema>;
  * Claude Code's tier slots and the variable each is set through. `subagent` is the model Claude Code's
  * subagents run on. Pinned by Ferretry so `/model opus` lands on the catalog's model on every backend.
  */
-export const CLAUDE_TIER_VARIABLES = {
+const CLAUDE_TIER_VARIABLES = {
   opus: 'ANTHROPIC_DEFAULT_OPUS_MODEL',
   sonnet: 'ANTHROPIC_DEFAULT_SONNET_MODEL',
   haiku: 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   subagent: 'CLAUDE_CODE_SUBAGENT_MODEL',
 } as const;
-export type ClaudeTierSlot = keyof typeof CLAUDE_TIER_VARIABLES;
+type ClaudeTierSlot = keyof typeof CLAUDE_TIER_VARIABLES;
 const ClaudeTiersSchema = z.strictObject({
   opus: SlotValueSchema.optional(),
   sonnet: SlotValueSchema.optional(),
@@ -187,7 +186,7 @@ const ClaudeTiersSchema = z.strictObject({
 export const slotModelId = (value: string): string => value.replace(/\[[^\]]*\]$/u, '');
 
 /** One CLI's models in a catalog. */
-export const CatalogHalfSchema = z
+const CatalogHalfSchema = z
   .strictObject({
     /** This CLI's own page at the provider, when it has one apart from the catalog's `docs`. */
     docs: z.url().optional(),

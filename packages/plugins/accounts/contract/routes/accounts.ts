@@ -74,8 +74,6 @@ import { sha256Hex } from './sha256.ts';
 export type { AccountId, AccountKey, SignInId, TwoFactorId, TwoFactorStageId };
 export { AccountIdSchema, AccountKeySchema, namesSignIn, SignInIdSchema, TwoFactorIdSchema, TwoFactorStageIdSchema };
 
-/** Most accounts one daemon keeps (today's most saved logins). */
-export const MAX_ACCOUNTS = MAX_LOGIN_ENTRIES;
 /** Most sign-ins one daemon keeps. */
 export const MAX_SIGN_INS = 512;
 /** Most sign-ins one account has. */
@@ -84,11 +82,10 @@ export const MAX_SIGN_INS_PER_ACCOUNT = 16;
 // ── Place ────────────────────────────────────────────────────────────────────────────────────────
 
 /** A key a target is matched on: a web host exactly as an origin names it, or `program@host` for a terminal. */
-export const PlaceKeySchema = LoginMatchSchema;
 export type PlaceKey = LoginMatch;
 
 /** A website. A page is matched on its login domains only; `match` says what it is FOR and never matches a page. */
-export const SitePlaceSchema = z
+const SitePlaceSchema = z
   .strictObject({
     kind: z.literal('site'),
     /** Where the sign-in happens: a page whose host is one of these EXACTLY is matched (a saved login's `domains`). */
@@ -100,11 +97,11 @@ export const SitePlaceSchema = z
 export type SitePlace = z.infer<typeof SitePlaceSchema>;
 
 /** The programs whose password is a REMOTE machine's, so their key names the destination. */
-export const REMOTE_TOOLS = ['ssh', 'scp', 'sftp'] as const;
+const REMOTE_TOOLS = ['ssh', 'scp', 'sftp'] as const;
 const isRemoteTool = (tool: string): boolean => (REMOTE_TOOLS as readonly string[]).includes(tool);
 
 /** A terminal tool: the program at the prompt, the machine it runs on and, for ssh, scp and sftp, where it goes. */
-export const TerminalPlaceSchema = z
+const TerminalPlaceSchema = z
   .strictObject({
     kind: z.literal('terminal'),
     tool: z.string().regex(/^[a-z0-9][a-z0-9._+-]{0,63}$/u, 'a program name, lowercase'),
@@ -126,7 +123,6 @@ export const TerminalPlaceSchema = z
   .refine(place => LoginMatchSchema.safeParse(terminalKey(place)).success, {
     message: 'the program and host are too long to be a terminal key',
   });
-export type TerminalPlace = z.infer<typeof TerminalPlaceSchema>;
 
 export const PlaceSchema = z.discriminatedUnion('kind', [SitePlaceSchema, TerminalPlaceSchema]);
 export type Place = z.infer<typeof PlaceSchema>;
@@ -175,12 +171,12 @@ export const SealedNameSchema = z.string().regex(/^L[0-9A-F]{24}_(?:PASSWORD|TOT
  * `totp` key can hold a value (a sealed seed), and only when the owner saved one with a passkey: every other kind is
  * a name and a few plain facts, so a card can say where the code went ("Code sent to ••42").
  */
-export const TWO_FACTOR_KINDS = ['totp', 'sms', 'email', 'push', 'security-key'] as const;
-export const TwoFactorKindSchema = z.enum(TWO_FACTOR_KINDS);
+const TWO_FACTOR_KINDS = ['totp', 'sms', 'email', 'push', 'security-key'] as const;
+const TwoFactorKindSchema = z.enum(TWO_FACTOR_KINDS);
 export type TwoFactorKind = z.infer<typeof TwoFactorKindSchema>;
 
 /** The kinds that end in a code someone types (or, for a `totp` key with a seed, the daemon makes). */
-export const CODE_FACTOR_KINDS = ['totp', 'sms', 'email'] as const satisfies readonly TwoFactorKind[];
+const CODE_FACTOR_KINDS = ['totp', 'sms', 'email'] as const satisfies readonly TwoFactorKind[];
 export const isCodeFactor = (kind: TwoFactorKind): boolean => (CODE_FACTOR_KINDS as readonly string[]).includes(kind);
 
 /** Most 2FA keys one account has. */
@@ -195,10 +191,10 @@ export const PushAppSchema = z.enum(PUSH_APPS);
 export type PushApp = z.infer<typeof PushAppSchema>;
 
 /** A key's label: the OWNER's words, one line. A card names a key by it, never by a ferret's text. */
-export const TwoFactorLabelSchema = oneLine(TWO_FACTOR_LABEL_MAX_LENGTH);
+const TwoFactorLabelSchema = oneLine(TWO_FACTOR_LABEL_MAX_LENGTH);
 
 /** Who put a key there: the owner. Never a ferret. */
-export const TwoFactorAddedBySchema = z.enum(['owner']);
+const TwoFactorAddedBySchema = z.enum(['owner']);
 
 /** What every kind says, beside its kind. */
 const factorShape = <Time extends z.ZodType<string>>(time: Time) => ({
@@ -253,7 +249,7 @@ const CHECKED_ONLY_WITH_SEED = {
  * A TOTP key as it rests in the index. `seal` present: Ferretry makes the codes ("automatic"), and the sealed name is
  * where the seed rests in the sealed document. Absent: an authenticator only the owner holds; they type its codes.
  */
-export const TotpKeyRecordSchema = z
+const TotpKeyRecordSchema = z
   .strictObject({
     ...factorShape(z.string().min(1)),
     ...totpShape,
@@ -262,7 +258,6 @@ export const TotpKeyRecordSchema = z
   })
   .refine(key => (key.seal === undefined) === (key.params === undefined), SEED_EXACTLY_WITH_PARAMS)
   .refine(key => key.verified === undefined || key.seal !== undefined, CHECKED_ONLY_WITH_SEED);
-export type TotpKeyRecord = z.infer<typeof TotpKeyRecordSchema>;
 
 /** One 2FA key as it rests in the index, by kind. Only `totp` has a field that can name a value (its seal). */
 export const TwoFactorKeyRecordSchema = z.discriminatedUnion('kind', [
@@ -304,7 +299,7 @@ export const TwoFactorKeyHintSchema = z.strictObject({
   kind: TwoFactorKindSchema,
   label: TwoFactorLabelSchema,
 });
-export type TwoFactorKeyHint = z.infer<typeof TwoFactorKeyHintSchema>;
+type TwoFactorKeyHint = z.infer<typeof TwoFactorKeyHintSchema>;
 
 /** A key as the owner reads it: its record without the seal. The one projection, so nothing else can leak in. */
 export function twoFactorKeySummaryOf(key: TwoFactorKeyRecord): TwoFactorKeySummary {
@@ -314,7 +309,7 @@ export function twoFactorKeySummaryOf(key: TwoFactorKeyRecord): TwoFactorKeySumm
 }
 
 /** A key as a ferret may know it. */
-export const twoFactorKeyHintOf = (key: Pick<TwoFactorKeySummary, 'id' | 'kind' | 'label'>): TwoFactorKeyHint => ({
+const twoFactorKeyHintOf = (key: Pick<TwoFactorKeySummary, 'id' | 'kind' | 'label'>): TwoFactorKeyHint => ({
   id: key.id,
   kind: key.kind,
   label: key.label,
@@ -353,7 +348,7 @@ export const addTwoFactorKeySubject = (accountKey: AccountKey, stage: TwoFactorS
 const foldedLabel = (label: string): string => label.normalize('NFKC').toLowerCase();
 
 /** An account as it rests in the index. Its handle is the index's key; `key` never changes. */
-export const AccountRecordSchema = z.strictObject({
+const AccountRecordSchema = z.strictObject({
   key: AccountKeySchema,
   label: z.string().min(1).max(LOGIN_LABEL_MAX_LENGTH),
   username: z.string().min(1).max(LOGIN_USERNAME_MAX_LENGTH).optional(),
@@ -364,7 +359,7 @@ export const AccountRecordSchema = z.strictObject({
    */
   factors: z.array(TwoFactorKeyRecordSchema).max(MAX_FACTORS_PER_ACCOUNT).optional(),
   /** Accounts the owner said are NOT one account ("these look like one account" → "Keep apart"), by key. */
-  apartFrom: z.array(AccountKeySchema).max(MAX_ACCOUNTS).optional(),
+  apartFrom: z.array(AccountKeySchema).max(MAX_LOGIN_ENTRIES).optional(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
 });
@@ -386,7 +381,7 @@ export function sealedNamesOf(account: Pick<AccountRecord, 'seals' | 'factors'>)
 }
 
 /** A method as a sign-in stores it: the provider it goes via is an account's KEY, so a rename touches nothing. */
-export const LoginMethodRecordSchema = z
+const LoginMethodRecordSchema = z
   .strictObject({
     kind: LoginMethodKindSchema,
     name: oneLine(40).optional(),
@@ -399,7 +394,7 @@ export const LoginMethodRecordSchema = z
 export type LoginMethodRecord = z.infer<typeof LoginMethodRecordSchema>;
 
 /** A sign-in as it rests in the index. Its id is the index's key and never changes. */
-export const SignInRecordSchema = z.strictObject({
+const SignInRecordSchema = z.strictObject({
   /** The account's immutable KEY, never its handle: a rename touches nothing here. */
   account: AccountKeySchema,
   place: PlaceSchema,
@@ -442,8 +437,8 @@ export function accountIndexProblems(document: {
   const problems: AccountIndexProblem[] = [];
   const accounts = Object.entries(document.accounts);
   const signIns = Object.entries(document.signIns);
-  if (accounts.length > MAX_ACCOUNTS)
-    problems.push({ path: ['accounts'], message: `at most ${String(MAX_ACCOUNTS)} accounts` });
+  if (accounts.length > MAX_LOGIN_ENTRIES)
+    problems.push({ path: ['accounts'], message: `at most ${String(MAX_LOGIN_ENTRIES)} accounts` });
   if (signIns.length > MAX_SIGN_INS)
     problems.push({ path: ['signIns'], message: `at most ${String(MAX_SIGN_INS)} sign-ins` });
 
@@ -596,8 +591,7 @@ export const AccountRefSchema = z.strictObject({ id: AccountIdSchema, label: one
 export type AccountRef = z.infer<typeof AccountRefSchema>;
 
 /** The provider a sign-in goes via: its account and, when it has one on a site, that sign-in. */
-export const SignInViaSchema = z.strictObject({ account: AccountRefSchema, signIn: SignInIdSchema.optional() });
-export type SignInVia = z.infer<typeof SignInViaSchema>;
+const SignInViaSchema = z.strictObject({ account: AccountRefSchema, signIn: SignInIdSchema.optional() });
 
 /** An account as the OWNER reads it. `fields` says which secret fields exist, never what they hold. */
 export const AccountSummarySchema = z.strictObject({
@@ -637,7 +631,7 @@ export const AccountListSchema = z.strictObject({
   v: z.literal(1),
   health: SecretStoreHealthSchema,
   diagnosis: z.string().min(1).optional(),
-  accounts: z.array(AccountSummarySchema).max(MAX_ACCOUNTS).readonly(),
+  accounts: z.array(AccountSummarySchema).max(MAX_LOGIN_ENTRIES).readonly(),
   signIns: z.array(SignInSummarySchema).max(MAX_SIGN_INS).readonly(),
 });
 export type AccountList = z.infer<typeof AccountListSchema>;
@@ -658,7 +652,6 @@ export type PutAccountRequest = z.infer<typeof PutAccountRequestSchema>;
 
 /** `POST /v1/accounts/:id/rename`. Its sign-ins and sealed values follow; nothing is re-typed. */
 export const RenameAccountRequestSchema = z.strictObject({ to: AccountIdSchema });
-export type RenameAccountRequest = z.infer<typeof RenameAccountRequestSchema>;
 
 /** `DELETE /v1/accounts/:id`: its sign-ins go with it. A 404 is how "there was none" is reported. */
 export const RemovedAccountSchema = z.strictObject({ id: AccountIdSchema, removed: z.literal(true) });
@@ -691,7 +684,6 @@ export type RemovedSignIn = z.infer<typeof RemovedSignInSchema>;
 
 /** `POST /v1/accounts/:id/merge` and `…/apart`: the OTHER account. Merge keeps `:id` and folds `from` into it. */
 export const AccountPairRequestSchema = z.strictObject({ from: AccountIdSchema });
-export type AccountPairRequest = z.infer<typeof AccountPairRequestSchema>;
 
 /**
  * `GET /v1/accounts/look-alike` (owner only): groups of accounts with the same username AND the same password, which
@@ -700,7 +692,7 @@ export type AccountPairRequest = z.infer<typeof AccountPairRequestSchema>;
  */
 export const AccountLookAlikeSchema = z.strictObject({
   v: z.literal(1),
-  groups: z.array(z.array(AccountIdSchema).min(2).max(MAX_ACCOUNTS).readonly()).max(MAX_ACCOUNTS).readonly(),
+  groups: z.array(z.array(AccountIdSchema).min(2).max(MAX_LOGIN_ENTRIES).readonly()).max(MAX_LOGIN_ENTRIES).readonly(),
 });
 export type AccountLookAlike = z.infer<typeof AccountLookAlikeSchema>;
 
@@ -784,12 +776,11 @@ export const StageTwoFactorSeedRequestSchema = z
 export type StageTwoFactorSeedRequest = z.infer<typeof StageTwoFactorSeedRequestSchema>;
 
 /** What a pasted key says it is for, where it differs from the account (the amber box), with its words. */
-export const TwoFactorMismatchSchema = z.strictObject({
+const TwoFactorMismatchSchema = z.strictObject({
   issuer: totpShape.issuer,
   accountName: totpShape.accountName,
   words: z.string().min(1).max(512),
 });
-export type TwoFactorMismatchView = z.infer<typeof TwoFactorMismatchSchema>;
 
 /** The stage's answer: what the daemon read of the key, never the key. */
 export const TwoFactorSeedStagedSchema = z.strictObject({
@@ -894,8 +885,8 @@ export const ADD_TWO_FACTOR_KEY_WHERE =
 // ── `config/account-defaults.yaml`───────────────────────────────────────────────────────────────
 
 const DefaultsMapSchema = z
-  .record(PlaceKeySchema, AccountIdSchema)
-  .refine(map => Object.keys(map).length <= MAX_ACCOUNTS, `at most ${String(MAX_ACCOUNTS)} lines`);
+  .record(LoginMatchSchema, AccountIdSchema)
+  .refine(map => Object.keys(map).length <= MAX_LOGIN_ENTRIES, `at most ${String(MAX_LOGIN_ENTRIES)} lines`);
 
 /**
  * WHICH ACCOUNT A SIGN-IN CARD OFFERS FIRST, as the owner wrote it. It orders buttons only: the owner's tap is still
@@ -934,7 +925,7 @@ export type AccountDefaultsFile = z.infer<typeof AccountDefaultsFileSchema>;
 // ── Reading and changing the lines ───────────────────────────────────────────────────────────────
 
 /** Where a defaults line applies. `sites` is the whole machine; a project or folder line also names which one. */
-export const ACCOUNT_DEFAULT_SCOPES = ['sites', 'projects', 'folders'] as const;
+const ACCOUNT_DEFAULT_SCOPES = ['sites', 'projects', 'folders'] as const;
 export type AccountDefaultScope = (typeof ACCOUNT_DEFAULT_SCOPES)[number];
 
 /** One line of the file: the account the card offers first for `key`, in a scope. */
@@ -1048,7 +1039,7 @@ export const PutAccountDefaultRequestSchema = z
     scope: z.enum(ACCOUNT_DEFAULT_SCOPES),
     /** The project (its id or exact name) or the folder; required for those scopes, refused for `sites`. */
     within: z.string().min(1).max(1_024).optional(),
-    key: PlaceKeySchema,
+    key: LoginMatchSchema,
     account: AccountIdSchema.nullable(),
   })
   .superRefine((request, context) => {
@@ -1243,11 +1234,11 @@ export const pickOneWords = (count: number): string => `Pick one: ${String(count
 // ── `account.hint` ──────────────────────────────────────────────────────────────────────────────
 
 /** Why a hint's sign-in would be first on the calling session's card. Never `ferret`: a hint is asked before one. */
-export const AccountHintDefaultSchema = z.strictObject({
+const AccountHintDefaultSchema = z.strictObject({
   by: z.enum(['project', 'folder', 'site', 'only']),
   project: oneLine(SIGN_IN_PROJECT_MAX_LENGTH).optional(),
 });
-export type AccountHintDefault = z.infer<typeof AccountHintDefaultSchema>;
+type AccountHintDefault = z.infer<typeof AccountHintDefaultSchema>;
 
 /**
  * WHAT A FERRET MAY LEARN ABOUT SIGNING IN TO A SITE (`account_hint`), one entry per sign-in: the account's label and
@@ -1281,14 +1272,14 @@ export type AccountHint = z.infer<typeof AccountHintSchema>;
 /** `GET /v1/accounts/hint?site=`. `passkeys` is always off: say so wherever a hint is read. */
 export const AccountHintListSchema = z.strictObject({
   v: z.literal(1),
-  site: PlaceKeySchema,
+  site: LoginMatchSchema,
   hints: z.array(AccountHintSchema).max(MAX_SIGN_INS).readonly(),
   passkeys: z.literal('off'),
 });
 export type AccountHintList = z.infer<typeof AccountHintListSchema>;
 
 /** A hint's `default` from the calling session's {@link chosenSignIn} (asked with no ferret hint). */
-export function accountHintDefault(choice: SignInChoice | undefined, signIn: SignInId): AccountHintDefault | undefined {
+function accountHintDefault(choice: SignInChoice | undefined, signIn: SignInId): AccountHintDefault | undefined {
   if (choice === undefined || choice.signIn !== signIn || choice.why === 'ferret') return undefined;
   return { by: choice.why, ...(choice.project === undefined ? {} : { project: choice.project }) };
 }
@@ -1402,7 +1393,7 @@ export const ACCOUNT_HINT_FACTOR_NEXT =
   "For a code, request input with the key's id (factor); for a push, request approval (push: true) and wait.";
 
 /** The sentence a hint that listed a sign-in ends with: how a ferret names one and suggests a better recipe. */
-export const ACCOUNT_HINT_NEXT =
+const ACCOUNT_HINT_NEXT =
   'Name the account when you request input (secretHint) if your brief says which; propose recipe fixes with account_propose and the sign-in id.';
 
 /**
@@ -1443,7 +1434,6 @@ export const AccountProposeCallSchema = z
     message: 'suggest a recipe, a standing rule (preapprove: true), or both',
     path: ['recipe'],
   });
-export type AccountProposeCall = z.infer<typeof AccountProposeCallSchema>;
 
 // ── Places from match keys ("Save as" on a card) ───────────────────────────────────────────────
 

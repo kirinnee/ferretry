@@ -3,7 +3,7 @@ import { VaultFile, VaultKeyFile } from '../../../contract/index.ts';
 import { SecretStoreError } from '../../lib/secrets/types.ts';
 
 /** The two files the sealed store rests in: `state/vault/vault.json` and `state/vault/vault.key` (spine D16). */
-export type SealedFile = 'vault' | 'key';
+type SealedFile = 'vault' | 'key';
 
 /**
  * The sealed store's files as text, over the kernel's state port (today's `FileSystemPort.readText` /

@@ -215,6 +215,16 @@
     "packages/plugins/skills": {
       "entry": ["app/views/surfaces.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/accounts": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": ["daemon/lib/index.ts", "daemon/lib/sign-in-grants/**"]
+    },
+    "packages/plugins/logins": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": ["daemon/lib/catalog/runtime.ts", "daemon/lib/shared/budget.ts"]
     }
   },
   "bun": false,

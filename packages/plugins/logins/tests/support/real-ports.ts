@@ -8,7 +8,7 @@ import { systemPortHolders } from '../../daemon/adapters/harness-login/port-hold
 import { deliverCodexCallback } from '../../daemon/adapters/harness-login/callback-delivery.ts';
 
 export const realClock = systemClock();
-export const realSpawn = bunSpawn({});
+const realSpawn = bunSpawn({});
 export const realFetch = globalFetch();
 
 export const spawnChild = spawnHarnessLoginChild(realSpawn);

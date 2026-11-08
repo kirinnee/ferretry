@@ -32,7 +32,7 @@ import {
 } from './schema.ts';
 
 /** One model a runtime offers. `id` is the value the CLI is handed (with a context suffix). */
-export interface RuntimeModelEntry {
+interface RuntimeModelEntry {
   readonly id: string;
   readonly label: string;
   readonly tier?: ModelTier;
@@ -47,7 +47,7 @@ export interface RuntimeModelEntry {
 }
 
 /** The catalog a runtime's models came from, as a picker names it. */
-export interface RuntimeModelCatalogSource {
+interface RuntimeModelCatalogSource {
   readonly id: string;
   readonly label: string;
   readonly origin: ModelCatalog['origin'];
@@ -71,7 +71,7 @@ export interface RuntimeModels {
  * The model set a runtime's profile resolved (Runtimes owns the resolution; only the part this module reads is
  * stated). `harness-default`: no set applies, the harness picks. `model-set`: the models this login can use.
  */
-export type ResolvedModelSet =
+type ResolvedModelSet =
   | { readonly source: 'harness-default' }
   | {
       readonly source: 'model-set';

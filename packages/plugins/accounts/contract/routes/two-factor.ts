@@ -88,7 +88,7 @@ const presentOrUndefined = (text: string | undefined): string | undefined => {
 };
 
 /** Google Authenticator's export-link scheme (a batch of keys): an external name, refused with its own sentence. */
-export const AUTHENTICATOR_EXPORT_SCHEME = 'otpauth-migration';
+const AUTHENTICATOR_EXPORT_SCHEME = 'otpauth-migration';
 
 /**
  * READS A TOTP KEY the owner pasted: a bare base32 key (spaces, dashes and `=` padding are fine; any case), or an

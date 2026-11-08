@@ -6,7 +6,7 @@ import {
   type TaskPlanStageId,
   TaskPlanStageIdSchema,
 } from './account-ids.ts';
-import { AccountRefSchema, type Place, PlaceKeySchema, PlaceSchema, placeKeys } from './accounts.ts';
+import { AccountRefSchema, type Place, PlaceSchema, placeKeys } from './accounts.ts';
 import { AgendaIdSchema } from './foreign.ts';
 import { canonicalJson } from '@ferretry/std';
 import { InstantSchema } from './foreign.ts';
@@ -20,7 +20,7 @@ import {
 } from './login-entries.ts';
 import { LOGIN_OBSERVED_MAX, LoginObservedSecondFactorSchema } from './login-recipes.ts';
 import { sha256Hex } from './sha256.ts';
-import { type DaemonId, DaemonIdSchema } from './foreign.ts';
+import { type DaemonId } from './foreign.ts';
 import {
   COPY_PLAN_DEFAULT_LIFETIME_SECONDS,
   COPY_PLAN_MAX_ITEMS,
@@ -28,7 +28,6 @@ import {
   COPY_PLAN_WHY_MAX_CHARS,
   type CopyPlan,
   CopyPlanIdSchema,
-  type CopyPlanItem,
   CopyRouteFromSchema,
   CopyRouteToSchema,
   RuleOwnerSchema,
@@ -282,22 +281,6 @@ export function grantMissLineFor(note: GrantMissNote): string | undefined {
   return `Your standing rule for this sign-in didn't apply: ${words}.${after}`;
 }
 
-/**
- * THE OWNER'S LINE for a card a pre-approval filled, by its source, with the place when it is known (`github.com`,
- * `sudo@kirin-box`): one sentence for a plan fill's agenda history and for the owner's input card (C9). A rule fill's
- * agenda card closes in the words a tap fill closes with, because every ferret can read every agenda (C26): this line
- * is drawn on the owner's input card only.
- */
-export function grantFilledLineFor(
-  note: { readonly by: 'plan'; readonly line: number } | { readonly by: 'rule' },
-  place?: string,
-): string {
-  const at = place === undefined || place === '' ? '' : ` on ${place}`;
-  return note.by === 'plan'
-    ? `Filled under your task plan (line ${String(note.line + 1)})${at}.`
-    : `Filled under your standing sign-in rule${at}.`;
-}
-
 /** What the FERRET is told when a plan did not fill a card: the same sentence for every reason. */
 export const TASK_PLAN_MISS_AGENT_NOTE = "Your task plan didn't cover this, so the owner was asked.";
 
@@ -351,7 +334,6 @@ export const TaskPlanSignInAskSchema = z
   })
   .superRefine(exactlyOne('signIn', 'site'))
   .superRefine(uniqueFields);
-export type TaskPlanSignInAsk = z.infer<typeof TaskPlanSignInAskSchema>;
 
 /** A terminal place key a line may name: `tool@host`, as an existing terminal sign-in is keyed. */
 const TerminalPlaceKeySchema = LoginMatchSchema.refine(key => key.includes('@'), 'a terminal key, like sudo@kirin-box');
@@ -366,7 +348,6 @@ export const TaskPlanTerminalAskSchema = z
     why: WhySchema,
   })
   .superRefine(exactlyOne('signIn', 'place'));
-export type TaskPlanTerminalAsk = z.infer<typeof TaskPlanTerminalAskSchema>;
 
 /** A planned paste: today's paste-plan item, plus a use count. */
 export const TaskPlanPasteAskSchema = z.strictObject({
@@ -376,7 +357,7 @@ export const TaskPlanPasteAskSchema = z.strictObject({
   uses: UsesSchema,
   why: WhySchema,
 });
-export type TaskPlanPasteAsk = z.infer<typeof TaskPlanPasteAskSchema>;
+type TaskPlanPasteAsk = z.infer<typeof TaskPlanPasteAskSchema>;
 
 export const TaskPlanLineAskSchema = z.discriminatedUnion('kind', [
   TaskPlanSignInAskSchema,
@@ -417,17 +398,6 @@ export const TaskPlanCallSchema = z
       seen.add(key);
     });
   });
-export type TaskPlanCall = z.infer<typeof TaskPlanCallSchema>;
-
-/** A paste plan's items (`secure.preapprove`) read as task-plan paste lines: one use each, as a paste plan allowed. */
-export const taskPlanLinesOfCopyItems = (items: readonly CopyPlanItem[]): readonly TaskPlanPasteAsk[] =>
-  items.map(item => ({
-    kind: 'paste',
-    from: item.from,
-    to: item.to,
-    uses: TASK_PLAN_LINE_DEFAULT_USES,
-    why: item.why,
-  }));
 
 // ── What the daemon keeps (RAM only) and the owner reads ─────────────────────────────────────────────
 
@@ -462,7 +432,7 @@ export const TaskPlanLineStateSchema = z.enum([
   /** The plan expired, was revoked, or its session ended. */
   'ended',
 ]);
-export type TaskPlanLineState = z.infer<typeof TaskPlanLineStateSchema>;
+type TaskPlanLineState = z.infer<typeof TaskPlanLineStateSchema>;
 
 /**
  * The daemon's flags on a sign-in line: drawn red (`root`, `one-factor`) or amber (`no-history`). The amber one means
@@ -511,7 +481,7 @@ export const taskPlanRootHost = (places: readonly Place[]): string | undefined =
  * WHAT A PLAN OR A STANDING RULE CAN'T COVER, listed under "You'll still be asked" on every plan card and rule sheet:
  * one list, so the two cannot drift. `for` says which surface shows an item (`both`, or one of them only).
  */
-export const STILL_ASKED_ITEMS: readonly {
+const STILL_ASKED_ITEMS: readonly {
   readonly what: string;
   readonly instead: string;
   readonly for: 'both' | 'plan' | 'rule';
@@ -612,7 +582,7 @@ export const taskPlanKeysFitLine = (kind: 'sign-in' | 'terminal-sign-in', keys: 
   keys.length > 0 && keys.every(key => (kind === 'sign-in' ? !key.includes('@') : taskPlanCoversTool(key)));
 
 /** What a sign-in line, as the daemon keeps it, may not be. */
-export const taskPlanSignInLineProblems = (line: SignInLineFacts): readonly string[] => {
+const taskPlanSignInLineProblems = (line: SignInLineFacts): readonly string[] => {
   const candidates = new Set(line.candidates.map(candidate => candidate.signIn));
   // An unavailable line can't be ticked, so it may show the owner a place it can't cover (an ssh sign-in, say).
   const misplaced =
@@ -933,7 +903,7 @@ export const taskPlanSelectionNeedsPasskey = (lines: readonly TaskPlanSelectedLi
  */
 export const TaskPlanLinePinsSchema = z.strictObject({
   accountKey: AccountKeySchema,
-  placeKeys: z.array(PlaceKeySchema).min(1).max(LOGIN_MATCH_MAX),
+  placeKeys: z.array(LoginMatchSchema).min(1).max(LOGIN_MATCH_MAX),
   recipeVersion: z.number().int().min(1).optional(),
   identities: z
     .array(z.string().regex(/^[0-9a-f]{16}$/u))
@@ -1060,7 +1030,6 @@ export const TaskPlanRevokeSchema = z
     path: ['lines'],
     message: 'name each line once',
   });
-export type TaskPlanRevoke = z.infer<typeof TaskPlanRevokeSchema>;
 
 /** The refusals the task-plan routes answer with, each a different next step for the person. */
 export const TASK_PLAN_ERROR_CODES = {
@@ -1085,40 +1054,5 @@ export const agendaDeepLinkFragment = (id: string, sessionId?: string, machine?:
   return `#agenda/${encodeURIComponent(id)}${text === '' ? '' : `?${text}`}`;
 };
 
-/**
- * The card an `#agenda/<id>?session=<sessionId>&machine=<daemon id>` fragment names, the reader of
- * {@link agendaDeepLinkFragment}: `null` for any other fragment, an id that is not one, or a machine that is not a
- * daemon id. A fragment only picks which card the app opens.
- */
-export const agendaDeepLinkFromFragment = (
-  fragment: string,
-): {
-  readonly id: z.infer<typeof AgendaIdSchema>;
-  readonly sessionId?: string;
-  readonly machine?: DaemonId;
-} | null => {
-  const match = /^#?agenda\/([^?]+)(?:\?(.*))?$/u.exec(fragment);
-  if (match === null) return null;
-  let raw: string;
-  try {
-    raw = decodeURIComponent(match[1] ?? '');
-  } catch {
-    return null;
-  }
-  const id = AgendaIdSchema.safeParse(raw);
-  if (!id.success) return null;
-  const query = new URLSearchParams(match[2] ?? '');
-  const session = query.get('session');
-  const named = query.get('machine');
-  const machine = named === null ? undefined : DaemonIdSchema.safeParse(named);
-  if (machine !== undefined && !machine.success) return null;
-  return {
-    id: id.data,
-    ...(session === null || session.trim() === '' ? {} : { sessionId: session }),
-    ...(machine === undefined ? {} : { machine: machine.data }),
-  };
-};
-
 /** `DELETE …/task-plans/:planId/approval/:stage`: the staged selection was dropped. */
 export const TaskPlanStageDroppedSchema = z.strictObject({ stage: TaskPlanStageIdSchema, dropped: z.literal(true) });
-export type TaskPlanStageDropped = z.infer<typeof TaskPlanStageDroppedSchema>;

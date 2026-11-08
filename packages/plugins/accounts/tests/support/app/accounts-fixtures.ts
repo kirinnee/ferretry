@@ -1,18 +1,16 @@
 /** Fake accounts, sign-ins and the daemon's answers for the Accounts screen's tests and screenshots. No real account or daemon. */
 
-import { type AccountList, AccountListSchema, type TwoFactorStageId } from '../../../contract/routes/index.ts';
+import { type AccountList, AccountListSchema } from '../../../contract/routes/index.ts';
 
 const AT = '2026-10-31T10:00:00.000Z';
 export const SI_GITHUB = 'si_0000000000000001';
-export const SI_WORK = 'si_0000000000000002';
-export const SI_VERCEL = 'si_0000000000000003';
-export const SMS = 'tf_000000000001';
-export const APP = 'tf_000000000002';
-export const PROPOSAL = 'rp_0123456789abcdef';
-export const STAGE = `st_${'a'.repeat(24)}` as TwoFactorStageId;
-export const KEY = 'otpauth://totp/GitHub:kirinnee?secret=JBSWY3DPEHPK3PXP&issuer=GitHub';
+const SI_WORK = 'si_0000000000000002';
+const SI_VERCEL = 'si_0000000000000003';
+const SMS = 'tf_000000000001';
+const APP = 'tf_000000000002';
+const PROPOSAL = 'rp_0123456789abcdef';
+
 const PARAMS = { algorithm: 'SHA1', digits: 6, period: 30 };
-export const SECRET_PASSWORD = 'correct-horse-battery';
 
 const sms = {
   id: SMS,

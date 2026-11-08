@@ -156,12 +156,6 @@ export const RULE_REPLACED_UNREADABLE_WORDS =
   'This sign-in already has a standing rule, and it could not be read, so it can’t be replaced here. Look at it in Settings › Secure copy › Standing sign-in rules.';
 export const RULE_DAMAGED_WORDS =
   'The standing rules file could not be read, so no rule fills until you approve one again. Every sign-in asks you.';
-/** A `#rules/<stage>` link whose stage the daemon no longer lists. */
-export const RULE_LINKED_STAGE_GONE_WORDS = 'That approval timed out or was already answered.';
-
-/** A `#rules/<stage>?machine=…` link for a machine this device is not paired with. */
-export const RULE_LINKED_ELSEWHERE_WORDS =
-  'That approval is not on this machine. Open the link on a device paired with the machine that asked.';
 
 /** What a rule can't cover, listed on every sheet under "You’ll still be asked": the protocol's one list. */
 export const RULE_STILL_ASKED = stillAskedFor('rule');
@@ -376,13 +370,6 @@ export const suspendableRules = (rules: readonly SignInRuleView[], signIn: SignI
 
 export const suspendWarning = (count: number): string =>
   `Saving this suspends ${String(count)} standing ${count === 1 ? 'rule' : 'rules'}: you approve again with a passkey.`;
-
-export const deviceRevokeWarning = (count: number): string =>
-  `${String(count)} standing ${count === 1 ? 'rule was' : 'rules were'} approved with this device’s passkey; ${count === 1 ? 'it' : 'they'} will be suspended.`;
-
-/** Rules that this paired device's passkey approved (a revoke of the device suspends them). */
-export const rulesApprovedWith = (rules: readonly SignInRuleView[], deviceId: string): number =>
-  rules.filter(rule => rule.approvedWith.deviceId === deviceId && rule.status !== 'suspended').length;
 
 // ── Narrowing the end, in days or hours ──────────────────────────────────────────────────────────────
 

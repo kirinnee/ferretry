@@ -4,7 +4,7 @@ import type { LoginIndexStore } from '../lib/accounts.ts';
 import { SecretStoreError } from '../lib/seal.ts';
 
 /** The account index's file (`state/accounts/accounts.json`): labels, places, which fields exist. Never a value. */
-export const ACCOUNT_INDEX_DOCUMENT = 'accounts.json';
+const ACCOUNT_INDEX_DOCUMENT = 'accounts.json';
 
 /**
  * The account index through the kernel's state port, `0600` (S68): it holds no value, but a username and where an

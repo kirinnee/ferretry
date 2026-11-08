@@ -63,9 +63,8 @@ export const BudgetSchema = z
       });
     }
   });
-export type Budget = z.infer<typeof BudgetSchema>;
 
-export const BUDGET_PERIODS = ['daily', 'weekly'] as const;
+const BUDGET_PERIODS = ['daily', 'weekly'] as const;
 export type BudgetPeriod = (typeof BUDGET_PERIODS)[number];
 
 /** Whether `zone` is an IANA time zone this runtime knows. */
@@ -183,7 +182,7 @@ export function budgetSpan(period: BudgetPeriod, nowMs: number, zone: string): B
 // ── Levels ───────────────────────────────────────────────────────────────────────────────────────
 
 /** Where a login stands against one period's limits, from best to worst. */
-export const BUDGET_LEVELS = ['ok', 'over_trigger', 'over_hard'] as const;
+const BUDGET_LEVELS = ['ok', 'over_trigger', 'over_hard'] as const;
 export type BudgetLevel = (typeof BUDGET_LEVELS)[number];
 
 /** The level `spentUsd` reaches against `limit`. Reaching a limit exactly counts as over it. */
@@ -213,7 +212,7 @@ export interface BudgetHold {
 }
 
 /** `$41.20` — two decimals, as a bill reads. */
-export const usdWords = (amount: number): string => `$${amount.toFixed(2)}`;
+const usdWords = (amount: number): string => `$${amount.toFixed(2)}`;
 
 /** `Sat 00:00 (America/Los_Angeles)` — a reset time in the zone the budget is counted in. */
 export function budgetResetWords(resetsAtMs: number, zone: string): string {

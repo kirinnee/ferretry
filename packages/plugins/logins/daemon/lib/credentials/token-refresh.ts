@@ -16,7 +16,7 @@ import type { HarnessKind } from '../shared/harness.ts';
  * Carries no material and no wrapper. The home is what decides *which* credential the harness
  * renews, and it comes from the manifest — never parsed back out of a wrapper's text or a name.
  */
-export interface FleetTokenRefreshTarget {
+interface FleetTokenRefreshTarget {
   readonly accountId: string;
   readonly kind: HarnessKind;
   /** Absolute harness configuration directory. */
@@ -31,7 +31,7 @@ export interface FleetTokenRefreshTarget {
  * for a guessed interval. The port is given this so it can stop early, and it has nowhere to put the
  * answer: judging the outcome stays with the service that owns the read.
  */
-export type FleetTokenRefreshSettled = () => Promise<boolean>;
+type FleetTokenRefreshSettled = () => Promise<boolean>;
 
 /**
  * What running the renewal path did — and, pointedly, not whether it worked.
@@ -91,13 +91,13 @@ export class SingleFlight<T> {
  * reading). A closed set, because the only thing taken from a harness's output is which of these it
  * said — never the text around them.
  */
-export const CODEX_REFRESH_FAILURE_CODES = [
+const CODEX_REFRESH_FAILURE_CODES = [
   'refresh_token_expired',
   'refresh_token_reused',
   'refresh_token_invalidated',
   'invalid_grant',
 ] as const;
-export type CodexRefreshFailureCode = (typeof CODEX_REFRESH_FAILURE_CODES)[number];
+type CodexRefreshFailureCode = (typeof CODEX_REFRESH_FAILURE_CODES)[number];
 
 /** What a refresh's output said about why it failed, reduced to closed-set facts. */
 export interface CodexRefreshEvidence {

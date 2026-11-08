@@ -2,9 +2,6 @@ import { type SignInRulesDocument, SignInRulesDocumentSchema } from '../../../co
 import type { SignInRuleStore } from '../../lib/sign-in-rules/service.ts';
 import type { StateDocument } from '../state-document.ts';
 
-/** The file's name in `state/accounts/`. */
-export const SIGN_IN_RULES_DOCUMENT = 'sign-in-rules.json';
-
 /**
  * THE OWNER'S STANDING SIGN-IN RULES, `state/accounts/sign-in-rules.json` (directory 0700, file 0600, written
  * atomically by the kernel): each rule's signed body, its kept passkey assertion and the unsigned overlay. Never a value.

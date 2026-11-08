@@ -1,15 +1,11 @@
 import {
-  GRANT_MISS_REASONS,
   GRANT_STOPPING_REASONS,
   type GrantMissReason,
-  grantMissLine,
-  grantMissWords,
   ruleMissSuspends,
   signInRuleSuspensionOf,
   TASK_PLAN_MISS_AGENT_NOTE,
 } from '../../../contract/routes/index.ts';
 import type { SignInGrant } from './matcher.ts';
-
 /**
  * WHY A PRE-APPROVAL DID NOT FILL (docs/input-requests.md, "Task plan fills", "Standing rule fills"). The closed list and
  * its sentences are the protocol's (`GRANT_MISS_REASONS`, `grantMissWords`, `grantMissLineFor`), so the app, the daemon
@@ -23,25 +19,16 @@ import type { SignInGrant } from './matcher.ts';
  *   resumes.
  */
 
-export { GRANT_MISS_REASONS, type GrantMissReason, grantMissLine, grantMissWords, TASK_PLAN_MISS_AGENT_NOTE };
-
 const STOPPING: ReadonlySet<GrantMissReason> = new Set(GRANT_STOPPING_REASONS);
 
 /** Whether a miss stops the line it was tried under: the form, the recipe or the place changed, or a value was left behind. */
-export const stopsTheLine = (reason: GrantMissReason): boolean => STOPPING.has(reason);
+const stopsTheLine = (reason: GrantMissReason): boolean => STOPPING.has(reason);
 
 /**
  * Whether a miss stops `grant`: a plan line by {@link stopsTheLine}; a standing rule when the miss is one the owner's
  * line says suspends it AND is a suspension a rule can carry (so the line never claims a suspension that didn't happen).
  */
-export const grantStops = (grant: Pick<SignInGrant, 'source'>, reason: GrantMissReason): boolean =>
+const grantStops = (grant: Pick<SignInGrant, 'source'>, reason: GrantMissReason): boolean =>
   grant.source === 'rule'
     ? ruleMissSuspends(reason) && signInRuleSuspensionOf(reason) !== undefined
     : stopsTheLine(reason);
-
-/**
- * The line an input card's agenda context carries when a PLAN line did not apply. The REASON is not in it: a ferret can
- * read its own session's agenda, so the card's words are the same whatever the reason; the owner reads the reason on
- * the input card itself, from the owner-only request. A standing rule's miss adds no line at all.
- */
-export const GRANT_MISS_CONTEXT_LINE = "A task plan line didn't apply here, so you're asked as usual.";

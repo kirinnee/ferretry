@@ -108,7 +108,7 @@ export class FleetCredentialRefusal extends Error {
 // ── Ports ────────────────────────────────────────────────────────────────────────────────────────
 
 /** What the status service offers, narrowed to the three calls this surface makes. */
-export interface CredentialStatusReader {
+interface CredentialStatusReader {
   view(subject: CredentialSubject, options?: CredentialViewOptions): Promise<CredentialStatusView>;
   observe(subject: CredentialSubject): Promise<CredentialStatusView>;
   checkNow(subject: CredentialSubject): Promise<CredentialStatusView>;
@@ -120,7 +120,7 @@ export type CredentialEmailSource =
   | { readonly harness: 'codex'; readonly resolution: CodexStoreResolution };
 
 /** One harness child the daemon starts for a sign-out, and the code it ended with. */
-export interface CredentialHarnessRun {
+interface CredentialHarnessRun {
   readonly command: readonly string[];
   readonly environment: Readonly<Record<string, string | undefined>>;
 }
@@ -313,7 +313,7 @@ const environmentReason = (entry: CredentialEntry): string =>
   `"${entry.id}" is authenticated by its environment variables, so there is nothing to sign in to`;
 
 /** The environment, arguments and directories a harness launch against this store needs. */
-export function credentialLaunch(resolution: StoredCredentialResolution): {
+function credentialLaunch(resolution: StoredCredentialResolution): {
   readonly environment: Readonly<Record<string, string>>;
   readonly arguments: readonly string[];
   readonly directories: readonly string[];
@@ -445,7 +445,7 @@ function whoOf(entry: CredentialEntry, email: string | undefined): string {
 }
 
 /** The sign-out confirm card's question, its consequences included (C7, E25). */
-export function signOutSentence(entry: CredentialEntry, email: string | undefined, machine: string): LoginSignOut {
+function signOutSentence(entry: CredentialEntry, email: string | undefined, machine: string): LoginSignOut {
   const host = entry.credential.store === 'host';
   const runtimes = entry.usedBy.length;
   const terminal = host ? ` This also signs out ${entry.credential.harness} in your terminal on ${machine}.` : '';
@@ -520,7 +520,7 @@ export interface FleetCredentialsServiceDeps {
 }
 
 /** The list's short keep: a clock, and how long a made list is answered again. */
-export interface CredentialListCache {
+interface CredentialListCache {
   now(): number;
   readonly freshMs: number;
 }
@@ -546,7 +546,7 @@ const LOGOUT_ARGV: Readonly<Record<HarnessKind, readonly string[]>> = {
 };
 
 /** The environment-login half of the credentials surface. */
-export interface CredentialEnvironmentDeps {
+interface CredentialEnvironmentDeps {
   /** The catalogue the Add a login flow offers. */
   catalog(): Promise<ProviderPresetCatalog>;
   presets(): Promise<readonly ProviderPreset[]>;
@@ -875,34 +875,4 @@ const subjectOf = (entry: CredentialEntry): CredentialSubject => ({ id: entry.id
 
 // ── Passive usage ────────────────────────────────────────────────────────────────────────────────
 
-/** One session this daemon launched, as usage attribution reads it: who ran it and where it wrote. */
-export interface CredentialSessionRecord {
-  /** The runtime the session was started on. */
-  readonly agent: string;
-  readonly transcript?: { readonly home: string; readonly file?: string };
-}
-
-/**
- * The transcripts of the sessions that ran on this credential (§8.2.3): a session started on one of
- * its runtimes. A rollout this
- * daemon did not launch has no record, so it is never attributed: the shared pool mixes credentials.
- */
-export function attributedTranscripts(
-  entry: Pick<CredentialEntry, 'usedBy'>,
-  sessions: readonly CredentialSessionRecord[],
-): readonly string[] {
-  const files = new Set<string>();
-  for (const session of sessions) {
-    const file = session.transcript?.file;
-    if (file === undefined) continue;
-    if (entry.usedBy.includes(session.agent)) files.add(file);
-  }
-  return [...files].sort();
-}
-
 // ── The subsystem ────────────────────────────────────────────────────────────────────────────────
-
-/** Builds the credentials subsystem the composition root mounts. */
-export function createFleetCredentialsSubsystem(deps: FleetCredentialsServiceDeps): FleetCredentialsService {
-  return new FleetCredentialsService(deps);
-}

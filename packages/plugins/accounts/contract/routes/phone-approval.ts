@@ -26,12 +26,11 @@ import { SurfaceKeySchema } from '@ferretry/core-vault/contract';
 
 /** A phone approval's id: `pa_` and 24 hex digits (the contract owns the shape). */
 export const PhoneApprovalIdSchema = ContractPhoneApprovalIdSchema;
-export type PhoneApprovalId = z.infer<typeof PhoneApprovalIdSchema>;
 
 /** How long a ferret may wait for a push to be approved, in seconds. */
-export const PHONE_APPROVAL_MIN_WAIT_SECONDS = 30;
-export const PHONE_APPROVAL_MAX_WAIT_SECONDS = 300;
-export const PHONE_APPROVAL_DEFAULT_WAIT_SECONDS = 120;
+const PHONE_APPROVAL_MIN_WAIT_SECONDS = 30;
+const PHONE_APPROVAL_MAX_WAIT_SECONDS = 300;
+const PHONE_APPROVAL_DEFAULT_WAIT_SECONDS = 120;
 
 /**
  * EXACTLY WHAT A FERRET MAY SAY when it asks for a phone approval: where, and hints. There is no prompt, message,
@@ -64,23 +63,22 @@ export const PhoneApprovalRaiseSchema = z
     path: ['element'],
     message: 'only a page has an element that shows a number',
   });
-export type PhoneApprovalRaise = z.infer<typeof PhoneApprovalRaiseSchema>;
 
 /**
  * Where a number the daemon read came from: a provider's own sign-in page. `pointed` (the element a ferret pointed at)
  * stays in the list for the wire only: no daemon produces it any more (secrev-1244 H1), and the words still mark one.
  */
-export const PHONE_APPROVAL_NUMBER_SOURCES = ['okta', 'microsoft', 'google', 'duo', 'pointed'] as const;
+const PHONE_APPROVAL_NUMBER_SOURCES = ['okta', 'microsoft', 'google', 'duo', 'pointed'] as const;
 
 /**
  * What the owner does with the number: tap it among the choices the phone shows (Okta, Microsoft, Google), or type it
  * into the app (Duo Verified Push).
  */
-export const PhoneApprovalDirectionSchema = z.enum(['tap-on-phone', 'type-on-phone']);
-export type PhoneApprovalDirection = z.infer<typeof PhoneApprovalDirectionSchema>;
+const PhoneApprovalDirectionSchema = z.enum(['tap-on-phone', 'type-on-phone']);
+type PhoneApprovalDirection = z.infer<typeof PhoneApprovalDirectionSchema>;
 
 /** The direction each source's number goes. */
-export const PHONE_APPROVAL_DIRECTION: Readonly<
+const PHONE_APPROVAL_DIRECTION: Readonly<
   Record<(typeof PHONE_APPROVAL_NUMBER_SOURCES)[number], PhoneApprovalDirection>
 > = {
   okta: 'tap-on-phone',
@@ -94,7 +92,7 @@ export const PHONE_APPROVAL_DIRECTION: Readonly<
  * A number the DAEMON read off the page. A number to tap is 1 to 3 digits (Okta, Microsoft and Google show two); a
  * Duo Verified Push code to type is 3 to 6 digits (its length is the organisation's setting).
  */
-export const PhoneApprovalNumberSchema = z
+const PhoneApprovalNumberSchema = z
   .strictObject({
     value: z.string().regex(/^[0-9]{1,6}$/u),
     from: z.enum(PHONE_APPROVAL_NUMBER_SOURCES),
@@ -109,7 +107,6 @@ export const PhoneApprovalNumberSchema = z
     path: ['value'],
     message: 'a number to tap is 1 to 3 digits, a code to type is 3 to 6',
   });
-export type PhoneApprovalNumber = z.infer<typeof PhoneApprovalNumberSchema>;
 
 /**
  * Why the card shows no number: the page had none Ferretry recognises; a ferret scripted the page this session; the
@@ -117,7 +114,7 @@ export type PhoneApprovalNumber = z.infer<typeof PhoneApprovalNumberSchema>;
  * was read; it is a terminal, which never shows one; or the page is a new document since the ferret asked and the
  * ferret acted on its pages meanwhile (`steered`), so it may have restarted the challenge to fish for a number.
  */
-export const PhoneApprovalNumberMissingSchema = z.enum([
+const PhoneApprovalNumberMissingSchema = z.enum([
   'none-found',
   'scripted',
   'origin',
@@ -126,26 +123,23 @@ export const PhoneApprovalNumberMissingSchema = z.enum([
   'terminal',
   'steered',
 ]);
-export type PhoneApprovalNumberMissing = z.infer<typeof PhoneApprovalNumberMissingSchema>;
+type PhoneApprovalNumberMissing = z.infer<typeof PhoneApprovalNumberMissingSchema>;
 
 /**
  * Where an approval stands. `moved-on` is the only success, and only the daemon sets it, on seeing the sign-in move
  * on; `refused` is the owner's "Not me — stop"; `gone`, the page or terminal closed.
  */
-export const PhoneApprovalStateSchema = z.enum(['waiting', 'moved-on', 'timed-out', 'refused', 'gone']);
+const PhoneApprovalStateSchema = z.enum(['waiting', 'moved-on', 'timed-out', 'refused', 'gone']);
 export type PhoneApprovalState = z.infer<typeof PhoneApprovalStateSchema>;
 
 /**
  * The origin of a page an approval waits on: https and an origin only (scheme, host, port), so no `javascript:` or
  * `data:` text, and no path a ferret chose, can reach the card. A push number is only ever read on an https page.
  */
-export const PhoneApprovalOriginSchema = AppOriginSchema.refine(
-  origin => origin.startsWith('https://'),
-  'an https origin',
-);
+const PhoneApprovalOriginSchema = AppOriginSchema.refine(origin => origin.startsWith('https://'), 'an https origin');
 
 /** The push key a card names, as the owner labelled it. */
-export const PhoneApprovalFactorSchema = z.strictObject({
+const PhoneApprovalFactorSchema = z.strictObject({
   id: TwoFactorIdSchema,
   label: oneLine(TWO_FACTOR_LABEL_MAX_LENGTH),
   app: PushAppSchema.optional(),
@@ -217,7 +211,6 @@ export const PhoneApprovalAgentViewSchema = z
     path: ['secondFactor'],
     message: 'a push is known only once the sign-in moved on',
   });
-export type PhoneApprovalAgentView = z.infer<typeof PhoneApprovalAgentViewSchema>;
 
 /** What a card, the agenda subject and the push say: built by {@link phoneApprovalWords}, and by nothing else. */
 export interface PhoneApprovalWords {
@@ -255,7 +248,7 @@ export interface PhoneApprovalWords {
 }
 
 /** What a card says under a number read from the element the ferret pointed at. */
-export const PHONE_APPROVAL_POINTED_SOURCE = 'Read from the element the ferret pointed at, on this sign-in page.';
+const PHONE_APPROVAL_POINTED_SOURCE = 'Read from the element the ferret pointed at, on this sign-in page.';
 
 /** The heading of every approve-on-phone card and push: no ferret's push may read as it (`agendaNotificationTitle`). */
 export const PHONE_APPROVAL_TITLE = 'Approve on your phone';

@@ -53,10 +53,10 @@ import { codeTargetProblem, type SavedListing } from './saved-logins.ts';
  */
 
 /** The most grant fills of one sign-in in an hour, across every grant and session. */
-export const FILLS_PER_HOUR_PER_SIGN_IN = 10;
+const FILLS_PER_HOUR_PER_SIGN_IN = 10;
 
 /** The most grant fills in one session in an hour. */
-export const FILLS_PER_HOUR_PER_SESSION = 30;
+const FILLS_PER_HOUR_PER_SESSION = 30;
 
 const HOUR_MS = 3_600_000;
 
@@ -65,7 +65,7 @@ const HOUR_MS = 3_600_000;
  * says whether the ferret did nothing to the session's pages since a moment (its own Enter, pressed by the daemon, is
  * no act of the ferret's). A rule's code step reads all of it; a missing part fails closed.
  */
-export interface GrantTarget {
+interface GrantTarget {
   readonly place?: string | undefined;
   readonly pageId?: string | undefined;
   readonly navigationId?: string | undefined;
@@ -73,7 +73,7 @@ export interface GrantTarget {
 }
 
 /** What a reservation is for: one grant, its sign-in, the session asking, and the uses it has left now. */
-export interface LedgerGrant {
+interface LedgerGrant {
   readonly id: string;
   readonly signIn: SignInId;
   /** `Infinity` for a standing rule with no cap. */
@@ -139,7 +139,7 @@ function followsPassword(password: PasswordWrite | undefined, target: GrantTarge
   );
 }
 
-export class SignInGrantLedger {
+class SignInGrantLedger {
   /** Per grant, per session: a standing rule fills for many sessions, and one session's steps never join another's. */
   readonly #attempts = new Map<string, Map<string, Attempt>>();
   readonly #pins = new Map<string, Map<string, string>>();
@@ -263,7 +263,7 @@ export class SignInGrantLedger {
 const STOPPING: ReadonlySet<GrantMissReason> = new Set(GRANT_STOPPING_REASONS);
 
 /** Whether a miss stops the line it was tried under: the form, the recipe or the place changed, or a value was left behind. */
-export const stopsTheLine = (reason: GrantMissReason): boolean => STOPPING.has(reason);
+const stopsTheLine = (reason: GrantMissReason): boolean => STOPPING.has(reason);
 
 // ─── from sign-in-grants/matcher.ts ───
 
@@ -278,7 +278,7 @@ export const stopsTheLine = (reason: GrantMissReason): boolean => STOPPING.has(r
  */
 
 /** What a grant was pinned to when the owner approved it: part of the bytes the passkey was bound to. */
-export interface GrantPins {
+interface GrantPins {
   /** Login domains, or `tool@host`; never a site's `match` hosts. */
   readonly placeKeys: readonly PlaceKey[];
   readonly recipeVersion: number | undefined;
@@ -287,7 +287,7 @@ export interface GrantPins {
 }
 
 /** What a standing rule pinned of its account, beside the key: its handle, its username and its 2FA keys' fingerprint. */
-export interface GrantAccountPins {
+interface GrantAccountPins {
   readonly id: AccountId;
   readonly username: string | undefined;
   readonly factors: string;
@@ -347,7 +347,7 @@ export const GRANT_MISS_CONTEXT_LINE = "A task plan line didn't apply here, so y
 // ─── from sign-in-grants/plans.ts ───
 
 /** What a grant's last check before typing reads, beside the grant itself: who asks, from where, typing what. */
-export interface GrantFillAt {
+interface GrantFillAt {
   readonly sessionId: string;
   /** The session's stamped board project, as the fill's sighting read it. */
   readonly project: string | undefined;
@@ -356,7 +356,7 @@ export interface GrantFillAt {
 }
 
 /** A grant checked again right before its write: still good, or why not (`reason` absent: it could not be told). */
-export type GrantVerdict = { readonly ok: true } | { readonly ok: false; readonly reason?: GrantMissReason };
+type GrantVerdict = { readonly ok: true } | { readonly ok: false; readonly reason?: GrantMissReason };
 
 // ─── from sign-in-grants/matcher.ts ───
 
@@ -424,11 +424,7 @@ export function clearJobOf(facts: InputTargetFacts, secretFields: readonly strin
  * somewhere unreadable): ferret A's script on github.com can arm storage that github.com's own code reads when ferret
  * B's fill types, weeks later, in the one shared browser profile.
  */
-export function scriptedSince(
-  view: ScriptedOriginsView,
-  keys: readonly PlaceKey[],
-  approvedAt: number | undefined,
-): boolean {
+function scriptedSince(view: ScriptedOriginsView, keys: readonly PlaceKey[], approvedAt: number | undefined): boolean {
   const since = (at: number | undefined): boolean => at !== undefined && (approvedAt === undefined || at >= approvedAt);
   return since(view.everywhere) || keys.some(key => since(view.hosts.get(key)));
 }
@@ -437,7 +433,7 @@ export function scriptedSince(
  * Whether a standing rule's scope covers this session (check 1b): `any` ferret; exactly this `session` (never its
  * children); or the sessions STAMPED with this board `project` (a project read from a folder never matches).
  */
-export function scopeCovers(scope: SignInRuleScope, sessionId: string, project: string | undefined): boolean {
+function scopeCovers(scope: SignInRuleScope, sessionId: string, project: string | undefined): boolean {
   switch (scope.kind) {
     case 'any':
       return true;
@@ -497,7 +493,7 @@ const sameKeys = (left: readonly string[], right: readonly string[]): boolean =>
   left.length === right.length && left.every(key => right.includes(key)) && right.every(key => left.includes(key));
 
 /** The field set a card fills, as pins are kept: its roles, sorted and joined (`password`, `username+password`). */
-export const fieldSetOf = (roles: readonly LoginFieldRole[]): string => [...new Set(roles)].sort().join('+');
+const fieldSetOf = (roles: readonly LoginFieldRole[]): string => [...new Set(roles)].sort().join('+');
 
 /**
  * The roles a card's fields take under a grant, or why it can't: a `private` value is never covered, a code needs the

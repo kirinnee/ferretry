@@ -16,7 +16,6 @@ import {
   type AccountRef,
   AccountRefSchema,
   type Place,
-  PlaceKeySchema,
   PlaceSchema,
   placeKeys,
   type TwoFactorKeySummary,
@@ -24,10 +23,16 @@ import {
 import { canonicalJson } from '@ferretry/std';
 import { timesWords } from '@ferretry/std';
 import { InstantSchema } from './foreign.ts';
-import { AUTOMATED_CODE_WARNING, LOGIN_MATCH_MAX, LOGIN_USERNAME_MAX_LENGTH, oneLine } from './login-entries.ts';
+import {
+  AUTOMATED_CODE_WARNING,
+  LOGIN_MATCH_MAX,
+  LOGIN_USERNAME_MAX_LENGTH,
+  LoginMatchSchema,
+  oneLine,
+} from './login-entries.ts';
 import { LOGIN_OBSERVED_MAX } from './login-recipes.ts';
 import { sha256Hex } from './sha256.ts';
-import { type DaemonId, DaemonIdSchema, PairedDeviceIdSchema } from './foreign.ts';
+import { type DaemonId, PairedDeviceIdSchema } from './foreign.ts';
 import { PASSKEY_CHALLENGE_TTL_SECONDS, StoredStepUpProofSchema } from './foreign.ts';
 import {
   type GrantMissReason,
@@ -86,15 +91,15 @@ export {
 /** Most rules on one machine: one per sign-in. */
 export const SIGN_IN_RULE_MAX = 64;
 /** How long a rule lasts when the owner names no time, and the most it may: in days, and the bounds in seconds. */
-export const SIGN_IN_RULE_DEFAULT_DAYS = 30;
-export const SIGN_IN_RULE_MAX_DAYS = 90;
+const SIGN_IN_RULE_DEFAULT_DAYS = 30;
+const SIGN_IN_RULE_MAX_DAYS = 90;
 /** One day, in seconds: every rule lifetime is a whole number of these. */
 export const DAY_SECONDS = 86_400;
 export const SIGN_IN_RULE_DEFAULT_SECONDS = SIGN_IN_RULE_DEFAULT_DAYS * DAY_SECONDS;
 export const SIGN_IN_RULE_MAX_SECONDS = SIGN_IN_RULE_MAX_DAYS * DAY_SECONDS;
 /** The same for a terminal rule (sudo, su, doas): root on demand, so a day by default and a week at most. */
-export const SIGN_IN_RULE_TERMINAL_DEFAULT_DAYS = 1;
-export const SIGN_IN_RULE_TERMINAL_MAX_DAYS = 7;
+const SIGN_IN_RULE_TERMINAL_DEFAULT_DAYS = 1;
+const SIGN_IN_RULE_TERMINAL_MAX_DAYS = 7;
 export const SIGN_IN_RULE_TERMINAL_DEFAULT_SECONDS = SIGN_IN_RULE_TERMINAL_DEFAULT_DAYS * DAY_SECONDS;
 export const SIGN_IN_RULE_TERMINAL_MAX_SECONDS = SIGN_IN_RULE_TERMINAL_MAX_DAYS * DAY_SECONDS;
 /** The shortest a rule may last. */
@@ -272,7 +277,7 @@ export const SignInRulePinsSchema = z.strictObject({
   accountKey: AccountKeySchema,
   account: AccountIdSchema,
   username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
-  placeKeys: z.array(PlaceKeySchema).min(1).max(LOGIN_MATCH_MAX),
+  placeKeys: z.array(LoginMatchSchema).min(1).max(LOGIN_MATCH_MAX),
   recipeVersion: z.number().int().min(1).optional(),
   identities: z.array(IdentitySchema).min(1).max(LOGIN_OBSERVED_MAX),
   factors: FactorFingerprintSchema,
@@ -430,7 +435,6 @@ export const SignInRuleUsageSchema = z.strictObject({
   lastUsedAt: InstantSchema.optional(),
   lastSession: oneLine(128).optional(),
 });
-export type SignInRuleUsage = z.infer<typeof SignInRuleUsageSchema>;
 
 /** The owner's narrowing of a rule, kept beside the signed body: drop the code, an earlier end, a lower cap. */
 export const SignInRuleNarrowedSchema = z.strictObject({
@@ -438,7 +442,7 @@ export const SignInRuleNarrowedSchema = z.strictObject({
   expiresAt: InstantSchema.optional(),
   uses: z.number().int().min(0).max(SIGN_IN_RULE_MAX_USES).optional(),
 });
-export type SignInRuleNarrowed = z.infer<typeof SignInRuleNarrowedSchema>;
+type SignInRuleNarrowed = z.infer<typeof SignInRuleNarrowedSchema>;
 
 /**
  * ONE RULE AS IT RESTS ON DISK: the signed `body`, its `proof`, and an UNSIGNED overlay that may only narrow or record
@@ -493,7 +497,7 @@ export type SignInRulesDocument = z.infer<typeof SignInRulesDocumentSchema>;
 // ── What is in force: the body, narrowed ────────────────────────────────────────────────────────────
 
 export const SignInRuleStatusSchema = z.enum(['active', 'suspended', 'used-up', 'expired']);
-export type SignInRuleStatus = z.infer<typeof SignInRuleStatusSchema>;
+type SignInRuleStatus = z.infer<typeof SignInRuleStatusSchema>;
 
 /** A rule as it stands now: the signed body intersected with the owner's narrowing, and its status. */
 export interface SignInRuleEffective {
@@ -538,7 +542,7 @@ export function signInRuleEffective(record: SignInRuleRecord, now: number): Sign
  * The daemon's flags on a rule, drawn red (`root`: a terminal rule types sudo, su or doas's password; `one-factor`: the
  * code is ticked) or amber (`auto-recipe`).
  */
-export const SIGN_IN_RULE_FLAGS = ['root', 'one-factor', 'auto-recipe'] as const;
+const SIGN_IN_RULE_FLAGS = ['root', 'one-factor', 'auto-recipe'] as const;
 export const SignInRuleFlagSchema = z.enum(SIGN_IN_RULE_FLAGS);
 export type SignInRuleFlag = z.infer<typeof SignInRuleFlagSchema>;
 
@@ -699,7 +703,7 @@ export const SignInRuleRowLabelSchema = z.enum([
   'Code key',
   'Note',
 ]);
-export type SignInRuleRowLabel = z.infer<typeof SignInRuleRowLabelSchema>;
+type SignInRuleRowLabel = z.infer<typeof SignInRuleRowLabelSchema>;
 
 /** One fact of a rule as the owner reads it: a label and one line. */
 export const SignInRuleRowSchema = z.strictObject({
@@ -918,22 +922,21 @@ export const SignInRuleStageDroppedSchema = z.strictObject({
   stage: SignInRuleStageIdSchema,
   dropped: z.literal(true),
 });
-export type SignInRuleStageDropped = z.infer<typeof SignInRuleStageDroppedSchema>;
+
 /** `DELETE /v1/sign-in-rules/:id`: the rule was revoked. */
 export const SignInRuleRevokedSchema = z.strictObject({ id: SignInRuleIdSchema, revoked: z.literal(true) });
-export type SignInRuleRevoked = z.infer<typeof SignInRuleRevokedSchema>;
+
 /** `POST /v1/accounts/:id/sign-in-rules/revoke`: how many of the account's rules were revoked (zero or more). */
 export const SignInRuleAccountRevokedSchema = z.strictObject({
   account: AccountIdSchema,
   revoked: z.number().int().min(0).max(SIGN_IN_RULE_MAX),
 });
-export type SignInRuleAccountRevoked = z.infer<typeof SignInRuleAccountRevokedSchema>;
+
 /** `DELETE /v1/sign-in-rules/suggestions/:sid`: whether a waiting suggestion was there to dismiss. */
 export const SignInRuleSuggestionDismissedSchema = z.strictObject({
   id: SignInRuleSuggestionIdSchema,
   dismissed: z.boolean(),
 });
-export type SignInRuleSuggestionDismissed = z.infer<typeof SignInRuleSuggestionDismissedSchema>;
 
 // ── The link that opens a waiting rule (`fy rules add`) ──────────────────────────────────────────────
 
@@ -943,35 +946,12 @@ const RULE_LINK_MACHINE_PARAMETER = 'machine';
  * THE FRAGMENT THAT OPENS ONE WAITING RULE in the app: `#rules/<stage>`, and `?machine=<daemon id>` when the printer
  * knows which machine holds it. It carries no secret and never reaches the daemon: it only picks which row to show.
  */
-export const ruleDeepLinkFragment = (stage: SignInRuleStageId, machine?: DaemonId): string =>
+const ruleDeepLinkFragment = (stage: SignInRuleStageId, machine?: DaemonId): string =>
   `#rules/${encodeURIComponent(stage)}${machine === undefined ? '' : `?${RULE_LINK_MACHINE_PARAMETER}=${encodeURIComponent(machine)}`}`;
 
 /** The whole link on an app address (trailing slashes dropped): what `fy rules add` prints and opens. */
 export const ruleDeepLink = (origin: string, stage: SignInRuleStageId, machine?: DaemonId): string =>
   `${origin.replace(/\/+$/u, '')}/${ruleDeepLinkFragment(stage, machine)}`;
-
-/**
- * The stage (and machine) a `#rules/<stage>` fragment names, the one reader of {@link ruleDeepLinkFragment}: `null` for
- * any other fragment, a stage id that is not one, or a machine that is not a daemon id.
- */
-export const ruleDeepLinkFromFragment = (
-  fragment: string,
-): { readonly stage: SignInRuleStageId; readonly machine?: DaemonId } | null => {
-  const match = /^#?rules\/([^/?]+)(?:\?(.*))?$/u.exec(fragment);
-  if (match === null) return null;
-  let raw: string;
-  try {
-    raw = decodeURIComponent(match[1] ?? '');
-  } catch {
-    return null;
-  }
-  const stage = SignInRuleStageIdSchema.safeParse(raw);
-  if (!stage.success) return null;
-  const named = new URLSearchParams(match[2] ?? '').get(RULE_LINK_MACHINE_PARAMETER);
-  if (named === null) return { stage: stage.data };
-  const machine = DaemonIdSchema.safeParse(named);
-  return machine.success ? { stage: stage.data, machine: machine.data } : null;
-};
 
 /** The longest reason of a ferret's suggestion the owner's sheet shows (redacted, one line). */
 export const SIGN_IN_RULE_SUGGESTION_WHY_MAX_CHARS = 300;
@@ -1182,7 +1162,7 @@ export const SIGN_IN_RULE_REFUSAL_WORDS = {
  * not a password one, it is a terminal sign-in for a program other than sudo, su or doas, it is sudo, su or doas on a
  * machine that does not offer terminal rules, or no paired device holds a passkey.
  */
-export const SIGN_IN_RULE_INELIGIBLE = [
+const SIGN_IN_RULE_INELIGIBLE = [
   'no-history',
   'via-provider',
   'not-password',

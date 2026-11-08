@@ -17,7 +17,7 @@ import type { ProviderProbeClock, ProviderProbePort } from './ports.ts';
  */
 
 /** One fixed sentence per code. */
-export const PROVIDER_TEST_MESSAGES: Readonly<Record<LoginTestCode, string>> = {
+const PROVIDER_TEST_MESSAGES: Readonly<Record<LoginTestCode, string>> = {
   ok: 'The provider accepted this login.',
   not_set: 'A secret this login needs is not in the secret store. Paste it and store it first.',
   rejected: 'The provider refused this key. Check it was copied whole, or make a new one.',

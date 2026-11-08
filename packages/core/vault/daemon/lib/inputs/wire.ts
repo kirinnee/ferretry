@@ -11,10 +11,8 @@ import {
   InputEchoSchema,
   type InputFieldRaise,
   InputFieldIdSchema,
-  type InputForegroundSchema,
   type InputHoldReasonSchema,
   InputHoldSchema,
-  type InputPaneProofSchema,
   type InputRaise,
   InputReasonSchema,
   InputRequestIdSchema,
@@ -24,7 +22,6 @@ import {
   InputSubmitModeSchema,
   InputTargetFactsSchema,
   InputTargetSchema,
-  type PageFieldFactsSchema,
   SurfaceKeySchema,
 } from '../../../contract/index.ts';
 import {
@@ -137,27 +134,22 @@ const boundedLine = (maximum: number) =>
 const HEX_DIGEST = /^[0-9a-f]{64}$/u;
 const Digest = z.string().regex(HEX_DIGEST, 'a sha-256 digest in lowercase hex');
 
-export type InputDeliveryId = z.infer<typeof InputDeliveryIdSchema>;
-
 /**
  * A sensitivity as a CLIENT reads it off a request: one this build does not know (a newer daemon's) reads as
  * `secret`, the most careful, so a card is never drawn or answered as `plain` because its kind is new. A build
  * from before `code` existed has the closed enum here and refuses the whole request instead: also closed, never
  * plain. The daemon never parses a request, so this leniency is a reader's only.
  */
-export const ReadInputSensitivitySchema = z.preprocess(
+const ReadInputSensitivitySchema = z.preprocess(
   raw => (typeof raw === 'string' && !(INPUT_SENSITIVITIES as readonly string[]).includes(raw) ? 'secret' : raw),
   InputSensitivitySchema,
 );
 
-export type InputSubmitMode = z.infer<typeof InputSubmitModeSchema>;
-
 /** The kinds of place a value can go: a terminal, a page, or the secret store. */
-export const InputTargetKindSchema = z.enum(['terminal', 'page', 'secret']);
-export type InputTargetKind = z.infer<typeof InputTargetKindSchema>;
+const InputTargetKindSchema = z.enum(['terminal', 'page', 'secret']);
 
 /** The longest label an agent may give a field ("Email", "Password"). */
-export const INPUT_FIELD_LABEL_MAX_LENGTH = 60;
+const INPUT_FIELD_LABEL_MAX_LENGTH = 60;
 /** The id a request with one field gives it when the agent names none. */
 export const INPUT_SINGLE_FIELD_ID = 'value';
 
@@ -171,25 +163,22 @@ const FieldLabelSchema = z
 const fieldsProblem = (fields: readonly { readonly id: string }[]): string | undefined =>
   new Set(fields.map(field => field.id)).size === fields.length ? undefined : 'each field needs its own id';
 
-export type InputFieldId = z.infer<typeof InputFieldIdSchema>;
-
 /**
  * The element a browser field names, the way every browser act names one: a snapshot's `ref` or a selector.
  * It is the agent's POINTER, never a fact: the daemon resolves it and observes what is actually there.
  */
-export const InputFieldElementSchema = z.discriminatedUnion('kind', [
+const InputFieldElementSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('selector'), selector: boundedLine(512) }),
   z.strictObject({ kind: z.literal('ref'), ref: BrowserRefSchema }),
 ]);
 export type InputFieldElement = z.infer<typeof InputFieldElementSchema>;
 
 /** Where a pasted value came from, as the DAEMON recorded it when the copy was captured: names, never the value. */
-export const InputSourceSchema = z.strictObject({
+const InputSourceSchema = z.strictObject({
   kind: z.literal('sealed'),
   name: CopyNameSchema,
   from: CopyOriginSchema,
 });
-export type InputSource = z.infer<typeof InputSourceSchema>;
 
 /**
  * Which fields of a card "Save as" keeps, and as what, so a login's username and password are kept together in
@@ -215,14 +204,6 @@ export function inputRaiseFields(raise: Pick<InputRaise, 'sensitivity' | 'fields
   if (raise.fields !== undefined) return raise.fields;
   return [{ id: INPUT_SINGLE_FIELD_ID, sensitivity: raise.sensitivity ?? 'secret' }];
 }
-
-export type InputPaneProof = z.infer<typeof InputPaneProofSchema>;
-
-export type InputEcho = z.infer<typeof InputEchoSchema>;
-
-export type InputForeground = z.infer<typeof InputForegroundSchema>;
-
-export type InputBrowserFieldFacts = z.infer<typeof PageFieldFactsSchema>;
 
 export type InputReason = z.infer<typeof InputReasonSchema>;
 
@@ -278,7 +259,6 @@ export const InputOutcomeSchema = z.strictObject({
   entry: LoginEntryIdSchema.optional(),
   reason: InputReasonSchema.optional(),
 });
-export type InputOutcome = z.infer<typeof InputOutcomeSchema>;
 
 /**
  * HOW RISKY THE VALUE IS TO TYPE where it is going, as a flag on the card and never a refusal: the owner
@@ -286,9 +266,9 @@ export type InputOutcome = z.infer<typeof InputOutcomeSchema>;
  * secret and goes where it was asked for; amber = it may show on screen, or the program is not known to ask; red =
  * not a secret, the ferret can see it. `reason` is one sentence.
  */
-export const INPUT_RISK_LEVELS = ['green', 'neutral', 'amber', 'red'] as const;
-export type InputRiskLevel = (typeof INPUT_RISK_LEVELS)[number];
-export const InputRiskSchema = z.strictObject({
+const INPUT_RISK_LEVELS = ['green', 'neutral', 'amber', 'red'] as const;
+type InputRiskLevel = (typeof INPUT_RISK_LEVELS)[number];
+const InputRiskSchema = z.strictObject({
   /** A level this build does not know (a newer daemon's) reads as `amber`: a warning, never a pass. */
   level: z.preprocess(
     raw => (typeof raw === 'string' && !(INPUT_RISK_LEVELS as readonly string[]).includes(raw) ? 'amber' : raw),
@@ -303,7 +283,7 @@ export type InputRisk = z.infer<typeof InputRiskSchema>;
  * the element it goes into (a browser field) and its own risk flag. A `plain` field is always red: the ferret
  * can see that value, and the card says so beside it.
  */
-export const InputRequestFieldSchema = z.strictObject({
+const InputRequestFieldSchema = z.strictObject({
   id: InputFieldIdSchema,
   label: FieldLabelSchema,
   /** Read as a client reads it: a kind this build does not know is `secret`. */
@@ -335,7 +315,7 @@ const PreapprovalOutcomeShape = {
  * revision (`by: 'rule'`). Only one that did not apply says why. A source this build does not know is refused, never
  * read as another.
  */
-export const InputPreapprovalSchema = z
+const InputPreapprovalSchema = z
   .discriminatedUnion('by', [
     z.strictObject({
       by: z.literal('plan'),
@@ -354,7 +334,6 @@ export const InputPreapprovalSchema = z
     path: ['reason'],
     message: 'only a pre-approval that did not apply says why',
   });
-export type InputPreapproval = z.infer<typeof InputPreapprovalSchema>;
 
 /**
  * THE REQUEST, as the owner's card reads it. `observed` is absent while the daemon is re-observing after
@@ -551,26 +530,6 @@ export const InputDeliverBodySchema = z
   });
 export type InputDeliverBody = z.infer<typeof InputDeliverBodySchema>;
 
-/**
- * `GET /v1/sessions/:sessionId/input-requests/:requestId/shot`: the picture of a page request's fields, taken at
- * raise BEFORE anything was typed, and where it sits on the page in viewport CSS pixels, so the card can draw each
- * field's `box` on it. The owner's only; it ends with the request.
- */
-export const InputShotSchema = z.strictObject({
-  pngBase64: z
-    .string()
-    .min(1)
-    .max(4_000_000)
-    .regex(/^[A-Za-z0-9+/]+=*$/u),
-  clip: z.strictObject({
-    x: z.number().finite(),
-    y: z.number().finite(),
-    w: z.number().finite().nonnegative(),
-    h: z.number().finite().nonnegative(),
-  }),
-});
-export type InputShot = z.infer<typeof InputShotSchema>;
-
 /** The answer to a deliver: the outcome, no value. A repeat of a `deliveryId` returns the first one. */
 export const InputDeliverResultSchema = z.strictObject({
   id: InputRequestIdSchema,
@@ -594,7 +553,6 @@ export type InputRequestList = z.infer<typeof InputRequestListSchema>;
 
 /** `POST …/cancel`: the owner declines. */
 export const InputCancelBodySchema = z.strictObject({});
-export type InputCancelBody = z.infer<typeof InputCancelBodySchema>;
 
 /** The error codes the input routes answer with, beside the HTTP status each rides on. */
 export const INPUT_ERROR_CODES = {
@@ -635,7 +593,7 @@ export const INPUT_JOURNAL_EVENT_TYPES = {
   expired: 'surface.input_expired',
   cancelled: 'surface.input_cancelled',
 } as const;
-export const InputJournalEventTypeSchema = z.enum([
+const InputJournalEventTypeSchema = z.enum([
   INPUT_JOURNAL_EVENT_TYPES.requested,
   INPUT_JOURNAL_EVENT_TYPES.delivering,
   INPUT_JOURNAL_EVENT_TYPES.delivered,
@@ -643,7 +601,6 @@ export const InputJournalEventTypeSchema = z.enum([
   INPUT_JOURNAL_EVENT_TYPES.expired,
   INPUT_JOURNAL_EVENT_TYPES.cancelled,
 ]);
-export type InputJournalEventType = z.infer<typeof InputJournalEventTypeSchema>;
 
 /**
  * One journal event about a request: ids, the target's name, the state it moved to and why. No prompt,
@@ -684,7 +641,7 @@ export const INPUT_QUARANTINE_EVENT_TYPES = {
   started: 'surface.input_quarantined',
   ended: 'surface.input_quarantine_ended',
 } as const;
-export const InputQuarantineEventSchema = z.strictObject({
+const InputQuarantineEventSchema = z.strictObject({
   type: z.enum([INPUT_QUARANTINE_EVENT_TYPES.started, INPUT_QUARANTINE_EVENT_TYPES.ended]),
   sessionId: boundedLine(128),
   names: z.array(SurfaceKeySchema).min(1).max(4),
@@ -697,9 +654,9 @@ export const InputQuarantineEventSchema = z.strictObject({
 export type InputQuarantineEvent = z.infer<typeof InputQuarantineEventSchema>;
 
 /** One terminal that is quarantined now and when its window ends, as the owner's client reads it. */
-export const InputQuarantineSchema = z.strictObject({ key: SurfaceKeySchema, until: InstantSchema });
+const InputQuarantineSchema = z.strictObject({ key: SurfaceKeySchema, until: InstantSchema });
 export type InputQuarantine = z.infer<typeof InputQuarantineSchema>;
-export const InputQuarantineListSchema = z.strictObject({ quarantines: z.array(InputQuarantineSchema) });
+const InputQuarantineListSchema = z.strictObject({ quarantines: z.array(InputQuarantineSchema) });
 export type InputQuarantineList = z.infer<typeof InputQuarantineListSchema>;
 
 /** The audit events this feature writes (general store, activity). Wired into `AUDIT_EVENTS` by the daemon PR. */
@@ -714,7 +671,7 @@ export const INPUT_AUDIT_EVENTS = [
   'input.quarantine_ended',
   'input.quarantine_revealed',
 ] as const;
-export const InputAuditEventSchema = z.enum(INPUT_AUDIT_EVENTS);
+const InputAuditEventSchema = z.enum(INPUT_AUDIT_EVENTS);
 export type InputAuditEvent = z.infer<typeof InputAuditEventSchema>;
 
 /**

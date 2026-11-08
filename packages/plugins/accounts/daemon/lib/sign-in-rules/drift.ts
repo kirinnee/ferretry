@@ -52,7 +52,7 @@ function found(listing: RuleListing, signInId: SignInId): Found | undefined {
  * The 2FA key a rule's code is made from: the NEWEST key Ferretry holds a seed for, by when it was added (then id), never
  * by whether a code of it went through — a ferret can steer that (secrev-1241 I1).
  */
-export function pinnedFactor(keys: readonly TwoFactorKeySummary[]): TwoFactorKeySummary | undefined {
+function pinnedFactor(keys: readonly TwoFactorKeySummary[]): TwoFactorKeySummary | undefined {
   return [...keys]
     .filter(key => key.automatic)
     .sort((left, right) => Date.parse(right.addedAt) - Date.parse(left.addedAt) || left.id.localeCompare(right.id))[0];

@@ -25,7 +25,7 @@ import type { QuotaFetch } from './anthropic-usage-probe.ts';
 export const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
 
 /** The provider label every row from this probe carries. */
-export const CODEX_USAGE_PROVIDER = 'openai';
+const CODEX_USAGE_PROVIDER = 'openai';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 

@@ -25,7 +25,7 @@
  * Variables that name a provider, a credential, or a live session. Removing one can only make a
  * wrapper fall back to its own configuration; keeping one can make it use somebody else's account.
  */
-export const INHERITED_HARNESS_ENV: readonly string[] = [
+const INHERITED_HARNESS_ENV: readonly string[] = [
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_BASE_URL',
