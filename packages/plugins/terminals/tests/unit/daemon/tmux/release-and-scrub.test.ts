@@ -76,6 +76,56 @@ describe('terminals #23 forget-ferret-identity (U1)', () => {
     expect(await forgetFerretIdentity(tmux)).toEqual([]);
     expect(asked.every(command => command[0] === 'set-environment')).toBe(true);
   });
+
+  test('#23 forget-ferret-identity with a bound asks a wedged server nothing more after one client and says so once', async () => {
+    const asked: string[][] = [];
+    const fire: (() => void)[] = [];
+    // The first client never answers: only the bound (and the kernel's kill at the same bound) ends it.
+    const tmux: TmuxCommandPort = {
+      execute: async arguments_ => {
+        asked.push([...arguments_]);
+        return await new Promise(() => {});
+      },
+    };
+    let stalled = 0;
+    const bounds: number[] = [];
+
+    const scrub = forgetFerretIdentity(tmux, {
+      after: (ms, fn) => {
+        bounds.push(ms);
+        fire.push(fn);
+        return () => undefined;
+      },
+      timeoutMs: 2_000,
+      stalled: () => (stalled += 1),
+    });
+    await Promise.resolve();
+    for (const fn of fire.splice(0)) fn();
+
+    expect(await scrub).toEqual([]);
+    expect(asked).toHaveLength(1);
+    expect(bounds).toEqual([2_000]);
+    expect(stalled).toBe(1);
+  });
+
+  test('#23 forget-ferret-identity with a bound clears every name from a server that answers, and clears its timers', async () => {
+    let armed = 0;
+    let disarmed = 0;
+    let stalled = 0;
+    const tmux: TmuxCommandPort = { execute: async () => ({ code: 0, stdout: '', stderr: '' }) };
+
+    const cleared = await forgetFerretIdentity(tmux, {
+      after: () => {
+        armed += 1;
+        return () => (disarmed += 1);
+      },
+      timeoutMs: 2_000,
+      stalled: () => (stalled += 1),
+    });
+
+    expect(cleared).toEqual(['FY_SESSION_TOKEN', 'FY_SESSION_BOARD_CAPABILITY', 'FY_SESSION_ID']);
+    expect([armed, disarmed, stalled]).toEqual([3, 3, 0]);
+  });
 });
 
 /** Today's two sentences (`R/packages/daemon/src/lib/core/doctor.ts` `TMUX_CRASH`, `TMUX_MOVE`), typed out here byte for byte. */

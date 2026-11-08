@@ -25,6 +25,12 @@ export type CommandLocator = (name: string, searchPath: string) => string | unde
  * (`envNames`; the value never reaches this plugin), or no search path at all. Either way the pane could reach a
  * `claude` the guard never looked at, so the launch is refused rather than passed (`UnprovableHarnessError`).
  *
+ * DECLARED DIFFERENCE FROM TODAY: today searched a launch's PATH by value, so a shell PATH holding no real
+ * `claude` passed. 5.0 cannot read the handle, so every armed launch whose handle names `PATH` is refused —
+ * that is every ferret with a Shells launch part, since Shells always sets PATH — and so is a launch with no
+ * search path at all, where today searched `''` and passed. Both fail closed (409 `real_harness`). Judging
+ * such a launch on its real PATH waits for a kernel/Vault-side resolve (GAP in `ports-pending.json`).
+ *
  * Every path is compared after symlinks are resolved and before, so a profile link and the store path
  * it points into are both recognised.
  */
