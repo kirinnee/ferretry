@@ -73,8 +73,11 @@ export async function openApp(
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify({ grants: options.grants }),
   });
-  // Status only: the body is a live credential.
-  if (!mint.ok) throw new Error(`minting a pairing code answered HTTP ${mint.status}\n${daemon.diagnose()}`);
+  // A refusal's body is its sentence and code (no credential); an answer's is the live code, never shown.
+  if (!mint.ok)
+    throw new Error(
+      `minting a pairing code answered HTTP ${mint.status}: ${(await mint.text()).slice(0, 400)}\n${daemon.diagnose()}`,
+    );
   const text = await mint.text();
   let code: unknown;
   try {
