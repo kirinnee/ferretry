@@ -92,7 +92,9 @@ describe('ruling #31b: the session-document writer, across a daemon restart', ()
     const { id: lead } = started.json<{ id: string }>();
     await first.settle();
     expect(document(first, lead)?.provenance).toBeDefined();
-    expect((await first.request('POST', `/v1/ferrets/${lead}/stop?how=now`, { body: {} })).status).toBeLessThan(300);
+    expect(
+      (await first.request('POST', `/v1/ferrets/${lead}/stop`, { query: { how: 'now' }, body: {} })).status,
+    ).toBeLessThan(300);
 
     // A ferret from before the writer, INDEXED: started and stopped through the real routes (so the session store
     // indexed its journal as it wrote it), then its session document taken away, leaving the journal alone — exactly
@@ -102,7 +104,9 @@ describe('ruling #31b: the session-document writer, across a daemon restart', ()
     expect(made.status).toBeLessThan(300);
     const { id: olderId } = made.json<{ id: string }>();
     await first.settle();
-    expect((await first.request('POST', `/v1/ferrets/${olderId}/stop?how=now`, { body: {} })).status).toBeLessThan(300);
+    expect(
+      (await first.request('POST', `/v1/ferrets/${olderId}/stop`, { query: { how: 'now' }, body: {} })).status,
+    ).toBeLessThan(300);
     await first.settle();
     const files = first.state('ferrets').files;
     files.delete(`${olderId}/config.json`);
@@ -132,9 +136,9 @@ describe('ruling #31b: the session-document writer, across a daemon restart', ()
     expect(stamped?.provenance).toBeDefined();
 
     // A Warden resume of the stopped child goes through the same admission, as a resume, and relaunches it.
-    expect((await second.request('POST', `/v1/ferrets/${childId}/stop?how=now`, { body: {} })).status).toBeLessThan(
-      300,
-    );
+    expect(
+      (await second.request('POST', `/v1/ferrets/${childId}/stop`, { query: { how: 'now' }, body: {} })).status,
+    ).toBeLessThan(300);
     await second.settle();
     const resumed = await second
       .provided(FerretsPort)
