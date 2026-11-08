@@ -8,10 +8,13 @@ import { homedir } from 'node:os';
 import type { DaemonImplementation } from '../manifest/implement.ts';
 import { toolEnvironment } from './adapters/process.ts';
 import { answerArguments, EXIT_USAGE } from './arguments.ts';
+import { nodeFs } from './adapters/node-fs.ts';
 import { PRODUCT_BINARIES } from './binaries.ts';
+import { checkHost, processAlive, tcpProbe } from './check.ts';
 import { bootHost } from './host.ts';
 import { parseBackgroundDelay } from './jobs.ts';
 import { listenLocal } from './listener.ts';
+import { filterByLevel, renderSettings, resolveSettings } from './settings.ts';
 import { bootTimings } from './session/timings.ts';
 import { fileLogSink, realAdapters } from './wiring.ts';
 
@@ -21,7 +24,6 @@ interface GeneratedRegistry {
 }
 
 const VERSION = '5.0.0';
-const DEFAULT_PORT = 7457;
 /** The client's binary name: the `bin` key of `packages/cli/package.json` (see `binaries.ts`), unless the operator names it. */
 const BINARY = process.env.FY_BINARY_NAME ?? PRODUCT_BINARIES.client;
 
@@ -33,31 +35,43 @@ async function main(): Promise<number> {
     (answer.kind === 'print' ? process.stdout : process.stderr).write(`${answer.text}\n`);
     return answer.exitCode;
   }
-  const { configFile, host: hostOverride, logLevel } = answer.overrides;
-  const unserved = [
-    answer.kind !== 'boot' && `--${answer.kind}`,
-    configFile !== undefined && '--config',
-    hostOverride !== undefined && '--host',
-    logLevel !== undefined && '--log-level',
-  ].filter(Boolean);
-  if (unserved.length > 0) {
-    process.stderr.write(`${usage.daemonName}: ${unserved.join(', ')} is not served by this daemon yet.\n`);
+  if (answer.overrides.configFile !== undefined) {
+    process.stderr.write(`${usage.daemonName}: --config is not an option in 5.0: configuration is read from $FY_HOME/config/ (one file per building block), so there is no single document to point at. Remove --config from the unit file or script that passes it.\n`);
     return EXIT_USAGE;
   }
-  const home = (process.env.FY_HOME ?? `${homedir()}/.ferretry`).replace(/\/+$/, '');
-  const port = answer.overrides.port ?? Number(process.env.FY_PORT ?? DEFAULT_PORT);
-  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
-    process.stderr.write(`${usage.daemonName}: FY_PORT ${String(port)} is not a port number.\n`);
+  const resolved = resolveSettings(process.env, answer.overrides, homedir());
+  if (resolved.kind === 'refused') {
+    process.stderr.write(`${usage.daemonName}: ${resolved.sentence}\n`);
     return EXIT_USAGE;
   }
+  if (answer.kind === 'print-config') {
+    for (const line of renderSettings(resolved.settings)) process.stdout.write(`${line}\n`);
+    return 0;
+  }
+  const home = resolved.settings.home.value;
+  const port = resolved.settings.port.value;
+  if (answer.kind === 'check')
+    return await checkHost({
+      fs: nodeFs(() => crypto.randomUUID()),
+      home,
+      host: resolved.settings.host.value,
+      port,
+      daemonName: usage.daemonName,
+      probe: tcpProbe,
+      alive: processAlive,
+      say: line => void process.stdout.write(`${line}\n`),
+    });
   // Nothing is written before the home is decided (§9.3): until boot creates `logs/`, a line is dropped.
-  const sink = fileLogSink(line => {
-    try {
-      appendFileSync(`${home}/logs/fyd.log`, line, { mode: 0o600 });
-    } catch {
-      // the home is not decided yet, or was refused
-    }
-  });
+  const sink = filterByLevel(
+    fileLogSink(line => {
+      try {
+        appendFileSync(`${home}/logs/fyd.log`, line, { mode: 0o600 });
+      } catch {
+        // the home is not decided yet, or was refused
+      }
+    }),
+    resolved.settings.logLevel.value,
+  );
   // R247: read once; a value that would lengthen anything refuses the boot, a shortened one is said once.
   const timings = bootTimings(process.env.FYD_TEST_TIMINGS, line => {
     process.stderr.write(`fyd: ${line}\n`);
@@ -99,6 +113,7 @@ async function main(): Promise<number> {
       await listenLocal(host, {
         home,
         port,
+        hostname: resolved.settings.host.value,
         pid: process.pid,
         version: VERSION,
         write: (path, text) => writeFile(path, text, { mode: 0o600 }),

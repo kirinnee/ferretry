@@ -138,6 +138,15 @@ describe('P89 a local client dials the recorded bind', () => {
   });
 });
 
+describe('V-0509 --host reaches the bind', () => {
+  test('V-0509 the host given to listenLocal is what Bun.serve binds and what run/daemon.json records', async () => {
+    const { tcp, written } = await listening(async () => jsonResponse({}), { hostname: '127.0.0.2', port: 7460 });
+    expect(tcp.options['hostname']).toBe('127.0.0.2');
+    const bind = DaemonRunSchema.parse(JSON.parse(written.get(runBindPath('/tmp/fy-listener-rows')) as string));
+    expect(bind).toMatchObject({ host: '127.0.0.2', port: 7460 });
+  });
+});
+
 describe('I74 the final check is the last synchronous step before bytes leave', () => {
   test('I74 late decides at toResponse, with no await between the check and the Response', () => {
     let held = false;

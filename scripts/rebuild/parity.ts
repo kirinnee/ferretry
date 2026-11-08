@@ -261,6 +261,8 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
   if (kind === 'S' && /legacy-tasks-redirect|version-skew|feature-unavailable|daemon-features/.test(what + file))
     return 'removed by design (§9.6: old routes/probes/fallback UI)';
   if (kind === 'V' && /fy daemon adopt\b/.test(what)) return 'removed by design (§9.1, §9.2: old home adoption)';
+  if (kind === 'V' && what === 'fyd --config')
+    return 'removed by design (5.0 reads configuration from $FY_HOME/config/; fyd refuses --config by name, exit 64)';
   if (kind === 'V' && what === 'fy import')
     return 'removed by design (§1.4: imports are links; its one verb is `fy link`)';
   if (kind === 'R' && /legacy-tasks/.test(file)) return 'removed by design (§9.1, §9.2: per-ferret tasks/old readers)';
@@ -1539,6 +1541,32 @@ for (const file of files) {
   // Release non-CLI trees after each file; shared box, no compiler program/typechecker required.
   if (!file.startsWith('packages/cli/') && !file.startsWith('packages/protocol/')) modules.delete(file);
 }
+/**
+ * The daemon's own command line: every long option its argument parser knows (`--check`, `--port`, ...), as a kernel
+ * `V` row named `fyd <option>`. Read from the parser's string literals, so an option added there appears here.
+ */
+const FYD_OPTION_TESTS: Record<string, string> = {
+  '--check': 'fyd-check.test.ts',
+  '--print-config': 'fyd-print-config.test.ts',
+  '--config': 'fyd-overrides.test.ts',
+  '--host': 'fyd-overrides.test.ts',
+  '--log-level': 'fyd-overrides.test.ts',
+};
+function daemonOptions() {
+  const file = 'packages/daemon/src/lib/runtime/arguments.ts';
+  if (!files.includes(file)) return;
+  const mod = parse(file);
+  const seen = new Set<string>();
+  walk(mod.ast, node => {
+    const value = node.type === 'Literal' ? node.value : undefined;
+    if (typeof value !== 'string' || !/^--[a-z][a-z-]*$/.test(value) || seen.has(value)) return;
+    seen.add(value);
+    add('V', `fyd ${value}`, file, lineOf(node), 'daemon option; honoured by the daemon entry', 'kernel');
+    rows[rows.length - 1]!.check =
+      `packages/core/kernel/tests/unit/host/${FYD_OPTION_TESTS[value] ?? 'fyd-arguments.test.ts'}`;
+  });
+}
+daemonOptions();
 // Every feature boundary is explicit even where a component is named without a Panel/Page suffix.
 const features = new Set(
   files
