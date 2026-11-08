@@ -150,6 +150,24 @@ describe('PacedTurnWatcher', () => {
     should(subject.looked.length).equal(before + 1);
   });
 
+  it('should look again on the next tick once woken (Ferrets typed into the pane), and start the wait over at 2 s', async () => {
+    // Arrange: a quiet pane, backed off to 10 s.
+    const subject = fleet(['quiet-1']);
+    for (let at = 0; at < 16; at += 1) await subject.tick();
+    const id = subject.id('quiet-1');
+    const backedOff = subject.watcher.delayOf(id);
+    const lookedBefore = subject.looked.length;
+
+    // Act
+    subject.watcher.wake(id);
+    await subject.tick();
+
+    // Assert
+    should(backedOff).equal(TURN_WATCH_QUIET_MAX_MS);
+    should(subject.looked.length).equal(lookedBefore + 1);
+    should(subject.watcher.delayOf(id)).equal(TURN_WATCH_INTERVAL_MS);
+  });
+
   it('should never slow the second look an unconfirmed end of turn waits for', async () => {
     // Arrange: the record says working; the pane now shows only an idle prompt (unconfirmed your-turn).
     const subject = fleet(['ends-1'], { status: 'running', turn: 1, turnState: 'working' });
@@ -196,14 +214,33 @@ describe('PacedTurnWatcher', () => {
     const subject = fleet(['bad-1', 'good-1'], { status: 'running', turn: 1, turnState: 'working' });
     subject.broken.add(subject.id('bad-1'));
 
-    // Act
+    // Act: the good one needs its second look to end its turn.
+    const first = await subject.tick();
     await subject.tick();
-    const report = await subject.tick();
 
     // Assert
-    should([...report.failures.keys()]).deepEqual([subject.id('bad-1')]);
-    should(subject.failed).deepEqual([subject.id('bad-1'), subject.id('bad-1')]);
+    should([...first.failures.keys()]).deepEqual([subject.id('bad-1')]);
+    should(subject.failed).deepEqual([subject.id('bad-1')]);
     should(subject.recorded.map(each => each.id)).deepEqual([subject.id('good-1')]);
+  });
+
+  it('should back a ferret it could not decide off to 10 s, not report it on every 2 s tick', async () => {
+    // Arrange: a failure at t0; the ticks that follow are 2 s apart.
+    const subject = fleet(['bad-2'], { status: 'running', turn: 1, turnState: 'working' });
+    subject.broken.add(subject.id('bad-2'));
+    await subject.tick();
+
+    // Act: four more ticks (2, 4, 6, 8 s), then the one at 10 s.
+    const inside: number[] = [];
+    for (let at = 0; at < 4; at += 1) inside.push((await subject.tick()).failures.size);
+    const due = await subject.tick();
+
+    // Assert: nothing is looked at or reported inside the wait, and it is reported again once it is due.
+    should(inside).deepEqual([0, 0, 0, 0]);
+    should(subject.failed).have.length(2);
+    should(subject.looked).have.length(2);
+    should([...due.failures.keys()]).deepEqual([subject.id('bad-2')]);
+    should(subject.watcher.delayOf(subject.id('bad-2'))).equal(TURN_WATCH_QUIET_MAX_MS);
   });
 
   it('should clear a stopped ferret without looking at its pane', async () => {

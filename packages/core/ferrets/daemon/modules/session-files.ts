@@ -99,6 +99,9 @@ export interface SessionFilesDeps {
   readonly log: Pick<Log, 'warn'>;
 }
 
+/** The file Claude Code's question hook writes in a ferret's session folder (today's `SessionPaths.questionAsked`). */
+const QUESTION_ASKED_FILE = 'question-asked.json';
+
 /**
  * Ferrets' per-ferret private session files, all on the internal `sessions` root (`state/ferrets/sessions/<ferret>/`):
  * the environment (the plaintext credential, `environment.json`, `0600`), the assigned task (`turns/turn-001.md`), every
@@ -108,9 +111,6 @@ export interface SessionFilesDeps {
  *
  * One launch gate and one serial queue for the whole process: a second of either would not see the first one's launches.
  */
-/** The file Claude Code's question hook writes in a ferret's session folder (today's `SessionPaths.questionAsked`). */
-const QUESTION_ASKED_FILE = 'question-asked.json';
-
 export class SessionFiles {
   /** ONE gate, shared by the lifecycle, the resume, the sends, the exit observer and the interrupted-launch reconciler. */
   readonly launchGate: InMemoryLaunchGate;

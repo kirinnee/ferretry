@@ -15,6 +15,7 @@
  * (Conversation's send tracker). The transcript half of a turn look reads as "not proved" until U5 wires the
  * transcript through the `harness-history` root, so a turn is decided from the pane alone.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import type { Log } from '@ferretry/kernel/contract';
 import type { FerretId, FerretRecord, Runner, RunnerHandle } from '../../contract/index.ts';
@@ -30,6 +31,14 @@ import { PacedTurnWatcher } from '../lib/session/observer/turn-watch.ts';
 import type { SessionTurnState } from '../lib/protocol/session.ts';
 import type { TurnPaneEvidence } from '../lib/session/peers/turn.ts';
 import type { SessionId } from '../lib/session-id.ts';
+
+/**
+ * The async context of the daemon's own start, taken while this module loads (outside every call). The kernel stamps an
+ * act's actor from the call it runs in, and a timer carries the context it was armed in: arming the tick through this
+ * puts every look the watch makes under the observer's OWN actor (`ferret`, the most restricted: a hold applies), whoever
+ * happens to be calling when Ferrets is (re)built. Nothing here chooses an actor; it only declines to inherit one.
+ */
+const outsideAnyCall = AsyncLocalStorage.snapshot();
 
 export interface TurnWatchDeps {
   readonly storage: DaemonStorage;
@@ -66,7 +75,12 @@ export function turnWatchFailureFields(error: unknown): Readonly<Record<string, 
 }
 
 /** The inline host over the turn part, unarmed: `arm()` starts the 2 s tick, `close()` stops it. */
-export function buildTurnWatch(deps: TurnWatchDeps): { readonly host: InlineObserverHost } {
+export function buildTurnWatch(deps: TurnWatchDeps): {
+  readonly host: InlineObserverHost;
+  /** Ferrets typed into this ferret's pane: its next look is due on the next tick, and its wait starts over at 2 s. */
+  readonly wake: (ferret: FerretId) => void;
+} {
+  let watcher: PacedTurnWatcher | undefined;
   const answersNotMounted = {
     all: async (): Promise<never> => {
       throw notMounted('The answer ledger of the session observer');
@@ -134,11 +148,11 @@ export function buildTurnWatch(deps: TurnWatchDeps): { readonly host: InlineObse
       // The live readout's frame is U5's (`StorageLiveActivitySource`): no frame is kept for it here.
       paneState: async () => undefined,
       sendEvidence: { read: refused('The send evidence of the session observer') },
-      every: deps.every,
+      every: (intervalMs, tick) => outsideAnyCall(() => deps.every(intervalMs, tick)),
       // Today's watcher, paced per pane. A ferret the registry does not hold, or holds as stopped, is not live
       // whatever its document says: its recorded turn is cleared and its pane is never looked at.
       turnWatcher: ports =>
-        new PacedTurnWatcher({
+        (watcher = new PacedTurnWatcher({
           ...ports,
           sessions: async () =>
             (await ports.sessions()).map(session => {
@@ -153,9 +167,9 @@ export function buildTurnWatch(deps: TurnWatchDeps): { readonly host: InlineObse
               ferret: id,
               ...turnWatchFailureFields(error),
             }),
-        }),
+        })),
     },
     new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex'), QUESTIONS_NOT_MOUNTED),
   );
-  return { host };
+  return { host, wake: ferret => watcher?.wake(ferret as unknown as SessionId) };
 }

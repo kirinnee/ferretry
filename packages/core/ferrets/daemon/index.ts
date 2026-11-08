@@ -343,6 +343,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       );
   };
 
+  // Bound once the turn watch is built below: a delivery into a ferret's pane brings its next look forward.
+  let wakeTurnWatch: ((ferret: FerretId) => void) | undefined;
   const service = new FerretsService(registry, tokens, {
     launchEnvironment,
     ready,
@@ -385,6 +387,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       if (!path.startsWith('/')) return err('the folder must be an absolute path');
       return ok(path as FencedPath);
     },
+    delivered: ferret => wakeTurnWatch?.(ferret),
     changed: payload => {
       followStatus(payload.ferret, payload.state);
       hooks.observe(FerretChanged, payload);
@@ -460,6 +463,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
     log,
   });
+  wakeTurnWatch = turnWatch.wake;
   kernel.jobs.add({
     id: TURN_WATCH_JOB,
     schedule: { onceAfterStart: true },

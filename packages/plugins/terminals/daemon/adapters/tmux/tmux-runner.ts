@@ -232,7 +232,7 @@ export class TmuxRunner implements Runner {
    * The last frame each watched pane was captured in (today's `PaneFrames`), by pane id: a look asks tmux ONE question
    * for the pane's activity stamp and captures the screen again only when that stamp says it may have changed. Held as
    * tmux printed it and masked on every look, so a value the Vault learns later is masked in a frame captured before.
-   * Forgotten when the pane is gone, dead or stopped.
+   * Forgotten when the pane is gone, dead, or stopped (politely or not).
    */
   readonly #frames = new Map<string, CapturedFrame>();
 
@@ -521,7 +521,8 @@ export class TmuxRunner implements Runner {
 
   async stop(handle: RunnerHandle, how: 'polite' | 'now'): Promise<void> {
     if (!PANE_ID.test(handle)) return;
-    if (how === 'now') this.#frames.delete(handle);
+    // Any stop forgets the pane text kept for the look: a polite one only interrupts, but the pane text is not kept.
+    this.#frames.delete(handle);
     const facts = await this.facts(handle);
     if (facts === undefined) return;
     if (how === 'polite' && !facts.dead) {

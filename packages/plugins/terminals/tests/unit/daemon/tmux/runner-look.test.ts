@@ -54,6 +54,7 @@ function subject(options: { readonly session?: string; readonly watched?: boolea
         if (args[0] === 'display-message')
           return { code: 0, stdout: `${dead ? 1 : 0}||1|22|40|120|${activityAt}|0|%7|4242\n`, stderr: '' };
         if (args[0] === 'capture-pane') return { code: 0, stdout: screen, stderr: '' };
+        if (args[0] === 'send-keys' || args[0] === 'kill-session') return { code: 0, stdout: '', stderr: '' };
         throw new Error(`a look must not run ${args[0]}`);
       },
     },
@@ -159,6 +160,23 @@ describe('TmuxRunner.look (U4, the turn watch read)', () => {
     should(moved?.frame).not.equal(same?.frame);
     // An unchanged frame is masked again on every look: a value the Vault learns later is still masked.
     should(pane.masked).have.length(3);
+  });
+
+  it('should keep no pane text after a stop, polite or not: the next look captures the screen again', async () => {
+    // Arrange
+    const pane = subject();
+    await pane.runner.look(pane.handle);
+
+    // Act
+    await pane.runner.stop(pane.handle, 'polite');
+    await pane.runner.look(pane.handle);
+    const afterPolite = pane.captures();
+    await pane.runner.stop(pane.handle, 'now');
+    await pane.runner.look(pane.handle);
+
+    // Assert: an unchanged frame would have been served from memory; a stop forgot it.
+    should(afterPolite).equal(2);
+    should(pane.captures()).equal(3);
   });
 
   it('should never read a pane that is not a ferret’s own (a person’s shell)', async () => {

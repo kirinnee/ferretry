@@ -316,3 +316,18 @@ test('decision 18: a ferret caller reaches its own and its helpers’ harness, n
   expect(await f.service.harness(other)).toBeDefined();
   expect(await f.service.harness(ferretId('nobody'), lead)).toBeUndefined();
 });
+
+describe('U4: Ferrets’ own delivery wakes the turn watch', () => {
+  test('a delivery that landed, and only that one, tells the watch the pane was typed into', async () => {
+    const held = new Set<string>();
+    const f = await running({ queueing: { held } });
+    const told: string[] = [];
+    f.ports.delivered = ferret => void told.push(ferret);
+
+    await f.seam.deliver({ text: 'hello there' });
+    held.add(f.handle);
+    await f.seam.deliver({ text: 'refused words' });
+
+    expect(told).toEqual([f.id]);
+  });
+});

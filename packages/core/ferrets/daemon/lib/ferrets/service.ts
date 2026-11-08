@@ -124,6 +124,8 @@ export interface FerretsPorts {
   /** The folder fenced by the kernel's `work` root, or why not. */
   folder(path: string): Result<FencedPath, string>;
   changed(payload: FerretChangedPayload): void;
+  /** Ferrets typed into this ferret's pane (a delivery or a queued line landed): the turn watch looks again soon. */
+  delivered?(ferret: FerretId): void;
   /** A stop of this ferret is being attempted (`ferret.stopping`), before anything in it can fail. */
   stopping?(ferret: FerretId): void;
   /** `ferret.started` (additive, D2 #12): told once a start's record is written, before its launch. */
@@ -1001,7 +1003,9 @@ export class FerretsService implements FerretsApi {
         const found = pane();
         if (!found.ok) return found;
         // The runner guards each write with kernel.act on this pane itself; a hold it meets types nothing.
-        return await written(async () => await found.value.runner.deliver(found.value.handle, delivery));
+        const delivered = await written(async () => await found.value.runner.deliver(found.value.handle, delivery));
+        if (delivered.ok) this.ports.delivered?.(ferret);
+        return delivered;
       },
       queue: async (text: string): Promise<Result<QueueOutcome, HarnessDeliveryFailure>> => {
         const found = pane();
@@ -1010,7 +1014,9 @@ export class FerretsService implements FerretsApi {
         const queue = runner.queue?.bind(runner);
         if (queue === undefined) return err({ refused: 'plugin_unavailable' });
         // As `deliver`: the runner acts on this pane for each write it makes, so it is NOT wrapped in a second act here.
-        return await written(async () => await queue(handle, text));
+        const queued = await written(async () => await queue(handle, text));
+        if (queued.ok) this.ports.delivered?.(ferret);
+        return queued;
       },
       interrupt: async (): Promise<Result<HarnessInterrupted, HarnessRefusal>> => {
         const found = pane();

@@ -93,8 +93,10 @@ const message = (error: unknown): string => (error instanceof Error ? error.mess
  *
  * WHAT IS NEW: IDLE BACK-OFF. Today a quiet pane cost nothing on the main thread because its worker slept until tmux
  * said it drew. Here the tick looks, so a pane whose frame did not change, whose recorded facts did not change and
- * whose look decided nothing waits one tick longer before its next look, up to 10 s; anything that moves — a redraw, a
- * recorded turn, a send that recorded `working` — brings it back to 2 s at once. A pane that is drawing (a spinner, a
+ * whose look decided nothing waits one tick longer before its next look, up to 10 s; a recorded fact that moves — a
+ * recorded turn, a send that recorded `working` — brings it back to 2 s at once, and a redraw is seen at the next
+ * look that is due (so a short turn that starts and ends inside a backed-off pane's wait is missed; GAP(observer)).
+ * A session the tick could not decide (a damaged document) waits the full 10 s, not one tick. A pane that is drawing (a spinner, a
  * clock) changes every frame and is looked at every 2 s, exactly as today's worker throttle did. The two-frame
  * confirmation of an unconfirmed `your-turn` is never slowed: an observation that disagrees with the record is not
  * quiet.
@@ -136,6 +138,7 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
         if (change !== undefined) changed.set(session.id, change);
       } catch (error) {
         failures.set(session.id, message(error));
+        this.backOff(session);
         try {
           this.ports.failed?.(session.id, error);
         } catch {}
@@ -146,6 +149,30 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
     for (const id of this.previous.keys()) if (!roster.has(id)) this.previous.delete(id);
     for (const id of this.paces.keys()) if (!roster.has(id)) this.paces.delete(id);
     return { changed, failures };
+  }
+
+  /**
+   * A session this tick could not decide (a damaged document, a refused write) waits the longest quiet wait before
+   * its next look, so it is reported once per {@link TURN_WATCH_QUIET_MAX_MS} and not on every tick. Anything recorded
+   * about it that moves (its facts) still brings it back at once.
+   */
+  private backOff(session: TurnWatchSession): void {
+    const nowMs = Date.parse(this.ports.clock.now());
+    const previous = this.paces.get(session.id);
+    this.paces.set(session.id, {
+      delayMs: TURN_WATCH_QUIET_MAX_MS,
+      dueMs: nowMs + TURN_WATCH_QUIET_MAX_MS - TURN_WATCH_INTERVAL_MS / 2,
+      frame: previous?.frame,
+      facts: factsKey(session.state),
+    });
+  }
+
+  /**
+   * Something the watch did not see happened to this session's pane (Ferrets typed into it): forget its pace, so its next
+   * look is due on the next tick and the wait starts over at 2 s. A session never seen is left as it is.
+   */
+  wake(id: SessionId): void {
+    this.paces.delete(id);
   }
 
   /** How long the session waits between looks now (for the live readout and tests); `undefined` before its first. */
