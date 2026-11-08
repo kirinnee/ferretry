@@ -27,26 +27,37 @@ import { dirname } from 'node:path';
 import type { FencedPath, RootHandle } from '@ferretry/kernel/contract';
 import type { SessionId } from '../../../lib/session-id.ts';
 import type { SessionTaskStore } from '../../../lib/session/lifecycle/index.ts';
+import { assertOwnSession, assertSessionsRoot, OwnFolder } from '../sessions-root.ts';
 
 /** The directory a session's turn documents live in, beneath the session's own directory. */
 const TURNS_DIRECTORY = 'turns';
 
 /** What this store asks of the kernel's root. */
-export type TaskRoot = Pick<RootHandle, 'resolve' | 'publish' | 'readDurable' | 'syncDirectory'>;
+export type TaskRoot = Pick<
+  RootHandle,
+  'name' | 'internal' | 'ensurePrivateDirectory' | 'resolve' | 'publish' | 'readDurable' | 'syncDirectory'
+>;
 
 export class FileSessionTaskStore implements SessionTaskStore {
+  private readonly folder: OwnFolder;
+
   constructor(
     private readonly root: TaskRoot,
-    private readonly sessionDirectory: (id: SessionId) => string,
-  ) {}
+    private readonly ferret: SessionId,
+  ) {
+    assertSessionsRoot(root, 'the session task store');
+    this.folder = new OwnFolder(root);
+  }
 
   file(id: SessionId): FencedPath {
-    const resolved = this.root.resolve(`${this.sessionDirectory(id)}/${TURNS_DIRECTORY}/turn-001.md`);
+    assertOwnSession(this.ferret, id, 'the session task store');
+    const resolved = this.root.resolve(`${TURNS_DIRECTORY}/turn-001.md`);
     if (!resolved.ok) throw new Error(`the session's turn document is outside its root (${resolved.error})`);
     return resolved.value;
   }
 
   async writeAssignedTask(id: SessionId, document: string): Promise<string> {
+    await this.folder.ensure();
     const file = this.file(id);
     // An exact replay proves what is already there rather than replacing it — and HOLDS the file it proved until
     // the very end (the descriptor pins the inode, so it cannot be freed and reused), because the claim is about the

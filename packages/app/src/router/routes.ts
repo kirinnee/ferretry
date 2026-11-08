@@ -36,6 +36,14 @@ interface Compiled {
 
 const segments = (path: string): string[] => path.split('/').filter(part => part.length > 0);
 
+/** The segments the router reads an address by: the empty ones dropped, and the installed app's prefix with them. */
+function routeSegments(pathname: string): string[] {
+  const parts = segments(pathname);
+  // The installed app's document is served at `/app/` (`public/_redirects`); that prefix is the app's home.
+  if (parts[0] === 'app') parts.shift();
+  return parts;
+}
+
 function decode(segment: string): string | undefined {
   try {
     return decodeURIComponent(segment);
@@ -93,9 +101,7 @@ export function routeTable(screens: Iterable<ScreenRef>): RouteTable {
 
   return {
     parse(pathname) {
-      const parts = segments(pathname);
-      // The installed app's document is served at `/app/` (`public/_redirects`); that prefix is the app's home.
-      if (parts[0] === 'app') parts.shift();
+      const parts = routeSegments(pathname);
       if (parts.length === 0) return { kind: 'home' };
       if (parts.length === 1 && parts[0] === 'settings') return { kind: 'device-settings' };
       if (parts[0] === 'd') {
@@ -133,6 +139,27 @@ export function routeTable(screens: Iterable<ScreenRef>): RouteTable {
       return `/d/${encodeURIComponent(daemon)}/${filled.join('/')}`;
     },
   };
+}
+
+/**
+ * WHERE AN ADDRESS STANDS TO ONE DAEMON-LESS SCREEN, read by the router's own parse, so a plugin that must act on its
+ * screen's address before anything is drawn (a share link's code leaves the address bar before any chunk loads) can
+ * never disagree with the router about which addresses are that screen's:
+ * - `at`: the router draws `screen` here. `/join`, `/join/`, `/app/join`, `/app/join/` and `/j%6Fin` are all `/join`;
+ * - `beneath`: the screen's own address with more segments after it (`/join/x`), which the router draws as not-found;
+ * - `elsewhere`: any other address. A per-daemon screen is always elsewhere here: its address names a daemon.
+ */
+export type AddressPlace = 'at' | 'beneath' | 'elsewhere';
+
+export function addressPlace(screen: ScreenRef, pathname: string): AddressPlace {
+  if (!screen.path.startsWith('/')) return 'elsewhere';
+  const drawn = routeTable([screen]).parse(pathname);
+  if (drawn.kind === 'screen' && drawn.screen === screen) return 'at';
+  const pattern = segments(screen.path);
+  const parts = routeSegments(pathname);
+  const root = pattern[0];
+  if (root === undefined || RESERVED_ROOTS.has(root) || parts.length <= pattern.length) return 'elsewhere';
+  return matchParts(pattern, parts.slice(0, pattern.length)) === undefined ? 'elsewhere' : 'beneath';
 }
 
 export const daemonHomeHref = (daemon: string): string => `/d/${encodeURIComponent(daemon)}`;

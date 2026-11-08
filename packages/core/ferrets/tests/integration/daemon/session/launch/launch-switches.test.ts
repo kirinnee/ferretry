@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { diskRoot } from '@ferretry/kernel/testing';
+import { diskSessionsRoot } from '@ferretry/kernel/testing';
 import should from 'should';
 import { FileSessionEnvironmentStore } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
 import { TmuxResumeLauncher } from '../../../../../daemon/adapters/session/resume/tmux-resume-launcher.ts';
@@ -94,8 +94,8 @@ async function fixture(mode: 'auto' | 'interactive', stored: Readonly<Record<str
   const home = await mkdtemp(join(tmpdir(), 'ferretry-launch-switches-'));
   homes.add(home);
   const id = parseSessionId(`session-${mode}`);
-  const { root, folder } = await diskRoot(home);
-  const files = new FileSessionEnvironmentStore(root, session => join(folder, session));
+  const { root } = await diskSessionsRoot(home, id);
+  const files = new FileSessionEnvironmentStore(root, id);
   await files.write(id, stored);
   const environments = files;
   const record = createSessionRecord(
