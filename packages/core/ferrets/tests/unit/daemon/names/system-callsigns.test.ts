@@ -152,7 +152,7 @@ describe('a damaged system-callsigns.json (F-0349)', () => {
     should(fs.snapshot().get(path)).equal('{not json');
   });
 
-  it('should hold the larger of the file and the daemon\'s own mark', async () => {
+  it("should hold the larger of the file and the daemon's own mark", async () => {
     // Arrange
     const fs = state.createMemoryHostFs();
     const port = state.createStatePort({ home: '/home/fy', pluginId: 'ferrets', files: [SystemCallsignsFile], fs });

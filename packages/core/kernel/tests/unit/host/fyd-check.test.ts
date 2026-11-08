@@ -58,7 +58,10 @@ test('V-0506 R689 --check on an existing home leaves every entry untouched', () 
   parents.push(parent);
   const home = join(parent, 'home');
   mkdirSync(join(home, 'run'), { recursive: true });
-  writeFileSync(join(home, 'home.json'), `${JSON.stringify({ format: 1, createdBy: 'test', createdAt: '2026-01-01T00:00:00.000Z' })}\n`);
+  writeFileSync(
+    join(home, 'home.json'),
+    `${JSON.stringify({ format: 1, createdBy: 'test', createdAt: '2026-01-01T00:00:00.000Z' })}\n`,
+  );
   const before = snapshot(home);
   const answer = check(home, 0);
   expect(answer.code).toBe(0);
@@ -96,7 +99,10 @@ test('V-0506 R689 --check exits 78 and says `taken — another fyd, pid N` when 
   parents.push(parent);
   const home = join(parent, 'home');
   mkdirSync(join(home, 'run'), { recursive: true });
-  writeFileSync(join(home, 'home.json'), `${JSON.stringify({ format: 1, createdBy: 'test', createdAt: '2026-01-01T00:00:00.000Z' })}\n`);
+  writeFileSync(
+    join(home, 'home.json'),
+    `${JSON.stringify({ format: 1, createdBy: 'test', createdAt: '2026-01-01T00:00:00.000Z' })}\n`,
+  );
   const holder = Bun.serve({ port: 0, fetch: () => new Response('') });
   try {
     const port = holder.port as number;
