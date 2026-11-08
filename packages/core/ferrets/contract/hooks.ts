@@ -123,10 +123,14 @@ export const FerretStarted = defineHook('ferret.started', { mode: 'observe', pay
 /**
  * One card as the archive's keep rule reads it (Board's answer): who owns and holds it, whether it was dropped, and
  * the category of its lane as Board resolved it. A category Ferrets does not know, or none, reads as "in flight".
+ * `owner` and `assignee` are FERRET IDS, never callsigns: the rule matches them against the ids it is deciding about,
+ * so a callsign would keep nobody.
  */
 export interface ArchiveCardStanding {
-  readonly owner: string;
-  readonly assignee: string | null;
+  /** The ferret id that owns the card (never a callsign). */
+  readonly owner: FerretId;
+  /** The ferret id the card is assigned to (never a callsign), or `null` for nobody. */
+  readonly assignee: FerretId | null;
   readonly dropped: boolean;
   readonly category: string | undefined;
 }
@@ -140,11 +144,25 @@ export type ArchiveKeepSource =
   | { readonly kind: 'board'; cards(): Promise<readonly ArchiveCardStanding[]> }
   | { readonly kind: 'agenda'; hasOpenItem(ferret: FerretId): Promise<boolean> };
 
+/** Whether a contributed item is a keep source at all: a known kind with its answering function. */
+const isArchiveKeepSource = (value: unknown): value is ArchiveKeepSource => {
+  if (typeof value !== 'object' || value === null) return false;
+  const item = value as { readonly kind?: unknown; readonly cards?: unknown; readonly hasOpenItem?: unknown };
+  if (item.kind === 'board') return typeof item.cards === 'function';
+  if (item.kind === 'agenda') return typeof item.hasOpenItem === 'function';
+  return false;
+};
+
 /**
  * Board and Agenda add what keeps a ferret live. FAIL SAFE: the archive runs only while BOTH kinds are contributed
- * (an absent answer is "keep live"), and a source that fails keeps every ferret it was asked about.
+ * (an absent answer is "keep live"), and a source that fails keeps every ferret it was asked about. An item that is
+ * not a keep source is left out by the kernel, which reads as that kind not answering; and every ANSWER a source gives
+ * is parsed by Ferrets (`daemon/modules/archive.ts`), so an answer of the wrong shape keeps every ferret too.
  */
 export const ArchiveKeeps = defineHook('session.archive-keeps', {
   mode: 'contribute',
-  item: z.custom<ArchiveKeepSource>(),
+  item: z.custom<ArchiveKeepSource>(
+    isArchiveKeepSource,
+    'a keep source is a board with cards() or an agenda with hasOpenItem()',
+  ),
 });

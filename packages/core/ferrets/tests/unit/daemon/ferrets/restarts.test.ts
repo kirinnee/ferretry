@@ -182,6 +182,58 @@ describe('restarting ferrets', () => {
       await h.stop();
     });
 
+    test('R-0128 GET /v1/ferrets marks a running outdated ferret with { sections }, and no ferret it cannot prove', async () => {
+      const { h, start } = await running();
+      const old = await start('aniya');
+      const current = await start('bodhi');
+      const damaged = await start('dara');
+      const stopped = await start('emre');
+      stale(h, old);
+      h.state('ferrets').plant(FerretLaunchSectionsFiles, '{ not json', damaged);
+      h.state('ferrets').plant(
+        FerretLaunchSectionsFiles,
+        JSON.stringify({ format: 1, sections: { board: 'bbbb2222' } }),
+        stopped,
+      );
+      await h.request('POST', `/v1/ferrets/${stopped}/stop`, { body: {} });
+      const list = (await h.request('GET', '/v1/ferrets')).json<FerretSummary[]>();
+      const marks = Object.fromEntries(list.map(summary => [summary.id, summary.outdated]));
+      expect(marks).toEqual({
+        [old]: { sections: ['board'] },
+        [current]: undefined,
+        [damaged]: undefined,
+        [stopped]: undefined,
+      });
+      // The one view says the same.
+      expect((await h.request('GET', `/v1/ferrets/${old}`)).json<FerretSummary>().outdated).toEqual({
+        sections: ['board'],
+      });
+      expect((await h.request('GET', `/v1/ferrets/${current}`)).json<FerretSummary>().outdated).toBeUndefined();
+      await h.stop();
+    });
+
+    test('R-0128 the mark is kept 5 s, then follows the record; an unchanged fleet still answers 304', async () => {
+      const { h, start } = await running();
+      const old = await start('aniya');
+      stale(h, old);
+      const first = await h.request('GET', '/v1/ferrets');
+      expect(first.json<FerretSummary[]>()[0]?.outdated).toEqual({ sections: ['board'] });
+      const etag = first.headers.get('etag');
+      expect(etag).toBeDefined();
+      expect((await h.request('GET', '/v1/ferrets', { headers: { 'if-none-match': etag ?? '' } })).status).toBe(304);
+      // It becomes current: inside the window the mark stays, after it the mark is gone and the tag moves.
+      h.state('ferrets').plant(FerretLaunchSectionsFiles, JSON.stringify({ format: 1, sections: {} }), old);
+      await h.clock.advance(4_000);
+      expect((await h.request('GET', '/v1/ferrets')).json<FerretSummary[]>()[0]?.outdated).toEqual({
+        sections: ['board'],
+      });
+      await h.clock.advance(1_000);
+      const after = await h.request('GET', '/v1/ferrets', { headers: { 'if-none-match': etag ?? '' } });
+      expect(after.status).toBe(200);
+      expect(after.json<FerretSummary[]>()[0]?.outdated).toBeUndefined();
+      await h.stop();
+    });
+
     test('R-0323 a ferret caller may not restart the whole outdated fleet', async () => {
       const { h, start } = await running();
       const id = await start('aniya');

@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
-import { ArchiveFile, type ArchiveKeepSource } from '../../../../contract/index.ts';
+import { ArchiveFile, ArchiveKeeps, type ArchiveKeepSource, type FerretId } from '../../../../contract/index.ts';
 import { DaemonStorage } from '../../../../daemon/adapters/storage/session-storage.ts';
 import {
+  ARCHIVE_ANSWER_TIMEOUT_MS,
   ARCHIVE_PASS_EVERY_MS,
   ARCHIVE_TICK_MS,
   archiveAfterMs,
@@ -22,6 +23,25 @@ const HOUR = 3_600_000;
 const iso = (ms: number) => new Date(ms).toISOString();
 
 const board: ArchiveKeepSource = { kind: 'board', cards: async () => [] };
+const fid = (id: string) => id as FerretId;
+
+/** The answer bound's timers, fired by hand: what is pending, and what was cancelled. */
+class Timers {
+  readonly pending = new Map<number, { readonly delayMs: number; readonly fire: () => void }>();
+  private next = 0;
+  readonly after = (delayMs: number, fire: () => void): (() => void) => {
+    this.next += 1;
+    const id = this.next;
+    this.pending.set(id, { delayMs, fire });
+    return () => this.pending.delete(id);
+  };
+  fireAll(): void {
+    for (const [id, timer] of [...this.pending]) {
+      this.pending.delete(id);
+      timer.fire();
+    }
+  }
+}
 const agenda: ArchiveKeepSource = { kind: 'agenda', hasOpenItem: async () => false };
 
 /** A session store holding `ids` as autonomous ferrets that ended `endedHoursAgo` before T0. */
@@ -54,6 +74,8 @@ function mount(
     readonly keeps?: readonly ArchiveKeepSource[];
     readonly passLimit?: number;
     readonly isLive?: (id: string) => boolean;
+    readonly timers?: Timers;
+    readonly loaded?: () => Promise<unknown>;
   } = {},
 ) {
   return buildArchive({
@@ -63,9 +85,10 @@ function mount(
     pinned: async () => new Map(),
     keeps: () => more.keeps ?? [board, agenda],
     isLive: more.isLive ?? (() => false),
-    loaded: async () => undefined,
+    loaded: more.loaded ?? (async () => undefined),
     yieldToLoop: async () => undefined,
     directory: id => `sessions/${id}`,
+    after: (more.timers ?? new Timers()).after,
     log: w.log,
     ...(more.passLimit === undefined ? {} : { passLimit: more.passLimit }),
   });
@@ -150,6 +173,7 @@ describe('J-0185 the archive pass is a kernel job that runs a pass only when one
       loaded: async () => undefined,
       yieldToLoop: async () => undefined,
       directory: id => `sessions/${id}`,
+      after: new Timers().after,
       log: w.log,
     });
     await off.tick();
@@ -228,7 +252,7 @@ describe('Board and Agenda must both have answered', () => {
 
     const holding: ArchiveKeepSource = {
       kind: 'board',
-      cards: async () => [{ owner: 'aa-1', assignee: null, dropped: false, category: 'review' }],
+      cards: async () => [{ owner: fid('aa-1'), assignee: null, dropped: false, category: 'review' }],
     };
     await mount(w, { now: T0 }, { keeps: [holding, agenda] }).tick();
     expect(w.storage.listArchivedSessions().map(row => String(row.id))).toEqual(['bb-1']);
@@ -239,11 +263,149 @@ describe('Board and Agenda must both have answered', () => {
     const cards: ArchiveKeepSource = {
       kind: 'board',
       cards: async () => [
-        { owner: 'aa-1', assignee: null, dropped: true, category: 'active' },
-        { owner: 'bb-1', assignee: null, dropped: false, category: 'closed' },
+        { owner: fid('aa-1'), assignee: null, dropped: true, category: 'active' },
+        { owner: fid('bb-1'), assignee: null, dropped: false, category: 'closed' },
       ],
     };
     await mount(w, { now: T0 }, { keeps: [cards, agenda] }).tick();
     expect(w.storage.listArchivedSessions().map(row => String(row.id))).toEqual(['aa-1', 'bb-1']);
+  });
+});
+
+/** Lets the pass run until it waits on an answer (its timer is armed), or gives up. */
+async function untilAsked(timers: Timers): Promise<void> {
+  for (let turn = 0; turn < 500 && timers.pending.size === 0; turn += 1) await Bun.sleep(0);
+  if (timers.pending.size === 0) throw new Error('the pass never asked');
+}
+
+describe('a garbage answer from Board or Agenda never archives (parsed at the Ferrets boundary)', () => {
+  /** A Board that answers `raw`, as a plugin of any quality might: the types say nothing about what really comes back. */
+  const boardSaying = (raw: unknown): ArchiveKeepSource => ({
+    kind: 'board',
+    cards: (async () => raw) as unknown as () => Promise<never>,
+  });
+  const agendaSaying = (raw: unknown): ArchiveKeepSource => ({
+    kind: 'agenda',
+    hasOpenItem: (async () => raw) as unknown as () => Promise<boolean>,
+  });
+
+  test('the control: a well-formed answer that keeps nobody archives (so every case below can go red)', async () => {
+    const w = await world(['aa-1']);
+    await mount(w, { now: T0 }, { keeps: [boardSaying([]), agendaSaying(false)] }).tick();
+    expect(w.storage.archivedCount()).toBe(1);
+  });
+
+  test.each([
+    ['an object, not a list', { cards: [{ owner: 'aa-1', assignee: null, dropped: false, category: 'active' }] }],
+    ['undefined', undefined],
+    ['null', null],
+    ['a string', 'aa-1'],
+    ['a list of strings', ['aa-1']],
+    ['a card with no owner', [{ assignee: null, dropped: false, category: 'active' }]],
+    ['a card whose owner is not a ferret id', [{ owner: 'a b/../c', assignee: null, dropped: false }]],
+    ['a card with no assignee key', [{ owner: 'zz-9', dropped: false, category: 'active' }]],
+    ['a dropped that is the string "false"', [{ owner: 'aa-1', assignee: null, dropped: 'false', category: 'active' }]],
+    ['a dropped that is 0', [{ owner: 'aa-1', assignee: null, dropped: 0, category: 'active' }]],
+    ['a category that is a number', [{ owner: 'zz-9', assignee: null, dropped: false, category: 3 }]],
+    ['a card with a field the contract does not name', [{ owner: 'zz-9', assignee: null, dropped: false, extra: 1 }]],
+  ])('Board answering %s keeps every ferret', async (_name, raw) => {
+    const w = await world(['aa-1']);
+    await mount(w, { now: T0 }, { keeps: [boardSaying(raw), agendaSaying(false)] }).tick();
+    expect(w.storage.archivedCount()).toBe(0);
+  });
+
+  test.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['0', 0],
+    ['1', 1],
+    ['the string "false"', 'false'],
+    ['an empty string', ''],
+    ['an object', {}],
+    ['a list', []],
+  ])('Agenda answering %s keeps the ferret', async (_name, raw) => {
+    const w = await world(['aa-1']);
+    await mount(w, { now: T0 }, { keeps: [boardSaying([]), agendaSaying(raw)] }).tick();
+    expect(w.storage.archivedCount()).toBe(0);
+  });
+
+  test('a Board whose cards() throws synchronously keeps every ferret, and so does an Agenda that does', async () => {
+    const w = await world(['aa-1']);
+    const throwing = (): never => {
+      throw new Error('not even a promise');
+    };
+    await mount(w, { now: T0 }, { keeps: [{ kind: 'board', cards: throwing }, agendaSaying(false)] }).tick();
+    expect(w.storage.archivedCount()).toBe(0);
+    await mount(w, { now: T0 }, { keeps: [boardSaying([]), { kind: 'agenda', hasOpenItem: throwing }] }).tick();
+    expect(w.storage.archivedCount()).toBe(0);
+  });
+
+  test('a Board that never answers keeps every ferret once its answer is late', async () => {
+    const w = await world(['aa-1']);
+    const timers = new Timers();
+    const hanging: ArchiveKeepSource = { kind: 'board', cards: async () => await new Promise<never>(() => {}) };
+    const ticking = mount(w, { now: T0 }, { keeps: [hanging, agendaSaying(false)], timers }).tick();
+    await untilAsked(timers);
+    expect([...timers.pending.values()].map(timer => timer.delayMs)).toEqual([ARCHIVE_ANSWER_TIMEOUT_MS]);
+    timers.fireAll();
+    await ticking;
+    expect(w.storage.archivedCount()).toBe(0);
+  });
+
+  test('an Agenda that never answers keeps the ferret once its answer is late', async () => {
+    const w = await world(['aa-1']);
+    const timers = new Timers();
+    const hanging: ArchiveKeepSource = { kind: 'agenda', hasOpenItem: async () => await new Promise<never>(() => {}) };
+    const ticking = mount(w, { now: T0 }, { keeps: [boardSaying([]), hanging], timers }).tick();
+    await untilAsked(timers);
+    timers.fireAll();
+    await ticking;
+    expect(w.storage.archivedCount()).toBe(0);
+  });
+
+  test('an answer that comes in time cancels its bound: no timer outlives the pass', async () => {
+    const w = await world(['aa-1', 'bb-1']);
+    const timers = new Timers();
+    await mount(w, { now: T0 }, { keeps: [boardSaying([]), agendaSaying(false)], timers }).tick();
+    expect(w.storage.archivedCount()).toBe(2);
+    expect(timers.pending.size).toBe(0);
+  });
+
+  test('the hook refuses an item that is not a keep source, so a garbage contribution is no answer at all', () => {
+    const fits = (item: unknown): boolean => ArchiveKeeps.item?.safeParse(item).success === true;
+    expect(fits(board)).toBe(true);
+    expect(fits(agenda)).toBe(true);
+    expect(fits(undefined)).toBe(false);
+    expect(fits(null)).toBe(false);
+    expect(fits({ kind: 'board' })).toBe(false);
+    expect(fits({ kind: 'board', cards: [] })).toBe(false);
+    expect(fits({ kind: 'agenda', hasOpenItem: true })).toBe(false);
+    expect(fits({ kind: 'agenda', cards: async () => [] })).toBe(false);
+    expect(fits({ kind: 'warden', cards: async () => [] })).toBe(false);
+  });
+});
+
+describe('a store whose archive did not load', () => {
+  test('fails the pass like any other failure: no rejection out of the tick, a warning, and the next try an hour later', async () => {
+    const w = await world(['aa-1']);
+    const clock = { now: T0 };
+    let loads = 0;
+    const archive = mount(w, clock, {
+      loaded: async () => {
+        loads += 1;
+        throw new Error('the archive registry is damaged');
+      },
+    });
+    await archive.tick();
+    expect(w.storage.archivedCount()).toBe(0);
+    expect(w.log.lines.some(line => line.level === 'warn' && line.message.includes('every ferret stays live'))).toBe(
+      true,
+    );
+    clock.now += ARCHIVE_TICK_MS;
+    await archive.tick();
+    expect(loads).toBe(1);
+    clock.now += ARCHIVE_PASS_EVERY_MS;
+    await archive.tick();
+    expect(loads).toBe(2);
   });
 });

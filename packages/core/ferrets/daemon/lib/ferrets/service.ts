@@ -150,9 +150,13 @@ export interface FerretsPorts {
   /**
    * Where a launch records the instruction sections it told the pane, by id and fingerprint, so a ferret whose words
    * changed since can be told apart (`outdated`). Unbound, or a write that fails: none is kept and the ferret is never
-   * marked out of date.
+   * marked out of date — a failed write `forget`s the PREVIOUS launch's record, so a resumed ferret is never compared
+   * against what an earlier launch told it.
    */
-  launchSections?: { write(ferret: FerretId, sections: Readonly<Record<string, string>>): Promise<void> };
+  launchSections?: {
+    write(ferret: FerretId, sections: Readonly<Record<string, string>>): Promise<void>;
+    forget(ferret: FerretId): Promise<void>;
+  };
   /** `limits.yaml` as it is now (the kernel's config port), read fresh for every agent-control answer. */
   limits?(): LimitsFile | undefined;
   /** Ferret id → the instant the owner pinned it (`agent-pins.json`). */
@@ -1326,7 +1330,12 @@ export class FerretsService implements FerretsApi {
       return failed(code, `the harness could not start: ${started.error}`);
     }
     // What this launch told the ferret, kept for the out-of-date check; only once the harness really started.
-    await this.ports.launchSections?.write(record.id, sectionDigests(base.instructions)).catch(() => undefined);
+    // A write that fails leaves no record at all (never the previous launch's), so nothing is compared against it.
+    const told = this.ports.launchSections;
+    await told
+      ?.write(record.id, sectionDigests(base.instructions))
+      .catch(async () => await told.forget(record.id))
+      .catch(() => undefined);
     const working: FerretRecord = {
       ...record,
       state: 'working',

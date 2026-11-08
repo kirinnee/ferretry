@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   ArchiveFile,
   FerretConfigFile,
+  FerretFiles,
   type FerretId,
   FerretStateFile,
   type FerretSummary,
@@ -158,10 +159,10 @@ describe('the session archive: what keeps a finished ferret live', () => {
 
   test('a card whose lane Board could not name reads as in flight', async () => {
     const { h, board, id } = await aged();
-    board.cards = [{ owner: 'someone-else', assignee: id, dropped: false, category: undefined }];
+    board.cards = [{ owner: 'someone-else' as FerretId, assignee: id, dropped: false, category: undefined }];
     await tickArchive(h);
     expect(await archivedIds(h)).toEqual([]);
-    board.cards = [{ owner: 'someone-else', assignee: id, dropped: false, category: 'no-such-lane' }];
+    board.cards = [{ owner: 'someone-else' as FerretId, assignee: id, dropped: false, category: 'no-such-lane' }];
     await pass(h, 2 * HOUR_MS);
     await tickArchive(h);
     expect(await archivedIds(h)).toEqual([]);
@@ -375,6 +376,147 @@ describe('the archive across a daemon restart', () => {
     await pass(again, 25 * HOUR_MS);
     await tickArchive(again);
     expect(await archivedIds(again)).toEqual([id]);
+    await again.stop();
+  });
+});
+
+describe('the session archive: a garbage answer from Board or Agenda is "keep live" (u6-r1 MAJOR 1)', () => {
+  async function aged() {
+    const world = await archiveWorld({ afterHours: 24 });
+    const id = await startFerret(world.h, 'aniya');
+    await finishFerret(world.h, id);
+    await pass(world.h, 25 * HOUR_MS);
+    return { ...world, id };
+  }
+
+  test.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['0', 0],
+    ['the string "false"', 'false'],
+  ])('Agenda answering %s instead of a boolean keeps the ferret live', async (_name, raw) => {
+    const { h, agenda } = await aged();
+    (agenda as unknown as { open: { has(ferret: string): unknown } }).open = { has: () => raw };
+    await tickArchive(h);
+    expect(await archivedIds(h)).toEqual([]);
+    await h.stop();
+  });
+
+  test('Board answering an object instead of a list keeps the ferret on its in-flight card live', async () => {
+    const { h, board, id } = await aged();
+    board.cards = {
+      cards: [{ owner: id, assignee: null, dropped: false, category: 'active' }],
+    } as unknown as typeof board.cards;
+    await tickArchive(h);
+    expect(await archivedIds(h)).toEqual([]);
+    await h.stop();
+  });
+
+  test('Board answering a dropped that is the string "false" does not drop the card: the ferret stays live', async () => {
+    const { h, board, id } = await aged();
+    board.cards = [
+      { owner: id, assignee: null, dropped: 'false', category: 'active' },
+    ] as unknown as typeof board.cards;
+    await tickArchive(h);
+    expect(await archivedIds(h)).toEqual([]);
+    await h.stop();
+  });
+
+  test('a Board that contributes something that is not a keep source counts as no Board: no pass runs', async () => {
+    const { h, id } = await (async () => {
+      const world = await archiveWorld({ afterHours: 24, boardItem: { kind: 'board', cards: [] } });
+      const ferret = await startFerret(world.h, 'aniya');
+      await finishFerret(world.h, ferret);
+      await pass(world.h, 25 * HOUR_MS);
+      return { ...world, id: ferret };
+    })();
+    await tickArchive(h);
+    expect(await archivedIds(h)).toEqual([]);
+    expect((await h.request('GET', `/v1/ferrets/${id}`)).status).toBe(200);
+    await h.stop();
+  });
+});
+
+describe('the session archive: an archived ferret leaves the live list, and nothing is deleted (u6-r1 MAJOR 2)', () => {
+  const liveIds = async (h: Parameters<typeof archived>[0]): Promise<string[]> =>
+    (await h.request('GET', '/v1/ferrets')).json<FerretSummary[]>().map(summary => summary.id);
+
+  async function archivedOne() {
+    const world = await archiveWorld({ afterHours: 24 });
+    const id = await startFerret(world.h, 'aniya');
+    const kept = await startFerret(world.h, 'bodhi');
+    await finishFerret(world.h, id);
+    await pass(world.h, 25 * HOUR_MS);
+    world.agenda.open.add(kept);
+    await tickArchive(world.h);
+    expect(await archivedIds(world.h)).toEqual([id]);
+    return { ...world, id, kept };
+  }
+
+  test('GET /v1/ferrets leaves out an archived ferret, and only it; its record and its view stay', async () => {
+    const { h, id, kept } = await archivedOne();
+    expect(await liveIds(h)).toEqual([kept]);
+    // Nothing deleted: the record is on disk, the view answers, and the name still resolves to it.
+    expect(h.state('ferrets').raw(FerretFiles, id)).toBeDefined();
+    expect((await h.request('GET', `/v1/ferrets/${id}`)).json<FerretSummary>().id).toBe(id);
+    expect((await h.request('GET', '/v1/ferrets/aniya')).json<FerretSummary>().id).toBe(id);
+    // A read of the list revives nothing.
+    expect(await archivedIds(h)).toEqual([id]);
+    await h.stop();
+  });
+
+  test('a ferret is in exactly one of the two lists: live, or archived', async () => {
+    const { h, id, kept } = await archivedOne();
+    const live = await liveIds(h);
+    const gone = await archivedIds(h);
+    expect(live.filter(ferret => gone.includes(ferret))).toEqual([]);
+    expect([...live, ...gone].sort()).toEqual([id, kept].sort());
+    await h.stop();
+  });
+
+  test('resuming an archived ferret brings it back into the live list', async () => {
+    const { h, id } = await archivedOne();
+    expect((await h.request('POST', `/v1/ferrets/${id}/resume`, { body: {} })).status).toBeLessThan(300);
+    await settle(h);
+    expect(await liveIds(h)).toContain(id);
+    expect(await archivedIds(h)).toEqual([]);
+    await h.stop();
+  });
+
+  test('pinning an archived ferret brings it back into the live list, and it is then kept by its pin', async () => {
+    const { h, id } = await archivedOne();
+    const pinned = await h.request('POST', `/v1/ferrets/${id}/pin`, { body: {} });
+    expect(pinned.status).toBe(200);
+    expect(pinned.json<FerretSummary>().pinnedAt).toBeDefined();
+    expect(await archivedIds(h)).toEqual([]);
+    expect(await liveIds(h)).toContain(id);
+    await pass(h, 2 * HOUR_MS);
+    await tickArchive(h);
+    expect(await archivedIds(h)).toEqual([]);
+    await h.stop();
+  });
+
+  test('unpinning a live ferret does not archive or revive anything', async () => {
+    const { h, id, kept } = await archivedOne();
+    await h.request('POST', `/v1/ferrets/${kept}/unpin`, { body: {} });
+    expect(await archivedIds(h)).toEqual([id]);
+    await h.stop();
+  });
+});
+
+describe('the session archive: a record that does not say it is autonomous is kept (u6-r1 minor 10)', () => {
+  test('a stopped ferret whose record carries no mode is never archived, even when its document says auto', async () => {
+    const { h } = await archiveWorld({ afterHours: 24 });
+    const id = await startFerret(h, 'aniya');
+    await finishFerret(h, id);
+    const record = JSON.parse(h.state('ferrets').raw(FerretFiles, id) as string) as Record<string, unknown>;
+    expect(record.mode).toBe('auto');
+    delete record.mode;
+    h.state('ferrets').plant(FerretFiles, JSON.stringify(record), id);
+    const again = await h.restart();
+    await pass(again, 25 * HOUR_MS);
+    await tickArchive(again);
+    expect(await archivedIds(again)).toEqual([]);
     await again.stop();
   });
 });
