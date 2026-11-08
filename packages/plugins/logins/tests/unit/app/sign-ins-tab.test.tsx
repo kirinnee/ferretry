@@ -208,6 +208,32 @@ describe('the page the address names', () => {
     expect(window.location.hash).toBe('#machines/box/sign-ins');
     await view.unmount();
   });
+
+  it('lands on the page of the login the add screen added, at the address that names it', async () => {
+    const calls: Call[] = [];
+    // The list read before the add is empty; the reload after it carries the login the change made.
+    const client = scripted(
+      {
+        'GET /v1/logins/presets': { presets: [PRESET] },
+        [LIST]: () =>
+          calls.some(call => call.route === APPLY) ? loginList(login({ id: 'claude-zai-glm' })) : loginList(),
+        [GRANTS]: OPEN,
+        [STAGE]: staged({ kind: 'login.add', id: 'claude-zai-glm', harness: 'claude-code' }),
+        [APPLY]: { outcome: 'applied' },
+      },
+      calls,
+    );
+    const view = await mount(<SignInsTab client={client} />);
+    await until(() => view.container.querySelector('[data-add-login]') !== null, 'the add button');
+    await click(view.container.querySelector('[data-add-login]'), 'Add a login');
+    await until(() => view.container.querySelector('[data-add-login-preset]') !== null, 'the provider');
+    await click(view.container.querySelector('[data-add-login-use="zai-glm"]'), 'Use this provider');
+    await click(view.container.querySelector('[data-add-login-form="zai-glm"] [data-change-submit]'), 'Add');
+    await until(() => view.container.querySelector('[data-login-page="claude-zai-glm"]') !== null, 'the new page');
+    expect(view.container.querySelector('[data-logins-adding]')).toBeNull();
+    expect(window.location.hash).toBe('#machines/box/sign-ins/claude-zai-glm');
+    await view.unmount();
+  });
 });
 
 describe('the sign-in panel mounted by itself', () => {
@@ -335,6 +361,88 @@ describe('the add-login panel', () => {
       store: 'environment',
       preset: 'zai-glm',
       env: { ZAI_KEY: '${secret:ZAI_KEY}' },
+    });
+    await view.unmount();
+  });
+
+  it('reads a pasted block, prefills the provider it recognised, and keeps the key out of everything', async () => {
+    const calls: Call[] = [];
+    const added: string[] = [];
+    const client = scripted(
+      {
+        'GET /v1/logins/presets': {
+          presets: [
+            {
+              ...PRESET,
+              variables: [
+                {
+                  name: 'ANTHROPIC_BASE_URL',
+                  kind: 'plain',
+                  required: true,
+                  allowEmpty: false,
+                  harnesses: ['claude-code'],
+                },
+                {
+                  name: 'ANTHROPIC_AUTH_TOKEN',
+                  kind: 'secret',
+                  secret: 'ZAI_API_KEY',
+                  required: true,
+                  allowEmpty: false,
+                  harnesses: ['claude-code'],
+                },
+              ],
+              detect: { hosts: ['api.z.ai'], variables: ['ZAI_API_KEY'], keyPrefixes: [] },
+            },
+          ],
+        },
+        [LIST]: loginList(),
+        [GRANTS]: OPEN,
+        [STAGE]: staged({ kind: 'login.enable', id: 'x' }),
+        [APPLY]: { outcome: 'applied' },
+      },
+      calls,
+    );
+    const view = await mount(<AddLoginPanel client={client} onAdded={id => added.push(id)} />);
+    await until(() => view.container.querySelector('[data-add-login-preset]') !== null, 'the preset');
+    await interact(() =>
+      must(
+        view.container.querySelector('[data-add-login-paste]') as HTMLButtonElement | null,
+        'Paste variables…',
+      ).click(),
+    );
+    const box = must(view.container.querySelector('[data-paste-input]') as HTMLTextAreaElement | null, 'the box');
+    await interact(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(
+        box,
+        'export ANTHROPIC_BASE_URL=https://api.z.ai/api/paas/v4\nexport ZAI_API_KEY=sk-zai-very-secret',
+      );
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await interact(() =>
+      must(view.container.querySelector('[data-paste-read]') as HTMLButtonElement | null, 'Read').click(),
+    );
+    await interact(() =>
+      must(view.container.querySelector('[data-paste-continue]') as HTMLButtonElement | null, 'Continue').click(),
+    );
+    const form = must(view.container.querySelector('[data-add-login-form="zai-glm"]'), 'the prefilled form');
+    // The plain value the paste carried fills its field; the secret stays a reference to a NAME.
+    const fields = Array.from(form.querySelectorAll('input'));
+    expect(fields.map(field => field.value)).toEqual(['https://api.z.ai/api/paas/v4', '${secret:ZAI_API_KEY}', '']);
+    expect(form.querySelector('[data-paste-secrets]')?.textContent).toContain(
+      'paste ZAI_API_KEY into the secret store',
+    );
+    // The pasted key never reaches the tree, before or after the form opens.
+    expect(view.container.innerHTML).not.toContain('sk-zai-very-secret');
+    await click(form.querySelector('[data-change-submit]'), 'Add');
+    await until(() => added.length > 0, 'the login to be added');
+    expect(calls.find(call => call.route === STAGE)?.body).toEqual({
+      kind: 'login.add',
+      id: 'claude-zai-glm',
+      harness: 'claude-code',
+      store: 'environment',
+      preset: 'zai-glm',
+      env: { ANTHROPIC_BASE_URL: 'https://api.z.ai/api/paas/v4', ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}' },
     });
     await view.unmount();
   });
