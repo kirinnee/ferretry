@@ -49,6 +49,28 @@ const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', '
 const READ_ONLY_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'imports']);
 /** Internal roots only one plugin may have, whatever another manifest declares. */
 const ROOT_OWNERS: Partial<Record<RootName, string>> = { credentials: 'logins', sessions: 'ferrets' };
+
+/**
+ * Whether a plugin may hold a root: an owned root (`credentials`, `sessions`) is its owner's alone. One fact, read by
+ * the real roots port and by the testing host, so a plugin's unit test cannot hold what production refuses.
+ */
+export function mayHoldRoot(plugin: string, name: RootName): boolean {
+  const owner = ROOT_OWNERS[name];
+  return owner === undefined || owner === plugin;
+}
+
+/** The roots whose files and folders never get a group or other bit, whatever a caller asks for. */
+function isPrivateRoot(name: RootName): boolean {
+  return name === 'sessions';
+}
+
+/** A ferret's own folder name under `sessions`: the ferret-id shape (one plain segment, no `.`, `..`, `/`, `\`, NUL). */
+const SESSION_FOLDER = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
+
+/** The one segment a `sessions` handle may be scoped to, or nothing when the given subfolder is not exactly that. */
+function sessionFolder(subfolder: string | undefined): string | undefined {
+  return subfolder !== undefined && SESSION_FOLDER.test(subfolder) ? subfolder : undefined;
+}
 const DEFAULT_COPY_ENTRIES = 10_000;
 const windowOk = (offset: number, length: number): boolean =>
   Number.isSafeInteger(offset) &&
@@ -967,9 +989,9 @@ function rootHandle(setup: HandleSetup): RootHandle {
         if (error instanceof HoldFailure) throw error.cause;
         if (errnoOf(error) === 'ENOENT') return undefined;
         if (error instanceof RootError && error.refusal === 'hard_link') {
-          // Only a root this kernel publishes into (internal, writable) can hold its OWN leftover; a read-only or an
-          // owner's root never loses a name to a read. At most one adoption per call.
-          if (!adoptionTried && !readOnly && !ownerRoot) {
+          // Only a root this kernel publishes into (internal, writable) can hold its OWN leftover; a read-only, an
+          // owner's or an outside root (`worktrees`) never loses a name to a read. At most one adoption per call.
+          if (!adoptionTried && !readOnly && isInternalRoot(name)) {
             adoptionTried = true;
             const adopted = await real(path)
               .then(async ({ full, scope }) => await adoptLeftoverName(scope, full, random))
@@ -1015,6 +1037,14 @@ function rootHandle(setup: HandleSetup): RootHandle {
   const writable = (): void => {
     if (readOnly) refuse('read_only');
   };
+  /**
+   * A private root (`sessions`: it holds a plaintext session credential) never widens past the owner: a file it
+   * writes is `0600` whatever mode the caller asks for, and a replaced file loses a wider mode it already had.
+   */
+  const privateFolder = isPrivateRoot(name);
+  const privateWrite = <T extends { readonly mode?: number; readonly replaceExisting?: boolean }>(
+    options: T | undefined,
+  ): T | undefined => (privateFolder ? ({ ...options, mode: (options?.mode ?? 0o600) & 0o600 } as T) : options);
   const read = async <T>(path: FencedPath, use: (file: OpenedFile) => Promise<T>): Promise<T> => {
     const { full, scope } = await real(path);
     return await withCheckedFile(scope, full, use);
@@ -1023,7 +1053,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
     writable();
     const leafOnly = options?.exclusive === true || options?.replaceExisting === true;
     const { full, scope } = leafOnly ? await realParent(path, true) : await real(path, true);
-    await writeChecked(scope, full, data, random, options);
+    await writeChecked(scope, full, data, random, privateWrite(options));
   };
   /**
    * Copies `from` (a folder of `source`) into the NEW folder `to`: each name checked against the source's own fence,
@@ -1061,7 +1091,13 @@ function rootHandle(setup: HandleSetup): RootHandle {
         const file = await source.real(sourceName);
         const bytes = await withCheckedFile(file.scope, file.full, async opened => await opened.read());
         const written = await realParent(targetName, true);
-        await writeChecked(written.scope, written.full, bytes, random, { exclusive: true, mode: info.mode & 0o777 });
+        await writeChecked(
+          written.scope,
+          written.full,
+          bytes,
+          random,
+          privateWrite({ exclusive: true, mode: info.mode & 0o777 }),
+        );
       }
       // a link is left alone (never entered), a device or a hard-linked file is never read
     }
@@ -1113,7 +1149,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
     publish: async (path, bytes, options) => {
       writable();
       const { full, scope } = await realParent(path, true);
-      return await publishChecked(scope, full, bytes, random, options);
+      return await publishChecked(scope, full, bytes, random, privateWrite(options));
     },
     readDurable: async (path, limit, hold) =>
       await readDurable(path, limit, async (read, stillNames) =>
@@ -1179,7 +1215,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
     makeDirectory: async (path, options) => {
       writable();
       const { full, scope } = await real(path, true);
-      const made = await openFolderMaking(scope, full, options?.mode ?? 0o700, true);
+      const made = await openFolderMaking(scope, full, privateFolder ? 0o700 : (options?.mode ?? 0o700), true);
       await made.folder.close();
     },
     realPath: async path => {
@@ -1276,8 +1312,7 @@ export async function ensureInternalRootBases(
   const refusals: RootBaseRefusal[] = [];
   for (const name of new Set(declared)) {
     try {
-      const owner = ROOT_OWNERS[name];
-      if (owner !== undefined && owner !== layout.plugin) continue;
+      if (!mayHoldRoot(layout.plugin, name)) continue;
       const home = absolute(layout.home, 'the home');
       const base = internalRootBase(home, layout.plugin, name);
       if (base === undefined) continue;
@@ -1343,8 +1378,7 @@ export function rootsPortFor(
   return {
     root: (name, scope) => {
       if (!allowed.has(name)) throw new RootError('not_declared');
-      const owner = ROOT_OWNERS[name];
-      if (owner !== undefined && owner !== layout.plugin) throw new RootError('not_declared');
+      if (!mayHoldRoot(layout.plugin, name)) throw new RootError('not_declared');
       const subfolder = scope?.subfolder;
       const internalSubfolder = (): string | undefined => {
         // An internal root's subfolder is one relative path below its anchor: never absolute, never `..`, no NUL.
@@ -1360,9 +1394,15 @@ export function rootsPortFor(
       })();
       const base = (): string | undefined => {
         switch (name) {
-          case 'agent-homes':
-          case 'sessions': {
+          case 'agent-homes': {
             const below = internalSubfolder();
+            return below === undefined || internal === undefined
+              ? undefined
+              : absolute(join(internal, below), 'a root');
+          }
+          case 'sessions': {
+            // One ferret's own folder and nothing else: never the whole base, never a nested path.
+            const below = sessionFolder(subfolder);
             return below === undefined || internal === undefined
               ? undefined
               : absolute(join(internal, below), 'a root');

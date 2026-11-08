@@ -68,5 +68,9 @@ export function launchGuardFor(options: LaunchGuardOptions): () => HostLaunchGua
   };
 }
 
-/** What a host that was told nothing holds: the guard is off. */
-export const INACTIVE_LAUNCH_GUARD = (): HostLaunchGuard => Object.freeze({ active: false });
+/**
+ * What a host that was never told how the kernel decided holds: the guard is ON, with no search path. A wiring that
+ * forgets to hand the kernel's decision therefore refuses to launch a real harness instead of silently running one.
+ * Production hands the real decision ({@link launchGuardFor}); only a fixture that never asks runs on this.
+ */
+export const UNDECIDED_LAUNCH_GUARD = (): HostLaunchGuard => Object.freeze({ active: true });

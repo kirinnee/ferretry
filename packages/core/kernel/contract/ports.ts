@@ -895,12 +895,6 @@ export type CgroupFile =
   | 'cpu.max';
 
 /**
- * The machine reads today's Terminals made through `node:fs` (its interim `adapters/host/fs.ts`), as narrow methods
- * that each name one kind of file: a pid is a whole number, a descriptor is digits, a cgroup path is plain segments,
- * and no method takes a free path. Each throws as the read it replaces did (a vanished process, a missing file), so
- * a caller keeps its own catch.
- */
-/**
  * Whether a daemon a test booted must refuse to launch a real harness, and where it looks for one. The kernel decides
  * `active` ONCE at boot (`FERRETRY_TEST=1`, or the home's real path under `os.tmpdir()`, `/tmp` or `/var/folders`)
  * and hands the daemon's `PATH`; no plugin reads the environment.
@@ -911,6 +905,12 @@ export interface HostLaunchGuard {
   readonly searchPath?: string;
 }
 
+/**
+ * The machine reads today's Terminals made through `node:fs` (its interim `adapters/host/fs.ts`), as narrow methods
+ * that each name one kind of file: a pid is a whole number, a descriptor is digits, a cgroup path is plain segments,
+ * and no method takes a free path. Each throws as the read it replaces did (a vanished process, a missing file), so
+ * a caller keeps its own catch.
+ */
 export interface HostFactsPort {
   /** `process.platform`. */
   readonly platform: string;

@@ -1,6 +1,6 @@
 /** K1: the `sessions` root — Ferrets' internal root under `state/ferrets/sessions/<ferret>`; the plaintext session credential lives there. */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { link, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { ok } from '@ferretry/std';
 import { z } from 'zod';
@@ -11,11 +11,13 @@ import { nodeFs } from '../../../host/adapters/node-fs.ts';
 import { bootHost, type HostOptions, type RunningHost } from '../../../host/host.ts';
 import { INTERNAL_ROOT_FOLDERS } from '../../../host/internal-roots.ts';
 import { ensureInternalRootBases, RootError, rootsPortFor } from '../../../host/roots.ts';
+import { UndeclaredStateFileError } from '../../../host/state/errors.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { createStatePort } from '../../../host/state/state-port.ts';
 import { realAdapters, stateOpener } from '../../../host/wiring.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { fixedClock } from '../../../testing/clock.ts';
+import { testHost } from '../../../testing/host.ts';
 import { silentLog } from './fixtures.ts';
 
 const parents: string[] = [];
@@ -124,8 +126,24 @@ describe('K1 the sessions root: base, mode, owner', () => {
   });
 });
 
-describe('K1 the sessions root: subfolder rule is the one agent-homes has', () => {
-  for (const bad of ['../x', '..', 'a/../../x', '/etc', '/', 'a\0b', 'f1/../..']) {
+describe('K1 the sessions root: a subfolder is exactly one plain ferret-id segment', () => {
+  for (const bad of [
+    '',
+    '.',
+    '..',
+    'a/b',
+    './a',
+    'a/',
+    '../x',
+    'a/../../x',
+    '/etc',
+    '/',
+    'a\0b',
+    'a\\b',
+    'f1/../..',
+    '.hidden',
+    'a b',
+  ]) {
     test(`K1 the subfolder ${JSON.stringify(bad)} is refused and nothing is made`, async () => {
       const f = await fresh();
       const root = f.port('ferrets').root('sessions', { subfolder: bad });
@@ -137,6 +155,22 @@ describe('K1 the sessions root: subfolder rule is the one agent-homes has', () =
       expect(await readdir(f.parent)).toEqual(['home']);
     });
   }
+
+  test('K1 a handle with no subfolder at all (the whole base) is refused', async () => {
+    const f = await fresh();
+    const root = f.port('ferrets').root('sessions');
+    expect(root.resolve('f1/environment.json')).toEqual({ ok: false, error: 'outside' });
+    await expect(root.writeText('/anywhere/x.json' as FencedPath, 'must-not-land')).rejects.toEqual(
+      new RootError('outside'),
+    );
+    expect(await readdir(`${f.home}/state`)).toEqual([]);
+  });
+
+  test('K1 a ferret id of the real shape (base36 time, hex) is accepted', async () => {
+    const f = await fresh();
+    for (const id of ['mw7bp88g-50e00159', 'f1', 'ferret_1'])
+      expect(f.port('ferrets').root('sessions', { subfolder: id }).resolve('x.json').ok).toBe(true);
+  });
 
   test('K1 a ferret id and a relative path inside it resolve beneath the base, a path out of it does not', async () => {
     const f = await fresh();
@@ -264,9 +298,129 @@ describe('K1 kernel.state.list(FerretFiles) skips the sessions folder', () => {
     expect(await port.list(ferretFile)).toEqual(['mw7bp88g-50e00159', 'mw7bq000-0badc0de']);
   });
 
-  test('K1 no clash: a generated ferret id (base36-hex pair) is never one of the kernel-made folder names', () => {
-    for (const id of ['mw7bp88g-50e00159', 'mw5qgajf-0fd90655', 'zzzzzzzz-ffffffff'])
-      expect(INTERNAL_ROOT_FOLDERS.includes(id as RootName)).toBe(false);
-    expect(/^[0-9a-z]{8}-[0-9a-f]{8}$/u.test('sessions')).toBe(false);
+  test('K1 no clash: the state port refuses a name equal to a kernel-made folder, on write and on read', async () => {
+    const fs = createMemoryHostFs();
+    const port = createStatePort({ home: '/home/fy', pluginId: 'ferrets', files: [ferretFile], fs });
+    for (const reserved of INTERNAL_ROOT_FOLDERS) {
+      await expect(port.write(ferretFile, { id: reserved }, reserved)).rejects.toBeInstanceOf(UndeclaredStateFileError);
+      await expect(port.read(ferretFile, reserved)).rejects.toBeInstanceOf(UndeclaredStateFileError);
+    }
+    await expect(port.write(ferretFile, { id: 'sessions' }, 'sessions')).rejects.toThrow(
+      'state ferret: "sessions" is not a valid name',
+    );
+    // nothing landed inside the credential root's base, and a generated id is still fine
+    expect(await fs.list('/home/fy/state/ferrets')).toEqual([]);
+    await port.write(ferretFile, { id: 'mw7bp88g-50e00159' }, 'mw7bp88g-50e00159');
+    expect(await port.list(ferretFile)).toEqual(['mw7bp88g-50e00159']);
   });
+
+  test('K1 a name that only starts like a kernel-made folder is still a name', async () => {
+    const fs = createMemoryHostFs();
+    const port = createStatePort({ home: '/home/fy', pluginId: 'ferrets', files: [ferretFile], fs });
+    await port.write(ferretFile, { id: 'sessions-1' }, 'sessions-1');
+    expect(await port.list(ferretFile)).toEqual(['sessions-1']);
+  });
+});
+
+describe('K1 the sessions root: leftover adoption is for internal roots only', () => {
+  test('K1 a worktrees root does not adopt a leftover temp name: both names stay and the read is refused', async () => {
+    const f = await fresh();
+    const worktrees = `${f.home}-worktrees`;
+    await mkdir(`${worktrees}/d`, { recursive: true, mode: 0o700 });
+    await writeFile(`${worktrees}/d/s.jsonl`, 'theirs');
+    await link(`${worktrees}/d/s.jsonl`, `${worktrees}/d/.s.jsonl.abc.tmp`);
+    const root = f.port('ferrets', ['worktrees']).root('worktrees');
+
+    await expect(root.readDurable(resolved(root, 'd/s.jsonl'))).rejects.toEqual(new RootError('hard_link'));
+    expect((await readdir(`${worktrees}/d`)).toSorted()).toEqual(['.s.jsonl.abc.tmp', 's.jsonl']);
+  });
+});
+
+describe('K1 the sessions root stays private: nothing widens past the owner', () => {
+  test('K1 a sessions folder that already exists as 0755 is tightened to 0700 at boot', async () => {
+    const f = await fresh();
+    await mkdir(`${f.home}/state/ferrets/sessions`, { recursive: true, mode: 0o755 });
+    await chmod(`${f.home}/state/ferrets/sessions`, 0o755);
+    await chmod(`${f.home}/state/ferrets`, 0o755);
+    expect(await modeOf(`${f.home}/state/ferrets/sessions`)).toBe(0o755);
+
+    expect(await ensureInternalRootBases(f.fs, { home: f.home, plugin: 'ferrets' }, ['sessions'])).toEqual([]);
+
+    expect(await modeOf(`${f.home}/state/ferrets/sessions`)).toBe(0o700);
+  });
+
+  test('K1 a file written with a wider mode, or replaced over a wider one, comes out 0600', async () => {
+    const f = await fresh();
+    await ensureInternalRootBases(f.fs, { home: f.home, plugin: 'ferrets' }, ['sessions']);
+    const root = f.port('ferrets').root('sessions', { subfolder: 'f1' });
+    const name = resolved(root, 'environment.json');
+    const on = `${f.home}/state/ferrets/sessions/f1/environment.json`;
+
+    await root.writeText(name, 'one', { mode: 0o644 });
+    expect(await modeOf(on)).toBe(0o600);
+
+    // a carried-over file at 0644, replaced in place with no mode named
+    await chmod(on, 0o644);
+    await root.writeText(name, 'two', { replaceExisting: true });
+    expect(await readFile(on, 'utf8')).toBe('two');
+    expect(await modeOf(on)).toBe(0o600);
+
+    await chmod(on, 0o644);
+    await root.writeText(name, 'three', { replaceExisting: true, mode: 0o666 });
+    expect(await modeOf(on)).toBe(0o600);
+
+    await root.publish(resolved(root, 'effects/e.json'), encoder.encode('p'), { mode: 0o644 });
+    expect(await modeOf(`${f.home}/state/ferrets/sessions/f1/effects/e.json`)).toBe(0o600);
+  });
+
+  test('K1 a folder made through the sessions handle is 0700 whatever mode is asked', async () => {
+    const f = await fresh();
+    await ensureInternalRootBases(f.fs, { home: f.home, plugin: 'ferrets' }, ['sessions']);
+    const root = f.port('ferrets').root('sessions', { subfolder: 'f1' });
+    await root.makeDirectory(resolved(root, 'turns'), { mode: 0o755 });
+    expect(await modeOf(`${f.home}/state/ferrets/sessions/f1/turns`)).toBe(0o700);
+  });
+
+  test('K1 a narrower mode a caller asks for is kept (0400 stays 0400)', async () => {
+    const f = await fresh();
+    await ensureInternalRootBases(f.fs, { home: f.home, plugin: 'ferrets' }, ['sessions']);
+    const root = f.port('ferrets').root('sessions', { subfolder: 'f1' });
+    await root.writeText(resolved(root, 'frozen.json'), 'x', { mode: 0o400 });
+    expect(await modeOf(`${f.home}/state/ferrets/sessions/f1/frozen.json`)).toBe(0o400);
+  });
+});
+
+describe('K1 the testing host refuses an owned root to a plugin that does not own it, as production does', () => {
+  const declare = (id: string, root: RootName) =>
+    implementDaemon(
+      definePlugin({
+        id,
+        title: id,
+        version: '5.0.0',
+        api: 5,
+        core: false,
+        kinds: [],
+        permissions: { roots: [root] },
+      }),
+      {
+        build: ctx => {
+          seen.set(id, () => ctx.kernel.roots.root(root, root === 'sessions' ? { subfolder: 'f1' } : undefined));
+          return {};
+        },
+      },
+    );
+  const seen = new Map<string, () => RootHandle>();
+
+  for (const [owned, owner] of [
+    ['sessions', 'ferrets'],
+    ['credentials', 'logins'],
+  ] as const) {
+    test(`K1 testHost: only ${owner} gets ${owned}; a terminals plugin that declares it is refused`, async () => {
+      seen.clear();
+      const host = await testHost({ plugins: [declare(owner, owned), declare('terminals', owned)] });
+      expect(seen.get(owner)?.().internal).toBe(true);
+      expect(() => seen.get('terminals')?.()).toThrow(`terminals: root ${owned} is not declared`);
+      await host.stop();
+    });
+  }
 });

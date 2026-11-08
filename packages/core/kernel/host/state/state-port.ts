@@ -105,6 +105,9 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
    */
   const nameAllowed = (def: StateFileDef, name: string): boolean => {
     const plain = (segment: string): boolean => COLLECTION_NAME.test(segment) && segment !== '.' && segment !== '..';
+    // A name that would put a file at the top of the plugin's state folder under a kernel-made root's folder name
+    // (`sessions`) is refused here, as `listCollection` would hide it: write, read and list agree.
+    if (isInternalRootFolder(def.path.replace('*', () => name).split('/')[0] ?? '')) return false;
     if (!name.includes('/')) return plain(name);
     if (def.store !== 'opaque' || !def.path.endsWith('/*')) return false;
     const folder = def.path.slice(0, -1);

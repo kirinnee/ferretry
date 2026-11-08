@@ -1,6 +1,7 @@
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { isInternalRoot } from '../host/internal-roots.ts';
+import { mayHoldRoot } from '../host/roots.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { failureResponse } from '../host/responses.ts';
 import type { ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
@@ -673,7 +674,7 @@ async function start(world: World): Promise<TestHost> {
   let nextInode = 0n;
   const rootsFor = (manifest: Manifest): KernelPorts['roots'] => ({
     root(name) {
-      if (!(manifest.permissions?.roots ?? []).includes(name))
+      if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name))
         throw new Error(`${manifest.id}: root ${name} is not declared`);
       const fileStat = (path: string) => ({
         kind: 'file' as const,

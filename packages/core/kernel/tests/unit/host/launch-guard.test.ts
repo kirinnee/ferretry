@@ -93,8 +93,8 @@ describe('K3 launchGuardFor decides active once, from FERRETRY_TEST and the home
 describe('K3 hostFacts.launchGuard is gated like the other hostFacts', () => {
   const base = nodeHostFacts({ proc: '/nonexistent-proc', sys: '/nonexistent-sys' });
 
-  test('K3 a node host with nothing decided answers inactive, no search path', () => {
-    expect(base.launchGuard()).toEqual({ active: false });
+  test('K3 a node host with nothing decided fails closed: active, no search path', () => {
+    expect(base.launchGuard()).toEqual({ active: true });
   });
 
   test('K3 nodeHostFacts hands what the kernel decided', () => {
@@ -141,7 +141,7 @@ describe('K3 hostFacts.launchGuard is gated like the other hostFacts', () => {
 });
 
 describe('K3 no environment read outside the kernel adapter', () => {
-  test('K3 no plugin source reads FERRETRY_TEST, and none reads process.env.PATH to find a harness guard', async () => {
+  test('K3 no plugin source reads FERRETRY_TEST (Terminals names it only until U1 deletes its copy)', async () => {
     const root = new URL('../../../../../', import.meta.url).pathname;
     const offenders: string[] = [];
     for await (const file of new Glob('plugins/*/{daemon,lib}/**/*.ts').scan({ cwd: root })) {
