@@ -90,7 +90,8 @@ function failingUnlockWrites(port: StatePort, fails: () => boolean): StatePort {
 
 function world(
   options: {
-    readonly identity?: AccessHost['identity'];
+    /** What `kernel.identity` answers; throwing models a kernel whose identity cannot be read. */
+    readonly identity?: () => { readonly daemonId: string; readonly daemonName: string };
     readonly folder?: MemoryStateFolder;
     readonly stages?: AccessRuntimeDeps['stages'];
     /** Makes the unlock ledger's writes reject while this answers true (a disk that refuses the write). */
@@ -108,7 +109,11 @@ function world(
     child: () => log,
   };
   const published: World['published'] = [];
+  const identity = options.identity ?? (() => ({ daemonId: DAEMON_ID, daemonName: 'Studio' }));
   const kernel = {
+    get identity() {
+      return { ...identity(), binaries: { client: 'fy', daemon: 'fyd' } };
+    },
     clock,
     log,
     state: failingUnlockWrites(
@@ -133,10 +138,8 @@ function world(
     policy: () => state.policy,
   };
   const host: AccessHost = {
-    identity: options.identity ?? (() => ({ daemonId: DAEMON_ID, daemonName: 'Studio' })),
     allowedOrigins: () => ['https://app.example.test'],
     ed25519,
-    clientName: 'fy',
   };
   const runtime = new AccessRuntime({
     kernel,

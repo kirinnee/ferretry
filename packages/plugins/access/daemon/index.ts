@@ -5,13 +5,11 @@ import { type AccessHost, AccessRuntime } from './runtime.ts';
 import { pairingRedirectBoot } from './adapters/pairing/boot-redirect-sweep.ts';
 
 /**
- * The facts no port gives Access yet (see {@link AccessHost}): the kernel's identity port is being added. Until they land, Access cannot open its device grants (they are bound to the
- * daemon identity), so every route answers `503 plugin_unavailable` and every session mode refuses — fail closed.
+ * The facts no port gives Access yet (see {@link AccessHost}): the app origins a passkey may answer for, and the
+ * Ed25519 check a key rotation's proof needs. The daemon identity and the client's command name come from
+ * `ctx.kernel.identity` inside the runtime.
  */
 const pendingHost: AccessHost = {
-  identity: () => {
-    throw new Error('the kernel does not hand Access the daemon identity yet');
-  },
   allowedOrigins: () => [HOSTED_APP_ORIGIN],
   ed25519: {
     verifyEd25519: async (publicKeySpki, signature, message) => {
@@ -25,7 +23,6 @@ const pendingHost: AccessHost = {
       }
     },
   },
-  clientName: 'fy',
 };
 
 /** Access's daemon half (§2.3): pairing, devices, passkeys, unlock, grants per device, push enrolments. */

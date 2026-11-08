@@ -80,8 +80,11 @@ export async function openApp(
     );
   const text = await mint.text();
   let code: unknown;
+  let mintedDaemonId: unknown;
   try {
-    code = (JSON.parse(text) as { code?: unknown }).code;
+    const minted = JSON.parse(text) as { code?: unknown; daemonId?: unknown };
+    code = minted.code;
+    mintedDaemonId = minted.daemonId;
   } catch {
     code = undefined;
   }
@@ -92,6 +95,9 @@ export async function openApp(
     );
 
   const daemonId = daemon.host.identity.daemonId;
+  // The QR carries the minted id; a session dialled with the kernel's id must be the same daemon (never print the code).
+  if (mintedDaemonId !== daemonId)
+    throw new Error(`the pairing code names daemon ${String(mintedDaemonId)} but the kernel answers as ${daemonId}`);
   const device = await crypto.generateDeviceKey();
   const handle = crypto.deviceKeyHandle(device.privateKey);
   const outcome = await pairOverDirect(

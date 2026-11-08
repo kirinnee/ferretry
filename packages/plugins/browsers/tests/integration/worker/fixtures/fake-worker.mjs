@@ -266,7 +266,7 @@ function inputReply(id, method, params) {
       page === 'garbled'
         ? { outcome: 'maybe' }
         : {
-            outcome: params?.fieldIds?.[0] === 'password' && params?.expected?.kind === 'browser' ? 'armed' : 'refused',
+            outcome: params?.fieldIds?.[0] === 'password' && params?.expected?.kind === 'page' ? 'armed' : 'refused',
           },
     );
   // The check before a grant fill's hold ends: nodes in, one word out, never a value either way.

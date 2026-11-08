@@ -85,16 +85,13 @@ import type { ApiRoute } from './lib/wire.ts';
 import { stepUpProvider } from './step-up-provider.ts';
 
 /**
- * What Access needs from the host that no kernel or plugin port gives yet (sent to the lead): the daemon identity
- * (kernel), the app origins a passkey may answer for,
- * and the Ed25519 check a key rotation's proof needs (kernel wire). The real ports replace this one by one.
+ * What Access still needs from the host that no kernel port gives (sent to the lead): the app origins a passkey may
+ * answer for, and the Ed25519 check a key rotation's proof needs (kernel wire). The daemon's identity and the client's
+ * command name are not here: Access reads them from `kernel.identity`. The real ports replace this one by one.
  */
 export interface AccessHost {
-  identity(): { readonly daemonId: string; readonly daemonName: string };
   allowedOrigins(): readonly string[];
   readonly ed25519: Ed25519Verifier;
-  /** The command a remedy sentence names (`fy`). */
-  readonly clientName: string;
 }
 
 export interface AccessRuntimeDeps {
@@ -171,7 +168,9 @@ export class AccessRuntime {
     const { kernel, gate, host } = this.#deps;
     const clock = kernel.clock;
     const repository = new StatePairingRepository(kernel.state);
-    const state = await repository.open(host.identity());
+    const { daemonId, daemonName, binaries } = kernel.identity;
+    const clientName = binaries.client;
+    const state = await repository.open({ daemonId, daemonName });
     const registry = new PairingDeviceRegistry(state.daemonId, state.devices);
     const grantAudit = new JournalGrantAudit(kernel.state);
     const securityAudit = new JournalGrantAudit(kernel.state, 'security.changed');
@@ -292,13 +291,13 @@ export class AccessRuntime {
       daemonWide: () => gate.policy()?.grants,
       audit: grantAudit,
       clock: { nowMs: () => clock.nowMs() },
-      clientName: host.clientName,
+      clientName,
       changed: () => {
         this.#connections.recheckAll();
         this.#moved();
       },
     });
-    const guard = gateGuard(gate, host.clientName);
+    const guard = gateGuard(gate, clientName);
     const routes = new Map<string, RouteHandler>();
     for (const route of [
       ...pairingRoutes(pairing, deviceGrants),
