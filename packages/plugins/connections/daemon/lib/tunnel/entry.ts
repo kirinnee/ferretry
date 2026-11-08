@@ -7,8 +7,3 @@ export const DaemonTunnelCarrierSchema = z.strictObject({
   enabled: z.boolean().default(false),
 });
 export type DaemonTunnelCarrierEntry = z.infer<typeof DaemonTunnelCarrierSchema>;
-export const IMPLIED_TUNNEL_CARRIER: DaemonTunnelCarrierEntry = {
-  kind: 'tunnel',
-  source: 'discovery',
-  enabled: false,
-};

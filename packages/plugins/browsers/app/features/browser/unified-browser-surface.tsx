@@ -68,7 +68,7 @@ import type { BrowserLoginSnapshot } from '../../lib/browser-login.ts';
 import { type BrowserDaemon, browserSessionKey, type BrowserSessionScope, sameBrowserDaemon } from '../../lib/scope.ts';
 import { Button } from '@ferretry/app/ui';
 /** Full screen for the whole surface: the frame owns the state and hands the bar the toggle. */
-export interface SurfaceFullscreen {
+interface SurfaceFullscreen {
   readonly active: boolean;
   readonly toggle: () => void;
 }
@@ -109,7 +109,7 @@ export interface UnifiedBrowserDependencies {
   readonly RemotePane: ComponentType<RemoteBrowserPaneProps>;
 }
 
-export const DEFAULT_UNIFIED_BROWSER_DEPENDENCIES: UnifiedBrowserDependencies = {
+const DEFAULT_UNIFIED_BROWSER_DEPENDENCIES: UnifiedBrowserDependencies = {
   PreviewFrame: InAppBrowserFrame,
   RemotePane: RemoteBrowserPane,
 };

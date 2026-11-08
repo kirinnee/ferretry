@@ -58,7 +58,7 @@ export function targetOfAction(sessionId: string, action: BrowserAction, status:
 }
 
 /** A refused act, as the fixed sentence of its code (I120: never the caught message). */
-export function refusedAct(refusal: { readonly refused: string }): ApiError {
+function refusedAct(refusal: { readonly refused: string }): ApiError {
   const sentence =
     (REFUSAL_SENTENCES as Readonly<Record<string, string>>)[refusal.refused] ?? REFUSAL_SENTENCES.holds_unavailable;
   return new ApiError(409, sentence, refusal.refused);
@@ -71,7 +71,7 @@ export function acted<O extends Op>(result: Result<ResultOf<O>, { readonly refus
 }
 
 /** A write-only act's answer for `fn`: a fresh `done`, never a value from the page. */
-export const DONE = Object.freeze({ status: 'done' as const });
+const DONE = Object.freeze({ status: 'done' as const });
 
 /** Runs a write-only act on one target and throws its refusal. */
 export async function writeAct(act: ActRunner, target: TargetRef, op: Op, work: () => Promise<unknown>): Promise<void> {

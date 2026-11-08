@@ -42,7 +42,7 @@ import { carrierLines, RECONNECTING_LABEL, stallCopy } from '../connection/conne
 import { type CarrierPreferenceAvailability, CarrierPreferenceSelector } from './carrier-preference-selector.tsx';
 
 /** This machine's connection preference on this device, and how to change it. */
-export interface CarrierPreferenceControl {
+interface CarrierPreferenceControl {
   readonly value: CarrierPreference;
   readonly onChange: (preference: CarrierPreference) => void;
   readonly availability: CarrierPreferenceAvailability;
@@ -65,16 +65,15 @@ export interface ActiveCarrierCardProps {
 export type ConnectionStatusKind = ConnectionMethod['kind'] | 'reconnecting' | 'none';
 
 /** Where running your own relay is documented. The app links it and never configures it. */
-export const SELF_HOSTING_RUNBOOK_URL =
-  'https://github.com/kirinnee/ferretry/blob/main/docs/cloudflare-relay-self-hosting.md';
+const SELF_HOSTING_RUNBOOK_URL = 'https://github.com/kirinnee/ferretry/blob/main/docs/cloudflare-relay-self-hosting.md';
 
 /** Said beside that link, so nobody looks for a relay setting this app does not have. */
-export const SELF_HOSTING_NOTE =
+const SELF_HOSTING_NOTE =
   'Running your own relay is an expert option set on the daemon, not in this app. This page follows ' +
   'whatever the daemon publishes.';
 
 /** The lead word for each status. */
-export const CONNECTION_STATUS_LABEL: Readonly<Record<ConnectionStatusKind, string>> = {
+const CONNECTION_STATUS_LABEL: Readonly<Record<ConnectionStatusKind, string>> = {
   direct: 'Direct',
   webrtc: 'WebRTC',
   tunnel: 'Via Cloudflare tunnel',
@@ -98,7 +97,7 @@ const carrierDetail = (method: ConnectionMethod): string | undefined => {
 };
 
 /** Reconnecting outranks any measured carrier: the router's answer is the LAST one that won. */
-export const connectionStatusKind = (
+const connectionStatusKind = (
   method: ConnectionMethod | undefined,
   health: ConnectionHealthState | undefined,
 ): ConnectionStatusKind => (health?.kind === 'reconnecting' ? 'reconnecting' : (method?.kind ?? 'none'));
@@ -109,14 +108,14 @@ export const connectionStatusKind = (
  * them. Not "not measured yet": something was measured, and the answer was no. The machine-readable
  * status stays `none`, because no carrier is live.
  */
-export const NOT_CONNECTED_LABEL = 'Not connected';
+const NOT_CONNECTED_LABEL = 'Not connected';
 
 export const CARRIER_UNMEASURED =
   'Nothing has been carried yet, so there is no carrier to name. This will say which one is in use, ' +
   'and why, as soon as this daemon is asked for anything.';
 
 /** Said when direct is the only carrier there is, so a reader knows what the constraint is. */
-export const CARRIER_NO_FALLBACK =
+const CARRIER_NO_FALLBACK =
   'There is no relay to fall back on right now, so this daemon has to be reachable from here — same ' +
   'network, a VPN, a tailnet, or a public address.';
 
@@ -131,13 +130,13 @@ export const CARRIER_NO_FALLBACK =
  * arrive whenever one does, and for a terminal that is keystroke timing, which is a materially
  * stronger observation than "a request happened" and deserves its own sentence rather than a clause.
  */
-export const CARRIER_STREAM_DISCLOSURE =
+const CARRIER_STREAM_DISCLOSURE =
   'Live updates and terminals travel this relay too, each on its own session. The relay cannot read any ' +
   'of it — but it sees when each frame arrives and how big it is, and for a terminal that is the rhythm ' +
   'of your typing.';
 
 /** The same disclosure for a tunnel: Cloudflare's edge sees each frame's size and timing (§15). */
-export const CARRIER_TUNNEL_STREAM_DISCLOSURE =
+const CARRIER_TUNNEL_STREAM_DISCLOSURE =
   'Live updates and terminals travel this tunnel too, each on its own session. Cloudflare cannot read any of ' +
   'it — but it sees when each frame arrives and how big it is, and for a terminal that is the rhythm of your typing.';
 

@@ -20,7 +20,7 @@ export interface LoginShellCandidate {
   readonly path: string;
 }
 
-export interface LoginShellRejection extends LoginShellCandidate {
+interface LoginShellRejection extends LoginShellCandidate {
   readonly reason: string;
 }
 

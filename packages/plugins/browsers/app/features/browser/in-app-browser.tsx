@@ -248,7 +248,7 @@ export interface InAppBrowserHost {
  * instead of a browser-only pane. `InAppBrowserWorkspace` remains for callers
  * without the full host.
  */
-export const InAppBrowserContext = createContext<InAppBrowserHost | null>(null);
+const InAppBrowserContext = createContext<InAppBrowserHost | null>(null);
 
 export interface InAppBrowserWorkspaceProps {
   compact: boolean;

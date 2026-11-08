@@ -52,7 +52,7 @@ const TEST_CALLERS: Readonly<Record<Caller, TestCaller>> = {
 };
 
 /** A runtime whose listing can be made to fail, the way a tmux that will not answer does. */
-export class FailableRuntime extends FakeTerminalRuntime {
+class FailableRuntime extends FakeTerminalRuntime {
   listFails: Error | undefined;
 
   override async list(): Promise<readonly TerminalRecord[]> {

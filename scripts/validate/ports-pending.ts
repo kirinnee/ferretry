@@ -41,6 +41,17 @@ export const ONE_TIME_HALF_ALLOWANCE: readonly {
   { id: 'skills', half: 'cli', reason: 'a correction: these halves were skeletons the whole time (britnee)' },
 ];
 
+/**
+ * Plugins that may re-enter `pending` once even though the list only shrinks: each was taken off with open work and
+ * goes back on by a lead ruling. An allowed id must state at least one `pendingReasons` line, or it is still a finding.
+ * An entry is inert once the base lists the id.
+ */
+export const ONE_TIME_PENDING_ALLOWANCE: readonly { readonly id: string; readonly reason: string }[] = [
+  { id: 'terminals', reason: 'ruling #23 (britnee): left with open work, back in pending' },
+  { id: 'usage', reason: 'ruling #23 (britnee): left with open work, back in pending' },
+  { id: 'board', reason: 'ruling #23 (britnee): left with open work, back in pending' },
+];
+
 export interface PortsPending {
   readonly format: 1;
   readonly pending: readonly string[];
@@ -129,9 +140,17 @@ export const check: Check = {
     const base = readBase(ctx.root, ctx.base ?? 'origin/rebuild/5.0');
     if (base !== undefined) {
       const before = new Set(base.pending);
-      for (const id of current.pending)
-        if (!before.has(id))
+      for (const id of current.pending) {
+        if (before.has(id)) continue;
+        if (!ONE_TIME_PENDING_ALLOWANCE.some(allowed => allowed.id === id))
           findings.push({ check, where: 'ports-pending.json', message: `${id} was added; the list may only shrink` });
+        else if ((current.reasons[id]?.length ?? 0) === 0)
+          findings.push({
+            check,
+            where: 'ports-pending.json',
+            message: `${id} is back in "pending" by a one-time ruling but states no "pendingReasons" line`,
+          });
+      }
       for (const [id, named] of Object.entries(current.halves))
         for (const half of named)
           if (

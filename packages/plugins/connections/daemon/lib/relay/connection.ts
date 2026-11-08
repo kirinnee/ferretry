@@ -113,12 +113,7 @@ export const ConnectionMethodSchema = z.discriminatedUnion('kind', [
 export type ConnectionMethod = z.infer<typeof ConnectionMethodSchema>;
 
 /** Every carrier kind, in the order the protocol walks them by default (§15 "The choice", Auto). */
-export const CONNECTION_KINDS = [
-  'direct',
-  'webrtc',
-  'tunnel',
-  'relay',
-] as const satisfies readonly ConnectionMethod['kind'][];
+const CONNECTION_KINDS = ['direct', 'webrtc', 'tunnel', 'relay'] as const satisfies readonly ConnectionMethod['kind'][];
 
 export type ConnectionRole = 'client' | 'daemon';
 

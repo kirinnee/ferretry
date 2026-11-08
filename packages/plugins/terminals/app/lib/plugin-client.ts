@@ -67,7 +67,7 @@ export const pluginTerminalDeckDependencies = (
  * The viewer is told it is open when the daemon ACCEPTS the stream (a frame sent before is dropped), and told how it
  * closed with the stream's own code: a close the carrier reports without one is a drop and is retried.
  */
-export function openPluginStream(
+function openPluginStream(
   client: PluginClient,
   ferretId: string,
   terminalId: string,

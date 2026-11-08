@@ -33,7 +33,7 @@ import { PAGE_LIVE_POLL_MS, PAGE_POLL_MS, pageChangeFeed } from '../lib/page-fee
 import type { BrowserDaemon, BrowserSessionScope } from '../lib/scope.ts';
 import { type SurfaceControlView, SurfaceControlViewSchema } from '../../contract/wire/control.ts';
 
-export const BROWSER_CONTROL_ROUTES = {
+const BROWSER_CONTROL_ROUTES = {
   read: 'GET /v1/sessions/:sessionId/surfaces/browser/control',
   act: 'POST /v1/sessions/:sessionId/surfaces/browser/control',
 } as const;

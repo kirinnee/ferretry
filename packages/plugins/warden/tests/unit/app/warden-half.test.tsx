@@ -126,11 +126,16 @@ const OPTIONAL_ON = {
 const PAUSED = new DaemonCallError(0, 'plugin_paused', 'voice is paused on this daemon (off).');
 
 describe('the Warden half, bound to the shell', () => {
-  it('builds its screen, its dashboard panels and its settings tab over the one client it is handed', async () => {
+  it('builds its screen, its dashboard panels, its two contributions to Ferrets’ pages and its settings tab over the one client it is handed', async () => {
     const client = fakeClient({ ...WARDEN, 'GET /v1/ferrets': [] });
     const half = app.build?.({ manifest, client }) as AppHalf<typeof manifest>;
     expect(Object.keys(half.screens)).toEqual(['warden']);
-    expect(Object.keys(half.panels).sort()).toEqual(['warden-strip', 'warden-verdicts']);
+    expect(Object.keys(half.panels).sort()).toEqual([
+      'ask-warden-row',
+      'ferret-warden',
+      'warden-strip',
+      'warden-verdicts',
+    ]);
     expect(Object.keys(half.settings)).toEqual(['warden']);
 
     const Screen = half.screens.warden as () => ReactNode;

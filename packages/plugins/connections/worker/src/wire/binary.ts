@@ -1,4 +1,4 @@
-/** Mirror of packages/core/kernel/host/session/wire/binary.ts, byte-copied; replace with kernel export when approved. */
+/** The subset of kernel packages/core/kernel/host/session/wire/binary.ts the relay worker uses; replace with a kernel export when approved. */
 /**
  * Byte helpers the wire format needs on both a daemon and a browser.
  *
@@ -84,12 +84,8 @@ export function utf8Text(bytes: Uint8Array): string | null {
   }
 }
 
-export function writeUint32(target: Uint8Array, offset: number, value: number): void {
+function writeUint32(target: Uint8Array, offset: number, value: number): void {
   new DataView(target.buffer, target.byteOffset, target.byteLength).setUint32(offset, value, false);
-}
-
-export function readUint32(source: Uint8Array, offset: number): number {
-  return new DataView(source.buffer, source.byteOffset, source.byteLength).getUint32(offset, false);
 }
 
 /** Sequence numbers are 64 bits on the wire even though {@link MAX_FRAME_SEQUENCE} bounds them. */

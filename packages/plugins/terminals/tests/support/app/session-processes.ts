@@ -131,6 +131,3 @@ export const outputAnswer = (
   complete: false,
   ...extra,
 });
-
-export const COLOURED_TEST_OUTPUT =
-  '\u001b[1mbun test\u001b[0m v1.3.13\n\u001b[32m✓\u001b[0m adds numbers\n\u001b[31m✗ fails loudly\u001b[0m\n\u001b[2m 2 pass, 1 fail\u001b[0m\n';

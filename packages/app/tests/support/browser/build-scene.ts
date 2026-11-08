@@ -11,6 +11,11 @@
  * `--entry` is relative to the test's working directory (each plugin keeps its scenes beside its tests); there is no
  * default scene.
  *
+ * THE PAGE'S STYLESHEET IS THE ONE THE REAL APP LOADS: `styles/index.css` (which carries every plugin app half's
+ * `app/styles.css` through `generated/plugin-styles.css`), then `ui/design-system.css` (the shared component
+ * classes, as `main.tsx` loads them), then the CSS the scene's own bundle imports (a component that imports its
+ * stylesheet, as Vite would emit it). One pass through Tailwind. A scene never inlines CSS of its own.
+ *
  * BUILT ONCE PER KEY. About twenty visual test files each asked for a build of their own, ~3.3 s
  * apiece, almost all of it the same Tailwind stylesheet. Each output is now kept under the temporary
  * directory, keyed by a hash of everything a build can read (`sceneInputPatterns` in
@@ -31,7 +36,18 @@ import { cachedText, cacheRootFor, hashFixtureInputs, sceneInputEnv, sceneInputP
 const packageRoot = resolve(import.meta.dir, '../../..');
 const workspace = resolve(packageRoot, '../..');
 
-const bundle = async (entry: string, label: string): Promise<string> => {
+/** What a Bun build made: the script and, when the entry's graph imports stylesheets, their CSS (in import order). */
+const bundleOf = async (entry: string, label: string): Promise<{ readonly js: string; readonly css: string }> => {
+  const result = await Bun.build({ entrypoints: [entry], target: 'browser', throw: false });
+  if (!result.success) throw new Error(`❌ ${label} did not build:\n${result.logs.join('\n')}`);
+  const sheets = result.outputs.filter(output => output.path.endsWith('.css'));
+  const script = result.outputs.find(output => output.path.endsWith('.js'));
+  if (script === undefined) throw new Error(`❌ ${label} made no script`);
+  return { js: await script.text(), css: (await Promise.all(sheets.map(sheet => sheet.text()))).join('\n') };
+};
+
+/** A stylesheet entry with its `@import` graph inlined. */
+const stylesheet = async (entry: string, label: string): Promise<string> => {
   const result = await Bun.build({ entrypoints: [entry], target: 'browser', throw: false });
   const [artifact] = result.outputs;
   if (!result.success || artifact === undefined)
@@ -66,19 +82,25 @@ const cached = async (name: string, make: () => Promise<string>): Promise<string
   cacheRoot === undefined ? await make() : await cachedText(cacheRoot, name, make);
 
 // Bun inlines the `@import` graph; Tailwind then expands `@tailwind` exactly as the Vite build does,
-// so utility classes (`hidden`, `sr-only`, …) behave as they ship.
+// so utility classes (`hidden`, `sr-only`, …) behave as they ship. `styles/index.css` carries every plugin's
+// `app/styles.css`; none of the plugin sheets or `design-system.css` has a Tailwind directive, so they follow the
+// processed index in the order `main.tsx` loads them.
 const css = await cached('app.css', async () => {
-  const imported = await bundle(resolve(packageRoot, 'src/styles/index.css'), 'the app stylesheet');
-  return (
-    await postcss([tailwindcss(tailwindConfig)]).process(imported, {
-      from: resolve(packageRoot, 'src/styles/index.css'),
-    })
-  ).css;
+  const index = resolve(packageRoot, 'src/styles/index.css');
+  const imported = await stylesheet(index, 'the app stylesheet');
+  const processed = (await postcss([tailwindcss(tailwindConfig)]).process(imported, { from: index })).css;
+  const designSystem = await stylesheet(
+    resolve(packageRoot, 'src/ui/design-system.css'),
+    'the design system stylesheet',
+  );
+  return `${processed}\n${designSystem}`;
 });
-const js = await cached(`${relative(workspace, entry).replace(/[^A-Za-z0-9.-]/gu, '_')}.js`, () =>
-  bundle(entry, `the scene ${entry}`),
-);
+const sceneName = relative(workspace, entry).replace(/[^A-Za-z0-9.-]/gu, '_');
+let built: ReturnType<typeof bundleOf> | undefined;
+const scene = (): ReturnType<typeof bundleOf> => (built ??= bundleOf(entry, `the scene ${entry}`));
+const js = await cached(`${sceneName}.js`, async () => (await scene()).js);
+const sceneCss = await cached(`${sceneName}.css`, async () => (await scene()).css);
 const manifest = { css: resolve(out, 'app.css'), js: resolve(out, 'app.js') };
-await writeFile(manifest.css, css, 'utf8');
+await writeFile(manifest.css, `${css}\n${sceneCss}`, 'utf8');
 await writeFile(manifest.js, js, 'utf8');
 console.log(JSON.stringify(manifest));

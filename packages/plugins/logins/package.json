@@ -36,6 +36,10 @@
     "@types/react-dom": "^19.0.0",
     "react-test-renderer": "^19.0.0",
     "@types/react-test-renderer": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "@types/react-test-renderer": "^19.0.0"
+  },
+  "scripts": {
+    "publish:model-catalog": "bun run scripts/publish-model-catalog.ts"
   }
 }

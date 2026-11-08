@@ -66,7 +66,7 @@ export interface TunnelHoldingPort {
 }
 
 /** The identity provisioning signs with: the key pairing minted, or why there is none. */
-export type TunnelIdentity =
+type TunnelIdentity =
   | { readonly ok: true; readonly identity: TunnelRequestSigner }
   | { readonly ok: false; readonly reason: string };
 

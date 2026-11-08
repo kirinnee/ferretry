@@ -33,7 +33,7 @@ async function subject(): Promise<{ readonly store: FileSessionTaskStore; readon
   return { store, file };
 }
 
-async function rejection(promise: Promise<unknown>): Promise<NodeJS.ErrnoException> {
+async function rejection(promise: Promise<unknown>): Promise<NodeJS.ErrnoException & { refusal?: string }> {
   try {
     await promise;
   } catch (error) {
@@ -44,15 +44,17 @@ async function rejection(promise: Promise<unknown>): Promise<NodeJS.ErrnoExcepti
 
 describe('FileSessionTaskStore replay proof', () => {
   it('should refuse a path that cannot be opened for a reason other than being absent', async () => {
-    // Arrange: a link that points at itself — the fenced read never follows it, and it is not "no file".
+    // Arrange: a link that points at itself — the kernel's fenced read never follows it, and it is not "no file".
     const { store, file } = await subject();
     await symlink(file, file);
 
     // Act
     const failure = await rejection(store.writeAssignedTask(SESSION, 'the task\n'));
 
-    // Assert: treating it as absent would publish over something nobody could read. The loop is the reason.
-    should(failure.code).equal('ELOOP');
+    // Assert: treating it as absent would publish over something nobody could read. The kernel root refuses the
+    // endless link as `fenced` (its hop bound), a RootError rather than the platform's ELOOP.
+    should(failure.name).equal('RootError');
+    should(failure.refusal).equal('fenced');
   });
 
   it('should refuse a path that opens but cannot be read, and release what it opened', async () => {

@@ -10,21 +10,15 @@
  */
 
 /** Which picker Codex currently has open. */
-export type CodexPickerKind =
-  | 'quick-models'
-  | 'all-models'
-  | 'reasoning'
-  | 'advanced-reasoning'
-  | 'plan-scope'
-  | 'none';
+type CodexPickerKind = 'quick-models' | 'all-models' | 'reasoning' | 'advanced-reasoning' | 'plan-scope' | 'none';
 
 /** One selectable row: the digit that chooses it and the name it shows. */
-export interface CodexPickerRow {
+interface CodexPickerRow {
   readonly number: number;
   readonly name: string;
 }
 
-export interface CodexPickerScreen {
+interface CodexPickerScreen {
   readonly kind: CodexPickerKind;
   readonly title?: string;
   readonly rows: readonly CodexPickerRow[];
@@ -80,7 +74,7 @@ function pickerRowName(value: string): string {
  * never be mistaken for the one that is open — and a numbered list in the
  * conversation can never be mistaken for selectable rows.
  */
-export function parseCodexPickerScreen(pane: string): CodexPickerScreen {
+function parseCodexPickerScreen(pane: string): CodexPickerScreen {
   const lines = pane.split('\n');
   let titleIndex = -1;
   let kind: CodexPickerKind = 'none';
@@ -109,30 +103,6 @@ export function parseCodexPickerScreen(pane: string): CodexPickerScreen {
     rows.push({ number, name: pickerRowName(match[2] ?? '') });
   }
   return { kind, ...(title === undefined ? {} : { title }), rows };
-}
-
-/**
- * True when the pane still shows the exact row a queued keystroke was aimed at.
- *
- * Re-checked immediately before every send: the picker is asynchronous, and a
- * digit typed into a screen that has since changed selects whatever now sits at
- * that position.
- */
-export function pickerStillShows(
-  pane: string,
-  expected: { readonly kind: CodexPickerKind; readonly title?: string; readonly row: CodexPickerRow },
-): boolean {
-  const current = parseCodexPickerScreen(pane);
-  return (
-    current.kind === expected.kind &&
-    current.title === expected.title &&
-    current.rows.some(row => row.number === expected.row.number && row.name === expected.row.name)
-  );
-}
-
-/** The row that selects a named choice on the current screen. */
-export function pickerRowFor(screen: CodexPickerScreen, name: string): CodexPickerRow | undefined {
-  return screen.rows.find(row => row.name === name);
 }
 
 /**

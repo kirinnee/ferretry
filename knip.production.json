@@ -201,7 +201,12 @@
     },
     "packages/plugins/connections": {
       "entry": ["worker/src/adapters/worker.ts"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/lib/tunnel-switch.ts",
+        "app/lib/webrtc-carrier.ts",
+        "daemon/adapters/tunnel/cloudflared-locator.ts"
+      ]
     },
     "packages/plugins/catalogs": {
       "entry": ["worker/src/adapters/link-store-worker.ts"],
@@ -246,6 +251,32 @@
     },
     "packages/plugins/layouts": {
       "entry": ["app/views/*.tsx"]
+    },
+    "packages/plugins/terminals": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "daemon/adapters/tmux/pane-queue.ts",
+        "daemon/adapters/tmux/harness-launch-guard.ts",
+        "daemon/adapters/tmux/forget-ferret-identity.ts",
+        "daemon/adapters/tmux/tmux-release-reader.ts",
+        "app/components/terminal-snapshot.tsx",
+        "app/components/terminal-snapshot-model.ts",
+        "app/features/workspace/phone/terminal-key-bar.tsx",
+        "app/features/workspace/phone/terminal-keys.ts",
+        "app/lib/session-processes.ts"
+      ]
+    },
+    "packages/plugins/browsers": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "daemon/holds/site.ts",
+        "daemon/stream/socket-downstream.ts",
+        "daemon/proxy/firewall/marker-reader.ts",
+        "daemon/proxy/firewall/state.ts",
+        "daemon/proxy/wire/firewall.ts"
+      ]
     }
   },
   "bun": false,

@@ -1,11 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  type HostedRelayControlNamespace,
   reconcileHostedRelayReservations,
   releaseHostedRelayReservation,
   requestHostedRelayDecision,
-} from '../../../worker/src/adapters/index.ts';
+  type HostedRelayControlNamespace,
+} from '../../../worker/src/adapters/hosted-control.ts';
 import { HostedRelayControlDurableObject } from '../../../worker/src/adapters/worker.ts';
 import {
   DEFAULT_HOSTED_RELAY_LIMITS,

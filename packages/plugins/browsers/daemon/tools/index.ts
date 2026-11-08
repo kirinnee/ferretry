@@ -15,7 +15,7 @@ import { type BrowserToolCall, BrowserToolCallSchema, type BrowserToolName } fro
 const toolOf = (name: string): BrowserToolName => `browser.${name.slice('browser_'.length)}` as BrowserToolName;
 
 /** Who the call is, from the kernel-stamped standing: a ferret's own call, or a person's about one ferret. */
-export function callerOf(call: CallContext, sessionId?: string): ToolCaller {
+function callerOf(call: CallContext, sessionId?: string): ToolCaller {
   const ferret = ferretOf(call);
   if (ferret !== undefined) return { kind: 'agent', sessionId: ferret };
   if (sessionId === undefined)
@@ -44,7 +44,7 @@ const STATUS: Readonly<Record<BrowserToolError['code'], number>> = {
 };
 
 /** An answer as MCP text: the sentence, then what was read. A picture rides in `data`, base64. */
-export function toolResult(answer: BrowserToolAnswer): ToolResult {
+function toolResult(answer: BrowserToolAnswer): ToolResult {
   const text = answer.output === undefined ? answer.summary : `${answer.summary}\n\n${answer.output}`;
   const data: Record<string, unknown> = {};
   if (answer.surfaces !== undefined) data.surfaces = answer.surfaces;
