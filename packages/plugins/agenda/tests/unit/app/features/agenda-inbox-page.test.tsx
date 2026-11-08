@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import type { ResolvedAgendaItem } from '@ferretry/core-asks/contract';
-import { LANE_PROPOSAL_ANSWERS } from '../../../../app/lib/lane-edit.ts';
 
 /** A lane-proposal card's `sourceRef`, in Board's spelling (`lanes:<project>:<version>`). */
 const laneProposalReference = (projectId: string, version: number): string => `lanes:${projectId}:${version}`;
@@ -22,6 +21,7 @@ import {
   type FakeInbox,
   fakeInbox,
   InboxHarness,
+  LANE_PROPOSAL_ANSWERS,
   inboxCard,
 } from '../../../support/app/agenda-inbox.tsx';
 import { openConversation } from '../../../support/app/agenda-folds.ts';
@@ -1042,8 +1042,8 @@ describe('a lane-proposal card', () => {
       sourceRef: laneProposalReference(PROJECT_ID, 2),
     }),
   );
-  // Board's lane editor: its board page with the lanes open (the harness spells Board's screens as a shell would).
-  const editPath = `/d/${proposal.daemonId}/board/${PROJECT_ID}?lanes=1`;
+  // The lane editor Board's `agenda.lane-proposal` hook answers for this ask (the harness's stand-in).
+  const editPath = `/lane-editor/lanes:${PROJECT_ID}:2`;
 
   const answerBy = (mounted: Mounted, label: string): HTMLButtonElement =>
     must(

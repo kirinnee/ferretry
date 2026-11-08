@@ -10,7 +10,7 @@ import { type ReactElement, useEffect, useSyncExternalStore } from 'react';
 import { ScreenHrefProvider, type ScreenHrefOf } from '@ferretry/app';
 import { AgendaClientContext } from '../../../app/lib/agenda-client-context.tsx';
 import type { AgendaCall } from '../../../app/lib/agenda-call.ts';
-import { agendaLinks } from '../../../app/lib/agenda-links.ts';
+import type { AgendaLaneEditor } from '../../../contract/app-hooks.ts';
 import type { AgendaInbox } from '../../../app/hooks/use-agenda-inbox.ts';
 import {
   type BoardItemRead,
@@ -223,8 +223,8 @@ export function InboxHarness({
     replied: fake.replied,
     repliedState: replied,
     connectionFor: () => undefined,
-    // As the runtime binds it: Board's lane editor on the machine the cards are on.
-    laneEditor: project => agendaLinks(SCREENS).lanes(cards[0]?.daemonId ?? '', project),
+    // As the screen binds it: the lane editor Board's `agenda.lane-proposal` hook answers (a stand-in path here).
+    laneEditor: testLaneEditor,
   };
   const drawn = <ScreenHrefProvider href={SCREENS}>{render(inbox)}</ScreenHrefProvider>;
   return client === undefined ? (
@@ -246,3 +246,18 @@ const SCREENS: ScreenHrefOf = (daemon, plugin, screen, params = {}) => {
   if (plugin === 'agenda' && screen === 'agenda') return `${at}/agenda`;
   return undefined;
 };
+
+/** The choice labels of a lane-proposal ask (Board's `LANE_PROPOSAL_ANSWERS`). */
+export const LANE_PROPOSAL_ANSWERS = { accept: 'Accept', edit: 'Edit' } as const;
+
+/**
+ * A stand-in for Board's `agenda.lane-proposal` hook: Edit on an ask that carries a lane proposal opens
+ * `/lane-editor/<sourceRef>`; any other answer opens nothing. Board's own rule is tested in Board.
+ */
+export const testLaneEditor: AgendaLaneEditor = (ask, answer) =>
+  answer.kind === 'respond' &&
+  answer.response?.kind === 'multiple-choice' &&
+  answer.response.choice === LANE_PROPOSAL_ANSWERS.edit &&
+  (ask.sourceRef ?? '').startsWith('lanes:')
+    ? `/lane-editor/${ask.sourceRef}`
+    : undefined;

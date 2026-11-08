@@ -92,8 +92,10 @@ card and type. Lane sets and the switch become one `boards/<project>.json` each 
 becomes `state/board/focus.json`. `legacyRef`, the session an owner or the daemon acted from and the switch's
 `migratedAt` have no v5 field and are listed in `notCarried` (`src/steps/board.ts` has the full mapping).
 
-Conversation (`src/steps/conversation.ts`) writes every file `@ferretry/plugin-conversation` declares under
-`state/conversation/`: the message-token key (moved unopened), each ferret's `turns/` (byte for byte), its drafts
+Conversation (`src/steps/conversation.ts`) copies each ferret's `turns/` byte for byte to
+`state/ferrets/sessions/<ferret>/turns/`, Ferrets' internal `sessions` root, the one place 5.0 reads them (a test reads
+`turn-001.md` back through the kernel's roots port and Ferrets' `FileSessionTaskStore`), and writes every other file `@ferretry/plugin-conversation` declares under
+`state/conversation/`: the message-token key (moved unopened), its drafts
 document (`{chat, items}`, snapshots through `DraftSnapshotSchema`, reply drafts under their unchanged ask ids),
 `links.json` (ferrets whose transcript identity is `adopted`), and `queue`, `sends`, `answers`, `inbox` and `outbox`
 `.jsonl` line for line. Every log line gains the kernel's `"format": 1` stamp and is parsed by the v5 store's own line

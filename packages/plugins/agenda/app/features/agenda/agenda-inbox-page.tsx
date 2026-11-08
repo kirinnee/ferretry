@@ -124,7 +124,7 @@ import {
   firstOpenGate,
 } from '../../lib/gate-items.ts';
 import { useAgendaLinks } from '../../lib/agenda-links.ts';
-import { laneEditDestination } from '../../lib/lane-edit.ts';
+
 import { AgendaCountBadge } from '../../components/unread-badge.tsx';
 import { RouteLink } from '../../shell.ts';
 import { browserClipboardWriter, CopyButton } from '../../shell.ts';
@@ -186,7 +186,7 @@ const answerCard = (
   action: InboxAction,
 ): void => {
   inbox.deferred.schedule(card, action);
-  const editor = laneEditDestination(card.item, action, inbox.laneEditor);
+  const editor = inbox.laneEditor?.(card.item, action);
   if (editor !== undefined) onNavigate(editor);
 };
 

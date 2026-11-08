@@ -189,6 +189,18 @@ describe('previewing a skill from this machine', () => {
     should(refusal.message).match(/cannot be carried/u);
   });
 
+  it('refuses a folder the reader hands back without a SKILL.md even when it states no refusal', async () => {
+    const r = rig();
+    r.tree.read = async () => ({ files: [{ path: 'notes.txt', content: 'no entry file' }], problems: [] });
+
+    const refusal = await refusedWith(
+      r.service.preview('project', { source: { path: ACCOUNT_SKILL }, target: projectTarget() }, CALLER),
+      'local_skill_source_invalid',
+    );
+
+    should(refusal.message).equal('demo cannot be copied: it has no SKILL.md among the files it can carry.');
+  });
+
   it('refuses to copy a file that holds a password, naming it and never showing it', async () => {
     const r = rig();
     r.tree.set(ACCOUNT_SKILL, { 'SKILL.md': SKILL_MD, 'setup.sh': 'curl https://me:hunter2hunter2@example.com/x' });

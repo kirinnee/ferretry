@@ -14,7 +14,7 @@ type Verb = (invocation: unknown) => Promise<number>;
  * exactly as `fy` builds it (`CliContext`: manifest, client, io); with one, the verbs are built over that host, the
  * parts the shell's context is to carry (lead decision 21).
  */
-function harness(answers: Record<string, Answer>, host?: PackHost) {
+function harness(answers: Record<string, Answer>, host?: PackHost, tty = false) {
   const calls: { route: string; init?: Init }[] = [];
   let out = '';
   let err = '';
@@ -33,7 +33,7 @@ function harness(answers: Record<string, Answer>, host?: PackHost) {
     err: (text: string) => {
       err += text;
     },
-    isTty: false,
+    isTty: tty,
   };
   const half: { verbs: Record<string, Verb> } =
     host === undefined
@@ -135,6 +135,22 @@ describe('command parity', () => {
       init: { body: { prompt: 'rough words', runtime: 'claude-work', model: 'opus' } },
     });
     expect(run.calls.at(-1)?.route).toBe('POST /v1/pack/routing/accept');
+  });
+
+  test('V-0274 guide clean-up at a terminal prints the review tinted, and says so through the same output', async () => {
+    const run = harness(
+      {
+        'POST /v1/pack/routing/clean-up': { outcome: 'started', job: JOB },
+        'GET /v1/pack/routing/jobs/:jobId': { job: { ...JOB, status: 'suggested' }, suggestion: SUGGESTION },
+      },
+      undefined,
+      true,
+    );
+
+    expect(await run.run('guide clean-up', [], { prompt: 'rough words' })).toBe(0);
+
+    expect(run.out()).toContain('\n');
+    expect(run.err()).toBe('');
   });
 
   test('V-0274 -y is --apply', async () => {

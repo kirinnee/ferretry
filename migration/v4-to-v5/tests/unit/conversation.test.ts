@@ -206,7 +206,7 @@ describe('conversation step', () => {
     const report = await conversationStep.run(f.ctx());
 
     const turns = join(f.to, v5TurnsFolder('f1'));
-    expect(v5TurnsFolder('f1')).toBe('state/conversation/f1/turns');
+    expect(v5TurnsFolder('f1')).toBe('state/ferrets/sessions/f1/turns');
     expect(await readFile(join(turns, 'turn-001.md'), 'utf8')).toBe('# FAKE task\n');
     expect(await readFile(join(turns, 'turn-001.by.json'), 'utf8')).toBe('{"kind":"owner"}');
     expect((await stat(join(turns, 'turn-001.by.json'))).mode & 0o777).toBe(0o640);
@@ -214,6 +214,36 @@ describe('conversation step', () => {
     expect(await stat(join(turns, 'linked.md')).catch(() => undefined)).toBeUndefined();
     expect(report.kept).toContainEqual({ what: 'turn files copied byte for byte', count: 2 });
     expect(report.note).toContain('1 link(s) in turns omitted');
+  });
+
+  test("5.0's own reader finds a migrated ferret's turn-001 (Ferrets' sessions root, FileSessionTaskStore)", async () => {
+    await f.session('f1');
+    await raw('state/sessions/f1/turns/turn-001.md', '# FAKE assigned task\n');
+    expect((await conversationStep.run(f.ctx())).status).toBe('converted');
+    // A subprocess that imports nothing from this tool: the kernel's roots port over the converted home, the one
+    // the daemon hands Ferrets, and Ferrets' task store, which resolves the assigned task as turns/turn-001.md.
+    const script = join(f.root, 'read-turn-v5.ts');
+    await writeFile(
+      script,
+      `
+const [repo, home, ferret] = process.argv.slice(2);
+const { nodeFs } = await import(repo + '/packages/core/kernel/host/adapters/node-fs.ts');
+const { rootsPortFor } = await import(repo + '/packages/core/kernel/host/roots.ts');
+const { FileSessionTaskStore } = await import(
+  repo + '/packages/core/ferrets/daemon/adapters/session/lifecycle/file-session-task-store.ts'
+);
+const layout = { home, plugin: 'ferrets', worktrees: home + '/../worktrees' };
+const root = rootsPortFor(nodeFs(() => 'x'), layout, ['sessions'], () => undefined).root('sessions', { subfolder: ferret });
+const file = new FileSessionTaskStore(root, ferret).file(ferret);
+const text = await root.readDurable(file, undefined, async held => new TextDecoder().decode(held.bytes));
+console.log(JSON.stringify({ text }));
+`,
+    );
+    const repo = join(import.meta.dir, '../../../..');
+    const child = Bun.spawn(['bun', script, repo, f.to, 'f1'], { cwd: repo, stdout: 'pipe', stderr: 'pipe' });
+    const [out, error] = [await new Response(child.stdout).text(), await new Response(child.stderr).text()];
+    if ((await child.exited) !== 0) throw new Error(error);
+    expect(JSON.parse(out)).toEqual({ text: '# FAKE assigned task\n' });
   });
 
   test('writes the chat draft and agenda reply drafts (same ask ids) through the v5 snapshot schema', async () => {

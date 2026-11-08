@@ -1,10 +1,10 @@
 /**
  * The cards a machine notice is about (`AgendaItem.cards`), with their buttons. The rows are the daemon's; the three
  * buttons are Board's writes (`agendaCardsActions`): Open goes to the card's page (Board's `card` screen, when Board is
- * installed), Start and Close are made through the {@link AgendaCardsBoard} a host provides
- * ({@link AgendaCardsBoardProvider}). Agenda has no need on Board's routes, so without a host the board is idle: Open
- * still goes to the card, Start and Close are refused with the reason — today's harness behaviour, and now the shell's
- * until Board contributes the board (GAP(cards-board)).
+ * installed), Start and Close are made through the {@link AgendaCardsBoard} the screen binds to Board's
+ * `agenda.card-answer` hook ({@link AgendaCardsBoardProvider}, `agenda-board-hooks.tsx`). Without that hook (Board not
+ * installed, or not allowed on this machine) the board is idle: Open still goes to the card, and Start and Close are
+ * refused with the reason.
  */
 
 import type { AgendaCardRow } from '@ferretry/core-asks/contract';
@@ -32,8 +32,6 @@ const AgendaCardsBoardContext = createContext<AgendaCardsBoard>(IDLE_BOARD);
 
 /**
  * Hands the notices below it the board their Start and Close write through.
- *
- * @pending agenda: GAP(done-close-board) and GAP(cards-board)
  */
 export function AgendaCardsBoardProvider({
   board,
