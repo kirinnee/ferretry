@@ -37,4 +37,35 @@ describe('unpairing a daemon', () => {
     daemons.remove('d1');
     expect(transport.closed).toBe(1);
   });
+  test('R568 a daemon unpaired while its connection is still opening gets that transport closed, never installed', async () => {
+    let asked = 0;
+    const transport = new ClosableTransport((request: TransportRequest) => {
+      asked += 1;
+      return request.path === '/v1/plugins'
+        ? json(inventoryOf(surfaces, {}))
+        : json({ error: 'none', code: 'not_found' }, 404);
+    });
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const daemons = new DaemonList({ storage: memoryStore(), now: () => 1 });
+    daemons.add({ daemon: 'd1', machine: 'laptop', deviceId: 'dev', address: 'http://127.0.0.1:40245' });
+    const runtime = new ShellRuntime({
+      appVersion: '5.0.0',
+      surfaces,
+      daemons,
+      connect: async () => {
+        await gate;
+        return transport;
+      },
+    });
+    expect(runtime.connection('d1').kind).toBe('connecting');
+    daemons.remove('d1');
+    release();
+    await settle();
+    expect(transport.closed).toBe(1);
+    expect(asked).toBe(0);
+    expect(runtime.connection('d1').kind).toBe('unreachable');
+  });
 });

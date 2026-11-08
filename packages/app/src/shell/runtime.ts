@@ -87,9 +87,10 @@ export class ShellRuntime {
     if (known !== undefined) return known;
     const paired = this.daemons.get(daemon);
     if (paired === undefined) return { kind: 'unreachable' };
-    this.#connections.set(daemon, { kind: 'connecting' });
-    void this.#open(paired);
-    return { kind: 'connecting' };
+    const connecting: Connection = { kind: 'connecting' };
+    this.#connections.set(daemon, connecting);
+    void this.#open(paired, connecting);
+    return connecting;
   }
 
   standing(daemon: string, packageId: string): Standing {
@@ -141,12 +142,18 @@ export class ShellRuntime {
     return client;
   }
 
-  async #open(paired: PairedDaemon): Promise<void> {
+  async #open(paired: PairedDaemon, connecting: Connection): Promise<void> {
     let transport: DaemonTransport | undefined;
     try {
       transport = await this.#connect(paired);
     } catch {
       transport = undefined;
+    }
+    // A connection that finishes opening into an entry nobody holds any more (the daemon was unpaired, or unpaired and
+    // paired again, while it dialled) is closed, not installed (R568): nothing would ever drop it again.
+    if (this.#connections.get(paired.daemon) !== connecting) {
+      transport?.close?.();
+      return;
     }
     if (transport === undefined) {
       this.#connections.set(paired.daemon, { kind: 'unreachable' });
