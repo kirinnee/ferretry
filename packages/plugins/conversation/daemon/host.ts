@@ -1,6 +1,6 @@
 import { ApiError, type KernelPorts, type RouteHandler, type SocketAccept } from '@ferretry/kernel/contract';
 import { type AskId, AskIdSchema, type AsksApi } from '@ferretry/core-asks/contract';
-import type { FerretsApi, FerretSummary, SitrepLineSource } from '@ferretry/core-ferrets/contract';
+import type { FerretsApi, FerretSummary, QueueOutcome, SitrepLineSource } from '@ferretry/core-ferrets/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { Instant } from '@ferretry/std';
 import { err, milliseconds, ok } from '@ferretry/std';
@@ -21,6 +21,7 @@ import {
 import { ClockSendScheduler, StateSendChannel, StateSendLedger } from './delivery/adapters/index.ts';
 import {
   defaultSessionSendSettings,
+  dispositionOf,
   peerMessageKind,
   peerPreamble,
   type SendTarget,
@@ -48,6 +49,7 @@ import {
   type HarnessGate,
   INTERRUPT_UNAVAILABLE,
   MaybeTyped,
+  PaneBusy,
   SEND_EXTRAS_UNAVAILABLE,
   SEND_UNAVAILABLE,
   terminalSeam,
@@ -357,11 +359,34 @@ export function buildConversationA(deps: {
     return { text: `${banner}${message}`, ...(from === undefined ? {} : { fromName: from.name }) };
   };
   /**
+   * TODAY'S TWO TRANSPORTS: typed at the prompt, or — when the agent is still working on its turn — put in the harness's
+   * own queue, which submits it at the next turn boundary (today's busy path, `routeSend` → `queue`). The queue is
+   * tried ONCE and only after `deliver` proved it typed NOTHING (`PaneBusy`), so a message cannot reach the pane twice.
+   * A runner that cannot queue leaves the busy refusal standing. `onQueue` is told before the first key of the queue.
+   */
+  const deliverOrQueue = async (
+    bound: Awaited<ReturnType<typeof terminal.bind>>,
+    text: string,
+    onQueue: () => void,
+  ): Promise<QueueOutcome | undefined> => {
+    try {
+      await bound.deliver(text);
+      return undefined;
+    } catch (error) {
+      if (!(error instanceof PaneBusy)) throw error;
+      onQueue();
+      const outcome = await bound.queue(text);
+      if (outcome === undefined) throw error.answer;
+      return outcome;
+    }
+  };
+  /**
    * Types one message. The send is ledgered as accepted BEFORE a key goes (the same id twice is one message), and a
    * refusal that typed nothing takes the record back so the id may start over. A send that was typed and not proven is
    * settled `unaccounted` and answered `send_unconfirmed` with its id, never typed again; a runner failure nobody could
    * classify keeps the record as it is, because what reached the pane is uncertain. Proof that the harness took it is
-   * the tracker's, so a delivered send's fate stays `accepted` here.
+   * the tracker's, so a delivered send's fate stays `accepted` here. A send to a ferret still working on its turn goes
+   * to the harness's own queue ({@link deliverOrQueue}): `queued` once the pane shows it held there.
    */
   const typeMessage = async (
     ferret: SessionId,
@@ -392,8 +417,16 @@ export function buildConversationA(deps: {
       ...(fromName === undefined ? {} : { fromName }),
     });
     if (!accepted.created) return (await keptSend(ferret, request.sendId)) ?? { ferret, disposition: 'sent' };
+    /** Set once the message went to the harness's own queue: the row's path is then today's busy path. */
+    let viaQueue = false;
+    const busyPath = { path: 'native-inline', busyTyped: true } as const;
+    let queued: QueueOutcome | undefined;
     try {
-      await bound.deliver(text);
+      queued = await deliverOrQueue(bound, text, () => {
+        viaQueue = true;
+      });
+      // Still in the composer after the submit and queue keys: the TUI will not send it at the turn's end by itself.
+      if (queued === 'typed') throw new Unconfirmed(true);
     } catch (error) {
       if (error instanceof MaybeTyped) throw error.answer;
       if (error instanceof Unconfirmed) {
@@ -406,6 +439,7 @@ export function buildConversationA(deps: {
             fateAt: kernel.clock.now(),
             unaccountedReason: 'landing_unconfirmed',
             ...(error.stranded ? { typedNotSent: true } : {}),
+            ...(viaQueue ? busyPath : {}),
           })
           .catch(() => {
             throw new SessionSendError('failed', `${error.message}. ${UNSETTLED_SENTENCE}`);
@@ -415,7 +449,24 @@ export function buildConversationA(deps: {
       await ledger.withdraw(ferret, request.sendId, 'nothing was typed').catch(() => undefined);
       throw error;
     }
-    return { ferret, disposition: 'sent', sendId: request.sendId, fate: 'accepted' };
+    if (queued === undefined) return { ferret, disposition: 'sent', sendId: request.sendId, fate: 'accepted' };
+    // In the harness's queue. `held` is proved by the pane (today's `queued`, proof `pane`); `left` left the composer
+    // and no queue shows it, so it stays `accepted` (only a transcript can say where it went). A settle that fails
+    // leaves the row `accepted` on the direct path: still true, and a repeat of this id types nothing.
+    const held = queued === 'held';
+    const settledAt = kernel.clock.now();
+    await ledger
+      .settle(ferret, request.sendId, {
+        ...busyPath,
+        ...(held ? { fate: 'queued', fateAt: settledAt, queuedAt: settledAt, queueProof: 'pane' } : {}),
+      })
+      .catch(() => undefined);
+    return {
+      ferret,
+      disposition: dispositionOf(busyPath.path, held),
+      sendId: request.sendId,
+      fate: held ? 'queued' : 'accepted',
+    };
   };
 
   /**

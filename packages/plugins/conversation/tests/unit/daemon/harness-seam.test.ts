@@ -9,6 +9,7 @@ import type {
   HarnessDeliveryFailure,
   HarnessInterrupted,
   HarnessRefusal,
+  QueueOutcome,
   RunnerDelivery,
 } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
@@ -58,6 +59,7 @@ const QUESTION_TOOL_USE = 'toolu_01T4KnfY1in2GTL7P9wUmRtt';
 /** What one scripted harness does when Conversation uses it. */
 interface Script {
   deliver?: () => Promise<Result<DeliveryOutcome, HarnessDeliveryFailure>>;
+  queue?: () => Promise<Result<QueueOutcome, HarnessDeliveryFailure>>;
   interrupt?: () => Promise<Result<HarnessInterrupted, HarnessRefusal>>;
 }
 
@@ -65,6 +67,8 @@ interface Script {
 class HarnessFerrets extends FakeFerrets {
   readonly opens: { readonly ferret: FerretId; readonly caller: FerretId | undefined }[] = [];
   readonly delivered: RunnerDelivery[] = [];
+  /** What was put in the busy pane's own queue. */
+  readonly queued: string[] = [];
   interrupts = 0;
   script: Script = {};
   /** Set when `harness()` itself refuses, as Ferrets' mayTouch rule does. */
@@ -79,8 +83,10 @@ class HarnessFerrets extends FakeFerrets {
         this.delivered.push(delivery);
         return await (this.script.deliver?.() ?? Promise.resolve(ok('turn-started' as const)));
       },
-      queue: async () => {
-        throw new Error('Conversation does not queue into the ferret through the harness seam');
+      queue: async text => {
+        this.queued.push(text);
+        if (this.script.queue === undefined) throw new Error('this test did not expect a send to be queued');
+        return await this.script.queue();
       },
       interrupt: async () => {
         this.interrupts += 1;
@@ -321,16 +327,19 @@ describe('Conversation types into a ferret through the Ferrets harness seam', ()
 
 describe('the closed taxonomy of a delivery, as today’s send routes answer it', () => {
   test.each(['busy', 'dialog', 'exited'] as const)(
-    'not_ready (%s): 409 send_refused with its ONE fixed sentence; nothing typed, so the record is taken back',
+    'not_ready (%s), and no queue to fall back on: 409 send_refused with its ONE fixed sentence; nothing typed, so the record is taken back',
     async why => {
       const { host, ferrets, api } = await conversation();
       ferrets.script.deliver = async () => err({ refused: 'not_ready', why });
+      // A runner that cannot queue: only a busy pane is offered the queue at all.
+      ferrets.script.queue = async () => err({ refused: 'plugin_unavailable' });
 
       const response = await send(host);
 
       expect([response.status, response.json<{ code: string }>().code]).toEqual([409, 'send_refused']);
       expect(response.json<{ error: string }>().error).toBe(NOT_READY_SENTENCES[why]);
       expect(await live(api)).toEqual([]);
+      expect(ferrets.queued).toEqual(why === 'busy' ? ['hello there'] : []);
       // The id may start over once the pane is ready.
       ferrets.script.deliver = async () => ok('turn-started');
       expect((await send(host)).status).toBe(200);
@@ -398,7 +407,8 @@ describe('the closed taxonomy of a delivery, as today’s send routes answer it'
   });
 
   test.each<[string, HarnessDeliveryFailure, string]>([
-    ['not_ready', { refused: 'not_ready', why: 'busy' }, 'send_refused'],
+    // A busy pane goes to the queue (its own describe); a dialog is the not_ready that is answered at once.
+    ['not_ready', { refused: 'not_ready', why: 'dialog' }, 'send_refused'],
     ['composer_occupied', { refused: 'composer_occupied', draft: 'mine' }, 'composer_occupied'],
     ['composer_unreadable', { refused: 'composer_unreadable' }, 'send_refused'],
     ['unconfirmed', { unconfirmed: true, stranded: false }, 'send_unconfirmed'],
@@ -459,6 +469,150 @@ describe('the closed taxonomy of a delivery, as today’s send routes answer it'
     expect(said).not.toContain('ENOSPC');
     expect((await live(api)).map(row => (row as { fate?: string }).fate)).toEqual(['accepted']);
     expect(ferrets.delivered).toHaveLength(1);
+    await host.stop();
+  });
+});
+
+describe('a send to a ferret still working on its turn goes to the harness’s own queue (today’s busy path)', () => {
+  const busy = async (ferrets: HarnessFerrets, queued: () => Promise<Result<QueueOutcome, HarnessDeliveryFailure>>) => {
+    ferrets.script.deliver = async () => err({ refused: 'not_ready', why: 'busy' });
+    ferrets.script.queue = queued;
+  };
+  type Row = { sendId: string; fate: string; path?: string; typedNotSent?: boolean; unaccountedReason?: string };
+  const rows = async (api: Awaited<ReturnType<typeof conversation>>['api']) =>
+    (await api().sends(F1)).sends.map(row => {
+      const { sendId, fate, path, typedNotSent, unaccountedReason } = row as unknown as Row;
+      return { sendId, fate, path, typedNotSent, unaccountedReason };
+    });
+
+  test('held: 200 queued, the row queued on the busy path, and a repeat of the id types nothing', async () => {
+    const { host, ferrets, api } = await conversation();
+    await busy(ferrets, async () => ok('held'));
+
+    const response = await send(host);
+
+    expect(response.status).toBe(200);
+    expect(response.json()).toMatchObject({ disposition: 'queued', sendId: 'req-1', fate: 'queued' });
+    expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    expect(ferrets.queued).toEqual(['hello there']);
+    expect(await rows(api)).toEqual([
+      { sendId: 'req-1', fate: 'queued', path: 'native-inline', typedNotSent: undefined, unaccountedReason: undefined },
+    ]);
+    const again = await send(host);
+    expect(again.status).toBe(200);
+    expect(again.json()).toMatchObject({ disposition: 'queued', fate: 'queued' });
+    expect([ferrets.delivered.length, ferrets.queued.length]).toEqual([1, 1]);
+    await host.stop();
+  });
+
+  test('left (out of the composer, no queue shows it): 200 sent, the row stays accepted on the busy path', async () => {
+    const { host, ferrets, api } = await conversation();
+    await busy(ferrets, async () => ok('left'));
+
+    const response = await send(host);
+
+    expect(response.status).toBe(200);
+    expect(response.json()).toMatchObject({ disposition: 'sent', fate: 'accepted' });
+    expect((await rows(api)).map(row => [row.fate, row.path])).toEqual([['accepted', 'native-inline']]);
+    await host.stop();
+  });
+
+  test('typed (still in the composer after the queue keys): 409 send_unconfirmed as stranded, never typed again', async () => {
+    const { host, ferrets, api } = await conversation();
+    await busy(ferrets, async () => ok('typed'));
+
+    const response = await send(host);
+
+    expect([response.status, response.json<{ code: string }>().code]).toEqual([409, 'send_unconfirmed']);
+    expect(response.json<{ error: string; sendId: string }>()).toMatchObject({
+      error: STRANDED_SENTENCE,
+      sendId: 'req-1',
+    });
+    expect(await rows(api)).toEqual([
+      {
+        sendId: 'req-1',
+        fate: 'unaccounted',
+        path: 'native-inline',
+        typedNotSent: true,
+        unaccountedReason: 'landing_unconfirmed',
+      },
+    ]);
+    expect((await send(host)).status).toBe(409);
+    expect([ferrets.delivered.length, ferrets.queued.length]).toEqual([1, 1]);
+    await host.stop();
+  });
+
+  test('the queue typed and nothing proved it: 409 send_unconfirmed, the row kept unaccounted', async () => {
+    const { host, ferrets, api } = await conversation();
+    await busy(ferrets, async () => err({ unconfirmed: true, stranded: false }));
+
+    const response = await send(host);
+
+    expect([response.status, response.json<{ code: string }>().code]).toEqual([409, 'send_unconfirmed']);
+    expect(response.json<{ error: string }>().error).toBe(UNCONFIRMED_SENTENCE);
+    expect((await rows(api)).map(row => [row.fate, row.path])).toEqual([['unaccounted', 'native-inline']]);
+    await host.stop();
+  });
+
+  test('the queue refused before a key (a draft in the way): 409 composer_occupied, the record taken back', async () => {
+    const { host, ferrets, api } = await conversation();
+    await busy(ferrets, async () => err({ refused: 'composer_occupied', draft: 'half a thought' }));
+
+    const response = await send(host);
+
+    expect([response.status, response.json<{ code: string }>().code]).toEqual([409, 'composer_occupied']);
+    expect(await live(api)).toEqual([]);
+    await host.stop();
+  });
+
+  test('the queue is tried ONCE: a queue that finds the pane busy too is the busy refusal, not a second try', async () => {
+    const { host, ferrets, api } = await conversation();
+    await busy(ferrets, async () => err({ refused: 'not_ready', why: 'busy' }));
+
+    const response = await send(host);
+
+    expect([response.status, response.json<{ code: string }>().code]).toEqual([409, 'send_refused']);
+    expect(response.json<{ error: string }>().error).toBe(NOT_READY_SENTENCES.busy);
+    expect([ferrets.delivered.length, ferrets.queued.length]).toEqual([1, 1]);
+    expect(await live(api)).toEqual([]);
+    await host.stop();
+  });
+
+  test('a queue that failed in a way nobody could classify is the uncertain 500: record kept', async () => {
+    const { host, ferrets, api } = await conversation();
+    await busy(ferrets, async () => {
+      throw new Error('tmux: lost server');
+    });
+
+    const response = await send(host);
+
+    expect([response.status, response.json<{ code: string }>().code]).toEqual([500, 'session_send_failed']);
+    expect((await rows(api)).map(row => row.fate)).toEqual(['accepted']);
+    await host.stop();
+  });
+
+  test('a peer’s send to a working lead is queued under its banner, through the port', async () => {
+    const { host, ferrets, api } = await conversation();
+    await busy(ferrets, async () => ok('held'));
+
+    const sent = await api().send(
+      F1,
+      { kind: 'ferret', ferret: CALLER },
+      { message: 'done: abc123', sendId: 's-1', label: 'action' },
+    );
+
+    expect(sent).toMatchObject({ ok: true, value: { disposition: 'queued', fate: 'queued' } });
+    expect(ferrets.queued).toEqual([`${banner('message', 'action')}done: abc123`]);
+    await host.stop();
+  });
+
+  test.each(['dialog', 'exited'] as const)('not_ready (%s) is never queued', async why => {
+    const { host, ferrets } = await conversation();
+    ferrets.script.deliver = async () => err({ refused: 'not_ready', why });
+    ferrets.script.queue = async () => ok('held');
+
+    expect((await send(host)).status).toBe(409);
+    expect(ferrets.queued).toEqual([]);
     await host.stop();
   });
 });

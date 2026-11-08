@@ -5,6 +5,7 @@ import type {
   HarnessDeliveryFailure,
   HarnessRefusal,
   PaneNotReadyReason,
+  QueueOutcome,
 } from '@ferretry/core-ferrets/contract';
 import { ApiError, REFUSAL_SENTENCES } from '@ferretry/kernel/contract';
 import type { TurnStopped } from './delivery/lib/interrupt.ts';
@@ -94,6 +95,12 @@ interface BoundTerminal {
    * when it was typed and not proven, or {@link MaybeTyped} when the runner failed in a way nobody could classify.
    */
   deliver(text: string): Promise<DeliveryOutcome>;
+  /**
+   * Puts one message into the BUSY pane's own queue (Ferrets' `queue`, the runner's `TmuxPaneQueue`), which the
+   * harness submits at its next turn boundary. Answers what the pane proved, or `undefined` when this runner cannot
+   * queue (nothing typed). Throws exactly as {@link deliver} does.
+   */
+  queue(text: string): Promise<QueueOutcome | undefined>;
   /** Presses the harness's stop under its own rule and says what it did. Throws the answer for a refusal. */
   interrupt(): Promise<TurnStopped>;
 }
@@ -107,6 +114,18 @@ export class MaybeTyped extends Error {
   constructor(readonly answer: Error) {
     super(answer.message);
     this.name = 'MaybeTyped';
+  }
+}
+
+/**
+ * The pane never came to a prompt because the agent is still working on its turn: NOTHING was typed, proven, so the
+ * caller may put the message in the harness's own queue instead (today's busy path). `answer` is what the caller is
+ * told when it does not.
+ */
+export class PaneBusy extends Error {
+  constructor(readonly answer: Error) {
+    super(answer.message);
+    this.name = 'PaneBusy';
   }
 }
 
@@ -160,6 +179,15 @@ function deliveryAnswer(ferret: string, failure: HarnessDeliveryFailure): Error 
   }
 }
 
+/** A rejection is a failure nobody could classify: what reached the pane is uncertain, so the record stays. */
+const uncertain = (error: unknown): never => {
+  throw new MaybeTyped(
+    error instanceof ApiError || error instanceof SessionSendError
+      ? error
+      : new SessionSendError('failed', error instanceof Error ? error.message : String(error)),
+  );
+};
+
 export function terminalSeam(ferrets: Pick<FerretsApi, 'harness'>): TerminalSeam {
   /** The ferret's harness, or the answer for why there is none. */
   const open = async (ferret: string): Promise<FerretHarness> => {
@@ -174,16 +202,17 @@ export function terminalSeam(ferrets: Pick<FerretsApi, 'harness'>): TerminalSeam
       const harness = await open(ferret);
       return {
         deliver: async text => {
-          const delivered = await harness.deliver({ text }).catch((error: unknown) => {
-            // A rejection is a failure nobody could classify: what reached the pane is uncertain, so the record stays.
-            throw new MaybeTyped(
-              error instanceof ApiError || error instanceof SessionSendError
-                ? error
-                : new SessionSendError('failed', error instanceof Error ? error.message : String(error)),
-            );
-          });
-          if (!delivered.ok) throw deliveryAnswer(ferret, delivered.error);
-          return delivered.value;
+          const delivered = await harness.deliver({ text }).catch(uncertain);
+          if (delivered.ok) return delivered.value;
+          const answer = deliveryAnswer(ferret, delivered.error);
+          const busy = 'refused' in delivered.error && delivered.error.refused === 'not_ready';
+          throw busy && delivered.error.why === 'busy' ? new PaneBusy(answer) : answer;
+        },
+        queue: async text => {
+          const queued = await harness.queue(text).catch(uncertain);
+          if (queued.ok) return queued.value;
+          if ('refused' in queued.error && queued.error.refused === 'plugin_unavailable') return undefined;
+          throw deliveryAnswer(ferret, queued.error);
         },
         interrupt: async () => {
           const interrupted = await harness.interrupt();
