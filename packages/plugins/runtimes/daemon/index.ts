@@ -38,6 +38,7 @@ import {
 import manifest from '../manifest.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
+import { autoResumeAnswer } from './lib/service/auto-resume-answer.ts';
 import { loginUsers } from './lib/service/login-users.ts';
 import { createRuntimesApi } from './lib/service/runtimes-api.ts';
 import { RuntimeEndSupervision, type RuntimeEndSeams } from './lib/service/runtime-end-supervision.ts';
@@ -77,6 +78,11 @@ export interface RuntimesAssembly {
    * dead pane's last screen. Absent until the host offers the process and pane seams; the subscriber then does nothing.
    */
   readonly ended?: RuntimeEndSeams;
+  /**
+   * The machine's "Auto-resume after restart" switch (`machine.yaml` `autoResume`): `true` on, `false` off. Absent, or
+   * answering `undefined`, until the host assembly reaches the account model: auto-resume then resumes nothing (W2-a).
+   */
+  readonly autoResume?: () => boolean | undefined;
 }
 
 export type RuntimesAssembler = (ctx: DaemonContext<typeof manifest>) => RuntimesAssembly;
@@ -173,7 +179,14 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
         },
         provides: { runtimes: api },
         // Logins asks which runtimes use a login before it removes one (`logins.used-by`).
-        hooks: { 'logins.used-by:runtimes': loginUsers(() => config.collection(runtimeItems)) },
+        hooks: {
+          'logins.used-by:runtimes': loginUsers(() => config.collection(runtimeItems)),
+          // Whether an automatic resume may spend (W2-a): the switch, then the ferret's runtime, each a no when in doubt.
+          'auto-resume.decide': autoResumeAnswer({
+            switchOn: () => assembly.autoResume?.(),
+            resolve: async id => await api.resolve(id),
+          }),
+        },
         subscribers: { 'ferrets.changed': async change => await ending.onChanged(change) },
       };
     },
