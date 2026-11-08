@@ -45,43 +45,64 @@ export interface TmuxReleaseReading {
   readonly server?: string;
 }
 
-/** What the doctor says about a reading: ok, a warning that names the fix, or a failure when tmux cannot be asked at all. */
-export interface TmuxReleaseVerdict {
-  readonly state: 'ok' | 'warn' | 'fail';
-  readonly detail: string;
-  readonly fix?: string;
+/** Today's `TMUX_CRASH` (`R/packages/daemon/src/lib/core/doctor.ts`), word for word. */
+const TMUX_CRASH =
+  'tmux before 3.7 can crash its whole server — ending every session at once — when a session ends while Ferretry is watching it. Ferretry works around it, but only a newer tmux removes it.';
+
+/** How to move without ending anything: the running server keeps its binary until it next starts (today's `TMUX_MOVE`). */
+const TMUX_MOVE =
+  'Do not kill the tmux server to switch: the new release is used the next time the server starts — once the last session has ended, or the machine restarts.';
+
+/**
+ * The `tmux release` row as today's doctor judged it: `present` or `missing`, its summary and its impact. A
+ * `capability` row, never `required`: tmux 3.6a starts and manages sessions, so the row never makes a host not ready.
+ */
+export interface TmuxReleaseRow {
+  readonly status: 'present' | 'missing';
+  readonly summary: string;
+  readonly impact: string;
 }
 
 /**
- * Judges what tmux said about itself. Only release NAMES appear in the words (`3.6a`), never a path or a value. An
- * absent server is not a problem (none is running until a ferret starts one); an absent program is.
+ * WHICH TMUX, AND WHETHER IT HAS THE SUBSCRIPTION CRASH (today's `tmuxRelease`, copied).
+ *
+ * The RUNNING server is judged as well as the installed program, because they differ after an
+ * upgrade: a server keeps the binary it was started from, and the server is what crashes. So a host
+ * that installed 3.7 is still told the truth while its 3.6a server is up — and told that nothing has
+ * to be stopped for the new release to take over.
+ *
+ * NO ROW (`undefined`) when neither answer came back: tmux could not be asked, and the doctor says nothing it did
+ * not hear. Only release NAMES appear in the words (`3.6a`), never a path or a value.
  */
-export function judgeTmuxRelease(reading: TmuxReleaseReading): TmuxReleaseVerdict {
-  const program = reading.program === undefined ? undefined : parseTmuxVersion(reading.program);
-  const server = reading.server === undefined ? undefined : parseTmuxVersion(reading.server);
-  if (reading.program === undefined || program === undefined)
+export function tmuxReleaseRow(reading: TmuxReleaseReading | undefined): TmuxReleaseRow | undefined {
+  const read = (text: string | undefined): TmuxVersion | undefined =>
+    text === undefined ? undefined : parseTmuxVersion(text);
+  const program = read(reading?.program);
+  const server = read(reading?.server);
+  if (program === undefined && server === undefined) return undefined;
+  const parts = [
+    ...(program === undefined ? [] : [`installed ${program.label}`]),
+    ...(server === undefined ? [] : [`running server ${server.label}`]),
+  ];
+  const summary = parts.join(', ');
+  const programCrashes = program !== undefined && hasSubscriptionCrash(program);
+  const serverCrashes = server !== undefined && hasSubscriptionCrash(server);
+  if (!programCrashes && !serverCrashes)
+    return { status: 'present', summary, impact: 'tmux 3.7 or newer: no known whole-server crash.' };
+  if (!programCrashes)
     return {
-      state: 'fail',
-      detail: 'tmux did not answer `tmux -V`',
-      fix: 'install tmux and put it on the daemon PATH',
-    };
-  const crashing = [program, server].filter(
-    (version): version is TmuxVersion => version !== undefined && hasSubscriptionCrash(version),
-  );
-  if (crashing.length > 0)
-    return {
-      state: 'warn',
-      detail: `tmux ${crashing.map(version => version.label).join(' / ')} can end every pane when one session ends; the daemon releases subscriptions first`,
-      fix: 'upgrade tmux to 3.7 or later',
-    };
-  if (server !== undefined && server.label !== program.label)
-    return {
-      state: 'warn',
-      detail: `the running tmux server is ${server.label}, the installed tmux is ${program.label}`,
-      fix: 'the server picks up the installed release the next time it starts',
+      status: 'missing',
+      summary: `${summary} — the server still runs the old release`,
+      impact: `${TMUX_CRASH} ${program === undefined ? '' : `${program.label} is installed already. `}${TMUX_MOVE}`,
     };
   return {
-    state: 'ok',
-    detail: `tmux ${program.label}${server === undefined ? ', no server running' : ', server current'}`,
+    status: 'missing',
+    summary: `${summary} — 3.7 or newer is needed`,
+    impact: `${TMUX_CRASH} Install tmux 3.7 or newer. ${TMUX_MOVE}`,
   };
+}
+
+/** The row's text as today's `renderDoctorReport` printed it after the label: a missing row adds its impact. */
+export function renderTmuxReleaseRow(row: TmuxReleaseRow): string {
+  return row.status === 'missing' ? `${row.summary} — ${row.impact}` : row.summary;
 }

@@ -152,7 +152,11 @@ export type ToolHandler = (call: CallContext, input: unknown) => Promise<ToolRes
 export type NetworkResolver = () => readonly string[];
 
 /** One declared `fy doctor` check: reads only the plugin's own ports; never a secret in `detail` or `fix`. */
-export type DoctorRun = () => Promise<DoctorFinding>;
+/**
+ * One declared doctor check. `undefined` is NO ROW: the check had nothing to judge (a program that could not be asked
+ * at all), so the report says nothing rather than a guess.
+ */
+export type DoctorRun = () => Promise<DoctorFinding | undefined>;
 
 /** What `build` returns: one implementation for everything the manifest declares, nothing more (`manifest-match`). */
 export type DaemonHalf<M extends Manifest> = Section<'routes', { readonly [K in RouteKeysOf<M>]: RouteHandler }> &
@@ -239,6 +243,11 @@ export interface SelftestProbe {
   readonly label: string;
   /** Asks for `stateDir` and `spawn` in the environment; a probe that does not still gets only `{ tempDir, signal, clock }`. */
   readonly host?: true;
+  /**
+   * With `host`: the programs this probe runs, a subset of the manifest's `permissions.spawn`. Its `spawn` then runs
+   * only these (a name the manifest does not declare grants nothing); absent, every declared program.
+   */
+  readonly programs?: readonly string[];
   readonly run: (environment: SelftestEnvironment) => Promise<string>;
 }
 

@@ -141,14 +141,13 @@ describe('K3 hostFacts.launchGuard is gated like the other hostFacts', () => {
 });
 
 describe('K3 no environment read outside the kernel adapter', () => {
-  test('K3 no plugin source reads FERRETRY_TEST (Terminals names it only until U1 deletes its copy)', async () => {
+  test('K3 no plugin source reads FERRETRY_TEST, Terminals included (U1 deleted its copy)', async () => {
     const root = new URL('../../../../../', import.meta.url).pathname;
     const offenders: string[] = [];
     for await (const file of new Glob('plugins/*/{daemon,lib}/**/*.ts').scan({ cwd: root })) {
       if (file.includes('/tests/')) continue;
       const text = await Bun.file(`${root}${file}`).text();
-      // the terminals guard module names the variable as a constant until U1 deletes it; no other plugin may
-      if (/FERRETRY_TEST/u.test(text) && !file.startsWith('plugins/terminals/')) offenders.push(file);
+      if (/FERRETRY_TEST/u.test(text)) offenders.push(file);
     }
     for await (const file of new Glob('ferrets/{daemon,lib}/**/*.ts').scan({ cwd: `${root}core/` })) {
       const text = await Bun.file(`${root}core/${file}`).text();

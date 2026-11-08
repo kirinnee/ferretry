@@ -7,7 +7,7 @@ import { nodeFs } from '../../../host/adapters/node-fs.ts';
 import { bootHost, type HostOptions, type RunningHost } from '../../../host/host.ts';
 import type { LogRecord } from '../../../host/log.ts';
 import { openHome } from '../../../host/home.ts';
-import { ensureInternalRootBases, RootError, rootsPortFor } from '../../../host/roots.ts';
+import { ensureInternalRootBases, pluginStateFolder, RootError, rootsPortFor } from '../../../host/roots.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { realAdapters, stateOpener } from '../../../host/wiring.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
@@ -288,6 +288,14 @@ describe('S42 every refusal the boot makes is still a refusal of every later use
       rootsPortFor(fs, { home: homePath, plugin, worktrees: `${homePath}-worktrees` }, declared, () => undefined);
     return { home: homePath, outside, fs, roots };
   }
+
+  test('U1 the downloads base sits in pluginStateFolder(home, plugin), the stateDir fyd --check hands a host selftest', async () => {
+    const f = await home();
+    const base = f.roots('terminals', ['downloads']).root('downloads').resolve('.');
+    if (!base.ok) throw new Error('the downloads root did not resolve');
+    expect(base.value.replace(/\/\.?$/u, '')).toBe(`${pluginStateFolder(f.home, 'terminals')}/downloads`);
+    expect(pluginStateFolder(`${f.home}/`, 'terminals')).toBe(`${f.home}/state/terminals`);
+  });
 
   test('S42 a base that is a file is refused at boot and every later write into the root is refused', async () => {
     const f = await home();

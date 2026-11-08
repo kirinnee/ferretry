@@ -2,7 +2,8 @@ import { type Duration, milliseconds } from '@ferretry/std';
 import type { Clock, SpawnOptions, SpawnPort, WorkersPort } from '../contract/ports.ts';
 import type { CheckLine, DaemonImplementation, PreflightFacts, SelftestProbe } from '../manifest/implement.ts';
 import type { TempDirs } from './adapters/temp-dir.ts';
-import { effectivePermissions, restrictSpawn } from './permissions.ts';
+import { effectivePermissions, NO_ITEMS, restrictSpawn, spawnPermitted } from './permissions.ts';
+import { pluginStateFolder } from './roots.ts';
 
 /**
  * WHAT `fyd --check` ASKS OF THE PLUGINS (DECISIONS-2 #22): their pure preflight lines, their bounded selftests and the
@@ -51,12 +52,22 @@ const NO_SPAWN: SpawnPort = {
     throw new Error('this check has no spawn adapter');
   },
 };
-/** A selftest's spawn: its plugin's declared programs only, the selftest's abort signal on every child, never a cwd, caller env or ferret. */
-function boundSpawn(implementation: DaemonImplementation, base: SpawnPort, signal: AbortSignal): SpawnPort {
+/**
+ * A selftest's spawn: its plugin's declared programs only — and, when the probe names `programs`, only those of them
+ * (a name the manifest does not declare grants nothing) — the selftest's abort signal on every child, never a cwd,
+ * caller env or ferret.
+ */
+function boundSpawn(
+  implementation: DaemonImplementation,
+  base: SpawnPort,
+  signal: AbortSignal,
+  programs?: readonly string[],
+): SpawnPort {
   const plugin = implementation.manifest.id;
+  const declared = effectivePermissions(plugin, implementation.manifest.permissions?.spawn ?? []);
   const narrowed = restrictSpawn(
     plugin,
-    effectivePermissions(plugin, implementation.manifest.permissions?.spawn ?? []),
+    programs === undefined ? declared : programs.filter(program => spawnPermitted(declared, NO_ITEMS, program)),
     base,
   );
   const options = <O extends SpawnOptions | undefined>(given: O): SpawnOptions => {
@@ -247,8 +258,8 @@ async function runSelftest(
       Object.freeze({
         ...(probe.host === true
           ? {
-              stateDir: `${deps.facts.home.replace(/\/+$/u, '')}/state/${implementation.manifest.id}`,
-              spawn: boundSpawn(implementation, deps.spawn ?? NO_SPAWN, abort.signal),
+              stateDir: pluginStateFolder(deps.facts.home, implementation.manifest.id),
+              spawn: boundSpawn(implementation, deps.spawn ?? NO_SPAWN, abort.signal, probe.programs),
             }
           : {}),
         tempDir,

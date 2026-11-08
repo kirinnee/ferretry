@@ -47,6 +47,7 @@ import {
   FerretDetailsSchema,
   FerretRecordSchema,
   HARNESS_KEYS,
+  REAL_HARNESS_REFUSED,
   StartRefusalCodeSchema,
   type FerretDetails,
 } from '../../../contract/index.ts';
@@ -1034,6 +1035,8 @@ export class FerretsService implements FerretsApi {
         ? await harness.start(spec, runner, env.value)
         : await harness.resume(spec, runner, env.value, conversation);
     if (!started.ok) {
+      // A test-mode daemon refused to reach a real harness: the closed code becomes a sentence a test log can act on.
+      if (started.error === 'real_harness') return failed('refused', REAL_HARNESS_REFUSED);
       const code = started.error === 'unavailable' ? 'runner_unavailable' : 'failed';
       return failed(code, `the harness could not start: ${started.error}`);
     }

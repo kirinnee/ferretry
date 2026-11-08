@@ -8,6 +8,7 @@ import { nodeFs } from '../../../host/adapters/node-fs.ts';
 import { checkDeadlineMs, loadRegistry, runPluginChecks, type PluginCheckDeps } from '../../../host/check-plugins.ts';
 import { bootHost, type HostOptions } from '../../../host/host.ts';
 import { realAdapters } from '../../../host/wiring.ts';
+import { pluginStateFolder } from '../../../host/roots.ts';
 import type { SpawnOptions, SpawnPort, WorkerHandle, WorkersPort } from '../../../contract/ports.ts';
 import {
   definePlugin,
@@ -1006,6 +1007,51 @@ describe('U1 a selftest that declares host gets its own state folder and a narro
       ),
     );
     expect(out[0]).toContain('clock,signal,tempDir');
+  });
+
+  test('U1 a probe naming programs may run only those of its declared ones', async () => {
+    seen.length = 0;
+    const tried: string[] = [];
+    const out = await lines(
+      deps(
+        [
+          hosted('terminals', ['tmux', 'ps', 'systemctl'], {
+            label: 'tmux',
+            host: true,
+            // `rm` is named by the probe but not declared by the manifest: naming it grants nothing.
+            programs: ['tmux', 'rm'],
+            run: async env => {
+              for (const program of ['ps', 'systemctl', 'rm', 'tmux'])
+                tried.push(
+                  (await env.spawn?.run(program, []).then(
+                    () => `${program} ran`,
+                    (error: unknown) => `${program}: ${(error as Error).message}`,
+                  )) ?? `${program}: no spawn`,
+                );
+              return 'done';
+            },
+          }),
+        ],
+        { spawn: base },
+      ),
+    );
+    expect(out[0]).toContain('done');
+    expect(tried).toEqual([
+      'ps: terminals may not run ps: its manifest does not declare it.',
+      'systemctl: terminals may not run systemctl: its manifest does not declare it.',
+      'rm: terminals may not run rm: its manifest does not declare it.',
+      'tmux ran',
+    ]);
+    expect(seen.map(entry => entry.program)).toEqual(['tmux']);
+  });
+
+  test("U1 stateDir is pluginStateFolder(home, plugin): the folder the plugin's internal roots sit in", async () => {
+    const out = await lines(
+      deps([hosted('terminals', ['tmux'], { label: 'tmux', host: true, run: async env => env.stateDir ?? 'none' })], {
+        spawn: base,
+      }),
+    );
+    expect(out[0]?.endsWith(pluginStateFolder('/h', 'terminals'))).toBe(true);
   });
 
   test('U1 an undeclared program is refused before anything starts', async () => {

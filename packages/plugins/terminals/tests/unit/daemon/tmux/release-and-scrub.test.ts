@@ -1,10 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import type { SpawnPort } from '@ferretry/kernel/contract';
 import { forgetFerretIdentity } from '../../../../daemon/adapters/tmux/forget-ferret-identity.ts';
-import { tmuxReleaseDoctorCheck, tmuxReleaseSelftest } from '../../../../daemon/adapters/tmux/tmux-release-checks.ts';
-import { TmuxReleaseReader } from '../../../../daemon/adapters/tmux/tmux-release-reader.ts';
+import {
+  releaseReader,
+  tmuxReleaseDoctor,
+  tmuxReleaseFinding,
+  tmuxReleaseSelftest,
+  tmuxSocketIn,
+} from '../../../../daemon/adapters/tmux/tmux-release-checks.ts';
 import type { TmuxCommandPort } from '../../../../daemon/lib/tmux/contracts.ts';
-import { judgeTmuxRelease } from '../../../../daemon/lib/tmux/version.ts';
+import { renderTmuxReleaseRow, type TmuxReleaseReading, tmuxReleaseRow } from '../../../../daemon/lib/tmux/version.ts';
+import { stateSocketPath } from '../../../../daemon/index.ts';
 
 /** A spawn port that records every program and argv and answers like tmux with no server on the socket. */
 function tmuxSpawn(options: { readonly server?: string; readonly program?: string } = {}) {
@@ -72,24 +78,20 @@ describe('terminals #23 forget-ferret-identity (U1)', () => {
   });
 });
 
+/** Today's two sentences (`R/packages/daemon/src/lib/core/doctor.ts` `TMUX_CRASH`, `TMUX_MOVE`), typed out here byte for byte. */
+const CRASH =
+  'tmux before 3.7 can crash its whole server — ending every session at once — when a session ends while Ferretry is watching it. Ferretry works around it, but only a newer tmux removes it.';
+const MOVE =
+  'Do not kill the tmux server to switch: the new release is used the next time the server starts — once the last session has ended, or the machine restarts.';
+
 describe('terminals #23 tmux release never starts a server (U1)', () => {
   test('#23 tmux release never starts a server: the doctor asks only -V and display-message', async () => {
     const { spawn, calls } = tmuxSpawn({ program: 'tmux 3.6a' });
-    const reader = new TmuxReleaseReader(
-      spawn,
-      'tmux',
-      {
-        execute: async arguments_ => {
-          const run = await spawn.run('tmux', ['-S', '/x', ...arguments_]);
-          return { code: run.exitCode ?? 1, stdout: run.stdout, stderr: run.stderr };
-        },
-      },
-      () => () => undefined,
-    );
+    const reader = releaseReader(spawn, '/x/tmux.sock', () => () => undefined);
 
-    const finding = await tmuxReleaseDoctorCheck(async () => await reader.read()).run();
+    const finding = await tmuxReleaseDoctor(async () => await reader.read())();
 
-    expect(finding.state).toBe('warn');
+    expect(finding?.state).toBe('warn');
     expect(calls.flat().some(word => SERVER_STARTERS.includes(word))).toBe(false);
     expect(calls.map(call => call.includes('-V') || call.includes('display-message'))).toEqual([true, true]);
   });
@@ -114,51 +116,156 @@ describe('terminals #23 tmux release never starts a server (U1)', () => {
     expect(sockets).toEqual(['/h/state/terminals/tmux.sock']);
   });
 
-  test('#23 tmux release: the selftest reports both releases when the daemon server answers', async () => {
-    const { spawn } = tmuxSpawn({ program: 'tmux 3.8', server: '3.8' });
+  test("#23 tmux release: the selftest prints today's row when the daemon server answers", async () => {
+    const run = async (program: string, server: string) =>
+      await tmuxReleaseSelftest.run({
+        tempDir: '/t',
+        signal: new AbortController().signal,
+        clock: clock as never,
+        spawn: tmuxSpawn({ program, server }).spawn,
+        stateDir: '/h/state/terminals',
+      });
 
-    const text = await tmuxReleaseSelftest.run({
-      tempDir: '/t',
-      signal: new AbortController().signal,
-      clock: clock as never,
-      spawn,
-      stateDir: '/h/state/terminals',
-    });
-
-    expect(text).toBe('tmux 3.8, server current');
+    expect(await run('tmux 3.8', '3.8')).toBe('installed 3.8, running server 3.8');
+    expect(await run('tmux 3.7b', '3.6a')).toBe(
+      `installed 3.7b, running server 3.6a — the server still runs the old release — ${CRASH} 3.7b is installed already. ${MOVE}`,
+    );
   });
 
-  test('J-0198 the release reader gives up on a wedged tmux at its timeout and answers nothing', async () => {
-    let fire: (() => void) | undefined;
-    const wedged: TmuxCommandPort = { execute: () => new Promise(() => undefined) };
+  test('#23 tmux release: the selftest may run tmux and nothing else', () => {
+    expect(tmuxReleaseSelftest.host).toBe(true);
+    expect(tmuxReleaseSelftest.programs).toEqual(['tmux']);
+  });
+
+  test('J-0198 the release reader gives up on a wedged tmux at its timeout, kills the -V child and bounds the server child', async () => {
+    const timers: number[] = [];
+    const killed: (string | undefined)[] = [];
+    const runs: { args: readonly string[]; timeout: unknown }[] = [];
+    const starts: { args: readonly string[]; timeout: unknown }[] = [];
     const spawn = {
-      start: () => ({
-        stdout: new ReadableStream<Uint8Array>(),
-        stderr: new ReadableStream<Uint8Array>(),
-        exited: new Promise<number>(() => undefined),
-        kill: () => undefined,
-      }),
+      // The server question never answers: only the kernel's timeout ends that child.
+      run: (_program: string, args: readonly string[], options?: { timeout?: unknown }) => {
+        runs.push({ args, timeout: options?.timeout });
+        return new Promise(() => undefined);
+      },
+      start: (_program: string, args: readonly string[], options?: { timeout?: unknown }) => {
+        starts.push({ args, timeout: options?.timeout });
+        return {
+          stdout: new ReadableStream<Uint8Array>(),
+          stderr: new ReadableStream<Uint8Array>(),
+          exited: new Promise<number>(() => undefined),
+          kill: (signal?: string) => killed.push(signal),
+        };
+      },
     } as unknown as SpawnPort;
-    const reader = new TmuxReleaseReader(
+    const pending: (() => void)[] = [];
+    const reader = releaseReader(
       spawn,
-      'tmux',
-      wedged,
-      (_ms, fn) => {
-        fire = fn;
-        setTimeout(fn, 0);
+      '/h/state/terminals/tmux.sock',
+      (ms, fn) => {
+        timers.push(ms);
+        pending.push(fn);
         return () => undefined;
       },
       50,
     );
 
-    expect(await reader.read()).toEqual({});
-    expect(fire).toBeDefined();
+    const reading = reader.read();
+    await Bun.sleep(0);
+    for (const fire of pending) fire();
+
+    expect(await reading).toEqual({});
+    // Each question waited exactly the bound it was given…
+    expect(timers).toEqual([50, 50]);
+    // …the `-V` child was killed outright, and the server child carries the kernel's kill-at timeout.
+    expect(killed).toEqual(['SIGKILL']);
+    expect(starts.map(start => [start.args, Number(start.timeout)])).toEqual([[['-V'], 50]]);
+    expect(runs.map(run => Number(run.timeout))).toEqual([50]);
+    expect(runs[0]?.args).toContain('display-message');
+  });
+});
+
+describe("terminals #23 tmux release row: today's doctor words (U1)", () => {
+  const row = (reading: TmuxReleaseReading | undefined) => tmuxReleaseRow(reading);
+
+  test('#23 tmux release row is left out when tmux could not be asked', () => {
+    expect(row(undefined)).toBeUndefined();
+    expect(row({})).toBeUndefined();
+    expect(row({ program: 'not a version' })).toBeUndefined();
   });
 
-  test('#23 tmux release is judged from names only: crash release warns, absent program fails, absent server is fine', () => {
-    expect(judgeTmuxRelease({ program: 'tmux 3.6a' }).state).toBe('warn');
-    expect(judgeTmuxRelease({}).state).toBe('fail');
-    expect(judgeTmuxRelease({ program: 'tmux 3.7', server: '3.7' }).state).toBe('ok');
-    expect(judgeTmuxRelease({ program: 'tmux 3.7' }).detail).toContain('no server running');
+  test("#23 tmux release row passes 3.7 or newer on both, with today's words", () => {
+    expect(row({ program: 'tmux 3.8', server: '3.7b' })).toEqual({
+      status: 'present',
+      summary: 'installed 3.8, running server 3.7b',
+      impact: 'tmux 3.7 or newer: no known whole-server crash.',
+    });
+  });
+
+  test('#23 tmux release row on 3.6a says 3.7 or newer is needed, byte for byte', () => {
+    expect(row({ program: 'tmux 3.6a', server: '3.6a' })).toEqual({
+      status: 'missing',
+      summary: 'installed 3.6a, running server 3.6a — 3.7 or newer is needed',
+      impact: `${CRASH} Install tmux 3.7 or newer. ${MOVE}`,
+    });
+  });
+
+  test('#23 tmux release row after an upgrade says the server still runs the old release, byte for byte', () => {
+    expect(row({ program: 'tmux 3.7b', server: '3.6a' })).toEqual({
+      status: 'missing',
+      summary: 'installed 3.7b, running server 3.6a — the server still runs the old release',
+      impact: `${CRASH} 3.7b is installed already. ${MOVE}`,
+    });
+  });
+
+  test('#23 tmux release row judges the installed program alone when no server runs, and the server alone with no program', () => {
+    expect(row({ program: 'tmux 3.6a' })?.summary).toBe('installed 3.6a — 3.7 or newer is needed');
+    expect(row({ program: 'tmux 3.8' })?.status).toBe('present');
+    expect(row({ server: '3.6a' })).toEqual({
+      status: 'missing',
+      summary: 'running server 3.6a — the server still runs the old release',
+      impact: `${CRASH} ${MOVE}`,
+    });
+    // A server on another release than the installed one is fine when neither crashes, as today.
+    expect(row({ program: 'tmux 3.8', server: '3.7' })?.status).toBe('present');
+  });
+
+  test('#23 tmux release row maps to a capability finding: present is ok, missing a warn, never a fail', () => {
+    const missing = row({ program: 'tmux 3.6a' });
+    const present = row({ program: 'tmux 3.9' });
+    if (missing === undefined || present === undefined) throw new Error('both rows are judged');
+
+    expect(tmuxReleaseFinding(missing)).toEqual({
+      state: 'warn',
+      detail: 'installed 3.6a — 3.7 or newer is needed',
+      fix: `${CRASH} Install tmux 3.7 or newer. ${MOVE}`,
+    });
+    expect(tmuxReleaseFinding(present)).toEqual({
+      state: 'ok',
+      detail: 'installed 3.9',
+      fix: 'tmux 3.7 or newer: no known whole-server crash.',
+    });
+    expect(renderTmuxReleaseRow(present)).toBe('installed 3.9');
+    expect(renderTmuxReleaseRow(missing)).toBe(
+      `installed 3.6a — 3.7 or newer is needed — ${CRASH} Install tmux 3.7 or newer. ${MOVE}`,
+    );
+  });
+
+  test('#23 tmux release doctor reports no row when neither answer came back', async () => {
+    expect(await tmuxReleaseDoctor(async () => ({}))()).toBeUndefined();
+  });
+});
+
+describe('terminals tmux socket has one owner (U1)', () => {
+  test("the daemon's socket and the selftest's are the same tmuxSocketIn(<state folder>)", () => {
+    const stateDir = '/home/owner/.ferretry/state/terminals';
+    // The kernel keeps every internal root in the plugin's state folder (`pluginStateFolder`): `<state>/downloads`.
+    const kernel = {
+      roots: { root: () => ({ resolve: () => ({ ok: true, value: `${stateDir}/downloads` }) }) },
+    } as unknown as Parameters<typeof stateSocketPath>[0];
+
+    expect(stateSocketPath(kernel)).toBe(`${stateDir}/tmux.sock`);
+    expect(tmuxSocketIn(stateDir)).toBe(stateSocketPath(kernel));
+    expect(tmuxSocketIn(`${stateDir}/`)).toBe(`${stateDir}/tmux.sock`);
   });
 });

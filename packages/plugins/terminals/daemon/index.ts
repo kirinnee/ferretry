@@ -72,8 +72,12 @@ import { KernelTmuxProcess, TMUX_PROGRAM } from './adapters/tmux/kernel-tmux-pro
 import { TmuxRunner, ferretTmuxSession } from './adapters/tmux/tmux-runner.ts';
 import { RealHarnessLaunchGuard } from './adapters/tmux/harness-launch-guard.ts';
 import { forgetFerretIdentity } from './adapters/tmux/forget-ferret-identity.ts';
-import { releaseReader, tmuxReleaseDoctorCheck, tmuxReleaseSelftest } from './adapters/tmux/tmux-release-checks.ts';
-import type { TmuxReleaseReading } from './lib/tmux/version.ts';
+import {
+  releaseReader,
+  tmuxReleaseDoctor,
+  tmuxReleaseSelftest,
+  tmuxSocketIn,
+} from './adapters/tmux/tmux-release-checks.ts';
 import { SurfaceControl } from './lib/agent-tools/control.ts';
 import {
   type AgentToolResult,
@@ -106,8 +110,6 @@ import { processIncarnationFor } from './adapters/session/processes/process-inca
 const TERMINAL_IDLE_TIMEOUT_MS = 60 * 60_000;
 /** How often finished ferrets' terminals are swept (J-0088). */
 const CLOSE_FINISHED_EVERY_MS = 5 * 60_000;
-/** How often the installed and running tmux releases are read again (the doctor reads the last answer). */
-const RELEASE_READ_EVERY_MS = 10 * 60_000;
 /** The CLI's binary name, as `packages/cli/package.json` declares it (the two-name model). */
 const BINARY_NAME = 'fy';
 
@@ -134,15 +136,17 @@ export interface TerminalsOverrides {
 }
 
 /**
- * Where tmux's socket lives: the manifest's opaque `tmux.sock`, in Terminals' own state folder. There is no kernel port
- * that names a state file's path (an opaque file is tmux's, not ours), so it is derived from the `downloads` root,
- * which the kernel keeps beside the state files (`<home>/state/terminals/downloads`). A declared gap.
+ * Where tmux's socket lives: the manifest's opaque `tmux.sock`, in Terminals' own state folder ({@link tmuxSocketIn},
+ * the one place its path is built). There is no kernel port that names a state file's path (an opaque file is tmux's,
+ * not ours), so the folder is the `downloads` root's parent: the kernel keeps every internal root in the plugin's
+ * state folder (`pluginStateFolder`, `<home>/state/terminals/downloads`), the same folder `fyd --check` hands the
+ * selftest as `stateDir`. A declared gap.
  */
-function stateSocketPath(kernel: KernelPorts): string {
+export function stateSocketPath(kernel: Pick<KernelPorts, 'roots'>): string {
   const resolved = kernel.roots.root('downloads').resolve('.');
   if (!resolved.ok) throw new Error('terminals: the state folder could not be located for the tmux socket');
   const downloads = resolved.value.replace(/\/\.?$/u, '');
-  return `${downloads.slice(0, downloads.lastIndexOf('/'))}/tmux.sock`;
+  return tmuxSocketIn(downloads.slice(0, downloads.lastIndexOf('/')));
 }
 
 /** The kernel's long-lived child, as a control client's transport. */
@@ -512,13 +516,16 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     const pane: RunnerPane = { tmuxSession: ferretTmuxSession(ferret), paneId, pid, processStartTicks: start };
     await panes.register(ferret, pane);
   };
-  // The kernel decides once whether this daemon is a test's (FERRETRY_TEST or a scratch home); Terminals never reads the
-  // environment. Armed, no launch may reach the owner's real Claude Code or Codex, found on the daemon's own PATH.
-  const hostGuard = kernel.hostFacts.launchGuard();
-  const launchGuard = hostGuard.active ? new RealHarnessLaunchGuard(() => hostGuard.searchPath) : undefined;
+  // The kernel decides once whether this daemon is a test's (its test-mode variable, or a scratch home); Terminals never
+  // reads the environment. Armed, no launch may reach the owner's real Claude Code or Codex, found on the daemon's PATH
+  // as the kernel states it at each launch; a refusal is logged here and answered `real_harness`.
+  const launchGuard = kernel.hostFacts.launchGuard().active
+    ? new RealHarnessLaunchGuard(() => kernel.hostFacts.launchGuard().searchPath)
+    : undefined;
   const runner = new TmuxRunner({
     tmux,
     ...(launchGuard === undefined ? {} : { launchGuard }),
+    log,
     spawn: kernel.spawn,
     socketPath,
     instantOf: seconds => instantFromEpochMs(seconds * 1_000),
@@ -541,18 +548,10 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
   });
 
   // ─── the tmux release ─────────────────────────────────────────────────────────────────────────────────────────────
-  // Read-only questions on a one-shot client: `tmux -V` and `display-message` on this daemon's own socket. Neither starts a server.
+  // Read-only questions on a one-shot client: `tmux -V` and `display-message` on this daemon's own socket, asked fresh
+  // for each doctor report as today's doctor did, each child killed at its bound. Neither starts a server.
   const releaseAfter = (ms: number, fn: () => void): (() => void) => kernel.clock.after(milliseconds(ms), fn);
   const reader = releaseReader(kernel.spawn, socketPath, releaseAfter);
-  let lastRelease: TmuxReleaseReading | undefined;
-  kernel.jobs.add({
-    id: 'terminals-tmux-release',
-    schedule: { every: milliseconds(RELEASE_READ_EVERY_MS) },
-    lane: 'worker',
-    run: async () => {
-      lastRelease = await reader.read();
-    },
-  });
 
   const provided: TerminalsApi = {
     of: async ferret => (await service.list(ferret).catch(() => ({ terminals: [] }))).terminals,
@@ -634,14 +633,8 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
         log.warn('the tmux server identity scrub did not run');
       }
     },
+    doctor: { 'tmux-release': tmuxReleaseDoctor(async () => await reader.read()) },
     hooks: {
-      'doctor.checks': () => {
-        const check = tmuxReleaseDoctorCheck(async () => {
-          lastRelease ??= await reader.read();
-          return lastRelease;
-        });
-        return [{ id: check.id, order: 0, item: check }];
-      },
       'input.targets:terminal': inputTarget,
       'runners:tmux': runner,
       // The composer's `%terminal` menu (reference.catalog): the ferret's terminals. Asked only while Conversation is on.
