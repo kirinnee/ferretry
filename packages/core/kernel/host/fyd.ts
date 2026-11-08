@@ -14,7 +14,7 @@ import { checkHost, processAlive, tcpProbe } from './check.ts';
 import { bootHost } from './host.ts';
 import { parseBackgroundDelay } from './jobs.ts';
 import { listenLocal } from './listener.ts';
-import { renderSettings, resolveSettings } from './settings.ts';
+import { filterByLevel, renderSettings, resolveSettings } from './settings.ts';
 import { bootTimings } from './session/timings.ts';
 import { fileLogSink, realAdapters } from './wiring.ts';
 
@@ -35,14 +35,8 @@ async function main(): Promise<number> {
     (answer.kind === 'print' ? process.stdout : process.stderr).write(`${answer.text}\n`);
     return answer.exitCode;
   }
-  const { configFile, host: hostOverride, logLevel } = answer.overrides;
-  const unserved = [
-    configFile !== undefined && '--config',
-    hostOverride !== undefined && '--host',
-    logLevel !== undefined && '--log-level',
-  ].filter(Boolean);
-  if (unserved.length > 0) {
-    process.stderr.write(`${usage.daemonName}: ${unserved.join(', ')} is not served by this daemon yet.\n`);
+  if (answer.overrides.configFile !== undefined) {
+    process.stderr.write(`${usage.daemonName}: --config is not served: v5 has no single configuration document to point at (configuration is one file per building block under <FY_HOME>/config/).\n`);
     return EXIT_USAGE;
   }
   const resolved = resolveSettings(process.env, answer.overrides, homedir());
@@ -60,7 +54,7 @@ async function main(): Promise<number> {
     return await checkHost({
       fs: nodeFs(() => crypto.randomUUID()),
       home,
-      host: '127.0.0.1',
+      host: resolved.settings.host.value,
       port,
       daemonName: usage.daemonName,
       probe: tcpProbe,
@@ -68,13 +62,16 @@ async function main(): Promise<number> {
       say: line => void process.stdout.write(`${line}\n`),
     });
   // Nothing is written before the home is decided (§9.3): until boot creates `logs/`, a line is dropped.
-  const sink = fileLogSink(line => {
-    try {
-      appendFileSync(`${home}/logs/fyd.log`, line, { mode: 0o600 });
-    } catch {
-      // the home is not decided yet, or was refused
-    }
-  });
+  const sink = filterByLevel(
+    fileLogSink(line => {
+      try {
+        appendFileSync(`${home}/logs/fyd.log`, line, { mode: 0o600 });
+      } catch {
+        // the home is not decided yet, or was refused
+      }
+    }),
+    resolved.settings.logLevel.value,
+  );
   // R247: read once; a value that would lengthen anything refuses the boot, a shortened one is said once.
   const timings = bootTimings(process.env.FYD_TEST_TIMINGS, line => {
     process.stderr.write(`fyd: ${line}\n`);
@@ -116,6 +113,7 @@ async function main(): Promise<number> {
       await listenLocal(host, {
         home,
         port,
+        hostname: resolved.settings.host.value,
         pid: process.pid,
         version: VERSION,
         write: (path, text) => writeFile(path, text, { mode: 0o600 }),
