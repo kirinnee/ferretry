@@ -164,7 +164,8 @@
     },
     "packages/plugins/claude-code": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": ["daemon/lib/harness/fast-mode.ts"]
     },
     "packages/plugins/packs": {
       "entry": ["app/views/*.tsx"],

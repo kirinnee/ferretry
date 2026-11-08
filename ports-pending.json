@@ -51,7 +51,8 @@
       "GAP(skills): selected skill parts are not materialized into the ferret home; copyTree takes only this plugin's own root handles, and no root the manifest declares reaches a skill source",
       "GAP(ferrets): the AskUserQuestion hook is installed, but Ferrets does not yet supply FY_QUESTION_FILE or consume and deliver the question",
       "the ten settings/hooks item verbs return 69 until the item-service route exists",
-      "the permission and dialog answer panels render nothing until Ferrets offers a prompt-state read"
+      "the permission and dialog answer panels render nothing until Ferrets offers a prompt-state read",
+      "GAP(claude-code): daemon/lib/harness/fast-mode.ts is not reached by Ferrets' start path: fastStartRefusal must refuse a fast start on a model without fast mode before anything is written (today: packages/daemon/bin/fyd.ts:2691-2697; 5.0 FerretsService.start has no such check) (owner: nelly)"
     ],
     "codex": [
       "GAP(kernel): skill launch parts are not materialized into the Codex home: RootHandle.copyTree (with link) exists, but its source must be one of Codex's own roots and no root Codex may declare reaches a skill part's folder (LaunchPart.path); needs a lead decision on that root",
