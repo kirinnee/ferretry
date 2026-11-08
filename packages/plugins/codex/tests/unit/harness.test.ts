@@ -146,6 +146,8 @@ describe('the Codex harness', () => {
     const command = seen[0]?.spec.command ?? [];
     should(command.slice(0, 3)).eql(['env', `CODEX_HOME=${HOME}`, '/opt/bin/codex']);
     should(command).containEql('gpt-5.6-codex');
+    // The task reaches the agent once, as the turn-one pointer Ferrets types: never also on the argv.
+    should(command).not.containEql('hello');
     should(seen[0]?.spec.cwd).equal(FOLDER);
     should(seen[0]?.call).equal('start');
   });

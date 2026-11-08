@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { dirname } from 'node:path';
 import { ApiError } from '@ferretry/kernel/contract';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
-import { TransferBriefFiles } from '../contract/index.ts';
+import { FERRET_SESSIONS_ROOT } from '../contract/index.ts';
 import type manifest from '../manifest.ts';
 import type { DaemonStorage } from './adapters/storage/session-storage.ts';
 import type { ProcessHostFacts } from './adapters/moves/process-inventory.ts';
@@ -89,13 +88,21 @@ export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): M
       throw unavailable('Reading where a process is working');
     },
   };
-  // A target's private directory, the string its rollout is later correlated by: the ferret's own state folder.
-  const sessionDirectory = (id: SessionId): string => dirname(dirname(kernel.state.pathOf(TransferBriefFiles, id)));
+  // A target's own private folder on the internal `sessions` root (`state/ferrets/sessions/<ferret>`, today's session
+  // directory): its first-turn brief is written there as its `turns/turn-001.md`, and the folder's path is the string its
+  // rollout is later correlated by.
+  const sessionRoot = (id: SessionId) => kernel.roots.root(FERRET_SESSIONS_ROOT, { subfolder: id });
+  const sessionDirectory = (id: SessionId): string => {
+    const folder = sessionRoot(id).resolve('.');
+    if (!folder.ok) throw new Error(`ferret ${id} has no private session folder (${folder.error})`);
+    return folder.value;
+  };
   return {
     fork: {
       state: kernel.state,
       storage,
       sessionDirectory,
+      briefs: sessionRoot,
       attachmentStore: unbound('The attachment store'),
       attachments: unbound('The attachment inventory'),
       conversation: unbound('The conversation reader'),

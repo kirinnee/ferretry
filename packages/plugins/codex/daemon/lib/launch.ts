@@ -46,12 +46,15 @@ export interface CodexLaunchParts {
   readonly fast?: boolean;
   /** Where to compact the conversation, in tokens. Absent leaves Codex's own trigger in charge. */
   readonly compactAt?: number;
-  /** The first message, when the owner gave one. */
-  readonly prompt?: string;
   readonly harnessFlags?: readonly string[];
 }
 
-/** The whole argv, in launch order. */
+/**
+ * The whole argv, in launch order. It carries NO prompt: a start's task is the ferret's `turns/turn-001.md`, and Ferrets
+ * types the pointer to it into the pane once Codex is up, under the effect ledger's first-turn admission, exactly as
+ * for every other harness (today put the prompt on no harness's argv). A prompt here as well would hand the agent its
+ * task twice.
+ */
 export function buildCodexLaunchArgv(parts: CodexLaunchParts): readonly string[] {
   return [
     parts.executable,
@@ -63,6 +66,5 @@ export function buildCodexLaunchArgv(parts: CodexLaunchParts): readonly string[]
       : ['-c', `${CODEX_TIER_KEY}=${tomlBasicString(parts.fast ? CODEX_TIER.fast : CODEX_TIER.standard)}`]),
     ...(parts.compactAt === undefined ? [] : ['-c', `${CODEX_COMPACT_KEY}=${parts.compactAt}`]),
     ...(parts.harnessFlags ?? []),
-    ...(parts.prompt === undefined ? [] : [parts.prompt]),
   ];
 }

@@ -61,6 +61,23 @@ export async function diskSessionsRoot(
   subfolder: string,
   observe: (disk: HostFs) => HostFs = disk => disk,
 ): Promise<DiskRoot> {
+  const roots = await diskSessionsRoots(parent, observe);
+  return { root: roots.root(subfolder), folder: roots.folderOf(subfolder) };
+}
+
+/** Every ferret's `sessions` folder under one real home: {@link diskSessionsRoot} for any number of ferrets. */
+export interface DiskSessionsRoots {
+  /** The scoped handle on `<subfolder>`'s own folder (made by the first write through it, as the host's is). */
+  root(subfolder: string): RootHandle;
+  /** The (absolute) folder that handle reaches. */
+  folderOf(subfolder: string): string;
+}
+
+/** {@link diskSessionsRoot}'s base made once, so a fixture can hand out any ferret's folder synchronously. */
+export async function diskSessionsRoots(
+  parent: string,
+  observe: (disk: HostFs) => HostFs = disk => disk,
+): Promise<DiskSessionsRoots> {
   const home = `${parent}/home`;
   const layout = { home, plugin: 'ferrets', worktrees: `${parent}/worktrees` };
   const disk = nodeFs(() => 'x');
@@ -68,11 +85,14 @@ export async function diskSessionsRoot(
   const refused = await ensureInternalRootBases(disk, layout, ['sessions']);
   if (refused.length > 0) throw new Error(`the sessions base was refused: ${refused[0]?.refusal ?? 'unknown'}`);
   let counter = 0;
-  const root = rootsPortFor(observe(disk), layout, ['sessions'], () => undefined, {
+  const port = rootsPortFor(observe(disk), layout, ['sessions'], () => undefined, {
     random: () => {
       counter += 1;
       return `t${String(counter)}`;
     },
-  }).root('sessions', { subfolder });
-  return { root, folder: `${home}/state/ferrets/sessions/${subfolder}` };
+  });
+  return {
+    root: subfolder => port.root('sessions', { subfolder }),
+    folderOf: subfolder => `${home}/state/ferrets/sessions/${subfolder}`,
+  };
 }

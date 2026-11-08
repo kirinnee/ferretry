@@ -9,16 +9,15 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  CODEX_OFFLINE_LAUNCH_ERROR,
   type CodexAppServerProcesses,
   CodexAppServerSupervisor,
   type CodexRuntimeAccount,
   codexAppServerPidFiles,
-  codexLaunchFailure,
   codexRuntimeHome,
   isCodexAppServerProcess,
   parseCodexPidFile,
 } from '../../../daemon/lib/service/codex-runtime.ts';
+import { CODEX_OFFLINE_LAUNCH_ERROR, codexLaunchFailure } from '../../../contract/codex-launch.ts';
 
 const HOMES = '/state/fleet/homes';
 const HOME = `${HOMES}/00000000-0000-4000-8000-000000000001`;

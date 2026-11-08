@@ -5,7 +5,7 @@ import type { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
 import type { JsonValue } from '@ferretry/std';
 import { ForkFiles } from '../../../../contract/index.ts';
-import { TransferBriefFiles, TransferPlanFiles } from '../../../../contract/transfer-state.ts';
+import { TransferPlanFiles } from '../../../../contract/transfer-state.ts';
 import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import {
   forkReceiptName,
@@ -541,7 +541,7 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
 
   // ONE brief writer and ONE copier, handed to the import half as writers and to the proof half as readers: two
   // instances over one layout would be two answers to where the target's bytes are.
-  const brief = new FileSessionTransferBriefWriter(opened.state);
+  const brief = new FileSessionTransferBriefWriter(opened.briefs);
   const copier = new FileSessionAttachmentCopier(attachments);
   const plans = new FileSessionTransferTargetPlanStore(opened.state);
 
@@ -918,7 +918,7 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
     target: async id => ({
       config: (await storage.readConfig(parseSessionId(id))) as Record<string, unknown>,
       plan: JSON.stringify(planOf(id)),
-      brief: new TextDecoder().decode(folder.rawBytes(TransferBriefFiles, id)),
+      brief: opened.briefText(id) ?? '',
     }),
   };
 }

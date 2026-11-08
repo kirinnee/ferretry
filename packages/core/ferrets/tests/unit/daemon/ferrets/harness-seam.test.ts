@@ -76,9 +76,9 @@ test('decision 18: with no act runner bound an interrupt is refused (fail closed
   expect(f.runner.signals).toEqual([]);
 });
 
-test('decision 18: the seam offers deliver, interrupt and transcript only; no raw pane write exists', async () => {
+test('decision 18: the seam offers deliver, queue (U3), interrupt and transcript only; no raw pane write exists', async () => {
   const f = await running();
-  expect(Object.keys(f.seam).sort()).toEqual(['deliver', 'interrupt', 'transcript']);
+  expect(Object.keys(f.seam).sort()).toEqual(['deliver', 'interrupt', 'queue', 'transcript']);
   expect(Object.keys(f.seam.transcript).sort()).toEqual(['find', 'follow', 'read']);
 });
 

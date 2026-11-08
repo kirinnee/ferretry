@@ -308,6 +308,7 @@
         "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-runtimes": "workspace:*",
         "@ferretry/std": "workspace:*",
         "react": "^19.0.0",
         "zod": "4.4.3",

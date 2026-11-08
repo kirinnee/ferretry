@@ -13,7 +13,8 @@ import { fakeLoginChanges, fakeLogins } from '@ferretry/plugin-logins/contract/t
 import should from 'should';
 import { RuntimesLaunchFailed } from '../../../contract/index.ts';
 import { type RuntimesAssembly, runtimesDaemon } from '../../../daemon/index.ts';
-import { CODEX_OFFLINE_LAUNCH_ERROR, type CodexAppServerOutcome } from '../../../daemon/lib/service/codex-runtime.ts';
+import { CODEX_OFFLINE_LAUNCH_ERROR } from '../../../contract/codex-launch.ts';
+import type { CodexAppServerOutcome } from '../../../daemon/lib/service/codex-runtime.ts';
 import { RuntimeEndSupervision, type RuntimeEndSeams } from '../../../daemon/lib/service/runtime-end-supervision.ts';
 
 const OFFLINE_PANE = 'Error: JSON-RPC error: workspace routing discovery failed (connect ENETUNREACH)';
