@@ -19,7 +19,7 @@
   "scripts": {
     "dev": "bun run build:fy-render-shell && vite",
     "build:fy-render-shell": "bun run scripts/build-fy-render-libs.ts",
-    "build": "bun run build:fy-render-shell && vite build && bun run scripts/build-release.ts",
+    "build": "bun run build:fy-render-shell && vite build && bun run --cwd ../plugins/logins publish:model-catalog ../../app/dist && bun run scripts/build-release.ts",
     "preview": "vite preview"
   },
   "dependencies": {
