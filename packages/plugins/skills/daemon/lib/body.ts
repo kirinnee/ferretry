@@ -1,5 +1,5 @@
 /**
- * Request-body parsing for Skills' routes (today's `daemon/src/lib/api/body.ts`, `parseBody` / `parseOptionalBody`, verbatim).
+ * Request-body parsing for Skills' routes (today's `daemon/src/lib/api/body.ts`, `parseBody`, verbatim).
  * Placement gives `api/` to Gate; until a contract exports these, each plugin keeps this copy. The kernel's
  * `ApiRequest.text(limit)` bounds the read.
  */

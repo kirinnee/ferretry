@@ -87,7 +87,6 @@
       "project": ["**/*.{ts,tsx}"],
       "ignore": [
         "app/hooks/use-project-scope.ts",
-        "app/lib/project-scope.ts",
         "app/hooks/use-work-project-names.ts",
         "app/lib/work-project-names.ts"
       ]
@@ -98,8 +97,7 @@
     },
     "packages/plugins/updates": {
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}"],
-      "ignore": ["app/lib/changelog.ts"]
+      "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/warden": {
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
