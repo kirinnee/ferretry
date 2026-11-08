@@ -16,6 +16,7 @@ import { factsSource, hostFacts, locationSource, npmLatest, probe, spawnRun } fr
 import { DialogAnswerService } from './lib/dialog/service.ts';
 import { PermissionAnswerService } from './lib/permission/service.ts';
 import { isConversationId } from './lib/harness/claude-path.ts';
+import { fastStartDecision } from './lib/harness/fast-mode.ts';
 import { ClaudeProjectApprovals } from './lib/project-approvals.ts';
 import { dialogRoute, permissionRoute, updateStartRoute, updateViewRoute } from './lib/routes.ts';
 import { HarnessUpdateService } from './lib/update/service.ts';
@@ -129,7 +130,11 @@ export default implementDaemon(manifest, {
           approvedProjectServers: async query => await approvals.approvedProjectServers(query),
         },
       },
-      hooks: { 'harnesses:claude-code': harness },
+      hooks: {
+        'harnesses:claude-code': harness,
+        // A fast start on a model without fast mode is refused before anything is written (today's fyd start refusal).
+        'start.decide': fastStartDecision,
+      },
     };
   },
 });

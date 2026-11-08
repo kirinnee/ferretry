@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { configDef } from './config-def.ts';
 import {
   DiscoverySchema,
+  HeldCatalogSchema,
   HarnessConfigSchema,
   type Discovery,
   type HarnessCliView,
@@ -95,6 +96,14 @@ export const CODEX_DISCOVERY = defineState({
   store: 'json',
   format: 1,
   schema: DiscoverySchema,
+});
+
+export const CODEX_FAST_CATALOG = defineState({
+  name: 'fastCatalog',
+  path: 'fast-catalog.json',
+  store: 'json',
+  format: 1,
+  schema: HeldCatalogSchema,
 });
 
 /** Per-ferret rollout provenance: baseline plus an explicitly resumed native conversation id. */

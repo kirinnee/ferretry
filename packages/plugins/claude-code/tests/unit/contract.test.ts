@@ -9,14 +9,14 @@ describe('claude-code contract', () => {
     expect(result.ok).toBe(true);
   });
 
-  test('the manifest declares its four routes and the harness take', () => {
+  test('the manifest declares its four routes, the harness take and the start.decide take', () => {
     expect(manifest.actions.routes.map(route => route.key)).toEqual([
       'GET /v1/claude-code/update',
       'POST /v1/claude-code/update',
       'POST /v1/ferrets/:ferretId/permission',
       'POST /v1/ferrets/:ferretId/dialog',
     ]);
-    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['harnesses']);
+    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['harnesses', 'start.decide']);
   });
 
   test('G31 (declaration only) the permission answer is terminal/use, a person act, audited as input and never with the choice', () => {
