@@ -158,6 +158,13 @@ flight) and Agenda (which ferrets have an open agenda item) have each contribute
 hook. While either is missing no pass runs, and a half that fails keeps every ferret it was asked about: an absent answer is
 "keep live", never "archive". A ferret the daemon still holds as running is kept too, whatever its state document says.
 
+Both halves are taken. **Board** answers every card as stored, closed and dropped included: its owner, its assignee,
+whether it was dropped and its lane's category as Board resolves it; Ferrets' rule keeps the owner and assignee of every
+card that is not dropped and not in a `closed` or `shipped` lane, and a lane Board cannot name counts as in flight.
+**Agenda** answers whether the ferret's own board holds an item still open (an unanswered ask, an open notice or a
+parked item). Each is read afresh on every pass. A board that cannot be read, an answer that is not that ferret's own
+board, and an agenda board with entries that did not parse all reject, which keeps the ferret live.
+
 ## Declared gaps
 
 - **A ferret that stopped before it was stamped is kept.** A stop writes `finishedAt` on the ferret's state document, which
@@ -194,3 +201,5 @@ hook. While either is missing no pass runs, and a half that fails keeps every fe
 | The session ports and the factory | `packages/daemon/src/adapters/session/archive/`                    |
 | `GET /v1/archived-sessions`       | `packages/daemon/src/lib/runtime/mounts/session-archive.ts`        |
 | The job and the keep hook         | `packages/core/ferrets/daemon/modules/archive.ts` (`ArchiveKeeps`) |
+| Board's half of the keep hook     | `packages/plugins/board/daemon/adapters/archive-keeps.ts`          |
+| Agenda's half of the keep hook    | `packages/plugins/agenda/daemon/lib/archive-keeps.ts`              |

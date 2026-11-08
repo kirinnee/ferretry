@@ -17,6 +17,7 @@ import {
 } from '../contract/index.ts';
 import type { BoardConfig } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { boardArchiveKeeps } from './adapters/archive-keeps.ts';
 import { CARD_SOURCE } from './adapters/asks.ts';
 import { BoardReferenceCatalog } from './adapters/reference-catalog.ts';
 import { assemble, type BoardDefs } from './wiring.ts';
@@ -169,6 +170,9 @@ export default implementDaemon(manifest, {
         'search.sources': () => [{ id: 'board', item: world.workSource }],
         // The `&` menu of a ferret's composer (reference.catalog): the ferret's cards. Read-scoped: none — Conversation masks the answer.
         'reference.catalog:&': new BoardReferenceCatalog(service),
+        // The session archive (Ferrets): every card's owner, assignee, drop and lane category, read afresh each pass.
+        // Off until the owner names an age; a read that fails keeps every ferret live.
+        'session.archive-keeps': () => [{ id: 'board', item: boardArchiveKeeps(service) }],
         // A turn ended (Conversation): the turn-end and gate checks of today (fyd.ts:10727-10783).
         'turn.ended': async payload => {
           await world.turnEnded(payload.ferret);

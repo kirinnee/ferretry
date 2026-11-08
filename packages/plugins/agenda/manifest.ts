@@ -13,7 +13,7 @@ import {
   cap,
 } from './contract/index.ts';
 import { AskAnswered, AsksChanged, AsksPort } from '@ferretry/core-asks/contract';
-import { FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
+import { ArchiveKeeps, FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { AccessPort } from './contract/others.ts';
 import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
 
@@ -147,7 +147,8 @@ export default definePlugin({
 
   // A ferret that goes idle with asks waiting is stopped on the owner: one buzz for the stop.
   // The composer's `!` menu is this plugin's: the ferret's open asks (reference.catalog).
-  hooks: { takes: [{ hook: FerretChanged }, { hook: ReferenceCatalog, key: '!' }] },
+  // The session archive's keep rule (Ferrets' `session.archive-keeps`): a ferret whose board holds an open item stays live.
+  hooks: { takes: [{ hook: FerretChanged }, { hook: ReferenceCatalog, key: '!' }, { hook: ArchiveKeeps }] },
 
   instructions: [{ id: 'notify', text: 'instructions/notify.md', when: { role: 'any' } }],
   doctor: ['agenda-buzz'],
