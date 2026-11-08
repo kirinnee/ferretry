@@ -8,6 +8,7 @@ import {
 } from '../../contract/index.ts';
 import { mergeProgress, parseProgressFile, type ProgressParts } from './board-progress.ts';
 import { explainingRefusals } from './board-refusal.ts';
+import { laneGuide } from './lane-guide.ts';
 import {
   type BoardVerb,
   renderActed,
@@ -86,8 +87,11 @@ export function resolveFerretRef(typed: string, directory: readonly FerretDirect
   return found?.id ?? refuse(`no ferret "${wanted}"; use a name (see \`fy ferret list\`) or an id`);
 }
 
-/** A typed lane, its id or its name, any case, to the lane's id, against the board's own lane set. */
-export function resolveLaneRef(laneSet: LaneSet | null, typed: string): string {
+/**
+ * A typed lane, its id or its name, any case, to the lane's id, against the board's own lane set. `hint` is a
+ * guide appended to the refusal when the lane is not the board's (`card move` passes the lane guide).
+ */
+export function resolveLaneRef(laneSet: LaneSet | null, typed: string, hint?: string): string {
   const wanted = typed.trim();
   if (laneSet === null) return wanted;
   const folded = wanted.toLowerCase();
@@ -96,7 +100,8 @@ export function resolveLaneRef(laneSet: LaneSet | null, typed: string): string {
   return (
     found?.id ??
     refuse(
-      `no lane "${wanted}" on this board; lanes: ${laneSet.lanes.map(lane => `${lane.id} (${lane.name})`).join(', ')}`,
+      `no lane "${wanted}" on this board; lanes: ${laneSet.lanes.map(lane => `${lane.id} (${lane.name})`).join(', ')}` +
+        (hint === undefined ? '' : `\n${hint}`),
     )
   );
 }
@@ -381,7 +386,12 @@ export class BoardController {
   async move(idText: string, laneText: string, options: BoardCommonOptions & { readonly reason?: string }) {
     const ref = requireCardRef(idText);
     const { laneSet } = await this.gateway.card(ref.id);
-    await this.perform('move', ref, options, buildMoveAction(resolveLaneRef(laneSet, laneText), options.reason));
+    await this.perform(
+      'move',
+      ref,
+      options,
+      buildMoveAction(resolveLaneRef(laneSet, laneText, laneGuide(this.deps.binary)), options.reason),
+    );
   }
 
   async trigger(idText: string, event: string, options: BoardCommonOptions & { readonly reason?: string }) {

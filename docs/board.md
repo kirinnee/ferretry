@@ -399,10 +399,10 @@ lane its workflow works in (In progress / Doing; Plan for `design-first`). A car
 where it is, and a failed move only warns: the session still starts. A card the lead makes with `fy task create`
 has no session yet, so it stays in Todo until the lead passes `--lane` or moves it.
 
-**Which lane, by what the work is.** `fy task move --help` and `fy board lanes show` give the rule by lane category,
+**Which lane, by what the work is.** `fy board lanes show`, and the refusal of `fy card move` to a lane the board lacks, give the rule by lane category,
 and `lanes show` adds a "use when" per lane (`laneUse`, single-sourced in `@ferretry/protocol`): planning or designing
 in the planning lane, building in the active lane, a PR, a merge, a release and
-`fy signal done` move a card by themselves, and blocked is not a lane (`fy task block`, `depend`).
+`fy signal done` move a card by themselves, and blocked is not a lane (`fy card block`, `depend`).
 
 A card's **workflow** (`quick`, `design-first`, `research-first`, `investigate`) selects its variant of the lane
 set and cannot change after creation. In the PR templates only `design-first` and `research-first` work walks
