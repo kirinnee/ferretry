@@ -142,5 +142,25 @@ export function halfFindings(
       if (!declared.has(name))
         findings.push({ check, where, message: `${half} half implements undeclared ${section} "${name}"` });
   }
+  if (half === 'daemon') findings.push(...checkSeamFindings(where, manifest, impl));
+  return findings;
+}
+
+/**
+ * The `fyd --check` seams sit beside `build` on the implementation, not in its result: every declared id needs an
+ * implementation and every implementation a declared id, exactly as a doctor check or a route does.
+ */
+function checkSeamFindings(where: string, manifest: Manifest, impl: AnyImplementation): Finding[] {
+  const check = 'manifest-match';
+  const findings: Finding[] = [];
+  const seams = impl as { preflight?: object; selftest?: object; workers?: object };
+  for (const seam of ['preflight', 'selftest', 'workers'] as const) {
+    const declared = new Set(manifest[seam] ?? []);
+    const have = new Set(Object.keys(seams[seam] ?? {}));
+    for (const id of declared)
+      if (!have.has(id)) findings.push({ check, where, message: `daemon half misses ${seam} "${id}"` });
+    for (const id of have)
+      if (!declared.has(id)) findings.push({ check, where, message: `daemon half implements undeclared ${seam} "${id}"` });
+  }
   return findings;
 }

@@ -241,6 +241,12 @@
       "entry": ["app/views/surfaces.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
+    "packages/plugins/shells": {
+      "entry": ["app/views/*.tsx"]
+    },
+    "packages/plugins/layouts": {
+      "entry": ["app/views/*.tsx"]
+    },
     "packages/plugins/terminals": {
       "entry": [],
       "project": ["**/*.{ts,tsx}", "!tests/**"],

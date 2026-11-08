@@ -22,7 +22,7 @@ import {
 import type { Clock, Log, StateDamage } from '../contract/ports.ts';
 import type { ConfigDef } from '../contract/define.ts';
 
-const random = (): string => crypto.getRandomValues(new Uint32Array(1))[0]?.toString(36) ?? '0';
+const random = (): string => crypto.randomUUID();
 
 /** A plugin whose state may describe live terminals, pages or ferrets: a lower format waits, never resets (§9.3). */
 const mayHaveLiveTargets = (manifest: Manifest): boolean =>

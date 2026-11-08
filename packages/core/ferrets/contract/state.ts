@@ -122,7 +122,9 @@ export const SystemCallsignsFile = defineState({
   schema: SystemCallsignsDocumentSchema,
   // Today a damaged counter file read as nothing issued. It never flags the Ferrets subsystem: the counter only says
   // where to start looking, and the fleet's own held names keep an issued id unique.
-  onDamaged: { narrower: 'a damaged system-callsigns.json reads as nothing issued; ids are still unique against the fleet' },
+  onDamaged: {
+    narrower: 'a damaged system-callsigns.json reads as nothing issued; ids are still unique against the fleet',
+  },
 });
 
 // ─── archive.json (today's archive registry, `lib/session/archive/registry.ts`) ────────────────────────────────

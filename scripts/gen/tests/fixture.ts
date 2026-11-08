@@ -65,6 +65,8 @@ export function fixture(
       workspaces: ['packages/*', 'packages/core/*', 'packages/plugins/*'],
     }),
   );
+  // The generator reads the client binary name from the CLI's `bin` key (the two-name model), so every fixture has one.
+  write('packages/cli/package.json', JSON.stringify({ name: 'fixture-cli', private: true, bin: { fx: './bin.ts' } }));
   write(
     'ports-pending.json',
     JSON.stringify({

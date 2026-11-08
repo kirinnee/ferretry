@@ -199,6 +199,7 @@ export function workersFor(
       });
       const forward = {
         ...(options?.name === undefined ? {} : { name: options.name }),
+        ...(options?.env === undefined ? {} : { env: options.env }),
         ...(grants.length === 0 ? {} : { workerData: { [WORKER_STATE_KEY]: grants } }),
       };
       return base.start(moduleUrl, forward);
