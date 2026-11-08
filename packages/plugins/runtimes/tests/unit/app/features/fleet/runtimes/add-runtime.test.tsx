@@ -229,7 +229,9 @@ describe('Add runtime: Login', () => {
     expect(text(view.container, '[data-add-runtime-needs-sign-in]')).toContain(
       'This login needs sign-in before you launch.',
     );
-    expect(view.container.querySelector('[data-add-runtime-sign-in]')?.getAttribute('href')).toBe(SIGN_INS);
+    expect(view.container.querySelector('[data-add-runtime-sign-in]')?.getAttribute('href')).toBe(
+      `${SIGN_INS}/claude-work`,
+    );
     await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
     expect(view.container.querySelector('[data-add-runtime-needs-sign-in]')).toBeNull();
   });
