@@ -1,4 +1,4 @@
-import { describe, it } from 'bun:test';
+import { afterEach, describe, it } from 'bun:test';
 import type { StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
@@ -23,6 +23,10 @@ interface Options {
 
 /** Journals that stop being readable after this many records, as a read torn by a failing disk would. */
 const tornAfter = new Map<string, number>();
+
+afterEach(() => {
+  tornAfter.clear();
+});
 
 function tearing(port: StatePort): StatePort {
   return {
@@ -203,7 +207,6 @@ describe('session storage — the index sweep and the survey', () => {
     tornAfter.set(id, 0);
 
     const result = await storage.syncSession(id);
-    tornAfter.clear();
 
     should(result.sessionCount).equal(1);
     should(result.eventCount).equal(0);
@@ -244,7 +247,6 @@ describe('session storage — the index sweep and the survey', () => {
     tornAfter.set(id, 2);
 
     const result = await storage.reconcile();
-    tornAfter.clear();
 
     should(result.problems).have.length(1);
     should(result.problems[0]?.line).equal(3);

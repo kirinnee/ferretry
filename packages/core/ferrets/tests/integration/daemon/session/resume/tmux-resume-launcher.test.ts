@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import {
   type ResumeLaunchSpec,
   TmuxResumeLauncher,
@@ -224,16 +224,26 @@ describe('the tmux resume launcher: registering the replacement', () => {
     expect((failure as Error).message).toContain('could not be killed either (tmux gone)');
   });
 
-  test('the default retry pauses on a real timer between attempts', async () => {
+  test('the default retry pauses for its delay on the runtime timer between attempts', async () => {
     const world = tmuxWorld();
+    // The runtime timer is observed, not waited on: it records the pause and returns at once.
+    const pauses: number[] = [];
+    const timer = spyOn(Bun, 'sleep').mockImplementation((async (milliseconds: number) => {
+      pauses.push(milliseconds);
+    }) as never);
     let attempts = 0;
-    const subject = new TmuxResumeLauncher(world.tmux, async () => baseSpec, {} as never, undefined, undefined, {
-      registerSession: async () => {
-        attempts += 1;
-        if (attempts === 1) throw new Error('race');
-      },
-    });
-    await subject.relaunch(ID);
+    try {
+      const subject = new TmuxResumeLauncher(world.tmux, async () => baseSpec, {} as never, undefined, undefined, {
+        registerSession: async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error('race');
+        },
+      });
+      await subject.relaunch(ID);
+    } finally {
+      timer.mockRestore();
+    }
     expect(attempts).toBe(2);
+    expect(pauses).toEqual([50]);
   });
 });

@@ -307,6 +307,7 @@ describe('the session archive when a document cannot be read, or Board and Agend
   it('should keep every ferret asked about when the pass is stopped before the check starts', async () => {
     const OLD = ago(72);
     const archivedBatches: string[][] = [];
+    const agendaAsked: string[] = [];
     const view = sessionView('free-1', { mode: 'auto', teammate: 'mika' }, { status: 'completed', finishedAt: OLD });
     const { subsystem } = createSessionArchive({
       directory: id => createSessionPaths(paths, id).directory,
@@ -325,7 +326,11 @@ describe('the session archive when a document cannot be read, or Board and Agend
       clock: { nowMs: () => NOW },
       afterMs: 24 * HOUR,
       passLimit: 200,
-      sources: { pinned: async () => new Map(), board: async () => [], hasOpenAgendaItem: async () => false },
+      sources: {
+        pinned: async () => new Map(),
+        board: async () => [],
+        hasOpenAgendaItem: async id => (agendaAsked.push(id), false),
+      },
       yieldToLoop: async () => undefined,
       ...archiveDeadline(),
     });
@@ -335,5 +340,6 @@ describe('the session archive when a document cannot be read, or Board and Agend
     await subsystem.run?.(stopped.signal);
 
     should(archivedBatches.flat()).deepEqual([]);
+    should(agendaAsked).deepEqual([]);
   });
 });
